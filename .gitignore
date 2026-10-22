@@ -1,0 +1,98 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+artifacts/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+publish/
+
+# Test / coverage output
+[Tt]est[Rr]esult*/
+*.trx
+*.coverage
+*.coveragexml
+coverage*.json
+coverage*.xml
+coverage*.info
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+!packages/build/
+project.lock.json
+project.assets.json
+*.nuget.props
+*.nuget.targets
+
+# Visual Studio / Rider / VS Code
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.DotSettings.user
+
+# MSBuild / diagnostics
+*.binlog
+msbuild.log
+msbuild.err
+msbuild.wrn
+*.tlog
+*.ilk
+*.pdb.bak
+
+# Runtime / crash dumps
+*.dmp
+*.mdmp
+
+# OS cruft
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Local, untracked developer state
+*.local.props
+*.local.targets
+local.settings.json
+
+# ROMs and user assets must never be committed to this repository.
+*.nes
+*.unf
+*.fds
+*.3dn
+
+# A pattern without a slash is matched against every path component, directories
+# included -- and case-insensitively on Windows. "*.nes" therefore also matches the
+# directories "src/Zax.Nes" and "src/Zax.Nes/..."; without these negations the whole NES
+# core would be silently left out of the repository. The negations re-include the source
+# trees only: no .nes file inside them is ever un-ignored, and tests/roms has its own
+# .gitignore.
+!src/Zax.Nes/
+
+# Dear ImGui layout dump (persistence is off; this only appears if it is re-enabled)
+imgui.ini
+
+# User data. REQ-PERS-071: a "portable.txt" next to the executable moves the settings, the
+# save states, the battery RAM, the covers and the imported .3dn profiles into "userdata/"
+# beside it -- which, run from a build output inside the tree, lands in the repository.
+userdata/
+portable.txt
+
+# Assets the user supplies for the optional "--assets <dir>" mode, and the television model of
+# AMD-025 when it is copied into a build output: never published from here, never committed.
+# Anchored to the root on purpose -- a bare "assets/" would also match "src/Zax.Render/Assets/",
+# since Windows matches these patterns without regard to case.
+/assets-neutral/
+/assets/

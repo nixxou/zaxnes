@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Zax.Settings\Zax.Settings.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <Description>Game profile format, catalogue and game library. Platform-free library.</Description>
+  </PropertyGroup>
+
+  <!--
+    No protobuf-net reference. SPEC-03 REQ-PROF-010 to REQ-PROF-013 and REQ-PROF-051 ask for
+    shared-reference envelopes, group-encoded nullable cells, a field written out of order and
+    byte-exact control of field presence; the hand-written codec in Wire/ does that in a single
+    pass. The catalogue and the library files are JSON, read with System.Text.Json from the BCL.
+  -->
+
+</Project>

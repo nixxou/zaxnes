@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>2D-to-3D conversion engine: patterns, shapes, tiles, atlas, tracking. Produces abstract meshes.</Description>
+  </PropertyGroup>
+
+  <!--
+    Deliberately has no PackageReference.
+    PLAN.md, libretro portability section: this engine produces abstract mesh data and
+    must not know about OpenGL, windows or wall-clock time. Zax.Render consumes its output.
+
+    It does reference the two platform-free domain libraries it converts between:
+    Zax.Nes for the tile contract of SPEC-02 and Zax.Profiles for the pattern model of
+    SPEC-03 (REQ-ARCH-002 allows this: neither pulls in a graphics, audio or input API).
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Zax.Nes\Zax.Nes.csproj" />
+    <ProjectReference Include="..\Zax.Profiles\Zax.Profiles.csproj" />
+  </ItemGroup>
+
+</Project>

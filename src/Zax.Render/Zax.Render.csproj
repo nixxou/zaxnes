@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>OpenGL 3.3 core renderer. Draws into a host-provided framebuffer; never assumes the default framebuffer.</Description>
+    <!-- Required by the GL interop (buffer uploads, vertex attribute pointers). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.OpenGL" />
+  </ItemGroup>
+
+  <!--
+    The renderer consumes the output contract of SPEC-04B (REQ-E3D-640, REQ-E3D-641): tile
+    meshes, object textures, resolved palette and per-tile transforms. REQ-ARCH-002 forbids the
+    reverse dependency, not this one.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\Zax.Engine3D\Zax.Engine3D.csproj" />
+  </ItemGroup>
+
+  <!--
+    No reference to Silk.NET.Windowing or Silk.NET.Input on purpose.
+    PLAN.md, libretro portability section: the GL context, the render target and its size
+    all come from the host (desktop app today, RETRO_HW_CONTEXT_OPENGL_CORE later).
+  -->
+
+</Project>

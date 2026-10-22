@@ -1,0 +1,593 @@
+# Zaxnes — guide d'utilisation
+
+Zaxnes est un émulateur NES qui affiche les jeux **en 3D**. Ce document explique comment
+l'installer, l'utiliser et où il range ses fichiers.
+
+Zaxnes est distribué sous **GPL v3** (`impl/LICENSE`). **Aucune ROM n'est fournie** : vous devez
+utiliser une ROM dont vous disposez légalement.
+
+---
+
+## 1. Prérequis et installation
+
+| Élément | Version |
+|---|---|
+| Système | Windows 10/11 x64 |
+| SDK (pour compiler) | .NET 10 |
+| Carte graphique | OpenGL 3.3 core (toute carte depuis ~2010) |
+| Audio | facultatif ; sans périphérique, Zaxnes démarre en silence |
+
+**Zaxnes n'a besoin d'aucun fichier d'asset** (AMD-024, phase P7a), à une exception près : le
+boîtier TV est le modèle « Retro Crt Tv » de meipal, sous licence **CC BY 4.0**, livré tel quel
+dans `assets/tv/retro_crt_tv.glb` (AMD-025) ; si le fichier manque, l'option « Boîtier TV » est
+simplement désactivée. Les skyboxes et les sons d'interface sont **produits par le code** ; il n'y a
+**pas de musique de menu** ; la police de l'interface est une police **déjà installée sur votre Windows**
+(Segoe UI, sinon Arial), ouverte au lancement et jamais recopiée. Le détail et les licences sont
+dans `ASSETS-LICENSES.md`.
+
+**Aucune ROM et aucun profil de jeu ne sont fournis.** La bibliothèque démarre avec deux entrées
+génériques écrites dans le code : « 2D Mode » (l'image de la console, sans conversion 3D) et
+« 3D par défaut (sans profil) » (la géométrie 3D par défaut, pour n'importe quelle ROM). Si vous
+disposez légalement d'un profil `.3dn`, **Fichier ▸ Importer un profil…** l'ajoute (voir §9).
+
+`--assets <dossier>` reste disponible pour lire un dossier de fichiers **que vous fournissez**
+(`profiles.json`, `cubemaps/`, `meshes/`, `textures/`, `audio/`, `fonts/`). Ce dossier n'est
+**jamais cherché automatiquement** : seule l'option le désigne.
+
+Pour compiler, depuis `cleanroom/impl/` :
+
+```
+dotnet build -c Release
+```
+
+Pour lancer la suite de tests (les tests de rendu créent une fenêtre OpenGL cachée) :
+
+```
+dotnet test -c Release                                      tout
+dotnet test -c Release --filter "Requires!=OriginalAssets"  la moitié publique
+```
+
+Les tests qui ont besoin des assets **d'origine** extraits (les 101 profils intégrés et leurs
+cubemaps, meshes et textures) portent `[Trait("Requires", "OriginalAssets")]` et sont *ignorés*,
+non échoués, quand ce dossier n'est pas là. Ceux qui ont besoin d'une ROM commerciale portent
+`[Trait("Requires", "UserRoms")]` et lisent le dossier nommé par la variable d'environnement
+`ZAXNES_ROMS` : voir la section 12.
+
+## 2. Démarrer
+
+Lancez simplement l'exécutable :
+
+```
+src\Zax.App\bin\Release\net10.0\Zaxnes.exe
+```
+
+Sans argument, Zaxnes ouvre son **écran d'accueil** : il rappelle le chemin **Fichier ▸ Ouvrir une
+ROM** et liste les dix dernières ROMs ouvertes, qu'un clic relance. La musique de menu joue si
+elle est activée (menu **Audio ▸ Musique de menu**).
+
+**Une seule instance à la fois** par dossier de données : un second lancement sur la même racine
+utilisateur écrit une ligne sur la sortie d'erreur et se ferme, pour que deux fenêtres n'écrivent
+pas dans les mêmes `settings.json`, `library.json` et emplacements de sauvegarde. Deux racines
+différentes — `--userdata <dossier>` — peuvent tourner côte à côte.
+
+### Ouvrir un jeu
+
+1. **Fichier ▸ Ouvrir une ROM…** (`Ctrl`+`O`) ouvre une boîte de dialogue : la colonne du haut
+   donne le chemin courant (cliquez sur un niveau pour y aller), la liste montre d'abord les
+   dossiers puis les fichiers que le filtre garde, et le champ de recherche filtre les noms de
+   fichiers. Filtres disponibles : `.nes` + `.zip`, `.nes` seul, `.zip` seul, tous les fichiers.
+   Le dossier où vous terminez est **mémorisé** pour la fois suivante.
+2. La **première fois** qu'un fichier est ouvert, Zaxnes demande quel **profil 3D** utiliser : la
+   liste commence par « 2D Mode » (le jeu en 2D, orbitable à la caméra), puis
+   « 3D par défaut (sans profil) » (la géométrie 3D par défaut), puis vos profils importés. Un
+   champ de recherche filtre par titre.
+3. Le choix est **mémorisé pour ce fichier** : la fois suivante, le jeu démarre directement.
+   **Fichier ▸ Choisir le profil 3D…** rouvre cette sélection pour le jeu en cours.
+
+Une archive `.zip` est acceptée : sa **première entrée** est lue comme image de ROM. Les
+archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/Q-028.md`).
+
+### Ligne de commande
+
+| Option | Effet |
+|---|---|
+| `--rom <chemin>` | ouvre cette ROM au démarrage ; sans `--profile`, la résolution de profil ci-dessus s'applique |
+| `--profile <titre>` | entrée de la bibliothèque (titre exact, identifiant ou préfixe non ambigu), ou chemin d'un profil `.3dn` déjà importé. Sans l'option : « 2D Mode » |
+| `--list-profiles` | liste les entrées de la bibliothèque, puis quitte |
+| `--assets <dossier>` | dossier de fichiers d'assets que vous fournissez (facultatif, jamais cherché tout seul) |
+| `--font <fichier>` | police de l'interface : un fichier, ou un nom dans le dossier des polices du système |
+| `--builtin-font` | force la police intégrée d'ImGui (accents et « ▸ » remplacés par de l'ASCII) |
+| `--userdata <dossier>` | racine des données modifiables (voir §6) |
+| `--size 1600x900` | taille de la fenêtre (défaut 1280 × 720) |
+| `--no-audio` | n'ouvre pas le périphérique audio |
+| `--tv-model <fichier.glb>` | le modèle du boîtier TV ; par défaut `assets/tv/retro_crt_tv.glb` à côté de l'exécutable |
+| `--smoke-test`, `--smoke-frames <n>` | rend un nombre fixe d'images sans interaction, puis quitte avec 0 |
+| `--smoke-emulated <n>` | joue `n` images émulées (60 = 1 s) sans interaction, puis quitte avec 0 |
+| `--ui-shots <dossier>` | capture une image PNG par écran d'interface, puis quitte |
+| `--help` | aide complète |
+
+#### Surcharges de réglages (le temps d'un lancement)
+
+Ces options **écrasent le réglage persisté correspondant**, et seulement si vous les passez :
+sans elles, c'est la valeur que vous avez choisie dans « Options ▸ Réglages » qui s'applique
+(`settings.json`, §6). La surcharge n'est **pas** réécrite dans le fichier : au lancement suivant
+vous retrouvez votre choix. Dès que vous modifiez le même réglage dans l'interface pendant la
+session, votre nouvelle valeur reprend la main et est enregistrée normalement
+(`spec/changes/Q-066.md`).
+
+| Option | Réglage | Effet |
+|---|---|---|
+| `--vsync [0\|1\|2]` | `video.vsync` | synchronisation des échanges de tampon : `0` désactivée, `1` chaque rafraîchissement, `2` un rafraîchissement sur deux. Sans valeur, l'option vaut `1`. Quand elle est active, le plafond d'images/s est levé : c'est l'écran qui cadence |
+| `--fps <60\|90\|120>` | `video.frame_rate` | plafond d'images/s **quand la synchronisation verticale est désactivée** |
+| `--no-render-skip` | `video.skip_frame` | redessine la scène même sans nouvelle image émulée |
+| `--fov <degrés>` | `camera.fov` | champ de vision, 45 à 95 |
+| `--no-shadows` | `render.shadow` | démarre sans les ombres |
+| `--skybox <nom>` | `scene.skybox` | `default`, `color`, `gradient` ou `fantasy` |
+| `--tv <0\|1>` | `scene.tv_box` | `0` aucun boîtier, `1` le boîtier (une valeur 2 ou 3 héritée donne 1) |
+
+Si l'image se déchire alors que « Synchronisation verticale » est activée, regardez la ligne
+`Zaxnes: display pacing: …` de la console : elle dit l'intervalle d'échange réellement en vigueur.
+Un repli `every other refresh unavailable, Q-066` signifie que le pilote ou le backend n'a pas
+l'appel d'intervalle exact et que la valeur 2 a été ramenée à 1. Un pilote réglé sur
+« Synchronisation verticale : désactivée » de force (panneau NVIDIA / AMD) écrase de toute façon
+la demande du programme.
+
+## 3. Les menus
+
+La barre de menus est en haut de la fenêtre. Chaque entrée affiche son raccourci. Une entrée
+grisée n'est pas disponible dans l'état courant — « Reset » sans jeu chargé, par exemple.
+
+### Fichier
+
+| Entrée | Raccourci | Effet |
+|---|---|---|
+| Ouvrir une ROM… | `Ctrl`+`O` | boîte de dialogue de fichiers |
+| ROMs récentes ▸ | | les dix derniers fichiers ouverts |
+| Choisir le profil 3D… | | rouvre la sélection de profil pour le jeu en cours |
+| Importer un profil… | | ajoute un fichier `.3dn` à la bibliothèque, sans redémarrage |
+| Supprimer le jeu… | | supprime le jeu courant **s'il vient d'un profil importé**, après confirmation |
+| Créer la jaquette | | la dernière capture de pause devient la jaquette du jeu courant |
+| Importer une jaquette… | | une image PNG devient la jaquette, réduite pour tenir dans 256 × 192 |
+| Charger un état ▸ | `Ctrl`+`F1` … `Ctrl`+`F10` | les dix emplacements, avec leur date et heure ou « vide », puis l'état rapide |
+| Sauvegarder l'état ▸ | `Maj`+`F1` … `Maj`+`F10` | les mêmes emplacements, en écriture |
+| Supprimer un état ▸ | | les emplacements occupés seulement, après confirmation |
+| Quitter | `Ctrl`+`Q` | ferme proprement : réglages, bindings et bibliothèque sont écrits |
+
+« Supprimer le jeu… » demande `Do you want to delete the game and its save states ?` et, sur
+« Yes », arrête l'émulation si c'est le jeu courant, vide tous ses emplacements — l'état rapide
+compris —, puis efface son fichier `.3dn`, sa jaquette et son entrée de bibliothèque. Un profil
+embarqué et l'entrée « 2D Mode » ne sont jamais supprimables : l'entrée reste grisée.
+« Supprimer un état ▸ » demande `Do you want to delete the slot <n> ?` avant d'effacer.
+
+### Émulation
+
+| Entrée | Raccourci | Effet |
+|---|---|---|
+| Pause / Reprise | `P` ou `Échap` | met en pause ou reprend |
+| Reset | `Ctrl`+`R` | redémarrage à froid du jeu courant |
+| Arrêter | | revient à l'écran d'accueil |
+| Avance rapide | `.` (point) | ×1,5 tant que la touche est maintenue |
+| Rollback | `,` (virgule) | recule d'une à deux secondes |
+| Vitesse ▸ | | −8 à +8, avec le facteur correspondant ; « Plus vite » et « Moins vite » |
+| Région ▸ | | Auto (depuis l'en-tête de la ROM), NTSC, PAL, Dendy |
+| Ports ▸ | | type de chaque port : Manette ou Zapper |
+
+### Vidéo
+
+| Entrée | Raccourci | Effet |
+|---|---|---|
+| Mode 3D / Mode 2D | `F11` | bascule **à chaud** entre le rendu 3D et l'image en pixels du cœur |
+| Mode caméra ▸ | | Orbitale (TPV), Première personne (FPV), Vue de dessus |
+| Réinitialiser la vue | `Échap` maintenu ≥ 0,3 s | revient à la vue par défaut |
+| Skybox ▸ | | Par défaut, Couleur, Dégradé, Fantaisie |
+| Boîtier TV ▸ | | Aucun, TV (grisé si le modèle `assets/tv/*.glb` est absent) |
+| Ombres | | active ou désactive les ombres |
+| Plein écran | `Alt`+`Entrée` | masque la barre de menus ; les raccourcis restent actifs |
+| Afficher les FPS | | petit compteur en haut à droite, **désactivé par défaut** |
+
+`F11` ne relance rien : la partie continue à la frame où elle était, le profil, les scripts et la
+conversion restent chargés, et un second appui rend le rendu 3D du profil courant immédiatement.
+Un jeu lancé sur l'entrée « 2D Mode » de la bibliothèque est toujours affiché en pixels, quel que
+soit l'état de la bascule.
+
+### Audio
+
+Volume ▸ (par paliers de 10 %, plus « Volume + » et « Volume − »), Muet, Musique de menu.
+
+### Outils
+
+| Entrée | Raccourci | Effet |
+|---|---|---|
+| Options… | `Ctrl`+`,` | la fenêtre d'options (§4) |
+| Configuration des touches… | | la fenêtre de remappage (§5) |
+| Dossier des données | | ouvre la racine utilisateur dans l'explorateur |
+| À propos | | nom, version, licence et crédits |
+
+### Notifications
+
+Les messages du programme — `Quick Save`, `Roll Back`, `Fast Forward`, les erreurs de chargement —
+s'affichent **en surimpression en bas de la vue**, une à la fois, pendant 4 s (1 s pour le
+rollback et l'avance rapide). Une notification normale ne remplace jamais une erreur encore
+visible. Elles restent affichées en plein écran.
+
+### Plein écran
+
+`Alt`+`Entrée` masque la barre de menus et donne toute la fenêtre à la vue du jeu. Tous les
+raccourcis clavier et manette continuent de fonctionner, et une fenêtre ouverte par raccourci —
+les options avec `Ctrl`+`,`, par exemple — s'affiche par-dessus la vue. `Alt`+`Entrée` à nouveau
+fait réapparaître la barre.
+
+### Panneau de statistiques
+
+`F12` affiche ou masque un panneau de mise au point (images par seconde, frames émulées, état de
+la boucle, nombre de tuiles, audio, pilote OpenGL). Il est **désactivé par défaut**.
+
+## 4. La fenêtre d'options
+
+**Outils ▸ Options…** (`Ctrl`+`,`). Six onglets : **Vidéo**, **Caméra**, **Lumière et ombres**,
+**Audio**, **Émulation**, **Interface**. Chaque ligne est un réglage ; le contrôle dépend de sa
+nature (case à cocher, liste, curseur, sélecteur de couleur) et ses bornes sont celles du modèle
+de réglages.
+
+- une modification **prend effet immédiatement** : il n'y a pas de bouton « Appliquer » ;
+- elle est **persistée** dans `settings.json`, au plus tard 2 s après le changement ;
+- le bouton **« Valeurs par défaut »** de chaque onglet remet les réglages de cet onglet à leur
+  valeur d'origine ;
+- une ligne marquée *(réglage de profil)* appartient au jeu : elle sera remplacée au chargement
+  d'un jeu différent. Une ligne marquée *(au prochain démarrage)* ou *(au prochain chargement)*
+  ne prend effet qu'à ce moment-là ;
+- chaque changement de valeur joue **une fois** le son de validation, **sauf** les curseurs
+  **Vitesse** (onglet Émulation) et **FOV** (onglet Caméra), qui sont muets.
+
+La fenêtre est **engendrée depuis le modèle de réglages** : un réglage ajouté au modèle y
+apparaît sans modification de l'interface. Les réglages de réalité virtuelle sont hors
+périmètre et n'y figurent pas ; le dernier dossier parcouru et la géométrie de la fenêtre n'y
+figurent pas non plus, car ce sont des états retenus automatiquement, pas des choix.
+
+## 5. La configuration des touches
+
+**Outils ▸ Configuration des touches…**. La fenêtre liste, par section :
+
+- **Joueur 1 — boutons NES** et **Joueur 2 — boutons NES** : les huit boutons de chaque joueur ;
+- **Caméra** : les six actions de caméra ;
+- **Raccourcis système** : `Menu`, `RollBack`, `FastForward`, `QuickSave`, `QuickLoad` ;
+- **Commandes de menu** : toutes les commandes des menus qui n'ont pas de paramètre.
+
+Chaque ligne a une colonne **Clavier** et une colonne **Manette**. Cliquez sur une case :
+
+1. le binding existant est **effacé immédiatement** ;
+2. la prochaine touche (colonne Clavier) ou le prochain bouton, axe ou gâchette de la manette du
+   joueur (colonne Manette) devient le binding ;
+3. « Arrêter la capture » interrompt l'écoute — l'action **reste sans binding**, puisqu'il a été
+   effacé au clic.
+
+Pendant une capture, les autres cases sont inactives et aucune action de jeu n'est produite :
+`Échap` peut donc être assignée sans mettre le jeu en pause au même instant. Une touche déjà
+maintenue quand vous cliquez n'est pas capturée : relâchez-la et réappuyez.
+
+Deux listes en haut attribuent une **manette** à chaque joueur ; elles se mettent à jour quand
+une manette est branchée ou débranchée. « Réinitialiser toutes les touches » restaure les
+tables par défaut.
+
+Il n'y a **aucune détection de conflit** : une même touche liée à deux actions les déclenche
+toutes les deux. Les boutons de souris ne sont pas assignables ; les modificatrices (Maj, Ctrl,
+Alt, gauche et droite séparément) le sont. Les bindings sont **globaux**, communs à tous les
+jeux, et écrits dans `input.json` à chaque modification et à la sortie.
+
+### Touches par défaut (joueur 1)
+
+Les touches sont désignées par leur **position physique** sur un clavier QWERTY : sur un clavier
+AZERTY, la touche `Z` ci-dessous est la touche **W**.
+
+| Touche | Action |
+|---|---|
+| Flèches | directions NES |
+| `X` | bouton A |
+| `Z` (W en AZERTY) | bouton B |
+| Espace | Select |
+| Entrée | Start |
+| `F5` / `F6` | tourner la caméra à gauche / à droite |
+| `F7` / `F8` | tourner la caméra vers le haut / vers le bas |
+| `F9` / `F10` | rapprocher / éloigner la caméra |
+| Glisser bouton gauche | orbiter (0,1° par pixel) |
+| Molette | rapprocher / éloigner (5 unités par cran) |
+| `Échap` (appui court) | pause / reprise — voir ci-dessous |
+| `Échap` maintenu ≥ 0,3 s | revenir à la vue par défaut |
+| `,` (virgule) | rollback |
+| `.` (point) | avance rapide maintenue (×1,5) |
+| `Select` maintenu puis stick droit vers le bas | sauvegarde rapide |
+| `Select` maintenu puis stick droit vers le haut | chargement rapide |
+
+Un appui court sur `Échap` dépend du contexte, dans cet ordre : pendant un chargement il ne fait
+**rien** et n'est pas reporté ; une boîte de confirmation ouverte l'ignore, elle ne se quitte que
+par ses boutons ; le navigateur de fichiers ou la sélection de profil se ferment comme avec
+« Cancel », sans toucher à l'émulation ; sinon le jeu passe en pause ou reprend.
+
+Le **joueur 2 n'a aucune touche par défaut** : attribuez-les dans la fenêtre de configuration,
+ou branchez une manette. Le clavier physique alimente les deux joueurs.
+
+`QuickSave` et `QuickLoad` n'ont pas de touche par défaut : seules les combinaisons ci-dessus
+les déclenchent, et elles sont évaluées **joueur par joueur** — c'est le même joueur qui doit
+maintenir `Select` et donner le coup de stick.
+
+> Note. AMD-010 demande `Fn` seul pour charger un état, ce qui entrerait en conflit avec les
+> touches caméra `F5`–`F10` ; Zaxnes utilise `Ctrl`+`Fn` (`spec/changes/Q-030.md`, tranché par
+> AMD-013).
+
+### Manettes
+
+Toute manette de type Xbox (XInput ou reconnue par la table standard) est prise en charge sans
+réglage. Les manettes de réalité virtuelle ne sont jamais proposées ni attribuées.
+
+| Commande | Action |
+|---|---|
+| Croix | directions NES |
+| Bouton sud (A Xbox, Croix PS) | bouton A |
+| Bouton ouest (X Xbox, Carré) | bouton B |
+| Bouton nord (Y Xbox, Triangle) | rollback |
+| Bouton est (B Xbox, Rond) | avance rapide |
+| Back / View / Share | Select |
+| Start / Menu / Options | Start |
+| Stick droit | tourner la caméra |
+| Gâchette gauche / droite | rapprocher / éloigner la caméra |
+| Clic du stick droit (R3) | pause / menu |
+| Stick gauche, clic du stick gauche, LB, RB, Guide | rien |
+
+La **première manette utilisée** va au joueur 1, la suivante au joueur 2 ; l'attribution est
+mémorisée et retrouvée environ 0,5 s après le démarrage suivant. Les bindings d'une manette
+appartiennent au **modèle de la manette**, pas au joueur.
+
+Sticks et gâchettes sont convertis en tout-ou-rien à partir de **0,34** de la course, mesurée
+**après mise en forme** : une zone morte de 0,2, une saturation à 0,9 et un ré-étalement linéaire
+entre les deux. Concrètement, un stick poussé droit n'appuie qu'à partir d'environ **0,44** de sa
+course physique, une gâchette à partir d'environ **0,44** aussi, et une poussée en diagonale
+appuie les deux directions dès 0,6 de course. La zone morte d'un stick est **radiale** : c'est la
+longueur des deux axes ensemble qui décide, donc une diagonale se comporte comme une poussée
+droite.
+
+### Zapper
+
+Le Zapper se joue **à la souris**, sans réticule : le curseur système sert de viseur. La
+**gâchette est le bouton droit** ; le bouton gauche continue d'orbiter la caméra. Un profil au
+Zapper met le port 2 dans ce mode tout seul, et **Émulation ▸ Ports** permet de le faire à la
+main. Les types de port ne sont pas persistés et reviennent à Manette dès qu'un jeu différent
+est chargé.
+
+Le curseur se masque après 2 s d'immobilité pendant qu'un jeu tourne et réapparaît au moindre
+mouvement ; la visée continue de fonctionner curseur masqué.
+
+## 6. Où Zaxnes écrit ses fichiers
+
+Par défaut, la racine utilisateur est `%LOCALAPPDATA%\Zaxnes\` — **Outils ▸ Dossier des données**
+l'ouvre dans l'explorateur. Un fichier `portable.txt` placé à côté de l'exécutable la déplace
+dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte sur les deux.
+
+> **Vous veniez d'une version « Sen ».** Le programme s'appelait « Sen » pendant son
+> développement et écrivait dans `%LOCALAPPDATA%\Sen\`. Au premier lancement, si
+> `%LOCALAPPDATA%\Zaxnes\` n'existe pas encore et que l'ancien dossier existe, son contenu y est
+> **copié** — réglages, bibliothèque, sauvegardes, RAM de pile, profils, jaquettes — et la
+> console l'annonce (`Zaxnes: user data copied from …`). L'ancien dossier n'est **ni modifié ni
+> supprimé** : vous pouvez le garder ou l'effacer vous-même. Les sauvegardes d'état écrites
+> alors restent lisibles.
+
+| Chemin | Contenu |
+|---|---|
+| `settings.json` | réglages : les préférences utilisateur, par clé stable (`camera.fov`, `audio.volume`, `scene.skybox`…) |
+| `games.json` | profil 3D choisi pour chaque fichier de ROM, et les dix ROMs récentes |
+| `input.json` | bindings : clavier J1/J2, un jeu par modèle de manette, dernière manette de chaque joueur |
+| `library.json` | bibliothèque : chemin de ROM, titre et date de dernière partie par jeu |
+| `saves/index.json` | métadonnées des 36 emplacements numérotés et de l'emplacement rapide |
+| `saves/<n>.state` | fichier de sauvegarde (signature `ZAXNESAV`, l'ancienne `SEN3DSAV` reste lisible) |
+| `saves/<n>.png` | vignette 256 × 192 de l'emplacement |
+| `battery/<sha1>.srm` | RAM sauvegardée par pile, par ROM (Zelda, Final Fantasy…) |
+| `profiles/*.3dn` | profils utilisateur importés |
+| `covers/*.png` | jaquettes, nommées `<Titre>_3dsen_<Id>.png` |
+| `logs/` | journaux |
+
+Ce qu'il faut savoir :
+
+- une sauvegarde d'état contient le **cœur complet** (image de ROM comprise), les données
+  persistantes des scripts, l'état de la caméra et l'état appris de la conversion : charger un
+  emplacement ne redemande jamais la ROM ;
+- un fichier illisible, tronqué ou étranger est refusé avec le message
+  `Corrupted save state.` et l'émulation revient à l'arrêt ;
+- la sauvegarde rapide n'a **pas** de vignette ;
+- une **jaquette** est une image PNG sans canal alpha, réduite pour tenir dans 256 × 192 en
+  conservant ses proportions, nommée d'après le titre et l'identifiant du profil, tout caractère
+  interdit dans un nom de fichier remplacé par `_`. Celle de l'entrée « 2D Mode » se met à jour
+  toute seule à chaque pause ;
+- les menus exposent **dix** emplacements alors que le modèle en gère 36 : un état écrit dans
+  l'emplacement 20 par une version ultérieure reste chargeable ;
+- la **RAM sauvegardée par pile est persistée**, ce que l'original ne fait pas : elle est écrite
+  à l'arrêt du jeu, à la sortie et au plus toutes les 30 s si son contenu a changé ;
+- si la racine n'est pas accessible en écriture, Zaxnes démarre quand même, l'annonce par une
+  notification et refuse les sauvegardes ;
+- un fichier illisible est renommé `<nom>.corrupt-<horodatage>` et les valeurs par défaut
+  s'appliquent, avec une notification. Une valeur isolée invalide est remplacée seule, sans
+  message ;
+- chaque fichier porte un `schemaVersion`. Un fichier plus ancien est migré après qu'une copie
+  `<nom>.v<N>.bak` a été gardée ; un fichier **plus récent** est lu au mieux, n'est pas réécrit
+  pendant la session, et l'annonce par une notification.
+
+Le fichier de réglages ne contient que les préférences de l'utilisateur, et seulement celles qui
+diffèrent du défaut :
+
+```json
+{
+  "schemaVersion": 1,
+  "values": {
+    "camera.fov": 85,
+    "audio.volume": 0.4,
+    "scene.skybox": "Gradient",
+    "scene.custom_bg_color": "#0078FCFF",
+    "ui.fullscreen": true
+  }
+}
+```
+
+N'y figurent **pas**, volontairement : les réglages qui viennent du profil du jeu (découpe,
+calques, lumière, conversion, région, caméra de dessus), ceux qui repartent de zéro à chaque
+lancement (lissage de caméra, types de ports), ce qu'un script Lua écrit sur une préférence — la
+valeur vit dans une couche de session et votre préférence revient à la fin de la partie — et
+tout réglage par jeu : la bibliothèque mémorise le chemin de ROM, le titre, la date de dernière
+partie et la jaquette, rien d'autre.
+
+## 7. Vitesse, avance rapide et rollback
+
+- la cadence émulée est de **60 images/s en NTSC** et **50 en PAL et Dendy**, mesurée sur une
+  horloge monotone indépendante de la cadence d'affichage ;
+- le réglage de vitesse est un entier de −8 à +8 : `k = 1 + s/4` pour `s ≥ 0` et
+  `k = 1/(1 − s/4)` pour `s < 0`, donc −8 donne ×1/3 et +8 ×3. L'audio suit, avec changement de
+  hauteur ;
+- l'avance rapide est de **vitesse fixe ×1,5** : chaque appui arme 30 frames émulées, et
+  maintenir la touche réarme la rafale ;
+- au-delà de **5 frames** de retard, le rattrapage est abandonné : le jeu ralentit au lieu
+  d'accélérer brutalement ;
+- un instantané du **cœur seul** est pris toutes les 60 frames émulées, 30 au maximum. Chaque
+  rollback restaure l'avant-dernier, donc recule de 1 à 2 s ; la caméra et les données Lua ne
+  sont pas restaurées.
+
+## 8. Audio
+
+- sortie à **48 kHz** si le périphérique l'accepte, blocs de 512 trames, signal de console mono
+  dupliqué sur les deux canaux ;
+- quand le cœur n'a pas un bloc complet, le bloc est du **silence exact** : jamais de craquement
+  partiel ;
+- les sons d'interface sont **synthétisés par le code** (AMD-024 REQ-PUB-005) : quatre sons
+  distincts — onglet, page, déplacement, validation. Aucun fichier audio n'est livré ;
+- il n'y a **pas de musique de menu** : REQ-PUB-005, révisée le 2026-10-21, la retire au lieu de
+  remplacer les pistes d'origine. Le réglage « Musique de menu » reste dans `settings.json`,
+  sans effet, et n'apparaît plus dans les options ni dans le menu Audio. Un dossier donné par
+  `--assets` qui contient un sous-dossier `audio/` rejoue ses propres pistes, avec les règles de
+  SPEC-11 (tirage aléatoire sans répétition immédiate, fondus de 3,33 s) ;
+- gains : `V` pour l'émulation, `0,02 × V` pour la musique, `0,07 × V` pour les sons
+  d'interface. Les valeurs sont faibles parce que c'est le mixage d'origine ;
+- `--no-audio` n'ouvre aucun périphérique : les fondus et la sélection des pistes avancent quand
+  même, le programme se comporte donc à l'identique en silence.
+
+## 9. Les profils 3D et leurs scripts
+
+Un profil décrit comment un jeu devient de la 3D : les motifs à extruder, les calques, les
+ombres, la caméra, et des **scripts Lua** qui pilotent tout cela en jeu. Ils tournent dans un
+interpréteur Lua 5.4, un état par profil.
+
+**Aucun profil de jeu n'est fourni** (AMD-024 REQ-PUB-001). Sans profil, deux entrées génériques
+sont toujours disponibles :
+
+| Entrée | Ce qu'elle fait |
+|---|---|
+| « 2D Mode » | joue n'importe quelle ROM **sans conversion 3D** : l'image de la console, posée sur le plan NES et orbitable à la caméra |
+| « 3D par défaut (sans profil) » | convertit n'importe quelle ROM **en 3D** avec la géométrie par défaut |
+
+**Importer un profil que vous détenez légalement** : **Fichier ▸ Importer un profil…**, choisissez
+le fichier `.3dn`. Il est copié dans `<données>/profiles` et l'entrée apparaît aussitôt dans la
+bibliothèque, sans redémarrage. Un fichier dont l'identifiant est absent ou vide est refusé avec
+le message « profil obsolète ou au mauvais format ». Les profils déjà présents dans ce dossier
+au démarrage sont lus automatiquement.
+
+Ce qu'il faut savoir :
+
+- un script qui lève une erreur est **journalisé une fois puis désactivé** ; le jeu continue
+  sans lui ;
+- les bibliothèques `io`, `os` (hors `clock`/`time`/`date`), `debug`, `package` et `require`
+  sont **absentes** : un profil est une donnée partageable et ne peut pas agir sur le système ;
+- les écritures d'un script sur un réglage ne sont jamais persistées : elles n'écrasent pas vos
+  préférences ;
+- un profil sans aucun script s'affiche sans animation particulière ; `--list-profiles` marque
+  d'un `*` les entrées qui n'en ont pas.
+
+**Fichier ▸ Importer un profil…** ajoute un fichier `.3dn` : il est copié dans `profiles/` et la
+bibliothèque le prend en compte sans redémarrage. Un profil dont l'identifiant est déjà celui
+d'un profil utilisateur le remplace ; un identifiant de profil intégré est ignoré. Un fichier
+invalide affiche un message et ne change rien.
+
+## 10. Captures hors écran, sans fenêtre
+
+L'outil `Zax.Harness` rend des scènes dans un contexte OpenGL **caché** et écrit des PNG. Il
+sert à vérifier le rendu sans ROM et à mesurer les temps de frame.
+
+```
+tools\Zax.Harness\bin\Release\net10.0\Zax.Harness.exe render --out captures
+```
+
+Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
+`--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
+`--distance`, `--mesh`, `--no-shadows`, `--skybox`, `--sky-bodies` (allume le soleil, la lune
+et les nuages procéduraux), `--bg-color`, `--tv`, `--tv-model <fichier.glb>`, `--tv-info`
+(décrit le modèle chargé et l'ajustement obtenu), `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
+`--bench 300` (médiane et 99ᵉ centile sur 300 frames).
+
+La commande `stress` rejoue en boucle le banc de mesure des jeux de référence — plusieurs jeux
+à la suite dans un seul contexte GL — pour traquer une faute intermittente (`spec/changes/Q-062.md`).
+Elle signale toute exception dès son lancer, avec la pile vue du site de lancer :
+
+```
+Zax.Harness.exe stress --games 3 --warmup 600 --frames 1800
+Zax.Harness.exe stress --no-gl        (émulation et conversion seules)
+Zax.Harness.exe stress --threaded     (émulation sur un fil, rendu sur le fil du contexte GL)
+```
+
+La commande `lua-api` écrit l'API que les scripts voient réellement, une ligne par membre :
+
+```
+Zax.Harness.exe lua-api --out api.txt
+```
+
+Du côté de l'interface, `Zaxnes --ui-shots <dossier>` place l'interface dans chacun de ses
+écrans, relit la fenêtre et écrit un PNG par écran. C'est ce qui produit les captures de
+`verify/round1/l9/`.
+
+## 11. Ce qui n'est pas encore là
+
+- la **bibliothèque visuelle** à tuiles : la barre de menus classique la remplace (`AMD-010`) ;
+  la suppression d'un profil utilisateur et les jaquettes, elles, sont en place (menu Fichier) ;
+- l'import d'une jaquette au format **JPEG** : seul le PNG est décodé (`spec/changes/Q-050.md`) ;
+- les **archives `.7z`** (`spec/changes/Q-028.md`) ;
+- le **pistolet optique libretro** : la table de correspondance existe comme donnée, le frontend
+  lui-même n'est pas écrit ;
+- le **frontend libretro** : le noyau expose déjà « exécuter exactement une frame émulée » et la
+  sérialisation complète, mais la DLL n'est pas écrite.
+
+Points laissés en question, visibles à l'écran ou à l'usage : le matériau des modèles de
+téléviseur (`spec/changes/Q-023.md`), l'espace des opérations sur les teintes de la skybox
+Fantasy (`Q-024`), les faces écrites dans la carte d'ombre (`Q-025`), le cadrage de la capture de
+référence (`Q-026`), la vignette d'un emplacement sauvegardé en cours de jeu (`Q-027`), les
+archives `.7z` (`Q-028`), la vue 3D pendant la pause (`Q-029`), les raccourcis des emplacements
+(`Q-030`), l'ordre entre la région automatique et le `TVMode` du profil (`Q-031`), la capture
+d'un binding dont la commande est déjà maintenue (`Q-033`) et le facteur « ×2 » du ciel Fantasy
+(`Q-045`, `Q-055`). `AMD-021` a tranché le seuil des commandes analogiques (il est mesuré après
+mise en forme, ce qui clôt `Q-048`, `Q-054` et `Q-056`) ; les cinq points de cet amendement
+restés indécis — dont l'ombre des touches du modèle TV 3 — ont été tranchés depuis par
+`AMD-022` (`spec/changes/Q-059.md`).
+
+## 12. Pointer les vérifications sur votre dossier de ROMs
+
+**Aucune ROM n'est fournie et aucun chemin de machine n'est écrit dans ce dépôt.** Les
+vérifications qui ont besoin d'une vraie ROM lisent le dossier nommé par la variable
+d'environnement **`ZAXNES_ROMS`** :
+
+```
+setx ZAXNES_ROMS "D:\mes-roms\nes"        (une fois pour toutes ; rouvrir la console ensuite)
+$env:ZAXNES_ROMS = "D:\mes-roms\nes"      (pour la session de console en cours)
+```
+
+| Ce que la variable sert | Comportement sans elle |
+| --- | --- |
+| `build\publish.ps1` : les deux lancements de vérification qui jouent une ROM (`REQ-PUB-001`) | ils sont **ignorés** avec un avertissement ; la publication, elle, se fait entièrement |
+| les tests qui demandent une ROM commerciale (`REQ-ACC-020`, `REQ-ACC-030`, `REQ-CORE-062`, `REQ-CORE-114`, `REQ-LUA-110`…) | ils sont **ignorés** (`skipped`), pas en échec, avec un motif qui nomme `ZAXNES_ROMS` |
+| `Zax.Harness.exe stress` | la commande s'arrête avec un message demandant `--roms` ou la variable |
+
+Le dossier se donne aussi en ligne de commande, ce qui l'emporte sur la variable :
+`publish.ps1 -Roms <dossier>` et `Zax.Harness.exe stress --roms <dossier>`.
+
+Les tests qui ont besoin d'une ROM de l'utilisateur portent le trait `Requires=UserRoms`, ceux
+qui ont besoin des profils extraits `Requires=OriginalAssets` ; la suite publique est donc :
+
+```
+dotnet test -c Release --filter "Requires!=OriginalAssets&Requires!=UserRoms"
+dotnet test -c Release --filter "Requires=UserRoms"     (avec ZAXNES_ROMS défini)
+```
+
+Les noms de fichiers attendus sont ceux des dumps No-Intro (par exemple
+`Super Mario Bros. 3 (USA).nes`) ; un test ignoré nomme dans son motif le fichier qu'il n'a pas
+trouvé.

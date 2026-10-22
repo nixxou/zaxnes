@@ -1,0 +1,26 @@
+* text=auto eol=lf
+
+*.sln        text eol=crlf
+*.csproj     text eol=lf
+*.props      text eol=lf
+*.targets    text eol=lf
+*.cs         text eol=lf
+*.md         text eol=lf
+*.json       text eol=lf
+*.glsl       text eol=lf
+*.vert       text eol=lf
+*.frag       text eol=lf
+*.lua        text eol=lf
+*.svg        text eol=lf
+*.py         text eol=lf
+
+*.png        binary
+*.ico        binary
+*.jpg        binary
+*.ttf        binary
+*.otf        binary
+*.wav        binary
+*.ogg        binary
+*.bytes      binary
+*.nes        binary
+*.3dn        binary

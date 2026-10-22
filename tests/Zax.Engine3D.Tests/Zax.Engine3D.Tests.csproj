@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Zax.Engine3D\Zax.Engine3D.csproj" />
+  </ItemGroup>
+
+</Project>

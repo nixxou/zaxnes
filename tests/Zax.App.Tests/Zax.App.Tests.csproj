@@ -1,0 +1,13 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- REQ-UI-207: the glyph test reads ImGui's font structures, which are raw pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Zax.App\Zax.App.csproj" />
+    <ProjectReference Include="..\..\src\Zax.Settings\Zax.Settings.csproj" />
+  </ItemGroup>
+
+</Project>

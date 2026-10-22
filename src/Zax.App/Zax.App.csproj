@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- The product name, not the project name: the shipped executable is Zaxnes.exe
+         (AMD-029 §1). The namespaces stay Zax.App. -->
+    <AssemblyName>Zaxnes</AssemblyName>
+    <Description>Desktop host: window, loop, offscreen render target, ImGui UI.</Description>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <!-- Required by the GL interop: allocating texture storage without initial data
+         means passing a null pixel pointer. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Lot ICON-1: the Win32 icon resource of Zaxnes.exe, which is what Explorer, the taskbar
+         and Alt+Tab read. The multi-size .ico (16…256) lives in the repository under
+         branding/; it is compiled into the executable, not copied beside it. -->
+    <ApplicationIcon>..\..\branding\zaxnes.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Zax.Nes\Zax.Nes.csproj" />
+    <ProjectReference Include="..\Zax.Profiles\Zax.Profiles.csproj" />
+    <ProjectReference Include="..\Zax.Engine3D\Zax.Engine3D.csproj" />
+    <ProjectReference Include="..\Zax.Scripting\Zax.Scripting.csproj" />
+    <ProjectReference Include="..\Zax.Render\Zax.Render.csproj" />
+    <ProjectReference Include="..\Zax.Platform\Zax.Platform.csproj" />
+    <ProjectReference Include="..\Zax.Settings\Zax.Settings.csproj" />
+  </ItemGroup>
+
+  <!-- Lot ICON-1: the window icon. GLFW wants decoded RGBA, not an .ico, so the PNG sizes of
+       branding/ are embedded in the assembly and decoded at start-up by the project's own PNG
+       reader (Zax.App.Branding.AppIcon). Embedded, not copied: build/publish.ps1 ships nothing
+       new, and REQ-PUB-002 keeps holding for the published folder. The logical names are fixed
+       here so that AppIcon does not depend on the default name mangling. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\branding\zaxnes-icon-16.png" LogicalName="Zax.App.Branding.zaxnes-icon-16.png" />
+    <EmbeddedResource Include="..\..\branding\zaxnes-icon-24.png" LogicalName="Zax.App.Branding.zaxnes-icon-24.png" />
+    <EmbeddedResource Include="..\..\branding\zaxnes-icon-32.png" LogicalName="Zax.App.Branding.zaxnes-icon-32.png" />
+    <EmbeddedResource Include="..\..\branding\zaxnes-icon-48.png" LogicalName="Zax.App.Branding.zaxnes-icon-48.png" />
+    <EmbeddedResource Include="..\..\branding\zaxnes-icon-64.png" LogicalName="Zax.App.Branding.zaxnes-icon-64.png" />
+    <EmbeddedResource Include="..\..\branding\zaxnes-icon-128.png" LogicalName="Zax.App.Branding.zaxnes-icon-128.png" />
+    <EmbeddedResource Include="..\..\branding\zaxnes-icon-256.png" LogicalName="Zax.App.Branding.zaxnes-icon-256.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.OpenGL" />
+    <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" />
+    <PackageReference Include="ImGui.NET" />
+  </ItemGroup>
+
+  <!-- The frame clock of SPEC-07 and the keyboard map of SPEC-08 are checked by unit tests. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Zax.App.Tests" />
+  </ItemGroup>
+
+</Project>

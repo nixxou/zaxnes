@@ -1,0 +1,9 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The settings model of SPEC-09. REQ-PERS-082 requires a library with no dependency on the
+    UI, on the window or on the file system: there are deliberately no project or package
+    references here. Reading and writing go through ISettingsStorage, which the host supplies.
+  -->
+
+</Project>

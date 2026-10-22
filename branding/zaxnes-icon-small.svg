@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges">
+<title>Zaxnes</title>
+<defs><linearGradient id="og" gradientUnits="userSpaceOnUse" x1="0" y1="2" x2="0" y2="14"><stop offset="0" stop-color="#FFD166"/><stop offset="0.55" stop-color="#FF8A3D"/><stop offset="1" stop-color="#E8505B"/></linearGradient><linearGradient id="bgt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#241C46"/><stop offset="1" stop-color="#120E24"/></linearGradient></defs>
+<rect x="0" y="0" width="16" height="16" rx="3" fill="url(#bgt)" shape-rendering="geometricPrecision"/>
+<polygon points="6,13 7,13 8,12 7,12" fill="#7C68D8"/>
+<polygon points="7,13 7,14 8,13 8,12" fill="#3A2E7A"/>
+<polygon points="13,13 13,14 14,13 14,12" fill="#3A2E7A"/>
+<polygon points="5,12 6,12 7,11 6,11" fill="#7C68D8"/>
+<polygon points="6,12 6,13 7,12 7,11" fill="#3A2E7A"/>
+<polygon points="8,12 9,12 10,11 9,11" fill="#7C68D8"/>
+<polygon points="9,12 10,12 11,11 10,11" fill="#7C68D8"/>
+<polygon points="10,12 11,12 12,11 11,11" fill="#7C68D8"/>
+<polygon points="11,12 12,12 13,11 12,11" fill="#7C68D8"/>
+<polygon points="12,12 13,12 14,11 13,11" fill="#7C68D8"/>
+<polygon points="13,12 13,13 14,12 14,11" fill="#3A2E7A"/>
+<polygon points="4,11 5,11 6,10 5,10" fill="#7C68D8"/>
+<polygon points="5,11 5,12 6,11 6,10" fill="#3A2E7A"/>
+<polygon points="3,10 4,10 5,9 4,9" fill="#7C68D8"/>
+<polygon points="4,10 4,11 5,10 5,9" fill="#3A2E7A"/>
+<polygon points="2,9 3,9 4,8 3,8" fill="#7C68D8"/>
+<polygon points="3,9 3,10 4,9 4,8" fill="#3A2E7A"/>
+<polygon points="5,9 6,9 7,8 6,8" fill="#7C68D8"/>
+<polygon points="7,9 7,10 8,9 8,8" fill="#3A2E7A"/>
+<polygon points="6,8 7,8 8,7 7,7" fill="#7C68D8"/>
+<polygon points="8,8 8,9 9,8 9,7" fill="#3A2E7A"/>
+<polygon points="7,7 8,7 9,6 8,6" fill="#7C68D8"/>
+<polygon points="9,7 9,8 10,7 10,6" fill="#3A2E7A"/>
+<polygon points="8,6 9,6 10,5 9,5" fill="#7C68D8"/>
+<polygon points="10,6 10,7 11,6 11,5" fill="#3A2E7A"/>
+<polygon points="9,5 10,5 11,4 10,4" fill="#7C68D8"/>
+<polygon points="11,5 11,6 12,5 12,4" fill="#3A2E7A"/>
+<polygon points="12,4 12,5 13,4 13,3" fill="#3A2E7A"/>
+<polygon points="13,3 13,4 14,3 14,2" fill="#3A2E7A"/>
+<polygon points="3,2 4,2 5,1 4,1" fill="#7C68D8"/>
+<polygon points="4,2 5,2 6,1 5,1" fill="#7C68D8"/>
+<polygon points="5,2 6,2 7,1 6,1" fill="#7C68D8"/>
+<polygon points="6,2 7,2 8,1 7,1" fill="#7C68D8"/>
+<polygon points="7,2 8,2 9,1 8,1" fill="#7C68D8"/>
+<polygon points="8,2 9,2 10,1 9,1" fill="#7C68D8"/>
+<polygon points="9,2 10,2 11,1 10,1" fill="#7C68D8"/>
+<polygon points="10,2 11,2 12,1 11,1" fill="#7C68D8"/>
+<polygon points="11,2 12,2 13,1 12,1" fill="#7C68D8"/>
+<polygon points="12,2 13,2 14,1 13,1" fill="#7C68D8"/>
+<polygon points="13,2 13,3 14,2 14,1" fill="#3A2E7A"/>
+<g fill="url(#og)"><rect x="2" y="9" width="1" height="1"/><rect x="2" y="10" width="1" height="1"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/><rect x="2" y="13" width="1" height="1"/><rect x="3" y="2" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="3" y="10" width="1" height="1"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="4" y="13" width="1" height="1"/><rect x="5" y="2" width="1" height="1"/><rect x="5" y="3" width="1" height="1"/><rect x="5" y="9" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="5" y="13" width="1" height="1"/><rect x="6" y="2" width="1" height="1"/><rect x="6" y="3" width="1" height="1"/><rect x="6" y="8" width="1" height="1"/><rect x="6" y="9" width="1" height="1"/><rect x="6" y="13" width="1" height="1"/><rect x="7" y="2" width="1" height="1"/><rect x="7" y="3" width="1" height="1"/><rect x="7" y="7" width="1" height="1"/><rect x="7" y="8" width="1" height="1"/><rect x="8" y="2" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="8" y="6" width="1" height="1"/><rect x="8" y="7" width="1" height="1"/><rect x="8" y="12" width="1" height="1"/><rect x="8" y="13" width="1" height="1"/><rect x="9" y="2" width="1" height="1"/><rect x="9" y="3" width="1" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="9" y="6" width="1" height="1"/><rect x="9" y="12" width="1" height="1"/><rect x="9" y="13" width="1" height="1"/><rect x="10" y="2" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="10" y="4" width="1" height="1"/><rect x="10" y="5" width="1" height="1"/><rect x="10" y="12" width="1" height="1"/><rect x="10" y="13" width="1" height="1"/><rect x="11" y="2" width="1" height="1"/><rect x="11" y="3" width="1" height="1"/><rect x="11" y="4" width="1" height="1"/><rect x="11" y="12" width="1" height="1"/><rect x="11" y="13" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/><rect x="12" y="3" width="1" height="1"/><rect x="12" y="12" width="1" height="1"/><rect x="12" y="13" width="1" height="1"/></g>
+</svg>
