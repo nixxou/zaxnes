@@ -32,6 +32,13 @@ internal sealed partial class ZaxUi
 
         DrawBrowserTrail();
 
+        // AMD-030 §2: the 3dSen picker says what it expects, since a folder is an unusual answer
+        // for this dialog.
+        if (_browser.Hint.Length > 0)
+        {
+            ImGui.TextWrapped(_browser.Hint);
+        }
+
         string search = _browser.Search;
         ImGui.SetNextItemWidth(220f);
         if (ImGui.InputText($"{UiText.Search}##search", ref search, 128))
@@ -153,7 +160,7 @@ internal sealed partial class ZaxUi
         }
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(_browser.FileName.Length == 0);
+        ImGui.BeginDisabled(!_browser.CanConfirm);
         if (ImGui.Button(UiText.Open) && _browser.Confirm() && _browser.Result is { } path)
         {
             Finish(path, ref open);

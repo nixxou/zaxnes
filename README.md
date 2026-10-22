@@ -61,6 +61,23 @@ profil) », which converts any ROM with the default geometry of SPEC-04. If you 
 appears in the library — the tile-encoding key it needs is a constant of the code
 (REQ-PUB-007).
 
+### Bring your own 3dSen
+
+If you own 3dSen, its profiles are already on your disk and
+`spec/changes/AMD-030-import-3dsen.md` makes them importable in one action: **Fichier ▸ Importer
+depuis 3dSen…** — or `--import-3dsen <folder-or-bundle>` on the command line — reads the
+profile bundle of **your** installation, checks every profile with the SPEC-03 decoder and
+writes the ones that decode, unmodified, into your own profile folder as `<name>.3dn`. They show
+up in the library at once, under the title each profile carries.
+
+Nothing is downloaded and nothing is redistributed: only your local installation is read, the
+bundle itself is never modified, moved or copied, and no file of 3dSen enters this repository or
+the release (REQ-PUB-002 still holds). The reader — a baseline LZ4 block decoder, the public
+Unity « UnityFS » bundle format and its serialized files — is written from the format
+description of AMD-030 §4 and adds no dependency. Identical profiles are skipped, so a second
+import adds nothing; a name clash gets a ` (2)` suffix. See
+[HOWTO-RUN.md §9.1](HOWTO-RUN.md) for the user-facing details.
+
 `--assets <dir>` still reads a folder of asset files **you** supply (`profiles.json`,
 `cubemaps/`, `meshes/`, `textures/`, `audio/`). It is never looked for automatically, and
 nothing in the repository or the release depends on it (REQ-PUB-001).

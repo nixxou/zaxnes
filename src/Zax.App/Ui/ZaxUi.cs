@@ -131,6 +131,11 @@ internal sealed partial class ZaxUi
 
         /// <summary>Choosing an image to use as cover art (REQ-PERS-036).</summary>
         Cover,
+
+        /// <summary>
+        /// Choosing an installation of 3dSen — a folder, or the bundle itself (AMD-030 §2).
+        /// </summary>
+        ThreeDSen,
     }
 
     /// <summary>Which windows are open and what full screen hides (REQ-UI-209).</summary>
@@ -258,6 +263,20 @@ internal sealed partial class ZaxUi
                 OpenBrowser(BrowserPurpose.Profile);
                 break;
 
+            case ZaxCommands.ImportThreeDSen:
+                // AMD-030 §2: with a path already given (a drag, a script), import straight
+                // away; without one, ask for the folder.
+                if (args.Text is { Length: > 0 } installation)
+                {
+                    ImportThreeDSen(installation);
+                }
+                else
+                {
+                    OpenBrowser(BrowserPurpose.ThreeDSen);
+                }
+
+                break;
+
             case ZaxCommands.ImportCover:
                 OpenBrowser(BrowserPurpose.Cover);
                 break;
@@ -324,15 +343,21 @@ internal sealed partial class ZaxUi
             {
                 BrowserPurpose.Rom => UiText.OpenRomTitle,
                 BrowserPurpose.Cover => UiText.ImportCoverTitle,
+                BrowserPurpose.ThreeDSen => UiText.ImportThreeDSenTitle,
                 _ => UiText.ImportProfileTitle,
             },
             purpose switch
             {
                 BrowserPurpose.Rom => FileBrowserModel.RomFilters,
                 BrowserPurpose.Cover => FileBrowserModel.CoverFilters,
+                BrowserPurpose.ThreeDSen => FileBrowserModel.ThreeDSenFilters,
                 _ => FileBrowserModel.ProfileFilters,
             },
-            _settings.LastBrowseDirectory);
+            _settings.LastBrowseDirectory,
+
+            // AMD-030 §2: the 3dSen import is the one dialog that answers with a folder.
+            allowFolders: purpose == BrowserPurpose.ThreeDSen,
+            hint: purpose == BrowserPurpose.ThreeDSen ? UiText.ImportThreeDSenHint : null);
         State.FileBrowser = true;
     }
 
@@ -385,9 +410,40 @@ internal sealed partial class ZaxUi
                 _host.Enqueue(ZaxCommands.ImportCover, CommandArgs.Of(path));
                 break;
 
+            case BrowserPurpose.ThreeDSen:
+                ImportThreeDSen(path);
+                break;
+
             default:
                 ImportProfile(path);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// The import of AMD-030 §2: every profile of the named installation goes into the library,
+    /// a summary is shown, and the chooser is rebuilt so the new profiles show at once.
+    /// </summary>
+    private void ImportThreeDSen(string path)
+    {
+        ThreeDSenImportReport report = _catalog.ImportFromThreeDSen(path);
+
+        if (report.Summary is null)
+        {
+            // AMD-030 §3, §5: nothing was found or nothing could be read, and the message says
+            // where it looked.
+            _host.Notifications.ShowError(report.Message);
+            _log(report.Message);
+            return;
+        }
+
+        _host.Notifications.Show(report.Message);
+        _log(report.Message);
+
+        if (report.Summary.Imported > 0)
+        {
+            _options.Mixer?.PlaySound(UiSound.Confirm);
+            RebuildChooser();
         }
     }
 

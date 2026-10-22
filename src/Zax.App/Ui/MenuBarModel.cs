@@ -208,6 +208,10 @@ internal sealed class MenuBarModel
             MenuItem.Of(Need(ZaxCommands.ChooseProfile)),
             MenuItem.Of(Need(ZaxCommands.ImportProfile)),
 
+            // AMD-030 §2: « Fichier → Importer depuis 3dSen… », right after the single-file
+            // import it extends.
+            MenuItem.Of(Need(ZaxCommands.ImportThreeDSen)),
+
             // SPEC-10 REQ-UI-037 with AMD-010 §3: the deletion of a user profile is one of the
             // functions the amendment keeps mandatory, and the tile button it describes becomes a
             // menu entry here — the presentation is informative, the function is not.

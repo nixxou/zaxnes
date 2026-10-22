@@ -48,6 +48,7 @@ public sealed class MenuBarTests
             ("Fichier", ZaxCommands.OpenRecentRom),
             ("Fichier", ZaxCommands.ChooseProfile),
             ("Fichier", ZaxCommands.ImportProfile),
+            ("Fichier", ZaxCommands.ImportThreeDSen), // AMD-030 §2
             ("Fichier", ZaxCommands.LoadSlot),
             ("Fichier", ZaxCommands.QuickLoad),
             ("Fichier", ZaxCommands.SaveSlot),

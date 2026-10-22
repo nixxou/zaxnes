@@ -94,6 +94,7 @@ archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/
 | `--rom <chemin>` | ouvre cette ROM au démarrage ; sans `--profile`, la résolution de profil ci-dessus s'applique |
 | `--profile <titre>` | entrée de la bibliothèque (titre exact, identifiant ou préfixe non ambigu), ou chemin d'un profil `.3dn` déjà importé. Sans l'option : « 2D Mode » |
 | `--list-profiles` | liste les entrées de la bibliothèque, puis quitte |
+| `--import-3dsen <dossier\|fichier>` | importe les profils de **votre** installation de 3dSen (§9.1), affiche le bilan, puis quitte avec `0` si tout s'est bien passé |
 | `--assets <dossier>` | dossier de fichiers d'assets que vous fournissez (facultatif, jamais cherché tout seul) |
 | `--font <fichier>` | police de l'interface : un fichier, ou un nom dans le dossier des polices du système |
 | `--builtin-font` | force la police intégrée d'ImGui (accents et « ▸ » remplacés par de l'ASCII) |
@@ -145,6 +146,7 @@ grisée n'est pas disponible dans l'état courant — « Reset » sans jeu charg
 | ROMs récentes ▸ | | les dix derniers fichiers ouverts |
 | Choisir le profil 3D… | | rouvre la sélection de profil pour le jeu en cours |
 | Importer un profil… | | ajoute un fichier `.3dn` à la bibliothèque, sans redémarrage |
+| Importer depuis 3dSen… | | importe d'un coup les profils de votre installation de 3dSen (§9.1) |
 | Supprimer le jeu… | | supprime le jeu courant **s'il vient d'un profil importé**, après confirmation |
 | Créer la jaquette | | la dernière capture de pause devient la jaquette du jeu courant |
 | Importer une jaquette… | | une image PNG devient la jaquette, réduite pour tenir dans 256 × 192 |
@@ -500,6 +502,43 @@ Ce qu'il faut savoir :
 bibliothèque le prend en compte sans redémarrage. Un profil dont l'identifiant est déjà celui
 d'un profil utilisateur le remplace ; un identifiant de profil intégré est ignoré. Un fichier
 invalide affiche un message et ne change rien.
+
+### 9.1 Si vous possédez 3dSen : importer ses profils
+
+Si vous avez acheté 3dSen, ses profils sont dans **votre** installation et vous pouvez les
+importer en une action. Rien n'est téléchargé et rien n'est redistribué : seul votre disque est
+lu, et le dossier de 3dSen n'est ni modifié, ni déplacé, ni copié.
+
+**Fichier ▸ Importer depuis 3dSen…** ouvre un sélecteur ; désignez
+
+- le **dossier d'installation** de 3dSen, celui qui contient `3dSen.exe` (le bouton « Ouvrir »
+  valide le dossier affiché, ou celui que vous avez sélectionné), ou
+- directement le **fichier bundle** des profils, si vous savez où il est :
+  `<installation>\<nom>_Data\StreamingAssets\aa\StandaloneWindows*\defaultprofiles_assets_all_*.bundle`.
+
+À la fin, un message donne le bilan : combien de profils ont été importés, combien étaient déjà
+présents (ignorés) et combien ont échoué. Les profils importés apparaissent aussitôt dans la
+bibliothèque, sans redémarrage, avec le titre que porte le profil lui-même.
+
+En ligne de commande, sans ouvrir de fenêtre :
+
+```
+Zaxnes.exe --import-3dsen "C:\Program Files (x86)\Steam\steamapps\common\3dSen"
+```
+
+Le code de sortie est `0` quand tout s'est bien passé, `1` quand aucun bundle n'a été trouvé, que
+le fichier est illisible ou qu'au moins un profil a été refusé ; le détail part sur la sortie
+d'erreur. Ajoutez `--userdata <dossier>` pour écrire ailleurs que dans votre dossier de données
+habituel.
+
+Détails utiles :
+
+- un profil **identique octet pour octet** à un fichier déjà importé est ignoré : réimporter la
+  même installation n'ajoute rien ;
+- un profil de même nom mais de contenu différent reçoit un suffixe ` (2)`, ` (3)`… ;
+- un profil que le lecteur de `.3dn` refuse est compté en échec et n'interrompt pas l'import ;
+- un fichier tronqué, une signature inconnue ou une compression LZMA donnent un message clair et
+  n'écrivent aucun fichier partiel.
 
 ## 10. Captures hors écran, sans fenêtre
 

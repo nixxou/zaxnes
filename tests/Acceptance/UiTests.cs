@@ -907,6 +907,54 @@ public sealed class UiTests
     }
 
     /// <summary>
+    /// AMD-030 §2: « Fichier → Importer depuis 3dSen… ouvre un sélecteur de dossier ». The
+    /// dialog of REQ-UI-100 answers with a <b>folder</b> in that one mode — the folder shown, or
+    /// the one selected — and still accepts the bundle file named directly (§3). The ROM dialog
+    /// is unchanged: it only ever answers with a file (REQ-UI-104).
+    /// </summary>
+    [Fact] // AMD-030 §2, §3
+    public void AMD_030_the_3dsen_picker_answers_with_a_folder()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), $"zax-3dsen-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(folder, "3dSen"));
+        try
+        {
+            string bundle = Path.Combine(
+                folder, "defaultprofiles_assets_all_0123456789abcdef.bundle");
+            File.WriteAllBytes(bundle, []);
+
+            object picker = UiDriver.OpenBrowser(
+                "Importer depuis 3dSen", folder, threeDSen: true);
+
+            // The bundle is listed: the dialog's own filter accepts the extension of §3.
+            Assert.True(UiDriver.BrowserAccepts(picker, Path.GetFileName(bundle)));
+            Assert.Contains(
+                UiDriver.BrowserEntries(picker),
+                entry => entry.Name == Path.GetFileName(bundle));
+
+            // With nothing selected, the answer is the folder being shown.
+            Assert.True(UiDriver.BrowserCanConfirm(picker));
+            Assert.Equal(folder, UiDriver.BrowserConfirm(picker));
+
+            // The ROM dialog of REQ-UI-104 still refuses to answer without a file.
+            object rom = UiDriver.OpenBrowser("Ouvrir une ROM", folder);
+            Assert.False(UiDriver.BrowserCanConfirm(rom));
+            Assert.Null(UiDriver.BrowserConfirm(rom));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A locked temporary folder must not fail a verification run.
+            }
+        }
+    }
+
+    /// <summary>
     /// SPEC-10 REQ-UI-037 with AMD-010 §3, which keeps "import <b>and deletion</b> of user
     /// profiles" among the mandatory functions: an interface route deletes a user profile, it
     /// opens the box E8 titled with the game, with the message

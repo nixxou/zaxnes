@@ -22,6 +22,12 @@ public sealed record AppOptions
     public string? RomPath { get; init; }
 
     /// <summary>
+    /// The installation folder of 3dSen — or its profile bundle — to import from, then exit
+    /// (AMD-030 §2, <c>--import-3dsen</c>); null when the option was not given.
+    /// </summary>
+    public string? ImportThreeDSenPath { get; init; }
+
+    /// <summary>
     /// Title of a built-in profile, or the path of a profile file. Null falls back to the
     /// "2D Mode" entry (REQ-SCN-055).
     /// </summary>
@@ -135,6 +141,7 @@ public sealed record AppOptions
         Usage:
           Zax.App --rom <path> [--profile <title-or-file>] [options]
           Zax.App --list-profiles
+          Zax.App --import-3dsen <folder-or-bundle>
 
         Options:
           --rom <path>            The .nes ROM to play. Without it only the empty scene shows.
@@ -149,6 +156,10 @@ public sealed record AppOptions
           --userdata <dir>        Where settings, save states and battery RAM go.
                                   Default: %LOCALAPPDATA%\Zaxnes, or userdata\ in portable mode.
           --list-profiles         Print the built-in catalogue and exit.
+          --import-3dsen <path>   Import the profiles of your own 3dSen installation into your
+                                  profile folder, print the summary and exit. Give the folder
+                                  holding 3dSen.exe, or the profile bundle itself. Nothing is
+                                  downloaded and the installation is only read (AMD-030).
           --size <w>x<h>          Window size in pixels (default 1280x720).
           --no-audio              Do not open the audio device.
 
@@ -210,6 +221,13 @@ public sealed record AppOptions
 
                 case "--list-profiles":
                     options = options with { ListProfiles = true };
+                    break;
+
+                case "--import-3dsen":
+                    options = options with
+                    {
+                        ImportThreeDSenPath = Next(args, ref i, "--import-3dsen"),
+                    };
                     break;
 
                 case "--rom":

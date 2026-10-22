@@ -21,7 +21,8 @@ public sealed class CommandModelTests
         string[] expected =
         [
             ZaxCommands.OpenRom, ZaxCommands.OpenRecentRom, ZaxCommands.ChooseProfile,
-            ZaxCommands.ImportProfile, ZaxCommands.LaunchGame, ZaxCommands.LoadSlot,
+            ZaxCommands.ImportProfile, ZaxCommands.ImportThreeDSen,
+            ZaxCommands.LaunchGame, ZaxCommands.LoadSlot,
             ZaxCommands.SaveSlot, ZaxCommands.QuickSave, ZaxCommands.QuickLoad,
             ZaxCommands.DeleteSlot, ZaxCommands.DeleteGame, ZaxCommands.CreateGameArt,
             ZaxCommands.ImportCover, ZaxCommands.CancelModal, ZaxCommands.Quit,

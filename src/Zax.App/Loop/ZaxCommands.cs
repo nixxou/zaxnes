@@ -33,6 +33,12 @@ public static class ZaxCommands
     /// <summary>Import a user profile; argument: the <c>.3dn</c> path.</summary>
     public const string ImportProfile = "file.import_profile";
 
+    /// <summary>
+    /// Import the profiles of an installed 3dSen (AMD-030 §2); argument: the installation folder
+    /// or the bundle file, and without one the interface asks for it.
+    /// </summary>
+    public const string ImportThreeDSen = "file.import_3dsen";
+
     /// <summary>Launch a library entry; argument: its profile id in <see cref="CommandArgs.Text"/>.</summary>
     public const string LaunchGame = "file.launch_game";
 

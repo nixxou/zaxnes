@@ -2,9 +2,20 @@ using Zax.App.Loop;
 using Zax.App.Persistence;
 using Zax.Profiles;
 using Zax.Profiles.Catalogue;
+using Zax.Profiles.Import;
 using Zax.Profiles.Library;
 
 namespace Zax.App;
+
+/// <summary>
+/// What an import from an installed 3dSen did (AMD-030 §2).
+/// </summary>
+/// <param name="Summary">
+/// The counts, or null when no bundle could be found or read — in which case nothing was
+/// written.
+/// </param>
+/// <param name="Message">The message to show: the summary, or why it failed.</param>
+internal sealed record ThreeDSenImportReport(ThreeDSenImportSummary? Summary, string Message);
 
 /// <summary>
 /// The application's library: the embedded catalogue, the user profiles of
@@ -299,6 +310,79 @@ internal sealed class LibraryGameCatalog : IGameCatalog
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Imports every profile of an installed 3dSen (AMD-030 §2, §5): the profiles are written
+    /// into <c>&lt;root&gt;/profiles</c> and the library gains the entries whose identifier is
+    /// still free, without a restart.
+    /// </summary>
+    /// <param name="installationOrBundlePath">
+    /// The installation folder — the one holding <c>3dSen.exe</c> — or the bundle itself.
+    /// </param>
+    public ThreeDSenImportReport ImportFromThreeDSen(string installationOrBundlePath)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(installationOrBundlePath);
+
+        if (!_paths.IsWritable)
+        {
+            // SPEC-09 REQ-PERS-073: with no writable root there is nowhere to put the profiles.
+            return new ThreeDSenImportReport(
+                null,
+                _paths.UnwritableMessage ?? "the user folder does not accept writes.");
+        }
+
+        ThreeDSenImportSummary summary;
+        try
+        {
+            ThreeDSenImporter importer = new(
+                PhysicalProfileFileSystem.Instance, _paths.ProfilesDirectory);
+            summary = importer.ImportFrom(installationOrBundlePath);
+        }
+        catch (Exception exception) when (exception is UnityAssetFormatException
+            or IOException or UnauthorizedAccessException)
+        {
+            _log($"the 3dSen import failed: {exception.Message}");
+            return new ThreeDSenImportReport(null, exception.Message);
+        }
+
+        AddImportedProfiles();
+        return new ThreeDSenImportReport(summary, summary.Message);
+    }
+
+    /// <summary>
+    /// Rescans the folder of imported profiles and adds to the library what is not there yet,
+    /// which is what makes a fresh import visible at once (AMD-030 §2). A profile whose
+    /// identifier belongs to a built-in one is left out, as SPEC-09 REQ-PERS-030 requires.
+    /// </summary>
+    private void AddImportedProfiles()
+    {
+        IReadOnlyList<UserProfile> profiles;
+        try
+        {
+            UserProfileFolder folder = new(PhysicalProfileFileSystem.Instance, _paths.ProfilesDirectory);
+            profiles = folder.Scan();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _log($"the user profile folder could not be read: {exception.Message}");
+            return;
+        }
+
+        bool added = false;
+        foreach (UserProfile profile in profiles)
+        {
+            if (_library.AddUserProfile(profile) is not null)
+            {
+                _profiles.Remove(profile.Id);
+                added = true;
+            }
+        }
+
+        if (added)
+        {
+            Save();
+        }
     }
 
     /// <summary>Writes <c>library.json</c> (REQ-PERS-037).</summary>

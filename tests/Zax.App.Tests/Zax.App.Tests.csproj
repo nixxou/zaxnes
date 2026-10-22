@@ -10,4 +10,12 @@
     <ProjectReference Include="..\..\src\Zax.Settings\Zax.Settings.csproj" />
   </ItemGroup>
 
+  <!-- AMD-030 §6: the synthetic « UnityFS » bundles of the profile tests, shared as source so
+       that the command line of §2 is exercised on a real bundle without any file of 3dSen and
+       without a second copy of the builder. -->
+  <ItemGroup>
+    <Compile Include="..\Zax.Profiles.Tests\SyntheticUnityBundle.cs" Link="Shared\SyntheticUnityBundle.cs" />
+    <Compile Include="..\Zax.Profiles.Tests\Lz4Encoder.cs" Link="Shared\Lz4Encoder.cs" />
+  </ItemGroup>
+
 </Project>

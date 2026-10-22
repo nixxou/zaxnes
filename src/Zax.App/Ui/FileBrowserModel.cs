@@ -74,8 +74,32 @@ internal sealed class FileBrowserModel
     /// <summary>The selected row, or null.</summary>
     public FileEntry? Selected { get; set; }
 
-    /// <summary>The file name field of REQ-UI-100, read only in this dialog.</summary>
-    public string FileName => Selected is { Kind: FileEntryKind.File } entry ? entry.Name : string.Empty;
+    /// <summary>
+    /// Whether a folder is an acceptable answer, which is what the 3dSen import of AMD-030 §2
+    /// needs: the user names the installation folder, or the bundle inside it.
+    /// </summary>
+    public bool AllowFolders { get; private set; }
+
+    /// <summary>A line the dialog shows above the list, or an empty string.</summary>
+    public string Hint { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// The file name field of REQ-UI-100, read only in this dialog. In folder mode it shows the
+    /// folder the dialog would answer with.
+    /// </summary>
+    public string FileName => Selected switch
+    {
+        { Kind: FileEntryKind.File } entry => entry.Name,
+        { Kind: FileEntryKind.Folder or FileEntryKind.Drive } entry when AllowFolders => entry.Name,
+        _ => AllowFolders && _directory is not null ? _directory : string.Empty,
+    };
+
+    /// <summary>
+    /// Whether <see cref="Confirm"/> would answer something: a selected file, or — in folder
+    /// mode — a selected folder or the folder being shown.
+    /// </summary>
+    public bool CanConfirm => Selected is { Kind: FileEntryKind.File }
+        || (AllowFolders && (Selected is not null || _directory is not null));
 
     /// <summary>What the dialog returns when it closes with a validation, or null.</summary>
     public string? Result { get; private set; }
@@ -101,10 +125,16 @@ internal sealed class FileBrowserModel
     /// <param name="title">The title.</param>
     /// <param name="filters">The filters, the first one chosen.</param>
     /// <param name="startDirectory">The remembered folder of <c>ui.last_browse_dir</c>.</param>
+    /// <param name="allowFolders">
+    /// Whether a folder is an acceptable answer (AMD-030 §2: the 3dSen installation folder).
+    /// </param>
+    /// <param name="hint">A line shown above the list, or null.</param>
     public void Open(
         string title,
         IReadOnlyList<(string Label, string[] Extensions)> filters,
-        string? startDirectory)
+        string? startDirectory,
+        bool allowFolders = false,
+        string? hint = null)
     {
         ArgumentNullException.ThrowIfNull(filters);
 
@@ -114,6 +144,8 @@ internal sealed class FileBrowserModel
         Filter = filters.Count > 0 ? filters[0].Extensions : [];
         Result = null;
         Selected = null;
+        AllowFolders = allowFolders;
+        Hint = hint ?? string.Empty;
         _search = string.Empty;
 
         GoTo(Exists(startDirectory) ? startDirectory : null);
@@ -174,16 +206,35 @@ internal sealed class FileBrowserModel
     }
 
     /// <summary>
-    /// The validation button of REQ-UI-104: it only acts when a file is selected.
+    /// The validation button of REQ-UI-104: it only acts when a file is selected. In folder mode
+    /// it also answers with the selected folder, or with the folder being shown when no row is
+    /// selected (AMD-030 §2).
     /// </summary>
     public bool Confirm()
     {
-        if (Selected is not { Kind: FileEntryKind.File } file)
+        if (Selected is { Kind: FileEntryKind.File } file)
+        {
+            Result = file.Path;
+            return true;
+        }
+
+        if (!AllowFolders)
         {
             return false;
         }
 
-        Result = file.Path;
+        if (Selected is { } folder)
+        {
+            Result = folder.Path;
+            return true;
+        }
+
+        if (_directory is null)
+        {
+            return false;
+        }
+
+        Result = _directory;
         return true;
     }
 
@@ -225,6 +276,16 @@ internal sealed class FileBrowserModel
     public static IReadOnlyList<(string Label, string[] Extensions)> ProfileFilters { get; } =
     [
         ("Profils 3D (*.3dn)", ["3dn"]),
+        ("Tous les fichiers", []),
+    ];
+
+    /// <summary>
+    /// The filters of the 3dSen import (AMD-030 §2, §3): the bundle of the installation, whose
+    /// fingerprint is never assumed, or any file the user points at.
+    /// </summary>
+    public static IReadOnlyList<(string Label, string[] Extensions)> ThreeDSenFilters { get; } =
+    [
+        ("Bundle de profils 3dSen (*.bundle)", ["bundle"]),
         ("Tous les fichiers", []),
     ];
 

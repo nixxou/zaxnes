@@ -106,6 +106,17 @@ internal static class UiText
     /// <summary>Title of the cover-art import dialog (REQ-PERS-036).</summary>
     public const string ImportCoverTitle = "Importer une jaquette";
 
+    /// <summary>Title of the 3dSen installation picker (AMD-030 §2).</summary>
+    public const string ImportThreeDSenTitle = "Importer depuis 3dSen";
+
+    /// <summary>
+    /// What the 3dSen picker asks for: the installation folder, or the bundle itself
+    /// (AMD-030 §2, §3).
+    /// </summary>
+    public const string ImportThreeDSenHint =
+        "Choisissez le dossier d'installation de 3dSen (celui qui contient 3dSen.exe), "
+        + "ou directement le fichier .bundle des profils.";
+
     // ------------------------------------------------------------- misc labels
 
     /// <summary>The "reset this tab to its defaults" button of REQ-UI-202.</summary>

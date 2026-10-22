@@ -61,6 +61,14 @@ internal sealed partial class EmulationHost
             args => UiRequested?.Invoke(ZaxCommands.ImportProfile, args),
             canExecute: _ => !IsLoading);
 
+        // AMD-030 §2: « Fichier → Importer depuis 3dSen… ». The folder picker and the import
+        // itself belong to the interface, which owns the library.
+        Commands.Register(
+            ZaxCommands.ImportThreeDSen,
+            "Importer depuis 3dSen…",
+            args => UiRequested?.Invoke(ZaxCommands.ImportThreeDSen, args),
+            canExecute: _ => !IsLoading);
+
         // SPEC-09 REQ-PERS-042 and SPEC-10 REQ-UI-037, which AMD-010 §3 keeps mandatory: the
         // deletion of a user game, behind the confirmation of REQ-UI-110.
         Commands.Register(
