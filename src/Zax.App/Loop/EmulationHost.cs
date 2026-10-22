@@ -171,12 +171,6 @@ internal sealed partial class EmulationHost : IDisposable
     /// <summary>The settings the loop reads and writes.</summary>
     public AppSettings Settings { get; }
 
-    /// <summary>
-    /// Whether the television model of AMD-025 was found. When it was not, the TV box setting
-    /// is offered nowhere: there is nothing to draw.
-    /// </summary>
-    public bool TelevisionAvailable { get; set; } = true;
-
     /// <summary>The frame clock of SPEC-07 §3.2.</summary>
     public FramePacer Pacer { get; }
 
@@ -511,10 +505,6 @@ internal sealed partial class EmulationHost : IDisposable
 
             case "scene.skybox":
                 _scene.Settings.Skybox = (SkyboxKind)Settings.Skybox;
-                break;
-
-            case "scene.tv_box":
-                _scene.Settings.TvBox = TvBoxSetting.From(Settings.TvBox);
                 break;
 
             case "camera.local_cam":

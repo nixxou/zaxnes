@@ -64,7 +64,6 @@ internal static class ScriptBridge
         scene.Camera.LocalCamera = settings.LocalCam;
         scene.Settings.Shadows = settings.Shadow;
         scene.Settings.Skybox = (SkyboxKind)settings.Skybox;
-        scene.Settings.TvBox = (TvBoxKind)settings.TVBox;
         scene.Settings.CustomBackgroundColor = settings.CustomBgColor.ToRgb24();
         scene.UseNesBackgroundColor = settings.BgColor;
     }

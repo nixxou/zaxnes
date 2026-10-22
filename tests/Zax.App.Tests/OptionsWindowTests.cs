@@ -62,7 +62,6 @@ public sealed class OptionsWindowTests
             SettingKeys.EmuGameSpeed,
             SettingKeys.CameraFov,
             SettingKeys.EmuTvMode,
-            SettingKeys.SceneTvBox,
             SettingKeys.SceneSkybox,
             SettingKeys.UiFullscreen,
         ];
@@ -223,7 +222,6 @@ public sealed class OptionsWindowTests
             SettingKeys.LightIntensity,
             SettingKeys.RenderShadow,
             SettingKeys.SceneSkybox,
-            SettingKeys.SceneTvBox,
             SettingKeys.VideoFrameRate,
             SettingKeys.UiFullscreen,
             SettingKeys.SceneCustomBgColor,

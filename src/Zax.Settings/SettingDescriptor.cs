@@ -100,19 +100,6 @@ public sealed class SettingDescriptor
     public bool IsLibretroExposed => LibretroValues is { Count: > 0 };
 
     /// <summary>
-    /// Labels a stored file may still carry from an earlier version of the catalogue, each
-    /// mapped to the value it becomes. They are accepted when a settings file is read, never
-    /// written and never shown.
-    /// </summary>
-    /// <remarks>
-    /// AMD-025 is what this exists for: the TV box setting had four values and now has two,
-    /// and a <c>settings.json</c> written before the amendment holds « TV 2 » or « TV 3 »
-    /// where the catalogue now knows only « TV ». Without the list the value would fall back
-    /// to the default, which is not what « toute valeur héritée 2 ou 3 est ramenée à 1 » says.
-    /// </remarks>
-    public IReadOnlyList<SettingOption> LegacyOptions { get; init; } = [];
-
-    /// <summary>
     /// The core option key: <c>zaxnes_</c> and the stable key with <c>.</c>, <c>[</c> and
     /// <c>]</c> replaced by <c>_</c> (REQ-PERS-083, prefix set by AMD-029 §3).
     /// </summary>

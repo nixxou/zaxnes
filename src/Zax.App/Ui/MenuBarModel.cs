@@ -272,8 +272,6 @@ internal sealed class MenuBarModel
             MenuItem.Rule,
             MenuItem.Sub(UiText.LabelOf(Zax.Settings.SettingsCatalogue.Get(Zax.Settings.SettingKeys.SceneSkybox)),
                 () => SkyboxItems(Need(ZaxCommands.SetSkybox), settings)),
-            MenuItem.Sub(UiText.LabelOf(Zax.Settings.SettingsCatalogue.Get(Zax.Settings.SettingKeys.SceneTvBox)),
-                () => TvBoxItems(Need(ZaxCommands.SetTvBox), settings)),
             MenuItem.Of(Need(ZaxCommands.ToggleShadows)),
             MenuItem.Rule,
             MenuItem.Of(Need(ZaxCommands.ToggleFullscreen)),
@@ -477,9 +475,6 @@ internal sealed class MenuBarModel
 
     private static IReadOnlyList<MenuItem> SkyboxItems(ZaxCommand set, AppSettings settings)
         => ChoiceItems(set, Zax.Settings.SettingKeys.SceneSkybox, () => settings.Skybox);
-
-    private static IReadOnlyList<MenuItem> TvBoxItems(ZaxCommand set, AppSettings settings)
-        => ChoiceItems(set, Zax.Settings.SettingKeys.SceneTvBox, () => settings.TvBox);
 
     /// <summary>
     /// The rows of an enumerated setting, taken from its domain in the catalogue rather than

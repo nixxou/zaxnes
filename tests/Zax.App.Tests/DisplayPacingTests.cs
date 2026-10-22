@@ -138,7 +138,6 @@ public sealed class DisplayPacingTests
         chosen.Fov = 55f;
         chosen.Shadow = false;
         chosen.Skybox = 2;
-        chosen.TvBox = 1;
         chosen.SkipFrame = false;
         chosen.FrameRate = 120;
         chosen.VSync = 2;
@@ -153,7 +152,6 @@ public sealed class DisplayPacingTests
         Assert.Equal(55f, settings.Fov);
         Assert.False(settings.Shadow);
         Assert.Equal(2, settings.Skybox);
-        Assert.Equal(1, settings.TvBox);
         Assert.False(settings.SkipFrame);
         Assert.Equal(120, settings.FrameRate);
         Assert.Equal(2, settings.VSync);

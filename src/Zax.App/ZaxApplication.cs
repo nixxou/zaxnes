@@ -47,7 +47,6 @@ internal sealed class ZaxApplication : IDisposable
     private GL? _gl;
     private OffscreenFramebuffer? _offscreen;
     private ISceneRenderer? _renderer;
-    private TvModel? _television;
     private ImGuiController? _imgui;
     private IKeyboard? _keyboard;
     private IMouse? _mouse;
@@ -229,7 +228,6 @@ internal sealed class ZaxApplication : IDisposable
         _scene.Camera.Fov = _settings.Fov;
         _scene.Settings.Shadows = _settings.Shadow;
         _scene.Settings.Skybox = (SkyboxKind)_settings.Skybox;
-        _scene.Settings.TvBox = TvBoxSetting.From(_settings.TvBox);
         _scene.Settings.SkipRender = _settings.SkipFrame;
         _scene.Settings.TargetFrameRate = _settings.FrameRate;
         _scene.Settings.VSync = _settings.VSync;
@@ -330,25 +328,11 @@ internal sealed class ZaxApplication : IDisposable
 
         _offscreen = new OffscreenFramebuffer(_gl, host.Window.FramebufferSize.X, host.Window.FramebufferSize.Y);
 
-        // REQ-SCN-057: the host, not the renderer, decides where the assets of REQ-SCN-050,
-        // REQ-SCN-051 and REQ-SCN-054 come from.
+        // REQ-SCN-057: the host, not the renderer, decides where the assets of REQ-SCN-050
+        // and REQ-SCN-051 come from.
         string? assetRoot = NeutralAssets.Locate(_options.AssetRoot);
 
-        // AMD-025: the television is the CC BY glTF file the release ships under assets/tv.
-        // Without it the model is simply absent and the TV option does nothing (REQ-PUB-001:
-        // the application runs with no asset at all).
-        TvModel? television = TvModel.TryLoad(TelevisionAsset.Locate(_options.TvModelPath));
-        if (television is null)
-        {
-            Log("no television model found; the TV box option is disabled.");
-        }
-        else
-        {
-            Log($"television model: {television.Describe()}");
-        }
-
-        _television = television;
-        _renderer = new SceneRenderer(_gl, NeutralSceneAssets.TryOpen(assetRoot), television);
+        _renderer = new SceneRenderer(_gl, NeutralSceneAssets.TryOpen(assetRoot));
         _imgui = new ImGuiController(_gl, host.Window, host.Input, ConfigureImGuiIo);
 
         // REQ-UI-207: the controller has just built the font atlas and uploaded its texture, so
@@ -506,14 +490,6 @@ internal sealed class ZaxApplication : IDisposable
         });
 
         _emulation.UiRequested += OnUiRequested;
-
-        // AMD-025: with no model file the TV box setting is disabled and forced off.
-        _emulation.TelevisionAvailable = _television is not null;
-        if (_television is null)
-        {
-            _settings.TvBox = 0;
-            _scene.Settings.TvBox = TvBoxKind.None;
-        }
 
         if (_emulation.Slots.WasRecovered)
         {

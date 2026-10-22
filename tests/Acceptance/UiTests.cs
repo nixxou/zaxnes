@@ -72,7 +72,6 @@ public sealed class UiTests
         Expect("Vidéo", ZaxCommands.SetCameraMode);
         Expect("Vidéo", ZaxCommands.ResetView);
         Expect("Vidéo", ZaxCommands.SetSkybox);
-        Expect("Vidéo", ZaxCommands.SetTvBox);
         Expect("Vidéo", ZaxCommands.ToggleShadows);
         Expect("Vidéo", ZaxCommands.ToggleFullscreen);
         Expect("Vidéo", ZaxCommands.ToggleFpsCounter);
@@ -184,11 +183,6 @@ public sealed class UiTests
         // Vidéo
         host.Run(ZaxCommands.SetSkybox, CommandArgs.Of(2));
         Assert.Equal(2, host.Settings.Skybox);
-        // AMD-025: one model, and the value 3 of an older shortcut still selects it.
-        host.Run(ZaxCommands.SetTvBox, CommandArgs.Of(3));
-        Assert.Equal(1, host.Settings.TvBox);
-        host.Run(ZaxCommands.SetTvBox, CommandArgs.Of(0));
-        Assert.Equal(0, host.Settings.TvBox);
         host.Run(ZaxCommands.ToggleShadows);
         Assert.False(host.Settings.Shadow);
         host.Run(ZaxCommands.ToggleShadows);
@@ -403,7 +397,7 @@ public sealed class UiTests
             SettingKeys.LightIntensity, SettingKeys.AudioVolume,
             SettingKeys.RenderShadow, SettingKeys.VideoFrameRate, SettingKeys.VideoSkipFrame,
             SettingKeys.EmuGameSpeed, SettingKeys.CameraFov, SettingKeys.EmuTvMode,
-            SettingKeys.SceneTvBox, SettingKeys.SceneSkybox, SettingKeys.SceneCustomBgColor,
+            SettingKeys.SceneSkybox, SettingKeys.SceneCustomBgColor,
             SettingKeys.UiFullscreen,
         ];
 
@@ -1266,10 +1260,6 @@ public sealed class UiTests
         Assert.Equal<IEnumerable<string>>(
             ["60fps", "90fps", "120fps"],
             [.. Labels(SettingKeys.VideoFrameRate)]);
-        // AMD-025 leaves one television model.
-        Assert.Equal<IEnumerable<string>>(
-            ["None", "TV"],
-            [.. Labels(SettingKeys.SceneTvBox)]);
         Assert.Equal<IEnumerable<string>>(
             ["Default", "Color", "Gradient", "Fantasy"],
             [.. Labels(SettingKeys.SceneSkybox)]);

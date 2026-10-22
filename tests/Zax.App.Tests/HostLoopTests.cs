@@ -112,7 +112,6 @@ public sealed class HostLoopTests
         Assert.Null(defaults.FrameRate);
         Assert.Null(defaults.SkipRender);
         Assert.Null(defaults.Skybox);
-        Assert.Null(defaults.TvBox);
         Assert.Null(defaults.VSync);
         Assert.Null(defaults.Fov);
         Assert.Null(defaults.Shadows);
@@ -125,17 +124,19 @@ public sealed class HostLoopTests
         Assert.Throws<ArgumentException>(static () => AppOptions.Parse(["--vsync", "3"]));
 
         AppOptions options = AppOptions.Parse(
-            ["--fps", "120", "--no-render-skip", "--skybox", "fantasy", "--tv", "1"]);
+            ["--fps", "120", "--no-render-skip", "--skybox", "fantasy"]);
 
         Assert.Equal(120, options.FrameRate);
         Assert.False(options.SkipRender);
         Assert.Equal(2, options.Skybox);
-        Assert.Equal(1, options.TvBox);
 
-        // AMD-025: a command line that still asks for TV 2 or TV 3 gets the one model.
-        Assert.Equal(1, AppOptions.Parse(["--tv", "3"]).TvBox);
-        Assert.Equal(0, AppOptions.Parse(["--tv", "0"]).TvBox);
         Assert.Throws<ArgumentException>(static () => AppOptions.Parse(["--skybox", "nebula"]));
+
+        // AMD-031 §2: --tv and --tv-model are gone, so they follow the general rule for an
+        // unknown option.
+        Assert.Throws<ArgumentException>(static () => AppOptions.Parse(["--tv", "1"]));
+        Assert.Throws<ArgumentException>(static () => AppOptions.Parse(["--tv-model", "tv.glb"]));
+        Assert.DoesNotContain("--tv", AppOptions.Usage, StringComparison.Ordinal);
     }
 
     [Fact]

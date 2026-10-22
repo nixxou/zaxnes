@@ -4,8 +4,8 @@ using Zax.Engine3D;
 namespace Zax.Render.Assets;
 
 /// <summary>
-/// A reader for the Wavefront OBJ files of <c>assets-neutral/meshes</c>, which hold the three
-/// television models of SPEC-06 REQ-SCN-054 and their buttons.
+/// A reader for the Wavefront OBJ files of <c>assets-neutral/meshes</c>, the mesh half of
+/// <see cref="ISceneAssets"/>.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,11 +15,9 @@ namespace Zax.Render.Assets;
 /// coordinate by <c>(0, 0)</c>.
 /// </para>
 /// <para>
-/// A <c>g</c> line starts a new group, which is how the export writes the submeshes of the
-/// original models: <c>Object004</c> keeps its two-triangle screen in the group
-/// <c>Object004_1</c>, apart from the cabinet. REQ-SCN-054 gives exactly one material per
-/// television, so <see cref="Load"/> keeps the first group that has faces and drops the rest
-/// (Q-023); <see cref="ParseGroups"/> returns all of them.
+/// A <c>g</c> line starts a new group, which is how an export writes the submeshes of one
+/// model. <see cref="Load"/> keeps the first group that has faces and drops the rest (Q-023);
+/// <see cref="ParseGroups"/> returns all of them.
 /// </para>
 /// </remarks>
 public static class ObjMesh
@@ -27,7 +25,7 @@ public static class ObjMesh
     /// <summary>Reads the OBJ file <paramref name="path"/>, keeping its first non-empty group.</summary>
     public static TileMesh Load(string path)
     {
-        // Q-023: REQ-SCN-054 lists one material per television, so one group per model.
+        // Q-023: one material per model, so one group per model.
         return Parse(File.ReadAllText(path));
     }
 

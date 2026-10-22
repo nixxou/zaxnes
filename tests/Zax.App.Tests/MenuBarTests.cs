@@ -67,7 +67,6 @@ public sealed class MenuBarTests
             ("Vidéo", ZaxCommands.SetCameraMode),
             ("Vidéo", ZaxCommands.ResetView),
             ("Vidéo", ZaxCommands.SetSkybox),
-            ("Vidéo", ZaxCommands.SetTvBox),
             ("Vidéo", ZaxCommands.ToggleShadows),
             ("Vidéo", ZaxCommands.ToggleFullscreen),
             ("Vidéo", ZaxCommands.ToggleFpsCounter),

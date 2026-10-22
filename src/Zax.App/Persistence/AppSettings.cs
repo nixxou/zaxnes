@@ -132,17 +132,6 @@ public sealed class AppSettings
         set => Model.Set(SettingKeys.SceneSkybox, SettingValue.OfEnum(value));
     }
 
-    /// <summary>
-    /// <c>scene.tv_box</c>: 0 None, 1 the television. AMD-025 brings a stored 2 or 3 — the
-    /// TV 2 and TV 3 of REQ-SCN-054 — back to 1, on the way in as on the way out, so a
-    /// settings file written before the amendment keeps working.
-    /// </summary>
-    public int TvBox
-    {
-        get => TvBoxSetting.Normalise(Model.GetInt(SettingKeys.SceneTvBox));
-        set => Model.Set(SettingKeys.SceneTvBox, SettingValue.OfEnum(TvBoxSetting.Normalise(value)));
-    }
-
     /// <summary><c>camera.fov</c>: vertical field of view in degrees, default 70.</summary>
     public float Fov
     {

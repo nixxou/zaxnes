@@ -32,7 +32,7 @@ public sealed class CommandModelTests
             ZaxCommands.SetRegion, ZaxCommands.ToggleAutoRegion, ZaxCommands.SetPortType,
             ZaxCommands.ToggleTwoDimensional, ZaxCommands.ResetView,
             ZaxCommands.SetCameraMode, ZaxCommands.ToggleLocalCamera, ZaxCommands.SetSkybox,
-            ZaxCommands.SetTvBox, ZaxCommands.ToggleShadows, ZaxCommands.ToggleFullscreen,
+            ZaxCommands.ToggleShadows, ZaxCommands.ToggleFullscreen,
             ZaxCommands.ToggleFpsCounter,
             ZaxCommands.SetVolume, ZaxCommands.VolumeUp, ZaxCommands.VolumeDown,
             ZaxCommands.ToggleMute, ZaxCommands.ToggleMenuMusic,

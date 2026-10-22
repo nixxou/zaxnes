@@ -65,7 +65,9 @@ public interface ISettingsMigration
 /// Only scope U is persisted, <c>ui.fullscreen</c> among them; the P and S settings are not
 /// needed at start-up and their presence in the file is ignored (REQ-PERS-020). Unknown keys
 /// survive a rewrite (REQ-PERS-023), so a file written by a newer version — or holding the VR
-/// keys the desktop build does not expose — loses nothing.
+/// keys the desktop build does not expose — loses nothing. The retired keys of
+/// <see cref="SettingsCatalogue.RetiredKeys"/> are the exception: AMD-031 §3 has them read
+/// without error and dropped, not written back.
 /// </para>
 /// <para>
 /// A file that cannot be parsed, or whose root is not an object, takes the whole model back to
@@ -269,6 +271,14 @@ public sealed class SettingsFile
     {
         foreach ((string key, JsonNode? node) in values)
         {
+            if (SettingsCatalogue.IsRetired(key))
+            {
+                // AMD-031 §3: a value stored for a retired key — the TV box — is ignored
+                // without error and is not kept, so the next save no longer writes it. That is
+                // the one exception to the unknown keys of REQ-PERS-023.
+                continue;
+            }
+
             SettingDescriptor? descriptor = SettingsCatalogue.Find(key);
             if (descriptor is null)
             {

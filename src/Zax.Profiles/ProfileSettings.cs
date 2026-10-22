@@ -229,10 +229,14 @@ public sealed class ProfileSettings
     /// <summary>Take the region from the ROM header when loading (field 33).</summary>
     public bool AutoTvMode { get; set; }
 
-    /// <summary>Television region (field 34).</summary>
+    /// <summary>Video region (field 34).</summary>
     public TvRegionMode TvMode { get; set; }
 
-    /// <summary>3D television model around the image (field 35).</summary>
+    /// <summary>
+    /// The decorative TV box of the original product (field 35). AMD-031 removed the feature
+    /// and kept the field: it is decoded and written back as it was found, byte for byte, and
+    /// has no effect on anything.
+    /// </summary>
     public int TvBox { get; set; }
 
     /// <summary>Library sort option (field 36): 0 A-Z, 1 recent.</summary>

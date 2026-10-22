@@ -66,15 +66,6 @@ internal sealed partial class ZaxUi
         SettingDescriptor descriptor = row.Descriptor;
         ImGui.PushID(descriptor.Key);
 
-        // AMD-025: with no television model file there is nothing to show, so the row is
-        // greyed out instead of offering a setting that would do nothing.
-        bool disabled = descriptor.Key == SettingKeys.SceneTvBox
-            && !_options.Host.TelevisionAvailable;
-        if (disabled)
-        {
-            ImGui.BeginDisabled();
-        }
-
         try
         {
             // A setting whose domain is a finite list gets a drop-down whatever its shape:
@@ -106,11 +97,6 @@ internal sealed partial class ZaxUi
         }
         finally
         {
-            if (disabled)
-            {
-                ImGui.EndDisabled();
-            }
-
             ImGui.PopID();
         }
     }

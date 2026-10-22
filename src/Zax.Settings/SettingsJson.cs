@@ -96,24 +96,10 @@ public static class SettingsJson
                     return true;
                 }
 
-                if (TryText(node) is { } text)
+                if (TryText(node) is { } text && descriptor.Domain.ValueOf(text) is { } fromLabel)
                 {
-                    if (descriptor.Domain.ValueOf(text) is { } fromLabel)
-                    {
-                        value = SettingValue.OfEnum((int)fromLabel);
-                        return true;
-                    }
-
-                    // A label the catalogue dropped: AMD-025 renamed the four TV box values
-                    // into two, and a file written before it must still be read.
-                    foreach (SettingOption legacy in descriptor.LegacyOptions)
-                    {
-                        if (string.Equals(legacy.Label, text, StringComparison.OrdinalIgnoreCase))
-                        {
-                            value = SettingValue.OfEnum((int)legacy.Value);
-                            return true;
-                        }
-                    }
+                    value = SettingValue.OfEnum((int)fromLabel);
+                    return true;
                 }
 
                 return false;

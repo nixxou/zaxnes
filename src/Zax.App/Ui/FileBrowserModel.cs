@@ -290,8 +290,8 @@ internal sealed class FileBrowserModel
     ];
 
     /// <summary>
-    /// The filter of the cover-art import (SPEC-09 REQ-PERS-036). Only PNG is decoded, so JPEG
-    /// is not offered — see <c>GameArt</c> and <c>spec/changes/Q-050.md</c>.
+    /// The filter of the cover-art import (SPEC-09 REQ-PERS-036). Only PNG is decoded, so
+    /// <c>.jpg</c> is not offered — see <c>GameArt</c> and <c>spec/changes/Q-050.md</c>.
     /// </summary>
     // Q-050
     public static IReadOnlyList<(string Label, string[] Extensions)> CoverFilters { get; } =

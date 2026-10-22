@@ -275,14 +275,6 @@ internal sealed partial class EmulationHost
             "Skybox",
             args => Settings.Skybox = args.Number);
 
-        // AMD-025: without the model file there is no television to draw, so the whole
-        // submenu is disabled rather than offering a setting with no effect.
-        Commands.Register(
-            ZaxCommands.SetTvBox,
-            "Boîtier TV",
-            args => Settings.TvBox = args.Number,
-            canExecute: _ => TelevisionAvailable);
-
         Commands.Register(
             ZaxCommands.ToggleShadows,
             "Ombres",

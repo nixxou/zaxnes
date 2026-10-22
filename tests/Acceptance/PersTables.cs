@@ -43,7 +43,11 @@ public static class PersTables
         }
     }
 
-    /// <summary>Every row of §4.1.1 to §4.1.10, in document order.</summary>
+    /// <summary>
+    /// Every row of §4.1.1 to §4.1.10 still in force, in document order: the rows an amendment
+    /// has retired since — <c>scene.tv_box</c>, which AMD-031 removed with the decorative TV
+    /// box — are dropped, so the comparison is against the specification <b>as amended</b>.
+    /// </summary>
     public static IReadOnlyList<PersSettingRow> Settings()
     {
         List<PersSettingRow> rows = [];
@@ -106,6 +110,12 @@ public static class PersTables
 
             foreach (string key in Keys(cells[keyColumn]))
             {
+                // AMD-031 §3: a retired key is no longer a setting at all.
+                if (Zax.Settings.SettingsCatalogue.IsRetired(key))
+                {
+                    continue;
+                }
+
                 string? lua = names.Count > 0 ? Expand(names[0], key) : null;
                 List<string> aliases = [.. names.Skip(1).Select(name => Expand(name, key))];
                 rows.Add(new PersSettingRow(key, lua, aliases, readOnly, scope, current));

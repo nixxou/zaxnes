@@ -3,9 +3,8 @@ using Zax.Engine3D;
 namespace Zax.Render.Gl;
 
 /// <summary>
-/// The unit box the backdrop of SPEC-06 REQ-SCN-048 and, later, the TV tunnel of REQ-SCN-053
-/// are drawn with: a <see cref="TileMesh"/> so that it goes through the same upload path and the
-/// same shaders as the tiles.
+/// The unit box the backdrop of SPEC-06 REQ-SCN-048 is drawn with: a <see cref="TileMesh"/> so
+/// that it goes through the same upload path and the same shaders as the tiles.
 /// </summary>
 internal static class BoxMesh
 {

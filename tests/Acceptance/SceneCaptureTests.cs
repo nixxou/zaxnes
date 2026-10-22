@@ -502,46 +502,6 @@ public sealed class SceneCaptureTests
     }
 
     /// <summary>
-    /// REQ-SCN-053 — with a TV box the scene appears through an opening whose edges are the
-    /// visible rectangle, and the tunnel hides what sticks out sideways.
-    /// </summary>
-    [GlFact] // REQ-SCN-053, AMD-025
-    public void The_TV_box_surrounds_the_scene_with_a_tunnel()
-    {
-        if (FreeTelevision.Model is not { } television)
-        {
-            return;
-        }
-
-        using GlTarget target = GlTarget.Create(640, 480);
-        using SceneRenderer renderer = new(target.Gl, null, television);
-
-        SceneFixture fixture = new();
-        fixture
-            .Background(0x22)
-            .Pattern(SceneFixture.Solid(1), depth: 4, ProfileLayer.L1, columns: 4, rows: 4)
-            .Palette(1, 0x30)
-            .Rect(SceneFixture.Solid(1), 12, 14, 4, 4, palette: 1);
-
-        SceneState scene = fixture.Build();
-        scene.Palette(fixture);
-
-        Shot none = target.Render(renderer, scene);
-        Assert.Equal(0, renderer.Statistics.TunnelBoxes);
-
-        scene.Settings.TvBox = TvBoxKind.Tv;
-        Shot shot = target.Render(renderer, scene);
-
-        Assert.Equal(5, renderer.Statistics.TunnelBoxes);
-        Assert.Equal(television.Parts.Count, renderer.Statistics.TvParts);
-        Assert.True(
-            shot.DistinctColors().Count >= none.DistinctColors().Count,
-            "the TV box must add the tunnel and the model.");
-
-        shot.SavePng(Path.Combine(PartBCaptures.Directory, "scn-053-tv.png"));
-    }
-
-    /// <summary>
     /// REQ-SCN-058 — the render order: the shadow map, the clear or the skybox, the opaque
     /// objects, the sorted transparent ones, then the HUD. A translucent motif in front of the
     /// backdrop lets it show, and the HUD draws over the translucent objects.

@@ -45,12 +45,6 @@ public sealed class RenderStatistics
     /// <summary>Whether a skybox was drawn for this frame (REQ-SCN-049).</summary>
     public bool SkyboxPass { get; internal set; }
 
-    /// <summary>Tunnel boxes drawn, 0 or 5 (REQ-SCN-053).</summary>
-    public int TunnelBoxes { get; internal set; }
-
-    /// <summary>Television meshes drawn (REQ-SCN-054).</summary>
-    public int TvParts { get; internal set; }
-
     /// <summary>
     /// Opaque tiles turned transparent this frame because they hide the followed shape
     /// (REQ-SCN-022).
@@ -68,8 +62,6 @@ public sealed class RenderStatistics
         ShadowCasters = 0;
         ShadowPass = false;
         SkyboxPass = false;
-        TunnelBoxes = 0;
-        TvParts = 0;
         Occluders = 0;
     }
 }

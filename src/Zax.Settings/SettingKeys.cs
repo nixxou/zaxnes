@@ -69,7 +69,7 @@ public static class SettingKeys
     /// <summary>Intensity of the directional light; a user preference.</summary>
     public const string LightIntensity = "light.intensity";
 
-    // §4.1.4 Background, skybox, television
+    // §4.1.4 Background and skybox
 
     /// <summary>Skybox choice.</summary>
     public const string SceneSkybox = "scene.skybox";
@@ -79,9 +79,6 @@ public static class SettingKeys
 
     /// <summary>Use the NES universal background colour.</summary>
     public const string SceneUseNesBgColor = "scene.use_nes_bg_color";
-
-    /// <summary>Decorative television model.</summary>
-    public const string SceneTvBox = "scene.tv_box";
 
     /// <summary>Kept for data compatibility; no observable effect.</summary>
     public const string SceneMapEnable = "scene.map_enable";

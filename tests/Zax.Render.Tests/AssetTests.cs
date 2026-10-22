@@ -7,8 +7,7 @@ namespace Zax.Render.Tests;
 
 /// <summary>
 /// The readers the extracted assets of SPEC-06 go through: the PNG decoder used by the skybox
-/// cubemaps (REQ-SCN-050, REQ-SCN-051) and the television textures, and the OBJ reader used by
-/// the television models (REQ-SCN-054).
+/// cubemaps (REQ-SCN-050, REQ-SCN-051) and the OBJ reader of the mesh folder.
 /// </summary>
 public sealed class AssetTests
 {
@@ -76,10 +75,10 @@ public sealed class AssetTests
     }
 
     [Fact]
-    public void REQ_SCN_054_only_the_first_group_is_kept_because_one_material_is_listed()
+    public void Q_023_only_the_first_group_is_kept_because_one_material_is_listed()
     {
-        // Q-023: `Object004.obj` keeps the screen of TV 2 in a second group, which is not the
-        // material REQ-SCN-054 lists; drawing it would hide the NES image.
+        // Q-023: an exported model may keep a second submesh in its own group; one material per
+        // model means one group, so the reader keeps the first and drops the rest.
         const string source = """
             g Object004
             v 0 0 0

@@ -17,10 +17,10 @@ utiliser une ROM dont vous disposez légalement.
 | Carte graphique | OpenGL 3.3 core (toute carte depuis ~2010) |
 | Audio | facultatif ; sans périphérique, Zaxnes démarre en silence |
 
-**Zaxnes n'a besoin d'aucun fichier d'asset** (AMD-024, phase P7a), à une exception près : le
-boîtier TV est le modèle « Retro Crt Tv » de meipal, sous licence **CC BY 4.0**, livré tel quel
-dans `assets/tv/retro_crt_tv.glb` (AMD-025) ; si le fichier manque, l'option « Boîtier TV » est
-simplement désactivée. Les skyboxes et les sons d'interface sont **produits par le code** ; il n'y a
+**Zaxnes n'a besoin d'aucun fichier d'asset** (AMD-024, phase P7a) et n'en livre aucun : le
+boîtier TV décoratif, qui était le seul fichier livré, a été retiré du produit (AMD-031). La
+scène se compose de l'image du jeu et du fond.
+Les skyboxes et les sons d'interface sont **produits par le code** ; il n'y a
 **pas de musique de menu** ; la police de l'interface est une police **déjà installée sur votre Windows**
 (Segoe UI, sinon Arial), ouverte au lancement et jamais recopiée. Le détail et les licences sont
 dans `ASSETS-LICENSES.md`.
@@ -101,7 +101,6 @@ archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/
 | `--userdata <dossier>` | racine des données modifiables (voir §6) |
 | `--size 1600x900` | taille de la fenêtre (défaut 1280 × 720) |
 | `--no-audio` | n'ouvre pas le périphérique audio |
-| `--tv-model <fichier.glb>` | le modèle du boîtier TV ; par défaut `assets/tv/retro_crt_tv.glb` à côté de l'exécutable |
 | `--smoke-test`, `--smoke-frames <n>` | rend un nombre fixe d'images sans interaction, puis quitte avec 0 |
 | `--smoke-emulated <n>` | joue `n` images émulées (60 = 1 s) sans interaction, puis quitte avec 0 |
 | `--ui-shots <dossier>` | capture une image PNG par écran d'interface, puis quitte |
@@ -124,7 +123,6 @@ session, votre nouvelle valeur reprend la main et est enregistrée normalement
 | `--fov <degrés>` | `camera.fov` | champ de vision, 45 à 95 |
 | `--no-shadows` | `render.shadow` | démarre sans les ombres |
 | `--skybox <nom>` | `scene.skybox` | `default`, `color`, `gradient` ou `fantasy` |
-| `--tv <0\|1>` | `scene.tv_box` | `0` aucun boîtier, `1` le boîtier (une valeur 2 ou 3 héritée donne 1) |
 
 Si l'image se déchire alors que « Synchronisation verticale » est activée, regardez la ligne
 `Zaxnes: display pacing: …` de la console : elle dit l'intervalle d'échange réellement en vigueur.
@@ -182,7 +180,6 @@ embarqué et l'entrée « 2D Mode » ne sont jamais supprimables : l'entrée res
 | Mode caméra ▸ | | Orbitale (TPV), Première personne (FPV), Vue de dessus |
 | Réinitialiser la vue | `Échap` maintenu ≥ 0,3 s | revient à la vue par défaut |
 | Skybox ▸ | | Par défaut, Couleur, Dégradé, Fantaisie |
-| Boîtier TV ▸ | | Aucun, TV (grisé si le modèle `assets/tv/*.glb` est absent) |
 | Ombres | | active ou désactive les ombres |
 | Plein écran | `Alt`+`Entrée` | masque la barre de menus ; les raccourcis restent actifs |
 | Afficher les FPS | | petit compteur en haut à droite, **désactivé par défaut** |
@@ -552,8 +549,7 @@ tools\Zax.Harness\bin\Release\net10.0\Zax.Harness.exe render --out captures
 Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
 `--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
 `--distance`, `--mesh`, `--no-shadows`, `--skybox`, `--sky-bodies` (allume le soleil, la lune
-et les nuages procéduraux), `--bg-color`, `--tv`, `--tv-model <fichier.glb>`, `--tv-info`
-(décrit le modèle chargé et l'ajustement obtenu), `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
+et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
 
 La commande `stress` rejoue en boucle le banc de mesure des jeux de référence — plusieurs jeux
@@ -580,15 +576,15 @@ Du côté de l'interface, `Zaxnes --ui-shots <dossier>` place l'interface dans c
 
 - la **bibliothèque visuelle** à tuiles : la barre de menus classique la remplace (`AMD-010`) ;
   la suppression d'un profil utilisateur et les jaquettes, elles, sont en place (menu Fichier) ;
-- l'import d'une jaquette au format **JPEG** : seul le PNG est décodé (`spec/changes/Q-050.md`) ;
+- l'import d'une jaquette au format **JPG** : seul le PNG est décodé (`spec/changes/Q-050.md`) ;
 - les **archives `.7z`** (`spec/changes/Q-028.md`) ;
 - le **pistolet optique libretro** : la table de correspondance existe comme donnée, le frontend
   lui-même n'est pas écrit ;
 - le **frontend libretro** : le noyau expose déjà « exécuter exactement une frame émulée » et la
   sérialisation complète, mais la DLL n'est pas écrite.
 
-Points laissés en question, visibles à l'écran ou à l'usage : le matériau des modèles de
-téléviseur (`spec/changes/Q-023.md`), l'espace des opérations sur les teintes de la skybox
+Points laissés en question, visibles à l'écran ou à l'usage : l'espace des opérations sur les
+teintes de la skybox
 Fantasy (`Q-024`), les faces écrites dans la carte d'ombre (`Q-025`), le cadrage de la capture de
 référence (`Q-026`), la vignette d'un emplacement sauvegardé en cours de jeu (`Q-027`), les
 archives `.7z` (`Q-028`), la vue 3D pendant la pause (`Q-029`), les raccourcis des emplacements
@@ -596,8 +592,7 @@ archives `.7z` (`Q-028`), la vue 3D pendant la pause (`Q-029`), les raccourcis d
 d'un binding dont la commande est déjà maintenue (`Q-033`) et le facteur « ×2 » du ciel Fantasy
 (`Q-045`, `Q-055`). `AMD-021` a tranché le seuil des commandes analogiques (il est mesuré après
 mise en forme, ce qui clôt `Q-048`, `Q-054` et `Q-056`) ; les cinq points de cet amendement
-restés indécis — dont l'ombre des touches du modèle TV 3 — ont été tranchés depuis par
-`AMD-022` (`spec/changes/Q-059.md`).
+restés indécis ont été tranchés depuis par `AMD-022` (`spec/changes/Q-059.md`).
 
 ## 12. Pointer les vérifications sur votre dossier de ROMs
 

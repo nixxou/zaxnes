@@ -126,9 +126,6 @@ public static class ZaxCommands
     /// <summary>Set the skybox; argument: −1 Default, 0 Color, 1 Gradient, 2 Fantasy.</summary>
     public const string SetSkybox = "video.set_skybox";
 
-    /// <summary>Set the decorative TV box; argument: 0 to 3.</summary>
-    public const string SetTvBox = "video.set_tv_box";
-
     /// <summary>Set the camera mode; argument: 0 TPV, 1 FPV (SPEC-06 REQ-SCN-006).</summary>
     public const string SetCameraMode = "video.set_camera_mode";
 

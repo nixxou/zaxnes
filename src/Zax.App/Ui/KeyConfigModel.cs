@@ -52,7 +52,6 @@ internal sealed class KeyConfigModel
         ZaxCommands.SetPortType,
         ZaxCommands.SetCameraMode,
         ZaxCommands.SetSkybox,
-        ZaxCommands.SetTvBox,
         ZaxCommands.SetVolume,
     };
 
