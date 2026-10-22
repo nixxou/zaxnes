@@ -499,6 +499,12 @@ internal sealed partial class EmulationHost : IDisposable
                 _scene.Settings.VSync = Settings.VSync;
                 break;
 
+            case "video.anti_alias":
+                // AMD-032 §2: the setting takes effect on the next rendered frame, the
+                // renderer reallocating its multisampled target by itself. No restart.
+                _scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(Settings.AntiAlias);
+                break;
+
             case "render.shadow":
                 _scene.Settings.Shadows = Settings.Shadow;
                 break;

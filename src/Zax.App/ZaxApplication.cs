@@ -106,7 +106,8 @@ internal sealed class ZaxApplication : IDisposable
             _options.Width,
             _options.Height,
             VSync: pacing.VSync,
-            TargetFrameRate: pacing.TargetFrameRate);
+            TargetFrameRate: pacing.TargetFrameRate,
+            Fullscreen: ShouldOpenFullscreen(_options, _settings.Fullscreen));
 
         _host = HostWindow.Create(settings);
         _host.Window.Load += OnLoad;
@@ -215,6 +216,24 @@ internal sealed class ZaxApplication : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Whether the window opens full screen (SPEC-09 REQ-PERS-067, AMD-032 §6).
+    /// </summary>
+    /// <param name="options">The parsed command line.</param>
+    /// <param name="persisted">The value of <c>ui.fullscreen</c> in the settings in force.</param>
+    /// <remarks>
+    /// The window state and the interface state have to agree from the first frame: the
+    /// interface reads <c>ui.fullscreen</c> every frame, so a window that opens windowed while
+    /// the setting says full screen hides the menu bar over an ordinary window. The two capture
+    /// runs are the exception — their PNGs have the size the command line asked for, which a
+    /// full-screen window would silently replace by the screen's.
+    /// </remarks>
+    internal static bool ShouldOpenFullscreen(AppOptions options, bool persisted)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return persisted && !options.SmokeTest && options.UiShotDirectory is null;
+    }
+
     private void ApplyCommandLineOverrides() => CommandLineSettings.Apply(_options, _settings);
 
     /// <summary>
@@ -232,6 +251,7 @@ internal sealed class ZaxApplication : IDisposable
         _scene.Settings.TargetFrameRate = _settings.FrameRate;
         _scene.Settings.VSync = _settings.VSync;
         _scene.Settings.LightIntensity = _settings.LightIntensity;
+        _scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(_settings.AntiAlias);
         _scene.Camera.SnapToSetpoints();
     }
 
@@ -593,8 +613,16 @@ internal sealed class ZaxApplication : IDisposable
         }
     }
 
-    private void OnFramebufferResize(Silk.NET.Maths.Vector2D<int> size)
-        => _offscreen?.Resize(size.X, size.Y);
+    /// <summary>
+    /// A window resize needs nothing here: <see cref="OnRender"/> sizes the scene buffer every
+    /// frame, and since AMD-032 §3 that size is the view scaled by <c>video.res_scale</c>, not
+    /// the framebuffer's own. Resizing to the window here would only allocate the full size for
+    /// one frame before the scaled one replaces it. REQ-UI-132 is met by the next frame either
+    /// way.
+    /// </summary>
+    private static void OnFramebufferResize(Silk.NET.Maths.Vector2D<int> size)
+    {
+    }
 
     private void OnRender(double deltaSeconds)
     {
@@ -635,7 +663,12 @@ internal sealed class ZaxApplication : IDisposable
         int windowWidth = host.Window.FramebufferSize.X;
         int windowHeight = host.Window.FramebufferSize.Y;
         int viewHeight = Math.Max(1, windowHeight - _viewInset);
-        offscreen.Resize(windowWidth, viewHeight);
+
+        // AMD-032 §3: with the render-texture method the scene is drawn at a fraction of the
+        // view and stretched back; with the direct method the buffer keeps the view's own size.
+        (int sceneWidth, int sceneHeight) = RenderScaling.SceneSize(
+            windowWidth, viewHeight, _settings.RenderMethod, _settings.ResScaleFactor);
+        offscreen.Resize(sceneWidth, sceneHeight);
 
         // REQ-SCN-060 / REQ-LOOP-014: with render skip on, a refresh that brought no new
         // emulated frame keeps the previous image.
@@ -643,11 +676,11 @@ internal sealed class ZaxApplication : IDisposable
             _scene.Settings.SkipRender,
             emulation.State == EmulationState.Running,
             emulated,
-            _lastRenderSize == (windowWidth, viewHeight));
+            _lastRenderSize == (sceneWidth, sceneHeight));
         if (!skip)
         {
             renderer.Render(offscreen.Target, _scene);
-            _lastRenderSize = (windowWidth, viewHeight);
+            _lastRenderSize = (sceneWidth, sceneHeight);
             _sceneFrames++;
         }
         else

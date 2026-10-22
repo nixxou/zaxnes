@@ -187,8 +187,8 @@ public sealed class UiFlowTests
     }
 
     /// <summary>
-    /// REQ-UI-207: with no ROM loaded the welcome screen is up; a loaded game hides it, and so
-    /// does full screen, since it is not an OSD element (REQ-UI-209).
+    /// REQ-UI-207: with no ROM loaded the welcome screen is up, in a window and in full screen
+    /// alike (Q-073); loading a game is what hides it.
     /// </summary>
     [Fact]
     public void REQ_UI_207_the_welcome_screen_shows_while_no_game_is_loaded()
@@ -207,7 +207,14 @@ public sealed class UiFlowTests
         imgui.Frame(() => harness.Ui.Draw(1f / 60f));
         Assert.True(harness.Ui.State.WelcomeVisible);
 
+        // Q-073: full screen with no game keeps the welcome screen, which is then the only
+        // thing on screen that names the way out (AMD-032 §6).
         harness.Settings.Fullscreen = true;
+        imgui.Frame(() => harness.Ui.Draw(1f / 60f));
+        Assert.True(harness.Ui.State.WelcomeVisible);
+        Assert.False(harness.Ui.State.MenuBarVisible);
+
+        harness.Launch("g0");
         imgui.Frame(() => harness.Ui.Draw(1f / 60f));
         Assert.False(harness.Ui.State.WelcomeVisible);
     }

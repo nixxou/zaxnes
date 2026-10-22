@@ -118,6 +118,28 @@ public sealed class AppSettings
         set => Model.Set(SettingKeys.VideoVSync, SettingValue.OfEnum(Math.Clamp(value, 0, 2)));
     }
 
+    /// <summary>
+    /// <c>video.anti_alias</c>: 0 off, 1 MSAA 4×, 2 MSAA 8× (SPEC-09 REQ-PERS-017, AMD-032 §2).
+    /// </summary>
+    public int AntiAlias
+    {
+        get => Model.GetInt(SettingKeys.VideoAntiAlias);
+        set => Model.Set(SettingKeys.VideoAntiAlias, SettingValue.OfEnum(Math.Clamp(value, 0, 2)));
+    }
+
+    /// <summary><c>video.render_method</c>: 0 direct, 1 render texture (SPEC-09 §4.1.1).</summary>
+    public int RenderMethod
+    {
+        get => Model.GetInt(SettingKeys.VideoRenderMethod);
+        set => Model.Set(SettingKeys.VideoRenderMethod, SettingValue.OfEnum(Math.Clamp(value, 0, 1)));
+    }
+
+    /// <summary>
+    /// <c>video.res_scale_factor</c>: the 1, 2/3, 1/2, 1/3 or 1/4 the index of
+    /// <c>video.res_scale</c> derives into (REQ-PERS-013 point 6, REQ-SCN-063).
+    /// </summary>
+    public float ResScaleFactor => Model.GetFloat(SettingKeys.VideoResScaleFactor);
+
     /// <summary><c>render.shadow</c>: the global shadow switch, default true.</summary>
     public bool Shadow
     {

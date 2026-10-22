@@ -59,6 +59,12 @@ public sealed class HostWindow : IDisposable
                 ? 0
                 : settings.TargetFrameRate,
             UpdatesPerSecond = 0,
+
+            // SPEC-09 REQ-PERS-067: the persisted full-screen state is restored at launch, on
+            // the window itself. Opening windowed and only telling the interface it is full
+            // screen leaves the two disagreeing — menu bar hidden over a plain window with no
+            // way back (AMD-032 §6).
+            WindowState = settings.Fullscreen ? WindowState.Fullscreen : WindowState.Normal,
         };
 
         return new HostWindow(Silk.NET.Windowing.Window.Create(options));

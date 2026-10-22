@@ -66,6 +66,16 @@ internal sealed partial class ZaxUi
         SettingDescriptor descriptor = row.Descriptor;
         ImGui.PushID(descriptor.Key);
 
+        // AMD-032 §3: the resolution scale only exists for the render-texture method; under
+        // the direct method the scene is always drawn at the native resolution, so the row is
+        // shown greyed out rather than hidden, with the reason spelled out beside it.
+        bool inert = descriptor.Key == SettingKeys.VideoResScale
+            && !RenderScaling.ScaleApplies(model.GetInt(SettingKeys.VideoRenderMethod));
+        if (inert)
+        {
+            ImGui.BeginDisabled();
+        }
+
         try
         {
             // A setting whose domain is a finite list gets a drop-down whatever its shape:
@@ -97,6 +107,13 @@ internal sealed partial class ZaxUi
         }
         finally
         {
+            if (inert)
+            {
+                ImGui.EndDisabled();
+                ImGui.SameLine();
+                ImGui.TextDisabled(UiText.ResScaleNeedsRenderTexture);
+            }
+
             ImGui.PopID();
         }
     }

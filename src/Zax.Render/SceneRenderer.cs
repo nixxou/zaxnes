@@ -452,7 +452,10 @@ public sealed class SceneRenderer : ISceneRenderer
         // AMD-021 R2-009: the scene is drawn into the renderer's own linear buffer, so that the
         // blending of the transparent objects and of the HUD happens on linear colours, and the
         // whole image is encoded to sRGB once, on the way into the host framebuffer.
-        _linear.BeginPass(target.Width, target.Height);
+        // AMD-032 §2: that buffer is multisampled when anti-aliasing is on, and resolved before
+        // the sRGB pass reads it. The shadow map keeps its own single-sample target.
+        _linear.BeginPass(target.Width, target.Height, scene.Settings.AntiAliasSamples);
+        Statistics.AntiAliasSamples = _linear.Samples;
         _gl.Disable(EnableCap.ScissorTest);
         _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.DepthTest);

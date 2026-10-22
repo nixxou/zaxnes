@@ -53,6 +53,8 @@ internal static class RenderExport
           --distance <d>           Camera setpoint distance (default 104 / atan(FOV/2)).
           --mesh <algorithm>       greedy (default), marching or multicolor (REQ-E3D-340).
           --no-shadows             Render with the shadows off.
+          --anti-alias <n>         video.anti_alias: 0 off (default), 1 MSAA 4x, 2 MSAA 8x
+                                   (AMD-032). The granted sample count is reported.
           --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049).
           --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046).
           --real-time <seconds>    Real time the star twinkle uses (REQ-SCN-050).
@@ -87,6 +89,7 @@ internal static class RenderExport
         int height = 480;
         float fov = 70f;
         bool shadows = true;
+        int antiAlias = 0;
         bool explain = false;
         int bench = 0;
         SkyboxKind skybox = SkyboxKind.Default;
@@ -165,6 +168,15 @@ internal static class RenderExport
 
                 case "--no-shadows":
                     shadows = false;
+                    break;
+
+                case "--anti-alias":
+                    antiAlias = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    if (antiAlias is < 0 or > 2)
+                    {
+                        throw new ArgumentException("--anti-alias expects 0, 1 or 2.");
+                    }
+
                     break;
 
                 case "--explain":
@@ -276,6 +288,9 @@ internal static class RenderExport
                 scene.Scene.Settings.Shadows = false;
                 scene.Engine.Settings.Shadow = false;
             }
+
+            // AMD-032 §2: video.anti_alias as the application applies it.
+            scene.Scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(antiAlias);
         }
 
         using OffscreenContext context = OffscreenContext.Create(width, height);
@@ -332,9 +347,12 @@ internal static class RenderExport
                 ? string.Create(CultureInfo.InvariantCulture, $"  {ms.Median:F2} ms median, {ms.P99:F2} ms p99")
                 : string.Empty;
             RenderStatistics counts = renderer.Statistics;
+            string msaa = counts.AntiAliasSamples > 1
+                ? string.Create(CultureInfo.InvariantCulture, $"  MSAA {counts.AntiAliasSamples}x")
+                : string.Empty;
             Console.Out.WriteLine(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{scene.Name,-18} {statistics.DistinctColors,6} colours  {counts.OpaqueTiles,5} opaque  {counts.TransparentTiles,4} alpha  {counts.HudTiles,4} HUD  {counts.ShadowCasters,5} casters{timing}"));
+                $"{scene.Name,-18} {statistics.DistinctColors,6} colours  {counts.OpaqueTiles,5} opaque  {counts.TransparentTiles,4} alpha  {counts.HudTiles,4} HUD  {counts.ShadowCasters,5} casters{msaa}{timing}"));
         }
 
         File.WriteAllText(
@@ -670,6 +688,7 @@ internal static class RenderExport
                 + $"\"hudTiles\": {render.HudTiles}, \"shadowCasters\": {render.ShadowCasters}, "
                 + $"\"drawCalls\": {render.DrawCalls}, \"triangles\": {render.Triangles}, "
                 + $"\"residentMeshes\": {render.ResidentMeshes}, "
+                + $"\"antiAliasSamples\": {render.AntiAliasSamples}, "
                 + $"\"distinctColors\": {capture.DistinctColors}, "
                 + $"\"backgroundPixels\": {capture.BackgroundPixels}, "
                 + $"\"meanLuma\": {capture.MeanLuma:F4}{bench} }}");

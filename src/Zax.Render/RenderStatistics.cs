@@ -46,6 +46,12 @@ public sealed class RenderStatistics
     public bool SkyboxPass { get; internal set; }
 
     /// <summary>
+    /// Samples per pixel the scene pass was granted (AMD-032 §2): 1 when anti-aliasing is off
+    /// or when the implementation refused what was asked for.
+    /// </summary>
+    public int AntiAliasSamples { get; internal set; } = 1;
+
+    /// <summary>
     /// Opaque tiles turned transparent this frame because they hide the followed shape
     /// (REQ-SCN-022).
     /// </summary>
@@ -62,6 +68,7 @@ public sealed class RenderStatistics
         ShadowCasters = 0;
         ShadowPass = false;
         SkyboxPass = false;
+        AntiAliasSamples = 1;
         Occluders = 0;
     }
 }

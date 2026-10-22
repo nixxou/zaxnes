@@ -28,6 +28,7 @@ public sealed class RenderSettings
 {
     private float _lightIntensity = 1f;
     private int _shadowMapSize = SceneConstants.ShadowMapSize;
+    private int _antiAliasSamples = 1;
     private int _vsync;
     private int _targetFrameRate = 90;
 
@@ -62,6 +63,17 @@ public sealed class RenderSettings
     {
         get => _shadowMapSize;
         set => _shadowMapSize = Math.Clamp(value, 64, 8192);
+    }
+
+    /// <summary>
+    /// Samples per pixel the scene is drawn with (AMD-032 §2): 1 for no anti-aliasing, 4 or 8
+    /// for the two levels of <c>video.anti_alias</c>. The shadow map is never multisampled.
+    /// A value the hardware refuses is lowered by the renderer, not here.
+    /// </summary>
+    public int AntiAliasSamples
+    {
+        get => _antiAliasSamples;
+        set => _antiAliasSamples = Math.Clamp(value, 1, SceneConstants.MaxAntiAliasSamples);
     }
 
     /// <summary>

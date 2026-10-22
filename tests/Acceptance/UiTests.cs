@@ -790,6 +790,10 @@ public sealed class UiTests
         object state = UiDriver.NewState();
         Assert.True(UiDriver.StateFlag(state, "MenuBarVisible"));
 
+        // Q-073: the chrome a full-screen *game view* hides. With no ROM loaded there is no
+        // view to leave room for and the welcome screen of REQ-UI-207 stays up, which is the
+        // only thing that keeps the way back visible (AMD-032 §6).
+        UiDriver.SetStateFlag(state, "HasCurrentGame", true);
         UiDriver.SetStateFlag(state, "Fullscreen", true);
         Assert.False(UiDriver.StateFlag(state, "MenuBarVisible"));
         Assert.False(UiDriver.StateFlag(state, "WelcomeVisible"));

@@ -49,8 +49,18 @@ internal sealed class UiState
     /// <summary>The menu bar of REQ-UI-200, hidden in full screen (REQ-UI-209).</summary>
     public bool MenuBarVisible => !Fullscreen;
 
-    /// <summary>The welcome screen of REQ-UI-207: no game loaded, and not in full screen.</summary>
-    public bool WelcomeVisible => !HasCurrentGame && !Fullscreen;
+    /// <summary>The welcome screen of REQ-UI-207: whenever no game is loaded.</summary>
+    /// <remarks>
+    /// Q-073: REQ-UI-209 hides every non-OSD element in full screen so that "la vue du jeu
+    /// occupe tout l'écran", and REQ-UI-207 shows the welcome screen "quand aucune ROM n'est
+    /// chargée". With no ROM the two premises do not overlap — there is no game view to leave
+    /// room for — and hiding both the menu bar and the welcome screen leaves a blank screen
+    /// whose only way out is an unshown shortcut. REQ-UI-207 therefore wins when no game is
+    /// loaded; with a game, <see cref="HasCurrentGame"/> hides the welcome screen anyway, so
+    /// REQ-UI-209 keeps the full-screen game view exactly as it was.
+    /// </remarks>
+    // Q-073
+    public bool WelcomeVisible => !HasCurrentGame;
 
     /// <summary>The statistics panel: only when asked for, and never in full screen.</summary>
     public bool DebugOverlayVisible => DebugOverlay && !Fullscreen;

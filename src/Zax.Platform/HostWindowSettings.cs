@@ -17,12 +17,18 @@ namespace Zax.Platform;
 /// allows" (SPEC-06 REQ-SCN-061). It is ignored when <paramref name="VSync"/> is on, since the
 /// driver then sets the pace.
 /// </param>
+/// <param name="Fullscreen">
+/// Whether the window opens full screen, which is what the persisted <c>ui.fullscreen</c> of
+/// SPEC-09 REQ-PERS-067 restores. The size above is then the windowed size the window goes back
+/// to.
+/// </param>
 public readonly record struct HostWindowSettings(
     string Title,
     int Width,
     int Height,
     int VSync,
-    int TargetFrameRate = 0)
+    int TargetFrameRate = 0,
+    bool Fullscreen = false)
 {
     /// <summary>The P0 defaults: a 1280x720 window titled "Zaxnes", with vsync on.</summary>
     public static HostWindowSettings Default { get; } = new("Zaxnes", 1280, 720, VSync: 1);

@@ -106,6 +106,48 @@ public static class SceneConstants
     /// </summary>
     public const float ShadowBiasTexels = 1.5f;
 
+    /// <summary>Highest sample count the anti-aliasing of AMD-032 §2 ever asks for.</summary>
+    public const int MaxAntiAliasSamples = 8;
+
+    /// <summary>
+    /// Samples per pixel the <c>video.anti_alias</c> option of SPEC-09 REQ-PERS-017 stands for:
+    /// 0 off, 1 four samples, 2 eight samples (AMD-032 §2).
+    /// </summary>
+    /// <param name="option">The stored option, 0 to 2; anything else means off.</param>
+    /// <returns>1, 4 or 8.</returns>
+    /// <remarks>
+    /// REQ-PERS-017 lets the reimplementation apply a full-screen anti-aliasing and names FXAA
+    /// and SMAA for the two levels. AMD-032 takes multisampling instead: the scene is a mass of
+    /// hard-edged flat faces with nearest-neighbour texturing (REQ-SCN-034), so a
+    /// post-processing filter would blur the pixel art it is supposed to keep crisp, while
+    /// multisampling only touches the geometric edges.
+    /// </remarks>
+    public static int AntiAliasSamples(int option) => option switch
+    {
+        1 => 4,
+        2 => MaxAntiAliasSamples,
+        _ => 1,
+    };
+
+    /// <summary>
+    /// Rounds a requested sample count down to a power of two no greater than
+    /// <paramref name="supported"/>, which is what a multisampled attachment can be asked for.
+    /// </summary>
+    /// <param name="samples">Requested samples per pixel.</param>
+    /// <param name="supported">What the implementation reports as its maximum.</param>
+    /// <returns>1 when anti-aliasing is off or nothing above one sample is supported.</returns>
+    public static int ClampAntiAliasSamples(int samples, int supported)
+    {
+        int limit = Math.Min(Math.Max(samples, 1), Math.Max(supported, 1));
+        int granted = 1;
+        while (granted * 2 <= limit)
+        {
+            granted *= 2;
+        }
+
+        return granted;
+    }
+
     /// <summary>Scale factor of the HUD plane, 0.5 (REQ-SCN-045).</summary>
     public const float HudScale = 0.5f;
 

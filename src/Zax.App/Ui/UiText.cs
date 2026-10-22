@@ -122,6 +122,12 @@ internal static class UiText
     /// <summary>The "reset this tab to its defaults" button of REQ-UI-202.</summary>
     public const string ResetDefaults = "Valeurs par défaut";
 
+    /// <summary>
+    /// Why the resolution scale is greyed out under the direct render method (AMD-032 §3).
+    /// </summary>
+    public const string ResScaleNeedsRenderTexture =
+        "(sans effet en rendu direct : résolution native)";
+
     /// <summary>Generic close button.</summary>
     public const string Close = "Fermer";
 

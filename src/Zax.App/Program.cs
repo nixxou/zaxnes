@@ -16,12 +16,6 @@ internal static partial class Program
 
     private static int Main(string[] args)
     {
-        // The executable is a GUI subsystem one, so a run from a terminal starts with no console
-        // of its own and everything written to the standard output goes nowhere. The options
-        // that only print — --help, --list-profiles and the import of AMD-030 §2 — borrow the
-        // terminal's console so their output is where the user is looking.
-        AttachToParentConsole();
-
         AppOptions options;
         try
         {
@@ -29,9 +23,17 @@ internal static partial class Program
         }
         catch (ArgumentException ex)
         {
+            // A usage error prints and exits like the three options below, so it borrows the
+            // terminal too; without that the message would go nowhere.
+            AttachToParentConsole();
             Console.Error.WriteLine(ex.Message);
             Console.Error.Write(AppOptions.Usage);
             return ExitUsage;
+        }
+
+        if (PrintsAndExits(options))
+        {
+            AttachToParentConsole();
         }
 
         if (options.ShowHelp)
@@ -73,6 +75,26 @@ internal static partial class Program
             Console.Error.WriteLine(ex);
             return ExitFailure;
         }
+    }
+
+    /// <summary>
+    /// Whether this run only prints something and exits, which is the single case where the
+    /// terminal's console is borrowed (AMD-032 §5).
+    /// </summary>
+    /// <param name="options">The parsed command line.</param>
+    /// <remarks>
+    /// A normal launch must <b>not</b> attach: the window then shares the terminal it was
+    /// started from, so the log lines land over the shell prompt and a Ctrl+C meant for the
+    /// shell reaches the emulator's process group and kills it. Only <c>--help</c>,
+    /// <c>--list-profiles</c> and the import of AMD-030 §2 write to the console and exit
+    /// without ever opening a window.
+    /// </remarks>
+    internal static bool PrintsAndExits(AppOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return options.ShowHelp
+            || options.ListProfiles
+            || options.ImportThreeDSenPath is not null;
     }
 
     /// <summary>
