@@ -494,10 +494,71 @@ impl Ppu2C02 {
 
     /// Advances the PPU by the dots of `cycles` CPU cycles, exactly as that many calls of
     /// [`Ppu2C02::step_cpu_cycle`] would.
+    ///
+    /// Only the NMI sample of the last cycle survives (each cycle overwrites it and nothing
+    /// reads it in between), so the dots run in two stretches around that one sample.
     pub fn run_cpu_cycles(&mut self, cycles: u32, mut cartridge: Option<&mut Cartridge>) {
-        for _ in 0..cycles {
-            self.step_cpu_cycle(cartridge.as_deref_mut());
+        if cycles == 0 {
+            return;
         }
+
+        let numerator = i64::from(self.timing.dots_per_cycle_numerator);
+        let denominator = i64::from(self.timing.dots_per_cycle_denominator);
+        let before = i64::from(self.dot_accumulator) + (i64::from(cycles) - 1) * numerator;
+        let dots_before = before / denominator;
+        let last = before % denominator + numerator;
+        let dots_last = last / denominator;
+        #[allow(clippy::cast_possible_truncation)] // A remainder of the i32 denominator.
+        let accumulator = (last % denominator) as i32;
+        self.dot_accumulator = accumulator;
+
+        let sample_after = (dots_last - i64::from(NMI_SAMPLE_LEAD)).max(0);
+        self.run_dots(dots_before + sample_after, &mut cartridge);
+        self.nmi_line_sample = self.nmi_asserted();
+        self.run_dots(dots_last - sample_after, &mut cartridge);
+    }
+
+    /// Runs `count` dots, skipping in one go the stretches where a dot does nothing but
+    /// move the counters (or, on a visible line with rendering off, draw the backdrop).
+    fn run_dots(&mut self, mut count: i64, cart: Cart<'_, '_>) {
+        while count > 0 {
+            let idle = self.idle_dots_ahead().min(count);
+            if idle > 0 {
+                #[allow(clippy::cast_possible_truncation)] // At most a line of dots.
+                let idle_i32 = idle as i32;
+                if self.scanline < VISIBLE_SCANLINES && self.dot < SCREEN_WIDTH_I32 {
+                    self.fill_backdrop(self.dot + 1, (self.dot + idle_i32).min(SCREEN_WIDTH_I32));
+                }
+
+                self.dot += idle_i32;
+                self.ppu_clock += idle;
+                count -= idle;
+            } else {
+                self.step_dot(cart);
+                count -= 1;
+            }
+        }
+    }
+
+    /// How many of the next dots of the current line have nothing to do but count (and draw
+    /// the backdrop on a visible line with rendering off), so that
+    /// [`Ppu2C02::run_dots`] may skip them.
+    fn idle_dots_ahead(&self) -> i64 {
+        let next = self.dot + 1;
+        let visible = self.scanline < VISIBLE_SCANLINES;
+        let pre_render = self.scanline == self.pre_render_scanline();
+        if next < 2 || (self.rendering_enabled() && (visible || pre_render)) {
+            return 0;
+        }
+
+        // Dot 340 closes the line; dot 338 of the pre-render line decides the odd frame's
+        // skipped dot.
+        let last_idle = if pre_render {
+            SKIP_DECISION_DOT - 1
+        } else {
+            DOTS_PER_SCANLINE - 2
+        };
+        i64::from((last_idle - next + 1).max(0))
     }
 
     /// Dots from the current one to the next dot where the vblank flag may rise or fall on

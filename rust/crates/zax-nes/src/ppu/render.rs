@@ -482,6 +482,22 @@ impl Ppu2C02 {
         }
     }
 
+    /// Draws dots `first` to `last` (1 to 256) of a visible line with rendering off: the
+    /// backdrop, as [`Ppu2C02::render_pixel`] draws it when both layers are off.
+    pub(super) fn fill_backdrop(&mut self, first: i32, last: i32) {
+        let mut color = self.palette[0];
+        if (self.mask & 0x01) != 0 {
+            color &= 0x30;
+        }
+
+        #[allow(clippy::cast_sign_loss)] // Visible line, dots 1..=256.
+        let (line, first, last) = (self.scanline as usize, first as usize, last as usize);
+        let start = line * SCREEN_WIDTH + first - 1;
+        if let Some(row) = self.pixels.get_mut(start..start + (last + 1 - first)) {
+            row.fill(color);
+        }
+    }
+
     fn render_pixel(&mut self, x: usize) {
         let mask = self.mask;
         let x = x & 0xFF;

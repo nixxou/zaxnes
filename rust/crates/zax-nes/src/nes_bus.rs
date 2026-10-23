@@ -208,7 +208,8 @@ impl NesBus {
     /// cycle, as before.
     fn catch_up_ppu(&mut self) {
         if self.ppu_lag > 0 {
-            self.ppu.run_cpu_cycles(self.ppu_lag, self.cartridge.as_mut());
+            self.ppu
+                .run_cpu_cycles(self.ppu_lag, self.cartridge.as_mut());
             self.ppu_lag = 0;
         }
 
@@ -230,13 +231,12 @@ impl NesBus {
         // A cycle is at most four dots (PAL averages 3.2); a margin of two cycles covers
         // the dot or two by which the sample trails and the odd frame's skipped dot.
         let nmi = self.ppu.dots_until_nmi_change() / 4 - 2;
-        let irq = self
-            .cartridge
-            .as_ref()
-            .map_or(i64::MAX, |cartridge| match cartridge.ppu_irq_horizon() {
+        let irq = self.cartridge.as_ref().map_or(i64::MAX, |cartridge| {
+            match cartridge.ppu_irq_horizon() {
                 Some(dots) => dots / 4 - 2,
                 None => 0,
-            });
+            }
+        });
         nmi.min(irq).max(1)
     }
 
