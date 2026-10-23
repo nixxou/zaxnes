@@ -109,11 +109,7 @@ pub(crate) fn build_geometry(
         return;
     };
 
-    for (index, instance) in pattern.instances_mut().iter_mut().enumerate() {
-        // A Lua error must not stop the conversion (REQ-E3D-324); the runtime disables the
-        // faulty script (SPEC-05 §3.8), so the error is dropped here as the C# engine does.
-        let _ = host.invoke_build_pattern(InstanceRef { pattern: id, index }, instance);
-    }
+    host.invoke_build_patterns(id, pattern.instances_mut());
 
     geometry.build(id, pattern, global);
 }

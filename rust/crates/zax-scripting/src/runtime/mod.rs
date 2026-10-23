@@ -27,6 +27,7 @@ use mlua::{HookTriggers, Lua, MultiValue, Value, VmState};
 use zax_engine3d::engine::{ConversionState, FrameRole};
 use zax_engine3d::frame::ShapeId;
 use zax_engine3d::instance::{InstanceRef, PatternInstance};
+use zax_engine3d::registry::PatternId;
 use zax_engine3d::script::{ScriptError, ScriptHost};
 use zax_engine3d::settings::ConversionSettings;
 use zax_profiles::profile::GameProfile;
@@ -102,6 +103,23 @@ impl RuntimeData {
         self.env.settings.take_view_reset()
     }
 
+    /// Puts into `linked` the scripts whose `BuildPattern` runs for `instance`: the active ones
+    /// that define it and are linked to the instance (REQ-LUA-030).
+    fn scripts_building(&self, instance: &PatternInstance, linked: &mut Vec<usize>) {
+        linked.clear();
+        linked.extend(
+            self.scripts
+                .iter()
+                .enumerate()
+                .filter(|(_, script)| {
+                    script.active()
+                        && script.defines(ScriptHook::BuildPattern)
+                        && script.is_linked_to(instance)
+                })
+                .map(|(index, _)| index),
+        );
+    }
+
     /// Changes the epochs: every frame handle issued so far reads as gone.
     fn invalidate_handles(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
@@ -133,10 +151,7 @@ impl ScriptBridge {
                 self.lua.set_app_data(HostLink::new(call));
             }
             operation();
-            let flushed = self
-                .lua
-                .app_data_ref::<HostLink>()
-                .map_or(Ok(()), |link| link.flush());
+            let flushed = flush_host_writes(&self.lua);
             self.lua.remove_app_data::<HostLink>();
             flushed
         });
@@ -289,9 +304,7 @@ impl ProfileScriptRuntime {
 
             lua.set_app_data(Lent { data, state, build });
             let result = operation(&Cx::new(lua));
-            let flushed = lua
-                .app_data_ref::<HostLink>()
-                .map_or(Ok(()), |link| link.flush());
+            let flushed = flush_host_writes(lua);
             lua.remove_app_data::<Lent>();
             flushed?;
             Ok(result)
@@ -801,6 +814,37 @@ fn compile(cx: &Cx, script: &mut LoadedScript, source: &str, limit: Duration) ->
     Ok(())
 }
 
+/// Calls `BuildPattern` of the scripts at `linked`, which are linked to the pattern instance
+/// `reference` being built.
+fn build_pattern(
+    cx: &Cx,
+    reference: InstanceRef,
+    linked: &[usize],
+) -> mlua::Result<Option<String>> {
+    let mut first = None;
+    for &index in linked {
+        // A script turned off by an earlier one of this call gets no hook.
+        if !cx.data(|data| data.scripts[index].active())? {
+            continue;
+        }
+
+        publish(
+            cx.lua,
+            Published::Pattern,
+            cx.object(Payload::Instance(InstanceTarget::Pattern(reference)))?,
+        )?;
+        first = first.or(call_hook(cx, index, ScriptHook::BuildPattern)?);
+    }
+
+    Ok(first)
+}
+
+/// Makes the writes to the host the script queued.
+fn flush_host_writes(lua: &Lua) -> mlua::Result<()> {
+    lua.app_data_ref::<HostLink>()
+        .map_or(Ok(()), |link| link.flush())
+}
+
 impl ScriptHost for ProfileScriptRuntime {
     fn has_frame_hooks(&self) -> bool {
         self.data.has_frame_hooks
@@ -835,41 +879,72 @@ impl ScriptHost for ProfileScriptRuntime {
         reference: InstanceRef,
         instance: &mut PatternInstance,
     ) -> Result<(), ScriptError> {
-        let linked: Vec<usize> = self
-            .data
-            .scripts
-            .iter()
-            .enumerate()
-            .filter(|(_, script)| {
-                script.active()
-                    && script.defines(ScriptHook::BuildPattern)
-                    && script.is_linked_to(instance)
-            })
-            .map(|(index, _)| index)
-            .collect();
+        let mut linked = Vec::new();
+        self.data.scripts_building(instance, &mut linked);
         if linked.is_empty() {
             return Ok(());
         }
 
         let result = self.run(None, Some((reference, instance)), |cx| {
-            let mut first = None;
-            for &index in &linked {
-                // A script turned off by an earlier one of this call gets no hook.
-                if !cx.data(|data| data.scripts[index].active())? {
+            build_pattern(cx, reference, &linked)
+        });
+        self.finish(result)
+    }
+
+    fn invoke_build_patterns(&mut self, pattern: PatternId, instances: &mut [PatternInstance]) {
+        let mut linked = Vec::new();
+        if !instances.iter().any(|instance| {
+            self.data.scripts_building(instance, &mut linked);
+            !linked.is_empty()
+        }) {
+            return;
+        }
+
+        // The runtime and the scope are lent once for all the instances; each one is lent in
+        // turn as the instance being built.
+        let Self { lua, data } = self;
+        let outcome = lua.scope(|scope| {
+            let data = scope.create_any_userdata_ref_mut(data)?;
+            let mut failure = None;
+            lua.set_app_data(Lent {
+                data,
+                state: None,
+                build: None,
+            });
+            let cx = Cx::new(lua);
+            for (index, instance) in instances.iter_mut().enumerate() {
+                let reference = InstanceRef { pattern, index };
+                // The scripts are looked up just before the instance is built, as a script
+                // built an earlier instance may have changed the tags of this one.
+                let counted = cx.data(|data| data.scripts_building(instance, &mut linked));
+                if let Err(error) = counted {
+                    failure.get_or_insert(error);
                     continue;
                 }
 
-                publish(
-                    cx.lua,
-                    Published::Pattern,
-                    cx.object(Payload::Instance(InstanceTarget::Pattern(reference)))?,
-                )?;
-                first = first.or(call_hook(cx, index, ScriptHook::BuildPattern)?);
+                if linked.is_empty() {
+                    continue;
+                }
+
+                let build = scope.create_any_userdata_ref_mut(instance)?;
+                if let Some(mut lent) = lua.app_data_mut::<Lent>() {
+                    lent.build = Some((reference, build));
+                }
+
+                // The script that raised an error was logged and disabled by the hook call.
+                if let Err(error) = build_pattern(&cx, reference, &linked) {
+                    failure.get_or_insert(error);
+                }
             }
 
-            Ok(first)
+            let flushed = flush_host_writes(lua);
+            lua.remove_app_data::<Lent>();
+            flushed?;
+            Ok(failure)
         });
-        self.finish(result)
+        if let Some(error) = outcome.unwrap_or_else(Some) {
+            self.settle(Err(error));
+        }
     }
 
     fn as_any(&self) -> &dyn Any {
