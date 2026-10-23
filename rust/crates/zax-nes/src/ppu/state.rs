@@ -50,6 +50,7 @@ impl Ppu2C02 {
     /// # Errors
     /// [`InvalidState`] when the block is truncated or inconsistent.
     pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.sprite_line_stale = true;
         reader.read_blob_into(&mut self.vram)?;
         reader.read_blob_into(&mut self.oam)?;
         reader.read_blob_into(&mut self.palette)?;
