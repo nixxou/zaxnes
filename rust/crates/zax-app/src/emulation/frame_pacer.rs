@@ -40,6 +40,16 @@ impl CatchUp {
         }
     }
 
+    /// The value of the `emu.catch_up` setting: 0 for [`CatchUp::Off`], else a limit of 1 to
+    /// [`MAX_BACKLOG`].
+    #[must_use]
+    pub fn from_setting(value: i32) -> Self {
+        match u32::try_from(value) {
+            Ok(0) | Err(_) => Self::Off,
+            Ok(limit) => Self::Limit(limit.min(MAX_BACKLOG)),
+        }
+    }
+
     /// The most emulated frames one displayed frame may run, at `effective_rate` emulated frames
     /// per second shown at `displayed_rate` frames per second (0 when unknown).
     #[must_use]

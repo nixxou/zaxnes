@@ -18,6 +18,31 @@ fn manual() -> (Rc<Cell<f64>>, Clock) {
 }
 
 #[test]
+fn the_setting_drives_the_catch_up_unless_it_is_forced() {
+    use zax_settings::catalogue::SettingId;
+    use zax_settings::values::SettingValue;
+
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    harness.tick_frame();
+    // REQ-LOOP-012's five by default.
+    assert_eq!(MAX_BACKLOG, harness.tick(0.5));
+    harness
+        .host
+        .update_settings(|settings| settings.set(SettingId::EmuCatchUp, SettingValue::Enum(0)));
+    assert_eq!(CatchUp::Off, harness.host.effective_catch_up());
+    assert_eq!(1, harness.tick(0.5));
+    harness
+        .host
+        .update_settings(|settings| settings.set(SettingId::EmuCatchUp, SettingValue::Enum(2)));
+    assert_eq!(2, harness.tick(0.5));
+    harness.host.catch_up = Some(CatchUp::Limit(3));
+    assert_eq!(3, harness.tick(0.5));
+    assert_eq!(CatchUp::Off, CatchUp::from_setting(0));
+    assert_eq!(CatchUp::Limit(5), CatchUp::from_setting(9));
+}
+
+#[test]
 fn the_values_of_the_option_are_zero_to_five() {
     assert_eq!(CatchUp::Off, parse_catch_up("0").unwrap());
     assert_eq!(CatchUp::Limit(1), parse_catch_up(" 1 ").unwrap());
@@ -70,8 +95,8 @@ fn the_host_applies_the_limit() {
     let mut harness = LoopHarness::create();
     harness.launch("g1");
     harness.tick_frame();
-    harness.host.catch_up = CatchUp::Off;
+    harness.host.catch_up = Some(CatchUp::Off);
     assert_eq!(1, harness.tick(0.5));
-    harness.host.catch_up = CatchUp::Limit(MAX_BACKLOG);
+    harness.host.catch_up = Some(CatchUp::Limit(MAX_BACKLOG));
     assert_eq!(MAX_BACKLOG, harness.tick(0.5));
 }

@@ -35,6 +35,8 @@ pub enum OptionRow {
     ShowFps,
     /// The camera preset.
     Camera,
+    /// How many emulated frames a displayed frame may run when the game is late.
+    CatchUp,
     /// The TV region: automatic (from the ROM header, at the next game start), NTSC or PAL.
     Region,
     /// The gamepad bindings.
@@ -42,7 +44,7 @@ pub enum OptionRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 9] = [
+pub const ROWS: [OptionRow; 10] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -50,9 +52,17 @@ pub const ROWS: [OptionRow; 9] = [
     OptionRow::FrameCap,
     OptionRow::ShowFps,
     OptionRow::Camera,
+    OptionRow::CatchUp,
     OptionRow::Region,
     OptionRow::Controls,
 ];
+
+/// The values of the catch-up row (`emu.catch_up`): none, then a limit of 1 to 5 frames.
+const CATCH_UPS: [i32; 6] = [0, 1, 2, 3, 4, 5];
+
+fn catch_up(settings: &SettingsModel) -> i32 {
+    settings.get(SettingId::EmuCatchUp).as_int()
+}
 
 /// The choices of the region row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +184,10 @@ impl HandheldOptionsModel {
                 settings.set_show_fps(!on);
             }
             OptionRow::Camera => return Some(OptionsCommand::StepCamera(step)),
+            OptionRow::CatchUp => {
+                let next = *cycled(&CATCH_UPS, &catch_up(settings), step);
+                settings.set(SettingId::EmuCatchUp, SettingValue::Enum(next));
+            }
             OptionRow::Region => {
                 cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
             }
@@ -194,6 +208,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::FrameCap => strings::get(keys::HANDHELD_OPTION_FRAME_CAP),
         OptionRow::ShowFps => text::label_of(catalogue::descriptor(SettingId::UiShowFps)),
         OptionRow::Camera => strings::get(keys::HANDHELD_OPTION_CAMERA),
+        OptionRow::CatchUp => strings::get(keys::HANDHELD_OPTION_CATCH_UP),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
     }
@@ -213,6 +228,10 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::FrameCap => format!("{} fps", frame_cap(settings)),
         OptionRow::ShowFps => switch(settings.show_fps()),
         OptionRow::Camera => camera_label(camera),
+        OptionRow::CatchUp => match catch_up(settings) {
+            0 => text::label_of_option("None"),
+            frames => frames.to_string(),
+        },
         OptionRow::Region => match RegionChoice::of(settings) {
             RegionChoice::Auto => strings::get(keys::HANDHELD_REGION_AUTO),
             RegionChoice::Ntsc => "NTSC".to_owned(),

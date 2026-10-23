@@ -31,7 +31,7 @@ use crate::audio::synth_audio_library::SynthAudioLibrary;
 use crate::audio::{AudioMixer, TrackRandom, UiAudioLibrary};
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
-use crate::emulation::frame_pacer::{CatchUp, MAX_BACKLOG};
+use crate::emulation::frame_pacer::CatchUp;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::host::{
     EmulationHost, EmulationHostOptions, GameView, HostEvent, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH,
@@ -257,10 +257,12 @@ impl Running {
             log_profiler_startup(
                 &model,
                 pacing_state,
-                catch_up(options),
+                options.catch_up.unwrap_or_else(|| {
+                    CatchUp::from_setting(model.get(SettingId::EmuCatchUp).as_int())
+                }),
                 group_draws(options),
                 separate_core(options),
-                generational_gc(options),
+                model.get(SettingId::EmuLuaGenerationalGc).as_bool(),
             );
         }
         let (width, height) = window.drawable_size();
@@ -291,11 +293,10 @@ impl Running {
         };
         let mut host = build_host(parts);
         host.set_profiling(profiling);
-        host.catch_up = catch_up(options);
+        host.catch_up = options.catch_up;
         // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
         host.rollback_enabled = !options.handheld;
         host.separate_core = separate_core(options);
-        host.lua_generational_gc = generational_gc(options);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui = ImguiFrontend::new(&gl, &host, options, height)?;
@@ -609,22 +610,6 @@ struct HostParts<'a> {
     view: OffscreenFramebuffer,
 }
 
-/// The catch-up bound of a handheld: emulated frames per displayed frame at most.
-const HANDHELD_CATCH_UP: u32 = 2;
-
-/// How far the frame clock catches up: the command line or `ZAXNES_CATCH_UP`, else two emulated
-/// frames per displayed one on a handheld and REQ-LOOP-012 elsewhere. With the core on its own
-/// thread, a frame caught up costs the main thread only its conversion and Lua hooks, so a heavy
-/// scene keeps the game at full speed by showing fewer frames, and the bound keeps a long stall
-/// from piling up five frames.
-fn catch_up(options: &AppOptions) -> CatchUp {
-    options.catch_up.unwrap_or(if options.handheld {
-        CatchUp::Limit(HANDHELD_CATCH_UP)
-    } else {
-        CatchUp::Limit(MAX_BACKLOG)
-    })
-}
-
 fn build_host(parts: HostParts<'_>) -> AppHost {
     let library: Box<dyn UiAudioLibrary> = match AudioAssets::try_open(parts.asset_root, log) {
         Some(files) => Box::new(files),
@@ -747,20 +732,6 @@ fn separate_core(options: &AppOptions) -> bool {
         _ => options.handheld,
     }
 }
-
-/// Whether the scripts' Lua collector runs in its generational mode: `ZAXNES_LUA_GC=gen` or
-/// `inc`, else on a handheld only (no stalls of tens of milliseconds; scripts see no difference
-/// but `collectgarbage("count")`).
-fn generational_gc(options: &AppOptions) -> bool {
-    match std::env::var(LUA_GC_VARIABLE).as_deref().map(str::trim) {
-        Ok("gen") => true,
-        Ok("inc") => false,
-        _ => options.handheld,
-    }
-}
-
-/// The variable that forces [`generational_gc`].
-const LUA_GC_VARIABLE: &str = "ZAXNES_LUA_GC";
 
 /// The variable that forces [`separate_core`].
 const SEPARATE_CORE_VARIABLE: &str = "ZAXNES_SEPARATE_CORE";

@@ -614,6 +614,41 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_field("33")
         .with_libretro(enabled_disabled()),
     );
+    // Rust-only (owner request): how many emulated frames a displayed frame may run when the
+    // game is late, 0 for none; REQ-LOOP-012's five by default. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCatchUp,
+            SettingKind::Enum,
+            SettingValue::Enum(5),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "None"),
+            opt(1, "1"),
+            opt(2, "2"),
+            opt(3, "3"),
+            opt(4, "4"),
+            opt(5, "5"),
+        ]))
+        .with_label("Catch-up (frames)"),
+    );
+    // Rust-only (owner request): the scripts' Lua collector in its generational mode, which
+    // removes the long collection stalls. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuLuaGenerationalGc,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Generational Lua collector"),
+    );
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,

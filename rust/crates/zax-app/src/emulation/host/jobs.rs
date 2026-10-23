@@ -8,6 +8,7 @@ use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::state_codec;
 use zax_nes::{NesCore, NesRegion};
 use zax_profiles::enums::TvRegionMode;
+use zax_settings::catalogue::SettingId;
 
 use super::{EmulationHost, GameView};
 use crate::audio::audio_mixer::AudioSampleSource;
@@ -265,9 +266,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     });
                     mixer.set_emulation_source(Some(source));
                 }
-                if self.lua_generational_gc {
-                    session.use_generational_gc();
-                }
+                session.set_generational_gc(
+                    self.settings.get(SettingId::EmuLuaGenerationalGc).as_bool(),
+                );
                 self.session = Some(session);
                 Ok(())
             }

@@ -17,7 +17,7 @@ use crate::render_scaling::RENDER_TEXTURE_METHOD;
 const TWO_THIRDS: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 5] {
+fn defaults() -> [(SettingId, SettingValue); 6] {
     [
         (
             SettingId::VideoRenderMethod,
@@ -28,6 +28,8 @@ fn defaults() -> [(SettingId, SettingValue); 5] {
         (SettingId::VideoAntiAlias, SettingValue::Enum(0)),
         // Swap every refresh: 60 frames per second on the 60 Hz screens of the handhelds.
         (SettingId::VideoVSync, SettingValue::Enum(1)),
+        // No catch-up: on the H700 a caught-up frame waits for the emulation thread in series.
+        (SettingId::EmuCatchUp, SettingValue::Enum(0)),
     ]
 }
 
@@ -53,6 +55,7 @@ mod tests {
         assert!((model.res_scale_factor() - 2.0 / 3.0).abs() < 1.0e-6);
         assert_eq!(0, model.anti_alias());
         assert_eq!(1, model.vsync());
+        assert_eq!(0, model.get(SettingId::EmuCatchUp).as_int());
     }
 
     #[test]
