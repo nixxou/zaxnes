@@ -1,4 +1,6 @@
 #![forbid(unsafe_code)]
+// Like the C# `WinExe`: no console window on Windows; the parent's console is attached on demand.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 //! The `zaxnes` executable: the command line of `Program.cs`, then the mode it asks for. A
 //! normal launch opens the application; `--help`, `--list-profiles` and `--import-3dsen` print
@@ -30,6 +32,8 @@ fn main() {
 
 /// Reads the command line and runs the mode it asks for; returns the exit code.
 fn run() -> i32 {
+    // Before anything prints: `--help`, `--list-profiles`, import output and usage errors.
+    zax_platform::console::attach_to_parent_console();
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
     let options = match AppOptions::parse(&arguments) {

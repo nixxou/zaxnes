@@ -18,5 +18,8 @@ png = "0.17"
 sdl2 = "0.38"
 thiserror = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
 [lints]
 workspace = true
