@@ -176,7 +176,6 @@ pub fn option(label: &str) -> String {
 }
 
 /// Every key published above, for the parity tests (the prefixes are not keys).
-#[cfg(test)]
 pub const PUBLISHED: &[&str] = &[
     MENU_FILE,
     MENU_EMULATION,
