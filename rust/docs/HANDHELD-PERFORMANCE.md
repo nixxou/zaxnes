@@ -127,6 +127,17 @@ displayed frame". All values are per displayed frame.
 - Device run of `cf00717` (owner): temple core 12.8 / lua 7.3 / conv 1.1 / scene 9 ms (~32 fps),
   world map 12.7 / 4.7 / 3.4 / 13.8 (~28 fps, scene was 50), battle 12.7 / 1 / 0.8 / 5.7
   (~47 fps). The core is now the largest stage everywhere. Rewind removed on handhelds (owner).
+- Emulation on a separate core (5.2, setting, handheld default): `core_worker.rs` runs each
+  emulated frame on a "zaxnes-emulation" thread. The session's core is moved there (never
+  shared: `GameSession::core` holds a ROM-less stand-in meanwhile) and taken back at the start
+  of the next tick, before anything reads or changes it. Order per tick: finish frame N (tile
+  capture, conversion, frame hooks), hotkeys and commands, prepare N+1 (input hook, input word),
+  battery / audio / settings / publication, then launch N+1 while the main thread draws N. The
+  scripts and the core see each other exactly as on one thread (test
+  `separate_core_tests.rs`: same frames, memory and picture); the frame is shown one displayed
+  frame later (input latency + 1 frame). `ZAXNES_SEPARATE_CORE=0/1` forces it; the profiler
+  start-up line shows it. Expected on the device (cf00717 numbers): battle ~max(12.7, 8) ms
+  -> 60 fps, temple ~21 ms, world map ~22 ms.
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now
