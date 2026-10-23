@@ -201,6 +201,17 @@ Native dialog (Rust-only change; `ZAXNES_NATIVE_DIALOG=0` forces the `ImGui` bro
 - Linux desktop (x86_64): the XDG portal dialog; with no portal or no session bus, or on aarch64
   (RG40XXV), the `ImGui` browser opens (`ZAXNES_NATIVE_DIALOG=1` forces the portal on aarch64).
 
+## 7d. Profiles without identifier (AMD-037, Windows)
+
+Import from 3dSen (Windows, owner's install), then count the games: without the asset folder 101
+games, 45 of them with a derived id (the log has 45 lines "the profile carries no identifier;
+using ..., derived from its content", none "ignored"); with the asset folder 101 entries and no
+game twice. Restart: same ids, covers and saves still attached. The imported files are unchanged.
+
+Owner's observation (Windows, no code change): Ctrl+F1 (load slot 1) may be captured by a global hotkey on some PCs (another application or the graphics driver); Ctrl+F2 and Ctrl+F3 work. If it happens, check the global hotkeys of the machine before suspecting the emulator.
+
+Rust-only keyboard fixes: Alt+Enter toggles full screen and the game does not see Start; Ctrl+, opens then closes the options window; with `--handheld` the keyboard navigates (arrows, Enter, Escape, Tab).
+
 ## 8. Packaging
 
 ```powershell

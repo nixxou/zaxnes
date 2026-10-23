@@ -233,3 +233,18 @@ pub fn resolve(
         .map(|shortcut| (shortcut.command, shortcut.args))
         .collect()
 }
+
+/// The keys among `pressed` that a shortcut with exactly `modifiers` (some modifier at least)
+/// uses.
+#[must_use]
+pub fn resolve_keys(pressed: &[Key], modifiers: ShortcutModifiers) -> Vec<Key> {
+    if modifiers == ShortcutModifiers::NONE {
+        return Vec::new();
+    }
+    distinct(
+        all()
+            .into_iter()
+            .filter(|shortcut| shortcut.modifiers == modifiers && pressed.contains(&shortcut.key))
+            .map(|shortcut| shortcut.key),
+    )
+}

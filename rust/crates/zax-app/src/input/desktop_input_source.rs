@@ -32,6 +32,9 @@ pub struct DesktopInputSource {
     saved_revision: u64,
     triggered: Vec<String>,
     held_commands: Vec<String>,
+    /// The keys an application shortcut consumed and that are still down: the game does not see
+    /// them until they are released and pressed again.
+    consumed_keys: Vec<i32>,
     last_pointer: [f32; 2],
     has_pointer: bool,
     /// Whether the interface has the keyboard (a text field has focus), so that no action is
@@ -56,6 +59,7 @@ impl DesktopInputSource {
             saved_revision,
             triggered: Vec::new(),
             held_commands: Vec::new(),
+            consumed_keys: Vec::new(),
             last_pointer: [0.0, 0.0],
             has_pointer: false,
             keyboard_captured_by_ui: false,
@@ -127,6 +131,16 @@ impl DesktopInputSource {
         }
     }
 
+    /// Keys that an application shortcut consumed on this press (Alt+Enter, Ctrl+O...): neither
+    /// the actions nor the commands see them until they are released.
+    pub fn consume_keys(&mut self, keys: impl IntoIterator<Item = i32>) {
+        for key in keys {
+            if !self.consumed_keys.contains(&key) {
+                self.consumed_keys.push(key);
+            }
+        }
+    }
+
     /// Samples every device once for the displayed frame.
     pub fn sample(&mut self, real_seconds: f32, devices: DeviceRefs<'_>) -> InputSnapshot {
         let DeviceRefs {
@@ -135,6 +149,8 @@ impl DesktopInputSource {
             hub,
         } = devices;
         hub.poll();
+        self.consumed_keys
+            .retain(|key| keyboard.is_some_and(|keyboard| keyboard.is_down(*key)));
         let hub: &dyn GamepadHub = hub;
         self.pads.update(hub, &mut self.bindings, real_seconds);
         // A capture consumes the sample: no action and no command is produced from the command
@@ -195,10 +211,9 @@ impl DesktopInputSource {
     ) -> InputAction {
         let mut mask = InputAction::NONE;
         if let Some(keyboard) = keyboard.filter(|_| !self.keyboard_captured_by_ui) {
-            mask |= self
-                .bindings
-                .keyboard(player)
-                .sample(|control| keyboard_pressed(keyboard, control));
+            mask |= self.bindings.keyboard(player).sample(|control| {
+                !self.consumed_keys.contains(&control.code) && keyboard_pressed(keyboard, control)
+            });
         }
         if let Some(pad) = self.pads.device(hub, player) {
             if let Some(set) = self.pads.gamepad_bindings(hub, &mut self.bindings, player) {
@@ -224,9 +239,13 @@ impl DesktopInputSource {
         let mut pressed: Vec<String> = Vec::new();
         for player in 0..PLAYER_COUNT {
             if let Some(keyboard) = keyboard.filter(|_| !self.keyboard_captured_by_ui) {
-                self.bindings
-                    .keyboard(player)
-                    .sample_commands(|control| keyboard_pressed(keyboard, control), &mut pressed);
+                self.bindings.keyboard(player).sample_commands(
+                    |control| {
+                        !self.consumed_keys.contains(&control.code)
+                            && keyboard_pressed(keyboard, control)
+                    },
+                    &mut pressed,
+                );
             }
             if let Some(pad) = self.pads.device(hub, player) {
                 if let Some(set) = self.pads.gamepad_bindings(hub, &mut self.bindings, player) {

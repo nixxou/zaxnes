@@ -10,6 +10,7 @@ use zax_platform::input::{Key, KeyboardDevice};
 
 use super::debug_overlay::{self, DebugInfo};
 use super::fonts::{FontSizes, UiFonts};
+use super::handheld::keyboard::KeyboardPad;
 use super::handheld::layout::Metrics;
 use super::handheld::HandheldUi;
 use super::menu_shortcuts::ShortcutModifiers;
@@ -20,7 +21,7 @@ use crate::app_options::AppOptions;
 use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::host::HostEvent;
-use crate::input::DesktopInputSource;
+use crate::input::{DesktopInputSource, InputBindings};
 
 /// The window sizes of one frame: the window's own and the drawable's.
 #[derive(Debug, Clone, Copy)]
@@ -41,6 +42,8 @@ pub struct ImguiFrontend {
     /// for the texts and the commands the two share.
     handheld: Option<HandheldUi>,
     shots: Option<UiShots>,
+    /// The keyboard as a pad of the handheld interface.
+    keyboard_pad: KeyboardPad,
 }
 
 impl ImguiFrontend {
@@ -120,6 +123,7 @@ impl ImguiFrontend {
             ui,
             handheld,
             shots,
+            keyboard_pad: KeyboardPad::new(),
         })
     }
 
@@ -164,9 +168,16 @@ impl ImguiFrontend {
         host: &mut AppHost,
         keyboard: &dyn KeyboardDevice,
         binding_capture_active: bool,
+        bindings: &InputBindings,
     ) {
-        // A handheld has no keyboard: its menus answer to the gamepad only.
+        // A handheld has no menu bar: the keys drive its pad instead of the shortcuts.
         if self.handheld.is_some() {
+            if binding_capture_active {
+                self.keyboard_pad.release(self.platform.pad_mut());
+            } else {
+                self.keyboard_pad
+                    .update(self.platform.pad_mut(), bindings, keyboard);
+            }
             return;
         }
         // While a binding capture is listening, the keyboard belongs to the capture: the fixed
@@ -185,6 +196,19 @@ impl ImguiFrontend {
             alt: down(Key::AltLeft) || down(Key::AltRight),
         };
         self.ui.handle_shortcuts(host, &pressed, modifiers);
+    }
+
+    /// The keys that go down this frame as an application shortcut, which the game must not see.
+    #[must_use]
+    pub fn consumed_keys(&self, keyboard: &dyn KeyboardDevice) -> Vec<i32> {
+        if self.handheld.is_some() || self.wants_keyboard() {
+            return Vec::new();
+        }
+        self.ui
+            .consumed_keys(|key: Key| keyboard.is_down(key as i32))
+            .into_iter()
+            .map(|key| key as i32)
+            .collect()
     }
 
     /// The commands a binding triggered that belong to the interface.

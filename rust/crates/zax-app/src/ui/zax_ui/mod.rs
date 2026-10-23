@@ -309,10 +309,29 @@ impl ZaxUi {
     ) {
         for (command, args) in menu_shortcuts::resolve(pressed, modifiers) {
             match command {
+                // The shortcut of a window toggles it.
+                ShortcutCommand::Host(Command::ShowOptions) if self.state.options => {
+                    self.state.options = false;
+                }
                 ShortcutCommand::Host(command) => host.enqueue(command, args),
                 ShortcutCommand::Ui(command) => self.run_ui_command(command),
             }
         }
+    }
+
+    /// The keys that go down now (not yet seen by [`Self::rising_keys`]) with the modifiers of a
+    /// shortcut: that press belongs to the application and not to the game.
+    pub fn consumed_keys(&self, is_down: impl Fn(Key) -> bool) -> Vec<Key> {
+        let modifiers = ShortcutModifiers {
+            control: is_down(Key::ControlLeft) || is_down(Key::ControlRight),
+            shift: is_down(Key::ShiftLeft) || is_down(Key::ShiftRight),
+            alt: is_down(Key::AltLeft) || is_down(Key::AltRight),
+        };
+        let fresh: Vec<Key> = menu_shortcuts::watched_keys()
+            .into_iter()
+            .filter(|key| is_down(*key) && !self.held_keys.contains(key))
+            .collect();
+        menu_shortcuts::resolve_keys(&fresh, modifiers)
     }
 
     /// The rising edge of every watched key since the previous call, from the keys held now.
