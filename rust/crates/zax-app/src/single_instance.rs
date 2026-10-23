@@ -38,8 +38,16 @@ impl SingleInstance {
     #[allow(clippy::incompatible_msrv)] // `File::try_lock` (1.89): the toolchain is pinned to 1.99.1
     pub fn acquire(user_data_root: Option<&Path>) -> Self {
         let path = std::env::temp_dir().join(Self::name_for(user_data_root));
-        let Ok(file) = OpenOptions::new().create(true).truncate(false).write(true).open(path) else {
-            return Self { lock: None, held: true };
+        let Ok(file) = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+        else {
+            return Self {
+                lock: None,
+                held: true,
+            };
         };
         match file.try_lock() {
             Ok(()) => Self {
@@ -50,7 +58,10 @@ impl SingleInstance {
                 lock: None,
                 held: false,
             },
-            Err(TryLockError::Error(_)) => Self { lock: None, held: true },
+            Err(TryLockError::Error(_)) => Self {
+                lock: None,
+                held: true,
+            },
         }
     }
 

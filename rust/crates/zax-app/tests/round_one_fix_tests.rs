@@ -40,7 +40,9 @@ fn req_scn_013_stopping_a_game_resets_the_view_and_returns_to_tpv() {
         scene.camera.current_mut().angles = Vector3::new(45.0, 45.0, 0.0);
         scene.camera.smooth_time = 2.0;
     }
-    harness.host.update_settings(|model| model.set_game_speed(4));
+    harness
+        .host
+        .update_settings(|model| model.set_game_speed(4));
     harness.run(Command::Stop);
     let scene = harness.scene.borrow();
     let camera = &scene.camera;
@@ -48,7 +50,8 @@ fn req_scn_013_stopping_a_game_resets_the_view_and_returns_to_tpv() {
     assert!((camera.current().angles.x - render_geometry::DEFAULT_ANGLES.x).abs() < 1e-3);
     assert!((camera.current().angles.y - render_geometry::DEFAULT_ANGLES.y).abs() < 1e-3);
     assert!(
-        (camera.current().distance() - render_geometry::default_distance(camera.fov())).abs() < 1e-3
+        (camera.current().distance() - render_geometry::default_distance(camera.fov())).abs()
+            < 1e-3
     );
     assert!((camera.smooth_time - CriticalSmoothing::DEFAULT_SMOOTH_TIME).abs() < 1e-4);
     drop(scene);
@@ -91,7 +94,11 @@ fn library_harness() -> LibraryHarness {
     let root = TemporaryRoot::new("zax-r1-");
     let paths = UserDataPaths::resolve(Some(root.path()), None, None);
     let profile_file = paths.profiles_directory.join("mine.3dn");
-    std::fs::write(&profile_file, format::save(&empty_profile("mine", "Mine"), FieldPresence::All)).unwrap();
+    std::fs::write(
+        &profile_file,
+        format::save(&empty_profile("mine", "Mine"), FieldPresence::All),
+    )
+    .unwrap();
     let catalog = LibraryGameCatalog::open(None, &paths, Box::new(|_| {}));
     let scene = Rc::new(RefCell::new(SceneState::default()));
     let mut options = EmulationHostOptions::new(
@@ -134,7 +141,8 @@ impl LibraryHarness {
     fn launch_mine(&mut self) {
         let rom = self.paths.root.join("game.nes");
         std::fs::write(&rom, SyntheticRom::counter()).unwrap();
-        self.host.launch_rom_with_profile(&rom.to_string_lossy(), "mine");
+        self.host
+            .launch_rom_with_profile(&rom.to_string_lossy(), "mine");
         self.settle();
         assert_eq!(EmulationState::Running, self.host.state());
     }
@@ -163,7 +171,10 @@ fn req_pers_042_a_user_game_is_deleted_with_its_states_its_file_and_its_cover() 
     harness.run(Command::DeleteGame, CommandArgs::of_text("mine"));
     // The interface asked first, with the exact text of SPEC-10 REQ-UI-037.
     let request = harness.host.pending_confirmation().unwrap().clone();
-    assert_eq!("Do you want to delete the game and its save states ?", request.message);
+    assert_eq!(
+        "Do you want to delete the game and its save states ?",
+        request.message
+    );
     assert_eq!("Mine", request.title);
     assert_eq!("Yes", request.confirm_label);
     assert_eq!("No", request.cancel_label);
@@ -189,7 +200,12 @@ fn req_pers_042_a_built_in_profile_is_never_deletable_and_no_changes_nothing() {
     };
     assert!(!harness.host.request_delete_game(&two_dimensional));
     assert!(!harness.host.delete_game(&two_dimensional));
-    assert!(harness.host.games().library().find(&two_dimensional).is_some());
+    assert!(harness
+        .host
+        .games()
+        .library()
+        .find(&two_dimensional)
+        .is_some());
     assert!(harness.host.request_delete_game("mine"));
     harness.host.cancel_pending();
     assert!(harness.host.games().library().find("mine").is_some());
@@ -220,15 +236,29 @@ fn req_pers_036_the_pause_capture_can_become_the_cover() {
     let mut harness = library_harness();
     harness.launch_mine();
     harness.run(Command::CreateGameArt, CommandArgs::default());
-    let cover = harness.host.games().library().find("mine").unwrap().cover.clone();
+    let cover = harness
+        .host
+        .games()
+        .library()
+        .find("mine")
+        .unwrap()
+        .cover
+        .clone();
     assert_eq!(Some("Mine_3dsen_mine.png".to_owned()), cover);
-    assert!(harness.paths.covers_directory.join(cover.unwrap()).is_file());
+    assert!(harness
+        .paths
+        .covers_directory
+        .join(cover.unwrap())
+        .is_file());
     assert!(harness.scene.borrow().game_running);
 }
 
 #[test]
 fn req_pers_074_a_derived_cover_name_is_sanitised_and_carries_the_identifier() {
-    assert_eq!("A_B_C__3dsen_42.png", game_art::cover_file_name("A/B:C?", "42"));
+    assert_eq!(
+        "A_B_C__3dsen_42.png",
+        game_art::cover_file_name("A/B:C?", "42")
+    );
     assert_eq!("A_B_3dsen_42.png", game_art::cover_file_name("A_B", "42"));
     assert!(!game_art::sanitise_file_name(r"a\b").contains('\\'));
     assert_eq!("a_b", game_art::sanitise_file_name(r"a\b"));
@@ -248,7 +278,11 @@ fn req_pers_036_an_imported_cover_is_reduced_to_fit_the_documented_size() {
     let root = TemporaryRoot::new("zax-art-");
     let paths = UserDataPaths::resolve(Some(root.path()), None, None);
     let source = root.path().join("art.png");
-    std::fs::write(&source, png_image::encode_rgb(1024, 1024, &vec![0x40; 1024 * 1024 * 3]).unwrap()).unwrap();
+    std::fs::write(
+        &source,
+        png_image::encode_rgb(1024, 1024, &vec![0x40; 1024 * 1024 * 3]).unwrap(),
+    )
+    .unwrap();
     let name = game_art::import_cover(&paths, "A/B", "7", &source).unwrap();
     assert_eq!("A_B_3dsen_7.png", name);
     let written = png_image::load(&paths.covers_directory.join(&name)).unwrap();
@@ -266,7 +300,10 @@ fn req_pers_036_an_undecodable_cover_is_refused() {
     std::fs::write(&source, [0xFF, 0xD8, 0xFF, 0xE0, 0, 0]).unwrap();
     let error = game_art::import_cover(&paths, "T", "1", &source).unwrap_err();
     assert_eq!(game_art::UNSUPPORTED_SOURCE_MESSAGE, error);
-    assert_eq!(0, std::fs::read_dir(&paths.covers_directory).unwrap().count());
+    assert_eq!(
+        0,
+        std::fs::read_dir(&paths.covers_directory).unwrap().count()
+    );
 }
 
 fn acquire_elsewhere(root: &std::path::Path) -> bool {

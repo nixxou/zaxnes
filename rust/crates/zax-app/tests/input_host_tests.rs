@@ -59,13 +59,19 @@ fn req_inp_005_every_emulated_frame_of_a_burst_sees_the_same_sample() {
         ran += harness.tick_snapshot(1.0 / 60.0, &held);
         assert_eq!(0x81, ports(&harness).0);
     }
-    assert!(ran >= 55, "a second of ticks ran only {ran} emulated frames");
+    assert!(
+        ran >= 55,
+        "a second of ticks ran only {ran} emulated frames"
+    );
     assert_eq!(before + i64::from(ran), harness.host.emulated_frames());
     // REQ-INP-103 with REQ-INP-005: holding FastForward runs more emulated frames for the same
     // real time, and the player bits of the same snapshot still reach the core on each of them.
     let before = harness.host.emulated_frames();
     let mut fast = 0;
-    let fast_held = InputSnapshot::of(InputAction::RIGHT | InputAction::FAST_FORWARD, InputAction::NONE);
+    let fast_held = InputSnapshot::of(
+        InputAction::RIGHT | InputAction::FAST_FORWARD,
+        InputAction::NONE,
+    );
     for _ in 0..60 {
         fast += harness.tick_snapshot(1.0 / 60.0, &fast_held);
         assert_eq!(0x80, ports(&harness).0);
@@ -82,15 +88,26 @@ fn req_inp_120_injected_snapshots_trigger_the_hotkeys() {
     let mut harness = launched();
     assert_eq!(EmulationState::Running, harness.host.state());
     // REQ-INP-101: a short press on J2's Menu pauses, whatever the port types are.
-    harness.tick_snapshot(0.1, &InputSnapshot::of(InputAction::NONE, InputAction::MENU));
+    harness.tick_snapshot(
+        0.1,
+        &InputSnapshot::of(InputAction::NONE, InputAction::MENU),
+    );
     harness.tick_snapshot(0.01, &InputSnapshot::EMPTY);
     assert_eq!(EmulationState::Paused, harness.host.state());
-    harness.tick_snapshot(0.1, &InputSnapshot::of(InputAction::MENU, InputAction::NONE));
+    harness.tick_snapshot(
+        0.1,
+        &InputSnapshot::of(InputAction::MENU, InputAction::NONE),
+    );
     harness.tick_snapshot(0.01, &InputSnapshot::EMPTY);
     assert_eq!(EmulationState::Running, harness.host.state());
     // REQ-INP-101: a long press resets the view and leaves the state alone. The first held tick
     // starts the measurement, so the 0.3 s boundary is crossed on the third.
-    harness.scene.borrow_mut().camera.current_mut().set_distance(42.0);
+    harness
+        .scene
+        .borrow_mut()
+        .camera
+        .current_mut()
+        .set_distance(42.0);
     let menu = InputSnapshot::of(InputAction::MENU, InputAction::NONE);
     harness.tick_snapshot(0.2, &menu);
     harness.tick_snapshot(0.2, &menu);
@@ -106,7 +123,9 @@ fn req_inp_120_injected_snapshots_trigger_the_hotkeys() {
 fn req_inp_120_injected_snapshots_move_the_zapper() {
     let mut harness = LoopHarness::create();
     let rom = harness.write_rom(&SyntheticRom::counter(), "game.nes");
-    harness.catalog().add_with("duck", Some(&rom), None, false, Some("Duck Hunt"));
+    harness
+        .catalog()
+        .add_with("duck", Some(&rom), None, false, Some("Duck Hunt"));
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("duck"));
     harness
         .host
@@ -137,7 +156,13 @@ fn req_inp_120_injected_snapshots_move_the_zapper() {
     assert_eq!(top_left, handed(&harness));
     harness.tick_snapshot(1.0 / 60.0, &aim([246.0, 230.0]));
     let bottom_right = harness.host.zapper.position();
-    assert!(bottom_right.x > top_left.x, "pointing right must raise the aimed column");
-    assert!(bottom_right.y > top_left.y, "pointing down must raise the aimed line");
+    assert!(
+        bottom_right.x > top_left.x,
+        "pointing right must raise the aimed column"
+    );
+    assert!(
+        bottom_right.y > top_left.y,
+        "pointing down must raise the aimed line"
+    );
     assert_eq!(bottom_right, handed(&harness));
 }

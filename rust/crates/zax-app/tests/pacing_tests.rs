@@ -58,7 +58,10 @@ fn req_loop_010_the_clock_hands_out_the_nominal_rate(
         now.set(now.get() + 0.001);
         frames += pacer.due_frames();
     }
-    assert!(((expected - 1)..=(expected + 1)).contains(&frames), "{frames}");
+    assert!(
+        ((expected - 1)..=(expected + 1)).contains(&frames),
+        "{frames}"
+    );
 }
 
 #[test]
@@ -68,7 +71,11 @@ fn req_loop_012_the_backlog_is_limited_to_five_frames() {
     assert_eq!(1, pacer.due_frames());
     now.set(now.get() + 1.0);
     assert_eq!(MAX_BACKLOG, pacer.due_frames());
-    assert!((50..=60).contains(&pacer.dropped_frames()), "{}", pacer.dropped_frames());
+    assert!(
+        (50..=60).contains(&pacer.dropped_frames()),
+        "{}",
+        pacer.dropped_frames()
+    );
 }
 
 #[test]
@@ -132,7 +139,9 @@ fn req_loop_015_a_speed_change_takes_effect_on_the_next_frame() {
     let mut harness = LoopHarness::create();
     harness.launch("g1");
     let frames = harness.host.session().unwrap().core().frame_count();
-    harness.host.update_settings(|model| model.set_game_speed(4));
+    harness
+        .host
+        .update_settings(|model| model.set_game_speed(4));
     harness.tick_frame();
     assert!((harness.host.pacer.speed - 2.0).abs() < 1e-9);
     let session = harness.host.session().unwrap();
@@ -158,5 +167,9 @@ fn req_loop_011_the_interval_between_frames_stays_close_to_the_period() {
         .iter()
         .filter(|interval| (0.0146..=0.0186).contains(*interval))
         .count();
-    assert!(inside >= intervals.len() * 95 / 100, "only {inside}/{} inside", intervals.len());
+    assert!(
+        inside >= intervals.len() * 95 / 100,
+        "only {inside}/{} inside",
+        intervals.len()
+    );
 }

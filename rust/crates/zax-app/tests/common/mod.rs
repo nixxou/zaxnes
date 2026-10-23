@@ -19,6 +19,7 @@ use zax_app::emulation::host::{EmulationHost, EmulationHostOptions};
 use zax_app::input::{InputAction, InputSnapshot};
 use zax_app::scene_script_bridge::SharedScene;
 use zax_app::user_data_paths::UserDataPaths;
+use zax_platform::input::{PhysicalControl, PhysicalControlKind};
 use zax_profiles::profile::GameProfile;
 use zax_render::scene::SceneState;
 
@@ -388,5 +389,259 @@ impl LoopHarness {
             ran += self.tick_actions(period, actions, InputAction::NONE);
         }
         ran
+    }
+}
+
+/// A keyboard driven by the test: the set of physical key positions currently held
+/// (SPEC-08 DEC-08-5).
+#[derive(Default)]
+pub struct FakeKeyboard {
+    down: std::collections::BTreeSet<i32>,
+}
+
+impl FakeKeyboard {
+    /// Holds the key at position `code`.
+    pub fn press(&mut self, code: i32) {
+        self.down.insert(code);
+    }
+
+    /// Releases the key at position `code`.
+    pub fn release(&mut self, code: i32) {
+        self.down.remove(&code);
+    }
+
+    /// Releases every key.
+    pub fn release_all(&mut self) {
+        self.down.clear();
+    }
+}
+
+impl zax_platform::input::KeyboardDevice for FakeKeyboard {
+    fn is_down(&self, key_code: i32) -> bool {
+        self.down.contains(&key_code)
+    }
+
+    fn collect_held_keys(&self, keys: &mut Vec<i32>) {
+        keys.extend(self.down.iter().copied());
+    }
+}
+
+/// A mouse driven by the test (REQ-INP-120).
+pub struct FakePointer {
+    pub position: [f32; 2],
+    pub left: bool,
+    pub right: bool,
+    pub visible: bool,
+    wheel: f32,
+}
+
+impl Default for FakePointer {
+    fn default() -> Self {
+        Self {
+            position: [0.0, 0.0],
+            left: false,
+            right: false,
+            visible: true,
+            wheel: 0.0,
+        }
+    }
+}
+
+impl FakePointer {
+    /// Adds `notches` of wheel travel, positive forward.
+    pub fn scroll(&mut self, notches: f32) {
+        self.wheel += notches;
+    }
+}
+
+impl zax_platform::input::PointerDevice for FakePointer {
+    fn position(&self) -> [f32; 2] {
+        self.position
+    }
+
+    fn left_button(&self) -> bool {
+        self.left
+    }
+
+    fn right_button(&self) -> bool {
+        self.right
+    }
+
+    fn take_wheel_notches(&mut self) -> f32 {
+        std::mem::take(&mut self.wheel)
+    }
+
+    fn cursor_visible(&self) -> bool {
+        self.visible
+    }
+
+    fn set_cursor_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+}
+
+#[derive(Default)]
+struct PadState {
+    buttons: std::collections::BTreeSet<i32>,
+    axes: [f32; 4],
+    triggers: [f32; 2],
+}
+
+/// A simulated gamepad: raw button states, raw stick axes and raw triggers, so the dead zones
+/// and the 0.34 threshold of SPEC-08 §3.4 are exercised exactly as on a real pad. Clones share
+/// the state, so a test keeps a handle after the pad went into a hub.
+#[derive(Clone)]
+pub struct FakeGamepad {
+    identity: String,
+    standard: bool,
+    state: Rc<RefCell<PadState>>,
+}
+
+impl FakeGamepad {
+    /// Creates a standard pad with the given identity (REQ-INP-025).
+    pub fn new(identity: &str) -> Self {
+        Self::with_layout(identity, true)
+    }
+
+    /// Creates a pad that answers to the standard layout or not (REQ-INP-020).
+    pub fn with_layout(identity: &str, standard: bool) -> Self {
+        Self {
+            identity: identity.to_owned(),
+            standard,
+            state: Rc::default(),
+        }
+    }
+
+    /// Holds button `code`.
+    pub fn press(&self, code: i32) -> &Self {
+        self.state.borrow_mut().buttons.insert(code);
+        self
+    }
+
+    /// Releases button `code`.
+    pub fn release(&self, code: i32) -> &Self {
+        self.state.borrow_mut().buttons.remove(&code);
+        self
+    }
+
+    /// Sets the raw value of stick axis `index`, -1 to 1.
+    pub fn axis(&self, index: i32, value: f32) -> &Self {
+        self.state.borrow_mut().axes[usize::try_from(index).expect("axis index")] = value;
+        self
+    }
+
+    /// Sets the raw travel of trigger `index`, 0 to 1.
+    pub fn trigger(&self, index: i32, value: f32) -> &Self {
+        self.state.borrow_mut().triggers[usize::try_from(index).expect("trigger index")] = value;
+        self
+    }
+
+    /// Releases everything.
+    pub fn release_all(&self) -> &Self {
+        *self.state.borrow_mut() = PadState::default();
+        self
+    }
+
+    fn paired(state: &PadState, axis: i32) -> f32 {
+        use zax_platform::input::standard_gamepad as pad;
+        let other = match axis {
+            pad::LEFT_STICK_X => pad::LEFT_STICK_Y,
+            pad::LEFT_STICK_Y => pad::LEFT_STICK_X,
+            pad::RIGHT_STICK_X => pad::RIGHT_STICK_Y,
+            pad::RIGHT_STICK_Y => pad::RIGHT_STICK_X,
+            _ => return 0.0,
+        };
+        state.axes[usize::try_from(other).expect("axis index")]
+    }
+}
+
+impl zax_platform::input::GamepadDevice for FakeGamepad {
+    fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    fn display_name(&self) -> &str {
+        &self.identity
+    }
+
+    fn is_standard(&self) -> bool {
+        self.standard
+    }
+
+    fn value(&self, control: PhysicalControl) -> f32 {
+        use zax_platform::input::calibration;
+        let state = self.state.borrow();
+        let index = usize::try_from(control.code).ok();
+        match control.kind {
+            PhysicalControlKind::Button => {
+                f32::from(u8::from(state.buttons.contains(&control.code)))
+            }
+            PhysicalControlKind::Axis => index.and_then(|i| state.axes.get(i)).map_or(0.0, |raw| {
+                calibration::half_axis(*raw, Self::paired(&state, control.code), control.direction)
+            }),
+            PhysicalControlKind::Trigger => index
+                .and_then(|i| state.triggers.get(i))
+                .map_or(0.0, |raw| calibration::trigger(*raw)),
+            _ => 0.0,
+        }
+    }
+
+    fn collect_active_controls(&self, controls: &mut Vec<PhysicalControl>) {
+        use zax_platform::input::{calibration, standard_gamepad as pad};
+        for button in 0..pad::BUTTON_COUNT {
+            if self.state.borrow().buttons.contains(&button) {
+                controls.push(PhysicalControl::button(button));
+            }
+        }
+        for axis in 0..pad::AXIS_COUNT {
+            for direction in [1, -1] {
+                let half = PhysicalControl::axis(axis, direction);
+                if calibration::is_pressed(self.value(half)) {
+                    controls.push(half);
+                }
+            }
+        }
+        for trigger in 0..pad::TRIGGER_COUNT {
+            let control = PhysicalControl::trigger(trigger);
+            if calibration::is_pressed(self.value(control)) {
+                controls.push(control);
+            }
+        }
+    }
+}
+
+/// A hub whose device list the test plugs and unplugs (REQ-INP-024).
+#[derive(Default)]
+pub struct FakeGamepadHub {
+    devices: Vec<Box<dyn zax_platform::input::GamepadDevice>>,
+    /// How many times `poll` ran.
+    pub polls: u32,
+}
+
+impl FakeGamepadHub {
+    /// Plugs `device` in, unless its identity is a VR one.
+    pub fn plug(&mut self, device: &FakeGamepad) -> &mut Self {
+        // REQ-INP-022: the hub is what filters VR devices out, so they are never offered.
+        if !zax_platform::input::devices::is_virtual_reality(&device.identity) {
+            self.devices.push(Box::new(device.clone()));
+        }
+        self
+    }
+
+    /// Unplugs the device of that identity (REQ-INP-024).
+    pub fn unplug(&mut self, identity: &str) -> &mut Self {
+        self.devices
+            .retain(|device| !device.identity().eq_ignore_ascii_case(identity));
+        self
+    }
+}
+
+impl zax_platform::input::GamepadHub for FakeGamepadHub {
+    fn devices(&self) -> &[Box<dyn zax_platform::input::GamepadDevice>] {
+        &self.devices
+    }
+
+    fn poll(&mut self) {
+        self.polls += 1;
     }
 }

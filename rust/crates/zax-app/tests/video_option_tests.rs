@@ -20,11 +20,20 @@ use zax_settings::values::SettingValue;
 fn req_pers_017_a_change_of_anti_alias_reaches_the_scene_at_once() {
     let mut harness = LoopHarness::create();
     assert_eq!(1, harness.scene.borrow().settings.anti_alias_samples());
-    harness.host.update_settings(|model| model.set_anti_alias(1));
+    harness
+        .host
+        .update_settings(|model| model.set_anti_alias(1));
     assert_eq!(4, harness.scene.borrow().settings.anti_alias_samples());
-    harness.host.update_settings(|model| model.set_anti_alias(2));
-    assert_eq!(MAX_ANTI_ALIAS_SAMPLES, harness.scene.borrow().settings.anti_alias_samples());
-    harness.host.update_settings(|model| model.set_anti_alias(0));
+    harness
+        .host
+        .update_settings(|model| model.set_anti_alias(2));
+    assert_eq!(
+        MAX_ANTI_ALIAS_SAMPLES,
+        harness.scene.borrow().settings.anti_alias_samples()
+    );
+    harness
+        .host
+        .update_settings(|model| model.set_anti_alias(0));
     assert_eq!(1, harness.scene.borrow().settings.anti_alias_samples());
 }
 
@@ -78,15 +87,27 @@ fn the_direct_method_ignores_the_resolution_scale(#[case] index: i32) {
 
 #[test]
 fn the_scaled_buffer_never_collapses_to_nothing() {
-    assert_eq!((1, 1), render_scaling::scene_size(2, 2, render_scaling::RENDER_TEXTURE_METHOD, 0.25));
-    assert_eq!((1, 1), render_scaling::scene_size(0, -4, render_scaling::RENDER_TEXTURE_METHOD, 1.0));
+    assert_eq!(
+        (1, 1),
+        render_scaling::scene_size(2, 2, render_scaling::RENDER_TEXTURE_METHOD, 0.25)
+    );
+    assert_eq!(
+        (1, 1),
+        render_scaling::scene_size(0, -4, render_scaling::RENDER_TEXTURE_METHOD, 1.0)
+    );
 }
 
 #[rstest]
 #[case(false, false)]
 #[case(true, true)]
-fn req_pers_067_the_window_opens_in_the_persisted_state(#[case] persisted: bool, #[case] expected: bool) {
-    assert_eq!(expected, should_open_fullscreen(&AppOptions::default(), persisted));
+fn req_pers_067_the_window_opens_in_the_persisted_state(
+    #[case] persisted: bool,
+    #[case] expected: bool,
+) {
+    assert_eq!(
+        expected,
+        should_open_fullscreen(&AppOptions::default(), persisted)
+    );
 }
 
 #[rstest]
