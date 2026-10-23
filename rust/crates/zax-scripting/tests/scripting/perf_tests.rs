@@ -248,6 +248,7 @@ fn perf_accesses() {
         ("Camera.Distance read", "local a = Camera.Distance"),
         ("Camera.Distance write", "Camera.Distance = 5"),
         ("Setting.SceneRatio read", "local a = Setting.SceneRatio"),
+        ("Setting.EmptyTile read", "local a = Setting.EmptyTile"),
         ("Script:ReadMem", "local a = Script:ReadMem(16)"),
         ("unknown member read", "local a = Camera.Nope"),
         ("Vector3(1, 2, 3)", "local a = Vector3(1, 2, 3)"),
