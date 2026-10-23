@@ -1,10 +1,13 @@
-//! A compiled and linked GLSL program, with a cache of uniform locations.
+//! A compiled and linked GLSL program, with a cache of uniform locations and of the values
+//! last uploaded (a uniform keeps its value in the program object, so setting it again to the
+//! same value is skipped: most draws of a frame change only a few of their uniforms).
 //!
 //! OpenGL 3.3 core without any extension (REQ-SCN-056), and the same sources on GLES 3.0
 //! (REQ-ARCH-030): no explicit uniform locations, no bindings in the source, no integer texture
 //! gathers.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use glow::{Program, UniformLocation};
 
@@ -17,7 +20,39 @@ use crate::numerics::{Matrix4x4, Vector2, Vector3, Vector4};
 pub struct ShaderProgram {
     gl: Gl,
     handle: Program,
-    uniforms: HashMap<&'static str, Option<UniformLocation>>,
+    uniforms: HashMap<&'static str, Uniform, BuildHasherDefault<NameHasher>>,
+}
+
+/// One uniform: its location, `None` when it is not active, and the bits last uploaded.
+#[derive(Debug)]
+struct Uniform {
+    location: Option<UniformLocation>,
+    /// The words of the value last uploaded; `len` 0 until the first upload.
+    last: [u32; 16],
+    len: usize,
+}
+
+/// FNV-1a over the uniform name: the names are short literals, looked up a dozen times per
+/// draw, where the default `SipHash` costs more than the GL call it guards.
+#[derive(Debug)]
+struct NameHasher(u64);
+
+impl Default for NameHasher {
+    fn default() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Hasher for NameHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 = (self.0 ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
 }
 
 impl ShaderProgram {
@@ -31,7 +66,7 @@ impl ShaderProgram {
             return Ok(Self {
                 gl: gl.clone(),
                 handle,
-                uniforms: HashMap::new(),
+                uniforms: HashMap::default(),
             });
         }
         let vertex = gl.compile(source.name, glow::VERTEX_SHADER, &vertex_source)?;
@@ -49,7 +84,7 @@ impl ShaderProgram {
         Ok(Self {
             gl: gl.clone(),
             handle,
-            uniforms: HashMap::new(),
+            uniforms: HashMap::default(),
         })
     }
 
@@ -58,46 +93,63 @@ impl ShaderProgram {
         self.gl.use_program(self.handle);
     }
 
-    /// Location of `name`, or `None` when the uniform is not active.
-    fn location(&mut self, name: &'static str) -> Option<UniformLocation> {
+    /// Location of `name` when the value whose bits are `words` has to be uploaded: `None`
+    /// when the uniform is not active or already holds exactly these bits.
+    fn location(&mut self, name: &'static str, words: &[u32]) -> Option<UniformLocation> {
         let (gl, handle) = (&self.gl, self.handle);
-        *self
-            .uniforms
-            .entry(name)
-            .or_insert_with(|| gl.uniform_location(handle, name))
+        let uniform = self.uniforms.entry(name).or_insert_with(|| Uniform {
+            location: gl.uniform_location(handle, name),
+            last: [0; 16],
+            len: 0,
+        });
+        let location = uniform.location?;
+        if uniform.len == words.len() && uniform.last[..words.len()] == *words {
+            return None;
+        }
+
+        uniform.last[..words.len()].copy_from_slice(words);
+        uniform.len = words.len();
+        Some(location)
     }
 
     /// Sets an integer uniform.
     pub fn set_i32(&mut self, name: &'static str, value: i32) {
-        if let Some(location) = self.location(name) {
+        if let Some(location) = self.location(name, &[u32::from_ne_bytes(value.to_ne_bytes())]) {
             self.gl.uniform_i32(location, value);
         }
     }
 
     /// Sets a float uniform.
     pub fn set_f32(&mut self, name: &'static str, value: f32) {
-        if let Some(location) = self.location(name) {
+        if let Some(location) = self.location(name, &[value.to_bits()]) {
             self.gl.uniform_f32(location, value);
         }
     }
 
     /// Sets a `vec2` uniform.
     pub fn set_vec2(&mut self, name: &'static str, value: Vector2) {
-        if let Some(location) = self.location(name) {
+        if let Some(location) = self.location(name, &[value.x.to_bits(), value.y.to_bits()]) {
             self.gl.uniform_vec2(location, value.x, value.y);
         }
     }
 
     /// Sets a `vec3` uniform.
     pub fn set_vec3(&mut self, name: &'static str, value: Vector3) {
-        if let Some(location) = self.location(name) {
+        let words = [value.x.to_bits(), value.y.to_bits(), value.z.to_bits()];
+        if let Some(location) = self.location(name, &words) {
             self.gl.uniform_vec3(location, value.x, value.y, value.z);
         }
     }
 
     /// Sets a `vec4` uniform.
     pub fn set_vec4(&mut self, name: &'static str, value: Vector4) {
-        if let Some(location) = self.location(name) {
+        let words = [
+            value.x.to_bits(),
+            value.y.to_bits(),
+            value.z.to_bits(),
+            value.w.to_bits(),
+        ];
+        if let Some(location) = self.location(name, &words) {
             self.gl
                 .uniform_vec4(location, value.x, value.y, value.z, value.w);
         }
@@ -107,14 +159,15 @@ impl ShaderProgram {
     /// to row vectors, so uploading it untransposed gives GLSL the column-vector matrix the
     /// shaders expect.
     pub fn set_matrix4(&mut self, name: &'static str, value: &Matrix4x4) {
-        if let Some(location) = self.location(name) {
-            self.gl.uniform_mat4(location, &value.to_cells());
+        let cells = value.to_cells();
+        if let Some(location) = self.location(name, &cells.map(f32::to_bits)) {
+            self.gl.uniform_mat4(location, &cells);
         }
     }
 
     /// Sets a `mat3` uniform from the nine cells, row by row.
     pub fn set_matrix3(&mut self, name: &'static str, row_major: &[f32; 9]) {
-        if let Some(location) = self.location(name) {
+        if let Some(location) = self.location(name, &row_major.map(f32::to_bits)) {
             // GLSL reads a mat3 column by column, so the row-major cells are uploaded
             // transposed.
             let m = row_major;

@@ -92,6 +92,19 @@ displayed frame". All values are per displayed frame.
   the full path). Goldens and `cargo test -p zax-nes --release` pass. FF1 (MMC1, 2D, no
   profile) bench-core x86 core 1.18 -> 0.87 ms/frame; callgrind before: core 25.4 M
   instructions per frame (PPU 51 %, APU 19.5 %, ~185 instructions per CPU cycle in the APU).
+- Device run of `a0c157a` (owner): FF1 2D core ~12 ms per frame (was ~15.6), 60 emulated and
+  displayed fps, smooth. Zelda II 3D profile: core 12.7, lua 6, conv 1.1, scene 29 ms per
+  displayed frame, ~20 fps; without catch-up the game then runs at a third of its speed (felt
+  worse than the old 5-frame catch-up, which kept the speed at ~5 fps). The scene is now the
+  first cost: 934 draw calls for 27 distinct objects in the first palace (harness:
+  `render --rom` with the press script in the notes below).
+- Draw state caching (5.3, first step, pixel-identical): `ShaderProgram` keeps the bits last
+  uploaded per uniform and skips identical uploads, with an FNV hasher for the name lookups
+  (SipHash was ~2 % of all instructions); the scene draws rebind textures and vertex arrays only
+  when they change. Zelda II frame identical (tolerance 0), 12 games x 3 angles identical to
+  the previous captures; RTX 3060 render 0.44 -> 0.33 ms median.
+  Zelda II press script (no save, registers "A"): `100:start,200:start,300:a,340:select,
+  370:select,400:select,440:start,540:start,640:start`, `--run 1300`.
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

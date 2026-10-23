@@ -141,6 +141,11 @@ struct Passes {
     shadow_enabled: bool,
     mirrored_winding: bool,
     mirrored_normal: bool,
+    /// The textures [`Passes::draw_item`] left on units 0 and 1, and the vertex array
+    /// [`Passes::draw`] left bound, so that a draw only rebinds what changed. Forgotten at the
+    /// start of each pass ([`Passes::forget_bindings`]): other code binds in between.
+    bound_textures: [Option<Texture>; 2],
+    bound_vertex_array: Option<glow::VertexArray>,
     statistics: RenderStatistics,
 }
 
@@ -222,6 +227,8 @@ impl SceneRenderer {
             shadow_enabled: false,
             mirrored_winding: false,
             mirrored_normal: false,
+            bound_textures: [None; 2],
+            bound_vertex_array: None,
             statistics,
         };
 
@@ -544,6 +551,7 @@ impl SceneRenderer {
         passes.set_winding(false, true);
 
         passes.shadow.use_program();
+        passes.forget_bindings();
         passes
             .shadow
             .set_matrix4("uLightViewProjection", &volume.view_projection);
@@ -761,6 +769,7 @@ impl CommonUniforms<'_> {
         gl.bind_texture(glow::TEXTURE_2D, Some(self.textures.palette()));
         gl.active_texture(3);
         gl.bind_texture(glow::TEXTURE_2D, Some(self.shadow_texture));
+        passes.forget_bindings();
     }
 }
 
@@ -829,14 +838,24 @@ impl Passes {
             Some(texture) if item.color_mode == mode => texture,
             _ => dummy,
         };
-        self.gl.active_texture(0);
-        self.gl
-            .bind_texture(glow::TEXTURE_2D, Some(texture(0, self.dummy_indexed)));
-        self.gl.active_texture(1);
-        self.gl
-            .bind_texture(glow::TEXTURE_2D, Some(texture(1, self.dummy_color)));
+        let textures = [texture(0, self.dummy_indexed), texture(1, self.dummy_color)];
+        for (unit, texture) in (0u32..).zip(textures) {
+            let slot = &mut self.bound_textures[unit as usize];
+            if *slot != Some(texture) {
+                self.gl.active_texture(unit);
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                *slot = Some(texture);
+            }
+        }
 
         self.draw(item.mesh);
+    }
+
+    /// Forgets which textures and vertex array the draws left bound: the next draw binds its
+    /// own again. Called at the start of each pass, after the code that binds other objects.
+    fn forget_bindings(&mut self) {
+        self.bound_textures = [None; 2];
+        self.bound_vertex_array = None;
     }
 
     /// Draws one blended object with the two passes of REQ-SCN-040: depth only, then colour
@@ -866,7 +885,10 @@ impl Passes {
     }
 
     fn draw(&mut self, mesh: GpuMesh) {
-        self.gl.bind_vertex_array(Some(mesh.vertex_array));
+        if self.bound_vertex_array != Some(mesh.vertex_array) {
+            self.gl.bind_vertex_array(Some(mesh.vertex_array));
+            self.bound_vertex_array = Some(mesh.vertex_array);
+        }
         self.gl.draw_triangles_indexed(mesh.index_count);
         self.statistics.draw_calls += 1;
         self.statistics.triangles += u64::from(mesh.index_count.unsigned_abs() / 3);
