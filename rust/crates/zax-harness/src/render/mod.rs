@@ -12,6 +12,7 @@ pub mod profile;
 pub mod replay;
 pub mod rom;
 pub mod scenes;
+pub mod timed_host;
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -249,16 +250,18 @@ impl Options {
     }
 }
 
-/// `synthetic`, `synthetic:<scene>` or the path of a JSON frame description.
+/// As the C# does: any value starting with `synthetic` (case ignored) is the synthetic frames,
+/// all of them or, after a colon, the scene named; anything else is the path of a JSON frame
+/// description.
 fn parse_frames(value: &str) -> FrameSource {
     let synthetic = value
         .get(.."synthetic".len())
-        .filter(|head| head.eq_ignore_ascii_case("synthetic"));
-    match (synthetic, value.split_once(':')) {
-        (Some(_), None) if value.len() == "synthetic".len() => FrameSource::Synthetic(None),
-        (Some(_), Some((_, scene))) => FrameSource::Synthetic(Some(scene.to_owned())),
-        _ => FrameSource::Json(PathBuf::from(value)),
+        .is_some_and(|head| head.eq_ignore_ascii_case("synthetic"));
+    if !synthetic {
+        return FrameSource::Json(PathBuf::from(value));
     }
+
+    FrameSource::Synthetic(value.split_once(':').map(|(_, scene)| scene.to_owned()))
 }
 
 fn parse_size(value: &str) -> Result<(i32, i32), String> {
