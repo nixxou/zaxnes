@@ -29,3 +29,11 @@ dbg_macro = "deny"
 # The PPU golden test runs 222 ROMs; the core is far too slow unoptimised.
 [profile.test.package.zax-nes]
 opt-level = 2
+
+# Smaller, faster shipped binaries. Panics keep unwinding (the default): the interface and the
+# script host report a failing hook instead of aborting. LTO does not change float results (no
+# fast-math anywhere); the core goldens are re-run in release after a change here.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
