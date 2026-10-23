@@ -212,6 +212,36 @@ impl HostWindow {
         )
     }
 
+    /// One line with the GL context SDL created: its profile and version, the colour, depth and
+    /// stencil bits, the multisampling and the double buffering it actually got.
+    #[must_use]
+    pub fn gl_config_report(&self) -> String {
+        let attributes = self.video.gl_attr();
+        let profile = match attributes.context_profile() {
+            GLProfile::Core => "core".to_owned(),
+            GLProfile::Compatibility => "compatibility".to_owned(),
+            GLProfile::GLES => "GLES".to_owned(),
+            GLProfile::Unknown(value) => format!("profile {value}"),
+        };
+        format!(
+            "GL context {profile} {}.{} (requested {:?}), RGBA {}/{}/{}/{} depth {} stencil {}, \
+             multisample {}x{}, double buffer {}, swap interval {:?}",
+            attributes.context_major_version(),
+            attributes.context_minor_version(),
+            self.flavor,
+            attributes.red_size(),
+            attributes.green_size(),
+            attributes.blue_size(),
+            attributes.alpha_size(),
+            attributes.depth_size(),
+            attributes.stencil_size(),
+            attributes.multisample_buffers(),
+            attributes.multisample_samples(),
+            attributes.double_buffer(),
+            self.video.gl_get_swap_interval()
+        )
+    }
+
     /// Size of the GL drawable in pixels.
     #[must_use]
     pub fn drawable_size(&self) -> (u32, u32) {

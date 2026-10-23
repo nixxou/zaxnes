@@ -282,6 +282,29 @@ pub fn gl_strings(gl: &glow::Context) -> (String, String) {
     }
 }
 
+/// A warning line when the GL renderer is a software rasteriser (Mesa llvmpipe, softpipe,
+/// swrast): on a handheld that means the GPU driver was not picked up and every pixel is drawn
+/// by the CPU.
+#[must_use]
+pub fn software_renderer_warning(gl: &glow::Context) -> Option<String> {
+    let (renderer, _) = gl_strings(gl);
+    is_software_renderer(&renderer).then(|| {
+        format!(
+            "WARNING: GL_RENDERER '{renderer}' is a software rasteriser; the GPU driver is not \
+             in use and the frame rate will be very low"
+        )
+    })
+}
+
+/// Whether `renderer` (`GL_RENDERER`) names a software rasteriser.
+#[must_use]
+pub fn is_software_renderer(renderer: &str) -> bool {
+    let renderer = renderer.to_ascii_lowercase();
+    ["llvmpipe", "softpipe", "swrast", "software"]
+        .iter()
+        .any(|name| renderer.contains(name))
+}
+
 /// One line describing what the GL driver provides (`GL_VERSION`, `GL_RENDERER`, `GL_VENDOR` and
 /// `GL_SHADING_LANGUAGE_VERSION`), for the start-up log of handheld devices.
 #[must_use]

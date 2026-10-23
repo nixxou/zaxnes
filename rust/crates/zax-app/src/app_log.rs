@@ -18,14 +18,33 @@ pub const FILE_NAME: &str = "zaxnes.log";
 static FILE: OnceLock<Mutex<LineWriter<File>>> = OnceLock::new();
 
 /// Opens `<directory>/zaxnes.log` (the folder is created) as the file copy of the log, and
-/// returns its path. The first call wins; `None` when the file cannot be created or a log file
-/// is already open.
-pub fn open(directory: &Path) -> Option<PathBuf> {
-    fs::create_dir_all(directory).ok()?;
+/// returns its path.
+///
+/// # Errors
+///
+/// Why the folder or the file could not be created, or that a log file is already open.
+pub fn open(directory: &Path) -> Result<PathBuf, String> {
     let path = directory.join(FILE_NAME);
-    let file = File::create(&path).ok()?;
-    FILE.set(Mutex::new(LineWriter::new(file))).ok()?;
-    Some(path)
+    let failed = |error: std::io::Error| format!("'{}': {error}", path.display());
+    fs::create_dir_all(directory).map_err(failed)?;
+    let file = File::create(&path).map_err(failed)?;
+    FILE.set(Mutex::new(LineWriter::new(file)))
+        .map_err(|_| "a log file is already open".to_owned())?;
+    Ok(path)
+}
+
+/// Opens the log file in the first of `directories` that takes it. Returns its path, and the
+/// failures met on the way, for the log.
+#[must_use]
+pub fn open_first(directories: &[PathBuf]) -> (Option<PathBuf>, Vec<String>) {
+    let mut failures = Vec::new();
+    for directory in directories {
+        match open(directory) {
+            Ok(path) => return (Some(path), failures),
+            Err(failure) => failures.push(failure),
+        }
+    }
+    (None, failures)
 }
 
 /// Writes `line` to the console's standard output and to the log file.

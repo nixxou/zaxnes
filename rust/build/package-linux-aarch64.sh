@@ -65,6 +65,10 @@ mkdir -p "$port/licenses" "$port/profiles" "$port/roms"
 install -m 755 "$binary" "$port/zaxnes.aarch64"
 cp "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir/ASSETS-LICENSES.md" \
     "$port/licenses/"
+if grep -q $'\r' "$script_dir/portmaster/Zaxnes.sh"; then
+    echo "error: Zaxnes.sh has CRLF line ends; the firmware's bash needs LF" >&2
+    exit 1
+fi
 cp "$script_dir/portmaster/Zaxnes.sh" "$stage/Zaxnes.sh"
 cp "$script_dir/portmaster/zaxnes.gptk" "$script_dir/portmaster/port.json" \
     "$script_dir/portmaster/gameinfo.xml" "$script_dir/portmaster/README.md" \
