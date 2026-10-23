@@ -8,3 +8,12 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+serde_json = { workspace = true, features = ["preserve_order"] }
+thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
+
+[dev-dependencies]
+rstest = "0.26"
+time = { version = "0.3", features = ["macros"] }
