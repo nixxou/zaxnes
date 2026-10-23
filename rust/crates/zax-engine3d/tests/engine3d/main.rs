@@ -9,6 +9,7 @@ mod cylinder_vector_tests;
 mod geometry_vector_tests;
 mod instance_and_output_tests;
 mod intake_and_frame_tests;
+mod marching_vector_tests;
 mod registry_tests;
 mod scaffold_tests;
 mod state_and_mode_tests;
