@@ -548,7 +548,8 @@ tools\Zax.Harness\bin\Release\net10.0\Zax.Harness.exe render --out captures
 
 Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
 `--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
-`--distance`, `--mesh`, `--no-shadows`, `--skybox`, `--sky-bodies` (allume le soleil, la lune
+`--distance`, `--mesh`, `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
+4096 par défaut depuis `AMD-034`), `--skybox`, `--sky-bodies` (allume le soleil, la lune
 et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
 

@@ -34,9 +34,10 @@ public sealed class SeamTests
         // The criterion is stated for the default view. The seam the users reported comes from
         // the shadow map, so the map resolution is what decides whether it shows: one texel of
         // the map has to stay smaller than the bias for the inner walls of the tiles not to
-        // shadow their neighbours. The default of 1024 texels (DEC-R2-D4) is checked first, then
-        // coarser maps, which is where the artefact used to appear.
-        foreach (int mapSize in new[] { 1024, 512, 256, 128 })
+        // shadow their neighbours. The default of 4096 texels (AMD-034 §2) is checked first,
+        // then the two fallback sizes and coarser maps still, which is where the artefact used
+        // to appear.
+        foreach (int mapSize in new[] { 4096, 2048, 1024, 512, 256, 128 })
         {
             scene.Settings.ShadowMapSize = mapSize;
             Capture capture = gl.Render(renderer, scene);

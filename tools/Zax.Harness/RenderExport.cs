@@ -53,6 +53,9 @@ internal static class RenderExport
           --distance <d>           Camera setpoint distance (default 104 / atan(FOV/2)).
           --mesh <algorithm>       greedy (default), marching or multicolor (REQ-E3D-340).
           --no-shadows             Render with the shadows off.
+          --shadow-map <texels>    Side of the shadow map (default 4096, AMD-034). A size the
+                                   hardware refuses is halved until it accepts one, and the
+                                   granted size is reported.
           --anti-alias <n>         video.anti_alias: 0 off (default), 1 MSAA 4x, 2 MSAA 8x
                                    (AMD-032). The granted sample count is reported.
           --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049).
@@ -89,6 +92,7 @@ internal static class RenderExport
         int height = 480;
         float fov = 70f;
         bool shadows = true;
+        int shadowMapSize = SceneConstants.ShadowMapSize;
         int antiAlias = 0;
         bool explain = false;
         int bench = 0;
@@ -168,6 +172,10 @@ internal static class RenderExport
 
                 case "--no-shadows":
                     shadows = false;
+                    break;
+
+                case "--shadow-map":
+                    shadowMapSize = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
                     break;
 
                 case "--anti-alias":
@@ -291,6 +299,7 @@ internal static class RenderExport
 
             // AMD-032 §2: video.anti_alias as the application applies it.
             scene.Scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(antiAlias);
+            scene.Scene.Settings.ShadowMapSize = shadowMapSize;
         }
 
         using OffscreenContext context = OffscreenContext.Create(width, height);
@@ -350,9 +359,17 @@ internal static class RenderExport
             string msaa = counts.AntiAliasSamples > 1
                 ? string.Create(CultureInfo.InvariantCulture, $"  MSAA {counts.AntiAliasSamples}x")
                 : string.Empty;
+
+            // AMD-034 §2: the granted size is only worth printing when it is not the one asked
+            // for, which is how a hardware fallback gets reported.
+            string shadow = counts.ShadowMapSize != counts.RequestedShadowMapSize
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"  shadow map {counts.ShadowMapSize} (asked {counts.RequestedShadowMapSize})")
+                : string.Empty;
             Console.Out.WriteLine(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{scene.Name,-18} {statistics.DistinctColors,6} colours  {counts.OpaqueTiles,5} opaque  {counts.TransparentTiles,4} alpha  {counts.HudTiles,4} HUD  {counts.ShadowCasters,5} casters{msaa}{timing}"));
+                $"{scene.Name,-18} {statistics.DistinctColors,6} colours  {counts.OpaqueTiles,5} opaque  {counts.TransparentTiles,4} alpha  {counts.HudTiles,4} HUD  {counts.ShadowCasters,5} casters{msaa}{shadow}{timing}"));
         }
 
         File.WriteAllText(
@@ -689,6 +706,8 @@ internal static class RenderExport
                 + $"\"drawCalls\": {render.DrawCalls}, \"triangles\": {render.Triangles}, "
                 + $"\"residentMeshes\": {render.ResidentMeshes}, "
                 + $"\"antiAliasSamples\": {render.AntiAliasSamples}, "
+                + $"\"shadowMapSize\": {render.ShadowMapSize}, "
+                + $"\"requestedShadowMapSize\": {render.RequestedShadowMapSize}, "
                 + $"\"distinctColors\": {capture.DistinctColors}, "
                 + $"\"backgroundPixels\": {capture.BackgroundPixels}, "
                 + $"\"meanLuma\": {capture.MeanLuma:F4}{bench} }}");

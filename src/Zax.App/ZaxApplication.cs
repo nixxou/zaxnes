@@ -77,6 +77,7 @@ internal sealed class ZaxApplication : IDisposable
     private long _emulatedFrames;
     private int _sceneFrames;
     private int _skippedFrames;
+    private bool _shadowMapReported;
     private (int Width, int Height) _lastRenderSize;
     private Vector2? _dragOrigin;
     private string _glRenderer = "unknown";
@@ -680,6 +681,7 @@ internal sealed class ZaxApplication : IDisposable
         if (!skip)
         {
             renderer.Render(offscreen.Target, _scene);
+            ReportShadowMapFallback(renderer.Statistics);
             _lastRenderSize = (sceneWidth, sceneHeight);
             _sceneFrames++;
         }
@@ -723,6 +725,25 @@ internal sealed class ZaxApplication : IDisposable
 
             host.Window.Close();
         }
+    }
+
+    /// <summary>
+    /// AMD-034 §2: when the hardware refuses the shadow map that was asked for, the renderer
+    /// settles for the largest smaller one and the host says so <b>once</b>.
+    /// </summary>
+    /// <param name="stats">The statistics of the frame just rendered.</param>
+    private void ReportShadowMapFallback(RenderStatistics stats)
+    {
+        if (_shadowMapReported || stats.ShadowMapSize == stats.RequestedShadowMapSize)
+        {
+            return;
+        }
+
+        _shadowMapReported = true;
+        Log(string.Create(
+            CultureInfo.InvariantCulture,
+            $"the hardware refused a {stats.RequestedShadowMapSize}-texel shadow map; "
+                + $"it is {stats.ShadowMapSize} texels (AMD-034)."));
     }
 
     /// <summary>

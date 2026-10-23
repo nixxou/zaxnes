@@ -42,6 +42,15 @@ public sealed class RenderStatistics
     /// <summary>Whether a shadow map was produced for this frame.</summary>
     public bool ShadowPass { get; internal set; }
 
+    /// <summary>
+    /// Side of the shadow map in texels the hardware granted (AMD-034 §2): the requested size,
+    /// or the largest smaller one whose depth framebuffer came out complete.
+    /// </summary>
+    public int ShadowMapSize { get; internal set; } = SceneConstants.ShadowMapSize;
+
+    /// <summary>Side of the shadow map in texels that was asked for (AMD-034 §2).</summary>
+    public int RequestedShadowMapSize { get; internal set; } = SceneConstants.ShadowMapSize;
+
     /// <summary>Whether a skybox was drawn for this frame (REQ-SCN-049).</summary>
     public bool SkyboxPass { get; internal set; }
 

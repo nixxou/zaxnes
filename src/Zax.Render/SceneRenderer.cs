@@ -61,6 +61,11 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass = ShaderProgram.Create(gl, "scene", SceneShaders.SceneVertex, SceneShaders.SceneFragment);
         _shadowPass = ShaderProgram.Create(gl, "shadow", SceneShaders.ShadowVertex, SceneShaders.ShadowFragment);
         _linear = new LinearColorBuffer(gl);
+
+        // AMD-034 §2: the size the hardware granted is known from here on, whether or not a
+        // shadow pass ever runs, so the host can report a fallback once.
+        Statistics.ShadowMapSize = _shadowMap.Size;
+        Statistics.RequestedShadowMapSize = _shadowMap.Requested;
     }
 
     /// <inheritdoc/>
@@ -383,6 +388,8 @@ public sealed class SceneRenderer : ISceneRenderer
         }
 
         _shadowMap.Resize(scene.Settings.ShadowMapSize);
+        Statistics.ShadowMapSize = _shadowMap.Size;
+        Statistics.RequestedShadowMapSize = _shadowMap.Requested;
 
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -412,10 +419,10 @@ public sealed class SceneRenderer : ISceneRenderer
 
         // Q-025: only the back faces of the casters fill the map. The tile meshes are closed
         // (REQ-E3D-505), so the stored depth is the far side of each object and a lit front
-        // face can no longer shadow itself: with a 1024-texel map over the whole scene, one
-        // texel spans more than the 0.02 unit bias of REQ-SCN-031, and front faces produce
-        // visible shadow acne on every slanted surface. The bias and the normal offset of
-        // REQ-SCN-031 are still applied on top.
+        // face can no longer shadow itself: over a whole scene one texel still spans more than
+        // the 0.02 unit bias of REQ-SCN-031 — about 0.1 unit on the 4096-texel map of
+        // AMD-034 §2 — and front faces produce visible shadow acne on every slanted surface.
+        // The bias and the normal offset of REQ-SCN-031 are still applied on top.
         _gl.Enable(EnableCap.CullFace);
         _gl.CullFace(TriangleFace.Front);
         SetWinding(false, force: true);
@@ -646,7 +653,7 @@ public sealed class SceneRenderer : ISceneRenderer
     /// <summary>
     /// The depth bias of the shadow test, in scene units: the 0.02 unit of REQ-SCN-031, raised
     /// to <see cref="SceneConstants.ShadowBiasTexels"/> texels of the current map when a texel is
-    /// coarser than that (Q-032).
+    /// coarser than that (Q-032, amended by AMD-034 §2 — one texel, never under 0.02 unit).
     /// </summary>
     /// <remarks>
     /// Q-025 fills the map with back faces only. A tile mesh is closed on itself (REQ-E3D-505),
@@ -658,9 +665,7 @@ public sealed class SceneRenderer : ISceneRenderer
     /// 0.02 unit figure.
     /// </remarks>
     private static float ShadowBias(ShadowVolume volume, int mapSize)
-        => MathF.Max(
-            SceneConstants.ShadowDepthBias,
-            SceneConstants.ShadowBiasTexels * volume.TexelSize(mapSize));
+        => SceneConstants.ShadowBias(volume.TexelSize(mapSize));
 
     private void DrawItemWithMaterial(in DrawItem item, bool opaque)
     {

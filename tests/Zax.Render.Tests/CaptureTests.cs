@@ -195,9 +195,10 @@ public sealed class CaptureTests
     [GlFact]
     public void REQ_SCN_031_a_slanted_lit_surface_shows_no_shadow_acne()
     {
-        // The biases of REQ-SCN-031 are there "pour éviter l'acné d'ombre". With a 1024-texel
-        // map over the whole scene one texel spans far more than 0.02 unit, so a front face
-        // would shadow itself in a stipple pattern; only the back faces fill the map.
+        // The biases of REQ-SCN-031 are there "pour éviter l'acné d'ombre". Even with the
+        // 4096-texel map of AMD-034 §2, one texel over a whole scene spans far more than
+        // 0.02 unit, so a front face would shadow itself in a stipple pattern; only the back
+        // faces fill the map.
         using GlFixture gl = GlFixture.Create(240, 240);
         using SceneRenderer renderer = new(gl.Gl);
 

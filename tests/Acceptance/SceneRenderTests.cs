@@ -248,28 +248,29 @@ public sealed class SceneRenderTests
     // ----------------------------------------------------------------- §3.10 shadows
 
     /// <summary>
-    /// REQ-SCN-030 — the shadow map is a single map of 1024 texels by default covering the part
-    /// of the scene within 512 units of the camera (DEC-R2-D4, Q-019).
+    /// REQ-SCN-030 — the shadow map is a single map of 4096 texels by default (AMD-034 §2,
+    /// replacing the 1024 of DEC-R2-D4) covering the part of the scene within 512 units of the
+    /// camera (Q-019).
     /// </summary>
-    [Fact] // REQ-SCN-030
-    public void The_shadow_map_is_one_1024_texel_map_over_512_units()
+    [Fact] // REQ-SCN-030, AMD-034
+    public void The_shadow_map_is_one_4096_texel_map_over_512_units()
     {
-        Assert.Equal(1024, SceneConstants.ShadowMapSize);
+        Assert.Equal(4096, SceneConstants.ShadowMapSize);
         Assert.Equal(512f, SceneConstants.ShadowDistance);
-        Assert.Equal(1024, new RenderSettings().ShadowMapSize);
+        Assert.Equal(4096, new RenderSettings().ShadowMapSize);
     }
 
     /// <summary>
-    /// REQ-SCN-031, Q-032 — the direct term is multiplied by 0.2 inside a shadow, the ambient is
-    /// untouched, and the depth bias is <c>max(0.02 ; 1.5 × texel)</c>.
+    /// REQ-SCN-031, Q-032 amended by AMD-034 §2 — the direct term is multiplied by 0.2 inside a
+    /// shadow, the ambient is untouched, and the depth bias is <c>max(0.02 ; 1 × texel)</c>.
     /// </summary>
-    [Fact] // REQ-SCN-031
+    [Fact] // REQ-SCN-031, AMD-034
     public void The_shadow_strength_is_zero_point_eight_and_the_bias_follows_the_texel()
     {
         Assert.Equal(0.2f, SceneColor.ShadowFactor);
         Assert.Equal(0.02f, SceneConstants.ShadowDepthBias);
         Assert.Equal(0.02f, SceneConstants.ShadowNormalOffset);
-        Assert.Equal(1.5f, SceneConstants.ShadowBiasTexels);
+        Assert.Equal(1f, SceneConstants.ShadowBiasTexels);
 
         // A white frontal face goes from 223 in full light to 146 in shadow (±3).
         Rgb24 white = NesPalette.Color(0x30);

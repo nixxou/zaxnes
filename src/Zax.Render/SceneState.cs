@@ -58,7 +58,10 @@ public sealed class RenderSettings
     // Q-064
     public SkyBodySettings SkyBodies { get; } = new();
 
-    /// <summary>Shadow map side in texels, 1024 by default (DEC-R2-D4).</summary>
+    /// <summary>
+    /// Shadow map side in texels, 4096 by default (AMD-034 §2, replacing the 1024 of
+    /// DEC-R2-D4). A size the hardware refuses is lowered by the renderer, not here.
+    /// </summary>
     public int ShadowMapSize
     {
         get => _shadowMapSize;
