@@ -294,7 +294,10 @@ impl GameSession {
         Ok(())
     }
 
-    fn with_runtime<R>(
+    /// Runs `operation` on the Lua runtime and the conversion state it works on, or returns `None`
+    /// when the session has no runtime. Used by the acceptance harness to evaluate chunks; the
+    /// settings model is not lent, so what a chunk writes to the settings stays in the runtime.
+    pub fn with_runtime<R>(
         &mut self,
         operation: impl FnOnce(
             &mut ProfileScriptRuntime,
@@ -490,6 +493,25 @@ impl GameSession {
             .unwrap_or(Ok(()));
         self.frame_counter = 0;
         self.start(model);
+        self.lend(model, |session| {
+            session.with_runtime(ProfileScriptRuntime::invoke_load);
+        });
+        restored
+    }
+
+    /// The `retro_unserialize` path of REQ-LUA-075 and DEC-R2-D5: the profile stays loaded, so
+    /// the entries go back and `Load` runs, with no `End` and no `Start`.
+    ///
+    /// # Errors
+    /// The Lua state could not be written.
+    pub fn restore_script_state_in_place(
+        &mut self,
+        model: &mut SettingsModel,
+        block: &[u8],
+    ) -> Result<(), LuaScriptError> {
+        let restored = self
+            .with_runtime(|runtime, _| runtime.restore_persistent_data(block))
+            .unwrap_or(Ok(()));
         self.lend(model, |session| {
             session.with_runtime(ProfileScriptRuntime::invoke_load);
         });
