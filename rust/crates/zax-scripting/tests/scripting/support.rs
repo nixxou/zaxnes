@@ -411,6 +411,21 @@ impl ScriptSession {
         self.number(&format!("if {expression} then return 1 else return 0 end"))
     }
 
+    /// Publishes the frame counter and the frame time as the globals `frame` and `time`.
+    pub fn set_frame_globals(&mut self, counter: i32, time: f32) {
+        self.runtime(|runtime, _| {
+            zax_engine3d::script::ScriptHost::set_frame_globals(runtime, counter, time).unwrap();
+        });
+    }
+
+    /// The entries of the global table `log`, in order.
+    pub fn log_entries(&mut self) -> Vec<String> {
+        let total = self.number("return #log");
+        (1..=total as usize)
+            .map(|index| self.text(&format!("return log[{index}]")))
+            .collect()
+    }
+
     /// Whether the script of this name is in error.
     pub fn script_failed(&mut self, name: &str) -> bool {
         self.runtime(|runtime, _| runtime.find_script(name).unwrap().failed())
@@ -459,4 +474,15 @@ pub mod neutral_assets {
                 .then(|| load_path(&path))
         })
     }
+}
+
+/// xUnit's `Assert.Equal(expected, actual, precision)`: both rounded to `precision` decimals.
+pub fn assert_close(expected: f64, actual: f64, precision: i32) {
+    let scale = 10_f64.powi(precision);
+    let round = |value: f64| (value * scale).round_ties_even() / scale;
+    assert_eq!(
+        round(expected),
+        round(actual),
+        "{expected} is not {actual} to {precision} decimals"
+    );
 }

@@ -289,9 +289,9 @@ fn setting() -> TypeDef {
     definition.read_only(
         "SkyboxEnable",
         |cx, _| {
-            Ok(boolean(
-                cx.data(|data| data.env.settings.flag(SettingId::SceneSkyboxEnable))?,
-            ))
+            Ok(boolean(cx.data(|data| {
+                data.env.settings.flag(SettingId::SceneSkyboxEnable)
+            })?))
         },
         None,
     );
@@ -327,7 +327,8 @@ fn setting() -> TypeDef {
         "IsProfileMode",
         |cx, _| {
             Ok(boolean(
-                cx.data(|data| data.env.settings.engine_mode())? == crate::settings::PROFILE_ENGINE_MODE,
+                cx.data(|data| data.env.settings.engine_mode())?
+                    == crate::settings::PROFILE_ENGINE_MODE,
             ))
         },
         None,
@@ -336,7 +337,8 @@ fn setting() -> TypeDef {
         "IsRomMode",
         |cx, _| {
             Ok(boolean(
-                cx.data(|data| data.env.settings.engine_mode())? == crate::settings::ROM_ENGINE_MODE,
+                cx.data(|data| data.env.settings.engine_mode())?
+                    == crate::settings::ROM_ENGINE_MODE,
             ))
         },
         None,
@@ -377,7 +379,8 @@ fn setting() -> TypeDef {
             require(call, "SetInputType")?;
             let first = call.integer(2, "SetInputType")?;
             let second = call.integer(3, "SetInputType")?;
-            call.cx.data(|data| data.env.input.set_port_types(first, second))?;
+            call.cx
+                .data(|data| data.env.input.set_port_types(first, second))?;
             with_settings(call.cx, |settings| settings.set_port_types(first, second))?;
             Ok(None)
         },
@@ -452,7 +455,11 @@ fn layers() -> [TypeDef; 3] {
     );
     config.property(
         "Auto",
-        |cx, _| Ok(boolean(cx.data(|data| data.env.settings.flag(SettingId::LayerAuto))?)),
+        |cx, _| {
+            Ok(boolean(cx.data(|data| {
+                data.env.settings.flag(SettingId::LayerAuto)
+            })?))
+        },
         |cx, _, value| {
             let wanted = assigned_bool(value);
             with_settings(cx, |settings| {
@@ -474,7 +481,11 @@ fn layers() -> [TypeDef; 3] {
     let mut layer = type_def(HostType::Layer, "Calque");
     layer.property(
         "Offset",
-        |cx, this| Ok(num(cx.data(|data| data.env.settings.layer_offset(layer_index(this)))?)),
+        |cx, this| {
+            Ok(num(cx.data(|data| {
+                data.env.settings.layer_offset(layer_index(this))
+            })?))
+        },
         |cx, this, value| {
             let wanted = cx.real(value, "Offset")?;
             let index = layer_index(this);
@@ -498,15 +509,19 @@ fn layers() -> [TypeDef; 3] {
     );
     layer.read_only(
         "Coef",
-        |cx, this| Ok(num(cx.data(|data| data.env.settings.layer_coef(layer_index(this)))?)),
+        |cx, this| {
+            Ok(num(cx.data(|data| {
+                data.env.settings.layer_coef(layer_index(this))
+            })?))
+        },
         None,
     );
     layer.property(
         "CastShadow",
         |cx, this| {
-            Ok(boolean(
-                cx.data(|data| data.env.settings.layer_cast_shadow(layer_index(this)))?,
-            ))
+            Ok(boolean(cx.data(|data| {
+                data.env.settings.layer_cast_shadow(layer_index(this))
+            })?))
         },
         |cx, this, value| {
             let wanted = assigned_bool(value);
@@ -518,9 +533,9 @@ fn layers() -> [TypeDef; 3] {
     layer.property(
         "RecvShadow",
         |cx, this| {
-            Ok(boolean(
-                cx.data(|data| data.env.settings.layer_recv_shadow(layer_index(this)))?,
-            ))
+            Ok(boolean(cx.data(|data| {
+                data.env.settings.layer_recv_shadow(layer_index(this))
+            })?))
         },
         |cx, this, value| {
             let wanted = assigned_bool(value);
