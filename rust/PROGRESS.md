@@ -58,6 +58,8 @@ Rust counts are `#[test]` results (rstest rows and table-driven loops count as o
 | zax-harness | 32 | (harness has no C# tests) | - |
 | zax-goldens | 3 | - | - |
 
+Linux smoke (`rust/build/smoke-linux.sh`, Xvfb/llvmpipe, release): window, frames, 2D and 3D render, audio, pause, save/load state, reset, options, FR/EN, rewind/ff keys, user-data files and clean exits all verified; no bug found. Notes: keys must be held about one frame (the keyboard is polled per frame), and loading a state ends in Running as in C#.
+
 Lua hook binding overhead (release, `cargo test -p zax-scripting --release --test scripting perf -- --ignored --nocapture --test-threads=1`, x86-64, synthetic profile of 60 shapes): per hook call before/after the binding rework, `Update` with 100 API accesses 45 -> 27.5 us (445 -> 275 ns per access), `BuildPattern` 2.2 -> 1.55 us (1.4 -> 0.93 us of setup, unchanged from 50 to 500 instances), `UpdateS` 4.85 -> 3.7 us (hook overhead 1.8 -> 1.2 us), a frame of `Update` + `LateUpdate` + 60 `UpdateS` 397 -> 300 us (1.3x; keeping a frame handle the one value of its object after its epoch, as the C# binder does, costs about 45 us of it: the handles of an epoch are handed to the weak object cache when it ends) What is left is the per-callback cost of mlua (about 1000 instructions per Lua-to-host call, see the benchmark), not the interpreter.
 
 Fixes after Windows check 3: render.json string escaping; --ui-shots ignores host cursor.

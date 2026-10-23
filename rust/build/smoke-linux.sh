@@ -8,7 +8,7 @@
 # --help / --list-profiles, the welcome screen, a game running and drawing, pause, save/load
 # state, reset, the options window, the French UI and back, rewind and fast forward, audio output
 # (SDL disk driver, not silent), the files written in the user-data folder, and a clean exit
-# (code 0, no panic) from Ctrl+Q and from a window-manager close. Exits non-zero on the first
+# (code 0, no panic) from Ctrl+Q and from a window-manager close, and the 3D default geometry. Exits non-zero on the first
 # failure.
 set -euo pipefail
 
@@ -136,7 +136,7 @@ sleep 12; alive three; shot three1; nonblank three1; sleep 1; shot three2
 [[ $(changed three1 three2) -gt 200 ]] || fail "3D mode: the picture does not move"
 tap F11; sleep 1; alive three; shot two
 chord ctrl q; finish three.log
-cp "$WORK"/three1.png /tmp/three1.png; ok "3D default geometry renders, F11, exit 0"
+ok "3D default geometry renders, F11, exit 0"
 
 # --- 4. window close from the window manager, and audio ----------------------------------------
 AUDIO=$WORK/audio.raw
