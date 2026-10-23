@@ -136,3 +136,28 @@ fn req_pers_067_the_window_settings_carry_the_full_screen_state() {
     assert!(full.fullscreen);
     assert_eq!(1280, full.width);
 }
+
+/// AMD-032 §5: only the options that print and exit write to the console without a window. A
+/// normal launch must not, or the window shares the shell it was started from.
+#[rstest]
+#[case(&["--help"])]
+#[case(&["-h"])]
+#[case(&["--list-profiles"])]
+#[case(&["--import-3dsen", "C:/3dSen"])]
+fn only_the_options_that_print_and_exit_attach_to_the_parent_console(#[case] arguments: &[&str]) {
+    assert!(AppOptions::parse(arguments)
+        .expect("the arguments parse")
+        .prints_and_exits());
+}
+
+/// Every launch that opens a window leaves the terminal alone.
+#[rstest]
+#[case(&[])]
+#[case(&["--no-audio"])]
+#[case(&["--smoke-test"])]
+#[case(&["--vsync", "0"])]
+fn a_launch_that_opens_a_window_does_not_attach(#[case] arguments: &[&str]) {
+    assert!(!AppOptions::parse(arguments)
+        .expect("the arguments parse")
+        .prints_and_exits());
+}

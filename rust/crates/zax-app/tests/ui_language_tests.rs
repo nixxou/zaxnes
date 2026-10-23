@@ -10,6 +10,7 @@ mod ui_harness;
 use std::collections::HashSet;
 
 use ui_harness::{UiHarness, UiLanguageScope};
+use zax_app::app_options::USAGE;
 use zax_app::emulation::commands::Command;
 use zax_app::emulation::host::{
     delete_slot_question, ConfirmationRequest, ConfirmedAction, DELETE_GAME_QUESTION, NO_LABEL,
