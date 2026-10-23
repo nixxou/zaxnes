@@ -59,55 +59,14 @@ pub struct RomRequest<'a> {
 /// [`HarnessError::Io`] when a file cannot be read or written.
 pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError> {
     let profile = request.profile;
-    let file_name = request
-        .rom
-        .file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-
-    let mut core = NesCore::new();
-    let load = core.load_rom(&fs::read(request.rom)?, &file_name);
-    if !load.success {
-        return Err(HarnessError::Rom(format!(
-            "Invalid rom file. ({})",
-            load.error.unwrap_or_default()
-        )));
-    }
-
-    core.set_region(load.region);
-    if let Some(battery) = request.battery {
-        // REQ-CORE-095: the battery RAM is imported before the reset, as the application does,
-        // so the run starts from the player's saved game.
-        core.import_battery_ram(&fs::read(battery)?);
-    }
-
-    let mut scene = SceneState::default();
-    let mut engine = ConversionEngine::new();
-    engine.use_geometry();
-    engine.settings_mut().render_algorithm = request.mesh;
-    engine.two_dimensional_mode =
-        profile.permanent_patterns.is_empty() && profile.temporary_patterns.is_empty();
-
-    // The mesh algorithm is a user preference a profile does not override (REQ-PROF-041).
-    let mut model = SettingsModel::new();
-    model.set(
-        SettingId::RenderMeshAlgo,
-        SettingValue::Enum(mesh_setting(request.mesh)),
-    );
-
-    let mut host = Host {
-        core,
-        engine,
-        bridge: None,
-        zapper_offset: Vec3::default(),
-    };
-    host.install_runtime(profile, model, &mut scene)?;
-    host.load_profile(profile, &mut scene)?;
-    if let Some(model) = host.model() {
-        push_settings(model, &mut scene);
-    }
-    host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_start);
-
-    host.core.reset();
+    let file_name = file_name(request.rom);
+    let (mut host, mut scene) = Host::start(&Startup {
+        rom: request.rom,
+        battery: request.battery,
+        profile,
+        mesh: request.mesh,
+        force_three_dimensional: false,
+    })?;
     let frames = request.frames.max(1);
     let mut records = Vec::new();
     for counter in 0..frames {
@@ -197,16 +156,87 @@ fn report_scripts(engine: &ConversionEngine) {
     }
 }
 
+/// The file name of `rom`, as the core and the reports name it.
+pub(crate) fn file_name(rom: &Path) -> String {
+    rom.file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
+/// What [`Host::start`] loads.
+pub(crate) struct Startup<'a> {
+    /// The `.nes` file.
+    pub rom: &'a Path,
+    /// Battery-backed PRG-RAM imported before the reset (REQ-CORE-095).
+    pub battery: Option<&'a Path>,
+    /// The profile to play.
+    pub profile: &'a GameProfile,
+    /// The mesh algorithm (REQ-E3D-340).
+    pub mesh: RenderAlgorithm,
+    /// Segments as a 3D profile does even when the profile has no pattern (benchmark only).
+    pub force_three_dimensional: bool,
+}
+
 /// The machine and the engine, with the bridge that lends the scene and the machine to the Lua
 /// runtime the engine owns.
-struct Host {
-    core: NesCore,
-    engine: ConversionEngine,
+pub(crate) struct Host {
+    pub(crate) core: NesCore,
+    pub(crate) engine: ConversionEngine,
     bridge: Option<ScriptBridge>,
     zapper_offset: Vec3,
 }
 
 impl Host {
+    /// Loads the ROM, the engine and the profile's runtime (REQ-LUA-015 steps 1 to 3), runs
+    /// the `Start` hooks and resets the machine: the state before the first emulated frame.
+    pub(crate) fn start(startup: &Startup<'_>) -> Result<(Self, SceneState), HarnessError> {
+        let profile = startup.profile;
+        let mut core = NesCore::new();
+        let load = core.load_rom(&fs::read(startup.rom)?, &file_name(startup.rom));
+        if !load.success {
+            return Err(HarnessError::Rom(format!(
+                "Invalid rom file. ({})",
+                load.error.unwrap_or_default()
+            )));
+        }
+
+        core.set_region(load.region);
+        if let Some(battery) = startup.battery {
+            // REQ-CORE-095: the battery RAM is imported before the reset, as the application
+            // does, so the run starts from the player's saved game.
+            core.import_battery_ram(&fs::read(battery)?);
+        }
+
+        let mut scene = SceneState::default();
+        let mut engine = ConversionEngine::new();
+        engine.use_geometry();
+        engine.settings_mut().render_algorithm = startup.mesh;
+        engine.two_dimensional_mode = !startup.force_three_dimensional
+            && profile.permanent_patterns.is_empty()
+            && profile.temporary_patterns.is_empty();
+
+        // The mesh algorithm is a user preference a profile does not override (REQ-PROF-041).
+        let mut model = SettingsModel::new();
+        model.set(
+            SettingId::RenderMeshAlgo,
+            SettingValue::Enum(mesh_setting(startup.mesh)),
+        );
+
+        let mut host = Self {
+            core,
+            engine,
+            bridge: None,
+            zapper_offset: Vec3::default(),
+        };
+        host.install_runtime(profile, model, &mut scene)?;
+        host.load_profile(profile, &mut scene)?;
+        if let Some(model) = host.model() {
+            push_settings(model, &mut scene);
+        }
+        host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_start);
+        host.core.reset();
+        Ok((host, scene))
+    }
+
     /// Creates the runtime of `profile`, with its settings, camera, backdrop, inputs and memory;
     /// the chunks run here (REQ-LUA-015 step 1), then the runtime becomes the engine's host.
     fn install_runtime(
@@ -308,7 +338,7 @@ impl Host {
 
     /// Runs `operation` on the engine with the scene and the machine lent to the script API for
     /// its length. The borrows end with the call: the runtime keeps none.
-    fn scripted(&mut self, scene: &mut SceneState, operation: impl FnOnce(&mut ConversionEngine)) {
+    pub(crate) fn scripted(&mut self, scene: &mut SceneState, operation: impl FnOnce(&mut ConversionEngine)) {
         let Self {
             core,
             engine,
@@ -336,7 +366,7 @@ impl Host {
     }
 
     /// Copies the settings the scripts changed into the engine's slice.
-    fn sync_settings(&mut self, scene: &mut SceneState) {
+    pub(crate) fn sync_settings(&mut self, scene: &mut SceneState) {
         self.with_runtime(scene, ProfileScriptRuntime::sync_settings);
     }
 }
