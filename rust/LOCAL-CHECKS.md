@@ -212,6 +212,19 @@ rust/build/package-linux-aarch64.sh            # cross build on x86_64 Linux (gc
 rust/build/package-linux-aarch64.sh --native   # on the device itself
 ```
 
+Standalone exe (`+crt-static`, `[profile.release]`): after the build, from a Visual Studio prompt
+
+```powershell
+dumpbin /dependents target\release\zaxnes.exe
+```
+
+must list only system DLLs (KERNEL32, USER32, GDI32, SHELL32, OPENGL32, ...) and none of
+`VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, `MSVCP140.dll`, `api-ms-win-crt-*.dll`, nor `SDL2.dll`.
+If one shows up, a C dependency (SDL2 through `cmake`, Lua or Dear ImGui through `cc`) was built
+with /MD: look for the flag in its build log. Then start the exe on a clean Windows (a fresh VM
+without the Visual C++ Redistributable): it must open. The exe is about 5 MB (7.7 MB before the
+release profile on Linux; check the Windows size too).
+
 Unzip the Windows package on a machine without Rust or SDL2 and start `zaxnes.exe`. For the
 RG40XXV, copy the aarch64 package to the device and follow `RG40XXV.txt` (GLES 3.0 is selected
 automatically on aarch64 Linux; `ZAXNES_GLES=1` forces it elsewhere).
