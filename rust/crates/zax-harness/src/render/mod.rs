@@ -2,10 +2,15 @@
 //! writes PNG captures plus a statistics file (SPEC-01 REQ-ARCH-031, SPEC-06 REQ-SCN-057; port
 //! of `RenderExport.cs`).
 //!
-//! Only the synthetic frames are ported; the C# command also replays a ROM (`--rom`), a JSON
-//! frame description (`--frames <file.json>`), prints draw-list reports (`--explain`) and
-//! times frames (`--bench`).
+//! The frames are the synthetic scenes, a ROM run headless (`--rom`) or a JSON frame
+//! description (`--frames <file.json>`). The C# command also prints draw-list reports
+//! (`--explain`) and times frames (`--bench`); those are not ported.
 
+pub mod frame_json;
+pub mod input_script;
+pub mod profile;
+pub mod replay;
+pub mod rom;
 pub mod scenes;
 
 use std::collections::HashSet;
@@ -13,7 +18,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use zax_engine3d::palette::Rgb24;
+use zax_engine3d::palette::{nes_color, Rgb24};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_render::assets::{png_image, NeutralSceneAssets, SceneAssets};
 use zax_render::geometry;
@@ -24,17 +29,32 @@ use zax_render::statistics::RenderStatistics;
 use zax_render::SceneRenderer;
 
 use crate::HarnessError;
+use input_script::InputScript;
+use rom::RomRequest;
 use scenes::SyntheticScene;
 
 /// Usage text of the command.
 pub const USAGE: &str = "\
 zax-harness render --out <dir> [--frames synthetic[:<scene>]] [options]
+zax-harness render --out <dir> --frames <file.json> --profile <title|file> [options]
+zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run <n>] [options]
 
   --out <dir>              where the PNG captures and render.json go (required)
   --frames <source>        'synthetic' (default) renders the built-in scenes,
-                           'synthetic:<scene>' one of them
-  --assets <dir>           folder holding the cubemaps the skybox uses; without it the
-                           skyboxes are the procedural ones (REQ-PUB-003)
+                           'synthetic:<scene>' one of them, a path the frame a JSON file
+                           describes
+  --rom <file.nes>         run a real ROM headless and capture it (REQ-ARCH-031)
+  --run <n>                emulated frames to run before capturing (default 120)
+  --sav <file>             battery-backed PRG-RAM to import before the run (REQ-CORE-095)
+  --dump-frame <file.json> write the captured frame as a '--frames' JSON file
+  --press <spec>           port 1 buttons to hold, a comma separated list of
+                           <first>[-<last>]:<buttons>, the frames counting from the reset and
+                           the buttons being a|b|select|start|up|down|left|right joined by '+'
+                           (for example 200:start,260:start,400-700:right)
+  --profile <title|file>   profile file, or title of an entry of <assets>/profiles.json
+  --assets <dir>           folder holding profiles.json (profile lookup) and the cubemaps the
+                           scene uses; without it the skyboxes are the procedural ones
+                           (REQ-PUB-003)
   --size <w>x<h>           capture size in pixels (default 640x480)
   --fov <degrees>          field of view, 45 to 95 (default 70)
   --angles <rx>,<ry>[,<rz>]  camera setpoint angles in degrees (default 0.81,0.81,0)
@@ -52,14 +72,35 @@ zax-harness render --out <dir> [--frames synthetic[:<scene>]] [options]
 Scenes: framing, sky, shadow, no-shadow, layer-shadow-off, nudge, alpha, hud, clip,
         backdrop, heavy.";
 
+/// Where `render` takes its frames from when there is no ROM.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrameSource {
+    /// The built-in scenes: one, or `None` for all of them.
+    Synthetic(Option<String>),
+    /// A JSON frame description (`--frames <file.json>`).
+    Json(PathBuf),
+}
+
 /// The parsed command line.
 #[derive(Debug, Clone, PartialEq)]
 #[allow(clippy::struct_excessive_bools)] // Independent switches of the command line.
 pub struct Options {
     /// Output directory.
     pub output: PathBuf,
-    /// One scene, or `None` for all of them.
-    pub scene: Option<String>,
+    /// Where the frames come from when no ROM is given.
+    pub frames: FrameSource,
+    /// The ROM to run.
+    pub rom: Option<PathBuf>,
+    /// Emulated frames to run before the capture.
+    pub run_frames: i32,
+    /// The port 1 buttons to hold.
+    pub press: InputScript,
+    /// Battery-backed PRG-RAM to import.
+    pub battery: Option<PathBuf>,
+    /// Where to write the captured frame as JSON.
+    pub dump_frame: Option<PathBuf>,
+    /// The profile file or title.
+    pub profile: Option<String>,
     /// Asset folder for the skybox cubemaps.
     pub assets: Option<PathBuf>,
     /// Capture width.
@@ -103,7 +144,13 @@ impl Options {
         let mut output = None;
         let mut options = Self {
             output: PathBuf::new(),
-            scene: None,
+            frames: FrameSource::Synthetic(None),
+            rom: None,
+            run_frames: 120,
+            press: InputScript::default(),
+            battery: None,
+            dump_frame: None,
+            profile: None,
             assets: None,
             width: 640,
             height: 480,
@@ -161,7 +208,15 @@ impl Options {
                 .map_err(|_| format!("{key} expects an integer, got '{value}'"))
         };
         match key {
-            "--frames" => self.scene = parse_frames(value)?,
+            "--frames" => self.frames = parse_frames(value),
+            "--rom" => self.rom = Some(PathBuf::from(value)),
+            "--run" => self.run_frames = integer(value)?,
+            "--press" => {
+                self.press = InputScript::parse(value).map_err(|error| error.to_string())?;
+            }
+            "--sav" => self.battery = Some(PathBuf::from(value)),
+            "--dump-frame" => self.dump_frame = Some(PathBuf::from(value)),
+            "--profile" => self.profile = Some(value.to_owned()),
             "--assets" => self.assets = Some(PathBuf::from(value)),
             "--size" => (self.width, self.height) = parse_size(value)?,
             "--fov" => self.fov = number(value)?,
@@ -194,16 +249,15 @@ impl Options {
     }
 }
 
-/// `synthetic` or `synthetic:<scene>`; the other frame sources are not ported.
-fn parse_frames(value: &str) -> Result<Option<String>, String> {
-    match value.split_once(':') {
-        None if value.eq_ignore_ascii_case("synthetic") => Ok(None),
-        Some((source, scene)) if source.eq_ignore_ascii_case("synthetic") => {
-            Ok(Some(scene.to_owned()))
-        }
-        _ => Err(format!(
-            "--frames '{value}': only the synthetic frames are ported"
-        )),
+/// `synthetic`, `synthetic:<scene>` or the path of a JSON frame description.
+fn parse_frames(value: &str) -> FrameSource {
+    let synthetic = value
+        .get(.."synthetic".len())
+        .filter(|head| head.eq_ignore_ascii_case("synthetic"));
+    match (synthetic, value.split_once(':')) {
+        (Some(_), None) if value.len() == "synthetic".len() => FrameSource::Synthetic(None),
+        (Some(_), Some((_, scene))) => FrameSource::Synthetic(Some(scene.to_owned())),
+        _ => FrameSource::Json(PathBuf::from(value)),
     }
 }
 
@@ -308,14 +362,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
     }
 
     fs::create_dir_all(&options.output)?;
-    let names: Vec<&str> = match &options.scene {
-        Some(name) => vec![name.as_str()],
-        None => scenes::NAMES.to_vec(),
-    };
-    let mut built = names
-        .into_iter()
-        .map(|name| scenes::build(name, options.mesh))
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut built = build_scenes(options)?;
     for scene in &mut built {
         apply(options, scene);
     }
@@ -335,6 +382,12 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         let pixels = context.read_pixels();
         let file = options.output.join(format!("{}.png", scene.name));
         write_png(&file, options, &pixels)?;
+        if scene.nes_picture.len() >= NES_PIXELS {
+            write_nes_picture(
+                &options.output.join(format!("{}-2d.png", scene.name)),
+                &scene.nes_picture,
+            )?;
+        }
 
         let statistics = CaptureStatistics::measure(&pixels);
         let counts = renderer.statistics();
@@ -383,6 +436,40 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
     Ok(text)
 }
 
+/// Pixels of the picture the core produces, 256 x 240.
+const NES_PIXELS: usize = 256 * 240;
+
+/// The scenes to render: the ROM run, the JSON frame, or the synthetic scenes.
+fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> {
+    let profile = || profile::load(options.profile.as_deref(), options.assets.as_deref());
+    if let Some(rom) = &options.rom {
+        let frames = u32::try_from(options.run_frames.max(1)).unwrap_or(1);
+        return Ok(vec![rom::capture(&RomRequest {
+            rom,
+            frames,
+            profile: &profile()?,
+            mesh: options.mesh,
+            input: &options.press,
+            battery: options.battery.as_deref(),
+            dump_frame: options.dump_frame.as_deref(),
+        })?]);
+    }
+
+    match &options.frames {
+        FrameSource::Json(path) => Ok(vec![replay::from_json(path, &profile()?, options.mesh)?]),
+        FrameSource::Synthetic(scene) => {
+            let names: Vec<&str> = match scene {
+                Some(name) => vec![name.as_str()],
+                None => scenes::NAMES.to_vec(),
+            };
+            names
+                .into_iter()
+                .map(|name| scenes::build(name, options.mesh))
+                .collect()
+        }
+    }
+}
+
 /// The options that change the scene state, as the application applies them.
 fn apply(options: &Options, scene: &mut SyntheticScene) {
     let state = &mut scene.scene;
@@ -425,6 +512,20 @@ fn apply(options: &Options, scene: &mut SyntheticScene) {
 fn write_png(file: &Path, options: &Options, pixels: &[u8]) -> Result<(), HarnessError> {
     let encoded = png_image::encode_rgba(options.width as u32, options.height as u32, pixels)?;
     fs::write(file, encoded)?;
+    Ok(())
+}
+
+/// Writes the flat NES picture, one colour index per pixel (REQ-CORE-048).
+fn write_nes_picture(file: &Path, indices: &[u8]) -> Result<(), HarnessError> {
+    let pixels: Vec<u8> = indices
+        .iter()
+        .take(NES_PIXELS)
+        .flat_map(|&index| {
+            let color = nes_color(usize::from(index));
+            [color.r, color.g, color.b, 255]
+        })
+        .collect();
+    fs::write(file, png_image::encode_rgba(256, 240, &pixels)?)?;
     Ok(())
 }
 

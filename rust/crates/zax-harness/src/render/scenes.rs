@@ -39,22 +39,27 @@ pub const NAMES: [&str; 11] = [
 /// scene state SPEC-06 needs.
 pub struct SyntheticScene {
     /// Name of the scene, used for the capture file.
-    pub name: &'static str,
+    pub name: String,
     /// One line saying what the scene checks.
-    pub description: &'static str,
+    pub description: String,
     /// The scene state, settings and camera included.
     pub scene: SceneState,
     /// The engine that produced the frame.
     pub engine: ConversionEngine,
     /// The tile list of the displayed frame.
     pub draw_list: FrameDrawList,
+    /// The 256 x 240 colour indices of the core's picture, empty without a ROM.
+    pub nes_picture: Vec<u8>,
 }
 
 impl SyntheticScene {
     /// The frame data to render.
     #[must_use]
     pub fn frame(&self) -> SceneFrame<'_> {
-        SceneFrame::with_draw_list(&self.draw_list)
+        SceneFrame {
+            nes_picture: &self.nes_picture,
+            ..SceneFrame::with_draw_list(&self.draw_list)
+        }
     }
 }
 
@@ -269,8 +274,8 @@ fn clip(mesh: RenderAlgorithm) -> Result<SyntheticScene, HarnessError> {
 /// The backdrop of REQ-SCN-048, 26 units behind the scene.
 fn backdrop(mesh: RenderAlgorithm) -> Result<SyntheticScene, HarnessError> {
     let mut scene = shadow_pair(mesh, true, true)?;
-    scene.name = "backdrop";
-    scene.description = "black backdrop at z = 25.5 receiving the front shadows";
+    "backdrop".clone_into(&mut scene.name);
+    "black backdrop at z = 25.5 receiving the front shadows".clone_into(&mut scene.description);
     let backdrop = &mut scene.scene.backdrop;
     backdrop.enabled = true;
     backdrop.color = Rgb24::new(0, 0, 0);
@@ -467,11 +472,12 @@ impl Builder {
         let draw_list = engine.build_draw_list().clone();
 
         Ok(SyntheticScene {
-            name,
-            description,
+            name: name.to_owned(),
+            description: description.to_owned(),
             scene,
             engine,
             draw_list,
+            nes_picture: Vec::new(),
         })
     }
 }

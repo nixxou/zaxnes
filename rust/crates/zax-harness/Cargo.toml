@@ -14,6 +14,7 @@ zax-nes = { path = "../zax-nes" }
 zax-profiles = { path = "../zax-profiles" }
 zax-render = { path = "../zax-render", features = ["offscreen"] }
 zax-scripting = { path = "../zax-scripting" }
+zax-settings = { path = "../zax-settings" }
 
 [dev-dependencies]
 zax-goldens = { path = "../zax-goldens" }
