@@ -139,6 +139,12 @@ fn req_pers_058_the_history_is_not_persisted() {
     let found = WalkDir::new(harness.root.path())
         .into_iter()
         .filter_map(Result::ok)
-        .any(|entry| entry.file_name().to_string_lossy().to_lowercase().contains("rollback"));
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .to_lowercase()
+                .contains("rollback")
+        });
     assert!(!found);
 }

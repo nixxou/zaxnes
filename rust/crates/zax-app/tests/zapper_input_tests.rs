@@ -34,10 +34,19 @@ fn project(view: &CameraView, scene_point: Vector3) -> [f32; 2] {
     let y = gl.x * m.m12 + gl.y * m.m22 + gl.z * m.m32 + m.m42;
     let w = gl.x * m.m14 + gl.y * m.m24 + gl.z * m.m34 + m.m44;
     let (ndc_x, ndc_y) = (x / w, y / w);
-    [(ndc_x + 1.0) * 0.5 * VIEWPORT[0], (1.0 - ndc_y) * 0.5 * VIEWPORT[1]]
+    [
+        (ndc_x + 1.0) * 0.5 * VIEWPORT[0],
+        (1.0 - ndc_y) * 0.5 * VIEWPORT[1],
+    ]
 }
 
-fn update(zapper: &mut ZapperState, active: bool, view: &CameraView, pointer: [f32; 2], right_button: bool) {
+fn update(
+    zapper: &mut ZapperState,
+    active: bool,
+    view: &CameraView,
+    pointer: [f32; 2],
+    right_button: bool,
+) {
     zapper.update(
         active,
         &ZapperInput {
@@ -67,8 +76,14 @@ fn req_inp_063_the_aim_is_the_nes_pixel_under_the_pointer(
     let view = default_view(None);
     let pointer = project(&view, Vector3::new(scene_x, scene_y, 0.0));
     let position = zapper::try_aim(&view, pointer, VIEWPORT, Vector3::ZERO, 1.0).unwrap();
-    assert!((expected_x - 1..=expected_x + 1).contains(&position.x), "{position:?}");
-    assert!((expected_y - 1..=expected_y + 1).contains(&position.y), "{position:?}");
+    assert!(
+        (expected_x - 1..=expected_x + 1).contains(&position.x),
+        "{position:?}"
+    );
+    assert!(
+        (expected_y - 1..=expected_y + 1).contains(&position.y),
+        "{position:?}"
+    );
 }
 
 #[test]
@@ -91,7 +106,8 @@ fn req_inp_063_the_zapper_offset_shifts_the_aimed_pixel() {
     // REQ-INP-063, notes: a positive ZapperOffset.y means the image moved up, so the same
     // screen point aims at a NES pixel further down.
     let centre = project(&view, Vector3::new(128.0, 128.0, 0.0));
-    let shifted = zapper::try_aim(&view, centre, VIEWPORT, Vector3::new(0.0, 10.0, 0.0), 1.0).unwrap();
+    let shifted =
+        zapper::try_aim(&view, centre, VIEWPORT, Vector3::new(0.0, 10.0, 0.0), 1.0).unwrap();
     assert!((129..=131).contains(&shifted.y), "{shifted:?}");
 }
 
@@ -112,7 +128,10 @@ fn req_inp_063_a_rotated_camera_still_aims_at_the_scene_point() {
     camera.reset_view();
     camera.current_mut().angles = Vector3::new(0.0, 30.0, 0.0);
     camera.snap_to_setpoints();
-    let view = camera.build_view(ConversionSettings::DEFAULT_CLIPPING, VIEWPORT[0] / VIEWPORT[1]);
+    let view = camera.build_view(
+        ConversionSettings::DEFAULT_CLIPPING,
+        VIEWPORT[0] / VIEWPORT[1],
+    );
     for point in [
         Vector3::new(128.0, 120.0, 0.0),
         Vector3::new(128.0, 128.0, 0.0),
@@ -122,8 +141,14 @@ fn req_inp_063_a_rotated_camera_still_aims_at_the_scene_point() {
         let pointer = project(&view, point);
         let position = zapper::try_aim(&view, pointer, VIEWPORT, Vector3::ZERO, 1.0).unwrap();
         let expected = zapper::to_nes_pixel([point.x, point.y], Vector3::ZERO, 1.0);
-        assert!((expected.x - 1..=expected.x + 1).contains(&position.x), "{position:?} {expected:?}");
-        assert!((expected.y - 1..=expected.y + 1).contains(&position.y), "{position:?} {expected:?}");
+        assert!(
+            (expected.x - 1..=expected.x + 1).contains(&position.x),
+            "{position:?} {expected:?}"
+        );
+        assert!(
+            (expected.y - 1..=expected.y + 1).contains(&position.y),
+            "{position:?} {expected:?}"
+        );
     }
 }
 
@@ -188,9 +213,21 @@ fn req_inp_062_the_trigger_is_the_right_button_with_the_dec_02_q1_polarity() {
 fn req_inp_061_an_inactive_zapper_ignores_the_mouse() {
     let mut zapper = ZapperState::new();
     let view = default_view(None);
-    update(&mut zapper, true, &view, project(&view, Vector3::new(128.0, 120.0, 0.0)), false);
+    update(
+        &mut zapper,
+        true,
+        &view,
+        project(&view, Vector3::new(128.0, 120.0, 0.0)),
+        false,
+    );
     let frozen = zapper.position();
-    update(&mut zapper, false, &view, project(&view, Vector3::new(32.0, 32.0, 0.0)), true);
+    update(
+        &mut zapper,
+        false,
+        &view,
+        project(&view, Vector3::new(32.0, 32.0, 0.0)),
+        true,
+    );
     assert_eq!(frozen, zapper.position());
     assert!(!zapper.trigger_held());
 }
@@ -223,8 +260,12 @@ fn req_inp_065_the_core_reads_the_zapper_byte_the_host_composed() {
 fn req_inp_060_a_different_game_puts_both_ports_back_on_controllers() {
     let mut harness = LoopHarness::create();
     let rom = harness.write_rom(&SyntheticRom::counter(), "game.nes");
-    harness.catalog().add_with("duck", Some(&rom), None, false, Some("Duck Hunt"));
-    harness.catalog().add_with("other", Some(&rom), None, false, Some("Other Game"));
+    harness
+        .catalog()
+        .add_with("duck", Some(&rom), None, false, Some("Duck Hunt"));
+    harness
+        .catalog()
+        .add_with("other", Some(&rom), None, false, Some("Other Game"));
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("duck"));
     assert_eq!(ControllerPortType::Controller, harness.host.port_type(0));
     assert_eq!(ControllerPortType::Controller, harness.host.port_type(1));
@@ -250,7 +291,9 @@ fn req_inp_060_a_different_game_puts_both_ports_back_on_controllers() {
 fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
     let mut harness = LoopHarness::create();
     let rom = harness.write_rom(&SyntheticRom::counter(), "game.nes");
-    harness.catalog().add_with("duck", Some(&rom), None, false, Some("Duck Hunt"));
+    harness
+        .catalog()
+        .add_with("duck", Some(&rom), None, false, Some("Duck Hunt"));
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("duck"));
     harness
         .host
@@ -260,7 +303,9 @@ fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
     // Pointer over the centre of the image, right button held.
     let view = {
         let scene = harness.scene.borrow();
-        scene.camera.build_view(scene.clipping, VIEWPORT[0] / VIEWPORT[1])
+        scene
+            .camera
+            .build_view(scene.clipping, VIEWPORT[0] / VIEWPORT[1])
     };
     let pointer = project(&view, Vector3::new(128.0, 128.0, 0.0));
     let held = InputSnapshot {
@@ -272,7 +317,14 @@ fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
     };
     harness.tick_snapshot(1.0 / 60.0, &held);
     let port_byte = |harness: &LoopHarness| {
-        harness.host.session().unwrap().core().bus().input().port_byte(1)
+        harness
+            .host
+            .session()
+            .unwrap()
+            .core()
+            .bus()
+            .input()
+            .port_byte(1)
     };
     assert_eq!(0x00, port_byte(&harness));
     assert!(harness.host.zapper.trigger_held());

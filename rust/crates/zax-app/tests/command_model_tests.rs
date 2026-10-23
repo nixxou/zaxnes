@@ -10,7 +10,9 @@ use zax_app::emulation::commands::{Command, CommandArgs, Shortcut};
 use zax_app::emulation::emulation_state::EmulationState;
 use zax_app::emulation::host::HostEvent;
 use zax_app::emulation::hotkey_tracker::{HotkeyEvents, HotkeyTracker};
-use zax_app::emulation::notification_center::{NotificationCenter, NotificationSeverity, DEFAULT_SECONDS, SHORT_SECONDS};
+use zax_app::emulation::notification_center::{
+    NotificationCenter, NotificationSeverity, DEFAULT_SECONDS, SHORT_SECONDS,
+};
 use zax_app::emulation::speed_setting;
 use zax_app::input::InputAction;
 use zax_app::persistence::app_settings::AppSettings;
@@ -23,15 +25,59 @@ fn can(harness: &LoopHarness, command: Command) -> bool {
 fn req_ui_205_the_model_enumerates_every_menu_command() {
     use Command::*;
     let expected = [
-        OpenRom, OpenRecentRom, ChooseProfile, ImportProfile, ImportThreeDSen, LaunchGame, LoadSlot, SaveSlot,
-        QuickSave, QuickLoad, DeleteSlot, DeleteGame, CreateGameArt, ImportCover, CancelModal, Quit, PauseResume,
-        Pause, Resume, Reset, Stop, FastForward, Rollback, SetSpeed, SpeedUp, SpeedDown, SetRegion,
-        ToggleAutoRegion, SetPortType, ToggleTwoDimensional, ResetView, SetCameraMode, ToggleLocalCamera,
-        SetSkybox, ToggleShadows, ToggleFullscreen, ToggleFpsCounter, SetVolume, VolumeUp, VolumeDown, ToggleMute,
-        ToggleMenuMusic, ShowOptions, ShowKeyConfig, ShowDataFolder, ShowAbout,
+        OpenRom,
+        OpenRecentRom,
+        ChooseProfile,
+        ImportProfile,
+        ImportThreeDSen,
+        LaunchGame,
+        LoadSlot,
+        SaveSlot,
+        QuickSave,
+        QuickLoad,
+        DeleteSlot,
+        DeleteGame,
+        CreateGameArt,
+        ImportCover,
+        CancelModal,
+        Quit,
+        PauseResume,
+        Pause,
+        Resume,
+        Reset,
+        Stop,
+        FastForward,
+        Rollback,
+        SetSpeed,
+        SpeedUp,
+        SpeedDown,
+        SetRegion,
+        ToggleAutoRegion,
+        SetPortType,
+        ToggleTwoDimensional,
+        ResetView,
+        SetCameraMode,
+        ToggleLocalCamera,
+        SetSkybox,
+        ToggleShadows,
+        ToggleFullscreen,
+        ToggleFpsCounter,
+        SetVolume,
+        VolumeUp,
+        VolumeDown,
+        ToggleMute,
+        ToggleMenuMusic,
+        ShowOptions,
+        ShowKeyConfig,
+        ShowDataFolder,
+        ShowAbout,
     ];
     for command in expected {
-        assert!(Command::ALL.contains(&command), "the command '{}' is missing", command.name());
+        assert!(
+            Command::ALL.contains(&command),
+            "the command '{}' is missing",
+            command.name()
+        );
     }
     assert_eq!(expected.len(), Command::ALL.len());
 }
@@ -40,11 +86,17 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
 fn req_ui_205_command_names_are_stable_keys() {
     let mut seen = HashSet::new();
     for command in Command::ALL {
-        assert!(seen.insert(command.name()), "'{}' is registered twice", command.name());
+        assert!(
+            seen.insert(command.name()),
+            "'{}' is registered twice",
+            command.name()
+        );
         let parts: Vec<&str> = command.name().split('.').collect();
         assert!(parts.len() >= 2, "{}", command.name());
         assert!(parts.iter().all(|part| !part.is_empty()
-            && part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')));
+            && part
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')));
         assert_eq!(Some(*command), Command::from_name(command.name()));
         assert!(!command.label_key().is_empty());
     }
@@ -56,9 +108,15 @@ fn req_ui_204_the_default_shortcuts_are_carried_by_the_model() {
     assert_eq!(Shortcut::Fixed("Ctrl+R"), Command::Reset.shortcut());
     assert_eq!(Shortcut::Fixed("Ctrl+Q"), Command::Quit.shortcut());
     assert_eq!(Shortcut::Fixed("P"), Command::PauseResume.shortcut());
-    assert_eq!(Shortcut::Fixed("F11"), Command::ToggleTwoDimensional.shortcut());
+    assert_eq!(
+        Shortcut::Fixed("F11"),
+        Command::ToggleTwoDimensional.shortcut()
+    );
     // "Alt+Enter" is the English text of the interface key this shortcut names.
-    assert_eq!(Shortcut::Key("shortcut.alt_enter"), Command::ToggleFullscreen.shortcut());
+    assert_eq!(
+        Shortcut::Key("shortcut.alt_enter"),
+        Command::ToggleFullscreen.shortcut()
+    );
     assert_eq!(Shortcut::Fixed("Ctrl+,"), Command::ShowOptions.shortcut());
 }
 
@@ -133,7 +191,12 @@ fn req_ui_205_ui_only_commands_raise_a_request() {
         })
         .collect();
     assert_eq!(
-        vec![Command::ShowOptions, Command::ShowKeyConfig, Command::ShowAbout, Command::ToggleFullscreen],
+        vec![
+            Command::ShowOptions,
+            Command::ShowKeyConfig,
+            Command::ShowAbout,
+            Command::ToggleFullscreen
+        ],
         requested
     );
     assert!(harness.host.settings().fullscreen());
@@ -162,7 +225,10 @@ fn req_ui_080_the_timer_runs_in_real_time() {
     let mut harness = LoopHarness::create();
     harness.launch("g1");
     harness.run(Command::QuickSave);
-    assert_eq!("Quick Save", harness.host.notifications.current().unwrap().text);
+    assert_eq!(
+        "Quick Save",
+        harness.host.notifications.current().unwrap().text
+    );
     harness.run(Command::Pause);
     for _ in 0..50 {
         harness.tick(0.1);
@@ -202,10 +268,14 @@ fn req_loop_007_the_queue_is_first_in_first_out() {
     let mut harness = LoopHarness::create();
     harness.launch("g1");
     harness.host.enqueue(Command::Pause, CommandArgs::default());
-    harness.host.enqueue(Command::Resume, CommandArgs::default());
+    harness
+        .host
+        .enqueue(Command::Resume, CommandArgs::default());
     harness.tick_frame();
     assert_eq!(EmulationState::Running, harness.host.state());
-    harness.host.enqueue(Command::Resume, CommandArgs::default());
+    harness
+        .host
+        .enqueue(Command::Resume, CommandArgs::default());
     harness.host.enqueue(Command::Pause, CommandArgs::default());
     harness.tick_frame();
     assert_eq!(EmulationState::Paused, harness.host.state());
@@ -215,29 +285,56 @@ fn req_loop_007_the_queue_is_first_in_first_out() {
 fn req_inp_101_the_menu_press_length_decides() {
     let mut tracker = HotkeyTracker::new();
     // A 0.1 s press is short.
-    assert_eq!(HotkeyEvents::NONE, tracker.update_mask(InputAction::MENU, 0.1));
-    assert_eq!(HotkeyEvents::MENU_SHORT, tracker.update_mask(InputAction::NONE, 0.0));
+    assert_eq!(
+        HotkeyEvents::NONE,
+        tracker.update_mask(InputAction::MENU, 0.1)
+    );
+    assert_eq!(
+        HotkeyEvents::MENU_SHORT,
+        tracker.update_mask(InputAction::NONE, 0.0)
+    );
     // A 0.5 s press is long and reports as soon as the threshold is crossed.
-    assert_eq!(HotkeyEvents::NONE, tracker.update_mask(InputAction::MENU, 0.0));
-    assert_eq!(HotkeyEvents::MENU_LONG, tracker.update_mask(InputAction::MENU, 0.4));
-    assert_eq!(HotkeyEvents::NONE, tracker.update_mask(InputAction::NONE, 0.0));
+    assert_eq!(
+        HotkeyEvents::NONE,
+        tracker.update_mask(InputAction::MENU, 0.0)
+    );
+    assert_eq!(
+        HotkeyEvents::MENU_LONG,
+        tracker.update_mask(InputAction::MENU, 0.4)
+    );
+    assert_eq!(
+        HotkeyEvents::NONE,
+        tracker.update_mask(InputAction::NONE, 0.0)
+    );
 }
 
 #[test]
 fn req_inp_103_the_hotkeys_produce_their_events() {
     let mut tracker = HotkeyTracker::new();
-    assert!(tracker.update_mask(InputAction::FAST_FORWARD, 0.01).contains(HotkeyEvents::FAST_FORWARD));
-    assert!(tracker.update_mask(InputAction::FAST_FORWARD, 0.01).contains(HotkeyEvents::FAST_FORWARD));
+    assert!(tracker
+        .update_mask(InputAction::FAST_FORWARD, 0.01)
+        .contains(HotkeyEvents::FAST_FORWARD));
+    assert!(tracker
+        .update_mask(InputAction::FAST_FORWARD, 0.01)
+        .contains(HotkeyEvents::FAST_FORWARD));
     // A rising edge only for RollBack.
-    assert!(tracker.update_mask(InputAction::ROLL_BACK, 0.01).contains(HotkeyEvents::ROLLBACK));
-    assert!(!tracker.update_mask(InputAction::ROLL_BACK, 0.01).contains(HotkeyEvents::ROLLBACK));
+    assert!(tracker
+        .update_mask(InputAction::ROLL_BACK, 0.01)
+        .contains(HotkeyEvents::ROLLBACK));
+    assert!(!tracker
+        .update_mask(InputAction::ROLL_BACK, 0.01)
+        .contains(HotkeyEvents::ROLLBACK));
     // Select held more than 0.1 s, then RotDown released: quick save.
     tracker.update_mask(InputAction::SELECT, 0.2);
     tracker.update_mask(InputAction::SELECT | InputAction::ROT_DOWN, 0.02);
-    assert!(tracker.update_mask(InputAction::SELECT, 0.02).contains(HotkeyEvents::QUICK_SAVE));
+    assert!(tracker
+        .update_mask(InputAction::SELECT, 0.02)
+        .contains(HotkeyEvents::QUICK_SAVE));
     // The same with RotUp: quick load.
     tracker.update_mask(InputAction::SELECT | InputAction::ROT_UP, 0.02);
-    assert!(tracker.update_mask(InputAction::SELECT, 0.02).contains(HotkeyEvents::QUICK_LOAD));
+    assert!(tracker
+        .update_mask(InputAction::SELECT, 0.02)
+        .contains(HotkeyEvents::QUICK_LOAD));
 }
 
 #[test]

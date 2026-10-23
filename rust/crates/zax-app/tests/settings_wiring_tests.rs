@@ -26,7 +26,10 @@ struct Root {
 fn root() -> Root {
     let folder = TemporaryRoot::new("zax-settings-");
     let paths = UserDataPaths::resolve(Some(folder.path()), None, None);
-    Root { _folder: folder, paths }
+    Root {
+        _folder: folder,
+        paths,
+    }
 }
 
 #[test]
@@ -43,7 +46,10 @@ fn a_change_reaches_the_host_with_its_stable_key() {
     let mut model = SettingsModel::new();
     model.set_volume(0.5);
     model.set_volume(0.5);
-    let seen: Vec<String> = model.drain_changes().map(|change| change.id.key().into_owned()).collect();
+    let seen: Vec<String> = model
+        .drain_changes()
+        .map(|change| change.id.key().into_owned())
+        .collect();
     assert_eq!(vec!["audio.volume".to_owned()], seen);
 }
 
@@ -130,13 +136,21 @@ fn an_unreadable_file_reports_its_notification_to_the_host() {
     let mut settings = SettingsModel::new();
     let mut store = SettingsStore::new(&root.paths);
     store.load(&mut settings, at(1_760_950_000));
-    assert_eq!(Some("Settings file was unreadable and has been reset."), store.message());
+    assert_eq!(
+        Some("Settings file was unreadable and has been reset."),
+        store.message()
+    );
     assert!((settings.fov() - 70.0).abs() < f32::EPSILON);
     assert!(!root.paths.root.join("settings.json").exists());
     let set_aside = std::fs::read_dir(&root.paths.root)
         .unwrap()
         .filter_map(Result::ok)
-        .any(|entry| entry.file_name().to_string_lossy().starts_with("settings.json.corrupt-"));
+        .any(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("settings.json.corrupt-")
+        });
     assert!(set_aside);
 }
 
@@ -153,20 +167,29 @@ fn the_recent_roms_and_the_rom_profile_choices_survive_a_restart() {
     assert!(root.paths.root.join("games.json").is_file());
     let mut reread = SettingsStore::new(&root.paths);
     reread.load(&mut SettingsModel::new(), at(0));
-    assert_eq!(vec![r"D:\roms\b.nes", r"D:\roms\a.nes"], reread.games().recent_roms());
+    assert_eq!(
+        vec![r"D:\roms\b.nes", r"D:\roms\a.nes"],
+        reread.games().recent_roms()
+    );
     assert_eq!(Some("42"), reread.games().profile_for(r"D:\roms\b.nes"));
 }
 
 #[test]
 fn the_game_list_coexists_with_the_library() {
     let root = root();
-    std::fs::write(&root.paths.library_file, r#"{ "schemaVersion": 1, "games": [] }"#).unwrap();
+    std::fs::write(
+        &root.paths.library_file,
+        r#"{ "schemaVersion": 1, "games": [] }"#,
+    )
+    .unwrap();
     let mut settings = SettingsModel::new();
     let mut store = SettingsStore::new(&root.paths);
     store.load(&mut settings, at(0));
     store.games_mut().note_rom_opened(r"D:\roms\a.nes");
     store.save(&settings);
-    assert!(std::fs::read_to_string(&root.paths.library_file).unwrap().contains("\"games\": []"));
+    assert!(std::fs::read_to_string(&root.paths.library_file)
+        .unwrap()
+        .contains("\"games\": []"));
     assert!(std::fs::read_to_string(root.paths.root.join("games.json"))
         .unwrap()
         .contains("recentRoms"));
@@ -182,7 +205,10 @@ fn a_read_only_root_does_not_stop_the_program() {
     let paths = UserDataPaths::resolve(Some(&blocked), None, None);
     assert!(!paths.is_writable);
     assert_eq!(
-        Some(format!("User data folder is not writable: {}", blocked.display())),
+        Some(format!(
+            "User data folder is not writable: {}",
+            blocked.display()
+        )),
         paths.unwritable_message
     );
     let mut settings = SettingsModel::new();
@@ -194,7 +220,13 @@ fn a_read_only_root_does_not_stop_the_program() {
 }
 
 fn empty_tile(harness: &LoopHarness) -> bool {
-    harness.host.session().unwrap().engine().settings().empty_tile
+    harness
+        .host
+        .session()
+        .unwrap()
+        .engine()
+        .settings()
+        .empty_tile
 }
 
 #[test]
@@ -205,17 +237,29 @@ fn launching_a_different_game_reapplies_the_profile_settings() {
     harness.catalog().add("b", Some(&rom));
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("a"));
     // A script changes a profile setting during the game.
-    harness
+    harness.host.update_settings(|model| {
+        model.set_layer(SettingId::ConvEmptyTile, true, SettingLayer::Session)
+    });
+    assert!(harness
         .host
-        .update_settings(|model| model.set_layer(SettingId::ConvEmptyTile, true, SettingLayer::Session));
-    assert!(harness.host.settings().get(SettingId::ConvEmptyTile).as_bool());
+        .settings()
+        .get(SettingId::ConvEmptyTile)
+        .as_bool());
     assert!(empty_tile(&harness));
     // Relaunching the same game keeps it (REQ-PERS-006).
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("a"));
-    assert!(harness.host.settings().get(SettingId::ConvEmptyTile).as_bool());
+    assert!(harness
+        .host
+        .settings()
+        .get(SettingId::ConvEmptyTile)
+        .as_bool());
     // A different game takes the profile's value back (REQ-PERS-005).
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("b"));
-    assert!(!harness.host.settings().get(SettingId::ConvEmptyTile).as_bool());
+    assert!(!harness
+        .host
+        .settings()
+        .get(SettingId::ConvEmptyTile)
+        .as_bool());
     assert!(!empty_tile(&harness));
 }
 
@@ -227,7 +271,11 @@ fn a_game_load_forces_the_background_flag_and_resets_the_layer_shadows() {
     harness.host.update_settings(|model| {
         model.set_layer(SettingId::SceneUseNesBgColor, false, SettingLayer::Profile);
         for layer in Layer::ALL {
-            model.set_layer(SettingId::LayerCastShadow(layer), true, SettingLayer::Profile);
+            model.set_layer(
+                SettingId::LayerCastShadow(layer),
+                true,
+                SettingLayer::Profile,
+            );
         }
     });
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("a"));
@@ -246,14 +294,18 @@ fn a_write_reaches_the_scene_and_the_conversion_slice() {
     let rom = harness.write_rom(&SyntheticRom::counter(), "game.nes");
     harness.catalog().add("a", Some(&rom));
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("a"));
-    harness
-        .host
-        .update_settings(|model| model.set_layer(SettingId::ClipBottom, 16.1_f32, SettingLayer::Profile));
+    harness.host.update_settings(|model| {
+        model.set_layer(SettingId::ClipBottom, 16.1_f32, SettingLayer::Profile)
+    });
     let clipping = harness.host.session().unwrap().engine().settings().clipping;
     assert!((clipping.y - 16.1).abs() < 1e-4);
     assert!((harness.scene.borrow().clipping.y - 16.1).abs() < 1e-4);
     harness.host.update_settings(|model| {
-        model.set_layer(SettingId::LayerOffset(Layer::ALL[3]), 24.0_f32, SettingLayer::Profile);
+        model.set_layer(
+            SettingId::LayerOffset(Layer::ALL[3]),
+            24.0_f32,
+            SettingLayer::Profile,
+        );
     });
     let offset = harness
         .host
@@ -266,7 +318,9 @@ fn a_write_reaches_the_scene_and_the_conversion_slice() {
     assert!((offset - 24.0).abs() < f32::EPSILON);
     harness.host.update_settings(|model| model.set_fov(50.0));
     assert!((harness.scene.borrow().settings.fov - 50.0).abs() < f32::EPSILON);
-    harness.host.update_settings(|model| model.set_light_intensity(1.4));
+    harness
+        .host
+        .update_settings(|model| model.set_light_intensity(1.4));
     assert!((harness.scene.borrow().settings.light_intensity() - 1.4).abs() < 1e-4);
 }
 
@@ -275,13 +329,20 @@ fn a_game_load_puts_both_ports_back_to_gamepad() {
     let mut harness = LoopHarness::create();
     let rom = harness.write_rom(&SyntheticRom::counter(), "game.nes");
     harness.catalog().add("a", Some(&rom));
-    harness
-        .host
-        .update_settings(|model| {
-            model.set(SettingId::InputPortType(Port::ALL[0]), SettingValue::Enum(1));
-        });
+    harness.host.update_settings(|model| {
+        model.set(
+            SettingId::InputPortType(Port::ALL[0]),
+            SettingValue::Enum(1),
+        );
+    });
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("a"));
     let model = harness.host.settings();
-    assert_eq!(0, model.get(SettingId::InputPortType(Port::ALL[0])).as_int());
-    assert_eq!(0, model.get(SettingId::InputPortType(Port::ALL[1])).as_int());
+    assert_eq!(
+        0,
+        model.get(SettingId::InputPortType(Port::ALL[0])).as_int()
+    );
+    assert_eq!(
+        0,
+        model.get(SettingId::InputPortType(Port::ALL[1])).as_int()
+    );
 }

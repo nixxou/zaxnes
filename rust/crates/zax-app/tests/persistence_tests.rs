@@ -9,13 +9,17 @@ use std::path::Path;
 use common::{LoopHarness, SyntheticRom, TemporaryRoot};
 use time::OffsetDateTime;
 use zax_app::emulation::commands::{Command, CommandArgs};
-use zax_app::emulation::rom_file::{self, CORRUPTED_ZIP_MESSAGE, INVALID_ROM_MESSAGE, UNCOMPRESSION_FAILED_MESSAGE};
+use zax_app::emulation::rom_file::{
+    self, CORRUPTED_ZIP_MESSAGE, INVALID_ROM_MESSAGE, UNCOMPRESSION_FAILED_MESSAGE,
+};
 use zax_app::persistence::app_settings::{AppSettings, AppSettingsMut};
 use zax_app::persistence::save_slots::SaveSlotIndex;
-use zax_app::persistence::settings_store::{SettingsStore, NEWER_VERSION_MESSAGE, UNREADABLE_MESSAGE};
+use zax_app::persistence::settings_store::{
+    SettingsStore, NEWER_VERSION_MESSAGE, UNREADABLE_MESSAGE,
+};
 use zax_app::user_data_paths::{
-    try_copy_legacy_root, UserDataPaths, UserDataRootKind, LEGACY_PRODUCT_NAME, PORTABLE_FOLDER_NAME,
-    PORTABLE_MARKER_NAME, PRODUCT_NAME,
+    try_copy_legacy_root, UserDataPaths, UserDataRootKind, LEGACY_PRODUCT_NAME,
+    PORTABLE_FOLDER_NAME, PORTABLE_MARKER_NAME, PRODUCT_NAME,
 };
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -46,7 +50,10 @@ fn req_pers_072_the_layout_is_created_on_the_first_start() {
     ] {
         assert!(folder.is_dir());
     }
-    assert!(paths.save_index_file.to_string_lossy().ends_with("index.json"));
+    assert!(paths
+        .save_index_file
+        .to_string_lossy()
+        .ends_with("index.json"));
 }
 
 #[test]
@@ -78,12 +85,24 @@ fn amd_029_the_first_run_copies_the_root_of_the_old_name() {
     assert_eq!(UserDataRootKind::LocalAppData, paths.kind);
     assert_eq!(local.join(PRODUCT_NAME), paths.root);
     assert_eq!(Some(legacy.clone()), paths.migrated_from);
-    assert_eq!(r#"{ "schemaVersion": 1 }"#, std::fs::read_to_string(&paths.settings_file).unwrap());
-    assert_eq!(vec![1, 2, 3, 4], std::fs::read(paths.slot_state_file("quick")).unwrap());
-    assert_eq!(vec![9], std::fs::read(paths.profiles_directory.join("a.3dn")).unwrap());
+    assert_eq!(
+        r#"{ "schemaVersion": 1 }"#,
+        std::fs::read_to_string(&paths.settings_file).unwrap()
+    );
+    assert_eq!(
+        vec![1, 2, 3, 4],
+        std::fs::read(paths.slot_state_file("quick")).unwrap()
+    );
+    assert_eq!(
+        vec![9],
+        std::fs::read(paths.profiles_directory.join("a.3dn")).unwrap()
+    );
     // The old root is read, never written to, moved or deleted.
     assert!(legacy.is_dir());
-    assert_eq!(vec![1, 2, 3, 4], std::fs::read(legacy.join("saves").join("quick.state")).unwrap());
+    assert_eq!(
+        vec![1, 2, 3, 4],
+        std::fs::read(legacy.join("saves").join("quick.state")).unwrap()
+    );
     assert_eq!(3, std::fs::read_dir(&legacy).unwrap().count());
 }
 
@@ -99,7 +118,10 @@ fn amd_029_an_existing_root_is_never_overwritten() {
     std::fs::write(current.join("settings.json"), "mine").unwrap();
     let paths = UserDataPaths::resolve(None, None, Some(&local));
     assert!(paths.migrated_from.is_none());
-    assert_eq!("mine", std::fs::read_to_string(&paths.settings_file).unwrap());
+    assert_eq!(
+        "mine",
+        std::fs::read_to_string(&paths.settings_file).unwrap()
+    );
     // No old root at all: a plain first start, with nothing to say.
     let fresh = root.path().join("fresh");
     std::fs::create_dir_all(&fresh).unwrap();
@@ -126,11 +148,17 @@ fn amd_029_the_copy_refuses_the_cases_that_are_not_a_migration() {
     let spelled = format!("{}{}", legacy.display(), std::path::MAIN_SEPARATOR);
     assert!(!try_copy_legacy_root(&legacy, Path::new(&spelled)));
     assert!(try_copy_legacy_root(&legacy, &target));
-    assert_eq!("[]", std::fs::read_to_string(target.join("library.json")).unwrap());
+    assert_eq!(
+        "[]",
+        std::fs::read_to_string(target.join("library.json")).unwrap()
+    );
     // Second call: the target now exists, so nothing is copied over it.
     std::fs::write(legacy.join("library.json"), "changed").unwrap();
     assert!(!try_copy_legacy_root(&legacy, &target));
-    assert_eq!("[]", std::fs::read_to_string(target.join("library.json")).unwrap());
+    assert_eq!(
+        "[]",
+        std::fs::read_to_string(target.join("library.json")).unwrap()
+    );
 }
 
 #[test]
@@ -202,7 +230,10 @@ fn req_pers_024_a_newer_file_is_left_alone() {
     assert!((model.volume() - 0.25).abs() < 1e-6);
     model.set_volume(1.0);
     store.save(&model);
-    assert_eq!(content, std::fs::read_to_string(&paths.settings_file).unwrap());
+    assert_eq!(
+        content,
+        std::fs::read_to_string(&paths.settings_file).unwrap()
+    );
 }
 
 #[test]
@@ -247,7 +278,10 @@ fn req_pers_055_a_corrupt_index_is_rebuilt_from_the_files() {
     assert!(rebuilt.was_recovered);
     assert!(rebuilt.find("9").unwrap().is_occupied());
     assert_eq!("g1", rebuilt.find("9").unwrap().game_id);
-    assert_eq!(1, files_matching(&harness.paths.saves_directory, "index.json.corrupt-"));
+    assert_eq!(
+        1,
+        files_matching(&harness.paths.saves_directory, "index.json.corrupt-")
+    );
 }
 
 #[test]
@@ -259,7 +293,10 @@ fn req_pers_073_an_unwritable_root_is_reported() {
     let paths = UserDataPaths::resolve(Some(&file.join("root")), None, None);
     assert!(!paths.is_writable);
     assert_eq!(
-        Some(format!("User data folder is not writable: {}", paths.root.display())),
+        Some(format!(
+            "User data folder is not writable: {}",
+            paths.root.display()
+        )),
         paths.unwritable_message
     );
 }
@@ -268,7 +305,8 @@ fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
     let file = std::fs::File::create(path).unwrap();
     let mut zip = zip::ZipWriter::new(file);
     for (name, contents) in entries {
-        zip.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.start_file(*name, zip::write::SimpleFileOptions::default())
+            .unwrap();
         zip.write_all(contents).unwrap();
     }
     zip.finish().unwrap();
@@ -292,11 +330,17 @@ fn req_loop_023_archive_failures_report_the_exact_messages() {
     assert_eq!(CORRUPTED_ZIP_MESSAGE, rom_file::read(&broken).unwrap_err());
     let empty = root.path().join("empty.zip");
     write_zip(&empty, &[]);
-    assert_eq!(UNCOMPRESSION_FAILED_MESSAGE, rom_file::read(&empty).unwrap_err());
+    assert_eq!(
+        UNCOMPRESSION_FAILED_MESSAGE,
+        rom_file::read(&empty).unwrap_err()
+    );
     // Q-028: no 7-Zip decoder is available, so such a file is refused cleanly.
     let seven = root.path().join("game.7z");
     std::fs::write(&seven, [0x37, 0x7A]).unwrap();
-    assert_eq!(UNCOMPRESSION_FAILED_MESSAGE, rom_file::read(&seven).unwrap_err());
+    assert_eq!(
+        UNCOMPRESSION_FAILED_MESSAGE,
+        rom_file::read(&seven).unwrap_err()
+    );
 }
 
 #[test]
@@ -314,18 +358,29 @@ fn req_pers_060_the_battery_ram_survives_a_restart() {
     harness.catalog().add("bat", Some(&rom));
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("bat"));
     harness.run_frames(10);
-    assert_eq!(0x5A, harness.host.session().unwrap().core().export_battery_ram()[0]);
+    assert_eq!(
+        0x5A,
+        harness.host.session().unwrap().core().export_battery_ram()[0]
+    );
     harness.run(Command::Stop);
     let files: Vec<_> = std::fs::read_dir(&harness.paths.battery_directory)
         .unwrap()
         .filter_map(Result::ok)
-        .filter(|entry| entry.path().extension().is_some_and(|extension| extension == "srm"))
+        .filter(|entry| {
+            entry
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "srm")
+        })
         .collect();
     assert_eq!(1, files.len());
     assert_eq!(0x5A, std::fs::read(files[0].path()).unwrap()[0]);
     // A second launch reads the file back before the first frame runs.
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("bat"));
-    assert_eq!(0x5A, harness.host.session().unwrap().core().export_battery_ram()[0]);
+    assert_eq!(
+        0x5A,
+        harness.host.session().unwrap().core().export_battery_ram()[0]
+    );
 }
 
 #[test]
@@ -334,5 +389,10 @@ fn req_pers_060_a_rom_without_a_battery_writes_nothing() {
     harness.launch("plain");
     harness.run_frames(10);
     harness.run(Command::Stop);
-    assert_eq!(0, std::fs::read_dir(&harness.paths.battery_directory).unwrap().count());
+    assert_eq!(
+        0,
+        std::fs::read_dir(&harness.paths.battery_directory)
+            .unwrap()
+            .count()
+    );
 }

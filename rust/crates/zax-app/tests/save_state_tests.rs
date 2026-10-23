@@ -8,11 +8,12 @@ use rstest::rstest;
 use time::OffsetDateTime;
 use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::emulation::emulation_state::EmulationState;
+use zax_app::input::InputAction;
 use zax_app::persistence::save_slots::{self, SaveSlotIndex, QUICK_SLOT_ID};
 use zax_app::persistence::save_state_file::{
-    self, CAMERA_SECTION_BYTES, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE, LEGACY_SIGNATURE, SIGNATURE,
+    self, CAMERA_SECTION_BYTES, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE, LEGACY_SIGNATURE,
+    SIGNATURE,
 };
-use zax_app::input::InputAction;
 use zax_nes::NesCore;
 use zax_scripting::persistent;
 
@@ -60,11 +61,23 @@ fn req_arch_012_a_savestate_replays_identically() {
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(1));
     let sequence = [InputAction::NONE, InputAction::A, InputAction::RIGHT];
     harness.run_exact_frames(120, &sequence);
-    let first_run = harness.host.session().unwrap().core().save_state(false).unwrap();
+    let first_run = harness
+        .host
+        .session()
+        .unwrap()
+        .core()
+        .save_state(false)
+        .unwrap();
     harness.run_with(Command::LoadSlot, CommandArgs::of_number(1));
     assert_eq!(EmulationState::Running, harness.host.state());
     harness.run_exact_frames(120, &sequence);
-    let second_run = harness.host.session().unwrap().core().save_state(false).unwrap();
+    let second_run = harness
+        .host
+        .session()
+        .unwrap()
+        .core()
+        .save_state(false)
+        .unwrap();
     assert_eq!(first_run, second_run);
 }
 
@@ -76,8 +89,13 @@ fn req_arch_013_the_file_stays_under_the_announced_bound() {
     let bound = harness.host.max_save_state_size();
     assert!(bound > 0);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(2));
-    let written = std::fs::metadata(harness.paths.slot_state_file("2")).unwrap().len();
-    assert!(written <= bound as u64, "{written} bytes written, bound announced {bound}");
+    let written = std::fs::metadata(harness.paths.slot_state_file("2"))
+        .unwrap()
+        .len();
+    assert!(
+        written <= bound as u64,
+        "{written} bytes written, bound announced {bound}"
+    );
 }
 
 #[test]
@@ -94,7 +112,10 @@ fn req_loop_046_a_corrupt_savestate_is_refused() {
     assert_eq!(EmulationState::Stopped, harness.host.state());
     assert!(harness.host.current_game_id().is_none());
     assert!(!harness.host.is_loading());
-    assert_eq!(CORRUPTED_MESSAGE, harness.host.notifications.current().unwrap().text);
+    assert_eq!(
+        CORRUPTED_MESSAGE,
+        harness.host.notifications.current().unwrap().text
+    );
 }
 
 #[rstest]
@@ -110,7 +131,8 @@ fn req_pers_056_the_signature_and_version_are_checked(#[case] signature: &str) {
 }
 
 fn replace_core_name(block: &[u8], name: &str) -> Vec<u8> {
-    let stored_length = usize::try_from(i32::from_le_bytes(block[8..12].try_into().unwrap())).unwrap();
+    let stored_length =
+        usize::try_from(i32::from_le_bytes(block[8..12].try_into().unwrap())).unwrap();
     let replacement = name.as_bytes();
     let mut result = block[..8].to_vec();
     result.extend_from_slice(&i32::try_from(replacement.len()).unwrap().to_le_bytes());
@@ -155,7 +177,8 @@ fn req_pers_056_an_inconsistent_section_length_is_refused() {
     let mut file = save_state_file::write(&content);
     // The core section's length prefix sits right after the signature, the version and the
     // metadata section; raising it past the end of the file must be refused.
-    let metadata_length = usize::try_from(i32::from_le_bytes(file[12..16].try_into().unwrap())).unwrap();
+    let metadata_length =
+        usize::try_from(i32::from_le_bytes(file[12..16].try_into().unwrap())).unwrap();
     let offset = 8 + 4 + 4 + metadata_length;
     file[offset..offset + 4].copy_from_slice(&i32::MAX.to_le_bytes());
     assert!(save_state_file::try_read(&file).is_none());
@@ -181,7 +204,10 @@ fn req_loop_043_the_quick_slot_has_no_thumbnail() {
     let frames = harness.host.session().unwrap().core().frame_count();
     assert_eq!(60, frames);
     assert_ne!(after, frames);
-    assert_eq!("Quick Load", harness.host.notifications.current().unwrap().text);
+    assert_eq!(
+        "Quick Load",
+        harness.host.notifications.current().unwrap().text
+    );
 }
 
 #[test]
@@ -201,7 +227,12 @@ fn req_loop_041_a_save_does_not_change_the_state() {
     let mut harness = LoopHarness::create();
     // Stopped, no game: nothing happens.
     harness.run(Command::QuickSave);
-    assert!(!harness.host.slots.find(QUICK_SLOT_ID).unwrap().is_occupied());
+    assert!(!harness
+        .host
+        .slots
+        .find(QUICK_SLOT_ID)
+        .unwrap()
+        .is_occupied());
     harness.launch("g1");
     harness.run_frames(30);
     harness.run(Command::QuickSave);
@@ -236,7 +267,10 @@ fn req_loop_042_a_numbered_slot_carries_the_game_the_thumbnail_and_the_date() {
     harness.run(Command::Resume);
     harness.run_frames(30);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(5));
-    assert_eq!(harness.now(), harness.host.slots.find("5").unwrap().saved_at);
+    assert_eq!(
+        harness.now(),
+        harness.host.slots.find("5").unwrap().saved_at
+    );
 }
 
 #[test]
@@ -248,7 +282,10 @@ fn req_loop_044_a_slot_of_a_deleted_game_reports_the_exact_message() {
     harness.catalog().remove("g1");
     harness.run_with(Command::LoadSlot, CommandArgs::of_number(2));
     assert_eq!(EmulationState::Stopped, harness.host.state());
-    assert_eq!(GAME_MISSING_MESSAGE, harness.host.notifications.current().unwrap().text);
+    assert_eq!(
+        GAME_MISSING_MESSAGE,
+        harness.host.notifications.current().unwrap().text
+    );
 }
 
 #[test]

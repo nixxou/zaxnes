@@ -25,7 +25,11 @@ fn req_loop_012_the_backlog_never_exceeds_five_emulated_frames() {
     block(0.5);
     let due = pacer.due_frames();
     assert_eq!(MAX_BACKLOG, due);
-    assert!(pacer.dropped_frames() > 20, "only {} frames were dropped", pacer.dropped_frames());
+    assert!(
+        pacer.dropped_frames() > 20,
+        "only {} frames were dropped",
+        pacer.dropped_frames()
+    );
 }
 
 #[test]
