@@ -25,7 +25,7 @@ use zax_profiles::script::ProfileScript;
 use zax_profiles::settings::LightSettings;
 use zax_profiles::tile::{PatternGrid, ProfileTile};
 use zax_profiles::values::Vec2I;
-use zax_profiles::values::Vec3F;
+use zax_profiles::values::{Vec3F, Vec4F};
 use zax_profiles::variant::PatternVariant;
 use zax_render::assets::png_image;
 
@@ -516,6 +516,31 @@ fn capture_with(
 }
 
 #[test]
+fn the_local_camera_a_profile_stores_does_not_reach_the_capture() {
+    let Some(rom) = test_rom() else { return };
+    let root = directory("render-rom-local-camera");
+    let mut profile = profile_for(&menu_glyph(&rom, &root));
+    let capture = |name: &str, profile: &GameProfile| {
+        capture_with(&rom, &root, name, profile, &["--angles", "20,30"]).0
+    };
+    let plain = capture("plain", &profile);
+
+    // The C# harness applies the profile's settings to the engine only: the settings model, and
+    // so the camera `ScriptBridge.Apply` sets up, keep their defaults.
+    profile.settings.as_mut().unwrap().local_camera = true;
+    assert_eq!(capture("stored", &profile), plain);
+
+    // A chunk that writes the setting runs before the scene takes the settings.
+    profile.scripts.push(ProfileScript::new(
+        Some("local"),
+        true,
+        Some("Setting.LocalCam = true"),
+        Some(""),
+    ));
+    assert_ne!(capture("scripted", &profile), plain);
+}
+
+#[test]
 fn a_script_changing_the_field_of_view_keeps_the_camera_it_placed() {
     let Some(rom) = test_rom() else { return };
     let root = directory("render-rom-fov-write");
@@ -538,4 +563,35 @@ fn a_script_changing_the_field_of_view_keeps_the_camera_it_placed() {
         "function Start() Camera.Distance = 400 Setting.Fov = 60 Video.SceneScale = 2 end",
     );
     assert_eq!(refocused, placed);
+}
+
+#[test]
+fn a_script_writing_one_clip_margin_gives_the_others_of_the_settings_model() {
+    let Some(rom) = test_rom() else { return };
+    let root = directory("render-rom-clip-write");
+    let mut profile = profile_for(&menu_glyph(&rom, &root));
+    let tiles = |entry: &Value| {
+        (
+            entry["opaqueTiles"].as_u64().unwrap(),
+            entry["triangles"].as_u64().unwrap(),
+        )
+    };
+    let full = tiles(&capture_with(&rom, &root, "full", &profile, &[]).1);
+
+    profile.settings.as_mut().unwrap().clipping = Some(Vec4F::new(120.0, 120.0, 120.0, 120.0));
+    let narrow = tiles(&capture_with(&rom, &root, "narrow", &profile, &[]).1);
+    assert!(narrow.0 < full.0, "the profile's margins hide tiles");
+
+    // The C# `ScriptSettings` mirrors the four margins of its model, which never held the
+    // profile's: writing the top margin brings back the default left, bottom and right ones.
+    profile.scripts.push(ProfileScript::new(
+        Some("clip"),
+        true,
+        Some("function Start() Setting.Clipping[3] = 0.2 end"),
+        Some(""),
+    ));
+    assert_eq!(
+        tiles(&capture_with(&rom, &root, "scripted", &profile, &[]).1),
+        full
+    );
 }

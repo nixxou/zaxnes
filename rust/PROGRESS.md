@@ -60,6 +60,8 @@ Rust counts are `#[test]` results (rstest rows and table-driven loops count as o
 
 Fixes after Windows check 3: render.json string escaping; --ui-shots ignores host cursor.
 
+Harness ROM parity (Windows check 3): profile settings go to the engine only, the script settings model keeps its defaults (local camera, `Setting` reads, one-margin clip writes); a script's FOV/SceneScale write no longer resets the camera (C# harness wires no ViewReset).
+
 The acceptance project (581 methods) checks requirement traceability and architecture rules of the C# solution; its Rust counterparts are the integration tests of `zax-app` and the golden comparisons above, not a method-for-method port.
 
 ### To check on a real machine (commands in `rust/LOCAL-CHECKS.md`)
