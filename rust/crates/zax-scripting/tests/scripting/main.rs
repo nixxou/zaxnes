@@ -15,6 +15,7 @@ mod corpus_tests;
 mod lend_tests;
 mod lua_access_resolver;
 mod lua_runtime_tests;
+mod perf_tests;
 mod scaffold_tests;
 mod smoke_tests;
 mod support;

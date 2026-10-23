@@ -289,6 +289,11 @@ impl ScriptProfileBuilder {
         self
     }
 
+    /// The profile built so far.
+    pub fn profile(&self) -> &GameProfile {
+        &self.profile
+    }
+
     /// Starts a session on this profile without calling `Start`.
     pub fn load(&self) -> ScriptSession {
         ScriptSession::create(&self.profile)
