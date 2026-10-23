@@ -48,6 +48,7 @@ use crate::render_skip;
 use crate::scene_script_bridge::{self, ConsoleScriptLog};
 use crate::ui::debug_overlay::DebugInfo;
 use crate::ui::frontend::{ImguiFrontend, Sizes};
+use crate::ui::handheld;
 use crate::ui::strings::UiLanguage;
 use crate::ui::zax_ui::{UiEffect, UiFrame};
 use crate::user_data_paths::UserDataPaths;
@@ -66,11 +67,11 @@ impl GameView for OffscreenFramebuffer {
     }
 }
 
-/// Whether the window opens in full screen: the persisted choice, except for smoke runs and
-/// screenshot runs.
+/// Whether the window opens in full screen: the persisted choice, or always on a handheld,
+/// except for smoke runs and screenshot runs.
 #[must_use]
 pub const fn should_open_fullscreen(options: &AppOptions, persisted: bool) -> bool {
-    persisted && !options.smoke_test && options.ui_shot_directory.is_none()
+    (persisted || options.handheld) && !options.smoke_test && options.ui_shot_directory.is_none()
 }
 
 /// What the window's pacing should be: the settings, except that a smoke run is not paced by
@@ -282,7 +283,7 @@ impl Running {
         let mut host = build_host(parts);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
-        let ui = ImguiFrontend::new(&gl, &host, options)?;
+        let ui = ImguiFrontend::new(&gl, &host, options, height)?;
         Ok(Self {
             options: options.clone(),
             ui,
@@ -509,6 +510,9 @@ impl Running {
 fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore, SettingsModel) {
     let mut store = SettingsStore::new(paths);
     let mut model = SettingsModel::new();
+    if options.handheld {
+        handheld::defaults::apply(&mut model);
+    }
     if let Some(locale) = options.system_locale.as_deref() {
         // Only the default: a saved `ui.language` (read next) always wins.
         model.set_environment_default(

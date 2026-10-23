@@ -1,5 +1,5 @@
 //! The Select + Start combination: held for [`HOLD_SECONDS`] it quits the application (the
-//! PortMaster convention); pressed and let go before that it is a tap, which opens the menu when
+//! `PortMaster` convention); pressed and let go before that it is a tap, which opens the menu when
 //! the setting "Menu = Select + Start" is on.
 
 /// Seconds the two buttons are held before the application quits.
@@ -71,8 +71,16 @@ mod tests {
         }
         assert!(combo.progress() > 0.85 && combo.progress() < 1.0);
         assert_eq!(ComboEvent::Quit, combo.update(0.15, true));
-        assert_eq!(ComboEvent::Idle, combo.update(0.5, true), "quit is sent once");
-        assert_eq!(ComboEvent::Idle, combo.update(0.1, false), "and releasing is no tap");
+        assert_eq!(
+            ComboEvent::Idle,
+            combo.update(0.5, true),
+            "quit is sent once"
+        );
+        assert_eq!(
+            ComboEvent::Idle,
+            combo.update(0.1, false),
+            "and releasing is no tap"
+        );
         assert_eq!(0.0, combo.progress());
     }
 

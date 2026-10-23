@@ -217,9 +217,6 @@ impl HandheldUi {
             ComboEvent::Tap if menu_is_select_start(host) => self.toggle_overlay(host),
             ComboEvent::Tap | ComboEvent::Idle => {}
         }
-        if pad.was_pressed(PadButton::Menu) && self.screen == Screen::InGame {
-            self.toggle_overlay(host);
-        }
     }
 
     /// The menu button or the combination: opens the in-game menu, or closes it.
@@ -255,6 +252,10 @@ impl HandheldUi {
                 frame.input.edit(|_, _, session| session.stop());
                 self.controls.capture_left = None;
             }
+            return;
+        }
+        if button == PadButton::Menu && self.screen == Screen::InGame {
+            self.toggle_overlay(frame.host);
             return;
         }
         match self.screen {
@@ -341,7 +342,11 @@ impl HandheldUi {
     fn open_options(&mut self, host: &AppHost) {
         if !matches!(self.screen, Screen::Options | Screen::Controls) {
             let playing = host.current_game_id().is_some();
-            self.return_to = if playing { Screen::Overlay } else { Screen::Home };
+            self.return_to = if playing {
+                Screen::Overlay
+            } else {
+                Screen::Home
+            };
         }
         self.screen = Screen::Options;
     }
@@ -417,13 +422,26 @@ impl HandheldUi {
                 };
                 let hub = frame.hub;
                 let listening = frame.input.edit(|bindings, pads, session| {
-                    key_config::begin(session, bindings, pads, hub, row, BindingDeviceKind::Gamepad)
+                    key_config::begin(
+                        session,
+                        bindings,
+                        pads,
+                        hub,
+                        row,
+                        BindingDeviceKind::Gamepad,
+                    )
                 });
                 self.controls.capture_left = listening.then_some(CAPTURE_SECONDS);
             }
             PadButton::B => self.screen = Screen::Options,
             _ => {}
         }
+    }
+
+    /// The list of games.
+    #[must_use]
+    pub const fn roms(&self) -> &RomListModel {
+        &self.roms
     }
 
     /// The ROM folder shown.
@@ -483,23 +501,5 @@ fn apply_camera(preset: CameraPreset, host: &mut AppHost) {
             host.enqueue(Command::SetCameraMode, CommandArgs::of_number(1));
         }
         CameraPreset::ResetView => host.enqueue(Command::ResetView, CommandArgs::default()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_the_game_screen_lets_the_input_through() {
-        for screen in [
-            Screen::Home,
-            Screen::Profiles,
-            Screen::Options,
-            Screen::Controls,
-            Screen::Overlay,
-        ] {
-            assert_ne!(Screen::InGame, screen);
-        }
     }
 }

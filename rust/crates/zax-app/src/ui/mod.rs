@@ -9,6 +9,7 @@ pub mod file_browser;
 pub mod file_picker;
 pub mod fonts;
 pub mod frontend;
+pub mod handheld;
 pub mod key_config;
 pub mod keys;
 pub mod menu_bar;

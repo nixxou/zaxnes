@@ -38,6 +38,9 @@ use crate::emulation::rom_file::INVALID_ROM_MESSAGE;
 use crate::input::DesktopInputSource;
 use crate::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
 
+/// Space between the notification and the bottom of the window.
+const NOTIFICATION_MARGIN: f32 = 48.0;
+
 /// What a frame of the interface borrows from the application.
 pub struct UiFrame<'a> {
     /// The host: settings, commands, notifications, the library.
@@ -226,7 +229,7 @@ impl ZaxUi {
             self.draw_confirm_dialog(ui, frame.host);
         }
         // REQ-UI-206: the OSD is the one layer full screen keeps.
-        Self::draw_notification(ui, frame.host);
+        Self::draw_notification(ui, frame.host, NOTIFICATION_MARGIN);
         self.draw_fps_counter(ui, frame);
     }
 

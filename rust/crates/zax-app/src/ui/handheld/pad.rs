@@ -167,6 +167,7 @@ impl PadState {
     pub const fn end_frame(&mut self) {
         self.pressed = [false; PadButton::COUNT];
     }
+}
 
 #[cfg(test)]
 mod tests {
@@ -180,7 +181,10 @@ mod tests {
         pad.end_frame();
         assert!(!pad.was_pressed(PadButton::A) && pad.is_held(PadButton::A));
         pad.set(PadButton::A, true);
-        assert!(!pad.was_pressed(PadButton::A), "a held button is not pressed again");
+        assert!(
+            !pad.was_pressed(PadButton::A),
+            "a held button is not pressed again"
+        );
     }
 
     #[test]
@@ -208,7 +212,10 @@ mod tests {
         pad.set_axis(false, -20_000);
         assert!(pad.is_held(PadButton::Up));
         pad.set_axis(false, -10_000);
-        assert!(pad.is_held(PadButton::Up), "between the two thresholds it holds");
+        assert!(
+            pad.is_held(PadButton::Up),
+            "between the two thresholds it holds"
+        );
         pad.set_axis(false, -4_000);
         assert!(!pad.is_held(PadButton::Up));
         pad.set_axis(true, 30_000);

@@ -304,13 +304,6 @@ impl AppOptions {
                     options.ui_shot_directory =
                         Some(next_value(arguments, &mut index, "--ui-shots")?.to_owned());
                 }
-                "--handheld" => {
-                    options.handheld = true;
-                }
-                "--roms" => {
-                    options.roms_directory =
-                        Some(next_value(arguments, &mut index, "--roms")?.to_owned());
-                }
                 "--smoke-test" => {
                     options.smoke_test = true;
                 }
@@ -330,15 +323,32 @@ impl AppOptions {
                     options.smoke_test = true;
                     options.smoke_test_frames = parse_count(value)?;
                 }
-                unknown => {
-                    return Err(OptionsError::UnknownArgument {
-                        argument: unknown.to_owned(),
-                    });
-                }
+                other => options.parse_rust_only(other, arguments, &mut index)?,
             }
             index += 1;
         }
         Ok(options)
+    }
+
+    /// The options only the Rust program has ([`RUST_ONLY_USAGE`]).
+    fn parse_rust_only(
+        &mut self,
+        argument: &str,
+        arguments: &[&str],
+        index: &mut usize,
+    ) -> Result<(), OptionsError> {
+        match argument {
+            "--handheld" => self.handheld = true,
+            "--roms" => {
+                self.roms_directory = Some(next_value(arguments, index, "--roms")?.to_owned());
+            }
+            unknown => {
+                return Err(OptionsError::UnknownArgument {
+                    argument: unknown.to_owned(),
+                });
+            }
+        }
+        Ok(())
     }
 
     /// Whether this run only prints something and exits: the single case where the console is

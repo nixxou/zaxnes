@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use super::handheld::{HandheldUi, Screen as HandheldScreen};
 use super::options::OptionsTab;
 use super::text;
 use super::zax_ui::ZaxUi;
@@ -21,9 +22,11 @@ enum Screen {
     Keys,
     ProfileChooser,
     About,
+    /// A screen of the handheld interface.
+    Handheld(HandheldScreen),
 }
 
-const PLAN: [(&str, Screen); 7] = [
+const DESKTOP_PLAN: [(&str, Screen); 7] = [
     ("accueil", Screen::Welcome),
     ("menu-fichier", Screen::FileMenu),
     ("options", Screen::Options),
@@ -31,6 +34,24 @@ const PLAN: [(&str, Screen); 7] = [
     ("touches", Screen::Keys),
     ("profil", Screen::ProfileChooser),
     ("a-propos", Screen::About),
+];
+
+/// The handheld screens, photographed at the size of the window (640x480 for the devices).
+const HANDHELD_PLAN: [(&str, Screen); 5] = [
+    ("handheld-accueil", Screen::Handheld(HandheldScreen::Home)),
+    (
+        "handheld-profils",
+        Screen::Handheld(HandheldScreen::Profiles),
+    ),
+    (
+        "handheld-options",
+        Screen::Handheld(HandheldScreen::Options),
+    ),
+    (
+        "handheld-commandes",
+        Screen::Handheld(HandheldScreen::Controls),
+    ),
+    ("handheld-menu", Screen::Handheld(HandheldScreen::Overlay)),
 ];
 
 /// What a frame of the plan asks of the application.
@@ -45,20 +66,27 @@ pub enum ShotStep {
 /// The plan and where it stands.
 #[derive(Debug)]
 pub struct UiShots {
+    plan: &'static [(&'static str, Screen)],
     directory: PathBuf,
     index: usize,
     frame: usize,
 }
 
 impl UiShots {
-    /// A plan whose files go to `directory`, created if need be.
+    /// A plan whose files go to `directory`, created if need be: the screens of the handheld
+    /// interface when `handheld`, those of the desktop one otherwise.
     ///
     /// # Errors
     /// The folder could not be created.
-    pub fn new(directory: &str) -> std::io::Result<Self> {
+    pub fn new(directory: &str, handheld: bool) -> std::io::Result<Self> {
         let directory = PathBuf::from(directory);
         std::fs::create_dir_all(&directory)?;
         Ok(Self {
+            plan: if handheld {
+                &HANDHELD_PLAN
+            } else {
+                &DESKTOP_PLAN
+            },
             directory,
             index: 0,
             frame: 0,
@@ -68,23 +96,26 @@ impl UiShots {
     /// Whether every screen has been photographed.
     #[must_use]
     pub const fn finished(&self) -> bool {
-        self.index >= PLAN.len()
+        self.index >= self.plan.len()
     }
 
     /// The number of frames the whole plan takes.
     #[must_use]
-    pub const fn total_frames() -> usize {
-        PLAN.len() * (SETTLE_FRAMES + 1)
+    pub const fn total_frames(&self) -> usize {
+        self.plan.len() * (SETTLE_FRAMES + 1)
     }
 
     /// Called once per frame, after the interface was drawn: arranges the screen on its first
     /// frame, and asks for the capture once it has settled.
-    pub fn advance(&mut self, ui: &mut ZaxUi) -> ShotStep {
-        let Some((name, screen)) = PLAN.get(self.index).copied() else {
+    pub fn advance(&mut self, ui: &mut ZaxUi, handheld: Option<&mut HandheldUi>) -> ShotStep {
+        let Some((name, screen)) = self.plan.get(self.index).copied() else {
             return ShotStep::Wait;
         };
         if self.frame == 0 {
-            arrange(ui, screen);
+            match (screen, handheld) {
+                (Screen::Handheld(screen), Some(handheld)) => handheld.arrange_for_capture(screen),
+                (screen, _) => arrange(ui, screen),
+            }
         }
         self.frame += 1;
         if self.frame <= SETTLE_FRAMES {
@@ -100,7 +131,9 @@ fn arrange(ui: &mut ZaxUi, screen: Screen) {
     ui.state.close_all();
     ui.force_open_menu = None;
     match screen {
-        Screen::Welcome => {}
+        // The welcome screen is what shows with nothing open, and only the handheld interface
+        // can show its own screens.
+        Screen::Welcome | Screen::Handheld(_) => {}
         Screen::FileMenu => ui.force_open_menu = Some(text::menu_file()),
         Screen::Options => ui.state.options = true,
         Screen::OptionsInterface => {

@@ -87,13 +87,10 @@ pub fn scan(directory: &Path) -> Vec<RomEntry> {
 }
 
 /// The name reduced to its letters and digits, lower case: "Super Mario Bros. (U)" and
-/// "super_mario_bros" meet at "supermariobros" once the tag is cut.
+/// "`super_mario_bros`" meet at "supermariobros" once the tag is cut.
 #[must_use]
 pub fn normalise(name: &str) -> String {
-    let untagged = name
-        .split(['(', '['])
-        .next()
-        .unwrap_or_default();
+    let untagged = name.split(['(', '[']).next().unwrap_or_default();
     untagged
         .chars()
         .filter(|character| character.is_alphanumeric())
@@ -104,10 +101,7 @@ pub fn normalise(name: &str) -> String {
 /// The profiles of `choices` that suit a ROM called `name`: the generic entries never do. The
 /// closest come first (same name, then a title the name starts with).
 #[must_use]
-pub fn matching_profiles<'a>(
-    choices: &'a [ProfileChoice],
-    name: &str,
-) -> Vec<&'a ProfileChoice> {
+pub fn matching_profiles<'a>(choices: &'a [ProfileChoice], name: &str) -> Vec<&'a ProfileChoice> {
     let wanted = normalise(name);
     if wanted.is_empty() {
         return Vec::new();
@@ -305,7 +299,10 @@ mod tests {
         let names: Vec<String> = scan(&folder).into_iter().map(|entry| entry.name).collect();
         std::fs::remove_dir_all(&folder).unwrap();
         assert_eq!(["A", "b", "Zelda"], names.as_slice());
-        assert!(scan(Path::new("/this/folder/does/not/exist")).is_empty());
+        assert_eq!(
+            Vec::<RomEntry>::new(),
+            scan(Path::new("/this/folder/does/not/exist"))
+        );
     }
 
     #[test]
@@ -321,7 +318,15 @@ mod tests {
 
     #[test]
     fn the_shoulders_jump_from_letter_to_letter() {
-        let mut model = list(&["1942", "Adventure", "Alien", "Bomb", "Castle", "Cave", "Zip"]);
+        let mut model = list(&[
+            "1942",
+            "Adventure",
+            "Alien",
+            "Bomb",
+            "Castle",
+            "Cave",
+            "Zip",
+        ]);
         assert_eq!('#', model.selected_entry().unwrap().initial());
         model.handle(PadButton::R1);
         assert_eq!("Adventure", model.selected_entry().unwrap().name);
@@ -338,7 +343,11 @@ mod tests {
         model.jump_letter(true);
         model.jump_letter(true);
         model.jump_letter(true);
-        assert_eq!("1942", model.selected_entry().unwrap().name, "forwards wraps");
+        assert_eq!(
+            "1942",
+            model.selected_entry().unwrap().name,
+            "forwards wraps"
+        );
     }
 
     #[test]
@@ -346,7 +355,10 @@ mod tests {
         let mut model = list(&["a", "b"]);
         model.handle(PadButton::Down);
         let path = PathBuf::from("/roms/b.nes");
-        assert_eq!(Some(RomListCommand::Play(path.clone())), model.handle(PadButton::A));
+        assert_eq!(
+            Some(RomListCommand::Play(path.clone())),
+            model.handle(PadButton::A)
+        );
         assert_eq!(
             Some(RomListCommand::ChooseProfile(path)),
             model.handle(PadButton::X)
@@ -379,11 +391,14 @@ mod tests {
                 .map(|choice| choice.title.as_str())
                 .collect()
         };
-        assert_eq!(["Super Mario Bros"], titles("Super_Mario_Bros. (U) [!]").as_slice());
+        assert_eq!(
+            ["Super Mario Bros"],
+            titles("Super_Mario_Bros. (U) [!]").as_slice()
+        );
         assert_eq!(["Zelda"], titles("zelda ii").as_slice());
-        assert!(titles("Metroid").is_empty());
-        assert!(titles("2D Mode").is_empty());
-        assert!(titles("(U)").is_empty());
+        assert_eq!(Vec::<&str>::new(), titles("Metroid"));
+        assert_eq!(Vec::<&str>::new(), titles("2D Mode"));
+        assert_eq!(Vec::<&str>::new(), titles("(U)"));
     }
 
     #[test]
