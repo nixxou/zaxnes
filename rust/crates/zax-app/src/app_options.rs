@@ -166,6 +166,9 @@ pub struct AppOptions {
     pub smoke_test: bool,
     /// Frames a smoke test renders.
     pub smoke_test_frames: u32,
+    /// The locale of the operating system (`fr-FR`), which picks the language of the interface
+    /// while no `ui.language` has been saved; `None` when unknown.
+    pub system_locale: Option<String>,
     /// Emulated frames a smoke test must reach; 0 for the rendered-frames criterion.
     pub smoke_emulated_frames: u64,
     /// Where a smoke test writes the picture of its last frame.
@@ -197,6 +200,7 @@ impl Default for AppOptions {
             skybox: None,
             smoke_test: false,
             smoke_test_frames: DEFAULT_SMOKE_TEST_FRAMES,
+            system_locale: None,
             smoke_emulated_frames: 0,
             smoke_shot_path: None,
             ui_shot_directory: None,
