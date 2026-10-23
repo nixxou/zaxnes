@@ -4,7 +4,11 @@
     HOWTO-RUN.md. Run it from any folder: `powershell -ExecutionPolicy Bypass -File rust\build\package-windows.ps1`.
 .DESCRIPTION
     The executable is built with `bundled`, which links SDL2 statically, so SDL2.dll is not needed
-    next to it. Nothing is downloaded and no asset is produced: the folder must hold the files
+    next to it, and with the C runtime linked statically (`+crt-static` in rust\.cargo\config.toml),
+    so neither VCRUNTIME140.dll nor the Visual C++ redistributable is needed: the exe stands alone.
+    The release profile (fat LTO, one codegen unit, stripped) keeps it small. To check, run
+    `dumpbin /dependents zaxnes.exe` from a Visual Studio prompt: only system DLLs (KERNEL32,
+    USER32, GDI32, OPENGL32, ...) and no VCRUNTIME140 / MSVCP140 / api-ms-win-crt-*. Nothing is downloaded and no asset is produced: the folder must hold the files
     listed below and nothing else (REQ-PUB-002). The zip goes to rust\target\package.
 #>
 [CmdletBinding()]
@@ -49,7 +53,7 @@ $readme = @"
 Zaxnes $version — émulateur NES avec rendu 3D
 ==========================================
 
-Build Windows x64 autonome : aucun runtime à installer. Lancez zaxnes.exe.
+Build Windows x64 autonome : un seul fichier, ni SDL2.dll ni Visual C++ Redistributable à installer. Lancez zaxnes.exe.
 
     zaxnes.exe
     zaxnes.exe --rom "jeu.nes" --profile "3D par défaut (sans profil)"
