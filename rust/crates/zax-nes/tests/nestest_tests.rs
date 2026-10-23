@@ -22,6 +22,7 @@ use zax_nes::cartridges::Cartridge;
 use zax_nes::cpu::{Cpu6502, CpuBus, CpuTraceLine, CpuTracer};
 use zax_nes::input::InputPorts;
 use zax_nes::ppu::Ppu2C02;
+use zax_nes::rom::RomImage;
 use zax_nes::NesBus;
 
 /// Entry point of nestest's automation mode (public nestest documentation).
@@ -112,11 +113,10 @@ fn compare(expected: &LogLine, actual: &CpuTraceLine) -> Option<String> {
 }
 
 /// Builds the NROM cartridge of an iNES image (stands in for `NesCore.LoadRom`).
+#[allow(clippy::expect_used)] // Test setup: a bad image should fail the test.
 fn nrom_from_ines(image: &[u8]) -> Cartridge {
-    assert_eq!(b"NES\x1A", &image[..4], "not an iNES image");
-    let prg_size = usize::from(image[4]) * 0x4000;
-    let offset = 16 + if image[6] & 0x04 != 0 { 512 } else { 0 };
-    Cartridge::nrom(image[offset..offset + prg_size].to_vec())
+    let rom = RomImage::try_load(image, "nestest").expect("nestest.nes loads");
+    Cartridge::create(rom).expect("nestest.nes is NROM")
 }
 
 #[test]
