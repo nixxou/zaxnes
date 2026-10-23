@@ -85,7 +85,10 @@ displayed frame". All values are per displayed frame.
   frame / DMC IRQ cycles); (3) IRQ horizons for Rambo1 and MMC5 so they batch too.
 - `rust/check.sh` was not run after `91123ec` (the session stopped): run it first.
 
-## 5. Next steps, in order (see `ROADMAP.md`)
+## 5. Next steps (see `ROADMAP.md`)
+
+Execution order decided with the owner after the batched-PPU device test: 5.2 multi-core,
+5.5 pacing, 5.3 draw-call batching, 5.4 Lua, then more of 5.1, then 5.6 only if needed.
 
 Rule: an optimisation that changes any output is a setting (on/off, platform default, per game
 where useful); an optimisation with identical output needs no switch but must pass the goldens.
