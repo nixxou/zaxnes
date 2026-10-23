@@ -3,7 +3,7 @@
 //! The registry of patterns: the permanent set and the temporary set active during the session
 //! (SPEC-04 §2, REQ-E3D-060 to 065).
 
-use std::collections::HashMap;
+use crate::hashing::FastMap;
 
 use zax_profiles::profile::GameProfile;
 
@@ -52,8 +52,8 @@ pub struct PatternRegistry {
     generations: Vec<u32>,
     permanent: Vec<PatternId>,
     temporary: Vec<PatternId>,
-    permanent_by_key: HashMap<ImageSetKey, PatternId>,
-    temporary_by_key: HashMap<ImageSetKey, PatternId>,
+    permanent_by_key: FastMap<ImageSetKey, PatternId>,
+    temporary_by_key: FastMap<ImageSetKey, PatternId>,
     profile_pattern_count: i32,
 }
 

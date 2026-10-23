@@ -1,7 +1,7 @@
 //! Patterns of the registry and their keys (SPEC-04 §2, REQ-E3D-060 to 065).
 
+use crate::hashing::FastSet;
 use std::borrow::Borrow;
-use std::collections::HashSet;
 use std::fmt;
 
 use zax_profiles::pattern::ProfilePattern;
@@ -109,8 +109,8 @@ pub struct EnginePattern {
     permanent: bool,
     cells: Vec<Option<TileImage>>,
     images: Vec<TileImage>,
-    horizontal: HashSet<u64>,
-    vertical: HashSet<u64>,
+    horizontal: FastSet<u64>,
+    vertical: FastSet<u64>,
     instances: Vec<PatternInstance>,
     key: ImageSetKey,
     self_connected: bool,
@@ -162,8 +162,8 @@ impl EnginePattern {
             key: ImageSetKey::new(&images),
             cells: grid,
             images,
-            horizontal: HashSet::new(),
-            vertical: HashSet::new(),
+            horizontal: FastSet::default(),
+            vertical: FastSet::default(),
             instances: Vec::new(),
             self_connected: true,
             pixel_start: Cell::default(),
@@ -486,7 +486,7 @@ const fn pair(a: u32, b: u32) -> u64 {
     ((a as u64) << 32) | b as u64
 }
 
-fn add_pair(relation: &mut HashSet<u64>, source: &TileImage, target: Option<TileImage>) {
+fn add_pair(relation: &mut FastSet<u64>, source: &TileImage, target: Option<TileImage>) {
     if let Some(target) = target {
         relation.insert(pair(source.id(), target.id()));
     }

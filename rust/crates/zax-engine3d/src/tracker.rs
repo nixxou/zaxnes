@@ -3,7 +3,7 @@
 //! Follows one shape from frame to frame (REQ-E3D-300). The subjective camera that follows a
 //! character uses it (SPEC-06).
 
-use std::collections::HashSet;
+use crate::hashing::FastSet;
 
 use crate::frame::{ConversionFrame, FrameShape, ShapeId};
 use crate::registry::PatternId;
@@ -23,8 +23,8 @@ use crate::vectors::Vec3;
 pub struct ShapeTracker {
     // Membership is a set, order is a list: a run must be reproducible byte for byte
     // (REQ-ARCH-012), and a hash order is not (DEC-04-Q02).
-    included: HashSet<PatternId>,
-    excluded: HashSet<PatternId>,
+    included: FastSet<PatternId>,
+    excluded: FastSet<PatternId>,
     included_order: Vec<PatternId>,
     excluded_order: Vec<PatternId>,
     running: bool,

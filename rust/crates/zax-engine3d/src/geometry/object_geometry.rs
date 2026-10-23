@@ -2,7 +2,7 @@
 
 //! The geometry of one 3D object (SPEC-04B §3.4, §3.7).
 
-use std::collections::HashMap;
+use crate::hashing::FastMap;
 use std::sync::Arc;
 
 use crate::geometry::greedy;
@@ -47,7 +47,7 @@ pub struct ObjectGeometry {
     built: BuiltObject,
     mesh_of_image: Vec<Option<usize>>,
     full_sides: Vec<u8>,
-    variants: HashMap<(usize, u8), Arc<TileMesh>>,
+    variants: FastMap<(usize, u8), Arc<TileMesh>>,
     ready: bool,
 }
 
@@ -65,7 +65,7 @@ impl ObjectGeometry {
             mesh_of_image: image_index(pattern),
             built,
             full_sides,
-            variants: HashMap::new(),
+            variants: FastMap::default(),
             ready: false,
         }
     }

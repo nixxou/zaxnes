@@ -3,8 +3,8 @@
 //! The geometry side of the engine (SPEC-04B §3.2 to §3.7) and the interface the conversion
 //! pipeline drives it through.
 
+use crate::hashing::FastMap;
 use std::any::Any;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::geometry::greedy;
@@ -166,7 +166,7 @@ impl PatternGeometryBuilder for NullPatternGeometryBuilder {
 /// [`GeometryBuilder::build_count`] is there so a test can prove it.
 #[derive(Debug, Clone)]
 pub struct GeometryBuilder {
-    geometry: HashMap<InstanceRef, ObjectGeometry>,
+    geometry: FastMap<InstanceRef, ObjectGeometry>,
     pending: Vec<InstanceRef>,
     built: usize,
     transferred: usize,
@@ -184,7 +184,7 @@ pub struct GeometryBuilder {
 impl Default for GeometryBuilder {
     fn default() -> Self {
         Self {
-            geometry: HashMap::new(),
+            geometry: FastMap::default(),
             pending: Vec::new(),
             built: 0,
             transferred: 0,

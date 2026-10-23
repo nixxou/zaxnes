@@ -6,8 +6,8 @@
 //! becomes an `RGBA8` texture holding the sRGB colours. Sampling is nearest neighbour without
 //! mipmap in both cases (REQ-E3D-563).
 
-use std::collections::HashMap;
 use std::sync::Arc;
+use zax_engine3d::hashing::FastMap;
 
 use glow::Texture;
 use zax_engine3d::geometry::texture::ObjectTexture;
@@ -35,7 +35,7 @@ struct Entry {
 #[derive(Debug)]
 pub struct TextureCache {
     gl: Gl,
-    entries: HashMap<*const ObjectTexture, Entry>,
+    entries: FastMap<*const ObjectTexture, Entry>,
     palette_bytes: [u8; FramePalette::ENTRY_COUNT * 3],
     palette: Texture,
     dummy_indexed: Texture,
@@ -57,7 +57,7 @@ impl TextureCache {
         let dummy_color = create(gl, glow::RGBA8, 1, glow::RGBA, glow::UNSIGNED_BYTE)?;
         Ok(Self {
             gl: gl.clone(),
-            entries: HashMap::new(),
+            entries: FastMap::default(),
             palette_bytes: [0; FramePalette::ENTRY_COUNT * 3],
             palette,
             dummy_indexed,
