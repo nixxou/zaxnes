@@ -520,6 +520,11 @@ version = "0.2.0"
 [[package]]
 name = "zax-engine3d"
 version = "0.2.0"
+dependencies = [
+ "thiserror",
+ "zax-nes",
+ "zax-profiles",
+]
 
 [[package]]
 name = "zax-goldens"
