@@ -9,8 +9,13 @@ use common::LoopHarness;
 
 /// What a run leaves: emulated frames, the counter the ROM increments, the picture.
 fn run(separate_core: bool, ticks: usize) -> (i64, u8, Vec<u8>) {
+    run_with(separate_core, true, ticks)
+}
+
+fn run_with(separate_core: bool, ahead: bool, ticks: usize) -> (i64, u8, Vec<u8>) {
     let mut harness = LoopHarness::create();
     harness.host.separate_core = separate_core;
+    harness.host.core_ahead = ahead;
     harness.launch("g1");
     for _ in 0..ticks {
         harness.tick_frame();
@@ -30,6 +35,15 @@ fn the_game_runs_the_same_frames_on_the_emulation_thread() {
     let threaded = run(true, 150);
     assert!(alone.0 > 100, "{}", alone.0);
     assert_eq!(alone, threaded);
+}
+
+#[test]
+fn the_frames_are_the_same_with_and_without_emulation_ahead() {
+    // The test profile has no script, so it may run ahead.
+    let serial = run_with(true, false, 150);
+    let ahead = run_with(true, true, 150);
+    assert_eq!(run(false, 150), serial);
+    assert_eq!(serial, ahead);
 }
 
 #[test]
