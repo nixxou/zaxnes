@@ -1159,6 +1159,7 @@ dependencies = [
  "zax-profiles",
  "zax-render",
  "zax-scripting",
+ "zax-settings",
 ]
 
 [[package]]

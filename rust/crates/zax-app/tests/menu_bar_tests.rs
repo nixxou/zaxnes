@@ -1,5 +1,7 @@
 //! The menu bar and the fixed shortcuts (`MenuBarTests.cs`).
 
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
 mod common;
 mod ui_harness;
 
@@ -318,7 +320,7 @@ fn req_ui_204_the_shortcut_table_resolves_each_combination() {
     assert_eq!(3, args.number);
 
     // An exact modifier match: P under Ctrl is nothing at all.
-    assert!(menu_shortcuts::resolve(&[Key::P], control).is_empty());
+    assert_eq!(0, menu_shortcuts::resolve(&[Key::P], control).len());
 }
 
 #[test]
@@ -332,7 +334,7 @@ fn req_ui_204_the_shortcut_table_has_no_conflict() {
             shortcut.modifiers.alt,
         );
         assert!(seen.insert(combination), "{} is used twice", shortcut.text);
-        assert!(!shortcut.text.is_empty());
+        assert_ne!(shortcut.text, "");
     }
 }
 

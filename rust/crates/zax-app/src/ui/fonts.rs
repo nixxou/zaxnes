@@ -25,10 +25,11 @@ pub const ASCII_POINTER: u32 = 0x3E;
 
 /// What the font atlas needs: Latin-1 (the accents and the guillemets), the ligature of "Cœur
 /// d'émulation" (REQ-UI-202), the dashes (the "unbound" sign of DEC-08-5), the typographic
-/// quotes, the ellipsis and the small triangles; zero ends the list.
-static GLYPH_RANGES: [u32; 15] = [
+/// quotes, the ellipsis and the small triangles, as pairs of first and last code point, then
+/// the zero that ends the list.
+static GLYPH_RANGES: [u32; 13] = [
     0x0020, 0x00FF, 0x0152, 0x0153, 0x2010, 0x2015, 0x2018, 0x201F, 0x2026, 0x2026, 0x25B6, 0x25BA,
-    0x0000, 0x0000, 0x0000,
+    0x0000,
 ];
 
 /// The substitutes the built-in font gets: Latin-1 is there, so the French accents survive, but

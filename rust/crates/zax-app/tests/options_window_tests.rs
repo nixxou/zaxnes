@@ -1,5 +1,7 @@
 //! The options window as data and as a drawn frame (`OptionsWindowTests.cs`).
 
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
 mod common;
 mod ui_harness;
 
@@ -120,7 +122,7 @@ fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
     for tab in options::TABS {
         assert!(!model.rows(tab).is_empty());
         for row in model.rows(tab) {
-            assert!(!row.label().is_empty());
+            assert_ne!(row.label(), "");
         }
     }
 

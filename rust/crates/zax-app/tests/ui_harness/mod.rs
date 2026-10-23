@@ -4,6 +4,8 @@
 #![allow(dead_code)] // each integration test crate uses a part of this module
 #![allow(clippy::expect_used, clippy::unwrap_used)] // test support code
 
+pub mod bundle_support;
+
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -68,16 +70,26 @@ pub struct ImGuiHarness {
 
 impl ImGuiHarness {
     pub fn new() -> Self {
+        let mut harness = Self::bare();
+        harness.context.fonts().build_rgba32_texture();
+        harness
+    }
+
+    /// A context whose font atlas is not built yet, for the tests that load their own fonts.
+    pub fn bare() -> Self {
         let turn = ONE_CONTEXT.lock().unwrap_or_else(PoisonError::into_inner);
         let mut context = imgui::Context::create();
         context.set_ini_filename(None);
         context.io_mut().display_size = [1280.0, 720.0];
         context.io_mut().delta_time = 1.0 / 60.0;
-        context.fonts().build_rgba32_texture();
         Self {
             context,
             _turn: turn,
         }
+    }
+
+    pub fn context_mut(&mut self) -> &mut imgui::Context {
+        &mut self.context
     }
 
     /// Runs one frame of `draw`.
@@ -176,6 +188,7 @@ impl UiHarness {
     pub fn tick(&mut self, seconds: f64) -> u32 {
         self.clock.set(self.clock.get() + seconds);
         self.host.set_modal_window_open(self.ui.state.is_modal());
+        #[allow(clippy::cast_possible_truncation)] // the C# `(float)seconds`
         let snapshot = self.sample(seconds as f32);
         let emulated = self.host.tick(seconds, &snapshot);
         self.pump();
