@@ -16,7 +16,8 @@ use crate::user_data_paths::{write_atomic, UserDataPaths};
 /// Notification text of an unreadable settings file.
 pub const UNREADABLE_MESSAGE: &str = SettingsFile::<UserDataSettingsStorage>::UNREADABLE_MESSAGE;
 /// Notification text of a settings file written by a newer version.
-pub const NEWER_VERSION_MESSAGE: &str = SettingsFile::<UserDataSettingsStorage>::NEWER_VERSION_MESSAGE;
+pub const NEWER_VERSION_MESSAGE: &str =
+    SettingsFile::<UserDataSettingsStorage>::NEWER_VERSION_MESSAGE;
 /// Schema version of the settings file.
 pub const SCHEMA_VERSION: i64 = SettingsFile::<UserDataSettingsStorage>::CURRENT_SCHEMA_VERSION;
 /// How long after a change the file is written, in real seconds.
@@ -61,7 +62,8 @@ impl SettingsStorage for UserDataSettingsStorage {
         if !self.writable {
             return Err(StorageError::ReadOnly);
         }
-        write_atomic(&self.path_of(name), contents).map_err(|_| StorageError::Failed(name.to_owned()))
+        write_atomic(&self.path_of(name), contents)
+            .map_err(|_| StorageError::Failed(name.to_owned()))
     }
 
     fn rename(&mut self, name: &str, target: &str) -> Result<(), StorageError> {

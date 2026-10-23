@@ -8,7 +8,7 @@ use super::{EmulationHost, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH};
 use crate::audio::UiSound;
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
-use crate::emulation::notification_center::{DEFAULT_SECONDS, SHORT_SECONDS, NotificationSeverity};
+use crate::emulation::notification_center::{NotificationSeverity, DEFAULT_SECONDS, SHORT_SECONDS};
 use crate::persistence::save_slots::{is_valid_slot_id, QUICK_SLOT_ID};
 use crate::persistence::save_state_file::{self, SaveStateContent, SaveStateHeader};
 use crate::user_data_paths::{remove_file_if_present, write_atomic};
@@ -52,7 +52,10 @@ impl<C: GameCatalog> EmulationHost<C> {
         // REQ-LOOP-041: a save only happens outside Stopped and with a current game.
         if self.state == EmulationState::Stopped
             || self.loading
-            || !self.session.as_ref().is_some_and(crate::game_session::GameSession::has_rom)
+            || !self
+                .session
+                .as_ref()
+                .is_some_and(crate::game_session::GameSession::has_rom)
         {
             return false;
         }
@@ -75,7 +78,11 @@ impl<C: GameCatalog> EmulationHost<C> {
         let Some(content) = self.capture_save_state(slot_id) else {
             return false;
         };
-        let picture = if with_thumbnail { self.thumbnail_for_slot() } else { None };
+        let picture = if with_thumbnail {
+            self.thumbnail_for_slot()
+        } else {
+            None
+        };
         match self.write_slot(slot_id, &content, picture.as_deref()) {
             Ok(()) => true,
             Err(error) => {
@@ -87,19 +94,30 @@ impl<C: GameCatalog> EmulationHost<C> {
         }
     }
 
-    fn write_slot(&mut self, slot_id: &str, content: &SaveStateContent, picture: Option<&[u8]>) -> std::io::Result<()> {
-        self.slots.occupy(slot_id, &content.header.game_id, content.header.saved_at, picture.is_some());
+    fn write_slot(
+        &mut self,
+        slot_id: &str,
+        content: &SaveStateContent,
+        picture: Option<&[u8]>,
+    ) -> std::io::Result<()> {
+        self.slots.occupy(
+            slot_id,
+            &content.header.game_id,
+            content.header.saved_at,
+            picture.is_some(),
+        );
         self.slots.save(&self.paths)?;
         let file = save_state_file::write(content);
-        let bound = self
-            .session
-            .as_ref()
-            .map_or(0, |session| save_state_file::max_file_size(session.core().max_state_size()));
+        let bound = self.session.as_ref().map_or(0, |session| {
+            save_state_file::max_file_size(session.core().max_state_size())
+        });
         if file.len() > bound {
             // REQ-ARCH-013: the announced bound must hold for the whole session. Going past it
             // is a bug in the bound, not a reason to lose the user's state, so it is logged and
             // the state is still written.
-            self.log(&format!("savestate of slot {slot_id} is larger than the announced bound."));
+            self.log(&format!(
+                "savestate of slot {slot_id} is larger than the announced bound."
+            ));
         }
         write_atomic(&self.paths.slot_state_file(slot_id), &file)?;
         let thumbnail_file = self.paths.slot_thumbnail_file(slot_id);
@@ -158,7 +176,12 @@ impl<C: GameCatalog> EmulationHost<C> {
 
     /// Goes back to the second-to-last snapshot (REQ-LOOP-032).
     pub(super) fn perform_rollback(&mut self) {
-        if self.state == EmulationState::Stopped || !self.session.as_ref().is_some_and(crate::game_session::GameSession::has_rom) {
+        if self.state == EmulationState::Stopped
+            || !self
+                .session
+                .as_ref()
+                .is_some_and(crate::game_session::GameSession::has_rom)
+        {
             return;
         }
         self.notifications

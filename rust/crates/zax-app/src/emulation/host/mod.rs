@@ -112,7 +112,12 @@ pub struct EmulationHostOptions<C: GameCatalog> {
 impl<C: GameCatalog> EmulationHostOptions<C> {
     /// Options with the required parts; everything else is absent.
     #[must_use]
-    pub fn new(paths: UserDataPaths, settings: SettingsModel, scene: SharedScene, games: C) -> Self {
+    pub fn new(
+        paths: UserDataPaths,
+        settings: SettingsModel,
+        scene: SharedScene,
+        games: C,
+    ) -> Self {
         Self {
             paths,
             settings,
@@ -408,13 +413,19 @@ impl<C: GameCatalog> EmulationHost<C> {
     pub fn port_type(&self, port: usize) -> zax_nes::ControllerPortType {
         self.session
             .as_ref()
-            .map_or(zax_nes::ControllerPortType::Controller, |session| session.port_type(port))
+            .map_or(zax_nes::ControllerPortType::Controller, |session| {
+                session.port_type(port)
+            })
     }
 
     /// Whether the pointer drives a Zapper (REQ-INP-061).
     #[must_use]
     pub fn zapper_active(&self) -> bool {
-        routing::zapper_active(self.state == EmulationState::Running, self.port_type(0), self.port_type(1))
+        routing::zapper_active(
+            self.state == EmulationState::Running,
+            self.port_type(0),
+            self.port_type(1),
+        )
     }
 
     /// Whether the interface holds a modal window.
@@ -514,8 +525,14 @@ impl<C: GameCatalog> EmulationHost<C> {
     }
 
     /// Runs the emulated frames that are due now.
-    pub fn run_due_frames(&mut self, player_one: crate::input::InputAction, player_two: crate::input::InputAction) -> u32 {
-        if self.state != EmulationState::Running || !self.session.as_ref().is_some_and(GameSession::has_rom) {
+    pub fn run_due_frames(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) -> u32 {
+        if self.state != EmulationState::Running
+            || !self.session.as_ref().is_some_and(GameSession::has_rom)
+        {
             return 0;
         }
         self.apply_speed();
@@ -535,11 +552,7 @@ impl<C: GameCatalog> EmulationHost<C> {
                 self.rollback.capture(state);
             }
             // REQ-INP-005: one emulated frame is one sample, fast forward included.
-            let port_byte = self.zapper.port_byte();
-            let position = self.zapper.position();
-            if let Some(session) = self.session.as_mut() {
-                session.run_frame(&mut self.settings, player_one, player_two, port_byte, position);
-            }
+            self.run_session_frame(player_one, player_two);
             self.emulated_frames += 1;
             if self.fast_forward.is_active() {
                 self.fast_forward.on_frame_run();
@@ -552,6 +565,26 @@ impl<C: GameCatalog> EmulationHost<C> {
         }
         self.dispatch_setting_changes();
         due
+    }
+
+    /// Runs one emulated frame of the session right now, outside the frame clock: no rollback
+    /// snapshot, no accounting. The input is the sample of that frame.
+    pub fn run_session_frame(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) {
+        let port_byte = self.zapper.port_byte();
+        let position = self.zapper.position();
+        if let Some(session) = self.session.as_mut() {
+            session.run_frame(
+                &mut self.settings,
+                player_one,
+                player_two,
+                port_byte,
+                position,
+            );
+        }
     }
 
     /// Stops the current game, writes the slot index and the settings (REQ-LOOP-052).
@@ -573,7 +606,11 @@ impl<C: GameCatalog> EmulationHost<C> {
         }
         // REQ-LOOP-006: the capture of the game view is taken before the menu appears.
         if self.state == EmulationState::Running && next == EmulationState::Paused {
-            if let Some(capture) = self.capture_thumbnail.as_mut().and_then(|capture| capture()) {
+            if let Some(capture) = self
+                .capture_thumbnail
+                .as_mut()
+                .and_then(|capture| capture())
+            {
                 self.pause_thumbnail = Some(capture);
             }
             // REQ-PERS-036, third source: the cover of the "2D Mode" entry follows the pause
@@ -590,7 +627,11 @@ impl<C: GameCatalog> EmulationHost<C> {
         // the game is paused, the frozen frame a desktop emulator shows. Q-029.
         self.scene.borrow_mut().game_running = self.state != EmulationState::Stopped;
         self.load_progress = self.session.as_ref().map_or(
-            if self.state == EmulationState::Stopped { 0.0 } else { 1.0 },
+            if self.state == EmulationState::Stopped {
+                0.0
+            } else {
+                1.0
+            },
             |session| session.engine().load_progress(),
         );
         if let Some(mixer) = &mut self.mixer {
@@ -682,28 +723,36 @@ impl<C: GameCatalog> EmulationHost<C> {
                 }
                 self.apply_speed();
             }
-            SettingId::AudioVolume | SettingId::AudioMute | SettingId::AudioBgMusic => self.publish_state(),
+            SettingId::AudioVolume | SettingId::AudioMute | SettingId::AudioBgMusic => {
+                self.publish_state()
+            }
             SettingId::UiLanguage => {
                 // AMD-035 §1: the change applies immediately. Everything the interface draws
                 // reads the table through the language, and the models that cache their labels
                 // watch its generation counter.
-                self.events.push(HostEvent::LanguageChanged(self.settings.language()));
+                self.events
+                    .push(HostEvent::LanguageChanged(self.settings.language()));
             }
-            SettingId::VideoSkipFrame => self.scene.borrow_mut().settings.skip_render = self.settings.skip_frame(),
+            SettingId::VideoSkipFrame => {
+                self.scene.borrow_mut().settings.skip_render = self.settings.skip_frame()
+            }
             SettingId::VideoFrameRate => {
                 self.scene
                     .borrow_mut()
                     .settings
                     .set_target_frame_rate(self.settings.frame_rate());
             }
-            SettingId::VideoVSync => self.scene.borrow_mut().settings.set_vsync(self.settings.vsync()),
+            SettingId::VideoVSync => self
+                .scene
+                .borrow_mut()
+                .settings
+                .set_vsync(self.settings.vsync()),
             SettingId::VideoAntiAlias => {
                 // AMD-032 §2: the setting takes effect on the next rendered frame, the renderer
                 // reallocating its multisampled target by itself. No restart.
-                self.scene
-                    .borrow_mut()
-                    .settings
-                    .set_anti_alias_samples(render_geometry::anti_alias_samples(self.settings.anti_alias()));
+                self.scene.borrow_mut().settings.set_anti_alias_samples(
+                    render_geometry::anti_alias_samples(self.settings.anti_alias()),
+                );
             }
             _ => {}
         }
@@ -733,7 +782,9 @@ impl<C: GameCatalog> EmulationHost<C> {
         let offset = self
             .session
             .as_ref()
-            .map_or(zax_render::numerics::Vector3::ZERO, |session| session.zapper_offset().into());
+            .map_or(zax_render::numerics::Vector3::ZERO, |session| {
+                session.zapper_offset().into()
+            });
         self.zapper.update(
             true,
             &ZapperInput {
@@ -749,9 +800,11 @@ impl<C: GameCatalog> EmulationHost<C> {
 
     #[allow(clippy::cast_possible_truncation)] // the C# `(float)realSeconds`
     fn read_hotkeys(&mut self, snapshot: &InputSnapshot, real_seconds: f64) {
-        let events = self
-            .hotkeys
-            .update(snapshot.player_one, snapshot.player_two, real_seconds as f32);
+        let events = self.hotkeys.update(
+            snapshot.player_one,
+            snapshot.player_two,
+            real_seconds as f32,
+        );
         if events.contains(HotkeyEvents::MENU_LONG) && !self.loading {
             // REQ-INP-101 and REQ-UI-005: a long press resets the view without changing the
             // pause state, and is inactive while the loading indicator is up.
@@ -802,7 +855,11 @@ impl<C: GameCatalog> EmulationHost<C> {
         // production down, an empty one speeds it up.
         let cap = zax_nes::apu::Apu2A03::MAX_RATIO_ADJUSTMENT;
         let adjustment = (-error * 0.002).clamp(-cap, cap);
-        if session.core_mut().set_audio_ratio_adjustment(adjustment).is_err() {
+        if session
+            .core_mut()
+            .set_audio_ratio_adjustment(adjustment)
+            .is_err()
+        {
             self.log("the core refused the audio ratio adjustment.");
         }
     }
@@ -853,5 +910,4 @@ impl<C: GameCatalog> EmulationHost<C> {
             self.dispatch_setting_changes();
         }
     }
-
 }

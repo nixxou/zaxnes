@@ -68,8 +68,24 @@ pub const ALL: [InputAction; COUNT] = [
 #[must_use]
 pub fn name_of(action: InputAction) -> &'static str {
     const NAMES: [&str; COUNT] = [
-        "Left", "Right", "Up", "Down", "A", "B", "Select", "Start", "RotLeft", "RotRight",
-        "RotUp", "RotDown", "ZoomIn", "ZoomOut", "Menu", "RollBack", "FastForward", "QuickSave",
+        "Left",
+        "Right",
+        "Up",
+        "Down",
+        "A",
+        "B",
+        "Select",
+        "Start",
+        "RotLeft",
+        "RotRight",
+        "RotUp",
+        "RotDown",
+        "ZoomIn",
+        "ZoomOut",
+        "Menu",
+        "RollBack",
+        "FastForward",
+        "QuickSave",
         "QuickLoad",
     ];
     ALL.iter()

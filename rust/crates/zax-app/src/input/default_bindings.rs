@@ -32,23 +32,74 @@ pub const PLAYER_ONE_KEYBOARD: [(InputAction, Key); 17] = [
 #[must_use]
 pub fn standard_gamepad_set() -> [(InputAction, PhysicalControl); 17] {
     [
-        (InputAction::LEFT, PhysicalControl::button(standard_gamepad::D_PAD_LEFT)),
-        (InputAction::RIGHT, PhysicalControl::button(standard_gamepad::D_PAD_RIGHT)),
-        (InputAction::UP, PhysicalControl::button(standard_gamepad::D_PAD_UP)),
-        (InputAction::DOWN, PhysicalControl::button(standard_gamepad::D_PAD_DOWN)),
-        (InputAction::A, PhysicalControl::button(standard_gamepad::SOUTH)),
-        (InputAction::B, PhysicalControl::button(standard_gamepad::WEST)),
-        (InputAction::SELECT, PhysicalControl::button(standard_gamepad::BACK)),
-        (InputAction::START, PhysicalControl::button(standard_gamepad::START)),
-        (InputAction::ROLL_BACK, PhysicalControl::button(standard_gamepad::NORTH)),
-        (InputAction::FAST_FORWARD, PhysicalControl::button(standard_gamepad::EAST)),
-        (InputAction::ROT_LEFT, PhysicalControl::axis_negative(standard_gamepad::RIGHT_STICK_X)),
-        (InputAction::ROT_RIGHT, PhysicalControl::axis_positive(standard_gamepad::RIGHT_STICK_X)),
-        (InputAction::ROT_UP, PhysicalControl::axis_positive(standard_gamepad::RIGHT_STICK_Y)),
-        (InputAction::ROT_DOWN, PhysicalControl::axis_negative(standard_gamepad::RIGHT_STICK_Y)),
-        (InputAction::ZOOM_IN, PhysicalControl::trigger(standard_gamepad::LEFT_TRIGGER)),
-        (InputAction::ZOOM_OUT, PhysicalControl::trigger(standard_gamepad::RIGHT_TRIGGER)),
-        (InputAction::MENU, PhysicalControl::button(standard_gamepad::RIGHT_STICK)),
+        (
+            InputAction::LEFT,
+            PhysicalControl::button(standard_gamepad::D_PAD_LEFT),
+        ),
+        (
+            InputAction::RIGHT,
+            PhysicalControl::button(standard_gamepad::D_PAD_RIGHT),
+        ),
+        (
+            InputAction::UP,
+            PhysicalControl::button(standard_gamepad::D_PAD_UP),
+        ),
+        (
+            InputAction::DOWN,
+            PhysicalControl::button(standard_gamepad::D_PAD_DOWN),
+        ),
+        (
+            InputAction::A,
+            PhysicalControl::button(standard_gamepad::SOUTH),
+        ),
+        (
+            InputAction::B,
+            PhysicalControl::button(standard_gamepad::WEST),
+        ),
+        (
+            InputAction::SELECT,
+            PhysicalControl::button(standard_gamepad::BACK),
+        ),
+        (
+            InputAction::START,
+            PhysicalControl::button(standard_gamepad::START),
+        ),
+        (
+            InputAction::ROLL_BACK,
+            PhysicalControl::button(standard_gamepad::NORTH),
+        ),
+        (
+            InputAction::FAST_FORWARD,
+            PhysicalControl::button(standard_gamepad::EAST),
+        ),
+        (
+            InputAction::ROT_LEFT,
+            PhysicalControl::axis_negative(standard_gamepad::RIGHT_STICK_X),
+        ),
+        (
+            InputAction::ROT_RIGHT,
+            PhysicalControl::axis_positive(standard_gamepad::RIGHT_STICK_X),
+        ),
+        (
+            InputAction::ROT_UP,
+            PhysicalControl::axis_positive(standard_gamepad::RIGHT_STICK_Y),
+        ),
+        (
+            InputAction::ROT_DOWN,
+            PhysicalControl::axis_negative(standard_gamepad::RIGHT_STICK_Y),
+        ),
+        (
+            InputAction::ZOOM_IN,
+            PhysicalControl::trigger(standard_gamepad::LEFT_TRIGGER),
+        ),
+        (
+            InputAction::ZOOM_OUT,
+            PhysicalControl::trigger(standard_gamepad::RIGHT_TRIGGER),
+        ),
+        (
+            InputAction::MENU,
+            PhysicalControl::button(standard_gamepad::RIGHT_STICK),
+        ),
     ]
 }
 

@@ -49,7 +49,11 @@ impl PressTracker {
     /// when the key is released.
     pub fn update(&mut self, down: bool, real_seconds: f32) -> PressKind {
         if down {
-            self.held = if self.down { self.held + real_seconds } else { 0.0 };
+            self.held = if self.down {
+                self.held + real_seconds
+            } else {
+                0.0
+            };
             self.down = true;
             if !self.consumed && self.held >= Self::LONG_PRESS_SECONDS {
                 self.consumed = true;

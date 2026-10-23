@@ -124,7 +124,8 @@ impl UserDataPaths {
         executable_directory: Option<&Path>,
         local_app_data_directory: Option<&Path>,
     ) -> Self {
-        let base = executable_directory.map_or_else(default_executable_directory, Path::to_path_buf);
+        let base =
+            executable_directory.map_or_else(default_executable_directory, Path::to_path_buf);
         let explicit_root = explicit_root.filter(|root| !root.as_os_str().is_empty());
         let mut paths = match explicit_root {
             Some(root) => Self::new(absolute(root), UserDataRootKind::Explicit, base),
@@ -197,7 +198,12 @@ pub fn try_copy_legacy_root(legacy_root: &Path, new_root: &Path) -> bool {
 }
 
 fn same_folder(left: &Path, right: &Path) -> bool {
-    let normal = |path: &Path| absolute(path).to_string_lossy().trim_end_matches(['/', '\\']).to_lowercase();
+    let normal = |path: &Path| {
+        absolute(path)
+            .to_string_lossy()
+            .trim_end_matches(['/', '\\'])
+            .to_lowercase()
+    };
     normal(left) == normal(right)
 }
 
@@ -221,7 +227,9 @@ fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
 /// # Errors
 /// The folder or the file could not be written.
 pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
-    let directory = path.parent().filter(|parent| !parent.as_os_str().is_empty());
+    let directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
     if let Some(directory) = directory {
         fs::create_dir_all(directory)?;
     }
@@ -268,7 +276,11 @@ fn default_executable_directory() -> PathBuf {
 }
 
 fn default_local_app_data() -> Option<PathBuf> {
-    let from_env = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty()).map(PathBuf::from);
+    let from_env = |name: &str| {
+        std::env::var_os(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    };
     from_env("LOCALAPPDATA")
         .or_else(|| from_env("XDG_DATA_HOME"))
         .or_else(|| from_env("HOME").map(|home| home.join(".local").join("share")))

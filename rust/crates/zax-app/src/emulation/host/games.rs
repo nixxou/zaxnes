@@ -100,7 +100,10 @@ impl<C: GameCatalog> EmulationHost<C> {
         if game_id.is_empty() || self.loading || !self.games.can_delete(game_id) {
             return false;
         }
-        let title = self.games.title(game_id).unwrap_or_else(|| game_id.to_owned());
+        let title = self
+            .games
+            .title(game_id)
+            .unwrap_or_else(|| game_id.to_owned());
         self.confirm(ConfirmationRequest {
             title,
             message: DELETE_GAME_QUESTION.to_owned(),
@@ -117,7 +120,10 @@ impl<C: GameCatalog> EmulationHost<C> {
             return false;
         }
         // The title is read before the entry goes, so the notification can name the game.
-        let title = self.games.title(game_id).unwrap_or_else(|| game_id.to_owned());
+        let title = self
+            .games
+            .title(game_id)
+            .unwrap_or_else(|| game_id.to_owned());
         // 1. The emulation stops when the game being deleted is the one playing.
         if self.current_game_id() == Some(game_id) {
             self.stop_current_game(true, true);
@@ -162,7 +168,12 @@ impl<C: GameCatalog> EmulationHost<C> {
         }
         let (id, fallback_title) = (game.id.clone(), game.title.clone());
         let title = self.games.title(&id).unwrap_or(fallback_title);
-        let stored = Some(game_art::import_cover(&self.paths, &title, &id, std::path::Path::new(path)));
+        let stored = Some(game_art::import_cover(
+            &self.paths,
+            &title,
+            &id,
+            std::path::Path::new(path),
+        ));
         self.store_cover(&id, stored, false)
     }
 
@@ -181,7 +192,12 @@ impl<C: GameCatalog> EmulationHost<C> {
         self.store_cover(&id, stored, true);
     }
 
-    fn store_cover(&mut self, game_id: &str, stored: Option<Result<String, String>>, quiet: bool) -> bool {
+    fn store_cover(
+        &mut self,
+        game_id: &str,
+        stored: Option<Result<String, String>>,
+        quiet: bool,
+    ) -> bool {
         match stored {
             Some(Ok(file_name)) => {
                 self.games.set_cover(game_id, Some(&file_name));

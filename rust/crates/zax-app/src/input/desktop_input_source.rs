@@ -2,7 +2,9 @@
 //! frame (SPEC-08 §3), through the bindings and the pad assignment.
 
 use zax_platform::input::calibration;
-use zax_platform::input::{GamepadDevice, GamepadHub, KeyboardDevice, PhysicalControl, PointerDevice};
+use zax_platform::input::{
+    GamepadDevice, GamepadHub, KeyboardDevice, PhysicalControl, PointerDevice,
+};
 
 use super::gamepad_assignment::GamepadAssignment;
 use super::input_action::{InputAction, PLAYER_COUNT};

@@ -69,7 +69,11 @@ impl VideoPacing {
     }
 
     /// Applies the current request to the window and logs what it did.
-    pub fn apply(&mut self, surface: &mut dyn DisplaySurface, model: &SettingsModel) -> DisplayPacingState {
+    pub fn apply(
+        &mut self,
+        surface: &mut dyn DisplaySurface,
+        model: &SettingsModel,
+    ) -> DisplayPacingState {
         let request = (self.request)(model);
         let state = pacing::apply(surface, request.vsync, request.target_frame_rate);
         self.state = Some(state);
@@ -82,7 +86,12 @@ impl VideoPacing {
 
     /// Follows a change of setting: both settings take effect immediately, whoever changed
     /// them, the options window, a menu, a libretro core option or a script (REQ-PERS-084).
-    pub fn on_setting_changed(&mut self, surface: &mut dyn DisplaySurface, model: &SettingsModel, id: SettingId) {
+    pub fn on_setting_changed(
+        &mut self,
+        surface: &mut dyn DisplaySurface,
+        model: &SettingsModel,
+        id: SettingId,
+    ) {
         if matches!(id, SettingId::VideoVSync | SettingId::VideoFrameRate) {
             self.apply(surface, model);
         }

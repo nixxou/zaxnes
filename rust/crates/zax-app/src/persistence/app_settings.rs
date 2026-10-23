@@ -315,11 +315,17 @@ impl AppSettingsMut for SettingsModel {
     }
 
     fn set_anti_alias(&mut self, value: i32) {
-        self.set(SettingId::VideoAntiAlias, SettingValue::Enum(value.clamp(0, 2)));
+        self.set(
+            SettingId::VideoAntiAlias,
+            SettingValue::Enum(value.clamp(0, 2)),
+        );
     }
 
     fn set_render_method(&mut self, value: i32) {
-        self.set(SettingId::VideoRenderMethod, SettingValue::Enum(value.clamp(0, 1)));
+        self.set(
+            SettingId::VideoRenderMethod,
+            SettingValue::Enum(value.clamp(0, 1)),
+        );
     }
 
     fn set_shadow(&mut self, value: bool) {
@@ -347,7 +353,10 @@ impl AppSettingsMut for SettingsModel {
     }
 
     fn set_sort_option(&mut self, value: i32) {
-        self.set(SettingId::UiSortOption, SettingValue::Enum(value.clamp(0, 1)));
+        self.set(
+            SettingId::UiSortOption,
+            SettingValue::Enum(value.clamp(0, 1)),
+        );
     }
 
     fn set_language(&mut self, value: &str) {

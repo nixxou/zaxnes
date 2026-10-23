@@ -35,7 +35,12 @@ impl MenuNavigation {
     /// Feeds the held actions and reports the menu events of this frame. Outside a paused,
     /// unsuspended game the edges are still consumed, so a key already held when the menu opens
     /// does not count as a press.
-    pub fn update(&mut self, mask: InputAction, paused: bool, suspended: bool) -> MenuNavigationEvents {
+    pub fn update(
+        &mut self,
+        mask: InputAction,
+        paused: bool,
+        suspended: bool,
+    ) -> MenuNavigationEvents {
         let left = self.left.rising(mask.contains(InputAction::LEFT));
         let right = self.right.rising(mask.contains(InputAction::RIGHT));
         let up = self.up.rising(mask.contains(InputAction::UP));

@@ -11,14 +11,16 @@ use zax_profiles::enums::TvRegionMode;
 
 use super::EmulationHost;
 use crate::audio::audio_mixer::AudioSampleSource;
+use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::{GameCatalog, ResolvedGame};
 use crate::emulation::rom_file::{self, RomData, INVALID_ROM_MESSAGE};
 use crate::game_session::{GameSession, SessionRequest};
 use crate::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
 use crate::persistence::save_slots::is_valid_slot_id;
-use crate::persistence::save_state_file::{self, SaveStateContent, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE};
-use crate::emulation::commands::{Command, CommandArgs};
+use crate::persistence::save_state_file::{
+    self, SaveStateContent, CORRUPTED_MESSAGE, GAME_MISSING_MESSAGE,
+};
 
 /// What a load job does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,8 +146,10 @@ impl<C: GameCatalog> EmulationHost<C> {
             return;
         }
         // REQ-PERS-032: the ROM path of the entry, and the per-file choice of Q-036.
-        let full = std::path::absolute(rom_path)
-            .map_or_else(|_| rom_path.to_owned(), |path| path.to_string_lossy().into_owned());
+        let full = std::path::absolute(rom_path).map_or_else(
+            |_| rom_path.to_owned(),
+            |path| path.to_string_lossy().into_owned(),
+        );
         self.games.set_rom_path(game_id, &full);
         if let Some(store) = &mut self.settings_store {
             store.games_mut().set_profile_for(&full, game_id);
@@ -278,12 +282,14 @@ impl<C: GameCatalog> EmulationHost<C> {
         match job.stage {
             0 => {
                 // Step 1: the launch date feeds the "Recent" sort (REQ-PERS-033).
-                self.games.mark_played(&game.id, (self.now)().unix_timestamp());
+                self.games
+                    .mark_played(&game.id, (self.now)().unix_timestamp());
                 // Step 3: the running game is stopped, End hook and 3D scene emptied, and the
                 // profile data is unloaded only when the game differs or is "2D Mode"
                 // (REQ-LOOP-021, REQ-PERS-006).
                 job.different_game = self.current_game_id() != Some(game.id.as_str());
-                job.reload_profile = self.session.is_none() || job.different_game || game.is_generic();
+                job.reload_profile =
+                    self.session.is_none() || job.different_game || game.is_generic();
                 self.stop_current_game(false, job.reload_profile);
                 job.stage = 1;
                 Step::Continue
@@ -349,7 +355,8 @@ impl<C: GameCatalog> EmulationHost<C> {
             0 => {
                 // Step 3: same stop as a launch.
                 job.different_game = self.current_game_id() != Some(game.id.as_str());
-                job.reload_profile = self.session.is_none() || job.different_game || game.is_generic();
+                job.reload_profile =
+                    self.session.is_none() || job.different_game || game.is_generic();
                 self.stop_current_game(false, job.reload_profile);
                 job.state = Some(state);
                 job.stage = 1;
@@ -381,7 +388,12 @@ impl<C: GameCatalog> EmulationHost<C> {
 
     /// Step 5 of a slot load, in the order of DEC-R2-T6: core, learned conversion state and
     /// camera, then `PData`, then Start, then Load.
-    fn restore_slot(&mut self, job: &mut LoadJob, game: &ResolvedGame, state: &SaveStateContent) -> Step {
+    fn restore_slot(
+        &mut self,
+        job: &mut LoadJob,
+        game: &ResolvedGame,
+        state: &SaveStateContent,
+    ) -> Step {
         let Some(session) = self.session.as_mut() else {
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
@@ -471,7 +483,11 @@ impl<C: GameCatalog> EmulationHost<C> {
             session.reset_frame_counter();
         }
         // REQ-AUD-010: no sound of the previous session is ever replayed.
-        session.core_mut().bus_mut().apu_mut().drop_pending_samples();
+        session
+            .core_mut()
+            .bus_mut()
+            .apu_mut()
+            .drop_pending_samples();
         self.rollback.clear();
         self.fast_forward.clear();
         self.apply_speed();
@@ -482,7 +498,12 @@ impl<C: GameCatalog> EmulationHost<C> {
     }
 
     /// Q-031: the region of the ROM when the automatic mode is on, the profile's otherwise.
-    fn apply_region_on_load(&mut self, detected: NesRegion, profile_reloaded: bool, game: &ResolvedGame) {
+    fn apply_region_on_load(
+        &mut self,
+        detected: NesRegion,
+        profile_reloaded: bool,
+        game: &ResolvedGame,
+    ) {
         if self.settings.auto_tv_mode() {
             self.settings.apply_detected_region(detected);
         } else if profile_reloaded {

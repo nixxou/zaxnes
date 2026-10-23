@@ -99,7 +99,11 @@ impl BindingSet {
     }
 
     fn insert(&mut self, target: BindingTarget, control: PhysicalControl) {
-        match self.bindings.iter_mut().find(|(candidate, _)| *candidate == target) {
+        match self
+            .bindings
+            .iter_mut()
+            .find(|(candidate, _)| *candidate == target)
+        {
             Some(entry) => entry.1 = control,
             None => self.bindings.push((target, control)),
         }
@@ -124,7 +128,10 @@ impl BindingSet {
     }
 
     /// Replaces every binding with `bindings`, dropping the ones this device cannot hold.
-    pub fn replace(&mut self, bindings: impl IntoIterator<Item = (BindingTarget, PhysicalControl)>) {
+    pub fn replace(
+        &mut self,
+        bindings: impl IntoIterator<Item = (BindingTarget, PhysicalControl)>,
+    ) {
         self.bindings.clear();
         for (target, control) in bindings {
             if !target.is_empty() && control.is_bound() && self.eligible(control) {

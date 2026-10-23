@@ -29,7 +29,10 @@ impl InputBindings {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            keyboards: [default_bindings::create_keyboard(0), default_bindings::create_keyboard(1)],
+            keyboards: [
+                default_bindings::create_keyboard(0),
+                default_bindings::create_keyboard(1),
+            ],
             gamepads: Vec::new(),
             last_gamepads: [None, None],
             structure_revision: 0,
@@ -42,7 +45,11 @@ impl InputBindings {
     pub fn revision(&self) -> u64 {
         self.structure_revision
             + self.keyboards.iter().map(BindingSet::revision).sum::<u64>()
-            + self.gamepads.iter().map(|(_, set)| set.revision()).sum::<u64>()
+            + self
+                .gamepads
+                .iter()
+                .map(|(_, set)| set.revision())
+                .sum::<u64>()
     }
 
     /// The identities of the gamepads that have a set, in the order they were added.
@@ -86,8 +93,10 @@ impl InputBindings {
         let position = if let Some(position) = existing {
             position
         } else {
-            self.gamepads
-                .push((identity.to_owned(), default_bindings::create_gamepad(standard)));
+            self.gamepads.push((
+                identity.to_owned(),
+                default_bindings::create_gamepad(standard),
+            ));
             self.structure_revision += 1;
             self.gamepads.len() - 1
         };
@@ -118,7 +127,8 @@ impl InputBindings {
     /// Puts `player`'s keyboard back to its defaults.
     pub fn reset_keyboard(&mut self, player: usize) {
         let defaults = default_bindings::create_keyboard(player);
-        self.keyboard_mut(player).replace(defaults.bindings().iter().cloned());
+        self.keyboard_mut(player)
+            .replace(defaults.bindings().iter().cloned());
     }
 
     /// Puts the pad `identity` back to the defaults of a `standard` pad.

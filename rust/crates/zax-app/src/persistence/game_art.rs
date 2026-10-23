@@ -37,7 +37,10 @@ pub fn sanitise_file_name(name: &str) -> String {
 /// The file name of the cover of the entry `id` titled `title`.
 #[must_use]
 pub fn cover_file_name(title: &str, id: &str) -> String {
-    format!("{}.png", sanitise_file_name(&format!("{title}{NAME_INFIX}{id}")))
+    format!(
+        "{}.png",
+        sanitise_file_name(&format!("{title}{NAME_INFIX}{id}"))
+    )
 }
 
 /// The cover file of an entry.
@@ -77,7 +80,14 @@ pub fn set_cover_from_capture(
 ) -> Option<Result<String, String>> {
     let size = MAXIMUM_WIDTH * MAXIMUM_HEIGHT * 3;
     let capture = capture.get(..size)?;
-    Some(write(paths, title, id, MAXIMUM_WIDTH, MAXIMUM_HEIGHT, capture))
+    Some(write(
+        paths,
+        title,
+        id,
+        MAXIMUM_WIDTH,
+        MAXIMUM_HEIGHT,
+        capture,
+    ))
 }
 
 /// Deletes the cover of an entry: both the derived name and whatever the entry recorded, so a
@@ -116,7 +126,11 @@ pub fn fitted_size(width: usize, height: usize) -> (usize, usize) {
     )
 }
 
-#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
 // image sizes are far below 2^24 and the quotient is positive, as the C# MathF.Round cast
 fn scaled(size: usize, factor: f32) -> usize {
     (size as f32 / factor).round() as usize
@@ -131,7 +145,8 @@ fn write(
     rgb: &[u8],
 ) -> Result<String, String> {
     let name = cover_file_name(title, id);
-    let encoded = png_image::encode_rgb(to_u32(width), to_u32(height), rgb).map_err(|error| error.to_string())?;
+    let encoded = png_image::encode_rgb(to_u32(width), to_u32(height), rgb)
+        .map_err(|error| error.to_string())?;
     fs::create_dir_all(&paths.covers_directory).map_err(|error| error.to_string())?;
     fs::write(paths.covers_directory.join(&name), encoded).map_err(|error| error.to_string())?;
     Ok(name)

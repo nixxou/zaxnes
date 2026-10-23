@@ -106,7 +106,9 @@ impl RebindingSession {
             BindingDeviceKind::Keyboard => Some(bindings.keyboard_mut(self.player)),
             BindingDeviceKind::Gamepad => {
                 let access = pads?;
-                access.pads.gamepad_bindings(access.hub, bindings, self.player)
+                access
+                    .pads
+                    .gamepad_bindings(access.hub, bindings, self.player)
             }
         }
     }
@@ -195,7 +197,9 @@ impl RebindingSession {
             BindingDeviceKind::Gamepad => {
                 // Buttons, hat, stick half-axes and triggers of the assigned pad, non-standard
                 // controls included (REQ-INP-021, REQ-INP-042).
-                if let Some(device) = pads.and_then(|access| access.pads.device(access.hub, self.player)) {
+                if let Some(device) =
+                    pads.and_then(|access| access.pads.device(access.hub, self.player))
+                {
                     device.collect_active_controls(&mut controls);
                 }
             }

@@ -60,8 +60,13 @@ pub fn camera_sources(
 
 /// Whether the pointer drives a Zapper: a game runs and one of the ports holds one.
 #[must_use]
-pub fn zapper_active(game_running: bool, port_one: ControllerPortType, port_two: ControllerPortType) -> bool {
-    game_running && (port_one == ControllerPortType::Zapper || port_two == ControllerPortType::Zapper)
+pub fn zapper_active(
+    game_running: bool,
+    port_one: ControllerPortType,
+    port_two: ControllerPortType,
+) -> bool {
+    game_running
+        && (port_one == ControllerPortType::Zapper || port_two == ControllerPortType::Zapper)
 }
 
 /// Adds the script pad's mask to the player it is attached to, never masking a physical input

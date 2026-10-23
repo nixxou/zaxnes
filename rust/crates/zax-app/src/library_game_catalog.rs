@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use time::OffsetDateTime;
 use zax_profiles::catalogue::{
-    built_in, import_messages, ProfileFolders, ProfileImportOutcome,
-    ProfileImportResult, ProfileOrigin, UserProfile, UserProfileFolder,
+    built_in, import_messages, ProfileFolders, ProfileImportOutcome, ProfileImportResult,
+    ProfileOrigin, UserProfile, UserProfileFolder,
 };
 use zax_profiles::format::{self, ProfileLog};
 use zax_profiles::import::{ThreeDSenImportError, ThreeDSenImportSummary, ThreeDSenImporter};
@@ -81,11 +81,18 @@ impl LibraryGameCatalog {
         let user_profiles = match profile_folders(&files, paths, &adapter).scan(&catalogue.ids()) {
             Ok(profiles) => profiles,
             Err(error) => {
-                log(&format!("the user profile folder could not be read: {error}"));
+                log(&format!(
+                    "the user profile folder could not be read: {error}"
+                ));
                 Vec::new()
             }
         };
-        let library = GameLibrary::build(&catalogue, &user_profiles, persisted.as_ref(), Some(&adapter));
+        let library = GameLibrary::build(
+            &catalogue,
+            &user_profiles,
+            persisted.as_ref(),
+            Some(&adapter),
+        );
         Self::from_library(library, paths.clone(), log)
     }
 
@@ -161,7 +168,10 @@ impl LibraryGameCatalog {
 
     /// Imports the profiles of a 3dSen installation or bundle into the user folder and the
     /// library.
-    pub fn import_from_three_d_sen(&mut self, installation_or_bundle_path: &Path) -> ThreeDSenImportReport {
+    pub fn import_from_three_d_sen(
+        &mut self,
+        installation_or_bundle_path: &Path,
+    ) -> ThreeDSenImportReport {
         if !self.paths.is_writable {
             // SPEC-09 REQ-PERS-073: with no writable root there is nowhere to put the profiles.
             return ThreeDSenImportReport {
@@ -203,13 +213,19 @@ impl LibraryGameCatalog {
         let profiles = match profile_folders(&files, &self.paths, &adapter).scan(&[]) {
             Ok(profiles) => profiles,
             Err(error) => {
-                (self.log)(&format!("the user profile folder could not be read: {error}"));
+                (self.log)(&format!(
+                    "the user profile folder could not be read: {error}"
+                ));
                 return;
             }
         };
         let mut added = false;
         for profile in &profiles {
-            if self.library.add_user_profile(profile, Some(&adapter)).is_some() {
+            if self
+                .library
+                .add_user_profile(profile, Some(&adapter))
+                .is_some()
+            {
                 self.profiles.remove(&profile.id);
                 added = true;
             }
@@ -227,7 +243,9 @@ impl LibraryGameCatalog {
         let files = PhysicalProfileFileSystem;
         let adapter = ProfileLogAdapter(&*self.log);
         let mut file = self.library.to_file();
-        if let Err(error) = GameLibraryStore::new(&files, Some(&adapter)).save(&self.paths.library_file, &mut file) {
+        if let Err(error) =
+            GameLibraryStore::new(&files, Some(&adapter)).save(&self.paths.library_file, &mut file)
+        {
             (self.log)(&format!("library.json could not be written: {error}"));
         }
     }
@@ -284,7 +302,8 @@ impl GameCatalog for LibraryGameCatalog {
             Arc::clone(profile)
         } else {
             let profile = Arc::new(self.load_profile(entry));
-            self.profiles.insert(game_id.to_owned(), Arc::clone(&profile));
+            self.profiles
+                .insert(game_id.to_owned(), Arc::clone(&profile));
             profile
         };
         Some(ResolvedGame {
@@ -348,7 +367,11 @@ impl GameCatalog for LibraryGameCatalog {
         // A built-in profile and the "2D Mode" entry must not be deletable (REQ-UI-037), and
         // neither is a profile of the folder next to the executable: deleting a game deletes its
         // file, and that folder is read-only for Zaxnes (AMD-033 §1, Q-074).
-        let Some(entry) = self.library.find(game_id).filter(|entry| entry.can_delete()) else {
+        let Some(entry) = self
+            .library
+            .find(game_id)
+            .filter(|entry| entry.can_delete())
+        else {
             return false;
         };
         let title = entry.title.clone();
@@ -357,7 +380,12 @@ impl GameCatalog for LibraryGameCatalog {
         let id = entry.id().to_owned();
         if !path.as_os_str().is_empty() {
             let files = PhysicalProfileFileSystem;
-            let folder = UserProfileFolder::new(&files, &self.paths.profiles_directory, None, ProfileOrigin::User);
+            let folder = UserProfileFolder::new(
+                &files,
+                &self.paths.profiles_directory,
+                None,
+                ProfileOrigin::User,
+            );
             let profile = UserProfile {
                 id: id.clone(),
                 title: title.clone(),
@@ -366,7 +394,9 @@ impl GameCatalog for LibraryGameCatalog {
                 origin: ProfileOrigin::User,
             };
             if let Err(error) = folder.delete(&profile) {
-                (self.log)(&format!("the profile file of '{game_id}' could not be deleted: {error}"));
+                (self.log)(&format!(
+                    "the profile file of '{game_id}' could not be deleted: {error}"
+                ));
             }
         }
         game_art::delete_cover(&self.paths, &title, &id, cover.as_deref());
@@ -375,16 +405,22 @@ impl GameCatalog for LibraryGameCatalog {
         }
         self.profiles.remove(game_id);
         self.save();
-        (self.log)(&format!("game '{game_id}' deleted with its profile file and its cover."));
+        (self.log)(&format!(
+            "game '{game_id}' deleted with its profile file and its cover."
+        ));
         true
     }
 
     fn title(&self, game_id: &str) -> Option<String> {
-        self.library.find(game_id).map(|entry| entry.display_title().to_owned())
+        self.library
+            .find(game_id)
+            .map(|entry| entry.display_title().to_owned())
     }
 
     fn can_delete(&self, game_id: &str) -> bool {
-        self.library.find(game_id).is_some_and(GameLibraryEntry::can_delete)
+        self.library
+            .find(game_id)
+            .is_some_and(GameLibraryEntry::can_delete)
     }
 
     fn set_cover(&mut self, game_id: &str, file_name: Option<&str>) -> bool {
@@ -397,7 +433,9 @@ impl GameCatalog for LibraryGameCatalog {
     }
 
     fn cover(&self, game_id: &str) -> Option<String> {
-        self.library.find(game_id).and_then(|entry| entry.cover.clone())
+        self.library
+            .find(game_id)
+            .and_then(|entry| entry.cover.clone())
     }
 }
 

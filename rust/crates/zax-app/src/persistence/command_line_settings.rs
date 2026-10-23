@@ -34,7 +34,11 @@ pub fn apply(options: &AppOptions, model: &mut SettingsModel) {
         model.set_layer(SettingId::VideoSkipFrame, skip_render, layer);
     }
     if let Some(frame_rate) = options.frame_rate {
-        model.set_layer(SettingId::VideoFrameRate, SettingValue::Int(frame_rate), layer);
+        model.set_layer(
+            SettingId::VideoFrameRate,
+            SettingValue::Int(frame_rate),
+            layer,
+        );
     }
     if let Some(vsync) = options.vsync {
         model.set_layer(
