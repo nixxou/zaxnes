@@ -31,6 +31,8 @@ displayed frame". All values are per displayed frame.
 | Before any core work (5e7ff3d) | 5.0 | ~90 ms | 3 ms | 5 ms | 4 ms | 6-10 |
 | PPU micro-optimisations (4fec238 / 537c0b2) | 5.0 | ~87 ms | 3 ms | 5 ms | 4 ms | ~10 |
 | Same, heavy 3D profile | 5.0 | ~87 ms | 15 ms | 25 ms (spikes 190-260 ms) | 60 ms | ~5 |
+| Batched PPU (91123ec), 2D-ish game | 5.0 | ~78 ms | 4 ms | 4 ms | 14 ms | ~10 |
+| Batched PPU (91123ec), heavy 3D profile | 5.0 | ~78 ms | 15-18 ms | 25-55 ms | 70-95 ms | 4-5 |
 
 - Core: about 17.4 ms per NES frame on the A53 (x86 release 1.9-2.9 ms; qemu-aarch64 13-17 ms).
   The budget for everything is 16.6 ms, so the core alone cannot keep real time.
@@ -66,7 +68,11 @@ displayed frame". All values are per displayed frame.
   horizon; Rambo1 and MMC5 still step every cycle), idle dots skipped. Full goldens and
   `cargo test -p zax-nes --release` pass. bench-core x86 core ms/frame (spritecans / nes15 /
   smwstomp / rastesam4): 2.97 / 2.30 / 1.98 / 1.88 -> 1.48 / 1.53 / 1.45 / 1.34 (approximate,
-  shared CPU). Not yet measured under qemu nor on the device: first thing to check.
+  shared CPU). Device: core 78 ms per 5 frames = ~15.6 ms per NES frame (was ~17.4): only ~11 % on the A53
+  although x86 gained 1.4-2x. The in-order A53 (small caches) does not profit like x86; count
+  instructions and cache misses (callgrind with `--cache-sim=yes`) rather than x86 wall time.
+  The core now fits in 16.6 ms on its own, which makes the multi-core step (5.2) the biggest
+  expected win: emulation alone on one core could reach ~60 emulated frames/s.
 - Profiling before milestone 2 (callgrind, nes15): ~23 M instructions per frame; PPU 62 %
   (~160 instructions per dot), APU 17 %, CPU + bus + PRG reads 15 %. Each PPU VRAM fetch costs
   ~116 instructions (A12 notification through the `Board` match, `ppu_read`, `banks()`,
