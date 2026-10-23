@@ -22,6 +22,17 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 use mappers::Mapper;
 
+/// `offset % len`, without the division when `offset` is already below `len`: bank offsets
+/// almost always fall inside the memory, and this runs on every PRG and CHR access.
+#[inline]
+pub(crate) const fn wrap_offset(offset: usize, len: usize) -> usize {
+    if offset < len {
+        offset
+    } else {
+        offset % len
+    }
+}
+
 /// The memories and the state every board shares: the ROM image, the PRG-RAM at
 /// $6000-$7FFF (REQ-CORE-012), the CHR-RAM buffer, the current nametable layout and the CPU
 /// cycle counter.
@@ -122,13 +133,13 @@ impl CartridgeMemory {
     pub fn read_chr_direct(&self, offset: usize) -> u8 {
         let chr_rom = self.rom.chr_rom();
         if !chr_rom.is_empty() {
-            return chr_rom[offset % chr_rom.len()];
+            return chr_rom[wrap_offset(offset, chr_rom.len())];
         }
 
         if self.chr_ram.is_empty() {
             0
         } else {
-            self.chr_ram[offset % self.chr_ram.len()]
+            self.chr_ram[wrap_offset(offset, self.chr_ram.len())]
         }
     }
 
@@ -136,7 +147,7 @@ impl CartridgeMemory {
     pub fn write_chr_direct(&mut self, offset: usize, value: u8) {
         if self.rom.chr_rom().is_empty() && !self.chr_ram.is_empty() {
             let len = self.chr_ram.len();
-            self.chr_ram[offset % len] = value;
+            self.chr_ram[wrap_offset(offset, len)] = value;
         }
     }
 }
