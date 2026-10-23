@@ -197,6 +197,21 @@ impl HostWindow {
         &self.window
     }
 
+    /// One line with the SDL video driver, the display mode the window is on and the drawable
+    /// size, for the start-up log.
+    #[must_use]
+    pub fn display_report(&self) -> String {
+        let (drawable_width, drawable_height) = self.drawable_size();
+        let mode = self.window.display_mode().map_or_else(
+            |error| format!("unknown ({error})"),
+            |mode| format!("{}x{}@{}Hz", mode.w, mode.h, mode.refresh_rate),
+        );
+        format!(
+            "SDL video driver '{}', display mode {mode}, drawable {drawable_width}x{drawable_height}",
+            self.video.current_video_driver()
+        )
+    }
+
     /// Size of the GL drawable in pixels.
     #[must_use]
     pub fn drawable_size(&self) -> (u32, u32) {

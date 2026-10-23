@@ -281,3 +281,22 @@ pub fn gl_strings(gl: &glow::Context) -> (String, String) {
         )
     }
 }
+
+/// One line describing what the GL driver provides (`GL_VERSION`, `GL_RENDERER`, `GL_VENDOR` and
+/// `GL_SHADING_LANGUAGE_VERSION`), for the start-up log of handheld devices.
+#[must_use]
+pub fn gl_report(gl: &glow::Context) -> String {
+    // SAFETY: reads constant strings of the current context.
+    let (version, renderer, vendor, glsl) = unsafe {
+        (
+            gl.get_parameter_string(glow::VERSION),
+            gl.get_parameter_string(glow::RENDERER),
+            gl.get_parameter_string(glow::VENDOR),
+            gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION),
+        )
+    };
+    format!(
+        "GL_VERSION='{version}' GL_RENDERER='{renderer}' GL_VENDOR='{vendor}' \
+         GL_SHADING_LANGUAGE_VERSION='{glsl}'"
+    )
+}

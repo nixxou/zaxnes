@@ -239,6 +239,8 @@ impl Running {
         }
         log_window_icon(&mut window);
         let gl = window.glow_context();
+        log(&window.display_report());
+        log(&framebuffer::gl_report(&gl));
         let (renderer_name, version) = framebuffer::gl_strings(&gl);
         let request_options = options.clone();
         let mut pacing = VideoPacing::new(
