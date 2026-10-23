@@ -1174,6 +1174,7 @@ name = "zax-platform"
 version = "0.2.0"
 dependencies = [
  "glow",
+ "imgui",
  "png",
  "sdl2",
  "thiserror",

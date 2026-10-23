@@ -6,6 +6,8 @@ pub mod audio;
 pub mod framebuffer;
 mod gl_loader;
 pub mod icon;
+pub mod imgui_glyphs;
+pub mod imgui_renderer;
 pub mod input;
 pub mod pacing;
 pub mod wave;
