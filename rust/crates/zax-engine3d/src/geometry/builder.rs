@@ -247,38 +247,38 @@ impl GeometryBuilder {
         self.geometry.get(&instance)
     }
 
+    /// The depth a build of `reference` starts from (Q-013): the depth the previous build was
+    /// asked for, unless something (a `BuildPattern` hook, REQ-E3D-322) has moved sizeZ since.
+    /// Without this a cylinder would shrink a little at every rebuild, because REQ-E3D-452
+    /// writes D' back into sizeZ.
+    fn requested_depth(&self, reference: InstanceRef, depth: i32) -> i32 {
+        let depth = match self.geometry.get(&reference) {
+            Some(previous) if depth == previous.effective_depth() => previous.requested_depth(),
+            _ => depth,
+        };
+        depth.clamp(0, MAX_DEPTH)
+    }
+
+    /// Builds the geometry of instance `index`, whose depth is already the requested one, and
+    /// returns its effective depth `D'` (REQ-E3D-452).
     fn build_object(
         &mut self,
         id: PatternId,
         pattern: &EnginePattern,
         index: usize,
         global: RenderAlgorithm,
-    ) -> Option<i32> {
+    ) -> i32 {
         let reference = InstanceRef { pattern: id, index };
-        let instance: &PatternInstance = pattern.instances().get(index)?;
-        let algorithm = instance.effective_algorithm(global);
-
-        // A rebuild starts from the depth the previous build was asked for, unless something
-        // (a BuildPattern hook, REQ-E3D-322) has moved sizeZ since. Without this a cylinder
-        // would shrink a little at every rebuild, because REQ-E3D-452 writes D' back into
-        // sizeZ. See Q-013.
-        let mut depth = instance.depth;
-        if let Some(previous) = self.geometry.get(&reference) {
-            if depth == previous.effective_depth() {
-                depth = previous.requested_depth();
-            }
-        }
-
-        let requested = depth.clamp(0, MAX_DEPTH);
-        let mut parameters = instance.clone();
-        parameters.depth = requested;
+        let parameters: &PatternInstance = &pattern.instances()[index];
+        let algorithm = parameters.effective_algorithm(global);
+        let requested = parameters.depth;
 
         let texture = ObjectTexture::for_object(
             pattern,
             parameters.texture.as_deref(),
             self.background_color,
         );
-        let built = voxel_construction::build(pattern, &texture, &parameters, algorithm);
+        let built = voxel_construction::build(pattern, &texture, parameters, algorithm);
         let meshes = if algorithm == RenderAlgorithm::Marching {
             let voxels = PatternVoxels::new(pattern, &texture, &built.fields);
             let empty = ObjectTexture::empty_color(parameters.empty_color);
@@ -308,18 +308,21 @@ impl GeometryBuilder {
         self.pending.push(reference);
         self.built += 1;
         self.build_count += 1;
-        Some(built.effective_depth)
+        built.effective_depth
     }
 }
 
 impl PatternGeometryBuilder for GeometryBuilder {
     fn build(&mut self, id: PatternId, pattern: &mut EnginePattern, global: RenderAlgorithm) {
         for index in 0..pattern.instances().len() {
+            let reference = InstanceRef { pattern: id, index };
+            let requested = self.requested_depth(reference, pattern.instances()[index].depth);
+            pattern.instances_mut()[index].depth = requested;
+            let effective = self.build_object(id, pattern, index, global);
+
             // REQ-E3D-452: from now on placement, the MARCHING scale correction, the
             // deformation and the scripts see D'.
-            if let Some(effective) = self.build_object(id, pattern, index, global) {
-                pattern.instances_mut()[index].depth = effective;
-            }
+            pattern.instances_mut()[index].depth = effective;
         }
 
         if !self.defer_transfer {

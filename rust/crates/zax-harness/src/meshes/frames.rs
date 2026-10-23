@@ -169,7 +169,7 @@ pub fn read_frame_dump(text: &str) -> Result<Vec<DumpFrame>, HarnessError> {
     let mut dirty = false;
 
     for (number, raw) in (1..).zip(text.lines()) {
-        let line = raw.split('#').next().unwrap_or_default().trim();
+        let line = raw.split_once('#').map_or(raw, |(line, _)| line).trim();
         if line.is_empty() {
             continue;
         }

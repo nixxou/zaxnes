@@ -301,6 +301,13 @@ impl ConversionEngine {
             .build(&state.frames[index], &mut sources)
     }
 
+    /// The list built by the last call of [`ConversionEngine::build_draw_list`] or
+    /// [`ConversionEngine::build_draw_list_of`].
+    #[must_use]
+    pub const fn draw_list(&self) -> &FrameDrawList {
+        self.draw_list_builder.list()
+    }
+
     /// Relaunches the same game without reloading the profile: the frames are emptied and the
     /// pinned frame released (REQ-E3D-281), while the image registry, the learned patterns and
     /// the temporary patterns stay active from the first frame (REQ-E3D-008).
