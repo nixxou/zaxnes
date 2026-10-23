@@ -162,6 +162,11 @@ pub struct Ppu2C02 {
     sprite_zero_found: bool,
     sprites_loaded: i32,
     sprite_zero_loaded: bool,
+    /// The sprite layer of the line being drawn, one cell per column, derived from the
+    /// loaded slots above (see `rebuild_sprite_line`); not part of the saved state.
+    sprite_line: [u8; SCREEN_WIDTH],
+    /// True when the slots changed since `sprite_line` was built.
+    sprite_line_stale: bool,
 
     // Tile capture state (tiles.rs).
     tiles: TileBuffer,
@@ -232,6 +237,8 @@ impl Ppu2C02 {
             sprite_zero_found: false,
             sprites_loaded: 0,
             sprite_zero_loaded: false,
+            sprite_line: [0; SCREEN_WIDTH],
+            sprite_line_stale: true,
             tiles: TileBuffer::new(),
             sprite_order: [0; 64],
             mask_x: 0,
@@ -464,9 +471,16 @@ impl Ppu2C02 {
 
     /// Advances the PPU by the dots of one CPU cycle of the current region.
     pub fn step_cpu_cycle(&mut self, mut cartridge: Option<&mut Cartridge>) {
-        let accumulator = self.dot_accumulator + self.timing.dots_per_cycle_numerator;
-        let dots = accumulator / self.timing.dots_per_cycle_denominator;
-        self.dot_accumulator = accumulator - (dots * self.timing.dots_per_cycle_denominator);
+        // accumulator / denominator by repeated subtraction: three or four rounds (3 or 3.2
+        // dots per cycle) cost less than a division on every CPU cycle.
+        let denominator = self.timing.dots_per_cycle_denominator;
+        let mut accumulator = self.dot_accumulator + self.timing.dots_per_cycle_numerator;
+        let mut dots = 0;
+        while accumulator >= denominator {
+            accumulator -= denominator;
+            dots += 1;
+        }
+        self.dot_accumulator = accumulator;
 
         let sample_after = (dots - NMI_SAMPLE_LEAD).max(0);
         for dot in 0..dots {
@@ -517,7 +531,7 @@ impl Ppu2C02 {
     }
 
     fn process_dot(&mut self, cart: Cart<'_, '_>) {
-        if self.scanline == self.pre_render_scanline() && self.dot == SKIP_DECISION_DOT {
+        if self.dot == SKIP_DECISION_DOT && self.scanline == self.pre_render_scanline() {
             self.skip_latch = self.rendering_enabled();
         }
 
@@ -549,7 +563,7 @@ impl Ppu2C02 {
 
         // The sprite captures of SPEC-02 §3.5 run on the first dot of the visible line that
         // is always reached: the idle dot 0 of line 0 is dropped on a skipped odd frame.
-        if self.scanline < VISIBLE_SCANLINES && self.dot == 1 {
+        if self.dot == 1 && self.scanline < VISIBLE_SCANLINES {
             self.begin_capture_line(self.scanline, cart);
         }
 

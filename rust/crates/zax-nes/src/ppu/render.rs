@@ -9,7 +9,7 @@
 //! fetches at dots 257 to 320 and two more tiles prefetched at dots 321 to 336.
 
 use super::{
-    palette_index, Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE_I32,
+    Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE_I32,
     VISIBLE_SCANLINES,
 };
 use crate::cartridges::ChrFetch;
@@ -51,85 +51,112 @@ impl Ppu2C02 {
         self.sprite_zero_found = false;
         self.sprites_loaded = 0;
         self.sprite_zero_loaded = false;
+        self.sprite_line_stale = true;
     }
 
     /// Runs everything the current dot owes: the fetch pipeline, sprite evaluation and the
     /// pixel of the visible lines.
     pub(super) fn run_render_dot(&mut self, cart: Cart<'_, '_>) {
+        let dot = self.dot;
         let visible = self.scanline < VISIBLE_SCANLINES;
-        let render_line = visible || self.scanline == self.pre_render_scanline();
 
-        if render_line && self.rendering_enabled() {
-            if self.dot == 1 {
-                // Dots 1 to 64 clear the secondary OAM to $FF; the unused slots then make
-                // the hardware fetch pattern $FF, which boards watching A12 can see.
-                self.secondary_oam.fill(0xFF);
-            }
-
-            self.run_background_pipeline(cart);
-
+        if self.rendering_enabled() {
             if visible {
-                self.run_sprite_evaluation();
-            } else if self.dot == 1 {
-                // Sprite evaluation does not run on the pre-render line, so no sprite is
-                // shown on line 0 (nesdev, "PPU sprite evaluation").
-                self.eval_found = 0;
-                self.sprite_zero_found = false;
-            }
-
-            self.run_sprite_fetches(cart);
-
-            if self.scanline == self.pre_render_scanline() && (280..=304).contains(&self.dot) {
-                self.transfer_address_y();
+                self.run_rendering_dot::<true>(dot, cart);
+            } else if self.scanline == self.pre_render_scanline() {
+                self.run_rendering_dot::<false>(dot, cart);
             }
         }
 
-        if visible && (1..=256).contains(&self.dot) {
+        if visible && (1..=256).contains(&dot) {
             #[allow(clippy::cast_sign_loss)] // dot is 1..=256 here.
-            let x = (self.dot - 1) as usize;
+            let x = (dot - 1) as usize;
             self.render_pixel(x);
+        }
+    }
+
+    /// The work of one dot of a line that renders (a visible line when `VISIBLE`, else the
+    /// pre-render line) with rendering on, in the order of the nesdev timing diagram:
+    /// background pipeline, sprite evaluation, sprite fetches, vertical reload.
+    fn run_rendering_dot<const VISIBLE: bool>(&mut self, dot: i32, cart: Cart<'_, '_>) {
+        match dot {
+            1..=256 => {
+                if dot == 1 {
+                    // Dots 1 to 64 clear the secondary OAM to $FF; the unused slots then make
+                    // the hardware fetch pattern $FF, which boards watching A12 can see.
+                    self.secondary_oam.fill(0xFF);
+                    if !VISIBLE {
+                        // Sprite evaluation does not run on the pre-render line, so no
+                        // sprite is shown on line 0 (nesdev, "PPU sprite evaluation").
+                        self.eval_found = 0;
+                        self.sprite_zero_found = false;
+                    }
+                } else {
+                    self.shift_background();
+                    self.background_fetch(dot, cart);
+                }
+
+                if dot == 256 {
+                    self.increment_y();
+                }
+
+                if VISIBLE && dot >= 65 {
+                    self.run_sprite_evaluation(dot);
+                }
+            }
+            257..=320 => {
+                if dot == 257 {
+                    self.shift_background();
+                    self.background_fetch(dot, cart);
+                    self.transfer_address_x();
+                }
+
+                self.run_sprite_fetches(dot, cart);
+
+                if !VISIBLE && (280..=304).contains(&dot) {
+                    self.transfer_address_y();
+                }
+            }
+            321..=337 => {
+                self.shift_background();
+                self.background_fetch(dot, cart);
+            }
+            // Two more nametable fetches the hardware performs and discards; they matter
+            // only for boards that watch the PPU address bus.
+            338 | 340 => {
+                self.nametable_latch = self.read_vram_inner(
+                    0x2000 | (self.v & 0x0FFF),
+                    PpuBusAccess::Render,
+                    ChrFetch::Background,
+                    cart,
+                );
+            }
+            _ => {}
         }
     }
 
     // ---------------------------------------------------------------- background
 
-    fn run_background_pipeline(&mut self, cart: Cart<'_, '_>) {
-        if (2..=257).contains(&self.dot) || (321..=337).contains(&self.dot) {
-            self.shift_background();
-
-            match (self.dot - 1) % 8 {
-                0 => {
-                    self.load_background_shifters();
-                    self.nametable_latch = self.read_vram_inner(
-                        0x2000 | (self.v & 0x0FFF),
-                        PpuBusAccess::Render,
-                        ChrFetch::Background,
-                        cart,
-                    );
-                }
-                2 => self.attribute_latch = self.fetch_attribute(cart),
-                3 => self.notify_pattern_address(0, cart),
-                4 => self.pattern_low_latch = self.fetch_pattern(0, cart),
-                5 => self.notify_pattern_address(8, cart),
-                6 => self.pattern_high_latch = self.fetch_pattern(8, cart),
-                7 => self.increment_coarse_x(),
-                _ => {}
+    /// The step of the four two-dot background fetches that falls on `dot` (2 to 257 and
+    /// 321 to 337).
+    fn background_fetch(&mut self, dot: i32, cart: Cart<'_, '_>) {
+        match (dot - 1) & 0x07 {
+            0 => {
+                self.load_background_shifters();
+                self.nametable_latch = self.read_vram_inner(
+                    0x2000 | (self.v & 0x0FFF),
+                    PpuBusAccess::Render,
+                    ChrFetch::Background,
+                    cart,
+                );
             }
-        }
-
-        if self.dot == 256 {
-            self.increment_y();
-        } else if self.dot == 257 {
-            self.transfer_address_x();
-        } else if self.dot == 338 || self.dot == 340 {
-            // Two more nametable fetches the hardware performs and discards; they matter
-            // only for boards that watch the PPU address bus.
-            self.nametable_latch = self.read_vram_inner(
-                0x2000 | (self.v & 0x0FFF),
-                PpuBusAccess::Render,
-                ChrFetch::Background,
-                cart,
-            );
+            2 => self.attribute_latch = self.fetch_attribute(cart),
+            3 => self.notify_pattern_address(0, cart),
+            4 => self.pattern_low_latch = self.fetch_pattern(0, cart),
+            5 => self.notify_pattern_address(8, cart),
+            6 => self.pattern_high_latch = self.fetch_pattern(8, cart),
+            7 => self.increment_coarse_x(),
+            _ => {}
         }
     }
 
@@ -248,8 +275,8 @@ impl Ppu2C02 {
     /// Sprite evaluation for the *next* line: dots 1 to 64 clear the secondary OAM, dots 65
     /// to 256 scan the 64 sprites (nesdev, "PPU sprite evaluation"). The overflow flag
     /// follows the hardware, byte-increment bug included.
-    fn run_sprite_evaluation(&mut self) {
-        if self.dot == 65 {
+    fn run_sprite_evaluation(&mut self, dot: i32) {
+        if dot == 65 {
             self.eval_sprite = i32::from(self.oam_address >> 2);
             self.eval_byte = i32::from(self.oam_address & 0x03);
             self.eval_found = 0;
@@ -258,11 +285,7 @@ impl Ppu2C02 {
             self.sprite_zero_found = false;
         }
 
-        if !(65..=256).contains(&self.dot) {
-            return;
-        }
-
-        if (self.dot & 1) == 1 {
+        if (dot & 1) == 1 {
             // Odd dots read primary OAM.
             #[allow(clippy::cast_sign_loss)] // Masked to 0..=255.
             let index = (((self.eval_sprite * 4) + self.eval_byte) & 0xFF) as usize;
@@ -336,21 +359,18 @@ impl Ppu2C02 {
 
     /// Dots 257 to 320 fetch the patterns of the eight sprites of the next line and hold
     /// OAMADDR at 0 (nesdev).
-    fn run_sprite_fetches(&mut self, cart: Cart<'_, '_>) {
-        if !(257..=320).contains(&self.dot) {
-            return;
-        }
-
+    fn run_sprite_fetches(&mut self, dot: i32, cart: Cart<'_, '_>) {
         self.oam_address = 0;
 
-        if self.dot == 257 {
+        if dot == 257 {
             self.sprites_loaded = self.eval_found;
             self.sprite_zero_loaded = self.sprite_zero_found;
+            self.sprite_line_stale = true;
         }
 
-        #[allow(clippy::cast_sign_loss)] // dot is 257..=320 here.
-        let slot = ((self.dot - 257) >> 3) as usize;
-        let step = (self.dot - 257) & 0x07;
+        #[allow(clippy::cast_sign_loss)] // dot is 257..=320 here, so the slot is 0..=7.
+        let slot = (((dot - 257) >> 3) & 0x07) as usize;
+        let step = (dot - 257) & 0x07;
 
         if step == 3 || step == 5 {
             // The address of the coming fetch is already on the bus (see
@@ -372,6 +392,7 @@ impl Ppu2C02 {
             cart,
         );
 
+        self.sprite_line_stale = true;
         if step == 4 {
             self.sprite_pattern_low[slot] = data;
             self.sprite_attribute[slot] = self.secondary_oam[(slot * 4) + 2];
@@ -422,81 +443,102 @@ impl Ppu2C02 {
 
     // ---------------------------------------------------------------- composition
 
-    fn render_pixel(&mut self, x: usize) {
-        let mut background_pixel = 0u8;
-        let mut background_palette = 0u8;
-        if self.rendering_enabled()
-            && self.background_enabled()
-            && (x >= 8 || (self.mask & 0x02) != 0)
-        {
-            let mux = 0x8000u16 >> self.fine_x;
-            background_pixel = u8::from((self.pattern_shift_low & mux) != 0)
-                | (u8::from((self.pattern_shift_high & mux) != 0) << 1);
-            background_palette = u8::from((self.attribute_shift_low & mux) != 0)
-                | (u8::from((self.attribute_shift_high & mux) != 0) << 1);
-        }
+    /// Rebuilds [`Ppu2C02::sprite_line`] from the eight loaded sprite slots: per column, the
+    /// first slot (in OAM order) whose pixel is opaque, as the hardware's priority
+    /// multiplexer picks it. The slots only change during dots 257 to 320, so the line is
+    /// the same whichever pixel of 1 to 256 asks for it.
+    fn rebuild_sprite_line(&mut self) {
+        self.sprite_line_stale = false;
+        self.sprite_line.fill(0);
 
-        let mut sprite_pixel = 0u8;
-        let mut sprite_palette = 0u8;
-        let mut sprite_behind = false;
-        let mut sprite_is_zero = false;
-        if self.rendering_enabled() && self.sprites_enabled() && (x >= 8 || (self.mask & 0x04) != 0)
-        {
-            #[allow(clippy::cast_sign_loss)] // 0..=8.
-            let loaded = self.sprites_loaded as usize;
-            for slot in 0..loaded {
-                let Some(column) = x.checked_sub(usize::from(self.sprite_x[slot])) else {
-                    continue;
-                };
-
-                if column > 7 {
+        #[allow(clippy::cast_sign_loss)] // 0..=8.
+        let loaded = (self.sprites_loaded.clamp(0, SPRITES_PER_LINE_I32)) as usize;
+        for slot in 0..loaded {
+            let attribute = self.sprite_attribute[slot];
+            let low = self.sprite_pattern_low[slot];
+            let high = self.sprite_pattern_high[slot];
+            let zero = slot == 0 && self.sprite_zero_loaded;
+            let flags = SPRITE_OPAQUE
+                | ((attribute & 0x03) << 2)
+                | if (attribute & 0x20) != 0 { SPRITE_BEHIND } else { 0 }
+                | if zero { SPRITE_ZERO } else { 0 };
+            let start = usize::from(self.sprite_x[slot]);
+            for (column, cell) in self.sprite_line.iter_mut().skip(start).take(8).enumerate() {
+                if *cell != 0 {
                     continue;
                 }
 
-                let attribute = self.sprite_attribute[slot];
-                let bit = if (attribute & 0x40) != 0 {
-                    column
-                } else {
-                    7 - column
-                };
-                let pixel = ((self.sprite_pattern_low[slot] >> bit) & 1)
-                    | (((self.sprite_pattern_high[slot] >> bit) & 1) << 1);
-                if pixel == 0 {
-                    continue;
+                let bit = if (attribute & 0x40) != 0 { column } else { 7 - column };
+                let pixel = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
+                if pixel != 0 {
+                    *cell = flags | pixel;
                 }
-
-                sprite_pixel = pixel;
-                sprite_palette = attribute & 0x03;
-                sprite_behind = (attribute & 0x20) != 0;
-                sprite_is_zero = slot == 0 && self.sprite_zero_loaded;
-                break;
             }
         }
+    }
 
+    fn render_pixel(&mut self, x: usize) {
+        let mask = self.mask;
+        let x = x & 0xFF;
+
+        let mut background = 0u8;
+        if (mask & 0x08) != 0 && (x >= 8 || (mask & 0x02) != 0) {
+            let shift = 15 - (self.fine_x & 0x07);
+            let pixel = ((self.pattern_shift_low >> shift) & 1)
+                | (((self.pattern_shift_high >> shift) & 1) << 1);
+            let palette = ((self.attribute_shift_low >> shift) & 1)
+                | (((self.attribute_shift_high >> shift) & 1) << 1);
+            #[allow(clippy::cast_possible_truncation)] // Two 2-bit fields.
+            let entry = ((palette << 2) | pixel) as u8;
+            background = entry;
+        }
+
+        let mut sprite = 0u8;
+        if (mask & 0x10) != 0 && (x >= 8 || (mask & 0x04) != 0) {
+            if self.sprite_line_stale {
+                self.rebuild_sprite_line();
+            }
+
+            sprite = self.sprite_line[x];
+        }
+
+        let background_opaque = (background & 0x03) != 0;
         // Sprite 0 hit needs both layers on, a non-transparent pixel in each, and never
         // happens at x = 255 (nesdev, "PPU sprite 0 hits").
-        if sprite_is_zero && sprite_pixel != 0 && background_pixel != 0 && x != SCREEN_WIDTH - 1 {
+        if (sprite & SPRITE_ZERO) != 0 && background_opaque && x != SCREEN_WIDTH - 1 {
             self.sprite_zero_hit = true;
         }
 
-        let entry: u16 = if sprite_pixel != 0 && (background_pixel == 0 || !sprite_behind) {
-            0x10 + u16::from(sprite_palette * 4) + u16::from(sprite_pixel)
-        } else if background_pixel != 0 {
-            u16::from(background_palette * 4) + u16::from(background_pixel)
+        // Entries $00, $04, ... of a palette all show the backdrop: a transparent pixel of
+        // either layer resolves to $3F00, and an opaque one never hits the $3F1x mirrors.
+        let entry = if (sprite & SPRITE_OPAQUE) != 0
+            && (!background_opaque || (sprite & SPRITE_BEHIND) == 0)
+        {
+            0x10 | (sprite & 0x0F)
+        } else if background_opaque {
+            background
         } else {
             0
         };
 
-        let mut color = self.palette[palette_index(0x3F00 | entry)];
+        let mut color = self.palette[usize::from(entry & 0x1F)];
 
         // The greyscale bit of PPUMASK is a video effect: it changes the image but neither
         // the tile records nor the palette handed to the engine (REQ-CORE-047).
-        if (self.mask & 0x01) != 0 {
+        if (mask & 0x01) != 0 {
             color &= 0x30;
         }
 
         #[allow(clippy::cast_sign_loss)] // Visible line, 0..240.
         let line = self.scanline as usize;
-        self.pixels[(line * SCREEN_WIDTH) + x] = color;
+        if let Some(pixel) = self.pixels.get_mut((line * SCREEN_WIDTH) + x) {
+            *pixel = color;
+        }
     }
 }
+
+/// [`Ppu2C02::sprite_line`] cell flags; the low four bits are the palette (bits 2-3) and the
+/// 2-bit pixel, 0 when no sprite covers the column.
+const SPRITE_OPAQUE: u8 = 0x40;
+const SPRITE_BEHIND: u8 = 0x20;
+const SPRITE_ZERO: u8 = 0x10;
