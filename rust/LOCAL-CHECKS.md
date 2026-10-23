@@ -179,6 +179,28 @@ fast forward and rewind keys, options window, French and back, the 3D default ge
 silent (SDL disk driver), user-data files, exits with code 0 from Ctrl+Q and from a window close.
 Needs `apt install xvfb openbox xdotool imagemagick wmctrl`; exits non-zero on the first failure.
 
+## 7c. Language and native file dialog (Windows, cannot be run on Linux)
+
+Language (Rust-only change, amends AMD-035):
+
+- Delete the user data folder (or start with `--user-data-root <empty folder>`). On a Windows whose display language is French, the first launch is in French; on an English or any other
+  language it is in English.
+- Pick the other language in Options and restart: the pick wins whatever the Windows language is.
+  Choose English on a French Windows, restart: still English (`settings.json` holds `ui.language`).
+- Remove `ui.language` from `settings.json` by hand: the Windows language applies again.
+
+Native dialog (Rust-only change; `ZAXNES_NATIVE_DIALOG=0` forces the `ImGui` browser):
+
+- File > Open a ROM opens the Windows Explorer dialog with "NES ROMs", ".nes", ".zip" and "All
+  files" filters, starting in the last folder used; the game keeps rendering and the window stays
+  responsive behind it. Cancel does nothing; choosing a ROM starts it.
+- In full screen the window leaves full screen while the dialog is open (the dialog is never
+  hidden behind it) and returns to full screen when it closes; the vsync setting is intact.
+- Import a profile (`.3dn`), Import a cover (`.png`) and Import from 3dSen (a folder picker) use the same dialog.
+- With `ZAXNES_NATIVE_DIALOG=0` the same menu entries open the `ImGui` browser as before.
+- Linux desktop (x86_64): the XDG portal dialog; with no portal or no session bus, or on aarch64
+  (RG40XXV), the `ImGui` browser opens (`ZAXNES_NATIVE_DIALOG=1` forces the portal on aarch64).
+
 ## 8. Packaging
 
 ```powershell

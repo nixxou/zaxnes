@@ -1,6 +1,7 @@
 //! The native file dialog behind the `FilePicker` trait: the interface asks the picker first,
 //! takes its answer, and falls back to the `ImGui` browser when the picker cannot show a dialog.
 
+mod common;
 mod ui_harness;
 
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
@@ -74,7 +75,10 @@ fn the_native_dialog_replaces_the_browser_and_its_answer_is_used() {
     let request = test.requests.try_recv().expect("the picker was asked");
     assert!(!request.folder);
     assert_eq!(["nes", "zip"], request.filters[0].extensions[..]);
-    assert!(request.filters.iter().any(|filter| filter.extensions.is_empty()));
+    assert!(request
+        .filters
+        .iter()
+        .any(|filter| filter.extensions.is_empty()));
 
     test.answer(PickPoll::Pending);
     assert!(test.harness.ui.state.native_dialog);
@@ -97,7 +101,7 @@ fn a_cancelled_native_dialog_opens_nothing() {
 
     assert!(!test.harness.ui.state.native_dialog);
     assert!(!test.harness.ui.state.file_browser);
-    assert!(!test.harness.ui.take_effects().is_empty() || test.harness.ui.state.any_window_open() == false);
+    assert!(!test.harness.ui.state.is_modal());
 }
 
 #[test]
@@ -124,5 +128,8 @@ fn an_unavailable_picker_leaves_the_browser_as_before() {
 #[test]
 fn the_three_d_sen_import_asks_for_a_folder() {
     let mut test = scripted(true);
-    test.harness.run(Command::ImportThreeD Sen);
+    test.harness.run(Command::ImportThreeDSen);
+
+    let request = test.requests.try_recv().expect("the picker was asked");
+    assert!(request.folder);
 }
