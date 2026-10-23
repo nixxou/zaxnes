@@ -44,12 +44,11 @@ impl Budget {
             return false;
         };
 
-        match self.started.get() {
-            Some(started) => started.elapsed() > limit,
-            None => {
-                self.started.set(Some(Instant::now()));
-                false
-            }
+        if let Some(started) = self.started.get() {
+            started.elapsed() > limit
+        } else {
+            self.started.set(Some(Instant::now()));
+            false
         }
     }
 
