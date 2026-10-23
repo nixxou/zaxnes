@@ -43,9 +43,7 @@ pub fn resolve(requested: bool, environment: &DisplayEnvironment) -> bool {
     match environment.handheld_variable.as_deref().map(str::trim) {
         Some("1") => true,
         Some("0") => false,
-        _ => {
-            environment.aarch64_linux && !environment.x11_display && !environment.wayland_display
-        }
+        _ => environment.aarch64_linux && !environment.x11_display && !environment.wayland_display,
     }
 }
 
