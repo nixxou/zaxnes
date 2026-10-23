@@ -1337,8 +1337,11 @@ impl ConversionFrame {
         let shape_box = data.shape_box();
         data.instances.clear();
         for (index, source) in pattern.instances().iter().enumerate() {
-            let mut parameters = PatternInstance::new();
-            parameters.copy_from(source);
+            // The copy of REQ-E3D-190: every parameter, the tags shared, the custom palette
+            // reset. Cloning shares the reference-counted parts, so binding allocates nothing
+            // once the instance list is warm (REQ-E3D-360).
+            let mut parameters = source.clone();
+            parameters.custom_palette = -1;
             parameters.set_index(index);
             data.instances.push(FrameInstance {
                 parameters,
