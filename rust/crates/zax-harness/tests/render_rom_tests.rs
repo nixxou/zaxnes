@@ -22,8 +22,10 @@ use zax_profiles::layout::FieldPresence;
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::script::ProfileScript;
+use zax_profiles::settings::LightSettings;
 use zax_profiles::tile::{PatternGrid, ProfileTile};
 use zax_profiles::values::Vec2I;
+use zax_profiles::values::Vec3F;
 use zax_profiles::variant::PatternVariant;
 use zax_render::assets::png_image;
 
@@ -202,6 +204,20 @@ fn the_command_line_reports_a_bad_press_and_keeps_the_rom_options() {
             .frames,
         FrameSource::Synthetic(Some("alpha".to_owned()))
     );
+    // As in C#, any value that starts with "synthetic" is the synthetic frames.
+    for (value, scene) in [
+        ("SYNTHETIC", None),
+        ("syntheticfoo", None),
+        ("Synthetic:hud", Some("hud")),
+    ] {
+        assert_eq!(
+            Options::parse(&arguments(&["--out", "x", "--frames", value]))
+                .unwrap()
+                .frames,
+            FrameSource::Synthetic(scene.map(str::to_owned)),
+            "{value}"
+        );
+    }
     assert_eq!(
         Options::parse(&arguments(&["--out", "x", "--frames", "dump.json"]))
             .unwrap()
@@ -427,4 +443,49 @@ fn a_profile_script_acts_on_the_scene_of_the_capture() {
         far["backgroundPixels"].as_u64().unwrap() > near["backgroundPixels"].as_u64().unwrap(),
         "the scene is seen from further away"
     );
+}
+
+#[test]
+fn only_a_script_moves_the_light_of_the_capture() {
+    let Some(rom) = test_rom() else { return };
+    let root = directory("render-rom-light");
+    let mut profile = profile_for(&menu_glyph(&rom, &root));
+    let capture = |name: &str, profile: &GameProfile| {
+        let file = root.join(format!("{name}.3dn"));
+        fs::write(&file, format::save(profile, FieldPresence::All)).unwrap();
+        let out = root.join(name);
+        render(
+            &out,
+            &[
+                "--rom",
+                path_text(&rom),
+                "--profile",
+                path_text(&file),
+                "--size",
+                "320x240",
+            ],
+        );
+        fs::read(out.join("nestest.png")).unwrap()
+    };
+    let plain = capture("plain", &profile);
+
+    // The C# harness leaves the light of the scene at its default: the one a profile stores is
+    // not applied.
+    let settings = profile.settings.as_mut().unwrap();
+    settings.light = Some(LightSettings {
+        direction: Some(Vec3F::new(0.0, -1.0, 0.0)),
+        color: None,
+        intensity: 0.2,
+        recorded_fields: None,
+    });
+    assert_eq!(capture("stored", &profile), plain);
+
+    // A script that writes the light reaches the scene (the C# `HarnessLight`).
+    profile.scripts.push(ProfileScript::new(
+        Some("lamp"),
+        true,
+        Some("function Start() Light.Direction = Vector3(0, -1, 0) end"),
+        Some(""),
+    ));
+    assert_ne!(capture("scripted", &profile), plain);
 }

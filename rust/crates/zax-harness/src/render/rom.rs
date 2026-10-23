@@ -30,6 +30,7 @@ use zax_settings::values::SettingValue;
 use super::frame_json;
 use super::input_script::InputScript;
 use super::scenes::SyntheticScene;
+use super::timed_host::TimedHost;
 use crate::HarnessError;
 
 /// What `render --rom` runs.
@@ -125,7 +126,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     // What a script wrote to the light during the run (the C# harness bridges it live).
     if let Some(model) = host.model() {
-        push_light(model, &mut scene);
+        push_scripted_light(model, &mut scene);
     }
 
     let picture = host.core.pixel_frame().to_vec();
@@ -166,12 +167,12 @@ const fn mesh_setting(mesh: RenderAlgorithm) -> i32 {
     }
 }
 
-/// Prints what ran and how many scripts went into error (REQ-LUA-110 timing is not ported).
+/// Prints what ran, how many scripts went into error and the hook budget of REQ-LUA-110.
 fn report_scripts(engine: &ConversionEngine) {
-    let Some(runtime) = engine.script_host_as::<ProfileScriptRuntime>() else {
+    let Some(host) = engine.script_host_as::<TimedHost>() else {
         return;
     };
-    let scripts = runtime.scripts();
+    let scripts = host.runtime.scripts();
     if scripts.is_empty() {
         return;
     }
@@ -185,6 +186,15 @@ fn report_scripts(engine: &ConversionEngine) {
     let failed = scripts.iter().filter(|script| script.failed()).count();
     if failed > 0 {
         println!("scripts: {failed} went into error during the run");
+    }
+
+    if host.frames() > 0 {
+        println!(
+            "scripts: hooks {:.3} ms mean, {:.3} ms p99 over {} frames (REQ-LUA-110: 2 ms / 6 ms)",
+            host.mean(),
+            host.p99(),
+            host.frames()
+        );
     }
 }
 
@@ -232,7 +242,8 @@ impl Host {
             ProfileScriptRuntime::create_in(profile, environment, engine.state_mut(), Some(context))
         })?;
         self.bridge = Some(runtime.bridge());
-        self.engine.set_script_host(Box::new(runtime));
+        self.engine
+            .set_script_host(Box::new(TimedHost::new(runtime)));
         Ok(())
     }
 
@@ -243,15 +254,27 @@ impl Host {
         profile: &GameProfile,
         scene: &mut SceneState,
     ) -> Result<(), HarnessError> {
-        let values = profile
+        // The C# harness never applies the light of a profile: the scene light stays at its
+        // default until a script writes it, so the profile's light is left out.
+        let values: Vec<_> = profile
             .settings
             .as_ref()
             .map(setting_application::to_setting_values)
-            .unwrap_or_default();
-        self.engine
-            .with_script_host::<ProfileScriptRuntime, _>(|runtime, _| {
-                runtime.settings_mut().model_mut().apply_profile(values);
-            });
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(id, _)| {
+                !matches!(
+                    id,
+                    SettingId::LightDirection | SettingId::LightColor | SettingId::LightIntensity
+                )
+            })
+            .collect();
+        self.engine.with_script_host::<TimedHost, _>(|host, _| {
+            host.runtime
+                .settings_mut()
+                .model_mut()
+                .apply_profile(values);
+        });
         self.sync_settings(scene);
 
         // The settings were applied through the model, so the engine must not copy them again.
@@ -295,8 +318,8 @@ impl Host {
     /// The settings model the runtime holds.
     fn model(&self) -> Option<&SettingsModel> {
         self.engine
-            .script_host_as::<ProfileScriptRuntime>()
-            .map(|runtime| runtime.settings().model())
+            .script_host_as::<TimedHost>()
+            .map(|host| host.runtime.settings().model())
     }
 
     /// Runs `operation` on the engine with the scene and the machine lent to the script API for
@@ -322,7 +345,9 @@ impl Host {
         operation: impl FnOnce(&mut ProfileScriptRuntime, &mut zax_engine3d::engine::ConversionState),
     ) {
         self.scripted(scene, |engine| {
-            engine.with_script_host::<ProfileScriptRuntime, _>(operation);
+            engine.with_script_host::<TimedHost, _>(|host, state| {
+                operation(&mut host.runtime, state);
+            });
         });
     }
 
@@ -553,15 +578,13 @@ fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
     scene.settings.skybox = skybox_of(model.get(SettingId::SceneSkybox).as_int());
     scene.settings.custom_background_color = color_of(model, SettingId::SceneCustomBgColor);
     scene.use_nes_background_color = model.get(SettingId::SceneUseNesBgColor).as_bool();
-    push_light(model, scene);
 }
 
-fn push_light(model: &SettingsModel, scene: &mut SceneState) {
+/// The direction and the colour of the light, which is all the C# `HarnessLight` writes to the
+/// scene; its intensity is kept apart and never reaches the renderer.
+fn push_scripted_light(model: &SettingsModel, scene: &mut SceneState) {
     let direction = model.get(SettingId::LightDirection).as_vector3();
     scene.light.direction =
         zax_render::numerics::Vector3::new(direction.x, direction.y, direction.z);
     scene.light.color = color_of(model, SettingId::LightColor);
-    scene
-        .settings
-        .set_light_intensity(model.get(SettingId::LightIntensity).as_float());
 }
