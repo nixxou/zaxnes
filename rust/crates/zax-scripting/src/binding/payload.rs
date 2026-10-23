@@ -93,6 +93,15 @@ pub(crate) struct FrameKey {
     pub epoch: u32,
 }
 
+/// Where the handle of a frame object is kept among those of every epoch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FrameSlot {
+    /// The kind of object, the frame it is in and the epoch of the frame.
+    pub group: u64,
+    /// The object among those of its group.
+    pub member: u64,
+}
+
 /// An instance a script holds: one of a registry pattern or one of a frame.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum InstanceTarget {
@@ -258,9 +267,35 @@ impl Payload {
         }
     }
 
-    /// The key under which the Lua value of a reference object is cached, so that the same
-    /// object always yields the same Lua value (REQ-LUA-043), or `None` for a value type or a
-    /// descriptor, which is a fresh value every time.
+    /// The place of a handle into a frame among the handles of every epoch, or `None` for any
+    /// other object. `group` tells the epoch and the kind of object apart, `member` the object.
+    pub fn frame_slot(&self) -> Option<FrameSlot> {
+        fn index(value: usize) -> u64 {
+            u64::from(u32::try_from(value).unwrap_or(u32::MAX))
+        }
+
+        fn group(kind: u64, key: FrameKey) -> u64 {
+            (kind << 33) | (u64::from(key.pinned) << 32) | u64::from(key.epoch)
+        }
+
+        let (group, member) = match self {
+            Self::Instance(InstanceTarget::Frame(key, id)) => (
+                group(0, *key),
+                (index(id.shape.index()) << 32) | index(id.index),
+            ),
+            Self::Shape(target) => (group(1, target.key), index(target.id.index())),
+            Self::Pattern(PatternTarget::Frame(target)) => {
+                (group(2, target.key), index(target.id.index()))
+            }
+            _ => return None,
+        };
+
+        Some(FrameSlot { group, member })
+    }
+
+    /// The key under which the Lua value of a reference object that is not a handle into a
+    /// frame is cached, so that the same object always yields the same Lua value
+    /// (REQ-LUA-043), or `None` for a value type, a descriptor or a frame handle.
     pub fn cache_key(&self) -> Option<[u8; 16]> {
         fn index(value: usize) -> u128 {
             u128::from(u32::try_from(value).unwrap_or(u32::MAX))
@@ -270,29 +305,11 @@ impl Payload {
             (u128::from(id.slot()) << 32) | u128::from(id.generation())
         }
 
-        fn frame(key: FrameKey) -> u128 {
-            (u128::from(key.pinned) << 32) | u128::from(key.epoch)
-        }
-
-        fn shape(target: ShapeTarget) -> u128 {
-            (frame(target.key) << 32) | index(target.id.index())
-        }
-
         let (tag, body): (u128, u128) = match self {
             Self::Instance(InstanceTarget::Pattern(r)) => {
                 (1, (pattern(r.pattern) << 32) | index(r.index))
             }
-            Self::Instance(InstanceTarget::Frame(key, id)) => (
-                2,
-                (shape(ShapeTarget {
-                    key: *key,
-                    id: id.shape,
-                }) << 32)
-                    | index(id.index),
-            ),
-            Self::Shape(target) => (3, shape(*target)),
             Self::Pattern(PatternTarget::Registry(id)) => (4, pattern(*id)),
-            Self::Pattern(PatternTarget::Frame(target)) => (5, shape(*target)),
             Self::Script(position) => (6, index(*position)),
             Self::Table(kind) => (7, kind.index() as u128),
             Self::Slot(r) => (8, (pattern(r.pattern) << 32) | index(r.index)),

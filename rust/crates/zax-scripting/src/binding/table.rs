@@ -253,3 +253,24 @@ impl Hasher for ByteHasher {
         self.0 = hash;
     }
 }
+
+/// Multiplicative hash of the integers handle keys are made of: the keys are dense indices, for
+/// which the keyed hash of the standard library costs more than the lookup is worth.
+#[derive(Default)]
+pub(crate) struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(u64::from(byte));
+        }
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
