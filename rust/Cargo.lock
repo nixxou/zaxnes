@@ -194,6 +194,12 @@ dependencies = [
 [[package]]
 name = "zax-harness"
 version = "0.2.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+ "zax-goldens",
+ "zax-nes",
+]
 
 [[package]]
 name = "zax-nes"
