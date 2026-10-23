@@ -16,8 +16,8 @@ serde_json = { workspace = true }
 thiserror = "2"
 time = "0.3"
 getrandom = { version = "0.3", features = ["std"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 rstest = "0.26"
-sha2 = "0.10"
 time = { version = "0.3", features = ["macros"] }

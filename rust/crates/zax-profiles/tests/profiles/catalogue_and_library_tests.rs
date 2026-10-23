@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use time::macros::datetime;
 use time::OffsetDateTime;
 use zax_profiles::catalogue::{
-    import_messages, ProfileCatalogue, ProfileCatalogueError, ProfileFileSystem,
+    derived_id, import_messages, ProfileCatalogue, ProfileCatalogueError, ProfileFileSystem,
     ProfileImportOutcome, UserDataLayout, UserProfile, UserProfileFolder, DEMO_EDITION,
     FULL_EDITION,
 };
@@ -247,6 +247,7 @@ fn req_prof_062_an_identifier_that_belongs_to_a_built_in_profile_is_ignored() {
 
 #[test]
 fn req_prof_062_an_unreadable_or_foreign_file_is_ignored_and_the_others_are_kept() {
+    // AMD-037 changes the rule for the identifier-less file: it is kept, under a derived id.
     let files = FakeProfileFileSystem::new();
     let layout = UserDataLayout::with_default_names(Path::new(ROOT));
     let good = make_profile(Some("good"), Some("Good"));
@@ -266,10 +267,80 @@ fn req_prof_062_an_unreadable_or_foreign_file_is_ignored_and_the_others_are_kept
     let folder = user_folder(&files, directory, Some(&log));
     let profiles = folder.scan(&[]).unwrap();
 
-    assert_eq!(1, profiles.len());
+    assert_eq!(2, profiles.len());
     assert_eq!("good", profiles[0].id);
+    assert_eq!("No identifier", profiles[1].title);
     assert!(log.any_contains(import_messages::NOT_A_3DN_FILE));
     assert!(log.any_contains("carries no identifier"));
+}
+
+#[test]
+fn amd_037_the_derived_identifier_is_twelve_base64_characters_of_the_sha256() {
+    // SHA-256("abc") starts with ba7816bf8f01cfea41...; its first 9 bytes in base64.
+    assert_eq!("ungWv48Bz+pB", derived_id(b"abc"));
+    assert_eq!(12, derived_id(&[]).len());
+}
+
+#[test]
+fn amd_037_a_profile_without_identifier_gets_a_stable_derived_one_and_is_not_rewritten() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let bytes = make_profile(None, Some("Sans id"));
+    let path = layout.profiles_directory().join("Sans id.3dn");
+    files.add_file(&path, &bytes);
+
+    let log = RecordingProfileLog::new();
+    let folder = user_folder(&files, layout.profiles_directory(), Some(&log));
+    let first = folder.scan(&[]).unwrap();
+    let again = user_folder(&files, layout.profiles_directory(), None)
+        .scan(&[])
+        .unwrap();
+
+    assert_eq!(1, first.len());
+    assert_eq!(derived_id(&bytes), first[0].id);
+    assert_eq!(first, again);
+    assert!(log.any_contains(&format!(
+        "the profile carries no identifier; using \"{}\", derived from its content",
+        first[0].id
+    )));
+    assert_eq!(bytes, files.read_all_bytes(&path).unwrap());
+}
+
+#[test]
+fn amd_037_the_same_content_under_two_names_is_one_game() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let bytes = make_profile(None, Some("Twin"));
+    files.add_file(&layout.profiles_directory().join("A.3dn"), &bytes);
+    files.add_file(&layout.profiles_directory().join("B.3dn"), &bytes);
+
+    let folder = user_folder(&files, layout.profiles_directory(), None);
+    let profiles = folder.scan(&[]).unwrap();
+
+    assert_eq!(1, profiles.len());
+    assert!(profiles[0].file_path.ends_with("A.3dn"));
+}
+
+#[test]
+fn amd_037_a_copy_of_a_built_in_profile_adds_no_game_with_or_without_identifier() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let without_id = make_profile(None, Some("Built-in"));
+    let with_id = make_profile(Some("b1"), Some("Built-in too"));
+    files.add_file(&layout.profiles_directory().join("A.3dn"), &without_id);
+    files.add_file(&layout.profiles_directory().join("B.3dn"), &with_id);
+    files.add_file(
+        &layout.profiles_directory().join("C.3dn"),
+        &make_profile(None, Some("Mine")),
+    );
+
+    let log = RecordingProfileLog::new();
+    let folder = user_folder(&files, layout.profiles_directory(), Some(&log));
+    let profiles = folder.scan_excluding(&[], &[without_id, with_id]).unwrap();
+
+    assert_eq!(1, profiles.len());
+    assert_eq!("Mine", profiles[0].title);
+    assert!(log.any_contains("identical to a built-in profile"));
 }
 
 #[test]

@@ -8,15 +8,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
-use zax_profiles::catalogue::UserProfileFolder;
+use zax_profiles::catalogue::{
+    built_in, ProfileCatalogue, ProfileOrigin, UserProfileFolder, FULL_EDITION,
+};
 use zax_profiles::format;
 use zax_profiles::import::{
     find_bundle, is_bundle_name, locate_bundle, read_text_assets, ThreeDSenImporter, UnityBundle,
     UnitySerializedFile,
 };
+use zax_profiles::library::{GameLibrary, GameLibraryEntry, GameProfileSource};
 
 use super::common::neutral_assets;
 use super::common::physical_fs::PhysicalProfileFileSystem;
+use super::common::recording_log::RecordingProfileLog;
 
 const PROFILE_COUNT: usize = 101;
 
@@ -139,6 +143,75 @@ fn the_import_writes_101_profiles_of_the_inventory_and_the_second_one_adds_nothi
         assert_eq!(PROFILE_COUNT, second.already_present);
         assert_eq!(0, second.failed);
         assert_eq!(PROFILE_COUNT, fs::read_dir(&destination).unwrap().count());
+    });
+    fs::remove_dir_all(&scratch).unwrap();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// AMD-037: after the import, every one of the 101 profiles is a game (45 of them carry no
+/// identifier and get a derived one) without assets, and no game appears twice with them.
+#[test]
+#[ignore = "needs ZAXNES_PROFILES and ZAXNES_3DSEN_INSTALL (a 3dSen installation)"]
+fn amd_037_the_imported_profiles_are_101_games_with_no_ignored_file_and_no_game_twice() {
+    let scratch = env::temp_dir().join(format!("zax-amd037-{}", std::process::id()));
+    let destination = scratch.join("profiles");
+    let outcome = std::panic::catch_unwind(|| {
+        let files = PhysicalProfileFileSystem;
+        ThreeDSenImporter::new(&files, &destination, None)
+            .import_from(&install_root())
+            .unwrap();
+        let before: Vec<Vec<u8>> = fs::read_dir(&destination)
+            .unwrap()
+            .map(|entry| fs::read(entry.unwrap().path()).unwrap())
+            .collect();
+
+        // Without assets: the generic catalogue, 101 games, nothing ignored.
+        let log = RecordingProfileLog::new();
+        let folder = UserProfileFolder::new(&files, &destination, Some(&log), ProfileOrigin::User);
+        let generic = built_in::create();
+        let profiles = folder
+            .scan_excluding(&generic.ids(), &generic.built_in_contents(&files))
+            .unwrap();
+        assert_eq!(PROFILE_COUNT, profiles.len());
+        assert!(!log.any_contains("ignored"));
+        let derived = log
+            .informations
+            .borrow()
+            .iter()
+            .filter(|line| line.contains("derived from its content"))
+            .count();
+        assert_eq!(
+            45, derived,
+            "the owner's install has 45 profiles without Id"
+        );
+        let library = GameLibrary::build(&generic, &profiles, None, Some(&log));
+        let user_games = library
+            .entries()
+            .iter()
+            .filter(|entry| entry.source() == GameProfileSource::User)
+            .count();
+        assert_eq!(PROFILE_COUNT, user_games);
+
+        // With assets: the profiles are the built-in ones, so no game appears twice.
+        let catalogue =
+            ProfileCatalogue::load(&files, &neutral_assets::catalogue_file(), FULL_EDITION)
+                .unwrap();
+        let profiles = folder
+            .scan_excluding(&catalogue.ids(), &catalogue.built_in_contents(&files))
+            .unwrap();
+        let library = GameLibrary::build(&catalogue, &profiles, None, Some(&log));
+        let ids: Vec<&str> = library.entries().iter().map(GameLibraryEntry::id).collect();
+        let distinct: HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), distinct.len());
+
+        // The import left the files byte-identical (AMD-030): scanning rewrote nothing.
+        let after: Vec<Vec<u8>> = fs::read_dir(&destination)
+            .unwrap()
+            .map(|entry| fs::read(entry.unwrap().path()).unwrap())
+            .collect();
+        assert_eq!(before, after);
     });
     fs::remove_dir_all(&scratch).unwrap();
     if let Err(panic) = outcome {

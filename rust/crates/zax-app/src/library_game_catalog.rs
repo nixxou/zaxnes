@@ -55,6 +55,8 @@ pub struct LibraryGameCatalog {
     paths: UserDataPaths,
     log: LogSink,
     profiles: HashMap<String, Arc<GameProfile>>,
+    /// The bytes of the built-in profile files: a user copy of one adds no game (AMD-037).
+    built_in_contents: Vec<Vec<u8>>,
 }
 
 impl LibraryGameCatalog {
@@ -78,7 +80,10 @@ impl LibraryGameCatalog {
             .load(&paths.library_file, OffsetDateTime::now_utc());
         // AMD-033 §1: the user folder and the read-only "profiles" folder next to the
         // executable, in every mode.
-        let user_profiles = match profile_folders(&files, paths, &adapter).scan(&catalogue.ids()) {
+        let built_in_contents = catalogue.built_in_contents(&files);
+        let user_profiles = match profile_folders(&files, paths, &adapter)
+            .scan_excluding(&catalogue.ids(), &built_in_contents)
+        {
             Ok(profiles) => profiles,
             Err(error) => {
                 log(&format!(
@@ -93,7 +98,9 @@ impl LibraryGameCatalog {
             persisted.as_ref(),
             Some(&adapter),
         );
-        Self::from_library(library, paths.clone(), log)
+        let mut catalog = Self::from_library(library, paths.clone(), log);
+        catalog.built_in_contents = built_in_contents;
+        catalog
     }
 
     /// A catalogue over an already built library.
@@ -104,6 +111,7 @@ impl LibraryGameCatalog {
             paths,
             log,
             profiles: HashMap::new(),
+            built_in_contents: Vec::new(),
         }
     }
 
@@ -210,7 +218,9 @@ impl LibraryGameCatalog {
     fn add_imported_profiles(&mut self) {
         let files = PhysicalProfileFileSystem;
         let adapter = ProfileLogAdapter(&*self.log);
-        let profiles = match profile_folders(&files, &self.paths, &adapter).scan(&[]) {
+        let profiles = match profile_folders(&files, &self.paths, &adapter)
+            .scan_excluding(&[], &self.built_in_contents)
+        {
             Ok(profiles) => profiles,
             Err(error) => {
                 (self.log)(&format!(

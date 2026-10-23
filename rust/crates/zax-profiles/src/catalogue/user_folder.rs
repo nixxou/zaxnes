@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use sha2::{Digest, Sha256};
+
 use super::ProfileFileSystem;
 use crate::format::{self, ProfileHeader, ProfileLog, NULL_PROFILE_LOG};
 use crate::text;
@@ -141,15 +143,32 @@ impl<'a> UserProfileFolder<'a> {
     ///
     /// The folder exists but could not be listed.
     pub fn scan(&self, reserved_ids: &[&str]) -> io::Result<Vec<UserProfile>> {
+        self.scan_excluding(reserved_ids, &[])
+    }
+
+    /// [`Self::scan`], also skipping, with a single log line, the files whose bytes are those of
+    /// one of `built_in_contents` (AMD-037): a copy of a built-in profile adds no game.
+    ///
+    /// # Errors
+    ///
+    /// The folder exists but could not be listed.
+    pub fn scan_excluding(
+        &self,
+        reserved_ids: &[&str],
+        built_in_contents: &[Vec<u8>],
+    ) -> io::Result<Vec<UserProfile>> {
         let mut paths = self.files.list_files(&self.directory, Self::EXTENSION)?;
         sort_ordinal(&mut paths);
 
         let mut taken: HashSet<String> = reserved_ids.iter().map(|id| (*id).to_owned()).collect();
         let mut profiles = Vec::new();
         for path in paths {
-            let Some(profile) = self.try_read(&path) else {
+            let Some((profile, bytes)) = self.read(&path) else {
                 continue;
             };
+            if self.is_built_in_copy(&path, &bytes, built_in_contents) {
+                continue;
+            }
             if !taken.insert(profile.id.clone()) {
                 self.log
                     .warning(&import_messages::duplicated_profile(&path, &profile.id));
@@ -253,9 +272,15 @@ impl<'a> UserProfileFolder<'a> {
     }
 
     /// Reads the header of the profile file `path`; none, with a warning, when the file is
-    /// unreadable, foreign or has no identifier.
+    /// unreadable or foreign. A profile with no identifier gets the one derived from its content
+    /// (AMD-037); the file is never rewritten.
     #[must_use]
     pub fn try_read(&self, path: &Path) -> Option<UserProfile> {
+        self.read(path).map(|(profile, _)| profile)
+    }
+
+    /// Like [`Self::try_read`], with the bytes of the file.
+    pub(crate) fn read(&self, path: &Path) -> Option<(UserProfile, Vec<u8>)> {
         let bytes = match self.files.read_all_bytes(path) {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -274,21 +299,42 @@ impl<'a> UserProfileFolder<'a> {
             ));
             return None;
         }
-        if !header.has_id() {
-            self.log.warning(&format!(
-                "{}: ignored, the profile carries no identifier",
+        let id = if header.has_id() {
+            header.id.clone().unwrap_or_default()
+        } else {
+            let id = derived_id(&bytes);
+            self.log.information(&format!(
+                "{}: the profile carries no identifier; using \"{id}\", derived from its content",
                 path.display()
             ));
-            return None;
-        }
+            id
+        };
 
-        Some(UserProfile {
-            id: header.id.clone().unwrap_or_default(),
+        let profile = UserProfile {
+            id,
             title: title_of(&header, path),
             file_path: path.to_path_buf(),
             header,
             origin: self.origin,
-        })
+        };
+        Some((profile, bytes))
+    }
+
+    /// True, with a log line, when `bytes` are those of a built-in profile.
+    pub(crate) fn is_built_in_copy(
+        &self,
+        path: &Path,
+        bytes: &[u8],
+        built_in_contents: &[Vec<u8>],
+    ) -> bool {
+        let copy = built_in_contents.iter().any(|content| content == bytes);
+        if copy {
+            self.log.information(&format!(
+                "{}: identical to a built-in profile; nothing added",
+                path.display()
+            ));
+        }
+        copy
     }
 
     fn reject(&self, message: String) -> ProfileImportResult {
@@ -299,6 +345,22 @@ impl<'a> UserProfileFolder<'a> {
             message,
         }
     }
+}
+
+/// The identifier of a profile that carries none (AMD-037): the first 9 bytes of the SHA-256 of
+/// the file, in standard base64 without padding, 12 characters.
+#[must_use]
+pub fn derived_id(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let digest = Sha256::digest(bytes);
+    let mut id = String::with_capacity(12);
+    for group in digest[..9].chunks_exact(3) {
+        let bits = (u32::from(group[0]) << 16) | (u32::from(group[1]) << 8) | u32::from(group[2]);
+        for shift in [18, 12, 6, 0] {
+            id.push(char::from(ALPHABET[((bits >> shift) & 63) as usize]));
+        }
+    }
+    id
 }
 
 fn title_of(header: &ProfileHeader, path: &Path) -> String {
