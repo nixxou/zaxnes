@@ -192,6 +192,15 @@ impl NesBus {
         self.in_dmc_dma = false;
     }
 
+    /// Reads controller port `port` ($4016 or $4017) with its side effects, the Zapper's light
+    /// detection included (REQ-CORE-061, REQ-CORE-062); this is the reference's
+    /// `InputPorts.Read` with its light probe wired to the PPU.
+    pub fn read_input_port(&mut self, port: usize, open_bus: u8) -> u8 {
+        let ppu = &self.ppu;
+        self.input
+            .read(port, open_bus, |aim| ppu.sees_light_at(aim.x, aim.y))
+    }
+
     fn read_internal(&mut self, address: u16) -> u8 {
         if address < 0x2000 {
             return self.ram[usize::from(address) & (RAM_SIZE - 1)];
@@ -206,8 +215,8 @@ impl NesBus {
         if address < 0x4020 {
             return match address {
                 0x4015 => self.apu.read_status(self.open_bus),
-                0x4016 => self.input.read(0, self.open_bus),
-                0x4017 => self.input.read(1, self.open_bus),
+                0x4016 => self.read_input_port(0, self.open_bus),
+                0x4017 => self.read_input_port(1, self.open_bus),
 
                 // $4000-$4014 are write-only and $4018-$401F are disabled: open bus.
                 _ => self.open_bus,

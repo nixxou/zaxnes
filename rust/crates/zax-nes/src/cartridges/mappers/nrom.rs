@@ -1,3 +1,4 @@
+use super::Mapper;
 use crate::cartridges::{CartridgeMemory, ChrFetch};
 
 /// iNES mapper 0, NROM (REQ-CORE-100).
@@ -11,8 +12,14 @@ pub struct Nrom;
 impl Nrom {
     /// iNES mapper number.
     pub const MAPPER_NUMBER: i32 = 0;
+}
 
-    pub(crate) fn try_read_prg(memory: &CartridgeMemory, address: u16) -> Option<u8> {
+impl Mapper for Nrom {
+    fn mapper_number(&self) -> i32 {
+        Self::MAPPER_NUMBER
+    }
+
+    fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         if address < 0x8000 {
             return None;
         }
@@ -21,11 +28,11 @@ impl Nrom {
         Some(prg[usize::from(address - 0x8000) % prg.len()])
     }
 
-    pub(crate) fn ppu_read(memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
+    fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
         memory.read_chr_direct(usize::from(address & 0x1FFF))
     }
 
-    pub(crate) fn ppu_write(memory: &mut CartridgeMemory, address: u16, value: u8) {
+    fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         memory.write_chr_direct(usize::from(address & 0x1FFF), value);
     }
 }
