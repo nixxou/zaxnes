@@ -43,7 +43,10 @@ use zax_render::scene::SceneState;
 use crate::scene_script_bridge;
 use crate::user_data_paths::UserDataPaths;
 
-pub use games::{ConfirmationRequest, ConfirmedAction};
+pub use games::{
+    delete_slot_question, ConfirmationRequest, ConfirmedAction, DELETE_GAME_QUESTION, NO_LABEL,
+    YES_LABEL,
+};
 pub use jobs::LoadKind;
 
 /// Width of the save state and cover thumbnails.
