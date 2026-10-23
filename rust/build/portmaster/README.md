@@ -11,7 +11,8 @@ No game, ROM or profile is included.
    the SD card, so you get `ports/Zaxnes.sh` and `ports/zaxnes/`).
 2. Copy your own `.nes` files to `zaxnes/roms/`.
 3. Copy your profiles to `zaxnes/profiles/`.
-4. Start Zaxnes from the Ports menu. Select+Start quits.
+4. Start Zaxnes from the Ports menu. Hold Select+Start for one second to quit (or "Exit to
+   launcher" in the in-game menu): the settings and saves are written before it closes.
 
 ## Profiles from 3dSen (convert on a PC first)
 

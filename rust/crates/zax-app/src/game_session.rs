@@ -616,7 +616,12 @@ impl GameSession {
         });
     }
 
-    fn run_frame_lent(&mut self, scene: &mut SceneState, frame: SessionFrame, clock: &mut StageClock) {
+    fn run_frame_lent(
+        &mut self,
+        scene: &mut SceneState,
+        frame: SessionFrame,
+        clock: &mut StageClock,
+    ) {
         let SessionFrame {
             player_one,
             player_two,

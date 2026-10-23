@@ -11,8 +11,8 @@ use time::OffsetDateTime;
 use zax_platform::audio::PREFERRED_SAMPLE_RATE;
 use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::icon;
-use zax_platform::pacing::DisplayPacingState;
 use zax_platform::input::sdl::SdlInput;
+use zax_platform::pacing::DisplayPacingState;
 use zax_platform::{AudioOutput, HostWindow, HostWindowSettings};
 use zax_profiles::format;
 use zax_render::assets::{NeutralSceneAssets, SceneAssets};
@@ -25,7 +25,6 @@ use zax_settings::model::SettingsModel;
 
 use crate::app_log;
 use crate::app_options::AppOptions;
-use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock};
 use crate::audio::audio_assets::AudioAssets;
 use crate::audio::synth_audio_library::SynthAudioLibrary;
 use crate::audio::{AudioMixer, TrackRandom, UiAudioLibrary};
@@ -36,6 +35,7 @@ use crate::emulation::host::{
     EmulationHost, EmulationHostOptions, GameView, HostEvent, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH,
 };
 use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
+use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock};
 use crate::frame_rate_counter::FrameRateCounter;
 use crate::game_session::GameSession;
 use crate::input::cursor_auto_hide::CursorAutoHide;
@@ -338,8 +338,10 @@ impl Running {
         if let Some(mark) = mark {
             // The emulated frames' own stages are counted apart from the rest of the tick.
             let inner = self.host.take_stage_times();
-            self.clock
-                .add(Stage::Emulation, mark.elapsed().saturating_sub(inner.total()));
+            self.clock.add(
+                Stage::Emulation,
+                mark.elapsed().saturating_sub(inner.total()),
+            );
             self.clock.merge(&inner);
         }
         let mark = self.clock.start();
@@ -378,7 +380,9 @@ impl Running {
         self.clock.stop(Stage::Pacer, mark);
         if let (Some(profiler), Some(begin)) = (self.profiler.as_mut(), frame_begin) {
             let times = self.clock.take();
-            if let Some(report) = profiler.end_frame(&times, begin.elapsed(), emulated, Instant::now()) {
+            if let Some(report) =
+                profiler.end_frame(&times, begin.elapsed(), emulated, Instant::now())
+            {
                 log(&report);
             }
         }
@@ -664,7 +668,9 @@ fn open_log_file(paths: &UserDataPaths) {
         None => app_log::error("Zaxnes: no log file could be created; the console has the log."),
     }
     for failure in failures {
-        app_log::error(&format!("Zaxnes: the log file could not be created at {failure}"));
+        app_log::error(&format!(
+            "Zaxnes: the log file could not be created at {failure}"
+        ));
     }
     log(&format!(
         "user data folder '{}' ({})",

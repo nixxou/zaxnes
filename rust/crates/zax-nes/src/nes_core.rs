@@ -478,7 +478,10 @@ impl NesCore {
     /// # Errors
     /// [`NoRomLoaded`] when there is nothing to save.
     pub fn save_state(&self, include_rom_image: bool) -> Result<Vec<u8>, NoRomLoaded> {
-        let rom_bytes = self.bus.cartridge().map_or(0, |cartridge| cartridge.rom().raw().len());
+        let rom_bytes = self
+            .bus
+            .cartridge()
+            .map_or(0, |cartridge| cartridge.rom().raw().len());
         let capacity = if include_rom_image { rom_bytes } else { 0 } + 32 * 1024;
         let mut buffer = Vec::with_capacity(capacity);
         self.save_state_to(include_rom_image, &mut buffer)?;
