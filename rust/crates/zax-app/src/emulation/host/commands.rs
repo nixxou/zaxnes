@@ -25,9 +25,15 @@ impl<C: GameCatalog> EmulationHost<C> {
             | Command::ImportProfile
             | Command::ImportThreeDSen
             | Command::SetCameraMode => !loading,
-            Command::LaunchGame => !loading && args.text.as_deref().is_some_and(|text| !text.is_empty()),
+            Command::LaunchGame => {
+                !loading && args.text.as_deref().is_some_and(|text| !text.is_empty())
+            }
             Command::DeleteGame => {
-                let game = args.text.as_deref().or_else(|| self.current_game_id()).unwrap_or_default();
+                let game = args
+                    .text
+                    .as_deref()
+                    .or_else(|| self.current_game_id())
+                    .unwrap_or_default();
                 !loading && self.games.can_delete(game)
             }
             Command::CreateGameArt
@@ -42,7 +48,10 @@ impl<C: GameCatalog> EmulationHost<C> {
             Command::QuickSave => self.current_game.is_some() && !stopped && !loading,
             Command::QuickLoad => !loading && self.slots.is_occupied(QUICK_SLOT_ID),
             Command::DeleteSlot => {
-                let slot = args.text.clone().unwrap_or_else(|| numbered_slot_id(args.number));
+                let slot = args
+                    .text
+                    .clone()
+                    .unwrap_or_else(|| numbered_slot_id(args.number));
                 !loading && self.slots.is_occupied(&slot)
             }
             Command::PauseResume | Command::Stop | Command::Rollback => !stopped && !loading,
@@ -192,7 +201,10 @@ impl<C: GameCatalog> EmulationHost<C> {
             Command::QuickSave => self.quick_save(),
             Command::QuickLoad => self.quick_load(),
             Command::DeleteSlot => {
-                let slot = args.text.clone().unwrap_or_else(|| numbered_slot_id(args.number));
+                let slot = args
+                    .text
+                    .clone()
+                    .unwrap_or_else(|| numbered_slot_id(args.number));
                 self.request_delete_slot(&slot);
             }
             _ => {}
@@ -225,7 +237,9 @@ impl<C: GameCatalog> EmulationHost<C> {
                 model.set_auto_tv_mode(value);
             }),
             Command::SetPortType => {
-                if let (Some(session), Ok(port)) = (self.session.as_ref(), usize::try_from(args.number)) {
+                if let (Some(session), Ok(port)) =
+                    (self.session.as_ref(), usize::try_from(args.number))
+                {
                     let kind = if args.number2 == 1 {
                         ControllerPortType::Zapper
                     } else {
@@ -246,7 +260,11 @@ impl<C: GameCatalog> EmulationHost<C> {
                 // SPEC-06 REQ-SCN-006: the two camera modes, with their own setpoints. The
                 // menu entry "Mode caméra" of REQ-UI-200 switches between them; REQ-SCN-009's
                 // local camera is the third item of the same submenu.
-                let mode = if args.number == 1 { CameraMode::Fpv } else { CameraMode::Tpv };
+                let mode = if args.number == 1 {
+                    CameraMode::Fpv
+                } else {
+                    CameraMode::Tpv
+                };
                 self.scene.borrow_mut().camera.set_mode(mode);
             }
             Command::ToggleLocalCamera => self.update_settings(|model| {

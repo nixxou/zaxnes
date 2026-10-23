@@ -181,7 +181,10 @@ impl GameSession {
     ///
     /// # Errors
     /// The runtime could not be installed, or a pattern of the profile is invalid.
-    pub fn create(request: SessionRequest<'_>, model: &mut SettingsModel) -> Result<Self, SessionError> {
+    pub fn create(
+        request: SessionRequest<'_>,
+        model: &mut SettingsModel,
+    ) -> Result<Self, SessionError> {
         let SessionRequest {
             profile,
             title,
@@ -193,8 +196,9 @@ impl GameSession {
         let core: SharedCore = Rc::new(RefCell::new(NesCore::new()));
         let mut engine = ConversionEngine::new();
         engine.use_geometry();
-        engine.two_dimensional_mode = two_dimensional_mode
-            .unwrap_or(profile.permanent_patterns.is_empty() && profile.temporary_patterns.is_empty());
+        engine.two_dimensional_mode = two_dimensional_mode.unwrap_or(
+            profile.permanent_patterns.is_empty() && profile.temporary_patterns.is_empty(),
+        );
         let cells = Rc::new(ScriptInputCells::default());
         let (sender, events) = channel();
         let mut settings = ScriptSettings::new(
@@ -205,7 +209,8 @@ impl GameSession {
         settings.set_on_changed(move |id| notify(&changes, SessionEvent::SettingChanged(id)));
         let saves = sender.clone();
         settings.set_on_save_requested(move || notify(&saves, SessionEvent::SaveSettingsRequested));
-        settings.set_on_load_requested(move || notify(&sender, SessionEvent::ReloadSettingsRequested));
+        settings
+            .set_on_load_requested(move || notify(&sender, SessionEvent::ReloadSettingsRequested));
         // The scene starts from the settings as they stand; the profile's own then reach it
         // through the changes the model reports.
         scene_script_bridge::push_settings(settings.model(), &mut scene.borrow_mut());
@@ -255,7 +260,11 @@ impl GameSession {
     /// the chunks, so an assignment made at the main level of a chunk is overwritten, as
     /// REQ-LUA-015 demands. Relaunching the same game skips it, so the scripts' changes survive
     /// (REQ-PERS-006).
-    fn load_profile(&mut self, profile: &GameProfile, different_game: bool) -> Result<(), SessionError> {
+    fn load_profile(
+        &mut self,
+        profile: &GameProfile,
+        different_game: bool,
+    ) -> Result<(), SessionError> {
         self.with_runtime(|runtime, _| {
             if different_game {
                 let values = profile
@@ -272,7 +281,10 @@ impl GameSession {
                 model.get(SettingId::InputPortType(Port::ALL[0])).as_int(),
                 model.get(SettingId::InputPortType(Port::ALL[1])).as_int(),
             ];
-            runtime.environment_mut().input.set_port_types(ports[0], ports[1]);
+            runtime
+                .environment_mut()
+                .input
+                .set_port_types(ports[0], ports[1]);
         });
         // Step 3: the patterns with their BuildPattern hooks. The settings were applied above,
         // through the model, so the engine must not copy them a second time.
@@ -284,9 +296,13 @@ impl GameSession {
 
     fn with_runtime<R>(
         &mut self,
-        operation: impl FnOnce(&mut ProfileScriptRuntime, &mut zax_engine3d::engine::ConversionState) -> R,
+        operation: impl FnOnce(
+            &mut ProfileScriptRuntime,
+            &mut zax_engine3d::engine::ConversionState,
+        ) -> R,
     ) -> Option<R> {
-        self.engine.with_script_host::<ProfileScriptRuntime, R>(operation)
+        self.engine
+            .with_script_host::<ProfileScriptRuntime, R>(operation)
     }
 
     fn sync_runtime_settings(&mut self) {
@@ -352,7 +368,13 @@ impl GameSession {
     #[must_use]
     pub fn script_names(&self) -> Vec<String> {
         self.runtime()
-            .map(|runtime| runtime.scripts().iter().map(|script| script.name().to_owned()).collect())
+            .map(|runtime| {
+                runtime
+                    .scripts()
+                    .iter()
+                    .map(|script| script.name().to_owned())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -438,12 +460,17 @@ impl GameSession {
     ///
     /// # Errors
     /// The Lua state could not be read.
-    pub fn capture_script_state(&mut self, model: &mut SettingsModel) -> Result<Vec<u8>, LuaScriptError> {
+    pub fn capture_script_state(
+        &mut self,
+        model: &mut SettingsModel,
+    ) -> Result<Vec<u8>, LuaScriptError> {
         self.lend(model, |session| {
             session
                 .with_runtime(|runtime, state| {
                     runtime.invoke_save(state);
-                    runtime.capture_persistent_data().map(|block| block.to_vec())
+                    runtime
+                        .capture_persistent_data()
+                        .map(|block| block.to_vec())
                 })
                 .unwrap_or_else(|| Ok(Vec::new()))
         })
@@ -624,7 +651,9 @@ impl GameSession {
 
     /// Switches the meshing algorithm; the geometry is rebuilt (REQ-LOOP-024).
     pub fn set_render_algorithm(&mut self, model: &mut SettingsModel, algorithm: RenderAlgorithm) {
-        self.lend(model, |session| session.engine.set_render_algorithm(algorithm));
+        self.lend(model, |session| {
+            session.engine.set_render_algorithm(algorithm)
+        });
     }
 
     /// Mirrors the settings changed since the last call into the engine, and reports what the

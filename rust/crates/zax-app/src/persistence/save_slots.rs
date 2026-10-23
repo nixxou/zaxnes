@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::persistence::save_state_file;
-use crate::user_data_paths::{remove_file_if_present, set_aside_corrupt_file, write_atomic, UserDataPaths};
+use crate::user_data_paths::{
+    remove_file_if_present, set_aside_corrupt_file, write_atomic, UserDataPaths,
+};
 
 /// Schema version of the index file.
 pub const SCHEMA_VERSION: i32 = 1;
@@ -113,7 +115,13 @@ impl SaveSlotIndex {
     /// Records that `slot_id` now holds a state of `game_id`.
     ///
     /// Returns false when no slot has that identifier.
-    pub fn occupy(&mut self, slot_id: &str, game_id: &str, saved_at: i64, has_thumbnail: bool) -> bool {
+    pub fn occupy(
+        &mut self,
+        slot_id: &str,
+        game_id: &str,
+        saved_at: i64,
+        has_thumbnail: bool,
+    ) -> bool {
         let Some(slot) = self.find_mut(slot_id) else {
             return false;
         };
@@ -172,7 +180,11 @@ impl SaveSlotIndex {
             if let Some(slot) = index.find_mut(&record.id) {
                 slot.game_id = record.game_id;
                 slot.saved_at = record.saved_at;
-                slot.file = Some(record.file.unwrap_or_else(|| format!("{}.state", record.id)));
+                slot.file = Some(
+                    record
+                        .file
+                        .unwrap_or_else(|| format!("{}.state", record.id)),
+                );
                 slot.thumbnail = record.thumbnail;
             }
         }
@@ -201,7 +213,11 @@ impl SaveSlotIndex {
 
     /// Empties the slots whose game is gone or whose file is missing, deleting the files of the
     /// former. Returns how many slots were cleared (REQ-PERS-046).
-    pub fn reconcile(&mut self, paths: &UserDataPaths, game_exists: impl Fn(&str) -> bool) -> usize {
+    pub fn reconcile(
+        &mut self,
+        paths: &UserDataPaths,
+        game_exists: impl Fn(&str) -> bool,
+    ) -> usize {
         let mut cleared = 0;
         for slot in &mut self.slots {
             if !slot.is_occupied() {

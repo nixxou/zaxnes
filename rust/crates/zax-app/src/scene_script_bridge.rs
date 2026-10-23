@@ -39,7 +39,11 @@ impl ScriptCamera for SceneCameraBridge {
     }
 
     fn set_distance(&mut self, distance: f32) {
-        self.0.borrow_mut().camera.current_mut().set_distance(distance);
+        self.0
+            .borrow_mut()
+            .camera
+            .current_mut()
+            .set_distance(distance);
     }
 
     fn mode(&self) -> i32 {
@@ -47,7 +51,11 @@ impl ScriptCamera for SceneCameraBridge {
     }
 
     fn set_mode(&mut self, mode: i32) {
-        let mode = if mode == 1 { CameraMode::Fpv } else { CameraMode::Tpv };
+        let mode = if mode == 1 {
+            CameraMode::Fpv
+        } else {
+            CameraMode::Tpv
+        };
         self.0.borrow_mut().camera.set_mode(mode);
     }
 
@@ -161,7 +169,8 @@ pub fn clipping_of(model: &SettingsModel) -> Vec4F {
 
 fn push_light(model: &SettingsModel, scene: &mut SceneState) {
     let direction = model.get(SettingId::LightDirection).as_vector3();
-    scene.light.direction = zax_render::numerics::Vector3::new(direction.x, direction.y, direction.z);
+    scene.light.direction =
+        zax_render::numerics::Vector3::new(direction.x, direction.y, direction.z);
     scene.light.color = color_of(model, SettingId::LightColor);
     scene
         .settings

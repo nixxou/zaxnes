@@ -22,7 +22,12 @@ pub const fn scale_applies(render_method: i32) -> bool {
 /// The size of the offscreen buffer for a view of `view_width` x `view_height` pixels: at least
 /// one pixel in each direction, whatever the factor.
 #[must_use]
-pub fn scene_size(view_width: i32, view_height: i32, render_method: i32, factor: f32) -> (i32, i32) {
+pub fn scene_size(
+    view_width: i32,
+    view_height: i32,
+    render_method: i32,
+    factor: f32,
+) -> (i32, i32) {
     let width = view_width.max(1);
     let height = view_height.max(1);
     if !scale_applies(render_method) || !factor.is_finite() || factor >= 1.0 || factor <= 0.0 {

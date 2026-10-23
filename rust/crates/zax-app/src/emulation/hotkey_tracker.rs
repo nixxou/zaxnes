@@ -46,10 +46,18 @@ impl HotkeyTracker {
     }
 
     /// Feeds one frame's actions of both players and returns the events.
-    pub fn update(&mut self, player_one: InputAction, player_two: InputAction, real_seconds: f32) -> HotkeyEvents {
+    pub fn update(
+        &mut self,
+        player_one: InputAction,
+        player_two: InputAction,
+        real_seconds: f32,
+    ) -> HotkeyEvents {
         let mask = player_one | player_two;
         let mut events = HotkeyEvents::NONE;
-        match self.menu.update(mask.contains(InputAction::MENU), real_seconds) {
+        match self
+            .menu
+            .update(mask.contains(InputAction::MENU), real_seconds)
+        {
             PressKind::Short => events |= HotkeyEvents::MENU_SHORT,
             PressKind::Long => events |= HotkeyEvents::MENU_LONG,
             PressKind::None => {}
@@ -61,10 +69,16 @@ impl HotkeyTracker {
         if mask.contains(InputAction::FAST_FORWARD) {
             events |= HotkeyEvents::FAST_FORWARD;
         }
-        if self.quick_save.rising(mask.contains(InputAction::QUICK_SAVE)) {
+        if self
+            .quick_save
+            .rising(mask.contains(InputAction::QUICK_SAVE))
+        {
             events |= HotkeyEvents::QUICK_SAVE;
         }
-        if self.quick_load.rising(mask.contains(InputAction::QUICK_LOAD)) {
+        if self
+            .quick_load
+            .rising(mask.contains(InputAction::QUICK_LOAD))
+        {
             events |= HotkeyEvents::QUICK_LOAD;
         }
         events |= self.combinations[0].update(player_one, real_seconds);
@@ -92,7 +106,11 @@ impl PlayerCombination {
         // The arming is tested against the hold measured before this frame, so a frame in which
         // Select and the stick appear together never fires.
         let armed = select && self.select_held >= SELECT_HOLD_SECONDS;
-        self.select_held = if select { self.select_held + real_seconds } else { 0.0 };
+        self.select_held = if select {
+            self.select_held + real_seconds
+        } else {
+            0.0
+        };
         let mut events = HotkeyEvents::NONE;
         if self.rot_down.falling(mask.contains(InputAction::ROT_DOWN)) && armed {
             events |= HotkeyEvents::QUICK_SAVE;

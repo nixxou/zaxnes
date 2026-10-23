@@ -27,7 +27,8 @@ pub const MAX_HEADER_BYTES: usize = 4096;
 /// Size of the camera section: the mode, two setpoints of seven floats and the transition.
 pub const CAMERA_SECTION_BYTES: usize = 4 + (2 * 7 * 4) + 4;
 
-const TIMESTAMP: &[FormatItem<'static>] = format_description!("[year]-[month]-[day] [hour]:[minute]");
+const TIMESTAMP: &[FormatItem<'static>] =
+    format_description!("[year]-[month]-[day] [hour]:[minute]");
 
 /// The header of a state file.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -132,7 +133,10 @@ pub fn try_read(file: &[u8]) -> Option<SaveStateContent> {
     if !cursor.is_empty() {
         return None;
     }
-    if core.is_empty() || lua.len() != persistent::BLOCK_SIZE || camera.len() != CAMERA_SECTION_BYTES {
+    if core.is_empty()
+        || lua.len() != persistent::BLOCK_SIZE
+        || camera.len() != CAMERA_SECTION_BYTES
+    {
         return None;
     }
     let header: SaveStateHeader = serde_json::from_slice(header_bytes).ok()?;
@@ -194,7 +198,11 @@ pub fn read_camera(block: &[u8]) -> Option<CameraStateData> {
     let fpv = read_mode(&mut cursor)?;
     let transition_remaining = read_f32(&mut cursor)?;
     Some(CameraStateData {
-        mode: if mode == 1 { CameraMode::Fpv } else { CameraMode::Tpv },
+        mode: if mode == 1 {
+            CameraMode::Fpv
+        } else {
+            CameraMode::Tpv
+        },
         tpv,
         fpv,
         transition_remaining,

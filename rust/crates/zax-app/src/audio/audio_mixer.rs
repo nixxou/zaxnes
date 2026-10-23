@@ -77,7 +77,11 @@ pub struct AudioMixer {
 impl AudioMixer {
     /// Creates a mixer at `sample_rate`, drawing the menu tracks from `assets`.
     #[must_use]
-    pub fn new(sample_rate: u32, assets: Option<Box<dyn UiAudioLibrary>>, random: TrackRandom) -> Self {
+    pub fn new(
+        sample_rate: u32,
+        assets: Option<Box<dyn UiAudioLibrary>>,
+        random: TrackRandom,
+    ) -> Self {
         let volume = 1.0_f32;
         let mut mixer = Self {
             sample_rate: sample_rate.max(1),
@@ -136,7 +140,8 @@ impl AudioMixer {
         }
         self.volume = clamped;
         let emulation = self.emulation_target();
-        self.emulation_gain.retarget(emulation, f64::from(self.volume));
+        self.emulation_gain
+            .retarget(emulation, f64::from(self.volume));
         let (music, range) = (self.music_target(), self.music_range());
         self.music_gain.retarget(music, range);
     }
@@ -340,7 +345,10 @@ impl AudioMixer {
         if self.track_suspended {
             return;
         }
-        let track_count = self.assets.as_ref().map_or(0, |assets| assets.track_count());
+        let track_count = self
+            .assets
+            .as_ref()
+            .map_or(0, |assets| assets.track_count());
         if self.track.is_none() && self.music_active() && track_count > 0 {
             self.select_track();
         }
@@ -364,7 +372,12 @@ impl AudioMixer {
                 return;
             };
             let ratio = f64::from(track.sample_rate) / f64::from(self.sample_rate);
-            let (left, right) = sample(&track.samples, usize::from(track.channels), track.frame_count(), self.track_position);
+            let (left, right) = sample(
+                &track.samples,
+                usize::from(track.channels),
+                track.frame_count(),
+                self.track_position,
+            );
             pair[0] += left * gain;
             pair[1] += right * gain;
             self.track_position += ratio;
@@ -382,7 +395,12 @@ impl AudioMixer {
                 return;
             }
             let ratio = f64::from(clip.sample_rate) / f64::from(self.sample_rate);
-            let (left, right) = sample(&clip.samples, usize::from(clip.channels), clip.frame_count(), self.sound_position);
+            let (left, right) = sample(
+                &clip.samples,
+                usize::from(clip.channels),
+                clip.frame_count(),
+                self.sound_position,
+            );
             pair[0] += left * gain;
             pair[1] += right * gain;
             self.sound_position += ratio;
@@ -406,7 +424,10 @@ impl AudioMixer {
             if Some(candidate) == previous && total > 1 {
                 continue;
             }
-            if let Some(track) = assets.load_track(candidate).filter(|track| track.frame_count() > 0) {
+            if let Some(track) = assets
+                .load_track(candidate)
+                .filter(|track| track.frame_count() > 0)
+            {
                 chosen = Some((candidate, track));
                 break;
             }
@@ -437,7 +458,11 @@ const fn frames_f64(frames: usize) -> f64 {
     frames as f64
 }
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
 // the C# `(int)position` of a positive position and `(float)` blend, as the mixer reads clips
 fn sample(samples: &[f32], channels: usize, count: usize, position: f64) -> (f32, f32) {
     if position < 0.0 {

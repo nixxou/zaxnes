@@ -18,7 +18,11 @@ pub const fn duration(sound: UiSound) -> f64 {
 
 /// Renders `sound` as a mono clip at `sample_rate` (at least 8000).
 #[must_use]
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)] // the C# casts of a positive duration times the rate; frames are far below 2^52
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)] // the C# casts of a positive duration times the rate; frames are far below 2^52
 pub fn render(sound: UiSound, sample_rate: u32) -> WaveAudio {
     let rate = f64::from(sample_rate.max(8000));
     let seconds = duration(sound);
@@ -35,21 +39,26 @@ pub fn render(sound: UiSound, sample_rate: u32) -> WaveAudio {
             // Selection: a bare triangle blip, high and dry. The quietest of the four, since it
             // fires on every movement of the cursor.
             UiSound::Move => {
-                0.45 * chip_voices::triangle(phase) * chip_voices::envelope(time, seconds, 0.001, 0.012)
+                0.45 * chip_voices::triangle(phase)
+                    * chip_voices::envelope(time, seconds, 0.001, 0.012)
             }
             // Page: a pulse falling a fifth, as "further back" in the list.
             UiSound::PageChange => {
-                0.5 * chip_voices::pulse(phase, 0.5) * chip_voices::envelope(time, seconds, 0.002, 0.022)
+                0.5 * chip_voices::pulse(phase, 0.5)
+                    * chip_voices::envelope(time, seconds, 0.002, 0.022)
             }
             // Tab: a pulse rising a fifth, with a noise tick on the attack so that it reads as a
             // wider move than a page change.
             UiSound::TabChange => {
-                (0.42 * chip_voices::pulse(phase, 0.25) * chip_voices::envelope(time, seconds, 0.002, 0.030))
+                (0.42
+                    * chip_voices::pulse(phase, 0.25)
+                    * chip_voices::envelope(time, seconds, 0.002, 0.030))
                     + (0.20 * noise_value * chip_voices::envelope(time, seconds, 0.0005, 0.006))
             }
             // Validation: two notes a fourth apart, the second louder: a coin, not a beep.
             UiSound::Confirm => {
-                0.55 * chip_voices::pulse(phase, 0.5) * chip_voices::envelope(time, seconds, 0.002, 0.090)
+                0.55 * chip_voices::pulse(phase, 0.5)
+                    * chip_voices::envelope(time, seconds, 0.002, 0.090)
             }
         };
         samples.push(value.clamp(-1.0, 1.0));

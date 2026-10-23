@@ -45,7 +45,11 @@ impl GamepadAssignment {
 
     /// The connected pad assigned to `player`.
     #[must_use]
-    pub fn device<'h>(&self, hub: &'h dyn GamepadHub, player: usize) -> Option<&'h dyn GamepadDevice> {
+    pub fn device<'h>(
+        &self,
+        hub: &'h dyn GamepadHub,
+        player: usize,
+    ) -> Option<&'h dyn GamepadDevice> {
         find(hub, self.assigned_identity(player)?)
     }
 
@@ -62,7 +66,12 @@ impl GamepadAssignment {
     }
 
     /// Advances the start-up delay and assigns pads that show activity.
-    pub fn update(&mut self, hub: &dyn GamepadHub, bindings: &mut InputBindings, real_seconds: f32) {
+    pub fn update(
+        &mut self,
+        hub: &dyn GamepadHub,
+        bindings: &mut InputBindings,
+        real_seconds: f32,
+    ) {
         if !self.startup_done {
             self.since_start += real_seconds;
             if self.since_start < STARTUP_DELAY_SECONDS {

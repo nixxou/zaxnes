@@ -166,7 +166,9 @@ fn read_gamepads(root: &Map<String, Value>, bindings: &mut InputBindings) {
         }
         // The set is created empty and then filled: a remembered set is authoritative and must
         // not be mixed with the §4.3 defaults (REQ-INP-025).
-        bindings.gamepad_mut(identity, false).replace(read_set(entries));
+        bindings
+            .gamepad_mut(identity, false)
+            .replace(read_set(entries));
     }
 }
 
