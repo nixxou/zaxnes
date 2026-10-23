@@ -22,11 +22,7 @@ struct MethodCache(Vec<Vec<Option<Function>>>);
 
 /// Installs the per-state parts of the binding: the weak object cache and the method functions.
 pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
-    let cache = lua.create_table()?;
-    let meta = lua.create_table()?;
-    meta.raw_set("__mode", "v")?;
-    cache.set_metatable(Some(meta))?;
-    lua.set_app_data(HostCache(cache));
+    lua.set_app_data(HostCache::new(lua)?);
 
     let mut methods = Vec::with_capacity(HostType::COUNT);
     for _ in 0..HostType::COUNT {

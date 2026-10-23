@@ -9,7 +9,7 @@ use zax_engine3d::engine::ConversionState;
 use zax_engine3d::instance::{InstanceRef, PatternInstance};
 use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
-use super::payload::{Host, Payload, Vec3Ref};
+use super::payload::{FrameKey, FrameSlot, Host, Payload, Vec3Ref};
 use crate::environment::ScriptContext;
 use crate::runtime::{FrameHandles, RuntimeData};
 use crate::values::{number_format, LuaColor};
@@ -191,8 +191,74 @@ pub(crate) fn with_host_context<R: Reply>(
     }
 }
 
-/// The weak table that maps a reference object to its Lua value.
-pub(crate) struct HostCache(pub Table);
+/// How many retirements of an epoch pass between two sweeps of the tables of retired epochs.
+const SWEEP_INTERVAL: u32 = 128;
+
+/// What maps a reference object to its Lua value, so that the same object always has the same
+/// value for as long as a script holds it (REQ-LUA-043).
+pub(crate) struct HostCache {
+    /// The weak table of the objects that are not handles into a frame, by cache key.
+    pub objects: Table,
+    /// The tables of the handles of epochs that are over, by group of [`FrameSlot`]. Each is
+    /// weak and keyed by the member, so that retiring a handle makes no string.
+    retired: Table,
+    /// The metatable that makes a table of `retired` weak.
+    weak: Table,
+    retirements: std::cell::Cell<u32>,
+}
+
+impl HostCache {
+    pub fn new(lua: &Lua) -> mlua::Result<Self> {
+        let weak = lua.create_table()?;
+        weak.raw_set("__mode", "v")?;
+        let objects = lua.create_table()?;
+        objects.set_metatable(Some(weak.clone()))?;
+        Ok(Self {
+            objects,
+            retired: lua.create_table()?,
+            weak,
+            retirements: std::cell::Cell::new(0),
+        })
+    }
+
+    /// The table of handles of `group`, made when `create` is set and it is not there.
+    fn group(&self, lua: &Lua, group: u64, create: bool) -> mlua::Result<Option<Table>> {
+        if let Value::Table(table) = self.retired.raw_get::<Value>(lua_key(group))? {
+            return Ok(Some(table));
+        }
+
+        if !create {
+            return Ok(None);
+        }
+
+        let table = lua.create_table()?;
+        table.set_metatable(Some(self.weak.clone()))?;
+        self.retired.raw_set(lua_key(group), &table)?;
+        Ok(Some(table))
+    }
+
+    /// Drops the tables of the groups none of whose handles is held any more.
+    fn sweep(&self) -> mlua::Result<()> {
+        let mut empty = Vec::new();
+        for entry in self.retired.pairs::<i64, Table>() {
+            let (key, table) = entry?;
+            if table.is_empty() {
+                empty.push(key);
+            }
+        }
+
+        for key in empty {
+            self.retired.raw_set(key, Value::Nil)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// The Lua integer that stands for `key`, whatever its top bit.
+fn lua_key(key: u64) -> i64 {
+    i64::from_ne_bytes(key.to_ne_bytes())
+}
 
 /// The context of one call from Lua into the host.
 pub(crate) struct Cx<'a> {
@@ -321,22 +387,39 @@ impl<'a> Cx<'a> {
 
     /// Hands the handles of an epoch that is over to the weak object cache: a script that still
     /// holds one keeps the one value of its object (REQ-LUA-043), whatever the epoch.
-    pub fn retire(&self, handles: FrameHandles) -> mlua::Result<()> {
+    pub fn retire(&self, mut handles: FrameHandles) -> mlua::Result<()> {
         if handles.is_empty() {
             return Ok(());
         }
 
         let cache = self.cache()?;
-        for (key, handle) in handles {
-            cache.raw_set(self.lua.create_string(key)?, handle)?;
+        let mut groups: Vec<(u64, Table)> = Vec::new();
+        for (slot, handle) in handles.drain() {
+            let position = match groups.iter().position(|(group, _)| *group == slot.group) {
+                Some(position) => position,
+                None => {
+                    let table = cache
+                        .group(self.lua, slot.group, true)?
+                        .ok_or_else(|| Self::not_available("the object cache"))?;
+                    groups.push((slot.group, table));
+                    groups.len() - 1
+                }
+            };
+            groups[position].1.raw_set(lua_key(slot.member), handle)?;
         }
+
+        let retirements = cache.retirements.get().wrapping_add(1);
+        cache.retirements.set(retirements);
+        if retirements % SWEEP_INTERVAL == 0 {
+            cache.sweep()?;
+        }
+
         Ok(())
     }
 
-    fn cache(&self) -> mlua::Result<Table> {
+    fn cache(&self) -> mlua::Result<mlua::AppDataRef<'_, HostCache>> {
         self.lua
             .app_data_ref::<HostCache>()
-            .map(|cache| cache.0.clone())
             .ok_or_else(|| Self::not_available("the object cache"))
     }
 
@@ -350,40 +433,62 @@ impl<'a> Cx<'a> {
     /// The Lua value of a reference object: the same object always gives the same value
     /// (REQ-LUA-043), which is what lets a script use it as a table key (REQ-LUA-045).
     pub fn object(&self, payload: Payload) -> mlua::Result<Value> {
+        if let (Some(frame), Some(slot)) = (payload.frame_key(), payload.frame_slot()) {
+            return self.frame_object(payload, frame, slot);
+        }
+
         let Some(key) = payload.cache_key() else {
             return self.value(payload);
         };
 
-        // A handle into the current epoch of a frame is made once: the runtime keeps its value
-        // until the epoch is over, which spares the weak table a string key and two accesses.
-        if let Some(frame) = payload.frame_key() {
-            let known = self.data(|data| {
-                data.handles_of(frame)
-                    .map(|handles| handles.get(&key).cloned())
-            })?;
-            match known {
-                Some(Some(handle)) => return Ok(handle),
-                Some(None) => {
-                    let created = self.value(payload)?;
-                    self.data(|data| {
-                        if let Some(handles) = data.handles_of(frame) {
-                            handles.insert(key, created.clone());
-                        }
-                    })?;
-                    return Ok(created);
-                }
-                None => {}
-            }
-        }
-
         let cache = self.cache()?;
         let key = self.lua.create_string(key)?;
-        if let Value::UserData(existing) = cache.raw_get::<Value>(&key)? {
+        if let Value::UserData(existing) = cache.objects.raw_get::<Value>(&key)? {
             return Ok(Value::UserData(existing));
         }
 
         let created = self.value(payload)?;
-        cache.raw_set(&key, &created)?;
+        cache.objects.raw_set(&key, &created)?;
+        Ok(created)
+    }
+
+    /// The Lua value of a handle into a frame. A handle into the current epoch of a frame is made
+    /// once: the runtime keeps its value until the epoch is over. One of an epoch that is over
+    /// is looked for among the retired handles, which a script may still hold.
+    fn frame_object(
+        &self,
+        payload: Payload,
+        frame: FrameKey,
+        slot: FrameSlot,
+    ) -> mlua::Result<Value> {
+        let known = self.data(|data| {
+            data.handles_of(frame)
+                .map(|handles| handles.get(&slot).cloned())
+        })?;
+        match known {
+            Some(Some(handle)) => return Ok(handle),
+            Some(None) => {
+                let created = self.value(payload)?;
+                self.data(|data| {
+                    if let Some(handles) = data.handles_of(frame) {
+                        handles.insert(slot, created.clone());
+                    }
+                })?;
+                return Ok(created);
+            }
+            None => {}
+        }
+
+        let cache = self.cache()?;
+        let handles = cache
+            .group(self.lua, slot.group, true)?
+            .ok_or_else(|| Self::not_available("the object cache"))?;
+        if let Value::UserData(existing) = handles.raw_get::<Value>(lua_key(slot.member))? {
+            return Ok(Value::UserData(existing));
+        }
+
+        let created = self.value(payload)?;
+        handles.raw_set(lua_key(slot.member), &created)?;
         Ok(created)
     }
 

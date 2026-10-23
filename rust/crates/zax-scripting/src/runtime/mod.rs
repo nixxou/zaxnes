@@ -41,8 +41,8 @@ use self::hooks::{
 };
 use crate::binding::cx::{with_host_context, Cx, HostLink, Lent, Reply};
 use crate::binding::dispatch;
-use crate::binding::payload::{FrameKey, InstanceTarget, Payload, ShapeTarget};
-use crate::binding::table::ByteHasher;
+use crate::binding::payload::{FrameKey, FrameSlot, InstanceTarget, Payload, ShapeTarget};
+use crate::binding::table::IdHasher;
 use crate::environment::{ScriptContext, ScriptEnvironment};
 use crate::error::{message_of, LuaScriptError};
 use crate::persistent_data;
@@ -53,7 +53,7 @@ use crate::settings::ScriptSettings;
 const BUDGET_CHECK_INSTRUCTIONS: u32 = 100_000;
 
 /// The Lua values of the handles of one epoch, by cache key.
-pub(crate) type FrameHandles = HashMap<[u8; 16], Value, BuildHasherDefault<ByteHasher>>;
+pub(crate) type FrameHandles = HashMap<FrameSlot, Value, BuildHasherDefault<IdHasher>>;
 
 /// Everything the runtime owns besides the Lua state. The script API reaches it through the
 /// call context while a call into Lua is in progress.
@@ -141,7 +141,11 @@ impl RuntimeData {
     #[must_use = "the retired handles must be given to the object cache"]
     pub fn advance_epoch(&mut self) -> FrameHandles {
         self.epoch = self.epoch.wrapping_add(1);
-        std::mem::take(&mut self.frame_handles)
+        let capacity = self.frame_handles.len();
+        std::mem::replace(
+            &mut self.frame_handles,
+            FrameHandles::with_capacity_and_hasher(capacity, BuildHasherDefault::default()),
+        )
     }
 
     /// Ends the epoch of the pinned frame.
