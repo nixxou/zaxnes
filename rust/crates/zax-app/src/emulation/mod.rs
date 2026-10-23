@@ -8,3 +8,6 @@ pub mod notification_center;
 pub mod rollback_history;
 pub mod speed_setting;
 pub mod game_catalog;
+pub mod video_pacing;
+pub mod commands;
+pub mod rom_file;
