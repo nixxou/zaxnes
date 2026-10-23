@@ -280,6 +280,7 @@ impl ProfileScriptRuntime {
             },
         };
 
+        runtime.lua.gc_inc(400, 400);
         runtime.build(profile, state, context).map_err(|error| {
             LuaScriptError(format!(
                 "The Lua base environment failed to install: {}",
