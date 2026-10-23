@@ -61,8 +61,23 @@ displayed frame". All values are per displayed frame.
   snapshots reuse the evicted buffer; no draw list built in 2D mode.
 - Core milestone 1 (`537c0b2`): PPU dot dispatch by range, per-line sprite buffer. Bit-identical,
   but only ~3 % on the device.
-- See the final lines of `rust/PROGRESS.md` and `git log --oneline` for anything committed after
-  this document (the core work may have continued).
+- Core milestone 2 (`91123ec`): the PPU is caught up in batches at sync points (CPU access to
+  $2000-$3FFF, $4014, $4016/$4017 reads, any cartridge write, vblank/NMI edges, an MMC3 IRQ
+  horizon; Rambo1 and MMC5 still step every cycle), idle dots skipped. Full goldens and
+  `cargo test -p zax-nes --release` pass. bench-core x86 core ms/frame (spritecans / nes15 /
+  smwstomp / rastesam4): 2.97 / 2.30 / 1.98 / 1.88 -> 1.48 / 1.53 / 1.45 / 1.34 (approximate,
+  shared CPU). Not yet measured under qemu nor on the device: first thing to check.
+- Profiling before milestone 2 (callgrind, nes15): ~23 M instructions per frame; PPU 62 %
+  (~160 instructions per dot), APU 17 %, CPU + bus + PRG reads 15 %. Each PPU VRAM fetch costs
+  ~116 instructions (A12 notification through the `Board` match, `ppu_read`, `banks()`,
+  `read_chr` with a modulo); the `Board` match lines alone are ~2 M instructions per frame.
+  Removing the PRG/CHR `% len` gave no x86 gain (dropped).
+- Recommended next core steps: (1) in `run_dots` (`zax-nes/src/ppu/mod.rs`) a tight loop for
+  visible lines with rendering on, dots 1-256: registers cannot change inside a batch, so hoist
+  mask / fine-X checks and work per 8-dot tile with direct CHR / nametable reads (expected
+  ~160 -> ~50 instructions per dot); (2) batch the APU the same way (sync on $4000-$4017 and on
+  frame / DMC IRQ cycles); (3) IRQ horizons for Rambo1 and MMC5 so they batch too.
+- `rust/check.sh` was not run after `91123ec` (the session stopped): run it first.
 
 ## 5. Next steps, in order (see `ROADMAP.md`)
 
