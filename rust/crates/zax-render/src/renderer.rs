@@ -2,6 +2,7 @@
 //! transparent objects, then the HUD (REQ-SCN-058), all inside a framebuffer the host provides
 //! (REQ-SCN-057).
 
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -170,7 +171,8 @@ pub struct SceneRenderer {
 impl SceneRenderer {
     /// Creates the renderer for the host context `gl`, which must be current. `assets` are
     /// where the skybox cubemaps of a user-supplied folder come from, or `None` when the host
-    /// has none (REQ-SCN-057: the renderer never reads files itself).
+    /// has none (REQ-SCN-057: the renderer reads no file of its own, but the program cache
+    /// of [`Self::with_program_cache`], whose folder the host names).
     ///
     /// # Errors
     ///
@@ -180,7 +182,26 @@ impl SceneRenderer {
         gl: Rc<glow::Context>,
         assets: Option<Box<dyn SceneAssets>>,
     ) -> Result<Self, RenderError> {
+        Self::with_program_cache(gl, assets, None)
+    }
+
+    /// Like [`Self::new`], keeping the binaries of the linked programs in `cache_directory` when
+    /// there is one and the driver can give them: the next start loads them instead of
+    /// compiling. A binary the driver refuses is compiled from source.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::new`].
+    pub fn with_program_cache(
+        gl: Rc<glow::Context>,
+        assets: Option<Box<dyn SceneAssets>>,
+        cache_directory: Option<PathBuf>,
+    ) -> Result<Self, RenderError> {
         let gl = Gl::new(gl);
+        let gl = match cache_directory {
+            Some(directory) => gl.with_program_cache(directory),
+            None => gl,
+        };
         let textures = TextureCache::new(&gl)?;
         let shadow_map = ShadowMap::new(&gl, geometry::SHADOW_MAP_SIZE)?;
 

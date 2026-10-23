@@ -67,6 +67,9 @@ impl GameView for OffscreenFramebuffer {
     }
 }
 
+/// The folder of the user data where the linked shader programs are kept.
+const SHADER_CACHE_FOLDER: &str = "shader-cache";
+
 /// Whether the window opens in full screen: the persisted choice, or always on a handheld,
 /// except for smoke runs and screenshot runs.
 #[must_use]
@@ -256,10 +259,14 @@ impl Running {
         // the game pauses, and the loop draws into it through the host.
         let view = OffscreenFramebuffer::new(Rc::clone(&gl), to_i32(width), to_i32(height))
             .map_err(|error| error.to_string())?;
-        let renderer = SceneRenderer::new(
+        // The linked programs are kept in the user folder, where the next start finds them.
+        let renderer = SceneRenderer::with_program_cache(
             Rc::clone(&gl),
             NeutralSceneAssets::try_open(asset_root.as_deref())
                 .map(|assets| Box::new(assets) as Box<dyn SceneAssets>),
+            paths
+                .is_writable
+                .then(|| paths.root.join(SHADER_CACHE_FOLDER)),
         )
         .map_err(|error| error.to_string())?;
         let input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;

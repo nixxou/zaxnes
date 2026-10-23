@@ -278,3 +278,44 @@ libdrm.so.2, libgbm.so.1, libEGL.so.1, libGLESv2.so.2); libsamplerate is off (no
 Still to check on the device (nothing graphical or audible ran under qemu): the KMSDRM window
 (`SDL_VIDEODRIVER=KMSDRM`), the GLES 3.0 context on the Mali-G31, the controls, the audio (ALSA)
 and the performance (frame time at 640x480 on the Cortex-A53).
+
+## 8c. Handheld interface (desktop first, then the device)
+
+On the desktop, with a gamepad and no mouse or keyboard touched after the start:
+
+```sh
+cd rust && cargo build --release -p zax-app
+mkdir -p /tmp/zax-roms && cp <some .nes files> /tmp/zax-roms
+target/release/zaxnes --handheld --size 640x480 --roms /tmp/zax-roms --userdata /tmp/zax-ud
+```
+
+Repeat with `--size 720x480` and `--size 720x720`, and once with `ZAXNES_HANDHELD=1` instead of the
+flag. Then, on the device (aarch64 Linux with no X11 or Wayland picks the mode by itself; the PortMaster
+launch script runs `./zaxnes --roms ./roms`):
+
+1. The ROM list fills the screen, the text is easy to read at arm's length, the focus bar is bright,
+   every row can be reached, and the last line shows the hints (A Play, X Profile, Y Options, L/R A-Z).
+2. D-pad up and down move (they repeat when held), the left stick does the same, L and R jump a
+   letter, left and right move a page; a game with a matching 3D profile shows its title in green.
+3. X lists the matching profiles and the two generic entries; A starts the game with the chosen one,
+   and the next time A on that game uses it.
+4. In a game, the Menu (guide) button opens the menu and pauses; B, the Menu button or Resume goes
+   on. Save state and Load state use the slot shown (left and right change it), Rewind goes back
+   a few seconds, Fast forward toggles, Camera preset switches between orbit, first person and the
+   default view and shows at once behind the menu, Options comes back to the menu on B.
+5. With "Menu = Select + Start" on (the option of the key configuration of the desktop build), a
+   quick tap of Select+Start does the same as the Menu button.
+6. Select+Start held for one second shows a bar and quits cleanly, from the list and from a game
+   (also from the menu: "Exit to launcher"); the front-end comes back and no process is left.
+7. Options: language switches at once, volume steps by 10 %, render scale changes the sharpness,
+   shadows and the FPS counter toggle, frame cap 30 halves the rate, Controls rebinds a button of
+   player one (press the new button; the Menu button or 5 s gives up). The values survive a restart.
+8. Without any saved setting, a first start in handheld mode has render scale 2/3, shadows off, no
+   anti-alias and 60 fps; a value saved by the user is kept.
+9. Neither the mouse nor the keyboard does anything in the interface (the menu-bar shortcuts are off).
+10. `shader-cache/` appears in the user folder after the first game; the second start is quicker
+    (note the time to the first frame in the log) and the picture is the same. Deleting the folder
+    or one file is harmless. Compare 3 starts on the device: cold, warm, after a firmware update.
+
+`--ui-shots <dir> --handheld --size 640x480` writes the five handheld screens (`handheld-*.png`);
+under Xvfb with llvmpipe they are not blank (about 650 to 1600 colours each).
