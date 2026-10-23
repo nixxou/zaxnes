@@ -1,6 +1,7 @@
 //! Shared by the integration tests: synthetic ROMs, a fake catalogue, the loop harness and the
 //! fake input devices (`LoopHarness.cs`, `FakeInputDevices.cs`).
 #![allow(dead_code)] // each integration test crate uses a part of this module
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test support code
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
