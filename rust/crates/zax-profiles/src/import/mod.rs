@@ -15,7 +15,7 @@ pub use bundle::{
     SIGNATURE as BUNDLE_SIGNATURE,
 };
 pub use importer::{
-    ThreeDSenImportSummary, ThreeDSenImporter, ThreeDSenProfileOutcome, ThreeDSenProfileResult,
+    ThreeDSenImportError, ThreeDSenImportSummary, ThreeDSenImporter, ThreeDSenProfileOutcome, ThreeDSenProfileResult,
 };
 pub use installation::{
     expected_layout, find_bundle, is_bundle_name, locate_bundle, BUNDLE_EXTENSION, BUNDLE_PREFIX,
