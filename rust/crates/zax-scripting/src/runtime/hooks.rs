@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-use mlua::{Lua, MultiValue, Table, Value};
+use mlua::{Function, Lua, MultiValue, Table, Value};
 use zax_engine3d::frame::FrameInstanceId;
 
 use super::globals::{protected_call, protected_hook_call};
@@ -171,9 +171,16 @@ fn fail(cx: &Cx, index: usize, hook: ScriptHook, message: &str) -> mlua::Result<
     })
 }
 
-/// Calls `hook` of the script at `index`. An absent hook is simply not called (REQ-LUA-022).
-/// Returns the text of the error the hook raised.
-pub(crate) fn call_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result<Option<String>> {
+/// What the call of a hook of a script needs, which stays the same from one call to the next.
+struct HookCall {
+    function: Function,
+    limit: Duration,
+    handle: Value,
+}
+
+/// The function of `hook` of the script at `index`, with the budget and the `self` of its calls,
+/// or `None` when the script has no such hook (REQ-LUA-022).
+fn prepare_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result<Option<HookCall>> {
     let (function, limit, handle) = cx.data(|data| {
         let script = &data.scripts[index];
         (
@@ -193,13 +200,38 @@ pub(crate) fn call_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result
         cx.data(|data| data.scripts[index].handle = Some(handle.clone()))?;
         handle
     };
-    publish(cx.lua, Published::Script, handle)?;
-    match with_budget(cx.lua, limit, || protected_hook_call(cx.lua, &function))? {
+    Ok(Some(HookCall {
+        function,
+        limit,
+        handle,
+    }))
+}
+
+/// Runs a prepared hook. Returns the text of the error it raised.
+fn run_hook(
+    cx: &Cx,
+    index: usize,
+    hook: ScriptHook,
+    call: &HookCall,
+) -> mlua::Result<Option<String>> {
+    publish(cx.lua, Published::Script, call.handle.clone())?;
+    match with_budget(cx.lua, call.limit, || {
+        protected_hook_call(cx.lua, &call.function)
+    })? {
         Ok(()) => Ok(None),
         Err(message) => {
             fail(cx, index, hook, &message)?;
             Ok(Some(message))
         }
+    }
+}
+
+/// Calls `hook` of the script at `index`. An absent hook is simply not called (REQ-LUA-022).
+/// Returns the text of the error the hook raised.
+pub(crate) fn call_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result<Option<String>> {
+    match prepare_hook(cx, index, hook)? {
+        Some(call) => run_hook(cx, index, hook, &call),
+        None => Ok(None),
     }
 }
 
@@ -290,12 +322,19 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
             pinned: false,
             epoch,
         };
+        let call = prepare_hook(cx, index, ScriptHook::UpdateS)?;
         for id in &pending {
-            if cx.data(|data| data.scripts[index].failed())? {
+            let Some(call) = &call else {
+                break;
+            };
+
+            // Only an error puts a script in error, and it ends the calls of its list.
+            let error = call_update_s(cx, index, call, key, *id)?;
+            let failed = error.is_some();
+            first = first.or(error);
+            if failed {
                 break;
             }
-
-            first = first.or(call_update_s(cx, index, key, *id)?);
         }
 
         cx.data(|data| {
@@ -311,6 +350,7 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
 fn call_update_s(
     cx: &Cx,
     index: usize,
+    call: &HookCall,
     key: crate::binding::payload::FrameKey,
     id: FrameInstanceId,
 ) -> mlua::Result<Option<String>> {
@@ -320,7 +360,7 @@ fn call_update_s(
         cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?,
     )?;
     defer_shape_2d(cx.lua, ShapeTarget { key, id: id.shape })?;
-    call_hook(cx, index, ScriptHook::UpdateS)
+    run_hook(cx, index, ScriptHook::UpdateS, call)
 }
 
 /// Calls `InputProcess` of the script that owns the script pad and returns the action mask to
