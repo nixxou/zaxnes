@@ -11,7 +11,7 @@ use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
 use super::payload::{FrameKey, FrameSlot, Host, Payload, Vec3Ref};
 use crate::environment::ScriptContext;
-use crate::runtime::{FrameHandles, RuntimeData};
+use crate::runtime::{Retired, RuntimeData};
 use crate::values::{number_format, LuaColor};
 
 /// What the host lends to the Lua state for the duration of one call into it: the runtime's
@@ -22,72 +22,9 @@ pub(crate) struct Lent {
     pub build: Option<(InstanceRef, AnyUserData)>,
 }
 
-/// What the host answers to a request. The common answers are held in place; only an answer of
-/// another type is boxed.
-pub(crate) enum Answer {
-    Unit,
-    Real(f32),
-    Int(i32),
-    Flag(bool),
-    Vector(Vec3),
-    Boxed(Box<dyn Any>),
-}
-
-/// A type the host can answer a request with.
-pub(crate) trait Reply: Sized + 'static {
-    fn pack(self) -> Answer;
-    fn unpack(answer: Answer) -> Option<Self>;
-}
-
-macro_rules! reply {
-    ($($type:ty => $variant:ident),* $(,)?) => {$(
-        impl Reply for $type {
-            fn pack(self) -> Answer {
-                Answer::$variant(self)
-            }
-
-            fn unpack(answer: Answer) -> Option<Self> {
-                match answer {
-                    Answer::$variant(value) => Some(value),
-                    _ => None,
-                }
-            }
-        }
-    )*};
-}
-
-macro_rules! boxed_reply {
-    ($($type:ty),* $(,)?) => {$(
-        impl Reply for $type {
-            fn pack(self) -> Answer {
-                Answer::Boxed(Box::new(self))
-            }
-
-            fn unpack(answer: Answer) -> Option<Self> {
-                match answer {
-                    Answer::Boxed(value) => value.downcast::<Self>().ok().map(|value| *value),
-                    _ => None,
-                }
-            }
-        }
-    )*};
-}
-
-reply!(f32 => Real, i32 => Int, bool => Flag, Vec3 => Vector);
-boxed_reply!(u8, LuaColor);
-
-impl Reply for () {
-    fn pack(self) -> Answer {
-        Answer::Unit
-    }
-
-    fn unpack(answer: Answer) -> Option<Self> {
-        matches!(answer, Answer::Unit).then_some(())
-    }
-}
-
-/// A request for the host context: run against the lent [`ScriptContext`], and answer.
-type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Answer>;
+/// A request for the host context: run against the lent [`ScriptContext`], and answer with a
+/// boxed value.
+type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Box<dyn Any>>;
 
 /// A change of the host the script asked for, which nothing in the script waits for.
 type HostWrite = Box<dyn FnOnce(&mut ScriptContext<'_>)>;
@@ -105,7 +42,7 @@ const QUEUED_WRITES_LIMIT: usize = 256;
 pub(crate) struct HostLink {
     call: Function,
     pending: RefCell<Option<HostRequest>>,
-    answer: RefCell<Option<Answer>>,
+    answer: RefCell<Option<Box<dyn Any>>>,
     writes: RefCell<Vec<HostWrite>>,
 }
 
@@ -161,26 +98,25 @@ impl HostLink {
     }
 
     /// Runs `operation` on the lent context.
-    fn run<R: Reply>(
+    fn run<R: 'static>(
         &self,
         operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
     ) -> mlua::Result<R> {
         self.pending
-            .replace(Some(Box::new(move |context| operation(context).pack())));
+            .replace(Some(Box::new(move |context| Box::new(operation(context)))));
         self.call.call::<()>(())?;
         self.answer
             .take()
-            .ok_or_else(|| mlua::Error::runtime("the host context gave no answer"))
-            .and_then(|answer| {
-                R::unpack(answer)
-                    .ok_or_else(|| mlua::Error::runtime("the host context gave another answer"))
-            })
+            .ok_or_else(|| mlua::Error::runtime("the host context gave no answer"))?
+            .downcast::<R>()
+            .map(|answer| *answer)
+            .map_err(|_| mlua::Error::runtime("the host context gave another answer"))
     }
 }
 
 /// Runs `operation` on the host context lent to `lua`, or on the headless bridges of the
 /// runtime's environment when the host lent none.
-pub(crate) fn with_host_context<R: Reply>(
+pub(crate) fn with_host_context<R: 'static>(
     lua: &Lua,
     data: &mut RuntimeData,
     operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
@@ -205,6 +141,26 @@ pub(crate) struct HostCache {
     /// The metatable that makes a table of `retired` weak.
     weak: Table,
     retirements: std::cell::Cell<u32>,
+    epochs: std::cell::Cell<Epochs>,
+}
+
+/// The epochs of the frame being converted and of the pinned frame: a frame handle reads as gone
+/// once its epoch is over. The runtime's data holds them too; the cache has them at hand
+/// without a borrow of the data.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Epochs {
+    pub frame: u32,
+    pub pinned: u32,
+}
+
+impl Epochs {
+    pub const fn of(self, pinned: bool) -> u32 {
+        if pinned {
+            self.pinned
+        } else {
+            self.frame
+        }
+    }
 }
 
 impl HostCache {
@@ -218,6 +174,7 @@ impl HostCache {
             retired: lua.create_table()?,
             weak,
             retirements: std::cell::Cell::new(0),
+            epochs: std::cell::Cell::new(Epochs::default()),
         })
     }
 
@@ -290,7 +247,7 @@ impl<'a> Cx<'a> {
 
     /// Runs `operation` on the camera, backdrop, inputs and memory the host lent to this call.
     /// The operation outlives the borrow of the host, so it owns what it captures.
-    pub fn host<R: Reply>(
+    pub fn host<R: 'static>(
         &self,
         operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
     ) -> mlua::Result<R> {
@@ -387,12 +344,14 @@ impl<'a> Cx<'a> {
 
     /// Hands the handles of an epoch that is over to the weak object cache: a script that still
     /// holds one keeps the one value of its object (REQ-LUA-043), whatever the epoch.
-    pub fn retire(&self, mut handles: FrameHandles) -> mlua::Result<()> {
+    pub fn retire(&self, retired: Retired) -> mlua::Result<()> {
+        let cache = self.cache()?;
+        cache.epochs.set(retired.epochs);
+        let mut handles = retired.handles;
         if handles.is_empty() {
             return Ok(());
         }
 
-        let cache = self.cache()?;
         let mut groups: Vec<(u64, Table)> = Vec::new();
         for (slot, handle) in handles.drain() {
             let position =
@@ -415,6 +374,11 @@ impl<'a> Cx<'a> {
         }
 
         Ok(())
+    }
+
+    /// The epoch the frame being converted, or the pinned frame, is in now.
+    pub fn epoch_of(&self, pinned: bool) -> mlua::Result<u32> {
+        Ok(self.cache()?.epochs.get().of(pinned))
     }
 
     fn cache(&self) -> mlua::Result<mlua::AppDataRef<'_, HostCache>> {

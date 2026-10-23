@@ -39,7 +39,7 @@ use self::hooks::{
     call_all, call_hook, input_process, publish, update_shapes, with_budget, Audience, Budget,
     Published, PublishedGlobals,
 };
-use crate::binding::cx::{with_host_context, Cx, HostLink, Lent, Reply};
+use crate::binding::cx::{with_host_context, Cx, Epochs, HostLink, Lent};
 use crate::binding::dispatch;
 use crate::binding::payload::{FrameKey, FrameSlot, InstanceTarget, Payload, ShapeTarget};
 use crate::binding::table::IdHasher;
@@ -54,6 +54,12 @@ const BUDGET_CHECK_INSTRUCTIONS: u32 = 100_000;
 
 /// The Lua values of the handles of one epoch, by cache key.
 pub(crate) type FrameHandles = HashMap<FrameSlot, Value, BuildHasherDefault<IdHasher>>;
+
+/// The handles of an epoch that is over, with the epochs that are current now.
+pub(crate) struct Retired {
+    pub handles: FrameHandles,
+    pub epochs: Epochs,
+}
 
 /// Everything the runtime owns besides the Lua state. The script API reaches it through the
 /// call context while a call into Lua is in progress.
@@ -130,7 +136,7 @@ impl RuntimeData {
     }
 
     /// Changes the epochs: every frame handle issued so far reads as gone.
-    fn invalidate_handles(&mut self) -> [FrameHandles; 2] {
+    fn invalidate_handles(&mut self) -> [Retired; 2] {
         [self.advance_epoch(), self.advance_pin_epoch()]
     }
 
@@ -139,22 +145,34 @@ impl RuntimeData {
     /// Returns the handles issued in the epoch, which the caller hands to the weak object cache
     /// so that they stay the one value of their object for as long as a script holds them.
     #[must_use = "the retired handles must be given to the object cache"]
-    pub fn advance_epoch(&mut self) -> FrameHandles {
+    pub fn advance_epoch(&mut self) -> Retired {
         self.epoch = self.epoch.wrapping_add(1);
         let capacity = self.frame_handles.len();
-        std::mem::replace(
+        let handles = std::mem::replace(
             &mut self.frame_handles,
             FrameHandles::with_capacity_and_hasher(capacity, BuildHasherDefault::default()),
-        )
+        );
+        self.retired(handles)
     }
 
     /// Ends the epoch of the pinned frame.
     ///
     /// Returns the handles issued in the epoch, as [`Self::advance_epoch`] does.
     #[must_use = "the retired handles must be given to the object cache"]
-    pub fn advance_pin_epoch(&mut self) -> FrameHandles {
+    pub fn advance_pin_epoch(&mut self) -> Retired {
         self.pin_epoch = self.pin_epoch.wrapping_add(1);
-        std::mem::take(&mut self.pinned_handles)
+        let handles = std::mem::take(&mut self.pinned_handles);
+        self.retired(handles)
+    }
+
+    fn retired(&self, handles: FrameHandles) -> Retired {
+        Retired {
+            handles,
+            epochs: Epochs {
+                frame: self.epoch,
+                pinned: self.pin_epoch,
+            },
+        }
     }
 
     /// The Lua values issued for the handles of the epoch `key` is in, or `None` when that epoch
@@ -428,7 +446,7 @@ impl ProfileScriptRuntime {
 
     /// Runs `operation` on the context the host lent, outside any call into Lua. A failure of
     /// the host side is logged and gives `None`.
-    fn with_context<R: Reply>(
+    fn with_context<R: 'static>(
         &mut self,
         operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
     ) -> Option<R> {
