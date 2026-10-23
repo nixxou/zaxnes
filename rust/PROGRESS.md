@@ -36,7 +36,7 @@ T15 (this container: Linux x86_64, Mesa llvmpipe EGL, SDL2 dev libs, rustc 1.99.
 |---|---|---|
 | `rust/check.sh` (fmt, clippy pedantic `-D warnings`, `cargo test --workspace`) | clean, 0 failures | fmt/clippy clean, 1264 passed with `--include-ignored` |
 | Core goldens, `ppu_golden_tests -- --ignored` (1200 frames) | 291/291 rows | to rerun (section 2 of LOCAL-CHECKS.md) |
-| Core goldens, `zax-harness golden-core` vs `core-goldens.jsonl` | GOLDENCORE | to rerun |
+| Core goldens, `zax-harness golden-core` vs `core-goldens.jsonl` | 291/291 rows equal (parsed JSON; 290 ROMs run, 1 load failure row) | to rerun |
 | Render synthetic (11 scenes, counts identical, pixels within 2 levels) | 9/11 at 100 %; `framing` 99.998 %, `heavy` 99.769 % (llvmpipe z-fighting of coplanar sprites) | 11/11 at 100 % |
 | Lua API dump (`lua-api` vs `goldens/lua-api.txt`) | byte-identical | byte-identical (test) |
 | MSAA 8x | not verifiable (llvmpipe caps `GL_MAX_SAMPLES` at 4; 1 ignored test) | passes |
