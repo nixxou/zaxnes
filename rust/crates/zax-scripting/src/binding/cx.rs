@@ -395,16 +395,16 @@ impl<'a> Cx<'a> {
         let cache = self.cache()?;
         let mut groups: Vec<(u64, Table)> = Vec::new();
         for (slot, handle) in handles.drain() {
-            let position = match groups.iter().position(|(group, _)| *group == slot.group) {
-                Some(position) => position,
-                None => {
+            let position =
+                if let Some(position) = groups.iter().position(|(group, _)| *group == slot.group) {
+                    position
+                } else {
                     let table = cache
                         .group(self.lua, slot.group, true)?
                         .ok_or_else(|| Self::not_available("the object cache"))?;
                     groups.push((slot.group, table));
                     groups.len() - 1
-                }
-            };
+                };
             groups[position].1.raw_set(lua_key(slot.member), handle)?;
         }
 
