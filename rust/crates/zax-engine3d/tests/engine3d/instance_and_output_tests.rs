@@ -772,7 +772,7 @@ fn req_e3d_642_material_classes_and_shadow_rules() {
     assert_eq!(MaterialClass::Transparent, first_tile(&mut engine).material);
 
     edit(&mut engine, &|instance| {
-        instance.style = RenderStyle::ShadowOnly
+        instance.style = RenderStyle::ShadowOnly;
     });
     let shadow_only = first_tile(&mut engine);
     assert_eq!(MaterialClass::ShadowOnly, shadow_only.material);
