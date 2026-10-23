@@ -333,6 +333,11 @@ impl ProfileBuilder {
         Arc::make_mut(&mut self.profile.permanent_patterns[index])
     }
 
+    /// The variant `variant` of the permanent pattern `pattern`, for changing it before a load.
+    pub fn variant(&mut self, pattern: usize, variant: usize) -> &mut PatternVariant {
+        Arc::make_mut(&mut self.permanent_pattern(pattern).variants[variant])
+    }
+
     /// The profile.
     pub fn build(&self) -> GameProfile {
         self.profile.clone()
