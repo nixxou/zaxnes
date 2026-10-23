@@ -17,6 +17,49 @@ pub const MAX_BACKLOG: u32 = 5;
 /// A frame may start up to 1 ms early (REQ-LOOP-011).
 pub const EARLY_START_SECONDS: f64 = 0.001;
 
+/// How far the clock catches up with late frames (Rust-only, for handhelds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatchUp {
+    /// Up to this many emulated frames per displayed frame; [`MAX_BACKLOG`] is REQ-LOOP-012.
+    Limit(u32),
+    /// Only the frames one displayed frame stands for (the effective rate over the displayed
+    /// rate, rounded up): a late frame slows the game down a little instead of piling up
+    /// emulated frames that make the next displayed frame later still.
+    Off,
+}
+
+impl CatchUp {
+    /// The value of `--catch-up` and `ZAXNES_CATCH_UP`: 0 for [`CatchUp::Off`], 1 to
+    /// [`MAX_BACKLOG`] for a limit.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().parse::<u32>().ok()? {
+            0 => Some(Self::Off),
+            limit if limit <= MAX_BACKLOG => Some(Self::Limit(limit)),
+            _ => None,
+        }
+    }
+
+    /// The most emulated frames one displayed frame may run, at `effective_rate` emulated frames
+    /// per second shown at `displayed_rate` frames per second (0 when unknown).
+    #[must_use]
+    pub fn frames_per_display(self, effective_rate: f64, displayed_rate: f64) -> u32 {
+        match self {
+            Self::Limit(limit) => limit.clamp(1, MAX_BACKLOG),
+            Self::Off if displayed_rate <= 0.0 => MAX_BACKLOG,
+            Self::Off => {
+                let wanted = effective_rate / displayed_rate;
+                // A rate a hair above the display (59.94 shown at 60) still needs one frame.
+                let mut frames = 1;
+                while f64::from(frames) + 0.01 < wanted && frames < MAX_BACKLOG {
+                    frames += 1;
+                }
+                frames
+            }
+        }
+    }
+}
+
 /// A clock that starts at zero now and follows the system's monotonic time.
 pub fn system_clock() -> Clock {
     let start = Instant::now();
@@ -31,6 +74,9 @@ pub struct FramePacer {
     pub nominal_rate: f64,
     /// Speed factor `k` of REQ-LOOP-015, 1 by default.
     pub speed: f64,
+    /// Most emulated frames one call to [`FramePacer::due_frames`] hands out, [`MAX_BACKLOG`]
+    /// by default (REQ-LOOP-012); see [`CatchUp`].
+    pub max_backlog: u32,
     frame_count: u64,
     dropped_frames: u64,
 }
@@ -45,6 +91,7 @@ impl FramePacer {
             next_due,
             nominal_rate,
             speed: 1.0,
+            max_backlog: MAX_BACKLOG,
             frame_count: 0,
             dropped_frames: 0,
         }
@@ -80,7 +127,7 @@ impl FramePacer {
         self.next_due = (self.clock)();
     }
 
-    /// How many emulated frames are due now, at most [`MAX_BACKLOG`]. Any further backlog is
+    /// How many emulated frames are due now, at most `max_backlog`. Any further backlog is
     /// abandoned, so the game slows down instead of suddenly speeding up.
     pub fn due_frames(&mut self) -> u32 {
         let now = (self.clock)();
@@ -89,10 +136,11 @@ impl FramePacer {
         while now + EARLY_START_SECONDS >= self.next_due {
             self.next_due += period;
             due += 1;
-            if due < MAX_BACKLOG {
+            if due < self.max_backlog.max(1) {
                 continue;
             }
-            // REQ-LOOP-012: the backlog never exceeds five frames; the rest is dropped.
+            // REQ-LOOP-012: the backlog never exceeds five frames (fewer with a catch-up
+            // limit); the rest is dropped.
             while now + EARLY_START_SECONDS >= self.next_due {
                 self.next_due += period;
                 self.dropped_frames += 1;

@@ -30,6 +30,7 @@ use crate::audio::synth_audio_library::SynthAudioLibrary;
 use crate::audio::{AudioMixer, TrackRandom, UiAudioLibrary};
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
+use crate::emulation::frame_pacer::{CatchUp, MAX_BACKLOG};
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::host::{
     EmulationHost, EmulationHostOptions, GameView, HostEvent, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH,
@@ -252,7 +253,7 @@ impl Running {
         let pacing_state = pacing.apply(&mut window, &model);
         let profiling = frame_profiler::requested_by_environment();
         if profiling {
-            log_profiler_startup(&model, pacing_state);
+            log_profiler_startup(&model, pacing_state, catch_up(options));
         }
         let (width, height) = window.drawable_size();
         // The host owns the picture of the scene: it reads it back for the thumbnails whenever
@@ -281,6 +282,7 @@ impl Running {
         };
         let mut host = build_host(parts);
         host.set_profiling(profiling);
+        host.catch_up = catch_up(options);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui = ImguiFrontend::new(&gl, &host, options, height)?;
@@ -588,6 +590,17 @@ struct HostParts<'a> {
     view: OffscreenFramebuffer,
 }
 
+/// How far the frame clock catches up: the command line or `ZAXNES_CATCH_UP`, else none on a
+/// handheld (a late frame slows the game a little there instead of collapsing the display into
+/// five emulated frames per shown one) and REQ-LOOP-012 elsewhere.
+fn catch_up(options: &AppOptions) -> CatchUp {
+    options.catch_up.unwrap_or(if options.handheld {
+        CatchUp::Off
+    } else {
+        CatchUp::Limit(MAX_BACKLOG)
+    })
+}
+
 fn build_host(parts: HostParts<'_>) -> AppHost {
     let library: Box<dyn UiAudioLibrary> = match AudioAssets::try_open(parts.asset_root, log) {
         Some(files) => Box::new(files),
@@ -702,7 +715,7 @@ fn open_renderer(
 
 /// The start-up line of the frame profiler: the machine, the build, the render settings and
 /// the pacing in force.
-fn log_profiler_startup(model: &SettingsModel, pacing: DisplayPacingState) {
+fn log_profiler_startup(model: &SettingsModel, pacing: DisplayPacingState, catch_up: CatchUp) {
     log(&frame_profiler::startup_report(
         &format!(
             "render scale {}, render method {}, shadows {}, MSAA setting {}, vsync {}, \
@@ -714,7 +727,7 @@ fn log_profiler_startup(model: &SettingsModel, pacing: DisplayPacingState) {
             model.vsync(),
             model.frame_rate()
         ),
-        &pacing.to_string(),
+        &format!("{pacing}, catch-up {catch_up:?}"),
     ));
 }
 
