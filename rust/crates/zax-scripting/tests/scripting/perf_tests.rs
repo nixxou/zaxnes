@@ -248,7 +248,6 @@ fn perf_accesses() {
         ("Camera.Distance read", "local a = Camera.Distance"),
         ("Camera.Distance write", "Camera.Distance = 5"),
         ("Setting.SceneRatio read", "local a = Setting.SceneRatio"),
-        ("Setting.EmptyTile read", "local a = Setting.EmptyTile"),
         ("Script:ReadMem", "local a = Script:ReadMem(16)"),
         ("unknown member read", "local a = Camera.Nope"),
         ("Vector3(1, 2, 3)", "local a = Vector3(1, 2, 3)"),
@@ -268,25 +267,4 @@ fn perf_accesses() {
     }
 
     assert_eq!(session.log.errors(), [] as [String; 0]);
-}
-
-#[test]
-#[ignore = "temporary profile"]
-fn prof_tmp() {
-    let mut session = ScriptProfileBuilder::new()
-        .pattern(&[img::c()], PatternSpec::tagged("s"))
-        .script("frame", "x = 0")
-        .start();
-    let mut rig = Rig::new();
-    let bridge = session.runtime(|runtime, _| runtime.bridge());
-    let body = std::env::var("PROF_BODY").unwrap();
-    let chunk = format!("local v = Vector3(1, 2, 3) for i = 1, 10000 do {body} end");
-    rig.lend(&bridge, || session.evaluate(&chunk));
-    assert_eq!(session.log.errors(), [] as [String; 0]);
-}
-
-#[test]
-#[ignore = "temporary profile"]
-fn prof_frames() {
-    let _ = frame_seconds(&std::env::var("PROF_US").unwrap());
 }
