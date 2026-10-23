@@ -299,7 +299,8 @@ impl ZaxUi {
         self.state.dialog = host.pending_confirmation().is_some();
     }
 
-    fn log(&mut self, message: String) {
+    /// Adds a line to the console log, through the effects.
+    pub fn log(&mut self, message: String) {
         self.effects.push(UiEffect::Log(message));
     }
 

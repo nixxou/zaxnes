@@ -4,7 +4,7 @@ use zax_engine3d::state_codec;
 use zax_nes::NesCore;
 use zax_render::assets::png_image;
 
-use super::{EmulationHost, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH};
+use super::{EmulationHost, GameView, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH};
 use crate::audio::UiSound;
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
@@ -13,7 +13,7 @@ use crate::persistence::save_slots::{is_valid_slot_id, QUICK_SLOT_ID};
 use crate::persistence::save_state_file::{self, SaveStateContent, SaveStateHeader};
 use crate::user_data_paths::{remove_file_if_present, write_atomic};
 
-impl<C: GameCatalog> EmulationHost<C> {
+impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Captures the state of the game being played for `slot_id`: the core, the scripts' data,
     /// the camera and the learned conversion state (REQ-PERS-055).
     pub fn capture_save_state(&mut self, slot_id: &str) -> Option<SaveStateContent> {
@@ -168,9 +168,9 @@ impl<C: GameCatalog> EmulationHost<C> {
                 return Some(paused.clone());
             }
         }
-        self.capture_thumbnail
+        self.view
             .as_mut()
-            .and_then(|capture| capture())
+            .and_then(GameView::capture_thumbnail)
             .or_else(|| self.pause_thumbnail.clone())
     }
 

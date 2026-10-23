@@ -12,9 +12,8 @@ use zax_settings::catalogue::{self, SettingId};
 
 use super::strings;
 use super::text;
+use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs, Shortcut};
-use crate::emulation::game_catalog::GameCatalog;
-use crate::emulation::host::EmulationHost;
 use crate::emulation::speed_setting;
 use crate::persistence::app_settings::{AppSettings, TvRegionSetting};
 use crate::persistence::save_slots::{
@@ -211,7 +210,7 @@ impl MenuBarModel {
     }
 
     /// Every entry of every menu, the children of each submenu after it.
-    pub fn all_items<C: GameCatalog>(&mut self, host: &EmulationHost<C>) -> Vec<MenuItem> {
+    pub fn all_items(&mut self, host: &AppHost) -> Vec<MenuItem> {
         let mut items = Vec::new();
         for menu in self.menus() {
             expand(&menu.items, host, &mut items);
@@ -221,14 +220,14 @@ impl MenuBarModel {
 
     /// Whether `item` can run now.
     #[must_use]
-    pub fn is_enabled<C: GameCatalog>(item: &MenuItem, host: &EmulationHost<C>) -> bool {
+    pub fn is_enabled(item: &MenuItem, host: &AppHost) -> bool {
         item.command
             .is_some_and(|command| host.can_execute(command, &item.args))
     }
 
     /// Whether `item` shows a check mark: a toggle that is on, a choice that is selected.
     #[must_use]
-    pub fn is_checked<C: GameCatalog>(item: &MenuItem, host: &EmulationHost<C>) -> bool {
+    pub fn is_checked(item: &MenuItem, host: &AppHost) -> bool {
         match item.kind {
             MenuItemKind::Choice => item
                 .selection
@@ -240,7 +239,7 @@ impl MenuBarModel {
 
     /// The entries of `submenu`, built from the state of `host` when it opens.
     #[must_use]
-    pub fn children<C: GameCatalog>(submenu: Submenu, host: &EmulationHost<C>) -> Vec<MenuItem> {
+    pub fn children(submenu: Submenu, host: &AppHost) -> Vec<MenuItem> {
         match submenu {
             Submenu::RecentRoms => recent_rom_items(&recent_roms(host)),
             Submenu::LoadState => slot_items(Command::LoadSlot, Command::QuickLoad, host),
@@ -257,7 +256,7 @@ impl MenuBarModel {
     }
 }
 
-fn expand<C: GameCatalog>(items: &[MenuItem], host: &EmulationHost<C>, into: &mut Vec<MenuItem>) {
+fn expand(items: &[MenuItem], host: &AppHost, into: &mut Vec<MenuItem>) {
     for item in items {
         into.push(item.clone());
         if let Some(submenu) = item.submenu {
@@ -266,12 +265,12 @@ fn expand<C: GameCatalog>(items: &[MenuItem], host: &EmulationHost<C>, into: &mu
     }
 }
 
-fn recent_roms<C: GameCatalog>(host: &EmulationHost<C>) -> Vec<String> {
+fn recent_roms(host: &AppHost) -> Vec<String> {
     host.settings_store()
         .map_or_else(Vec::new, |store| store.games().recent_roms().to_vec())
 }
 
-fn is_selected<C: GameCatalog>(selection: Selection, host: &EmulationHost<C>) -> bool {
+fn is_selected(selection: Selection, host: &AppHost) -> bool {
     let settings = host.settings();
     match selection {
         Selection::Speed(value) => settings.game_speed() == value,
@@ -393,11 +392,7 @@ fn recent_rom_items(roms: &[String]) -> Vec<MenuItem> {
         .collect()
 }
 
-fn slot_items<C: GameCatalog>(
-    numbered: Command,
-    quick: Command,
-    host: &EmulationHost<C>,
-) -> Vec<MenuItem> {
+fn slot_items(numbered: Command, quick: Command, host: &AppHost) -> Vec<MenuItem> {
     let mut items = Vec::with_capacity(EXPOSED_SLOT_COUNT + 2);
     for slot in 1..=slot_count() {
         items.push(MenuItem::of(
@@ -419,7 +414,7 @@ fn slot_items<C: GameCatalog>(
     items
 }
 
-fn delete_slot_items<C: GameCatalog>(host: &EmulationHost<C>) -> Vec<MenuItem> {
+fn delete_slot_items(host: &AppHost) -> Vec<MenuItem> {
     let mut items = Vec::new();
     for slot in 1..=slot_count() {
         let id = numbered_slot_id(slot);

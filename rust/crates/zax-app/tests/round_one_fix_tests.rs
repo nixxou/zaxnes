@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{LoopHarness, SyntheticRom, TemporaryRoot};
+use common::{LoopHarness, StubView, SyntheticRom, TemporaryRoot};
 use zax_app::audio::{AudioMixer, TrackRandom};
 use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::emulation::emulation_state::EmulationState;
@@ -82,7 +82,7 @@ fn empty_profile(id: &str, title: &str) -> GameProfile {
 struct LibraryHarness {
     _root: TemporaryRoot,
     paths: UserDataPaths,
-    host: EmulationHost<LibraryGameCatalog>,
+    host: EmulationHost<LibraryGameCatalog, StubView>,
 }
 
 fn library_harness() -> LibraryHarness {
@@ -103,7 +103,7 @@ fn library_harness() -> LibraryHarness {
     );
     options.mixer = Some(AudioMixer::new(48_000, None, TrackRandom::new(1)));
     options.confirm_with_interface = true;
-    options.capture_thumbnail = Some(Box::new(|| Some(vec![0x30; 256 * 192 * 3])));
+    options.view = Some(StubView(Some(vec![0x30; 256 * 192 * 3])));
     LibraryHarness {
         host: EmulationHost::new(options),
         paths,

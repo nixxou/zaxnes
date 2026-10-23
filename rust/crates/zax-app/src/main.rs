@@ -4,9 +4,9 @@
 //! command-line front end; until then the program starts with the default options.
 
 use zax_app::app_options::AppOptions;
-use zax_app::application::{NoUi, ZaxApplication};
+use zax_app::application::ZaxApplication;
 
 fn main() {
-    let code = ZaxApplication::new(AppOptions::default()).run(Box::new(NoUi));
+    let code = ZaxApplication::new(AppOptions::default()).run();
     std::process::exit(code);
 }

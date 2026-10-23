@@ -1,7 +1,7 @@
 //! Deleting games and slots behind a confirmation, and the cover art (SPEC-09 REQ-PERS-036,
 //! REQ-PERS-042, SPEC-10 REQ-UI-037, REQ-UI-110).
 
-use super::EmulationHost;
+use super::{EmulationHost, GameView};
 use crate::emulation::game_catalog::GameCatalog;
 use crate::persistence::app_settings::AppSettings;
 use crate::persistence::game_art;
@@ -44,7 +44,7 @@ pub struct ConfirmationRequest {
     pub action: ConfirmedAction,
 }
 
-impl<C: GameCatalog> EmulationHost<C> {
+impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The message shown once a game is deleted, in the language of the interface.
     #[must_use]
     pub fn deleted_message(&self, title: &str) -> String {
