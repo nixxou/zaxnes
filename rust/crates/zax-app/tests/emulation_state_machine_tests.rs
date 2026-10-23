@@ -16,7 +16,7 @@ use zax_app::persistence::settings_store::SettingsStore;
 use zax_nes::NesRegion;
 use zax_settings::model::SettingsModel;
 
-pub fn launch(harness: &mut LoopHarness, game_id: &str) {
+fn launch(harness: &mut LoopHarness, game_id: &str) {
     harness.launch(game_id);
     assert_eq!(EmulationState::Running, harness.host.state());
 }

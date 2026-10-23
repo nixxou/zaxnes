@@ -272,7 +272,7 @@ impl LoopHarness {
         options.capture_thumbnail = Some(Box::new(move || capture.borrow().clone()));
         let lines = Rc::clone(&log);
         options.log = Some(Box::new(move |message| {
-            lines.borrow_mut().push(message.to_owned())
+            lines.borrow_mut().push(message.to_owned());
         }));
         adjust(&mut options);
         Self {
