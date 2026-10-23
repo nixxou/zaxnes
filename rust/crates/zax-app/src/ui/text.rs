@@ -209,13 +209,13 @@ pub fn import_cover_title() -> String {
 
 /// Title of the 3dSen installation picker (AMD-030 §2).
 #[must_use]
-pub fn import_three_dsen_title() -> String {
+pub fn import_three_d_sen_title() -> String {
     strings::get(keys::WINDOW_IMPORT_THREE_DSEN)
 }
 
 /// What the 3dSen picker asks for: the installation folder, or the bundle itself (AMD-030 §2, §3).
 #[must_use]
-pub fn import_three_dsen_hint() -> String {
+pub fn import_three_d_sen_hint() -> String {
     strings::get(keys::HINT_IMPORT_THREE_DSEN)
 }
 
@@ -299,13 +299,13 @@ pub fn reset_bindings() -> String {
 
 /// Hint shown while a capture is listening.
 #[must_use]
-pub fn press_acontrol() -> String {
+pub fn press_a_control() -> String {
     strings::get(keys::HINT_PRESS_ACONTROL)
 }
 
 /// Hint shown when no capture is running (REQ-INP-042).
 #[must_use]
-pub fn click_acell() -> String {
+pub fn click_a_cell() -> String {
     strings::get(keys::HINT_CLICK_ACELL)
 }
 

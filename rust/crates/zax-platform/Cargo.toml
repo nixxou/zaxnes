@@ -13,6 +13,7 @@ bundled = ["sdl2/bundled", "sdl2/static-link"]
 
 [dependencies]
 glow = "0.16"
+imgui = "0.12"
 png = "0.17"
 sdl2 = "0.38"
 thiserror = "2"
