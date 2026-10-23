@@ -116,6 +116,18 @@ impl Domain {
         Self::greater_than(0.0)
     }
 
+    /// The lower bound, when the domain has one.
+    #[must_use]
+    pub const fn minimum(&self) -> Option<f64> {
+        self.minimum
+    }
+
+    /// The upper bound, when the domain has one.
+    #[must_use]
+    pub const fn maximum(&self) -> Option<f64> {
+        self.maximum
+    }
+
     /// The finite ordered set of admitted values, or none when there is none.
     #[must_use]
     pub fn options(&self) -> Option<&[SettingOption]> {
