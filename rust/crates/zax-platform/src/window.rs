@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::surface::Surface;
-use sdl2::video::{FullscreenType, GLContext, GLProfile, SwapInterval, Window};
+use sdl2::video::{FullscreenType, GLContext, GLProfile, Window};
 use sdl2::{EventPump, Sdl, VideoSubsystem};
 
 use crate::icon::{WindowIconImage, WindowIconTarget};
@@ -216,29 +216,45 @@ impl HostWindow {
     /// stencil bits, the multisampling and the double buffering it actually got.
     #[must_use]
     pub fn gl_config_report(&self) -> String {
-        let attributes = self.video.gl_attr();
-        let profile = match attributes.context_profile() {
-            GLProfile::Core => "core".to_owned(),
-            GLProfile::Compatibility => "compatibility".to_owned(),
-            GLProfile::GLES => "GLES".to_owned(),
-            GLProfile::Unknown(value) => format!("profile {value}"),
+        use sdl2::sys::SDL_GLattr as Attribute;
+        // The `sdl2` getters panic when the driver refuses a query (Mesa refuses the stencil
+        // size of the default framebuffer, for one), so SDL is asked directly and a refused
+        // attribute reads "?".
+        let get = |attribute: Attribute| {
+            let mut value = 0;
+            // SAFETY: SDL_GL_GetAttribute only writes the int behind the pointer, which lives
+            // for the call; the window's GL context is current on this thread.
+            let status = unsafe { sdl2::sys::SDL_GL_GetAttribute(attribute, &raw mut value) };
+            if status == 0 {
+                value.to_string()
+            } else {
+                "?".to_owned()
+            }
+        };
+        let profile = match get(Attribute::SDL_GL_CONTEXT_PROFILE_MASK).as_str() {
+            "1" => "core".to_owned(),
+            "2" => "compatibility".to_owned(),
+            "4" => "GLES".to_owned(),
+            other => format!("profile {other}"),
         };
         format!(
             "GL context {profile} {}.{} (requested {:?}), RGBA {}/{}/{}/{} depth {} stencil {}, \
-             multisample {}x{}, double buffer {}, swap interval {:?}",
-            attributes.context_major_version(),
-            attributes.context_minor_version(),
+             multisample {}x{}, double buffer {}, accelerated {}, swap interval {}",
+            get(Attribute::SDL_GL_CONTEXT_MAJOR_VERSION),
+            get(Attribute::SDL_GL_CONTEXT_MINOR_VERSION),
             self.flavor,
-            attributes.red_size(),
-            attributes.green_size(),
-            attributes.blue_size(),
-            attributes.alpha_size(),
-            attributes.depth_size(),
-            attributes.stencil_size(),
-            attributes.multisample_buffers(),
-            attributes.multisample_samples(),
-            attributes.double_buffer(),
-            self.video.gl_get_swap_interval()
+            get(Attribute::SDL_GL_RED_SIZE),
+            get(Attribute::SDL_GL_GREEN_SIZE),
+            get(Attribute::SDL_GL_BLUE_SIZE),
+            get(Attribute::SDL_GL_ALPHA_SIZE),
+            get(Attribute::SDL_GL_DEPTH_SIZE),
+            get(Attribute::SDL_GL_STENCIL_SIZE),
+            get(Attribute::SDL_GL_MULTISAMPLEBUFFERS),
+            get(Attribute::SDL_GL_MULTISAMPLESAMPLES),
+            get(Attribute::SDL_GL_DOUBLEBUFFER),
+            get(Attribute::SDL_GL_ACCELERATED_VISUAL),
+            // SAFETY: as above (the wrapper's getter asserts the interval is -1, 0 or 1).
+            unsafe { sdl2::sys::SDL_GL_GetSwapInterval() }
         )
     }
 
@@ -318,9 +334,10 @@ impl DisplaySurface for HostWindow {
     }
 
     fn try_set_swap_interval(&mut self, interval: i32) -> bool {
-        self.video
-            .gl_set_swap_interval(SwapInterval::from(interval))
-            .is_ok()
+        // SDL is called directly: the `sdl2` wrapper's `SwapInterval::from` panics on 2, the
+        // every-other-refresh interval of `video.vsync` 2.
+        // SAFETY: a plain SDL call on the window's GL context, current on this thread.
+        unsafe { sdl2::sys::SDL_GL_SetSwapInterval(interval) == 0 }
     }
 }
 
