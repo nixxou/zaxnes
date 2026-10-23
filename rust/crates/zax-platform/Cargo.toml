@@ -10,6 +10,10 @@ publish.workspace = true
 # Builds and statically links SDL2 instead of using the system library. This is what the
 # Windows and aarch64 packages use (T14): without it, SDL2.dll must sit next to the executable.
 bundled = ["sdl2/bundled", "sdl2/static-link"]
+# Builds SDL2 from source as a shared library for the link step only: the executable gets a
+# NEEDED libSDL2-2.0.so.0 and resolves it on the device, so the firmware's SDL2 (patched for its
+# GPU driver) is used. The built library is not shipped (handheld package).
+firmware-sdl = ["sdl2/bundled"]
 
 [dependencies]
 glow = "0.16"

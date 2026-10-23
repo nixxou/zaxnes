@@ -9,8 +9,9 @@
 use std::io;
 use std::path::Path;
 
-use zax_app::app_options::{AppOptions, USAGE};
+use zax_app::app_options::{AppOptions, RUST_ONLY_USAGE, USAGE};
 use zax_app::application::ZaxApplication;
+use zax_app::handheld_mode::{self, DisplayEnvironment};
 use zax_app::single_instance::{SingleInstance, ALREADY_RUNNING_MESSAGE};
 use zax_app::three_d_sen_command;
 use zax_app::{neutral_assets, profile_resolver};
@@ -39,17 +40,19 @@ fn run() -> i32 {
     let options = match AppOptions::parse(&arguments) {
         Ok(mut options) => {
             options.system_locale = sys_locale::get_locale();
+            options.handheld =
+                handheld_mode::resolve(options.handheld, &DisplayEnvironment::of_process());
             options
         }
         Err(error) => {
             eprintln!("{error}");
-            eprint!("{USAGE}");
+            eprint!("{USAGE}{RUST_ONLY_USAGE}");
             return EXIT_USAGE;
         }
     };
 
     if options.show_help {
-        print!("{USAGE}");
+        print!("{USAGE}{RUST_ONLY_USAGE}");
         return EXIT_SUCCESS;
     }
     if options.list_profiles {

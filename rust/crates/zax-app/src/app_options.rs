@@ -68,6 +68,16 @@ Menu shortcuts (AMD-010 REQ-UI-204; see spec/changes/Q-030.md for Ctrl+Fn):
   Ctrl+Q    quit               Ctrl+,      options
 "#;
 
+/// The Rust-only options, which the C# program does not have. They are kept out of [`USAGE`] so
+/// that the test comparing it with the C# text stays meaningful; `--help` prints both.
+pub const RUST_ONLY_USAGE: &str = "
+Rust-only options:
+  --handheld              Gamepad-only interface for handheld consoles (also ZAXNES_HANDHELD=1,
+                          and automatic on aarch64 Linux without an X11 or Wayland display).
+  --roms <dir>            Folder of .nes files the handheld ROM list shows
+                          (default: the roms folder of the user data).
+";
+
 /// A command line that cannot be read. The messages are those of the C# program.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OptionsError {
@@ -175,6 +185,12 @@ pub struct AppOptions {
     pub smoke_shot_path: Option<String>,
     /// Where the interface screenshots go.
     pub ui_shot_directory: Option<String>,
+    /// The gamepad-only interface of handheld consoles (Rust-only). `--handheld` sets it; the
+    /// environment and the platform can too, see [`crate::handheld_mode`].
+    pub handheld: bool,
+    /// The folder the handheld ROM list shows (Rust-only); `None` for the `roms` folder of the
+    /// user data.
+    pub roms_directory: Option<String>,
 }
 
 impl Default for AppOptions {
@@ -204,6 +220,8 @@ impl Default for AppOptions {
             smoke_emulated_frames: 0,
             smoke_shot_path: None,
             ui_shot_directory: None,
+            handheld: false,
+            roms_directory: None,
         }
     }
 }
@@ -285,6 +303,13 @@ impl AppOptions {
                 "--ui-shots" => {
                     options.ui_shot_directory =
                         Some(next_value(arguments, &mut index, "--ui-shots")?.to_owned());
+                }
+                "--handheld" => {
+                    options.handheld = true;
+                }
+                "--roms" => {
+                    options.roms_directory =
+                        Some(next_value(arguments, &mut index, "--roms")?.to_owned());
                 }
                 "--smoke-test" => {
                     options.smoke_test = true;

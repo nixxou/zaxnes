@@ -20,6 +20,8 @@ default = ["native-dialog"]
 native-dialog = ["dep:rfd"]
 # Statically links SDL2 (Windows, aarch64); forwarded to zax-platform.
 bundled = ["zax-platform/bundled"]
+# Links the firmware's libSDL2-2.0.so.0 dynamically (handhelds); forwarded to zax-platform.
+firmware-sdl = ["zax-platform/firmware-sdl"]
 
 [dependencies]
 zax-nes = { path = "../zax-nes" }
