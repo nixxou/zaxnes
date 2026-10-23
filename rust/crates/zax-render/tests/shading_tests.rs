@@ -1,6 +1,9 @@
 //! The light and the shading of SPEC-06 §3.9 to §3.11 and the test vectors of §5.2 (port of
 //! `ShadingTests.cs`).
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use common::assert_close;
@@ -20,7 +23,10 @@ fn close(expected: f32, actual: f32, tolerance: f64) {
 #[track_caller]
 fn in_range(value: u8, low: i32, high: i32) {
     let value = i32::from(value);
-    assert!((low..=high).contains(&value), "{value} not in {low}..={high}");
+    assert!(
+        (low..=high).contains(&value),
+        "{value} not in {low}..={high}"
+    );
 }
 
 #[track_caller]
@@ -62,18 +68,47 @@ fn req_scn_025_the_three_faces_towards_the_light_get_the_same_illumination() {
 fn section_5_2_linear_factors_are_0_7585_0_2966_and_0_1812() {
     let ndl = 0.577_350_3_f32;
     close(0.7585, color::ambient_linear() + ndl, 1e-3);
-    close(0.2966, color::ambient_linear() + (ndl * color::SHADOW_FACTOR), 1e-3);
+    close(
+        0.2966,
+        color::ambient_linear() + (ndl * color::SHADOW_FACTOR),
+        1e-3,
+    );
     close(0.1812, color::ambient_linear(), 1e-3);
 }
 
 #[test]
 fn section_5_2_shading_vectors() {
     // NES colour, sRGB input, lit, in shadow, ambient only (SPEC-06 §5.2, ±3 per channel).
-    let rows: [(usize, [u8; 3], [i32; 3], [i32; 3], [i32; 3]); 4] = [
-        (0x30, [252, 248, 252], [223, 219, 223], [146, 144, 146], [117, 115, 117]),
-        (0x22, [104, 136, 252], [91, 120, 223], [57, 76, 146], [44, 60, 117]),
-        (0x17, [228, 96, 24], [202, 84, 20], [132, 52, 9], [105, 40, 5]),
-        (0x29, [188, 248, 24], [166, 219, 20], [108, 144, 9], [85, 115, 5]),
+    type Row = (usize, [u8; 3], [i32; 3], [i32; 3], [i32; 3]);
+    let rows: [Row; 4] = [
+        (
+            0x30,
+            [252, 248, 252],
+            [223, 219, 223],
+            [146, 144, 146],
+            [117, 115, 117],
+        ),
+        (
+            0x22,
+            [104, 136, 252],
+            [91, 120, 223],
+            [57, 76, 146],
+            [44, 60, 117],
+        ),
+        (
+            0x17,
+            [228, 96, 24],
+            [202, 84, 20],
+            [132, 52, 9],
+            [105, 40, 5],
+        ),
+        (
+            0x29,
+            [188, 248, 24],
+            [166, 219, 20],
+            [108, 144, 9],
+            [85, 115, 5],
+        ),
     ];
     for (nes, input, lit, shadow, ambient) in rows {
         let albedo = nes_color(nes);
@@ -81,7 +116,14 @@ fn section_5_2_shading_vectors() {
 
         let front = Vector3::new(0.0, 0.0, -1.0);
         assert_shade(albedo, front, 1.0, lit[0], lit[1], lit[2]);
-        assert_shade(albedo, front, color::SHADOW_FACTOR, shadow[0], shadow[1], shadow[2]);
+        assert_shade(
+            albedo,
+            front,
+            color::SHADOW_FACTOR,
+            shadow[0],
+            shadow[1],
+            shadow[2],
+        );
         let back = Vector3::new(0.0, 0.0, 1.0);
         assert_shade(albedo, back, 1.0, ambient[0], ambient[1], ambient[2]);
     }
@@ -91,7 +133,14 @@ fn section_5_2_shading_vectors() {
 fn section_5_2_pure_white_vector() {
     let albedo = Rgb24::new(255, 255, 255);
     assert_shade(albedo, Vector3::new(0.0, 0.0, -1.0), 1.0, 226, 226, 226);
-    assert_shade(albedo, Vector3::new(0.0, 0.0, -1.0), color::SHADOW_FACTOR, 148, 148, 148);
+    assert_shade(
+        albedo,
+        Vector3::new(0.0, 0.0, -1.0),
+        color::SHADOW_FACTOR,
+        148,
+        148,
+        148,
+    );
     assert_shade(albedo, Vector3::new(0.0, 0.0, 1.0), 1.0, 118, 118, 118);
 }
 
@@ -117,6 +166,7 @@ fn req_scn_027_a_white_face_lit_only_by_the_ambient_shows_srgb_117() {
 /// so the ambient term of REQ-SCN-027 is the one the original uses and an "ambient intensity of
 /// 0,3" — whichever way it is read, 0,054 or 0,3 in linear space — is not.
 #[test]
+#[allow(clippy::cast_possible_truncation)] // A rounded 0..255 value, as the C# (int) cast.
 fn q_072_only_the_ambient_of_req_scn_027_matches_the_reference_capture() {
     // linear ambient, expected sRGB of a white face lit by the ambient alone
     for (ambient_linear, expected) in [

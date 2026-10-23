@@ -5,6 +5,9 @@
 //! the ones of `assets-neutral/`; [`UniformAssets`] is that injection, which the renderer
 //! accepts because it takes its assets from the host (REQ-SCN-057).
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use std::sync::Arc;
@@ -45,10 +48,16 @@ fn req_scn_050_the_horizon_is_the_background_colour_and_the_poles_scale_it() {
     assert_eq!(srgb(blue()), centre(&gl, &mut renderer, 0.0, blue()));
 
     // Zenith: srgb(lin(1.4 M)) component by component, saturated at display.
-    assert_eq!(scaled(blue(), 1.4), centre(&gl, &mut renderer, -90.0, blue()));
+    assert_eq!(
+        scaled(blue(), 1.4),
+        centre(&gl, &mut renderer, -90.0, blue())
+    );
 
     // Nadir: srgb(lin(0.6 M)).
-    assert_eq!(scaled(blue(), 0.6), centre(&gl, &mut renderer, 90.0, blue()));
+    assert_eq!(
+        scaled(blue(), 0.6),
+        centre(&gl, &mut renderer, 90.0, blue())
+    );
 }
 
 #[test]
@@ -62,10 +71,22 @@ fn req_scn_050_a_dark_background_lights_the_stars_of_the_cubemap() {
 
     // AMD-019 (Q-045): the "×2" factor is the one the sRGB curve of SPEC-06 §2 gives.
     let e = color::to_linear(0.5) * sky::SRGB_DOUBLE;
-    let expected = (color::to_srgb(0.2 * e) * 255.0).round_ties_even() as i32;
-    assert!((expected - zenith.0).abs() <= 2, "r {} vs {expected}", zenith.0);
-    assert!((expected - zenith.1).abs() <= 2, "g {} vs {expected}", zenith.1);
-    assert!((expected - zenith.2).abs() <= 2, "b {} vs {expected}", zenith.2);
+    let expected = byte(color::to_srgb(0.2 * e));
+    assert!(
+        (expected - zenith.0).abs() <= 2,
+        "r {} vs {expected}",
+        zenith.0
+    );
+    assert!(
+        (expected - zenith.1).abs() <= 2,
+        "g {} vs {expected}",
+        zenith.1
+    );
+    assert!(
+        (expected - zenith.2).abs() <= 2,
+        "b {} vs {expected}",
+        zenith.2
+    );
 
     // The same sky without the cubemap stays pure black at the zenith.
     let mut none = gl.renderer_with(UniformAssets::black());
@@ -93,8 +114,7 @@ fn req_scn_051_b_a_green_diffusion_of_one_half_multiplies_f0_by_2_2975() {
     let grey = Rgb24::new(51, 51, 51);
     let capture = render(&gl, &mut renderer, SkyboxKind::Fantasy, grey, 0.0, None);
 
-    let expected =
-        (color::to_srgb(2.2975 * color::to_linear(51.0 / 255.0)) * 255.0).round_ties_even() as i32;
+    let expected = byte(color::to_srgb(2.2975 * color::to_linear(51.0 / 255.0)));
     let (r, g, b) = capture.at(32, 32);
     assert!((expected - r).abs() <= 2, "r {r} vs {expected}");
     assert!((expected - g).abs() <= 2, "g {g} vs {expected}");
@@ -109,7 +129,14 @@ fn req_scn_051_c_a_light_background_takes_nothing_from_the_starfield() {
     // gamma > 0.4 that tint is transparent, so the sky stays F0.
     let mut renderer = gl.renderer_with(UniformAssets::with("Starfield", [255, 255, 255]));
     let light = Rgb24::new(220, 220, 220);
-    let capture = render(&gl, &mut renderer, SkyboxKind::Fantasy, light, 0.0, Some(0x30));
+    let capture = render(
+        &gl,
+        &mut renderer,
+        SkyboxKind::Fantasy,
+        light,
+        0.0,
+        Some(0x30),
+    );
     assert_eq!(
         vec![light.packed()],
         capture.distinct_colors().into_iter().collect::<Vec<_>>()
@@ -144,8 +171,8 @@ fn req_scn_049_the_scene_is_drawn_in_front_of_the_skybox() {
     let capture = gl.render_built(&mut renderer, &built);
 
     // The tiles are white and lit; the sky around them is the black background colour.
-    assert!(capture.count(0x000000) > 0);
-    assert!(capture.count_other(0x000000) > 0);
+    assert!(capture.count(0x00_0000) > 0);
+    assert!(capture.count_other(0x00_0000) > 0);
     assert!(renderer.statistics().skybox_pass);
 }
 
@@ -170,7 +197,12 @@ fn req_scn_049_default_and_color_draw_no_skybox_at_all() {
     assert!(renderer.statistics().skybox_pass);
 }
 
-fn centre(gl: &GlFixture, renderer: &mut SceneRenderer, rx: f32, background: Rgb24) -> (i32, i32, i32) {
+fn centre(
+    gl: &GlFixture,
+    renderer: &mut SceneRenderer,
+    rx: f32,
+    background: Rgb24,
+) -> (i32, i32, i32) {
     let capture = render(gl, renderer, SkyboxKind::Gradient, background, rx, None);
     capture.at(capture.width / 2, capture.height / 2)
 }
@@ -216,10 +248,17 @@ fn render(
     gl.render(renderer, &scene, &frame)
 }
 
+/// A 0..1 value as a rounded byte, as the C# `Math.Round` then cast.
+#[allow(clippy::cast_possible_truncation)] // A 0..255 value.
+fn byte(value: f32) -> i32 {
+    (value * 255.0).round_ties_even() as i32
+}
+
 fn srgb(color: Rgb24) -> (i32, i32, i32) {
     (i32::from(color.r), i32::from(color.g), i32::from(color.b))
 }
 
+#[allow(clippy::cast_possible_truncation)] // Rounded and clamped to 0..255 first.
 fn scaled(color: Rgb24, factor: f32) -> (i32, i32, i32) {
     // REQ-SCN-050: the factor is applied to the sRGB value without saturating it, the result is
     // linearised and re-encoded, and only then saturated for display.

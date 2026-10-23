@@ -3,6 +3,9 @@
 //! built without assets: nothing can read a file, so what the captures show is what the code
 //! produces.
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use common::{Capture, GlFixture, SceneFixture};
@@ -43,8 +46,16 @@ fn req_pub_003_the_procedural_stars_only_appear_over_a_dark_background() {
     let mut renderer = gl.renderer();
 
     // Looking at the zenith, where the |0.2 y| factor is at its largest.
-    let dark = render(&gl, &mut renderer, SkyboxKind::Gradient, black(), -90.0, None, 0.0);
-    let lit = dark.count_other(0x000000);
+    let dark = render(
+        &gl,
+        &mut renderer,
+        SkyboxKind::Gradient,
+        black(),
+        -90.0,
+        None,
+        0.0,
+    );
+    let lit = dark.count_other(0x00_0000);
     assert!(lit > 0, "a dark sky should carry stars");
     assert!(
         lit < usize::try_from(dark.width * dark.height / 2).expect("size"),
@@ -54,8 +65,24 @@ fn req_pub_003_the_procedural_stars_only_appear_over_a_dark_background() {
     // A bright background turns them off entirely (grey level above 0.4): the image is then the
     // smooth gradient alone, which the twinkle of REQ-SCN-050 cannot touch.
     assert!(!sky::stars_visible(blue()));
-    let bright = render(&gl, &mut renderer, SkyboxKind::Gradient, blue(), -90.0, None, 0.0);
-    let bright_later = render(&gl, &mut renderer, SkyboxKind::Gradient, blue(), -90.0, None, 20.0);
+    let bright = render(
+        &gl,
+        &mut renderer,
+        SkyboxKind::Gradient,
+        blue(),
+        -90.0,
+        None,
+        0.0,
+    );
+    let bright_later = render(
+        &gl,
+        &mut renderer,
+        SkyboxKind::Gradient,
+        blue(),
+        -90.0,
+        None,
+        20.0,
+    );
     assert_eq!(bright.pixels, bright_later.pixels);
 }
 
@@ -64,8 +91,24 @@ fn req_pub_003_the_stars_twinkle_with_real_time() {
     let gl = GlFixture::create(128, 128);
     let mut renderer = gl.renderer();
 
-    let first = render(&gl, &mut renderer, SkyboxKind::Gradient, black(), -90.0, None, 0.0);
-    let later = render(&gl, &mut renderer, SkyboxKind::Gradient, black(), -90.0, None, 20.0);
+    let first = render(
+        &gl,
+        &mut renderer,
+        SkyboxKind::Gradient,
+        black(),
+        -90.0,
+        None,
+        0.0,
+    );
+    let later = render(
+        &gl,
+        &mut renderer,
+        SkyboxKind::Gradient,
+        black(),
+        -90.0,
+        None,
+        20.0,
+    );
 
     // 20 s at 3°/s turns the twinkle mask by 60°, which changes the brightness of the stars
     // without moving them.
@@ -77,7 +120,15 @@ fn req_pub_003_the_fantasy_sky_has_structure_and_follows_the_palette() {
     let gl = GlFixture::create(128, 128);
     let mut renderer = gl.renderer();
 
-    let nebula = render(&gl, &mut renderer, SkyboxKind::Fantasy, blue(), 0.0, Some(0x21), 0.0);
+    let nebula = render(
+        &gl,
+        &mut renderer,
+        SkyboxKind::Fantasy,
+        blue(),
+        0.0,
+        Some(0x21),
+        0.0,
+    );
     assert!(
         nebula.distinct_colors().len() > 8,
         "the nebula should not be a flat colour"
@@ -198,6 +249,7 @@ fn srgb(color: Rgb24) -> (i32, i32, i32) {
     (i32::from(color.r), i32::from(color.g), i32::from(color.b))
 }
 
+#[allow(clippy::cast_possible_truncation)] // Rounded and clamped to 0..255 first.
 fn scaled(color: Rgb24, factor: f32) -> (i32, i32, i32) {
     let channel = |value: u8| {
         let srgb = f32::from(value) / 255.0 * factor;

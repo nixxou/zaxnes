@@ -5,6 +5,9 @@
 //! Every test renders through the GL fixture, which hands the renderer a framebuffer it did not
 //! create — the contract of REQ-SCN-057 and REQ-ARCH-003.
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use common::{solid, Built, Capture, GlFixture, PatternOptions, SceneFixture};
@@ -15,7 +18,8 @@ use zax_profiles::values::Vec4F;
 use zax_render::numerics::Vector3;
 use zax_render::scene::SkyboxKind;
 
-const BLUE_22: i32 = (104 << 16) | (136 << 8) | 252;
+/// NES 0x22, (104, 136, 252).
+const BLUE_22: i32 = 0x68_88FC;
 const BLACK: i32 = 0;
 
 /// The lit front face of the NES 0x30 floor: (223, 219, 223) (SPEC-06 §5.2).
@@ -34,7 +38,10 @@ fn req_scn_046_the_background_is_the_universal_nes_colour_of_the_frame() {
 
     // The capture corners are outside the NES picture, so they show the clear colour.
     assert_eq!(BLUE_22, capture.packed(0, 0));
-    assert_eq!(BLUE_22, capture.packed(capture.width - 1, capture.height - 1));
+    assert_eq!(
+        BLUE_22,
+        capture.packed(capture.width - 1, capture.height - 1)
+    );
 }
 
 #[test]
@@ -68,17 +75,29 @@ fn req_scn_012_the_default_view_frames_the_nes_picture_centred_and_about_87_perc
     let (first_column, last_column) = capture.column_span(BLUE_22);
 
     let height_ratio = f64::from(last_row - first_row + 1) / f64::from(capture.height);
-    assert!((0.85..=0.93).contains(&height_ratio), "height ratio {height_ratio}");
+    assert!(
+        (0.85..=0.93).contains(&height_ratio),
+        "height ratio {height_ratio}"
+    );
 
     // 4:3 here, so the picture is wider on screen than the 52 % of the 16:9 reference view.
     let width_ratio = f64::from(last_column - first_column + 1) / f64::from(capture.width);
-    assert!((0.65..=0.78).contains(&width_ratio), "width ratio {width_ratio}");
+    assert!(
+        (0.65..=0.78).contains(&width_ratio),
+        "width ratio {width_ratio}"
+    );
 
     // Centred: the margins left and right, top and bottom, match within 2 % of the side.
     let horizontal = (first_column - (capture.width - 1 - last_column)).abs();
-    assert!(horizontal <= capture.width * 2 / 100, "horizontal offset {horizontal}");
+    assert!(
+        horizontal <= capture.width * 2 / 100,
+        "horizontal offset {horizontal}"
+    );
     let vertical = (first_row - (capture.height - 1 - last_row)).abs();
-    assert!(vertical <= capture.height * 2 / 100, "vertical offset {vertical}");
+    assert!(
+        vertical <= capture.height * 2 / 100,
+        "vertical offset {vertical}"
+    );
 }
 
 #[test]
@@ -139,14 +158,17 @@ fn req_scn_037_a_flat_sprite_stays_in_front_of_a_background_tile_of_the_same_dep
     let first = gl.render_built(&mut renderer, &built);
     let second = gl.render_built(&mut renderer, &built);
 
-    let (x, y) = (first.width / 2, first.height / 2);
-    let (r, g, b) = first.at(x, y);
+    let (cx, cy) = (first.width / 2, first.height / 2);
+    let (r, g, b) = first.at(cx, cy);
 
     // The sprite is 0x16 (red, lit), the background tile 0x21 (blue, lit): red wins.
-    assert!(r > g && r > b, "expected the sprite's red in front, got ({r}, {g}, {b})");
+    assert!(
+        r > g && r > b,
+        "expected the sprite's red in front, got ({r}, {g}, {b})"
+    );
 
     // No flicker: the same pixel comes out the same on two consecutive frames.
-    assert_eq!(first.packed(x, y), second.packed(x, y));
+    assert_eq!(first.packed(cx, cy), second.packed(cx, cy));
 }
 
 #[test]
@@ -157,11 +179,14 @@ fn req_scn_037_a_behind_background_sprite_is_pushed_behind_instead() {
     let front = gl.render_built(&mut renderer, &nudge_scene(false));
     let behind = gl.render_built(&mut renderer, &nudge_scene(true));
 
-    let (x, y) = (front.width / 2, front.height / 2);
-    assert_ne!(front.packed(x, y), behind.packed(x, y));
+    let (cx, cy) = (front.width / 2, front.height / 2);
+    assert_ne!(front.packed(cx, cy), behind.packed(cx, cy));
 
-    let (r, g, b) = behind.at(x, y);
-    assert!(b > r, "expected the background tile's blue in front, got ({r}, {g}, {b})");
+    let (r, g, b) = behind.at(cx, cy);
+    assert!(
+        b > r,
+        "expected the background tile's blue in front, got ({r}, {g}, {b})"
+    );
 }
 
 #[test]
@@ -169,9 +194,14 @@ fn req_scn_030_the_cast_shadow_is_present_and_its_edge_is_sharp() {
     let gl = GlFixture::new();
     let mut renderer = gl.renderer();
 
-    let lit = gl.render_built(&mut renderer, &shadow_scene(false, true, VariantRenderStyle::Normal));
-    let shadowed =
-        gl.render_built(&mut renderer, &shadow_scene(true, true, VariantRenderStyle::Normal));
+    let lit = gl.render_built(
+        &mut renderer,
+        &shadow_scene(false, true, VariantRenderStyle::Normal),
+    );
+    let shadowed = gl.render_built(
+        &mut renderer,
+        &shadow_scene(true, true, VariantRenderStyle::Normal),
+    );
 
     // The floor is NES 0x30 seen from the front: (223, 219, 223) lit, (146, 144, 146) in
     // shadow (SPEC-06 §5.2).
@@ -227,8 +257,14 @@ fn req_scn_030_turning_the_shadows_off_removes_every_shadow() {
     let gl = GlFixture::new();
     let mut renderer = gl.renderer();
 
-    let off = gl.render_built(&mut renderer, &shadow_scene(false, true, VariantRenderStyle::Normal));
-    let on = gl.render_built(&mut renderer, &shadow_scene(true, true, VariantRenderStyle::Normal));
+    let off = gl.render_built(
+        &mut renderer,
+        &shadow_scene(false, true, VariantRenderStyle::Normal),
+    );
+    let on = gl.render_built(
+        &mut renderer,
+        &shadow_scene(true, true, VariantRenderStyle::Normal),
+    );
 
     assert!(off.distinct_colors().len() < on.distinct_colors().len());
 }
@@ -238,10 +274,14 @@ fn req_scn_032_clearing_the_casting_flag_of_a_layer_removes_its_shadows() {
     let gl = GlFixture::new();
     let mut renderer = gl.renderer();
 
-    let casting =
-        gl.render_built(&mut renderer, &shadow_scene(true, true, VariantRenderStyle::Normal));
-    let not_casting =
-        gl.render_built(&mut renderer, &shadow_scene(true, false, VariantRenderStyle::Normal));
+    let casting = gl.render_built(
+        &mut renderer,
+        &shadow_scene(true, true, VariantRenderStyle::Normal),
+    );
+    let not_casting = gl.render_built(
+        &mut renderer,
+        &shadow_scene(true, false, VariantRenderStyle::Normal),
+    );
 
     assert!(count_near(&casting, SHADOWED_FLOOR, 4) > 200);
     assert_eq!(0, count_near(&not_casting, SHADOWED_FLOOR, 4));
@@ -289,7 +329,10 @@ fn req_scn_044_a_hud_pattern_outside_the_visible_rectangle_stays_whole() {
     let capture = gl.render_built(&mut renderer, &built);
     let drawn = capture.count_other(BLACK);
 
-    assert!(drawn > 500, "the HUD strip was clipped away, only {drawn} pixels drawn");
+    assert!(
+        drawn > 500,
+        "the HUD strip was clipped away, only {drawn} pixels drawn"
+    );
 }
 
 #[test]

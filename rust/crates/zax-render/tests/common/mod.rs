@@ -6,12 +6,14 @@
 //! a machine with no EGL driver fails them with the reason instead of passing them silently.
 
 #![allow(dead_code)] // Each test binary uses its own part of the support module.
+#![allow(clippy::expect_used, clippy::panic)] // A broken fixture fails the test loudly.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use zax_engine3d::draw_list::FrameDrawList;
+use zax_engine3d::draw_list::{DrawTile, FrameDrawList};
 use zax_engine3d::engine::ConversionEngine;
+use zax_engine3d::frame::{FrameInstance, FrameInstanceId};
 use zax_engine3d::palette::nes_color;
 use zax_engine3d::settings::ConversionSettings;
 use zax_nes::{FrameBatch, TileRecord};
@@ -126,14 +128,14 @@ impl Capture {
 
     /// The packed RGB of the pixel.
     pub fn packed(&self, x: i32, y: i32) -> i32 {
-        let (r, g, b) = self.at(x, y);
-        (r << 16) | (g << 8) | b
+        let (red, green, blue) = self.at(x, y);
+        (red << 16) | (green << 8) | blue
     }
 
     /// Relative luma of the pixel, 0 to 1.
     pub fn luma(&self, x: i32, y: i32) -> f64 {
-        let (r, g, b) = self.at(x, y);
-        ((0.299 * f64::from(r)) + (0.587 * f64::from(g)) + (0.114 * f64::from(b))) / 255.0
+        let (red, green, blue) = self.at(x, y);
+        ((0.299 * f64::from(red)) + (0.587 * f64::from(green)) + (0.114 * f64::from(blue))) / 255.0
     }
 
     fn all(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
@@ -142,12 +144,16 @@ impl Capture {
 
     /// How many pixels have the packed colour `color`.
     pub fn count(&self, color: i32) -> usize {
-        self.all().filter(|&(x, y)| self.packed(x, y) == color).count()
+        self.all()
+            .filter(|&(x, y)| self.packed(x, y) == color)
+            .count()
     }
 
     /// How many pixels differ from `color`.
     pub fn count_other(&self, color: i32) -> usize {
-        self.all().filter(|&(x, y)| self.packed(x, y) != color).count()
+        self.all()
+            .filter(|&(x, y)| self.packed(x, y) != color)
+            .count()
     }
 
     /// The distinct colours of the capture.
@@ -377,7 +383,15 @@ impl SceneFixture {
         self
     }
 
-    fn push_rect(&mut self, tile: Tile, column: i32, row: i32, columns: i32, rows: i32, palette: u8) {
+    fn push_rect(
+        &mut self,
+        tile: Tile,
+        column: i32,
+        row: i32,
+        columns: i32,
+        rows: i32,
+        palette: u8,
+    ) {
         for y in 0..rows {
             for x in 0..columns {
                 self.push_tile(tile, (column + x) * 8, (row + y) * 8, palette);
@@ -465,5 +479,39 @@ impl Built {
     /// Builds the draw list again after a change to the engine.
     pub fn rebuild_draw_list(&mut self) {
         self.draw_list = self.engine.build_draw_list().clone();
+    }
+
+    /// The distinct shape instances of the draw list whose tiles pass `filter`, in list order.
+    pub fn instances(&self, filter: impl Fn(&DrawTile) -> bool) -> Vec<FrameInstanceId> {
+        let mut instances = Vec::new();
+        for tile in self.draw_list.tiles().iter().filter(|tile| filter(tile)) {
+            if !instances.contains(&tile.instance) {
+                instances.push(tile.instance);
+            }
+        }
+        instances
+    }
+
+    /// An instance of the displayed frame.
+    pub fn instance(&self, id: FrameInstanceId) -> &FrameInstance {
+        self.engine.state().converting_frame().instance(id)
+    }
+
+    /// An instance of the displayed frame, for writing. The frame is still the converting one:
+    /// nothing was converted after the publication.
+    pub fn instance_mut(&mut self, id: FrameInstanceId) -> &mut FrameInstance {
+        self.engine
+            .state_mut()
+            .converting_frame_mut()
+            .instance_mut(id)
+    }
+
+    /// An instance of the displayed frame and the settings it is positioned with.
+    pub fn instance_and_settings_mut(
+        &mut self,
+        id: FrameInstanceId,
+    ) -> (&mut FrameInstance, &ConversionSettings) {
+        let (frame, settings) = self.engine.state_mut().converting_frame_and_settings_mut();
+        (frame.instance_mut(id), settings)
     }
 }
