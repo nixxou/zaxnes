@@ -9,7 +9,7 @@ use zax_engine3d::state_codec;
 use zax_nes::{NesCore, NesRegion};
 use zax_profiles::enums::TvRegionMode;
 
-use super::EmulationHost;
+use super::{EmulationHost, GameView};
 use crate::audio::audio_mixer::AudioSampleSource;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
@@ -72,7 +72,7 @@ enum Step {
     Failed(String),
 }
 
-impl<C: GameCatalog> EmulationHost<C> {
+impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Launches `game_id`: checks the ROM, then starts the job (REQ-LOOP-018 to REQ-LOOP-023).
     pub(super) fn launch_game(&mut self, game_id: &str) {
         // REQ-LOOP-020: a selection is ignored while the loading indicator is up.

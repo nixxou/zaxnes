@@ -2,7 +2,6 @@
 //! scene and pumps the audio (SPEC-07, SPEC-06 §3.13). The interface plugs in through
 //! [`ApplicationUi`].
 
-use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
@@ -30,7 +29,7 @@ use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::host::{
-    EmulationHost, EmulationHostOptions, HostEvent, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH,
+    EmulationHost, EmulationHostOptions, GameView, HostEvent, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH,
 };
 use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
 use crate::frame_rate_counter::FrameRateCounter;
@@ -46,56 +45,24 @@ use crate::persistence::settings_store::SettingsStore;
 use crate::render_scaling;
 use crate::render_skip;
 use crate::scene_script_bridge::{self, ConsoleScriptLog};
+use crate::ui::debug_overlay::DebugInfo;
+use crate::ui::frontend::{ImguiFrontend, Sizes};
+use crate::ui::zax_ui::{UiEffect, UiFrame};
 use crate::user_data_paths::UserDataPaths;
 use crate::{neutral_assets, persistence::input_binding_store::InputBindingStore as _};
 
-/// The host the application runs.
-pub type AppHost = EmulationHost<LibraryGameCatalog>;
+/// The host the application runs: over the library, with the offscreen picture of the scene as
+/// its view of the game.
+pub type AppHost = EmulationHost<LibraryGameCatalog, OffscreenFramebuffer>;
 
-/// What the interface layer provides to the application. Every member has a do-nothing default,
-/// which is the headless application.
-pub trait ApplicationUi {
-    /// An SDL event, before the input layer sees it.
-    fn handle_event(&mut self, _event: &Event) {}
-
-    /// Whether a text field of the interface owns the keyboard.
-    fn wants_keyboard(&self) -> bool {
-        false
+impl GameView for OffscreenFramebuffer {
+    fn capture_thumbnail(&mut self) -> Option<Vec<u8>> {
+        self.read_scaled_rgb(
+            to_i32_usize(THUMBNAIL_WIDTH),
+            to_i32_usize(THUMBNAIL_HEIGHT),
+        )
     }
-
-    /// Whether the pointer is over a piece of the interface.
-    fn wants_pointer(&self) -> bool {
-        false
-    }
-
-    /// Whether the interface holds a modal window (REQ-UI-004).
-    fn is_modal(&self) -> bool {
-        false
-    }
-
-    /// Height of the menu bar, which the game view sits under (REQ-UI-200).
-    fn chrome_height(&self) -> f32 {
-        0.0
-    }
-
-    /// Draws the interface over the game view.
-    fn draw(&mut self, _host: &mut AppHost, _real_seconds: f32) {}
-
-    /// A command asked the interface for a window or a dialogue.
-    fn handle_ui_request(&mut self, _host: &mut AppHost, _command: Command, _args: &CommandArgs) {}
-
-    /// The language of the interface changed.
-    fn language_changed(&mut self, _code: &str) {}
-
-    /// The window is closing: a binding capture in progress stops.
-    fn close_capture(&mut self) {}
 }
-
-/// An interface that draws nothing.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoUi;
-
-impl ApplicationUi for NoUi {}
 
 /// Whether the window opens in full screen: the persisted choice, except for smoke runs and
 /// screenshot runs.
@@ -194,8 +161,8 @@ impl ZaxApplication {
 
     /// Runs the application to the end and returns the exit code (0 for success).
     #[must_use]
-    pub fn run(self, ui: Box<dyn ApplicationUi>) -> i32 {
-        match self.run_inner(ui) {
+    pub fn run(self) -> i32 {
+        match self.run_inner() {
             Ok(code) => code,
             Err(message) => {
                 eprintln!("{message}");
@@ -204,8 +171,8 @@ impl ZaxApplication {
         }
     }
 
-    fn run_inner(&self, ui: Box<dyn ApplicationUi>) -> Result<i32, String> {
-        let mut running = Running::build(&self.options, ui)?;
+    fn run_inner(&self) -> Result<i32, String> {
+        let mut running = Running::build(&self.options)?;
         while running.frame()? {}
         Ok(running.finish())
     }
@@ -214,17 +181,15 @@ impl ZaxApplication {
 /// Everything a run owns once the window is open.
 struct Running {
     options: AppOptions,
-    ui: Box<dyn ApplicationUi>,
+    ui: ImguiFrontend,
     window: HostWindow,
     gl: Rc<glow::Context>,
-    offscreen: Rc<RefCell<OffscreenFramebuffer>>,
     renderer: SceneRenderer,
     input: SdlInput,
     source: DesktopInputSource,
     audio: Option<AudioOutput>,
     host: AppHost,
     pacing: VideoPacing,
-    modal_flag: Rc<Cell<bool>>,
     counter: FrameRateCounter,
     cursor: CursorAutoHide,
     state: RunState,
@@ -232,7 +197,7 @@ struct Running {
 }
 
 impl Running {
-    fn build(options: &AppOptions, ui: Box<dyn ApplicationUi>) -> Result<Self, String> {
+    fn build(options: &AppOptions) -> Result<Self, String> {
         let asset_root = neutral_assets::locate(options.asset_root.as_deref().map(Path::new));
         let paths =
             UserDataPaths::resolve(options.user_data_root.as_deref().map(Path::new), None, None);
@@ -282,12 +247,10 @@ impl Running {
         );
         pacing.apply(&mut window, &model);
         let (width, height) = window.drawable_size();
-        // The host reads the buffer back for the thumbnails whenever the game pauses, so the
-        // loop and the host's capture closure share it; the borrows are momentary.
-        let offscreen = Rc::new(RefCell::new(
-            OffscreenFramebuffer::new(Rc::clone(&gl), to_i32(width), to_i32(height))
-                .map_err(|error| error.to_string())?,
-        ));
+        // The host owns the picture of the scene: it reads it back for the thumbnails whenever
+        // the game pauses, and the loop draws into it through the host.
+        let view = OffscreenFramebuffer::new(Rc::clone(&gl), to_i32(width), to_i32(height))
+            .map_err(|error| error.to_string())?;
         let renderer = SceneRenderer::new(
             Rc::clone(&gl),
             NeutralSceneAssets::try_open(asset_root.as_deref())
@@ -301,7 +264,6 @@ impl Running {
         let source = DesktopInputSource::new(bindings, Box::new(bindings_store));
 
         let (audio, sample_rate) = open_audio(options, window.sdl());
-        let modal_flag = Rc::new(Cell::new(false));
         let parts = HostParts {
             paths: &paths,
             model,
@@ -311,25 +273,23 @@ impl Running {
             asset_root: asset_root.as_deref(),
             sample_rate,
             audio_open: audio.is_some(),
-            offscreen: &offscreen,
-            modal_flag: &modal_flag,
+            view,
         };
         let mut host = build_host(parts);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
+        let ui = ImguiFrontend::new(&gl, &host, options)?;
         Ok(Self {
             options: options.clone(),
             ui,
             window,
             gl,
-            offscreen,
             renderer,
             input,
             source,
             audio,
             host,
             pacing,
-            modal_flag,
             counter: FrameRateCounter::new(),
             cursor: CursorAutoHide::new(),
             state: RunState::new(renderer_name, version),
@@ -350,7 +310,7 @@ impl Running {
         let real = delta.clamp(0.0, 0.25);
         #[allow(clippy::cast_possible_truncation)] // the C# `(float)` of a clamped delta
         let real_f = real as f32;
-        self.modal_flag.set(self.ui.is_modal());
+        self.host.set_modal_window_open(self.ui.is_modal());
         let (width, height) = self.window.drawable_size();
         let (width, height) = (to_i32(width), to_i32(height));
         let snapshot = self.sample_input(real_f, width, height);
@@ -377,6 +337,7 @@ impl Running {
             &mut self.pacing,
         );
         self.draw(emulated, width, height, real_f)?;
+        self.carry_out_ui_effects();
         pump_audio(&mut self.host, self.audio.as_mut(), real);
         if self.host.quit_requested()
             || (self.options.smoke_test
@@ -430,11 +391,16 @@ impl Running {
                 hub: &mut self.input.gamepads,
             },
         );
+        let capturing = self.source.rebinding().suppresses_actions();
+        self.ui
+            .handle_shortcuts(&mut self.host, &self.input.keyboard, capturing);
         for command in self.source.triggered_commands() {
             if let Some(command) = Command::from_name(command) {
                 self.host.enqueue(command, CommandArgs::default());
             }
         }
+        // The commands the interface owns (F12 and its like) are not in the host's model.
+        self.ui.run_bound_ui_commands(&self.source);
         snapshot
     }
 
@@ -448,8 +414,9 @@ impl Running {
             self.host.settings().render_method(),
             self.host.settings().res_scale_factor(),
         );
-        self.offscreen
-            .borrow_mut()
+        self.host
+            .view_mut()
+            .ok_or("the host has no view of the game")?
             .resize(scene_width, scene_height)
             .map_err(|error| error.to_string())?;
         let skip = render_skip::should_skip(
@@ -461,27 +428,56 @@ impl Running {
         if skip {
             self.state.skipped_frames += 1;
         } else {
-            render_scene(
-                &mut self.renderer,
-                &self.offscreen.borrow(),
-                &mut self.host,
-                &mut self.state,
-            )?;
+            render_scene(&mut self.renderer, &mut self.host, &mut self.state)?;
             self.state.last_render_size = (scene_width, scene_height);
             self.state.scene_frames += 1;
         }
         framebuffer::begin_window_pass(&self.gl, width, height);
-        self.offscreen
-            .borrow()
-            .blit_to_default_framebuffer(width, view_height);
-        self.ui.draw(&mut self.host, real);
+        if let Some(view) = self.host.view() {
+            view.blit_to_default_framebuffer(width, view_height);
+        }
+        let debug = DebugInfo {
+            frames_per_second: self.counter.frames_per_second(),
+            frame_milliseconds: self.counter.frame_milliseconds(),
+            rendered_frames: self.state.rendered_frames,
+            scene_frames: self.state.scene_frames,
+            skipped_frames: self.state.skipped_frames,
+            statistics: self.renderer.statistics(),
+            gl_renderer: &self.state.renderer_name,
+        };
+        let sizes = Sizes {
+            window: self.window.window().size(),
+            drawable: self.window.drawable_size(),
+        };
+        let mut frame = UiFrame {
+            host: &mut self.host,
+            input: &mut self.source,
+            hub: &self.input.gamepads,
+            real_seconds: real,
+            #[allow(clippy::cast_possible_truncation)] // the C# `(float)FramesPerSecond`
+            frames_per_second: debug.frames_per_second as f32,
+        };
+        let gl = &self.gl;
+        self.ui.draw(&mut frame, sizes, &debug, |path| {
+            capture_window(gl, width, height, path);
+        });
         Ok(())
+    }
+
+    /// Does what the interface asked: the lines of the log, the data folder in the file manager.
+    fn carry_out_ui_effects(&mut self) {
+        for effect in self.ui.take_effects() {
+            match effect {
+                UiEffect::Log(message) => log(&message),
+                UiEffect::RevealFolder(folder) => reveal_folder(&folder),
+            }
+        }
     }
 
     /// REQ-LOOP-052: the current game is stopped (End hook), the settings and the slot metadata
     /// are written, and nothing is auto-saved.
     fn finish(mut self) -> i32 {
-        self.ui.close_capture();
+        ImguiFrontend::close_capture(&mut self.source);
         let emulated_frames = self.host.emulated_frames();
         self.host.shutdown();
         // REQ-INP-050 / REQ-PERS-065: the bindings are written at exit as well as after each
@@ -517,8 +513,7 @@ struct HostParts<'a> {
     asset_root: Option<&'a Path>,
     sample_rate: u32,
     audio_open: bool,
-    offscreen: &'a Rc<RefCell<OffscreenFramebuffer>>,
-    modal_flag: &'a Rc<Cell<bool>>,
+    view: OffscreenFramebuffer,
 }
 
 fn build_host(parts: HostParts<'_>) -> AppHost {
@@ -537,15 +532,7 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     options.log = Some(Box::new(log));
     options.settings_store = Some(parts.store);
     options.confirm_with_interface = true;
-    let probe = Rc::clone(parts.modal_flag);
-    options.modal_window_open = Some(Box::new(move || probe.get()));
-    let capture = Rc::clone(parts.offscreen);
-    options.capture_thumbnail = Some(Box::new(move || {
-        capture.borrow().read_scaled_rgb(
-            to_i32_usize(THUMBNAIL_WIDTH),
-            to_i32_usize(THUMBNAIL_HEIGHT),
-        )
-    }));
+    options.view = Some(parts.view);
     EmulationHost::new(options)
 }
 
@@ -813,14 +800,14 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
 
 fn render_scene(
     renderer: &mut SceneRenderer,
-    offscreen: &OffscreenFramebuffer,
     host: &mut AppHost,
     state: &mut RunState,
 ) -> Result<(), String> {
+    let view = host.view().ok_or("the host has no view of the game")?;
     let target = RenderTarget {
-        framebuffer: offscreen.handle(),
-        width: offscreen.width(),
-        height: offscreen.height(),
+        framebuffer: view.handle(),
+        width: view.width(),
+        height: view.height(),
     };
     let (session, scene) = host.session_and_scene();
     let picture: &[u8] = if scene.two_dimensional_mode {
@@ -851,28 +838,31 @@ fn render_scene(
 
 fn forward_events(
     host: &mut AppHost,
-    ui: &mut Box<dyn ApplicationUi>,
+    ui: &mut ImguiFrontend,
     window: &mut HostWindow,
     pacing: &mut VideoPacing,
 ) {
     for event in host.take_events() {
-        match event {
-            HostEvent::SettingChanged(id) => pacing.on_setting_changed(window, host.settings(), id),
-            HostEvent::LanguageChanged(code) => ui.language_changed(&code),
-            HostEvent::UiRequested { command, args } => {
-                // REQ-UI-209: the window state follows ui.fullscreen, whoever flipped it.
-                if command == Command::ToggleFullscreen {
-                    if let Err(error) = window.set_fullscreen(host.settings().fullscreen()) {
-                        log(&format!("the window state could not be changed: {error}"));
-                    }
-                    // FIX-1: a window-state change makes the windowing layer re-apply its own
-                    // boolean vsync, which would lose the interval 2 and, on some drivers, the
-                    // interval altogether.
-                    pacing.apply(window, host.settings());
-                }
-                ui.handle_ui_request(host, command, &args);
+        match &event {
+            HostEvent::SettingChanged(id) => {
+                pacing.on_setting_changed(window, host.settings(), *id);
             }
+            // REQ-UI-209: the window state follows ui.fullscreen, whoever flipped it.
+            HostEvent::UiRequested {
+                command: Command::ToggleFullscreen,
+                ..
+            } => {
+                if let Err(error) = window.set_fullscreen(host.settings().fullscreen()) {
+                    log(&format!("the window state could not be changed: {error}"));
+                }
+                // FIX-1: a window-state change makes the windowing layer re-apply its own
+                // boolean vsync, which would lose the interval 2 and, on some drivers, the
+                // interval altogether.
+                pacing.apply(window, host.settings());
+            }
+            HostEvent::UiRequested { .. } | HostEvent::LanguageChanged(_) => {}
         }
+        ui.handle_host_event(host, event);
     }
 }
 
@@ -899,7 +889,7 @@ fn pump_audio(host: &mut AppHost, audio: Option<&mut AudioOutput>, real: f64) {
     }
 }
 
-fn capture_window(gl: &glow::Context, width: i32, height: i32, path: &Path) {
+pub(crate) fn capture_window(gl: &glow::Context, width: i32, height: i32, path: &Path) {
     let rgb = framebuffer::read_window_rgb(gl, width, height);
     let encoded = zax_render::assets::png_image::encode_rgb(
         u32::try_from(width).unwrap_or(0),
@@ -917,4 +907,25 @@ fn capture_window(gl: &glow::Context, width: i32, height: i32, path: &Path) {
 
 fn to_i32_usize(value: usize) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+/// Opens `folder` in the desktop's file manager (REQ-PERS-072). A failure is logged and nothing
+/// else: the path is also printed.
+fn reveal_folder(folder: &Path) {
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let result = std::fs::create_dir_all(folder).and_then(|()| {
+        std::process::Command::new(opener)
+            .arg(folder)
+            .spawn()
+            .map(drop)
+    });
+    if let Err(error) = result {
+        log(&format!("the data folder could not be opened: {error}"));
+    }
 }

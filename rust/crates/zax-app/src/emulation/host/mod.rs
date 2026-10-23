@@ -69,18 +69,31 @@ pub enum HostEvent {
 
 /// Produces the log a new session's scripts write to.
 pub type ScriptLogFactory = Box<dyn Fn() -> Box<dyn ScriptLog>>;
-/// Captures the game view as a 256 x 192 RGB picture, for the thumbnails.
-pub type ThumbnailSource = Box<dyn FnMut() -> Option<Vec<u8>>>;
+/// The picture of the game as the player sees it, which the thumbnails of the save states and
+/// the covers are cut from. The host owns the view it is given; the application reaches it
+/// through [`EmulationHost::view`] to draw into it.
+pub trait GameView {
+    /// Captures the game view as a 256 x 192 RGB picture, rows top to bottom.
+    fn capture_thumbnail(&mut self) -> Option<Vec<u8>>;
+}
+
+/// The view of a host that has none (the headless host of the tests that need no picture).
+#[derive(Debug, Clone, Copy)]
+pub enum NoView {}
+
+impl GameView for NoView {
+    fn capture_thumbnail(&mut self) -> Option<Vec<u8>> {
+        match *self {}
+    }
+}
 /// The time of day.
 pub type Now = Box<dyn Fn() -> OffsetDateTime>;
 /// Receives the lines the host logs.
 pub type LogFn = Box<dyn Fn(&str)>;
-/// Tells whether the interface holds a modal window.
-pub type ModalProbe = Box<dyn Fn() -> bool>;
 
 /// What the host is made of.
 #[allow(clippy::struct_excessive_bools)] // independent switches, as the C# options record
-pub struct EmulationHostOptions<C: GameCatalog> {
+pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     /// The user data folder.
     pub paths: UserDataPaths,
     /// The settings model, which the host owns from here on.
@@ -93,16 +106,14 @@ pub struct EmulationHostOptions<C: GameCatalog> {
     pub mixer: Option<AudioMixer>,
     /// Where each session's scripts log; the null log by default.
     pub script_log: Option<ScriptLogFactory>,
-    /// Captures the game view for the thumbnails.
-    pub capture_thumbnail: Option<ThumbnailSource>,
+    /// The picture of the game, for the thumbnails.
+    pub view: Option<V>,
     /// The time of day; the system's by default.
     pub now: Option<Now>,
     /// The monotonic clock of the frame pacer; the system's by default.
     pub clock: Option<Clock>,
     /// Where the host logs.
     pub log: Option<LogFn>,
-    /// Whether the interface holds a modal window (REQ-UI-004 cases 2 and 3).
-    pub modal_window_open: Option<ModalProbe>,
     /// Whether an audio device is open, which turns on the drift correction.
     pub audio_device_open: bool,
     /// The settings and game list files; none when nothing is persisted.
@@ -111,7 +122,7 @@ pub struct EmulationHostOptions<C: GameCatalog> {
     pub confirm_with_interface: bool,
 }
 
-impl<C: GameCatalog> EmulationHostOptions<C> {
+impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
     /// Options with the required parts; everything else is absent.
     #[must_use]
     pub fn new(paths: UserDataPaths, settings: SettingsModel, scene: SceneState, games: C) -> Self {
@@ -122,11 +133,10 @@ impl<C: GameCatalog> EmulationHostOptions<C> {
             games,
             mixer: None,
             script_log: None,
-            capture_thumbnail: None,
+            view: None,
             now: None,
             clock: None,
             log: None,
-            modal_window_open: None,
             audio_device_open: false,
             settings_store: None,
             confirm_with_interface: false,
@@ -136,7 +146,7 @@ impl<C: GameCatalog> EmulationHostOptions<C> {
 
 /// The emulation host.
 #[allow(clippy::struct_excessive_bools)] // independent flags of the loop, as the C# class
-pub struct EmulationHost<C: GameCatalog> {
+pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     paths: UserDataPaths,
     scene: SceneState,
     games: C,
@@ -144,10 +154,10 @@ pub struct EmulationHost<C: GameCatalog> {
     settings: SettingsModel,
     settings_store: Option<SettingsStore>,
     script_log: ScriptLogFactory,
-    capture_thumbnail: Option<ThumbnailSource>,
+    view: Option<V>,
     now: Now,
     log: LogFn,
-    modal_window_open: Option<ModalProbe>,
+    modal_window_open: bool,
     audio_device_open: bool,
     confirm_with_interface: bool,
     pending: VecDeque<(Command, CommandArgs)>,
@@ -182,11 +192,11 @@ pub struct EmulationHost<C: GameCatalog> {
     pub zapper: ZapperState,
 }
 
-impl<C: GameCatalog> EmulationHost<C> {
+impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Creates the host: loads the slot index, reconciles it with the library, reads the
     /// language and the speed from the settings.
     #[must_use]
-    pub fn new(options: EmulationHostOptions<C>) -> Self {
+    pub fn new(options: EmulationHostOptions<C, V>) -> Self {
         let EmulationHostOptions {
             paths,
             settings,
@@ -194,11 +204,10 @@ impl<C: GameCatalog> EmulationHost<C> {
             games,
             mixer,
             script_log,
-            capture_thumbnail,
+            view,
             now,
             clock,
             log,
-            modal_window_open,
             audio_device_open,
             settings_store,
             confirm_with_interface,
@@ -218,10 +227,10 @@ impl<C: GameCatalog> EmulationHost<C> {
             settings,
             settings_store,
             script_log: script_log.unwrap_or_else(|| Box::new(|| Box::new(NullScriptLog))),
-            capture_thumbnail,
+            view,
             now,
             log: log.unwrap_or_else(|| Box::new(|_| {})),
-            modal_window_open,
+            modal_window_open: false,
             audio_device_open,
             confirm_with_interface,
             pending: VecDeque::new(),
@@ -443,8 +452,25 @@ impl<C: GameCatalog> EmulationHost<C> {
 
     /// Whether the interface holds a modal window.
     #[must_use]
-    pub fn modal_window_open(&self) -> bool {
-        self.modal_window_open.as_ref().is_some_and(|open| open())
+    pub const fn modal_window_open(&self) -> bool {
+        self.modal_window_open
+    }
+
+    /// Tells the host whether the interface holds a modal window (REQ-UI-004 cases 2 and 3). The
+    /// loop says so before each frame.
+    pub const fn set_modal_window_open(&mut self, open: bool) {
+        self.modal_window_open = open;
+    }
+
+    /// The picture of the game the host captures its thumbnails from.
+    #[must_use]
+    pub const fn view(&self) -> Option<&V> {
+        self.view.as_ref()
+    }
+
+    /// The same, for drawing into it.
+    pub const fn view_mut(&mut self) -> Option<&mut V> {
+        self.view.as_mut()
     }
 
     /// Takes the events raised since the last call.
@@ -620,11 +646,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         }
         // REQ-LOOP-006: the capture of the game view is taken before the menu appears.
         if self.state == EmulationState::Running && next == EmulationState::Paused {
-            if let Some(capture) = self
-                .capture_thumbnail
-                .as_mut()
-                .and_then(|capture| capture())
-            {
+            if let Some(capture) = self.view.as_mut().and_then(GameView::capture_thumbnail) {
                 self.pause_thumbnail = Some(capture);
             }
             // REQ-PERS-036, third source: the cover of the "2D Mode" entry follows the pause

@@ -4,7 +4,7 @@
 use zax_nes::ControllerPortType;
 use zax_render::camera::CameraMode;
 
-use super::{EmulationHost, HostEvent};
+use super::{EmulationHost, GameView, HostEvent};
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
@@ -13,7 +13,7 @@ use crate::emulation::speed_setting;
 use crate::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
 use crate::persistence::save_slots::{is_valid_slot_id, numbered_slot_id, QUICK_SLOT_ID};
 
-impl<C: GameCatalog> EmulationHost<C> {
+impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Whether `command` can run now with `args`.
     #[must_use]
     pub fn can_execute(&self, command: Command, args: &CommandArgs) -> bool {

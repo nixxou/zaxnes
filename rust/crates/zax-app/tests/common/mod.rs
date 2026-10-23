@@ -15,7 +15,7 @@ use zax_app::audio::{AudioMixer, TrackRandom};
 use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::emulation::frame_pacer::Clock;
 use zax_app::emulation::game_catalog::{GameCatalog, ResolvedGame};
-use zax_app::emulation::host::{EmulationHost, EmulationHostOptions};
+use zax_app::emulation::host::{EmulationHost, EmulationHostOptions, GameView};
 use zax_app::input::{InputAction, InputSnapshot};
 use zax_app::user_data_paths::UserDataPaths;
 use zax_platform::input::{PhysicalControl, PhysicalControlKind};
@@ -229,13 +229,21 @@ impl GameCatalog for FakeCatalog {
     }
 }
 
+/// The view of the game a test hands the host: the picture a thumbnail is cut from, or none.
+pub struct StubView(pub Option<Vec<u8>>);
+
+impl GameView for StubView {
+    fn capture_thumbnail(&mut self) -> Option<Vec<u8>> {
+        self.0.clone()
+    }
+}
+
 /// A host over a temporary user folder, a fake catalogue and a clock the test moves by hand.
 pub struct LoopHarness {
     pub root: TemporaryRoot,
-    pub host: EmulationHost<FakeCatalog>,
+    pub host: EmulationHost<FakeCatalog, StubView>,
     pub paths: UserDataPaths,
     pub log: Rc<RefCell<Vec<String>>>,
-    pub thumbnail: Rc<RefCell<Option<Vec<u8>>>>,
     clock: Rc<Cell<f64>>,
     now: Rc<Cell<i64>>,
 }
@@ -246,13 +254,12 @@ impl LoopHarness {
     }
 
     /// A harness whose host options are adjusted by `adjust` before the host is built.
-    pub fn create_with(adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog>)) -> Self {
+    pub fn create_with(adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog, StubView>)) -> Self {
         let root = TemporaryRoot::new("zax-loop-");
         let paths = UserDataPaths::resolve(Some(root.path()), None, None);
         let clock = Rc::new(Cell::new(0.0));
         let now = Rc::new(Cell::new(START_UNIX_SECONDS));
         let log = Rc::new(RefCell::new(Vec::new()));
-        let thumbnail = Rc::new(RefCell::new(None));
         let mut options = EmulationHostOptions::new(
             paths.clone(),
             zax_settings::model::SettingsModel::new(),
@@ -266,8 +273,7 @@ impl LoopHarness {
         options.now = Some(Box::new(move || {
             OffsetDateTime::from_unix_timestamp(now_for_host.get()).expect("a valid instant")
         }));
-        let capture = Rc::clone(&thumbnail);
-        options.capture_thumbnail = Some(Box::new(move || capture.borrow().clone()));
+        options.view = Some(StubView(None));
         let lines = Rc::clone(&log);
         options.log = Some(Box::new(move |message| {
             lines.borrow_mut().push(message.to_owned());
@@ -278,7 +284,6 @@ impl LoopHarness {
             root,
             paths,
             log,
-            thumbnail,
             clock,
             now,
         }
@@ -296,8 +301,10 @@ impl LoopHarness {
         self.clock.get()
     }
 
-    pub fn set_thumbnail(&self, picture: Option<Vec<u8>>) {
-        *self.thumbnail.borrow_mut() = picture;
+    pub fn set_thumbnail(&mut self, picture: Option<Vec<u8>>) {
+        if let Some(view) = self.host.view_mut() {
+            view.0 = picture;
+        }
     }
 
     pub fn catalog(&mut self) -> &mut FakeCatalog {
