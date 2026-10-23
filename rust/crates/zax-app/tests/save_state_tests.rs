@@ -32,10 +32,10 @@ fn req_pers_056_the_file_has_the_signature_and_the_four_sections() {
     assert_eq!("g1", content.header.game_id);
     assert_eq!(harness.now(), content.header.saved_at);
     assert_eq!("3", content.header.slot_id);
-    assert!(!content.core.is_empty());
+    assert_ne!(content.core, Vec::<u8>::new());
     assert_eq!(persistent::BLOCK_SIZE, content.lua.len());
     assert_eq!(CAMERA_SECTION_BYTES, content.camera.len());
-    assert!(!content.conversion.is_empty());
+    assert_ne!(content.conversion, Vec::<u8>::new());
     assert_eq!(40, content.header.rom_sha1.len());
 }
 

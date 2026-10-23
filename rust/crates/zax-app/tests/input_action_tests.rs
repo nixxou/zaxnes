@@ -444,8 +444,8 @@ fn req_inp_033_a_stick_turns_the_camera_at_a_constant_speed() {
     assert!(rotate(0.2, 1.0).abs() < 1e-4);
 }
 
-/// REQ-INP-082: one second of ZoomOut adds 70 scene units to the camera distance, and ZoomIn
-/// wins over ZoomOut.
+/// REQ-INP-082: one second of `ZoomOut` adds 70 scene units to the camera distance, and `ZoomIn`
+/// wins over `ZoomOut`.
 #[test]
 fn req_inp_082_zoom_moves_seventy_units_per_second() {
     let mut camera = SceneCamera::new();
