@@ -22,6 +22,7 @@ use zax_render::target::RenderTarget;
 use zax_render::SceneRenderer;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
+use zax_settings::values::SettingValue;
 
 use crate::app_log;
 use crate::app_options::AppOptions;
@@ -571,6 +572,9 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     if options.handheld {
         handheld::defaults::apply(&mut model);
     }
+    // Rust-only (owner request): the region comes from the ROM header unless the user turned the
+    // automatic mode off, so a European dump runs at 50 Hz (`emu.auto_tv_mode` is off in C#).
+    model.set_environment_default(SettingId::EmuAutoTvMode, SettingValue::Bool(true));
     if let Some(locale) = options.system_locale.as_deref() {
         // Only the default: a saved `ui.language` (read next) always wins.
         model.set_environment_default(

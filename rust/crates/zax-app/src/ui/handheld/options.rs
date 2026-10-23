@@ -8,7 +8,7 @@ use zax_settings::values::SettingValue;
 
 use super::overlay::CameraPreset;
 use super::pad::PadButton;
-use crate::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
+use crate::persistence::app_settings::{AppSettings as _, AppSettingsMut as _, TvRegionSetting};
 use crate::render_scaling::{DIRECT_METHOD, RENDER_TEXTURE_METHOD};
 use crate::ui::{keys, strings, text};
 
@@ -35,12 +35,14 @@ pub enum OptionRow {
     ShowFps,
     /// The camera preset.
     Camera,
+    /// The TV region: automatic (from the ROM header, at the next game start), NTSC or PAL.
+    Region,
     /// The gamepad bindings.
     Controls,
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 8] = [
+pub const ROWS: [OptionRow; 9] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -48,8 +50,46 @@ pub const ROWS: [OptionRow; 8] = [
     OptionRow::FrameCap,
     OptionRow::ShowFps,
     OptionRow::Camera,
+    OptionRow::Region,
     OptionRow::Controls,
 ];
+
+/// The choices of the region row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegionChoice {
+    /// `emu.auto_tv_mode` on: the region of the ROM header, applied when a game starts.
+    Auto,
+    /// NTSC, at once.
+    Ntsc,
+    /// PAL, at once.
+    Pal,
+}
+
+impl RegionChoice {
+    /// The choices, in the order the row cycles through them.
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Ntsc, Self::Pal];
+
+    /// The choice `settings` stand for: Auto while the automatic mode is on, else the region.
+    #[must_use]
+    pub fn of(settings: &SettingsModel) -> Self {
+        if settings.auto_tv_mode() {
+            Self::Auto
+        } else if settings.tv_mode() == TvRegionSetting::Pal {
+            Self::Pal
+        } else {
+            Self::Ntsc
+        }
+    }
+
+    fn apply(self, settings: &mut SettingsModel) {
+        settings.set_auto_tv_mode(self == Self::Auto);
+        match self {
+            Self::Auto => {}
+            Self::Ntsc => settings.set_tv_mode(TvRegionSetting::Ntsc),
+            Self::Pal => settings.set_tv_mode(TvRegionSetting::Pal),
+        }
+    }
+}
 
 /// What the options ask of the application beyond the settings they change themselves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,6 +174,9 @@ impl HandheldOptionsModel {
                 settings.set_show_fps(!on);
             }
             OptionRow::Camera => return Some(OptionsCommand::StepCamera(step)),
+            OptionRow::Region => {
+                cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
+            }
             OptionRow::Controls => {}
         }
         None
@@ -151,6 +194,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::FrameCap => strings::get(keys::HANDHELD_OPTION_FRAME_CAP),
         OptionRow::ShowFps => text::label_of(catalogue::descriptor(SettingId::UiShowFps)),
         OptionRow::Camera => strings::get(keys::HANDHELD_OPTION_CAMERA),
+        OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
     }
 }
@@ -169,6 +213,11 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::FrameCap => format!("{} fps", frame_cap(settings)),
         OptionRow::ShowFps => switch(settings.show_fps()),
         OptionRow::Camera => camera_label(camera),
+        OptionRow::Region => match RegionChoice::of(settings) {
+            RegionChoice::Auto => strings::get(keys::HANDHELD_REGION_AUTO),
+            RegionChoice::Ntsc => "NTSC".to_owned(),
+            RegionChoice::Pal => "PAL".to_owned(),
+        },
         OptionRow::Controls => String::new(),
     }
 }
@@ -276,6 +325,28 @@ mod tests {
         while model.selected() != row {
             model.handle(PadButton::Down, settings);
         }
+    }
+
+    #[test]
+    fn the_region_row_cycles_auto_ntsc_and_pal() {
+        let mut settings = SettingsModel::new();
+        settings.set_auto_tv_mode(true);
+        let mut model = HandheldOptionsModel::new();
+        go_to(&mut model, OptionRow::Region, &mut settings);
+        assert_eq!(RegionChoice::Auto, RegionChoice::of(&settings));
+        model.handle(PadButton::Right, &mut settings);
+        assert!(!settings.auto_tv_mode());
+        assert_eq!(TvRegionSetting::Ntsc, settings.tv_mode());
+        model.handle(PadButton::Right, &mut settings);
+        assert_eq!(TvRegionSetting::Pal, settings.tv_mode());
+        assert_eq!(
+            "PAL",
+            value_text(OptionRow::Region, &settings, CameraPreset::Orbit)
+        );
+        model.handle(PadButton::Right, &mut settings);
+        assert!(settings.auto_tv_mode());
+        model.handle(PadButton::Left, &mut settings);
+        assert_eq!(RegionChoice::Pal, RegionChoice::of(&settings));
     }
 
     #[test]
