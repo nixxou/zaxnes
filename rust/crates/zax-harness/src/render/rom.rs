@@ -274,6 +274,11 @@ impl Host {
         let runtime = with_context(scene, core, zapper_offset, |context| {
             ProfileScriptRuntime::create_in(profile, environment, engine.state_mut(), Some(context))
         })?;
+        // `ZAXNES_LUA_GC=smooth` measures with the collector tuning the application uses by
+        // default (`emu.lua_smooth_gc`); the runtime starts with the original one.
+        if std::env::var("ZAXNES_LUA_GC").is_ok_and(|value| value.trim() == "smooth") {
+            runtime.set_smooth_gc(true);
+        }
         self.bridge = Some(runtime.bridge());
         self.engine
             .set_script_host(Box::new(TimedHost::new(runtime)));

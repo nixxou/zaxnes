@@ -178,6 +178,14 @@ displayed frame". All values are per displayed frame.
   (`separate_core_tests.rs`: frames identical with and without ahead). Expected per emulated
   frame: max(core 13, conversion + hooks + render) instead of core + conversion + hooks.
   `ZAXNES_CORE_AHEAD=0` disables it.
+- Device run of `e312c87` with catch-up 5 (owner): ~50 emulated/s almost everywhere, heavy areas
+  shown at 33-41 fps instead of slowing down; one Lua spike of 293 ms in the temple. With the core
+  off the main thread, catch-up 5 works: handheld default back to 5 (REQ-LOOP-012).
+- The spike was the generational collector's major collection: over a long temple run its heap
+  grows to 49 MB and a major takes 120 ms on x86. Replaced by a smooth incremental tuning
+  (`emu.lua_smooth_gc`, on by default: pause 120 %, step multiplier 400 %, 256-byte steps;
+  off = the original 400 / 400 / 8 KiB). x86 Zelda II, worst Lua frame: temple 136 -> 2.5 ms,
+  world 126 -> 1.3 ms, start 135 -> 1.1 ms; mean equal or lower. Harness: `ZAXNES_LUA_GC=smooth`.
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

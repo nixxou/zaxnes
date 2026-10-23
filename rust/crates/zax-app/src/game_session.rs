@@ -476,11 +476,11 @@ impl GameSession {
         self.engine.script_host_as::<ProfileScriptRuntime>()
     }
 
-    /// Puts the scripts' Lua collector in its generational or its incremental mode (see
-    /// `ProfileScriptRuntime::set_generational_gc`).
-    pub fn set_generational_gc(&self, generational: bool) {
+    /// Puts the scripts' Lua collector in its smooth or its original tuning (see
+    /// `ProfileScriptRuntime::set_smooth_gc`).
+    pub fn set_smooth_gc(&self, smooth: bool) {
         if let Some(runtime) = self.runtime() {
-            runtime.set_generational_gc(generational);
+            runtime.set_smooth_gc(smooth);
         }
     }
 

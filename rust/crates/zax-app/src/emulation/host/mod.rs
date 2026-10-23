@@ -937,10 +937,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         match id {
             SettingId::EmuGameSpeed => self.apply_speed(),
-            SettingId::EmuLuaGenerationalGc => {
-                let generational = self.settings.get(id).as_bool();
+            SettingId::EmuLuaSmoothGc => {
+                let smooth = self.settings.get(id).as_bool();
                 if let Some(session) = &self.session {
-                    session.set_generational_gc(generational);
+                    session.set_smooth_gc(smooth);
                 }
             }
             SettingId::EmuTvMode => {

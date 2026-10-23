@@ -262,7 +262,7 @@ impl Running {
                 }),
                 group_draws(options),
                 separate_core(options),
-                model.get(SettingId::EmuLuaGenerationalGc).as_bool(),
+                model.get(SettingId::EmuLuaSmoothGc).as_bool(),
             );
         }
         let (width, height) = window.drawable_size();
@@ -772,7 +772,7 @@ fn log_profiler_startup(
     catch_up: CatchUp,
     group_draws: bool,
     separate_core: bool,
-    generational_gc: bool,
+    smooth_gc: bool,
 ) {
     log(&frame_profiler::startup_report(
         &format!(
@@ -785,7 +785,7 @@ fn log_profiler_startup(
             model.vsync(),
             model.frame_rate()
         ),
-        &format!("{pacing}, catch-up {catch_up:?}, grouped draws {group_draws}, separate core {separate_core}, Lua GC {}", if generational_gc { "generational" } else { "incremental" }),
+        &format!("{pacing}, catch-up {catch_up:?}, grouped draws {group_draws}, separate core {separate_core}, Lua GC {}", if smooth_gc { "smooth" } else { "original" }),
     ));
 }
 

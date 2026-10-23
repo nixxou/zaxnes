@@ -266,9 +266,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     });
                     mixer.set_emulation_source(Some(source));
                 }
-                session.set_generational_gc(
-                    self.settings.get(SettingId::EmuLuaGenerationalGc).as_bool(),
-                );
+                session.set_smooth_gc(self.settings.get(SettingId::EmuLuaSmoothGc).as_bool());
                 self.session = Some(session);
                 Ok(())
             }
