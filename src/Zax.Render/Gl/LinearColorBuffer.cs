@@ -22,6 +22,13 @@ namespace Zax.Render.Gl;
 /// resolves it with one full-screen triangle. The alpha channel is copied through unchanged:
 /// it is never a colour (REQ-SCN-035).
 /// </para>
+/// <para>
+/// AMD-032 §2: when anti-aliasing is on, the scene is drawn into a <em>multisampled</em> copy
+/// of the same attachments and that copy is resolved into the single-sample texture before
+/// anything samples it. Multisampling belongs here rather than on the host framebuffer because
+/// the blending of R2-009 has to keep happening on the linear buffer, and because the renderer
+/// does not own the host's format (REQ-SCN-057).
+/// </para>
 /// </remarks>
 internal sealed class LinearColorBuffer : IDisposable
 {
@@ -30,7 +37,11 @@ internal sealed class LinearColorBuffer : IDisposable
     private uint _framebuffer;
     private uint _colorTexture;
     private uint _depthBuffer;
+    private uint _sampleFramebuffer;
+    private uint _sampleColorBuffer;
+    private uint _sampleDepthBuffer;
     private uint _vertexArray;
+    private int _maxSamples = -1;
     private bool _disposed;
 
     /// <summary>Creates the buffer; the attachments are allocated on the first use.</summary>
@@ -46,24 +57,41 @@ internal sealed class LinearColorBuffer : IDisposable
     /// <summary>Height of the attachments in pixels.</summary>
     public int Height { get; private set; }
 
+    /// <summary>
+    /// Samples the scene is actually drawn with: 1 when anti-aliasing is off, and otherwise
+    /// what the implementation granted, which may be fewer than what was asked for
+    /// (AMD-032 §2).
+    /// </summary>
+    public int Samples { get; private set; } = 1;
+
     /// <summary>Name of the framebuffer object, 0 before the first <see cref="BeginPass"/>.</summary>
     public uint Framebuffer => _framebuffer;
 
     /// <summary>
     /// Binds the buffer as the draw target at <paramref name="width"/> ×
-    /// <paramref name="height"/>, reallocating it when the size changed.
+    /// <paramref name="height"/>, reallocating it when the size or the sample count changed.
     /// </summary>
-    public void BeginPass(int width, int height)
+    /// <param name="width">Width in pixels.</param>
+    /// <param name="height">Height in pixels.</param>
+    /// <param name="samples">
+    /// Requested samples per pixel, 1 for no anti-aliasing. Clamped to what
+    /// <c>GL_MAX_SAMPLES</c> allows, then lowered one step at a time until the multisampled
+    /// framebuffer is complete (AMD-032 §2).
+    /// </param>
+    public void BeginPass(int width, int height, int samples = 1)
     {
         int w = Math.Max(1, width);
         int h = Math.Max(1, height);
-        if (_framebuffer == 0 || w != Width || h != Height)
+        int wanted = SceneConstants.ClampAntiAliasSamples(samples, MaxSamples());
+        if (_framebuffer == 0 || w != Width || h != Height || wanted != Samples)
         {
             Release();
             Allocate(w, h);
+            AllocateSamples(w, h, wanted);
         }
 
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _framebuffer);
+        _gl.BindFramebuffer(
+            FramebufferTarget.Framebuffer, Samples > 1 ? _sampleFramebuffer : _framebuffer);
         _gl.Viewport(0, 0, (uint)Width, (uint)Height);
     }
 
@@ -77,6 +105,8 @@ internal sealed class LinearColorBuffer : IDisposable
         {
             return;
         }
+
+        ResolveSamples();
 
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, target.Framebuffer);
         _gl.Viewport(0, 0, (uint)target.Width, (uint)target.Height);
@@ -119,6 +149,119 @@ internal sealed class LinearColorBuffer : IDisposable
         }
 
         Release();
+    }
+
+    /// <summary>
+    /// Flattens the multisampled attachments into the single-sample texture the resolve pass
+    /// and every later reader sample. A no-op when anti-aliasing is off.
+    /// </summary>
+    /// <remarks>
+    /// The two framebuffers have the same size, so the filter the blit is given is never used;
+    /// <c>Nearest</c> is the one a multisample resolve is allowed to take.
+    /// </remarks>
+    private void ResolveSamples()
+    {
+        if (Samples <= 1 || _sampleFramebuffer == 0)
+        {
+            return;
+        }
+
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _sampleFramebuffer);
+        _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _framebuffer);
+        _gl.Disable(EnableCap.ScissorTest);
+        _gl.BlitFramebuffer(
+            0, 0, Width, Height,
+            0, 0, Width, Height,
+            (uint)ClearBufferMask.ColorBufferBit,
+            BlitFramebufferFilter.Nearest);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
+
+    /// <summary>
+    /// The highest sample count this implementation accepts, read once. OpenGL 3.3 core always
+    /// answers at least 4 (REQ-SCN-056: no extension is needed for any of this).
+    /// </summary>
+    private int MaxSamples()
+    {
+        if (_maxSamples < 0)
+        {
+            _gl.GetInteger(GLEnum.MaxSamples, out int max);
+
+            // A driver that answers nonsense must not disable anti-aliasing silently for ever;
+            // the completeness check below is the real guard.
+            _maxSamples = Math.Clamp(max, 1, SceneConstants.MaxAntiAliasSamples);
+        }
+
+        return _maxSamples;
+    }
+
+    /// <summary>
+    /// Allocates the multisampled attachments, halving the sample count until the framebuffer
+    /// is complete and falling back to no anti-aliasing at all (AMD-032 §2).
+    /// </summary>
+    private void AllocateSamples(int width, int height, int samples)
+    {
+        Samples = 1;
+        for (int count = samples; count > 1; count /= 2)
+        {
+            if (TryAllocateSamples(width, height, count))
+            {
+                Samples = count;
+                return;
+            }
+
+            ReleaseSamples();
+        }
+    }
+
+    private bool TryAllocateSamples(int width, int height, int samples)
+    {
+        _sampleFramebuffer = _gl.GenFramebuffer();
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _sampleFramebuffer);
+
+        _sampleColorBuffer = _gl.GenRenderbuffer();
+        _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sampleColorBuffer);
+        _gl.RenderbufferStorageMultisample(
+            RenderbufferTarget.Renderbuffer, (uint)samples, InternalFormat.Rgba16f,
+            (uint)width, (uint)height);
+        _gl.FramebufferRenderbuffer(
+            FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
+            RenderbufferTarget.Renderbuffer, _sampleColorBuffer);
+
+        _sampleDepthBuffer = _gl.GenRenderbuffer();
+        _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sampleDepthBuffer);
+        _gl.RenderbufferStorageMultisample(
+            RenderbufferTarget.Renderbuffer, (uint)samples, InternalFormat.DepthComponent24,
+            (uint)width, (uint)height);
+        _gl.FramebufferRenderbuffer(
+            FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            RenderbufferTarget.Renderbuffer, _sampleDepthBuffer);
+        _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+
+        GLEnum status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        return status == GLEnum.FramebufferComplete;
+    }
+
+    private void ReleaseSamples()
+    {
+        if (_sampleDepthBuffer != 0)
+        {
+            _gl.DeleteRenderbuffer(_sampleDepthBuffer);
+            _sampleDepthBuffer = 0;
+        }
+
+        if (_sampleColorBuffer != 0)
+        {
+            _gl.DeleteRenderbuffer(_sampleColorBuffer);
+            _sampleColorBuffer = 0;
+        }
+
+        if (_sampleFramebuffer != 0)
+        {
+            _gl.DeleteFramebuffer(_sampleFramebuffer);
+            _sampleFramebuffer = 0;
+        }
     }
 
     /// <summary>The empty vertex array the full-screen triangle is drawn from.</summary>
@@ -178,6 +321,9 @@ internal sealed class LinearColorBuffer : IDisposable
 
     private void Release()
     {
+        ReleaseSamples();
+        Samples = 1;
+
         if (_depthBuffer != 0)
         {
             _gl.DeleteRenderbuffer(_depthBuffer);

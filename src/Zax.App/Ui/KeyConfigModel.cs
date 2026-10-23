@@ -10,7 +10,7 @@ namespace Zax.App.Ui;
 internal sealed record KeyConfigRow(string Label, BindingTarget Target, int Player);
 
 /// <summary>A group of lines with a heading.</summary>
-/// <param name="Title">The French heading.</param>
+/// <param name="Title">The heading, in the interface language.</param>
 /// <param name="Rows">Its lines, in order.</param>
 internal sealed record KeyConfigSection(string Title, IReadOnlyList<KeyConfigRow> Rows);
 
@@ -52,36 +52,64 @@ internal sealed class KeyConfigModel
         ZaxCommands.SetPortType,
         ZaxCommands.SetCameraMode,
         ZaxCommands.SetSkybox,
-        ZaxCommands.SetTvBox,
         ZaxCommands.SetVolume,
     };
 
+    private readonly CommandModel _commands;
     private readonly List<KeyConfigSection> _sections = [];
+
+    private int _builtFor = -1;
 
     /// <summary>Builds the window over <paramref name="commands"/>.</summary>
     /// <param name="commands">The command model, whose argument-less commands become lines.</param>
     public KeyConfigModel(CommandModel commands)
     {
         ArgumentNullException.ThrowIfNull(commands);
+        _commands = commands;
+        Rebuild();
+    }
+
+    /// <summary>
+    /// The sections, in display order. The headings and the command labels follow the interface
+    /// language, so the window switches without a restart (AMD-035 §1).
+    /// </summary>
+    public IReadOnlyList<KeyConfigSection> Sections
+    {
+        get
+        {
+            Rebuild();
+            return _sections;
+        }
+    }
+
+    private void Rebuild()
+    {
+        if (_builtFor == UiStrings.Generation)
+        {
+            return;
+        }
+
+        _builtFor = UiStrings.Generation;
+        _sections.Clear();
 
         _sections.Add(new KeyConfigSection(
-            "Joueur 1 — boutons NES",
+            UiStrings.Get(UiKeys.KeysPlayerOne),
             [.. NesButtons.Select(action => Row(action, player: 0))]));
 
         _sections.Add(new KeyConfigSection(
-            "Joueur 2 — boutons NES",
+            UiStrings.Get(UiKeys.KeysPlayerTwo),
             [.. NesButtons.Select(action => Row(action, player: 1))]));
 
         _sections.Add(new KeyConfigSection(
-            "Caméra",
+            UiStrings.Get(UiKeys.KeysCamera),
             [.. CameraActions.Select(action => Row(action, player: 0))]));
 
         _sections.Add(new KeyConfigSection(
-            "Raccourcis système",
+            UiStrings.Get(UiKeys.KeysHotkeys),
             [.. Hotkeys.Select(action => Row(action, player: 0))]));
 
         List<KeyConfigRow> commandRows = [];
-        foreach (ZaxCommand command in commands.Commands)
+        foreach (ZaxCommand command in _commands.Commands)
         {
             if (CommandsNeedingArguments.Contains(command.Name))
             {
@@ -94,16 +122,13 @@ internal sealed class KeyConfigModel
                 Player: 0));
         }
 
-        _sections.Add(new KeyConfigSection("Commandes de menu", commandRows));
+        _sections.Add(new KeyConfigSection(UiStrings.Get(UiKeys.KeysCommands), commandRows));
     }
-
-    /// <summary>The sections, in display order.</summary>
-    public IReadOnlyList<KeyConfigSection> Sections => _sections;
 
     /// <summary>Every line of every section.</summary>
     public IEnumerable<KeyConfigRow> AllRows()
     {
-        foreach (KeyConfigSection section in _sections)
+        foreach (KeyConfigSection section in Sections)
         {
             foreach (KeyConfigRow row in section.Rows)
             {

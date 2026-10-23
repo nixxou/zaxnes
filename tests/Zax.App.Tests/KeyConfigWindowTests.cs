@@ -25,7 +25,7 @@ public sealed class KeyConfigWindowTests
         KeyConfigModel model = harness.Ui.Keys;
 
         Assert.Equal(
-            ["Joueur 1 — boutons NES", "Joueur 2 — boutons NES", "Caméra", "Raccourcis système", "Commandes de menu"],
+            ["Player 1 — NES buttons", "Player 2 — NES buttons", "Camera", "System hotkeys", "Menu commands"],
             model.Sections.Select(static section => section.Title));
 
         // The 19 actions of §4.1 are all there for player 1, and the eight NES buttons again for

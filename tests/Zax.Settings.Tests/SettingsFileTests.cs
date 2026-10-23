@@ -290,26 +290,50 @@ public sealed class SettingsFileTests
         storage.Put(
             SettingsFile.DefaultName,
             """
-            { "schemaVersion": 1, "values": { "scene.skybox": 2, "scene.tv_box": "TV" } }
+            { "schemaVersion": 1, "values": { "scene.skybox": 2 } }
             """);
         SettingsModel read = new();
         new SettingsFile(storage).Load(read, Now);
         Assert.Equal(2, read.GetInt(SettingKeys.SceneSkybox));
-        Assert.Equal(1, read.GetInt(SettingKeys.SceneTvBox));
+    }
 
-        // AMD-025: a file written before the amendment holds one of the three old labels,
-        // and each of them is the one model now.
-        foreach (string legacy in new[] { "TV 1", "TV 2", "TV 3" })
-        {
-            storage.Put(
-                SettingsFile.DefaultName,
-                $$"""
-                { "schemaVersion": 1, "values": { "scene.tv_box": "{{legacy}}" } }
-                """);
-            SettingsModel old = new();
-            new SettingsFile(storage).Load(old, Now);
-            Assert.Equal(1, old.GetInt(SettingKeys.SceneTvBox));
-        }
+    /// <summary>
+    /// AMD-031 §3: a value stored for the TV box key is read without error, has no effect, and
+    /// is not written back — unlike the unknown keys of REQ-PERS-023, which survive a rewrite.
+    /// </summary>
+    [Theory] // AMD-031 §3
+    [InlineData("1")]
+    [InlineData("\"TV\"")]
+    [InlineData("\"TV 3\"")]
+    [InlineData("3")]
+    public void AMD_031_a_stored_TV_box_value_is_ignored_and_dropped(string stored)
+    {
+        MemorySettingsStorage storage = new();
+        storage.Put(
+            SettingsFile.DefaultName,
+            $$"""
+            {
+              "schemaVersion": 1,
+              "values": { "scene.skybox": 1, "scene.tv_box": {{stored}}, "vr.unknown": 7 }
+            }
+            """);
+
+        SettingsModel model = new();
+        SettingsFile file = new(storage);
+        SettingsLoadResult result = file.Load(model, Now);
+
+        // Read without error, and the rest of the file is applied as usual.
+        Assert.Equal(SettingsLoadStatus.Loaded, result.Status);
+        Assert.Equal(1, model.GetInt(SettingKeys.SceneSkybox));
+        Assert.Null(SettingsCatalogue.Find("scene.tv_box"));
+
+        Assert.True(file.Save(model));
+        JsonObject values = (JsonObject)((JsonObject)JsonNode.Parse(
+            storage.Text(SettingsFile.DefaultName)!)!)["values"]!;
+
+        // The retired key is gone; a genuinely unknown key is still kept (REQ-PERS-023).
+        Assert.False(values.ContainsKey("scene.tv_box"));
+        Assert.Equal(7, values["vr.unknown"]!.GetValue<int>());
     }
 
     /// <summary>§4.5.1: a vector is an array of numbers and a colour the <c>#RRGGBBAA</c> form.</summary>

@@ -100,6 +100,37 @@ public sealed class ShadingTests
         Assert.InRange(shaded.B, 115, 119);
     }
 
+    /// <summary>
+    /// Q-072, lot FIX-4: what the original's own 1080 p capture shows on the unlit side faces of
+    /// the extruded HUD glyphs of Super Mario Bros. 3, measured in
+    /// <c>verify/reference/smb3-map-original-1080p.png</c>. The white glyphs are NES 0x30 over
+    /// a cyan panel; the faces the light does not reach come out at sRGB 117 in the original and
+    /// 116 here, so the ambient term of REQ-SCN-027 is the one the original uses and an
+    /// "ambient intensity of 0,3" — whichever way it is read, 0,054 or 0,3 in linear space —
+    /// is not.
+    /// </summary>
+    [Theory]
+    // linear ambient, expected sRGB of a white face lit by the ambient alone
+    [InlineData(0.1812f, 117)]   // REQ-SCN-027, what both the original and Zaxnes show
+    [InlineData(0.0544f, 65)]    // 0,3 read as a factor on the ambient colour: far too dark
+    [InlineData(0.3f, 147)]      // 0,3 read as the linear ambient itself: too light
+    public void Q_072_only_the_ambient_of_REQ_SCN_027_matches_the_reference_capture(
+        float ambientLinear,
+        int expected)
+    {
+        // The shading of REQ-SCN-028 for a face with N·L = 0, spelled out so that the three
+        // candidate ambients can be compared without changing the renderer's constant.
+        float albedo = SceneColor.ToLinear(NesPalette.Color(0x30).R / 255f);
+        int shown = (int)MathF.Round(SceneColor.ToSrgb(albedo * ambientLinear) * 255f);
+        Assert.Equal(expected, shown);
+
+        // And the one the renderer actually uses is the first of the three.
+        if (expected == 117)
+        {
+            Assert.Equal(ambientLinear, SceneColor.AmbientLinear, 1e-4);
+        }
+    }
+
     [Fact]
     public void REQ_SCN_031_a_white_front_face_goes_from_223_to_146_in_shadow()
     {

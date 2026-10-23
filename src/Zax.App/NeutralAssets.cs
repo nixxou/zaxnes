@@ -17,8 +17,8 @@ namespace Zax.App;
 /// <para>
 /// Without the option the host runs on what the code produces: the built-in catalogue of
 /// <see cref="BuiltInCatalogue"/>, the procedural skyboxes of REQ-PUB-003, the synthesised
-/// audio of REQ-PUB-005 and a system font (REQ-PUB-006). The television is the one shipped
-/// file, found by <see cref="TelevisionAsset"/> (AMD-025).
+/// audio of REQ-PUB-005 and a system font (REQ-PUB-006). AMD-031 removed the one asset file
+/// the release used to carry, so the build ships none at all.
 /// </para>
 /// </remarks>
 internal static class NeutralAssets

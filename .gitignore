@@ -90,8 +90,8 @@ imgui.ini
 userdata/
 portable.txt
 
-# Assets the user supplies for the optional "--assets <dir>" mode, and the television model of
-# AMD-025 when it is copied into a build output: never published from here, never committed.
+# Assets the user supplies for the optional "--assets <dir>" mode, when they are copied into a
+# build output: never published from here, never committed.
 # Anchored to the root on purpose -- a bare "assets/" would also match "src/Zax.Render/Assets/",
 # since Windows matches these patterns without regard to case.
 /assets-neutral/

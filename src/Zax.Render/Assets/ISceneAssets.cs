@@ -29,13 +29,13 @@ public enum CubeFace
 
 /// <summary>
 /// Where the renderer gets the extracted assets of SPEC-06: the skybox cubemaps of REQ-SCN-050
-/// and REQ-SCN-051, and the meshes and textures of the decorative television of REQ-SCN-054.
+/// and REQ-SCN-051, plus the meshes and textures of an asset folder.
 /// </summary>
 /// <remarks>
 /// The renderer never touches the file system itself: the host supplies this (REQ-SCN-057,
 /// REQ-ARCH-003). A test can therefore inject the uniform cubemaps the acceptance criterion of
 /// REQ-SCN-051 asks for. Every member may return <see langword="null"/>; the renderer then
-/// falls back to the plain background and to no television.
+/// falls back to the plain background.
 /// </remarks>
 public interface ISceneAssets
 {

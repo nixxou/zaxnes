@@ -53,12 +53,13 @@ internal static class RenderExport
           --distance <d>           Camera setpoint distance (default 104 / atan(FOV/2)).
           --mesh <algorithm>       greedy (default), marching or multicolor (REQ-E3D-340).
           --no-shadows             Render with the shadows off.
+          --shadow-map <texels>    Side of the shadow map (default 4096, AMD-034). A size the
+                                   hardware refuses is halved until it accepts one, and the
+                                   granted size is reported.
+          --anti-alias <n>         video.anti_alias: 0 off (default), 1 MSAA 4x, 2 MSAA 8x
+                                   (AMD-032). The granted sample count is reported.
           --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049).
           --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046).
-          --tv <0|1>               Decorative TV box: 0 none, 1 the television (AMD-025).
-          --tv-model <file.glb>    The television model. Without it --tv draws nothing.
-          --tv-info                Print what the model holds — parts, hidden screen plates,
-                                   textures, the measured opening — and the fit it lands on.
           --real-time <seconds>    Real time the star twinkle uses (REQ-SCN-050).
           --sky-bodies             Light the procedural sun, moon and clouds of the skybox,
                                    which REQ-SCN-050 leaves off by default (REQ-PUB-003, Q-064).
@@ -91,12 +92,11 @@ internal static class RenderExport
         int height = 480;
         float fov = 70f;
         bool shadows = true;
+        int shadowMapSize = SceneConstants.ShadowMapSize;
+        int antiAlias = 0;
         bool explain = false;
         int bench = 0;
         SkyboxKind skybox = SkyboxKind.Default;
-        TvBoxKind tvBox = TvBoxKind.None;
-        string? tvModelPath = null;
-        bool tvInfo = false;
         Rgb24 customBackground = default;
         float realTime = 0f;
         bool skyBodies = false;
@@ -174,6 +174,19 @@ internal static class RenderExport
                     shadows = false;
                     break;
 
+                case "--shadow-map":
+                    shadowMapSize = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    break;
+
+                case "--anti-alias":
+                    antiAlias = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    if (antiAlias is < 0 or > 2)
+                    {
+                        throw new ArgumentException("--anti-alias expects 0, 1 or 2.");
+                    }
+
+                    break;
+
                 case "--explain":
                     explain = true;
                     break;
@@ -192,18 +205,6 @@ internal static class RenderExport
 
                 case "--bg-color":
                     customBackground = ParseColor(Next(args, ref i));
-                    break;
-
-                case "--tv":
-                    tvBox = TvBoxSetting.From(int.Parse(Next(args, ref i), CultureInfo.InvariantCulture));
-                    break;
-
-                case "--tv-model":
-                    tvModelPath = Next(args, ref i);
-                    break;
-
-                case "--tv-info":
-                    tvInfo = true;
                     break;
 
                 case "--real-time":
@@ -277,7 +278,6 @@ internal static class RenderExport
 
             scene.Scene.Camera.SnapToSetpoints();
             scene.Scene.Settings.Skybox = skybox;
-            scene.Scene.Settings.TvBox = tvBox;
             scene.Scene.Settings.CustomBackgroundColor = customBackground;
             scene.Scene.RealTime = realTime;
 
@@ -296,52 +296,20 @@ internal static class RenderExport
                 scene.Scene.Settings.Shadows = false;
                 scene.Engine.Settings.Shadow = false;
             }
+
+            // AMD-032 §2: video.anti_alias as the application applies it.
+            scene.Scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(antiAlias);
+            scene.Scene.Settings.ShadowMapSize = shadowMapSize;
         }
 
         using OffscreenContext context = OffscreenContext.Create(width, height);
 
         // AMD-024 REQ-PUB-001: the scene assets are only the folder --assets names, as in the
         // application — never one found by walking up the tree. Without the option the renderer
-        // produces the procedural skyboxes and televisions of REQ-PUB-003 and REQ-PUB-004,
-        // which is what a capture of the publishable build has to show. The profile lookup
-        // below keeps its own search: the harness is a development tool and the 101 embedded
-        // profiles are still what it replays.
-        // AMD-025: the television is the glTF model --tv-model names; without it --tv draws
-        // nothing, which is what the "missing model" capture shows.
-        TvModel? television = TvModel.TryLoad(tvModelPath);
-        if (tvModelPath is not null && television is null)
-        {
-            Console.Error.WriteLine($"render: the television model '{tvModelPath}' could not be read.");
-        }
-
-        if (tvInfo && television is { } model)
-        {
-            Console.Out.WriteLine($"tv model: {model.Describe()}");
-            foreach (TvModelPart part in model.Parts)
-            {
-                Console.Out.WriteLine(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"  part {part.Name}: cast {part.CastShadow}, receive {part.ReceiveShadow}, "
-                        + $"base colour {part.Material.Diffuse}, normal {part.Material.Normal}, "
-                        + $"mr {part.Material.MetallicRoughness}, double sided {part.Material.DoubleSided}"));
-            }
-
-            foreach (SyntheticScene scene in scenes)
-            {
-                VisibleRect wanted = VisibleRect.From(scene.Scene.Clipping);
-                VisibleRect footprint = model.Footprint(scene.Scene.Clipping);
-                Console.Out.WriteLine(string.Create(
-                    CultureInfo.InvariantCulture,
-                    $"  fit on {scene.Name}: R = [{wanted.MinX:F1}, {wanted.MaxX:F1}] x "
-                        + $"[{wanted.MinY:F1}, {wanted.MaxY:F1}], cabinet covers "
-                        + $"[{footprint.MinX:F1}, {footprint.MaxX:F1}] x [{footprint.MinY:F1}, {footprint.MaxY:F1}]"));
-            }
-        }
-
-        using SceneRenderer renderer = new(
-            context.Gl,
-            NeutralSceneAssets.TryOpen(assets),
-            television);
+        // produces the procedural skyboxes of REQ-PUB-003, which is what a capture of the
+        // publishable build has to show. The profile lookup below keeps its own search: the
+        // harness is a development tool and the 101 embedded profiles are still what it replays.
+        using SceneRenderer renderer = new(context.Gl, NeutralSceneAssets.TryOpen(assets));
 
         List<string> report = [];
         foreach (SyntheticScene scene in scenes)
@@ -388,9 +356,20 @@ internal static class RenderExport
                 ? string.Create(CultureInfo.InvariantCulture, $"  {ms.Median:F2} ms median, {ms.P99:F2} ms p99")
                 : string.Empty;
             RenderStatistics counts = renderer.Statistics;
+            string msaa = counts.AntiAliasSamples > 1
+                ? string.Create(CultureInfo.InvariantCulture, $"  MSAA {counts.AntiAliasSamples}x")
+                : string.Empty;
+
+            // AMD-034 §2: the granted size is only worth printing when it is not the one asked
+            // for, which is how a hardware fallback gets reported.
+            string shadow = counts.ShadowMapSize != counts.RequestedShadowMapSize
+                ? string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"  shadow map {counts.ShadowMapSize} (asked {counts.RequestedShadowMapSize})")
+                : string.Empty;
             Console.Out.WriteLine(string.Create(
                 CultureInfo.InvariantCulture,
-                $"{scene.Name,-18} {statistics.DistinctColors,6} colours  {counts.OpaqueTiles,5} opaque  {counts.TransparentTiles,4} alpha  {counts.HudTiles,4} HUD  {counts.ShadowCasters,5} casters{timing}"));
+                $"{scene.Name,-18} {statistics.DistinctColors,6} colours  {counts.OpaqueTiles,5} opaque  {counts.TransparentTiles,4} alpha  {counts.HudTiles,4} HUD  {counts.ShadowCasters,5} casters{msaa}{shadow}{timing}"));
         }
 
         File.WriteAllText(
@@ -726,6 +705,9 @@ internal static class RenderExport
                 + $"\"hudTiles\": {render.HudTiles}, \"shadowCasters\": {render.ShadowCasters}, "
                 + $"\"drawCalls\": {render.DrawCalls}, \"triangles\": {render.Triangles}, "
                 + $"\"residentMeshes\": {render.ResidentMeshes}, "
+                + $"\"antiAliasSamples\": {render.AntiAliasSamples}, "
+                + $"\"shadowMapSize\": {render.ShadowMapSize}, "
+                + $"\"requestedShadowMapSize\": {render.RequestedShadowMapSize}, "
                 + $"\"distinctColors\": {capture.DistinctColors}, "
                 + $"\"backgroundPixels\": {capture.BackgroundPixels}, "
                 + $"\"meanLuma\": {capture.MeanLuma:F4}{bench} }}");

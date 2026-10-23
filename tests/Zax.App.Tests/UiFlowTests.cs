@@ -99,7 +99,7 @@ public sealed class UiFlowTests
 
         // The filters of SPEC-10 §4 plus "every file", as REQ-UI-201 asks.
         Assert.Equal(["nes", "zip"], harness.Ui.Browser.Filter);
-        Assert.Contains("Tous les fichiers", harness.Ui.Browser.Filters.Select(static f => f.Label));
+        Assert.Contains("All files", harness.Ui.Browser.Filters.Select(static f => f.Label));
     }
 
     /// <summary>
@@ -187,8 +187,8 @@ public sealed class UiFlowTests
     }
 
     /// <summary>
-    /// REQ-UI-207: with no ROM loaded the welcome screen is up; a loaded game hides it, and so
-    /// does full screen, since it is not an OSD element (REQ-UI-209).
+    /// REQ-UI-207: with no ROM loaded the welcome screen is up, in a window and in full screen
+    /// alike (Q-073); loading a game is what hides it.
     /// </summary>
     [Fact]
     public void REQ_UI_207_the_welcome_screen_shows_while_no_game_is_loaded()
@@ -207,7 +207,14 @@ public sealed class UiFlowTests
         imgui.Frame(() => harness.Ui.Draw(1f / 60f));
         Assert.True(harness.Ui.State.WelcomeVisible);
 
+        // Q-073: full screen with no game keeps the welcome screen, which is then the only
+        // thing on screen that names the way out (AMD-032 §6).
         harness.Settings.Fullscreen = true;
+        imgui.Frame(() => harness.Ui.Draw(1f / 60f));
+        Assert.True(harness.Ui.State.WelcomeVisible);
+        Assert.False(harness.Ui.State.MenuBarVisible);
+
+        harness.Launch("g0");
         imgui.Frame(() => harness.Ui.Draw(1f / 60f));
         Assert.False(harness.Ui.State.WelcomeVisible);
     }
@@ -322,12 +329,22 @@ public sealed class UiFlowTests
         Assert.Matches(@"^\d+\.\d+\.\d+", UiText.Version);
         Assert.Equal("GPL v3", UiText.AboutLines[2]);
 
-        // AMD-029 §3 word for word, split over the three lines of the block.
-        Assert.Equal("Projet indépendant inspiré de 3dSen (Geod Studio) ;", UiText.AboutLines[3]);
+        // AMD-035: English by default, the translation of the three attribution lines.
+        Assert.Equal("Independent project inspired by 3dSen (Geod Studio);", UiText.AboutLines[3]);
         Assert.Equal(
-            "contient du code adapté de 3DNes_Engine (Geod Studio, GPL v3).",
+            "contains code adapted from 3DNes_Engine (Geod Studio, GPL v3).",
             UiText.AboutLines[4]);
-        Assert.Equal("Sans lien avec Geod Studio ni Nintendo.", UiText.AboutLines[5]);
+        Assert.Equal("Not affiliated with Geod Studio or Nintendo.", UiText.AboutLines[5]);
+
+        // AMD-029 §3 writes the sentence in French, word for word, split over the three lines.
+        using (new UiLanguageScope(UiLanguage.French))
+        {
+            Assert.Equal("Projet indépendant inspiré de 3dSen (Geod Studio) ;", UiText.AboutLines[3]);
+            Assert.Equal(
+                "contient du code adapté de 3DNes_Engine (Geod Studio, GPL v3).",
+                UiText.AboutLines[4]);
+            Assert.Equal("Sans lien avec Geod Studio ni Nintendo.", UiText.AboutLines[5]);
+        }
 
         harness.Run(ZaxCommands.ShowAbout);
         Assert.True(harness.Ui.State.About);

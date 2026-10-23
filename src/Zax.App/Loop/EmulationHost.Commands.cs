@@ -1,5 +1,6 @@
 using Zax.App.Audio;
 using Zax.App.Persistence;
+using Zax.App.Ui;
 using Zax.Engine3D;
 using Zax.Nes;
 using Zax.Render;
@@ -19,6 +20,16 @@ namespace Zax.App.Loop;
 /// </remarks>
 internal sealed partial class EmulationHost
 {
+    /// <summary>
+    /// Reads the label of <paramref name="command"/> in the interface language (AMD-035): the
+    /// commands are registered once at start-up and the language can change at any time, so the
+    /// label is a lookup, not a stored text.
+    /// </summary>
+    private static Func<string> LabelOf(string command) => () => UiStrings.Get(UiKeys.Command(command));
+
+    /// <summary>Reads a shortcut text whose wording is translated (AMD-035).</summary>
+    private static Func<string> TextOf(string key) => () => UiStrings.Get(key);
+
     private void RegisterCommands()
     {
         RegisterFileCommands();
@@ -33,39 +44,47 @@ internal sealed partial class EmulationHost
     {
         Commands.Register(
             ZaxCommands.OpenRom,
-            "Ouvrir une ROM…",
+            LabelOf(ZaxCommands.OpenRom),
             OpenRomOrAskForOne,
-            "Ctrl+O",
+            static () => "Ctrl+O",
             _ => !IsLoading);
 
         Commands.Register(
             ZaxCommands.LaunchGame,
-            "Lancer le jeu",
+            LabelOf(ZaxCommands.LaunchGame),
             args => LaunchGame(args.Text ?? string.Empty),
             canExecute: args => !IsLoading && !string.IsNullOrEmpty(args.Text));
 
         Commands.Register(
             ZaxCommands.OpenRecentRom,
-            "ROMs récentes",
+            LabelOf(ZaxCommands.OpenRecentRom),
             args => UiRequested?.Invoke(ZaxCommands.OpenRecentRom, args));
 
         Commands.Register(
             ZaxCommands.ChooseProfile,
-            "Choisir le profil 3D…",
+            LabelOf(ZaxCommands.ChooseProfile),
             args => UiRequested?.Invoke(ZaxCommands.ChooseProfile, args),
             canExecute: _ => !IsLoading);
 
         Commands.Register(
             ZaxCommands.ImportProfile,
-            "Importer un profil…",
+            LabelOf(ZaxCommands.ImportProfile),
             args => UiRequested?.Invoke(ZaxCommands.ImportProfile, args),
+            canExecute: _ => !IsLoading);
+
+        // AMD-030 §2: « Fichier → Importer depuis 3dSen… ». The folder picker and the import
+        // itself belong to the interface, which owns the library.
+        Commands.Register(
+            ZaxCommands.ImportThreeDSen,
+            LabelOf(ZaxCommands.ImportThreeDSen),
+            args => UiRequested?.Invoke(ZaxCommands.ImportThreeDSen, args),
             canExecute: _ => !IsLoading);
 
         // SPEC-09 REQ-PERS-042 and SPEC-10 REQ-UI-037, which AMD-010 §3 keeps mandatory: the
         // deletion of a user game, behind the confirmation of REQ-UI-110.
         Commands.Register(
             ZaxCommands.DeleteGame,
-            "Supprimer le jeu…",
+            LabelOf(ZaxCommands.DeleteGame),
             args => RequestDeleteGame(args.Text ?? CurrentGameId ?? string.Empty),
             canExecute: args => !IsLoading
                 && _games.CanDelete(args.Text ?? CurrentGameId ?? string.Empty));
@@ -73,13 +92,13 @@ internal sealed partial class EmulationHost
         // REQ-PERS-036, P3 after AMD-020 (Q-050): the two sources a classic menu can offer.
         Commands.Register(
             ZaxCommands.CreateGameArt,
-            "Créer la jaquette",
+            LabelOf(ZaxCommands.CreateGameArt),
             _ => CreateGameArt(),
             canExecute: _ => !IsLoading && _currentGame is not null);
 
         Commands.Register(
             ZaxCommands.ImportCover,
-            "Importer une jaquette…",
+            LabelOf(ZaxCommands.ImportCover),
             args =>
             {
                 if (string.IsNullOrEmpty(args.Text))
@@ -94,48 +113,48 @@ internal sealed partial class EmulationHost
 
         Commands.Register(
             ZaxCommands.Quit,
-            "Quitter",
+            LabelOf(ZaxCommands.Quit),
             _ => QuitRequested = true,
-            "Ctrl+Q");
+            static () => "Ctrl+Q");
     }
 
     private void RegisterStateCommands()
     {
         Commands.Register(
             ZaxCommands.SaveSlot,
-            "Sauvegarder l'état",
+            LabelOf(ZaxCommands.SaveSlot),
             args => SaveToSlot(SaveSlotIndex.NumberedSlotId(args.Number)),
-            "Maj+F1…F10",
+            TextOf(UiKeys.ShortcutSaveSlots),
             args => CanSave(args.Number));
 
         Commands.Register(
             ZaxCommands.LoadSlot,
-            "Charger un état",
+            LabelOf(ZaxCommands.LoadSlot),
             args => LoadSlot(SaveSlotIndex.NumberedSlotId(args.Number)),
-            "Ctrl+F1…F10",
+            TextOf(UiKeys.ShortcutLoadSlots),
             args => !IsLoading
                 && SaveSlotIndex.IsValidSlotId(SaveSlotIndex.NumberedSlotId(args.Number))
                 && Slots.Find(SaveSlotIndex.NumberedSlotId(args.Number)) is { IsOccupied: true });
 
         Commands.Register(
             ZaxCommands.QuickSave,
-            "État rapide : sauvegarder",
+            LabelOf(ZaxCommands.QuickSave),
             _ => QuickSave(),
-            "raccourci QuickSave",
+            TextOf(UiKeys.ShortcutQuickSave),
             _ => _currentGame is not null && State != EmulationState.Stopped && !IsLoading);
 
         Commands.Register(
             ZaxCommands.QuickLoad,
-            "État rapide : charger",
+            LabelOf(ZaxCommands.QuickLoad),
             _ => QuickLoad(),
-            "raccourci QuickLoad",
+            TextOf(UiKeys.ShortcutQuickLoad),
             _ => !IsLoading && Slots.Find(SaveSlotIndex.QuickSlotId) is { IsOccupied: true });
 
         // REQ-UI-052: the deletion asks for the confirmation of REQ-UI-110 first. A text
         // argument names the slot directly, which is how the quick slot is reached.
         Commands.Register(
             ZaxCommands.DeleteSlot,
-            "Supprimer l'état",
+            LabelOf(ZaxCommands.DeleteSlot),
             args => RequestDeleteSlot(args.Text ?? SaveSlotIndex.NumberedSlotId(args.Number)),
             canExecute: args => !IsLoading
                 && Slots.Find(args.Text ?? SaveSlotIndex.NumberedSlotId(args.Number)) is { IsOccupied: true });
@@ -145,83 +164,83 @@ internal sealed partial class EmulationHost
     {
         Commands.Register(
             ZaxCommands.PauseResume,
-            "Pause / Reprise",
+            LabelOf(ZaxCommands.PauseResume),
             _ => TogglePause(),
-            "P",
+            static () => "P",
             _ => State != EmulationState.Stopped && !IsLoading,
             () => State == EmulationState.Paused);
 
         Commands.Register(
             ZaxCommands.Pause,
-            "Pause",
+            LabelOf(ZaxCommands.Pause),
             _ => Pause(),
             canExecute: _ => State == EmulationState.Running && !IsLoading);
 
         Commands.Register(
             ZaxCommands.Resume,
-            "Reprise",
+            LabelOf(ZaxCommands.Resume),
             _ => Resume(),
             canExecute: _ => State == EmulationState.Paused && !IsLoading);
 
         Commands.Register(
             ZaxCommands.Reset,
-            "Reset",
+            LabelOf(ZaxCommands.Reset),
             _ => ResetGame(),
-            "Ctrl+R",
+            static () => "Ctrl+R",
             _ => _currentGame is not null && !IsLoading);
 
         Commands.Register(
             ZaxCommands.Stop,
-            "Arrêter",
+            LabelOf(ZaxCommands.Stop),
             _ => StopCurrentGame(clearCurrentGame: true),
             canExecute: _ => State != EmulationState.Stopped && !IsLoading);
 
         Commands.Register(
             ZaxCommands.FastForward,
-            "Avance rapide",
+            LabelOf(ZaxCommands.FastForward),
             _ => RequestFastForward(),
-            "raccourci FastForward",
+            TextOf(UiKeys.ShortcutFastForward),
             _ => State == EmulationState.Running,
             () => FastForward.IsActive);
 
         Commands.Register(
             ZaxCommands.Rollback,
-            "Rollback",
+            LabelOf(ZaxCommands.Rollback),
             _ => PerformRollback(),
-            "raccourci RollBack",
+            TextOf(UiKeys.ShortcutRollback),
             _ => State != EmulationState.Stopped && !IsLoading);
 
         Commands.Register(
             ZaxCommands.SetSpeed,
-            "Vitesse",
+            LabelOf(ZaxCommands.SetSpeed),
             args => Settings.GameSpeed = args.Number);
 
         Commands.Register(
             ZaxCommands.SpeedUp,
-            "Plus vite",
+            LabelOf(ZaxCommands.SpeedUp),
             _ => Settings.GameSpeed = SpeedSetting.Clamp(Settings.GameSpeed + 1),
             canExecute: _ => Settings.GameSpeed < SpeedSetting.Maximum);
 
         Commands.Register(
             ZaxCommands.SpeedDown,
-            "Moins vite",
+            LabelOf(ZaxCommands.SpeedDown),
             _ => Settings.GameSpeed = SpeedSetting.Clamp(Settings.GameSpeed - 1),
             canExecute: _ => Settings.GameSpeed > SpeedSetting.Minimum);
 
         Commands.Register(
             ZaxCommands.SetRegion,
-            "Région",
+            LabelOf(ZaxCommands.SetRegion),
             args => Settings.TvMode = (TvRegionSetting)args.Number);
 
         Commands.Register(
             ZaxCommands.ToggleAutoRegion,
-            "Région : Auto",
+            LabelOf(ZaxCommands.ToggleAutoRegion),
             _ => Settings.AutoTvMode = !Settings.AutoTvMode,
             isChecked: () => Settings.AutoTvMode);
 
         Commands.Register(
             ZaxCommands.SetPortType,
-            "Type de port",
+            LabelOf(ZaxCommands.SetPortType),
             args => _session?.Core.SetPortType(args.Number, (ControllerPortType)args.Number2),
             canExecute: args => _session is not null && args.Number is 0 or 1);
     }
@@ -233,30 +252,30 @@ internal sealed partial class EmulationHost
         // library entry, which is what it used to do.
         Commands.Register(
             ZaxCommands.ToggleTwoDimensional,
-            "Mode 3D / Mode 2D",
+            LabelOf(ZaxCommands.ToggleTwoDimensional),
             _ => TwoDimensionalView = !TwoDimensionalView,
-            "F11",
+            static () => "F11",
             _ => _currentGame is not null && !IsLoading,
             () => ShowingTwoDimensional);
 
         Commands.Register(
             ZaxCommands.ResetView,
-            "Réinitialiser la vue",
+            LabelOf(ZaxCommands.ResetView),
             _ => _scene.Camera.ResetView(),
-            "appui long sur Menu");
+            TextOf(UiKeys.ShortcutLongPressMenu));
 
         // SPEC-06 REQ-SCN-006: the two camera modes, with their own setpoints. The menu entry
         // "Mode caméra" of REQ-UI-200 switches between them; REQ-SCN-009's local camera is the
         // third item of the same submenu.
         Commands.Register(
             ZaxCommands.SetCameraMode,
-            "Mode caméra",
+            LabelOf(ZaxCommands.SetCameraMode),
             args => _scene.Camera.SetMode(args.Number == 1 ? CameraMode.Fpv : CameraMode.Tpv),
             canExecute: _ => !IsLoading);
 
         Commands.Register(
             ZaxCommands.ToggleLocalCamera,
-            "Vue de dessus",
+            LabelOf(ZaxCommands.ToggleLocalCamera),
             _ => Settings.Model.SetBool(
                 Zax.Settings.SettingKeys.CameraLocalCam,
                 !Settings.Model.GetBool(Zax.Settings.SettingKeys.CameraLocalCam)),
@@ -264,37 +283,29 @@ internal sealed partial class EmulationHost
 
         Commands.Register(
             ZaxCommands.SetSkybox,
-            "Skybox",
+            LabelOf(ZaxCommands.SetSkybox),
             args => Settings.Skybox = args.Number);
-
-        // AMD-025: without the model file there is no television to draw, so the whole
-        // submenu is disabled rather than offering a setting with no effect.
-        Commands.Register(
-            ZaxCommands.SetTvBox,
-            "Boîtier TV",
-            args => Settings.TvBox = args.Number,
-            canExecute: _ => TelevisionAvailable);
 
         Commands.Register(
             ZaxCommands.ToggleShadows,
-            "Ombres",
+            LabelOf(ZaxCommands.ToggleShadows),
             _ => Settings.Shadow = !Settings.Shadow,
             isChecked: () => Settings.Shadow);
 
         Commands.Register(
             ZaxCommands.ToggleFullscreen,
-            "Plein écran",
+            LabelOf(ZaxCommands.ToggleFullscreen),
             _ =>
             {
                 Settings.Fullscreen = !Settings.Fullscreen;
                 UiRequested?.Invoke(ZaxCommands.ToggleFullscreen, default);
             },
-            "Alt+Entrée",
+            TextOf(UiKeys.ShortcutAltEnter),
             isChecked: () => Settings.Fullscreen);
 
         Commands.Register(
             ZaxCommands.ToggleFpsCounter,
-            "Afficher les FPS",
+            LabelOf(ZaxCommands.ToggleFpsCounter),
             _ => Settings.ShowFps = !Settings.ShowFps,
             isChecked: () => Settings.ShowFps);
     }
@@ -303,28 +314,28 @@ internal sealed partial class EmulationHost
     {
         Commands.Register(
             ZaxCommands.SetVolume,
-            "Volume",
+            LabelOf(ZaxCommands.SetVolume),
             args => Settings.Volume = Math.Clamp(args.Number, 0, 100) / 100f);
 
         Commands.Register(
             ZaxCommands.VolumeUp,
-            "Volume +",
+            LabelOf(ZaxCommands.VolumeUp),
             _ => Settings.Volume = MathF.Min(1f, Settings.Volume + 0.05f));
 
         Commands.Register(
             ZaxCommands.VolumeDown,
-            "Volume −",
+            LabelOf(ZaxCommands.VolumeDown),
             _ => Settings.Volume = MathF.Max(0f, Settings.Volume - 0.05f));
 
         Commands.Register(
             ZaxCommands.ToggleMute,
-            "Muet",
+            LabelOf(ZaxCommands.ToggleMute),
             _ => Settings.Mute = !Settings.Mute,
             isChecked: () => Settings.Mute);
 
         Commands.Register(
             ZaxCommands.ToggleMenuMusic,
-            "Musique de menu",
+            LabelOf(ZaxCommands.ToggleMenuMusic),
             _ => Settings.MenuMusic = !Settings.MenuMusic,
             isChecked: () => Settings.MenuMusic);
     }
@@ -333,23 +344,23 @@ internal sealed partial class EmulationHost
     {
         Commands.Register(
             ZaxCommands.ShowOptions,
-            "Options…",
+            LabelOf(ZaxCommands.ShowOptions),
             args => UiRequested?.Invoke(ZaxCommands.ShowOptions, args),
-            "Ctrl+,");
+            static () => "Ctrl+,");
 
         Commands.Register(
             ZaxCommands.ShowKeyConfig,
-            "Configuration des touches…",
+            LabelOf(ZaxCommands.ShowKeyConfig),
             args => UiRequested?.Invoke(ZaxCommands.ShowKeyConfig, args));
 
         Commands.Register(
             ZaxCommands.ShowDataFolder,
-            "Dossier des données",
+            LabelOf(ZaxCommands.ShowDataFolder),
             args => UiRequested?.Invoke(ZaxCommands.ShowDataFolder, args));
 
         Commands.Register(
             ZaxCommands.ShowAbout,
-            "À propos",
+            LabelOf(ZaxCommands.ShowAbout),
             args => UiRequested?.Invoke(ZaxCommands.ShowAbout, args));
 
         // REQ-UI-004 cases 2 and 3: what a short press on Menu becomes while a modal window is
@@ -357,7 +368,7 @@ internal sealed partial class EmulationHost
         // whether Escape closes it, belongs to the frontend.
         Commands.Register(
             ZaxCommands.CancelModal,
-            "Fermer la fenêtre modale",
+            LabelOf(ZaxCommands.CancelModal),
             args => UiRequested?.Invoke(ZaxCommands.CancelModal, args),
             canExecute: _ => ModalWindowOpen);
     }

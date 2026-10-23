@@ -1,6 +1,5 @@
 using System.Globalization;
 using Zax.Platform;
-using Zax.Render;
 
 namespace Zax.App;
 
@@ -20,6 +19,12 @@ public sealed record AppOptions
 
     /// <summary>Path of the user's <c>.nes</c> ROM, or null.</summary>
     public string? RomPath { get; init; }
+
+    /// <summary>
+    /// The installation folder of 3dSen — or its profile bundle — to import from, then exit
+    /// (AMD-030 §2, <c>--import-3dsen</c>); null when the option was not given.
+    /// </summary>
+    public string? ImportThreeDSenPath { get; init; }
 
     /// <summary>
     /// Title of a built-in profile, or the path of a profile file. Null falls back to the
@@ -90,18 +95,6 @@ public sealed record AppOptions
     /// </summary>
     public int? Skybox { get; init; }
 
-    /// <summary>
-    /// Decorative TV box: 0 None, 1 the television (REQ-SCN-053, AMD-025), or null for the
-    /// setting.
-    /// </summary>
-    public int? TvBox { get; init; }
-
-    /// <summary>
-    /// The glTF file of the television of AMD-025, or null to look for
-    /// <c>assets/tv/retro_crt_tv.glb</c> next to the executable.
-    /// </summary>
-    public string? TvModelPath { get; init; }
-
     /// <summary>Whether to run non-interactively: render a fixed number of frames, then exit.</summary>
     public bool SmokeTest { get; init; }
 
@@ -135,6 +128,7 @@ public sealed record AppOptions
         Usage:
           Zax.App --rom <path> [--profile <title-or-file>] [options]
           Zax.App --list-profiles
+          Zax.App --import-3dsen <folder-or-bundle>
 
         Options:
           --rom <path>            The .nes ROM to play. Without it only the empty scene shows.
@@ -149,6 +143,10 @@ public sealed record AppOptions
           --userdata <dir>        Where settings, save states and battery RAM go.
                                   Default: %LOCALAPPDATA%\Zaxnes, or userdata\ in portable mode.
           --list-profiles         Print the built-in catalogue and exit.
+          --import-3dsen <path>   Import the profiles of your own 3dSen installation into your
+                                  profile folder, print the summary and exit. Give the folder
+                                  holding 3dSen.exe, or the profile bundle itself. Nothing is
+                                  downloaded and the installation is only read (AMD-030).
           --size <w>x<h>          Window size in pixels (default 1280x720).
           --no-audio              Do not open the audio device.
 
@@ -160,9 +158,6 @@ public sealed record AppOptions
           --fps <60|90|120>       Target frame rate when vsync is off (setting default 90).
           --no-render-skip        Redraw the scene even without a new emulated frame.
           --skybox <name>         default, color, gradient or fantasy (REQ-SCN-049).
-          --tv <0|1>              Decorative TV box: 0 none, 1 the television (AMD-025).
-          --tv-model <file.glb>   The television model; by default assets/tv/retro_crt_tv.glb
-                                  next to the executable. Without it the TV option is off.
           --smoke-test            Render frames without waiting for input, then exit with 0.
           --smoke-frames <count>  Frames to render in smoke-test mode (default 60).
           --smoke-emulated <n>    Stop the smoke run after n emulated frames (60 = 1 s NTSC).
@@ -210,6 +205,13 @@ public sealed record AppOptions
 
                 case "--list-profiles":
                     options = options with { ListProfiles = true };
+                    break;
+
+                case "--import-3dsen":
+                    options = options with
+                    {
+                        ImportThreeDSenPath = Next(args, ref i, "--import-3dsen"),
+                    };
                     break;
 
                 case "--rom":
@@ -278,22 +280,6 @@ public sealed record AppOptions
                             _ => throw new ArgumentException(
                                 "--skybox expects default, color, gradient or fantasy."),
                         },
-                    };
-                    break;
-
-                case "--tv":
-                    // AMD-025: 0 or 1; a 2 or a 3 from an older script or shortcut still
-                    // selects the one model.
-                    options = options with
-                    {
-                        TvBox = TvBoxSetting.Normalise(ParseIndex(Next(args, ref i, "--tv"), "--tv")),
-                    };
-                    break;
-
-                case "--tv-model":
-                    options = options with
-                    {
-                        TvModelPath = Next(args, ref i, "--tv-model"),
                     };
                     break;
 

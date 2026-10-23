@@ -62,7 +62,6 @@ public sealed class OptionsWindowTests
             SettingKeys.EmuGameSpeed,
             SettingKeys.CameraFov,
             SettingKeys.EmuTvMode,
-            SettingKeys.SceneTvBox,
             SettingKeys.SceneSkybox,
             SettingKeys.UiFullscreen,
         ];
@@ -74,15 +73,24 @@ public sealed class OptionsWindowTests
     }
 
     /// <summary>
-    /// REQ-UI-202: the six tabs the amendment names, and every row lands in one of them with a
-    /// French label.
+    /// REQ-UI-202 with AMD-035: the six tabs the amendment names, in the interface language,
+    /// and every row lands in one of them with a non-empty label.
     /// </summary>
     [Fact]
     public void REQ_UI_202_the_six_tabs_are_the_ones_the_amendment_names()
     {
+        using UiLanguageScope language = new();
+
+        Assert.Equal(
+            ["Video", "Camera", "Light and shadows", "Audio", "Emulation", "Interface"],
+            OptionsModel.Tabs.Select(OptionsModel.TitleOf));
+
+        UiStrings.Language = UiLanguage.French;
         Assert.Equal(
             ["Vidéo", "Caméra", "Lumière et ombres", "Audio", "Émulation", "Interface"],
             OptionsModel.Tabs.Select(OptionsModel.TitleOf));
+
+        UiStrings.Language = UiLanguage.English;
 
         OptionsModel model = new();
         foreach (OptionsTab tab in OptionsModel.Tabs)
@@ -223,7 +231,6 @@ public sealed class OptionsWindowTests
             SettingKeys.LightIntensity,
             SettingKeys.RenderShadow,
             SettingKeys.SceneSkybox,
-            SettingKeys.SceneTvBox,
             SettingKeys.VideoFrameRate,
             SettingKeys.UiFullscreen,
             SettingKeys.SceneCustomBgColor,

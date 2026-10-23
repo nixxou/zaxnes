@@ -33,6 +33,12 @@ public static class ZaxCommands
     /// <summary>Import a user profile; argument: the <c>.3dn</c> path.</summary>
     public const string ImportProfile = "file.import_profile";
 
+    /// <summary>
+    /// Import the profiles of an installed 3dSen (AMD-030 §2); argument: the installation folder
+    /// or the bundle file, and without one the interface asks for it.
+    /// </summary>
+    public const string ImportThreeDSen = "file.import_3dsen";
+
     /// <summary>Launch a library entry; argument: its profile id in <see cref="CommandArgs.Text"/>.</summary>
     public const string LaunchGame = "file.launch_game";
 
@@ -119,9 +125,6 @@ public static class ZaxCommands
 
     /// <summary>Set the skybox; argument: −1 Default, 0 Color, 1 Gradient, 2 Fantasy.</summary>
     public const string SetSkybox = "video.set_skybox";
-
-    /// <summary>Set the decorative TV box; argument: 0 to 3.</summary>
-    public const string SetTvBox = "video.set_tv_box";
 
     /// <summary>Set the camera mode; argument: 0 TPV, 1 FPV (SPEC-06 REQ-SCN-006).</summary>
     public const string SetCameraMode = "video.set_camera_mode";

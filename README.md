@@ -28,23 +28,19 @@ closed with **0 non-conformity**, the round-2 findings were folded back in
 (`spec/changes/AMD-021`, `AMD-022`), and phase **P6 — closure** produced the spec index
 `spec/SPEC-v1.2-INDEX.md` and the traceability check `spec/TRACEABILITY-CHECK-P6.md`. Phase
 **P7a** (`spec/changes/AMD-024-p7-assets-libres.md`, REQ-PUB-001 to 009) made the program
-**asset-free**, and phase **P7b** (`spec/changes/AMD-025-tv-cc-by.md`) replaced the three
-procedural TV cabinets by a single **CC BY 4.0** television model.
+**asset-free**. `spec/changes/AMD-031-retrait-tv.md` then removed the decorative TV box
+altogether: the scene is the game's image and its background, and the release ships no asset
+file at all.
 
 ## No assets from another program, no ROMs, no profiles
 
 Nothing this repository or its release carries comes from another program's build
-(REQ-PUB-002). Everything the program shows or plays is **produced by its own code**, read from
-your machine at run time **without being redistributed**, or — for the one asset file the
-release ships — a freely licensed third-party work with its attribution:
+(REQ-PUB-002). Everything the program shows or plays is **produced by its own code** or read
+from your machine at run time **without being redistributed**. The release carries **no asset
+file at all** (AMD-031):
 
 - the **skyboxes** « Gradient » and « Fantasy » — gradient, stars, nebula, and a procedural
   sun, moon and cloud layer — are GLSL, not images (REQ-PUB-003);
-- the **TV cabinet** is the one asset file the release carries: `assets/tv/retro_crt_tv.glb`,
-  « Retro Crt Tv » by **meipal**, **CC BY 4.0**, shipped unmodified and attributed in
-  [`ASSETS-LICENSES.md`](ASSETS-LICENSES.md) with the adaptations Zaxnes makes at run time
-  (AMD-025, superseding REQ-PUB-004). It is **not** in this repository; without it the release
-  still runs and the « Boîtier TV » option is simply greyed out;
 - the four **interface sounds** of SPEC-11 are synthesised, one distinct timbre per event
   (REQ-PUB-005). There is **no menu music**: REQ-PUB-005 was revised on 2026-10-21 to drop it
   rather than replace the three tracks of the original build;
@@ -60,6 +56,31 @@ profil) », which converts any ROM with the default geometry of SPEC-04. If you 
 `.3dn` profile, **Fichier ▸ Importer un profil…** copies it into your data folder and it
 appears in the library — the tile-encoding key it needs is a constant of the code
 (REQ-PUB-007).
+
+### Bring your own 3dSen
+
+If you own 3dSen, its profiles are already on your disk and
+`spec/changes/AMD-030-import-3dsen.md` makes them importable in one action: **Fichier ▸ Importer
+depuis 3dSen…** — or `--import-3dsen <folder-or-bundle>` on the command line — reads the
+profile bundle of **your** installation, checks every profile with the SPEC-03 decoder and
+writes the ones that decode, unmodified, into your own profile folder as `<name>.3dn`. They show
+up in the library at once, under the title each profile carries.
+
+Nothing is downloaded and nothing is redistributed: only your local installation is read, the
+bundle itself is never modified, moved or copied, and no file of 3dSen enters this repository or
+the release (REQ-PUB-002 still holds). The reader — a baseline LZ4 block decoder, the public
+Unity « UnityFS » bundle format and its serialized files — is written from the format
+description of AMD-030 §4 and adds no dependency. Identical profiles are skipped, so a second
+import adds nothing; a name clash gets a ` (2)` suffix. See
+[HOWTO-RUN.md §9.1](HOWTO-RUN.md) for the user-facing details.
+
+Profiles you already have can also simply be dropped next to the executable:
+`spec/changes/AMD-033-dossier-profiles-exe.md` makes Zaxnes scan a `profiles` folder beside
+`Zaxnes.exe` in every mode — normal, portable and `--userdata` — on top of your own. The published build ships
+it empty, with a `README.txt` and no profile (REQ-PUB-002 still holds). That folder is only ever
+read: imports keep writing to your data folder, a missing or read-only one is not an error, and
+your own folder wins every clash — same file name, identical contents or same profile
+identifier. The library shows which folder each profile came from.
 
 `--assets <dir>` still reads a folder of asset files **you** supply (`profiles.json`,
 `cubemaps/`, `meshes/`, `textures/`, `audio/`). It is never looked for automatically, and
@@ -164,23 +185,21 @@ the target machine), with `LICENSE`, `ASSETS-LICENSES.md`, `THIRD-PARTY-NOTICES.
 
 1. the welcome screen comes up and draws 120 frames with no asset folder of any kind;
 2. Elevator Action plays **60 s in 3D with no profile**, on the default geometry, with the
-   procedural Gradient sky and the television;
+   procedural Gradient sky;
 3. with `-ImportProfile <file.3dn> [-ImportRom <game.nes>]`, the same again on a profile
    imported into a throw-away user folder — the import path of REQ-PUB-001.
 
-The one asset file the release carries is the television of AMD-025, `assets/tv/retro_crt_tv.glb`
-— « Retro Crt Tv » by **meipal**, **CC BY 4.0**, shipped unmodified and attributed in
-`ASSETS-LICENSES.md`. Everything else is produced by the code, and the build runs without the
-model too: the TV box option is then disabled.
+The release carries **no asset file**: everything it shows is produced by the code (AMD-031
+removed the one model that used to be shipped).
 
 The captures of the procedural skyboxes and of the welcome screen with both fonts are in
-`verify/p7/`; those of the television and of the two skies are in `verify/p7/look/`.
+`verify/p7/`; those of the two skies are in `verify/p7/look/`.
 
 ## Specification and traceability
 
 The normative corpus lives in `spec/`, outside this solution: `SPEC-00` to `SPEC-12` frozen at
 version 1.1, the R0 decisions (`DECISIONS-R0.md`) and the amendments `changes/AMD-001` to
-`AMD-029`. **`spec/SPEC-v1.2-INDEX.md`** is the entry point: for every requirement it lists each
+`AMD-031`. **`spec/SPEC-v1.2-INDEX.md`** is the entry point: for every requirement it lists each
 decision and amendment that applies to it, and in what order. Requirement ids appear in the
 tests that verify them (`// REQ-<MOD>-NNN`), and an ambiguity found while implementing is written
 up as a `spec/changes/Q-NNN.md` ticket and referenced in the code as `// Q-NNN`.

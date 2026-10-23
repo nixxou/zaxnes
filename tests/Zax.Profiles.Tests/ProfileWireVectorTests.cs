@@ -361,6 +361,39 @@ public sealed class ProfileWireVectorTests
         }
     }
 
+    /// <summary>
+    /// AMD-031 §3 — the TV box field of the embedded settings (field 35) is still decoded and
+    /// written back as it was found, byte for byte, and no longer reaches any setting.
+    /// </summary>
+    [Theory] // AMD-031 §3, REQ-PROF-051
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(3)]
+    public void AMD_031_the_tv_box_field_survives_a_round_trip_and_applies_nothing(int stored)
+    {
+        GameProfile written = GameProfile.CreateEmpty();
+        written.Settings!.TvBox = stored;
+        byte[] original = ProfileFormat.Save(written);
+
+        // Field 35 is really on the wire: its tag, 35 << 3, is the two bytes 98 02.
+        Assert.Contains($"98 02 {stored:x2}", Hex(original));
+
+        ProfileLoadResult result = ProfileFormat.Load(original, sourceName: "tv-box");
+        Assert.True(result.IsSuccess, result.Message);
+
+        ProfileDocument document = result.Document!;
+        Assert.Equal(0, document.UnknownFieldCount);
+        Assert.Equal(stored, document.Profile.Settings!.TvBox);
+        Assert.Equal(original, document.Save());
+
+        // No effect: the field is in neither list of REQ-PROF-041 and reaches no setting key.
+        Assert.DoesNotContain("scene.tv_box", ProfileSettingApplication.AppliedKeys);
+        Assert.DoesNotContain("scene.tv_box", ProfileSettingApplication.PreservedKeys);
+        Assert.DoesNotContain(
+            "scene.tv_box",
+            ProfileSettingApplication.ValuesToApply(document.Profile.Settings!).Keys);
+    }
+
     private static string Hex(ReadOnlySpan<byte> bytes)
     {
         char[] text = new char[(bytes.Length * 3) - (bytes.Length > 0 ? 1 : 0)];

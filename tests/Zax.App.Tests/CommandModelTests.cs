@@ -21,7 +21,8 @@ public sealed class CommandModelTests
         string[] expected =
         [
             ZaxCommands.OpenRom, ZaxCommands.OpenRecentRom, ZaxCommands.ChooseProfile,
-            ZaxCommands.ImportProfile, ZaxCommands.LaunchGame, ZaxCommands.LoadSlot,
+            ZaxCommands.ImportProfile, ZaxCommands.ImportThreeDSen,
+            ZaxCommands.LaunchGame, ZaxCommands.LoadSlot,
             ZaxCommands.SaveSlot, ZaxCommands.QuickSave, ZaxCommands.QuickLoad,
             ZaxCommands.DeleteSlot, ZaxCommands.DeleteGame, ZaxCommands.CreateGameArt,
             ZaxCommands.ImportCover, ZaxCommands.CancelModal, ZaxCommands.Quit,
@@ -31,7 +32,7 @@ public sealed class CommandModelTests
             ZaxCommands.SetRegion, ZaxCommands.ToggleAutoRegion, ZaxCommands.SetPortType,
             ZaxCommands.ToggleTwoDimensional, ZaxCommands.ResetView,
             ZaxCommands.SetCameraMode, ZaxCommands.ToggleLocalCamera, ZaxCommands.SetSkybox,
-            ZaxCommands.SetTvBox, ZaxCommands.ToggleShadows, ZaxCommands.ToggleFullscreen,
+            ZaxCommands.ToggleShadows, ZaxCommands.ToggleFullscreen,
             ZaxCommands.ToggleFpsCounter,
             ZaxCommands.SetVolume, ZaxCommands.VolumeUp, ZaxCommands.VolumeDown,
             ZaxCommands.ToggleMute, ZaxCommands.ToggleMenuMusic,
@@ -79,7 +80,7 @@ public sealed class CommandModelTests
         Assert.Equal("Ctrl+Q", harness.Host.Commands.Find(ZaxCommands.Quit)!.Shortcut);
         Assert.Equal("P", harness.Host.Commands.Find(ZaxCommands.PauseResume)!.Shortcut);
         Assert.Equal("F11", harness.Host.Commands.Find(ZaxCommands.ToggleTwoDimensional)!.Shortcut);
-        Assert.Equal("Alt+Entrée", harness.Host.Commands.Find(ZaxCommands.ToggleFullscreen)!.Shortcut);
+        Assert.Equal("Alt+Enter", harness.Host.Commands.Find(ZaxCommands.ToggleFullscreen)!.Shortcut);
         Assert.Equal("Ctrl+,", harness.Host.Commands.Find(ZaxCommands.ShowOptions)!.Shortcut);
     }
 

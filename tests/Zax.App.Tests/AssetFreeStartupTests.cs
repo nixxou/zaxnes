@@ -155,8 +155,8 @@ public sealed class AssetFreeStartupTests : IDisposable
         Assert.Equal(2, chooser.All.Count);
         Assert.True(chooser.All[0].Is2DMode);
         Assert.True(chooser.All[1].IsDefault3D);
-        Assert.Equal("sans conversion 3D", chooser.All[0].SourceLabel);
-        Assert.Equal("géométrie 3D par défaut", chooser.All[1].SourceLabel);
+        Assert.Equal("no 3D conversion", chooser.All[0].SourceLabel);
+        Assert.Equal("default 3D geometry", chooser.All[1].SourceLabel);
     }
 
     [Fact] // REQ-PUB-001

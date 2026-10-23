@@ -52,7 +52,6 @@ internal sealed class SkyboxPass : IDisposable
 
     /// <summary>
     /// The handle of a cubemap, uploading it on first use, or 0 when there is no asset source.
-    /// The environment reflection of TV 2 (REQ-SCN-054) shares the cache with the skyboxes.
     /// </summary>
     public uint Cubemap(string name) => _cubemaps?.Get(name) ?? 0;
 

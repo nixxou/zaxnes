@@ -36,7 +36,7 @@ public static class ProfileSettingApplication
     /// The keys a profile replaces, in a stable order. Forty-four entries: the two light
     /// vectors, the four clipping margins, the map flag, the two layer-set keys, the four keys
     /// of each of the six layers, the graphic quality, the two editor preset lists, the five
-    /// conversion settings, the top-down camera, the television region, and the forced
+    /// conversion settings, the top-down camera, the video region, and the forced
     /// background flag.
     /// </summary>
     public static IReadOnlyList<string> AppliedKeys { get; } = BuildAppliedKeys();
@@ -67,7 +67,9 @@ public static class ProfileSettingApplication
         "video.anti_alias",
         "vr.mirroring",
         "emu.auto_tv_mode",
-        "scene.tv_box",
+
+        // AMD-031 retired scene.tv_box with the TV box, so the second list of REQ-PROF-041 is
+        // one key shorter: there is no longer a user preference to preserve.
         "ui.sort_option",
         "scene.custom_bg_color",
         "camera.fov",

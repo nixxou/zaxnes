@@ -91,6 +91,38 @@ public sealed class SettingDescriptor
     public string? UiLabel { get; init; }
 
     /// <summary>
+    /// The finite ordered list of texts a <see cref="SettingKind.String"/> setting accepts, or
+    /// null when any text will do. <c>ui.language</c> of AMD-035 is the one setting that has one:
+    /// the options window turns it into a drop-down, and a text outside the list is read as the
+    /// default without an error.
+    /// </summary>
+    public IReadOnlyList<string>? TextOptions { get; init; }
+
+    /// <summary>
+    /// Brings a text back into <see cref="TextOptions"/>: the stored text when the list admits
+    /// it — case and surrounding spaces ignored — and the default otherwise (AMD-035 §1).
+    /// </summary>
+    public string CoerceText(string? text)
+    {
+        string fallback = DefaultValue.AsString;
+        if (TextOptions is not { Count: > 0 } options)
+        {
+            return text ?? fallback;
+        }
+
+        string trimmed = (text ?? string.Empty).Trim();
+        foreach (string option in options)
+        {
+            if (string.Equals(option, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return option;
+            }
+        }
+
+        return fallback;
+    }
+
+    /// <summary>
     /// The finite ordered list of values exposed as a libretro core option, or null when the
     /// setting is not exposed (column "libretro", REQ-PERS-081, SPEC-09 §4.6).
     /// </summary>
@@ -98,19 +130,6 @@ public sealed class SettingDescriptor
 
     /// <summary>Whether the setting is exposed as a libretro core option.</summary>
     public bool IsLibretroExposed => LibretroValues is { Count: > 0 };
-
-    /// <summary>
-    /// Labels a stored file may still carry from an earlier version of the catalogue, each
-    /// mapped to the value it becomes. They are accepted when a settings file is read, never
-    /// written and never shown.
-    /// </summary>
-    /// <remarks>
-    /// AMD-025 is what this exists for: the TV box setting had four values and now has two,
-    /// and a <c>settings.json</c> written before the amendment holds « TV 2 » or « TV 3 »
-    /// where the catalogue now knows only « TV ». Without the list the value would fall back
-    /// to the default, which is not what « toute valeur héritée 2 ou 3 est ramenée à 1 » says.
-    /// </remarks>
-    public IReadOnlyList<SettingOption> LegacyOptions { get; init; } = [];
 
     /// <summary>
     /// The core option key: <c>zaxnes_</c> and the stable key with <c>.</c>, <c>[</c> and

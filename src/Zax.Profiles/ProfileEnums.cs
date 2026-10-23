@@ -181,7 +181,7 @@ public enum TextureFormat
     Direct = 1,
 }
 
-/// <summary>Television region of the embedded settings (SPEC-03 §4.6 field 34).</summary>
+/// <summary>Video region of the embedded settings (SPEC-03 §4.6 field 34).</summary>
 public enum TvRegionMode
 {
     /// <summary>NTSC.</summary>

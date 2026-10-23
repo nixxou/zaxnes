@@ -47,7 +47,6 @@ internal sealed class ZaxApplication : IDisposable
     private GL? _gl;
     private OffscreenFramebuffer? _offscreen;
     private ISceneRenderer? _renderer;
-    private TvModel? _television;
     private ImGuiController? _imgui;
     private IKeyboard? _keyboard;
     private IMouse? _mouse;
@@ -78,6 +77,7 @@ internal sealed class ZaxApplication : IDisposable
     private long _emulatedFrames;
     private int _sceneFrames;
     private int _skippedFrames;
+    private bool _shadowMapReported;
     private (int Width, int Height) _lastRenderSize;
     private Vector2? _dragOrigin;
     private string _glRenderer = "unknown";
@@ -107,7 +107,8 @@ internal sealed class ZaxApplication : IDisposable
             _options.Width,
             _options.Height,
             VSync: pacing.VSync,
-            TargetFrameRate: pacing.TargetFrameRate);
+            TargetFrameRate: pacing.TargetFrameRate,
+            Fullscreen: ShouldOpenFullscreen(_options, _settings.Fullscreen));
 
         _host = HostWindow.Create(settings);
         _host.Window.Load += OnLoad;
@@ -216,6 +217,24 @@ internal sealed class ZaxApplication : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Whether the window opens full screen (SPEC-09 REQ-PERS-067, AMD-032 §6).
+    /// </summary>
+    /// <param name="options">The parsed command line.</param>
+    /// <param name="persisted">The value of <c>ui.fullscreen</c> in the settings in force.</param>
+    /// <remarks>
+    /// The window state and the interface state have to agree from the first frame: the
+    /// interface reads <c>ui.fullscreen</c> every frame, so a window that opens windowed while
+    /// the setting says full screen hides the menu bar over an ordinary window. The two capture
+    /// runs are the exception — their PNGs have the size the command line asked for, which a
+    /// full-screen window would silently replace by the screen's.
+    /// </remarks>
+    internal static bool ShouldOpenFullscreen(AppOptions options, bool persisted)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return persisted && !options.SmokeTest && options.UiShotDirectory is null;
+    }
+
     private void ApplyCommandLineOverrides() => CommandLineSettings.Apply(_options, _settings);
 
     /// <summary>
@@ -229,11 +248,11 @@ internal sealed class ZaxApplication : IDisposable
         _scene.Camera.Fov = _settings.Fov;
         _scene.Settings.Shadows = _settings.Shadow;
         _scene.Settings.Skybox = (SkyboxKind)_settings.Skybox;
-        _scene.Settings.TvBox = TvBoxSetting.From(_settings.TvBox);
         _scene.Settings.SkipRender = _settings.SkipFrame;
         _scene.Settings.TargetFrameRate = _settings.FrameRate;
         _scene.Settings.VSync = _settings.VSync;
         _scene.Settings.LightIntensity = _settings.LightIntensity;
+        _scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(_settings.AntiAlias);
         _scene.Camera.SnapToSetpoints();
     }
 
@@ -330,25 +349,11 @@ internal sealed class ZaxApplication : IDisposable
 
         _offscreen = new OffscreenFramebuffer(_gl, host.Window.FramebufferSize.X, host.Window.FramebufferSize.Y);
 
-        // REQ-SCN-057: the host, not the renderer, decides where the assets of REQ-SCN-050,
-        // REQ-SCN-051 and REQ-SCN-054 come from.
+        // REQ-SCN-057: the host, not the renderer, decides where the assets of REQ-SCN-050
+        // and REQ-SCN-051 come from.
         string? assetRoot = NeutralAssets.Locate(_options.AssetRoot);
 
-        // AMD-025: the television is the CC BY glTF file the release ships under assets/tv.
-        // Without it the model is simply absent and the TV option does nothing (REQ-PUB-001:
-        // the application runs with no asset at all).
-        TvModel? television = TvModel.TryLoad(TelevisionAsset.Locate(_options.TvModelPath));
-        if (television is null)
-        {
-            Log("no television model found; the TV box option is disabled.");
-        }
-        else
-        {
-            Log($"television model: {television.Describe()}");
-        }
-
-        _television = television;
-        _renderer = new SceneRenderer(_gl, NeutralSceneAssets.TryOpen(assetRoot), television);
+        _renderer = new SceneRenderer(_gl, NeutralSceneAssets.TryOpen(assetRoot));
         _imgui = new ImGuiController(_gl, host.Window, host.Input, ConfigureImGuiIo);
 
         // REQ-UI-207: the controller has just built the font atlas and uploaded its texture, so
@@ -507,14 +512,6 @@ internal sealed class ZaxApplication : IDisposable
 
         _emulation.UiRequested += OnUiRequested;
 
-        // AMD-025: with no model file the TV box setting is disabled and forced off.
-        _emulation.TelevisionAvailable = _television is not null;
-        if (_television is null)
-        {
-            _settings.TvBox = 0;
-            _scene.Settings.TvBox = TvBoxKind.None;
-        }
-
         if (_emulation.Slots.WasRecovered)
         {
             _emulation.Notifications.Show(
@@ -617,8 +614,16 @@ internal sealed class ZaxApplication : IDisposable
         }
     }
 
-    private void OnFramebufferResize(Silk.NET.Maths.Vector2D<int> size)
-        => _offscreen?.Resize(size.X, size.Y);
+    /// <summary>
+    /// A window resize needs nothing here: <see cref="OnRender"/> sizes the scene buffer every
+    /// frame, and since AMD-032 §3 that size is the view scaled by <c>video.res_scale</c>, not
+    /// the framebuffer's own. Resizing to the window here would only allocate the full size for
+    /// one frame before the scaled one replaces it. REQ-UI-132 is met by the next frame either
+    /// way.
+    /// </summary>
+    private static void OnFramebufferResize(Silk.NET.Maths.Vector2D<int> size)
+    {
+    }
 
     private void OnRender(double deltaSeconds)
     {
@@ -659,7 +664,12 @@ internal sealed class ZaxApplication : IDisposable
         int windowWidth = host.Window.FramebufferSize.X;
         int windowHeight = host.Window.FramebufferSize.Y;
         int viewHeight = Math.Max(1, windowHeight - _viewInset);
-        offscreen.Resize(windowWidth, viewHeight);
+
+        // AMD-032 §3: with the render-texture method the scene is drawn at a fraction of the
+        // view and stretched back; with the direct method the buffer keeps the view's own size.
+        (int sceneWidth, int sceneHeight) = RenderScaling.SceneSize(
+            windowWidth, viewHeight, _settings.RenderMethod, _settings.ResScaleFactor);
+        offscreen.Resize(sceneWidth, sceneHeight);
 
         // REQ-SCN-060 / REQ-LOOP-014: with render skip on, a refresh that brought no new
         // emulated frame keeps the previous image.
@@ -667,11 +677,12 @@ internal sealed class ZaxApplication : IDisposable
             _scene.Settings.SkipRender,
             emulation.State == EmulationState.Running,
             emulated,
-            _lastRenderSize == (windowWidth, viewHeight));
+            _lastRenderSize == (sceneWidth, sceneHeight));
         if (!skip)
         {
             renderer.Render(offscreen.Target, _scene);
-            _lastRenderSize = (windowWidth, viewHeight);
+            ReportShadowMapFallback(renderer.Statistics);
+            _lastRenderSize = (sceneWidth, sceneHeight);
             _sceneFrames++;
         }
         else
@@ -714,6 +725,25 @@ internal sealed class ZaxApplication : IDisposable
 
             host.Window.Close();
         }
+    }
+
+    /// <summary>
+    /// AMD-034 §2: when the hardware refuses the shadow map that was asked for, the renderer
+    /// settles for the largest smaller one and the host says so <b>once</b>.
+    /// </summary>
+    /// <param name="stats">The statistics of the frame just rendered.</param>
+    private void ReportShadowMapFallback(RenderStatistics stats)
+    {
+        if (_shadowMapReported || stats.ShadowMapSize == stats.RequestedShadowMapSize)
+        {
+            return;
+        }
+
+        _shadowMapReported = true;
+        Log(string.Create(
+            CultureInfo.InvariantCulture,
+            $"the hardware refused a {stats.RequestedShadowMapSize}-texel shadow map; "
+                + $"it is {stats.ShadowMapSize} texels (AMD-034)."));
     }
 
     /// <summary>

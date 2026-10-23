@@ -5,17 +5,23 @@ using Zax.Settings;
 namespace Zax.App.Ui;
 
 /// <summary>
-/// The visible French text of the classic interface (AMD-010): menu titles, window titles,
-/// buttons and the French label of each setting the options window shows.
+/// The named view onto the interface texts of AMD-035: one property per text the code needs,
+/// each reading the table of the language in force through <see cref="UiStrings.Get"/>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The <b>notification</b> texts are deliberately absent: SPEC-10 REQ-UI-082, REQ-UI-083 and
-/// REQ-UI-084 fix them word for word, in English, and AMD-010 §3 keeps them normative. They are
-/// produced by the emulation loop and by the profile reader, and are shown verbatim.
+/// Every member here is a <b>property</b>, never a constant: AMD-035 §1 has the language change
+/// apply immediately, and a constant would be baked into the caller at compile time. The models
+/// that cache a list of labels watch <see cref="UiStrings.Generation"/> instead.
 /// </para>
 /// <para>
-/// The labels of the 19 logical actions are likewise left in English: SPEC-08 §4.1 publishes them
+/// The <b>notification</b> texts have no property here: they are produced by the emulation loop,
+/// by the profile reader and by the settings files, in the exact English SPEC-10 REQ-UI-082 to
+/// REQ-UI-084 and SPEC-09 fix word for word. AMD-036 §1 makes that English the table entry and
+/// has <see cref="UiNotifications"/> translate the message where it is shown.
+/// </para>
+/// <para>
+/// The labels of the 19 logical actions are left in English: SPEC-08 §4.1 publishes them
 /// (<c>RotLeft</c>, <c>QuickSave</c>…) as the names of the actions, the key configuration screen
 /// shows them (REQ-UI-070) and the binding file persists them (REQ-PERS-065).
 /// </para>
@@ -28,143 +34,200 @@ internal static class UiText
     // ------------------------------------------------------------- menu titles
 
     /// <summary>Title of the File menu (REQ-UI-200).</summary>
-    public const string MenuFile = "Fichier";
+    public static string MenuFile => UiStrings.Get(UiKeys.MenuFile);
 
     /// <summary>Title of the Emulation menu.</summary>
-    public const string MenuEmulation = "Émulation";
+    public static string MenuEmulation => UiStrings.Get(UiKeys.MenuEmulation);
 
     /// <summary>Title of the Video menu.</summary>
-    public const string MenuVideo = "Vidéo";
+    public static string MenuVideo => UiStrings.Get(UiKeys.MenuVideo);
 
     /// <summary>Title of the Audio menu.</summary>
-    public const string MenuAudio = "Audio";
+    public static string MenuAudio => UiStrings.Get(UiKeys.MenuAudio);
 
     /// <summary>Title of the Tools menu.</summary>
-    public const string MenuTools = "Outils";
+    public static string MenuTools => UiStrings.Get(UiKeys.MenuTools);
 
     // ------------------------------------------------------------ menu entries
 
     /// <summary>Label of the recent ROM submenu (REQ-UI-200).</summary>
-    public const string RecentRoms = "ROMs récentes";
+    public static string RecentRoms => UiStrings.Get(UiKeys.MenuRecentRoms);
 
     /// <summary>Label of the load-state submenu.</summary>
-    public const string LoadState = "Charger un état";
+    public static string LoadState => UiStrings.Get(UiKeys.MenuLoadState);
 
     /// <summary>Label of the save-state submenu.</summary>
-    public const string SaveState = "Sauvegarder l'état";
+    public static string SaveState => UiStrings.Get(UiKeys.MenuSaveState);
 
     /// <summary>Label of the submenu that deletes a state (REQ-UI-052).</summary>
-    public const string DeleteState = "Supprimer un état";
+    public static string DeleteState => UiStrings.Get(UiKeys.MenuDeleteState);
 
     /// <summary>Label of the speed submenu.</summary>
-    public const string Speed = "Vitesse";
+    public static string Speed => UiStrings.Get(UiKeys.MenuSpeed);
 
     /// <summary>Label of the region submenu.</summary>
-    public const string Region = "Région";
+    public static string Region => UiStrings.Get(UiKeys.MenuRegion);
 
     /// <summary>Label of the port submenu.</summary>
-    public const string Ports = "Ports";
+    public static string Ports => UiStrings.Get(UiKeys.MenuPorts);
 
     /// <summary>Label of the camera mode submenu.</summary>
-    public const string CameraMode = "Mode caméra";
+    public static string CameraMode => UiStrings.Get(UiKeys.MenuCameraMode);
 
     /// <summary>Label of the volume submenu.</summary>
-    public const string Volume = "Volume";
+    public static string Volume => UiStrings.Get(UiKeys.MenuVolume);
 
     /// <summary>Shown in place of an empty submenu.</summary>
-    public const string NothingHere = "(vide)";
+    public static string NothingHere => UiStrings.Get(UiKeys.MenuNothingHere);
+
+    /// <summary>The automatic region entry of the Region submenu.</summary>
+    public static string RegionAuto => UiStrings.Get(UiKeys.MenuRegionAuto);
+
+    /// <summary>The word a port submenu is titled with (REQ-INP-060).</summary>
+    public static string Port => UiStrings.Get(UiKeys.MenuPort);
+
+    /// <summary>The Controller entry of a port submenu.</summary>
+    public static string PortController => UiStrings.Get(UiKeys.MenuPortController);
+
+    /// <summary>The Zapper entry of a port submenu.</summary>
+    public static string PortZapper => UiStrings.Get(UiKeys.MenuPortZapper);
+
+    /// <summary>The orbital camera entry of the camera submenu (SPEC-06 REQ-SCN-006).</summary>
+    public static string CameraOrbital => UiStrings.Get(UiKeys.MenuCameraOrbital);
+
+    /// <summary>The first-person camera entry of the camera submenu.</summary>
+    public static string CameraFirstPerson => UiStrings.Get(UiKeys.MenuCameraFirstPerson);
 
     /// <summary>What an empty save slot shows (REQ-UI-208).</summary>
-    public const string EmptySlot = "vide";
+    public static string EmptySlot => UiStrings.Get(UiKeys.SlotEmpty);
 
     /// <summary>Label of the quick slot in the state submenus (REQ-UI-208).</summary>
-    public const string QuickSlot = "État rapide";
+    public static string QuickSlot => UiStrings.Get(UiKeys.SlotQuick);
 
     /// <summary>Prefix of a numbered slot in the state submenus.</summary>
-    public const string SlotPrefix = "Emplacement";
+    public static string SlotPrefix => UiStrings.Get(UiKeys.SlotPrefix);
 
     // ---------------------------------------------------------- window titles
 
     /// <summary>Title of the options window (REQ-UI-202).</summary>
-    public const string OptionsTitle = "Options";
+    public static string OptionsTitle => UiStrings.Get(UiKeys.WindowOptions);
 
     /// <summary>Title of the key configuration window (REQ-UI-203).</summary>
-    public const string KeyConfigTitle = "Configuration des touches";
+    public static string KeyConfigTitle => UiStrings.Get(UiKeys.WindowKeyConfig);
 
     /// <summary>Title of the about window (DEC-10-Q3).</summary>
-    public const string AboutTitle = "À propos";
+    public static string AboutTitle => UiStrings.Get(UiKeys.WindowAbout);
 
     /// <summary>Title of the profile chooser (REQ-UI-201).</summary>
-    public const string ProfileChooserTitle = "Choisir le profil 3D";
+    public static string ProfileChooserTitle => UiStrings.Get(UiKeys.WindowProfileChooser);
 
     /// <summary>Title of the ROM file dialog (REQ-UI-201, SPEC-10 §4).</summary>
-    public const string OpenRomTitle = "Ouvrir une ROM";
+    public static string OpenRomTitle => UiStrings.Get(UiKeys.WindowOpenRom);
 
     /// <summary>Title of the profile import dialog (SPEC-10 §4).</summary>
-    public const string ImportProfileTitle = "Importer un profil 3D";
+    public static string ImportProfileTitle => UiStrings.Get(UiKeys.WindowImportProfile);
 
     /// <summary>Title of the cover-art import dialog (REQ-PERS-036).</summary>
-    public const string ImportCoverTitle = "Importer une jaquette";
+    public static string ImportCoverTitle => UiStrings.Get(UiKeys.WindowImportCover);
+
+    /// <summary>Title of the 3dSen installation picker (AMD-030 §2).</summary>
+    public static string ImportThreeDSenTitle => UiStrings.Get(UiKeys.WindowImportThreeDSen);
+
+    /// <summary>
+    /// What the 3dSen picker asks for: the installation folder, or the bundle itself
+    /// (AMD-030 §2, §3).
+    /// </summary>
+    public static string ImportThreeDSenHint => UiStrings.Get(UiKeys.HintImportThreeDSen);
 
     // ------------------------------------------------------------- misc labels
 
     /// <summary>The "reset this tab to its defaults" button of REQ-UI-202.</summary>
-    public const string ResetDefaults = "Valeurs par défaut";
+    public static string ResetDefaults => UiStrings.Get(UiKeys.ButtonResetDefaults);
+
+    /// <summary>
+    /// Why the resolution scale is greyed out under the direct render method (AMD-032 §3).
+    /// </summary>
+    public static string ResScaleNeedsRenderTexture => UiStrings.Get(UiKeys.HintResScaleDirect);
 
     /// <summary>Generic close button.</summary>
-    public const string Close = "Fermer";
+    public static string Close => UiStrings.Get(UiKeys.ButtonClose);
 
     /// <summary>Generic cancel button.</summary>
-    public const string Cancel = "Annuler";
+    public static string Cancel => UiStrings.Get(UiKeys.ButtonCancel);
 
     /// <summary>Validation button of the file dialog.</summary>
-    public const string Open = "Ouvrir";
+    public static string Open => UiStrings.Get(UiKeys.ButtonOpen);
+
+    /// <summary>Validation button of the profile chooser.</summary>
+    public static string Launch => UiStrings.Get(UiKeys.ButtonLaunch);
+
+    /// <summary>The "go up one folder" button of the file dialog.</summary>
+    public static string ParentFolder => UiStrings.Get(UiKeys.ButtonParentFolder);
 
     /// <summary>Search field hint.</summary>
-    public const string Search = "Rechercher";
+    public static string Search => UiStrings.Get(UiKeys.FieldSearch);
+
+    /// <summary>Column header of the bound action.</summary>
+    public static string ActionColumn => UiStrings.Get(UiKeys.ColumnAction);
 
     /// <summary>Column header of the keyboard bindings.</summary>
-    public const string KeyboardColumn = "Clavier";
+    public static string KeyboardColumn => UiStrings.Get(UiKeys.ColumnKeyboard);
 
     /// <summary>Column header of the gamepad bindings.</summary>
-    public const string GamepadColumn = "Manette";
+    public static string GamepadColumn => UiStrings.Get(UiKeys.ColumnGamepad);
 
     /// <summary>Button that interrupts a binding capture (REQ-UI-072).</summary>
-    public const string StopBinding = "Arrêter la capture";
+    public static string StopBinding => UiStrings.Get(UiKeys.ButtonStopBinding);
+
+    /// <summary>Button that puts every binding back to its default (REQ-INP-049).</summary>
+    public static string ResetBindings => UiStrings.Get(UiKeys.ButtonResetBindings);
 
     /// <summary>Hint shown while a capture is listening.</summary>
-    public const string PressAControl = "Appuyez sur une touche ou un bouton…";
+    public static string PressAControl => UiStrings.Get(UiKeys.HintPressAControl);
+
+    /// <summary>Hint shown when no capture is running (REQ-INP-042).</summary>
+    public static string ClickACell => UiStrings.Get(UiKeys.HintClickACell);
 
     /// <summary>The "no gamepad" entry of the pad chooser (REQ-UI-070).</summary>
-    public const string NoGamepad = "(aucune manette)";
+    public static string NoGamepad => UiStrings.Get(UiKeys.ValueNoGamepad);
 
     /// <summary>The 2D Mode entry of the profile chooser (SPEC-10 §2).</summary>
-    public const string TwoDimensionalMode = "2D Mode";
+    public static string TwoDimensionalMode => UiStrings.Get(UiKeys.ProfileTwoDimensional);
+
+    /// <summary>Why a setting only takes effect at the next start (REQ-PERS-084).</summary>
+    public static string AtNextStart => UiStrings.Get(UiKeys.HintAtNextStart);
+
+    /// <summary>Why a setting only takes effect at the next load (REQ-PERS-084).</summary>
+    public static string AtNextLoad => UiStrings.Get(UiKeys.HintAtNextLoad);
+
+    /// <summary>That a setting is a profile parameter a profile load overwrites (REQ-PERS-005).</summary>
+    public static string ProfileSetting => UiStrings.Get(UiKeys.HintProfileSetting);
 
     // ---------------------------------------------------------- welcome screen
 
     /// <summary>The call to action of REQ-UI-207.</summary>
-    public const string WelcomeHint = "Fichier ▸ Ouvrir une ROM";
+    public static string WelcomeHint => UiStrings.Get(UiKeys.WelcomeHint);
 
     /// <summary>Heading above the recent ROM list of the welcome screen.</summary>
-    public const string WelcomeRecent = "ROMs récentes";
+    public static string WelcomeRecent => UiStrings.Get(UiKeys.WelcomeRecent);
 
     /// <summary>Shown on the welcome screen when no ROM has ever been opened.</summary>
-    public const string WelcomeNoRecent = "Aucune ROM n'a encore été ouverte.";
+    public static string WelcomeNoRecent => UiStrings.Get(UiKeys.WelcomeNoRecent);
 
     /// <summary>
     /// The version the about block shows. The build metadata the compiler appends to the
     /// informational version — a plus sign and the commit hash — is left out.
     /// </summary>
-    /// <remarks>
-    /// Declared before <see cref="AboutLines"/> on purpose: static initialisers run in the order
-    /// they are written, so a version read afterwards would reach the about block empty.
-    /// </remarks>
     public static string Version { get; } = Shorten(
         typeof(UiText).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion
         ?? typeof(UiText).Assembly.GetName().Version?.ToString(3)
         ?? "0.0.0");
+
+    /// <summary>The version line of the about block and of the welcome screen.</summary>
+    public static string VersionLine => string.Create(
+        CultureInfo.InvariantCulture,
+        $"{UiStrings.Get(UiKeys.AboutVersionPrefix)} {Version}");
 
     /// <summary>
     /// The about block of DEC-10-Q3 / SPEC-10 REQ-UI-076, one line per entry: the product name,
@@ -176,16 +239,17 @@ internal static class UiText
     /// program the specification describes, and the upstream engine part of
     /// <c>Zax.Engine3D</c> is adapted from — then the disclaimer that ends it. The credit is
     /// UI text, not a claim about this file: the attribution header belongs on the adapted
-    /// sources themselves (checked by <c>ArchitectureTests</c>).
+    /// sources themselves (checked by <c>ArchitectureTests</c>). AMD-029 writes the sentence in
+    /// French, so the French table is the normative one and the English table translates it.
     /// </remarks>
-    public static IReadOnlyList<string> AboutLines { get; } =
+    public static IReadOnlyList<string> AboutLines =>
     [
         ProductName,
-        string.Create(CultureInfo.InvariantCulture, $"Version {Version}"),
-        "GPL v3",
-        "Projet indépendant inspiré de 3dSen (Geod Studio) ;",
-        "contient du code adapté de 3DNes_Engine (Geod Studio, GPL v3).",
-        "Sans lien avec Geod Studio ni Nintendo.",
+        VersionLine,
+        UiStrings.Get(UiKeys.AboutLicence),
+        UiStrings.Get(UiKeys.AboutCreditInspired),
+        UiStrings.Get(UiKeys.AboutCreditAdapted),
+        UiStrings.Get(UiKeys.AboutCreditDisclaimer),
     ];
 
     private static string Shorten(string version)
@@ -195,66 +259,30 @@ internal static class UiText
     }
 
     /// <summary>
-    /// The French label of <paramref name="descriptor"/> for the options window. The settings
-    /// SPEC-10 REQ-UI-061 made visible keep the meaning of their original label; the ones the
-    /// original hid (P3 in REQ-UI-202) get a descriptive one.
+    /// The label of <paramref name="descriptor"/> for the options window, in the language in
+    /// force. The settings SPEC-10 REQ-UI-061 made visible keep the meaning of their original
+    /// label; the ones the original hid (P3 in REQ-UI-202) get a descriptive one.
     /// </summary>
     public static string LabelOf(SettingDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        return descriptor.Key switch
-        {
-            SettingKeys.VideoFrameRate => "Fréquence de rendu",
-            SettingKeys.VideoSkipFrame => "Rendu accéléré (saut d'images)",
-            SettingKeys.VideoVSync => "Synchronisation verticale",
-            SettingKeys.VideoRenderMethod => "Méthode de rendu",
-            SettingKeys.VideoResScale => "Échelle de résolution",
-            SettingKeys.VideoAntiAlias => "Anticrénelage",
-            SettingKeys.RenderMeshAlgo => "Algorithme de maillage",
-            SettingKeys.RenderShadow => "Ombres",
-            SettingKeys.CameraFov => "Champ de vision (degrés)",
-            SettingKeys.LightIntensity => "Intensité lumineuse",
-            SettingKeys.SceneSkybox => "Fond (skybox)",
-            SettingKeys.SceneCustomBgColor => "Couleur de fond",
-            SettingKeys.SceneTvBox => "Boîtier TV",
-            SettingKeys.EmuGameSpeed => "Vitesse de jeu",
-            SettingKeys.EmuAutoTvMode => "Région détectée automatiquement",
-            SettingKeys.EmuTvMode => "Région vidéo",
-            SettingKeys.EmuCore => "Cœur d'émulation",
-            SettingKeys.AudioVolume => "Volume général",
-            SettingKeys.AudioBgMusic => "Musique de menu",
-            SettingKeys.AudioMute => "Muet",
-            SettingKeys.InputEmulatedMenuButton => "Menu = Select + Start",
-            SettingKeys.UiFullscreen => "Plein écran",
-            SettingKeys.UiShowFps => "Afficher les FPS",
-            SettingKeys.UiSortOption => "Tri de la bibliothèque",
-            _ => descriptor.UiLabel ?? descriptor.Key,
-        };
+
+        string key = UiKeys.Setting(descriptor.Key);
+        string text = UiStrings.Get(key);
+        return ReferenceEquals(text, key) || string.Equals(text, key, StringComparison.Ordinal)
+            ? descriptor.UiLabel ?? descriptor.Key
+            : text;
     }
 
-    /// <summary>The French label of an enumerated value, or the English one when there is none.</summary>
+    /// <summary>The label of an enumerated value, or the raw domain label when there is none.</summary>
     public static string LabelOf(SettingDescriptor descriptor, string option)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        return option switch
-        {
-            "Off" => "Désactivée",
-            "Every refresh" => "À chaque rafraîchissement",
-            "Every other refresh" => "Un rafraîchissement sur deux",
-            "Default" => "Par défaut",
-            "Color" => "Couleur",
-            "Gradient" => "Dégradé",
-            "Fantasy" => "Fantaisie",
-            "None" when descriptor.Key == SettingKeys.SceneTvBox => "Aucun",
-            "None" => "Aucun",
-            "Native" => "Native",
-            "enabled" => "activées",
-            "disabled" => "désactivées",
-            "A-Z" => "A-Z",
-            "Recent" => "Récent",
-            "NTSC" or "PAL" or "DENDY" or "MULTI" => option,
-            _ => option,
-        };
+        ArgumentNullException.ThrowIfNull(option);
+
+        string key = UiKeys.Option(option);
+        string text = UiStrings.Get(key);
+        return string.Equals(text, key, StringComparison.Ordinal) ? option : text;
     }
 
     /// <summary>The label of the speed setting <paramref name="setting"/> and its factor.</summary>

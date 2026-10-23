@@ -3,7 +3,7 @@ using Zax.Engine3D;
 namespace Zax.Render.Assets;
 
 /// <summary>
-/// Reads the skybox and television assets straight out of <c>assets-neutral/</c>.
+/// Reads the skybox assets straight out of <c>assets-neutral/</c>.
 /// </summary>
 /// <remarks>
 /// Meshes and the small textures are cached once read; cubemap faces are <b>not</b> cached,

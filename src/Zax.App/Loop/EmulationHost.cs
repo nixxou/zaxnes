@@ -154,6 +154,11 @@ internal sealed partial class EmulationHost : IDisposable
         Slots.Reconcile(options.Paths, _games.Exists);
 
         Settings.Changed += OnSettingChanged;
+
+        // AMD-035 §1: the language in force is the setting's, read once here and kept in step by
+        // OnSettingChanged afterwards. There is no detection of the system's language.
+        Ui.UiStrings.Language = Ui.UiStrings.Parse(Settings.Language);
+
         ApplySpeed();
         RegisterCommands();
         PublishState();
@@ -170,12 +175,6 @@ internal sealed partial class EmulationHost : IDisposable
 
     /// <summary>The settings the loop reads and writes.</summary>
     public AppSettings Settings { get; }
-
-    /// <summary>
-    /// Whether the television model of AMD-025 was found. When it was not, the TV box setting
-    /// is offered nowhere: there is nothing to draw.
-    /// </summary>
-    public bool TelevisionAvailable { get; set; } = true;
 
     /// <summary>The frame clock of SPEC-07 §3.2.</summary>
     public FramePacer Pacer { get; }
@@ -493,6 +492,13 @@ internal sealed partial class EmulationHost : IDisposable
                 PublishState();
                 break;
 
+            case Zax.Settings.SettingKeys.UiLanguage:
+                // AMD-035 §1: the change applies immediately. Everything the interface draws
+                // reads the table through UiStrings, and the models that cache their labels
+                // watch its generation counter.
+                Ui.UiStrings.Language = Ui.UiStrings.Parse(Settings.Language);
+                break;
+
             case "video.skip_frame":
                 _scene.Settings.SkipRender = Settings.SkipFrame;
                 break;
@@ -505,16 +511,18 @@ internal sealed partial class EmulationHost : IDisposable
                 _scene.Settings.VSync = Settings.VSync;
                 break;
 
+            case "video.anti_alias":
+                // AMD-032 §2: the setting takes effect on the next rendered frame, the
+                // renderer reallocating its multisampled target by itself. No restart.
+                _scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(Settings.AntiAlias);
+                break;
+
             case "render.shadow":
                 _scene.Settings.Shadows = Settings.Shadow;
                 break;
 
             case "scene.skybox":
                 _scene.Settings.Skybox = (SkyboxKind)Settings.Skybox;
-                break;
-
-            case "scene.tv_box":
-                _scene.Settings.TvBox = TvBoxSetting.From(Settings.TvBox);
                 break;
 
             case "camera.local_cam":

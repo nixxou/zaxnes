@@ -1,3 +1,4 @@
+using Zax.Profiles.Catalogue;
 using Zax.Profiles.Library;
 
 namespace Zax.App.Ui;
@@ -10,22 +11,33 @@ namespace Zax.App.Ui;
 /// <param name="IsDefault3D">
 /// Whether this is the « 3D par défaut (sans profil) » entry of AMD-024 REQ-PUB-001 (Q-065).
 /// </param>
+/// <param name="Origin">
+/// Which scanned folder the file came from, shown as the source of the profile (AMD-033 §2).
+/// </param>
 internal sealed record ProfileChoice(
     string Id,
     string Title,
     GameProfileSource Source,
     bool Is2DMode,
-    bool IsDefault3D = false)
+    bool IsDefault3D = false,
+    ProfileOrigin Origin = ProfileOrigin.User)
 {
     /// <summary>Whether this is one of the two generic built-in entries.</summary>
     public bool IsGeneric => Is2DMode || IsDefault3D;
 
-    /// <summary>The French word for where the profile comes from.</summary>
-    public string SourceLabel => Is2DMode
-        ? "sans conversion 3D"
+    /// <summary>
+    /// Where the profile comes from, in the interface language. A user profile says which of the
+    /// two scanned folders holds it, which is where AMD-033 §2 asks for the origin to be visible.
+    /// </summary>
+    public string SourceLabel => UiStrings.Get(Is2DMode
+        ? UiKeys.ProfileSourceTwoDimensional
         : IsDefault3D
-            ? "géométrie 3D par défaut"
-            : Source == GameProfileSource.User ? "profil utilisateur" : "profil intégré";
+            ? UiKeys.ProfileSourceDefaultThreeD
+            : Source != GameProfileSource.User
+                ? UiKeys.ProfileSourceBuiltIn
+                : Origin == ProfileOrigin.ProgramFolder
+                    ? UiKeys.ProfileSourceProgramFolder
+                    : UiKeys.ProfileSourceUser);
 }
 
 /// <summary>
@@ -57,7 +69,8 @@ internal sealed class ProfileChooserModel
                 entry.DisplayTitle,
                 entry.Source,
                 entry.Is2DMode,
-                entry.IsDefaultThreeDimensional));
+                entry.IsDefaultThreeDimensional,
+                entry.Origin));
         }
 
         // Q-065: « 2D Mode » first, then « 3D par défaut (sans profil) », then the titles in

@@ -13,12 +13,20 @@ namespace Zax.App.Tests;
 public sealed class MenuBarTests
 {
     /// <summary>
-    /// REQ-UI-200: the five menus exist, with the titles the amendment writes.
+    /// REQ-UI-200 with AMD-035: the five menus exist, with the titles the amendment writes —
+    /// in English by default, and in French once the setting says so.
     /// </summary>
     [Fact]
     public void REQ_UI_200_the_five_menus_exist_with_their_titles()
     {
+        using UiLanguageScope language = new();
         using UiHarness harness = new("Arkanoid");
+
+        Assert.Equal(
+            ["File", "Emulation", "Video", "Audio", "Tools"],
+            harness.Ui.MenuBar.Menus.Select(static menu => menu.Title));
+
+        harness.Host.Settings.Language = "fr";
 
         Assert.Equal(
             ["Fichier", "Émulation", "Vidéo", "Audio", "Outils"],
@@ -44,42 +52,42 @@ public sealed class MenuBarTests
         // command it must invoke.
         (string Menu, string Command)[] expected =
         [
-            ("Fichier", ZaxCommands.OpenRom),
-            ("Fichier", ZaxCommands.OpenRecentRom),
-            ("Fichier", ZaxCommands.ChooseProfile),
-            ("Fichier", ZaxCommands.ImportProfile),
-            ("Fichier", ZaxCommands.LoadSlot),
-            ("Fichier", ZaxCommands.QuickLoad),
-            ("Fichier", ZaxCommands.SaveSlot),
-            ("Fichier", ZaxCommands.QuickSave),
-            ("Fichier", ZaxCommands.Quit),
-            ("Émulation", ZaxCommands.PauseResume),
-            ("Émulation", ZaxCommands.Reset),
-            ("Émulation", ZaxCommands.Stop),
-            ("Émulation", ZaxCommands.FastForward),
-            ("Émulation", ZaxCommands.Rollback),
-            ("Émulation", ZaxCommands.SetSpeed),
-            ("Émulation", ZaxCommands.SetRegion),
-            ("Émulation", ZaxCommands.ToggleAutoRegion),
-            ("Émulation", ZaxCommands.SetPortType),
-            ("Vidéo", ZaxCommands.ToggleTwoDimensional),
-            ("Vidéo", ZaxCommands.SetCameraMode),
-            ("Vidéo", ZaxCommands.ResetView),
-            ("Vidéo", ZaxCommands.SetSkybox),
-            ("Vidéo", ZaxCommands.SetTvBox),
-            ("Vidéo", ZaxCommands.ToggleShadows),
-            ("Vidéo", ZaxCommands.ToggleFullscreen),
-            ("Vidéo", ZaxCommands.ToggleFpsCounter),
-            ("Audio", ZaxCommands.SetVolume),
-            ("Audio", ZaxCommands.ToggleMute),
+            (UiText.MenuFile, ZaxCommands.OpenRom),
+            (UiText.MenuFile, ZaxCommands.OpenRecentRom),
+            (UiText.MenuFile, ZaxCommands.ChooseProfile),
+            (UiText.MenuFile, ZaxCommands.ImportProfile),
+            (UiText.MenuFile, ZaxCommands.ImportThreeDSen), // AMD-030 §2
+            (UiText.MenuFile, ZaxCommands.LoadSlot),
+            (UiText.MenuFile, ZaxCommands.QuickLoad),
+            (UiText.MenuFile, ZaxCommands.SaveSlot),
+            (UiText.MenuFile, ZaxCommands.QuickSave),
+            (UiText.MenuFile, ZaxCommands.Quit),
+            (UiText.MenuEmulation, ZaxCommands.PauseResume),
+            (UiText.MenuEmulation, ZaxCommands.Reset),
+            (UiText.MenuEmulation, ZaxCommands.Stop),
+            (UiText.MenuEmulation, ZaxCommands.FastForward),
+            (UiText.MenuEmulation, ZaxCommands.Rollback),
+            (UiText.MenuEmulation, ZaxCommands.SetSpeed),
+            (UiText.MenuEmulation, ZaxCommands.SetRegion),
+            (UiText.MenuEmulation, ZaxCommands.ToggleAutoRegion),
+            (UiText.MenuEmulation, ZaxCommands.SetPortType),
+            (UiText.MenuVideo, ZaxCommands.ToggleTwoDimensional),
+            (UiText.MenuVideo, ZaxCommands.SetCameraMode),
+            (UiText.MenuVideo, ZaxCommands.ResetView),
+            (UiText.MenuVideo, ZaxCommands.SetSkybox),
+            (UiText.MenuVideo, ZaxCommands.ToggleShadows),
+            (UiText.MenuVideo, ZaxCommands.ToggleFullscreen),
+            (UiText.MenuVideo, ZaxCommands.ToggleFpsCounter),
+            (UiText.MenuAudio, ZaxCommands.SetVolume),
+            (UiText.MenuAudio, ZaxCommands.ToggleMute),
 
             // AMD-024 REQ-PUB-005 (revised 2026-10-21): « Musique de menu » is gone from the
             // Audio menu with the menu music itself.
 
-            ("Outils", ZaxCommands.ShowOptions),
-            ("Outils", ZaxCommands.ShowKeyConfig),
-            ("Outils", ZaxCommands.ShowDataFolder),
-            ("Outils", ZaxCommands.ShowAbout),
+            (UiText.MenuTools, ZaxCommands.ShowOptions),
+            (UiText.MenuTools, ZaxCommands.ShowKeyConfig),
+            (UiText.MenuTools, ZaxCommands.ShowDataFolder),
+            (UiText.MenuTools, ZaxCommands.ShowAbout),
         ];
 
         foreach ((string menu, string command) in expected)
@@ -110,14 +118,14 @@ public sealed class MenuBarTests
         Assert.Equal("P", shown[ZaxCommands.PauseResume]);
         Assert.Equal("Ctrl+R", shown[ZaxCommands.Reset]);
         Assert.Equal("F11", shown[ZaxCommands.ToggleTwoDimensional]);
-        Assert.Equal("Alt+Entrée", shown[ZaxCommands.ToggleFullscreen]);
+        Assert.Equal("Alt+Enter", shown[ZaxCommands.ToggleFullscreen]);
         Assert.Equal("Ctrl+,", shown[ZaxCommands.ShowOptions]);
         Assert.Equal("Ctrl+Q", shown[ZaxCommands.Quit]);
         Assert.Equal("Ctrl+F1…F10", shown[ZaxCommands.LoadSlot]);
-        Assert.Equal("Maj+F1…F10", shown[ZaxCommands.SaveSlot]);
-        Assert.Equal("raccourci FastForward", shown[ZaxCommands.FastForward]);
-        Assert.Equal("raccourci RollBack", shown[ZaxCommands.Rollback]);
-        Assert.Equal("appui long sur Menu", shown[ZaxCommands.ResetView]);
+        Assert.Equal("Shift+F1…F10", shown[ZaxCommands.SaveSlot]);
+        Assert.Equal("FastForward shortcut", shown[ZaxCommands.FastForward]);
+        Assert.Equal("RollBack shortcut", shown[ZaxCommands.Rollback]);
+        Assert.Equal("long press on Menu", shown[ZaxCommands.ResetView]);
     }
 
     /// <summary>
@@ -145,26 +153,26 @@ public sealed class MenuBarTests
     }
 
     /// <summary>
-    /// REQ-UI-208: each of the ten slot rows shows the date and time of its state, or « vide »,
-    /// and the quick slot is there too.
+    /// REQ-UI-208: each of the ten slot rows shows the date and time of its state, or the word
+    /// for « vide » in the interface language (AMD-035), and the quick slot is there too.
     /// </summary>
     [Fact]
     public void REQ_UI_208_the_slot_submenus_show_a_date_or_vide()
     {
         using UiHarness harness = new("Arkanoid");
 
-        IReadOnlyList<MenuItem> slots = SubmenuOf(harness.Ui.MenuBar, "Fichier", UiText.SaveState);
+        IReadOnlyList<MenuItem> slots = SubmenuOf(harness.Ui.MenuBar, UiText.MenuFile, UiText.SaveState);
 
         // Ten numbered rows, a rule, and the quick slot (REQ-UI-208).
         Assert.Equal(SaveSlotIndex.ExposedSlotCount + 2, slots.Count);
         Assert.All(
             slots.Where(static item => item.Kind != MenuItemKind.Separator),
-            item => Assert.Contains("vide", item.Label));
+            item => Assert.Contains(UiText.EmptySlot, item.Label));
 
         harness.Launch("g0");
         harness.Run(ZaxCommands.SaveSlot, CommandArgs.Of(3));
 
-        slots = SubmenuOf(harness.Ui.MenuBar, "Fichier", UiText.LoadState);
+        slots = SubmenuOf(harness.Ui.MenuBar, UiText.MenuFile, UiText.LoadState);
         Assert.Contains(
             SaveStateFile.FormatTimestamp(harness.Now.ToUnixTimeSeconds()),
             slots[2].Label);
@@ -182,7 +190,7 @@ public sealed class MenuBarTests
     {
         using UiHarness harness = new("Arkanoid");
 
-        IReadOnlyList<MenuItem> recent = SubmenuOf(harness.Ui.MenuBar, "Fichier", UiText.RecentRoms);
+        IReadOnlyList<MenuItem> recent = SubmenuOf(harness.Ui.MenuBar, UiText.MenuFile, UiText.RecentRoms);
         Assert.Equal(UiText.NothingHere, Assert.Single(recent).Label);
 
         for (int index = 0; index < 12; index++)
@@ -190,7 +198,7 @@ public sealed class MenuBarTests
             harness.Store.Games.NoteRomOpened($"C:\\roms\\rom{index}.nes");
         }
 
-        recent = SubmenuOf(harness.Ui.MenuBar, "Fichier", UiText.RecentRoms);
+        recent = SubmenuOf(harness.Ui.MenuBar, UiText.MenuFile, UiText.RecentRoms);
         Assert.Equal(10, recent.Count);
         Assert.Equal("rom11.nes", recent[0].Label);
     }

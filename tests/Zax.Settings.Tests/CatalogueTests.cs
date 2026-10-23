@@ -36,7 +36,7 @@ public sealed class CatalogueTests
 
         Assert.Empty(specified.Except(model));
         Assert.Equal(
-            new[] { SettingKeys.AudioMute, SettingKeys.UiShowFps }.Order(),
+            new[] { SettingKeys.AudioMute, SettingKeys.UiShowFps, SettingKeys.UiLanguage }.Order(),
             model.Except(specified).Order());
     }
 
@@ -228,7 +228,6 @@ public sealed class CatalogueTests
     [InlineData(SettingKeys.AudioVolume)]
     [InlineData(SettingKeys.SceneCustomBgColor)]
     [InlineData(SettingKeys.CameraFov)]
-    [InlineData(SettingKeys.SceneTvBox)]
     public void The_preserved_settings_are_user_scoped(string key)
         => Assert.Equal(SettingScope.User, SettingsCatalogue.Get(key).Scope);
 

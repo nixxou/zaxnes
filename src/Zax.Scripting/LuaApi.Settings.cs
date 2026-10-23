@@ -77,6 +77,9 @@ internal static partial class LuaApi
         Whole("Skybox", () => settings.Skybox, v => settings.Skybox = v);
         Whole("Core", () => settings.Core, v => settings.Core = v);
         Whole("TVMode", () => settings.TVMode, v => settings.TVMode = v);
+
+        // AMD-031 §3: the TV box is gone but the property stays, so a script that reads or
+        // writes it runs without error. The reading is always 0 — « none ».
         Whole("TVBox", () => settings.TVBox, v => settings.TVBox = v);
         Whole("SortOption", () => settings.SortOption, v => settings.SortOption = v);
         Whole("MovieMode", () => settings.MovieMode, v => settings.MovieMode = v);

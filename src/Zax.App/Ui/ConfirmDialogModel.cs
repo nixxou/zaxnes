@@ -16,12 +16,16 @@ namespace Zax.App.Ui;
 /// <para>
 /// The texts are never written here: they come with the <see cref="ConfirmationRequest"/> the
 /// loop raises, so the exact wording of SPEC-09 REQ-PERS-042 and REQ-PERS-054 has a single
-/// source.
+/// source. That wording is the English entry of the table, which AMD-036 §1 has translated as
+/// it is read — hence the three properties below rather than three stored strings.
 /// </para>
 /// </remarks>
 internal sealed class ConfirmDialogModel
 {
     private Action? _confirmed;
+    private string _message = string.Empty;
+    private string _confirmLabel = EmulationHost.YesLabel;
+    private string _cancelLabel = EmulationHost.NoLabel;
 
     /// <summary>Whether the box is up.</summary>
     public bool IsOpen { get; private set; }
@@ -29,14 +33,14 @@ internal sealed class ConfirmDialogModel
     /// <summary>Title of the box; the game's title for the deletions of SPEC-09.</summary>
     public string Title { get; private set; } = string.Empty;
 
-    /// <summary>The message, exactly as the requirement writes it.</summary>
-    public string Message { get; private set; } = string.Empty;
+    /// <summary>The message, in the language in force (AMD-036 §1).</summary>
+    public string Message => UiNotifications.Translate(_message);
 
     /// <summary>Label of the button that acts; it has the focus (REQ-UI-110).</summary>
-    public string ConfirmLabel { get; private set; } = "Yes";
+    public string ConfirmLabel => UiNotifications.Translate(_confirmLabel);
 
     /// <summary>Label of the button that changes nothing.</summary>
-    public string CancelLabel { get; private set; } = "No";
+    public string CancelLabel => UiNotifications.Translate(_cancelLabel);
 
     /// <summary>Opens the box on <paramref name="request"/>; a second call replaces it.</summary>
     public void Open(ConfirmationRequest request)
@@ -44,9 +48,9 @@ internal sealed class ConfirmDialogModel
         ArgumentNullException.ThrowIfNull(request);
 
         Title = request.Title;
-        Message = request.Message;
-        ConfirmLabel = request.ConfirmLabel;
-        CancelLabel = request.CancelLabel;
+        _message = request.Message;
+        _confirmLabel = request.ConfirmLabel;
+        _cancelLabel = request.CancelLabel;
         _confirmed = request.Confirmed;
         IsOpen = true;
     }

@@ -17,10 +17,10 @@ utiliser une ROM dont vous disposez légalement.
 | Carte graphique | OpenGL 3.3 core (toute carte depuis ~2010) |
 | Audio | facultatif ; sans périphérique, Zaxnes démarre en silence |
 
-**Zaxnes n'a besoin d'aucun fichier d'asset** (AMD-024, phase P7a), à une exception près : le
-boîtier TV est le modèle « Retro Crt Tv » de meipal, sous licence **CC BY 4.0**, livré tel quel
-dans `assets/tv/retro_crt_tv.glb` (AMD-025) ; si le fichier manque, l'option « Boîtier TV » est
-simplement désactivée. Les skyboxes et les sons d'interface sont **produits par le code** ; il n'y a
+**Zaxnes n'a besoin d'aucun fichier d'asset** (AMD-024, phase P7a) et n'en livre aucun : le
+boîtier TV décoratif, qui était le seul fichier livré, a été retiré du produit (AMD-031). La
+scène se compose de l'image du jeu et du fond.
+Les skyboxes et les sons d'interface sont **produits par le code** ; il n'y a
 **pas de musique de menu** ; la police de l'interface est une police **déjà installée sur votre Windows**
 (Segoe UI, sinon Arial), ouverte au lancement et jamais recopiée. Le détail et les licences sont
 dans `ASSETS-LICENSES.md`.
@@ -94,13 +94,13 @@ archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/
 | `--rom <chemin>` | ouvre cette ROM au démarrage ; sans `--profile`, la résolution de profil ci-dessus s'applique |
 | `--profile <titre>` | entrée de la bibliothèque (titre exact, identifiant ou préfixe non ambigu), ou chemin d'un profil `.3dn` déjà importé. Sans l'option : « 2D Mode » |
 | `--list-profiles` | liste les entrées de la bibliothèque, puis quitte |
+| `--import-3dsen <dossier\|fichier>` | importe les profils de **votre** installation de 3dSen (§9.1), affiche le bilan, puis quitte avec `0` si tout s'est bien passé |
 | `--assets <dossier>` | dossier de fichiers d'assets que vous fournissez (facultatif, jamais cherché tout seul) |
 | `--font <fichier>` | police de l'interface : un fichier, ou un nom dans le dossier des polices du système |
 | `--builtin-font` | force la police intégrée d'ImGui (accents et « ▸ » remplacés par de l'ASCII) |
 | `--userdata <dossier>` | racine des données modifiables (voir §6) |
 | `--size 1600x900` | taille de la fenêtre (défaut 1280 × 720) |
 | `--no-audio` | n'ouvre pas le périphérique audio |
-| `--tv-model <fichier.glb>` | le modèle du boîtier TV ; par défaut `assets/tv/retro_crt_tv.glb` à côté de l'exécutable |
 | `--smoke-test`, `--smoke-frames <n>` | rend un nombre fixe d'images sans interaction, puis quitte avec 0 |
 | `--smoke-emulated <n>` | joue `n` images émulées (60 = 1 s) sans interaction, puis quitte avec 0 |
 | `--ui-shots <dossier>` | capture une image PNG par écran d'interface, puis quitte |
@@ -123,7 +123,6 @@ session, votre nouvelle valeur reprend la main et est enregistrée normalement
 | `--fov <degrés>` | `camera.fov` | champ de vision, 45 à 95 |
 | `--no-shadows` | `render.shadow` | démarre sans les ombres |
 | `--skybox <nom>` | `scene.skybox` | `default`, `color`, `gradient` ou `fantasy` |
-| `--tv <0\|1>` | `scene.tv_box` | `0` aucun boîtier, `1` le boîtier (une valeur 2 ou 3 héritée donne 1) |
 
 Si l'image se déchire alors que « Synchronisation verticale » est activée, regardez la ligne
 `Zaxnes: display pacing: …` de la console : elle dit l'intervalle d'échange réellement en vigueur.
@@ -145,6 +144,7 @@ grisée n'est pas disponible dans l'état courant — « Reset » sans jeu charg
 | ROMs récentes ▸ | | les dix derniers fichiers ouverts |
 | Choisir le profil 3D… | | rouvre la sélection de profil pour le jeu en cours |
 | Importer un profil… | | ajoute un fichier `.3dn` à la bibliothèque, sans redémarrage |
+| Importer depuis 3dSen… | | importe d'un coup les profils de votre installation de 3dSen (§9.1) |
 | Supprimer le jeu… | | supprime le jeu courant **s'il vient d'un profil importé**, après confirmation |
 | Créer la jaquette | | la dernière capture de pause devient la jaquette du jeu courant |
 | Importer une jaquette… | | une image PNG devient la jaquette, réduite pour tenir dans 256 × 192 |
@@ -180,7 +180,6 @@ embarqué et l'entrée « 2D Mode » ne sont jamais supprimables : l'entrée res
 | Mode caméra ▸ | | Orbitale (TPV), Première personne (FPV), Vue de dessus |
 | Réinitialiser la vue | `Échap` maintenu ≥ 0,3 s | revient à la vue par défaut |
 | Skybox ▸ | | Par défaut, Couleur, Dégradé, Fantaisie |
-| Boîtier TV ▸ | | Aucun, TV (grisé si le modèle `assets/tv/*.glb` est absent) |
 | Ombres | | active ou désactive les ombres |
 | Plein écran | `Alt`+`Entrée` | masque la barre de menus ; les raccourcis restent actifs |
 | Afficher les FPS | | petit compteur en haut à droite, **désactivé par défaut** |
@@ -238,6 +237,19 @@ de réglages.
   ne prend effet qu'à ce moment-là ;
 - chaque changement de valeur joue **une fois** le son de validation, **sauf** les curseurs
   **Vitesse** (onglet Émulation) et **FOV** (onglet Caméra), qui sont muets.
+
+### Langue de l'interface
+
+L'onglet **Interface** porte le réglage **Langue** (`ui.language`), qui vaut `en` (« English »)
+ou `fr` (« Français »). **Par défaut l'interface est en anglais** : il n'y a aucune détection de
+la langue du système, et au premier lancement, sur un dossier utilisateur vierge, tout est en
+anglais. Le changement s'applique **immédiatement**, sans redémarrer, et il est conservé au
+lancement suivant ; une valeur inconnue dans `settings.json` est lue comme `en`, sans erreur.
+
+Ce document, la sortie de `--help`, les messages de la ligne de commande et les journaux de la
+console (préfixe « Zaxnes: ») restent en anglais ou en français comme ils sont : ils ne suivent
+pas le réglage (AMD-035 §2). Les copies d'écran et les noms de menus cités plus bas utilisent le
+français ; en anglais, la correspondance est celle de la table des textes.
 
 La fenêtre est **engendrée depuis le modèle de réglages** : un réglage ajouté au modèle y
 apparaît sans modification de l'interface. Les réglages de réalité virtuelle sont hors
@@ -370,6 +382,19 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 > supprimé** : vous pouvez le garder ou l'effacer vous-même. Les sauvegardes d'état écrites
 > alors restent lisibles.
 
+> **Un second dossier de profils, à côté de l'exécutable.** Quel que soit le mode — normal,
+> portable ou `--userdata` —, Zaxnes parcourt **toujours** un dossier `profiles` placé à côté de
+> `Zaxnes.exe`, en plus du vôtre. La version publiée le fournit vide, avec un `README.txt` ;
+> déposez-y vos `.3dn` et ils apparaissent dans la bibliothèque au lancement suivant. Ce dossier
+> n'est jamais écrit, déplacé ni supprimé : vos imports vont toujours dans **votre** dossier de
+> données, et Zaxnes fonctionne même s'il est en lecture seule (sous `Program Files`, par
+> exemple) ou absent. Si les deux dossiers proposent le même profil, **le vôtre l'emporte** : un
+> fichier de même nom chez vous masque entièrement l'autre, deux fichiers identiques n'en font
+> qu'un, et à identifiant égal c'est le vôtre qui est chargé, l'autre étant signalé dans le
+> journal. Le choix du profil indique d'où vient chaque entrée (« profil utilisateur » ou
+> « profil du dossier du programme »), et un jeu du dossier du programme ne se supprime pas
+> depuis l'interface.
+
 | Chemin | Contenu |
 |---|---|
 | `settings.json` | réglages : les préférences utilisateur, par clé stable (`camera.fov`, `audio.volume`, `scene.skybox`…) |
@@ -380,7 +405,7 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 | `saves/<n>.state` | fichier de sauvegarde (signature `ZAXNESAV`, l'ancienne `SEN3DSAV` reste lisible) |
 | `saves/<n>.png` | vignette 256 × 192 de l'emplacement |
 | `battery/<sha1>.srm` | RAM sauvegardée par pile, par ROM (Zelda, Final Fantasy…) |
-| `profiles/*.3dn` | profils utilisateur importés |
+| `profiles/*.3dn` | profils utilisateur importés — et, en plus, ceux du dossier `profiles` à côté de l'exécutable |
 | `covers/*.png` | jaquettes, nommées `<Titre>_3dsen_<Id>.png` |
 | `logs/` | journaux |
 
@@ -501,6 +526,43 @@ bibliothèque le prend en compte sans redémarrage. Un profil dont l'identifiant
 d'un profil utilisateur le remplace ; un identifiant de profil intégré est ignoré. Un fichier
 invalide affiche un message et ne change rien.
 
+### 9.1 Si vous possédez 3dSen : importer ses profils
+
+Si vous avez acheté 3dSen, ses profils sont dans **votre** installation et vous pouvez les
+importer en une action. Rien n'est téléchargé et rien n'est redistribué : seul votre disque est
+lu, et le dossier de 3dSen n'est ni modifié, ni déplacé, ni copié.
+
+**Fichier ▸ Importer depuis 3dSen…** ouvre un sélecteur ; désignez
+
+- le **dossier d'installation** de 3dSen, celui qui contient `3dSen.exe` (le bouton « Ouvrir »
+  valide le dossier affiché, ou celui que vous avez sélectionné), ou
+- directement le **fichier bundle** des profils, si vous savez où il est :
+  `<installation>\<nom>_Data\StreamingAssets\aa\StandaloneWindows*\defaultprofiles_assets_all_*.bundle`.
+
+À la fin, un message donne le bilan : combien de profils ont été importés, combien étaient déjà
+présents (ignorés) et combien ont échoué. Les profils importés apparaissent aussitôt dans la
+bibliothèque, sans redémarrage, avec le titre que porte le profil lui-même.
+
+En ligne de commande, sans ouvrir de fenêtre :
+
+```
+Zaxnes.exe --import-3dsen "C:\Program Files (x86)\Steam\steamapps\common\3dSen"
+```
+
+Le code de sortie est `0` quand tout s'est bien passé, `1` quand aucun bundle n'a été trouvé, que
+le fichier est illisible ou qu'au moins un profil a été refusé ; le détail part sur la sortie
+d'erreur. Ajoutez `--userdata <dossier>` pour écrire ailleurs que dans votre dossier de données
+habituel.
+
+Détails utiles :
+
+- un profil **identique octet pour octet** à un fichier déjà importé est ignoré : réimporter la
+  même installation n'ajoute rien ;
+- un profil de même nom mais de contenu différent reçoit un suffixe ` (2)`, ` (3)`… ;
+- un profil que le lecteur de `.3dn` refuse est compté en échec et n'interrompt pas l'import ;
+- un fichier tronqué, une signature inconnue ou une compression LZMA donnent un message clair et
+  n'écrivent aucun fichier partiel.
+
 ## 10. Captures hors écran, sans fenêtre
 
 L'outil `Zax.Harness` rend des scènes dans un contexte OpenGL **caché** et écrit des PNG. Il
@@ -512,9 +574,9 @@ tools\Zax.Harness\bin\Release\net10.0\Zax.Harness.exe render --out captures
 
 Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
 `--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
-`--distance`, `--mesh`, `--no-shadows`, `--skybox`, `--sky-bodies` (allume le soleil, la lune
-et les nuages procéduraux), `--bg-color`, `--tv`, `--tv-model <fichier.glb>`, `--tv-info`
-(décrit le modèle chargé et l'ajustement obtenu), `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
+`--distance`, `--mesh`, `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
+4096 par défaut depuis `AMD-034`), `--skybox`, `--sky-bodies` (allume le soleil, la lune
+et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
 
 La commande `stress` rejoue en boucle le banc de mesure des jeux de référence — plusieurs jeux
@@ -541,15 +603,15 @@ Du côté de l'interface, `Zaxnes --ui-shots <dossier>` place l'interface dans c
 
 - la **bibliothèque visuelle** à tuiles : la barre de menus classique la remplace (`AMD-010`) ;
   la suppression d'un profil utilisateur et les jaquettes, elles, sont en place (menu Fichier) ;
-- l'import d'une jaquette au format **JPEG** : seul le PNG est décodé (`spec/changes/Q-050.md`) ;
+- l'import d'une jaquette au format **JPG** : seul le PNG est décodé (`spec/changes/Q-050.md`) ;
 - les **archives `.7z`** (`spec/changes/Q-028.md`) ;
 - le **pistolet optique libretro** : la table de correspondance existe comme donnée, le frontend
   lui-même n'est pas écrit ;
 - le **frontend libretro** : le noyau expose déjà « exécuter exactement une frame émulée » et la
   sérialisation complète, mais la DLL n'est pas écrite.
 
-Points laissés en question, visibles à l'écran ou à l'usage : le matériau des modèles de
-téléviseur (`spec/changes/Q-023.md`), l'espace des opérations sur les teintes de la skybox
+Points laissés en question, visibles à l'écran ou à l'usage : l'espace des opérations sur les
+teintes de la skybox
 Fantasy (`Q-024`), les faces écrites dans la carte d'ombre (`Q-025`), le cadrage de la capture de
 référence (`Q-026`), la vignette d'un emplacement sauvegardé en cours de jeu (`Q-027`), les
 archives `.7z` (`Q-028`), la vue 3D pendant la pause (`Q-029`), les raccourcis des emplacements
@@ -557,8 +619,7 @@ archives `.7z` (`Q-028`), la vue 3D pendant la pause (`Q-029`), les raccourcis d
 d'un binding dont la commande est déjà maintenue (`Q-033`) et le facteur « ×2 » du ciel Fantasy
 (`Q-045`, `Q-055`). `AMD-021` a tranché le seuil des commandes analogiques (il est mesuré après
 mise en forme, ce qui clôt `Q-048`, `Q-054` et `Q-056`) ; les cinq points de cet amendement
-restés indécis — dont l'ombre des touches du modèle TV 3 — ont été tranchés depuis par
-`AMD-022` (`spec/changes/Q-059.md`).
+restés indécis ont été tranchés depuis par `AMD-022` (`spec/changes/Q-059.md`).
 
 ## 12. Pointer les vérifications sur votre dossier de ROMs
 

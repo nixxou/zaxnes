@@ -91,11 +91,11 @@ public static class CatalogueTable
             new("light.color", "Light.Color", Colour, "#FFFFFFFF", P, Imm),
             new("light.intensity", "Light.Intensity", Real, "1", U, Imm),
 
-            // §4.1.4 Background, skybox, television
+            // §4.1.4 Background and skybox. The row scene.tv_box of the specification's table
+            // is gone: AMD-031 retired the setting with the decorative TV box.
             new("scene.skybox", "Skybox", Choice, "-1", U, Imm),
             new("scene.custom_bg_color", "CustomBgColor", Colour, "#000000FF", U, Imm),
             new("scene.use_nes_bg_color", "BgColor", Flag, "true", P, Imm),
-            new("scene.tv_box", "TVBox", Choice, "0", U, Imm),
             new("scene.map_enable", "MapEnable", Flag, "false", P, None),
 
             // §4.1.5 Clipping: index 0 left, 1 bottom, 2 right, 3 top (DEC-R2-T1)

@@ -105,14 +105,14 @@ internal sealed partial class ZaxUi
         // is built, so that window offers them too (REQ-UI-203).
         _host.Commands.Register(
             UiCommands.ToggleDebugOverlay,
-            "Panneau de statistiques",
+            static () => UiStrings.Get(UiKeys.Command(UiCommands.ToggleDebugOverlay)),
             _ => State.DebugOverlay = !State.DebugOverlay,
-            MenuShortcuts.TextOf(UiCommands.ToggleDebugOverlay),
+            static () => MenuShortcuts.TextOf(UiCommands.ToggleDebugOverlay),
             isChecked: () => State.DebugOverlay);
 
         _host.Commands.Register(
             UiCommands.CloseWindows,
-            "Fermer les fenêtres",
+            static () => UiStrings.Get(UiKeys.Command(UiCommands.CloseWindows)),
             _ => State.CloseAll(),
             canExecute: _ => State.AnyWindowOpen);
 
@@ -131,6 +131,11 @@ internal sealed partial class ZaxUi
 
         /// <summary>Choosing an image to use as cover art (REQ-PERS-036).</summary>
         Cover,
+
+        /// <summary>
+        /// Choosing an installation of 3dSen — a folder, or the bundle itself (AMD-030 §2).
+        /// </summary>
+        ThreeDSen,
     }
 
     /// <summary>Which windows are open and what full screen hides (REQ-UI-209).</summary>
@@ -177,6 +182,13 @@ internal sealed partial class ZaxUi
     /// photographs an open menu without a mouse; nothing else sets it.
     /// </summary>
     public string? ForceOpenMenu { get; set; }
+
+    /// <summary>
+    /// A tab of the options window to bring to the front on the next frame, or null. Like
+    /// <see cref="ForceOpenMenu"/> it only exists for <c>--ui-shots</c>, which has no mouse to
+    /// click the tab with.
+    /// </summary>
+    public OptionsTab? ForceOptionsTab { get; set; }
 
     /// <summary>Opens the profile chooser on no particular ROM, for <c>--ui-shots</c>.</summary>
     public void OpenProfileChooserForCapture() => OpenProfileChooser(null);
@@ -258,6 +270,20 @@ internal sealed partial class ZaxUi
                 OpenBrowser(BrowserPurpose.Profile);
                 break;
 
+            case ZaxCommands.ImportThreeDSen:
+                // AMD-030 §2: with a path already given (a drag, a script), import straight
+                // away; without one, ask for the folder.
+                if (args.Text is { Length: > 0 } installation)
+                {
+                    ImportThreeDSen(installation);
+                }
+                else
+                {
+                    OpenBrowser(BrowserPurpose.ThreeDSen);
+                }
+
+                break;
+
             case ZaxCommands.ImportCover:
                 OpenBrowser(BrowserPurpose.Cover);
                 break;
@@ -324,15 +350,21 @@ internal sealed partial class ZaxUi
             {
                 BrowserPurpose.Rom => UiText.OpenRomTitle,
                 BrowserPurpose.Cover => UiText.ImportCoverTitle,
+                BrowserPurpose.ThreeDSen => UiText.ImportThreeDSenTitle,
                 _ => UiText.ImportProfileTitle,
             },
             purpose switch
             {
                 BrowserPurpose.Rom => FileBrowserModel.RomFilters,
                 BrowserPurpose.Cover => FileBrowserModel.CoverFilters,
+                BrowserPurpose.ThreeDSen => FileBrowserModel.ThreeDSenFilters,
                 _ => FileBrowserModel.ProfileFilters,
             },
-            _settings.LastBrowseDirectory);
+            _settings.LastBrowseDirectory,
+
+            // AMD-030 §2: the 3dSen import is the one dialog that answers with a folder.
+            allowFolders: purpose == BrowserPurpose.ThreeDSen,
+            hint: purpose == BrowserPurpose.ThreeDSen ? UiText.ImportThreeDSenHint : null);
         State.FileBrowser = true;
     }
 
@@ -385,9 +417,43 @@ internal sealed partial class ZaxUi
                 _host.Enqueue(ZaxCommands.ImportCover, CommandArgs.Of(path));
                 break;
 
+            case BrowserPurpose.ThreeDSen:
+                ImportThreeDSen(path);
+                break;
+
             default:
                 ImportProfile(path);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// The import of AMD-030 §2: every profile of the named installation goes into the library,
+    /// a summary is shown, and the chooser is rebuilt so the new profiles show at once.
+    /// </summary>
+    private void ImportThreeDSen(string path)
+    {
+        ThreeDSenImportReport report = _catalog.ImportFromThreeDSen(path);
+
+        if (report.Summary is null)
+        {
+            // AMD-030 §3, §5: nothing was found or nothing could be read, and the message says
+            // where it looked.
+            _host.Notifications.ShowError(report.Message);
+            _log(report.Message);
+            return;
+        }
+
+        // AMD-036 §1: the notification follows the interface language, the log stays English.
+        _host.Notifications.Show(
+            UiNotifications.ThreeDSenSummary(
+                report.Summary.Imported, report.Summary.AlreadyPresent, report.Summary.Failed));
+        _log(report.Message);
+
+        if (report.Summary.Imported > 0)
+        {
+            _options.Mixer?.PlaySound(UiSound.Confirm);
+            RebuildChooser();
         }
     }
 

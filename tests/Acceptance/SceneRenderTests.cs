@@ -248,28 +248,29 @@ public sealed class SceneRenderTests
     // ----------------------------------------------------------------- §3.10 shadows
 
     /// <summary>
-    /// REQ-SCN-030 — the shadow map is a single map of 1024 texels by default covering the part
-    /// of the scene within 512 units of the camera (DEC-R2-D4, Q-019).
+    /// REQ-SCN-030 — the shadow map is a single map of 4096 texels by default (AMD-034 §2,
+    /// replacing the 1024 of DEC-R2-D4) covering the part of the scene within 512 units of the
+    /// camera (Q-019).
     /// </summary>
-    [Fact] // REQ-SCN-030
-    public void The_shadow_map_is_one_1024_texel_map_over_512_units()
+    [Fact] // REQ-SCN-030, AMD-034
+    public void The_shadow_map_is_one_4096_texel_map_over_512_units()
     {
-        Assert.Equal(1024, SceneConstants.ShadowMapSize);
+        Assert.Equal(4096, SceneConstants.ShadowMapSize);
         Assert.Equal(512f, SceneConstants.ShadowDistance);
-        Assert.Equal(1024, new RenderSettings().ShadowMapSize);
+        Assert.Equal(4096, new RenderSettings().ShadowMapSize);
     }
 
     /// <summary>
-    /// REQ-SCN-031, Q-032 — the direct term is multiplied by 0.2 inside a shadow, the ambient is
-    /// untouched, and the depth bias is <c>max(0.02 ; 1.5 × texel)</c>.
+    /// REQ-SCN-031, Q-032 amended by AMD-034 §2 — the direct term is multiplied by 0.2 inside a
+    /// shadow, the ambient is untouched, and the depth bias is <c>max(0.02 ; 1 × texel)</c>.
     /// </summary>
-    [Fact] // REQ-SCN-031
+    [Fact] // REQ-SCN-031, AMD-034
     public void The_shadow_strength_is_zero_point_eight_and_the_bias_follows_the_texel()
     {
         Assert.Equal(0.2f, SceneColor.ShadowFactor);
         Assert.Equal(0.02f, SceneConstants.ShadowDepthBias);
         Assert.Equal(0.02f, SceneConstants.ShadowNormalOffset);
-        Assert.Equal(1.5f, SceneConstants.ShadowBiasTexels);
+        Assert.Equal(1f, SceneConstants.ShadowBiasTexels);
 
         // A white frontal face goes from 223 in full light to 146 in shadow (±3).
         Rgb24 white = NesPalette.Color(0x30);
@@ -834,120 +835,6 @@ public sealed class SceneRenderTests
             scene.NesBackgroundColor);
     }
 
-    // ------------------------------------------------------------- §3.15 TV box
-
-    /// <summary>
-    /// REQ-SCN-053, §5.3 — the five tunnel boxes with the clipping (0.1 ; 8.1 ; 8.1 ; 0.1).
-    /// </summary>
-    [Fact] // REQ-SCN-053
-    public void The_tunnel_boxes_of_section_5_3()
-    {
-        Assert.Equal(5, TvBox.TunnelBoxCount);
-
-        TunnelBox[] tunnel = TvBox.Tunnel(DefaultClipping);
-        Assert.Equal(5, tunnel.Length);
-
-        // left: x ∈ [−8 ; 0.1], y ∈ [4.1 ; 243.9], z ∈ [−16 ; 112].
-        Box(tunnel[0], -8f, 0.1f, 4.1f, 243.9f, -16f, 112f);
-
-        // right: x ∈ [247.9 ; 264].
-        Box(tunnel[1], 247.9f, 264f, 4.1f, 243.9f, -16f, 112f);
-
-        // bottom: y ∈ [−4 ; 8.1].
-        Box(tunnel[2], -8f, 264f, -4f, 8.1f, -16f, 112f);
-
-        // top: y ∈ [239.9 ; 244].
-        Box(tunnel[3], -8f, 264f, 239.9f, 244f, -16f, 112f);
-
-        // back: x ∈ [0 ; 256], y ∈ [0 ; 240], z ∈ [112 ; 120].
-        Box(tunnel[4], 0f, 256f, 0f, 240f, 112f, 120f);
-
-        static void Box(TunnelBox box, float x0, float x1, float y0, float y1, float z0, float z1)
-        {
-            Assert.Equal(x0, box.Min.X, 1e-3f);
-            Assert.Equal(x1, box.Max.X, 1e-3f);
-            Assert.Equal(y0, box.Min.Y, 1e-3f);
-            Assert.Equal(y1, box.Max.Y, 1e-3f);
-            Assert.Equal(z0, box.Min.Z, 1e-3f);
-            Assert.Equal(z1, box.Max.Z, 1e-3f);
-        }
-    }
-
-    /// <summary>
-    /// REQ-SCN-054, §5.3 — the TV frame: the origin
-    /// <c>C + ((c0 − c2) / 256, (c1 − c3) / 240, −16)</c> and the scales
-    /// <c>(256 − c0 − c2) / 256</c>, <c>(240 − c1 − c3) / 240</c>, 1.
-    /// </summary>
-    [Fact] // REQ-SCN-054
-    public void The_TV_frame_origin_and_scale_of_section_5_3()
-    {
-        Vector3 origin = TvBox.FrameOrigin(DefaultClipping);
-        Vector3 scale = TvBox.FrameScale(DefaultClipping);
-
-        Assert.Equal(SceneConstants.Center.X + (-0.03125f), origin.X, 1e-4f);
-        Assert.Equal(SceneConstants.Center.Y + 0.03333f, origin.Y, 1e-4f);
-        Assert.Equal(SceneConstants.Center.Z - 16f, origin.Z, 1e-4f);
-
-        Assert.Equal(0.96797f, scale.X, 1e-4f);
-        Assert.Equal(0.96583f, scale.Y, 1e-4f);
-        Assert.Equal(1f, scale.Z, 1e-4f);
-    }
-
-    /// <summary>
-    /// REQ-SCN-053 with AMD-025 — the TV box setting has two values now, and a stored 2 or 3,
-    /// the TV 2 and TV 3 of REQ-SCN-054, comes back as the one model.
-    /// </summary>
-    [Fact] // REQ-SCN-053, AMD-025
-    public void The_TV_box_setting_has_one_model_and_migrates_the_old_values()
-    {
-        Assert.Equal(TvBoxKind.None, TvBoxSetting.From(0));
-        Assert.Equal(TvBoxKind.Tv, TvBoxSetting.From(1));
-        Assert.Equal(TvBoxKind.Tv, TvBoxSetting.From(2));
-        Assert.Equal(TvBoxKind.Tv, TvBoxSetting.From(3));
-
-        // Out-of-range values settle on one side or the other rather than on a value the
-        // renderer could not read.
-        Assert.Equal(TvBoxKind.None, TvBoxSetting.From(-4));
-        Assert.Equal(TvBoxKind.Tv, TvBoxSetting.From(9));
-
-        Assert.Equal(0, TvBoxSetting.Normalise(0));
-        Assert.Equal(1, TvBoxSetting.Normalise(3));
-        Assert.Equal(1, TvBoxSetting.Max);
-    }
-
-    /// <summary>
-    /// REQ-SCN-054, notes — the textures and the cubemap the three TV models need are present in
-    /// <c>assets-neutral</c>.
-    /// </summary>
-    [Trait("Requires", "OriginalAssets")]
-    [CorpusFact] // REQ-SCN-054
-    public void The_TV_textures_and_the_cubemap_are_in_the_neutral_assets()
-    {
-        string textures = Path.Combine(NeutralAssets.Root, "textures");
-        string cubemaps = Path.Combine(NeutralAssets.Root, "cubemaps");
-        string meshes = Path.Combine(NeutralAssets.Root, "meshes");
-
-        foreach (string name in new[]
-        {
-            "Tv_3_4_diff", "Tv_3_4_normal", "Tv_1_2_diff", "Tv_1_2_normal", "Tv_1_2_gloss",
-        })
-        {
-            Assert.True(
-                Directory.GetFiles(textures, name + ".*").Length > 0,
-                $"the texture {name} is missing.");
-        }
-
-        Assert.True(
-            Directory.GetFiles(textures, "2000s_CRT_TV_black_*").Length > 0,
-            "the TV 3 textures are missing.");
-        Assert.True(Directory.GetFiles(cubemaps, "Cubemap*").Length > 0, "the cubemap is missing.");
-
-        foreach (string mesh in new[] { "Object003.obj", "Object004.obj", "2000s_CRT_TV_LOD0.obj" })
-        {
-            Assert.True(File.Exists(Path.Combine(meshes, mesh)), $"the mesh {mesh} is missing.");
-        }
-    }
-
     // ----------------------------------------------------------------- §3.16 2D mode
 
     /// <summary>
@@ -1011,7 +898,6 @@ public sealed class SceneRenderTests
         Assert.Equal(0, settings.VSync);
         Assert.Equal(90, settings.TargetFrameRate);
         Assert.True(settings.Shadows);
-        Assert.Equal(TvBoxKind.None, settings.TvBox);
         Assert.Equal(default, settings.CustomBackgroundColor);
         Assert.Equal(70f, settings.Fov);
 

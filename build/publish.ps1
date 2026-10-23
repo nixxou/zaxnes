@@ -14,14 +14,8 @@
     two generic entries « 2D Mode » and « 3D par défaut (sans profil) », and .3dn profiles are
     imported by the user.
 
-    The one asset file the release carries is the television of AMD-025:
-    assets/tv/retro_crt_tv.glb, « Retro Crt Tv » by meipal, CC BY 4.0, copied unmodified and
-    attributed in ASSETS-LICENSES.md. The script verifies that no other asset file slipped
-    into the output, and that this one is there.
-
-.PARAMETER Television
-    The glTF model of AMD-025. Default: assets-free/tv/retro-crt-tv/retro_crt_tv.glb next to
-    the clean-room tree. The release is still produced without it, with the TV option disabled.
+    AMD-031 removed the decorative TV box, the one asset file the release used to carry, so the
+    output now holds no asset file at all and the script fails if any slipped in.
 
 .PARAMETER Output
     Where the release goes. Default: impl/artifacts/zaxnes-win-x64.
@@ -75,7 +69,6 @@ param(
     [string]$Roms = $env:ZAXNES_ROMS,
     [string]$ImportProfile,
     [string]$ImportRom,
-    [string]$Television,
     [int]$PlaySeconds = 60,
     [switch]$SkipChecks
 )
@@ -144,11 +137,9 @@ Build Windows x64 autonome : aucun .NET à installer. Lancez Zaxnes.exe.
     Zaxnes.exe --rom "jeu.nes" --profile "2D Mode"
     Zaxnes.exe --help
 
-AUCUN ASSET N'EST NÉCESSAIRE. Les skyboxes et les sons d'interface sont produits par le code ;
-la police de l'interface est une police déjà installée sur votre Windows (Segoe UI, sinon
-Arial), lue au lancement et jamais redistribuée. Il n'y a pas de musique de menu. Le seul
-fichier d'asset livré est le boîtier TV, « Retro Crt Tv » de meipal, sous licence CC BY 4.0
-(assets/tv/retro_crt_tv.glb) ; sans lui, l'option « Boîtier TV » est simplement désactivée.
+AUCUN ASSET N'EST NÉCESSAIRE NI LIVRÉ. Les skyboxes et les sons d'interface sont produits par
+le code ; la police de l'interface est une police déjà installée sur votre Windows (Segoe UI,
+sinon Arial), lue au lancement et jamais redistribuée. Il n'y a pas de musique de menu.
 Détail et licences : ASSETS-LICENSES.md.
 
 AUCUNE ROM N'EST FOURNIE. Utilisez une ROM dont vous disposez légalement.
@@ -178,33 +169,14 @@ Vérification non interactive :
 "@
 Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 
-# ---------------------------------------------------------------- 3. the television (AMD-025)
+# AMD-033 §3: an empty 'profiles' folder next to Zaxnes.exe, with a line saying what to put in
+# it. It is the second folder the library scans, in every mode, and it is only ever read.
+$profilesFolder = Join-Path $Output 'profiles'
+New-Item -ItemType Directory -Force -Path $profilesFolder | Out-Null
+Set-Content -Path (Join-Path $profilesFolder 'README.txt') -Encoding utf8 `
+    -Value "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni."
 
-# The one asset file the release ships: the CC BY 4.0 model, copied unmodified, with its
-# attribution in ASSETS-LICENSES.md. Without it the build is still valid; the TV box option is
-# simply disabled (AMD-025).
-if (-not $Television) {
-    $Television = Join-Path (Split-Path -Parent $root) 'assets-free\tv\retro-crt-tv\retro_crt_tv.glb'
-}
-
-$televisionName = 'retro_crt_tv.glb'
-if (Test-Path $Television) {
-    $tvFolder = Join-Path $Output 'assets\tv'
-    New-Item -ItemType Directory -Force -Path $tvFolder | Out-Null
-    Copy-Item $Television (Join-Path $tvFolder $televisionName) -Force
-
-    $source = Get-Item $Television
-    $copy = Get-Item (Join-Path $tvFolder $televisionName)
-    if ($source.Length -ne $copy.Length) {
-        throw 'publish: AMD-025 — the television model was not copied unmodified.'
-    }
-
-    Write-Host "publish: television model copied to assets\tv\$televisionName ($([math]::Round($copy.Length / 1MB, 1)) MB)"
-} else {
-    Write-Warning "publish: AMD-025 — $Television was not found; the TV box option will be disabled."
-}
-
-# ---------------------------------------------------------------- 4. no other asset (REQ-PUB-002)
+# ---------------------------------------------------------------- 3. no asset at all (REQ-PUB-002)
 
 #. '.ico' is here for lot ICON-1: the application icon travels *inside* Zaxnes.exe — the Win32
 #  icon resource compiled from branding/zaxnes.ico, and the PNG sizes embedded as assembly
@@ -214,13 +186,28 @@ $assetExtensions = @(
     '.bytes', '.3dn', '.png', '.jpg', '.jpeg', '.bmp', '.tga', '.dds', '.ico',
     '.obj', '.fbx', '.gltf', '.glb', '.wav', '.ogg', '.mp3', '.ttf', '.otf')
 $stowaways = Get-ChildItem -Recurse -File $Output |
-    Where-Object { $assetExtensions -contains $_.Extension.ToLowerInvariant() } |
-    Where-Object { $_.Name -ne $televisionName }
+    Where-Object { $assetExtensions -contains $_.Extension.ToLowerInvariant() }
 if ($stowaways) {
     $names = ($stowaways | ForEach-Object { $_.Name }) -join ', '
     throw "publish: REQ-PUB-002 — the release carries asset files: $names"
 }
-Write-Host 'publish: no asset file but the CC BY television in the output (REQ-PUB-002 OK)'
+
+# AMD-031 §4: the TV box is gone, so there is no assets\tv folder either.
+if (Test-Path (Join-Path $Output 'assets')) {
+    throw 'publish: AMD-031 — the release must carry no assets folder.'
+}
+
+# AMD-033 §3: the profiles folder ships empty — its README.txt and nothing else. A .3dn would
+# already have failed the check above; this one also catches anything else slipped in.
+$shipped = @(Get-ChildItem -Recurse -Force $profilesFolder |
+    Where-Object { $_.FullName -ne (Join-Path $profilesFolder 'README.txt') })
+if ($shipped) {
+    $names = ($shipped | ForEach-Object { $_.Name }) -join ', '
+    throw "publish: AMD-033 — profiles\ must hold README.txt alone, found: $names"
+}
+
+Write-Host 'publish: no asset file in the output (REQ-PUB-002, AMD-031 OK)'
+Write-Host 'publish: profiles\README.txt alone in profiles\ (AMD-033 OK)'
 
 $size = [math]::Round(((Get-ChildItem -Recurse -File $Output | Measure-Object -Sum Length).Sum / 1MB), 1)
 $count = (Get-ChildItem -Recurse -File $Output | Measure-Object).Count
@@ -231,7 +218,7 @@ if ($SkipChecks) {
     exit 0
 }
 
-# ---------------------------------------------------------------- 5. does it start and play?
+# ---------------------------------------------------------------- 4. does it start and play?
 
 $userdata = Join-Path ([System.IO.Path]::GetTempPath()) ("zaxnes-publish-" + [System.Guid]::NewGuid().ToString('N'))
 
@@ -302,7 +289,7 @@ try {
     } elseif (Test-Path $rom) {
         $lines = Invoke-Smoke 'Elevator Action in 3D without a profile' @(
             '--rom', $rom, '--profile', '3D par défaut (sans profil)',
-            '--skybox', 'gradient', '--tv', '1',
+            '--skybox', 'gradient',
             '--smoke-emulated', "$playFrames",
             '--userdata', (Join-Path $userdata 'b'))
         Assert-Played -Lines $lines -Label 'Elevator Action in 3D without a profile' -Wanted $playFrames
@@ -336,7 +323,7 @@ try {
             # scan of <root>/profiles created, whatever title the profile carries.
             $lines = Invoke-Smoke 'the imported profile plays its game' @(
                 '--rom', $importRom, '--profile', $copy,
-                '--skybox', 'fantasy', '--tv', '1',
+                '--skybox', 'fantasy',
                 '--smoke-emulated', "$playFrames",
                 '--userdata', $importRoot)
             Assert-Played -Lines $lines -Label 'the imported profile plays its game' -Wanted $playFrames

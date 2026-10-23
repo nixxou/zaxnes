@@ -292,6 +292,22 @@ public sealed class UiDriver
         return value?.ToString() ?? throw new InvalidOperationException($"UiText has no '{name}'");
     }
 
+    /// <summary>
+    /// The text of the key <paramref name="key"/> in the language in force (AMD-035 §3). A test
+    /// that has to compare a label reads the expected one from here instead of spelling it out,
+    /// so that it checks the function and not the language the interface happens to be in.
+    /// </summary>
+    public static string Label(string key)
+        => (string)Type("Zax.App.Ui.UiStrings")
+            .GetMethod("Get", BindingFlags.Public | BindingFlags.Static)!
+            .Invoke(null, [key])!;
+
+    /// <summary>The label of the menu row that invokes <paramref name="command"/> (REQ-UI-205).</summary>
+    public static string CommandLabel(string command)
+        => Label((string)Type("Zax.App.Ui.UiKeys")
+            .GetMethod("Command", BindingFlags.Public | BindingFlags.Static)!
+            .Invoke(null, [command])!);
+
     /// <summary>The lines of the about block (REQ-UI-076, DEC-10-Q3).</summary>
     public static IReadOnlyList<string> AboutLines()
     {
@@ -305,16 +321,29 @@ public sealed class UiDriver
     // -------------------------------------------------------------- file browser
 
     /// <summary>A file browser opened on <paramref name="directory"/> with the ROM filters.</summary>
-    public static object OpenBrowser(string title, string? directory, bool profileFilters = false)
+    /// <param name="title">Title of the dialog.</param>
+    /// <param name="directory">The folder it opens on.</param>
+    /// <param name="profileFilters">Whether to use the <c>.3dn</c> filters.</param>
+    /// <param name="threeDSen">
+    /// Whether to open it the way the 3dSen import does: the bundle filters and a folder as an
+    /// acceptable answer (AMD-030 §2).
+    /// </param>
+    public static object OpenBrowser(
+        string title,
+        string? directory,
+        bool profileFilters = false,
+        bool threeDSen = false)
     {
         Type type = Type("Zax.App.Ui.FileBrowserModel");
         object model = Activator.CreateInstance(type)!;
         object filters = type
-            .GetProperty(profileFilters ? "ProfileFilters" : "RomFilters",
+            .GetProperty(
+                threeDSen ? "ThreeDSenFilters" : profileFilters ? "ProfileFilters" : "RomFilters",
                 BindingFlags.Public | BindingFlags.Static)!
             .GetValue(null)!;
 
-        type.GetMethod("Open")!.Invoke(model, [title, filters, directory]);
+        // Every parameter is given: Open has optional ones and reflection does not fill them in.
+        type.GetMethod("Open")!.Invoke(model, [title, filters, directory, threeDSen, null]);
         return model;
     }
 
@@ -337,6 +366,18 @@ public sealed class UiDriver
     /// <summary>Sets the browser's search text (REQ-UI-103).</summary>
     public static void BrowserSearch(object browser, string text)
         => browser.GetType().GetProperty("Search")!.SetValue(browser, text);
+
+    /// <summary>
+    /// Validates the dialog and returns what it answers, or null when it refuses to answer
+    /// (REQ-UI-104; AMD-030 §2 for the folder answer).
+    /// </summary>
+    public static string? BrowserConfirm(object browser)
+        => (bool)browser.GetType().GetMethod("Confirm")!.Invoke(browser, null)!
+            ? (string?)Get(browser, "Result")
+            : null;
+
+    /// <summary>Whether the dialog would answer something (AMD-030 §2).</summary>
+    public static bool BrowserCanConfirm(object browser) => (bool)Get(browser, "CanConfirm")!;
 
     /// <summary>The browser's path trail (REQ-UI-101).</summary>
     public static IReadOnlyList<string> BrowserTrail(object browser)

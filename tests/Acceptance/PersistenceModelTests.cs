@@ -314,7 +314,6 @@ public sealed class PersistenceModelTests
         Assert.Equal(1f, model.GetFloat(SettingKeys.LightIntensity));
         Assert.Equal(new SettingColor(0f, 0f, 0f, 1f), model.GetColor(SettingKeys.SceneCustomBgColor));
         Assert.True(model.GetBool(SettingKeys.SceneUseNesBgColor));
-        Assert.Equal(0, model.GetInt(SettingKeys.SceneTvBox));
         Assert.False(model.GetBool(SettingKeys.SceneMapEnable));
 
         Assert.Equal(0.1f, model.GetFloat(SettingKeys.ClipLeft), 4);
@@ -890,9 +889,8 @@ public sealed class PersistenceModelTests
         Assert.Equal<IEnumerable<string>>(["Default", "Color", "Gradient", "Fantasy"], skybox.Values);
         Assert.Equal("Default", skybox.DefaultValue);
 
-        LibretroCoreOption tv = Zax.Settings.LibretroCoreOptions.Find("zaxnes_scene_tv_box")!.Value;
-        // AMD-025 leaves one model, so the core option has two values.
-        Assert.Equal<IEnumerable<string>>(["None", "TV"], tv.Values);
+        // AMD-031 removed the TV box, so there is no core option for it any more.
+        Assert.Null(Zax.Settings.LibretroCoreOptions.Find("zaxnes_scene_tv_box"));
 
         LibretroCoreOption mesh = Zax.Settings.LibretroCoreOptions.Find("zaxnes_render_mesh_algo")!.Value;
         Assert.Equal<IEnumerable<string>>(["GREEDY", "MARCHING", "GREEDY_MULTICOLOR"], mesh.Values);

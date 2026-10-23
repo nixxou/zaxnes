@@ -32,7 +32,6 @@ internal static class CommandLineSettings
         SettingKeys.CameraFov,
         SettingKeys.RenderShadow,
         SettingKeys.SceneSkybox,
-        SettingKeys.SceneTvBox,
         SettingKeys.VideoSkipFrame,
         SettingKeys.VideoFrameRate,
         SettingKeys.VideoVSync,
@@ -62,15 +61,6 @@ internal static class CommandLineSettings
         if (options.Skybox is { } skybox)
         {
             model.Set(SettingKeys.SceneSkybox, SettingValue.OfEnum(skybox), SettingLayer.CommandLine);
-        }
-
-        if (options.TvBox is { } tvBox)
-        {
-            // AMD-025: a stored or requested TV 2 or TV 3 is the one model.
-            model.Set(
-                SettingKeys.SceneTvBox,
-                SettingValue.OfEnum(TvBoxSetting.Normalise(tvBox)),
-                SettingLayer.CommandLine);
         }
 
         if (options.SkipRender is { } skipRender)

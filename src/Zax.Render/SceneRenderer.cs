@@ -15,19 +15,16 @@ namespace Zax.Render;
 /// <remarks>
 /// Not thread-safe, and bound to the GL context that was current when it was created. The
 /// skyboxes of REQ-SCN-050 and REQ-SCN-051 are procedural (AMD-024 REQ-PUB-003) and need no
-/// asset; the television of AMD-025 is the glTF model the host hands over, and without it the
-/// TV box behaves as <see cref="TvBoxKind.None"/>.
+/// asset, so the scene is the game's image and its background and nothing else (AMD-031).
 /// </remarks>
 public sealed class SceneRenderer : ISceneRenderer
 {
     private readonly GL _gl;
     private readonly MeshCache _meshes;
     private readonly TextureCache _textures;
-    private readonly ImageTextureCache _images;
     private readonly ShadowMap _shadowMap;
     private readonly SkyboxPass _skybox;
     private readonly ISceneAssets? _assets;
-    private readonly TvModel? _television;
     private readonly NesPictureTexture _picture;
     private readonly ShaderProgram _scenePass;
     private readonly ShaderProgram _shadowPass;
@@ -39,11 +36,7 @@ public sealed class SceneRenderer : ISceneRenderer
     private readonly List<DrawItem> _casters = [];
     private readonly List<DrawGroup> _transparentObjects = [];
     private readonly List<DrawGroup> _hudObjects = [];
-    private readonly List<TunnelBox> _tunnel = [];
-    private readonly List<TvDrawPart> _tvParts = [];
 
-    private ShaderProgram? _tunnelPass;
-    private ShaderProgram? _modelPass;
     private bool _disposed;
     private bool _shadowEnabled;
     private bool _mirroredWinding;
@@ -55,36 +48,24 @@ public sealed class SceneRenderer : ISceneRenderer
     /// Where the skybox cubemaps of a user-supplied folder come from, or null when the host has
     /// none (REQ-SCN-057: the renderer never reads files itself).
     /// </param>
-    /// <param name="television">
-    /// The television model of AMD-025, already read from its <c>.glb</c>, or null when the
-    /// file is missing — the TV box setting then draws nothing.
-    /// </param>
-    public SceneRenderer(GL gl, ISceneAssets? assets = null, TvModel? television = null)
+    public SceneRenderer(GL gl, ISceneAssets? assets = null)
     {
         ArgumentNullException.ThrowIfNull(gl);
         _gl = gl;
         _assets = assets;
-        _television = television;
         _meshes = new MeshCache(gl);
         _textures = new TextureCache(gl);
-        _images = new ImageTextureCache(gl, assets);
-
-        // AMD-025: the model's textures live inside its own file, so they are handed to the
-        // cache by name instead of being looked up in an asset folder.
-        if (television is not null)
-        {
-            for (int index = 0; index < television.Images.Count; index++)
-            {
-                _images.Register(TvModel.TextureName(index), television.Images[index]);
-            }
-        }
-
         _shadowMap = new ShadowMap(gl, SceneConstants.ShadowMapSize);
         _skybox = new SkyboxPass(gl, assets);
         _picture = new NesPictureTexture(gl);
         _scenePass = ShaderProgram.Create(gl, "scene", SceneShaders.SceneVertex, SceneShaders.SceneFragment);
         _shadowPass = ShaderProgram.Create(gl, "shadow", SceneShaders.ShadowVertex, SceneShaders.ShadowFragment);
         _linear = new LinearColorBuffer(gl);
+
+        // AMD-034 §2: the size the hardware granted is known from here on, whether or not a
+        // shadow pass ever runs, so the host can report a fallback once.
+        Statistics.ShadowMapSize = _shadowMap.Size;
+        Statistics.RequestedShadowMapSize = _shadowMap.Requested;
     }
 
     /// <inheritdoc/>
@@ -136,15 +117,12 @@ public sealed class SceneRenderer : ISceneRenderer
         }
 
         _disposed = true;
-        _modelPass?.Dispose();
-        _tunnelPass?.Dispose();
         _shadowPass.Dispose();
         _scenePass.Dispose();
         _picture.Dispose();
         _linear.Dispose();
         _skybox.Dispose();
         _shadowMap.Dispose();
-        _images.Dispose();
         _textures.Dispose();
         _meshes.Dispose();
     }
@@ -161,8 +139,6 @@ public sealed class SceneRenderer : ISceneRenderer
         _transparent.Clear();
         _hud.Clear();
         _casters.Clear();
-        _tunnel.Clear();
-        _tvParts.Clear();
 
         // REQ-SCN-047: outside a running game the 3D scene is not displayed at all.
         if (!scene.GameRunning)
@@ -174,7 +150,6 @@ public sealed class SceneRenderer : ISceneRenderer
         // of a recomposition of the tile records.
         if (scene.TwoDimensionalMode && CollectPictureQuad(scene, view))
         {
-            CollectDecoration(scene, view);
             return;
         }
 
@@ -193,8 +168,6 @@ public sealed class SceneRenderer : ISceneRenderer
         {
             CollectBackdrop(scene, view);
         }
-
-        CollectDecoration(scene, view);
 
         // AMD-012 (Q-020 revised): the depth pass and the sort of the transparent objects are per
         // whole object, so the faces between the tiles of one translucent object stay invisible.
@@ -237,56 +210,6 @@ public sealed class SceneRenderer : ISceneRenderer
             groups.Add(new DrawGroup(start, end - start, Vector3.Distance((min + max) * 0.5f, eye)));
             start = end;
         }
-    }
-
-    /// <summary>
-    /// The tunnel of REQ-SCN-053 and the television of AMD-025, recomputed from the clip
-    /// margins at every rendered frame.
-    /// </summary>
-    /// <remarks>
-    /// AMD-025: with no model file there is no television at all, and the setting behaves as
-    /// <see cref="TvBoxKind.None"/> — the tunnel alone would be a frame floating in the void.
-    /// </remarks>
-    private void CollectDecoration(SceneState scene, in CameraView view)
-    {
-        if (scene.Settings.TvBox == TvBoxKind.None || _television is not { } television)
-        {
-            return;
-        }
-
-        // The tunnel of REQ-SCN-053, clipped to what the cabinet hides (AMD-025).
-        VisibleRect footprint = television.Footprint(scene.Clipping);
-        foreach (TunnelBox wall in TvBox.Tunnel(scene.Clipping))
-        {
-            _tunnel.Add(wall.ClampTo(footprint));
-        }
-
-        Mat4 model = television.Placement(scene.Clipping);
-        foreach (TvModelPart part in television.Parts)
-        {
-            if (_meshes.Get(part.Mesh) is not { } resident)
-            {
-                continue;
-            }
-
-            bool receives = part.ReceiveShadow && scene.Settings.Shadows;
-            _tvParts.Add(new TvDrawPart(resident, model, part.Material, receives));
-
-            // AMD-025, AMD-021 R2-014: the buttons fill the shadow map, the cabinet does not.
-            if (part.CastShadow && scene.Settings.Shadows)
-            {
-                _casters.Add(new DrawItem
-                {
-                    Mesh = resident,
-                    Model = model,
-                    Alpha = 1f,
-                    BoundsMin = part.Mesh.BoundsMin,
-                    BoundsMax = part.Mesh.BoundsMax,
-                });
-            }
-        }
-
-        _ = view;
     }
 
     /// <summary>
@@ -465,6 +388,8 @@ public sealed class SceneRenderer : ISceneRenderer
         }
 
         _shadowMap.Resize(scene.Settings.ShadowMapSize);
+        Statistics.ShadowMapSize = _shadowMap.Size;
+        Statistics.RequestedShadowMapSize = _shadowMap.Requested;
 
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -494,10 +419,10 @@ public sealed class SceneRenderer : ISceneRenderer
 
         // Q-025: only the back faces of the casters fill the map. The tile meshes are closed
         // (REQ-E3D-505), so the stored depth is the far side of each object and a lit front
-        // face can no longer shadow itself: with a 1024-texel map over the whole scene, one
-        // texel spans more than the 0.02 unit bias of REQ-SCN-031, and front faces produce
-        // visible shadow acne on every slanted surface. The bias and the normal offset of
-        // REQ-SCN-031 are still applied on top.
+        // face can no longer shadow itself: over a whole scene one texel still spans more than
+        // the 0.02 unit bias of REQ-SCN-031 — about 0.1 unit on the 4096-texel map of
+        // AMD-034 §2 — and front faces produce visible shadow acne on every slanted surface.
+        // The bias and the normal offset of REQ-SCN-031 are still applied on top.
         _gl.Enable(EnableCap.CullFace);
         _gl.CullFace(TriangleFace.Front);
         SetWinding(false, force: true);
@@ -534,7 +459,10 @@ public sealed class SceneRenderer : ISceneRenderer
         // AMD-021 R2-009: the scene is drawn into the renderer's own linear buffer, so that the
         // blending of the transparent objects and of the HUD happens on linear colours, and the
         // whole image is encoded to sRGB once, on the way into the host framebuffer.
-        _linear.BeginPass(target.Width, target.Height);
+        // AMD-032 §2: that buffer is multisampled when anti-aliasing is on, and resolved before
+        // the sRGB pass reads it. The shadow map keeps its own single-sample target.
+        _linear.BeginPass(target.Width, target.Height, scene.Settings.AntiAliasSamples);
+        Statistics.AntiAliasSamples = _linear.Samples;
         _gl.Disable(EnableCap.ScissorTest);
         _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.DepthTest);
@@ -553,11 +481,7 @@ public sealed class SceneRenderer : ISceneRenderer
         // (REQ-SCN-047).
         Statistics.SkyboxPass = _skybox.Draw(scene, view);
 
-        if (_opaque.Count == 0
-            && _transparent.Count == 0
-            && _hud.Count == 0
-            && _tunnel.Count == 0
-            && _tvParts.Count == 0)
+        if (_opaque.Count == 0 && _transparent.Count == 0 && _hud.Count == 0)
         {
             _linear.ResolveTo(target);
             return;
@@ -592,20 +516,8 @@ public sealed class SceneRenderer : ISceneRenderer
 
         Statistics.OpaqueTiles = _opaque.Count;
 
-        // The tiles may have left the winding reversed (Q-069); the decoration that follows is
-        // never mirrored.
+        // The tiles may have left the winding reversed (Q-069).
         SetWinding(false);
-
-        // 1b. The decorative TV box, still opaque (REQ-SCN-053, REQ-SCN-054, REQ-SCN-058).
-        if (_tunnel.Count > 0)
-        {
-            DrawTunnel(scene, view);
-        }
-
-        if (_tvParts.Count > 0)
-        {
-            DrawTvModels(scene, view, volume);
-        }
 
         // 2. Transparent objects, farthest first, each with a depth-only pass first
         // (REQ-SCN-040, AMD-012).
@@ -648,147 +560,6 @@ public sealed class SceneRenderer : ISceneRenderer
         _gl.DepthFunc(DepthFunction.Less);
         SetWinding(false);
         _linear.ResolveTo(target);
-    }
-
-    /// <summary>
-    /// The five tunnel boxes of REQ-SCN-053: one flat colour equal to the background colour of
-    /// REQ-SCN-046, unlit, shadowless, and not cut by the visible rectangle.
-    /// </summary>
-    private void DrawTunnel(SceneState scene, in CameraView view)
-    {
-        if (_meshes.Get(BoxMesh.Unit) is not { } box)
-        {
-            return;
-        }
-
-        ShaderProgram program = _tunnelPass ??= ShaderProgram.Create(
-            _gl, "tunnel", ModelShaders.TunnelVertex, ModelShaders.TunnelFragment);
-        program.Use();
-        program.Set("uViewProjection", view.ViewProjection);
-
-        // R2-009: the shaders of the scene write linear colours.
-        program.Set("uColor", SceneColor.ToLinear(scene.BackgroundColor));
-
-        foreach (TunnelBox wall in _tunnel)
-        {
-            Vector3 size = wall.Size;
-            if (size.X <= 0f || size.Y <= 0f || size.Z <= 0f)
-            {
-                continue;
-            }
-
-            Mat4 model = Mat4.Translation(MatrixInterop.ToVec3(wall.Center))
-                * Mat4.ScaleMatrix(MatrixInterop.ToVec3(size));
-            program.Set("uModel", MatrixInterop.ToNumerics(model));
-            Draw(box);
-            Statistics.TunnelBoxes++;
-        }
-    }
-
-    /// <summary>
-    /// The television of AMD-025: the metallic-roughness materials of its glTF file, lit by the
-    /// scene light, the cabinet without any shadow and the buttons with one.
-    /// </summary>
-    private void DrawTvModels(SceneState scene, in CameraView view, ShadowVolume volume)
-    {
-        ShaderProgram program = _modelPass ??= ShaderProgram.Create(
-            _gl, "tv-model", ModelShaders.Vertex, ModelShaders.Fragment);
-        program.Use();
-        program.Set("uViewProjection", view.ViewProjection);
-        program.Set("uEye", view.Eye);
-        program.Set("uAmbient", SceneColor.AmbientLinear);
-        program.Set("uLightDirection", scene.Light.Direction);
-        program.Set(
-            "uLightLinear",
-            SceneColor.ToLinear(scene.Light.Color) * SceneColor.ToLinear(scene.Settings.LightIntensity));
-        program.Set("uBaseColor", 0);
-        program.Set("uNormalMap", 1);
-        program.Set("uMetallicRoughness", 2);
-        program.Set("uEmissive", 3);
-
-        // R2-014: the shadow of the buttons, read with the parameters of REQ-SCN-031.
-        program.Set("uShadowMap", 5);
-        program.Set("uLightViewProjection", volume.ViewProjection);
-        program.Set(
-            "uShadowBias",
-            volume.HasContent ? ShadowBias(volume, _shadowMap.Size) / volume.DepthRange : 0f);
-        program.Set("uNormalOffset", SceneConstants.ShadowNormalOffset);
-        program.Set("uShadowStrength", SceneColor.ShadowFactor);
-        _gl.ActiveTexture(TextureUnit.Texture5);
-        _gl.BindTexture(TextureTarget.Texture2D, _shadowMap.DepthTexture);
-
-        Span<float> normal = stackalloc float[9];
-        bool cull = scene.Settings.CullBackFaces;
-        bool culling = cull;
-        bool mirroredNow = false;
-        foreach (TvDrawPart part in _tvParts)
-        {
-            TvMaterial material = part.Material;
-            program.Set("uModel", MatrixInterop.ToNumerics(part.Model));
-            MatrixInterop.NormalMatrix(part.Model, normal);
-            program.SetMatrix3("uNormalMatrix", normal);
-
-            // A placement with a negative determinant mirrors the model: the triangles come
-            // out the other way round and the cofactor normal points inwards.
-            bool mirrored = Determinant(part.Model) < 0f;
-            program.Set("uNormalSign", mirrored ? -1f : 1f);
-
-            // glTF 2.0 §3.7.4: a double-sided material draws both faces.
-            bool wanted = cull && !material.DoubleSided;
-            if (wanted != culling)
-            {
-                if (wanted)
-                {
-                    _gl.Enable(EnableCap.CullFace);
-                }
-                else
-                {
-                    _gl.Disable(EnableCap.CullFace);
-                }
-
-                culling = wanted;
-            }
-
-            if (culling)
-            {
-                SetWinding(mirrored);
-                mirroredNow = mirrored;
-            }
-
-            program.Set("uBaseColorFactor", material.BaseColor);
-            program.Set("uAlphaCutout", material.AlphaCutout ? 1 : 0);
-            program.Set("uAlphaCutoff", material.AlphaCutoff);
-            program.Set("uReceiveShadow", part.ReceiveShadow && volume.HasContent ? 1 : 0);
-            program.Set("uMetallic", material.Metallic);
-            program.Set("uRoughness", material.Roughness);
-            program.Set("uNormalScale", material.NormalScale);
-            program.Set("uEmissiveColor", material.EmissiveColor);
-            program.Set("uHasNormalMap", _images.Has(material.Normal) ? 1 : 0);
-            program.Set("uHasMetallicRoughness", _images.Has(material.MetallicRoughness) ? 1 : 0);
-            program.Set("uHasEmissive", _images.Has(material.Emissive) ? 1 : 0);
-
-            _gl.ActiveTexture(TextureUnit.Texture0);
-            _gl.BindTexture(TextureTarget.Texture2D, _images.Get(material.Diffuse));
-            _gl.ActiveTexture(TextureUnit.Texture1);
-            _gl.BindTexture(TextureTarget.Texture2D, _images.Get(material.Normal));
-            _gl.ActiveTexture(TextureUnit.Texture2);
-            _gl.BindTexture(TextureTarget.Texture2D, _images.Get(material.MetallicRoughness));
-            _gl.ActiveTexture(TextureUnit.Texture3);
-            _gl.BindTexture(TextureTarget.Texture2D, _images.Get(material.Emissive));
-
-            _gl.ActiveTexture(TextureUnit.Texture0);
-            Draw(part.Mesh);
-            Statistics.TvParts++;
-        }
-
-        if (cull)
-        {
-            _gl.Enable(EnableCap.CullFace);
-            if (mirroredNow)
-            {
-                SetWinding(false);
-            }
-        }
     }
 
     /// <summary>
@@ -882,7 +653,7 @@ public sealed class SceneRenderer : ISceneRenderer
     /// <summary>
     /// The depth bias of the shadow test, in scene units: the 0.02 unit of REQ-SCN-031, raised
     /// to <see cref="SceneConstants.ShadowBiasTexels"/> texels of the current map when a texel is
-    /// coarser than that (Q-032).
+    /// coarser than that (Q-032, amended by AMD-034 §2 — one texel, never under 0.02 unit).
     /// </summary>
     /// <remarks>
     /// Q-025 fills the map with back faces only. A tile mesh is closed on itself (REQ-E3D-505),
@@ -894,9 +665,7 @@ public sealed class SceneRenderer : ISceneRenderer
     /// 0.02 unit figure.
     /// </remarks>
     private static float ShadowBias(ShadowVolume volume, int mapSize)
-        => MathF.Max(
-            SceneConstants.ShadowDepthBias,
-            SceneConstants.ShadowBiasTexels * volume.TexelSize(mapSize));
+        => SceneConstants.ShadowBias(volume.TexelSize(mapSize));
 
     private void DrawItemWithMaterial(in DrawItem item, bool opaque)
     {
@@ -1000,13 +769,6 @@ public sealed class SceneRenderer : ISceneRenderer
 
     private static Vector4 Row(Mat4 matrix, int row)
         => new(matrix[row, 0], matrix[row, 1], matrix[row, 2], matrix[row, 3]);
-
-    /// <summary>One resolved mesh of the television model, ready to draw.</summary>
-    private readonly record struct TvDrawPart(
-        GpuMesh Mesh,
-        Mat4 Model,
-        TvMaterial Material,
-        bool ReceiveShadow);
 
     /// <summary>
     /// One blended object of AMD-012: the slice <c>[Start, Start + Count)</c> of a draw list and

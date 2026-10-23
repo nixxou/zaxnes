@@ -38,10 +38,17 @@ public sealed class UserDataPaths
     /// <summary>Folder used by the portable layout.</summary>
     public const string PortableFolderName = "userdata";
 
-    private UserDataPaths(string root, UserDataRootKind kind)
+    /// <summary>
+    /// Name of a profile folder, under the user root and next to the executable alike
+    /// (REQ-PERS-072, AMD-033 §1).
+    /// </summary>
+    public const string ProfilesFolderName = "profiles";
+
+    private UserDataPaths(string root, UserDataRootKind kind, string executableDirectory)
     {
         Root = root;
         Kind = kind;
+        ExecutableDirectory = executableDirectory;
         SettingsFile = Path.Combine(root, "settings.json");
         InputFile = Path.Combine(root, "input.json");
         LibraryFile = Path.Combine(root, "library.json");
@@ -49,6 +56,7 @@ public sealed class UserDataPaths
         SaveIndexFile = Path.Combine(SavesDirectory, "index.json");
         BatteryDirectory = Path.Combine(root, "battery");
         ProfilesDirectory = Path.Combine(root, "profiles");
+        ProgramProfilesDirectory = Path.Combine(executableDirectory, ProfilesFolderName);
         CoversDirectory = Path.Combine(root, "covers");
         LogsDirectory = Path.Combine(root, "logs");
     }
@@ -92,6 +100,16 @@ public sealed class UserDataPaths
 
     /// <summary>Folder scanned for user profiles (REQ-PERS-040).</summary>
     public string ProfilesDirectory { get; }
+
+    /// <summary>The folder the executable lives in. Read-only for Zaxnes (AMD-033 §1).</summary>
+    public string ExecutableDirectory { get; }
+
+    /// <summary>
+    /// The second scanned profile folder, <c>profiles</c> next to the executable (AMD-033 §1).
+    /// It is scanned in every mode, it is never created nor written to, and it being missing or
+    /// unreadable is not an error.
+    /// </summary>
+    public string ProgramProfilesDirectory { get; }
 
     /// <summary>Folder holding the cover art (REQ-PERS-036).</summary>
     public string CoversDirectory { get; }
@@ -144,13 +162,15 @@ public sealed class UserDataPaths
 
         if (!string.IsNullOrWhiteSpace(explicitRoot))
         {
-            paths = new UserDataPaths(Path.GetFullPath(explicitRoot), UserDataRootKind.Explicit);
+            paths = new UserDataPaths(
+                Path.GetFullPath(explicitRoot), UserDataRootKind.Explicit, baseDirectory);
         }
         else if (File.Exists(Path.Combine(baseDirectory, PortableMarkerName)))
         {
             paths = new UserDataPaths(
                 Path.Combine(baseDirectory, PortableFolderName),
-                UserDataRootKind.Portable);
+                UserDataRootKind.Portable,
+                baseDirectory);
         }
         else
         {
@@ -161,7 +181,8 @@ public sealed class UserDataPaths
                 local = baseDirectory;
             }
 
-            paths = new UserDataPaths(Path.Combine(local, ProductName), UserDataRootKind.LocalAppData);
+            paths = new UserDataPaths(
+                Path.Combine(local, ProductName), UserDataRootKind.LocalAppData, baseDirectory);
 
             // Before EnsureDirectories, which would create the new root and make it look as if
             // it had always been there (AMD-029 §2).

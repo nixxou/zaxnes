@@ -27,6 +27,11 @@ internal sealed partial class EmulationHost
     /// The confirmation text of SPEC-09 REQ-PERS-042 and SPEC-10 REQ-UI-037, with its spacing
     /// before the question mark.
     /// </summary>
+    /// <remarks>
+    /// This and the three texts below are the English entries of the tables (AMD-036 §1): the
+    /// loop keeps producing them word for word, and the frontend translates them where the box
+    /// is drawn (<c>UiNotifications</c>).
+    /// </remarks>
     public const string DeleteGameQuestion = "Do you want to delete the game and its save states ?";
 
     /// <summary>Labels of the two buttons of the deletions (REQ-UI-037, REQ-UI-052).</summary>
@@ -37,6 +42,16 @@ internal sealed partial class EmulationHost
 
     /// <summary>The confirmation text of SPEC-09 REQ-PERS-054 and SPEC-10 REQ-UI-052.</summary>
     public static string DeleteSlotQuestion(string slotId) => $"Do you want to delete the slot {slotId} ?";
+
+    /// <summary>
+    /// What the notification says once a game has gone. Unlike the two questions above, SPEC-09
+    /// fixes no wording for it, so it is an ordinary interface text and follows the language of
+    /// AMD-035.
+    /// </summary>
+    public static string DeletedMessage(string title)
+        => Ui.UiStrings.Language == Ui.UiLanguage.French
+            ? $"« {title} » supprimé."
+            : $"“{title}” deleted.";
 
     /// <summary>
     /// Deletes a user game, after confirmation when the frontend offers one (REQ-PERS-042): the
@@ -96,7 +111,7 @@ internal sealed partial class EmulationHost
             return false;
         }
 
-        Notifications.Show($"« {title} » supprimé.");
+        Notifications.Show(DeletedMessage(title));
         return true;
     }
 

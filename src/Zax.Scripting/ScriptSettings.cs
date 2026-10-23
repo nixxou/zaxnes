@@ -193,7 +193,7 @@ public sealed class ScriptSettings : IDisposable
 
     #endregion
 
-    #region background, skybox, TV (§4.1.4)
+    #region background and skybox (§4.1.4)
 
     /// <summary>Skybox: −1 default, 0 colour, 1 gradient, 2 fantasy; otherwise −1.</summary>
     public int Skybox
@@ -216,11 +216,19 @@ public sealed class ScriptSettings : IDisposable
         set => Write(SettingKeys.SceneUseNesBgColor, value);
     }
 
-    /// <summary>Decorative TV box: 0 none, 1 to 3.</summary>
+    /// <summary>
+    /// The decorative TV box a script may still read or write (AMD-031 §3): the reading is
+    /// always « none » and the writing has no effect, neither raising an error.
+    /// </summary>
+    /// <remarks>
+    /// AMD-031 retired the setting with the feature, so there is no key behind this any more.
+    /// A built-in profile that sets <c>Setting.TVBox</c> — several do — has to keep running,
+    /// which is why the property stays and simply answers 0.
+    /// </remarks>
     public int TVBox
     {
-        get => Int(SettingKeys.SceneTvBox);
-        set => Write(SettingKeys.SceneTvBox, value);
+        get => 0;
+        set { }
     }
 
     /// <summary>Kept for data compatibility; no observable effect (REQ-PERS-017).</summary>

@@ -24,9 +24,9 @@ namespace Zax.App.Persistence;
 /// is the loop's (<c>EmulationHost</c>).
 /// </para>
 /// <para>
-/// Only PNG sources are decoded. REQ-PERS-036 also names <c>jpg</c>, which would mean a JPEG
-/// decoder the rest of the program has no use for; a JPEG import is refused with a message
-/// instead, which the P3 status of the requirement allows. Q-050.
+/// Only PNG sources are decoded. REQ-PERS-036 also names <c>jpg</c>, which would mean a second
+/// image decoder the rest of the program has no use for; a <c>.jpg</c> import is refused with a
+/// message instead, which the P3 status of the requirement allows. Q-050.
 /// </para>
 /// </remarks>
 // Q-050

@@ -4,6 +4,11 @@
 # withdrawn, its key stays in this list with a "# withdrawn in <version>" comment on the line
 # above: reading it is tolerated and ignored, and the non-regression test still finds it here.
 #
+# A key an amendment RETIRES — the setting itself is gone, so there is no descriptor left — is
+# commented out instead, with the amendment named. The key is still recorded here and is still
+# never reused; it simply has no entry in the catalogue any more, and SettingsCatalogue.
+# RetiredKeys is what drops it from settings.json.
+#
 # Generated from SettingsCatalogue; order follows the tables of SPEC-09 §4.1.
 video.graphic_quality
 video.vsync
@@ -24,7 +29,8 @@ light.intensity
 scene.skybox
 scene.custom_bg_color
 scene.use_nes_bg_color
-scene.tv_box
+# retired by AMD-031 (the decorative TV box was removed from the product)
+# scene.tv_box
 scene.map_enable
 clip.left
 clip.bottom
@@ -98,3 +104,4 @@ emu.tv_data
 app.engine_mode
 audio.mute
 ui.show_fps
+ui.language

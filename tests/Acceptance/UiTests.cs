@@ -32,7 +32,7 @@ public sealed class UiTests
         UiDriver bar = UiDriver.MenuBar(host, ["D:\\roms\\a.nes", "D:\\roms\\b.nes"]);
 
         Assert.Equal<IEnumerable<string>>(
-            ["Fichier", "Émulation", "Vidéo", "Audio", "Outils"],
+            ["File", "Emulation", "Video", "Audio", "Tools"],
             bar.MenuTitles);
 
         IReadOnlyList<UiMenuRow> rows = bar.Rows();
@@ -46,36 +46,35 @@ public sealed class UiTests
         }
 
         // Fichier
-        Expect("Fichier", ZaxCommands.OpenRom);
-        Expect("Fichier", ZaxCommands.OpenRecentRom);
-        Expect("Fichier", ZaxCommands.ChooseProfile);
-        Expect("Fichier", ZaxCommands.ImportProfile);
-        Expect("Fichier", ZaxCommands.LoadSlot);
-        Expect("Fichier", ZaxCommands.QuickLoad);
-        Expect("Fichier", ZaxCommands.SaveSlot);
-        Expect("Fichier", ZaxCommands.QuickSave);
-        Expect("Fichier", ZaxCommands.Quit);
+        Expect("File", ZaxCommands.OpenRom);
+        Expect("File", ZaxCommands.OpenRecentRom);
+        Expect("File", ZaxCommands.ChooseProfile);
+        Expect("File", ZaxCommands.ImportProfile);
+        Expect("File", ZaxCommands.LoadSlot);
+        Expect("File", ZaxCommands.QuickLoad);
+        Expect("File", ZaxCommands.SaveSlot);
+        Expect("File", ZaxCommands.QuickSave);
+        Expect("File", ZaxCommands.Quit);
 
         // Émulation
-        Expect("Émulation", ZaxCommands.PauseResume);
-        Expect("Émulation", ZaxCommands.Reset);
-        Expect("Émulation", ZaxCommands.Stop);
-        Expect("Émulation", ZaxCommands.FastForward);
-        Expect("Émulation", ZaxCommands.Rollback);
-        Expect("Émulation", ZaxCommands.SetSpeed);
-        Expect("Émulation", ZaxCommands.SetRegion);
-        Expect("Émulation", ZaxCommands.ToggleAutoRegion);
-        Expect("Émulation", ZaxCommands.SetPortType);
+        Expect("Emulation", ZaxCommands.PauseResume);
+        Expect("Emulation", ZaxCommands.Reset);
+        Expect("Emulation", ZaxCommands.Stop);
+        Expect("Emulation", ZaxCommands.FastForward);
+        Expect("Emulation", ZaxCommands.Rollback);
+        Expect("Emulation", ZaxCommands.SetSpeed);
+        Expect("Emulation", ZaxCommands.SetRegion);
+        Expect("Emulation", ZaxCommands.ToggleAutoRegion);
+        Expect("Emulation", ZaxCommands.SetPortType);
 
         // Vidéo
-        Expect("Vidéo", ZaxCommands.ToggleTwoDimensional);
-        Expect("Vidéo", ZaxCommands.SetCameraMode);
-        Expect("Vidéo", ZaxCommands.ResetView);
-        Expect("Vidéo", ZaxCommands.SetSkybox);
-        Expect("Vidéo", ZaxCommands.SetTvBox);
-        Expect("Vidéo", ZaxCommands.ToggleShadows);
-        Expect("Vidéo", ZaxCommands.ToggleFullscreen);
-        Expect("Vidéo", ZaxCommands.ToggleFpsCounter);
+        Expect("Video", ZaxCommands.ToggleTwoDimensional);
+        Expect("Video", ZaxCommands.SetCameraMode);
+        Expect("Video", ZaxCommands.ResetView);
+        Expect("Video", ZaxCommands.SetSkybox);
+        Expect("Video", ZaxCommands.ToggleShadows);
+        Expect("Video", ZaxCommands.ToggleFullscreen);
+        Expect("Video", ZaxCommands.ToggleFpsCounter);
 
         // Audio
         Expect("Audio", ZaxCommands.SetVolume);
@@ -88,10 +87,10 @@ public sealed class UiTests
         Assert.DoesNotContain(ZaxCommands.ToggleMenuMusic, commands);
 
         // Outils
-        Expect("Outils", ZaxCommands.ShowOptions);
-        Expect("Outils", ZaxCommands.ShowKeyConfig);
-        Expect("Outils", ZaxCommands.ShowDataFolder);
-        Expect("Outils", ZaxCommands.ShowAbout);
+        Expect("Tools", ZaxCommands.ShowOptions);
+        Expect("Tools", ZaxCommands.ShowKeyConfig);
+        Expect("Tools", ZaxCommands.ShowDataFolder);
+        Expect("Tools", ZaxCommands.ShowAbout);
 
         // The region submenu offers Auto, NTSC, PAL and Dendy.
         string[] regions = [.. rows
@@ -131,7 +130,7 @@ public sealed class UiTests
         Assert.Equal("P", Shortcut(rows, ZaxCommands.PauseResume));
         Assert.Equal("Ctrl+R", Shortcut(rows, ZaxCommands.Reset));
         Assert.Equal("F11", Shortcut(rows, ZaxCommands.ToggleTwoDimensional));
-        Assert.Equal("Alt+Entrée", Shortcut(rows, ZaxCommands.ToggleFullscreen));
+        Assert.Equal("Alt+Enter", Shortcut(rows, ZaxCommands.ToggleFullscreen));
         Assert.Equal("Ctrl+,", Shortcut(rows, ZaxCommands.ShowOptions));
 
         static string Shortcut(IReadOnlyList<UiMenuRow> rows, string command)
@@ -184,11 +183,6 @@ public sealed class UiTests
         // Vidéo
         host.Run(ZaxCommands.SetSkybox, CommandArgs.Of(2));
         Assert.Equal(2, host.Settings.Skybox);
-        // AMD-025: one model, and the value 3 of an older shortcut still selects it.
-        host.Run(ZaxCommands.SetTvBox, CommandArgs.Of(3));
-        Assert.Equal(1, host.Settings.TvBox);
-        host.Run(ZaxCommands.SetTvBox, CommandArgs.Of(0));
-        Assert.Equal(0, host.Settings.TvBox);
         host.Run(ZaxCommands.ToggleShadows);
         Assert.False(host.Settings.Shadow);
         host.Run(ZaxCommands.ToggleShadows);
@@ -388,7 +382,7 @@ public sealed class UiTests
     public void REQ_UI_202_the_options_window_holds_every_visible_user_preference()
     {
         Assert.Equal<IEnumerable<string>>(
-            ["Vidéo", "Caméra", "Lumière et ombres", "Audio", "Émulation", "Interface"],
+            ["Video", "Camera", "Light and shadows", "Audio", "Emulation", "Interface"],
             UiDriver.OptionTabs());
 
         IReadOnlyList<(string Tab, string Key, string Label, double Minimum, double Maximum)> rows =
@@ -403,7 +397,7 @@ public sealed class UiTests
             SettingKeys.LightIntensity, SettingKeys.AudioVolume,
             SettingKeys.RenderShadow, SettingKeys.VideoFrameRate, SettingKeys.VideoSkipFrame,
             SettingKeys.EmuGameSpeed, SettingKeys.CameraFov, SettingKeys.EmuTvMode,
-            SettingKeys.SceneTvBox, SettingKeys.SceneSkybox, SettingKeys.SceneCustomBgColor,
+            SettingKeys.SceneSkybox, SettingKeys.SceneCustomBgColor,
             SettingKeys.UiFullscreen,
         ];
 
@@ -429,7 +423,7 @@ public sealed class UiTests
         // The "default values" button of the tab.
         SettingsModel model = new();
         model.SetFloat(SettingKeys.CameraFov, 95f);
-        UiDriver.ResetOptionTab(model, "Caméra");
+        UiDriver.ResetOptionTab(model, "Camera");
         Assert.Equal(70f, model.GetFloat(SettingKeys.CameraFov));
 
         (double, double) Bounds(string key)
@@ -524,11 +518,11 @@ public sealed class UiTests
         Expect(Key.P, "None", ZaxCommands.PauseResume, 0, "P");
         Expect(Key.R, "Control", ZaxCommands.Reset, 0, "Ctrl+R");
         Expect(Key.F11, "None", ZaxCommands.ToggleTwoDimensional, 0, "F11");
-        Expect(Key.Enter, "Alt", ZaxCommands.ToggleFullscreen, 0, "Alt+Entrée");
+        Expect(Key.Enter, "Alt", ZaxCommands.ToggleFullscreen, 0, "Alt+Enter");
         Expect(Key.Comma, "Control", ZaxCommands.ShowOptions, 0, "Ctrl+,");
         Expect(Key.Q, "Control", ZaxCommands.Quit, 0, "Ctrl+Q");
 
-        // Q-030: Ctrl+Fn loads the state n, Maj+Fn saves it, for n = 1 to 10.
+        // Q-030: Ctrl+Fn loads the state n, Shift+Fn saves it, for n = 1 to 10.
         Key[] functions =
         [
             Key.F1, Key.F2, Key.F3, Key.F4, Key.F5,
@@ -538,7 +532,7 @@ public sealed class UiTests
         for (int slot = 1; slot <= 10; slot++)
         {
             Expect(functions[slot - 1], "Control", ZaxCommands.LoadSlot, slot, $"Ctrl+F{slot}");
-            Expect(functions[slot - 1], "Shift", ZaxCommands.SaveSlot, slot, $"Maj+F{slot}");
+            Expect(functions[slot - 1], "Shift", ZaxCommands.SaveSlot, slot, $"Shift+F{slot}");
         }
 
         // A bare Fn stays with the camera actions of SPEC-08 §4.2.
@@ -743,15 +737,19 @@ public sealed class UiTests
         UiDriver.SetStateFlag(state, "HasCurrentGame", true);
         Assert.False(UiDriver.StateFlag(state, "WelcomeVisible"));
 
-        Assert.Equal("Fichier ▸ Ouvrir une ROM", UiDriver.Text("WelcomeHint"));
-        Assert.Equal("ROMs récentes", UiDriver.Text("WelcomeRecent"));
+        Assert.Equal("File ▸ Open a ROM", UiDriver.Text("WelcomeHint"));
+        Assert.Equal("Recent ROMs", UiDriver.Text("WelcomeRecent"));
         Assert.NotEmpty(UiDriver.Text("WelcomeNoRecent"));
     }
 
     /// <summary>
     /// AMD-010 REQ-UI-208: ten numbered slots plus the quick state are exposed in the menus, each
-    /// showing its date or « vide »; the persistence model keeps SPEC-09's 36.
+    /// showing its date or the « empty » word; the persistence model keeps SPEC-09's 36.
     /// </summary>
+    /// <remarks>
+    /// The word an empty slot shows is a translated text since AMD-035, so it is read from the
+    /// table of the language in force rather than spelled out here.
+    /// </remarks>
     [Trait("Requires", "OriginalAssets")]
     [HostFact]
     public void REQ_UI_208_ten_slots_and_the_quick_state_are_exposed()
@@ -771,14 +769,15 @@ public sealed class UiTests
         Assert.Equal(1, rows.Count(static row => row.Command == ZaxCommands.QuickLoad));
         Assert.Equal(1, rows.Count(static row => row.Command == ZaxCommands.QuickSave));
 
-        // The occupied slot shows a date, the others « vide ».
+        // The occupied slot shows a date, the others the « empty » word of the current table.
+        string empty = UiDriver.Text("EmptySlot");
         Assert.Contains(
             rows,
             row => row.Command == ZaxCommands.LoadSlot && row.Label.Contains("3", StringComparison.Ordinal)
-                && !row.Label.Contains("vide", StringComparison.Ordinal));
+                && !row.Label.Contains(empty, StringComparison.Ordinal));
         Assert.Contains(
             rows,
-            row => row.Command == ZaxCommands.LoadSlot && row.Label.Contains("vide", StringComparison.Ordinal));
+            row => row.Command == ZaxCommands.LoadSlot && row.Label.Contains(empty, StringComparison.Ordinal));
 
         // Slot 20 is still loadable through the model, as (D) requires.
         Assert.Equal(36, SaveSlotIndex.NumberedSlotCount);
@@ -796,6 +795,10 @@ public sealed class UiTests
         object state = UiDriver.NewState();
         Assert.True(UiDriver.StateFlag(state, "MenuBarVisible"));
 
+        // Q-073: the chrome a full-screen *game view* hides. With no ROM loaded there is no
+        // view to leave room for and the welcome screen of REQ-UI-207 stays up, which is the
+        // only thing that keeps the way back visible (AMD-032 §6).
+        UiDriver.SetStateFlag(state, "HasCurrentGame", true);
         UiDriver.SetStateFlag(state, "Fullscreen", true);
         Assert.False(UiDriver.StateFlag(state, "MenuBarVisible"));
         Assert.False(UiDriver.StateFlag(state, "WelcomeVisible"));
@@ -866,7 +869,7 @@ public sealed class UiTests
             File.WriteAllText(Path.Combine(folder, "super mario.nes"), "x");
             File.WriteAllText(Path.Combine(folder, "zelda.nes"), "x");
 
-            object browser = UiDriver.OpenBrowser("Ouvrir une ROM", folder);
+            object browser = UiDriver.OpenBrowser(UiDriver.Text("OpenRomTitle"), folder);
 
             IReadOnlyList<(string Name, string Kind)> entries = UiDriver.BrowserEntries(browser);
             Assert.Equal("x", entries[0].Name);
@@ -885,13 +888,61 @@ public sealed class UiTests
             // The trail starts at the root and has one step per component.
             IReadOnlyList<string> trail = UiDriver.BrowserTrail(browser);
             Assert.True(trail.Count >= 2);
-            Assert.Equal("Poste de travail", trail[0]);
+            Assert.Equal(UiDriver.Label("browser.computer"), trail[0]);
 
             // Reopening clears the search (REQ-UI-103, last sentence).
-            object reopened = UiDriver.OpenBrowser("Ouvrir une ROM", folder);
+            object reopened = UiDriver.OpenBrowser(UiDriver.Text("OpenRomTitle"), folder);
             Assert.Contains(
                 UiDriver.BrowserEntries(reopened),
                 entry => entry.Name == "zelda.nes");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A locked temporary folder must not fail a verification run.
+            }
+        }
+    }
+
+    /// <summary>
+    /// AMD-030 §2: « Fichier → Importer depuis 3dSen… ouvre un sélecteur de dossier ». The
+    /// dialog of REQ-UI-100 answers with a <b>folder</b> in that one mode — the folder shown, or
+    /// the one selected — and still accepts the bundle file named directly (§3). The ROM dialog
+    /// is unchanged: it only ever answers with a file (REQ-UI-104).
+    /// </summary>
+    [Fact] // AMD-030 §2, §3
+    public void AMD_030_the_3dsen_picker_answers_with_a_folder()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), $"zax-3dsen-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(folder, "3dSen"));
+        try
+        {
+            string bundle = Path.Combine(
+                folder, "defaultprofiles_assets_all_0123456789abcdef.bundle");
+            File.WriteAllBytes(bundle, []);
+
+            object picker = UiDriver.OpenBrowser(
+                UiDriver.Text("ImportThreeDSenTitle"), folder, threeDSen: true);
+
+            // The bundle is listed: the dialog's own filter accepts the extension of §3.
+            Assert.True(UiDriver.BrowserAccepts(picker, Path.GetFileName(bundle)));
+            Assert.Contains(
+                UiDriver.BrowserEntries(picker),
+                entry => entry.Name == Path.GetFileName(bundle));
+
+            // With nothing selected, the answer is the folder being shown.
+            Assert.True(UiDriver.BrowserCanConfirm(picker));
+            Assert.Equal(folder, UiDriver.BrowserConfirm(picker));
+
+            // The ROM dialog of REQ-UI-104 still refuses to answer without a file.
+            object rom = UiDriver.OpenBrowser(UiDriver.Text("OpenRomTitle"), folder);
+            Assert.False(UiDriver.BrowserCanConfirm(rom));
+            Assert.Null(UiDriver.BrowserConfirm(rom));
         }
         finally
         {
@@ -915,11 +966,13 @@ public sealed class UiTests
     /// </summary>
     /// <remarks>
     /// Round 1: no menu row and no command deleted a user profile
-    /// (<c>verify/round1/R1-report-part-c.md</c>). The <c>R1-fixes</c> batch adds the row
-    /// « Supprimer le jeu… » on <c>file.delete_game</c>. AMD-010 §1 makes the <i>presentation</i>
-    /// informative — a menu row stands in for the small button on the selected tile — so what is
-    /// checked here is the function, the exact texts and the two buttons. Re-verified 2026-10-21,
-    /// <c>verify/round1/R1-recheck.md</c>.
+    /// (<c>verify/round1/R1-report-part-c.md</c>). The <c>R1-fixes</c> batch adds the row of
+    /// <c>file.delete_game</c>, whose label AMD-035 now takes from the table of the language in
+    /// force — so the row is identified by its command and its label compared with that table.
+    /// AMD-010 §1 makes the <i>presentation</i> informative — a menu row stands in for the small
+    /// button on the selected tile — so what is checked here is the function, the exact texts of
+    /// the box (which AMD-036 §1 leaves as they are in <c>en</c>) and the two buttons.
+    /// Re-verified 2026-10-21, <c>verify/round1/R1-recheck.md</c>.
     /// </remarks>
     [Trait("Requires", "OriginalAssets")]
     [HostFact] // REQ-UI-037, REQ-UI-110
@@ -937,7 +990,7 @@ public sealed class UiTests
         UiMenuRow[] offered = [.. bar.Rows().Where(static candidate =>
             candidate.Command == ZaxCommands.DeleteGame)];
         UiMenuRow row = Assert.Single(offered);
-        Assert.Contains("Supprim", row.Label, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(UiDriver.CommandLabel(ZaxCommands.DeleteGame), row.Label);
 
         // It opens the box E8 rather than deleting straight away, with the exact texts.
         host.HoldConfirmations = true;
@@ -1218,10 +1271,6 @@ public sealed class UiTests
         Assert.Equal<IEnumerable<string>>(
             ["60fps", "90fps", "120fps"],
             [.. Labels(SettingKeys.VideoFrameRate)]);
-        // AMD-025 leaves one television model.
-        Assert.Equal<IEnumerable<string>>(
-            ["None", "TV"],
-            [.. Labels(SettingKeys.SceneTvBox)]);
         Assert.Equal<IEnumerable<string>>(
             ["Default", "Color", "Gradient", "Fantasy"],
             [.. Labels(SettingKeys.SceneSkybox)]);

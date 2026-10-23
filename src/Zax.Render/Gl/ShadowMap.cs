@@ -4,26 +4,36 @@ using Silk.NET.OpenGL;
 namespace Zax.Render.Gl;
 
 /// <summary>
-/// The single shadow map of SPEC-06 REQ-SCN-030: hard shadows, no cascade, 1024 texels of side
-/// by default (DEC-R2-D4).
+/// The single shadow map of SPEC-06 REQ-SCN-030: hard shadows, no cascade, 4096 texels of side
+/// by default (AMD-034 §2, which replaces the 1024 of DEC-R2-D4).
 /// </summary>
+/// <remarks>
+/// OpenGL 3.3 only guarantees <c>GL_MAX_TEXTURE_SIZE</c> ≥ 1024, so 4096 is not a size every
+/// implementation has to accept. AMD-034 §2 asks for the largest one it does accept: the
+/// requested size is clamped to what the driver advertises, then halved until the depth
+/// framebuffer comes out complete — 4096, 2048, 1024. <see cref="Requested"/> and
+/// <see cref="Size"/> differ exactly when that happened, which is what the host reports once.
+/// </remarks>
 internal sealed class ShadowMap : IDisposable
 {
     private readonly GL _gl;
     private uint _framebuffer;
     private uint _depthTexture;
+    private int _maxTextureSize = -1;
 
     /// <summary>Creates the map at <paramref name="size"/> texels of side.</summary>
     public ShadowMap(GL gl, int size)
     {
         ArgumentNullException.ThrowIfNull(gl);
         _gl = gl;
-        Size = Math.Max(64, size);
-        Allocate();
+        Allocate(size);
     }
 
-    /// <summary>Side of the map in texels.</summary>
+    /// <summary>Side of the map in texels, as the hardware granted it.</summary>
     public int Size { get; private set; }
+
+    /// <summary>Side of the map in texels, as it was asked for.</summary>
+    public int Requested { get; private set; }
 
     /// <summary>The depth texture.</summary>
     public uint DepthTexture => _depthTexture;
@@ -31,15 +41,13 @@ internal sealed class ShadowMap : IDisposable
     /// <summary>Reallocates the map when the setting changes.</summary>
     public void Resize(int size)
     {
-        int clamped = Math.Max(64, size);
-        if (clamped == Size)
+        if (Math.Max(SceneConstants.MinShadowMapSize, size) == Requested)
         {
             return;
         }
 
         Release();
-        Size = clamped;
-        Allocate();
+        Allocate(size);
     }
 
     /// <summary>Binds the map as the draw target and clears its depth.</summary>
@@ -55,13 +63,47 @@ internal sealed class ShadowMap : IDisposable
     /// <inheritdoc/>
     public void Dispose() => Release();
 
-    private unsafe void Allocate()
+    /// <summary>
+    /// Allocates the largest map the hardware accepts, starting at <paramref name="size"/>
+    /// and halving on refusal (AMD-034 §2).
+    /// </summary>
+    /// <param name="size">The size asked for, in texels.</param>
+    private void Allocate(int size)
+    {
+        Requested = Math.Max(SceneConstants.MinShadowMapSize, size);
+
+        // A driver that answers nonsense must not shrink the map for ever; the completeness
+        // check of TryAllocate is the real guard.
+        if (_maxTextureSize < 0)
+        {
+            _gl.GetInteger(GLEnum.MaxTextureSize, out int max);
+            _maxTextureSize = Math.Max(SceneConstants.MinShadowMapSize, max);
+        }
+
+        foreach (int side in SceneConstants.ShadowMapSizes(Requested, _maxTextureSize))
+        {
+            if (TryAllocate(side))
+            {
+                Size = side;
+                return;
+            }
+
+            Release();
+        }
+
+        throw new InvalidOperationException(
+            $"No shadow map from {Requested} down to {SceneConstants.MinShadowMapSize} texels is complete.");
+    }
+
+    /// <summary>Builds the depth texture and its framebuffer; false when the pair is refused.</summary>
+    /// <param name="size">Side of the map to try, in texels.</param>
+    private unsafe bool TryAllocate(int size)
     {
         _depthTexture = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, _depthTexture);
         _gl.TexImage2D(
             TextureTarget.Texture2D, 0, InternalFormat.DepthComponent24,
-            (uint)Size, (uint)Size, 0,
+            (uint)size, (uint)size, 0,
             PixelFormat.DepthComponent, PixelType.Float, null);
 
         // Hard shadows: nearest sampling, no soft filtering (REQ-SCN-030).
@@ -82,11 +124,7 @@ internal sealed class ShadowMap : IDisposable
         GLEnum status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
-        if (status != GLEnum.FramebufferComplete)
-        {
-            Release();
-            throw new InvalidOperationException($"The {Size}x{Size} shadow map is incomplete: {status}.");
-        }
+        return status == GLEnum.FramebufferComplete;
     }
 
     private void Release()
@@ -129,8 +167,8 @@ internal readonly record struct ShadowVolume(
     /// <summary>
     /// Builds the volume from the scene-space bounds of the casters, the eye and the light
     /// direction. The bounds are first restricted to the 512-unit sphere around the eye
-    /// (REQ-SCN-030), then fitted so that the 1024 texels are spent on what actually casts
-    /// rather than on the empty space the sphere mostly contains (Q-019).
+    /// (REQ-SCN-030), then fitted so that the texels are spent on what actually casts rather
+    /// than on the empty space the sphere mostly contains (Q-019).
     /// </summary>
     /// <param name="boundsMin">Lowest corner of the casters' bounds, scene frame.</param>
     /// <param name="boundsMax">Highest corner of the casters' bounds, scene frame.</param>

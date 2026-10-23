@@ -746,6 +746,29 @@ public sealed class LuaApiTests
     }
 
     /// <summary>
+    /// AMD-031 §3 — a script that reads or writes the TV box setting raises no error: the
+    /// reading is always « none » and the writing has no effect.
+    /// </summary>
+    [Fact] // AMD-031 §3
+    public void AMD_031_the_TV_box_setting_reads_none_and_ignores_every_write()
+    {
+        using LuaRun run = Empty();
+
+        // « Aucun » is 0, both before and after a write of any of the old model numbers.
+        Assert.Equal(0, run.Num("Setting.TVBox"));
+        foreach (int written in new[] { 1, 2, 3, -1 })
+        {
+            Assert.Null(run.Error($"Setting.TVBox = {written}"));
+            Assert.Equal(0, run.Num("Setting.TVBox"));
+            Assert.Equal(0, run.Settings.TVBox);
+        }
+
+        // The notification identifier of SPEC-09 §4.3 is still published (REQ-PERS-014), so a
+        // script that watches the setting still runs.
+        Assert.Equal("TVBoxId", run.Text("Setting.TVBoxId"));
+    }
+
+    /// <summary>
     /// REQ-LUA-090 — the backdrop members read and write the state of SPEC-06, and the state
     /// goes back to its defaults at the end of each game.
     /// </summary>

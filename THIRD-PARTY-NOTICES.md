@@ -44,10 +44,8 @@ Le format de profil `.3dn` est lu et écrit par un codec écrit pour ce projet
 
 ## Assets
 
-**Un seul asset est livré sous forme de fichier** : le boîtier TV `assets/tv/retro_crt_tv.glb`,
-« **Retro Crt Tv** » de **meipal**, sous licence **CC BY 4.0**, livré tel quel (AMD-025).
-L'attribution complète et la liste des adaptations faites à l'exécution sont dans
-[`ASSETS-LICENSES.md`](ASSETS-LICENSES.md). Tout le reste est **généré par le code du projet**
+**Aucun asset n'est livré sous forme de fichier.** Le seul qui l'était — le boîtier TV
+décoratif — a été retiré du produit par AMD-031. Tout est **généré par le code du projet**
 (AMD-024 REQ-PUB-002) : décors, matières et sons d'interface ; la police de l'interface est lue
 sur la machine de l'utilisateur au lancement, sans redistribution. Il n'y a **pas de musique de
 menu** (REQ-PUB-005, révisée le 2026-10-21). Les profils de jeu et les ROMs ne sont pas fournis.

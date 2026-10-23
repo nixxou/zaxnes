@@ -35,7 +35,9 @@ public sealed class SettingApplicationTests
             "emu.game_speed", "render.shadow", "audio.volume", "video.frame_rate", "video.vsync",
             "vr.control_method", "vr.scene_ratio", "input.emulated_menu_button",
             "video.render_method", "video.res_scale", "video.skip_frame", "audio.bg_music",
-            "video.anti_alias", "vr.mirroring", "emu.auto_tv_mode", "scene.tv_box",
+            // scene.tv_box stood between emu.auto_tv_mode and ui.sort_option; AMD-031 retired
+            // the setting with the TV box, so there is no preference left to preserve.
+            "video.anti_alias", "vr.mirroring", "emu.auto_tv_mode",
             "ui.sort_option", "scene.custom_bg_color", "camera.fov",
         ];
 

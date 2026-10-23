@@ -38,7 +38,7 @@ internal sealed record FileEntry(string Name, string Path, FileEntryKind Kind);
 internal sealed class FileBrowserModel
 {
     /// <summary>The root row label under Windows (REQ-UI-101).</summary>
-    public const string ComputerLabel = "Poste de travail";
+    public static string ComputerLabel => UiStrings.Get(UiKeys.BrowserComputer);
 
     private readonly List<FileEntry> _entries = [];
     private readonly List<(string Label, string Path)> _trail = [];
@@ -74,8 +74,32 @@ internal sealed class FileBrowserModel
     /// <summary>The selected row, or null.</summary>
     public FileEntry? Selected { get; set; }
 
-    /// <summary>The file name field of REQ-UI-100, read only in this dialog.</summary>
-    public string FileName => Selected is { Kind: FileEntryKind.File } entry ? entry.Name : string.Empty;
+    /// <summary>
+    /// Whether a folder is an acceptable answer, which is what the 3dSen import of AMD-030 §2
+    /// needs: the user names the installation folder, or the bundle inside it.
+    /// </summary>
+    public bool AllowFolders { get; private set; }
+
+    /// <summary>A line the dialog shows above the list, or an empty string.</summary>
+    public string Hint { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// The file name field of REQ-UI-100, read only in this dialog. In folder mode it shows the
+    /// folder the dialog would answer with.
+    /// </summary>
+    public string FileName => Selected switch
+    {
+        { Kind: FileEntryKind.File } entry => entry.Name,
+        { Kind: FileEntryKind.Folder or FileEntryKind.Drive } entry when AllowFolders => entry.Name,
+        _ => AllowFolders && _directory is not null ? _directory : string.Empty,
+    };
+
+    /// <summary>
+    /// Whether <see cref="Confirm"/> would answer something: a selected file, or — in folder
+    /// mode — a selected folder or the folder being shown.
+    /// </summary>
+    public bool CanConfirm => Selected is { Kind: FileEntryKind.File }
+        || (AllowFolders && (Selected is not null || _directory is not null));
 
     /// <summary>What the dialog returns when it closes with a validation, or null.</summary>
     public string? Result { get; private set; }
@@ -101,10 +125,16 @@ internal sealed class FileBrowserModel
     /// <param name="title">The title.</param>
     /// <param name="filters">The filters, the first one chosen.</param>
     /// <param name="startDirectory">The remembered folder of <c>ui.last_browse_dir</c>.</param>
+    /// <param name="allowFolders">
+    /// Whether a folder is an acceptable answer (AMD-030 §2: the 3dSen installation folder).
+    /// </param>
+    /// <param name="hint">A line shown above the list, or null.</param>
     public void Open(
         string title,
         IReadOnlyList<(string Label, string[] Extensions)> filters,
-        string? startDirectory)
+        string? startDirectory,
+        bool allowFolders = false,
+        string? hint = null)
     {
         ArgumentNullException.ThrowIfNull(filters);
 
@@ -114,6 +144,8 @@ internal sealed class FileBrowserModel
         Filter = filters.Count > 0 ? filters[0].Extensions : [];
         Result = null;
         Selected = null;
+        AllowFolders = allowFolders;
+        Hint = hint ?? string.Empty;
         _search = string.Empty;
 
         GoTo(Exists(startDirectory) ? startDirectory : null);
@@ -174,16 +206,35 @@ internal sealed class FileBrowserModel
     }
 
     /// <summary>
-    /// The validation button of REQ-UI-104: it only acts when a file is selected.
+    /// The validation button of REQ-UI-104: it only acts when a file is selected. In folder mode
+    /// it also answers with the selected folder, or with the folder being shown when no row is
+    /// selected (AMD-030 §2).
     /// </summary>
     public bool Confirm()
     {
-        if (Selected is not { Kind: FileEntryKind.File } file)
+        if (Selected is { Kind: FileEntryKind.File } file)
+        {
+            Result = file.Path;
+            return true;
+        }
+
+        if (!AllowFolders)
         {
             return false;
         }
 
-        Result = file.Path;
+        if (Selected is { } folder)
+        {
+            Result = folder.Path;
+            return true;
+        }
+
+        if (_directory is null)
+        {
+            return false;
+        }
+
+        Result = _directory;
         return true;
     }
 
@@ -212,31 +263,44 @@ internal sealed class FileBrowserModel
         return false;
     }
 
-    /// <summary>The filters of the ROM dialog (SPEC-10 §4, AMD-010 REQ-UI-201).</summary>
-    public static IReadOnlyList<(string Label, string[] Extensions)> RomFilters { get; } =
+    /// <summary>
+    /// The filters of the ROM dialog (SPEC-10 §4, AMD-010 REQ-UI-201). Built on each read, so
+    /// that a dialog opened after a change of language shows the new wording (AMD-035).
+    /// </summary>
+    public static IReadOnlyList<(string Label, string[] Extensions)> RomFilters =>
     [
-        ("ROMs NES (*.nes, *.zip)", ["nes", "zip"]),
-        ("Fichiers .nes", ["nes"]),
-        ("Archives .zip", ["zip"]),
-        ("Tous les fichiers", []),
+        (UiStrings.Get(UiKeys.BrowserFilterNesRoms), ["nes", "zip"]),
+        (UiStrings.Get(UiKeys.BrowserFilterNesFiles), ["nes"]),
+        (UiStrings.Get(UiKeys.BrowserFilterZip), ["zip"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
     /// <summary>The filter of the profile import dialog (SPEC-10 §4).</summary>
-    public static IReadOnlyList<(string Label, string[] Extensions)> ProfileFilters { get; } =
+    public static IReadOnlyList<(string Label, string[] Extensions)> ProfileFilters =>
     [
-        ("Profils 3D (*.3dn)", ["3dn"]),
-        ("Tous les fichiers", []),
+        (UiStrings.Get(UiKeys.BrowserFilterProfiles), ["3dn"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
     /// <summary>
-    /// The filter of the cover-art import (SPEC-09 REQ-PERS-036). Only PNG is decoded, so JPEG
-    /// is not offered — see <c>GameArt</c> and <c>spec/changes/Q-050.md</c>.
+    /// The filters of the 3dSen import (AMD-030 §2, §3): the bundle of the installation, whose
+    /// fingerprint is never assumed, or any file the user points at.
+    /// </summary>
+    public static IReadOnlyList<(string Label, string[] Extensions)> ThreeDSenFilters =>
+    [
+        (UiStrings.Get(UiKeys.BrowserFilterBundle), ["bundle"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
+    ];
+
+    /// <summary>
+    /// The filter of the cover-art import (SPEC-09 REQ-PERS-036). Only PNG is decoded, so
+    /// <c>.jpg</c> is not offered — see <c>GameArt</c> and <c>spec/changes/Q-050.md</c>.
     /// </summary>
     // Q-050
-    public static IReadOnlyList<(string Label, string[] Extensions)> CoverFilters { get; } =
+    public static IReadOnlyList<(string Label, string[] Extensions)> CoverFilters =>
     [
-        ("Images PNG (*.png)", ["png"]),
-        ("Tous les fichiers", []),
+        (UiStrings.Get(UiKeys.BrowserFilterPng), ["png"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
     private static bool Exists([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? directory)

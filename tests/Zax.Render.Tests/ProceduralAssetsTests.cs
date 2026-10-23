@@ -8,9 +8,8 @@ namespace Zax.Render.Tests;
 
 /// <summary>
 /// The free assets of AMD-024: the procedural skyboxes of REQ-PUB-003, which must render with
-/// <b>no asset source at all</b>. The television is no longer among them — AMD-025 replaced the
-/// three procedural models of REQ-PUB-004 by one glTF file, which <see cref="TvModelTests"/>
-/// covers.
+/// <b>no asset source at all</b>. REQ-PUB-004 asked for procedural TV cabinets as well; AMD-031
+/// removed the decorative TV box from the product, so there is nothing left to cover there.
 /// </summary>
 /// <remarks>
 /// Every renderer here is built with the default <c>assets</c>, that is null: nothing can read a

@@ -428,7 +428,16 @@ public sealed class RoundOneFixTests
     public unsafe void REQ_UI_207_the_triangle_of_the_welcome_hint_is_in_the_font_atlas()
     {
         Assert.Contains('▸', UiText.WelcomeHint);
-        Assert.Equal("Fichier ▸ Ouvrir une ROM", UiText.WelcomeHint);
+        Assert.Equal("File ▸ Open a ROM", UiText.WelcomeHint);
+
+        // AMD-035: the French hint keeps the amendment's wording, and is what the atlas has to
+        // carry too — the triangle plus the accents.
+        string frenchHint;
+        using (new UiLanguageScope(UiLanguage.French))
+        {
+            frenchHint = UiText.WelcomeHint;
+            Assert.Equal("Fichier ▸ Ouvrir une ROM", frenchHint);
+        }
 
         nint context = ImGuiNET.ImGui.CreateContext();
         try
@@ -453,7 +462,7 @@ public sealed class RoundOneFixTests
                 // Every character of the hint resolves to a real glyph rather than to the
                 // missing-glyph box: the accents of AMD-010 and the triangle of REQ-UI-207,
                 // whether the face carries U+25B8 itself or one of the substitutes.
-                foreach (char letter in UiText.WelcomeHint)
+                foreach (char letter in UiText.WelcomeHint + frenchHint)
                 {
                     Assert.NotEqual(nint.Zero, (nint)font.FindGlyphNoFallback(letter).NativePtr);
                 }

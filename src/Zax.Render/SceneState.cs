@@ -21,44 +21,6 @@ public enum SkyboxKind
 }
 
 /// <summary>
-/// Decorative TV box setting (SPEC-06 REQ-SCN-053, AMD-025).
-/// </summary>
-/// <remarks>
-/// AMD-025 leaves one model: the setting is 0 for none and 1 for the television. A stored 2 or
-/// 3 — the TV 2 and TV 3 of REQ-SCN-054 — comes back as <see cref="Tv"/>; see
-/// <see cref="TvBoxSetting.From"/>.
-/// </remarks>
-public enum TvBoxKind
-{
-    /// <summary>No TV box, the default.</summary>
-    None = 0,
-
-    /// <summary>The television of AMD-025.</summary>
-    Tv = 1,
-}
-
-/// <summary>
-/// The migration AMD-025 asks for on the stored TV box setting: « toute valeur héritée 2 ou 3
-/// est ramenée à 1 ».
-/// </summary>
-/// <remarks>
-/// It is applied wherever a stored integer becomes a <see cref="TvBoxKind"/> — the user
-/// settings, a profile field, a Lua write, the command line — so that a settings file or a
-/// <c>.3dn</c> profile written before AMD-025 keeps working and simply shows the one model.
-/// </remarks>
-public static class TvBoxSetting
-{
-    /// <summary>The highest value the setting takes now.</summary>
-    public const int Max = (int)TvBoxKind.Tv;
-
-    /// <summary>The setting a stored integer stands for.</summary>
-    public static TvBoxKind From(int value) => value <= 0 ? TvBoxKind.None : TvBoxKind.Tv;
-
-    /// <summary>The integer a stored setting is normalised to: 0, or 1 for any legacy model.</summary>
-    public static int Normalise(int value) => (int)From(value);
-}
-
-/// <summary>
 /// The user settings of SPEC-06 §4.1 the renderer reads. Their persistence belongs to SPEC-09;
 /// the bounds and defaults here are those of §4.1.
 /// </summary>
@@ -66,6 +28,7 @@ public sealed class RenderSettings
 {
     private float _lightIntensity = 1f;
     private int _shadowMapSize = SceneConstants.ShadowMapSize;
+    private int _antiAliasSamples = 1;
     private int _vsync;
     private int _targetFrameRate = 90;
 
@@ -88,9 +51,6 @@ public sealed class RenderSettings
     /// <summary>The custom background colour, black by default (REQ-SCN-046).</summary>
     public Rgb24 CustomBackgroundColor { get; set; }
 
-    /// <summary>TV box setting (REQ-SCN-053).</summary>
-    public TvBoxKind TvBox { get; set; } = TvBoxKind.None;
-
     /// <summary>
     /// The sun, the moon and the clouds of the procedural skyboxes (AMD-024 REQ-PUB-003). All
     /// three are off by default, which is what REQ-SCN-050 asks for (Q-064).
@@ -98,11 +58,25 @@ public sealed class RenderSettings
     // Q-064
     public SkyBodySettings SkyBodies { get; } = new();
 
-    /// <summary>Shadow map side in texels, 1024 by default (DEC-R2-D4).</summary>
+    /// <summary>
+    /// Shadow map side in texels, 4096 by default (AMD-034 §2, replacing the 1024 of
+    /// DEC-R2-D4). A size the hardware refuses is lowered by the renderer, not here.
+    /// </summary>
     public int ShadowMapSize
     {
         get => _shadowMapSize;
         set => _shadowMapSize = Math.Clamp(value, 64, 8192);
+    }
+
+    /// <summary>
+    /// Samples per pixel the scene is drawn with (AMD-032 §2): 1 for no anti-aliasing, 4 or 8
+    /// for the two levels of <c>video.anti_alias</c>. The shadow map is never multisampled.
+    /// A value the hardware refuses is lowered by the renderer, not here.
+    /// </summary>
+    public int AntiAliasSamples
+    {
+        get => _antiAliasSamples;
+        set => _antiAliasSamples = Math.Clamp(value, 1, SceneConstants.MaxAntiAliasSamples);
     }
 
     /// <summary>

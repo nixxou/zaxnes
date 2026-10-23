@@ -33,6 +33,14 @@ internal sealed class UiShots
             ui.ForceOpenMenu = null;
             ui.State.Options = true;
         }),
+        ("options-interface", static ui =>
+        {
+            // AMD-035 §1: the Interface tab is where the language is chosen, so the capture
+            // set shows it rather than only the first tab.
+            ui.State.CloseAll();
+            ui.State.Options = true;
+            ui.ForceOptionsTab = OptionsTab.Interface;
+        }),
         ("touches", static ui =>
         {
             ui.State.CloseAll();

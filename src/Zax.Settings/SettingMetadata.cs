@@ -99,7 +99,7 @@ public enum SettingTheme
     /// <summary>Light and shadows.</summary>
     Light,
 
-    /// <summary>Scene: background, skybox, television.</summary>
+    /// <summary>Scene: background and skybox.</summary>
     Scene,
 
     /// <summary>Picture clipping.</summary>

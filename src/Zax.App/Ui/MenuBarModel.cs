@@ -120,15 +120,37 @@ internal sealed record Menu(string Title, IReadOnlyList<MenuItem> Items);
 internal sealed class MenuBarModel
 {
     private readonly CommandModel _commands;
+    private readonly Func<IReadOnlyList<Menu>> _build;
 
-    private MenuBarModel(CommandModel commands, IReadOnlyList<Menu> menus)
+    private IReadOnlyList<Menu> _menus;
+    private int _builtFor;
+
+    private MenuBarModel(CommandModel commands, Func<IReadOnlyList<Menu>> build)
     {
         _commands = commands;
-        Menus = menus;
+        _build = build;
+        _menus = build();
+        _builtFor = UiStrings.Generation;
     }
 
-    /// <summary>The five menus, in the order of REQ-UI-200.</summary>
-    public IReadOnlyList<Menu> Menus { get; }
+    /// <summary>
+    /// The five menus, in the order of REQ-UI-200. The titles and the static labels are built
+    /// once and rebuilt when the interface language changes, so the bar switches with the rest
+    /// of the interface and without a restart (AMD-035 §1).
+    /// </summary>
+    public IReadOnlyList<Menu> Menus
+    {
+        get
+        {
+            if (_builtFor != UiStrings.Generation)
+            {
+                _builtFor = UiStrings.Generation;
+                _menus = _build();
+            }
+
+            return _menus;
+        }
+    }
 
     /// <summary>Every row of every menu, submenus expanded, for the tests and the shortcut audit.</summary>
     public IEnumerable<MenuItem> AllItems()
@@ -194,6 +216,14 @@ internal sealed class MenuBarModel
         ArgumentNullException.ThrowIfNull(recentRoms);
         ArgumentNullException.ThrowIfNull(camera);
 
+        return new MenuBarModel(host.Commands, () => BuildMenus(host, recentRoms, camera));
+    }
+
+    private static IReadOnlyList<Menu> BuildMenus(
+        EmulationHost host,
+        Func<IReadOnlyList<string>> recentRoms,
+        SceneCamera camera)
+    {
         CommandModel commands = host.Commands;
         AppSettings settings = host.Settings;
 
@@ -207,6 +237,10 @@ internal sealed class MenuBarModel
             MenuItem.Rule,
             MenuItem.Of(Need(ZaxCommands.ChooseProfile)),
             MenuItem.Of(Need(ZaxCommands.ImportProfile)),
+
+            // AMD-030 §2: « Fichier → Importer depuis 3dSen… », right after the single-file
+            // import it extends.
+            MenuItem.Of(Need(ZaxCommands.ImportThreeDSen)),
 
             // SPEC-10 REQ-UI-037 with AMD-010 §3: the deletion of a user profile is one of the
             // functions the amendment keeps mandatory, and the tile button it describes becomes a
@@ -268,8 +302,6 @@ internal sealed class MenuBarModel
             MenuItem.Rule,
             MenuItem.Sub(UiText.LabelOf(Zax.Settings.SettingsCatalogue.Get(Zax.Settings.SettingKeys.SceneSkybox)),
                 () => SkyboxItems(Need(ZaxCommands.SetSkybox), settings)),
-            MenuItem.Sub(UiText.LabelOf(Zax.Settings.SettingsCatalogue.Get(Zax.Settings.SettingKeys.SceneTvBox)),
-                () => TvBoxItems(Need(ZaxCommands.SetTvBox), settings)),
             MenuItem.Of(Need(ZaxCommands.ToggleShadows)),
             MenuItem.Rule,
             MenuItem.Of(Need(ZaxCommands.ToggleFullscreen)),
@@ -299,7 +331,7 @@ internal sealed class MenuBarModel
             MenuItem.Of(Need(ZaxCommands.ShowAbout)),
         ]);
 
-        return new MenuBarModel(commands, [file, emulation, video, audio, tools]);
+        return [file, emulation, video, audio, tools];
     }
 
     private static IReadOnlyList<MenuItem> RecentRomItems(ZaxCommand open, IReadOnlyList<string> roms)
@@ -414,7 +446,7 @@ internal sealed class MenuBarModel
         AppSettings settings)
         =>
         [
-            MenuItem.Of(auto, "Auto"),
+            MenuItem.Of(auto, UiText.RegionAuto),
             MenuItem.Rule,
             MenuItem.Choice(set, "NTSC", CommandArgs.Of((int)TvRegionSetting.Ntsc),
                 () => !settings.AutoTvMode && settings.TvMode == TvRegionSetting.Ntsc),
@@ -432,17 +464,17 @@ internal sealed class MenuBarModel
         {
             int captured = port;
             items.Add(MenuItem.Sub(
-                string.Create(CultureInfo.InvariantCulture, $"Port {captured + 1}"),
+                string.Create(CultureInfo.InvariantCulture, $"{UiText.Port} {captured + 1}"),
                 () =>
                 [
                     MenuItem.Choice(
                         set,
-                        "Manette",
+                        UiText.PortController,
                         new CommandArgs(captured, null, (int)ControllerPortType.Controller),
                         () => host.PortType(captured) == ControllerPortType.Controller),
                     MenuItem.Choice(
                         set,
-                        "Zapper",
+                        UiText.PortZapper,
                         new CommandArgs(captured, null, (int)ControllerPortType.Zapper),
                         () => host.PortType(captured) == ControllerPortType.Zapper),
                 ]));
@@ -463,9 +495,9 @@ internal sealed class MenuBarModel
         SceneCamera camera)
         =>
         [
-            MenuItem.Choice(set, "Orbitale (TPV)", CommandArgs.Of(0),
+            MenuItem.Choice(set, UiText.CameraOrbital, CommandArgs.Of(0),
                 () => camera.Mode == Zax.Render.CameraMode.Tpv),
-            MenuItem.Choice(set, "Première personne (FPV)", CommandArgs.Of(1),
+            MenuItem.Choice(set, UiText.CameraFirstPerson, CommandArgs.Of(1),
                 () => camera.Mode == Zax.Render.CameraMode.Fpv),
             MenuItem.Rule,
             MenuItem.Of(local),
@@ -473,9 +505,6 @@ internal sealed class MenuBarModel
 
     private static IReadOnlyList<MenuItem> SkyboxItems(ZaxCommand set, AppSettings settings)
         => ChoiceItems(set, Zax.Settings.SettingKeys.SceneSkybox, () => settings.Skybox);
-
-    private static IReadOnlyList<MenuItem> TvBoxItems(ZaxCommand set, AppSettings settings)
-        => ChoiceItems(set, Zax.Settings.SettingKeys.SceneTvBox, () => settings.TvBox);
 
     /// <summary>
     /// The rows of an enumerated setting, taken from its domain in the catalogue rather than

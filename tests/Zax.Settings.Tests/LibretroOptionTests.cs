@@ -32,9 +32,9 @@ public sealed class LibretroOptionTests
     }
 
     /// <summary>
-    /// SPEC-09 §4.6: the normative extract, entry by entry. The eleven entries of the table are
+    /// SPEC-09 §4.6: the normative extract, entry by entry. The ten entries of the table are
     /// what the generator must produce, with <c>video.graphic_quality</c> and
-    /// <c>emu.tv_mode</c> withdrawn by v1.1.
+    /// <c>emu.tv_mode</c> withdrawn by v1.1 and <c>scene.tv_box</c> by AMD-031.
     /// </summary>
     [Fact]
     public void The_table_is_the_normative_extract_of_the_specification()
@@ -48,7 +48,8 @@ public sealed class LibretroOptionTests
                 "zaxnes_light_intensity",
                 "zaxnes_scene_skybox",
                 "zaxnes_scene_custom_bg_color",
-                "zaxnes_scene_tv_box",
+
+                // AMD-031 retired scene.tv_box, so the extract is one entry shorter.
                 "zaxnes_emu_game_speed",
                 "zaxnes_emu_auto_tv_mode",
                 "zaxnes_audio_volume",
@@ -59,7 +60,6 @@ public sealed class LibretroOptionTests
     /// <summary>SPEC-09 §4.6: the values and defaults of the five single-line entries.</summary>
     [Theory]
     [InlineData("zaxnes_scene_skybox", "Default", "Default,Color,Gradient,Fantasy")]
-    [InlineData("zaxnes_scene_tv_box", "None", "None,TV")] // AMD-025: one model
     [InlineData("zaxnes_render_mesh_algo", "GREEDY", "GREEDY,MARCHING,GREEDY_MULTICOLOR")]
     [InlineData("zaxnes_render_shadow", "enabled", "enabled,disabled")]
     [InlineData("zaxnes_emu_auto_tv_mode", "disabled", "enabled,disabled")]

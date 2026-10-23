@@ -45,6 +45,18 @@ internal sealed class FakeProfileFileSystem : IProfileFileSystem
 
     public IReadOnlyCollection<string> Paths => _files.Keys;
 
+    /// <summary>
+    /// Every file read, in order, so that a test can check a file was <b>not</b> read — the rule
+    /// of AMD-033 §2 for a file hidden by one of the same name in the user folder.
+    /// </summary>
+    public List<string> Reads { get; } = [];
+
+    /// <summary>
+    /// Folders that refuse to be listed, standing in for a profile folder the account cannot
+    /// read (AMD-033 §1).
+    /// </summary>
+    public HashSet<string> Unreadable { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public void AddFile(string path, byte[] contents)
     {
         _files[path] = contents;
@@ -63,6 +75,11 @@ internal sealed class FakeProfileFileSystem : IProfileFileSystem
     public IReadOnlyList<string> ListFiles(string directory, string extension)
     {
         string normalised = Normalise(directory);
+        if (Unreadable.Contains(normalised))
+        {
+            throw new UnauthorizedAccessException($"access to {directory} is denied");
+        }
+
         List<string> matches = [];
         foreach (string path in _files.Keys)
         {
@@ -81,9 +98,12 @@ internal sealed class FakeProfileFileSystem : IProfileFileSystem
     }
 
     public byte[] ReadAllBytes(string path)
-        => _files.TryGetValue(path, out byte[]? contents)
+    {
+        Reads.Add(path);
+        return _files.TryGetValue(path, out byte[]? contents)
             ? contents
             : throw new FileNotFoundException(path);
+    }
 
     public string ReadAllText(string path) => System.Text.Encoding.UTF8.GetString(ReadAllBytes(path));
 

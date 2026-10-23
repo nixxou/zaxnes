@@ -47,12 +47,12 @@ internal sealed partial class ZaxUi
                 ImGui.TextUnformatted(UiText.ProductName);
             }
 
-            ImGui.TextDisabled(string.Create(CultureInfo.InvariantCulture, $"Version {UiText.Version}"));
+            ImGui.TextDisabled(UiText.VersionLine);
             ImGui.Separator();
             ImGui.TextUnformatted(UiText.WelcomeHint);
             ImGui.Spacing();
 
-            if (ImGui.Button("Ouvrir une ROM…"))
+            if (ImGui.Button(_host.Commands.Find(ZaxCommands.OpenRom)?.Label ?? UiText.OpenRomTitle))
             {
                 Activate(ZaxCommands.OpenRom, default);
             }
@@ -118,7 +118,11 @@ internal sealed partial class ZaxUi
 
         if (ImGui.Begin("##notification", flags))
         {
-            ImGui.TextColored(ColourOf(notification.Severity), notification.Text);
+            // AMD-036 §1: the text the loop produced is the English entry of the table, so it is
+            // translated here, when it is drawn — and follows a language change while it is up.
+            ImGui.TextColored(
+                ColourOf(notification.Severity),
+                UiNotifications.Translate(notification.Text));
         }
 
         ImGui.End();

@@ -85,6 +85,25 @@ public static class SettingsCatalogue
         }
     }
 
+    /// <summary>
+    /// The keys a former version of the program persisted and this one no longer knows
+    /// (AMD-031 §3).
+    /// </summary>
+    /// <remarks>
+    /// They are not settings: they have no descriptor, no default and no effect. They are
+    /// named only so that <c>settings.json</c> can drop them instead of keeping them as the
+    /// unknown keys of REQ-PERS-023 — a retired key is read without error and never written
+    /// back, where an unknown one survives every rewrite.
+    /// </remarks>
+    public static IReadOnlySet<string> RetiredKeys { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        // AMD-031: the decorative TV box is gone from the product.
+        "scene.tv_box",
+    };
+
+    /// <summary>Whether <paramref name="key"/> is one of the retired keys of AMD-031 §3.</summary>
+    public static bool IsRetired(string? key) => key is not null && RetiredKeys.Contains(key);
+
     /// <summary>The descriptor of <paramref name="key"/>, or null when there is none.</summary>
     public static SettingDescriptor? Find(string key)
         => key is not null && ByKeyIndex.TryGetValue(key, out SettingDescriptor? found) ? found : null;
@@ -457,7 +476,7 @@ public static class SettingsCatalogue
 
     #endregion
 
-    #region §4.1.4 Background, skybox, television
+    #region §4.1.4 Background and skybox
 
     private static void AddScene(List<SettingDescriptor> list)
     {
@@ -512,35 +531,6 @@ public static class SettingsCatalogue
             Domain = SettingDomain.Switch,
             LuaPath = "BgColor",
             ProfileField = "2",
-        });
-
-        list.Add(new SettingDescriptor(
-            SettingKeys.SceneTvBox,
-            SettingKind.Enum,
-            SettingValue.OfEnum(0),
-            SettingScope.User,
-            SettingEffect.Immediate,
-            SettingTheme.Scene)
-        {
-            // AMD-025: one model. A stored 2 or 3 is read back as 1 (TvBoxSetting), and the
-            // labels the three models were written under become the one model.
-            Domain = SettingDomain.Choice(
-                new SettingOption(0d, "None"),
-                new SettingOption(1d, "TV")),
-            LegacyOptions =
-            [
-                new SettingOption(1d, "TV 1"),
-                new SettingOption(1d, "TV 2"),
-                new SettingOption(1d, "TV 3"),
-            ],
-            LuaPath = "TVBox",
-            ProfileField = "35",
-            UiLabel = "TV Box",
-            LibretroValues =
-            [
-                new SettingOption(0d, "None"),
-                new SettingOption(1d, "TV"),
-            ],
         });
 
         list.Add(new SettingDescriptor(
@@ -1253,7 +1243,28 @@ public static class SettingsCatalogue
             Domain = SettingDomain.Switch,
             UiLabel = "Show FPS",
         });
+
+        // AMD-035 §1: the interface language, « en » by default, with no detection of the
+        // system's language. The two texts are the whole domain; anything else reads as « en »
+        // (SettingDescriptor.CoerceText).
+        list.Add(new SettingDescriptor(
+            SettingKeys.UiLanguage,
+            SettingKind.String,
+            SettingValue.OfString(LanguageEnglish),
+            SettingScope.User,
+            SettingEffect.Immediate,
+            SettingTheme.Interface)
+        {
+            TextOptions = [LanguageEnglish, LanguageFrench],
+            UiLabel = "Language",
+        });
     }
+
+    /// <summary>The <c>ui.language</c> text for English, which is also its default (AMD-035).</summary>
+    public const string LanguageEnglish = "en";
+
+    /// <summary>The <c>ui.language</c> text for French (AMD-035).</summary>
+    public const string LanguageFrench = "fr";
 
     #endregion
 }

@@ -142,8 +142,6 @@ internal static class SceneSettingBridge
         scene.Camera.LocalCamera = settings.LocalCam;
         scene.Settings.Shadows = settings.Shadow;
         scene.Settings.Skybox = (SkyboxKind)settings.Skybox;
-        // AMD-025: a profile or a script that still asks for TV 2 or TV 3 gets the one model.
-        scene.Settings.TvBox = TvBoxSetting.From(settings.TVBox);
         scene.Settings.CustomBackgroundColor = settings.CustomBgColor.ToRgb24();
         scene.UseNesBackgroundColor = settings.BgColor;
         scene.Clipping = settings.ClippingVector;

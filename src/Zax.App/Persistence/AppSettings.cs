@@ -118,6 +118,28 @@ public sealed class AppSettings
         set => Model.Set(SettingKeys.VideoVSync, SettingValue.OfEnum(Math.Clamp(value, 0, 2)));
     }
 
+    /// <summary>
+    /// <c>video.anti_alias</c>: 0 off, 1 MSAA 4×, 2 MSAA 8× (SPEC-09 REQ-PERS-017, AMD-032 §2).
+    /// </summary>
+    public int AntiAlias
+    {
+        get => Model.GetInt(SettingKeys.VideoAntiAlias);
+        set => Model.Set(SettingKeys.VideoAntiAlias, SettingValue.OfEnum(Math.Clamp(value, 0, 2)));
+    }
+
+    /// <summary><c>video.render_method</c>: 0 direct, 1 render texture (SPEC-09 §4.1.1).</summary>
+    public int RenderMethod
+    {
+        get => Model.GetInt(SettingKeys.VideoRenderMethod);
+        set => Model.Set(SettingKeys.VideoRenderMethod, SettingValue.OfEnum(Math.Clamp(value, 0, 1)));
+    }
+
+    /// <summary>
+    /// <c>video.res_scale_factor</c>: the 1, 2/3, 1/2, 1/3 or 1/4 the index of
+    /// <c>video.res_scale</c> derives into (REQ-PERS-013 point 6, REQ-SCN-063).
+    /// </summary>
+    public float ResScaleFactor => Model.GetFloat(SettingKeys.VideoResScaleFactor);
+
     /// <summary><c>render.shadow</c>: the global shadow switch, default true.</summary>
     public bool Shadow
     {
@@ -130,17 +152,6 @@ public sealed class AppSettings
     {
         get => Model.GetInt(SettingKeys.SceneSkybox);
         set => Model.Set(SettingKeys.SceneSkybox, SettingValue.OfEnum(value));
-    }
-
-    /// <summary>
-    /// <c>scene.tv_box</c>: 0 None, 1 the television. AMD-025 brings a stored 2 or 3 — the
-    /// TV 2 and TV 3 of REQ-SCN-054 — back to 1, on the way in as on the way out, so a
-    /// settings file written before the amendment keeps working.
-    /// </summary>
-    public int TvBox
-    {
-        get => TvBoxSetting.Normalise(Model.GetInt(SettingKeys.SceneTvBox));
-        set => Model.Set(SettingKeys.SceneTvBox, SettingValue.OfEnum(TvBoxSetting.Normalise(value)));
     }
 
     /// <summary><c>camera.fov</c>: vertical field of view in degrees, default 70.</summary>
@@ -176,6 +187,18 @@ public sealed class AppSettings
     {
         get => Model.GetInt(SettingKeys.UiSortOption);
         set => Model.Set(SettingKeys.UiSortOption, SettingValue.OfEnum(Math.Clamp(value, 0, 1)));
+    }
+
+    /// <summary>
+    /// <c>ui.language</c>: the interface language of AMD-035, <c>en</c> or <c>fr</c>. Reading
+    /// brings an unknown text back to <c>en</c> without an error (AMD-035 §1); writing stores
+    /// the text as it is given, so a hand-edited file is never rewritten behind the user's back.
+    /// </summary>
+    public string Language
+    {
+        get => SettingsCatalogue.Get(SettingKeys.UiLanguage)
+            .CoerceText(Model.GetString(SettingKeys.UiLanguage));
+        set => Model.SetString(SettingKeys.UiLanguage, value);
     }
 
     /// <summary><c>ui.last_browse_dir</c> (REQ-PERS-066).</summary>

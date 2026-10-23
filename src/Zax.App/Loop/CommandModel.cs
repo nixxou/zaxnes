@@ -20,23 +20,30 @@ public readonly record struct CommandArgs(int Number = 0, string? Text = null, i
 /// One command of the model: a stable name, a label, the default shortcut shown next to it, and
 /// the three things a menu needs — invoke, "is it available", "is it ticked".
 /// </summary>
+/// <remarks>
+/// The label and the shortcut text are read through a delegate, not stored: AMD-035 has the
+/// interface language change without a restart, and a command registered once at start-up must
+/// answer in the language in force at the moment a menu draws it.
+/// </remarks>
 public sealed class ZaxCommand
 {
+    private readonly Func<string> _label;
+    private readonly Func<string> _shortcut;
     private readonly Action<CommandArgs> _execute;
     private readonly Func<CommandArgs, bool>? _canExecute;
     private readonly Func<bool>? _isChecked;
 
     internal ZaxCommand(
         string name,
-        string label,
-        string shortcut,
+        Func<string> label,
+        Func<string> shortcut,
         Action<CommandArgs> execute,
         Func<CommandArgs, bool>? canExecute,
         Func<bool>? isChecked)
     {
         Name = name;
-        Label = label;
-        Shortcut = shortcut;
+        _label = label;
+        _shortcut = shortcut;
         _execute = execute;
         _canExecute = canExecute;
         _isChecked = isChecked;
@@ -45,11 +52,11 @@ public sealed class ZaxCommand
     /// <summary>The stable name (<see cref="ZaxCommands"/>).</summary>
     public string Name { get; }
 
-    /// <summary>Label a menu shows.</summary>
-    public string Label { get; }
+    /// <summary>Label a menu shows, in the interface language of AMD-035.</summary>
+    public string Label => _label();
 
     /// <summary>Default keyboard shortcut, as AMD-010 REQ-UI-204 lists it; may be empty.</summary>
-    public string Shortcut { get; }
+    public string Shortcut => _shortcut();
 
     /// <summary>Whether the command is a toggle, so that a menu can draw a tick.</summary>
     public bool IsToggle => _isChecked is not null;
@@ -81,7 +88,7 @@ public sealed class CommandModel
     /// <summary>Every registered command, in registration order.</summary>
     public IReadOnlyList<ZaxCommand> Commands => _order;
 
-    /// <summary>Registers a command.</summary>
+    /// <summary>Registers a command whose label and shortcut text never change.</summary>
     /// <param name="name">A stable name from <see cref="ZaxCommands"/>.</param>
     /// <param name="label">Label for a menu.</param>
     /// <param name="execute">What the command does.</param>
@@ -95,8 +102,28 @@ public sealed class CommandModel
         string shortcut = "",
         Func<CommandArgs, bool>? canExecute = null,
         Func<bool>? isChecked = null)
+        => Register(name, () => label, execute, () => shortcut, canExecute, isChecked);
+
+    /// <summary>
+    /// Registers a command whose label — and, when it has one, whose shortcut text — follows the
+    /// interface language (AMD-035).
+    /// </summary>
+    /// <param name="name">A stable name from <see cref="ZaxCommands"/>.</param>
+    /// <param name="label">Reads the label in the language in force.</param>
+    /// <param name="execute">What the command does.</param>
+    /// <param name="shortcut">Reads the shortcut text, or null for none.</param>
+    /// <param name="canExecute">Availability test, or null for "always".</param>
+    /// <param name="isChecked">Tick state, or null when the command is not a toggle.</param>
+    public ZaxCommand Register(
+        string name,
+        Func<string> label,
+        Action<CommandArgs> execute,
+        Func<string>? shortcut = null,
+        Func<CommandArgs, bool>? canExecute = null,
+        Func<bool>? isChecked = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(label);
         ArgumentNullException.ThrowIfNull(execute);
 
         if (_commands.ContainsKey(name))
@@ -104,7 +131,13 @@ public sealed class CommandModel
             throw new InvalidOperationException($"The command '{name}' is already registered.");
         }
 
-        ZaxCommand command = new(name, label, shortcut, execute, canExecute, isChecked);
+        ZaxCommand command = new(
+            name,
+            label,
+            shortcut ?? (static () => string.Empty),
+            execute,
+            canExecute,
+            isChecked);
         _commands.Add(name, command);
         _order.Add(command);
         return command;
