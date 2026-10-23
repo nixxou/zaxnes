@@ -194,6 +194,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// (Rust-only "emulation on a separate core", handheld default): the game sees its inputs
     /// one displayed frame later, nothing else changes. See `GameSession::prepare_frame_timed`.
     pub separate_core: bool,
+    /// Whether the scripts' Lua collector runs in its generational mode (Rust-only, handheld
+    /// default): no long collection stalls; see `GameSession::use_generational_gc`.
+    pub lua_generational_gc: bool,
     /// The fast-forward burst.
     pub fast_forward: FastForwardState,
     /// The notification area.
@@ -269,6 +272,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             rollback: RollbackHistory::new(),
             rollback_enabled: true,
             separate_core: false,
+            lua_generational_gc: false,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
             slots,

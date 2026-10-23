@@ -446,6 +446,14 @@ impl GameSession {
         self.engine.script_host_as::<ProfileScriptRuntime>()
     }
 
+    /// Switches the scripts' Lua collector to its generational mode (see
+    /// `ProfileScriptRuntime::use_generational_gc`).
+    pub fn use_generational_gc(&self) {
+        if let Some(runtime) = self.runtime() {
+            runtime.use_generational_gc();
+        }
+    }
+
     /// The names of the scripts, in hook order.
     #[must_use]
     pub fn script_names(&self) -> Vec<String> {

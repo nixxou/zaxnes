@@ -58,6 +58,14 @@ const GC_STEP_MULTIPLIER: i32 = 400;
 /// The size of a collector step as a power of two in bytes (the default of Lua 5.4).
 const GC_STEP_SIZE_LOG2: i32 = 13;
 
+/// Generational mode: a minor collection after the heap grew this much, in percent (the
+/// default of Lua 5.4).
+const GC_GENERATIONAL_MINOR_PERCENT: i32 = 20;
+
+/// Generational mode: a major collection after the old generation grew this much, in percent
+/// (the default of Lua 5.4).
+const GC_GENERATIONAL_MAJOR_PERCENT: i32 = 100;
+
 /// How many VM instructions pass between two looks at the execution budget.
 const BUDGET_CHECK_INSTRUCTIONS: u32 = 100_000;
 
@@ -442,6 +450,15 @@ impl ProfileScriptRuntime {
     /// afterwards.
     pub fn settings_mut(&mut self) -> &mut ScriptSettings {
         &mut self.data.env.settings
+    }
+
+    /// Switches the Lua collector to its generational mode (Rust-only setting, handheld
+    /// default): the hooks' short-lived values are reclaimed by cheap minor collections instead
+    /// of the long incremental cycles that stall a frame now and then. Scripts see no
+    /// difference but the numbers of `collectgarbage("count")`.
+    pub fn use_generational_gc(&self) {
+        self.lua
+            .gc_gen(GC_GENERATIONAL_MINOR_PERCENT, GC_GENERATIONAL_MAJOR_PERCENT);
     }
 
     /// Copies the changes made to the settings since the last call into the pipeline's own

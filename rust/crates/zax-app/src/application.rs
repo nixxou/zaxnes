@@ -260,6 +260,7 @@ impl Running {
                 catch_up(options),
                 group_draws(options),
                 separate_core(options),
+                generational_gc(options),
             );
         }
         let (width, height) = window.drawable_size();
@@ -294,6 +295,7 @@ impl Running {
         // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
         host.rollback_enabled = !options.handheld;
         host.separate_core = separate_core(options);
+        host.lua_generational_gc = generational_gc(options);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui = ImguiFrontend::new(&gl, &host, options, height)?;
@@ -607,12 +609,17 @@ struct HostParts<'a> {
     view: OffscreenFramebuffer,
 }
 
-/// How far the frame clock catches up: the command line or `ZAXNES_CATCH_UP`, else none on a
-/// handheld (a late frame slows the game a little there instead of collapsing the display into
-/// five emulated frames per shown one) and REQ-LOOP-012 elsewhere.
+/// The catch-up bound of a handheld: emulated frames per displayed frame at most.
+const HANDHELD_CATCH_UP: u32 = 2;
+
+/// How far the frame clock catches up: the command line or `ZAXNES_CATCH_UP`, else two emulated
+/// frames per displayed one on a handheld and REQ-LOOP-012 elsewhere. With the core on its own
+/// thread, a frame caught up costs the main thread only its conversion and Lua hooks, so a heavy
+/// scene keeps the game at full speed by showing fewer frames, and the bound keeps a long stall
+/// from piling up five frames.
 fn catch_up(options: &AppOptions) -> CatchUp {
     options.catch_up.unwrap_or(if options.handheld {
-        CatchUp::Off
+        CatchUp::Limit(HANDHELD_CATCH_UP)
     } else {
         CatchUp::Limit(MAX_BACKLOG)
     })
@@ -741,6 +748,20 @@ fn separate_core(options: &AppOptions) -> bool {
     }
 }
 
+/// Whether the scripts' Lua collector runs in its generational mode: `ZAXNES_LUA_GC=gen` or
+/// `inc`, else on a handheld only (no stalls of tens of milliseconds; scripts see no difference
+/// but `collectgarbage("count")`).
+fn generational_gc(options: &AppOptions) -> bool {
+    match std::env::var(LUA_GC_VARIABLE).as_deref().map(str::trim) {
+        Ok("gen") => true,
+        Ok("inc") => false,
+        _ => options.handheld,
+    }
+}
+
+/// The variable that forces [`generational_gc`].
+const LUA_GC_VARIABLE: &str = "ZAXNES_LUA_GC";
+
 /// The variable that forces [`separate_core`].
 const SEPARATE_CORE_VARIABLE: &str = "ZAXNES_SEPARATE_CORE";
 
@@ -772,6 +793,7 @@ fn log_profiler_startup(
     catch_up: CatchUp,
     group_draws: bool,
     separate_core: bool,
+    generational_gc: bool,
 ) {
     log(&frame_profiler::startup_report(
         &format!(
@@ -784,7 +806,7 @@ fn log_profiler_startup(
             model.vsync(),
             model.frame_rate()
         ),
-        &format!("{pacing}, catch-up {catch_up:?}, grouped draws {group_draws}, separate core {separate_core}"),
+        &format!("{pacing}, catch-up {catch_up:?}, grouped draws {group_draws}, separate core {separate_core}, Lua GC {}", if generational_gc { "generational" } else { "incremental" }),
     ));
 }
 

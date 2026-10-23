@@ -152,6 +152,17 @@ displayed frame". All values are per displayed frame.
   now splits the scene into list / collect / scene. Lua (callgrind, temple): 84 % in UpdateS
   and LateUpdate; each geometry read (`TopRight`, `size`...) is a HostLink round trip plus a new
   `Vector3` userdata (allocation, metatable, finaliser); descriptors (`Offset`...) under 10 %.
+- Device run of `f914154` (owner, PAL 50 Hz): light areas full speed; outside conv 3.3 / lua 3-5 /
+  list 4.7 / collect 2.3 / scene 5.6 = 20-22 ms on the main thread, so 45 emulated frames/s
+  instead of 50; Lua spikes up to 234 ms.
+- Handheld catch-up back to 2 emulated frames per displayed frame (`HANDHELD_CATCH_UP`): with the
+  core on its own thread a caught-up frame costs the main thread only conversion + Lua, so a
+  heavy scene keeps full speed by showing fewer frames; the bound stops long stalls piling up.
+- Generational Lua collector (setting, handheld default, `ZAXNES_LUA_GC=gen|inc`,
+  `ProfileScriptRuntime::use_generational_gc`): x86 Zelda II temple Lua mean 0.85 -> 0.83 ms,
+  max 62.8 -> 2.7 ms; world map mean 0.48 -> 0.41, max 40.7 -> 1.2 ms. Scripts see no difference
+  but `collectgarbage("count")` (none of the corpus calls it). Desktop default unchanged
+  (incremental) pending the owner's approval.
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

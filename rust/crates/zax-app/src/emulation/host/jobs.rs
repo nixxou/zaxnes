@@ -265,6 +265,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     });
                     mixer.set_emulation_source(Some(source));
                 }
+                if self.lua_generational_gc {
+                    session.use_generational_gc();
+                }
                 self.session = Some(session);
                 Ok(())
             }
