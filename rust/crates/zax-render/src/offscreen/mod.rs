@@ -79,6 +79,7 @@ pub struct OffscreenContext {
     width: i32,
     height: i32,
     /// Declared last: fields drop in order, so the context outlives `gl`.
+    #[expect(dead_code, reason = "held for its `Drop`, which releases the context")]
     native: NativeContext,
 }
 

@@ -34,13 +34,12 @@ impl NativeContext {
     pub(super) fn new(api: ContextApi) -> Result<(Self, glow::Context), OffscreenError> {
         // SAFETY: libEGL is the system's EGL loader; loading it runs no initialiser beyond the
         // library's own, and every entry point the instance binds has the EGL 1.4 signature.
-        let egl =
-            unsafe { Egl::load_required_from_filename(LIBRARY) }.map_err(|error| {
-                OffscreenError::Load {
-                    library: LIBRARY,
-                    message: error.to_string(),
-                }
-            })?;
+        let egl = unsafe { Egl::load_required_from_filename(LIBRARY) }.map_err(|error| {
+            OffscreenError::Load {
+                library: LIBRARY,
+                message: error.to_string(),
+            }
+        })?;
         let display = open_display(&egl)?;
         egl_call("eglInitialize", egl.initialize(display))?;
 
@@ -100,9 +99,7 @@ impl NativeContext {
         };
         egl_call(
             "eglMakeCurrent",
-            native
-                .egl
-                .make_current(display, None, None, Some(context)),
+            native.egl.make_current(display, None, None, Some(context)),
         )?;
 
         // SAFETY: the context is current on this thread and the loader returns the address of
