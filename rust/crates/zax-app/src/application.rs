@@ -23,6 +23,7 @@ use zax_render::SceneRenderer;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 
+use crate::app_log;
 use crate::app_options::AppOptions;
 use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock};
 use crate::audio::audio_assets::AudioAssets;
@@ -152,7 +153,7 @@ pub fn resolve_startup_game(
 }
 
 fn log(message: &str) {
-    println!("Zaxnes: {message}");
+    app_log::line(&format!("Zaxnes: {message}"));
 }
 
 /// The windowed application.
@@ -173,7 +174,7 @@ impl ZaxApplication {
         match self.run_inner() {
             Ok(code) => code,
             Err(message) => {
-                eprintln!("{message}");
+                app_log::error(&message);
                 1
             }
         }
@@ -219,6 +220,17 @@ impl Running {
                 legacy.display(),
                 paths.root.display()
             ));
+        }
+        // The file copy of the log: the start-up report and the profiler reach it even when the
+        // launcher loses the console (Rust-only).
+        if paths.is_writable {
+            if let Some(file) = app_log::open(&paths.logs_directory) {
+                log(&format!(
+                    "zaxnes {} log file '{}'",
+                    env!("CARGO_PKG_VERSION"),
+                    file.display()
+                ));
+            }
         }
         let (store, model) = load_settings(options, &paths);
         let catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
@@ -573,10 +585,10 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     // then the scene gets the values that came out of the two.
     command_line_settings::apply(options, &mut model);
     if !paths.is_writable {
-        eprintln!(
+        app_log::error(&format!(
             "Zaxnes: {}",
             paths.unwritable_message.clone().unwrap_or_default()
-        );
+        ));
     }
     (store, model)
 }
@@ -811,9 +823,7 @@ fn start_game_from_command_line(
     startup_game: Option<&str>,
 ) {
     let Some(rom) = options.rom_path.as_deref() else {
-        println!(
-            "Zaxnes: no --rom given; the window opens on the welcome screen (AMD-010 REQ-UI-207)."
-        );
+        log("no --rom given; the window opens on the welcome screen (AMD-010 REQ-UI-207).");
         return;
     };
     let full: PathBuf = std::path::absolute(rom).unwrap_or_else(|_| PathBuf::from(rom));
