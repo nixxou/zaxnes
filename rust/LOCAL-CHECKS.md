@@ -208,9 +208,33 @@ powershell -ExecutionPolicy Bypass -File rust\build\package-windows.ps1     # zi
 ```
 
 ```sh
-rust/build/package-linux-aarch64.sh            # cross build on x86_64 Linux (gcc-aarch64-linux-gnu)
-rust/build/package-linux-aarch64.sh --native   # on the device itself
+pip install ziglang && cargo install cargo-zigbuild --locked   # once; also cmake and zip
+rust/build/package-linux-aarch64.sh            # rust/target/package/Zaxnes.zip (PortMaster)
+rust/build/package-linux-aarch64.sh --native   # on an aarch64 machine (no glibc pin)
 ```
+
+The script builds with `cargo zigbuild --target aarch64-unknown-linux-gnu.2.31 --features firmware-sdl`
+and fails when the binary needs a glibc above 2.31 or a library besides libc, libm, libdl,
+libpthread, librt, libgcc_s and the firmware's `libSDL2-2.0.so.0`. SDL2 is not shipped.
+
+## 8b. Handheld device (Anbernic H700: muOS, Knulli, ROCKNIX)
+
+1. Unzip `Zaxnes.zip` into the `ports` folder of the SD card (muOS: `ROMS/Ports` or the
+   PortMaster folder it uses; Knulli: `roms/ports`; ROCKNIX: `roms/ports`), so that `Zaxnes.sh` and
+   `zaxnes/` sit side by side. PortMaster must already be installed on the device.
+2. Put `.nes` files in `zaxnes/roms/` and profiles in `zaxnes/profiles/` (convert 3dSen profiles
+   on a PC: `zaxnes --import-3dsen <3dSen folder> --userdata <folder>`, copy `<folder>/profiles`).
+3. Refresh the game list and start Zaxnes from the Ports menu.
+4. Check: the handheld menu appears at 640x480; the pad moves the list; a game starts and
+   shows in 3D; sound plays; Select+Start quits cleanly and returns to the front-end; settings
+   and saves persist across runs (they live in `zaxnes/`).
+5. Log: `ports/zaxnes/log.txt` (overwritten each run). It starts with the firmware, GPU driver and
+   screen from PortMaster, then the SDL video driver, display mode, `GL_VERSION`, `GL_RENDERER`
+   and `GL_SHADING_LANGUAGE_VERSION` that the device really provides. Send it back with any bug.
+6. If the program cannot load `libSDL2-2.0.so.0` or reports a `GLIBC_` version, note the firmware
+   and its glibc (`CFW_GLIBC` in the log's first line).
+
+Not done yet: a muOS native `.muxapp` (`mux_launch.sh`), a screenshot for the PortMaster listing.
 
 Standalone exe (`+crt-static`, `[profile.release]`): after the build, from a Visual Studio prompt
 

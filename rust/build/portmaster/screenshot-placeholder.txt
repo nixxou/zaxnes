@@ -1,0 +1,2 @@
+No screenshot yet. PortMaster wants screenshot.png or screenshot.jpg (gameplay, 4:3, at least
+640x480) next to port.json in the submission. Take one on the device and replace this file.

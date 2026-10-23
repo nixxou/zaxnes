@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<gameList>
+  <game>
+    <path>./Zaxnes.sh</path>
+    <name>Zaxnes</name>
+    <desc>NES emulator that draws the games in 3D with 3dSen-style profiles. Needs your own .nes files and profiles (see README.md). Select+Start quits.</desc>
+    <releasedate>20250101T000000</releasedate>
+    <developer>nixxou</developer>
+    <publisher>nixxou</publisher>
+    <genre>emulator</genre>
+  </game>
+</gameList>
