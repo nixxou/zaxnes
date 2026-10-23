@@ -26,10 +26,13 @@ pub struct VideoPacingRequest {
 /// Where the request comes from: the settings, or something the host decides.
 pub type RequestSource = Box<dyn Fn(&SettingsModel) -> VideoPacingRequest>;
 
+/// Receives one line per application of the pacing.
+pub type PacingLog = Box<dyn Fn(&str)>;
+
 /// The pacing applied to a window.
 pub struct VideoPacing {
     request: RequestSource,
-    log: Option<Box<dyn Fn(&str)>>,
+    log: Option<PacingLog>,
     state: Option<DisplayPacingState>,
     applications: u32,
 }
@@ -39,7 +42,7 @@ impl VideoPacing {
     /// `video.vsync` and `video.frame_rate` are followed as they stand. `log` receives one line
     /// per application.
     #[must_use]
-    pub fn new(request: Option<RequestSource>, log: Option<Box<dyn Fn(&str)>>) -> Self {
+    pub fn new(request: Option<RequestSource>, log: Option<PacingLog>) -> Self {
         Self {
             request: request.unwrap_or_else(|| {
                 Box::new(|model| VideoPacingRequest {
