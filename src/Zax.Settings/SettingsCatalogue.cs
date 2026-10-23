@@ -1243,7 +1243,28 @@ public static class SettingsCatalogue
             Domain = SettingDomain.Switch,
             UiLabel = "Show FPS",
         });
+
+        // AMD-035 §1: the interface language, « en » by default, with no detection of the
+        // system's language. The two texts are the whole domain; anything else reads as « en »
+        // (SettingDescriptor.CoerceText).
+        list.Add(new SettingDescriptor(
+            SettingKeys.UiLanguage,
+            SettingKind.String,
+            SettingValue.OfString(LanguageEnglish),
+            SettingScope.User,
+            SettingEffect.Immediate,
+            SettingTheme.Interface)
+        {
+            TextOptions = [LanguageEnglish, LanguageFrench],
+            UiLabel = "Language",
+        });
     }
+
+    /// <summary>The <c>ui.language</c> text for English, which is also its default (AMD-035).</summary>
+    public const string LanguageEnglish = "en";
+
+    /// <summary>The <c>ui.language</c> text for French (AMD-035).</summary>
+    public const string LanguageFrench = "fr";
 
     #endregion
 }

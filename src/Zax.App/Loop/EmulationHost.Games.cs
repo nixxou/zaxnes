@@ -39,6 +39,16 @@ internal sealed partial class EmulationHost
     public static string DeleteSlotQuestion(string slotId) => $"Do you want to delete the slot {slotId} ?";
 
     /// <summary>
+    /// What the notification says once a game has gone. Unlike the two questions above, SPEC-09
+    /// fixes no wording for it, so it is an ordinary interface text and follows the language of
+    /// AMD-035.
+    /// </summary>
+    public static string DeletedMessage(string title)
+        => Ui.UiStrings.Language == Ui.UiLanguage.French
+            ? $"« {title} » supprimé."
+            : $"“{title}” deleted.";
+
+    /// <summary>
     /// Deletes a user game, after confirmation when the frontend offers one (REQ-PERS-042): the
     /// emulation stops if this is the current game, every slot of that game is emptied — the
     /// quick slot included — and the profile file, the cover art and the library entry go.
@@ -96,7 +106,7 @@ internal sealed partial class EmulationHost
             return false;
         }
 
-        Notifications.Show($"« {title} » supprimé.");
+        Notifications.Show(DeletedMessage(title));
         return true;
     }
 

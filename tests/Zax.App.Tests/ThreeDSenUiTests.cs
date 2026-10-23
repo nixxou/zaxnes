@@ -26,7 +26,10 @@ public sealed class ThreeDSenUiTests
         Assert.Equal(UiText.ImportThreeDSenHint, harness.Ui.Browser.Hint);
 
         // §3: the bundle can be named directly, so the dialog offers its extension.
-        Assert.Equal(FileBrowserModel.ThreeDSenFilters, harness.Ui.Browser.Filters);
+        Assert.Equal(
+            FileBrowserModel.ThreeDSenFilters.Select(static f => f.Label),
+            harness.Ui.Browser.Filters.Select(static f => f.Label));
+        Assert.Equal(["bundle"], harness.Ui.Browser.Filter);
     }
 
     [Fact] // AMD-030 §2: the dialog answers with the folder being shown.

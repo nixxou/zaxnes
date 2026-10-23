@@ -25,20 +25,24 @@ internal enum OptionsTab
 }
 
 /// <summary>
-/// One row of the options window: a setting, its French label and the bounds the widget uses.
+/// One row of the options window: a setting, its label and the bounds the widget uses.
 /// </summary>
 /// <param name="Descriptor">The setting, straight out of the catalogue.</param>
-/// <param name="Label">The French label (<see cref="UiText.LabelOf(SettingDescriptor)"/>).</param>
 /// <param name="Minimum">Lowest value the widget offers, for a number.</param>
 /// <param name="Maximum">Highest value the widget offers, for a number.</param>
 /// <param name="Step">The step a number widget snaps to, or 0 for a free slider.</param>
 internal sealed record OptionsRow(
     SettingDescriptor Descriptor,
-    string Label,
     double Minimum,
     double Maximum,
     double Step)
 {
+    /// <summary>
+    /// The label, read in the interface language every time it is asked for, so a change of
+    /// language reaches the open window at once (AMD-035 §1).
+    /// </summary>
+    public string Label => UiText.LabelOf(Descriptor);
+
     /// <summary>Whether the setting is a profile parameter a profile load will overwrite.</summary>
     public bool IsProfileScoped => Descriptor.Scope == SettingScope.Profile;
 }
@@ -119,16 +123,16 @@ internal sealed class OptionsModel
         OptionsTab.Interface,
     ];
 
-    /// <summary>The French title of a tab, as REQ-UI-202 writes it.</summary>
-    public static string TitleOf(OptionsTab tab) => tab switch
+    /// <summary>The title of a tab, in the interface language (REQ-UI-202, AMD-035).</summary>
+    public static string TitleOf(OptionsTab tab) => UiStrings.Get(tab switch
     {
-        OptionsTab.Video => "Vidéo",
-        OptionsTab.Camera => "Caméra",
-        OptionsTab.Light => "Lumière et ombres",
-        OptionsTab.Audio => "Audio",
-        OptionsTab.Emulation => "Émulation",
-        _ => "Interface",
-    };
+        OptionsTab.Video => UiKeys.TabVideo,
+        OptionsTab.Camera => UiKeys.TabCamera,
+        OptionsTab.Light => UiKeys.TabLight,
+        OptionsTab.Audio => UiKeys.TabAudio,
+        OptionsTab.Emulation => UiKeys.TabEmulation,
+        _ => UiKeys.TabInterface,
+    });
 
     /// <summary>The rows of a tab, in catalogue order.</summary>
     public IReadOnlyList<OptionsRow> Rows(OptionsTab tab) => _rows[tab];
@@ -160,7 +164,7 @@ internal sealed class OptionsModel
             return true;
         }
 
-        return descriptor.Scope == SettingScope.User && IsEditableKind(descriptor.Kind);
+        return descriptor.Scope == SettingScope.User && IsEditable(descriptor);
     }
 
     /// <summary>
@@ -224,17 +228,23 @@ internal sealed class OptionsModel
         }
     }
 
-    private static bool IsEditableKind(SettingKind kind) => kind
-        is SettingKind.Bool
-        or SettingKind.Int
-        or SettingKind.Float
-        or SettingKind.Enum
-        or SettingKind.Color;
+    /// <summary>
+    /// Whether the window has a widget for <paramref name="descriptor"/>. A text setting only
+    /// qualifies when its values are a finite list, which is the drop-down <c>ui.language</c>
+    /// of AMD-035 needs; a free text field — <c>ui.last_browse_dir</c> — stays out.
+    /// </summary>
+    private static bool IsEditable(SettingDescriptor descriptor) => descriptor.Kind switch
+    {
+        SettingKind.Bool or SettingKind.Int or SettingKind.Float
+            or SettingKind.Enum or SettingKind.Color => true,
+        SettingKind.String => descriptor.TextOptions is { Count: > 0 },
+        _ => false,
+    };
 
     private static OptionsRow BuildRow(SettingDescriptor descriptor)
     {
         (double minimum, double maximum, double step) = Bounds(descriptor);
-        return new OptionsRow(descriptor, UiText.LabelOf(descriptor), minimum, maximum, step);
+        return new OptionsRow(descriptor, minimum, maximum, step);
     }
 
     private static (double Minimum, double Maximum, double Step) Bounds(SettingDescriptor descriptor)

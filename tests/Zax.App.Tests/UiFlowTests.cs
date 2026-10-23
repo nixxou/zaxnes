@@ -99,7 +99,7 @@ public sealed class UiFlowTests
 
         // The filters of SPEC-10 §4 plus "every file", as REQ-UI-201 asks.
         Assert.Equal(["nes", "zip"], harness.Ui.Browser.Filter);
-        Assert.Contains("Tous les fichiers", harness.Ui.Browser.Filters.Select(static f => f.Label));
+        Assert.Contains("All files", harness.Ui.Browser.Filters.Select(static f => f.Label));
     }
 
     /// <summary>
@@ -329,12 +329,22 @@ public sealed class UiFlowTests
         Assert.Matches(@"^\d+\.\d+\.\d+", UiText.Version);
         Assert.Equal("GPL v3", UiText.AboutLines[2]);
 
-        // AMD-029 §3 word for word, split over the three lines of the block.
-        Assert.Equal("Projet indépendant inspiré de 3dSen (Geod Studio) ;", UiText.AboutLines[3]);
+        // AMD-035: English by default, the translation of the three attribution lines.
+        Assert.Equal("Independent project inspired by 3dSen (Geod Studio);", UiText.AboutLines[3]);
         Assert.Equal(
-            "contient du code adapté de 3DNes_Engine (Geod Studio, GPL v3).",
+            "contains code adapted from 3DNes_Engine (Geod Studio, GPL v3).",
             UiText.AboutLines[4]);
-        Assert.Equal("Sans lien avec Geod Studio ni Nintendo.", UiText.AboutLines[5]);
+        Assert.Equal("Not affiliated with Geod Studio or Nintendo.", UiText.AboutLines[5]);
+
+        // AMD-029 §3 writes the sentence in French, word for word, split over the three lines.
+        using (new UiLanguageScope(UiLanguage.French))
+        {
+            Assert.Equal("Projet indépendant inspiré de 3dSen (Geod Studio) ;", UiText.AboutLines[3]);
+            Assert.Equal(
+                "contient du code adapté de 3DNes_Engine (Geod Studio, GPL v3).",
+                UiText.AboutLines[4]);
+            Assert.Equal("Sans lien avec Geod Studio ni Nintendo.", UiText.AboutLines[5]);
+        }
 
         harness.Run(ZaxCommands.ShowAbout);
         Assert.True(harness.Ui.State.About);

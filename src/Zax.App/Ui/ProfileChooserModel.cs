@@ -26,18 +26,18 @@ internal sealed record ProfileChoice(
     public bool IsGeneric => Is2DMode || IsDefault3D;
 
     /// <summary>
-    /// The French words for where the profile comes from. A user profile says which of the two
-    /// scanned folders holds it, which is where AMD-033 §2 asks for the origin to be visible.
+    /// Where the profile comes from, in the interface language. A user profile says which of the
+    /// two scanned folders holds it, which is where AMD-033 §2 asks for the origin to be visible.
     /// </summary>
-    public string SourceLabel => Is2DMode
-        ? "sans conversion 3D"
+    public string SourceLabel => UiStrings.Get(Is2DMode
+        ? UiKeys.ProfileSourceTwoDimensional
         : IsDefault3D
-            ? "géométrie 3D par défaut"
+            ? UiKeys.ProfileSourceDefaultThreeD
             : Source != GameProfileSource.User
-                ? "profil intégré"
+                ? UiKeys.ProfileSourceBuiltIn
                 : Origin == ProfileOrigin.ProgramFolder
-                    ? "profil du dossier du programme"
-                    : "profil utilisateur";
+                    ? UiKeys.ProfileSourceProgramFolder
+                    : UiKeys.ProfileSourceUser);
 }
 
 /// <summary>

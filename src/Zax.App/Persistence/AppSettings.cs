@@ -189,6 +189,18 @@ public sealed class AppSettings
         set => Model.Set(SettingKeys.UiSortOption, SettingValue.OfEnum(Math.Clamp(value, 0, 1)));
     }
 
+    /// <summary>
+    /// <c>ui.language</c>: the interface language of AMD-035, <c>en</c> or <c>fr</c>. Reading
+    /// brings an unknown text back to <c>en</c> without an error (AMD-035 §1); writing stores
+    /// the text as it is given, so a hand-edited file is never rewritten behind the user's back.
+    /// </summary>
+    public string Language
+    {
+        get => SettingsCatalogue.Get(SettingKeys.UiLanguage)
+            .CoerceText(Model.GetString(SettingKeys.UiLanguage));
+        set => Model.SetString(SettingKeys.UiLanguage, value);
+    }
+
     /// <summary><c>ui.last_browse_dir</c> (REQ-PERS-066).</summary>
     public string LastBrowseDirectory
     {

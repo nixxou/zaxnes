@@ -47,7 +47,7 @@ internal sealed partial class ZaxUi
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Dossier parent") && _browser.Directory is not null)
+        if (ImGui.Button(UiText.ParentFolder) && _browser.Directory is not null)
         {
             _browser.GoUp();
         }
@@ -244,7 +244,7 @@ internal sealed partial class ZaxUi
         ImGui.EndChild();
 
         ImGui.BeginDisabled(_chooser.SelectedId is null);
-        if (ImGui.Button("Lancer"))
+        if (ImGui.Button(UiText.Launch))
         {
             ProfileChoice? picked = null;
             foreach (ProfileChoice choice in _chooser.All)

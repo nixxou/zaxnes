@@ -38,7 +38,7 @@ internal sealed record FileEntry(string Name, string Path, FileEntryKind Kind);
 internal sealed class FileBrowserModel
 {
     /// <summary>The root row label under Windows (REQ-UI-101).</summary>
-    public const string ComputerLabel = "Poste de travail";
+    public static string ComputerLabel => UiStrings.Get(UiKeys.BrowserComputer);
 
     private readonly List<FileEntry> _entries = [];
     private readonly List<(string Label, string Path)> _trail = [];
@@ -263,30 +263,33 @@ internal sealed class FileBrowserModel
         return false;
     }
 
-    /// <summary>The filters of the ROM dialog (SPEC-10 §4, AMD-010 REQ-UI-201).</summary>
-    public static IReadOnlyList<(string Label, string[] Extensions)> RomFilters { get; } =
+    /// <summary>
+    /// The filters of the ROM dialog (SPEC-10 §4, AMD-010 REQ-UI-201). Built on each read, so
+    /// that a dialog opened after a change of language shows the new wording (AMD-035).
+    /// </summary>
+    public static IReadOnlyList<(string Label, string[] Extensions)> RomFilters =>
     [
-        ("ROMs NES (*.nes, *.zip)", ["nes", "zip"]),
-        ("Fichiers .nes", ["nes"]),
-        ("Archives .zip", ["zip"]),
-        ("Tous les fichiers", []),
+        (UiStrings.Get(UiKeys.BrowserFilterNesRoms), ["nes", "zip"]),
+        (UiStrings.Get(UiKeys.BrowserFilterNesFiles), ["nes"]),
+        (UiStrings.Get(UiKeys.BrowserFilterZip), ["zip"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
     /// <summary>The filter of the profile import dialog (SPEC-10 §4).</summary>
-    public static IReadOnlyList<(string Label, string[] Extensions)> ProfileFilters { get; } =
+    public static IReadOnlyList<(string Label, string[] Extensions)> ProfileFilters =>
     [
-        ("Profils 3D (*.3dn)", ["3dn"]),
-        ("Tous les fichiers", []),
+        (UiStrings.Get(UiKeys.BrowserFilterProfiles), ["3dn"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
     /// <summary>
     /// The filters of the 3dSen import (AMD-030 §2, §3): the bundle of the installation, whose
     /// fingerprint is never assumed, or any file the user points at.
     /// </summary>
-    public static IReadOnlyList<(string Label, string[] Extensions)> ThreeDSenFilters { get; } =
+    public static IReadOnlyList<(string Label, string[] Extensions)> ThreeDSenFilters =>
     [
-        ("Bundle de profils 3dSen (*.bundle)", ["bundle"]),
-        ("Tous les fichiers", []),
+        (UiStrings.Get(UiKeys.BrowserFilterBundle), ["bundle"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
     /// <summary>
@@ -294,10 +297,10 @@ internal sealed class FileBrowserModel
     /// <c>.jpg</c> is not offered — see <c>GameArt</c> and <c>spec/changes/Q-050.md</c>.
     /// </summary>
     // Q-050
-    public static IReadOnlyList<(string Label, string[] Extensions)> CoverFilters { get; } =
+    public static IReadOnlyList<(string Label, string[] Extensions)> CoverFilters =>
     [
-        ("Images PNG (*.png)", ["png"]),
-        ("Tous les fichiers", []),
+        (UiStrings.Get(UiKeys.BrowserFilterPng), ["png"]),
+        (UiStrings.Get(UiKeys.BrowserFilterAll), []),
     ];
 
     private static bool Exists([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? directory)

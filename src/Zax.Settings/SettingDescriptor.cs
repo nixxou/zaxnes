@@ -91,6 +91,38 @@ public sealed class SettingDescriptor
     public string? UiLabel { get; init; }
 
     /// <summary>
+    /// The finite ordered list of texts a <see cref="SettingKind.String"/> setting accepts, or
+    /// null when any text will do. <c>ui.language</c> of AMD-035 is the one setting that has one:
+    /// the options window turns it into a drop-down, and a text outside the list is read as the
+    /// default without an error.
+    /// </summary>
+    public IReadOnlyList<string>? TextOptions { get; init; }
+
+    /// <summary>
+    /// Brings a text back into <see cref="TextOptions"/>: the stored text when the list admits
+    /// it — case and surrounding spaces ignored — and the default otherwise (AMD-035 §1).
+    /// </summary>
+    public string CoerceText(string? text)
+    {
+        string fallback = DefaultValue.AsString;
+        if (TextOptions is not { Count: > 0 } options)
+        {
+            return text ?? fallback;
+        }
+
+        string trimmed = (text ?? string.Empty).Trim();
+        foreach (string option in options)
+        {
+            if (string.Equals(option, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return option;
+            }
+        }
+
+        return fallback;
+    }
+
+    /// <summary>
     /// The finite ordered list of values exposed as a libretro core option, or null when the
     /// setting is not exposed (column "libretro", REQ-PERS-081, SPEC-09 §4.6).
     /// </summary>

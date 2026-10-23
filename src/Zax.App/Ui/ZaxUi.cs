@@ -105,14 +105,14 @@ internal sealed partial class ZaxUi
         // is built, so that window offers them too (REQ-UI-203).
         _host.Commands.Register(
             UiCommands.ToggleDebugOverlay,
-            "Panneau de statistiques",
+            static () => UiStrings.Get(UiKeys.Command(UiCommands.ToggleDebugOverlay)),
             _ => State.DebugOverlay = !State.DebugOverlay,
-            MenuShortcuts.TextOf(UiCommands.ToggleDebugOverlay),
+            static () => MenuShortcuts.TextOf(UiCommands.ToggleDebugOverlay),
             isChecked: () => State.DebugOverlay);
 
         _host.Commands.Register(
             UiCommands.CloseWindows,
-            "Fermer les fenêtres",
+            static () => UiStrings.Get(UiKeys.Command(UiCommands.CloseWindows)),
             _ => State.CloseAll(),
             canExecute: _ => State.AnyWindowOpen);
 
@@ -182,6 +182,13 @@ internal sealed partial class ZaxUi
     /// photographs an open menu without a mouse; nothing else sets it.
     /// </summary>
     public string? ForceOpenMenu { get; set; }
+
+    /// <summary>
+    /// A tab of the options window to bring to the front on the next frame, or null. Like
+    /// <see cref="ForceOpenMenu"/> it only exists for <c>--ui-shots</c>, which has no mouse to
+    /// click the tab with.
+    /// </summary>
+    public OptionsTab? ForceOptionsTab { get; set; }
 
     /// <summary>Opens the profile chooser on no particular ROM, for <c>--ui-shots</c>.</summary>
     public void OpenProfileChooserForCapture() => OpenProfileChooser(null);

@@ -80,7 +80,7 @@ public sealed class CommandModelTests
         Assert.Equal("Ctrl+Q", harness.Host.Commands.Find(ZaxCommands.Quit)!.Shortcut);
         Assert.Equal("P", harness.Host.Commands.Find(ZaxCommands.PauseResume)!.Shortcut);
         Assert.Equal("F11", harness.Host.Commands.Find(ZaxCommands.ToggleTwoDimensional)!.Shortcut);
-        Assert.Equal("Alt+Entrée", harness.Host.Commands.Find(ZaxCommands.ToggleFullscreen)!.Shortcut);
+        Assert.Equal("Alt+Enter", harness.Host.Commands.Find(ZaxCommands.ToggleFullscreen)!.Shortcut);
         Assert.Equal("Ctrl+,", harness.Host.Commands.Find(ZaxCommands.ShowOptions)!.Shortcut);
     }
 

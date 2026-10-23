@@ -36,7 +36,7 @@ public sealed class CatalogueTests
 
         Assert.Empty(specified.Except(model));
         Assert.Equal(
-            new[] { SettingKeys.AudioMute, SettingKeys.UiShowFps }.Order(),
+            new[] { SettingKeys.AudioMute, SettingKeys.UiShowFps, SettingKeys.UiLanguage }.Order(),
             model.Except(specified).Order());
     }
 

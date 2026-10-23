@@ -238,6 +238,19 @@ de réglages.
 - chaque changement de valeur joue **une fois** le son de validation, **sauf** les curseurs
   **Vitesse** (onglet Émulation) et **FOV** (onglet Caméra), qui sont muets.
 
+### Langue de l'interface
+
+L'onglet **Interface** porte le réglage **Langue** (`ui.language`), qui vaut `en` (« English »)
+ou `fr` (« Français »). **Par défaut l'interface est en anglais** : il n'y a aucune détection de
+la langue du système, et au premier lancement, sur un dossier utilisateur vierge, tout est en
+anglais. Le changement s'applique **immédiatement**, sans redémarrer, et il est conservé au
+lancement suivant ; une valeur inconnue dans `settings.json` est lue comme `en`, sans erreur.
+
+Ce document, la sortie de `--help`, les messages de la ligne de commande et les journaux de la
+console (préfixe « Zaxnes: ») restent en anglais ou en français comme ils sont : ils ne suivent
+pas le réglage (AMD-035 §2). Les copies d'écran et les noms de menus cités plus bas utilisent le
+français ; en anglais, la correspondance est celle de la table des textes.
+
 La fenêtre est **engendrée depuis le modèle de réglages** : un réglage ajouté au modèle y
 apparaît sans modification de l'interface. Les réglages de réalité virtuelle sont hors
 périmètre et n'y figurent pas ; le dernier dossier parcouru et la géométrie de la fenêtre n'y

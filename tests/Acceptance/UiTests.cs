@@ -32,7 +32,7 @@ public sealed class UiTests
         UiDriver bar = UiDriver.MenuBar(host, ["D:\\roms\\a.nes", "D:\\roms\\b.nes"]);
 
         Assert.Equal<IEnumerable<string>>(
-            ["Fichier", "Émulation", "Vidéo", "Audio", "Outils"],
+            ["File", "Emulation", "Video", "Audio", "Tools"],
             bar.MenuTitles);
 
         IReadOnlyList<UiMenuRow> rows = bar.Rows();
@@ -46,35 +46,35 @@ public sealed class UiTests
         }
 
         // Fichier
-        Expect("Fichier", ZaxCommands.OpenRom);
-        Expect("Fichier", ZaxCommands.OpenRecentRom);
-        Expect("Fichier", ZaxCommands.ChooseProfile);
-        Expect("Fichier", ZaxCommands.ImportProfile);
-        Expect("Fichier", ZaxCommands.LoadSlot);
-        Expect("Fichier", ZaxCommands.QuickLoad);
-        Expect("Fichier", ZaxCommands.SaveSlot);
-        Expect("Fichier", ZaxCommands.QuickSave);
-        Expect("Fichier", ZaxCommands.Quit);
+        Expect("File", ZaxCommands.OpenRom);
+        Expect("File", ZaxCommands.OpenRecentRom);
+        Expect("File", ZaxCommands.ChooseProfile);
+        Expect("File", ZaxCommands.ImportProfile);
+        Expect("File", ZaxCommands.LoadSlot);
+        Expect("File", ZaxCommands.QuickLoad);
+        Expect("File", ZaxCommands.SaveSlot);
+        Expect("File", ZaxCommands.QuickSave);
+        Expect("File", ZaxCommands.Quit);
 
         // Émulation
-        Expect("Émulation", ZaxCommands.PauseResume);
-        Expect("Émulation", ZaxCommands.Reset);
-        Expect("Émulation", ZaxCommands.Stop);
-        Expect("Émulation", ZaxCommands.FastForward);
-        Expect("Émulation", ZaxCommands.Rollback);
-        Expect("Émulation", ZaxCommands.SetSpeed);
-        Expect("Émulation", ZaxCommands.SetRegion);
-        Expect("Émulation", ZaxCommands.ToggleAutoRegion);
-        Expect("Émulation", ZaxCommands.SetPortType);
+        Expect("Emulation", ZaxCommands.PauseResume);
+        Expect("Emulation", ZaxCommands.Reset);
+        Expect("Emulation", ZaxCommands.Stop);
+        Expect("Emulation", ZaxCommands.FastForward);
+        Expect("Emulation", ZaxCommands.Rollback);
+        Expect("Emulation", ZaxCommands.SetSpeed);
+        Expect("Emulation", ZaxCommands.SetRegion);
+        Expect("Emulation", ZaxCommands.ToggleAutoRegion);
+        Expect("Emulation", ZaxCommands.SetPortType);
 
         // Vidéo
-        Expect("Vidéo", ZaxCommands.ToggleTwoDimensional);
-        Expect("Vidéo", ZaxCommands.SetCameraMode);
-        Expect("Vidéo", ZaxCommands.ResetView);
-        Expect("Vidéo", ZaxCommands.SetSkybox);
-        Expect("Vidéo", ZaxCommands.ToggleShadows);
-        Expect("Vidéo", ZaxCommands.ToggleFullscreen);
-        Expect("Vidéo", ZaxCommands.ToggleFpsCounter);
+        Expect("Video", ZaxCommands.ToggleTwoDimensional);
+        Expect("Video", ZaxCommands.SetCameraMode);
+        Expect("Video", ZaxCommands.ResetView);
+        Expect("Video", ZaxCommands.SetSkybox);
+        Expect("Video", ZaxCommands.ToggleShadows);
+        Expect("Video", ZaxCommands.ToggleFullscreen);
+        Expect("Video", ZaxCommands.ToggleFpsCounter);
 
         // Audio
         Expect("Audio", ZaxCommands.SetVolume);
@@ -87,10 +87,10 @@ public sealed class UiTests
         Assert.DoesNotContain(ZaxCommands.ToggleMenuMusic, commands);
 
         // Outils
-        Expect("Outils", ZaxCommands.ShowOptions);
-        Expect("Outils", ZaxCommands.ShowKeyConfig);
-        Expect("Outils", ZaxCommands.ShowDataFolder);
-        Expect("Outils", ZaxCommands.ShowAbout);
+        Expect("Tools", ZaxCommands.ShowOptions);
+        Expect("Tools", ZaxCommands.ShowKeyConfig);
+        Expect("Tools", ZaxCommands.ShowDataFolder);
+        Expect("Tools", ZaxCommands.ShowAbout);
 
         // The region submenu offers Auto, NTSC, PAL and Dendy.
         string[] regions = [.. rows
@@ -130,7 +130,7 @@ public sealed class UiTests
         Assert.Equal("P", Shortcut(rows, ZaxCommands.PauseResume));
         Assert.Equal("Ctrl+R", Shortcut(rows, ZaxCommands.Reset));
         Assert.Equal("F11", Shortcut(rows, ZaxCommands.ToggleTwoDimensional));
-        Assert.Equal("Alt+Entrée", Shortcut(rows, ZaxCommands.ToggleFullscreen));
+        Assert.Equal("Alt+Enter", Shortcut(rows, ZaxCommands.ToggleFullscreen));
         Assert.Equal("Ctrl+,", Shortcut(rows, ZaxCommands.ShowOptions));
 
         static string Shortcut(IReadOnlyList<UiMenuRow> rows, string command)
@@ -382,7 +382,7 @@ public sealed class UiTests
     public void REQ_UI_202_the_options_window_holds_every_visible_user_preference()
     {
         Assert.Equal<IEnumerable<string>>(
-            ["Vidéo", "Caméra", "Lumière et ombres", "Audio", "Émulation", "Interface"],
+            ["Video", "Camera", "Light and shadows", "Audio", "Emulation", "Interface"],
             UiDriver.OptionTabs());
 
         IReadOnlyList<(string Tab, string Key, string Label, double Minimum, double Maximum)> rows =
@@ -423,7 +423,7 @@ public sealed class UiTests
         // The "default values" button of the tab.
         SettingsModel model = new();
         model.SetFloat(SettingKeys.CameraFov, 95f);
-        UiDriver.ResetOptionTab(model, "Caméra");
+        UiDriver.ResetOptionTab(model, "Camera");
         Assert.Equal(70f, model.GetFloat(SettingKeys.CameraFov));
 
         (double, double) Bounds(string key)
@@ -518,11 +518,11 @@ public sealed class UiTests
         Expect(Key.P, "None", ZaxCommands.PauseResume, 0, "P");
         Expect(Key.R, "Control", ZaxCommands.Reset, 0, "Ctrl+R");
         Expect(Key.F11, "None", ZaxCommands.ToggleTwoDimensional, 0, "F11");
-        Expect(Key.Enter, "Alt", ZaxCommands.ToggleFullscreen, 0, "Alt+Entrée");
+        Expect(Key.Enter, "Alt", ZaxCommands.ToggleFullscreen, 0, "Alt+Enter");
         Expect(Key.Comma, "Control", ZaxCommands.ShowOptions, 0, "Ctrl+,");
         Expect(Key.Q, "Control", ZaxCommands.Quit, 0, "Ctrl+Q");
 
-        // Q-030: Ctrl+Fn loads the state n, Maj+Fn saves it, for n = 1 to 10.
+        // Q-030: Ctrl+Fn loads the state n, Shift+Fn saves it, for n = 1 to 10.
         Key[] functions =
         [
             Key.F1, Key.F2, Key.F3, Key.F4, Key.F5,
@@ -532,7 +532,7 @@ public sealed class UiTests
         for (int slot = 1; slot <= 10; slot++)
         {
             Expect(functions[slot - 1], "Control", ZaxCommands.LoadSlot, slot, $"Ctrl+F{slot}");
-            Expect(functions[slot - 1], "Shift", ZaxCommands.SaveSlot, slot, $"Maj+F{slot}");
+            Expect(functions[slot - 1], "Shift", ZaxCommands.SaveSlot, slot, $"Shift+F{slot}");
         }
 
         // A bare Fn stays with the camera actions of SPEC-08 §4.2.
@@ -737,8 +737,8 @@ public sealed class UiTests
         UiDriver.SetStateFlag(state, "HasCurrentGame", true);
         Assert.False(UiDriver.StateFlag(state, "WelcomeVisible"));
 
-        Assert.Equal("Fichier ▸ Ouvrir une ROM", UiDriver.Text("WelcomeHint"));
-        Assert.Equal("ROMs récentes", UiDriver.Text("WelcomeRecent"));
+        Assert.Equal("File ▸ Open a ROM", UiDriver.Text("WelcomeHint"));
+        Assert.Equal("Recent ROMs", UiDriver.Text("WelcomeRecent"));
         Assert.NotEmpty(UiDriver.Text("WelcomeNoRecent"));
     }
 
@@ -883,7 +883,7 @@ public sealed class UiTests
             // The trail starts at the root and has one step per component.
             IReadOnlyList<string> trail = UiDriver.BrowserTrail(browser);
             Assert.True(trail.Count >= 2);
-            Assert.Equal("Poste de travail", trail[0]);
+            Assert.Equal("This computer", trail[0]);
 
             // Reopening clears the search (REQ-UI-103, last sentence).
             object reopened = UiDriver.OpenBrowser("Ouvrir une ROM", folder);

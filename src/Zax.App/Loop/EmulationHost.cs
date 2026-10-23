@@ -154,6 +154,11 @@ internal sealed partial class EmulationHost : IDisposable
         Slots.Reconcile(options.Paths, _games.Exists);
 
         Settings.Changed += OnSettingChanged;
+
+        // AMD-035 §1: the language in force is the setting's, read once here and kept in step by
+        // OnSettingChanged afterwards. There is no detection of the system's language.
+        Ui.UiStrings.Language = Ui.UiStrings.Parse(Settings.Language);
+
         ApplySpeed();
         RegisterCommands();
         PublishState();
@@ -485,6 +490,13 @@ internal sealed partial class EmulationHost : IDisposable
             case "audio.mute":
             case "audio.bg_music":
                 PublishState();
+                break;
+
+            case Zax.Settings.SettingKeys.UiLanguage:
+                // AMD-035 §1: the change applies immediately. Everything the interface draws
+                // reads the table through UiStrings, and the models that cache their labels
+                // watch its generation counter.
+                Ui.UiStrings.Language = Ui.UiStrings.Parse(Settings.Language);
                 break;
 
             case "video.skip_frame":

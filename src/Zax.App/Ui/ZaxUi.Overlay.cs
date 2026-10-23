@@ -47,12 +47,12 @@ internal sealed partial class ZaxUi
                 ImGui.TextUnformatted(UiText.ProductName);
             }
 
-            ImGui.TextDisabled(string.Create(CultureInfo.InvariantCulture, $"Version {UiText.Version}"));
+            ImGui.TextDisabled(UiText.VersionLine);
             ImGui.Separator();
             ImGui.TextUnformatted(UiText.WelcomeHint);
             ImGui.Spacing();
 
-            if (ImGui.Button("Ouvrir une ROM…"))
+            if (ImGui.Button(_host.Commands.Find(ZaxCommands.OpenRom)?.Label ?? UiText.OpenRomTitle))
             {
                 Activate(ZaxCommands.OpenRom, default);
             }

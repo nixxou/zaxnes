@@ -190,10 +190,10 @@ public sealed class ProgramProfilesTests : IDisposable
         ProfileChooserModel chooser = new(catalog.Library);
 
         Assert.Equal(
-            "profil du dossier du programme",
+            "profile from the program folder",
             chooser.All.Single(choice => choice.Id == "shipped").SourceLabel);
         Assert.Equal(
-            "profil utilisateur",
+            "user profile",
             chooser.All.Single(choice => choice.Id == "mine").SourceLabel);
     }
 

@@ -104,3 +104,4 @@ emu.tv_data
 app.engine_mode
 audio.mute
 ui.show_fps
+ui.language

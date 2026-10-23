@@ -65,8 +65,27 @@ internal static class MenuShortcuts
         Key.F6, Key.F7, Key.F8, Key.F9, Key.F10,
     ];
 
-    /// <summary>Every default shortcut, in the order of the table of REQ-UI-204.</summary>
-    public static IReadOnlyList<MenuShortcut> All { get; } = Build();
+    private static IReadOnlyList<MenuShortcut> _all = Build();
+    private static int _builtFor = UiStrings.Generation;
+
+    /// <summary>
+    /// Every default shortcut, in the order of the table of REQ-UI-204. Two of the texts are
+    /// words rather than key names — « Alt+Entrée », « Maj+Fn » — so the table is rebuilt when
+    /// the interface language changes (AMD-035).
+    /// </summary>
+    public static IReadOnlyList<MenuShortcut> All
+    {
+        get
+        {
+            if (_builtFor != UiStrings.Generation)
+            {
+                _builtFor = UiStrings.Generation;
+                _all = Build();
+            }
+
+            return _all;
+        }
+    }
 
     /// <summary>
     /// The keys that act with no modifier at all. REQ-INP-106 lets an implementation add fixed
@@ -137,7 +156,8 @@ internal static class MenuShortcuts
             new(Key.P, ShortcutModifiers.None, ZaxCommands.PauseResume, default, "P"),
             new(Key.R, ShortcutModifiers.Control, ZaxCommands.Reset, default, "Ctrl+R"),
             new(Key.F11, ShortcutModifiers.None, ZaxCommands.ToggleTwoDimensional, default, "F11"),
-            new(Key.Enter, ShortcutModifiers.Alt, ZaxCommands.ToggleFullscreen, default, "Alt+Entrée"),
+            new(Key.Enter, ShortcutModifiers.Alt, ZaxCommands.ToggleFullscreen, default,
+                UiStrings.Get(UiKeys.ShortcutAltEnter)),
             new(Key.Comma, ShortcutModifiers.Control, ZaxCommands.ShowOptions, default, "Ctrl+,"),
             new(Key.Q, ShortcutModifiers.Control, ZaxCommands.Quit, default, "Ctrl+Q"),
 
@@ -151,7 +171,7 @@ internal static class MenuShortcuts
             Key key = SlotKeys[slot - 1];
             string suffix = slot.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-            // AMD-013 (Q-030): Ctrl+Fn loads, Maj+Fn saves.
+            // AMD-013 (Q-030): Ctrl+Fn loads, Shift (« Maj ») + Fn saves.
             list.Add(new MenuShortcut(
                 key,
                 ShortcutModifiers.Control,
@@ -163,7 +183,7 @@ internal static class MenuShortcuts
                 ShortcutModifiers.Shift,
                 ZaxCommands.SaveSlot,
                 CommandArgs.Of(slot),
-                $"Maj+F{suffix}"));
+                $"{UiStrings.Get(UiKeys.ShortcutShiftPrefix)}+F{suffix}"));
         }
 
         return [.. list];

@@ -75,12 +75,12 @@ internal sealed partial class ZaxUi
         }
         else
         {
-            ImGui.TextDisabled("Cliquez sur une case pour réassigner.");
+            ImGui.TextDisabled(UiText.ClickACell);
         }
 
         DrawGamepadChoosers();
 
-        if (ImGui.Button("Réinitialiser toutes les touches"))
+        if (ImGui.Button(UiText.ResetBindings))
         {
             // REQ-INP-049: back to the defaults of §4.2 and §4.3, both players, both devices.
             _options.Input?.Rebinding.Stop();
@@ -146,7 +146,7 @@ internal sealed partial class ZaxUi
             return;
         }
 
-        ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthStretch, 2f);
+        ImGui.TableSetupColumn(UiText.ActionColumn, ImGuiTableColumnFlags.WidthStretch, 2f);
         ImGui.TableSetupColumn(UiText.KeyboardColumn, ImGuiTableColumnFlags.WidthStretch, 1.5f);
         ImGui.TableSetupColumn(UiText.GamepadColumn, ImGuiTableColumnFlags.WidthStretch, 1.5f);
         ImGui.TableHeadersRow();

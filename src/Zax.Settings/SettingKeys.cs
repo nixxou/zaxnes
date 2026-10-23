@@ -250,6 +250,12 @@ public static class SettingKeys
     /// <summary>The frame-rate counter of DEC-10-Q7.</summary>
     public const string UiShowFps = "ui.show_fps";
 
+    /// <summary>
+    /// The interface language of AMD-035: the text <c>en</c> or <c>fr</c>, <c>en</c> by default.
+    /// Any other text is read as <c>en</c>, without an error.
+    /// </summary>
+    public const string UiLanguage = "ui.language";
+
     private static int Check(int index) => (uint)index < LayerCount
         ? index
         : throw new ArgumentOutOfRangeException(nameof(index), index, "layer index is 0 to 5");

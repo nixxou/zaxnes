@@ -29,9 +29,20 @@ internal sealed partial class ZaxUi
         if (ImGui.Begin(UiText.OptionsTitle, ref open, ImGuiWindowFlags.NoCollapse)
             && ImGui.BeginTabBar("##options"))
         {
+            // The capture aid of --ui-shots: asking for a tab is the same thing a click on it
+            // would do. It is honoured on one frame only, so the tab the shot photographs has
+            // no stray close button left on it.
+            OptionsTab? forced = ForceOptionsTab;
+            ForceOptionsTab = null;
+
             foreach (OptionsTab tab in OptionsModel.Tabs)
             {
-                if (!ImGui.BeginTabItem(OptionsModel.TitleOf(tab)))
+                bool selected = true;
+                bool shown = forced == tab
+                    ? ImGui.BeginTabItem(OptionsModel.TitleOf(tab), ref selected, ImGuiTabItemFlags.SetSelected)
+                    : ImGui.BeginTabItem(OptionsModel.TitleOf(tab));
+
+                if (!shown)
                 {
                     continue;
                 }
@@ -84,16 +95,18 @@ internal sealed partial class ZaxUi
             bool enumerated = descriptor.Domain.Options is { Count: > 0 }
                 && descriptor.Kind is SettingKind.Enum or SettingKind.Int;
 
-            bool changed = enumerated
-                ? DrawEnum(model, row)
-                : descriptor.Kind switch
-                {
-                    SettingKind.Bool => DrawBool(model, row),
-                    SettingKind.Enum => DrawEnum(model, row),
-                    SettingKind.Color => DrawColor(model, row),
-                    SettingKind.Int => DrawInt(model, row),
-                    _ => DrawFloat(model, row),
-                };
+            bool changed = descriptor.Kind == SettingKind.String
+                ? DrawText(model, row)
+                : enumerated
+                    ? DrawEnum(model, row)
+                    : descriptor.Kind switch
+                    {
+                        SettingKind.Bool => DrawBool(model, row),
+                        SettingKind.Enum => DrawEnum(model, row),
+                        SettingKind.Color => DrawColor(model, row),
+                        SettingKind.Int => DrawInt(model, row),
+                        _ => DrawFloat(model, row),
+                    };
 
             if (changed && OptionsModel.PlaysValidationSound(descriptor.Key))
             {
@@ -128,19 +141,53 @@ internal sealed partial class ZaxUi
         if (row.Descriptor.Effect == SettingEffect.Restart)
         {
             ImGui.SameLine();
-            ImGui.TextDisabled("(au prochain démarrage)");
+            ImGui.TextDisabled(UiText.AtNextStart);
         }
         else if (row.Descriptor.Effect is SettingEffect.NextGameLoad or SettingEffect.NextRomLoad)
         {
             ImGui.SameLine();
-            ImGui.TextDisabled("(au prochain chargement)");
+            ImGui.TextDisabled(UiText.AtNextLoad);
         }
 
         if (row.IsProfileScoped)
         {
             ImGui.SameLine();
-            ImGui.TextDisabled("(réglage de profil)");
+            ImGui.TextDisabled(UiText.ProfileSetting);
         }
+    }
+
+    /// <summary>
+    /// The drop-down of a text setting whose values are a finite list: the interface language of
+    /// AMD-035. The stored text is <c>en</c> or <c>fr</c>; what the list shows is the name of the
+    /// language in its own language, which is what makes a wrong choice recoverable.
+    /// </summary>
+    private static bool DrawText(SettingsModel model, OptionsRow row)
+    {
+        IReadOnlyList<string> options = row.Descriptor.TextOptions ?? [];
+        if (options.Count == 0)
+        {
+            return false;
+        }
+
+        string current = row.Descriptor.CoerceText(model.GetString(row.Descriptor.Key));
+        int index = 0;
+        string[] labels = new string[options.Count];
+        for (int i = 0; i < options.Count; i++)
+        {
+            labels[i] = UiText.LabelOf(row.Descriptor, options[i]);
+            if (string.Equals(options[i], current, StringComparison.Ordinal))
+            {
+                index = i;
+            }
+        }
+
+        if (!ImGui.Combo(row.Label, ref index, labels, labels.Length))
+        {
+            return false;
+        }
+
+        model.SetString(row.Descriptor.Key, options[index]);
+        return true;
     }
 
     private static bool DrawBool(SettingsModel model, OptionsRow row)
