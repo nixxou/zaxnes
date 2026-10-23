@@ -51,7 +51,7 @@ pub fn write(engine: &ConversionEngine) -> Vec<u8> {
     // Images met while playing, in registry order, so that reinterning them in that order
     // gives back the same identities (REQ-E3D-007).
     let images = engine.images().images();
-    let learned_images = images.get(profile_image_count..).unwrap_or_default();
+    let learned_images = images.iter().skip(profile_image_count);
     out.i32(learned_images.len() as i32);
     for image in learned_images {
         let key = image.key();
