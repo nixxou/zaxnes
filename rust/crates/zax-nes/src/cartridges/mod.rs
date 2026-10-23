@@ -1,42 +1,109 @@
-//! Cartridges (port of `src/Zax.Nes/Cartridges`).
+//! Cartridges (port of `src/Zax.Nes/Cartridges`): the shared cartridge state, the bank
+//! window machinery and the mapper boards.
 //!
-//! Stub for T01: a plain NROM board, just enough for the CPU bus and nestest. T04
-//! replaces it with the real cartridge and mapper set, keeping the CPU-side methods.
+//! A [`Cartridge`] holds the memories every board needs ([`CartridgeMemory`]) and a
+//! [`Board`] enum, created once at load time, that carries the mapper registers. Every bus
+//! entry point dispatches on the board (REQ-CORE-100).
 
-/// Default PRG-RAM size, 8 KiB at $6000-$7FFF.
-const DEFAULT_PRG_RAM_SIZE: usize = 0x2000;
+mod a12_watcher;
+mod banked;
+mod chr_fetch;
+pub mod mappers;
 
-/// A cartridge plugged into the CPU and PPU buses.
-#[derive(Debug, Clone)]
-pub struct Cartridge {
-    prg_rom: Vec<u8>,
+pub use a12_watcher::A12Watcher;
+pub use banked::BankWindows;
+pub use chr_fetch::ChrFetch;
+
+use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
+use crate::NametableMirroring;
+use mappers::Nrom;
+
+/// The memories and the state every board shares: the ROM image, the PRG-RAM at
+/// $6000-$7FFF (REQ-CORE-012), the CHR-RAM buffer, the current nametable layout and the CPU
+/// cycle counter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CartridgeMemory {
+    rom: RomImage,
     prg_ram: Vec<u8>,
+    chr_ram: Vec<u8>,
+    mirroring: NametableMirroring,
     cpu_cycle: i64,
 }
 
-impl Cartridge {
-    /// Builds an NROM board (mapper 0) from its PRG-ROM, 16 KiB (mirrored) or 32 KiB.
-    #[must_use]
-    pub fn nrom(prg_rom: Vec<u8>) -> Self {
-        Self {
-            prg_rom,
-            prg_ram: vec![0; DEFAULT_PRG_RAM_SIZE],
+impl CartridgeMemory {
+    /// Initialises the shared cartridge state from `rom`; `minimum_prg_ram_size` is for
+    /// boards that carry more than 8 KiB of PRG-RAM and bank it (MMC1 SOROM and SXROM,
+    /// MMC5).
+    fn new(rom: RomImage, minimum_prg_ram_size: usize) -> Self {
+        let prg_ram_size = rom
+            .header()
+            .prg_ram_size
+            .max(InesHeader::DEFAULT_PRG_RAM_SIZE)
+            .max(minimum_prg_ram_size);
+        let chr_ram_size = rom.header().chr_ram_size;
+        let mirroring = rom.header().mirroring;
+        let mut memory = Self {
+            rom,
+            prg_ram: vec![0; prg_ram_size],
+            chr_ram: vec![0; chr_ram_size],
+            mirroring,
             cpu_cycle: 0,
+        };
+        memory.load_trainer();
+        memory
+    }
+
+    /// Copies the 512-byte trainer to $7000 inside the PRG-RAM (REQ-CORE-012).
+    ///
+    /// The reference does not skip the trainer at all; handling it is an accepted
+    /// divergence (REQ-CORE-012, notes). It is re-applied whenever PRG-RAM is cleared,
+    /// because a power-on must leave the trainer in place.
+    fn load_trainer(&mut self) {
+        if self.rom.header().has_trainer && self.prg_ram.len() >= 0x1000 + InesHeader::TRAINER_SIZE
+        {
+            let start = usize::from(InesHeader::TRAINER_LOAD_ADDRESS - 0x6000);
+            let trainer = self.rom.trainer();
+            self.prg_ram[start..start + trainer.len()].copy_from_slice(trainer);
         }
     }
 
-    /// iNES mapper number of this cartridge.
+    /// The ROM image this cartridge was built from.
     #[must_use]
-    #[allow(clippy::unused_self)] // Stub: NROM only until T04.
-    pub const fn mapper_number(&self) -> i32 {
-        0
+    pub const fn rom(&self) -> &RomImage {
+        &self.rom
     }
 
-    /// Whether the cartridge is asserting the CPU IRQ line.
+    /// PRG-RAM at $6000-$7FFF, 8 KiB unless the board or the header asks for more.
     #[must_use]
-    #[allow(clippy::unused_self)] // Stub: NROM has no IRQ.
-    pub const fn irq_asserted(&self) -> bool {
-        false
+    pub fn prg_ram(&self) -> &[u8] {
+        &self.prg_ram
+    }
+
+    /// PRG-RAM, mutably.
+    pub fn prg_ram_mut(&mut self) -> &mut [u8] {
+        &mut self.prg_ram
+    }
+
+    /// CHR-RAM, empty when the cartridge has CHR-ROM.
+    #[must_use]
+    pub fn chr_ram(&self) -> &[u8] {
+        &self.chr_ram
+    }
+
+    /// CHR-RAM, mutably.
+    pub fn chr_ram_mut(&mut self) -> &mut [u8] {
+        &mut self.chr_ram
+    }
+
+    /// Current nametable layout.
+    #[must_use]
+    pub const fn mirroring(&self) -> NametableMirroring {
+        self.mirroring
+    }
+
+    /// Changes the nametable layout (mappers that switch it).
+    pub fn set_mirroring(&mut self, mirroring: NametableMirroring) {
+        self.mirroring = mirroring;
     }
 
     /// CPU cycles elapsed since power-on, as the cartridge sees them.
@@ -45,37 +112,379 @@ impl Cartridge {
         self.cpu_cycle
     }
 
+    /// Reads CHR-ROM if present, CHR-RAM otherwise, with the address wrapped to the
+    /// available size. Helper for the simple boards.
+    #[must_use]
+    pub fn read_chr_direct(&self, offset: usize) -> u8 {
+        let chr_rom = self.rom.chr_rom();
+        if !chr_rom.is_empty() {
+            return chr_rom[offset % chr_rom.len()];
+        }
+
+        if self.chr_ram.is_empty() {
+            0
+        } else {
+            self.chr_ram[offset % self.chr_ram.len()]
+        }
+    }
+
+    /// Writes CHR-RAM, ignoring writes when the cartridge has CHR-ROM.
+    pub fn write_chr_direct(&mut self, offset: usize, value: u8) {
+        if self.rom.chr_rom().is_empty() && !self.chr_ram.is_empty() {
+            let len = self.chr_ram.len();
+            self.chr_ram[offset % len] = value;
+        }
+    }
+}
+
+/// The mapper of a cartridge, with its registers (REQ-CORE-100).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Board {
+    /// Mapper 0.
+    Nrom(Nrom),
+}
+
+/// A cartridge: PRG and CHR banking, nametable layout, PRG-RAM and mapper IRQ
+/// (REQ-CORE-100).
+///
+/// **Side-effect-free reads.** The tile emitter reads pattern data outside of real
+/// rendering and must not disturb the machine: no A12 IRQ counting (MMC3), no latch toggling
+/// (MMC2/MMC4), no read-buffer change (REQ-CORE-033). Boards with such side effects
+/// therefore put them in [`Cartridge::ppu_read`] and [`Cartridge::on_ppu_address_bus`],
+/// never in [`Cartridge::ppu_peek`], which is what the tile emitter and the host memory
+/// accessors call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cartridge {
+    memory: CartridgeMemory,
+    board: Board,
+}
+
+impl Cartridge {
+    /// Returned by [`Cartridge::nametable_page`] when the board leaves the layout to
+    /// [`Cartridge::mirroring`], which is what every mapper but MMC5 does.
+    pub const FOLLOW_MIRRORING: i32 = -1;
+
+    /// Returned by [`Cartridge::nametable_page`] when the cartridge serves the nametable
+    /// itself (MMC5 `ExRAM` and fill mode) through [`Cartridge::read_nametable`].
+    pub const SERVED_BY_CARTRIDGE: i32 = -2;
+
+    /// Mapper numbers this build can run, in ascending order (REQ-CORE-102).
+    pub const SUPPORTED_MAPPERS: &'static [i32] = &[Nrom::MAPPER_NUMBER];
+
+    /// Whether `mapper` is implemented.
+    #[must_use]
+    pub fn is_supported(mapper: i32) -> bool {
+        Self::SUPPORTED_MAPPERS.contains(&mapper)
+    }
+
+    /// Builds the cartridge of `rom`, already powered on, so that a caller which only wants
+    /// to look at the banks never sees a board whose registers have not been initialised.
+    ///
+    /// # Errors
+    ///
+    /// [`RomLoadFailure::UnsupportedMapper`] with an REQ-CORE-011 message when the mapper
+    /// number is not implemented (REQ-CORE-102).
+    pub fn create(rom: RomImage) -> Result<Self, RomLoadError> {
+        let board = match rom.mapper() {
+            Nrom::MAPPER_NUMBER => Board::Nrom(Nrom),
+            mapper => {
+                // Q-001: the wording is ours; REQ-CORE-011 only requires the number to
+                // appear, and AMD-002 makes the typed cause the normative part.
+                return Err(RomLoadError::new(
+                    RomLoadFailure::UnsupportedMapper,
+                    format!("Unsupported mapper {mapper}."),
+                ));
+            }
+        };
+
+        let mut cartridge = Self {
+            memory: CartridgeMemory::new(rom, 0),
+            board,
+        };
+        cartridge.reset();
+        Ok(cartridge)
+    }
+
+    /// The shared memories.
+    #[must_use]
+    pub const fn memory(&self) -> &CartridgeMemory {
+        &self.memory
+    }
+
+    /// The board and its registers.
+    #[must_use]
+    pub const fn board(&self) -> &Board {
+        &self.board
+    }
+
+    /// The ROM image this cartridge was built from.
+    #[must_use]
+    pub const fn rom(&self) -> &RomImage {
+        &self.memory.rom
+    }
+
+    /// iNES mapper number of this cartridge.
+    #[must_use]
+    pub const fn mapper_number(&self) -> i32 {
+        match self.board {
+            Board::Nrom(_) => Nrom::MAPPER_NUMBER,
+        }
+    }
+
+    /// Current nametable layout (SPEC-02 §2, "current mirroring").
+    #[must_use]
+    pub const fn mirroring(&self) -> NametableMirroring {
+        self.memory.mirroring
+    }
+
+    /// Whether the cartridge is asserting the CPU IRQ line.
+    #[must_use]
+    pub const fn irq_asserted(&self) -> bool {
+        match self.board {
+            Board::Nrom(_) => false,
+        }
+    }
+
+    /// CPU cycles elapsed since power-on, as the cartridge sees them.
+    ///
+    /// Boards that time anything in CPU cycles read it: the MMC1 shift register ignores a
+    /// write made on the cycle right after another one, and the VRC4, FCG and SS88006 IRQ
+    /// counters tick on it.
+    #[must_use]
+    pub const fn cpu_cycle(&self) -> i64 {
+        self.memory.cpu_cycle
+    }
+
+    /// True when $6000-$7FFF is readable and writable. Mappers may disable it.
+    const fn prg_ram_enabled(&self) -> bool {
+        match self.board {
+            Board::Nrom(_) => true,
+        }
+    }
+
+    /// True when $6000-$7FFF accepts writes. Mappers may write-protect it.
+    const fn prg_ram_writable(&self) -> bool {
+        self.prg_ram_enabled()
+    }
+
+    /// Index in PRG-RAM of CPU address `address` in $6000-$7FFF. Boards that bank their
+    /// PRG-RAM override it (MMC1 SOROM, MMC5).
+    fn prg_ram_offset(&self, address: u16) -> usize {
+        usize::from(address - 0x6000) % self.memory.prg_ram.len()
+    }
+
+    /// Battery-backed PRG-RAM, exposed so that a host can persist it (REQ-CORE-095,
+    /// libretro "`SAVE_RAM`"). Empty when bit 1 of header byte 6 is clear.
+    #[must_use]
+    pub fn battery_ram(&self) -> &[u8] {
+        if self.memory.rom.header().has_battery {
+            &self.memory.prg_ram
+        } else {
+            &[]
+        }
+    }
+
+    /// Battery-backed PRG-RAM, mutably; empty without a battery.
+    pub fn battery_ram_mut(&mut self) -> &mut [u8] {
+        if self.memory.rom.header().has_battery {
+            &mut self.memory.prg_ram
+        } else {
+            &mut []
+        }
+    }
+
     /// Reads a byte the cartridge drives on the CPU bus, in $4020-$FFFF; `None` when it does
     /// not drive the bus there and the caller keeps the open-bus value (REQ-CORE-081).
     pub fn try_cpu_read(&mut self, address: u16) -> Option<u8> {
-        self.try_cpu_peek(address)
+        if (0x6000..=0x7FFF).contains(&address)
+            && self.prg_ram_enabled()
+            && !self.memory.prg_ram.is_empty()
+        {
+            return Some(self.memory.prg_ram[self.prg_ram_offset(address)]);
+        }
+
+        self.try_read_prg(address)
     }
 
     /// Side-effect-free counterpart of [`Cartridge::try_cpu_read`], used by the host memory
     /// accessor (REQ-CORE-080, REQ-CORE-081).
     #[must_use]
     pub fn try_cpu_peek(&self, address: u16) -> Option<u8> {
-        if (0x6000..=0x7FFF).contains(&address) {
-            return Some(self.prg_ram[usize::from(address - 0x6000) % self.prg_ram.len()]);
+        if (0x6000..=0x7FFF).contains(&address)
+            && self.prg_ram_enabled()
+            && !self.memory.prg_ram.is_empty()
+        {
+            return Some(self.memory.prg_ram[self.prg_ram_offset(address)]);
         }
 
-        if address < 0x8000 || self.prg_rom.is_empty() {
-            return None;
-        }
+        self.try_read_prg(address)
+    }
 
-        Some(self.prg_rom[usize::from(address - 0x8000) % self.prg_rom.len()])
+    /// Reads PRG-ROM, or a readable mapper register, at `address` (typically $8000-$FFFF).
+    fn try_read_prg(&self, address: u16) -> Option<u8> {
+        match self.board {
+            Board::Nrom(_) => Nrom::try_read_prg(&self.memory, address),
+        }
     }
 
     /// Writes a byte from the CPU bus, in $4020-$FFFF.
     pub fn cpu_write(&mut self, address: u16, value: u8) {
-        if (0x6000..=0x7FFF).contains(&address) {
-            let len = self.prg_ram.len();
-            self.prg_ram[usize::from(address - 0x6000) % len] = value;
+        if (0x6000..=0x7FFF).contains(&address) && !self.memory.prg_ram.is_empty() {
+            if self.prg_ram_writable() {
+                let offset = self.prg_ram_offset(address);
+                self.memory.prg_ram[offset] = value;
+            }
+
+            return;
+        }
+
+        self.write_register(address, value);
+    }
+
+    /// Handles a write to a mapper register; boards without registers such as NROM ignore
+    /// it.
+    fn write_register(&mut self, _address: u16, _value: u8) {
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Reads CHR at `address` ($0000-$1FFF) as the PPU would, side effects included
+    /// (latches, A12 counting).
+    pub fn ppu_read(&mut self, address: u16, fetch: ChrFetch) -> u8 {
+        match self.board {
+            Board::Nrom(_) => Nrom::ppu_read(&self.memory, address, fetch),
+        }
+    }
+
+    /// Reads CHR without any side effect. The tile emitter and the host accessors use this
+    /// one (REQ-CORE-033).
+    #[must_use]
+    pub fn ppu_peek(&self, address: u16, fetch: ChrFetch) -> u8 {
+        match self.board {
+            Board::Nrom(_) => Nrom::ppu_read(&self.memory, address, fetch),
+        }
+    }
+
+    /// Writes CHR-RAM at `address` ($0000-$1FFF).
+    pub fn ppu_write(&mut self, address: u16, value: u8) {
+        match self.board {
+            Board::Nrom(_) => Nrom::ppu_write(&mut self.memory, address, value),
+        }
+    }
+
+    /// Opaque state of the CHR latches of a board whose banks depend on the patterns fetched
+    /// before (MMC2 and MMC4, REQ-CORE-039). Always 0 on every other board.
+    ///
+    /// The tile emitter reads it, walks the line forward with
+    /// [`Cartridge::advance_chr_latch`] so that each record carries the pattern the hardware
+    /// would show at that column, then writes the saved value back: the emulation is
+    /// unchanged whether or not records were built (REQ-CORE-033).
+    #[must_use]
+    pub const fn chr_latch_state(&self) -> i32 {
+        match self.board {
+            Board::Nrom(_) => 0,
+        }
+    }
+
+    /// Restores the opaque CHR latch state (see [`Cartridge::chr_latch_state`]).
+    pub fn set_chr_latch_state(&mut self, _state: i32) {
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Moves the CHR latches on as the fetch of pattern `tile` from `pattern_table` ($0000
+    /// or $1000) would (REQ-CORE-039).
+    pub fn advance_chr_latch(&mut self, _pattern_table: i32, _tile: i32) {
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Signals that the PPU put `address` (14 bits) on its address bus during real rendering
+    /// or a $2006/$2007 access. Boards that count A12 rises (MMC3 and compatibles) hook
+    /// their scanline counter here. Never called for a peek (REQ-CORE-033).
+    ///
+    /// `ppu_clock` is the PPU dot count since power-on, which the A12 filter of MMC3-style
+    /// boards needs to tell a real rise from the short dips of the fetch pipeline.
+    pub fn on_ppu_address_bus(&mut self, _address: u16, _ppu_clock: i64) {
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Signals a write to PPUCTRL ($2000). MMC5 needs it: the sprite size decides whether
+    /// its two CHR register sets are used separately (nesdev, "MMC5").
+    pub fn on_ppu_control(&mut self, _control: u8) {
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Signals the start of a scanline (0 to 239 for a visible line) to boards that count
+    /// them outside the PPU address bus (MMC5, whose IRQ follows the rendered line, nesdev
+    /// "MMC5").
+    pub fn on_ppu_scanline(&mut self, _scanline: i32, _rendering_enabled: bool) {
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Which physical 1 KiB page of console VRAM the logical nametable `table` (0 to 3)
+    /// shows: a page number 0 to 3, [`Cartridge::FOLLOW_MIRRORING`] when the layout is the
+    /// one [`Cartridge::mirroring`] describes, or [`Cartridge::SERVED_BY_CARTRIDGE`] when the
+    /// cartridge supplies the bytes itself.
+    #[must_use]
+    pub const fn nametable_page(&self, _table: i32) -> i32 {
+        match self.board {
+            Board::Nrom(_) => Self::FOLLOW_MIRRORING,
+        }
+    }
+
+    /// Reads a nametable byte the cartridge serves itself (MMC5 `ExRAM`, fill mode).
+    #[must_use]
+    pub const fn read_nametable(&self, _address: u16) -> u8 {
+        match self.board {
+            Board::Nrom(_) => 0,
+        }
+    }
+
+    /// Writes a nametable byte the cartridge serves itself (MMC5 `ExRAM`).
+    pub fn write_nametable(&mut self, _address: u16, _value: u8) {
+        match self.board {
+            Board::Nrom(_) => {}
         }
     }
 
     /// Advances the cartridge by one CPU cycle.
     pub fn step_cpu_cycle(&mut self) {
-        self.cpu_cycle += 1;
+        self.memory.cpu_cycle += 1;
+
+        // Cycle-counted mapper logic (VRC, FCG and SS88006 IRQ timers) goes here.
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Returns the cartridge to its power-on state (REQ-CORE-004). PRG-RAM is cleared by the
+    /// core, not here, so that a host which reloaded battery RAM can keep it
+    /// (REQ-CORE-095).
+    pub fn reset(&mut self) {
+        self.memory.mirroring = self.memory.rom.header().mirroring;
+        self.memory.cpu_cycle = 0;
+        match self.board {
+            Board::Nrom(_) => {}
+        }
+    }
+
+    /// Clears PRG-RAM (when `clear_prg_ram`) and CHR-RAM (part of power-on, REQ-CORE-004).
+    pub fn clear_volatile_ram(&mut self, clear_prg_ram: bool) {
+        if clear_prg_ram {
+            self.memory.prg_ram.fill(0);
+            self.memory.load_trainer();
+        }
+
+        self.memory.chr_ram.fill(0);
     }
 }

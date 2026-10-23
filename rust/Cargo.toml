@@ -25,3 +25,7 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 dbg_macro = "deny"
+
+# The PPU golden test runs 222 ROMs; the core is far too slow unoptimised.
+[profile.test.package.zax-nes]
+opt-level = 2

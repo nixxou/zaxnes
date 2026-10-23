@@ -133,6 +133,11 @@ impl NesBus {
         self.cartridge.as_mut()
     }
 
+    /// The PPU and the cartridge together, for a register access made outside a CPU cycle.
+    pub fn ppu_and_cartridge_mut(&mut self) -> (&mut Ppu2C02, Option<&mut Cartridge>) {
+        (&mut self.ppu, self.cartridge.as_mut())
+    }
+
     /// Attaches `cartridge`, or detaches it with `None`.
     pub fn attach(&mut self, cartridge: Option<Cartridge>) {
         self.cartridge = cartridge;
