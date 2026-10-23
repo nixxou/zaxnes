@@ -218,8 +218,12 @@ impl Host {
     ) -> Result<(), HarnessError> {
         // The scene starts from the settings as they stand.
         push_settings(&model, scene);
+        // The C# harness wires no `ViewReset`: a script's change of field of view or of scene
+        // ratio leaves the camera as it is.
+        let mut settings = ScriptSettings::new(model, ScriptLight::Model);
+        settings.set_resets_view(false);
         let environment = ScriptEnvironment {
-            settings: ScriptSettings::new(model, ScriptLight::Model),
+            settings,
             log: Box::new(ConsoleScriptLog),
             profile: ScriptProfileInfo {
                 title: profile.title.clone().unwrap_or_default(),

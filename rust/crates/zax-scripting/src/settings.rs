@@ -93,6 +93,7 @@ pub struct ScriptSettings {
     pending: Vec<SettingId>,
     changed: Option<Box<dyn FnMut(SettingId)>>,
     view_reset: bool,
+    resets_view: bool,
     save_requested: Option<Box<dyn FnMut()>>,
     load_requested: Option<Box<dyn FnMut()>>,
 }
@@ -114,6 +115,7 @@ impl ScriptSettings {
             pending: Vec::new(),
             changed: None,
             view_reset: false,
+            resets_view: true,
             save_requested: None,
             load_requested: None,
         }
@@ -135,6 +137,13 @@ impl ScriptSettings {
     /// (REQ-PERS-009), so that the host can apply the effect it owns.
     pub fn set_on_changed(&mut self, callback: impl FnMut(SettingId) + 'static) {
         self.changed = Some(Box::new(callback));
+    }
+
+    /// Sets whether a change of field of view or of the kept scene ratio asks for a view reset
+    /// (on by default). A host that does not wire the C# `ScriptSettings.ViewReset` callback,
+    /// as the C# harness does not, turns it off so that such a write leaves the camera alone.
+    pub const fn set_resets_view(&mut self, resets_view: bool) {
+        self.resets_view = resets_view;
     }
 
     /// True once since the last call when a change of field of view or of the kept scene ratio
@@ -424,7 +433,7 @@ impl ScriptSettings {
 
             // A change of field of view or of the kept scene ratio resets the view
             // (REQ-SCN-002, REQ-SCN-012, REQ-PERS-011).
-            if matches!(id, SettingId::CameraFov | SettingId::VrSceneRatio) {
+            if self.resets_view && matches!(id, SettingId::CameraFov | SettingId::VrSceneRatio) {
                 self.view_reset = true;
             }
         }
