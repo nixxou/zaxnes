@@ -244,7 +244,6 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_MENU_RESUME, "Reprendre"),
     (keys::HANDHELD_MENU_SAVE_STATE, "Sauvegarder l'état"),
     (keys::HANDHELD_MENU_LOAD_STATE, "Charger l'état"),
-    (keys::HANDHELD_MENU_REWIND, "Rembobiner"),
     (keys::HANDHELD_MENU_FAST_FORWARD, "Avance rapide"),
     (keys::HANDHELD_MENU_QUIT_TO_LIST, "Retour à la liste des ROM"),
     (keys::HANDHELD_MENU_EXIT, "Quitter vers le lanceur"),

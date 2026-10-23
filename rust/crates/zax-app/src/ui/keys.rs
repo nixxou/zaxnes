@@ -167,7 +167,6 @@ pub const HANDHELD_MENU_TITLE: &str = "handheld.menu.title";
 pub const HANDHELD_MENU_RESUME: &str = "handheld.menu.resume";
 pub const HANDHELD_MENU_SAVE_STATE: &str = "handheld.menu.save_state";
 pub const HANDHELD_MENU_LOAD_STATE: &str = "handheld.menu.load_state";
-pub const HANDHELD_MENU_REWIND: &str = "handheld.menu.rewind";
 pub const HANDHELD_MENU_FAST_FORWARD: &str = "handheld.menu.fast_forward";
 pub const HANDHELD_MENU_QUIT_TO_LIST: &str = "handheld.menu.quit_to_list";
 pub const HANDHELD_MENU_EXIT: &str = "handheld.menu.exit";
@@ -342,7 +341,6 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_MENU_RESUME,
     HANDHELD_MENU_SAVE_STATE,
     HANDHELD_MENU_LOAD_STATE,
-    HANDHELD_MENU_REWIND,
     HANDHELD_MENU_FAST_FORWARD,
     HANDHELD_MENU_QUIT_TO_LIST,
     HANDHELD_MENU_EXIT,

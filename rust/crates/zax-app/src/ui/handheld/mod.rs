@@ -381,10 +381,6 @@ impl HandheldUi {
                 host.enqueue(Command::LoadSlot, CommandArgs::of_number(slot));
                 close(self, host);
             }
-            OverlayCommand::Rewind => {
-                host.enqueue(Command::Rollback, CommandArgs::default());
-                close(self, host);
-            }
             OverlayCommand::ToggleFastForward => {
                 close(self, host);
                 host.enqueue(Command::FastForward, CommandArgs::default());

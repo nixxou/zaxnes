@@ -430,7 +430,6 @@ impl HandheldUi {
             OverlayItem::Resume => keys::HANDHELD_MENU_RESUME,
             OverlayItem::SaveState => keys::HANDHELD_MENU_SAVE_STATE,
             OverlayItem::LoadState => keys::HANDHELD_MENU_LOAD_STATE,
-            OverlayItem::Rewind => keys::HANDHELD_MENU_REWIND,
             OverlayItem::FastForward => keys::HANDHELD_MENU_FAST_FORWARD,
             OverlayItem::Camera => keys::HANDHELD_OPTION_CAMERA,
             OverlayItem::Options => keys::WINDOW_OPTIONS,

@@ -187,6 +187,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub pacer: FramePacer,
     /// The rollback history.
     pub rollback: RollbackHistory,
+    /// Whether the rollback snapshots are taken (REQ-LOOP-030); off on a handheld (Rust-only,
+    /// owner request): no savestate every 60 frames, and the rollback finds nothing to go back to.
+    pub rollback_enabled: bool,
     /// The fast-forward burst.
     pub fast_forward: FastForwardState,
     /// The notification area.
@@ -260,6 +263,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             was_running_before_suspend: false,
             stage_clock: StageClock::default(),
             rollback: RollbackHistory::new(),
+            rollback_enabled: true,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
             slots,
@@ -612,7 +616,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
             // counter is a multiple of 60, so before that frame executes.
             let core = session.core();
-            if RollbackHistory::is_snapshot_frame(core.frame_count()) {
+            if self.rollback_enabled && RollbackHistory::is_snapshot_frame(core.frame_count()) {
                 let started = self.stage_clock.start();
                 // A failure (no ROM) leaves the history as it was, as before.
                 let _ = self
