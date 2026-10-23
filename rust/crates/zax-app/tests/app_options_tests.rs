@@ -2,7 +2,7 @@
 //! must be the text of the C# program.
 #![allow(clippy::expect_used, clippy::unwrap_used)] // test code
 
-use zax_app::app_options::{AppOptions, OptionsError, USAGE};
+use zax_app::app_options::{AppOptions, OptionsError, RUST_ONLY_USAGE, USAGE};
 
 /// The C# program's options, read to compare the usage text with it.
 const CSHARP_OPTIONS: &str = concat!(
@@ -138,4 +138,19 @@ fn req_pub_006_the_font_can_be_named_or_forced_back_to_the_built_in_one() {
     assert!(!named.built_in_font);
 
     assert!(parse(&["--builtin-font"]).built_in_font);
+}
+
+#[test]
+fn the_rust_only_options_parse_and_are_listed_apart_from_the_csharp_usage() {
+    let options = parse(&["--handheld", "--roms", "/storage/roms"]);
+    assert!(options.handheld);
+    assert_eq!(Some("/storage/roms"), options.roms_directory.as_deref());
+    assert!(!parse(&["--rom", "a.nes"]).handheld);
+    assert_eq!(
+        Err(OptionsError::MissingValue { option: "--roms" }),
+        AppOptions::parse(&["--roms"])
+    );
+    // The text compared with the C# program is untouched; the new options have their own block.
+    assert!(!USAGE.contains("--handheld"));
+    assert!(RUST_ONLY_USAGE.contains("--handheld") && RUST_ONLY_USAGE.contains("--roms"));
 }

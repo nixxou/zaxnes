@@ -27,7 +27,9 @@ impl Metrics {
     /// The sizes for a display `height` pixels high.
     #[must_use]
     pub fn for_height(height: f32) -> Self {
-        let font = (BODY_AT_480 * height / 480.0).round().max(BODY_AT_480 - 2.0);
+        let font = (BODY_AT_480 * height / 480.0)
+            .round()
+            .max(BODY_AT_480 - 2.0);
         Self {
             font,
             heading: (font * 1.25).round(),
@@ -85,33 +87,39 @@ const fn hint(button: &'static str, meaning: &'static str) -> Hint {
     Hint { button, meaning }
 }
 
+const HOME_HINTS: &[Hint] = &[
+    hint("A", keys::HANDHELD_HINT_PLAY),
+    hint("X", keys::HANDHELD_HINT_PROFILE),
+    hint("Y", keys::HANDHELD_HINT_OPTIONS),
+    hint("L/R", keys::HANDHELD_HINT_JUMP),
+];
+const PROFILES_HINTS: &[Hint] = &[
+    hint("A", keys::HANDHELD_HINT_CHOOSE),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
+const OPTIONS_HINTS: &[Hint] = &[
+    hint("</>", keys::HANDHELD_HINT_CHANGE),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
+const CONTROLS_HINTS: &[Hint] = &[
+    hint("A", keys::HANDHELD_HINT_REBIND),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
+const OVERLAY_HINTS: &[Hint] = &[
+    hint("A", keys::HANDHELD_HINT_CHOOSE),
+    hint("</>", keys::HANDHELD_HINT_CHANGE),
+    hint("B", keys::HANDHELD_MENU_RESUME),
+];
+
 /// The hints at the bottom of `screen`.
 #[must_use]
 pub const fn hints(screen: Screen) -> &'static [Hint] {
     match screen {
-        Screen::Home => &[
-            hint("A", keys::HANDHELD_HINT_PLAY),
-            hint("X", keys::HANDHELD_HINT_PROFILE),
-            hint("Y", keys::HANDHELD_HINT_OPTIONS),
-            hint("L/R", keys::HANDHELD_HINT_JUMP),
-        ],
-        Screen::Profiles => &[
-            hint("A", keys::HANDHELD_HINT_CHOOSE),
-            hint("B", keys::HANDHELD_HINT_BACK),
-        ],
-        Screen::Options => &[
-            hint("</>", keys::HANDHELD_HINT_CHANGE),
-            hint("B", keys::HANDHELD_HINT_BACK),
-        ],
-        Screen::Controls => &[
-            hint("A", keys::HANDHELD_HINT_REBIND),
-            hint("B", keys::HANDHELD_HINT_BACK),
-        ],
-        Screen::Overlay => &[
-            hint("A", keys::HANDHELD_HINT_CHOOSE),
-            hint("</>", keys::HANDHELD_HINT_CHANGE),
-            hint("B", keys::HANDHELD_MENU_RESUME),
-        ],
+        Screen::Home => HOME_HINTS,
+        Screen::Profiles => PROFILES_HINTS,
+        Screen::Options => OPTIONS_HINTS,
+        Screen::Controls => CONTROLS_HINTS,
+        Screen::Overlay => OVERLAY_HINTS,
         Screen::InGame => &[],
     }
 }
@@ -167,7 +175,10 @@ mod tests {
         .concat()
         {
             for language in [UiLanguage::English, UiLanguage::French] {
-                assert!(strings::lookup(language, hint.meaning).is_some(), "{hint:?}");
+                assert!(
+                    strings::lookup(language, hint.meaning).is_some(),
+                    "{hint:?}"
+                );
             }
         }
     }

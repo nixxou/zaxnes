@@ -82,15 +82,18 @@ pub struct UiFonts {
 impl UiFonts {
     /// Adds the faces to `atlas`: the system face (the `hint` file, or the platform's) at the
     /// body size, then the bold one of the same family at the heading size. With no face, or
-    /// `built_in_only`, the built-in font of `ImGui` is the only one; `sizes` are the desktop's
-    /// unless the handheld interface asks for others.
-    pub fn load(
+    /// `built_in_only`, the built-in font of `ImGui` is the only one.
+    pub fn load(atlas: &mut FontAtlas, hint: Option<&str>, built_in_only: bool) -> Self {
+        Self::load_sized(atlas, hint, built_in_only, FontSizes::DESKTOP)
+    }
+
+    /// [`Self::load`] with other sizes, which the handheld interface derives from its display.
+    pub fn load_sized(
         atlas: &mut FontAtlas,
         hint: Option<&str>,
         built_in_only: bool,
-        sizes: Option<FontSizes>,
+        wanted: FontSizes,
     ) -> Self {
-        let wanted = sizes.unwrap_or(FontSizes::DESKTOP);
         let files = if built_in_only {
             system_fonts::FontFiles::default()
         } else {
@@ -106,8 +109,8 @@ impl UiFonts {
             Some((regular.clone(), body, bold))
         });
         let Some((body_file, body, bold)) = faces else {
-            let config = sizes.map(|sizes| FontConfig {
-                size_pixels: sizes.body,
+            let config = (wanted != FontSizes::DESKTOP).then(|| FontConfig {
+                size_pixels: wanted.body,
                 ..FontConfig::default()
             });
             atlas.add_font(&[FontSource::DefaultFontData { config }]);

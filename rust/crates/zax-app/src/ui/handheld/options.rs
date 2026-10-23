@@ -111,11 +111,12 @@ impl HandheldOptionsModel {
         None
     }
 
-    fn step(&self, settings: &mut SettingsModel, step: i32) -> Option<OptionsCommand> {
+    fn step(self, settings: &mut SettingsModel, step: i32) -> Option<OptionsCommand> {
         match self.selected() {
             OptionRow::Language => {
                 let codes = language_codes();
-                let next = cycled(&codes, &settings.language().as_str(), step);
+                let current = settings.language();
+                let next = *cycled(&codes, &current.as_str(), step);
                 settings.set_language(next);
             }
             OptionRow::Volume => settings.set_volume(stepped_volume(settings.volume(), step)),
@@ -254,7 +255,9 @@ fn render_scale_index(settings: &SettingsModel) -> usize {
 }
 
 fn set_render_scale(settings: &mut SettingsModel, step: i32) {
-    let count = i32::try_from(render_scale_options().len()).unwrap_or(1).max(1);
+    let count = i32::try_from(render_scale_options().len())
+        .unwrap_or(1)
+        .max(1);
     let here = i32::try_from(render_scale_index(settings)).unwrap_or(0);
     let next = (here + step).rem_euclid(count);
     settings.set(SettingId::VideoResScale, SettingValue::Enum(next));
@@ -305,7 +308,11 @@ mod tests {
         assert_eq!(DIRECT_METHOD, settings.render_method());
         assert!((settings.res_scale_factor() - 1.0).abs() < 1.0e-6);
         model.handle(PadButton::Left, &mut settings);
-        assert_eq!(4, settings.get(SettingId::VideoResScale).as_int(), "wraps round");
+        assert_eq!(
+            4,
+            settings.get(SettingId::VideoResScale).as_int(),
+            "wraps round"
+        );
     }
 
     #[test]

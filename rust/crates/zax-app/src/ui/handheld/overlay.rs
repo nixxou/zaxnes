@@ -151,8 +151,8 @@ impl OverlayModel {
         match button {
             PadButton::Up => self.selected = (self.selected + ITEMS.len() - 1) % ITEMS.len(),
             PadButton::Down => self.selected = (self.selected + 1) % ITEMS.len(),
-            PadButton::Left => self.step(-1),
-            PadButton::Right => self.step(1),
+            PadButton::Left => return self.step(-1),
+            PadButton::Right => return self.step(1),
             PadButton::A => return Some(self.activate()),
             PadButton::B | PadButton::Menu => return Some(OverlayCommand::Resume),
             _ => {}
@@ -160,16 +160,24 @@ impl OverlayModel {
         None
     }
 
-    /// Left and right change the value of the row that has one.
-    fn step(&mut self, step: i32) {
+    /// Left and right change the value of the row that has one; a new camera preset is applied
+    /// at once, so the view behind the menu shows it.
+    fn step(&mut self, step: i32) -> Option<OverlayCommand> {
         match self.selected() {
             OverlayItem::SaveState | OverlayItem::LoadState => {
                 let count = i32::try_from(EXPOSED_SLOT_COUNT).unwrap_or(1);
                 self.slot = (self.slot - 1 + step).rem_euclid(count) + 1;
+                None
             }
-            OverlayItem::Camera => self.camera = self.camera.stepped(step),
-            _ => {}
+            OverlayItem::Camera => Some(OverlayCommand::SetCamera(self.step_camera(step))),
+            _ => None,
         }
+    }
+
+    /// Moves the camera preset `step` places on and returns it.
+    pub fn step_camera(&mut self, step: i32) -> CameraPreset {
+        self.camera = self.camera.stepped(step);
+        self.camera
     }
 
     fn activate(&self) -> OverlayCommand {
@@ -215,12 +223,18 @@ mod tests {
         assert_eq!(1, model.slot(), "Resume has no value");
         go_to(&mut model, OverlayItem::SaveState);
         model.handle(PadButton::Right);
-        assert_eq!(Some(OverlayCommand::SaveState(2)), model.handle(PadButton::A));
+        assert_eq!(
+            Some(OverlayCommand::SaveState(2)),
+            model.handle(PadButton::A)
+        );
         model.handle(PadButton::Left);
         model.handle(PadButton::Left);
         assert_eq!(10, model.slot());
         go_to(&mut model, OverlayItem::LoadState);
-        assert_eq!(Some(OverlayCommand::LoadState(10)), model.handle(PadButton::A));
+        assert_eq!(
+            Some(OverlayCommand::LoadState(10)),
+            model.handle(PadButton::A)
+        );
     }
 
     #[test]
@@ -242,7 +256,10 @@ mod tests {
     fn the_camera_row_cycles_the_presets() {
         let mut model = OverlayModel::new();
         go_to(&mut model, OverlayItem::Camera);
-        model.handle(PadButton::Right);
+        assert_eq!(
+            Some(OverlayCommand::SetCamera(CameraPreset::FirstPerson)),
+            model.handle(PadButton::Right)
+        );
         assert_eq!(
             Some(OverlayCommand::SetCamera(CameraPreset::FirstPerson)),
             model.handle(PadButton::A)

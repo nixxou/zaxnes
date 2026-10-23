@@ -1,6 +1,7 @@
 //! The interface as the application loop holds it: a Dear `ImGui` context with its renderer and
 //! platform input, over the screens of [`ZaxUi`] and the developer panel.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use sdl2::event::Event;
@@ -8,7 +9,9 @@ use zax_platform::imgui_renderer::ImguiRenderer;
 use zax_platform::input::{Key, KeyboardDevice};
 
 use super::debug_overlay::{self, DebugInfo};
-use super::fonts::UiFonts;
+use super::fonts::{FontSizes, UiFonts};
+use super::handheld::layout::Metrics;
+use super::handheld::HandheldUi;
 use super::menu_shortcuts::ShortcutModifiers;
 use super::platform::SdlPlatform;
 use super::shots::{ShotStep, UiShots};
@@ -34,11 +37,15 @@ pub struct ImguiFrontend {
     renderer: ImguiRenderer,
     platform: SdlPlatform,
     ui: ZaxUi,
+    /// The gamepad-only interface, which takes the place of `ui` in the handheld mode; `ui` stays
+    /// for the texts and the commands the two share.
+    handheld: Option<HandheldUi>,
     shots: Option<UiShots>,
 }
 
 impl ImguiFrontend {
-    /// Builds the context, loads the fonts and uploads the atlas.
+    /// Builds the context, loads the fonts and uploads the atlas. `drawable_height` sizes the
+    /// fonts and the rows of the handheld interface.
     ///
     /// # Errors
     /// The renderer could not be built, or the folder of the screenshots could not be created.
@@ -46,15 +53,24 @@ impl ImguiFrontend {
         gl: &Rc<glow::Context>,
         host: &AppHost,
         options: &AppOptions,
+        drawable_height: u32,
     ) -> Result<Self, String> {
+        #[allow(clippy::cast_precision_loss)] // display heights are far below 2^24
+        let height = drawable_height as f32;
+        let metrics = Metrics::for_height(height);
         let mut context = imgui::Context::create();
         // Dear ImGui would otherwise drop an imgui.ini next to the working directory.
         context.set_ini_filename(None);
         context.set_log_filename(None);
-        let fonts = UiFonts::load(
+        let fonts = UiFonts::load_sized(
             context.fonts(),
             options.font_file.as_deref(),
             options.built_in_font,
+            if options.handheld {
+                metrics.font_sizes()
+            } else {
+                FontSizes::DESKTOP
+            },
         );
         let renderer =
             ImguiRenderer::new(gl, context.fonts()).map_err(|error| error.to_string())?;
@@ -63,6 +79,18 @@ impl ImguiFrontend {
         fonts.remap_missing_glyphs(context.fonts());
         let mut ui = ZaxUi::new(host);
         ui.set_heading_font(fonts.heading);
+        let handheld = options.handheld.then(|| {
+            let directory = roms_directory(host, options);
+            if let Err(error) = std::fs::create_dir_all(&directory) {
+                ui.log(format!(
+                    "the ROM folder '{}' could not be created: {error}",
+                    directory.display()
+                ));
+            }
+            let mut handheld = HandheldUi::new(host, directory, height);
+            handheld.set_heading_font(fonts.heading);
+            handheld
+        });
         #[cfg(feature = "native-dialog")]
         if options.ui_shot_directory.is_none() {
             ui.set_file_picker(Box::new(super::native_picker::NativePicker::detect()));
@@ -74,18 +102,23 @@ impl ImguiFrontend {
         let shots = options
             .ui_shot_directory
             .as_deref()
-            .map(UiShots::new)
+            .map(|directory| UiShots::new(directory, options.handheld))
             .transpose()
             .map_err(|error| format!("the screenshot folder could not be created: {error}"))?;
+        let platform = if options.handheld {
+            SdlPlatform::for_handheld()
+        } else if shots.is_some() {
+            SdlPlatform::for_capture()
+        } else {
+            SdlPlatform::new()
+        };
+        platform.configure(context.io_mut());
         Ok(Self {
             context,
             renderer,
-            platform: if shots.is_some() {
-                SdlPlatform::for_capture()
-            } else {
-                SdlPlatform::new()
-            },
+            platform,
             ui,
+            handheld,
             shots,
         })
     }
@@ -109,14 +142,20 @@ impl ImguiFrontend {
 
     /// Whether the interface holds a modal window (REQ-UI-004).
     #[must_use]
-    pub const fn is_modal(&self) -> bool {
-        self.ui.state.is_modal()
+    pub fn is_modal(&self) -> bool {
+        self.handheld
+            .as_ref()
+            .map_or_else(|| self.ui.state.is_modal(), HandheldUi::is_modal)
     }
 
     /// Height of the menu bar, which the game view sits under (REQ-UI-200).
     #[must_use]
     pub const fn chrome_height(&self) -> f32 {
-        self.ui.chrome_height
+        if self.handheld.is_some() {
+            0.0
+        } else {
+            self.ui.chrome_height
+        }
     }
 
     /// The menu shortcuts of REQ-UI-204: the rising edge of every watched key.
@@ -126,6 +165,10 @@ impl ImguiFrontend {
         keyboard: &dyn KeyboardDevice,
         binding_capture_active: bool,
     ) {
+        // A handheld has no keyboard: its menus answer to the gamepad only.
+        if self.handheld.is_some() {
+            return;
+        }
         // While a binding capture is listening, the keyboard belongs to the capture: the fixed
         // shortcuts must not fire either, for the same reason REQ-INP-047 and DEC-08-2 suspend
         // the actions. A text field of the interface (the two search boxes) owns the keyboard
@@ -166,13 +209,24 @@ impl ImguiFrontend {
             frame.real_seconds,
         );
         let ui = self.context.new_frame();
-        self.ui.draw(ui, frame);
-        if self.ui.state.debug_overlay_visible() {
-            debug_overlay::draw(ui, frame.host, self.ui.chrome_height, debug);
+        if let Some(handheld) = &mut self.handheld {
+            // A screenshot run has no gamepad, and its screens are staged by the plan.
+            if self.shots.is_none() {
+                self.platform.pad_mut().advance(frame.real_seconds);
+                handheld.update(self.platform.pad(), frame.real_seconds, frame);
+            }
+            handheld.draw(ui, frame);
+            self.ui.draw_fps_counter(ui, frame);
+        } else {
+            self.ui.draw(ui, frame);
+            if self.ui.state.debug_overlay_visible() {
+                debug_overlay::draw(ui, frame.host, self.ui.chrome_height, debug);
+            }
         }
+        self.platform.pad_mut().end_frame();
         self.renderer.render(self.context.render());
         if let Some(shots) = &mut self.shots {
-            if let ShotStep::Capture(path) = shots.advance(&mut self.ui) {
+            if let ShotStep::Capture(path) = shots.advance(&mut self.ui, self.handheld.as_mut()) {
                 capture(&path);
             }
             if shots.finished() {
@@ -183,7 +237,11 @@ impl ImguiFrontend {
 
     /// Takes one event of the host.
     pub fn handle_host_event(&mut self, host: &mut AppHost, event: HostEvent) {
-        self.ui.handle_host_event(host, event);
+        match (&mut self.handheld, event) {
+            (Some(_), HostEvent::LanguageChanged(code)) => self.ui.language_changed(&code),
+            (Some(handheld), event) => handheld.handle_host_event(host, event),
+            (None, event) => self.ui.handle_host_event(host, event),
+        }
     }
 
     /// Stops a binding capture in progress (REQ-UI-067).
@@ -193,6 +251,19 @@ impl ImguiFrontend {
 
     /// What the interface asked of the application since the last call.
     pub fn take_effects(&mut self) -> Vec<UiEffect> {
-        self.ui.take_effects()
+        let mut effects = self.ui.take_effects();
+        if let Some(handheld) = &mut self.handheld {
+            effects.extend(handheld.take_effects());
+        }
+        effects
     }
+}
+
+/// The folder the handheld ROM list reads: `--roms`, or the `roms` folder of the user data.
+fn roms_directory(host: &AppHost, options: &AppOptions) -> PathBuf {
+    let directory = options
+        .roms_directory
+        .as_deref()
+        .map_or_else(|| host.paths().root.join("roms"), PathBuf::from);
+    std::path::absolute(&directory).unwrap_or(directory)
 }

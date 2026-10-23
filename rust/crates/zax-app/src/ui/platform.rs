@@ -299,7 +299,7 @@ mod tests {
         }
     }
 
-    /// Dear `ImGui` allows one context per process, so both platforms are checked in turn.
+    /// Dear `ImGui` allows one context per process, so the platforms are checked in turn.
     #[test]
     fn a_capture_platform_ignores_the_host_cursor_and_buttons() {
         let mut context = imgui::Context::create();
@@ -319,5 +319,42 @@ mod tests {
         SdlPlatform::new().handle_event(context.io_mut(), &motion());
         context.new_frame();
         assert_eq!(context.io().mouse_pos, [120.0, 80.0]);
+        let _ = context.render();
+
+        // The handheld platform declares the gamepad to Dear ImGui and feeds the pad state; the
+        // desktop one ignores the controllers.
+        let start = Event::ControllerButtonDown {
+            timestamp: 0,
+            which: 0,
+            button: Button::Start,
+        };
+        let mut handheld = SdlPlatform::for_handheld();
+        handheld.configure(context.io_mut());
+        assert!(context
+            .io()
+            .config_flags
+            .contains(ConfigFlags::NAV_ENABLE_GAMEPAD));
+        assert!(context
+            .io()
+            .backend_flags
+            .contains(BackendFlags::HAS_GAMEPAD));
+        handheld.handle_event(context.io_mut(), &start);
+        assert!(handheld.pad().is_held(PadButton::Start));
+        let mut desktop = SdlPlatform::new();
+        desktop.handle_event(context.io_mut(), &start);
+        assert!(!desktop.pad().is_held(PadButton::Start));
+    }
+    #[test]
+    fn the_standard_buttons_reach_the_handheld_buttons_and_the_imgui_keys() {
+        assert_eq!(
+            Some((PadButton::A, Some(Key::GamepadFaceDown))),
+            pad_mapping(Button::A)
+        );
+        assert_eq!(
+            Some((PadButton::L1, Some(Key::GamepadL1))),
+            pad_mapping(Button::LeftShoulder)
+        );
+        assert_eq!(Some((PadButton::Menu, None)), pad_mapping(Button::Guide));
+        assert_eq!(None, pad_mapping(Button::LeftStick));
     }
 }

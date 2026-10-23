@@ -85,7 +85,7 @@ impl ZaxUi {
         }
     }
 
-    pub(super) fn draw_notification(ui: &Ui, host: &AppHost) {
+    pub(in crate::ui) fn draw_notification(ui: &Ui, host: &AppHost, bottom_margin: f32) {
         let Some(notification) = host.notifications.current() else {
             return;
         };
@@ -98,7 +98,10 @@ impl ZaxUi {
             | WindowFlags::NO_INPUTS;
         let window = ui
             .window("##notification")
-            .position([display[0] * 0.5, display[1] - 48.0], Condition::Always)
+            .position(
+                [display[0] * 0.5, display[1] - bottom_margin],
+                Condition::Always,
+            )
             .position_pivot([0.5, 1.0])
             .bg_alpha(0.5)
             .flags(flags)
@@ -113,7 +116,7 @@ impl ZaxUi {
         }
     }
 
-    pub(super) fn draw_fps_counter(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
+    pub(in crate::ui) fn draw_fps_counter(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
         if !frame.host.settings().show_fps() {
             return;
         }
