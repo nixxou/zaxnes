@@ -251,6 +251,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_OPTION_FRAME_CAP, "Limite d'images"),
     (keys::HANDHELD_OPTION_CAMERA, "Vue de la caméra"),
     (keys::HANDHELD_OPTION_CONTROLS, "Commandes"),
+    (keys::HANDHELD_OPTION_REGION, "Région"),
+    (keys::HANDHELD_REGION_AUTO, "Auto (ROM)"),
     (keys::HANDHELD_CAMERA_RESET, "Vue par défaut"),
     (keys::HANDHELD_CONTROLS_PLAYER, "Manette du joueur 1"),
 ];

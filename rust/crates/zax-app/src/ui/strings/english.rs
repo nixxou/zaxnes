@@ -252,6 +252,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_OPTION_FRAME_CAP, "Frame cap"),
     (keys::HANDHELD_OPTION_CAMERA, "Camera preset"),
     (keys::HANDHELD_OPTION_CONTROLS, "Controls"),
+    (keys::HANDHELD_OPTION_REGION, "Region"),
+    (keys::HANDHELD_REGION_AUTO, "Auto (ROM)"),
     (keys::HANDHELD_CAMERA_RESET, "Default view"),
     (keys::HANDHELD_CONTROLS_PLAYER, "Player 1 gamepad"),
 ];
