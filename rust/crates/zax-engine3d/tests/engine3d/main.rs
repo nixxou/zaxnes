@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod cylinder_vector_tests;
+mod geometry_placement_tests;
 mod geometry_vector_tests;
 mod instance_and_output_tests;
 mod intake_and_frame_tests;
