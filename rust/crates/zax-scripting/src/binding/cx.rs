@@ -1,0 +1,391 @@
+//! The context of a call from Lua into the host: access to the runtime and the engine state
+//! the call was made under, argument checking (REQ-LUA-041) and error raising.
+
+use mlua::{AnyUserData, Lua, MultiValue, Table, UserDataRefMut, Value};
+use zax_engine3d::engine::ConversionState;
+use zax_engine3d::instance::InstanceRef;
+use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
+
+use super::payload::{Host, Payload, Vec3Ref};
+use crate::runtime::RuntimeData;
+use crate::values::{number_format, LuaColor};
+
+/// What the host lends to the Lua state for the duration of one call into it: the runtime's
+/// data, the engine state when there is one, and the pattern instance being built.
+pub(crate) struct Lent {
+    pub data: AnyUserData,
+    pub state: Option<AnyUserData>,
+    pub build: Option<(InstanceRef, AnyUserData)>,
+}
+
+/// The weak table that maps a reference object to its Lua value.
+pub(crate) struct HostCache(pub Table);
+
+/// The context of one call from Lua into the host.
+pub(crate) struct Cx<'a> {
+    pub lua: &'a Lua,
+}
+
+impl<'a> Cx<'a> {
+    pub const fn new(lua: &'a Lua) -> Self {
+        Self { lua }
+    }
+
+    fn not_available(what: &str) -> mlua::Error {
+        mlua::Error::runtime(format!("{what} is not available here"))
+    }
+
+    /// The runtime's data.
+    pub fn data(&self) -> mlua::Result<UserDataRefMut<RuntimeData>> {
+        let lent = self
+            .lua
+            .app_data_ref::<Lent>()
+            .ok_or_else(|| Self::not_available("the script API"))?;
+        lent.data.borrow_mut::<RuntimeData>()
+    }
+
+    /// The engine state, which only a hook with access to it has.
+    pub fn state(&self) -> mlua::Result<UserDataRefMut<ConversionState>> {
+        let lent = self
+            .lua
+            .app_data_ref::<Lent>()
+            .ok_or_else(|| Self::not_available("the script API"))?;
+        lent.state
+            .as_ref()
+            .ok_or_else(|| Self::not_available("the conversion state"))?
+            .borrow_mut::<ConversionState>()
+    }
+
+    /// True when the call was made with the engine state at hand.
+    pub fn has_state(&self) -> bool {
+        self.lua
+            .app_data_ref::<Lent>()
+            .is_some_and(|lent| lent.state.is_some())
+    }
+
+    /// The pattern instance being built, when `reference` is it.
+    pub fn build_target(
+        &self,
+        reference: InstanceRef,
+    ) -> mlua::Result<Option<UserDataRefMut<zax_engine3d::instance::PatternInstance>>> {
+        let lent = self
+            .lua
+            .app_data_ref::<Lent>()
+            .ok_or_else(|| Self::not_available("the script API"))?;
+        match &lent.build {
+            Some((building, target)) if *building == reference => Ok(Some(target.borrow_mut()?)),
+            _ => Ok(None),
+        }
+    }
+
+    // errors
+
+    /// A Lua error carrying the position of the calling script line, the form REQ-LUA-061 logs.
+    pub fn raise(&self, message: &str) -> mlua::Error {
+        let position = self
+            .lua
+            .inspect_stack(1, |frame| {
+                let source = frame.source();
+                match (source.short_src, frame.current_line()) {
+                    (Some(name), Some(line)) => format!("{name}:{line}: "),
+                    _ => String::new(),
+                }
+            })
+            .unwrap_or_default();
+        mlua::Error::runtime(format!("{position}{message}"))
+    }
+
+    /// `invalid arguments to <member>` (REQ-LUA-041).
+    pub fn invalid(&self, member: &str) -> mlua::Error {
+        self.raise(&format!("invalid arguments to {member}"))
+    }
+
+    /// Checks a 0-based index against a count, raising a Lua error (REQ-LUA-045).
+    pub fn check_bounds(&self, index: i32, count: usize, member: &str) -> mlua::Result<usize> {
+        match usize::try_from(index) {
+            Ok(position) if position < count => Ok(position),
+            _ => Err(self.raise(&format!(
+                "index {index} is out of range for {member} (count {count})"
+            ))),
+        }
+    }
+
+    // pushing
+
+    /// A fresh Lua value for `payload`.
+    pub fn value(&self, payload: Payload) -> mlua::Result<Value> {
+        Ok(Value::UserData(self.lua.create_userdata(Host { payload })?))
+    }
+
+    /// The Lua value of a reference object: the same object always gives the same value
+    /// (REQ-LUA-043), which is what lets a script use it as a table key (REQ-LUA-045).
+    pub fn object(&self, payload: Payload) -> mlua::Result<Value> {
+        let Some(key) = payload.cache_key() else {
+            return self.value(payload);
+        };
+
+        let cache = self
+            .lua
+            .app_data_ref::<HostCache>()
+            .ok_or_else(|| Self::not_available("the object cache"))?
+            .0
+            .clone();
+        let key = self.lua.create_string(key)?;
+        if let Value::UserData(existing) = cache.raw_get::<Value>(&key)? {
+            return Ok(Value::UserData(existing));
+        }
+
+        let created = self.value(payload)?;
+        cache.raw_set(&key, &created)?;
+        Ok(created)
+    }
+
+    /// A Lua string.
+    pub fn text(&self, text: &str) -> mlua::Result<Value> {
+        Ok(Value::String(self.lua.create_string(text)?))
+    }
+
+    /// A `Vector3` value.
+    pub fn vector3(&self, value: Vec3) -> mlua::Result<Value> {
+        self.value(Payload::Vector3(value))
+    }
+
+    /// A `Vector2` value.
+    pub fn vector2(&self, value: Vec2) -> mlua::Result<Value> {
+        self.value(Payload::Vector2(value))
+    }
+
+    /// A `Color` value.
+    pub fn color(&self, value: LuaColor) -> mlua::Result<Value> {
+        self.value(Payload::Color(value))
+    }
+
+    /// An `IntVector2` value.
+    pub fn int_vector2(&self, value: Cell) -> mlua::Result<Value> {
+        self.value(Payload::IntVector2(value))
+    }
+
+    // reading
+
+    /// The payload of the host value `value`, or `None` for any other Lua value.
+    pub fn host(&self, value: &Value) -> Option<Payload> {
+        match value {
+            Value::UserData(data) => data.borrow::<Host>().ok().map(|host| host.payload),
+            _ => None,
+        }
+    }
+
+    /// The number at hand. A string, even a numeric one, is refused (REQ-LUA-041).
+    #[allow(clippy::cast_precision_loss)] // lua_tonumber converts an integer to a double.
+    pub fn number(&self, value: &Value, member: &str) -> mlua::Result<f64> {
+        match value {
+            Value::Number(number) => Ok(*number),
+            Value::Integer(integer) => Ok(*integer as f64),
+            _ => Err(self.invalid(member)),
+        }
+    }
+
+    /// The number at hand, as a single-precision real.
+    #[allow(clippy::cast_possible_truncation)] // The C# casts the double to float.
+    pub fn real(&self, value: &Value, member: &str) -> mlua::Result<f32> {
+        Ok(self.number(value, member)? as f32)
+    }
+
+    /// The number at hand, truncated towards zero (REQ-LUA-040).
+    pub fn integer(&self, value: &Value, member: &str) -> mlua::Result<i32> {
+        Ok(number_format::to_i32(self.number(value, member)?))
+    }
+
+    /// The string at hand; a number is refused (REQ-LUA-041).
+    pub fn string(&self, value: &Value, member: &str) -> mlua::Result<String> {
+        match value {
+            Value::String(text) => Ok(text.to_string_lossy()),
+            _ => Err(self.invalid(member)),
+        }
+    }
+
+    /// The value at hand read as a `Vector3`. A bound vector is accepted wherever a `Vector3`
+    /// is expected, because the corpus passes one straight through (`shape:GetPos(shape.Pivot)`);
+    /// it is read by copy, so the callee cannot write back through it.
+    pub fn try_vec3(&self, value: &Value) -> mlua::Result<Option<Vec3>> {
+        match self.host(value) {
+            Some(Payload::Vector3(vector)) => Ok(Some(vector)),
+            Some(Payload::Vec3Ref(reference)) => self.read_vec3_ref(&reference).map(Some),
+            Some(Payload::Vector2(vector)) => Ok(Some(Vec3::new(vector.x, vector.y, 0.0))),
+            _ => Ok(None),
+        }
+    }
+
+    /// The value at hand as a `Vector3`, or an error (REQ-LUA-041).
+    pub fn vec3(&self, value: &Value, member: &str) -> mlua::Result<Vec3> {
+        self.try_vec3(value)?.ok_or_else(|| self.invalid(member))
+    }
+
+    /// The value at hand read as a `Vector2`.
+    #[allow(clippy::cast_precision_loss)] // The C# widens an int to a float.
+    pub fn try_vec2(&self, value: &Value) -> mlua::Result<Option<Vec2>> {
+        match self.host(value) {
+            Some(Payload::Vector2(vector)) => Ok(Some(vector)),
+            Some(Payload::IntVector2(cell)) => Ok(Some(Vec2::new(cell.x as f32, cell.y as f32))),
+            Some(Payload::Vector3(_) | Payload::Vec3Ref(_)) => Ok(self
+                .try_vec3(value)?
+                .map(|three| Vec2::new(three.x, three.y))),
+            _ => Ok(None),
+        }
+    }
+
+    /// The value at hand read as a `Quaternion`, as `[x, y, z, w]`.
+    pub fn try_quaternion(&self, value: &Value) -> Option<[f32; 4]> {
+        match self.host(value) {
+            Some(Payload::Quaternion(parts)) => Some(parts),
+            _ => None,
+        }
+    }
+
+    /// The value at hand read as a `Color`.
+    pub fn try_color(&self, value: &Value) -> Option<LuaColor> {
+        match self.host(value) {
+            Some(Payload::Color(color)) => Some(color),
+            _ => None,
+        }
+    }
+
+    /// The value at hand read as an `IntVector2`; a real vector is truncated.
+    #[allow(clippy::cast_possible_truncation)] // The C# casts the float components to int.
+    pub fn try_int_vector2(&self, value: &Value) -> mlua::Result<Option<Cell>> {
+        match self.host(value) {
+            Some(Payload::IntVector2(cell)) => Ok(Some(cell)),
+            Some(Payload::Vector2(_) | Payload::Vector3(_) | Payload::Vec3Ref(_)) => Ok(self
+                .try_vec2(value)?
+                .map(|pair| Cell::new(pair.x as i32, pair.y as i32))),
+            _ => Ok(None),
+        }
+    }
+
+    /// The value at hand read as a `Rect`.
+    pub fn try_rect(&self, value: &Value) -> Option<Rect> {
+        match self.host(value) {
+            Some(Payload::Rect(rectangle)) => Some(rectangle),
+            _ => None,
+        }
+    }
+
+    /// The value at hand as a `Rect`, or an error.
+    pub fn rect(&self, value: &Value, member: &str) -> mlua::Result<Rect> {
+        self.try_rect(value).ok_or_else(|| self.invalid(member))
+    }
+
+    /// The vector a `Vec3R` designates, or zero when its owner is gone (REQ-LUA-028).
+    pub fn read_vec3_ref(&self, reference: &Vec3Ref) -> mlua::Result<Vec3> {
+        super::access::read_vec3_ref(self, reference)
+    }
+}
+
+/// The arguments of a method or a table function, numbered from 1 as the stack of a Lua call
+/// is; argument 1 is the receiver.
+pub(crate) struct Call<'a> {
+    pub cx: &'a Cx<'a>,
+    values: &'a MultiValue,
+    nil: Value,
+}
+
+impl<'a> Call<'a> {
+    pub const fn new(cx: &'a Cx<'a>, values: &'a MultiValue) -> Self {
+        Self {
+            cx,
+            values,
+            nil: Value::Nil,
+        }
+    }
+
+    /// The argument `index` (1-based), nil when the script passed fewer.
+    pub fn value(&self, index: usize) -> &Value {
+        index
+            .checked_sub(1)
+            .and_then(|position| self.values.get(position))
+            .unwrap_or(&self.nil)
+    }
+
+    /// True when the argument is absent or nil.
+    pub fn is_none_or_nil(&self, index: usize) -> bool {
+        matches!(self.value(index), Value::Nil)
+    }
+
+    /// True when the argument is a number.
+    pub fn is_number(&self, index: usize) -> bool {
+        matches!(self.value(index), Value::Number(_) | Value::Integer(_))
+    }
+
+    /// The payload of the host value at `index`.
+    pub fn host(&self, index: usize) -> Option<Payload> {
+        self.cx.host(self.value(index))
+    }
+
+    /// The number at `index` (REQ-LUA-041).
+    pub fn number(&self, index: usize, member: &str) -> mlua::Result<f64> {
+        self.cx.number(self.value(index), member)
+    }
+
+    /// The number at `index` as a single-precision real.
+    pub fn real(&self, index: usize, member: &str) -> mlua::Result<f32> {
+        self.cx.real(self.value(index), member)
+    }
+
+    /// The number at `index`, truncated towards zero.
+    pub fn integer(&self, index: usize, member: &str) -> mlua::Result<i32> {
+        self.cx.integer(self.value(index), member)
+    }
+
+    /// The number at `index`, or `fallback` if the argument is absent or nil.
+    pub fn optional_number(&self, index: usize, member: &str, fallback: f64) -> mlua::Result<f64> {
+        if self.is_none_or_nil(index) {
+            Ok(fallback)
+        } else {
+            self.number(index, member)
+        }
+    }
+
+    /// The string at `index`; a number is refused.
+    pub fn string(&self, index: usize, member: &str) -> mlua::Result<String> {
+        self.cx.string(self.value(index), member)
+    }
+
+    /// The string at `index`, or `fallback` if the argument is absent or nil.
+    pub fn optional_string(
+        &self,
+        index: usize,
+        member: &str,
+        fallback: &str,
+    ) -> mlua::Result<String> {
+        if self.is_none_or_nil(index) {
+            Ok(fallback.to_owned())
+        } else {
+            self.string(index, member)
+        }
+    }
+
+    /// The truth value at `index`.
+    pub fn boolean(&self, index: usize) -> bool {
+        truthy(self.value(index))
+    }
+
+    /// The `Vector3` at `index`, or an error.
+    pub fn vec3(&self, index: usize, member: &str) -> mlua::Result<Vec3> {
+        self.cx.vec3(self.value(index), member)
+    }
+
+    /// The `Rect` at `index`, or an error.
+    pub fn rect(&self, index: usize, member: &str) -> mlua::Result<Rect> {
+        self.cx.rect(self.value(index), member)
+    }
+
+    /// `invalid arguments to <member>`.
+    pub fn invalid(&self, member: &str) -> mlua::Error {
+        self.cx.invalid(member)
+    }
+}
+
+/// Lua truthiness: everything but nil and false.
+pub(crate) const fn truthy(value: &Value) -> bool {
+    !matches!(value, Value::Nil | Value::Boolean(false))
+}

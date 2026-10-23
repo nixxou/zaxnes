@@ -32,6 +32,14 @@ pub enum TileId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ShapeId(usize);
 
+impl ShapeId {
+    /// The position of the shape in its frame's shape store.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0
+    }
+}
+
 /// The handle of a frame instance inside its frame: its shape and its index there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FrameInstanceId {
@@ -886,6 +894,18 @@ impl ConversionFrame {
         &mut self.shape_store[id.0]
     }
 
+    /// The shape of a handle, or `None` when the frame holds no such shape: a handle a script
+    /// kept from another frame (SPEC-05 REQ-LUA-028).
+    #[must_use]
+    pub fn get_shape(&self, id: ShapeId) -> Option<&FrameShape> {
+        self.shape_store.get(id.0)
+    }
+
+    /// The same, for writing.
+    pub fn get_shape_mut(&mut self, id: ShapeId) -> Option<&mut FrameShape> {
+        self.shape_store.get_mut(id.0)
+    }
+
     /// The ordered shapes themselves.
     pub fn shape_list(&self) -> impl Iterator<Item = &FrameShape> {
         self.shapes.iter().map(|&id| self.shape(id))
@@ -919,6 +939,17 @@ impl ConversionFrame {
     /// The frame instance of a handle, for writing.
     pub fn instance_mut(&mut self, id: FrameInstanceId) -> &mut FrameInstance {
         &mut self.shape_store[id.shape.0].instances[id.index]
+    }
+
+    /// The frame instance of a handle, or `None` when the frame holds no such instance.
+    #[must_use]
+    pub fn get_instance(&self, id: FrameInstanceId) -> Option<&FrameInstance> {
+        self.get_shape(id.shape)?.instances.get(id.index)
+    }
+
+    /// The same, for writing.
+    pub fn get_instance_mut(&mut self, id: FrameInstanceId) -> Option<&mut FrameInstance> {
+        self.get_shape_mut(id.shape)?.instances.get_mut(id.index)
     }
 
     /// Recomputes `pos` and `center` of every instance of the frame (REQ-E3D-205).

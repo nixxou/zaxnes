@@ -739,6 +739,7 @@ dependencies = [
  "zax-goldens",
  "zax-nes",
  "zax-profiles",
+ "zax-scripting",
 ]
 
 [[package]]
@@ -775,7 +776,12 @@ version = "0.2.0"
 name = "zax-scripting"
 version = "0.2.0"
 dependencies = [
+ "getrandom",
  "mlua",
+ "thiserror",
+ "zax-engine3d",
+ "zax-profiles",
+ "zax-settings",
 ]
 
 [[package]]
