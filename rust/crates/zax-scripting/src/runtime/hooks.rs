@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use mlua::{Lua, MultiValue, Value};
 use zax_engine3d::frame::FrameInstanceId;
 
-use super::globals::protected_call;
+use super::globals::{protected_call, protected_hook_call};
 use crate::binding::cx::Cx;
 use crate::binding::payload::{InstanceTarget, Payload, ShapeTarget};
 use crate::script::ScriptHook;
@@ -78,8 +78,8 @@ pub(crate) fn call_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result
     cx.lua
         .globals()
         .set("self", cx.object(Payload::Script(index))?)?;
-    match with_budget(cx.lua, limit, || protected_call(cx.lua, &function, ()))? {
-        Ok(_) => Ok(None),
+    match with_budget(cx.lua, limit, || protected_hook_call(cx.lua, &function))? {
+        Ok(()) => Ok(None),
         Err(message) => {
             fail(cx, index, hook, &message)?;
             Ok(Some(message))

@@ -226,9 +226,25 @@ impl Payload {
 
 /// The userdata every host value is. The payload of a value type is rewritten in place when a
 /// script assigns one of its components: the value is the script's own copy (REQ-LUA-044).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Host {
-    pub payload: Payload,
+    payload: std::cell::Cell<Payload>,
+}
+
+impl Host {
+    pub const fn new(payload: Payload) -> Self {
+        Self {
+            payload: std::cell::Cell::new(payload),
+        }
+    }
+
+    pub fn payload(&self) -> Payload {
+        self.payload.get()
+    }
+
+    pub fn set_payload(&self, payload: Payload) {
+        self.payload.set(payload);
+    }
 }
 
 impl Payload {
