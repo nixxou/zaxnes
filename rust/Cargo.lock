@@ -541,8 +541,10 @@ version = "0.2.0"
 dependencies = [
  "serde_json",
  "sha2",
+ "zax-engine3d",
  "zax-goldens",
  "zax-nes",
+ "zax-profiles",
 ]
 
 [[package]]

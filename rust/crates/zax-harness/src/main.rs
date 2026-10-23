@@ -5,9 +5,10 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use zax_harness::{golden_core, HarnessError};
+use zax_harness::{golden_core, meshes, HarnessError};
 
-const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]";
+const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
+       zax-harness meshes --profile <file|name> [options] (zax-harness help for the options)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -25,6 +26,15 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
                 "golden-core: {} ROMs run, {} files, {frames} frames each -> {out_path}",
                 summary.run, summary.files
             );
+            Ok(())
+        }
+        [command, rest @ ..] if command == "meshes" => {
+            let options = meshes::Options::parse(rest)?;
+            println!("{}", meshes::run(&options)?);
+            Ok(())
+        }
+        [command] if matches!(command.as_str(), "help" | "--help" | "-h") => {
+            println!("{USAGE}\n\n{}", meshes::USAGE);
             Ok(())
         }
         _ => Err(HarnessError::Usage(USAGE.to_owned())),
