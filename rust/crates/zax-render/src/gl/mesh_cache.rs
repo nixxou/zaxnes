@@ -11,8 +11,8 @@
 //! Vertices are interleaved: position (3 floats), normal (3 floats), texel coordinates
 //! (2 floats). Indices are 32 bits, as REQ-E3D-524 allows meshes over 65 535 vertices.
 
-use std::collections::HashMap;
 use std::sync::Arc;
+use zax_engine3d::hashing::FastMap;
 
 use glow::{Buffer, VertexArray};
 use zax_engine3d::geometry::tile_mesh::TileMesh;
@@ -51,7 +51,7 @@ struct Entry {
 #[derive(Debug)]
 pub struct MeshCache {
     gl: Gl,
-    entries: HashMap<*const TileMesh, Entry>,
+    entries: FastMap<*const TileMesh, Entry>,
     frame: u64,
     uploads: u32,
 }
@@ -61,7 +61,7 @@ impl MeshCache {
     pub fn new(gl: &Gl) -> Self {
         Self {
             gl: gl.clone(),
-            entries: HashMap::new(),
+            entries: FastMap::default(),
             frame: 0,
             uploads: 0,
         }

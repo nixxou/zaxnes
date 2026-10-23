@@ -1,7 +1,7 @@
 //! Tile images and the session's image registry (SPEC-04 §2, REQ-E3D-007, REQ-E3D-020,
 //! REQ-E3D-021).
 
-use std::collections::HashMap;
+use crate::hashing::FastMap;
 use std::fmt;
 
 use crate::registry::PatternId;
@@ -348,7 +348,7 @@ impl Candidates {
 /// carries (REQ-E3D-008, DEC-R2-T5).
 #[derive(Debug, Clone, Default)]
 pub struct ImageRegistry {
-    by_key: HashMap<TileImageKey, u32>,
+    by_key: FastMap<TileImageKey, u32>,
     images: Vec<TileImage>,
     candidates: Vec<Candidates>,
 }

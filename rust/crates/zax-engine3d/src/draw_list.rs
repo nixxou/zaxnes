@@ -1,6 +1,6 @@
 //! Turns a converted frame into the ordered list of tiles to draw (SPEC-04B REQ-E3D-641).
 
-use std::collections::HashMap;
+use crate::hashing::FastMap;
 use std::sync::Arc;
 
 use zax_profiles::enums::TextureFormat;
@@ -224,7 +224,7 @@ pub struct DrawSources<'a> {
 #[derive(Debug, Default)]
 pub struct DrawListBuilder {
     list: FrameDrawList,
-    neighbours: HashMap<(i32, i32), Option<TileImage>>,
+    neighbours: FastMap<(i32, i32), Option<TileImage>>,
 }
 
 impl DrawListBuilder {

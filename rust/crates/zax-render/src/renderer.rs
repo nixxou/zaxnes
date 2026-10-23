@@ -2,7 +2,6 @@
 //! transparent objects, then the HUD (REQ-SCN-058), all inside a framebuffer the host provides
 //! (REQ-SCN-057).
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -12,6 +11,7 @@ use thiserror::Error;
 use zax_engine3d::draw_list::{DeformParameters, DrawTile, MaterialClass, SceneContainer};
 use zax_engine3d::frame::FrameInstanceId;
 use zax_engine3d::geometry::tile_mesh::{TileMesh, TriangleCountError};
+use zax_engine3d::hashing::FastMap;
 use zax_engine3d::vectors::{Mat4, Vec3};
 use zax_profiles::enums::TextureFormat;
 
@@ -1152,7 +1152,7 @@ fn deform_bits(deform: &DeformParameters) -> [u32; 38] {
 /// Reusable buffers of [`group_opaque_by_state`].
 #[derive(Debug, Default)]
 struct OpaqueScratch {
-    groups: HashMap<DrawStateKey, usize>,
+    groups: FastMap<DrawStateKey, usize>,
     order: Vec<(usize, usize)>,
     items: Vec<DrawItem>,
 }

@@ -138,6 +138,15 @@ displayed frame". All values are per displayed frame.
   frame later (input latency + 1 frame). `ZAXNES_SEPARATE_CORE=0/1` forces it; the profiler
   start-up line shows it. Expected on the device (cf00717 numbers): battle ~max(12.7, 8) ms
   -> 60 fps, temple ~21 ms, world map ~22 ms.
+- Device run of `6b5ad4f` (owner): battle 60 fps; temple edges 50-60 fps; temple centre
+  conv 3.2 / lua 9-12 / scene 17 ms (~30 fps); outside conv 3.5 / lua 4.5 / scene 15 (~41 fps).
+  With the core on its own thread, the main thread (conversion + Lua + scene) sets the pace.
+- Fast hasher (`zax_engine3d::hashing::FastMap` / `FastSet`, rustc's Fx multiply-rotate) for
+  the engine's per-frame maps (instances, patterns, tile images, meshes, tracker) and the
+  renderer's mesh / texture caches and draw-state groups: SipHash was ~18 % of the
+  conversion + Lua + draw-list instructions. No map relies on its iteration order (the standard
+  one is random per process). x86, Zelda II world map: draw list 0.24 -> 0.14 ms, conversion
+  0.14 -> 0.126 ms; captures identical (36 campaign + Zelda II, tolerance 0).
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

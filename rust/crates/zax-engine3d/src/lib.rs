@@ -13,6 +13,7 @@ pub mod error;
 pub mod frame;
 pub mod geometry;
 pub mod grid;
+pub mod hashing;
 pub mod image;
 pub mod instance;
 pub mod palette;
