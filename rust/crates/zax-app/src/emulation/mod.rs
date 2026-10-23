@@ -3,6 +3,7 @@
 pub mod emulation_state;
 pub mod fast_forward_state;
 pub mod frame_pacer;
+pub mod host;
 pub mod hotkey_tracker;
 pub mod notification_center;
 pub mod rollback_history;
