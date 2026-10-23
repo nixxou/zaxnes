@@ -5,6 +5,9 @@
 //! The size chain and the bias are arithmetic and need no context; only the last two tests ask
 //! for one.
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use common::{assert_close, solid, Built, GlFixture, SceneFixture};
@@ -45,7 +48,10 @@ fn the_largest_size_tried_is_capped_by_the_hardware() {
         (4096, 1024, 1024),
         (2048, 16384, 2048),
     ] {
-        assert_eq!(Some(first), geometry::shadow_map_sizes(requested, max).next());
+        assert_eq!(
+            Some(first),
+            geometry::shadow_map_sizes(requested, max).next()
+        );
     }
 }
 
@@ -124,7 +130,10 @@ fn a_finer_map_casts_more_shadow_under_a_thin_stroke() {
     let coarse = shadowed_pixels(&gl, &mut renderer, 1024);
     let fine = shadowed_pixels(&gl, &mut renderer, geometry::SHADOW_MAP_SIZE);
 
-    assert!(coarse > 0, "the coarse map casts no shadow at all; the scene is wrong");
+    assert!(
+        coarse > 0,
+        "the coarse map casts no shadow at all; the scene is wrong"
+    );
     assert!(
         fine > coarse,
         "the {}-texel map shadows {fine} pixels, no more than the {coarse} of a 1024-texel one",

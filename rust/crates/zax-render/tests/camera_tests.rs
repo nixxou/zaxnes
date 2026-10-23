@@ -1,5 +1,8 @@
 //! The camera of SPEC-06 §3.2 to §3.6 and the test vectors of §5.1 (port of `CameraTests.cs`).
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use common::assert_close;
@@ -26,6 +29,7 @@ fn steady(clipping: Vec4F) -> CameraView {
     camera.build_view(clipping, 16.0 / 9.0)
 }
 
+#[allow(clippy::cast_possible_truncation)] // The C# (int) conversion of a small count.
 fn advance(camera: &mut SceneCamera, seconds: f32) {
     let steps = (seconds * 600.0).round_ties_even() as i32;
     for _ in 0..steps {
@@ -35,7 +39,12 @@ fn advance(camera: &mut SceneCamera, seconds: f32) {
 
 #[test]
 fn req_scn_012_default_distance_is_104_over_atan_of_half_the_fov() {
-    for (fov, expected) in [(70.0, 189.65), (45.0, 277.93), (95.0, 150.25), (90.0, 156.21)] {
+    for (fov, expected) in [
+        (70.0, 189.65),
+        (45.0, 277.93),
+        (95.0, 150.25),
+        (90.0, 156.21),
+    ] {
         close(expected, geometry::default_distance(fov), 0.05);
     }
 }
@@ -170,6 +179,7 @@ fn req_scn_011_the_setpoint_distance_is_bounded_but_the_angles_are_not() {
 }
 
 #[test]
+#[allow(clippy::cast_possible_truncation)] // The C# (int) conversion of a small count.
 fn req_scn_014_rotate_right_held_three_seconds_adds_ninety_degrees_at_any_frame_rate() {
     for frame_rate in [30.0_f32, 60.0, 144.0] {
         let mut camera = SceneCamera::new();
@@ -246,7 +256,11 @@ fn req_scn_019_a_distance_step_of_one_hundred_decays_as_the_criterion_says() {
     camera.current_mut().set_distance(target + 100.0);
 
     advance(&mut camera, 0.4);
-    close(40.6, (camera.current().distance() - camera.distance()).abs(), 3.0);
+    close(
+        40.6,
+        (camera.current().distance() - camera.distance()).abs(),
+        3.0,
+    );
 
     advance(&mut camera, 0.8);
     assert!((camera.current().distance() - camera.distance()).abs() < 2.0);
@@ -298,7 +312,10 @@ fn req_scn_012_a_view_reset_only_changes_the_distance_of_the_current_mode() {
         0.05,
     );
     close(40.0, camera.setpoints(CameraMode::Fpv).distance(), 0.0);
-    assert_eq!(geometry::DEFAULT_ANGLES, camera.setpoints(CameraMode::Fpv).angles);
+    assert_eq!(
+        geometry::DEFAULT_ANGLES,
+        camera.setpoints(CameraMode::Fpv).angles
+    );
     assert_eq!(geometry::CENTER, camera.setpoints(CameraMode::Fpv).target);
 }
 
@@ -346,7 +363,11 @@ fn req_scn_013_ending_a_game_returns_to_tpv_and_to_a_smooth_time_of_zero_point_f
     camera.end_game();
 
     assert_eq!(CameraMode::Tpv, camera.mode());
-    close(CriticalSmoothing::DEFAULT_SMOOTH_TIME, camera.smooth_time, 0.0);
+    close(
+        CriticalSmoothing::DEFAULT_SMOOTH_TIME,
+        camera.smooth_time,
+        0.0,
+    );
     close(
         geometry::default_distance(70.0),
         camera.current().distance(),

@@ -5,6 +5,9 @@
 //! The mapping and the fallback are arithmetic and need no context; only the last two tests ask
 //! for one. The shadow map is deliberately left out of all this (REQ-SCN-030).
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use common::{solid, Built, GlFixture, SceneFixture};
@@ -44,7 +47,10 @@ fn the_sample_count_falls_back_to_what_is_supported() {
         (8, 0, 1),
         (0, 8, 1),
     ] {
-        assert_eq!(granted, geometry::clamp_anti_alias_samples(asked, supported));
+        assert_eq!(
+            granted,
+            geometry::clamp_anti_alias_samples(asked, supported)
+        );
     }
 }
 
@@ -55,7 +61,10 @@ fn the_scene_setting_is_clamped_to_the_defined_range() {
     assert_eq!(1, settings.anti_alias_samples());
 
     settings.set_anti_alias_samples(64);
-    assert_eq!(geometry::MAX_ANTI_ALIAS_SAMPLES, settings.anti_alias_samples());
+    assert_eq!(
+        geometry::MAX_ANTI_ALIAS_SAMPLES,
+        settings.anti_alias_samples()
+    );
 
     settings.set_anti_alias_samples(0);
     assert_eq!(1, settings.anti_alias_samples());
@@ -98,7 +107,10 @@ fn anti_aliasing_adds_intermediate_colours_along_the_edges() {
             .scene
             .settings
             .set_anti_alias_samples(geometry::anti_alias_samples(option));
-        *count = gl.render_built(&mut renderer, &built).distinct_colors().len();
+        *count = gl
+            .render_built(&mut renderer, &built)
+            .distinct_colors()
+            .len();
     }
 
     assert!(

@@ -2,6 +2,9 @@
 //! that crosses the segment from the eye to the followed target is drawn at 0.5 for that frame
 //! (port of `OcclusionTests.cs`).
 
+// Test helpers fail loudly on a broken fixture, as the C# assertions do.
+#![allow(clippy::expect_used, clippy::panic)]
+
 mod common;
 
 use common::{solid, GlFixture, SceneFixture};
@@ -97,7 +100,10 @@ fn req_scn_022_a_wall_in_front_of_the_followed_shape_becomes_transparent() {
     gl.render_built(&mut renderer, &built);
 
     let statistics = renderer.statistics();
-    assert!(statistics.occluders > 0, "the wall should hide the followed shape");
+    assert!(
+        statistics.occluders > 0,
+        "the wall should hide the followed shape"
+    );
     assert!(
         statistics.transparent_tiles >= statistics.occluders,
         "every occluder is drawn with the transparent objects"

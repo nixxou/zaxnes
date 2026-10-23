@@ -2,6 +2,9 @@
 //! cubemaps (REQ-SCN-050, REQ-SCN-051) and the OBJ reader of the mesh folder (port of
 //! `AssetTests.cs`).
 
+// A malformed test file fails the test loudly.
+#![allow(clippy::expect_used)]
+
 use std::io::Write;
 
 use flate2::write::ZlibEncoder;
@@ -16,9 +19,9 @@ fn req_scn_050_the_png_decoder_reads_an_rgba_image_whatever_the_row_filter() {
     // are exercised at once.
     let mut pixels = vec![0_u8; 4 * 5 * 4];
     for i in 0..4 * 5 {
-        pixels[i * 4] = (i * 11) as u8;
-        pixels[i * 4 + 1] = (255 - i * 7) as u8;
-        pixels[i * 4 + 2] = (i * 3) as u8;
+        pixels[i * 4] = u8::try_from(i * 11).expect("small value");
+        pixels[i * 4 + 1] = u8::try_from(255 - i * 7).expect("small value");
+        pixels[i * 4 + 2] = u8::try_from(i * 3).expect("small value");
         pixels[i * 4 + 3] = if i % 2 == 0 { 255 } else { 128 };
     }
 
@@ -114,11 +117,21 @@ mod png {
     use super::{Compression, Write, ZlibEncoder};
 
     pub fn rgba(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
-        build(width, height, 6, &filtered(width as usize, height as usize, 4, pixels))
+        build(
+            width,
+            height,
+            6,
+            &filtered(width as usize, height as usize, 4, pixels),
+        )
     }
 
     pub fn grey(width: u32, height: u32, samples: &[u8]) -> Vec<u8> {
-        build(width, height, 0, &filtered(width as usize, height as usize, 1, samples))
+        build(
+            width,
+            height,
+            0,
+            &filtered(width as usize, height as usize, 1, samples),
+        )
     }
 
     /// Applies filter `row % 5` to each row, filter byte included.
@@ -127,7 +140,7 @@ mod png {
         let mut raw = vec![0_u8; (stride + 1) * height];
         for y in 0..height {
             let filter = y % 5;
-            raw[y * (stride + 1)] = filter as u8;
+            raw[y * (stride + 1)] = u8::try_from(filter).expect("filter 0 to 4");
             for x in 0..stride {
                 let value = i32::from(pixels[y * stride + x]);
                 let a = if x >= bytes_per_pixel {
@@ -153,7 +166,9 @@ mod png {
                     3 => value - ((a + b) >> 1),
                     _ => value - paeth(a, b, c),
                 };
-                raw[y * (stride + 1) + 1 + x] = encoded as u8;
+                // The filters work modulo 256 (PNG §9.2).
+                raw[y * (stride + 1) + 1 + x] =
+                    u8::try_from(encoded.rem_euclid(256)).expect("a byte");
             }
         }
 
@@ -179,18 +194,22 @@ mod png {
         header.extend_from_slice(&width.to_be_bytes());
         header.extend_from_slice(&height.to_be_bytes());
         header.extend_from_slice(&[8, color_type, 0, 0, 0]);
-        chunk(&mut file, b"IHDR", &header);
+        chunk(&mut file, *b"IHDR", &header);
 
         let mut deflate = ZlibEncoder::new(Vec::new(), Compression::fast());
         deflate.write_all(raw).expect("deflate");
-        chunk(&mut file, b"IDAT", &deflate.finish().expect("deflate"));
-        chunk(&mut file, b"IEND", &[]);
+        chunk(&mut file, *b"IDAT", &deflate.finish().expect("deflate"));
+        chunk(&mut file, *b"IEND", &[]);
         file
     }
 
-    fn chunk(file: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
-        file.extend_from_slice(&u32::try_from(data.len()).expect("small chunk").to_be_bytes());
-        file.extend_from_slice(kind);
+    fn chunk(file: &mut Vec<u8>, kind: [u8; 4], data: &[u8]) {
+        file.extend_from_slice(
+            &u32::try_from(data.len())
+                .expect("small chunk")
+                .to_be_bytes(),
+        );
+        file.extend_from_slice(&kind);
         file.extend_from_slice(data);
 
         // The decoder does not check the CRC, so four zero bytes stand in for it.
