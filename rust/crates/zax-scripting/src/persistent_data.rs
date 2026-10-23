@@ -49,8 +49,8 @@ mod tests {
     #[test]
     fn the_real_count_is_the_count() {
         assert_eq!(
-            ENTRY_COUNT_REAL,
-            f64::from(u8::try_from(ENTRY_COUNT).unwrap())
+            ENTRY_COUNT_REAL.to_bits(),
+            f64::from(u8::try_from(ENTRY_COUNT).unwrap()).to_bits()
         );
     }
 
@@ -65,7 +65,7 @@ mod tests {
     #[test]
     fn a_short_block_gives_zeros() {
         let values = read(&1.5_f32.to_le_bytes());
-        assert_eq!(values[0], 1.5);
-        assert_eq!(values[1], 0.0);
+        assert_eq!(values[0].to_bits(), 1.5_f32.to_bits());
+        assert_eq!(values[1].to_bits(), 0.0_f32.to_bits());
     }
 }

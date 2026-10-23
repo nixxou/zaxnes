@@ -30,7 +30,7 @@ pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.extend(rectangle());
 }
 
-fn text_of(value: f32) -> String {
+pub(super) fn text_of(value: f32) -> String {
     number_format::to_text(f64::from(value))
 }
 
@@ -169,14 +169,14 @@ fn vector3_value() -> TypeDef {
 
         cx.vector3(operand3(cx, a, "/")? * (1.0 / divisor))
     }));
-    definition.text = Some(std::sync::Arc::new(|p| {
+    definition.text = Some(std::sync::Arc::new(|_, p| {
         let value = vec3_of(p);
-        format!(
+        Ok(format!(
             "({}, {}, {})",
             text_of(value.x),
             text_of(value.y),
             text_of(value.z)
-        )
+        ))
     }));
     definition
 }
@@ -358,9 +358,9 @@ fn vector2() -> [TypeDef; 2] {
         let value = operand2(cx, a)?;
         cx.vector2(Vec2::new(value.x / divisor, value.y / divisor))
     }));
-    definition.text = Some(std::sync::Arc::new(|p| {
+    definition.text = Some(std::sync::Arc::new(|_, p| {
         let value = vec2_of(p);
-        format!("({}, {})", text_of(value.x), text_of(value.y))
+        Ok(format!("({}, {})", text_of(value.x), text_of(value.y)))
     }));
 
     let mut table = type_def(HostType::Vector2Class, "Vector2Classe");
@@ -513,15 +513,15 @@ fn quaternion_value_type() -> TypeDef {
 
         Err(cx.invalid("Quaternion *"))
     }));
-    definition.text = Some(std::sync::Arc::new(|p| {
+    definition.text = Some(std::sync::Arc::new(|_, p| {
         let value = quat_of(p);
-        format!(
+        Ok(format!(
             "({}, {}, {}, {})",
             text_of(value.x),
             text_of(value.y),
             text_of(value.z),
             text_of(value.w)
-        )
+        ))
     }));
     definition
 }
@@ -685,15 +685,15 @@ fn color() -> [TypeDef; 2] {
         let (a, c) = (operand_color(a), operand_color(b));
         cx.color(LuaColor::new(a.r * c.r, a.g * c.g, a.b * c.b, a.a * c.a))
     }));
-    definition.text = Some(std::sync::Arc::new(|p| {
+    definition.text = Some(std::sync::Arc::new(|_, p| {
         let value = color_of(p);
-        format!(
+        Ok(format!(
             "({}, {}, {}, {})",
             text_of(value.r),
             text_of(value.g),
             text_of(value.b),
             text_of(value.a)
-        )
+        ))
     }));
 
     let mut table = type_def(HostType::ColorClass, "ColorClasse");
@@ -777,9 +777,9 @@ fn int_vector2() -> [TypeDef; 2] {
             _ => Err(cx.raise("IntVector2 / 0")),
         }
     }));
-    definition.text = Some(std::sync::Arc::new(|p| {
+    definition.text = Some(std::sync::Arc::new(|_, p| {
         let value = cell_of(p);
-        format!("({}, {})", value.x, value.y)
+        Ok(format!("({}, {})", value.x, value.y))
     }));
 
     let mut table = type_def(HostType::IntVector2Class, "IntVector2Classe");
@@ -928,15 +928,15 @@ fn rectangle() -> [TypeDef; 2] {
         },
         None,
     );
-    definition.text = Some(std::sync::Arc::new(|p| {
+    definition.text = Some(std::sync::Arc::new(|_, p| {
         let value = rect_of(p);
-        format!(
+        Ok(format!(
             "({}, {}, {}, {})",
             text_of(value.x),
             text_of(value.y),
             text_of(value.width),
             text_of(value.height)
-        )
+        ))
     }));
 
     let mut table = type_def(HostType::RectClass, "RectClasse");

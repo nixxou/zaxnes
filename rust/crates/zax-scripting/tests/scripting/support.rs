@@ -421,10 +421,8 @@ impl ScriptSession {
 
     /// The entries of the global table `log`, in order.
     pub fn log_entries(&mut self) -> Vec<String> {
-        let total = self.number("return #log");
-        (1..=total as usize)
-            .map(|index| self.text(&format!("return log[{index}]")))
-            .collect()
+        let joined = self.text("return table.concat(log, '\\n')");
+        joined.lines().map(str::to_owned).collect()
     }
 
     /// Whether the script of this name is in error.
