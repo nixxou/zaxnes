@@ -1,0 +1,22 @@
+{
+  "version": 4,
+  "name": "Zaxnes.zip",
+  "items": ["Zaxnes.sh", "zaxnes"],
+  "items_opt": [],
+  "attr": {
+    "title": "Zaxnes",
+    "porter": ["nixxou"],
+    "desc": "NES emulator that draws the games in 3D, using 3dSen-style profiles.",
+    "inst": "Copy your own .nes files to ports/zaxnes/roms and your 3dSen profiles to ports/zaxnes/profiles. No game, ROM or profile is included. See README.md.",
+    "genres": ["emulator"],
+    "image": null,
+    "rtr": false,
+    "exp": false,
+    "runtime": [],
+    "store": [],
+    "availability": "full",
+    "reqs": [],
+    "arch": ["aarch64"],
+    "min_glibc": "2.31"
+  }
+}

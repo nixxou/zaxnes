@@ -1,85 +1,81 @@
 #!/usr/bin/env bash
-# Builds the Linux aarch64 package of the Rust port (RG40XXV and similar handhelds), then packs
-# zaxnes, the licences, HOWTO-RUN.md and RG40XXV.txt into rust/target/package.
+# Builds the Linux aarch64 binary of the Rust port and packs the PortMaster package
+# rust/target/package/Zaxnes.zip (Anbernic H700 handhelds: muOS, Knulli, ROCKNIX; RK3566 too).
 #
 #   rust/build/package-linux-aarch64.sh            cross build on an x86_64 Linux host
-#   rust/build/package-linux-aarch64.sh --native   build on the device itself
+#   rust/build/package-linux-aarch64.sh --native   build on an aarch64 machine (no glibc pin)
 #
-# Cross toolchain (x86_64 host, Debian or Ubuntu):
-#   sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake \
-#       libdrm-dev libgbm-dev libegl-dev libgles-dev
+# Why zig: the container's glibc is newer than the firmwares' (2.31 on muOS, Knulli, ROCKNIX).
+# cargo-zigbuild links against glibc 2.31 headers and symbols whatever the host has, and builds
+# the C and C++ dependencies (Lua, Dear ImGui, SDL2) with `zig cc` for the same baseline.
+#   pip install ziglang && cargo install cargo-zigbuild --locked
+#   sudo apt install cmake        (SDL2 link library, see below)
 #   rustup target add aarch64-unknown-linux-gnu
-#   The linker is set in rust/.cargo/config.toml. The C and C++ dependencies (Lua, Dear ImGui,
-#   SDL2) are compiled with the compilers exported below.
 #
-# SDL2: the build links SDL2 statically (feature `bundled`), so the package needs no libSDL2 on
-# the device. CMake uses rust/build/aarch64-sdl2.cmake (SDL2_TOOLCHAIN). The KMSDRM, GBM, EGL
-# and GLES backends are loaded with dlopen: the build only needs the (architecture independent)
-# headers of the host, but the device must provide libdrm.so.2, libgbm.so.1, libEGL.so.1 and
-# libGLESv2.so.2 (Mali userspace driver). Without `bundled`, build against the system library
-# of the target instead (a sysroot with PKG_CONFIG_SYSROOT_DIR and PKG_CONFIG_PATH pointing at
-# the aarch64 .pc files) and copy libSDL2-2.0.so.0 next to zaxnes.
-#
-# Not verified on a device yet: the notes in RG40XXV.txt are the settings to try first.
+# SDL2: the firmware's libSDL2-2.0.so.0 is patched for its GPU driver (libmali on muOS and
+# Knulli, Panfrost on ROCKNIX), so the program links it dynamically (feature `firmware-sdl`) and
+# the package ships none. SDL2 is still compiled once from the pinned source of the sdl2-sys
+# crate (2.26.x), with every backend turned off (rust/build/aarch64-sdl2-zig.cmake): that copy
+# only provides the symbols and the soname for the linker and is not packaged. GL, EGL, KMS and
+# audio are loaded by the firmware's SDL at run time.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 rust_dir="$(cd "$script_dir/.." && pwd)"
 root_dir="$(cd "$rust_dir/.." && pwd)"
 target=aarch64-unknown-linux-gnu
-
-features=(--features bundled)
-if [[ "${1:-}" == "--native" ]]; then
-    # On the device, the host and the target are the same: no cross linker needed.
-    target_args=()
-else
-    target_args=(--target "$target")
-    export CC_aarch64_unknown_linux_gnu="${CC_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-gcc}"
-    export CXX_aarch64_unknown_linux_gnu="${CXX_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-g++}"
-    export AR_aarch64_unknown_linux_gnu="${AR_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-ar}"
-    export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/aarch64-sdl2.cmake}"
-fi
-
-(cd "$rust_dir" && cargo build --release -p zax-app "${features[@]}" "${target_args[@]}")
+glibc=2.31
+target_dir="${CARGO_TARGET_DIR:-$rust_dir/target}"
+out_dir="$target_dir/package"
 
 if [[ "${1:-}" == "--native" ]]; then
-    binary="$rust_dir/target/release/zaxnes"
+    (cd "$rust_dir" && cargo build --release -p zax-app --features firmware-sdl)
+    binary="$target_dir/release/zaxnes"
 else
-    binary="$rust_dir/target/$target/release/zaxnes"
+    export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/aarch64-sdl2-zig.cmake}"
+    (cd "$rust_dir" && cargo zigbuild --release -p zax-app --features firmware-sdl \
+        --target "$target.$glibc")
+    binary="$target_dir/$target/release/zaxnes"
 fi
 
-version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$rust_dir/Cargo.toml" | head -n 1)"
-name="zaxnes-$version-linux-aarch64"
-package="$rust_dir/target/package/$name"
-rm -rf "$package"
-mkdir -p "$package/profiles"
+[[ -x "$binary" ]] || { echo "error: $binary was not built" >&2; exit 1; }
 
-cp "$binary" "$package/zaxnes"
-cp "$root_dir/LICENSE" "$root_dir/HOWTO-RUN.md" "$root_dir/ASSETS-LICENSES.md" \
-    "$root_dir/THIRD-PARTY-NOTICES.md" "$package/"
-# AMD-033 §3: the profile folder ships empty, with a line saying what to put in it.
-printf '%s\n' "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni." \
-    > "$package/profiles/README.txt"
-cat > "$package/RG40XXV.txt" <<'NOTES'
-Zaxnes on the RG40XXV (Linux aarch64, SDL2 on KMS/DRM)
-=====================================================
+# The package must load on the oldest firmware: refuse a binary that needs a newer glibc, or
+# any library beyond the base system and the firmware's SDL2.
+objdump="$(command -v aarch64-linux-gnu-objdump || command -v objdump)"
+readelf="$(command -v aarch64-linux-gnu-readelf || command -v readelf)"
+newest="$("$objdump" -T "$binary" | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -n 1 || true)"
+if [[ -n "$newest" && "$(printf '%s\n' "${newest#GLIBC_}" "$glibc" | sort -V | tail -n 1)" != "$glibc" ]]; then
+    echo "error: $binary needs $newest, newer than glibc $glibc" >&2
+    exit 1
+fi
+unexpected="$("$readelf" -d "$binary" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' \
+    | grep -v -E '^(libc|libm|libdl|libpthread|librt|libgcc_s)\.so|^ld-linux-aarch64|^libSDL2-2\.0\.so\.0$' || true)"
+if [[ -n "$unexpected" ]]; then
+    echo "error: unexpected dynamic dependencies: $unexpected" >&2
+    exit 1
+fi
+echo "binary: max $newest, dependencies ok"
 
-Start from a terminal on the device:
+stage="$out_dir/stage"
+port="$stage/zaxnes"
+rm -rf "$stage"
+mkdir -p "$port/licenses" "$port/profiles" "$port/roms"
 
-    SDL_VIDEODRIVER=KMSDRM ./zaxnes --size 640x480 --no-audio --rom game.nes
+install -m 755 "$binary" "$port/zaxnes.aarch64"
+cp "$root_dir/LICENSE" "$root_dir/THIRD-PARTY-NOTICES.md" "$root_dir/ASSETS-LICENSES.md" \
+    "$port/licenses/"
+cp "$script_dir/portmaster/Zaxnes.sh" "$stage/Zaxnes.sh"
+cp "$script_dir/portmaster/zaxnes.gptk" "$script_dir/portmaster/port.json" \
+    "$script_dir/portmaster/gameinfo.xml" "$script_dir/portmaster/README.md" \
+    "$script_dir/portmaster/screenshot-placeholder.txt" "$port/"
+chmod 755 "$stage/Zaxnes.sh"
+printf '%s\n' "Put your 3dSen profiles (.3dn or converted profile files) here." \
+    > "$port/profiles/README.txt"
+printf '%s\n' "Put your .nes files here." > "$port/roms/README.txt"
 
-- KMSDRM: SDL2 draws straight to the display with no X11 or Wayland. Leave the
-  front-end (EmulationStation or similar) before starting Zaxnes, or the DRM device is busy.
-  If the window does not appear, try SDL_VIDEODRIVER=KMSDRM alone, then `--size` at the
-  panel's native resolution (640x480 on the RG40XXV).
-- OpenGL: the aarch64 Linux build uses GLES 3.0 by itself. ZAXNES_GLES=1 forces the same
-  choice on another platform.
-- Audio: start with --no-audio if the sound device is busy; otherwise SDL2 uses ALSA.
-- Profiles and saves go to the user data folder: $XDG_DATA_HOME/Zaxnes, or ~/.local/share/Zaxnes,
-  unless a portable.txt file sits next to the binary (then ./userdata). Use --userdata <dir> to choose another.
-- Check the build without a display: ./zaxnes --help and ./zaxnes --list-profiles.
-- Licences: LICENSE (GPL-3.0), ASSETS-LICENSES.md, THIRD-PARTY-NOTICES.md.
-NOTES
-
-tar -C "$rust_dir/target/package" -czf "$rust_dir/target/package/$name.tar.gz" "$name"
-echo "package: $rust_dir/target/package/$name.tar.gz"
+zip_path="$out_dir/Zaxnes.zip"
+rm -f "$zip_path"
+(cd "$stage" && zip -q -r -X "$zip_path" Zaxnes.sh zaxnes)
+rm -rf "$stage"
+echo "package: $zip_path"
