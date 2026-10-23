@@ -70,7 +70,7 @@ if grep -q $'\r' "$script_dir/portmaster/Zaxnes.sh"; then
     exit 1
 fi
 cp "$script_dir/portmaster/Zaxnes.sh" "$stage/Zaxnes.sh"
-cp "$script_dir/portmaster/zaxnes.gptk" "$script_dir/portmaster/port.json" \
+cp "$script_dir/portmaster/port.json" \
     "$script_dir/portmaster/gameinfo.xml" "$script_dir/portmaster/README.md" \
     "$script_dir/portmaster/screenshot-placeholder.txt" "$port/"
 chmod 755 "$stage/Zaxnes.sh"

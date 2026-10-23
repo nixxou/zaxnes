@@ -1,2 +1,0 @@
-# Zaxnes reads the gamepad through SDL. This mapping is deliberately empty: gptokeyb only
-# provides its Select+Start kill switch, and no button is turned into a key.

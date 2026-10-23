@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use common::SyntheticRom;
 use ui_harness::{ImGuiHarness, UiHarness};
 use zax_app::emulation::emulation_state::EmulationState;
-use zax_app::persistence::app_settings::AppSettings as _;
+use zax_app::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
 use zax_app::ui::handheld::pad::{PadButton, PadState};
 use zax_app::ui::handheld::{HandheldUi, Screen};
 use zax_app::ui::zax_ui::UiFrame;
@@ -169,6 +169,29 @@ fn exit_to_the_launcher_quits_the_application() {
     tap(&mut harness, &mut handheld, PadButton::A);
     harness.settle();
     assert!(harness.host.quit_requested());
+}
+
+#[test]
+fn the_exit_combination_ends_with_the_settings_and_the_slot_index_written() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    play(&mut harness, &mut handheld);
+    harness
+        .host
+        .update_settings(|model| model.set_show_fps(true));
+    harness.settle();
+    let mut pad = PadState::new();
+    pad.set(PadButton::Select, true);
+    pad.set(PadButton::Start, true);
+    for _ in 0..12 {
+        frame(&mut harness, &mut handheld, &pad, 0.1);
+    }
+    harness.settle();
+    assert!(harness.host.quit_requested());
+    // What the application does once the loop sees the quit request (`Running::finish`).
+    harness.host.shutdown();
+    let written = std::fs::read_to_string(&harness.paths.settings_file).unwrap();
+    assert!(written.contains("show_fps"), "{written}");
+    assert!(harness.paths.save_index_file.is_file());
 }
 
 #[test]

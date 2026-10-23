@@ -29,7 +29,10 @@ fn a_full_history_lends_its_oldest_buffer_to_the_next_snapshot() {
         let byte = u8::try_from(index).unwrap();
         history
             .capture_with(|buffer| {
-                assert!(buffer.is_empty(), "no buffer to recycle before the history is full");
+                assert!(
+                    buffer.is_empty(),
+                    "no buffer to recycle before the history is full"
+                );
                 buffer.push(byte);
                 Ok::<(), ()>(())
             })
@@ -37,7 +40,11 @@ fn a_full_history_lends_its_oldest_buffer_to_the_next_snapshot() {
     }
     history
         .capture_with(|buffer| {
-            assert_eq!(&[0], buffer.as_slice(), "the oldest snapshot is the one recycled");
+            assert_eq!(
+                &[0],
+                buffer.as_slice(),
+                "the oldest snapshot is the one recycled"
+            );
             buffer.clear();
             buffer.push(99);
             Ok::<(), ()>(())

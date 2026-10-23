@@ -44,8 +44,11 @@ export ZAXNES_GLES=1
 # every two seconds (and next to the FPS counter). Remove once the handheld frame rate is known.
 export ZAXNES_PROFILE=1
 
-# The program reads the pad through SDL itself; gptokeyb only provides the Select+Start exit.
-$GPTOKEYB "zaxnes.aarch64" -c "$GAMEDIR/zaxnes.gptk" &
+# No gptokeyb: the program reads the pad through SDL and has its own exit (Select+Start held
+# one second, or "Exit to launcher" in the in-game menu), which saves the settings, the battery
+# RAM and the slot index first. gptokeyb's kill switch fired on the first press of Select+Start
+# and killed the process before any of that (SIGKILL cannot be caught); a plain SIGTERM is
+# turned into a clean quit by SDL.
 pm_platform_helper "$GAMEDIR/zaxnes.aarch64" > /dev/null
 
 # The emulation core needs the full CPU speed: a power-saving governor can leave the H700 at a

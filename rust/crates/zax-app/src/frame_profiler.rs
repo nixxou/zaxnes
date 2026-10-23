@@ -301,12 +301,7 @@ impl FrameProfiler {
         for stage in Stage::ALL {
             let tally = self.stages[stage.index()];
             let mean = tally.mean_ms(frames);
-            let _ = write!(
-                line,
-                " | {} {mean:.2}/{:.2}",
-                stage.label(),
-                tally.max_ms()
-            );
+            let _ = write!(line, " | {} {mean:.2}/{:.2}", stage.label(), tally.max_ms());
             if mean >= SHOWN_MINIMUM_MS {
                 let _ = write!(self.summary, " {} {mean:.1}", stage.label());
             }
