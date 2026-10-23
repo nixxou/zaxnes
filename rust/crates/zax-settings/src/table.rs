@@ -1057,8 +1057,9 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Show FPS"),
     );
-    // AMD-035 §1: the interface language, "en" by default, with no detection of the system's
-    // language. The two texts are the whole domain; anything else reads as "en".
+    // AMD-035 §1 (amended): the interface language, "en" in the catalogue. While nothing is saved
+    // the application suggests the operating-system language through the model's environment
+    // default. The two texts are the whole domain; anything else reads as "en".
     out.push(
         SettingDescriptor::new(
             SettingId::UiLanguage,

@@ -87,3 +87,9 @@ The acceptance project (581 methods) checks requirement traceability and archite
 - Render: llvmpipe differences on overlapping coplanar sprites (heavy scene, framing edge pixels); 8x MSAA unverifiable here.
 - Platform: Windows console attach and every window, audio and gamepad path were never run against real hardware by the agent; the aarch64 package and the RG40XXV are untested on a device; `zax-app`/`zax-platform` cannot be cross-checked for Windows from Linux (MSVC tools).
 - Build: `--all-features` on `zax-app`/`zax-platform` enables `bundled` (static SDL2, needs CMake and MSVC), otherwise ship SDL2.dll 2.30.x.
+
+### Rust-only changes (owner requests)
+
+Deliberate departures from the C# 0.2.0 behaviour.
+
+- Default UI language from the OS: amends AMD-035 ("English by default" becomes "OS language if French, else English"). It applies only while no `ui.language` is saved; the choice is persisted as before (the file format is unchanged, but a `ui.language` the user holds is now written even when it equals the default `en`, so it keeps winning over the OS). The decision is `UiLanguage::from_locale`; the OS locale (`sys-locale`) is injected through `AppOptions::system_locale` and reaches the model as an environment default.
