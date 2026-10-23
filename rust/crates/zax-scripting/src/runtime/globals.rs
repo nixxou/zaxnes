@@ -40,6 +40,23 @@ math.ldexp = function (m, e) return m * 2.0 ^ e end
 math.log10 = function (x) return math.log(x, 10) end
 ";
 
+/// The text of the error a protected call raised.
+fn error_text(error: Value) -> String {
+    match error {
+        Value::String(text) => text.to_string_lossy(),
+        Value::Error(error) => message_of(&error),
+        Value::Nil => "error".to_owned(),
+        other => format!("{} error object", other.type_name()),
+    }
+}
+
+/// The `pcall` the state was created with.
+fn pcall_of(lua: &Lua) -> mlua::Result<Function> {
+    lua.app_data_ref::<Pcall>()
+        .map(|pcall| pcall.0.clone())
+        .ok_or_else(|| mlua::Error::runtime("the protected call is not installed"))
+}
+
 /// Calls `function` in protected mode. The outer result is a failure of the host itself; the
 /// inner one is the script's own: its values, or the text of the error it raised.
 pub(crate) fn protected_call(
@@ -47,24 +64,29 @@ pub(crate) fn protected_call(
     function: &Function,
     arguments: impl IntoLuaMulti,
 ) -> mlua::Result<Result<MultiValue, String>> {
-    let pcall = lua
-        .app_data_ref::<Pcall>()
-        .ok_or_else(|| mlua::Error::runtime("the protected call is not installed"))?
-        .0
-        .clone();
+    let pcall = pcall_of(lua)?;
     let mut call = arguments.into_lua_multi(lua)?;
     call.push_front(Value::Function(function.clone()));
 
     let mut results: MultiValue = pcall.call(call)?;
     match results.pop_front() {
         Some(Value::Boolean(true)) => Ok(Ok(results)),
-        _ => Ok(Err(match results.pop_front() {
-            Some(Value::String(text)) => text.to_string_lossy(),
-            Some(Value::Error(error)) => message_of(&error),
-            Some(other) => format!("{} error object", other.type_name()),
-            None => "error".to_owned(),
-        })),
+        _ => Ok(Err(error_text(results.pop_front().unwrap_or(Value::Nil)))),
     }
+}
+
+/// Calls `function`, which takes no argument, in protected mode and drops what it returns: the
+/// call of a hook, which does not build the lists of values [`protected_call`] hands back.
+pub(crate) fn protected_hook_call(
+    lua: &Lua,
+    function: &Function,
+) -> mlua::Result<Result<(), String>> {
+    let (succeeded, second): (bool, Value) = pcall_of(lua)?.call(function)?;
+    Ok(if succeeded {
+        Ok(())
+    } else {
+        Err(error_text(second))
+    })
 }
 
 /// The text of one value: a number through the dialect's own format, anything else through the

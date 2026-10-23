@@ -3,6 +3,7 @@
 //! them back, so the two cannot drift apart (REQ-LUA-051).
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
 
 use mlua::Value;
@@ -67,7 +68,7 @@ pub(crate) struct TypeDef {
     pub name: &'static str,
     /// Properties and methods, in declaration order.
     pub members: Vec<Member>,
-    lookup: HashMap<&'static str, usize>,
+    lookup: HashMap<&'static str, usize, BuildHasherDefault<NameHasher>>,
     /// The type of `obj[i]`, for the static check of REQ-LUA-051.
     pub element: Option<HostType>,
     pub indexer: Option<IndexFn>,
@@ -92,7 +93,7 @@ impl TypeDef {
             id,
             name,
             members: Vec::new(),
-            lookup: HashMap::new(),
+            lookup: HashMap::default(),
             element: None,
             indexer: None,
             index_setter: None,
@@ -226,5 +227,29 @@ impl Api {
     /// Every declared type.
     pub fn declared(&self) -> impl Iterator<Item = &TypeDef> {
         self.types.iter().flatten()
+    }
+}
+
+/// FNV-1a over the bytes of a member name: the names are short and fixed, so the keyed hash of
+/// the standard library costs more than the lookup is worth.
+#[derive(Default)]
+struct NameHasher(u64);
+
+impl Hasher for NameHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let mut hash = if self.0 == 0 {
+            0xcbf2_9ce4_8422_2325
+        } else {
+            self.0
+        };
+        for &byte in bytes {
+            hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+        }
+
+        self.0 = hash;
     }
 }

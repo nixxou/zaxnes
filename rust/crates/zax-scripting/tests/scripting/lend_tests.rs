@@ -9,9 +9,9 @@ use super::support::ScriptProfileBuilder;
 
 /// The input and the memory of one machine.
 #[derive(Default)]
-struct Machine {
-    input: DetachedScriptInput,
-    memory: DetachedScriptMemory,
+pub(super) struct Machine {
+    pub(super) input: DetachedScriptInput,
+    pub(super) memory: DetachedScriptMemory,
 }
 
 impl ScriptInput for Machine {

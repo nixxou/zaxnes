@@ -63,7 +63,7 @@ fn definition_of(cx: &Cx, payload: &Payload) -> mlua::Result<&'static TypeDef> {
 }
 
 fn payload_of(this: &AnyUserData) -> mlua::Result<Payload> {
-    Ok(this.borrow::<Host>()?.payload)
+    Ok(this.borrow::<Host>()?.payload())
 }
 
 /// The text a key stands for in an error message.
@@ -82,9 +82,8 @@ fn is_number(value: &Value) -> bool {
 
 /// `obj[key]`: a member first, then the numeric indexer; an unknown member reads as nil, without
 /// an error (REQ-LUA-042).
-fn index(lua: &Lua, this: &AnyUserData, key: &Value) -> mlua::Result<Value> {
+fn index(lua: &Lua, payload: Payload, key: &Value) -> mlua::Result<Value> {
     let cx = Cx::new(lua);
-    let payload = payload_of(this)?;
     let definition = definition_of(&cx, &payload)?;
 
     if let Value::String(name) = key {
@@ -116,9 +115,9 @@ fn index(lua: &Lua, this: &AnyUserData, key: &Value) -> mlua::Result<Value> {
 
 /// `obj[key] = value`: a writable member, a numeric index, or the exact errors of REQ-LUA-042
 /// and TV-LUA-13.
-fn new_index(lua: &Lua, this: &AnyUserData, key: &Value, value: &Value) -> mlua::Result<()> {
+fn new_index(lua: &Lua, this: &Host, key: &Value, value: &Value) -> mlua::Result<()> {
     let cx = Cx::new(lua);
-    let mut payload = payload_of(this)?;
+    let mut payload = this.payload();
     let definition = definition_of(&cx, &payload)?;
 
     if let Value::String(name) = key {
@@ -130,7 +129,7 @@ fn new_index(lua: &Lua, this: &AnyUserData, key: &Value, value: &Value) -> mlua:
                         if definition.id.is_value() {
                             // The value is the script's own copy: the component it assigned
                             // belongs to the userdata it assigned it to (REQ-LUA-044).
-                            this.borrow_mut::<Host>()?.payload = payload;
+                            this.set_payload(payload);
                         }
 
                         Ok(())
@@ -186,15 +185,12 @@ fn operate(
 
 impl UserData for Host {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_meta_function(
-            MetaMethod::Index,
-            |lua, (this, key): (AnyUserData, Value)| index(lua, &this, &key),
-        );
-        methods.add_meta_function(
+        methods.add_meta_method(MetaMethod::Index, |lua, this, key: Value| {
+            index(lua, this.payload(), &key)
+        });
+        methods.add_meta_method(
             MetaMethod::NewIndex,
-            |lua, (this, key, value): (AnyUserData, Value, Value)| {
-                new_index(lua, &this, &key, &value)
-            },
+            |lua, this, (key, value): (Value, Value)| new_index(lua, this, &key, &value),
         );
         methods.add_meta_function(MetaMethod::Eq, |_, (left, right): (Value, Value)| {
             Ok(equal(&left, &right))

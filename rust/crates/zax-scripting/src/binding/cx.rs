@@ -2,6 +2,7 @@
 //! the call was made under, argument checking (REQ-LUA-041) and error raising.
 
 use std::any::Any;
+use std::cell::RefCell;
 
 use mlua::{AnyUserData, Function, Lua, MultiValue, Table, Value};
 use zax_engine3d::engine::ConversionState;
@@ -29,31 +30,47 @@ type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Box<dyn Any>>;
 /// borrowed, so it cannot be stored in the Lua state: what is stored is a function, valid for the
 /// scope of the lend, which runs the pending request against the context.
 pub(crate) struct HostLink {
-    pub call: Function,
-    pending: Option<HostRequest>,
-    answer: Option<Box<dyn Any>>,
+    call: Function,
+    pending: RefCell<Option<HostRequest>>,
+    answer: RefCell<Option<Box<dyn Any>>>,
 }
 
 impl HostLink {
     pub const fn new(call: Function) -> Self {
         Self {
             call,
-            pending: None,
-            answer: None,
+            pending: RefCell::new(None),
+            answer: RefCell::new(None),
         }
     }
 
-    /// The body of the function behind [`HostLink::call`].
+    /// The body of the function behind the link.
     pub fn serve(lua: &Lua, context: &mut ScriptContext<'_>) -> mlua::Result<()> {
-        let request = lua
-            .app_data_mut::<Self>()
-            .and_then(|mut link| link.pending.take())
+        let link = lua
+            .app_data_ref::<Self>()
+            .ok_or_else(|| mlua::Error::runtime("the host context was withdrawn"))?;
+        let request = link
+            .pending
+            .take()
             .ok_or_else(|| mlua::Error::runtime("no request for the host context"))?;
-        let answer = request(context);
-        lua.app_data_mut::<Self>()
-            .ok_or_else(|| mlua::Error::runtime("the host context was withdrawn"))?
-            .answer = Some(answer);
+        link.answer.replace(Some(request(context)));
         Ok(())
+    }
+
+    /// Runs `operation` on the lent context.
+    fn run<R: 'static>(
+        &self,
+        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+    ) -> mlua::Result<R> {
+        self.pending
+            .replace(Some(Box::new(move |context| Box::new(operation(context)))));
+        self.call.call::<()>(())?;
+        self.answer
+            .take()
+            .ok_or_else(|| mlua::Error::runtime("the host context gave no answer"))?
+            .downcast::<R>()
+            .map(|answer| *answer)
+            .map_err(|_| mlua::Error::runtime("the host context gave another answer"))
     }
 }
 
@@ -64,22 +81,10 @@ pub(crate) fn with_host_context<R: 'static>(
     data: &mut RuntimeData,
     operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
 ) -> mlua::Result<R> {
-    let Some(call) = lua.app_data_ref::<HostLink>().map(|link| link.call.clone()) else {
-        return Ok(data.env.with_headless_context(operation));
-    };
-
-    lua.app_data_mut::<HostLink>()
-        .ok_or_else(|| mlua::Error::runtime("the host context was withdrawn"))?
-        .pending = Some(Box::new(move |context| Box::new(operation(context))));
-    call.call::<()>(())?;
-    let answer = lua
-        .app_data_mut::<HostLink>()
-        .and_then(|mut link| link.answer.take())
-        .ok_or_else(|| mlua::Error::runtime("the host context gave no answer"))?;
-    answer
-        .downcast::<R>()
-        .map(|answer| *answer)
-        .map_err(|_| mlua::Error::runtime("the host context gave another answer"))
+    match lua.app_data_ref::<HostLink>() {
+        Some(link) => link.run(operation),
+        None => Ok(data.env.with_headless_context(operation)),
+    }
 }
 
 /// The weak table that maps a reference object to its Lua value.
@@ -119,6 +124,10 @@ impl<'a> Cx<'a> {
         &self,
         operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
     ) -> mlua::Result<R> {
+        if let Some(link) = self.lua.app_data_ref::<HostLink>() {
+            return link.run(operation);
+        }
+
         self.data(|data| with_host_context(self.lua, data, operation))?
     }
 
@@ -195,7 +204,9 @@ impl<'a> Cx<'a> {
 
     /// A fresh Lua value for `payload`.
     pub fn value(&self, payload: Payload) -> mlua::Result<Value> {
-        Ok(Value::UserData(self.lua.create_userdata(Host { payload })?))
+        Ok(Value::UserData(
+            self.lua.create_userdata(Host::new(payload))?,
+        ))
     }
 
     /// The Lua value of a reference object: the same object always gives the same value
@@ -333,7 +344,7 @@ impl<'a> Cx<'a> {
 /// The payload of the host value `value`, or `None` for any other Lua value.
 pub(crate) fn host_payload(value: &Value) -> Option<Payload> {
     match value {
-        Value::UserData(data) => data.borrow::<Host>().ok().map(|host| host.payload),
+        Value::UserData(data) => data.borrow::<Host>().ok().map(|host| host.payload()),
         _ => None,
     }
 }
