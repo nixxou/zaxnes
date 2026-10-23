@@ -258,6 +258,7 @@ impl Running {
                 pacing_state,
                 catch_up(options),
                 group_draws(options),
+                separate_core(options),
             );
         }
         let (width, height) = window.drawable_size();
@@ -291,6 +292,7 @@ impl Running {
         host.catch_up = catch_up(options);
         // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
         host.rollback_enabled = !options.handheld;
+        host.separate_core = separate_core(options);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui = ImguiFrontend::new(&gl, &host, options, height)?;
@@ -718,6 +720,23 @@ fn group_draws(options: &AppOptions) -> bool {
     }
 }
 
+/// Whether each emulated frame runs on its own thread while the previous one is drawn:
+/// `ZAXNES_SEPARATE_CORE=1` or `0`, else on a handheld only (the game reads its inputs one
+/// displayed frame later).
+fn separate_core(options: &AppOptions) -> bool {
+    match std::env::var(SEPARATE_CORE_VARIABLE)
+        .as_deref()
+        .map(str::trim)
+    {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => options.handheld,
+    }
+}
+
+/// The variable that forces [`separate_core`].
+const SEPARATE_CORE_VARIABLE: &str = "ZAXNES_SEPARATE_CORE";
+
 /// The variable that forces [`group_draws`].
 const GROUP_DRAWS_VARIABLE: &str = "ZAXNES_GROUP_DRAWS";
 
@@ -745,6 +764,7 @@ fn log_profiler_startup(
     pacing: DisplayPacingState,
     catch_up: CatchUp,
     group_draws: bool,
+    separate_core: bool,
 ) {
     log(&frame_profiler::startup_report(
         &format!(
@@ -757,7 +777,7 @@ fn log_profiler_startup(
             model.vsync(),
             model.frame_rate()
         ),
-        &format!("{pacing}, catch-up {catch_up:?}, grouped draws {group_draws}"),
+        &format!("{pacing}, catch-up {catch_up:?}, grouped draws {group_draws}, separate core {separate_core}"),
     ));
 }
 

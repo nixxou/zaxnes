@@ -33,6 +33,7 @@ use zax_scripting::{
 use zax_settings::catalogue::{Port, SettingId};
 use zax_settings::model::SettingsModel;
 
+use crate::core_worker::CoreWorker;
 use crate::frame_profiler::{Stage, StageClock};
 use crate::input::input_action::InputAction;
 use crate::input::routing;
@@ -185,7 +186,7 @@ pub struct SessionFrame {
 
 /// One game being played.
 pub struct GameSession {
-    core: NesCore,
+    core: Box<NesCore>,
     engine: ConversionEngine,
     bridge: ScriptBridge,
     input: ScriptInputState,
@@ -195,6 +196,24 @@ pub struct GameSession {
     started: bool,
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
+    pipeline: FramePipeline,
+}
+
+/// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
+/// frame is prepared (input hook, input word) during the host's tick and runs on the emulation
+/// thread while the main thread draws the frame before it; the next tick takes the core back
+/// and finishes the frame (tile capture, conversion, frame hooks) before anything else.
+#[derive(Default)]
+struct FramePipeline {
+    worker: Option<CoreWorker>,
+    /// A core without a ROM that stands in `GameSession::core` while the real one is away.
+    spare: Option<Box<NesCore>>,
+    /// The input word of the prepared frame that has not started yet.
+    prepared: Option<u16>,
+    /// Whether the emulation thread holds the core.
+    in_flight: bool,
+    /// The picture of the last finished frame, kept while the core is away.
+    picture: Vec<u8>,
 }
 
 impl GameSession {
@@ -258,7 +277,7 @@ impl GameSession {
         let bridge = runtime.bridge();
         engine.set_script_host(Box::new(runtime));
         let mut session = Self {
-            core,
+            core: Box::new(core),
             engine,
             bridge,
             input,
@@ -268,6 +287,7 @@ impl GameSession {
             started: false,
             aimed: None,
             batch_records: Vec::new(),
+            pipeline: FramePipeline::default(),
         };
         // The runtime holds the model from here until the last line of this function.
         let loaded = session.load_profile(profile, different_game, scene);
@@ -387,13 +407,13 @@ impl GameSession {
 
     /// The core, for reading.
     #[must_use]
-    pub const fn core(&self) -> &NesCore {
+    pub fn core(&self) -> &NesCore {
         &self.core
     }
 
     /// The core, for writing.
     #[must_use]
-    pub const fn core_mut(&mut self) -> &mut NesCore {
+    pub fn core_mut(&mut self) -> &mut NesCore {
         &mut self.core
     }
 
@@ -608,20 +628,119 @@ impl GameSession {
         frame: SessionFrame,
         clock: &mut StageClock,
     ) {
+        self.complete_frame_timed(model, scene, clock);
         if clock.enabled() != self.engine.last_hook_time().is_some() {
             self.engine.set_hook_timing(clock.enabled());
         }
         self.lend(model, scene, |session, scene| {
-            session.run_frame_lent(scene, frame, clock);
+            let word = session.begin_frame_lent(scene, frame, clock);
+            let started = clock.start();
+            session.core.run_frame(word);
+            clock.stop(Stage::Core, started);
+            session.finish_frame_lent(scene, clock);
         });
     }
 
-    fn run_frame_lent(
+    /// Prepares the next frame for the emulation thread ("emulation on a separate core"): the
+    /// frame before it is finished first, then the input hook of the scripts runs and the input
+    /// word is computed, as at the start of [`GameSession::run_frame_timed`]. The frame itself
+    /// runs from [`GameSession::launch_prepared`] and is finished by
+    /// [`GameSession::complete_frame_timed`].
+    pub fn prepare_frame_timed(
         &mut self,
+        model: &mut SettingsModel,
         scene: &mut SceneState,
         frame: SessionFrame,
         clock: &mut StageClock,
     ) {
+        self.complete_frame_timed(model, scene, clock);
+        if clock.enabled() != self.engine.last_hook_time().is_some() {
+            self.engine.set_hook_timing(clock.enabled());
+        }
+        let word = self.lend(model, scene, |session, scene| {
+            session.begin_frame_lent(scene, frame, clock)
+        });
+        self.pipeline.prepared = Some(word);
+    }
+
+    /// Hands the core and the prepared frame to the emulation thread, which is started the first
+    /// time. Without a thread (the system refused one) the frame stays prepared and runs on the
+    /// calling thread when it is completed.
+    pub fn launch_prepared(&mut self) {
+        let Some(word) = self.pipeline.prepared.take() else {
+            return;
+        };
+        if self.pipeline.worker.is_none() {
+            match CoreWorker::spawn() {
+                Ok(worker) => {
+                    self.pipeline.worker = Some(worker);
+                    self.pipeline.spare = Some(Box::new(NesCore::new()));
+                }
+                Err(error) => {
+                    crate::app_log::error(&format!(
+                        "Zaxnes: no emulation thread ({error}); the emulation stays on the main thread."
+                    ));
+                }
+            }
+        }
+        let (Some(worker), Some(spare)) = (&self.pipeline.worker, self.pipeline.spare.take())
+        else {
+            self.pipeline.prepared = Some(word);
+            return;
+        };
+
+        // The 2D mode shows the core's picture while the next frame runs.
+        self.pipeline.picture.clear();
+        self.pipeline
+            .picture
+            .extend_from_slice(self.core.pixel_frame());
+        let core = std::mem::replace(&mut self.core, spare);
+        match worker.start(core, word) {
+            Ok(()) => self.pipeline.in_flight = true,
+            Err(core) => {
+                self.pipeline.spare = Some(std::mem::replace(&mut self.core, core));
+                self.pipeline.prepared = Some(word);
+            }
+        }
+    }
+
+    /// Finishes the frame [`GameSession::prepare_frame_timed`] prepared, if any: takes the core
+    /// back from the emulation thread (or runs the frame here when it never left), then captures
+    /// the tile records, converts the frame and runs the frame hooks. Whatever reads or changes
+    /// the core calls this first.
+    pub fn complete_frame_timed(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        clock: &mut StageClock,
+    ) {
+        if self.pipeline.in_flight {
+            self.pipeline.in_flight = false;
+            let Some(finished) = self.pipeline.worker.as_ref().and_then(CoreWorker::finish) else {
+                crate::app_log::error("Zaxnes: the emulation thread stopped during a frame.");
+                return;
+            };
+            self.pipeline.spare = Some(std::mem::replace(&mut self.core, finished.core));
+            clock.add(Stage::Core, finished.elapsed);
+        } else if let Some(word) = self.pipeline.prepared.take() {
+            let started = clock.start();
+            self.core.run_frame(word);
+            clock.stop(Stage::Core, started);
+        } else {
+            return;
+        }
+        self.lend(model, scene, |session, scene| {
+            session.finish_frame_lent(scene, clock);
+        });
+    }
+
+    /// The scripts' input hook and the input word of the next frame (the first half of a frame).
+    fn begin_frame_lent(
+        &mut self,
+        scene: &mut SceneState,
+        frame: SessionFrame,
+        clock: &mut StageClock,
+    ) -> u16 {
         let SessionFrame {
             player_one,
             player_two,
@@ -657,19 +776,22 @@ impl GameSession {
                 .set_zapper_position_source(Some(Box::new(move |_| zapper_position)));
         }
         // REQ-INP-004: a Zapper port carries the Zapper byte and no controller button at all.
+        routing::core_word(
+            first,
+            second,
+            self.core.port_type(0).unwrap_or_default(),
+            self.core.port_type(1).unwrap_or_default(),
+            zapper_byte,
+        )
+    }
+
+    /// The tile capture, the conversion and the frame hooks of the frame the core just ran (the
+    /// second half of a frame).
+    fn finish_frame_lent(&mut self, scene: &mut SceneState, clock: &mut StageClock) {
+        let counter = self.frame_counter;
         let mut records = std::mem::take(&mut self.batch_records);
         let (palette, mask_x, mask_y) = {
             let core = &mut self.core;
-            let word = routing::core_word(
-                first,
-                second,
-                core.port_type(0).unwrap_or_default(),
-                core.port_type(1).unwrap_or_default(),
-                zapper_byte,
-            );
-            let started = clock.start();
-            core.run_frame(word);
-            clock.stop(Stage::Core, started);
             let started = clock.start();
             let batch = core.frame_batch();
             records.clear();
@@ -744,7 +866,11 @@ impl GameSession {
     /// Copies the core's 256 x 240 indexed picture into `destination`.
     pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) {
         destination.clear();
-        destination.extend_from_slice(self.core.pixel_frame());
+        if self.pipeline.in_flight {
+            destination.extend_from_slice(&self.pipeline.picture);
+        } else {
+            destination.extend_from_slice(self.core.pixel_frame());
+        }
     }
 
     /// The shape the subjective camera follows.

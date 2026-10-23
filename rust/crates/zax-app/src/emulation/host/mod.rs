@@ -190,6 +190,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// Whether the rollback snapshots are taken (REQ-LOOP-030); off on a handheld (Rust-only,
     /// owner request): no savestate every 60 frames, and the rollback finds nothing to go back to.
     pub rollback_enabled: bool,
+    /// Whether each emulated frame runs on the emulation thread while the previous one is drawn
+    /// (Rust-only "emulation on a separate core", handheld default): the game sees its inputs
+    /// one displayed frame later, nothing else changes. See `GameSession::prepare_frame_timed`.
+    pub separate_core: bool,
     /// The fast-forward burst.
     pub fast_forward: FastForwardState,
     /// The notification area.
@@ -264,6 +268,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             stage_clock: StageClock::default(),
             rollback: RollbackHistory::new(),
             rollback_enabled: true,
+            separate_core: false,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
             slots,
@@ -529,6 +534,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// load or the queued commands and the emulated frames that are due. Returns how many
     /// emulated frames ran.
     pub fn tick(&mut self, real_seconds: f64, snapshot: &InputSnapshot) -> u32 {
+        // The frame the emulation thread ran during the last drawing is finished before
+        // anything of this tick can read or change the core.
+        self.complete_frame_in_flight();
         self.elapsed += real_seconds;
         // The notification timer is real time: neither the pause nor the game speed affect it
         // (REQ-UI-080).
@@ -553,7 +561,22 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             store.tick(&self.settings, self.elapsed);
         }
         self.publish_state();
+        // Last: the prepared frame runs on the emulation thread while the host draws.
+        if let Some(session) = self.session.as_mut() {
+            session.launch_prepared();
+        }
         frames
+    }
+
+    /// Finishes the frame the emulation thread holds or that was prepared for it, if any.
+    pub fn complete_frame_in_flight(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            session.complete_frame_timed(
+                &mut self.settings,
+                &mut self.scene,
+                &mut self.stage_clock,
+            );
+        }
     }
 
     /// A tick carrying only the two players' actions.
@@ -610,6 +633,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .frames_per_display(self.pacer.effective_rate(), displayed_rate);
         let due = self.pacer.due_frames();
         for _ in 0..due {
+            // A frame prepared by the previous round runs and is finished first.
+            self.complete_frame_in_flight();
             let Some(session) = self.session.as_mut() else {
                 break;
             };
@@ -625,7 +650,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.stage_clock.stop(Stage::Rollback, started);
             }
             // REQ-INP-005: one emulated frame is one sample, fast forward included.
-            self.run_session_frame(player_one, player_two);
+            if self.separate_core {
+                self.prepare_session_frame(player_one, player_two);
+            } else {
+                self.run_session_frame(player_one, player_two);
+            }
             self.emulated_frames += 1;
             if self.fast_forward.is_active() {
                 self.fast_forward.on_frame_run();
@@ -647,6 +676,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         player_one: crate::input::InputAction,
         player_two: crate::input::InputAction,
     ) {
+        self.complete_frame_in_flight();
         let port_byte = self.zapper.port_byte();
         let position = self.zapper.position();
         if let Some(session) = self.session.as_mut() {
@@ -665,8 +695,34 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// Prepares one emulated frame for the emulation thread ([`EmulationHost::separate_core`]):
+    /// the scripts' input hook and the input word now, the frame itself at the end of the tick.
+    fn prepare_session_frame(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) {
+        let port_byte = self.zapper.port_byte();
+        let position = self.zapper.position();
+        if let Some(session) = self.session.as_mut() {
+            let frame = SessionFrame {
+                player_one,
+                player_two,
+                zapper_byte: port_byte,
+                zapper_position: position,
+            };
+            session.prepare_frame_timed(
+                &mut self.settings,
+                &mut self.scene,
+                frame,
+                &mut self.stage_clock,
+            );
+        }
+    }
+
     /// Stops the current game, writes the slot index and the settings (REQ-LOOP-052).
     pub fn shutdown(&mut self) {
+        self.complete_frame_in_flight();
         self.stop_current_game(true, true);
         if self.slots.save(&self.paths).is_err() {
             self.log("the save slot index could not be written.");

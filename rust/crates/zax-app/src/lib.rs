@@ -6,6 +6,7 @@ pub mod app_log;
 pub mod app_options;
 pub mod application;
 pub mod audio;
+pub mod core_worker;
 pub mod emulation;
 mod flags;
 pub mod frame_profiler;
