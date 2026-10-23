@@ -21,6 +21,8 @@ pub struct UiState {
     pub file_browser: bool,
     /// A confirmation or message dialogue.
     pub dialog: bool,
+    /// The platform's own file dialog is open, outside the frame.
+    pub native_dialog: bool,
     /// The debug overlay (F3).
     pub debug_overlay: bool,
 }
@@ -48,7 +50,7 @@ impl UiState {
     /// dialogue (REQ-UI-004).
     #[must_use]
     pub const fn is_modal(&self) -> bool {
-        self.file_browser || self.profile_chooser || self.dialog
+        self.file_browser || self.profile_chooser || self.dialog || self.native_dialog
     }
 
     /// Whether any window is open.

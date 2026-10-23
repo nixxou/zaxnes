@@ -472,8 +472,22 @@ impl Running {
             match effect {
                 UiEffect::Log(message) => log(&message),
                 UiEffect::RevealFolder(folder) => reveal_folder(&folder),
+                UiEffect::LeaveFullscreen => self.set_window_fullscreen(false),
+                UiEffect::RestoreFullscreen => {
+                    self.set_window_fullscreen(self.host.settings().fullscreen());
+                }
             }
         }
+    }
+
+    /// Puts the window in or out of full screen without touching `ui.fullscreen` (a native file
+    /// dialog needs the window out of the way while it is open).
+    fn set_window_fullscreen(&mut self, fullscreen: bool) {
+        if let Err(error) = self.window.set_fullscreen(fullscreen) {
+            log(&format!("the window state could not be changed: {error}"));
+        }
+        // As for any window-state change (FIX-1): the vsync interval is applied again.
+        self.pacing.apply(&mut self.window, self.host.settings());
     }
 
     /// REQ-LOOP-052: the current game is stopped (End hook), the settings and the slot metadata

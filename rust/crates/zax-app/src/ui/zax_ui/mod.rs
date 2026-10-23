@@ -20,6 +20,7 @@ use zax_profiles::catalogue::ProfileImportOutcome;
 use super::commands::UiCommand;
 use super::confirm_dialog::ConfirmationView;
 use super::file_browser::{self, FileBrowserModel};
+use super::file_picker::{FilePicker, PickPoll, PickRequest};
 use super::key_config::KeyConfigModel;
 use super::menu_bar::MenuBarModel;
 use super::menu_shortcuts::{self, ShortcutCommand, ShortcutModifiers};
@@ -58,6 +59,10 @@ pub enum UiEffect {
     Log(String),
     /// Open this folder in the desktop's file manager (REQ-PERS-072).
     RevealFolder(PathBuf),
+    /// A native file dialog is about to open: take the window out of full screen.
+    LeaveFullscreen,
+    /// The native file dialog closed: put the window back as `ui.fullscreen` says.
+    RestoreFullscreen,
 }
 
 /// What the file browser is open for.
@@ -95,6 +100,7 @@ pub struct ZaxUi {
     pub force_options_tab: Option<OptionsTab>,
     heading_font: Option<imgui::FontId>,
     purpose: BrowserPurpose,
+    picker: Option<Box<dyn FilePicker>>,
     fps_shown: f32,
     fps_countdown: f32,
     held_keys: Vec<Key>,
@@ -117,6 +123,7 @@ impl ZaxUi {
             force_options_tab: None,
             heading_font: None,
             purpose: BrowserPurpose::Rom,
+            picker: None,
             fps_shown: 0.0,
             fps_countdown: 0.0,
             held_keys: Vec::new(),
@@ -128,6 +135,42 @@ impl ZaxUi {
     /// window); the body face when none is set.
     pub const fn set_heading_font(&mut self, font: Option<imgui::FontId>) {
         self.heading_font = font;
+    }
+
+    /// Chooses files with `picker` (the platform's dialog) instead of the `ImGui` browser, which
+    /// stays the fallback when the picker cannot start or fails.
+    pub fn set_file_picker(&mut self, picker: Box<dyn FilePicker>) {
+        self.picker = Some(picker);
+    }
+
+    /// Takes the answer of the native file dialog, when one is open. A dialog that could not be
+    /// shown opens the `ImGui` browser instead.
+    pub fn poll_file_picker(&mut self, host: &mut AppHost) {
+        if !self.state.native_dialog {
+            return;
+        }
+        let Some(picker) = self.picker.as_mut() else {
+            self.state.native_dialog = false;
+            return;
+        };
+        let poll = picker.poll();
+        if poll == PickPoll::Pending {
+            return;
+        }
+        self.state.native_dialog = false;
+        if picker.needs_windowed() {
+            self.effects.push(UiEffect::RestoreFullscreen);
+        }
+        match poll {
+            PickPoll::Chosen(path) => self.on_file_chosen(host, &path),
+            PickPoll::Failed => {
+                self.log(
+                    "the native file dialog is unavailable; using the built-in browser.".into(),
+                );
+                self.open_imgui_browser(host, self.purpose);
+            }
+            PickPoll::Pending | PickPoll::Cancelled => {}
+        }
     }
 
     /// What the interface asked of the application since the last call.
@@ -148,6 +191,7 @@ impl ZaxUi {
 
     /// Draws one frame of the interface over the game view.
     pub fn draw(&mut self, ui: &imgui::Ui, frame: &mut UiFrame<'_>) {
+        self.poll_file_picker(frame.host);
         // The window state is the setting's (REQ-PERS-067); a change made by a shortcut, by the
         // options window or by the menu reaches the interface here.
         self.state.fullscreen = frame.host.settings().fullscreen();
@@ -317,23 +361,59 @@ impl ZaxUi {
 
     fn open_browser(&mut self, host: &AppHost, purpose: BrowserPurpose) {
         self.purpose = purpose;
-        let title = match purpose {
+        if self.start_native_dialog(host, purpose) {
+            return;
+        }
+        self.open_imgui_browser(host, purpose);
+    }
+
+    fn browser_title(purpose: BrowserPurpose) -> String {
+        match purpose {
             BrowserPurpose::Rom => text::open_rom_title(),
             BrowserPurpose::Cover => text::import_cover_title(),
             BrowserPurpose::ThreeDSen => text::import_three_d_sen_title(),
             BrowserPurpose::Profile => text::import_profile_title(),
-        };
-        let filters = match purpose {
+        }
+    }
+
+    fn browser_filters(purpose: BrowserPurpose) -> Vec<file_browser::FileFilter> {
+        match purpose {
             BrowserPurpose::Rom => file_browser::rom_filters(),
             BrowserPurpose::Cover => file_browser::cover_filters(),
             BrowserPurpose::ThreeDSen => file_browser::three_d_sen_filters(),
             BrowserPurpose::Profile => file_browser::profile_filters(),
+        }
+    }
+
+    /// Asks the platform's dialog, when there is a picker and it can work. Returns whether the
+    /// dialog is open.
+    fn start_native_dialog(&mut self, host: &AppHost, purpose: BrowserPurpose) -> bool {
+        let Some(picker) = self.picker.as_mut() else {
+            return false;
         };
+        let request = PickRequest {
+            title: Self::browser_title(purpose),
+            filters: Self::browser_filters(purpose),
+            start_directory: Some(host.settings().last_browse_directory()),
+            // AMD-030 §2: the 3dSen import is the one dialog that answers with a folder.
+            folder: purpose == BrowserPurpose::ThreeDSen,
+        };
+        if !picker.start(request) {
+            return false;
+        }
+        if picker.needs_windowed() {
+            self.effects.push(UiEffect::LeaveFullscreen);
+        }
+        self.state.native_dialog = true;
+        true
+    }
+
+    fn open_imgui_browser(&mut self, host: &AppHost, purpose: BrowserPurpose) {
         let three_d_sen = purpose == BrowserPurpose::ThreeDSen;
         let hint = text::import_three_d_sen_hint();
         self.browser.open(
-            &title,
-            filters,
+            &Self::browser_title(purpose),
+            Self::browser_filters(purpose),
             Some(&host.settings().last_browse_directory()),
             // AMD-030 §2: the 3dSen import is the one dialog that answers with a folder.
             three_d_sen,
