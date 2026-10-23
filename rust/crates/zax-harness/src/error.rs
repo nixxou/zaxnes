@@ -6,6 +6,7 @@ use zax_profiles::format::ProfileLoadError;
 use zax_render::assets::png_image::PngError;
 use zax_render::offscreen::OffscreenError;
 use zax_render::RenderError;
+use zax_scripting::LuaScriptError;
 
 /// Why a harness command failed.
 #[derive(Debug)]
@@ -20,6 +21,10 @@ pub enum HarnessError {
     Profile(String),
     /// A frame dump does not parse; the message names the line.
     Format(String),
+    /// The ROM was refused by the core.
+    Rom(String),
+    /// The Lua runtime of a profile could not be installed.
+    Script(LuaScriptError),
     /// The conversion engine refused the profile.
     Engine(EngineError),
     /// A text export could not be formatted.
@@ -37,9 +42,11 @@ impl fmt::Display for HarnessError {
         match self {
             Self::Io(error) => write!(f, "{error}"),
             Self::Audio(error) => write!(f, "{error}"),
-            Self::Usage(message) | Self::Profile(message) | Self::Format(message) => {
-                f.write_str(message)
-            }
+            Self::Usage(message)
+            | Self::Profile(message)
+            | Self::Format(message)
+            | Self::Rom(message) => f.write_str(message),
+            Self::Script(error) => write!(f, "{error}"),
             Self::Engine(error) => write!(f, "{error}"),
             Self::Text(error) => write!(f, "{error}"),
             Self::Offscreen(error) => write!(f, "{error}"),
@@ -96,5 +103,11 @@ impl From<RenderError> for HarnessError {
 impl From<PngError> for HarnessError {
     fn from(error: PngError) -> Self {
         Self::Png(error)
+    }
+}
+
+impl From<LuaScriptError> for HarnessError {
+    fn from(error: LuaScriptError) -> Self {
+        Self::Script(error)
     }
 }
