@@ -3,6 +3,10 @@
 
 #[path = "common/catalogue_table.rs"]
 mod catalogue_table;
+#[path = "common/exact.rs"]
+mod exact;
+
+use exact::assert_exact;
 
 use std::collections::HashSet;
 
@@ -22,7 +26,12 @@ fn every_setting_of_the_tables_is_present_with_its_kind_default_scope_and_effect
         assert_eq!(row.scope, descriptor.scope(), "{}", row.key);
         assert_eq!(row.effect, descriptor.effect(), "{}", row.key);
         assert_eq!(row.lua.as_deref(), descriptor.lua_path(), "{}", row.key);
-        assert_eq!(row.default, describe(descriptor.default_value()), "{}", row.key);
+        assert_eq!(
+            row.default,
+            describe(descriptor.default_value()),
+            "{}",
+            row.key
+        );
     }
 }
 
@@ -31,7 +40,9 @@ fn every_setting_of_the_tables_is_present_with_its_kind_default_scope_and_effect
 #[test]
 fn the_enumeration_covers_the_tables_and_names_its_additions() {
     let specified: HashSet<String> = rows().into_iter().map(|row| row.key).collect();
-    let model: HashSet<String> = catalogue::descriptors().map(|d| d.key().into_owned()).collect();
+    let model: HashSet<String> = catalogue::descriptors()
+        .map(|d| d.key().into_owned())
+        .collect();
     assert!(specified.is_subset(&model));
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
@@ -41,7 +52,9 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
 /// REQ-PERS-080: every key matches the published grammar and appears once.
 #[test]
 fn keys_are_stable_and_unique() {
-    let keys: Vec<String> = catalogue::descriptors().map(|d| d.key().into_owned()).collect();
+    let keys: Vec<String> = catalogue::descriptors()
+        .map(|d| d.key().into_owned())
+        .collect();
     let distinct: HashSet<&String> = keys.iter().collect();
     assert_eq!(keys.len(), distinct.len());
     for key in &keys {
@@ -59,8 +72,13 @@ fn no_published_key_disappeared() {
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect();
     assert!(!reference.is_empty());
-    let keys: HashSet<String> = catalogue::descriptors().map(|d| d.key().into_owned()).collect();
-    let missing: Vec<&&str> = reference.iter().filter(|key| !keys.contains(**key)).collect();
+    let keys: HashSet<String> = catalogue::descriptors()
+        .map(|d| d.key().into_owned())
+        .collect();
+    let missing: Vec<&&str> = reference
+        .iter()
+        .filter(|key| !keys.contains(**key))
+        .collect();
     assert!(missing.is_empty(), "{missing:?}");
 }
 
@@ -68,14 +86,23 @@ fn no_published_key_disappeared() {
 #[test]
 fn first_launch_values_are_the_defaults_of_the_tables() {
     let model = SettingsModel::new();
-    assert_eq!(model.get(SettingId::CameraFov).as_float(), 70.0);
+    assert_exact(model.get(SettingId::CameraFov).as_float(), 70.0);
     assert_eq!(model.get(SettingId::VideoFrameRate).as_int(), 90);
     assert_eq!(model.get(SettingId::SceneSkybox).as_int(), -1);
-    assert_eq!(model.get(SettingId::AudioVolume).as_float(), 1.0);
+    assert_exact(model.get(SettingId::AudioVolume).as_float(), 1.0);
     assert!(model.get(SettingId::RenderShadow).as_bool());
-    assert_eq!(model.get(SettingId::LightDirection).as_vector3(), zax_settings::values::Vector3::new(1.0, -1.0, 1.0));
-    assert_eq!(model.get(SettingId::LayerOffset(Layer::ALL[2])).as_float(), 0.0);
-    assert_eq!(model.get(SettingId::LayerOffset(Layer::ALL[5])).as_float(), 36.0);
+    assert_eq!(
+        model.get(SettingId::LightDirection).as_vector3(),
+        zax_settings::values::Vector3::new(1.0, -1.0, 1.0)
+    );
+    assert_exact(
+        model.get(SettingId::LayerOffset(Layer::ALL[2])).as_float(),
+        0.0,
+    );
+    assert_exact(
+        model.get(SettingId::LayerOffset(Layer::ALL[5])).as_float(),
+        36.0,
+    );
 }
 
 /// REQ-PERS-008: the Lua aliases are exposed as well as the main names.
@@ -145,9 +172,18 @@ fn scene_scale_is_the_one_writable_derived_member() {
 /// REQ-PERS-084: the three examples of the acceptance criterion.
 #[test]
 fn the_moment_of_effect_is_exposed_as_metadata() {
-    assert_eq!(catalogue::descriptor(SettingId::CameraFov).effect(), SettingEffect::Immediate);
-    assert_eq!(catalogue::descriptor(SettingId::EmuAutoTvMode).effect(), SettingEffect::NextRomLoad);
-    assert_eq!(catalogue::descriptor(SettingId::UiWindowRect).effect(), SettingEffect::Restart);
+    assert_eq!(
+        catalogue::descriptor(SettingId::CameraFov).effect(),
+        SettingEffect::Immediate
+    );
+    assert_eq!(
+        catalogue::descriptor(SettingId::EmuAutoTvMode).effect(),
+        SettingEffect::NextRomLoad
+    );
+    assert_eq!(
+        catalogue::descriptor(SettingId::UiWindowRect).effect(),
+        SettingEffect::Restart
+    );
 }
 
 /// REQ-PERS-020: scope U, and `ui.fullscreen` among them, is what gets persisted; nothing else is.
@@ -155,7 +191,12 @@ fn the_moment_of_effect_is_exposed_as_metadata() {
 fn only_user_preferences_are_persisted() {
     assert!(catalogue::descriptor(SettingId::UiFullscreen).is_persisted());
     for descriptor in catalogue::descriptors() {
-        assert_eq!(descriptor.is_persisted(), descriptor.scope() == SettingScope::User, "{}", descriptor.key());
+        assert_eq!(
+            descriptor.is_persisted(),
+            descriptor.scope() == SettingScope::User,
+            "{}",
+            descriptor.key()
+        );
     }
 }
 
@@ -193,7 +234,10 @@ fn the_profile_scoped_settings_are_the_list_of_req_prof_041() {
             SettingId::LayerRecvShadow(layer),
         ]);
     }
-    let mut expected: Vec<String> = expected.into_iter().map(|id| id.key().into_owned()).collect();
+    let mut expected: Vec<String> = expected
+        .into_iter()
+        .map(|id| id.key().into_owned())
+        .collect();
     expected.sort();
     let mut actual: Vec<String> = catalogue::of_scope(SettingScope::Profile)
         .map(|d| d.key().into_owned())
@@ -221,6 +265,11 @@ fn the_preserved_settings_are_user_scoped(#[case] id: SettingId) {
 fn every_setting_announces_a_type_and_a_domain_or_bounds() {
     for descriptor in catalogue::descriptors() {
         assert!(!descriptor.key().is_empty());
-        assert_eq!(descriptor.default_value().kind(), descriptor.kind(), "{}", descriptor.key());
+        assert_eq!(
+            descriptor.default_value().kind(),
+            descriptor.kind(),
+            "{}",
+            descriptor.key()
+        );
     }
 }

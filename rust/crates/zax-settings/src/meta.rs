@@ -110,7 +110,11 @@ impl SettingDescriptor {
         effect: SettingEffect,
         theme: SettingTheme,
     ) -> Self {
-        debug_assert!(catalogue::is_valid_key(&id.key()), "{} is not a stable key", id.key());
+        debug_assert!(
+            catalogue::is_valid_key(&id.key()),
+            "{} is not a stable key",
+            id.key()
+        );
         Self {
             id,
             kind,

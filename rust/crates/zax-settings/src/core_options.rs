@@ -127,6 +127,8 @@ fn default_label(
     default: &SettingValue,
     values: &[crate::domain::SettingOption],
 ) -> String {
+    // An exposed option always has values (see `SettingDescriptor::is_libretro_exposed`), so the
+    // first label exists; the empty fallback is never used.
     let first = values
         .first()
         .map(|value| value.label.clone())
