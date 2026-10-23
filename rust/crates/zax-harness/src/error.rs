@@ -1,6 +1,8 @@
 use std::fmt;
 
+use zax_engine3d::error::EngineError;
 use zax_nes::apu::AudioError;
+use zax_profiles::format::ProfileLoadError;
 
 /// Why a harness command failed.
 #[derive(Debug)]
@@ -11,6 +13,14 @@ pub enum HarnessError {
     Audio(AudioError),
     /// The command line is wrong; the message says how.
     Usage(String),
+    /// A profile was not found or was refused by the loader.
+    Profile(String),
+    /// A frame dump does not parse; the message names the line.
+    Format(String),
+    /// The conversion engine refused the profile.
+    Engine(EngineError),
+    /// A text export could not be formatted.
+    Text(std::fmt::Error),
 }
 
 impl fmt::Display for HarnessError {
@@ -18,7 +28,11 @@ impl fmt::Display for HarnessError {
         match self {
             Self::Io(error) => write!(f, "{error}"),
             Self::Audio(error) => write!(f, "{error}"),
-            Self::Usage(message) => f.write_str(message),
+            Self::Usage(message) | Self::Profile(message) | Self::Format(message) => {
+                f.write_str(message)
+            }
+            Self::Engine(error) => write!(f, "{error}"),
+            Self::Text(error) => write!(f, "{error}"),
         }
     }
 }
@@ -34,5 +48,23 @@ impl From<std::io::Error> for HarnessError {
 impl From<AudioError> for HarnessError {
     fn from(error: AudioError) -> Self {
         Self::Audio(error)
+    }
+}
+
+impl From<ProfileLoadError> for HarnessError {
+    fn from(error: ProfileLoadError) -> Self {
+        Self::Profile(error.message)
+    }
+}
+
+impl From<EngineError> for HarnessError {
+    fn from(error: EngineError) -> Self {
+        Self::Engine(error)
+    }
+}
+
+impl From<std::fmt::Error> for HarnessError {
+    fn from(error: std::fmt::Error) -> Self {
+        Self::Text(error)
     }
 }

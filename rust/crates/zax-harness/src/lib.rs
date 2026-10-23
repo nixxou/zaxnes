@@ -4,5 +4,6 @@
 
 mod error;
 pub mod golden_core;
+pub mod meshes;
 
 pub use error::HarnessError;

@@ -9,7 +9,9 @@ publish.workspace = true
 [dependencies]
 serde_json.workspace = true
 sha2 = "0.10"
+zax-engine3d = { path = "../zax-engine3d" }
 zax-nes = { path = "../zax-nes" }
+zax-profiles = { path = "../zax-profiles" }
 
 [dev-dependencies]
 zax-goldens = { path = "../zax-goldens" }
