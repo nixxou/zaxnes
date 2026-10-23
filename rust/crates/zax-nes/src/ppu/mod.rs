@@ -78,6 +78,9 @@ const VISIBLE_SCANLINES: i32 = RegionTiming::VISIBLE_SCANLINES;
 const SCREEN_WIDTH_I32: i32 = 256;
 const SPRITES_PER_LINE_I32: i32 = 8;
 const DOTS_PER_SCANLINE: i32 = RegionTiming::DOTS_PER_SCANLINE;
+/// The last dot of the fixed stretch of a visible line (dots 2 to 255: no line start, no
+/// vertical increment, no reload) that [`Ppu2C02::run_visible_span`] runs.
+const LAST_SPAN_DOT: i32 = 255;
 
 /// The picture processing unit.
 #[derive(Debug, Clone)]
@@ -533,11 +536,30 @@ impl Ppu2C02 {
                 self.dot += idle_i32;
                 self.ppu_clock += idle;
                 count -= idle;
+                continue;
+            }
+
+            let span = self.visible_span_ahead(count);
+            if span > 0 && self.run_visible_span(span, cart.as_deref()) {
+                count -= span;
             } else {
                 self.step_dot(cart);
                 count -= 1;
             }
         }
+    }
+
+    /// How many of the next dots lie in the stretch of a rendering visible line that
+    /// [`Ppu2C02::run_visible_span`] can take (dots 2 to [`LAST_SPAN_DOT`]), at most `count`.
+    fn visible_span_ahead(&self, count: i64) -> i64 {
+        if self.scanline >= VISIBLE_SCANLINES
+            || !self.rendering_enabled()
+            || !(1..LAST_SPAN_DOT).contains(&self.dot)
+        {
+            return 0;
+        }
+
+        i64::from(LAST_SPAN_DOT - self.dot).min(count)
     }
 
     /// How many of the next dots of the current line have nothing to do but count (and draw

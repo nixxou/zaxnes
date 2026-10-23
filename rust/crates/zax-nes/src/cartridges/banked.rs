@@ -223,6 +223,51 @@ fn wrap(bank: i32, count: i32) -> usize {
     usize::try_from(bank.rem_euclid(count)).unwrap_or(0)
 }
 
+/// The CHR a board's pattern fetches read when reading has no side effect: the CHR memory
+/// and the offset of each 1 KiB window. [`ChrView::read`] answers exactly what
+/// [`BankWindows::read_chr`] answers for the same windows.
+#[derive(Debug, Clone, Copy)]
+pub struct ChrView<'m> {
+    data: &'m [u8],
+    offsets: [usize; BankWindows::CHR_WINDOWS],
+}
+
+impl<'m> ChrView<'m> {
+    /// A view through `windows` of `chr` (the CHR-ROM, or the CHR-RAM on a board without ROM).
+    #[must_use]
+    pub const fn new(chr: &'m [u8], windows: &BankWindows) -> Self {
+        Self {
+            data: chr,
+            offsets: windows.chr_offset,
+        }
+    }
+
+    /// A view of `chr` laid out linearly, as a board without CHR banking shows it.
+    #[must_use]
+    pub const fn linear(chr: &'m [u8]) -> Self {
+        let mut offsets = [0; BankWindows::CHR_WINDOWS];
+        let mut window = 0;
+        while window < BankWindows::CHR_WINDOWS {
+            offsets[window] = window * BankWindows::CHR_WINDOW_SIZE;
+            window += 1;
+        }
+        Self { data: chr, offsets }
+    }
+
+    /// The byte at `address` ($0000-$1FFF), 0 when there is no CHR at all.
+    #[must_use]
+    pub fn read(&self, address: u16) -> u8 {
+        if self.data.is_empty() {
+            return 0;
+        }
+
+        let index = usize::from(address) & 0x1FFF;
+        let offset = self.offsets[index / BankWindows::CHR_WINDOW_SIZE]
+            + (index & (BankWindows::CHR_WINDOW_SIZE - 1));
+        self.data[wrap_offset(offset, self.data.len())]
+    }
+}
+
 impl BankWindows {
     /// Appends the window tables to `writer` (REQ-CORE-090); the bank counts follow from the
     /// ROM and are not stored.

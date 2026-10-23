@@ -85,6 +85,13 @@ displayed frame". All values are per displayed frame.
   frame / DMC IRQ cycles); (3) IRQ horizons for Rambo1 and MMC5 so they batch too.
 - `91123ec` checked on Windows afterwards: core goldens, fmt, clippy and the workspace tests
   (`--all-features`) pass.
+- Core milestone 3 (PPU fast span): on a visible line with rendering on, dots 2 to 255 run in
+  one loop without the per-dot dispatch, with the PPUMASK / fine-X decisions hoisted and the
+  fetches reading CHR and console VRAM directly when the board's fetches have no side effect
+  (`Mapper::chr_view`: every board but MMC2/MMC4, MMC3 and compatibles, Rambo1, MMC5, which keep
+  the full path). Goldens and `cargo test -p zax-nes --release` pass. FF1 (MMC1, 2D, no
+  profile) bench-core x86 core 1.18 -> 0.87 ms/frame; callgrind before: core 25.4 M
+  instructions per frame (PPU 51 %, APU 19.5 %, ~185 instructions per CPU cycle in the APU).
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

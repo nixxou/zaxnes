@@ -13,7 +13,7 @@ pub mod mappers;
 pub mod registry;
 
 pub use a12_watcher::A12Watcher;
-pub use banked::BankWindows;
+pub use banked::{BankWindows, ChrView};
 pub use board::Board;
 pub use chr_fetch::ChrFetch;
 
@@ -368,6 +368,13 @@ impl Cartridge {
     /// (latches, A12 counting).
     pub fn ppu_read(&mut self, address: u16, fetch: ChrFetch) -> u8 {
         self.board.ppu_read(&mut self.memory, address, fetch)
+    }
+
+    /// The CHR the rendering fetches read when they have no side effect and nothing watches
+    /// the PPU address bus (see [`Mapper::chr_view`]); `None` for the other boards.
+    #[must_use]
+    pub fn chr_view(&self) -> Option<ChrView<'_>> {
+        self.board.chr_view(&self.memory)
     }
 
     /// Reads CHR without any side effect. The tile emitter and the host accessors use this

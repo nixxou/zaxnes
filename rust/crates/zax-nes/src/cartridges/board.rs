@@ -6,7 +6,7 @@ use super::mappers::{
     GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034, Mmc1, Mmc2, Mmc3,
     Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
-use super::{BankWindows, CartridgeMemory, ChrFetch};
+use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The mapper of a cartridge, with its registers (REQ-CORE-100).
@@ -175,6 +175,10 @@ impl Mapper for Board {
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         dispatch!(self, b => b.ppu_peek(memory, address, fetch))
+    }
+
+    fn chr_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        dispatch!(self, b => b.chr_view(memory))
     }
 
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {

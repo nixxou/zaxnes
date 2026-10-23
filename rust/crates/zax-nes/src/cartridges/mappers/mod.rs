@@ -48,7 +48,7 @@ pub use nrom::Nrom;
 pub use rambo1::Rambo1;
 pub use vrc2_vrc4::Vrc2Vrc4;
 
-use super::{BankWindows, CartridgeMemory, ChrFetch};
+use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The behaviour a board adds to the shared cartridge state (REQ-CORE-100). Every method has
@@ -170,6 +170,23 @@ pub trait Mapper {
     /// Reads CHR as the PPU would, side effects included.
     fn ppu_read(&mut self, memory: &mut CartridgeMemory, address: u16, fetch: ChrFetch) -> u8 {
         self.ppu_peek(memory, address, fetch)
+    }
+
+    /// The CHR the rendering fetches read, for the PPU's fast path: `None` when a fetch has
+    /// a side effect or another source (a board that overrides [`Mapper::ppu_read`],
+    /// [`Mapper::ppu_peek`] or [`Mapper::on_ppu_address_bus`] must override this one too).
+    /// The default matches the default [`Mapper::ppu_peek`].
+    fn chr_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        let chr_rom = memory.rom().chr_rom();
+        let chr = if chr_rom.is_empty() {
+            memory.chr_ram()
+        } else {
+            chr_rom
+        };
+        Some(
+            self.banks()
+                .map_or(ChrView::linear(&[]), |banks| ChrView::new(chr, banks)),
+        )
     }
 
     /// Reads CHR without any side effect.

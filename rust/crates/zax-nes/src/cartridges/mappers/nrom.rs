@@ -28,6 +28,16 @@ impl Mapper for Nrom {
         Some(prg[wrap_offset(usize::from(address - 0x8000), prg.len())])
     }
 
+    fn chr_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<crate::cartridges::ChrView<'m>> {
+        // What `read_chr_direct` reads: the CHR-ROM, else the CHR-RAM.
+        let chr_rom = memory.rom().chr_rom();
+        Some(crate::cartridges::ChrView::linear(if chr_rom.is_empty() {
+            memory.chr_ram()
+        } else {
+            chr_rom
+        }))
+    }
+
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
         memory.read_chr_direct(usize::from(address & 0x1FFF))
     }
