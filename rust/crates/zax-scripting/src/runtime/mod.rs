@@ -369,10 +369,10 @@ impl ProfileScriptRuntime {
         match with_host_context(&self.lua, &mut self.data, operation) {
             Ok(answer) => Some(answer),
             Err(error) => {
-                self.data.env.log.error(&format!(
-                    "Lua: the runtime failed: {}",
-                    message_of(&error)
-                ));
+                self.data
+                    .env
+                    .log
+                    .error(&format!("Lua: the runtime failed: {}", message_of(&error)));
                 None
             }
         }

@@ -17,7 +17,7 @@ use zax_platform::{AudioOutput, HostWindow, HostWindowSettings};
 use zax_profiles::format;
 use zax_render::assets::{NeutralSceneAssets, SceneAssets};
 use zax_render::controls;
-use zax_render::scene::SceneFrame;
+use zax_render::scene::{SceneFrame, SceneState};
 use zax_render::target::RenderTarget;
 use zax_render::SceneRenderer;
 use zax_settings::model::SettingsModel;
@@ -45,7 +45,7 @@ use crate::persistence::input_binding_store::FileInputBindingStore;
 use crate::persistence::settings_store::SettingsStore;
 use crate::render_scaling;
 use crate::render_skip;
-use crate::scene_script_bridge::{self, ConsoleScriptLog, SharedScene};
+use crate::scene_script_bridge::{self, ConsoleScriptLog};
 use crate::user_data_paths::UserDataPaths;
 use crate::{neutral_assets, persistence::input_binding_store::InputBindingStore as _};
 
@@ -223,7 +223,6 @@ struct Running {
     source: DesktopInputSource,
     audio: Option<AudioOutput>,
     host: AppHost,
-    scene: SharedScene,
     pacing: VideoPacing,
     modal_flag: Rc<Cell<bool>>,
     counter: FrameRateCounter,
@@ -255,8 +254,8 @@ impl Running {
             return Err(format!("Zaxnes: the ROM '{rom}' does not exist."));
         }
         let startup_game = resolve_startup_game(options, &catalog, &paths, &log);
-        let scene: SharedScene = Rc::default();
-        publish_settings_to_scene(&model, &scene);
+        let mut scene = SceneState::default();
+        publish_settings_to_scene(&model, &mut scene);
 
         let request = pacing_request(options, &model);
         let mut window = HostWindow::create(&HostWindowSettings {
@@ -306,7 +305,7 @@ impl Running {
         let parts = HostParts {
             paths: &paths,
             model,
-            scene: &scene,
+            scene,
             catalog,
             store,
             asset_root: asset_root.as_deref(),
@@ -329,7 +328,6 @@ impl Running {
             source,
             audio,
             host,
-            scene,
             pacing,
             modal_flag,
             counter: FrameRateCounter::new(),
@@ -356,7 +354,7 @@ impl Running {
         let (width, height) = self.window.drawable_size();
         let (width, height) = (to_i32(width), to_i32(height));
         let snapshot = self.sample_input(real_f, width, height);
-        handle_camera_input(&self.host, &self.scene, &snapshot, real_f, &mut self.state);
+        handle_camera_input(&mut self.host, &snapshot, real_f, &mut self.state);
         update_cursor(
             &mut self.cursor,
             &self.host,
@@ -366,9 +364,9 @@ impl Running {
         );
         let emulated = self.host.tick(real, &snapshot);
         self.source.end_sample();
-        update_scene(&mut self.host, &self.scene, &mut self.state);
+        update_scene(&mut self.host, &mut self.state);
         {
-            let mut scene = self.scene.borrow_mut();
+            let scene = self.host.scene_mut();
             scene.camera.advance(real_f);
             scene.real_time += real_f;
         }
@@ -455,7 +453,7 @@ impl Running {
             .resize(scene_width, scene_height)
             .map_err(|error| error.to_string())?;
         let skip = render_skip::should_skip(
-            self.scene.borrow().settings.skip_render,
+            self.host.scene().settings.skip_render,
             self.host.state() == EmulationState::Running,
             emulated,
             self.state.last_render_size == (scene_width, scene_height),
@@ -466,7 +464,6 @@ impl Running {
             render_scene(
                 &mut self.renderer,
                 &self.offscreen.borrow(),
-                &self.scene,
                 &mut self.host,
                 &mut self.state,
             )?;
@@ -514,7 +511,7 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
 struct HostParts<'a> {
     paths: &'a UserDataPaths,
     model: SettingsModel,
-    scene: &'a SharedScene,
+    scene: SceneState,
     catalog: LibraryGameCatalog,
     store: SettingsStore,
     asset_root: Option<&'a Path>,
@@ -532,12 +529,8 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     let mut mixer = AudioMixer::new(parts.sample_rate, Some(library), TrackRandom::new(seed()));
     mixer.set_volume(parts.model.effective_volume());
     mixer.set_menu_music_enabled(parts.model.menu_music());
-    let mut options = EmulationHostOptions::new(
-        parts.paths.clone(),
-        parts.model,
-        Rc::clone(parts.scene),
-        parts.catalog,
-    );
+    let mut options =
+        EmulationHostOptions::new(parts.paths.clone(), parts.model, parts.scene, parts.catalog);
     options.mixer = Some(mixer);
     options.script_log = Some(Box::new(|| Box::new(ConsoleScriptLog)));
     options.audio_device_open = parts.audio_open;
@@ -663,9 +656,8 @@ fn finish(options: &AppOptions, state: &RunState, emulated: i64) -> i32 {
     1
 }
 
-fn publish_settings_to_scene(model: &SettingsModel, scene: &SharedScene) {
-    let mut scene = scene.borrow_mut();
-    scene_script_bridge::push_settings(model, &mut scene);
+fn publish_settings_to_scene(model: &SettingsModel, scene: &mut SceneState) {
+    scene_script_bridge::push_settings(model, scene);
     scene.settings.skip_render = model.skip_frame();
     scene.settings.set_target_frame_rate(model.frame_rate());
     scene.settings.set_vsync(model.vsync());
@@ -739,8 +731,7 @@ fn start_game_from_command_line(
 }
 
 fn handle_camera_input(
-    host: &AppHost,
-    scene: &SharedScene,
+    host: &mut AppHost,
     snapshot: &InputSnapshot,
     real: f32,
     state: &mut RunState,
@@ -757,7 +748,7 @@ fn handle_camera_input(
         host.port_type(0),
         host.port_type(1),
     ));
-    let mut scene = scene.borrow_mut();
+    let scene = host.scene_mut();
     controls::apply(&mut scene.camera, camera_actions, real);
     // REQ-INP-090: the wheel is ignored over a piece of interface and while a zoom action is
     // held; 5 scene units per notch (DEC-08-3).
@@ -798,15 +789,14 @@ fn update_cursor(
     }
 }
 
-fn update_scene(host: &mut AppHost, scene: &SharedScene, state: &mut RunState) {
+fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
-    let Some(session) = host.session() else {
-        let mut scene = scene.borrow_mut();
+    let (session, scene) = host.session_and_scene_mut();
+    let Some(session) = session else {
         scene.two_dimensional_mode = false;
         scene.followed_shape = None;
         return;
     };
-    let mut scene = scene.borrow_mut();
     scene.nes_background_color = session.nes_background_color();
     scene.emulated_time = session.emulated_time();
     scene.clipping = session.engine().settings().clipping;
@@ -824,7 +814,6 @@ fn update_scene(host: &mut AppHost, scene: &SharedScene, state: &mut RunState) {
 fn render_scene(
     renderer: &mut SceneRenderer,
     offscreen: &OffscreenFramebuffer,
-    scene: &SharedScene,
     host: &mut AppHost,
     state: &mut RunState,
 ) -> Result<(), String> {
@@ -833,19 +822,19 @@ fn render_scene(
         width: offscreen.width(),
         height: offscreen.height(),
     };
-    let scene = scene.borrow();
+    let (session, scene) = host.session_and_scene();
     let picture: &[u8] = if scene.two_dimensional_mode {
         &state.picture
     } else {
         &[]
     };
-    let list = host.session_mut().map(GameSession::build_draw_list);
+    let list = session.map(GameSession::build_draw_list);
     let frame = SceneFrame {
         draw_list: list,
         nes_picture: picture,
     };
     renderer
-        .render(&target, &scene, &frame)
+        .render(&target, scene, &frame)
         .map_err(|error| error.to_string())?;
     let statistics = renderer.statistics();
     if !state.shadow_map_reported

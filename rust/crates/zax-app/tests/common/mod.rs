@@ -17,7 +17,6 @@ use zax_app::emulation::frame_pacer::Clock;
 use zax_app::emulation::game_catalog::{GameCatalog, ResolvedGame};
 use zax_app::emulation::host::{EmulationHost, EmulationHostOptions};
 use zax_app::input::{InputAction, InputSnapshot};
-use zax_app::scene_script_bridge::SharedScene;
 use zax_app::user_data_paths::UserDataPaths;
 use zax_platform::input::{PhysicalControl, PhysicalControlKind};
 use zax_profiles::profile::GameProfile;
@@ -234,7 +233,6 @@ impl GameCatalog for FakeCatalog {
 pub struct LoopHarness {
     pub root: TemporaryRoot,
     pub host: EmulationHost<FakeCatalog>,
-    pub scene: SharedScene,
     pub paths: UserDataPaths,
     pub log: Rc<RefCell<Vec<String>>>,
     pub thumbnail: Rc<RefCell<Option<Vec<u8>>>>,
@@ -251,7 +249,6 @@ impl LoopHarness {
     pub fn create_with(adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog>)) -> Self {
         let root = TemporaryRoot::new("zax-loop-");
         let paths = UserDataPaths::resolve(Some(root.path()), None, None);
-        let scene: SharedScene = Rc::new(RefCell::new(SceneState::default()));
         let clock = Rc::new(Cell::new(0.0));
         let now = Rc::new(Cell::new(START_UNIX_SECONDS));
         let log = Rc::new(RefCell::new(Vec::new()));
@@ -259,7 +256,7 @@ impl LoopHarness {
         let mut options = EmulationHostOptions::new(
             paths.clone(),
             zax_settings::model::SettingsModel::new(),
-            Rc::clone(&scene),
+            SceneState::default(),
             FakeCatalog::default(),
         );
         options.mixer = Some(AudioMixer::new(48_000, None, TrackRandom::new(1234)));
@@ -279,7 +276,6 @@ impl LoopHarness {
         Self {
             host: EmulationHost::new(options),
             root,
-            scene,
             paths,
             log,
             thumbnail,

@@ -5,9 +5,6 @@
 
 mod common;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use common::{LoopHarness, SyntheticRom, TemporaryRoot};
 use zax_app::audio::{AudioMixer, TrackRandom};
 use zax_app::emulation::commands::{Command, CommandArgs};
@@ -34,7 +31,7 @@ fn req_scn_013_stopping_a_game_resets_the_view_and_returns_to_tpv() {
     harness.launch("g1");
     assert_eq!(EmulationState::Running, harness.host.state());
     {
-        let mut scene = harness.scene.borrow_mut();
+        let scene = harness.host.scene_mut();
         scene.camera.set_mode(CameraMode::Fpv);
         scene.camera.current_mut().set_distance(42.0);
         scene.camera.current_mut().angles = Vector3::new(45.0, 45.0, 0.0);
@@ -44,7 +41,7 @@ fn req_scn_013_stopping_a_game_resets_the_view_and_returns_to_tpv() {
         .host
         .update_settings(|model| model.set_game_speed(4));
     harness.run(Command::Stop);
-    let scene = harness.scene.borrow();
+    let scene = harness.host.scene();
     let camera = &scene.camera;
     assert_eq!(CameraMode::Tpv, camera.mode());
     assert!((camera.current().angles.x - render_geometry::DEFAULT_ANGLES.x).abs() < 1e-3);
@@ -54,7 +51,6 @@ fn req_scn_013_stopping_a_game_resets_the_view_and_returns_to_tpv() {
             < 1e-3
     );
     assert!((camera.smooth_time - CriticalSmoothing::DEFAULT_SMOOTH_TIME).abs() < 1e-4);
-    drop(scene);
     assert_eq!(0, harness.host.settings().game_speed());
 }
 
@@ -87,7 +83,6 @@ struct LibraryHarness {
     _root: TemporaryRoot,
     paths: UserDataPaths,
     host: EmulationHost<LibraryGameCatalog>,
-    scene: Rc<RefCell<SceneState>>,
 }
 
 fn library_harness() -> LibraryHarness {
@@ -100,11 +95,10 @@ fn library_harness() -> LibraryHarness {
     )
     .unwrap();
     let catalog = LibraryGameCatalog::open(None, &paths, Box::new(|_| {}));
-    let scene = Rc::new(RefCell::new(SceneState::default()));
     let mut options = EmulationHostOptions::new(
         paths.clone(),
         zax_settings::model::SettingsModel::new(),
-        Rc::clone(&scene),
+        SceneState::default(),
         catalog,
     );
     options.mixer = Some(AudioMixer::new(48_000, None, TrackRandom::new(1)));
@@ -113,7 +107,6 @@ fn library_harness() -> LibraryHarness {
     LibraryHarness {
         host: EmulationHost::new(options),
         paths,
-        scene,
         _root: root,
     }
 }
@@ -250,7 +243,7 @@ fn req_pers_036_the_pause_capture_can_become_the_cover() {
         .covers_directory
         .join(cover.unwrap())
         .is_file());
-    assert!(harness.scene.borrow().game_running);
+    assert!(harness.host.scene().game_running);
 }
 
 #[test]

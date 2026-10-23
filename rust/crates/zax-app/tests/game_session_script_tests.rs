@@ -7,9 +7,6 @@
 
 mod common;
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use common::SyntheticRom;
 use zax_app::game_session::{GameSession, SessionRequest};
 use zax_app::input::zapper::RELEASED_BYTE;
@@ -32,7 +29,7 @@ fn prelude(source: &str) -> ProfileScript {
 /// A session over the synthetic ROM and a profile built from the given scripts.
 struct Session {
     game: GameSession,
-    scene: Rc<RefCell<SceneState>>,
+    scene: SceneState,
     model: SettingsModel,
 }
 
@@ -41,39 +38,45 @@ impl Session {
         let mut profile = GameProfile::create_empty();
         profile.scripts.extend(scripts);
 
-        let scene = Rc::new(RefCell::new(SceneState::default()));
+        let mut scene = SceneState::default();
         let mut model = SettingsModel::new();
         let request = SessionRequest {
             profile: &profile,
             title: "Test",
-            scene: Rc::clone(&scene),
+            scene: &mut scene,
             log: Box::new(NullScriptLog),
             different_game: true,
             two_dimensional_mode: None,
         };
         let mut game = GameSession::create(request, &mut model).unwrap();
         assert!(game.load_rom(&SyntheticRom::counter(), "test.nes").success);
-        game.start(&mut model);
+        game.start(&mut model, &mut scene);
         Self { game, scene, model }
     }
 
     fn evaluate(&mut self, chunk: &str) {
         self.game
-            .with_runtime(|runtime, state| runtime.evaluate(state, chunk))
+            .with_runtime(&mut self.scene, |runtime, state| {
+                runtime.evaluate(state, chunk)
+            })
             .expect("a runtime")
             .unwrap();
     }
 
     fn number(&mut self, chunk: &str) -> f64 {
         self.game
-            .with_runtime(|runtime, state| runtime.evaluate_number(state, chunk))
+            .with_runtime(&mut self.scene, |runtime, state| {
+                runtime.evaluate_number(state, chunk)
+            })
             .expect("a runtime")
             .unwrap()
     }
 
     fn text(&mut self, chunk: &str) -> String {
         self.game
-            .with_runtime(|runtime, state| runtime.evaluate_text(state, chunk))
+            .with_runtime(&mut self.scene, |runtime, state| {
+                runtime.evaluate_text(state, chunk)
+            })
             .expect("a runtime")
             .unwrap()
     }
@@ -91,6 +94,7 @@ impl Session {
     fn run_frame(&mut self, player_one: InputAction) {
         self.game.run_frame(
             &mut self.model,
+            &mut self.scene,
             player_one,
             InputAction::NONE,
             RELEASED_BYTE,
@@ -134,15 +138,15 @@ fn ending_the_game_calls_end_then_resets_the_backdrop_req_lua_021() {
         prelude("log = {}"),
     ]);
 
-    assert!(session.scene.borrow().backdrop.enabled);
-    assert!((session.scene.borrow().backdrop.offset.z - 17.1).abs() < 1e-4);
+    assert!(session.scene.backdrop.enabled);
+    assert!((session.scene.backdrop.offset.z - 17.1).abs() < 1e-4);
 
-    session.game.end(&mut session.model);
+    session.game.end(&mut session.model, &mut session.scene);
 
     // End saw the state it had set; the reset of REQ-LUA-090 runs after it.
     assert_eq!(session.log(), ["End", "true"]);
-    assert!(!session.scene.borrow().backdrop.enabled);
-    assert_eq!(session.scene.borrow().backdrop.offset.z, 0.0);
+    assert!(!session.scene.backdrop.enabled);
+    assert_eq!(session.scene.backdrop.offset.z, 0.0);
 }
 
 /// REQ-LUA-071 and REQ-LUA-072 with the order of DEC-R2-T6: `Save` then the block, then on the way
@@ -164,7 +168,7 @@ fn the_savestate_sequence_follows_req_lua_072_and_dec_r2_t6() {
     session.evaluate("scene = 2");
     let block = session
         .game
-        .capture_script_state(&mut session.model)
+        .capture_script_state(&mut session.model, &mut session.scene)
         .unwrap();
 
     // The savestate kept scene 2; the running game moves on to something else.
@@ -172,10 +176,10 @@ fn the_savestate_sequence_follows_req_lua_072_and_dec_r2_t6() {
     session.run_frame(InputAction::NONE);
 
     // BeginScriptRestore is End; the caller restores the core in between.
-    session.game.end(&mut session.model);
+    session.game.end(&mut session.model, &mut session.scene);
     session
         .game
-        .complete_script_restore(&mut session.model, &block)
+        .complete_script_restore(&mut session.model, &mut session.scene, &block)
         .unwrap();
 
     assert_eq!(
@@ -205,12 +209,12 @@ fn the_libretro_sequence_calls_load_alone_req_lua_075() {
 
     let block = session
         .game
-        .capture_script_state(&mut session.model)
+        .capture_script_state(&mut session.model, &mut session.scene)
         .unwrap();
     session.evaluate("PData[1] = 0");
     session
         .game
-        .restore_script_state_in_place(&mut session.model, &block)
+        .restore_script_state_in_place(&mut session.model, &mut session.scene, &block)
         .unwrap();
 
     assert_eq!(session.log(), ["Start", "Save", "Load(42)"]);
@@ -234,7 +238,7 @@ fn a_reset_keeps_the_lua_state_req_lua_013() {
     session.run_frame(InputAction::NONE);
     assert!(session.script_failed("bad"));
 
-    session.game.reset(&mut session.model);
+    session.game.reset(&mut session.model, &mut session.scene);
 
     // The chunk did not run again (n stays 1) and the failed script got neither hook
     // (REQ-LUA-062).

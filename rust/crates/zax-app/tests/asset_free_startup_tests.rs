@@ -9,9 +9,7 @@
 
 mod common;
 
-use std::cell::RefCell;
 use std::path::Path;
-use std::rc::Rc;
 
 use common::TemporaryRoot;
 use walkdir::WalkDir;
@@ -124,10 +122,11 @@ fn req_pub_001_the_default_3d_entry_converts_in_3d_and_the_2d_entry_does_not() {
     // other reading of the same empty profile.
     let profile = GameProfile::create_empty();
     let session_of = |title: &str, two_dimensional_mode: Option<bool>| {
+        let mut scene = SceneState::default();
         let request = SessionRequest {
             profile: &profile,
             title,
-            scene: Rc::new(RefCell::new(SceneState::default())),
+            scene: &mut scene,
             log: Box::new(NullScriptLog),
             different_game: true,
             two_dimensional_mode,

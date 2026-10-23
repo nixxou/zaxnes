@@ -272,7 +272,7 @@ fn req_inp_060_a_different_game_puts_both_ports_back_on_controllers() {
     // A Zapper profile would do this from its Start hook (SPEC-05 REQ-LUA-032).
     harness
         .host
-        .session()
+        .session_mut()
         .unwrap()
         .set_port_type(1, ControllerPortType::Zapper);
     assert_eq!(ControllerPortType::Zapper, harness.host.port_type(1));
@@ -297,12 +297,12 @@ fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("duck"));
     harness
         .host
-        .session()
+        .session_mut()
         .unwrap()
         .set_port_type(1, ControllerPortType::Zapper);
     // Pointer over the centre of the image, right button held.
     let view = {
-        let scene = harness.scene.borrow();
+        let scene = harness.host.scene();
         scene
             .camera
             .build_view(scene.clipping, VIEWPORT[0] / VIEWPORT[1])

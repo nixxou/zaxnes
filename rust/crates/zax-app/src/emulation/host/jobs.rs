@@ -234,7 +234,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         if !job.different_game {
             return;
         }
-        if let Some(session) = &self.session {
+        if let Some(session) = &mut self.session {
             session.reset_port_types();
             self.zapper.reset();
         }
@@ -248,7 +248,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         let request = SessionRequest {
             profile: &game.profile,
             title: &game.title,
-            scene: std::rc::Rc::clone(&self.scene),
+            scene: &mut self.scene,
             log: (self.script_log)(),
             different_game: reload_profile,
             // Q-065: the same empty profile plays flat as "2D Mode" and in 3D as "3D by
@@ -322,13 +322,13 @@ impl<C: GameCatalog> EmulationHost<C> {
                 }
                 self.reset_port_types_on_game_change(job);
                 if let Some(session) = self.session.as_mut() {
-                    session.start(&mut self.settings);
+                    session.start(&mut self.settings, &mut self.scene);
                 }
                 self.current_game = Some(game);
                 // Nothing per-game is remembered about the camera (REQ-PERS-031): a launch always
                 // starts from the default view.
                 {
-                    let mut scene = self.scene.borrow_mut();
+                    let scene = &mut self.scene;
                     scene.camera.reset_view();
                     scene.camera.snap_to_setpoints();
                 }
@@ -409,13 +409,15 @@ impl<C: GameCatalog> EmulationHost<C> {
             self.log("savestate sections refused: the camera section has the wrong size.");
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
-        self.scene.borrow_mut().camera.restore(&camera);
+        self.scene.camera.restore(&camera);
         // REQ-INP-060: the core block carries the port types, but they are not part of what is
         // persisted across a game change; they go back to Controller before the Start hook that
         // the script restore runs.
         self.reset_port_types_on_game_change(job);
         if let Some(session) = self.session.as_mut() {
-            if let Err(error) = session.complete_script_restore(&mut self.settings, &state.lua) {
+            if let Err(error) =
+                session.complete_script_restore(&mut self.settings, &mut self.scene, &state.lua)
+            {
                 self.log(&format!("savestate sections refused: {error}"));
                 return Step::Failed(CORRUPTED_MESSAGE.to_owned());
             }
@@ -444,7 +446,11 @@ impl<C: GameCatalog> EmulationHost<C> {
         match job.stage {
             0 => {
                 if let Some(session) = self.session.as_mut() {
-                    session.set_render_algorithm(&mut self.settings, job.algorithm);
+                    session.set_render_algorithm(
+                        &mut self.settings,
+                        &mut self.scene,
+                        job.algorithm,
+                    );
                 }
                 job.stage = 1;
                 Step::Continue
@@ -517,7 +523,7 @@ impl<C: GameCatalog> EmulationHost<C> {
                 self.settings.set_tv_mode(mode);
             }
         }
-        if let Some(session) = &self.session {
+        if let Some(session) = &mut self.session {
             session.core_mut().set_region(self.settings.region());
         }
         self.dispatch_setting_changes();
@@ -527,10 +533,10 @@ impl<C: GameCatalog> EmulationHost<C> {
     /// Resets the light and the backdrop and pushes the profile's settings into the scene
     /// (REQ-SCN-009, SPEC-09 REQ-PERS-005).
     fn apply_profile_scene(&mut self) {
-        let mut scene = self.scene.borrow_mut();
+        let scene = &mut self.scene;
         scene.light.reset();
         scene.backdrop.reset();
-        crate::scene_script_bridge::push_settings(&self.settings, &mut scene);
+        crate::scene_script_bridge::push_settings(&self.settings, scene);
     }
 
     pub(super) fn current_rom_fingerprint(&self) -> Option<String> {
@@ -550,7 +556,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         let saved = self.battery.attach(&self.paths, &fingerprint);
         // A savestate carries its own cartridge RAM, exactly as a console would, so it must not
         // be overwritten by the file on disk (REQ-PERS-060, notes).
-        if let (true, Some(saved), Some(session)) = (import_saved, saved, self.session.as_ref()) {
+        if let (true, Some(saved), Some(session)) = (import_saved, saved, self.session.as_mut()) {
             session.core_mut().import_battery_ram(&saved);
         }
     }

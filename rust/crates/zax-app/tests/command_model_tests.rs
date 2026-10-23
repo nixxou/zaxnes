@@ -145,7 +145,7 @@ fn req_ui_205_the_toggles_report_their_state() {
     harness.run(Command::ToggleShadows);
     assert!(!harness.host.is_checked(Command::ToggleShadows));
     assert!(!harness.host.settings().shadow());
-    assert!(!harness.scene.borrow().settings.shadows);
+    assert!(!harness.host.scene().settings.shadows);
     assert!(Command::ToggleMenuMusic.is_toggle());
     assert!(harness.host.is_checked(Command::ToggleMenuMusic));
     harness.run(Command::ToggleMenuMusic);
