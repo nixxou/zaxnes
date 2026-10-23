@@ -244,8 +244,12 @@ fn amd_035_the_options_window_offers_the_language_in_the_interface_tab() {
 /// AMD-035 §2: the console log and the command line stay in English whatever the setting says.
 /// The usage text is a constant of `AppOptions`, so it cannot follow the language at all.
 #[test]
-#[ignore = "the usage text of AppOptions is ported with the command-line front end (T14)"]
-fn amd_035_the_help_text_stays_in_english() {}
+fn amd_035_the_help_text_stays_in_english() {
+    let _language = UiLanguageScope::new(UiLanguage::French);
+
+    assert!(USAGE.contains("Show this help and exit."));
+    assert!(USAGE.contains("Usage:"));
+}
 
 /// AMD-036 §2: in `en`, every notification whose text SPEC-10 §3.10 and SPEC-09 fix word for
 /// word is identical, character for character, to the text of the spec: the two spaces of

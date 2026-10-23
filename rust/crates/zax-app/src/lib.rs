@@ -19,5 +19,6 @@ pub mod render_scaling;
 pub mod render_skip;
 pub mod scene_script_bridge;
 pub mod single_instance;
+pub mod three_d_sen_command;
 pub mod ui;
 pub mod user_data_paths;
