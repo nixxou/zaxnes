@@ -6,7 +6,7 @@ mod ui_harness;
 use std::collections::{HashMap, HashSet};
 
 use ui_harness::{UiHarness, UiLanguageScope};
-use zax_platform::input::Key;
+use zax_app::application::AppHost;
 use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::input::default_bindings::PLAYER_ONE_KEYBOARD;
 use zax_app::persistence::save_slots::EXPOSED_SLOT_COUNT;
@@ -16,7 +16,7 @@ use zax_app::ui::menu_bar::{MenuBarModel, MenuItem, MenuItemKind};
 use zax_app::ui::menu_shortcuts::{self, ShortcutCommand, ShortcutModifiers};
 use zax_app::ui::strings::UiLanguage;
 use zax_app::ui::text;
-use zax_app::application::AppHost;
+use zax_platform::input::Key;
 
 /// Every entry of `items`, the children of each submenu after it.
 fn expand(items: &[MenuItem], host: &AppHost) -> Vec<MenuItem> {
@@ -84,7 +84,13 @@ fn req_ui_200_the_five_menus_exist_with_their_titles() {
     let _language = UiLanguageScope::keep();
     let mut harness = UiHarness::new(&["Arkanoid"]);
 
-    let titles: Vec<String> = harness.ui.menu_bar.menus().iter().map(|m| m.title.clone()).collect();
+    let titles: Vec<String> = harness
+        .ui
+        .menu_bar
+        .menus()
+        .iter()
+        .map(|m| m.title.clone())
+        .collect();
     assert_eq!(vec!["File", "Emulation", "Video", "Audio", "Tools"], titles);
 
     harness.host.update_settings(|model| {
@@ -93,8 +99,17 @@ fn req_ui_200_the_five_menus_exist_with_their_titles() {
     });
     harness.pump();
 
-    let titles: Vec<String> = harness.ui.menu_bar.menus().iter().map(|m| m.title.clone()).collect();
-    assert_eq!(vec!["Fichier", "Émulation", "Vidéo", "Audio", "Outils"], titles);
+    let titles: Vec<String> = harness
+        .ui
+        .menu_bar
+        .menus()
+        .iter()
+        .map(|m| m.title.clone())
+        .collect();
+    assert_eq!(
+        vec!["Fichier", "Émulation", "Vidéo", "Audio", "Outils"],
+        titles
+    );
 }
 
 #[test]
@@ -214,7 +229,10 @@ fn req_ui_208_the_slot_submenus_show_a_date_or_vide() {
 
     // Ten numbered rows, a rule, and the quick slot (REQ-UI-208).
     assert_eq!(EXPOSED_SLOT_COUNT + 2, slots.len());
-    for item in slots.iter().filter(|item| item.kind != MenuItemKind::Separator) {
+    for item in slots
+        .iter()
+        .filter(|item| item.kind != MenuItemKind::Separator)
+    {
         assert!(item.label.contains(&text::empty_slot()), "{}", item.label);
     }
 
@@ -222,10 +240,12 @@ fn req_ui_208_the_slot_submenus_show_a_date_or_vide() {
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(3));
 
     let slots = submenu_of(&mut harness, &text::menu_file(), &text::load_state());
+    assert!(slots[2].label.contains(&save_state_file::format_timestamp(
+        common::START_UNIX_SECONDS
+    )));
     assert!(slots[2]
         .label
-        .contains(&save_state_file::format_timestamp(common::START_UNIX_SECONDS)));
-    assert!(slots[2].label.starts_with(&format!("{} 3 ", text::slot_prefix())));
+        .starts_with(&format!("{} 3 ", text::slot_prefix())));
 
     // The slots beyond ten are never exposed (REQ-UI-208, accepted divergence D).
     assert_eq!(
@@ -258,7 +278,11 @@ fn req_ui_200_the_recent_rom_submenu_lists_the_ten_last_files() {
     let recent = submenu_of(&mut harness, &text::menu_file(), &text::recent_roms());
     assert_eq!(10, recent.len());
     // The file name of a Windows path, whatever the platform running the test.
-    assert!(recent[0].label.ends_with("rom11.nes"), "{}", recent[0].label);
+    assert!(
+        recent[0].label.ends_with("rom11.nes"),
+        "{}",
+        recent[0].label
+    );
 }
 
 #[test]
@@ -275,7 +299,10 @@ fn req_ui_204_the_shortcut_table_resolves_each_combination() {
         Host(Command::ToggleFullscreen),
         single(Key::Enter, ShortcutModifiers::ALT).0
     );
-    assert_eq!(Host(Command::ToggleTwoDimensional), single(Key::F11, none).0);
+    assert_eq!(
+        Host(Command::ToggleTwoDimensional),
+        single(Key::F11, none).0
+    );
     assert_eq!(
         ShortcutCommand::Ui(UiCommand::ToggleDebugOverlay),
         single(Key::F12, none).0
@@ -313,7 +340,10 @@ fn req_ui_204_the_shortcut_table_has_no_conflict() {
 fn req_ui_204_no_bare_shortcut_collides_with_a_default_game_key() {
     // Player 2 has no default keyboard binding (REQ-INP-011), so player 1's table is the whole of
     // §4.2.
-    let game_keys: HashSet<i32> = PLAYER_ONE_KEYBOARD.iter().map(|(_, key)| *key as i32).collect();
+    let game_keys: HashSet<i32> = PLAYER_ONE_KEYBOARD
+        .iter()
+        .map(|(_, key)| *key as i32)
+        .collect();
 
     for key in menu_shortcuts::bare_keys() {
         assert!(!game_keys.contains(&(key as i32)), "{}", key.name());

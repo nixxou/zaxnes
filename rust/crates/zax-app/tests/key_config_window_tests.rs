@@ -6,12 +6,12 @@ mod ui_harness;
 
 use common::FakeGamepad;
 use ui_harness::UiHarness;
-use zax_platform::input::{standard_gamepad, GamepadHub as _, Key};
 use zax_app::emulation::commands::Command;
 use zax_app::input::input_action::{self, InputAction};
 use zax_app::input::{BindingDeviceKind, BindingTarget};
-use zax_app::ui::key_config::{self, KeyConfigRow, COMMANDS_NEEDING_ARGUMENTS};
 use zax_app::ui::commands::UiCommand;
+use zax_app::ui::key_config::{self, KeyConfigRow, COMMANDS_NEEDING_ARGUMENTS};
+use zax_platform::input::{standard_gamepad, GamepadHub as _, Key};
 
 fn row_of(harness: &mut UiHarness, target: &BindingTarget, player: usize) -> KeyConfigRow {
     harness
@@ -67,7 +67,15 @@ fn req_ui_203_the_window_lists_the_actions_of_both_players_and_the_commands() {
             input_action::name_of(action)
         );
     }
-    assert_eq!(8, harness.ui.keys.all_rows().filter(|row| row.player == 1).count());
+    assert_eq!(
+        8,
+        harness
+            .ui
+            .keys
+            .all_rows()
+            .filter(|row| row.player == 1)
+            .count()
+    );
 
     // Every argument-less command of the model is bindable (REQ-UI-203).
     for command in Command::ALL {
@@ -181,9 +189,10 @@ fn req_ui_203_a_menu_command_bound_to_a_pad_button_runs() {
     let triggered: Vec<String> = harness.input.triggered_commands().to_vec();
     for name in triggered {
         if let Some(command) = Command::from_name(&name) {
-            harness
-                .host
-                .enqueue(command, zax_app::emulation::commands::CommandArgs::default());
+            harness.host.enqueue(
+                command,
+                zax_app::emulation::commands::CommandArgs::default(),
+            );
         }
     }
     harness.host.apply_commands();

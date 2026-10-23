@@ -14,7 +14,11 @@ use zax_settings::catalogue::{self, SettingId};
 use zax_settings::meta::{SettingScope, SettingTheme};
 
 fn keys(model: &OptionsModel, tab: OptionsTab) -> Vec<SettingId> {
-    model.rows(tab).iter().map(|row| row.descriptor.id()).collect()
+    model
+        .rows(tab)
+        .iter()
+        .map(|row| row.descriptor.id())
+        .collect()
 }
 
 fn row(model: &OptionsModel, id: SettingId) -> OptionsRow {
@@ -86,13 +90,27 @@ fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
         tabs.iter().map(|tab| options::title_of(*tab)).collect()
     };
     assert_eq!(
-        vec!["Video", "Camera", "Light and shadows", "Audio", "Emulation", "Interface"],
+        vec![
+            "Video",
+            "Camera",
+            "Light and shadows",
+            "Audio",
+            "Emulation",
+            "Interface"
+        ],
         titles(&options::TABS)
     );
 
     strings::set_language(UiLanguage::French);
     assert_eq!(
-        vec!["Vidéo", "Caméra", "Lumière et ombres", "Audio", "Émulation", "Interface"],
+        vec![
+            "Vidéo",
+            "Caméra",
+            "Lumière et ombres",
+            "Audio",
+            "Émulation",
+            "Interface"
+        ],
         titles(&options::TABS)
     );
 
@@ -172,12 +190,20 @@ fn req_ui_202_a_change_takes_effect_and_the_reset_restores_the_defaults() {
     assert!((harness.host.settings().get(SettingId::CameraFov).as_float() - 70.0).abs() < 1e-4);
 
     // The shadows are on the light tab, so the camera reset leaves them alone.
-    assert!(!harness.host.settings().get(SettingId::RenderShadow).as_bool());
+    assert!(!harness
+        .host
+        .settings()
+        .get(SettingId::RenderShadow)
+        .as_bool());
 
     harness
         .host
         .update_settings(|settings| model.reset_tab(settings, OptionsTab::Light));
-    assert!(harness.host.settings().get(SettingId::RenderShadow).as_bool());
+    assert!(harness
+        .host
+        .settings()
+        .get(SettingId::RenderShadow)
+        .as_bool());
 }
 
 #[test]

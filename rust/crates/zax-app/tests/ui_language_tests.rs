@@ -53,10 +53,20 @@ fn amd_035_the_two_tables_have_the_same_keys_and_no_empty_value() {
 
     let english_keys: HashSet<&str> = english.iter().map(|(key, _)| *key).collect();
     let french_keys: HashSet<&str> = french.iter().map(|(key, _)| *key).collect();
-    assert_eq!(english.len(), english_keys.len(), "a key is twice in English");
+    assert_eq!(
+        english.len(),
+        english_keys.len(),
+        "a key is twice in English"
+    );
     assert_eq!(french.len(), french_keys.len(), "a key is twice in French");
-    assert_eq!(Vec::<&&str>::new(), english_keys.difference(&french_keys).collect::<Vec<_>>());
-    assert_eq!(Vec::<&&str>::new(), french_keys.difference(&english_keys).collect::<Vec<_>>());
+    assert_eq!(
+        Vec::<&&str>::new(),
+        english_keys.difference(&french_keys).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        Vec::<&&str>::new(),
+        french_keys.difference(&english_keys).collect::<Vec<_>>()
+    );
 
     for (key, text) in english.iter().chain(french) {
         assert!(!text.trim().is_empty(), "{key}");
@@ -129,7 +139,10 @@ fn amd_035_a_fresh_user_folder_is_english() {
     assert_eq!("File", harness.ui.menu_bar.menus()[0].title);
     assert_eq!("Video", options::title_of(OptionsTab::Video));
     assert_eq!("Open a ROM…", strings::get(&Command::OpenRom.label_key()));
-    assert_eq!("Player 1 — NES buttons", harness.ui.keys.sections()[0].title);
+    assert_eq!(
+        "Player 1 — NES buttons",
+        harness.ui.keys.sections()[0].title
+    );
 }
 
 /// AMD-035 §1 and §4: writing `fr` switches the whole interface at once (the menu bar, the
@@ -139,19 +152,29 @@ fn amd_035_switching_to_french_changes_the_texts_at_once() {
     let _language = UiLanguageScope::keep();
     let mut harness = UiHarness::new(&["Arkanoid"]);
 
-    harness.host.update_settings(|model| model.set_language("fr"));
+    harness
+        .host
+        .update_settings(|model| model.set_language("fr"));
     harness.pump();
 
     assert_eq!(UiLanguage::French, strings::language());
     assert_eq!("Fichier", harness.ui.menu_bar.menus()[0].title);
     assert_eq!("Vidéo", options::title_of(OptionsTab::Video));
-    assert_eq!("Ouvrir une ROM…", strings::get(&Command::OpenRom.label_key()));
-    assert_eq!("Joueur 1 — boutons NES", harness.ui.keys.sections()[0].title);
+    assert_eq!(
+        "Ouvrir une ROM…",
+        strings::get(&Command::OpenRom.label_key())
+    );
+    assert_eq!(
+        "Joueur 1 — boutons NES",
+        harness.ui.keys.sections()[0].title
+    );
     assert_eq!("Valeurs par défaut", text::reset_defaults());
     assert_eq!("Poste de travail", file_browser::computer_label());
 
     // And back again, still without a restart.
-    harness.host.update_settings(|model| model.set_language("en"));
+    harness
+        .host
+        .update_settings(|model| model.set_language("en"));
     harness.pump();
     assert_eq!("File", harness.ui.menu_bar.menus()[0].title);
 }
@@ -162,7 +185,9 @@ fn amd_035_the_choice_is_persisted_and_read_back_at_the_next_launch() {
     let _language = UiLanguageScope::keep();
     let mut harness = UiHarness::new(&["Arkanoid"]);
 
-    harness.host.update_settings(|model| model.set_language("fr"));
+    harness
+        .host
+        .update_settings(|model| model.set_language("fr"));
     harness.pump();
     let mut store = SettingsStore::new(&harness.paths);
     store.save(harness.host.settings());
@@ -234,7 +259,10 @@ fn req_ui_082_in_english_the_fixed_texts_are_the_texts_of_the_spec() {
     assert_eq!("Quick Load", strings::get(keys::NOTIFY_QUICK_LOAD));
 
     // REQ-UI-083: the five load and read failures.
-    assert_eq!("Corrupted zip file", strings::get(keys::NOTIFY_CORRUPTED_ZIP));
+    assert_eq!(
+        "Corrupted zip file",
+        strings::get(keys::NOTIFY_CORRUPTED_ZIP)
+    );
     assert_eq!(
         "Uncompression is not successful",
         strings::get(keys::NOTIFY_UNCOMPRESSION_FAILED)
@@ -277,7 +305,10 @@ fn req_ui_082_in_english_the_fixed_texts_are_the_texts_of_the_spec() {
     );
 
     // REQ-PERS-042 and REQ-PERS-054: the two questions and their buttons.
-    assert_eq!(DELETE_GAME_QUESTION, strings::get(keys::CONFIRM_DELETE_GAME));
+    assert_eq!(
+        DELETE_GAME_QUESTION,
+        strings::get(keys::CONFIRM_DELETE_GAME)
+    );
     assert_eq!(
         "Do you want to delete the slot 4 ?",
         notifications::translate(&delete_slot_question("4"))
@@ -288,7 +319,10 @@ fn req_ui_082_in_english_the_fixed_texts_are_the_texts_of_the_spec() {
     // Every one of them is produced in English by the module that raises it, so the English
     // interface shows exactly what that module wrote.
     for key in fixed_text_keys() {
-        assert_eq!(strings::lookup(UiLanguage::English, key), Some(strings::get(key).as_str()));
+        assert_eq!(
+            strings::lookup(UiLanguage::English, key),
+            Some(strings::get(key).as_str())
+        );
     }
 }
 
@@ -299,14 +333,19 @@ fn amd_036_in_french_the_fixed_texts_are_translated_where_they_are_shown() {
     let _language = UiLanguageScope::new(UiLanguage::French);
 
     assert_eq!("Sauvegarde rapide", notifications::translate("Quick Save"));
-    assert_eq!("Fichier ROM invalide.", notifications::translate(INVALID_ROM_MESSAGE));
+    assert_eq!(
+        "Fichier ROM invalide.",
+        notifications::translate(INVALID_ROM_MESSAGE)
+    );
     assert_eq!(
         "Le profil du jeu n'existe plus.",
         notifications::translate(GAME_MISSING_MESSAGE)
     );
     assert_eq!(
         "Le fichier de réglages était illisible et a été réinitialisé.",
-        notifications::translate(SettingsFile::<zax_settings::store::MemoryStorage>::UNREADABLE_MESSAGE)
+        notifications::translate(
+            SettingsFile::<zax_settings::store::MemoryStorage>::UNREADABLE_MESSAGE
+        )
     );
 
     // The value of a patterned text is read out of the English message and put back into the
@@ -315,10 +354,12 @@ fn amd_036_in_french_the_fixed_texts_are_translated_where_they_are_shown() {
         "La version 7 du format 3dn n'est pas prise en charge",
         notifications::translate(&import_messages::unsupported_version("7"))
     );
-    assert!(notifications::translate(&import_messages::obsolete_format(
-        std::path::Path::new("C:\\x\\y.3dn")
-    ))
-    .starts_with("C:\\x\\y.3dn a un format de profil obsolète"));
+    assert!(
+        notifications::translate(&import_messages::obsolete_format(std::path::Path::new(
+            "C:\\x\\y.3dn"
+        )))
+        .starts_with("C:\\x\\y.3dn a un format de profil obsolète")
+    );
 
     // The two confirmations and their buttons, through the box that shows them.
     let request = ConfirmationRequest {
@@ -354,8 +395,18 @@ fn amd_036_the_3dsen_import_summary_is_english_on_the_command_line() {
     let summary = ThreeDSenImportSummary::new(
         std::path::Path::new("C:\\3dSen\\bundle"),
         vec![
-            result("Pinball", ThreeDSenProfileOutcome::Imported, "Pinball.3dn", ""),
-            result("Tetris", ThreeDSenProfileOutcome::AlreadyPresent, "Tetris.3dn", ""),
+            result(
+                "Pinball",
+                ThreeDSenProfileOutcome::Imported,
+                "Pinball.3dn",
+                "",
+            ),
+            result(
+                "Tetris",
+                ThreeDSenProfileOutcome::AlreadyPresent,
+                "Tetris.3dn",
+                "",
+            ),
             result("junk", ThreeDSenProfileOutcome::Failed, "", "bad"),
         ],
     );
@@ -368,7 +419,11 @@ fn amd_036_the_3dsen_import_summary_is_english_on_the_command_line() {
     // The same three counts, in the language of the interface, for the notification.
     assert_eq!(
         "3dSen : 1 profil(s) importé(s), 1 déjà présent(s), 1 en échec.",
-        notifications::three_d_sen_summary(summary.imported, summary.already_present, summary.failed)
+        notifications::three_d_sen_summary(
+            summary.imported,
+            summary.already_present,
+            summary.failed
+        )
     );
 }
 

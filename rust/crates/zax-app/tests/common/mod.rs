@@ -254,7 +254,9 @@ impl LoopHarness {
     }
 
     /// A harness whose host options are adjusted by `adjust` before the host is built.
-    pub fn create_with(adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog, StubView>)) -> Self {
+    pub fn create_with(
+        adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog, StubView>),
+    ) -> Self {
         let root = TemporaryRoot::new("zax-loop-");
         let paths = UserDataPaths::resolve(Some(root.path()), None, None);
         let clock = Rc::new(Cell::new(0.0));
