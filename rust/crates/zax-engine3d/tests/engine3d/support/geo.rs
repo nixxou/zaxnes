@@ -114,7 +114,8 @@ pub fn fields(
     instance: &PatternInstance,
     algorithm: RenderAlgorithm,
 ) -> (Vec<TileVoxels>, i32) {
-    let built = voxel_construction::build(pattern, &texture_of(pattern, instance), instance, algorithm);
+    let built =
+        voxel_construction::build(pattern, &texture_of(pattern, instance), instance, algorithm);
     (built.fields, built.effective_depth)
 }
 
@@ -129,7 +130,11 @@ pub fn mesh(
     let built = voxel_construction::build(pattern, &texture, instance, algorithm);
     if algorithm == RenderAlgorithm::Marching {
         let voxels = PatternVoxels::new(pattern, &texture, &built.fields);
-        return marching::build(&voxels, image_index, ObjectTexture::empty_color(instance.empty_color));
+        return marching::build(
+            &voxels,
+            image_index,
+            ObjectTexture::empty_color(instance.empty_color),
+        );
     }
 
     greedy::build(
@@ -141,7 +146,11 @@ pub fn mesh(
 }
 
 /// The mesh of a one-tile pattern, the usual case of §5.
-pub fn mesh_of(tile: TileImageKey, instance: &PatternInstance, algorithm: RenderAlgorithm) -> TileMesh {
+pub fn mesh_of(
+    tile: TileImageKey,
+    instance: &PatternInstance,
+    algorithm: RenderAlgorithm,
+) -> TileMesh {
     mesh(&one_tile(tile), instance, algorithm, 0)
 }
 

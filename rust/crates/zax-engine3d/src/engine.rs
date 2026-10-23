@@ -18,8 +18,8 @@ use crate::geometry::builder::{
 use crate::grid;
 use crate::image::{ImageRegistry, TileImageKey};
 use crate::instance::InstanceRef;
-use crate::pattern::EnginePattern;
 use crate::palette::Rgb24;
+use crate::pattern::EnginePattern;
 use crate::registry::{PatternId, PatternRegistry};
 use crate::script::{NullScriptHost, ScriptHost};
 use crate::segmenter::{SegmentContext, Segmenter};

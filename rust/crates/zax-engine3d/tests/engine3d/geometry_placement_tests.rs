@@ -39,7 +39,9 @@ fn profile(key: TileImageKey, depth: i32, layer: ProfileLayer, tags: Option<&str
 fn engine_with(depth: i32, layer: ProfileLayer, tags: Option<&str>) -> ConversionEngine {
     let mut engine = ConversionEngine::new();
     engine.use_geometry();
-    engine.load_profile(&profile(img::a(), depth, layer, tags), true).unwrap();
+    engine
+        .load_profile(&profile(img::a(), depth, layer, tags), true)
+        .unwrap();
     engine
 }
 
@@ -68,12 +70,16 @@ fn single(list: &FrameDrawList) -> &DrawTile {
     &list.tiles()[0]
 }
 
-fn bottom(py: i32) -> f32 {
-    (grid::SCENE_HEIGHT - py - 1) as f32
+fn scene_height() -> f32 {
+    f32::from(i16::try_from(grid::SCENE_HEIGHT).unwrap())
 }
 
-fn top(py: i32) -> f32 {
-    (grid::SCENE_HEIGHT - py) as f32
+fn bottom(py: u8) -> f32 {
+    scene_height() - f32::from(py) - 1.0
+}
+
+fn top(py: u8) -> f32 {
+    scene_height() - f32::from(py)
 }
 
 fn assert_scene_box(tile: &DrawTile, min: (f32, f32, f32), max: (f32, f32, f32)) {
@@ -83,7 +89,11 @@ fn assert_scene_box(tile: &DrawTile, min: (f32, f32, f32), max: (f32, f32, f32))
     for vertex in mesh.vertices() {
         let scene = tile.transform.transform_point(vertex.position);
         low = Vec3::new(low.x.min(scene.x), low.y.min(scene.y), low.z.min(scene.z));
-        high = Vec3::new(high.x.max(scene.x), high.y.max(scene.y), high.z.max(scene.z));
+        high = Vec3::new(
+            high.x.max(scene.x),
+            high.y.max(scene.y),
+            high.z.max(scene.z),
+        );
     }
 
     assert_close(min.0, low.x, 3);
@@ -105,13 +115,13 @@ fn req_e3d_410_the_scene_frame_places_the_nes_image_in_y_from_eight_to_two_hundr
 
     // The geometric centre of the visible image is (128, 128); the reference frame is centred
     // on C = (128, 120, 0), eight units below it.
-    assert_eq!(128.0, (bottom(239) + top(0)) / 2.0);
+    assert_eq!(128.0, bottom(239).midpoint(top(0)));
     assert_eq!(120.0, 240.0 / 2.0);
 
     // Inverse relation: a point (x, y) of the plane z = 0 shows the pixel
     // (floor x, floor (Hs − y)).
-    assert_eq!(239.0, (grid::SCENE_HEIGHT as f32 - 8.5).floor());
-    assert_eq!(0.0, (grid::SCENE_HEIGHT as f32 - 247.5).floor());
+    assert_eq!(239.0, (scene_height() - 8.5).floor());
+    assert_eq!(0.0, (scene_height() - 247.5).floor());
 }
 
 #[test]
@@ -128,14 +138,26 @@ fn tv_w1_a_background_tile_is_placed_in_front_of_its_layer() {
 
     // In L2 the whole object moves twelve units away.
     let mut second = engine_with(4, ProfileLayer::L2, None);
-    assert_scene_box(single(&draw(&mut second, img::a(), 16, 32)), (16.0, 208.0, 12.0), (24.0, 216.0, 16.0));
+    assert_scene_box(
+        single(&draw(&mut second, img::a(), 16, 32)),
+        (16.0, 208.0, 12.0),
+        (24.0, 216.0, 16.0),
+    );
 
     // CENTER and BACK alignments, with a zero layer offset.
     engine.settings_mut().layer_mut(ZLayer::L1).alignment = ZAlignment::Center;
-    assert_scene_box(single(&draw(&mut engine, img::a(), 16, 32)), (16.0, 208.0, -2.0), (24.0, 216.0, 2.0));
+    assert_scene_box(
+        single(&draw(&mut engine, img::a(), 16, 32)),
+        (16.0, 208.0, -2.0),
+        (24.0, 216.0, 2.0),
+    );
 
     engine.settings_mut().layer_mut(ZLayer::L1).alignment = ZAlignment::Back;
-    assert_scene_box(single(&draw(&mut engine, img::a(), 16, 32)), (16.0, 208.0, -4.0), (24.0, 216.0, 0.0));
+    assert_scene_box(
+        single(&draw(&mut engine, img::a(), 16, 32)),
+        (16.0, 208.0, -4.0),
+        (24.0, 216.0, 0.0),
+    );
     assert_eq!(1, engine.geometry_builder().unwrap().object_count());
 }
 
@@ -174,7 +196,11 @@ fn tv_w3_scale_pivot_and_rotation_act_around_the_anchor() {
     let mut engine = engine(4);
 
     reference(&mut engine).scale = Vec3::new(2.0, 1.0, 1.0);
-    assert_scene_box(single(&draw(&mut engine, img::a(), 16, 32)), (12.0, 208.0, 0.0), (28.0, 216.0, 4.0));
+    assert_scene_box(
+        single(&draw(&mut engine, img::a(), 16, 32)),
+        (12.0, 208.0, 0.0),
+        (28.0, 216.0, 4.0),
+    );
 
     reference(&mut engine).pivot = Vec3::ZERO;
     let list = draw(&mut engine, img::a(), 16, 32);
@@ -216,9 +242,11 @@ fn req_e3d_407_the_gaxis_tag_swaps_the_first_two_rotations() {
     let with_tag = single(&draw(&mut tagged, img::a(), 16, 32)).transform;
 
     let anchor = Vec3::new(20.0, 212.0, 2.0);
-    let first = without_tag.transform_point(Vec3::new(0.0, 0.0, 1.0) + anchor - Vec3::new(20.0, 212.0, 2.0))
+    let first = without_tag
+        .transform_point(Vec3::new(0.0, 0.0, 1.0) + anchor - Vec3::new(20.0, 212.0, 2.0))
         - without_tag.transform_point(Vec3::ZERO);
-    let second = with_tag.transform_point(Vec3::new(0.0, 0.0, 1.0)) - with_tag.transform_point(Vec3::ZERO);
+    let second =
+        with_tag.transform_point(Vec3::new(0.0, 0.0, 1.0)) - with_tag.transform_point(Vec3::ZERO);
 
     assert_close(1.0, first.x, 3);
     assert_close(0.0, first.y, 3);
@@ -236,7 +264,9 @@ fn tv_w4_marching_shrinks_the_scale_back_to_the_pixel_box() {
     let mut engine = engine(1);
     engine.settings_mut().render_algorithm = RenderAlgorithm::Marching;
     let pixel = img::pixel(0, 0, false, false);
-    engine.load_profile(&profile(pixel, 1, ProfileLayer::L1, None), true).unwrap();
+    engine
+        .load_profile(&profile(pixel, 1, ProfileLayer::L1, None), true)
+        .unwrap();
 
     let list = draw(&mut engine, pixel, 16, 32);
     let tile = single(&list);
@@ -269,7 +299,9 @@ fn tv_k1_indexed_colours_come_from_the_frame_palette_table() {
     let mut engine = engine(4);
 
     let mut batch = identity_palette_batch();
-    batch.bg(img::a(), 16, 32, 1).sprite_full(img::a(), 64, 64, 1, false);
+    batch
+        .bg(img::a(), 16, 32, 1)
+        .sprite_full(img::a(), 64, 64, 1, false);
     let list = draw_batch(&mut engine, &batch, 0);
 
     assert_eq!(2, list.tiles().len());
@@ -281,17 +313,32 @@ fn tv_k1_indexed_colours_come_from_the_frame_palette_table() {
     let entry = |table: i32, column: i32| usize::try_from((4 * table) + column).unwrap();
 
     // Background tile of palette 1, texel 2 -> core[6]; the same sprite -> core[22].
-    assert_eq!(nes_color(6), list.palette()[entry(background.palette_table, 2)]);
-    assert_eq!(nes_color(22), list.palette()[entry(sprite.palette_table, 2)]);
+    assert_eq!(
+        nes_color(6),
+        list.palette()[entry(background.palette_table, 2)]
+    );
+    assert_eq!(
+        nes_color(22),
+        list.palette()[entry(sprite.palette_table, 2)]
+    );
 
     // Texel 0 is the universal background colour in every table.
-    assert_eq!(nes_color(0x0F), list.palette()[entry(background.palette_table, 0)]);
-    assert_eq!(nes_color(0x0F), list.palette()[entry(sprite.palette_table, 0)]);
+    assert_eq!(
+        nes_color(0x0F),
+        list.palette()[entry(background.palette_table, 0)]
+    );
+    assert_eq!(
+        nes_color(0x0F),
+        list.palette()[entry(sprite.palette_table, 0)]
+    );
 
     // A custom palette of 9 reaches the same colour as the table 1 (REQ-E3D-561). It is set
     // on the frame instance: a pattern instance's value is reset every frame (REQ-E3D-190).
     let first = batch.convert(&mut engine, 2).instances()[0];
-    engine.converting_frame_mut().instance_mut(first).custom_palette = 9;
+    engine
+        .converting_frame_mut()
+        .instance_mut(first)
+        .custom_palette = 9;
     let custom = engine.build_draw_list_of(FrameRole::Converting);
     assert_eq!(9, custom.tiles()[0].palette_table);
     assert_eq!(nes_color(6), custom.palette()[entry(9, 2)]);
@@ -319,7 +366,11 @@ fn req_e3d_560_the_palette_table_is_the_one_of_each_tile_not_of_the_shape() {
     assert_eq!(vec![0, 0, 1, 1], tables);
 
     // The tiles belong to one single shape, whose own palette is the germ's.
-    let shapes: HashSet<_> = list.tiles().iter().map(|tile| tile.instance.shape).collect();
+    let shapes: HashSet<_> = list
+        .tiles()
+        .iter()
+        .map(|tile| tile.instance.shape)
+        .collect();
     assert_eq!(1, shapes.len());
     let first = list.tiles()[0].instance;
     assert_eq!(0, engine.converting_frame().instance(first).palette_table());
@@ -334,7 +385,10 @@ fn req_e3d_560_a_custom_palette_overrides_every_tile_of_the_shape() {
     batch.bg(img::a(), 16, 32, 0).bg(img::a(), 24, 32, 1);
 
     let first = batch.convert(&mut engine, 0).instances()[0];
-    engine.converting_frame_mut().instance_mut(first).custom_palette = 9;
+    engine
+        .converting_frame_mut()
+        .instance_mut(first)
+        .custom_palette = 9;
     let list = engine.build_draw_list_of(FrameRole::Converting);
 
     let tables: Vec<i32> = list.tiles().iter().map(|tile| tile.palette_table).collect();
@@ -347,7 +401,11 @@ fn req_e3d_562_a_direct_texture_freezes_its_zero_texels_when_it_is_built() {
     let texture = VariantTexture::new(
         2,
         1,
-        Some(TexturePixels::new(TextureFormat::Direct, vec![0x00FF_0000, 0], Vec::new())),
+        Some(TexturePixels::new(
+            TextureFormat::Direct,
+            vec![0x00FF_0000, 0],
+            Vec::new(),
+        )),
     );
 
     let resolved = ObjectTexture::for_object(&pattern, Some(&texture), Rgb24::new(1, 2, 3));
@@ -427,8 +485,16 @@ fn tv_d1_the_deformation_is_a_standing_wave_across_the_shape() {
 
     // nrm.x = 0.25 -> no displacement; 0 -> +1.6; 0.5 -> −1.6.
     assert_close(0.0, deform.displacement(Vec3::new(0.0, 0.0, 0.0), 0.0).y, 3);
-    assert_close(1.6, deform.displacement(Vec3::new(-4.0, 0.0, 0.0), 0.0).y, 3);
-    assert_close(-1.6, deform.displacement(Vec3::new(4.0, 0.0, 0.0), 0.0).y, 3);
+    assert_close(
+        1.6,
+        deform.displacement(Vec3::new(-4.0, 0.0, 0.0), 0.0).y,
+        3,
+    );
+    assert_close(
+        -1.6,
+        deform.displacement(Vec3::new(4.0, 0.0, 0.0), 0.0).y,
+        3,
+    );
     assert_close(0.0, deform.displacement(Vec3::new(0.0, 0.0, 0.0), 0.0).x, 3);
     assert_close(0.0, deform.displacement(Vec3::new(0.0, 0.0, 0.0), 0.0).z, 3);
 }
@@ -468,7 +534,10 @@ fn req_e3d_569_the_free_script_row_never_moves_a_vertex() {
     assert_close(plain.z, with_data.z, 5);
 
     for index in 0..8u8 {
-        assert_eq!(3.5 + f32::from(index), reference(&mut engine).custom_data(usize::from(index)));
+        assert_eq!(
+            3.5 + f32::from(index),
+            reference(&mut engine).custom_data(usize::from(index))
+        );
     }
 }
 
@@ -476,7 +545,10 @@ fn req_e3d_569_the_free_script_row_never_moves_a_vertex() {
 fn req_e3d_566_the_material_class_follows_alpha_and_the_render_style() {
     let mut engine = engine(4);
 
-    assert_eq!(MaterialClass::Opaque, single(&draw(&mut engine, img::a(), 16, 32)).material);
+    assert_eq!(
+        MaterialClass::Opaque,
+        single(&draw(&mut engine, img::a(), 16, 32)).material
+    );
 
     reference(&mut engine).alpha = 0.5;
     let list = draw(&mut engine, img::a(), 16, 32);

@@ -8,14 +8,17 @@
 
 use zax_engine3d::engine::{ConversionEngine, FrameRole};
 use zax_engine3d::geometry::greedy;
+use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::geometry::tile_sides;
 use zax_engine3d::geometry::tile_voxels::TileVoxels;
 use zax_engine3d::image::TileImageKey;
-use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::pattern::EnginePattern;
 use zax_engine3d::settings::RenderAlgorithm;
 
-use super::support::geo::{self, object_3d, rectangles, rectangles_with_normal, MINUS_X, MINUS_Y, MINUS_Z, PLUS_X, PLUS_Y, PLUS_Z};
+use super::support::geo::{
+    self, object_3d, rectangles, rectangles_with_normal, MINUS_X, MINUS_Y, MINUS_Z, PLUS_X, PLUS_Y,
+    PLUS_Z,
+};
 use super::support::{Batch, PatternOptions, ProfileBuilder};
 
 /// A solid 8 × 8 tile: every lateral side is a full plane.
@@ -163,10 +166,22 @@ fn the_draw_list_seals_the_joints_of_a_surface_and_keeps_its_border() {
 
 #[test]
 fn sealing_is_symmetric_between_the_two_sides_of_a_joint() {
-    assert_eq!(tile_sides::PLUS_X, tile_sides::opposite(tile_sides::MINUS_X));
-    assert_eq!(tile_sides::MINUS_X, tile_sides::opposite(tile_sides::PLUS_X));
-    assert_eq!(tile_sides::PLUS_Y, tile_sides::opposite(tile_sides::MINUS_Y));
-    assert_eq!(tile_sides::MINUS_Y, tile_sides::opposite(tile_sides::PLUS_Y));
+    assert_eq!(
+        tile_sides::PLUS_X,
+        tile_sides::opposite(tile_sides::MINUS_X)
+    );
+    assert_eq!(
+        tile_sides::MINUS_X,
+        tile_sides::opposite(tile_sides::PLUS_X)
+    );
+    assert_eq!(
+        tile_sides::PLUS_Y,
+        tile_sides::opposite(tile_sides::MINUS_Y)
+    );
+    assert_eq!(
+        tile_sides::MINUS_Y,
+        tile_sides::opposite(tile_sides::PLUS_Y)
+    );
 
     // The Z sides are never sealed: nothing is ever against them inside one object.
     assert!(!tile_sides::is_sealed(tile_sides::ALL, 2, -1, 8));

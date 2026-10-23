@@ -64,7 +64,12 @@ fn req_e3d_540_a_shape_draws_one_mesh_per_tile_and_shares_the_repeated_ones() {
     engine
         .load_profile(
             &ProfileBuilder::new()
-                .pattern_with(2, 2, &cells(&[img::a(), img::a(), img::a(), img::b()]), with_depth(2))
+                .pattern_with(
+                    2,
+                    2,
+                    &cells(&[img::a(), img::a(), img::a(), img::b()]),
+                    with_depth(2),
+                )
                 .build(),
             true,
         )
@@ -85,7 +90,10 @@ fn req_e3d_540_a_shape_draws_one_mesh_per_tile_and_shares_the_repeated_ones() {
     // the mesh of the image, which is the one the object owns.
     let mut meshes = HashSet::new();
     for tile in list.tiles() {
-        let reference = engine.converting_frame().instance(tile.instance).reference();
+        let reference = engine
+            .converting_frame()
+            .instance(tile.instance)
+            .reference();
         let mesh = builder_mut(&mut engine)
             .mesh_of(reference, tile.tile.image(), 0)
             .unwrap();
@@ -143,7 +151,12 @@ fn req_e3d_541_each_3d_object_of_a_pattern_gets_its_own_geometry() {
 fn req_e3d_542_changing_a_frame_instance_moves_it_without_remeshing_it() {
     let mut engine = geometry_engine();
     engine
-        .load_profile(&ProfileBuilder::new().pattern_with(1, 1, &cells(&[img::a()]), with_depth(4)).build(), true)
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(4))
+                .build(),
+            true,
+        )
         .unwrap();
 
     let mut batch = Batch::new();
@@ -173,7 +186,12 @@ fn req_e3d_543_a_hidden_or_unready_object_is_not_drawn() {
     let mut engine = geometry_engine();
     builder_mut(&mut engine).defer_transfer = true;
     engine
-        .load_profile(&ProfileBuilder::new().pattern_with(1, 1, &cells(&[img::a()]), with_depth(2)).build(), true)
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(2))
+                .build(),
+            true,
+        )
         .unwrap();
 
     let mut batch = Batch::new();
@@ -222,8 +240,14 @@ fn req_e3d_600_a_mass_build_reports_its_progress_in_two_halves() {
     assert_close(1.0, builder(&engine).progress().value(), 3);
 
     for &id in engine.patterns().permanent() {
-        let reference = InstanceRef { pattern: id, index: 0 };
-        assert_eq!(RenderAlgorithm::Marching, builder(&engine).of(reference).unwrap().algorithm());
+        let reference = InstanceRef {
+            pattern: id,
+            index: 0,
+        };
+        assert_eq!(
+            RenderAlgorithm::Marching,
+            builder(&engine).of(reference).unwrap().algorithm()
+        );
     }
 }
 
@@ -245,7 +269,12 @@ fn req_e3d_500_an_object_with_its_own_algorithm_ignores_the_setting() {
     profile.variant(0, 1).mesh_algorithm = MeshAlgorithm::Marching;
     engine.load_profile(&profile.build(), true).unwrap();
 
-    let algorithm = |engine: &ConversionEngine, index| builder(engine).of(instance_ref(engine, 0, index)).unwrap().algorithm();
+    let algorithm = |engine: &ConversionEngine, index| {
+        builder(engine)
+            .of(instance_ref(engine, 0, index))
+            .unwrap()
+            .algorithm()
+    };
     assert_eq!(RenderAlgorithm::Greedy, algorithm(&engine, 0));
     assert_eq!(RenderAlgorithm::Marching, algorithm(&engine, 1));
 
@@ -258,13 +287,20 @@ fn req_e3d_500_an_object_with_its_own_algorithm_ignores_the_setting() {
 fn req_e3d_602_no_runtime_change_ever_rebuilds_a_mesh() {
     let mut engine = geometry_engine();
     engine
-        .load_profile(&ProfileBuilder::new().pattern_with(1, 1, &cells(&[img::a()]), with_depth(4)).build(), true)
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(4))
+                .build(),
+            true,
+        )
         .unwrap();
 
     let builds = builder(&engine).build_count();
     let reference = instance_ref(&engine, 0, 0);
     let image = engine.images().by_id(0).unwrap();
-    let mesh = builder_mut(&mut engine).mesh_of(reference, &image, 0).unwrap();
+    let mesh = builder_mut(&mut engine)
+        .mesh_of(reference, &image, 0)
+        .unwrap();
 
     for counter in 1..=3u8 {
         let mut batch = Batch::new();
@@ -298,7 +334,12 @@ fn req_e3d_602_no_runtime_change_ever_rebuilds_a_mesh() {
 fn req_e3d_600_learning_a_pattern_builds_only_its_geometry() {
     let mut engine = geometry_engine();
     engine
-        .load_profile(&ProfileBuilder::new().pattern_with(1, 1, &cells(&[img::a()]), with_depth(4)).build(), true)
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(4))
+                .build(),
+            true,
+        )
         .unwrap();
 
     let builds = builder(&engine).build_count();
@@ -312,7 +353,10 @@ fn req_e3d_600_learning_a_pattern_builds_only_its_geometry() {
     assert_eq!(builds + 1, builder(&engine).build_count());
     assert_eq!(2, engine.patterns().permanent().len());
 
-    let learned = engine.patterns().instance(instance_ref(&engine, 1, 0)).unwrap();
+    let learned = engine
+        .patterns()
+        .instance(instance_ref(&engine, 1, 0))
+        .unwrap();
     assert_eq!(3, learned.depth);
     assert_eq!(ZLayer::L1, learned.layer);
     assert_eq!(Geo3DType::Default, learned.geometry);
@@ -367,7 +411,12 @@ fn describe(list: &FrameDrawList) -> String {
         )
         .unwrap();
         for vertex in tile.mesh.as_ref().unwrap().vertices() {
-            writeln!(text, "  {} {} {}", vertex.position, vertex.normal, vertex.uv).unwrap();
+            writeln!(
+                text,
+                "  {} {} {}",
+                vertex.position, vertex.normal, vertex.uv
+            )
+            .unwrap();
         }
     }
 
@@ -378,7 +427,12 @@ fn describe(list: &FrameDrawList) -> String {
 fn req_e3d_643_the_clip_margins_never_touch_the_meshes() {
     let mut engine = geometry_engine();
     engine
-        .load_profile(&ProfileBuilder::new().pattern_with(1, 1, &cells(&[img::a()]), with_depth(4)).build(), true)
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(4))
+                .build(),
+            true,
+        )
         .unwrap();
 
     engine.settings_mut().clipping = ConversionSettings::DEFAULT_CLIPPING;
@@ -424,11 +478,25 @@ fn build_all() -> String {
     for &id in engine.patterns().permanent() {
         let count = engine.patterns().get(id).unwrap().instances().len();
         for index in 0..count {
-            let built = builder(&engine).of(InstanceRef { pattern: id, index }).unwrap();
-            writeln!(text, "{:?} {} {}", built.algorithm(), built.build_depth(), built.effective_depth()).unwrap();
+            let built = builder(&engine)
+                .of(InstanceRef { pattern: id, index })
+                .unwrap();
+            writeln!(
+                text,
+                "{:?} {} {}",
+                built.algorithm(),
+                built.build_depth(),
+                built.effective_depth()
+            )
+            .unwrap();
             for mesh in built.meshes() {
                 for vertex in mesh.vertices() {
-                    writeln!(text, "  {} {} {}", vertex.position, vertex.normal, vertex.uv).unwrap();
+                    writeln!(
+                        text,
+                        "  {} {} {}",
+                        vertex.position, vertex.normal, vertex.uv
+                    )
+                    .unwrap();
                 }
 
                 for index in mesh.triangles() {

@@ -19,16 +19,25 @@ fn not_connected() -> PatternOptions {
 }
 
 fn tile_counts(frame: &ConversionFrame) -> Vec<usize> {
-    frame.shape_list().map(|shape| shape.tile_count()).collect()
+    frame
+        .shape_list()
+        .map(zax_engine3d::frame::FrameShape::tile_count)
+        .collect()
 }
 
 #[test]
 fn tv_e3d_01_region_of_a_periodic_pattern_req_e3d_090_095() {
     // Profile [A B] sc true. Row 5: A B A B A B at columns 10 to 15.
-    let mut engine = ProfileBuilder::new().row(&cells(&[img::a(), img::b()])).load();
+    let mut engine = ProfileBuilder::new()
+        .row(&cells(&[img::a(), img::b()]))
+        .load();
     let first = permanent(&engine, 0);
     let mut batch = Batch::new();
-    batch.bg_row(5, 10, &[img::a(), img::b(), img::a(), img::b(), img::a(), img::b()]);
+    batch.bg_row(
+        5,
+        10,
+        &[img::a(), img::b(), img::a(), img::b(), img::a(), img::b()],
+    );
 
     let frame = batch.convert(&mut engine, 0);
 
@@ -42,9 +51,24 @@ fn tv_e3d_01_region_of_a_periodic_pattern_req_e3d_090_095() {
 
 #[test]
 fn tv_e3d_01_eight_tiles_are_kept_by_pass_1_req_e3d_092() {
-    let mut engine = ProfileBuilder::new().row(&cells(&[img::a(), img::b()])).load();
+    let mut engine = ProfileBuilder::new()
+        .row(&cells(&[img::a(), img::b()]))
+        .load();
     let mut batch = Batch::new();
-    batch.bg_row(5, 8, &[img::a(), img::b(), img::a(), img::b(), img::a(), img::b(), img::a(), img::b()]);
+    batch.bg_row(
+        5,
+        8,
+        &[
+            img::a(),
+            img::b(),
+            img::a(),
+            img::b(),
+            img::a(),
+            img::b(),
+            img::a(),
+            img::b(),
+        ],
+    );
 
     let frame = batch.convert(&mut engine, 0);
 
@@ -61,7 +85,11 @@ fn tv_e3d_02_self_connected_false_req_e3d_061() {
         .row_with(&cells(&[img::a(), img::b()]), not_connected())
         .load();
     let mut batch = Batch::new();
-    batch.bg_row(5, 10, &[img::a(), img::b(), img::a(), img::b(), img::a(), img::b()]);
+    batch.bg_row(
+        5,
+        10,
+        &[img::a(), img::b(), img::a(), img::b(), img::a(), img::b()],
+    );
 
     let frame = batch.convert(&mut engine, 0);
 
@@ -72,7 +100,10 @@ fn tv_e3d_02_self_connected_false_req_e3d_061() {
     }
 
     // Left to right.
-    let starts: Vec<i32> = frame.shape_list().map(|shape| shape.tile_start().x).collect();
+    let starts: Vec<i32> = frame
+        .shape_list()
+        .map(|shape| shape.tile_start().x)
+        .collect();
     assert_eq!(vec![11, 13, 15], starts);
 }
 
@@ -83,9 +114,14 @@ fn tv_e3d_02_the_pair_b_a_does_not_exist_req_e3d_061() {
         .load();
     let mut batch = Batch::new();
     batch.bg_row(5, 10, &[img::b(), img::a()]);
-    assert_eq!(2, batch.convert(&mut not_connected_engine, 0).shapes().len());
+    assert_eq!(
+        2,
+        batch.convert(&mut not_connected_engine, 0).shapes().len()
+    );
 
-    let mut connected = ProfileBuilder::new().row(&cells(&[img::a(), img::b()])).load();
+    let mut connected = ProfileBuilder::new()
+        .row(&cells(&[img::a(), img::b()]))
+        .load();
     assert_eq!(1, batch.convert(&mut connected, 0).shapes().len());
 }
 
@@ -109,7 +145,9 @@ fn tv_e3d_03_constraint_size_req_e3d_062() {
 
     assert_eq!(3, frame.shapes().len());
     assert_eq!(vec![2, 2, 1], tile_counts(frame));
-    assert!(frame.shape_list().all(|shape| shape.reference_pattern() == Some(first)));
+    assert!(frame
+        .shape_list()
+        .all(|shape| shape.reference_pattern() == Some(first)));
 }
 
 #[test]
@@ -351,7 +389,14 @@ fn tv_e3d_08_sprites_with_an_empty_profile_req_e3d_131() {
     let first = engine.patterns().get(permanent(&engine, 0)).unwrap();
     assert_eq!(2, first.width());
     assert_eq!(1, first.height());
-    assert_eq!(1, engine.patterns().get(permanent(&engine, 1)).unwrap().width());
+    assert_eq!(
+        1,
+        engine
+            .patterns()
+            .get(permanent(&engine, 1))
+            .unwrap()
+            .width()
+    );
 }
 
 fn abc_batch(b_palette: u8) -> Batch {
@@ -379,7 +424,9 @@ fn tv_e3d_08_sprite_tolerance_req_e3d_130_131() {
     engine.settings_mut().sprite_tolerance = 0;
     let tight = abc_batch(0).convert(&mut engine, 1);
     assert_eq!(2, tight.shapes().len());
-    assert!(tight.shape_list().all(|shape| shape.reference_pattern() == Some(first)));
+    assert!(tight
+        .shape_list()
+        .all(|shape| shape.reference_pattern() == Some(first)));
 }
 
 #[test]
@@ -514,7 +561,11 @@ fn tv_e3d_12_tracker_req_e3d_300() {
     let expected = frame.shapes()[0];
     let z = engine.track(FrameRole::Converting).unwrap();
     assert_eq!(expected, z);
-    let z_pattern = engine.converting_frame().shape(z).reference_pattern().unwrap();
+    let z_pattern = engine
+        .converting_frame()
+        .shape(z)
+        .reference_pattern()
+        .unwrap();
     assert!(engine.tracker().included().contains(&z_pattern));
     assert_eq!(Vec3::new(145.0, 103.0, 0.0), engine.tracker().position());
 }
@@ -525,7 +576,9 @@ fn tv_e3d_13_a_frame_instance_is_reset_every_frame_req_e3d_190() {
         tags: Some("t".to_owned()),
         ..PatternOptions::default()
     };
-    let mut engine = ProfileBuilder::new().row_with(&cells(&[img::a()]), tagged.clone()).load();
+    let mut engine = ProfileBuilder::new()
+        .row_with(&cells(&[img::a()]), tagged.clone())
+        .load();
     engine.set_script_host(Box::new(RecordingScriptHost {
         on_update_shape: Some(Box::new(|instance| {
             instance.offset.x += 5.0;
@@ -545,7 +598,9 @@ fn tv_e3d_13_a_frame_instance_is_reset_every_frame_req_e3d_190() {
     assert_eq!(positions[1], positions[2]);
 
     // Without the script the anchor would be at the centre of the tile box.
-    let mut plain = ProfileBuilder::new().row_with(&cells(&[img::a()]), tagged).load();
+    let mut plain = ProfileBuilder::new()
+        .row_with(&cells(&[img::a()]), tagged)
+        .load();
     let expected = instances(batch.convert(&mut plain, 0))[0].pos.x;
     assert_close(expected + 5.0, positions[0], 3);
 }

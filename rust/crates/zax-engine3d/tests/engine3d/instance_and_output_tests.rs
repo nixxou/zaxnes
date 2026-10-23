@@ -21,7 +21,12 @@ use super::support::{
     PatternOptions, ProfileBuilder, RecordingGeometryBuilder, RecordingScriptHost,
 };
 
-fn one_tile_engine(depth: i32, layer: ProfileLayer, tags: Option<&str>, instance_count: usize) -> ConversionEngine {
+fn one_tile_engine(
+    depth: i32,
+    layer: ProfileLayer,
+    tags: Option<&str>,
+    instance_count: usize,
+) -> ConversionEngine {
     ProfileBuilder::new()
         .pattern_with(
             1,
@@ -92,11 +97,20 @@ fn req_e3d_191_a_hidden_instance_stays_in_the_frame_but_is_not_drawn() {
     engine.set_geometry(Box::new(RecordingGeometryBuilder::default()));
 
     let id = one_tile_frame(&mut engine);
-    engine.converting_frame_mut().instance_mut(id).set_enable(false);
+    engine
+        .converting_frame_mut()
+        .instance_mut(id)
+        .set_enable(false);
 
     assert_eq!(1, engine.converting_frame().instances().len());
-    assert_eq!(RenderStyle::Hidden, engine.converting_frame().instance(id).style);
-    assert!(engine.build_draw_list_of(FrameRole::Converting).tiles().is_empty());
+    assert_eq!(
+        RenderStyle::Hidden,
+        engine.converting_frame().instance(id).style
+    );
+    assert!(engine
+        .build_draw_list_of(FrameRole::Converting)
+        .tiles()
+        .is_empty());
 }
 
 #[test]
@@ -119,8 +133,14 @@ fn req_e3d_205_the_placement_box_and_the_anchor() {
     let id = one_tile_frame(&mut engine);
     let instance = engine.converting_frame().instance(id);
 
-    assert_eq!(Vec3::new(16.0, 208.0, 0.0), instance.box_min(engine.settings()));
-    assert_eq!(Vec3::new(24.0, 216.0, 3.0), instance.box_max(engine.settings()));
+    assert_eq!(
+        Vec3::new(16.0, 208.0, 0.0),
+        instance.box_min(engine.settings())
+    );
+    assert_eq!(
+        Vec3::new(24.0, 216.0, 3.0),
+        instance.box_max(engine.settings())
+    );
     assert_eq!(Vec3::new(20.0, 212.0, 1.5), instance.pos);
     assert_eq!(Vec3::new(20.0, 212.0, 1.5), instance.center);
     assert_eq!(Vec3::new(16.0, 208.0, -1.5), instance.bl());
@@ -131,11 +151,17 @@ fn req_e3d_205_the_placement_box_and_the_anchor() {
 fn req_e3d_205_the_effective_layer_of_an_unidentified_instance() {
     let mut engine = one_tile_engine(3, ProfileLayer::Unidentified, None, 1);
     let id = one_tile_frame(&mut engine);
-    let layer = engine.converting_frame().instance(id).effective_layer(engine.settings());
+    let layer = engine
+        .converting_frame()
+        .instance(id)
+        .effective_layer(engine.settings());
     assert_eq!(ZLayer::L1, layer);
 
     engine.settings_mut().default_layer = ZLayer::L3;
-    let layer = engine.converting_frame().instance(id).effective_layer(engine.settings());
+    let layer = engine
+        .converting_frame()
+        .instance(id)
+        .effective_layer(engine.settings());
     assert_eq!(ZLayer::L3, layer);
 
     // A sprite shape always falls back to L1.
@@ -153,7 +179,12 @@ fn req_e3d_205_the_layer_offset_and_alignment_move_the_depth_interval() {
     let mut engine = one_tile_engine(4, ProfileLayer::L2, None, 1);
     let id = one_tile_frame(&mut engine);
 
-    let interval = |engine: &ConversionEngine| engine.converting_frame().instance(id).depth_interval(engine.settings());
+    let interval = |engine: &ConversionEngine| {
+        engine
+            .converting_frame()
+            .instance(id)
+            .depth_interval(engine.settings())
+    };
     assert_eq!((12.0, 16.0), interval(&engine));
 
     engine.settings_mut().layer_mut(ZLayer::L2).offset = 0.0;
@@ -245,18 +276,26 @@ fn req_e3d_231_add_new_shape_places_the_tiles_at_the_grid_origin() {
     let tile = frame.shape_tiles(id).next().unwrap();
     assert_eq!(0, tile.x());
     assert_eq!(0, tile.y());
-    assert_eq!(Vec3::new(44.0, 104.0, 1.5), frame.shape(id).instances()[0].pos);
+    assert_eq!(
+        Vec3::new(44.0, 104.0, 1.5),
+        frame.shape(id).instances()[0].pos
+    );
 }
 
 #[test]
 fn req_e3d_232_insert_shape_equals_create_new_shape_shifted_by_the_bottom_left() {
     let mut engine = default_engine();
     let pattern = permanent(&engine, 0);
-    assert_eq!(Vec2::new(0.0, 0.0), engine.patterns().get(pattern).unwrap().bottom_left());
+    assert_eq!(
+        Vec2::new(0.0, 0.0),
+        engine.patterns().get(pattern).unwrap().bottom_left()
+    );
 
     engine.set_script_host(Box::new(RecordingScriptHost {
         on_update: Some(Box::new(move |state| {
-            state.insert_shape(pattern, Vec3::new(10.0, 20.0, 0.0), 5).unwrap();
+            state
+                .insert_shape(pattern, Vec3::new(10.0, 20.0, 0.0), 5)
+                .unwrap();
             state
                 .create_new_shape(pattern, Vec3::new(10.0, 20.0, 0.0), 5)
                 .unwrap();
@@ -293,7 +332,13 @@ fn req_e3d_230_with_an_instance_only_that_instance_is_enabled() {
 
     let id = frame.shapes()[0];
     let shape = frame.shape(id);
-    assert_eq!(FrameInstanceId { shape: id, index: 1 }, receiver.recv().unwrap());
+    assert_eq!(
+        FrameInstanceId {
+            shape: id,
+            index: 1
+        },
+        receiver.recv().unwrap()
+    );
     assert!(!shape.instances()[0].enable());
     assert!(shape.instances()[1].enable());
     assert!(!shape.instances()[2].enable());
@@ -328,14 +373,23 @@ fn req_e3d_233_a_pinned_frame_restores_its_shapes_where_a_rectangle_overlaps() {
     assert_eq!(pinned_shape.pixel_start(), restored.pixel_start());
     assert_eq!(pinned_shape.pixel_end(), restored.pixel_end());
     assert_eq!(pinned_shape.tile_count(), restored.tile_count());
-    assert_eq!(pinned_shape.reference_pattern(), restored.reference_pattern());
+    assert_eq!(
+        pinned_shape.reference_pattern(),
+        restored.reference_pattern()
+    );
     assert!(restored.restored_from_pinned_frame());
     assert!(!restored.scriptable());
     assert!(second.scriptable_instances().is_empty());
 
     // Only the tiles whose 8 x 8 cell overlaps a rectangle are drawn.
     assert!(second.tile_overlaps_pinned_rects(second.shape_tiles(restored_id).next().unwrap()));
-    assert_eq!(1, engine.build_draw_list_of(FrameRole::Converting).tiles().len());
+    assert_eq!(
+        1,
+        engine
+            .build_draw_list_of(FrameRole::Converting)
+            .tiles()
+            .len()
+    );
 
     // The pinned frame itself is untouched by the new conversion.
     let pinned = engine.pinned_frame().unwrap();
@@ -377,7 +431,10 @@ fn req_e3d_280_a_new_conversion_never_touches_the_published_or_pinned_frame() {
     let published = engine.pinned_frame().unwrap();
     assert_eq!(1, published.shapes().len());
     assert_eq!(1, published.counter());
-    assert_eq!(Cell::new(16, 32), published.shape(published.shapes()[0]).pixel_start());
+    assert_eq!(
+        Cell::new(16, 32),
+        published.shape(published.shapes()[0]).pixel_start()
+    );
 }
 
 #[test]
@@ -402,7 +459,9 @@ fn req_e3d_320_the_hooks_run_in_order_after_the_segmentation() {
     let (sender, receiver) = mpsc::channel();
     engine.set_script_host(Box::new(RecordingScriptHost {
         on_update: Some(Box::new(move |state| {
-            sender.send(state.converting_frame().shapes().len()).unwrap();
+            sender
+                .send(state.converting_frame().shapes().len())
+                .unwrap();
         })),
         ..RecordingScriptHost::default()
     }));
@@ -412,7 +471,10 @@ fn req_e3d_320_the_hooks_run_in_order_after_the_segmentation() {
     batch.convert(&mut engine, 7);
 
     let host = host(&engine);
-    assert_eq!(["globals(7)", "Update", "UpdateS[1]", "LateUpdate"], host.calls.as_slice());
+    assert_eq!(
+        ["globals(7)", "Update", "UpdateS[1]", "LateUpdate"],
+        host.calls.as_slice()
+    );
     assert_eq!(1, receiver.recv().unwrap());
     assert_eq!(Some(7), host.last_frame);
     assert_close(7.0 / 60.0, host.last_time.unwrap(), 5);
@@ -437,7 +499,10 @@ fn req_e3d_001_the_position_takes_the_offset_a_hook_changed() {
 #[test]
 fn req_e3d_321_a_script_is_linked_by_star_or_by_an_equal_tag() {
     let engine = one_tile_engine(3, ProfileLayer::L1, Some("boss"), 1);
-    let instance = engine.patterns().instance(first_reference(&engine, 0)).unwrap();
+    let instance = engine
+        .patterns()
+        .instance(first_reference(&engine, 0))
+        .unwrap();
 
     assert!(is_linked(Some("enemy, boss"), instance));
     assert!(!is_linked(Some("enemy, Boss"), instance));
@@ -470,7 +535,12 @@ fn req_e3d_322_build_pattern_runs_before_every_construction() {
 
     assert_eq!(1, host(&engine).built_patterns.len());
     let depth = |engine: &ConversionEngine, n: usize| {
-        engine.patterns().get(permanent(engine, n)).unwrap().instances()[0].depth
+        engine
+            .patterns()
+            .get(permanent(engine, n))
+            .unwrap()
+            .instances()[0]
+            .depth
     };
     assert_eq!(8, depth(&engine, 0));
     assert_eq!(1, recorder(&engine).built.len());
@@ -497,7 +567,9 @@ fn req_e3d_323_the_pipeline_has_no_detect_shape_call_point() {
 fn req_e3d_324_a_hook_error_does_not_interrupt_the_conversion() {
     let mut engine = default_engine();
     engine.set_script_host(Box::new(RecordingScriptHost {
-        on_update_shape: Some(Box::new(|_| Err(zax_engine3d::script::ScriptError("lua error".to_owned())))),
+        on_update_shape: Some(Box::new(|_| {
+            Err(zax_engine3d::script::ScriptError("lua error".to_owned()))
+        })),
         ..RecordingScriptHost::default()
     }));
 
@@ -523,7 +595,10 @@ fn req_e3d_340_changing_the_global_algorithm_rebuilds_every_pattern() {
     engine.set_geometry(Box::new(RecordingGeometryBuilder::default()));
 
     engine.set_render_algorithm(RenderAlgorithm::Marching);
-    assert_eq!(RenderAlgorithm::Marching, engine.settings().render_algorithm);
+    assert_eq!(
+        RenderAlgorithm::Marching,
+        engine.settings().render_algorithm
+    );
     assert_eq!(2, recorder(&engine).built.len());
 
     // Setting the same value again rebuilds nothing.
@@ -535,12 +610,24 @@ fn req_e3d_340_changing_the_global_algorithm_rebuilds_every_pattern() {
 fn req_e3d_340_the_per_instance_algorithm_wins_over_the_setting() {
     let mut instance = PatternInstance::new();
     instance.mesh_algorithm = 2;
-    assert_eq!(RenderAlgorithm::Marching, instance.effective_algorithm(RenderAlgorithm::Greedy));
-    assert_eq!(RenderAlgorithm::Marching, instance.effective_algorithm(RenderAlgorithm::GreedyMulticolor));
+    assert_eq!(
+        RenderAlgorithm::Marching,
+        instance.effective_algorithm(RenderAlgorithm::Greedy)
+    );
+    assert_eq!(
+        RenderAlgorithm::Marching,
+        instance.effective_algorithm(RenderAlgorithm::GreedyMulticolor)
+    );
 
     instance.mesh_algorithm = 0;
-    assert_eq!(RenderAlgorithm::Greedy, instance.effective_algorithm(RenderAlgorithm::Greedy));
-    assert_eq!(RenderAlgorithm::Marching, instance.effective_algorithm(RenderAlgorithm::Marching));
+    assert_eq!(
+        RenderAlgorithm::Greedy,
+        instance.effective_algorithm(RenderAlgorithm::Greedy)
+    );
+    assert_eq!(
+        RenderAlgorithm::Marching,
+        instance.effective_algorithm(RenderAlgorithm::Marching)
+    );
 }
 
 #[test]
@@ -554,7 +641,10 @@ fn req_e3d_361_a_shape_without_geometry_is_kept_but_not_drawn() {
 
     assert_eq!(1, engine.converting_frame().shapes().len());
     assert_eq!(1, engine.converting_frame().scriptable_instances().len());
-    assert!(engine.build_draw_list_of(FrameRole::Converting).tiles().is_empty());
+    assert!(engine
+        .build_draw_list_of(FrameRole::Converting)
+        .tiles()
+        .is_empty());
 }
 
 #[rstest]
@@ -562,7 +652,12 @@ fn req_e3d_361_a_shape_without_geometry_is_kept_but_not_drawn() {
 #[case(50, 0, 100, 0.25)]
 #[case(100, 100, 100, 1.0)]
 #[case(100, 0, 100, 0.5)]
-fn req_e3d_362_the_loading_progress(#[case] built: usize, #[case] transferred: usize, #[case] to_build: usize, #[case] expected: f32) {
+fn req_e3d_362_the_loading_progress(
+    #[case] built: usize,
+    #[case] transferred: usize,
+    #[case] to_build: usize,
+    #[case] expected: f32,
+) {
     let mut engine = default_engine();
     engine.set_geometry(Box::new(RecordingGeometryBuilder {
         reported_progress: GeometryProgress::new(built, transferred, to_build),
@@ -582,7 +677,10 @@ fn req_e3d_250_254_the_scene_background_colour() {
     assert_eq!(Rgb24::new(0x38, 0xC0, 0xFC), engine.background_color(false));
 
     // A skybox, or the setting turned off, gives the custom colour.
-    assert_eq!(engine.settings().custom_background_color, engine.background_color(true));
+    assert_eq!(
+        engine.settings().custom_background_color,
+        engine.background_color(true)
+    );
     engine.settings_mut().use_nes_background_color = false;
     engine.settings_mut().custom_background_color = Rgb24::new(1, 2, 3);
     assert_eq!(Rgb24::new(1, 2, 3), engine.background_color(false));
@@ -632,7 +730,10 @@ fn req_e3d_641_the_draw_list_carries_the_placement_and_the_flags() {
     assert_eq!(Rgb24::new(0xFC, 0x38, 0x00), list.palette()[1]);
 
     let background = &list.tiles()[0];
-    assert!(engine.converting_frame().instance(background.instance).background());
+    assert!(engine
+        .converting_frame()
+        .instance(background.instance)
+        .background());
     assert!(!background.sprite);
     assert_eq!(SceneContainer::Game, background.container);
     assert_eq!(MaterialClass::Opaque, background.material);
@@ -645,7 +746,10 @@ fn req_e3d_641_the_draw_list_carries_the_placement_and_the_flags() {
 
     // The tile centre of SPEC-04B REQ-E3D-405 and the transform of REQ-E3D-406.
     assert_eq!(Vec3::new(20.0, 212.0, 1.5), background.tile_center);
-    assert_eq!(background.tile_center, background.transform.transform_point(Vec3::ZERO));
+    assert_eq!(
+        background.tile_center,
+        background.transform.transform_point(Vec3::ZERO)
+    );
 
     let sprite = &list.tiles()[1];
     assert!(sprite.sprite);
@@ -656,15 +760,20 @@ fn req_e3d_641_the_draw_list_carries_the_placement_and_the_flags() {
 fn req_e3d_642_material_classes_and_shadow_rules() {
     let mut engine = default_engine();
     let id = one_tile_frame(&mut engine);
-    let first_tile = |engine: &mut ConversionEngine| engine.build_draw_list_of(FrameRole::Converting).tiles()[0].clone();
-    let edit = |engine: &mut ConversionEngine, change: &dyn Fn(&mut zax_engine3d::frame::FrameInstance)| {
+    let first_tile = |engine: &mut ConversionEngine| {
+        engine.build_draw_list_of(FrameRole::Converting).tiles()[0].clone()
+    };
+    let edit = |engine: &mut ConversionEngine,
+                change: &dyn Fn(&mut zax_engine3d::frame::FrameInstance)| {
         change(engine.converting_frame_mut().instance_mut(id));
     };
 
     edit(&mut engine, &|instance| instance.alpha = 0.5);
     assert_eq!(MaterialClass::Transparent, first_tile(&mut engine).material);
 
-    edit(&mut engine, &|instance| instance.style = RenderStyle::ShadowOnly);
+    edit(&mut engine, &|instance| {
+        instance.style = RenderStyle::ShadowOnly
+    });
     let shadow_only = first_tile(&mut engine);
     assert_eq!(MaterialClass::ShadowOnly, shadow_only.material);
     assert!(shadow_only.cast_shadow);

@@ -4,7 +4,9 @@
 use std::fmt::Write as _;
 
 use zax_engine3d::engine::{ConversionEngine, FrameRole};
-use zax_engine3d::geometry::texture::{default_profile_texture, default_texture, is_default_texture};
+use zax_engine3d::geometry::texture::{
+    default_profile_texture, default_texture, is_default_texture,
+};
 use zax_engine3d::palette::FramePalette;
 use zax_engine3d::state_codec;
 use zax_engine3d::vectors::Cell;
@@ -22,9 +24,9 @@ use super::support::{
 fn digest(engine: &mut ConversionEngine) -> String {
     let mut text = String::new();
     let frame = engine.converting_frame();
-    write!(
+    writeln!(
         text,
-        "frame {} t={} bg={} sp={} shapes={}/{}\n",
+        "frame {} t={} bg={} sp={} shapes={}/{}",
         frame.counter(),
         frame.time(),
         frame.background_tile_count(),
@@ -38,7 +40,7 @@ fn digest(engine: &mut ConversionEngine) -> String {
         let registration = shape
             .reference_pattern()
             .and_then(|id| engine.patterns().get(id))
-            .map(|pattern| pattern.registration_index());
+            .map(zax_engine3d::pattern::EnginePattern::registration_index);
         writeln!(
             text,
             "  shape bg={} t={}-{} p={}-{} pal={} hidden={} tiles={} pattern={registration:?} completed={}",
@@ -70,9 +72,10 @@ fn digest(engine: &mut ConversionEngine) -> String {
         .unwrap();
     }
 
-    let palette: String = (0..FramePalette::ENTRY_COUNT)
-        .map(|entry| format!("{:02X}", frame.palette().get(entry).unwrap()))
-        .collect();
+    let mut palette = String::new();
+    for entry in 0..FramePalette::ENTRY_COUNT {
+        write!(palette, "{:02X}", frame.palette().get(entry).unwrap()).unwrap();
+    }
 
     for tile in engine.build_draw_list_of(FrameRole::Converting).tiles() {
         writeln!(
@@ -123,11 +126,17 @@ fn sample_batches() -> Vec<Batch> {
                 .palette(0, 0x0F + u8::try_from(n).unwrap())
                 .palette(5, 0x16)
                 .mask(8, 0);
-            batch.bg_row(5 + n, 4, &[img::a(), img::b(), img::a(), img::b(), img::c()]);
+            batch.bg_row(
+                5 + n,
+                4,
+                &[img::a(), img::b(), img::a(), img::b(), img::c()],
+            );
             batch.bg_row(6 + n, 4, &[img::d(), img::a(), img::a(), img::d()]);
             batch.bg_cell(img::full(20 + n.unsigned_abs()), 20, 20);
             batch.bg_cell(img::full(10), 0, 10);
-            batch.sprite(img::a(), 100 + n, 50).sprite(img::b(), 108 + n, 50);
+            batch
+                .sprite(img::a(), 100 + n, 50)
+                .sprite(img::b(), 108 + n, 50);
             batch.sprite(img::full(30 + n.unsigned_abs()), 200, 100);
             batch
         })
@@ -141,7 +150,10 @@ fn loaded(profile: &GameProfile) -> ConversionEngine {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02X}")).collect()
+    bytes.iter().fold(String::new(), |mut text, byte| {
+        write!(text, "{byte:02X}").unwrap();
+        text
+    })
 }
 
 #[test]
@@ -189,7 +201,11 @@ fn req_arch_011_two_engines_in_the_same_process_are_independent() {
 fn describe(engine: &ConversionEngine) -> String {
     let mut text = String::new();
     let patterns = engine.patterns();
-    for pattern in patterns.permanent().iter().map(|&id| patterns.get(id).unwrap()) {
+    for pattern in patterns
+        .permanent()
+        .iter()
+        .map(|&id| patterns.get(id).unwrap())
+    {
         writeln!(
             text,
             "perm {}x{} |Img|={} sc={} skip={} c={} ins={} depth={} layer={:?}",
@@ -206,7 +222,11 @@ fn describe(engine: &ConversionEngine) -> String {
         .unwrap();
     }
 
-    for pattern in patterns.temporary().iter().map(|&id| patterns.get(id).unwrap()) {
+    for pattern in patterns
+        .temporary()
+        .iter()
+        .map(|&id| patterns.get(id).unwrap())
+    {
         writeln!(
             text,
             "temp {}x{} |Img|={}",
@@ -313,7 +333,9 @@ fn dec_r2_t5_a_state_written_with_another_profile_is_refused() {
 fn two_d_engine() -> ConversionEngine {
     let mut engine = ConversionEngine::new();
     engine.two_dimensional_mode = true;
-    engine.load_profile(&GameProfile::create_empty(), true).unwrap();
+    engine
+        .load_profile(&GameProfile::create_empty(), true)
+        .unwrap();
     engine
 }
 
@@ -330,7 +352,9 @@ fn req_e3d_380_two_dimensional_mode_starts_from_an_empty_registry() {
     assert!(engine.patterns().permanent().is_empty());
     assert_eq!(0, engine.images().count());
 
-    engine.load_profile(&GameProfile::create_empty(), true).unwrap();
+    engine
+        .load_profile(&GameProfile::create_empty(), true)
+        .unwrap();
     assert!(engine.patterns().permanent().is_empty());
 }
 
@@ -339,7 +363,11 @@ fn req_e3d_381_a_two_image_brick_wall_gives_a_two_tile_shape_in_2d_mode() {
     let mut engine = two_d_engine();
 
     let mut batch = Batch::new();
-    batch.bg_row(10, 4, &[img::a(), img::b(), img::a(), img::b(), img::a(), img::b()]);
+    batch.bg_row(
+        10,
+        4,
+        &[img::a(), img::b(), img::a(), img::b(), img::a(), img::b()],
+    );
     let frame = batch.convert(&mut engine, 1);
 
     // Pass 2 stops at one tile per image, instead of swallowing the whole wall.
@@ -407,7 +435,10 @@ fn req_prof_052_a_texture_equal_to_the_default_one_is_recognised() {
 
     // No texture and the null marker both mean "use the default".
     assert!(is_default_texture(None, &pattern));
-    assert!(is_default_texture(Some(&VariantTexture::null_marker()), &pattern));
+    assert!(is_default_texture(
+        Some(&VariantTexture::null_marker()),
+        &pattern
+    ));
 
     // An explicit copy of the default texture is recognised as such.
     let texels = default_profile_texture(&pattern);
@@ -419,7 +450,11 @@ fn req_prof_052_a_texture_equal_to_the_default_one_is_recognised() {
         extra[n / 16] |= ((i32::from(texel) >> 2) & 1) << (n % 16);
     }
 
-    let mut texture = VariantTexture::new(8, 8, Some(TexturePixels::new(TextureFormat::Indexed, data, extra)));
+    let mut texture = VariantTexture::new(
+        8,
+        8,
+        Some(TexturePixels::new(TextureFormat::Indexed, data, extra)),
+    );
     assert!(is_default_texture(Some(&texture), &pattern));
 
     // One texel apart it is not.
