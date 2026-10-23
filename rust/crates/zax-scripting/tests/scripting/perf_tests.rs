@@ -268,3 +268,18 @@ fn perf_accesses() {
 
     assert_eq!(session.log.errors(), [] as [String; 0]);
 }
+
+#[test]
+#[ignore = "temporary profile"]
+fn prof_tmp() {
+    let mut session = ScriptProfileBuilder::new()
+        .pattern(&[img::c()], PatternSpec::tagged("s"))
+        .script("frame", "x = 0")
+        .start();
+    let mut rig = Rig::new();
+    let bridge = session.runtime(|runtime, _| runtime.bridge());
+    let body = std::env::var("PROF_BODY").unwrap();
+    let chunk = format!("local v = Vector3(1, 2, 3) for i = 1, 10000 do {body} end");
+    rig.lend(&bridge, || session.evaluate(&chunk));
+    assert_eq!(session.log.errors(), [] as [String; 0]);
+}
