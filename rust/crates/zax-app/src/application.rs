@@ -395,6 +395,8 @@ impl Running {
         {
             self.source.render_target_size = [width as f32, height as f32];
         }
+        let consumed = self.ui.consumed_keys(&self.input.keyboard);
+        self.source.consume_keys(consumed);
         let snapshot = self.source.sample(
             real,
             DeviceRefs {
@@ -404,8 +406,12 @@ impl Running {
             },
         );
         let capturing = self.source.rebinding().suppresses_actions();
-        self.ui
-            .handle_shortcuts(&mut self.host, &self.input.keyboard, capturing);
+        self.ui.handle_shortcuts(
+            &mut self.host,
+            &self.input.keyboard,
+            capturing,
+            self.source.bindings(),
+        );
         for command in self.source.triggered_commands() {
             if let Some(command) = Command::from_name(command) {
                 self.host.enqueue(command, CommandArgs::default());

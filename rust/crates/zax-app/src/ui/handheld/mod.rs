@@ -6,6 +6,7 @@
 pub mod defaults;
 mod draw;
 pub mod exit_combo;
+pub mod keyboard;
 pub mod layout;
 pub mod options;
 pub mod overlay;

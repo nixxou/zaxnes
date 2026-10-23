@@ -36,7 +36,7 @@ pub enum PadButton {
 impl PadButton {
     const COUNT: usize = 13;
 
-    const ALL: [Self; Self::COUNT] = [
+    pub const ALL: [Self; Self::COUNT] = [
         Self::Up,
         Self::Down,
         Self::Left,
