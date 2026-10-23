@@ -7,7 +7,6 @@ mod ui_harness;
 use std::path::Path;
 
 use ui_harness::{UiHarness, UiLanguageScope};
-use zax_platform::input::Key;
 use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::emulation::emulation_state::EmulationState;
 use zax_app::emulation::notification_center::{NotificationSeverity, DEFAULT_SECONDS};
@@ -15,8 +14,8 @@ use zax_app::emulation::rom_file::INVALID_ROM_MESSAGE;
 use zax_app::persistence::app_settings::{AppSettings, AppSettingsMut};
 use zax_app::ui::menu_shortcuts::ShortcutModifiers;
 use zax_app::ui::strings::UiLanguage;
-use zax_app::ui::{file_browser, text};
-use zax_app::emulation::game_catalog::GameCatalog as _;
+use zax_app::ui::text;
+use zax_platform::input::Key;
 use zax_profiles::catalogue::ProfileImportOutcome;
 
 fn full_path(path: &str) -> String {
@@ -58,7 +57,10 @@ fn req_ui_201_the_first_open_asks_for_a_profile_and_the_second_does_not() {
     assert!(harness.host.current_game_id().is_none());
 
     // The chooser offers the catalogue, the user profiles and "2D Mode", first.
-    assert_eq!(text::two_dimensional_mode(), harness.ui.chooser.all()[0].title);
+    assert_eq!(
+        text::two_dimensional_mode(),
+        harness.ui.chooser.all()[0].title
+    );
     assert!(harness
         .ui
         .chooser
@@ -88,7 +90,10 @@ fn req_ui_201_the_chooser_searches_by_title() {
     let chooser = &mut harness.ui.chooser;
 
     chooser.set_search("  BAT ");
-    let titles: Vec<&str> = chooser.filtered().map(|choice| choice.title.as_str()).collect();
+    let titles: Vec<&str> = chooser
+        .filtered()
+        .map(|choice| choice.title.as_str())
+        .collect();
     assert_eq!(vec!["Batman"], titles);
 
     chooser.set_search("");
@@ -111,13 +116,18 @@ fn req_ui_201_the_menu_entry_opens_the_file_dialog() {
     let _language = UiLanguageScope::new(UiLanguage::English);
     let mut harness = UiHarness::new(&["Arkanoid"]);
     let root = harness.paths.root.to_string_lossy().into_owned();
-    harness.host.update_settings(|model| model.set_last_browse_directory(&root));
+    harness
+        .host
+        .update_settings(|model| model.set_last_browse_directory(&root));
 
     harness.run(Command::OpenRom);
 
     assert!(harness.ui.state.file_browser);
     assert_eq!(text::open_rom_title(), harness.ui.browser.title());
-    assert_eq!(Some(full_path(&root).as_str()), harness.ui.browser.directory());
+    assert_eq!(
+        Some(full_path(&root).as_str()),
+        harness.ui.browser.directory()
+    );
 
     // The filters of SPEC-10 §4 plus "every file", as REQ-UI-201 asks.
     assert_eq!(["nes", "zip"], harness.ui.browser.extensions());
@@ -153,7 +163,11 @@ fn req_ui_200_the_recent_roms_are_remembered_and_pruned() {
     harness.run_with(Command::OpenRecentRom, CommandArgs::of_number(0));
 
     assert!(recent(&harness).is_empty());
-    let shown = harness.host.notifications.current().expect("a notification");
+    let shown = harness
+        .host
+        .notifications
+        .current()
+        .expect("a notification");
     assert_eq!(INVALID_ROM_MESSAGE, shown.text);
     assert_eq!(NotificationSeverity::Error, shown.severity);
 }
@@ -226,7 +240,9 @@ fn req_ui_207_the_welcome_screen_shows_while_no_game_is_loaded() {
 
     // Q-073: full screen with no game keeps the welcome screen, which is then the only thing on
     // screen that names the way out (AMD-032 §6).
-    harness.host.update_settings(|model| model.set_fullscreen(true));
+    harness
+        .host
+        .update_settings(|model| model.set_fullscreen(true));
     harness.draw();
     assert!(harness.ui.state.welcome_visible());
     assert!(!harness.ui.state.menu_bar_visible());
@@ -288,14 +304,20 @@ fn req_ui_206_the_osd_shows_the_notifications_of_spec10() {
     harness.launch("g0");
     harness.run(Command::QuickSave);
 
-    let shown = harness.host.notifications.current().expect("a notification");
+    let shown = harness
+        .host
+        .notifications
+        .current()
+        .expect("a notification");
     assert_eq!("Quick Save", shown.text);
     assert!((shown.seconds - DEFAULT_SECONDS).abs() < f64::EPSILON);
     assert_eq!(NotificationSeverity::Normal, shown.severity);
 
     // The OSD draws in both states and in full screen (REQ-UI-209).
     harness.draw();
-    harness.host.update_settings(|model| model.set_fullscreen(true));
+    harness
+        .host
+        .update_settings(|model| model.set_fullscreen(true));
     harness.draw();
 
     // REQ-UI-081: a normal notification cannot replace a visible error.
@@ -303,7 +325,12 @@ fn req_ui_206_the_osd_shows_the_notifications_of_spec10() {
     assert!(!harness.host.notifications.show_normal("Quick Save"));
     assert_eq!(
         NotificationSeverity::Error,
-        harness.host.notifications.current().expect("a notification").severity
+        harness
+            .host
+            .notifications
+            .current()
+            .expect("a notification")
+            .severity
     );
 }
 
@@ -330,11 +357,19 @@ fn dec_10_q3_the_about_block_has_its_six_lines() {
     assert_eq!("Zaxnes", lines[0]);
     assert_eq!(format!("Version {}", text::version()), lines[1]);
     let numbers: Vec<&str> = text::version().split('.').collect();
-    assert!(numbers.len() >= 3 && numbers.iter().all(|n| n.chars().next().is_some_and(|c| c.is_ascii_digit())));
+    assert!(
+        numbers.len() >= 3
+            && numbers
+                .iter()
+                .all(|n| n.chars().next().is_some_and(|c| c.is_ascii_digit()))
+    );
     assert_eq!("GPL v3", lines[2]);
 
     // AMD-035: English by default, the translation of the three attribution lines.
-    assert_eq!("Independent project inspired by 3dSen (Geod Studio);", lines[3]);
+    assert_eq!(
+        "Independent project inspired by 3dSen (Geod Studio);",
+        lines[3]
+    );
     assert_eq!(
         "contains code adapted from 3DNes_Engine (Geod Studio, GPL v3).",
         lines[4]
@@ -345,7 +380,10 @@ fn dec_10_q3_the_about_block_has_its_six_lines() {
     {
         let _french = UiLanguageScope::new(UiLanguage::French);
         let lines = text::about_lines();
-        assert_eq!("Projet indépendant inspiré de 3dSen (Geod Studio) ;", lines[3]);
+        assert_eq!(
+            "Projet indépendant inspiré de 3dSen (Geod Studio) ;",
+            lines[3]
+        );
         assert_eq!(
             "contient du code adapté de 3DNes_Engine (Geod Studio, GPL v3).",
             lines[4]
@@ -363,7 +401,9 @@ fn dec_10_q3_the_about_block_has_its_six_lines() {
 fn req_ui_209_a_window_opened_by_shortcut_survives_full_screen() {
     let mut harness = UiHarness::new(&["Arkanoid"]);
 
-    harness.host.update_settings(|model| model.set_fullscreen(true));
+    harness
+        .host
+        .update_settings(|model| model.set_fullscreen(true));
     harness.run(Command::ShowKeyConfig);
 
     // The state follows the setting at the next drawn frame (REQ-PERS-067).
@@ -385,7 +425,9 @@ fn req_ui_200_the_whole_interface_draws_in_one_frame() {
     harness.run(Command::ShowAbout);
     harness.ui.state.profile_chooser = true;
     harness.ui.state.debug_overlay = true;
-    harness.host.update_settings(|model| model.set_show_fps(true));
+    harness
+        .host
+        .update_settings(|model| model.set_show_fps(true));
     harness.host.notifications.show_normal("Quick Save");
 
     harness.draw_frames(4);
@@ -408,6 +450,11 @@ fn req_ui_084_a_bad_profile_import_shows_the_exact_message() {
     harness.host.notifications.show_normal(&result.message);
     assert_eq!(
         NotificationSeverity::Normal,
-        harness.host.notifications.current().expect("a notification").severity
+        harness
+            .host
+            .notifications
+            .current()
+            .expect("a notification")
+            .severity
     );
 }

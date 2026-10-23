@@ -26,7 +26,9 @@ use zax_profiles::catalogue::ProfileCatalogue;
 use zax_profiles::library::GameLibrary;
 use zax_render::scene::SceneState;
 
-use crate::common::{FakeGamepadHub, FakeKeyboard, SyntheticRom, TemporaryRoot, START_UNIX_SECONDS};
+use crate::common::{
+    FakeGamepadHub, FakeKeyboard, SyntheticRom, TemporaryRoot, START_UNIX_SECONDS,
+};
 
 /// Puts the interface language back when it goes out of scope, so the order of the tests cannot
 /// matter (the language is thread-local, so a test cannot disturb another either).
@@ -219,16 +221,18 @@ impl UiHarness {
             imgui,
             ..
         } = self;
-        imgui.get_or_insert_with(ImGuiHarness::new).frame(|imgui_ui| {
-            let mut frame = UiFrame {
-                host,
-                input,
-                hub: pads,
-                real_seconds: 1.0 / 60.0,
-                frames_per_second: 60.0,
-            };
-            ui.draw(imgui_ui, &mut frame);
-        });
+        imgui
+            .get_or_insert_with(ImGuiHarness::new)
+            .frame(|imgui_ui| {
+                let mut frame = UiFrame {
+                    host,
+                    input,
+                    hub: pads,
+                    real_seconds: 1.0 / 60.0,
+                    frames_per_second: 60.0,
+                };
+                ui.draw(imgui_ui, &mut frame);
+            });
     }
 
     pub fn draw_frames(&mut self, count: usize) {
@@ -243,9 +247,8 @@ fn instant(unix_seconds: i64) -> OffsetDateTime {
 }
 
 fn catalogue(titles: &[&str]) -> ProfileCatalogue {
-    let mut entries = vec![
-        r#"{"id":"2d","title":"2D Mode","file":"profiles/2d.bytes"}"#.to_owned(),
-    ];
+    let mut entries =
+        vec![r#"{"id":"2d","title":"2D Mode","file":"profiles/2d.bytes"}"#.to_owned()];
     for (index, title) in titles.iter().enumerate() {
         entries.push(format!(
             r#"{{"id":"g{index}","title":"{title}","file":"profiles/g{index}.bytes"}}"#
