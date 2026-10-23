@@ -1,1 +1,1 @@
-//! zax-platform (skeleton).
+//! x
