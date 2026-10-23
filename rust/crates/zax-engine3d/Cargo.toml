@@ -6,5 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[dependencies]
+thiserror = "2"
+zax-nes = { path = "../zax-nes" }
+zax-profiles = { path = "../zax-profiles" }
+
 [lints]
 workspace = true
