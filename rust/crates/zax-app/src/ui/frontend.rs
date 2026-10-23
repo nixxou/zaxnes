@@ -63,6 +63,10 @@ impl ImguiFrontend {
         fonts.remap_missing_glyphs(context.fonts());
         let mut ui = ZaxUi::new(host);
         ui.set_heading_font(fonts.heading);
+        #[cfg(feature = "native-dialog")]
+        if options.ui_shot_directory.is_none() {
+            ui.set_file_picker(Box::new(super::native_picker::NativePicker::detect()));
+        }
         ui.log(match &fonts.body_file {
             Some(file) => format!("interface font: {}", file.display()),
             None => "no system font was loaded; the built-in ImGui font has no accents.".to_owned(),

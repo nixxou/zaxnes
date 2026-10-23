@@ -6,12 +6,15 @@ pub mod commands;
 pub mod confirm_dialog;
 pub mod debug_overlay;
 pub mod file_browser;
+pub mod file_picker;
 pub mod fonts;
 pub mod frontend;
 pub mod key_config;
 pub mod keys;
 pub mod menu_bar;
 pub mod menu_shortcuts;
+#[cfg(feature = "native-dialog")]
+pub mod native_picker;
 pub mod notifications;
 pub mod options;
 pub mod platform;

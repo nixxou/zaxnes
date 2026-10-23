@@ -14,6 +14,10 @@ name = "zaxnes"
 path = "src/main.rs"
 
 [features]
+# The platform's own file dialog (Windows Explorer, the XDG portal on Linux) in place of the
+# ImGui browser; the browser stays as the fallback at run time.
+default = ["native-dialog"]
+native-dialog = ["dep:rfd"]
 # Statically links SDL2 (Windows, aarch64); forwarded to zax-platform.
 bundled = ["zax-platform/bundled"]
 
@@ -34,6 +38,7 @@ zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
 sdl2 = "0.38"
 glow = "0.16"
 sys-locale = "0.3.2"
+rfd = { version = "0.17", default-features = false, features = ["xdg-portal"], optional = true }
 imgui = { version = "0.12", features = ["tables-api"] }
 
 [dev-dependencies]
