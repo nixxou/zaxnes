@@ -271,7 +271,7 @@ fn an_empty_text_asset_is_read() {
 
     assert_eq!(1, read.len());
     assert_eq!("empty", read[0].name);
-    assert!(read[0].script.is_empty());
+    assert_eq!(read[0].script, [] as [u8; 0]);
 }
 
 /// AMD-030 §4.4: a name whose length is not a multiple of four exercises the alignment.

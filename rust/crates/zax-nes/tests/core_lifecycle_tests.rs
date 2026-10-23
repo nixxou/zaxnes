@@ -35,7 +35,7 @@ fn req_core_031_video_info_is_33_by_31_with_128_sprites() {
 
 #[test]
 fn req_core_002_core_name_is_a_stable_non_empty_string() {
-    assert!(!NesCore::CORE_NAME.trim().is_empty());
+    assert_ne!(NesCore::CORE_NAME.trim(), "");
     assert_eq!("Zaxnes", NesCore::CORE_NAME);
 }
 

@@ -74,7 +74,7 @@ fn req_core_082_writing_work_ram_has_the_same_effect_as_a_cpu_write() {
 #[test]
 fn req_core_095_battery_ram_is_exported_and_imported_only_with_a_battery() {
     let mut without_battery = loaded_machine();
-    assert!(without_battery.export_battery_ram().is_empty());
+    assert_eq!(without_battery.export_battery_ram(), []);
     assert!(!without_battery.import_battery_ram(&[0; 8192]));
 
     let mut image = minimal();

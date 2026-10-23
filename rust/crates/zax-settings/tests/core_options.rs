@@ -121,9 +121,9 @@ fn the_background_colour_is_exposed_as_eight_presets() {
 /// REQ-PERS-081: every exposed option offers a non-empty list, without duplicates, that holds its default.
 #[test]
 fn every_option_offers_a_clean_list_holding_its_default() {
-    assert!(!core_options::all().is_empty());
+    assert_ne!(core_options::all(), []);
     for option in core_options::all() {
-        assert!(!option.values.is_empty());
+        assert_ne!(option.values, [] as [std::string::String; 0]);
         let mut distinct = option.values.clone();
         distinct.sort();
         distinct.dedup();

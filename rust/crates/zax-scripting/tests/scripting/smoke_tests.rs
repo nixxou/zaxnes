@@ -10,7 +10,7 @@ fn a_chunk_runs_and_its_globals_survive() {
         .script("a", "n = (n or 0) + 1\nfunction Start() started = n end")
         .start();
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_eq!(session.number("return started"), 1.0);
 }
 
@@ -112,7 +112,7 @@ fn frame_hooks_see_the_instances() {
 
     session.frame(&Batch::new().bg_cell(img::a(), 10, 5), 0);
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_eq!(session.number("return seen"), 1.0);
     assert_eq!(session.text("return lastTag"), "t");
     assert_eq!(session.number("return offsetX"), 0.0);
@@ -198,7 +198,7 @@ fn identity_holds_across_accesses() {
 
     session.frame(&Batch::new().bg_cell(img::a(), 10, 5), 0);
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_eq!(
         session.number("if sameShape then return 1 else return 0 end"),
         1.0

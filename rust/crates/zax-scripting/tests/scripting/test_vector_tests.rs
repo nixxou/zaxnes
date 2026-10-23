@@ -287,7 +287,7 @@ fn tv_lua_05_positions() {
         1,
     );
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_vector(&mut session, "bl", 16.0, 201.0, -4.0);
     assert_vector(&mut session, "tr", 31.0, 216.0, 4.0);
     assert_vector(&mut session, "bl2", 16.0, 200.0, -4.0);
@@ -321,7 +321,7 @@ fn tv_lua_06_overlap() {
         &Batch::new().sprite(img::a(), 0, 0).sprite(img::b(), 7, 0),
         1,
     );
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_ne!(session.truth("plain"), 1.0);
     assert_eq!(session.truth("slack"), 1.0);
 
@@ -374,7 +374,7 @@ fn tv_lua_07_deformation() {
         1,
     );
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_close(0.0, session.number("return d.x"), 4);
     assert_close(0.0, session.number("return d.y"), 4);
     assert_close(7.02066, session.number("return d.z"), 4);
@@ -483,7 +483,7 @@ fn tv_lua_10_colours_and_palette() {
     // sees the palette of the first (REQ-LUA-087, DEC-05-Q4).
     batch.convert_and_publish(&mut session.engine, 2);
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_eq!(session.number("return alpha"), 1.0);
     assert_eq!(session.number("return published"), f64::from(0x16));
     assert_eq!(session.number("return current"), f64::from(0x16));
@@ -612,7 +612,7 @@ fn tv_lua_14_shared_list() {
         1,
     );
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert_eq!(session.number("return n"), 3.0);
     assert_eq!(session.number("return afterwards"), 1.0);
     assert_eq!(truth(&mut session, "same"), 1.0);

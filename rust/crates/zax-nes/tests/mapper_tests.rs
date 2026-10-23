@@ -899,6 +899,6 @@ fn req_core_095_battery_backed_prg_ram_is_exposed_and_survives_a_reload() {
 fn req_core_095_a_cartridge_without_a_battery_exposes_nothing() {
     let mut core = load(4);
 
-    assert!(core.export_battery_ram().is_empty());
+    assert_eq!(core.export_battery_ram(), []);
     assert!(!core.import_battery_ram(&[1, 2, 3]));
 }

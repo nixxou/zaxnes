@@ -75,7 +75,7 @@ fn req_core_090_the_apu_state_survives_a_save_and_restore() {
     let state = core.save_state(true).unwrap();
 
     let expected = capture(&mut core, 60_000);
-    assert!(!expected.is_empty());
+    assert_ne!(expected, [] as [f32; 0]);
     assert!(expected.iter().any(|&sample| sample != 0.0));
 
     core.try_load_state(&state, 0).unwrap();

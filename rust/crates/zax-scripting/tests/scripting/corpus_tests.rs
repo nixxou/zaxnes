@@ -266,7 +266,7 @@ fn profiles_that_use_goto_load_and_run() {
             .contains("goto")));
 
         let mut session = ScriptSession::create(&profile);
-        assert!(session.log.errors().is_empty());
+        assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
 
         session.start();
         let batch = synthetic_frame(&profile);

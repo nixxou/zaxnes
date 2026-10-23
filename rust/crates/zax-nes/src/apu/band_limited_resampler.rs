@@ -198,7 +198,10 @@ fn build_kernel() -> Box<[f64]> {
         let from = f64::from(i as i32 - 1 - ORIGIN) / PHASES as f64;
         for sub in 0..INTEGRATION_SUB_STEPS {
             let a = from + (sub as f64 * dx);
-            accumulated += (impulse(a) + impulse(a + dx)) * 0.5 * dx;
+            // Exact trapezoid arithmetic kept as is: `midpoint` could change the audio bit for bit.
+            #[allow(clippy::manual_midpoint)]
+            let trapezoid = (impulse(a) + impulse(a + dx)) * 0.5 * dx;
+            accumulated += trapezoid;
         }
 
         *slot = accumulated;

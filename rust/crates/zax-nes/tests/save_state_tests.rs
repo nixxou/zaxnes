@@ -210,7 +210,7 @@ fn req_core_092_the_same_inputs_give_the_same_frames_memory_and_audio() {
         }
     }
 
-    assert!(!first_audio.is_empty());
+    assert_ne!(first_audio, [] as [f32; 0]);
     assert_eq!(first_audio, second_audio);
 }
 

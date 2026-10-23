@@ -238,7 +238,10 @@ fn req_prof_062_an_identifier_that_belongs_to_a_built_in_profile_is_ignored() {
     let log = RecordingProfileLog::new();
     let folder = user_folder(&files, layout.profiles_directory(), Some(&log));
 
-    assert!(folder.scan(&["1"]).unwrap().is_empty());
+    assert_eq!(
+        folder.scan(&["1"]).unwrap(),
+        [] as [zax_profiles::catalogue::UserProfile; 0]
+    );
     assert!(log.any_contains("duplicated profile"));
 }
 
@@ -344,10 +347,12 @@ fn req_prof_063_importing_the_identifier_of_a_built_in_profile_does_nothing() {
     let result = folder.import(source, &["1"], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::AlreadyBuiltIn, result.outcome);
-    assert!(files
-        .list_files(layout.profiles_directory(), UserProfileFolder::EXTENSION)
-        .unwrap()
-        .is_empty());
+    assert_eq!(
+        files
+            .list_files(layout.profiles_directory(), UserProfileFolder::EXTENSION)
+            .unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 #[test]

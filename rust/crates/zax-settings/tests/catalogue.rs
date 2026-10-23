@@ -71,7 +71,7 @@ fn no_published_key_disappeared() {
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect();
-    assert!(!reference.is_empty());
+    assert_ne!(reference, [] as [&str; 0]);
     let keys: HashSet<String> = catalogue::descriptors()
         .map(|d| d.key().into_owned())
         .collect();

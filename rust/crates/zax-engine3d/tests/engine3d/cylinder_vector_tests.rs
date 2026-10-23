@@ -445,5 +445,5 @@ fn req_e3d_452_a_cylinder_without_a_segment_has_no_depth() {
     let (fields, depth) = geo::fields(&blank, &instance, GREEDY);
 
     assert_eq!(0, depth);
-    assert!(section(&fields[0], 0, true).is_empty());
+    assert_eq!(section(&fields[0], 0, true), [] as [(i32, i32, i32); 0]);
 }
