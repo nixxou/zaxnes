@@ -236,6 +236,47 @@ fn a_hook_may_not_define_an_unknown_hook_name_but_detect_shape_is_never_called_r
     assert_eq!(session.text("return type(called)"), "nil");
 }
 
+// the identity of frame handles (REQ-LUA-043, REQ-LUA-028)
+
+/// A session whose `UpdateS` runs `body` for the one sprite of every frame.
+fn one_shape_session(body: &str) -> ScriptSession {
+    ScriptProfileBuilder::new()
+        .pattern(&[img::c()], PatternSpec::tagged("s"))
+        .script("keep", &format!("function UpdateS() {body} end"))
+        .start()
+}
+
+#[test]
+fn a_frame_handle_is_one_value_within_its_epoch_req_lua_043() {
+    let mut session = one_shape_session(
+        "if frame == 1 then a = shape.Shape; b = shape.Shape; t = {}; t[a] = 7 end",
+    );
+    session.frame(&Batch::new().sprite(img::c(), 0, 0), 1);
+
+    assert_eq!(session.truth("return a == b and rawequal(a, b)"), 1.0);
+    assert_eq!(session.number("return t[b]"), 7.0);
+}
+
+#[test]
+fn a_kept_frame_handle_stays_the_same_value_after_its_epoch_req_lua_028() {
+    // The C# binder maps a host object to one userdata whatever frame it is read in, so a
+    // handle kept from frame 1 is the value its object gives later, and a table key still finds it.
+    let mut session = one_shape_session(
+        "if frame == 1 then held = shape; first = shape.Shape; t = {}; t[first] = 7 \
+         elseif frame == 5 then later = held.Shape; x = held.Offset.x end",
+    );
+    let batch = Batch::new().sprite(img::c(), 0, 0);
+    for counter in 1..=5 {
+        session.frame(&batch, counter);
+    }
+
+    assert_eq!(session.log.errors(), [] as [String; 0]);
+    assert_eq!(session.truth("return rawequal(first, later)"), 1.0);
+    assert_eq!(session.truth("return first == later"), 1.0);
+    assert_eq!(session.number("return t[later]"), 7.0);
+    assert_eq!(session.text("return type(x)"), "number");
+}
+
 // the notifications (REQ-LUA-093)
 
 #[test]

@@ -11,7 +11,7 @@ use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
 use super::payload::{Host, Payload, Vec3Ref};
 use crate::environment::ScriptContext;
-use crate::runtime::RuntimeData;
+use crate::runtime::{FrameHandles, RuntimeData};
 use crate::values::{number_format, LuaColor};
 
 /// What the host lends to the Lua state for the duration of one call into it: the runtime's
@@ -255,6 +255,27 @@ impl<'a> Cx<'a> {
 
     // pushing
 
+    /// Hands the handles of an epoch that is over to the weak object cache: a script that still
+    /// holds one keeps the one value of its object (REQ-LUA-043), whatever the epoch.
+    pub fn retire(&self, handles: FrameHandles) -> mlua::Result<()> {
+        if handles.is_empty() {
+            return Ok(());
+        }
+
+        let cache = self.cache()?;
+        for (key, handle) in handles {
+            cache.raw_set(self.lua.create_string(key)?, handle)?;
+        }
+        Ok(())
+    }
+
+    fn cache(&self) -> mlua::Result<Table> {
+        self.lua
+            .app_data_ref::<HostCache>()
+            .map(|cache| cache.0.clone())
+            .ok_or_else(|| Self::not_available("the object cache"))
+    }
+
     /// A fresh Lua value for `payload`.
     pub fn value(&self, payload: Payload) -> mlua::Result<Value> {
         Ok(Value::UserData(
@@ -291,12 +312,7 @@ impl<'a> Cx<'a> {
             }
         }
 
-        let cache = self
-            .lua
-            .app_data_ref::<HostCache>()
-            .ok_or_else(|| Self::not_available("the object cache"))?
-            .0
-            .clone();
+        let cache = self.cache()?;
         let key = self.lua.create_string(key)?;
         if let Value::UserData(existing) = cache.raw_get::<Value>(&key)? {
             return Ok(Value::UserData(existing));

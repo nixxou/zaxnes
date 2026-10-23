@@ -245,7 +245,8 @@ fn frame_pinned(definition: &mut TypeDef) {
         |call| {
             require(call, HostType::FrameApi, "PinNewFrame")?;
             call.cx.state(ConversionState::pin_new_frame)?;
-            call.cx.data(RuntimeData::advance_pin_epoch)?;
+            let retired = call.cx.data(RuntimeData::advance_pin_epoch)?;
+            call.cx.retire(retired)?;
             Ok(None)
         },
         None,
@@ -255,7 +256,8 @@ fn frame_pinned(definition: &mut TypeDef) {
         |call| {
             require(call, HostType::FrameApi, "ReleasePinnedFrame")?;
             call.cx.state(ConversionState::release_pinned_frame)?;
-            call.cx.data(RuntimeData::advance_pin_epoch)?;
+            let retired = call.cx.data(RuntimeData::advance_pin_epoch)?;
+            call.cx.retire(retired)?;
             Ok(None)
         },
         None,
