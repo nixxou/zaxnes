@@ -249,11 +249,11 @@ fn one_shape_session(body: &str) -> ScriptSession {
 #[test]
 fn a_frame_handle_is_one_value_within_its_epoch_req_lua_043() {
     let mut session = one_shape_session(
-        "if frame == 1 then a = shape.Shape; b = shape.Shape; t = {}; t[a] = 7 end",
+        "if frame == 1 then a = shape.Shape2D; b = shape.Shape2D; t = {}; t[a] = 7 end",
     );
     session.frame(&Batch::new().sprite(img::c(), 0, 0), 1);
 
-    assert_eq!(session.truth("return a == b and rawequal(a, b)"), 1.0);
+    assert_eq!(session.truth("a == b and rawequal(a, b)"), 1.0);
     assert_eq!(session.number("return t[b]"), 7.0);
 }
 
@@ -262,8 +262,8 @@ fn a_kept_frame_handle_stays_the_same_value_after_its_epoch_req_lua_028() {
     // The C# binder maps a host object to one userdata whatever frame it is read in, so a
     // handle kept from frame 1 is the value its object gives later, and a table key still finds it.
     let mut session = one_shape_session(
-        "if frame == 1 then held = shape; first = shape.Shape; t = {}; t[first] = 7 \
-         elseif frame == 5 then later = held.Shape; x = held.Offset.x end",
+        "if frame == 1 then held = shape; first = shape.Shape2D; t = {}; t[first] = 7 \
+         elseif frame == 5 then later = held.Shape2D; x = held.Shape2D.tStart.x end",
     );
     let batch = Batch::new().sprite(img::c(), 0, 0);
     for counter in 1..=5 {
@@ -271,8 +271,8 @@ fn a_kept_frame_handle_stays_the_same_value_after_its_epoch_req_lua_028() {
     }
 
     assert_eq!(session.log.errors(), [] as [String; 0]);
-    assert_eq!(session.truth("return rawequal(first, later)"), 1.0);
-    assert_eq!(session.truth("return first == later"), 1.0);
+    assert_eq!(session.truth("rawequal(first, later)"), 1.0);
+    assert_eq!(session.truth("first == later"), 1.0);
     assert_eq!(session.number("return t[later]"), 7.0);
     assert_eq!(session.text("return type(x)"), "number");
 }
