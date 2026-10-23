@@ -79,7 +79,7 @@ The acceptance project (581 methods) checks requirement traceability and archite
 ### Known gaps
 
 - Lua: `CoreScriptInput`/`CoreScriptMemory` are implemented by the app, not by `zax-scripting`; `SlotTexture` w/h uses the 8W x 8H fallback; `BuildPattern` only has the instance (state members raise "not available here"); `Camera.FpvShape` reads nil after its frame epoch changes; ViewReset goes through a flag; the C# "Disposed runtime" test is not portable; `Setting:Save/Load` from Lua run at the end of the hook.
-- Application: core error to `Stopped` not ported (no exception path); `REQ-PUB-006` system-font half not ported; `ISceneRenderer` interface not ported.
+- Application: core error to `Stopped` not ported (no exception path); `ISceneRenderer` interface not ported.
 - Render: llvmpipe differences on overlapping coplanar sprites (heavy scene, framing edge pixels); 8x MSAA unverifiable here.
 - Platform: Windows console attach and every window, audio and gamepad path were never run against real hardware by the agent; the aarch64 package and the RG40XXV are untested on a device; `zax-app`/`zax-platform` cannot be cross-checked for Windows from Linux (MSVC tools).
 - Build: `--all-features` on `zax-app`/`zax-platform` enables `bundled` (static SDL2, needs CMake and MSVC), otherwise ship SDL2.dll 2.30.x.
