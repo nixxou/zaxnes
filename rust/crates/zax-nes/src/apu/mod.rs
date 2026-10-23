@@ -216,6 +216,10 @@ pub struct Apu2A03 {
     readable_status: u8,
     level_key: i32,
     level: f64,
+    /// Whether something the mixed level depends on may have changed since it was computed
+    /// (a register write, a frame-counter clock, a reset or a loaded state); a timer that moves
+    /// a channel says so itself. The level is only recomputed then: it depends on nothing else.
+    level_dirty: bool,
 }
 
 impl Clone for Apu2A03 {
@@ -246,6 +250,7 @@ impl Clone for Apu2A03 {
             readable_status: self.readable_status,
             level_key: self.level_key,
             level: self.level,
+            level_dirty: self.level_dirty,
         }
     }
 }
@@ -305,6 +310,7 @@ impl Apu2A03 {
             readable_status: 0,
             level_key: -1,
             level: 0.0,
+            level_dirty: true,
         };
         apu.apply_timing();
         apu.recompute_ratio();
@@ -440,6 +446,7 @@ impl Apu2A03 {
 
     /// Changes the timings in force.
     pub fn set_timing(&mut self, timing: RegionTiming) {
+        self.level_dirty = true;
         self.timing = timing;
         self.apply_timing();
         self.recompute_ratio();
@@ -472,6 +479,7 @@ impl Apu2A03 {
         self.readable_status = 0;
         self.level_key = -1;
         self.level = 0.0;
+        self.level_dirty = true;
 
         self.discard_samples();
     }
@@ -514,20 +522,24 @@ impl Apu2A03 {
             }
         }
 
-        self.step_frame_counter();
+        let mut changed = self.step_frame_counter();
 
         self.apu_cycle = !self.apu_cycle;
         if self.apu_cycle {
             // The pulse timers run at half the CPU clock (nesdev).
-            self.pulse1.clock_timer();
-            self.pulse2.clock_timer();
+            changed |= self.pulse1.clock_timer();
+            changed |= self.pulse2.clock_timer();
         }
 
-        self.triangle.clock_timer();
-        self.noise.clock_timer();
-        self.dmc.clock_timer();
+        changed |= self.triangle.clock_timer();
+        changed |= self.noise.clock_timer();
+        changed |= self.dmc.clock_timer();
 
-        let level = self.current_level();
+        if changed || self.level_dirty {
+            self.level_dirty = false;
+            self.current_level();
+        }
+        let level = self.level;
         let ring = &self.ring;
         self.resampler
             .step_cycle(level, &mut |sample| lock(ring).enqueue(sample));
@@ -535,12 +547,14 @@ impl Apu2A03 {
 
     // ---------------------------------------------------------------- frame counter
 
-    fn step_frame_counter(&mut self) {
+    /// Moves the frame counter on; `true` when a step fell on this cycle (a quarter or half
+    /// frame, or an IRQ step).
+    fn step_frame_counter(&mut self) -> bool {
         let sequence = self.sequence();
         self.frame_counter += 1;
 
         if self.frame_counter != sequence[self.frame_step] {
-            return;
+            return false;
         }
 
         if self.five_step_mode {
@@ -578,6 +592,8 @@ impl Apu2A03 {
             self.frame_step = 0;
             self.frame_counter = 0;
         }
+
+        true
     }
 
     const fn sequence(&self) -> &'static [i32; 6] {
@@ -665,6 +681,7 @@ impl Apu2A03 {
 
     /// Writes an APU register, `address` in $4000-$4017.
     pub fn write(&mut self, address: u16, value: u8) {
+        self.level_dirty = true;
         match address {
             0x4000..=0x4003 => self.pulse1.write(address - 0x4000, value, self.cycles),
             0x4004..=0x4007 => self.pulse2.write(address - 0x4004, value, self.cycles),
@@ -821,6 +838,7 @@ impl Apu2A03 {
         self.readable_status = reader.read_u8()?;
         self.level_key = reader.read_i32()?;
         self.level = reader.read_f64()?;
+        self.level_dirty = true;
 
         self.resampler.load_state(reader)?;
 

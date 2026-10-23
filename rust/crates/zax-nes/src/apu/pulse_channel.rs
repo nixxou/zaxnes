@@ -100,12 +100,15 @@ impl PulseChannel {
     }
 
     /// Clocks the timer; called every other CPU cycle.
-    pub fn clock_timer(&mut self) {
+    /// Clocks the timer; `true` when the sequencer moved (the output may have changed).
+    pub fn clock_timer(&mut self) -> bool {
         if self.timer == 0 {
             self.timer = self.timer_period;
             self.sequence_position = (self.sequence_position + 1) & 7;
+            true
         } else {
             self.timer -= 1;
+            false
         }
     }
 

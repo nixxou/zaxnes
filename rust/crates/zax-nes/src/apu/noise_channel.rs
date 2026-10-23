@@ -82,7 +82,8 @@ impl NoiseChannel {
     }
 
     /// Clocks the timer; called every CPU cycle.
-    pub fn clock_timer(&mut self) {
+    /// Clocks the timer; `true` when the shift register moved (the output may have changed).
+    pub fn clock_timer(&mut self) -> bool {
         if self.timer == 0 {
             self.timer = self.periods[self.period_index] - 1;
 
@@ -91,8 +92,10 @@ impl NoiseChannel {
                 ^ (self.shift_register >> if self.short_mode { 6 } else { 1 }))
                 & 1;
             self.shift_register = (self.shift_register >> 1) | (feedback << 14);
+            true
         } else {
             self.timer -= 1;
+            false
         }
     }
 

@@ -133,10 +133,11 @@ impl DmcChannel {
     }
 
     /// Clocks the output unit's timer; called once per CPU cycle.
-    pub fn clock_timer(&mut self) {
+    /// Clocks the timer; `true` when a bit was played (the output may have changed).
+    pub fn clock_timer(&mut self) -> bool {
         if self.timer > 0 {
             self.timer -= 1;
-            return;
+            return false;
         }
 
         self.timer = self.rates[self.rate_index] - 1;
@@ -165,6 +166,8 @@ impl DmcChannel {
                 self.buffer_empty = true;
             }
         }
+
+        true
     }
 
     /// Hands the byte the DMA read over to the memory reader. Advances the address, which
