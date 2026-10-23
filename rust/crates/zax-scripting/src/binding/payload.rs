@@ -248,6 +248,16 @@ impl Host {
 }
 
 impl Payload {
+    /// The frame whose epoch bounds the life of this object, when it is a handle into a frame.
+    pub const fn frame_key(&self) -> Option<FrameKey> {
+        match self {
+            Self::Instance(InstanceTarget::Frame(key, _))
+            | Self::Shape(ShapeTarget { key, .. })
+            | Self::Pattern(PatternTarget::Frame(ShapeTarget { key, .. })) => Some(*key),
+            _ => None,
+        }
+    }
+
     /// The key under which the Lua value of a reference object is cached, so that the same
     /// object always yields the same Lua value (REQ-LUA-043), or `None` for a value type or a
     /// descriptor, which is a fresh value every time.

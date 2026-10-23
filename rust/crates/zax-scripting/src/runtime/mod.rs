@@ -21,6 +21,7 @@ mod hooks;
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
 use std::time::Duration;
 
 use mlua::{HookTriggers, Lua, MultiValue, Value, VmState};
@@ -41,6 +42,7 @@ use self::hooks::{
 use crate::binding::cx::{with_host_context, Cx, HostLink, Lent};
 use crate::binding::dispatch;
 use crate::binding::payload::{FrameKey, InstanceTarget, Payload, ShapeTarget};
+use crate::binding::table::ByteHasher;
 use crate::environment::{ScriptContext, ScriptEnvironment};
 use crate::error::{message_of, LuaScriptError};
 use crate::persistent_data;
@@ -49,6 +51,9 @@ use crate::settings::ScriptSettings;
 
 /// How many VM instructions pass between two looks at the execution budget.
 const BUDGET_CHECK_INSTRUCTIONS: u32 = 100_000;
+
+/// The Lua values of the handles of one epoch, by cache key.
+pub(crate) type FrameHandles = HashMap<[u8; 16], Value, BuildHasherDefault<ByteHasher>>;
 
 /// Everything the runtime owns besides the Lua state. The script API reaches it through the
 /// call context while a call into Lua is in progress.
@@ -68,6 +73,10 @@ pub(crate) struct RuntimeData {
     pub epoch: u32,
     /// The same for the pinned frame, which only the pin and release calls change.
     pub pin_epoch: u32,
+    /// The Lua values issued for the handles of the current epoch and of the current pin epoch,
+    /// so that a handle is made once and found again until its epoch ends.
+    frame_handles: FrameHandles,
+    pinned_handles: FrameHandles,
     pub script_pad_enabled: bool,
     pub script_pad_index: i32,
     pub script_pad_state: i32,
@@ -122,8 +131,30 @@ impl RuntimeData {
 
     /// Changes the epochs: every frame handle issued so far reads as gone.
     fn invalidate_handles(&mut self) {
+        self.advance_epoch();
+        self.advance_pin_epoch();
+    }
+
+    /// Ends the epoch of the frame being converted.
+    pub fn advance_epoch(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
+        self.frame_handles.clear();
+    }
+
+    /// Ends the epoch of the pinned frame.
+    pub fn advance_pin_epoch(&mut self) {
         self.pin_epoch = self.pin_epoch.wrapping_add(1);
+        self.pinned_handles.clear();
+    }
+
+    /// The Lua values issued for the handles of the epoch `key` is in, or `None` when that epoch
+    /// is over.
+    pub fn handles_of(&mut self, key: FrameKey) -> Option<&mut FrameHandles> {
+        if key.pinned {
+            (key.epoch == self.pin_epoch).then_some(&mut self.pinned_handles)
+        } else {
+            (key.epoch == self.epoch).then_some(&mut self.frame_handles)
+        }
     }
 }
 
@@ -208,6 +239,8 @@ impl ProfileScriptRuntime {
                 frame_counter: 0,
                 epoch: 0,
                 pin_epoch: 0,
+                frame_handles: FrameHandles::default(),
+                pinned_handles: FrameHandles::default(),
                 script_pad_enabled: false,
                 script_pad_index: 0,
                 script_pad_state: 0,
@@ -690,7 +723,7 @@ impl ProfileScriptRuntime {
 
     fn publish_frame_globals(&mut self, frame_counter: i32, time: f32) -> mlua::Result<()> {
         self.data.frame_counter = frame_counter;
-        self.data.epoch = self.data.epoch.wrapping_add(1);
+        self.data.advance_epoch();
         let globals = self.lua.globals();
         globals.set("frame", f64::from(frame_counter))?;
         globals.set("time", f64::from(time))

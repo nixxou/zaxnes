@@ -269,6 +269,28 @@ impl<'a> Cx<'a> {
             return self.value(payload);
         };
 
+        // A handle into the current epoch of a frame is made once: the runtime keeps its value
+        // until the epoch is over, which spares the weak table a string key and two accesses.
+        if let Some(frame) = payload.frame_key() {
+            let known = self.data(|data| {
+                data.handles_of(frame)
+                    .map(|handles| handles.get(&key).cloned())
+            })?;
+            match known {
+                Some(Some(handle)) => return Ok(handle),
+                Some(None) => {
+                    let created = self.value(payload)?;
+                    self.data(|data| {
+                        if let Some(handles) = data.handles_of(frame) {
+                            handles.insert(key, created.clone());
+                        }
+                    })?;
+                    return Ok(created);
+                }
+                None => {}
+            }
+        }
+
         let cache = self
             .lua
             .app_data_ref::<HostCache>()

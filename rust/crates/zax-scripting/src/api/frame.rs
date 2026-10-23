@@ -15,6 +15,7 @@ use crate::binding::payload::{
     HostType, InstanceListKind, InstanceTarget, PatternTarget, Payload, ShapeTarget,
 };
 use crate::binding::table::{Reply, TypeDef};
+use crate::runtime::RuntimeData;
 use crate::values::{number_format, LuaColor};
 
 pub(super) fn declare(types: &mut Vec<TypeDef>) {
@@ -244,8 +245,7 @@ fn frame_pinned(definition: &mut TypeDef) {
         |call| {
             require(call, HostType::FrameApi, "PinNewFrame")?;
             call.cx.state(ConversionState::pin_new_frame)?;
-            call.cx
-                .data(|data| data.pin_epoch = data.pin_epoch.wrapping_add(1))?;
+            call.cx.data(RuntimeData::advance_pin_epoch)?;
             Ok(None)
         },
         None,
@@ -255,8 +255,7 @@ fn frame_pinned(definition: &mut TypeDef) {
         |call| {
             require(call, HostType::FrameApi, "ReleasePinnedFrame")?;
             call.cx.state(ConversionState::release_pinned_frame)?;
-            call.cx
-                .data(|data| data.pin_epoch = data.pin_epoch.wrapping_add(1))?;
+            call.cx.data(RuntimeData::advance_pin_epoch)?;
             Ok(None)
         },
         None,
