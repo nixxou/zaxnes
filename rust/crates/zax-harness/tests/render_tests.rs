@@ -107,12 +107,16 @@ fn the_scene_list_is_the_one_of_the_goldens() {
 }
 
 #[test]
-fn an_unported_frame_source_is_refused() {
-    let arguments = [
-        "--out".to_owned(),
-        "x".to_owned(),
-        "--frames".to_owned(),
-        "a.json".to_owned(),
-    ];
-    assert!(Options::parse(&arguments).is_err());
+fn a_frame_file_or_a_rom_that_does_not_exist_is_an_error() {
+    let output = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("render-missing");
+    for source in [["--frames", "missing.json"], ["--rom", "missing.nes"]] {
+        let arguments = [
+            "--out".to_owned(),
+            output.to_str().unwrap().to_owned(),
+            source[0].to_owned(),
+            source[1].to_owned(),
+        ];
+        let options = Options::parse(&arguments).unwrap();
+        assert!(render::run(&options).is_err(), "{source:?}");
+    }
 }
