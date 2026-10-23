@@ -4,7 +4,7 @@
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
-use mlua::{Lua, MultiValue, Value};
+use mlua::{Lua, MultiValue, Table, Value};
 use zax_engine3d::frame::FrameInstanceId;
 
 use super::globals::{protected_call, protected_hook_call};
@@ -53,6 +53,45 @@ pub(crate) fn with_budget<R>(lua: &Lua, limit: Duration, operation: impl FnOnce(
     result
 }
 
+/// The globals a hook call publishes before it runs.
+#[derive(Clone, Copy)]
+pub(crate) enum Published {
+    Script,
+    Shape,
+    Shape2D,
+    Pattern,
+}
+
+/// The globals table and the names of [`Published`], made once so that publishing a global costs
+/// no string and no lookup of the table.
+pub(crate) struct PublishedGlobals {
+    table: Table,
+    names: [mlua::String; 4],
+}
+
+impl PublishedGlobals {
+    /// Installs the names in `lua`.
+    pub fn install(lua: &Lua) -> mlua::Result<()> {
+        let names = ["self", "shape", "shape2D", "pattern"].map(|name| lua.create_string(name));
+        let [script, shape, shape_2d, pattern] = names;
+        lua.set_app_data(Self {
+            table: lua.globals(),
+            names: [script?, shape?, shape_2d?, pattern?],
+        });
+        Ok(())
+    }
+}
+
+/// Sets the global `which` for the hook about to run.
+pub(crate) fn publish(lua: &Lua, which: Published, value: Value) -> mlua::Result<()> {
+    let published = lua
+        .app_data_ref::<PublishedGlobals>()
+        .ok_or_else(|| mlua::Error::runtime("the hook globals are not installed"))?;
+    published
+        .table
+        .raw_set(&published.names[which as usize], value)
+}
+
 /// Marks the script in error and logs it once (REQ-LUA-061, REQ-LUA-062).
 fn fail(cx: &Cx, index: usize, hook: ScriptHook, message: &str) -> mlua::Result<()> {
     cx.data(|data| {
@@ -69,15 +108,26 @@ fn fail(cx: &Cx, index: usize, hook: ScriptHook, message: &str) -> mlua::Result<
 /// Calls `hook` of the script at `index`. An absent hook is simply not called (REQ-LUA-022).
 /// Returns the text of the error the hook raised.
 pub(crate) fn call_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result<Option<String>> {
-    let (function, limit) =
-        cx.data(|data| (data.scripts[index].hook(hook).cloned(), data.hook_budget))?;
+    let (function, limit, handle) = cx.data(|data| {
+        let script = &data.scripts[index];
+        (
+            script.hook(hook).cloned(),
+            data.hook_budget,
+            script.handle.clone(),
+        )
+    })?;
     let Some(function) = function else {
         return Ok(None);
     };
 
-    cx.lua
-        .globals()
-        .set("self", cx.object(Payload::Script(index))?)?;
+    let handle = if let Some(handle) = handle {
+        handle
+    } else {
+        let handle = cx.object(Payload::Script(index))?;
+        cx.data(|data| data.scripts[index].handle = Some(handle.clone()))?;
+        handle
+    };
+    publish(cx.lua, Published::Script, handle)?;
     match with_budget(cx.lua, limit, || protected_hook_call(cx.lua, &function))? {
         Ok(()) => Ok(None),
         Err(message) => {
@@ -198,13 +248,14 @@ fn call_update_s(
     key: crate::binding::payload::FrameKey,
     id: FrameInstanceId,
 ) -> mlua::Result<Option<String>> {
-    let globals = cx.lua.globals();
-    globals.set(
-        "shape",
+    publish(
+        cx.lua,
+        Published::Shape,
         cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?,
     )?;
-    globals.set(
-        "shape2D",
+    publish(
+        cx.lua,
+        Published::Shape2D,
         cx.object(Payload::Shape(ShapeTarget { key, id: id.shape }))?,
     )?;
     call_hook(cx, index, ScriptHook::UpdateS)

@@ -34,7 +34,8 @@ use zax_profiles::script_order;
 
 use self::globals::{install_api_globals, install_base, protected_call, text_of};
 use self::hooks::{
-    call_all, call_hook, input_process, update_shapes, with_budget, Audience, Budget,
+    call_all, call_hook, input_process, publish, update_shapes, with_budget, Audience, Budget,
+    Published, PublishedGlobals,
 };
 use crate::binding::cx::{with_host_context, Cx, HostLink, Lent};
 use crate::binding::dispatch;
@@ -218,6 +219,7 @@ impl ProfileScriptRuntime {
         dispatch::install(&self.lua)?;
         self.lua.set_app_data(Budget::new());
         install_api_globals(&self.lua)?;
+        PublishedGlobals::install(&self.lua)?;
 
         self.data.env.settings.mirror_all(state.settings_mut());
         let bridge = self.bridge();
@@ -849,8 +851,9 @@ impl ScriptHost for ProfileScriptRuntime {
                     continue;
                 }
 
-                cx.lua.globals().set(
-                    "pattern",
+                publish(
+                    cx.lua,
+                    Published::Pattern,
                     cx.object(Payload::Instance(InstanceTarget::Pattern(reference)))?,
                 )?;
                 first = first.or(call_hook(cx, index, ScriptHook::BuildPattern)?);
