@@ -62,21 +62,14 @@ const fn role_of(key: FrameKey) -> FrameRole {
 impl Cx<'_> {
     /// The key a handle to the frame being converted (or the pinned frame) gets now.
     pub fn frame_key(&self, pinned: bool) -> mlua::Result<FrameKey> {
-        self.data(|data| FrameKey {
+        Ok(FrameKey {
             pinned,
-            epoch: if pinned { data.pin_epoch } else { data.epoch },
+            epoch: self.epoch_of(pinned)?,
         })
     }
 
     fn is_current(&self, key: FrameKey) -> mlua::Result<bool> {
-        self.data(|data| {
-            key.epoch
-                == if key.pinned {
-                    data.pin_epoch
-                } else {
-                    data.epoch
-                }
-        })
+        Ok(key.epoch == self.epoch_of(key.pinned)?)
     }
 
     /// Runs `operation` on the instance `target` names, or returns `None` when it is gone.
