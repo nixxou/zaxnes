@@ -345,6 +345,13 @@ const HALT_CONFIRMATION_FRAMES: i32 = 20;
 /// Runs a ROM that uses the shell protocol: $6001-$6003 = DE B0 61, $6000 holds $80 while
 /// running, $81 when it wants a reset, and the final code afterwards, 0 meaning "passed".
 pub fn run_shell_rom(image: &[u8], max_frames: i64) -> RomRun {
+    run_shell_rom_with(image, max_frames, true)
+}
+
+/// [`run_shell_rom`] with the choice of pressing reset when the ROM asks for it ($6000 =
+/// $81). `false` stops the run there and reports $81, which is how the power-on half of a
+/// reset test is read on a core whose reset is a power cycle (REQ-CORE-004).
+pub fn run_shell_rom_with(image: &[u8], max_frames: i64, press_reset: bool) -> RomRun {
     let mut core = machine_with(image, "shell");
     let mut frames = 0;
     let mut started = false;
@@ -374,6 +381,16 @@ pub fn run_shell_rom(image: &[u8], max_frames: i64) -> RomRun {
         }
 
         if status == 0x81 {
+            if !press_reset {
+                return RomRun {
+                    code: status,
+                    passed: false,
+                    text: shell_text(&core),
+                    frames,
+                    timed_out: false,
+                };
+            }
+
             // "Emulator should wait a couple of frames after seeing $81."
             reset_delay = 3;
             continue;

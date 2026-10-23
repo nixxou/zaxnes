@@ -1,4 +1,4 @@
-use crate::apu::Apu2A03;
+use crate::apu::{Apu2A03, AudioError, AudioReader};
 use crate::cartridges::Cartridge;
 use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::InputPorts;
@@ -60,6 +60,7 @@ impl Machine {
     pub fn close_rom(&mut self) {
         self.battery_ram_imported = false;
         self.bus.attach(None);
+        self.bus.apu_mut().discard_samples();
     }
 
     /// Whether a ROM is loaded.
@@ -93,6 +94,7 @@ impl Machine {
 
         self.bus.reset();
         self.bus.ppu_mut().reset();
+        self.bus.apu_mut().reset();
         let clear_prg_ram = !self.battery_ram_imported;
         if let Some(cartridge) = self.bus.cartridge_mut() {
             cartridge.reset();
@@ -116,9 +118,72 @@ impl Machine {
     }
 
     fn apply_region(&mut self) {
-        self.bus
-            .ppu_mut()
-            .set_timing(RegionTiming::for_region(self.region));
+        let timing = RegionTiming::for_region(self.region);
+        self.bus.ppu_mut().set_timing(timing);
+        self.bus.apu_mut().set_timing(timing);
+    }
+
+    /// Output sample rate in Hz (REQ-CORE-070).
+    #[must_use]
+    pub const fn sample_rate(&self) -> i32 {
+        self.bus.apu().sample_rate()
+    }
+
+    /// Sets the output sample rate (REQ-CORE-070).
+    ///
+    /// # Errors
+    /// [`AudioError::SampleRateOutOfRange`] outside 22 050 to 96 000 Hz.
+    pub fn set_sample_rate(&mut self, value: i32) -> Result<(), AudioError> {
+        self.bus.apu_mut().set_sample_rate(value)
+    }
+
+    /// Speed factor: it only retimes the audio, never the emulation (REQ-CORE-072).
+    #[must_use]
+    pub const fn speed(&self) -> f64 {
+        self.bus.apu().speed()
+    }
+
+    /// Sets the speed factor (REQ-CORE-072).
+    ///
+    /// # Errors
+    /// [`AudioError::SpeedNotPositive`] for zero or less.
+    pub fn set_speed(&mut self, value: f64) -> Result<(), AudioError> {
+        self.bus.apu_mut().set_speed(value)
+    }
+
+    /// Fine adjustment of the audio resampling ratio, at most ±0.5 % (REQ-CORE-070).
+    #[must_use]
+    pub const fn audio_ratio_adjustment(&self) -> f64 {
+        self.bus.apu().ratio_adjustment()
+    }
+
+    /// Sets the fine ratio adjustment (REQ-CORE-070).
+    ///
+    /// # Errors
+    /// [`AudioError::RatioAdjustmentOutOfRange`] beyond ±0.5 %.
+    pub fn set_audio_ratio_adjustment(&mut self, value: f64) -> Result<(), AudioError> {
+        self.bus.apu_mut().set_ratio_adjustment(value)
+    }
+
+    /// Fills `destination` with audio, entirely or not at all (REQ-CORE-071); see
+    /// [`Apu2A03::read_samples`].
+    ///
+    /// # Errors
+    /// [`AudioError::OddStereoBuffer`] when `stereo` and the length is odd.
+    pub fn read_audio(&self, destination: &mut [f32], stereo: bool) -> Result<usize, AudioError> {
+        self.bus.apu().read_samples(destination, stereo)
+    }
+
+    /// A handle the host's audio thread can read samples from (REQ-CORE-071).
+    #[must_use]
+    pub fn audio_reader(&self) -> AudioReader {
+        self.bus.apu().audio_reader()
+    }
+
+    /// The APU.
+    #[must_use]
+    pub const fn apu(&self) -> &Apu2A03 {
+        self.bus.apu()
     }
 
     /// Runs one frame: from where the previous one stopped to the start of the next vblank
