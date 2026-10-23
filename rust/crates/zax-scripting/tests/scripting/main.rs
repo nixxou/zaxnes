@@ -12,6 +12,7 @@ mod api_coverage_tests;
 mod api_engine_tests;
 mod api_value_tests;
 mod corpus_tests;
+mod lend_tests;
 mod lua_access_resolver;
 mod lua_runtime_tests;
 mod scaffold_tests;

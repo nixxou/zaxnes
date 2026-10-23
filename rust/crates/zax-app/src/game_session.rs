@@ -135,6 +135,23 @@ impl ScriptMemory for CoreMachine<'_> {
     }
 }
 
+/// Runs `operation` with the scene, the core and the script inputs lent to the script API.
+fn with_context<R>(
+    scene: &mut SceneState,
+    core: &mut NesCore,
+    input: &mut ScriptInputState,
+    operation: impl FnOnce(&mut ScriptContext<'_>) -> R,
+) -> R {
+    let mut camera = SceneCameraBridge(&mut scene.camera);
+    let mut backdrop = SceneBackdropBridge(&mut scene.backdrop);
+    let mut machine = CoreMachine { core, input };
+    operation(&mut ScriptContext {
+        camera: &mut camera,
+        backdrop: &mut backdrop,
+        machine: &mut machine,
+    })
+}
+
 /// What `GameSession::create` needs to know besides the profile.
 pub struct SessionRequest<'a> {
     /// The profile to play.
@@ -217,29 +234,13 @@ impl GameSession {
                 id: profile.id.clone().unwrap_or_default(),
                 version: profile.version_text.clone().unwrap_or_default(),
             },
-            notify: None,
             ..ScriptEnvironment::default()
         };
         // REQ-LUA-015 step 1: every chunk runs before anything else, with the scene and the
         // machine at hand.
-        let runtime = {
-            let mut camera = SceneCameraBridge(&mut scene.camera);
-            let mut backdrop = SceneBackdropBridge(&mut scene.backdrop);
-            let mut machine = CoreMachine {
-                core: &mut core,
-                input: &mut input,
-            };
-            ProfileScriptRuntime::create_in(
-                profile,
-                environment,
-                engine.state_mut(),
-                Some(&mut ScriptContext {
-                    camera: &mut camera,
-                    backdrop: &mut backdrop,
-                    machine: &mut machine,
-                }),
-            )?
-        };
+        let runtime = with_context(scene, &mut core, &mut input, |context| {
+            ProfileScriptRuntime::create_in(profile, environment, engine.state_mut(), Some(context))
+        })?;
         let bridge = runtime.bridge();
         engine.set_script_host(Box::new(runtime));
         let mut session = Self {
@@ -270,78 +271,116 @@ impl GameSession {
         &mut self,
         profile: &GameProfile,
         different_game: bool,
+        scene: &mut SceneState,
     ) -> Result<(), SessionError> {
-        self.with_runtime(|runtime, _| {
-            if different_game {
-                let values = profile
-                    .settings
-                    .as_ref()
-                    .map(setting_application::to_setting_values)
-                    .unwrap_or_default();
-                runtime.settings_mut().model_mut().apply_profile(values);
+        let ports = self
+            .engine
+            .with_script_host::<ProfileScriptRuntime, _>(|runtime, _| {
+                if different_game {
+                    let values = profile
+                        .settings
+                        .as_ref()
+                        .map(setting_application::to_setting_values)
+                        .unwrap_or_default();
+                    runtime.settings_mut().model_mut().apply_profile(values);
+                }
+                // Both ports go back to Gamepad at every load of a different game (REQ-PERS-012,
+                // DEC-09-Q6); the input layer stays the authority and takes its types from the model.
+                let model = runtime.settings().model();
+                [
+                    model.get(SettingId::InputPortType(Port::ALL[0])).as_int(),
+                    model.get(SettingId::InputPortType(Port::ALL[1])).as_int(),
+                ]
+            });
+        if let Some([first, second]) = ports {
+            CoreMachine {
+                core: &mut self.core,
+                input: &mut self.input,
             }
-            // Both ports go back to Gamepad at every load of a different game (REQ-PERS-012,
-            // DEC-09-Q6); the input layer stays the authority and takes its types from the model.
-            let model = runtime.settings().model();
-            let ports = [
-                model.get(SettingId::InputPortType(Port::ALL[0])).as_int(),
-                model.get(SettingId::InputPortType(Port::ALL[1])).as_int(),
-            ];
-            runtime
-                .environment_mut()
-                .input
-                .set_port_types(ports[0], ports[1]);
-        });
+            .set_port_types(first, second);
+        }
         // Step 3: the patterns with their BuildPattern hooks. The settings were applied above,
         // through the model, so the engine must not copy them a second time.
-        self.sync_runtime_settings();
-        self.engine.load_profile(profile, false)?;
-        self.sync_runtime_settings();
+        self.sync_runtime_settings(scene);
+        let mut loaded = Ok(());
+        self.scripted(scene, |engine| {
+            loaded = engine.load_profile(profile, false);
+        });
+        loaded?;
+        self.sync_runtime_settings(scene);
         Ok(())
     }
 
+    /// Runs `operation` on the engine with the scene, the core and the script inputs lent to the
+    /// script API for its length. The borrows end with the call: the runtime keeps none.
+    fn scripted(&mut self, scene: &mut SceneState, operation: impl FnOnce(&mut ConversionEngine)) {
+        let Self {
+            core,
+            input,
+            bridge,
+            engine,
+            ..
+        } = self;
+        with_context(scene, core, input, |context| {
+            bridge.lend(context, || operation(engine));
+        });
+    }
+
     /// Runs `operation` on the Lua runtime and the conversion state it works on, or returns `None`
-    /// when the session has no runtime. Used by the acceptance harness to evaluate chunks; the
-    /// settings model is not lent, so what a chunk writes to the settings stays in the runtime.
+    /// when the session has no runtime. The scripts it runs see `scene` and the core. Used by the
+    /// acceptance harness to evaluate chunks; the settings model is not lent, so what a chunk
+    /// writes to the settings stays in the runtime.
     pub fn with_runtime<R>(
         &mut self,
+        scene: &mut SceneState,
         operation: impl FnOnce(
             &mut ProfileScriptRuntime,
             &mut zax_engine3d::engine::ConversionState,
         ) -> R,
     ) -> Option<R> {
-        self.engine
-            .with_script_host::<ProfileScriptRuntime, R>(operation)
+        let mut result = None;
+        self.scripted(scene, |engine| {
+            result = engine.with_script_host::<ProfileScriptRuntime, R>(operation);
+        });
+        result
     }
 
-    fn sync_runtime_settings(&mut self) {
-        self.with_runtime(ProfileScriptRuntime::sync_settings);
+    fn sync_runtime_settings(&mut self, scene: &mut SceneState) {
+        self.with_runtime(scene, ProfileScriptRuntime::sync_settings);
     }
 
     fn exchange_model(&mut self, model: &mut SettingsModel) {
-        self.with_runtime(|runtime, _| std::mem::swap(runtime.settings_mut().model_mut(), model));
+        self.engine
+            .with_script_host::<ProfileScriptRuntime, _>(|runtime, _| {
+                std::mem::swap(runtime.settings_mut().model_mut(), model);
+            });
     }
 
     /// Lends the host's `model` to the Lua runtime for the length of `operation`, then mirrors
     /// what the scripts changed and gives the model back.
-    fn lend<R>(&mut self, model: &mut SettingsModel, operation: impl FnOnce(&mut Self) -> R) -> R {
+    fn lend<R>(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        operation: impl FnOnce(&mut Self, &mut SceneState) -> R,
+    ) -> R {
         self.exchange_model(model);
-        let result = operation(self);
-        self.sync_runtime_settings();
+        let result = operation(self, scene);
+        self.sync_runtime_settings(scene);
         self.exchange_model(model);
         result
     }
 
     /// The core, for reading.
     #[must_use]
-    pub fn core(&self) -> Ref<'_, NesCore> {
-        self.core.borrow()
+    pub const fn core(&self) -> &NesCore {
+        &self.core
     }
 
     /// The core, for writing.
     #[must_use]
-    pub fn core_mut(&self) -> RefMut<'_, NesCore> {
-        self.core.borrow_mut()
+    pub const fn core_mut(&mut self) -> &mut NesCore {
+        &mut self.core
     }
 
     /// The conversion engine.
@@ -390,12 +429,12 @@ impl GameSession {
     /// Nominal frames per second of the core's region.
     #[must_use]
     pub fn nominal_frame_rate(&self) -> i32 {
-        self.core.borrow().timing().nominal_frames_per_second
+        self.core.timing().nominal_frames_per_second
     }
 
     /// Loads a ROM image into the core (REQ-LOOP-021 step 4).
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
-        let result = self.core.borrow_mut().load_rom(image, name);
+        let result = self.core.load_rom(image, name);
         if result.success {
             self.frame_counter = 0;
         }
@@ -405,7 +444,7 @@ impl GameSession {
     /// Whether a ROM is loaded.
     #[must_use]
     pub fn has_rom(&self) -> bool {
-        self.core.borrow().is_running()
+        self.core.is_running()
     }
 
     /// Puts the frame counter back to zero.
@@ -421,7 +460,6 @@ impl GameSession {
     pub fn restore_core(&mut self, block: &[u8]) -> Result<(), String> {
         let restored = self
             .core
-            .borrow_mut()
             .try_load_state(block, 0)
             .map(|_| ())
             .map_err(|error| error.to_string());
@@ -432,37 +470,35 @@ impl GameSession {
     }
 
     /// Runs the `Start` hooks, once.
-    pub fn start(&mut self, model: &mut SettingsModel) {
+    pub fn start(&mut self, model: &mut SettingsModel, scene: &mut SceneState) {
         if self.started {
             return;
         }
         self.started = true;
-        self.lend(model, |session| {
-            session.with_runtime(ProfileScriptRuntime::invoke_start);
+        self.lend(model, scene, |session, scene| {
+            session.with_runtime(scene, ProfileScriptRuntime::invoke_start);
         });
     }
 
     /// Runs the `End` hooks and resets what a game leaves in the scene and the settings.
-    pub fn end(&mut self, model: &mut SettingsModel) {
+    pub fn end(&mut self, model: &mut SettingsModel, scene: &mut SceneState) {
         if !self.started {
             return;
         }
         self.started = false;
-        self.lend(model, |session| {
-            session.with_runtime(|runtime, state| {
-                runtime.invoke_end(state);
-                runtime.environment_mut().backdrop.reset();
-                runtime.settings_mut().end_game();
-            });
+        self.lend(model, scene, |session, scene| {
+            session.with_runtime(scene, ProfileScriptRuntime::invoke_end);
+            scene.backdrop.reset();
+            session.with_runtime(scene, |runtime, _| runtime.settings_mut().end_game());
         });
     }
 
     /// Resets the game: `End`, a power cycle of the core, `Start`.
-    pub fn reset(&mut self, model: &mut SettingsModel) {
-        self.end(model);
-        self.core.borrow_mut().reset();
+    pub fn reset(&mut self, model: &mut SettingsModel, scene: &mut SceneState) {
+        self.end(model, scene);
+        self.core.reset();
         self.frame_counter = 0;
-        self.start(model);
+        self.start(model, scene);
     }
 
     /// The scripts' state for a save state: runs `Save`, then reads `PData`.
@@ -472,10 +508,11 @@ impl GameSession {
     pub fn capture_script_state(
         &mut self,
         model: &mut SettingsModel,
+        scene: &mut SceneState,
     ) -> Result<Vec<u8>, LuaScriptError> {
-        self.lend(model, |session| {
+        self.lend(model, scene, |session, scene| {
             session
-                .with_runtime(|runtime, state| {
+                .with_runtime(scene, |runtime, state| {
                     runtime.invoke_save(state);
                     runtime
                         .capture_persistent_data()
@@ -492,15 +529,16 @@ impl GameSession {
     pub fn complete_script_restore(
         &mut self,
         model: &mut SettingsModel,
+        scene: &mut SceneState,
         block: &[u8],
     ) -> Result<(), LuaScriptError> {
         let restored = self
-            .with_runtime(|runtime, _| runtime.restore_persistent_data(block))
+            .with_runtime(scene, |runtime, _| runtime.restore_persistent_data(block))
             .unwrap_or(Ok(()));
         self.frame_counter = 0;
-        self.start(model);
-        self.lend(model, |session| {
-            session.with_runtime(ProfileScriptRuntime::invoke_load);
+        self.start(model, scene);
+        self.lend(model, scene, |session, scene| {
+            session.with_runtime(scene, ProfileScriptRuntime::invoke_load);
         });
         restored
     }
@@ -513,13 +551,14 @@ impl GameSession {
     pub fn restore_script_state_in_place(
         &mut self,
         model: &mut SettingsModel,
+        scene: &mut SceneState,
         block: &[u8],
     ) -> Result<(), LuaScriptError> {
         let restored = self
-            .with_runtime(|runtime, _| runtime.restore_persistent_data(block))
+            .with_runtime(scene, |runtime, _| runtime.restore_persistent_data(block))
             .unwrap_or(Ok(()));
-        self.lend(model, |session| {
-            session.with_runtime(ProfileScriptRuntime::invoke_load);
+        self.lend(model, scene, |session, scene| {
+            session.with_runtime(scene, ProfileScriptRuntime::invoke_load);
         });
         restored
     }
@@ -531,18 +570,20 @@ impl GameSession {
     pub fn run_frame(
         &mut self,
         model: &mut SettingsModel,
+        scene: &mut SceneState,
         player_one: InputAction,
         player_two: InputAction,
         zapper_byte: u8,
         zapper_position: ZapperPosition,
     ) {
-        self.lend(model, |session| {
-            session.run_frame_lent(player_one, player_two, zapper_byte, zapper_position);
+        self.lend(model, scene, |session, scene| {
+            session.run_frame_lent(scene, player_one, player_two, zapper_byte, zapper_position);
         });
     }
 
     fn run_frame_lent(
         &mut self,
+        scene: &mut SceneState,
         player_one: InputAction,
         player_two: InputAction,
         zapper_byte: u8,
@@ -552,7 +593,7 @@ impl GameSession {
         #[allow(clippy::cast_precision_loss)] // the C# `FrameCounter / 60f`
         let time = counter as f32 / 60.0;
         let (pad, pad_index) = self
-            .with_runtime(|runtime, state| {
+            .with_runtime(scene, |runtime, state| {
                 (
                     runtime.invoke_input_process(state, counter, time),
                     runtime.script_pad_index(),
@@ -565,19 +606,19 @@ impl GameSession {
             InputAction::from_bits(u32::try_from(pad).unwrap_or(0)),
             pad_index,
         );
-        self.input.players.set([
+        self.input.players = [
             i32::try_from(first.bits()).unwrap_or(0),
             i32::try_from(second.bits()).unwrap_or(0),
-        ]);
+        ];
         if self.aimed != Some(zapper_position) {
             self.aimed = Some(zapper_position);
             self.core
-                .borrow_mut()
                 .set_zapper_position_source(Some(Box::new(move |_| zapper_position)));
         }
         // REQ-INP-004: a Zapper port carries the Zapper byte and no controller button at all.
+        let mut records = std::mem::take(&mut self.batch_records);
         let (palette, mask_x, mask_y) = {
-            let mut core = self.core.borrow_mut();
+            let core = &mut self.core;
             let word = routing::core_word(
                 first,
                 second,
@@ -587,21 +628,24 @@ impl GameSession {
             );
             core.run_frame(word);
             let batch = core.frame_batch();
-            self.batch_records.clear();
-            self.batch_records.extend_from_slice(batch.records);
+            records.clear();
+            records.extend_from_slice(batch.records);
             (batch.palette, batch.mask_x, batch.mask_y)
         };
         // The conversion is synchronous, right after the frame, as REQ-LOOP-060 (c) requires.
         let batch = FrameBatch {
-            records: &self.batch_records,
+            records: &records,
             palette,
             mask_x,
             mask_y,
         };
-        self.engine.convert(&batch, counter);
+        self.scripted(scene, |engine| {
+            engine.convert(&batch, counter);
+        });
+        self.batch_records = records;
         // The subjective camera follows the shape a script picked, through the tracker of
         // SPEC-04 (REQ-LUA-088, REQ-SCN-021).
-        self.with_runtime(ProfileScriptRuntime::advance_camera_tracking);
+        self.with_runtime(scene, ProfileScriptRuntime::advance_camera_tracking);
         self.engine.publish();
         self.frame_counter += 1;
     }
@@ -609,18 +653,18 @@ impl GameSession {
     /// The device plugged into `port`.
     #[must_use]
     pub fn port_type(&self, port: usize) -> ControllerPortType {
-        self.core.borrow().port_type(port).unwrap_or_default()
+        self.core.port_type(port).unwrap_or_default()
     }
 
     /// Plugs `kind` into `port`.
-    pub fn set_port_type(&self, port: usize, kind: ControllerPortType) {
-        if self.core.borrow_mut().set_port_type(port, kind).is_err() {
+    pub fn set_port_type(&mut self, port: usize, kind: ControllerPortType) {
+        if self.core.set_port_type(port, kind).is_err() {
             // Only ports 0 and 1 exist; the command model has already checked the number.
         }
     }
 
     /// Both ports back to a standard pad.
-    pub fn reset_port_types(&self) {
+    pub fn reset_port_types(&mut self) {
         for port in 0..2 {
             self.set_port_type(port, ControllerPortType::Controller);
         }
@@ -629,7 +673,7 @@ impl GameSession {
     /// The Zapper aim offset the scripts set.
     #[must_use]
     pub fn zapper_offset(&self) -> Vec3 {
-        self.input.zapper_offset.get()
+        self.input.zapper_offset
     }
 
     /// The list of tiles to draw for the published frame.
@@ -646,7 +690,7 @@ impl GameSession {
     /// Copies the core's 256 x 240 indexed picture into `destination`.
     pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) {
         destination.clear();
-        destination.extend_from_slice(self.core.borrow().pixel_frame());
+        destination.extend_from_slice(self.core.pixel_frame());
     }
 
     /// The shape the subjective camera follows.
@@ -678,16 +722,25 @@ impl GameSession {
     }
 
     /// Switches the meshing algorithm; the geometry is rebuilt (REQ-LOOP-024).
-    pub fn set_render_algorithm(&mut self, model: &mut SettingsModel, algorithm: RenderAlgorithm) {
-        self.lend(model, |session| {
-            session.engine.set_render_algorithm(algorithm);
+    pub fn set_render_algorithm(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        algorithm: RenderAlgorithm,
+    ) {
+        self.lend(model, scene, |session, scene| {
+            session.scripted(scene, |engine| engine.set_render_algorithm(algorithm));
         });
     }
 
     /// Mirrors the settings changed since the last call into the engine, and reports what the
     /// scripts and the model changed.
-    pub fn sync_settings(&mut self, model: &mut SettingsModel) -> Vec<SessionEvent> {
-        self.lend(model, |_| ());
+    pub fn sync_settings(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+    ) -> Vec<SessionEvent> {
+        self.lend(model, scene, |_, _| ());
         self.events.try_iter().collect()
     }
 
@@ -697,7 +750,7 @@ impl GameSession {
     }
 
     /// Ends the game and drops the session.
-    pub fn dispose(mut self, model: &mut SettingsModel) {
-        self.end(model);
+    pub fn dispose(mut self, model: &mut SettingsModel, scene: &mut SceneState) {
+        self.end(model, scene);
     }
 }

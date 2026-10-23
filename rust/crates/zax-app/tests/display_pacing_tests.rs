@@ -276,5 +276,5 @@ fn req_ui_209_the_2d_toggle_and_full_screen_keep_the_swap_interval() {
 
     assert_eq!(surface.swap_interval, 2);
     assert_eq!(surface.frame_cap, 0);
-    assert_eq!(harness.scene.borrow().settings.vsync(), 2);
+    assert_eq!(harness.host.scene().settings.vsync(), 2);
 }

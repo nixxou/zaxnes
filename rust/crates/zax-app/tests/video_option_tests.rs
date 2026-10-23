@@ -19,22 +19,22 @@ use zax_settings::values::SettingValue;
 #[test]
 fn req_pers_017_a_change_of_anti_alias_reaches_the_scene_at_once() {
     let mut harness = LoopHarness::create();
-    assert_eq!(1, harness.scene.borrow().settings.anti_alias_samples());
+    assert_eq!(1, harness.host.scene().settings.anti_alias_samples());
     harness
         .host
         .update_settings(|model| model.set_anti_alias(1));
-    assert_eq!(4, harness.scene.borrow().settings.anti_alias_samples());
+    assert_eq!(4, harness.host.scene().settings.anti_alias_samples());
     harness
         .host
         .update_settings(|model| model.set_anti_alias(2));
     assert_eq!(
         MAX_ANTI_ALIAS_SAMPLES,
-        harness.scene.borrow().settings.anti_alias_samples()
+        harness.host.scene().settings.anti_alias_samples()
     );
     harness
         .host
         .update_settings(|model| model.set_anti_alias(0));
-    assert_eq!(1, harness.scene.borrow().settings.anti_alias_samples());
+    assert_eq!(1, harness.host.scene().settings.anti_alias_samples());
 }
 
 #[test]

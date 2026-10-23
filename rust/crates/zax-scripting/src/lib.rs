@@ -23,9 +23,9 @@ mod values;
 
 pub use environment::{
     CollectingScriptLog, DetachedScriptBackdrop, DetachedScriptCamera, DetachedScriptInput,
-    DetachedScriptMemory, NullScriptLog, ScriptBackdrop, ScriptCamera, ScriptEnvironment,
-    ScriptContext, ScriptInput, ScriptLog, ScriptMachine, ScriptMemory, ScriptNotification, ScriptNotificationSeverity,
-    ScriptProfileInfo,
+    DetachedScriptMemory, NullScriptLog, ScriptBackdrop, ScriptCamera, ScriptContext,
+    ScriptEnvironment, ScriptInput, ScriptLog, ScriptMachine, ScriptMemory, ScriptNotification,
+    ScriptNotificationSeverity, ScriptProfileInfo,
 };
 pub use error::LuaScriptError;
 pub use lua_runtime::LuaRuntime;

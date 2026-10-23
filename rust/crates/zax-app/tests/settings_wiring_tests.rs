@@ -299,7 +299,7 @@ fn a_write_reaches_the_scene_and_the_conversion_slice() {
     });
     let clipping = harness.host.session().unwrap().engine().settings().clipping;
     assert!((clipping.y - 16.1).abs() < 1e-4);
-    assert!((harness.scene.borrow().clipping.y - 16.1).abs() < 1e-4);
+    assert!((harness.host.scene().clipping.y - 16.1).abs() < 1e-4);
     harness.host.update_settings(|model| {
         model.set_layer(
             SettingId::LayerOffset(Layer::ALL[3]),
@@ -317,11 +317,11 @@ fn a_write_reaches_the_scene_and_the_conversion_slice() {
         .offset;
     assert!((offset - 24.0).abs() < f32::EPSILON);
     harness.host.update_settings(|model| model.set_fov(50.0));
-    assert!((harness.scene.borrow().settings.fov - 50.0).abs() < f32::EPSILON);
+    assert!((harness.host.scene().settings.fov - 50.0).abs() < f32::EPSILON);
     harness
         .host
         .update_settings(|model| model.set_light_intensity(1.4));
-    assert!((harness.scene.borrow().settings.light_intensity() - 1.4).abs() < 1e-4);
+    assert!((harness.host.scene().settings.light_intensity() - 1.4).abs() < 1e-4);
 }
 
 #[test]

@@ -238,7 +238,7 @@ impl<C: GameCatalog> EmulationHost<C> {
             }),
             Command::SetPortType => {
                 if let (Some(session), Ok(port)) =
-                    (self.session.as_ref(), usize::try_from(args.number))
+                    (self.session.as_mut(), usize::try_from(args.number))
                 {
                     let kind = if args.number2 == 1 {
                         ControllerPortType::Zapper
@@ -255,7 +255,7 @@ impl<C: GameCatalog> EmulationHost<C> {
     fn execute_video(&mut self, command: Command, args: &CommandArgs) {
         match command {
             Command::ToggleTwoDimensional => self.two_dimensional_view = !self.two_dimensional_view,
-            Command::ResetView => self.scene.borrow_mut().camera.reset_view(),
+            Command::ResetView => self.scene.camera.reset_view(),
             Command::SetCameraMode => {
                 // SPEC-06 REQ-SCN-006: the two camera modes, with their own setpoints. The
                 // menu entry "Mode caméra" of REQ-UI-200 switches between them; REQ-SCN-009's
@@ -265,7 +265,7 @@ impl<C: GameCatalog> EmulationHost<C> {
                 } else {
                     CameraMode::Tpv
                 };
-                self.scene.borrow_mut().camera.set_mode(mode);
+                self.scene.camera.set_mode(mode);
             }
             Command::ToggleLocalCamera => self.update_settings(|model| {
                 let value = !model.local_camera();

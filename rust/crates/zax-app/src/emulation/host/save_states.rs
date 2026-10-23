@@ -21,7 +21,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         let fingerprint = self.current_rom_fingerprint().unwrap_or_default();
         let saved_at = (self.now)().unix_timestamp();
         let session = self.session.as_mut().filter(|session| session.has_rom())?;
-        let lua = match session.capture_script_state(&mut self.settings) {
+        let lua = match session.capture_script_state(&mut self.settings, &mut self.scene) {
             Ok(lua) => lua,
             Err(error) => {
                 self.log(&format!("the scripts' state could not be read: {error}"));
@@ -29,7 +29,7 @@ impl<C: GameCatalog> EmulationHost<C> {
             }
         };
         let core = session.core().save_state(true).ok()?;
-        let camera = save_state_file::write_camera(&self.scene.borrow().camera.capture());
+        let camera = save_state_file::write_camera(&self.scene.camera.capture());
         let conversion = state_codec::write(session.engine());
         Some(SaveStateContent {
             header: SaveStateHeader {

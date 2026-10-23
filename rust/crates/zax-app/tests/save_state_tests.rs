@@ -310,16 +310,16 @@ fn req_loop_040_the_camera_comes_back_with_the_state() {
     let mut harness = LoopHarness::create();
     harness.launch("g1");
     harness.run_frames(30);
-    let set_distance = |harness: &LoopHarness, distance: f32| {
-        let mut scene = harness.scene.borrow_mut();
+    let set_distance = |harness: &mut LoopHarness, distance: f32| {
+        let scene = harness.host.scene_mut();
         scene.camera.current_mut().set_distance(distance);
         scene.camera.snap_to_setpoints();
     };
-    set_distance(&harness, 200.0);
+    set_distance(&mut harness, 200.0);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(6));
-    set_distance(&harness, 40.0);
+    set_distance(&mut harness, 40.0);
     harness.run_with(Command::LoadSlot, CommandArgs::of_number(6));
-    assert!((harness.scene.borrow().camera.current().distance() - 200.0).abs() < 1e-3);
+    assert!((harness.host.scene().camera.current().distance() - 200.0).abs() < 1e-3);
 }
 
 #[test]

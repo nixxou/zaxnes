@@ -121,13 +121,13 @@ fn dec_07_q3_a_rollback_leaves_the_camera_alone() {
     harness.launch("g1");
     harness.run_frames(120);
     {
-        let mut scene = harness.scene.borrow_mut();
+        let scene = harness.host.scene_mut();
         scene.camera.current_mut().set_distance(123.0);
         scene.camera.snap_to_setpoints();
     }
-    let distance = harness.scene.borrow().camera.distance();
+    let distance = harness.host.scene().camera.distance();
     harness.run(Command::Rollback);
-    assert!((harness.scene.borrow().camera.distance() - distance).abs() < 1e-3);
+    assert!((harness.host.scene().camera.distance() - distance).abs() < 1e-3);
 }
 
 #[test]

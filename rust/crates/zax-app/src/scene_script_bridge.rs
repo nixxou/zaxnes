@@ -1,53 +1,41 @@
 //! What the Lua environment sees of the scene (SPEC-05 REQ-LUA-088, REQ-LUA-090) and how the
 //! settings model reaches the scene (SPEC-09 REQ-PERS-007).
 //!
-//! The scene is shared between the loop, which owns the renderer's inputs, and the camera and
-//! backdrop the scripts drive: the script environment keeps `'static` trait objects, so those
-//! cannot borrow it. No borrow is ever held across a call into the session, so the runtime
-//! borrow checks of the [`RefCell`] cannot fail.
-
-use std::cell::RefCell;
-use std::rc::Rc;
+//! The scene belongs to the host. The bridges borrow its camera and its backdrop for the length
+//! of one call into the scripts; see `GameSession`.
 
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::vectors::Vec3;
 use zax_profiles::values::Vec4F;
-use zax_render::camera::CameraMode;
-use zax_render::scene::{SceneState, SkyboxKind};
+use zax_render::camera::{CameraMode, SceneCamera};
+use zax_render::scene::{BackdropState, SceneState, SkyboxKind};
 use zax_scripting::{LuaColor, ScriptBackdrop, ScriptCamera, ScriptLog};
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 
-/// The scene, shared by the loop and the script bridges.
-pub type SharedScene = Rc<RefCell<SceneState>>;
-
 /// The camera of the scene as scripts see it.
-pub struct SceneCameraBridge(pub SharedScene);
+pub struct SceneCameraBridge<'a>(pub &'a mut SceneCamera);
 
-impl ScriptCamera for SceneCameraBridge {
+impl ScriptCamera for SceneCameraBridge<'_> {
     fn angles(&self) -> Vec3 {
-        self.0.borrow().camera.current().angles.into()
+        self.0.current().angles.into()
     }
 
     fn set_angles(&mut self, angles: Vec3) {
-        self.0.borrow_mut().camera.current_mut().angles = angles.into();
+        self.0.current_mut().angles = angles.into();
     }
 
     fn distance(&self) -> f32 {
         // The setpoint bounds the distance to [0, 512] itself (REQ-SCN-011).
-        self.0.borrow().camera.current().distance()
+        self.0.current().distance()
     }
 
     fn set_distance(&mut self, distance: f32) {
-        self.0
-            .borrow_mut()
-            .camera
-            .current_mut()
-            .set_distance(distance);
+        self.0.current_mut().set_distance(distance);
     }
 
     fn mode(&self) -> i32 {
-        self.0.borrow().camera.mode() as i32
+        self.0.mode() as i32
     }
 
     fn set_mode(&mut self, mode: i32) {
@@ -56,69 +44,69 @@ impl ScriptCamera for SceneCameraBridge {
         } else {
             CameraMode::Tpv
         };
-        self.0.borrow_mut().camera.set_mode(mode);
+        self.0.set_mode(mode);
     }
 
     fn look_at(&self) -> Vec3 {
-        self.0.borrow().camera.current().target.into()
+        self.0.current().target.into()
     }
 
     fn set_look_at(&mut self, target: Vec3) {
-        self.0.borrow_mut().camera.current_mut().target = target.into();
+        self.0.current_mut().target = target.into();
     }
 
     fn reset_view(&mut self) {
-        self.0.borrow_mut().camera.reset_view();
+        self.0.reset_view();
     }
 }
 
 /// The backdrop panel of the scene as scripts see it.
-pub struct SceneBackdropBridge(pub SharedScene);
+pub struct SceneBackdropBridge<'a>(pub &'a mut BackdropState);
 
-impl ScriptBackdrop for SceneBackdropBridge {
+impl ScriptBackdrop for SceneBackdropBridge<'_> {
     fn enabled(&self) -> bool {
-        self.0.borrow().backdrop.enabled
+        self.0.enabled
     }
 
     fn set_enabled(&mut self, enabled: bool) {
-        self.0.borrow_mut().backdrop.enabled = enabled;
+        self.0.enabled = enabled;
     }
 
     fn color(&self) -> LuaColor {
-        let color = self.0.borrow().backdrop.color;
+        let color = self.0.color;
         LuaColor::from_bytes(color.r, color.g, color.b)
     }
 
     fn set_color(&mut self, color: LuaColor) {
-        self.0.borrow_mut().backdrop.color = color.to_rgb24();
+        self.0.color = color.to_rgb24();
     }
 
     fn receive_shadow(&self) -> bool {
-        self.0.borrow().backdrop.receive_shadow
+        self.0.receive_shadow
     }
 
     fn set_receive_shadow(&mut self, receive: bool) {
-        self.0.borrow_mut().backdrop.receive_shadow = receive;
+        self.0.receive_shadow = receive;
     }
 
     fn size(&self) -> Vec3 {
-        self.0.borrow().backdrop.size.into()
+        self.0.size.into()
     }
 
     fn set_size(&mut self, size: Vec3) {
-        self.0.borrow_mut().backdrop.size = size.into();
+        self.0.size = size.into();
     }
 
     fn offset(&self) -> Vec3 {
-        self.0.borrow().backdrop.offset.into()
+        self.0.offset.into()
     }
 
     fn set_offset(&mut self, offset: Vec3) {
-        self.0.borrow_mut().backdrop.offset = offset.into();
+        self.0.offset = offset.into();
     }
 
     fn reset(&mut self) {
-        self.0.borrow_mut().backdrop.reset();
+        self.0.reset();
     }
 }
 

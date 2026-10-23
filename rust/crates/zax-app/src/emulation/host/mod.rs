@@ -38,7 +38,9 @@ use crate::persistence::app_settings::AppSettings;
 use crate::persistence::battery_ram_store::BatteryRamStore;
 use crate::persistence::save_slots::SaveSlotIndex;
 use crate::persistence::settings_store::SettingsStore;
-use crate::scene_script_bridge::{self, SharedScene};
+use zax_render::scene::SceneState;
+
+use crate::scene_script_bridge;
 use crate::user_data_paths::UserDataPaths;
 
 pub use games::{ConfirmationRequest, ConfirmedAction};
@@ -84,7 +86,7 @@ pub struct EmulationHostOptions<C: GameCatalog> {
     /// The settings model, which the host owns from here on.
     pub settings: SettingsModel,
     /// The scene the renderer draws and the scripts drive.
-    pub scene: SharedScene,
+    pub scene: SceneState,
     /// The library of games.
     pub games: C,
     /// The program's own audio mix.
@@ -112,12 +114,7 @@ pub struct EmulationHostOptions<C: GameCatalog> {
 impl<C: GameCatalog> EmulationHostOptions<C> {
     /// Options with the required parts; everything else is absent.
     #[must_use]
-    pub fn new(
-        paths: UserDataPaths,
-        settings: SettingsModel,
-        scene: SharedScene,
-        games: C,
-    ) -> Self {
+    pub fn new(paths: UserDataPaths, settings: SettingsModel, scene: SceneState, games: C) -> Self {
         Self {
             paths,
             settings,
@@ -141,7 +138,7 @@ impl<C: GameCatalog> EmulationHostOptions<C> {
 #[allow(clippy::struct_excessive_bools)] // independent flags of the loop, as the C# class
 pub struct EmulationHost<C: GameCatalog> {
     paths: UserDataPaths,
-    scene: SharedScene,
+    scene: SceneState,
     games: C,
     mixer: Option<AudioMixer>,
     settings: SettingsModel,
@@ -303,8 +300,13 @@ impl<C: GameCatalog> EmulationHost<C> {
 
     /// The scene.
     #[must_use]
-    pub const fn scene(&self) -> &SharedScene {
+    pub const fn scene(&self) -> &SceneState {
         &self.scene
+    }
+
+    /// The scene, for writing.
+    pub const fn scene_mut(&mut self) -> &mut SceneState {
+        &mut self.scene
     }
 
     /// The library of games.
@@ -349,6 +351,17 @@ impl<C: GameCatalog> EmulationHost<C> {
     /// The session, for writing.
     pub fn session_mut(&mut self) -> Option<&mut GameSession> {
         self.session.as_mut()
+    }
+
+    /// The session and the scene together, for what draws the scene from the session.
+    pub fn session_and_scene(&mut self) -> (Option<&mut GameSession>, &SceneState) {
+        (self.session.as_mut(), &self.scene)
+    }
+
+    /// The session for reading and the scene for writing, for what the session publishes to the
+    /// scene.
+    pub fn session_and_scene_mut(&mut self) -> (Option<&GameSession>, &mut SceneState) {
+        (self.session.as_ref(), &mut self.scene)
     }
 
     /// The identifier of the game being played.
@@ -579,6 +592,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         if let Some(session) = self.session.as_mut() {
             session.run_frame(
                 &mut self.settings,
+                &mut self.scene,
                 player_one,
                 player_two,
                 port_byte,
@@ -625,7 +639,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         // REQ-SCN-047 wants the 3D scene hidden outside a running game. With the classic menu
         // bar of AMD-010 there is no opaque menu covering it, so the scene stays visible while
         // the game is paused, the frozen frame a desktop emulator shows. Q-029.
-        self.scene.borrow_mut().game_running = self.state != EmulationState::Stopped;
+        self.scene.game_running = self.state != EmulationState::Stopped;
         self.load_progress = self.session.as_ref().map_or(
             if self.state == EmulationState::Stopped {
                 0.0
@@ -652,7 +666,7 @@ impl<C: GameCatalog> EmulationHost<C> {
             self.settings.speed_factor()
         };
         self.pacer.speed = factor;
-        if let Some(session) = &self.session {
+        if let Some(session) = &mut self.session {
             self.pacer.nominal_rate = f64::from(session.nominal_frame_rate());
             // REQ-AUD-011: the audio follows k by time compression with a proportional pitch
             // change; the core retimes its resampler, it never drops samples for that.
@@ -684,7 +698,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         if let Some(session) = self.session.as_mut() {
             // The runtime drains the model's changes, mirrors them into the engine and
             // reports them back.
-            for event in session.sync_settings(&mut self.settings) {
+            for event in session.sync_settings(&mut self.settings, &mut self.scene) {
                 match event {
                     SessionEvent::SettingChanged(id) => ids.push(id),
                     SessionEvent::SaveSettingsRequested => self.save_settings_file(),
@@ -718,7 +732,7 @@ impl<C: GameCatalog> EmulationHost<C> {
             SettingId::EmuTvMode => {
                 // REQ-LOOP-017: a region change is applied at once, to the core and to the
                 // cadence, even in the middle of a game.
-                if let Some(session) = self.session.as_ref().filter(|session| session.has_rom()) {
+                if let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) {
                     session.core_mut().set_region(self.settings.region());
                 }
                 self.apply_speed();
@@ -734,31 +748,28 @@ impl<C: GameCatalog> EmulationHost<C> {
                     .push(HostEvent::LanguageChanged(self.settings.language()));
             }
             SettingId::VideoSkipFrame => {
-                self.scene.borrow_mut().settings.skip_render = self.settings.skip_frame();
+                self.scene.settings.skip_render = self.settings.skip_frame();
             }
             SettingId::VideoFrameRate => {
                 self.scene
-                    .borrow_mut()
                     .settings
                     .set_target_frame_rate(self.settings.frame_rate());
             }
-            SettingId::VideoVSync => self
-                .scene
-                .borrow_mut()
-                .settings
-                .set_vsync(self.settings.vsync()),
+            SettingId::VideoVSync => self.scene.settings.set_vsync(self.settings.vsync()),
             SettingId::VideoAntiAlias => {
                 // AMD-032 §2: the setting takes effect on the next rendered frame, the renderer
                 // reallocating its multisampled target by itself. No restart.
-                self.scene.borrow_mut().settings.set_anti_alias_samples(
-                    render_geometry::anti_alias_samples(self.settings.anti_alias()),
-                );
+                self.scene
+                    .settings
+                    .set_anti_alias_samples(render_geometry::anti_alias_samples(
+                        self.settings.anti_alias(),
+                    ));
             }
             _ => {}
         }
         // The fov, shadows, skybox, local camera and light follow the model into the scene
         // (REQ-SCN-009), whoever changed them.
-        scene_script_bridge::apply_setting(id, &self.settings, &mut self.scene.borrow_mut());
+        scene_script_bridge::apply_setting(id, &self.settings, &mut self.scene);
         self.events.push(HostEvent::SettingChanged(id));
     }
 
@@ -776,7 +787,7 @@ impl<C: GameCatalog> EmulationHost<C> {
             1.0
         };
         let view = {
-            let scene = self.scene.borrow();
+            let scene = &self.scene;
             scene.camera.build_view(scene.clipping, aspect)
         };
         let offset = self
@@ -845,7 +856,7 @@ impl<C: GameCatalog> EmulationHost<C> {
         if !self.audio_device_open || self.state != EmulationState::Running {
             return;
         }
-        let Some(session) = self.session.as_ref().filter(|session| session.has_rom()) else {
+        let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
             return;
         };
         let available = session.core().apu().available_samples();
@@ -865,7 +876,7 @@ impl<C: GameCatalog> EmulationHost<C> {
     }
 
     fn advance_battery(&mut self, real_seconds: f64) {
-        let Some(session) = self.session.as_ref().filter(|session| session.has_rom()) else {
+        let Some(session) = self.session.as_mut().filter(|session| session.has_rom()) else {
             return;
         };
         // REQ-PERS-060: written at most every 30 s, and only when the content changed.
@@ -883,10 +894,10 @@ impl<C: GameCatalog> EmulationHost<C> {
                 let core = session.core();
                 self.battery.flush(&self.paths, core.export_battery_ram());
             }
-            session.end(&mut self.settings);
+            session.end(&mut self.settings, &mut self.scene);
             session.engine_mut().clear_frames();
             if dispose_session {
-                session.dispose(&mut self.settings);
+                session.dispose(&mut self.settings, &mut self.scene);
                 self.battery.detach();
                 if let Some(mixer) = &mut self.mixer {
                     mixer.set_emulation_source(None);
@@ -905,7 +916,7 @@ impl<C: GameCatalog> EmulationHost<C> {
             // REQ-SCN-013: the end of a game is a view-reset trigger, and it must in addition
             // go back to TPV and put the smoothing time back to 0.4 s. `end_game` does all
             // three.
-            self.scene.borrow_mut().camera.end_game();
+            self.scene.camera.end_game();
             self.set_state(EmulationState::Stopped);
             self.dispatch_setting_changes();
         }

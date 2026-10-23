@@ -103,8 +103,8 @@ fn req_inp_120_injected_snapshots_trigger_the_hotkeys() {
     // REQ-INP-101: a long press resets the view and leaves the state alone. The first held tick
     // starts the measurement, so the 0.3 s boundary is crossed on the third.
     harness
-        .scene
-        .borrow_mut()
+        .host
+        .scene_mut()
         .camera
         .current_mut()
         .set_distance(42.0);
@@ -114,7 +114,7 @@ fn req_inp_120_injected_snapshots_trigger_the_hotkeys() {
     harness.tick_snapshot(0.2, &menu);
     harness.tick_snapshot(0.01, &InputSnapshot::EMPTY);
     assert_eq!(EmulationState::Running, harness.host.state());
-    assert!((harness.scene.borrow().camera.current().distance() - 42.0).abs() > f32::EPSILON);
+    assert!((harness.host.scene().camera.current().distance() - 42.0).abs() > f32::EPSILON);
 }
 
 /// REQ-INP-061 and REQ-INP-063: an injected snapshot moves the Zapper, and the position the
@@ -129,7 +129,7 @@ fn req_inp_120_injected_snapshots_move_the_zapper() {
     harness.run_with(Command::LaunchGame, CommandArgs::of_text("duck"));
     harness
         .host
-        .session()
+        .session_mut()
         .unwrap()
         .set_port_type(1, ControllerPortType::Zapper);
     let viewport = [256.0, 240.0];
