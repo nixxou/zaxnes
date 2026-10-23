@@ -3,9 +3,10 @@
 //! of `RenderExport.cs`).
 //!
 //! The frames are the synthetic scenes, a ROM run headless (`--rom`) or a JSON frame
-//! description (`--frames <file.json>`). The C# command also prints draw-list reports
-//! (`--explain`) and times frames (`--bench`); those are not ported.
+//! description (`--frames <file.json>`). `--explain` prints the draw-list report of each scene and
+//! `--bench <frames>` times the rendering of each one (REQ-SCN-064).
 
+pub mod draw_list_report;
 pub mod frame_json;
 pub mod input_script;
 pub mod profile;
@@ -18,10 +19,12 @@ use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use zax_engine3d::palette::{nes_color, Rgb24};
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_render::assets::{png_image, NeutralSceneAssets, SceneAssets};
+use zax_render::camera::CameraView;
 use zax_render::geometry;
 use zax_render::numerics::Vector3;
 use zax_render::offscreen::{ContextApi, OffscreenContext};
@@ -68,6 +71,9 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --bg-color <r,g,b>       the custom background colour, 0-255 (REQ-SCN-046)
   --real-time <seconds>    real time the star twinkle uses (REQ-SCN-050)
   --sky-bodies             light the procedural sun, moon and clouds (REQ-PUB-003, Q-064)
+  --bench <frames>         also time that many frames per scene and report them
+  --explain                print the draw list grouped by 3D object, with the NES
+                           colours each group's texels resolve to (colour fidelity)
   --list-scenes            print the built-in synthetic scene names and exit
 
 Scenes: framing, sky, shadow, no-shadow, layer-shadow-off, nudge, alpha, hud, clip,
@@ -130,6 +136,10 @@ pub struct Options {
     pub real_time: f32,
     /// Whether the sun, the moon and the clouds are lit.
     pub sky_bodies: bool,
+    /// Frames to time per scene; 0 times nothing.
+    pub bench: i32,
+    /// Print the camera and the draw-list report of each scene.
+    pub explain: bool,
     /// Only print the scene names.
     pub list_scenes: bool,
 }
@@ -166,6 +176,8 @@ impl Options {
             background: Rgb24::default(),
             real_time: 0.0,
             sky_bodies: false,
+            bench: 0,
+            explain: false,
             list_scenes: false,
         };
 
@@ -174,6 +186,7 @@ impl Options {
             match argument.as_str() {
                 "--no-shadows" => options.shadows = false,
                 "--sky-bodies" => options.sky_bodies = true,
+                "--explain" => options.explain = true,
                 "--list-scenes" => options.list_scenes = true,
                 "--out" => {
                     let value = rest
@@ -244,6 +257,7 @@ impl Options {
             "--skybox" => self.skybox = parse_skybox(value)?,
             "--bg-color" => self.background = parse_color(value)?,
             "--real-time" => self.real_time = number(value)?,
+            "--bench" => self.bench = integer(value)?,
             _ => return Err(format!("unknown argument '{key}'")),
         }
         Ok(())
@@ -392,9 +406,25 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             )?;
         }
 
+        if options.explain {
+            text.push_str(&explain(scene, renderer.last_view()));
+        }
+
         let statistics = CaptureStatistics::measure(&pixels);
+        let measured = if options.bench > 0 {
+            Some(bench(&mut renderer, &context, scene, options.bench)?)
+        } else {
+            None
+        };
         let counts = renderer.statistics();
-        report.push(describe(scene, counts, &statistics, options));
+        report.push(describe(scene, counts, &statistics, measured, options));
+
+        let timing = measured.map_or_else(String::new, |time| {
+            format!(
+                "  {:.2} ms median, {:.2} ms p99",
+                time.median_ms, time.p99_ms
+            )
+        });
 
         let msaa = if counts.anti_alias_samples > 1 {
             format!("  MSAA {}x", counts.anti_alias_samples)
@@ -414,7 +444,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         };
         writeln!(
             text,
-            "{:<18} {:>6} colours  {:>5} opaque  {:>4} alpha  {:>4} HUD  {:>5} casters{msaa}{shadow}",
+            "{:<18} {:>6} colours  {:>5} opaque  {:>4} alpha  {:>4} HUD  {:>5} casters{msaa}{shadow}{timing}",
             scene.name,
             statistics.distinct_colors,
             counts.opaque_tiles,
@@ -537,14 +567,21 @@ fn describe(
     scene: &SyntheticScene,
     render: &RenderStatistics,
     capture: &CaptureStatistics,
+    timing: Option<FrameTimes>,
     options: &Options,
 ) -> String {
+    let bench = timing.map_or_else(String::new, |time| {
+        format!(
+            ", \"medianFrameMs\": {:.3}, \"p99FrameMs\": {:.3}",
+            time.median_ms, time.p99_ms
+        )
+    });
     format!(
         "{{ \"scene\": \"{}\", \"description\": \"{}\", \"width\": {}, \"height\": {}, \
          \"opaqueTiles\": {}, \"transparentTiles\": {}, \"hudTiles\": {}, \"shadowCasters\": {}, \
          \"drawCalls\": {}, \"triangles\": {}, \"residentMeshes\": {}, \"antiAliasSamples\": {}, \
          \"shadowMapSize\": {}, \"requestedShadowMapSize\": {}, \"distinctColors\": {}, \
-         \"backgroundPixels\": {}, \"meanLuma\": {:.4} }}",
+         \"backgroundPixels\": {}, \"meanLuma\": {:.4}{bench} }}",
         scene.name,
         scene.description,
         options.width,
@@ -563,4 +600,86 @@ fn describe(
         capture.background_pixels,
         capture.mean_luma
     )
+}
+
+/// The frame times `--bench` measured, in milliseconds.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameTimes {
+    /// Median frame time.
+    pub median_ms: f64,
+    /// 99th percentile frame time.
+    pub p99_ms: f64,
+}
+
+/// Warm-up frames rendered before the timing, so that the mesh and texture uploads do not count.
+const WARM_UP_FRAMES: usize = 8;
+
+/// Renders `count` frames and returns the median and the 99th percentile frame time, the
+/// measurement REQ-SCN-064 asks for.
+fn bench(
+    renderer: &mut SceneRenderer,
+    context: &OffscreenContext,
+    scene: &SyntheticScene,
+    count: i32,
+) -> Result<FrameTimes, HarnessError> {
+    let count = usize::try_from(count).unwrap_or(0).max(1);
+    for _ in 0..WARM_UP_FRAMES {
+        renderer.render(&context.target(), &scene.scene, &scene.frame())?;
+    }
+    context.finish();
+
+    let mut samples = Vec::with_capacity(count);
+    for _ in 0..count {
+        let start = Instant::now();
+        renderer.render(&context.target(), &scene.scene, &scene.frame())?;
+        context.finish();
+        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    samples.sort_by(f64::total_cmp);
+    Ok(FrameTimes {
+        median_ms: samples[count / 2],
+        p99_ms: samples[(count - 1).min(count * 99 / 100)],
+    })
+}
+
+/// The camera lines and the draw-list report of one scene (`--explain`).
+fn explain(scene: &SyntheticScene, camera: &CameraView) -> String {
+    let state = &scene.scene;
+    let angles = state.camera.current().angles;
+    let clipping = state.clipping;
+    let rect = state.visible_rectangle();
+    let mut text = format!(
+        "camera: fov {:.1}  d {:.2}  angles ({:.2}, {:.2}, {:.2})\n        \
+         eye ({:.2}, {:.2}, {:.2})  T' ({:.2}, {:.2})  P* ({:.2}, {:.2})\n\
+         clipping: ({}, {}, {}, {})  R = [{}, {}] x [{}, {}]\n",
+        camera.fov,
+        camera.distance,
+        angles.x,
+        angles.y,
+        angles.z,
+        camera.eye.x,
+        camera.eye.y,
+        camera.eye.z,
+        camera.target.x,
+        camera.target.y,
+        camera.aim_point.x,
+        camera.aim_point.y,
+        clipping.x,
+        clipping.y,
+        clipping.z,
+        clipping.w,
+        rect.min_x,
+        rect.max_x,
+        rect.min_y,
+        rect.max_y
+    );
+    if let Some(frame) = scene.engine.published_frame() {
+        text.push_str(&draw_list_report::describe(
+            &scene.draw_list,
+            frame,
+            scene.engine.patterns(),
+        ));
+    }
+    text
 }

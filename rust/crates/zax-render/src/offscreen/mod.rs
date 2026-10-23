@@ -144,6 +144,13 @@ impl OffscreenContext {
         }
     }
 
+    /// Waits until every GL command issued so far has been executed, so that a timing taken
+    /// around a render covers the work of the GPU and not only the submission.
+    pub fn finish(&self) {
+        // SAFETY: the context is current on this thread and `glFinish` takes no arguments.
+        unsafe { self.gl.finish() };
+    }
+
     /// Reads the target back as rows of RGBA bytes, the top row first.
     #[must_use]
     #[allow(clippy::cast_sign_loss)] // The size is positive (checked at creation).
