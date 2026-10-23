@@ -52,8 +52,8 @@ impl BitOr for CameraAction {
 }
 
 /// Applies the held rotation and zoom actions over `real_seconds` (REQ-SCN-014, REQ-SCN-015).
-/// Opposite actions do not cancel out: RotLeft wins over RotRight, RotDown over RotUp and
-/// ZoomIn over ZoomOut.
+/// Opposite actions do not cancel out: `RotLeft` wins over `RotRight`, `RotDown` over `RotUp`
+/// and `ZoomIn` over `ZoomOut`.
 pub fn apply(camera: &mut SceneCamera, held: CameraAction, real_seconds: f32) {
     if real_seconds <= 0.0 || held == CameraAction::NONE {
         return;
@@ -85,7 +85,9 @@ pub fn apply(camera: &mut SceneCamera, held: CameraAction, real_seconds: f32) {
 /// Applies `notches` of mouse wheel, 5 units of distance each, positive forward (REQ-SCN-016,
 /// DEC-08-3). It only acts when no zoom action is held.
 pub fn apply_wheel(camera: &mut SceneCamera, notches: f32, held: CameraAction) {
-    if notches == 0.0 || held.contains(CameraAction::ZOOM_IN) || held.contains(CameraAction::ZOOM_OUT)
+    if notches == 0.0
+        || held.contains(CameraAction::ZOOM_IN)
+        || held.contains(CameraAction::ZOOM_OUT)
     {
         return;
     }

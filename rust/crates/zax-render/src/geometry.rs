@@ -141,8 +141,8 @@ impl VisibleRect {
     #[must_use]
     pub fn center(&self) -> Vector3 {
         Vector3::new(
-            (self.min_x + self.max_x) * 0.5,
-            (self.min_y + self.max_y) * 0.5,
+            f32::midpoint(self.min_x, self.max_x),
+            f32::midpoint(self.min_y, self.max_y),
             0.0,
         )
     }
@@ -278,6 +278,7 @@ pub fn effective_target(target: Vector3, clipping: Vec4F) -> Vector3 {
 /// eye sees the segment lands. `fallback` is returned when the two lines are parallel, in
 /// practice the effective target.
 #[must_use]
+#[allow(clippy::many_single_char_names)] // The corners A to D and points of REQ-SCN-008.
 pub fn aim_point(eye: Vector3, rect: VisibleRect, fallback: Vector3) -> Vector3 {
     let a = Vector3::new(rect.min_x, rect.min_y, 0.0);
     let b = Vector3::new(rect.max_x, rect.min_y, 0.0);

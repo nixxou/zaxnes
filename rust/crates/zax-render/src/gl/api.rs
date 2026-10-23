@@ -10,8 +10,8 @@
 use std::rc::Rc;
 
 use glow::{
-    Buffer, Framebuffer, HasContext, PixelUnpackData, Program, Renderbuffer, Shader,
-    Texture, UniformLocation, VertexArray,
+    Buffer, Framebuffer, HasContext, PixelUnpackData, Program, Renderbuffer, Shader, Texture,
+    UniformLocation, VertexArray,
 };
 use thiserror::Error;
 
@@ -231,46 +231,46 @@ impl Gl {
         unsafe { self.context.get_uniform_location(program, name) }
     }
 
-    pub fn uniform_i32(&self, location: &UniformLocation, value: i32) {
+    pub fn uniform_i32(&self, location: UniformLocation, value: i32) {
         // SAFETY: renderer contract; the location belongs to the program in use.
-        unsafe { self.context.uniform_1_i32(Some(location), value) }
+        unsafe { self.context.uniform_1_i32(Some(&location), value) }
     }
 
-    pub fn uniform_f32(&self, location: &UniformLocation, value: f32) {
+    pub fn uniform_f32(&self, location: UniformLocation, value: f32) {
         // SAFETY: renderer contract; the location belongs to the program in use.
-        unsafe { self.context.uniform_1_f32(Some(location), value) }
+        unsafe { self.context.uniform_1_f32(Some(&location), value) }
     }
 
-    pub fn uniform_vec2(&self, location: &UniformLocation, x: f32, y: f32) {
+    pub fn uniform_vec2(&self, location: UniformLocation, x: f32, y: f32) {
         // SAFETY: renderer contract; the location belongs to the program in use.
-        unsafe { self.context.uniform_2_f32(Some(location), x, y) }
+        unsafe { self.context.uniform_2_f32(Some(&location), x, y) }
     }
 
-    pub fn uniform_vec3(&self, location: &UniformLocation, x: f32, y: f32, z: f32) {
+    pub fn uniform_vec3(&self, location: UniformLocation, x: f32, y: f32, z: f32) {
         // SAFETY: renderer contract; the location belongs to the program in use.
-        unsafe { self.context.uniform_3_f32(Some(location), x, y, z) }
+        unsafe { self.context.uniform_3_f32(Some(&location), x, y, z) }
     }
 
-    pub fn uniform_vec4(&self, location: &UniformLocation, x: f32, y: f32, z: f32, w: f32) {
+    pub fn uniform_vec4(&self, location: UniformLocation, x: f32, y: f32, z: f32, w: f32) {
         // SAFETY: renderer contract; the location belongs to the program in use.
-        unsafe { self.context.uniform_4_f32(Some(location), x, y, z, w) }
+        unsafe { self.context.uniform_4_f32(Some(&location), x, y, z, w) }
     }
 
-    pub fn uniform_mat3(&self, location: &UniformLocation, cells: &[f32; 9]) {
+    pub fn uniform_mat3(&self, location: UniformLocation, cells: &[f32; 9]) {
         // SAFETY: renderer contract; the location belongs to the program in use and the slice
         // holds one matrix.
         unsafe {
             self.context
-                .uniform_matrix_3_f32_slice(Some(location), false, cells);
+                .uniform_matrix_3_f32_slice(Some(&location), false, cells);
         }
     }
 
-    pub fn uniform_mat4(&self, location: &UniformLocation, cells: &[f32; 16]) {
+    pub fn uniform_mat4(&self, location: UniformLocation, cells: &[f32; 16]) {
         // SAFETY: renderer contract; the location belongs to the program in use and the slice
         // holds one matrix.
         unsafe {
             self.context
-                .uniform_matrix_4_f32_slice(Some(location), false, cells);
+                .uniform_matrix_4_f32_slice(Some(&location), false, cells);
         }
     }
 
@@ -278,7 +278,9 @@ impl Gl {
 
     pub fn create_vertex_array(&self) -> Result<VertexArray, GlError> {
         // SAFETY: renderer contract; creates a new object.
-        created("vertex array", unsafe { self.context.create_vertex_array() })
+        created("vertex array", unsafe {
+            self.context.create_vertex_array()
+        })
     }
 
     pub fn bind_vertex_array(&self, array: Option<VertexArray>) {
@@ -499,7 +501,9 @@ impl Gl {
 
     pub fn create_renderbuffer(&self) -> Result<Renderbuffer, GlError> {
         // SAFETY: renderer contract; creates a new object.
-        created("renderbuffer", unsafe { self.context.create_renderbuffer() })
+        created("renderbuffer", unsafe {
+            self.context.create_renderbuffer()
+        })
     }
 
     pub fn renderbuffer_storage(

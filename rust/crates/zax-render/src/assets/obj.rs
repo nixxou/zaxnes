@@ -52,7 +52,9 @@ pub fn parse_groups(text: &str) -> Result<Vec<(String, TileMesh)>, TriangleCount
             parser.normals.push(read_vec3(rest));
         } else if line == "g" || line.starts_with("g ") {
             parser.flush()?;
-            parser.name = line.get(2..).map_or_else(String::new, |n| n.trim().to_owned());
+            parser.name = line
+                .get(2..)
+                .map_or_else(String::new, |n| n.trim().to_owned());
         } else if let Some(rest) = line.strip_prefix("f ") {
             parser.add_face(rest);
         }
@@ -81,7 +83,8 @@ impl Parser {
         self.seen.clear();
         if !triangles.is_empty() {
             let name = std::mem::take(&mut self.name);
-            self.groups.push((name, TileMesh::new(vertices, triangles)?));
+            self.groups
+                .push((name, TileMesh::new(vertices, triangles)?));
         }
 
         Ok(())
@@ -100,25 +103,25 @@ impl Parser {
                 return;
             };
 
-            let index = match self.seen.get(&(p, t, n)) {
-                Some(&index) => index,
-                None => {
-                    let normal = usize::try_from(n)
-                        .ok()
-                        .and_then(|n| self.normals.get(n))
-                        .copied()
-                        .unwrap_or(Vec3::ZERO);
-                    let uv = usize::try_from(t)
-                        .ok()
-                        .and_then(|t| self.uvs.get(t))
-                        .copied()
-                        .unwrap_or(Vec2::ZERO);
-                    #[allow(clippy::cast_possible_truncation)] // An asset mesh holds far fewer than 2^32 vertices.
-                    let index = self.vertices.len() as u32;
-                    self.vertices.push(MeshVertex::new(position, normal, uv));
-                    self.seen.insert((p, t, n), index);
-                    index
-                }
+            let index = if let Some(&index) = self.seen.get(&(p, t, n)) {
+                index
+            } else {
+                let normal = usize::try_from(n)
+                    .ok()
+                    .and_then(|n| self.normals.get(n))
+                    .copied()
+                    .unwrap_or(Vec3::ZERO);
+                let uv = usize::try_from(t)
+                    .ok()
+                    .and_then(|t| self.uvs.get(t))
+                    .copied()
+                    .unwrap_or(Vec2::ZERO);
+                #[allow(clippy::cast_possible_truncation)]
+                // An asset mesh holds far fewer than 2^32 vertices.
+                let index = self.vertices.len() as u32;
+                self.vertices.push(MeshVertex::new(position, normal, uv));
+                self.seen.insert((p, t, n), index);
+                index
             };
 
             corners.push(index);
