@@ -58,7 +58,7 @@ Rust counts are `#[test]` results (rstest rows and table-driven loops count as o
 | zax-harness | 32 | (harness has no C# tests) | - |
 | zax-goldens | 3 | - | - |
 
-Lua hook binding overhead (release, `cargo test -p zax-scripting --release --test scripting perf -- --ignored --nocapture --test-threads=1`, x86-64, synthetic profile of 60 shapes): per hook call before/after the binding rework, `Update` with 100 API accesses 45 -> 27.5 us (445 -> 275 ns per access), `BuildPattern` 2.2 -> 1.55 us (1.4 -> 0.93 us of setup, unchanged from 50 to 500 instances), `UpdateS` 4.85 -> 3.0 us (hook overhead 1.8 -> 1.1 us), a frame of `Update` + `LateUpdate` + 60 `UpdateS` 397 -> 253 us (1.57x). What is left is the per-callback cost of mlua (about 1000 instructions per Lua-to-host call, see the benchmark), not the interpreter.
+Lua hook binding overhead (release, `cargo test -p zax-scripting --release --test scripting perf -- --ignored --nocapture --test-threads=1`, x86-64, synthetic profile of 60 shapes): per hook call before/after the binding rework, `Update` with 100 API accesses 45 -> 27.5 us (445 -> 275 ns per access), `BuildPattern` 2.2 -> 1.55 us (1.4 -> 0.93 us of setup, unchanged from 50 to 500 instances), `UpdateS` 4.85 -> 3.7 us (hook overhead 1.8 -> 1.2 us), a frame of `Update` + `LateUpdate` + 60 `UpdateS` 397 -> 300 us (1.3x; keeping a frame handle the one value of its object after its epoch, as the C# binder does, costs about 45 us of it: the handles of an epoch are handed to the weak object cache when it ends) What is left is the per-callback cost of mlua (about 1000 instructions per Lua-to-host call, see the benchmark), not the interpreter.
 
 Fixes after Windows check 3: render.json string escaping; --ui-shots ignores host cursor.
 
