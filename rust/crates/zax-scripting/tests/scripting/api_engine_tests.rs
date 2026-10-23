@@ -516,6 +516,7 @@ fn a_host_value_is_a_table_key_req_lua_045() {
 
     session.evaluate(
         r"
+        local seen = {}
         seen[Pattern.GetPatternWithTag('t')] = 'a'
         seen[Pattern.GetPatternWithTag('s')] = 'b'
         a, b = seen[Pattern.GetPatternWithTag('t')], seen[Pattern.GetPatternWithTag('s')]
