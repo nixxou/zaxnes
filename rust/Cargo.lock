@@ -556,6 +556,7 @@ name = "zax-profiles"
 version = "0.2.0"
 dependencies = [
  "getrandom",
+ "rstest",
  "serde",
  "serde_json",
  "thiserror",

@@ -10,7 +10,10 @@ mod profile_bundle;
 mod serialized_file;
 mod text_asset;
 
-pub use bundle::{UnityBundle, UnityBundleFile, UnityCompression};
+pub use bundle::{
+    UnityBundle, UnityBundleFile, UnityCompression, MAXIMUM_FORMAT_VERSION, MINIMUM_FORMAT_VERSION,
+    SIGNATURE as BUNDLE_SIGNATURE,
+};
 pub use importer::{
     ThreeDSenImportSummary, ThreeDSenImporter, ThreeDSenProfileOutcome, ThreeDSenProfileResult,
 };
@@ -20,7 +23,7 @@ pub use installation::{
 pub use lz4::decode as decode_lz4_block;
 pub use profile_bundle::read_text_assets;
 pub use serialized_file::{UnityObject, UnitySerializedFile};
-pub use text_asset::UnityTextAsset;
+pub use text_asset::{UnityTextAsset, CLASS_ID as TEXT_ASSET_CLASS_ID};
 
 /// A bundle, a serialized file or an asset is not what the reader supports or is damaged.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
