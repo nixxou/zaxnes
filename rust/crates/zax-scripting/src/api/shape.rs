@@ -12,16 +12,12 @@ use crate::binding::cx::Cx;
 use crate::binding::payload::{
     HostType, InstanceListKind, InstanceTarget, PatternTarget, Payload, ShapeTarget,
 };
-use crate::binding::table::{Reply, TypeDef};
+use crate::binding::table::TypeDef;
 
 pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.push(shape());
     types.push(pattern());
     types.extend(lists());
-}
-
-fn reply(value: Value) -> mlua::Result<Reply> {
-    Ok(Some(value))
 }
 
 const fn shape_target(payload: &Payload) -> Option<ShapeTarget> {
@@ -119,18 +115,31 @@ fn first_instance_int(
 fn shape() -> TypeDef {
     let mut definition = type_def(HostType::Shape, "Shape");
 
-    tiles(&mut definition, "tStart", FrameShape::tile_start);
-    tiles(&mut definition, "tEnd", FrameShape::tile_end);
-    tiles(&mut definition, "tSize", FrameShape::tile_size);
+    shape_extents(&mut definition);
+
+    shape_state(&mut definition);
+
+    shape_links(&mut definition);
+
+    shape_methods(&mut definition);
+
+    definition
+}
+
+/// The extent of the shape in tiles and in pixels, and its corners.
+fn shape_extents(definition: &mut TypeDef) {
+    tiles(definition, "tStart", FrameShape::tile_start);
+    tiles(definition, "tEnd", FrameShape::tile_end);
+    tiles(definition, "tSize", FrameShape::tile_size);
     definition.alias("TStart", "tStart");
     definition.alias("TEnd", "tEnd");
     definition.alias("TSize", "tSize");
 
-    tiles(&mut definition, "Start", FrameShape::pixel_start);
-    tiles(&mut definition, "End", FrameShape::pixel_end);
+    tiles(definition, "Start", FrameShape::pixel_start);
+    tiles(definition, "End", FrameShape::pixel_end);
     definition.alias("pStart", "Start");
     definition.alias("pEnd", "End");
-    tiles(&mut definition, "Size", FrameShape::pixel_size);
+    tiles(definition, "Size", FrameShape::pixel_size);
 
     definition.read_only(
         "BottomLeft",
@@ -144,7 +153,10 @@ fn shape() -> TypeDef {
     );
     definition.alias("BL", "BottomLeft");
     definition.alias("TR", "TopRight");
+}
 
+/// The state of the shape: background, hidden, palette, tile count, completeness, instance count.
+fn shape_state(definition: &mut TypeDef) {
     definition.read_only(
         "Bg",
         |cx, this| Ok(boolean(read(cx, this, false, FrameShape::background)?)),
@@ -190,12 +202,11 @@ fn shape() -> TypeDef {
         None,
     );
     definition.alias("Count", "InsCount");
+}
 
-    definition.read_only(
-        "shape3D",
-        |cx, this| first_instance(cx, this),
-        Some(HostType::Instance),
-    );
+/// The links to the instances and the patterns, and the members of instance 0.
+fn shape_links(definition: &mut TypeDef) {
+    definition.read_only("shape3D", first_instance, Some(HostType::Instance));
     definition.read_only(
         "refPattern",
         |cx, this| {
@@ -216,16 +227,19 @@ fn shape() -> TypeDef {
         Some(HostType::Pattern),
     );
 
-    first_instance_int(&mut definition, "layer", |instance| instance.layer as i32);
-    first_instance_int(&mut definition, "geo", |instance| instance.geometry as i32);
-    first_instance_int(&mut definition, "sizeZ", |instance| instance.depth);
+    first_instance_int(definition, "layer", |instance| instance.layer as i32);
+    first_instance_int(definition, "geo", |instance| instance.geometry as i32);
+    first_instance_int(definition, "sizeZ", |instance| instance.depth);
 
     definition.read_only(
         "center",
         |cx, this| cx.vector3(read(cx, this, Vec3::ZERO, FrameShape::center)?),
         Some(HostType::Vector3),
     );
+}
 
+/// The indexing and the methods of the shape.
+fn shape_methods(definition: &mut TypeDef) {
     definition.element = Some(HostType::Instance);
     definition.indexer = Some(Arc::new(|cx, this, key| {
         let index = cx.integer(key, "Shape")?;
@@ -241,7 +255,7 @@ fn shape() -> TypeDef {
                 call.integer(2, "Shape3D")?
             };
             let target = call.host(1).as_ref().and_then(shape_target);
-            reply(nth_instance(call.cx, target, index, "Shape3D")?)
+            Ok(Some(nth_instance(call.cx, target, index, "Shape3D")?))
         },
         Some(HostType::Instance),
     );
@@ -272,7 +286,7 @@ fn shape() -> TypeDef {
             };
 
             let Some(mine) = call.host(1).as_ref().and_then(shape_target) else {
-                return reply(num(0));
+                return Ok(Some(num(0)));
             };
 
             let distance = call
@@ -284,12 +298,10 @@ fn shape() -> TypeDef {
                     }
                 })?
                 .unwrap_or(0.0);
-            reply(num(distance))
+            Ok(Some(num(distance)))
         },
         None,
     );
-
-    definition
 }
 
 /// The pattern a `Pattern` value stands for.
@@ -352,6 +364,18 @@ fn read_pattern<R>(
 fn pattern() -> TypeDef {
     let mut definition = type_def(HostType::Pattern, "Pattern");
 
+    pattern_flags_and_size(&mut definition);
+
+    pattern_corners_and_instances(&mut definition);
+
+    pattern_constraints(&mut definition);
+
+    pattern_kind_and_indexing(&mut definition);
+    definition
+}
+
+/// The `Disable` flag and the size of the pattern.
+fn pattern_flags_and_size(definition: &mut TypeDef) {
     definition.property(
         "Disable",
         |cx, this| {
@@ -414,7 +438,10 @@ fn pattern() -> TypeDef {
         },
         Some(HostType::Vector2),
     );
+}
 
+/// The corners of the pattern and its instances.
+fn pattern_corners_and_instances(definition: &mut TypeDef) {
     definition.read_only(
         "BottomLeft",
         |cx, this| {
@@ -480,7 +507,10 @@ fn pattern() -> TypeDef {
         },
         Some(HostType::InstanceList),
     );
+}
 
+/// The constraint, the connectivity and the geometry flag of the pattern.
+fn pattern_constraints(definition: &mut TypeDef) {
     definition.property(
         "constraintSize",
         |cx, this| {
@@ -568,7 +598,10 @@ fn pattern() -> TypeDef {
         },
         None,
     );
+}
 
+/// The family of the pattern and the indexing of its instances.
+fn pattern_kind_and_indexing(definition: &mut TypeDef) {
     definition.read_only(
         "permanent",
         |cx, this| {
@@ -596,7 +629,6 @@ fn pattern() -> TypeDef {
             None => Ok(Value::Nil),
         }
     }));
-    definition
 }
 
 // the shared lists of REQ-LUA-048
@@ -634,7 +666,7 @@ fn list_instance(cx: &Cx, this: &Payload, index: usize) -> mlua::Result<Option<I
 }
 
 fn list_shape(cx: &Cx, index: usize) -> mlua::Result<Option<ShapeTarget>> {
-    Ok(cx.data(|data| data.pinned_query.get(index).copied())?)
+    cx.data(|data| data.pinned_query.get(index).copied())
 }
 
 fn lists() -> [TypeDef; 2] {
@@ -653,7 +685,7 @@ fn lists() -> [TypeDef; 2] {
         "Contains",
         |call| {
             let found = instance_position(call.cx, call.host(1), call.host(2))?;
-            reply(boolean(found.is_some()))
+            Ok(Some(boolean(found.is_some())))
         },
         None,
     );
@@ -661,7 +693,7 @@ fn lists() -> [TypeDef; 2] {
         "IndexOf",
         |call| {
             let found = instance_position(call.cx, call.host(1), call.host(2))?;
-            reply(found.map_or_else(|| num(-1), count))
+            Ok(Some(found.map_or_else(|| num(-1), count)))
         },
         None,
     );
@@ -682,7 +714,7 @@ fn lists() -> [TypeDef; 2] {
         "Contains",
         |call| {
             let found = shape_position(call.cx, call.host(2))?;
-            reply(boolean(found.is_some()))
+            Ok(Some(boolean(found.is_some())))
         },
         None,
     );
@@ -690,7 +722,7 @@ fn lists() -> [TypeDef; 2] {
         "IndexOf",
         |call| {
             let found = shape_position(call.cx, call.host(2))?;
-            reply(found.map_or_else(|| num(-1), count))
+            Ok(Some(found.map_or_else(|| num(-1), count)))
         },
         None,
     );

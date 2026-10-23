@@ -243,6 +243,12 @@ impl ScriptProfileBuilder {
         cells: &[TileImageKey],
         spec: PatternSpec,
     ) -> Self {
+        let PatternSpec {
+            tags,
+            instance_count,
+            depth,
+            permanent,
+        } = spec;
         let tiles = cells
             .iter()
             .map(|key| {
@@ -257,35 +263,30 @@ impl ScriptProfileBuilder {
         let mut pattern = ProfilePattern {
             grid: Some(PatternGrid::new(width, height, tiles)),
             tile_size: Some(Vec2I::new(width, height)),
-            permanent: spec.permanent,
+            permanent,
             self_connected: true,
             constraint_size: Vec2I::new(99, 99),
             ..ProfilePattern::default()
         };
 
-        for _ in 0..spec.instance_count {
+        for _ in 0..instance_count {
             pattern.variants.push(Arc::new(PatternVariant {
-                depth: spec.depth,
+                depth,
                 layer: ProfileLayer::L1,
                 alpha: 1.0,
                 render_style: VariantRenderStyle::Normal,
-                tag_string: spec.tags.clone(),
+                tag_string: tags.clone(),
                 ..PatternVariant::default()
             }));
         }
 
-        if spec.permanent {
+        if permanent {
             self.profile.permanent_patterns.push(Arc::new(pattern));
         } else {
             self.profile.temporary_patterns.push(Arc::new(pattern));
         }
 
         self
-    }
-
-    /// The profile.
-    pub fn build(&self) -> GameProfile {
-        self.profile.clone()
     }
 
     /// Starts a session on this profile without calling `Start`.
@@ -369,19 +370,19 @@ impl ScriptSession {
     }
 
     pub fn start(&mut self) {
-        self.runtime(|runtime, state| runtime.invoke_start(state));
+        self.runtime(ProfileScriptRuntime::invoke_start);
     }
 
     pub fn end(&mut self) {
-        self.runtime(|runtime, state| runtime.invoke_end(state));
+        self.runtime(ProfileScriptRuntime::invoke_end);
     }
 
     pub fn save(&mut self) {
-        self.runtime(|runtime, state| runtime.invoke_save(state));
+        self.runtime(ProfileScriptRuntime::invoke_save);
     }
 
     pub fn load(&mut self) {
-        self.runtime(|runtime, state| runtime.invoke_load(state));
+        self.runtime(ProfileScriptRuntime::invoke_load);
     }
 
     /// Runs a chunk in the profile's state; the chunk is expected to succeed.

@@ -3,23 +3,18 @@
 
 use std::sync::Arc;
 
-use mlua::Value;
 use zax_engine3d::vectors::Vec3;
 
 use super::{boolean, num, type_def};
 use crate::binding::cx::Call;
 use crate::binding::payload::{HostType, Payload};
-use crate::binding::table::{Reply, TypeDef};
+use crate::binding::table::TypeDef;
 use crate::values::LuaXrState;
 
 pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.push(script_pad());
     types.extend(gamepad());
     types.push(xr_state());
-}
-
-fn reply(value: Value) -> mlua::Result<Reply> {
-    Ok(Some(value))
 }
 
 fn require(call: &Call, kind: HostType, member: &str) -> mlua::Result<()> {
@@ -62,9 +57,9 @@ fn script_pad() -> TypeDef {
         |call| {
             require(call, HostType::ScriptPadApi, "Pressed")?;
             let mask = call.integer(2, "Pressed")?;
-            reply(boolean(
+            Ok(Some(boolean(
                 call.cx.data(|data| data.script_pad_state)? & mask != 0,
-            ))
+            )))
         },
         None,
     );
@@ -74,7 +69,7 @@ fn script_pad() -> TypeDef {
         "HandPos",
         |call| {
             require(call, HostType::ScriptPadApi, "HandPos")?;
-            reply(call.cx.vector3(Vec3::ZERO)?)
+            Ok(Some(call.cx.vector3(Vec3::ZERO)?))
         },
         Some(HostType::Vector3),
     );
@@ -82,7 +77,7 @@ fn script_pad() -> TypeDef {
         "RotPos",
         |call| {
             require(call, HostType::ScriptPadApi, "RotPos")?;
-            reply(call.cx.vector3(Vec3::ZERO)?)
+            Ok(Some(call.cx.vector3(Vec3::ZERO)?))
         },
         Some(HostType::Vector3),
     );
@@ -119,9 +114,9 @@ fn gamepad() -> [TypeDef; 2] {
         |call| {
             require(call, HostType::GamepadApi, "Pressed")?;
             let mask = call.integer(2, "Pressed")?;
-            reply(boolean(
+            Ok(Some(boolean(
                 call.cx.data(|data| data.env.input.global_state())? & mask != 0,
-            ))
+            )))
         },
         None,
     );
@@ -131,7 +126,9 @@ fn gamepad() -> [TypeDef; 2] {
             require(call, HostType::GamepadApi, "GetInput")?;
             let port = call.integer(2, "GetInput")?;
             let port = call.cx.check_bounds(port, 2, "GetInput")?;
-            reply(num(call.cx.data(|data| data.env.input.port_byte(port))?))
+            Ok(Some(num(call
+                .cx
+                .data(|data| data.env.input.port_byte(port))?)))
         },
         None,
     );
@@ -160,9 +157,9 @@ fn gamepad() -> [TypeDef; 2] {
             };
 
             let mask = call.integer(2, "Pressed")?;
-            reply(boolean(
+            Ok(Some(boolean(
                 call.cx.data(|data| data.env.input.player_state(index))? & mask != 0,
-            ))
+            )))
         },
         None,
     );
@@ -183,7 +180,7 @@ fn xr_vector(definition: &mut TypeDef, name: &'static str, read: fn(&LuaXrState)
     );
 }
 
-/// XRState (§4.2): a value type whose four vectors are zero on desktop.
+/// `XRState` (§4.2): a value type whose four vectors are zero on desktop.
 fn xr_state() -> TypeDef {
     let mut definition = type_def(HostType::XrState, "XRState");
     xr_vector(&mut definition, "pos", |state| state.position);

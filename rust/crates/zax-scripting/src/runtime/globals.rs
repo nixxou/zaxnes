@@ -20,7 +20,7 @@ pub(crate) struct OriginalToString(pub Function);
 /// Keeps the libraries REQ-LUA-050 allows and removes the rest: no `io`, no `debug`, no
 /// `package`, no `require`, no file access; `os` keeps only `clock`, `time` and `date`. The
 /// 5.1 globals REQ-LUA-101 point 4 asks for are added back.
-const SANDBOX: &str = r#"
+const SANDBOX: &str = r"
 io = nil
 debug = nil
 package = nil
@@ -38,7 +38,7 @@ loadstring = function (s, name) return load(s, name) end
 math.pow = function (x, y) return x ^ y end
 math.ldexp = function (m, e) return m * 2.0 ^ e end
 math.log10 = function (x) return math.log(x, 10) end
-"#;
+";
 
 /// Calls `function` in protected mode. The outer result is a failure of the host itself; the
 /// inner one is the script's own: its values, or the text of the error it raised.

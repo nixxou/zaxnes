@@ -18,22 +18,18 @@ use super::{assigned_bool, boolean, count, num, type_def};
 use crate::binding::access::{
     read_matrix, read_vec2_ref, read_vec3_ref, write_matrix, write_vec2_ref, write_vec3_ref,
 };
-use crate::binding::cx::{Call, Cx};
+use crate::binding::cx::{host_payload, try_rect, Call, Cx};
 use crate::binding::payload::{
     HostType, InstanceTarget, InstanceVec, Mat4Kind, PatternTarget, Payload, ShapeTarget, Vec2Kind,
     Vec3Ref,
 };
-use crate::binding::table::{Reply, TypeDef};
+use crate::binding::table::TypeDef;
 
 pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.push(instance());
     types.extend(references());
     types.push(custom_data());
     types.push(slot());
-}
-
-fn reply(value: Value) -> mlua::Result<Reply> {
-    Ok(Some(value))
 }
 
 /// The instance a member was called on.
@@ -356,50 +352,76 @@ fn deformation(instance: &FrameInstance, point: Vec3, anchor: Vec3, time: f32) -
 fn instance() -> TypeDef {
     let mut definition = type_def(HostType::Instance, "Instance");
 
+    instance_transforms(&mut definition);
+
+    instance_render_members(&mut definition);
+
+    instance_flags_and_depth(&mut definition);
+
+    instance_slot_and_links(&mut definition);
+
+    instance_pattern_and_index(&mut definition);
+
+    instance_geometry(&mut definition);
+
+    instance_carrier_size(&mut definition);
+    instance_carrier_flags(&mut definition);
+
+    instance_tag_flags(&mut definition);
+
+    methods(&mut definition);
+    definition
+}
+
+/// The transforms: bound vectors, matrices and the custom data (REQ-LUA-044).
+fn instance_transforms(definition: &mut TypeDef) {
     // Transforms: bound vectors, modifiable in place (REQ-LUA-044).
-    bound_vector(&mut definition, "Offset", InstanceVec::Offset);
+    bound_vector(definition, "Offset", InstanceVec::Offset);
     definition.alias("offset", "Offset");
-    bound_vector(&mut definition, "Scale", InstanceVec::Scale);
+    bound_vector(definition, "Scale", InstanceVec::Scale);
     definition.alias("scale", "Scale");
-    bound_vector(&mut definition, "Rot", InstanceVec::Rotation);
+    bound_vector(definition, "Rot", InstanceVec::Rotation);
     definition.alias("rot", "Rot");
-    bound_vector(&mut definition, "Pivot", InstanceVec::Pivot);
+    bound_vector(definition, "Pivot", InstanceVec::Pivot);
     definition.alias("pivot", "Pivot");
-    bound_vector(&mut definition, "DeformAmp", InstanceVec::DeformAmplitude);
-    bound_vector(&mut definition, "DeformPivot", InstanceVec::DeformPivot);
+    bound_vector(definition, "DeformAmp", InstanceVec::DeformAmplitude);
+    bound_vector(definition, "DeformPivot", InstanceVec::DeformPivot);
 
     descriptor(
-        &mut definition,
+        definition,
         "DeformSpeed",
         |target| Payload::Mat4Ref(target, Mat4Kind::DeformSpeed),
         HostType::Mat4Ref,
     );
     descriptor(
-        &mut definition,
+        definition,
         "DeformOffset",
         |target| Payload::Mat4Ref(target, Mat4Kind::DeformOffset),
         HostType::Mat4Ref,
     );
     descriptor(
-        &mut definition,
+        definition,
         "texOffset",
         |target| Payload::Vec2Ref(target, Vec2Kind::TexOffset),
         HostType::Vec2Ref,
     );
     descriptor(
-        &mut definition,
+        definition,
         "texTilting",
         |target| Payload::Vec2Ref(target, Vec2Kind::TexTilting),
         HostType::Vec2Ref,
     );
     descriptor(
-        &mut definition,
+        definition,
         "CData",
         Payload::CustomData,
         HostType::CustomData,
     );
+}
 
-    real_member(&mut definition, "Alpha", |i| i.alpha, |i, v| i.alpha = v);
+/// Opacity, visibility, palette and layer.
+fn instance_render_members(definition: &mut TypeDef) {
+    real_member(definition, "Alpha", |i| i.alpha, |i, v| i.alpha = v);
     definition.alias("alpha", "Alpha");
     definition.property(
         "Enable",
@@ -411,7 +433,7 @@ fn instance() -> TypeDef {
         None,
     );
     int_member(
-        &mut definition,
+        definition,
         "RenderStyle",
         0,
         |i| i.style as i32,
@@ -442,14 +464,14 @@ fn instance() -> TypeDef {
         None,
     );
     int_member(
-        &mut definition,
+        definition,
         "customPalette",
         -1,
         |i| i.custom_palette,
         |i, v| i.custom_palette = v,
     );
     int_member(
-        &mut definition,
+        definition,
         "Layer",
         0,
         |i| i.layer as i32,
@@ -471,29 +493,32 @@ fn instance() -> TypeDef {
         None,
     );
     definition.alias("ui", "UI");
+}
 
+/// The shadow flags, the depth, the geometry and the fill.
+fn instance_flags_and_depth(definition: &mut TypeDef) {
     flag(
-        &mut definition,
+        definition,
         "CastShadow",
         |i| i.cast_shadow,
         |i, v| i.cast_shadow = v,
     );
     flag(
-        &mut definition,
+        definition,
         "RecvShadow",
         |i| i.receive_shadow,
         |i, v| i.receive_shadow = v,
     );
     flag(
-        &mut definition,
+        definition,
         "antiShadow",
         |i| i.anti_shadow,
         |i, v| i.anti_shadow = v,
     );
-    flag(&mut definition, "flip", |i| i.flip, |i, v| i.flip = v);
-    flag(&mut definition, "solid", |i| i.solid, |i, v| i.solid = v);
+    flag(definition, "flip", |i| i.flip, |i, v| i.flip = v);
+    flag(definition, "solid", |i| i.solid, |i, v| i.solid = v);
     flag(
-        &mut definition,
+        definition,
         "fullWarp",
         |i| i.full_warp,
         |i, v| i.full_warp = v,
@@ -509,28 +534,31 @@ fn instance() -> TypeDef {
         None,
     );
 
-    int_member(&mut definition, "sizeZ", 0, |i| i.depth, |i, v| i.depth = v);
+    int_member(definition, "sizeZ", 0, |i| i.depth, |i, v| i.depth = v);
     int_member(
-        &mut definition,
+        definition,
         "geo",
         0,
         |i| i.geometry as i32,
         |i, v| i.geometry = Geo3DType::from_raw(v),
     );
     real_member(
-        &mut definition,
+        definition,
         "fillrate",
         |i| i.fill_rate,
         |i, v| i.fill_rate = v,
     );
     int_member(
-        &mut definition,
+        definition,
         "emptyColor",
         0,
         |i| i.empty_color,
         |i, v| i.empty_color = v,
     );
+}
 
+/// The texture slot and the links to the shape and the patterns.
+fn instance_slot_and_links(definition: &mut TypeDef) {
     // The texture slot: shared between a pattern instance and its frame instances, and
     // assignable so that an instance borrows another's texture (REQ-LUA-097).
     definition.property(
@@ -553,7 +581,7 @@ fn instance() -> TypeDef {
             owner.map_or(Ok(Value::Nil), |owner| cx.object(Payload::Slot(owner)))
         },
         |cx, this, value| {
-            let wanted = match cx.host(value) {
+            let wanted = match host_payload(value) {
                 Some(Payload::Slot(source)) => Some(source),
                 None if matches!(value, Value::Nil) => None,
                 _ => return Err(cx.invalid("slot")),
@@ -605,7 +633,10 @@ fn instance() -> TypeDef {
         },
         Some(HostType::Pattern),
     );
+}
 
+/// The carrying pattern and the position in it.
+fn instance_pattern_and_index(definition: &mut TypeDef) {
     // The carrying pattern: the registry pattern of a pattern instance, the frame pattern of a
     // frame instance (§4.2, type Pattern). Listed as writable in §4.2, but rebinding an
     // instance to another pattern has no meaning in this model and no profile does it; the
@@ -646,18 +677,21 @@ fn instance() -> TypeDef {
         |cx, this| Ok(boolean(read_frame(cx, this, false, |i, _| i.background())?)),
         None,
     );
+}
 
-    geometry(&mut definition, "BottomLeft", FrameInstance::bottom_left);
-    geometry(&mut definition, "TopRight", FrameInstance::top_right);
-    geometry(&mut definition, "BL", FrameInstance::bl);
-    geometry(&mut definition, "TR", FrameInstance::tr);
-    geometry(&mut definition, "size", FrameInstance::size);
+/// The box of the frame instance and its anchor (REQ-LUA-083).
+fn instance_geometry(definition: &mut TypeDef) {
+    geometry(definition, "BottomLeft", FrameInstance::bottom_left);
+    geometry(definition, "TopRight", FrameInstance::top_right);
+    geometry(definition, "BL", FrameInstance::bl);
+    geometry(definition, "TR", FrameInstance::tr);
+    geometry(definition, "size", FrameInstance::size);
     definition.alias("Size", "size");
-    geometry(&mut definition, "OriPos", FrameInstance::ori_pos);
-    geometry(&mut definition, "OriPosWoLayer", |i| {
+    geometry(definition, "OriPos", FrameInstance::ori_pos);
+    geometry(definition, "OriPosWoLayer", |i| {
         i.get_pos_without_layer(i.deform_pivot)
     });
-    geometry(&mut definition, "Pos", |i| i.pos);
+    geometry(definition, "Pos", |i| i.pos);
 
     definition.property(
         "Center",
@@ -676,7 +710,10 @@ fn instance() -> TypeDef {
         },
         Some(HostType::Vector3),
     );
+}
 
+/// The size and the constraint of the carrying pattern.
+fn instance_carrier_size(definition: &mut TypeDef) {
     definition.read_only(
         "tSize",
         |cx, this| {
@@ -753,6 +790,10 @@ fn instance() -> TypeDef {
         },
         None,
     );
+}
+
+/// The flags of the carrying pattern and the tag string.
+fn instance_carrier_flags(definition: &mut TypeDef) {
     definition.property(
         "skipGeo",
         |cx, this| {
@@ -780,7 +821,10 @@ fn instance() -> TypeDef {
         },
         None,
     );
+}
 
+/// The members derived from the tags (SPEC-06) and the animation.
+fn instance_tag_flags(definition: &mut TypeDef) {
     // The two tag-derived flags of SPEC-06. The tag string decides them, so a write is accepted
     // without effect; no built-in profile writes either (both P3).
     definition.property(
@@ -815,9 +859,6 @@ fn instance() -> TypeDef {
         },
         None,
     );
-
-    methods(&mut definition);
-    definition
 }
 
 fn set_constraint(cx: &Cx, this: &Payload, compute: impl FnOnce(Cell) -> Cell) -> mlua::Result<()> {
@@ -844,7 +885,7 @@ fn methods(definition: &mut TypeDef) {
         "GetPos",
         |call| {
             let Some(target) = frame_receiver(call) else {
-                return reply(call.cx.vector3(Vec3::ZERO)?);
+                return Ok(Some(call.cx.vector3(Vec3::ZERO)?));
             };
 
             let pivot = if call.is_none_or_nil(2) {
@@ -861,7 +902,7 @@ fn methods(definition: &mut TypeDef) {
                 })?
                 .flatten()
                 .unwrap_or(Vec3::ZERO);
-            reply(call.cx.vector3(position)?)
+            Ok(Some(call.cx.vector3(position)?))
         },
         Some(HostType::Vector3),
     );
@@ -870,7 +911,7 @@ fn methods(definition: &mut TypeDef) {
         |call| {
             let pivot = call.vec3(2, "GetOriginalPos")?;
             let position = frame_position(call, |instance| instance.get_original_pos(pivot))?;
-            reply(call.cx.vector3(position)?)
+            Ok(Some(call.cx.vector3(position)?))
         },
         Some(HostType::Vector3),
     );
@@ -879,7 +920,7 @@ fn methods(definition: &mut TypeDef) {
         |call| {
             let pivot = call.vec3(2, "GetPosWoLayer")?;
             let position = frame_position(call, |instance| instance.get_pos_without_layer(pivot))?;
-            reply(call.cx.vector3(position)?)
+            Ok(Some(call.cx.vector3(position)?))
         },
         Some(HostType::Vector3),
     );
@@ -908,15 +949,20 @@ fn methods(definition: &mut TypeDef) {
                     .unwrap_or(false),
                 _ => false,
             };
-            reply(boolean(found))
+            Ok(Some(boolean(found)))
         },
         None,
     );
+    overlap_and_deformation_methods(definition);
+}
+
+/// `Overlap`, `OverlapRect` and the deformation a script predicts (REQ-LUA-083).
+fn overlap_and_deformation_methods(definition: &mut TypeDef) {
     definition.function(
         "Overlap",
         |call| {
             let Some(target) = frame_receiver(call) else {
-                return reply(boolean(false));
+                return Ok(Some(boolean(false)));
             };
 
             if let Some(Payload::Instance(other @ InstanceTarget::Frame(..))) = call.host(2) {
@@ -929,13 +975,13 @@ fn methods(definition: &mut TypeDef) {
                     .cx
                     .with_frame_pair(&target, &other, |me, other| me.overlap(other, delta))?
                     .unwrap_or(false);
-                return reply(boolean(overlaps));
+                return Ok(Some(boolean(overlaps)));
             }
 
-            if let Some(rectangle) = call.cx.try_rect(call.value(2)) {
-                return reply(boolean(frame_flag(call, |instance| {
+            if let Some(rectangle) = try_rect(call.value(2)) {
+                return Ok(Some(boolean(frame_flag(call, |instance| {
                     instance.overlap_with_rect(&rectangle)
-                })?));
+                })?)));
             }
 
             Err(call.invalid("Overlap"))
@@ -946,9 +992,9 @@ fn methods(definition: &mut TypeDef) {
         "OverlapRect",
         |call| {
             let rectangle = call.rect(2, "OverlapRect")?;
-            reply(boolean(frame_flag(call, |instance| {
+            Ok(Some(boolean(frame_flag(call, |instance| {
                 instance.overlap_rect(&rectangle)
-            })?))
+            })?)))
         },
         None,
     );
@@ -960,7 +1006,7 @@ fn methods(definition: &mut TypeDef) {
             let value = frame_position(call, |instance| {
                 deformation(instance, point, instance.ori_pos(), time)
             })?;
-            reply(call.cx.vector3(value)?)
+            Ok(Some(call.cx.vector3(value)?))
         },
         Some(HostType::Vector3),
     );
@@ -977,7 +1023,7 @@ fn methods(definition: &mut TypeDef) {
                     time,
                 )
             })?;
-            reply(call.cx.vector3(value)?)
+            Ok(Some(call.cx.vector3(value)?))
         },
         Some(HostType::Vector3),
     );
@@ -1055,6 +1101,11 @@ fn vec3_component(definition: &mut TypeDef, name: &'static str, axis: usize) {
 }
 
 fn references() -> [TypeDef; 3] {
+    [bound_vec3(), bound_vec2(), bound_matrix()]
+}
+
+/// The bound vector `Vec3R` (SPEC-05 §4.3).
+fn bound_vec3() -> TypeDef {
     let mut vec3 = type_def(HostType::Vec3Ref, "Vec3R");
     vec3_component(&mut vec3, "x", 0);
     vec3_component(&mut vec3, "y", 1);
@@ -1108,7 +1159,11 @@ fn references() -> [TypeDef; 3] {
         write_vec3_ref(cx, &reference, current)
     }));
     vec3.text = Some(Arc::new(|_| "Vec3R".to_owned()));
+    vec3
+}
 
+/// The bound 2D vector `Vec2R`.
+fn bound_vec2() -> TypeDef {
     let mut vec2 = type_def(HostType::Vec2Ref, "Vec2R");
     vec2_component(&mut vec2, "x", 0);
     vec2_component(&mut vec2, "y", 1);
@@ -1148,15 +1203,21 @@ fn references() -> [TypeDef; 3] {
 
         write_vec2(cx, this, current)
     }));
+    vec2
+}
 
-    // Mat4R: mRC is row R, column C; the numeric index is column-major, i = R + 4·C (§4.3).
+/// The names of the sixteen cells of a `Mat4R`: `mRC` is row R, column C.
+const NAMES: [[&str; 4]; 4] = [
+    ["m00", "m01", "m02", "m03"],
+    ["m10", "m11", "m12", "m13"],
+    ["m20", "m21", "m22", "m23"],
+    ["m30", "m31", "m32", "m33"],
+];
+
+/// The bound matrix `Mat4R`.
+fn bound_matrix() -> TypeDef {
+    // The numeric index is column-major, i = R + 4·C (§4.3).
     let mut matrix = type_def(HostType::Mat4Ref, "Mat4R");
-    const NAMES: [[&str; 4]; 4] = [
-        ["m00", "m01", "m02", "m03"],
-        ["m10", "m11", "m12", "m13"],
-        ["m20", "m21", "m22", "m23"],
-        ["m30", "m31", "m32", "m33"],
-    ];
     for (row, names) in NAMES.iter().enumerate() {
         for (column, name) in names.iter().enumerate() {
             let name: &'static str = name;
@@ -1185,8 +1246,7 @@ fn references() -> [TypeDef; 3] {
         current[(row, column)] = cx.real(value, "Mat4R")?;
         write_mat4(cx, this, current)
     }));
-
-    [vec3, vec2, matrix]
+    matrix
 }
 
 fn matrix_cell(cx: &Cx, index: i32) -> mlua::Result<(usize, usize)> {

@@ -12,8 +12,9 @@ pub(crate) fn message_of(error: &mlua::Error) -> String {
         mlua::Error::CallbackError { cause, .. } | mlua::Error::WithContext { cause, .. } => {
             message_of(cause)
         }
-        mlua::Error::RuntimeError(message) => message.clone(),
-        mlua::Error::SyntaxError { message, .. } => message.clone(),
+        mlua::Error::RuntimeError(message) | mlua::Error::SyntaxError { message, .. } => {
+            message.clone()
+        }
         other => other.to_string(),
     }
 }

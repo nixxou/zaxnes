@@ -200,10 +200,11 @@ impl ProfileScriptRuntime {
         building: Option<(InstanceRef, &mut PatternInstance)>,
         operation: impl FnOnce(&Cx) -> R,
     ) -> mlua::Result<R> {
-        let state = state.map(|state| {
+        let mut state = state;
+        if let Some(state) = state.as_deref_mut() {
             self.data.settle_settings(Some(state.settings_mut()));
-            state
-        });
+        }
+
         let Self { lua, data } = self;
         lua.scope(|scope| {
             let data = scope.create_any_userdata_ref_mut(data)?;
@@ -547,7 +548,7 @@ impl ProfileScriptRuntime {
     ) -> Result<R, LuaScriptError> {
         let limit = self.data.hook_budget;
         let outcome = self.run(Some(state), None, |cx| {
-            let function = cx.lua.load(chunk).into_function()?;
+            let function = cx.lua.load(chunk).set_name(chunk).into_function()?;
             let results = with_budget(cx.lua, limit, || protected_call(cx.lua, &function, ()))?;
             Ok::<_, mlua::Error>(results.map(|results| read(cx.lua, &results)))
         });

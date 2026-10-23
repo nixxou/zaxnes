@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use mlua::{AnyUserData, Function, Lua, MetaMethod, MultiValue, UserData, UserDataMethods, Value};
 
-use super::cx::{Call, Cx, HostCache};
+use super::cx::{host_payload, Call, Cx, HostCache};
 use super::payload::{Host, HostType, Payload};
 use super::table::{Api, MemberKind, OperatorFn, TypeDef};
 use crate::values::number_format;
@@ -150,9 +150,8 @@ fn new_index(lua: &Lua, this: &AnyUserData, key: &Value, value: &Value) -> mlua:
     Err(cx.raise(&format!("cannot set {}, no such field", key_text(key))))
 }
 
-fn equal(lua: &Lua, left: &Value, right: &Value) -> bool {
-    let cx = Cx::new(lua);
-    let (Some(left), Some(right)) = (cx.host(left), cx.host(right)) else {
+fn equal(left: &Value, right: &Value) -> bool {
+    let (Some(left), Some(right)) = (host_payload(left), host_payload(right)) else {
         return false;
     };
 
@@ -175,7 +174,7 @@ fn operate(
 ) -> mlua::Result<Value> {
     let cx = Cx::new(lua);
     for operand in [left, right] {
-        if let Some(payload) = cx.host(operand) {
+        if let Some(payload) = host_payload(operand) {
             if let Some(operator) = api().get(payload.host_type()).and_then(&pick) {
                 return operator(&cx, left, right);
             }
@@ -197,8 +196,8 @@ impl UserData for Host {
                 new_index(lua, &this, &key, &value)
             },
         );
-        methods.add_meta_function(MetaMethod::Eq, |lua, (left, right): (Value, Value)| {
-            Ok(equal(lua, &left, &right))
+        methods.add_meta_function(MetaMethod::Eq, |_, (left, right): (Value, Value)| {
+            Ok(equal(&left, &right))
         });
         methods.add_meta_function(MetaMethod::Call, |lua, values: MultiValue| {
             let cx = Cx::new(lua);

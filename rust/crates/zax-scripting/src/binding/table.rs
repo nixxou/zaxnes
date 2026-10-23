@@ -117,12 +117,11 @@ impl TypeDef {
     fn push(&mut self, member: Member) -> &mut Self {
         // A later declaration of a name replaces the earlier one, as the dictionary of the
         // original did.
-        match self.lookup.get(member.name) {
-            Some(&position) => self.members[position] = member,
-            None => {
-                self.lookup.insert(member.name, self.members.len());
-                self.members.push(member);
-            }
+        if let Some(&position) = self.lookup.get(member.name) {
+            self.members[position] = member;
+        } else {
+            self.lookup.insert(member.name, self.members.len());
+            self.members.push(member);
         }
 
         self

@@ -9,9 +9,9 @@ use mlua::Value;
 use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
 use super::{boolean, num, type_def};
-use crate::binding::cx::{Call, Cx};
+use crate::binding::cx::{try_color, try_quaternion, Call, Cx};
 use crate::binding::payload::{HostType, Payload};
-use crate::binding::table::{Reply, TypeDef};
+use crate::binding::table::TypeDef;
 use crate::quaternion::Quat;
 use crate::values::{number_format, LuaColor, LuaIntVector3};
 
@@ -25,16 +25,13 @@ pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.extend(vector2());
     types.extend(quaternion());
     types.extend(color());
-    types.extend(int_vectors());
+    types.extend(int_vector2());
+    types.extend(int_vector3());
     types.extend(rectangle());
 }
 
 fn text_of(value: f32) -> String {
     number_format::to_text(f64::from(value))
-}
-
-fn reply(value: Value) -> mlua::Result<Reply> {
-    Ok(Some(value))
 }
 
 /// A component of a value type, read as a real and written as a real.
@@ -81,6 +78,11 @@ fn vec3_of(payload: &Payload) -> Vec3 {
 }
 
 fn vector3() -> [TypeDef; 2] {
+    [vector3_value(), vector3_class()]
+}
+
+/// The type `Vector3`.
+fn vector3_value() -> TypeDef {
     let mut definition = type_def(HostType::Vector3, "Vector3");
     real_component(
         &mut definition,
@@ -176,7 +178,11 @@ fn vector3() -> [TypeDef; 2] {
             text_of(value.z)
         )
     }));
+    definition
+}
 
+/// The class table `Vector3`: the constants, the functions and the constructor.
+fn vector3_class() -> TypeDef {
     let mut table = type_def(HostType::Vector3Class, "Vector3Classe");
     for (name, value) in [
         ("zero", Vec3::ZERO),
@@ -200,11 +206,11 @@ fn vector3() -> [TypeDef; 2] {
         |call| {
             let a = call.vec3(1, "Cross")?;
             let c = call.vec3(2, "Cross")?;
-            reply(call.cx.vector3(Vec3::new(
+            Ok(Some(call.cx.vector3(Vec3::new(
                 (a.y * c.z) - (a.z * c.y),
                 (a.z * c.x) - (a.x * c.z),
                 (a.x * c.y) - (a.y * c.x),
-            ))?)
+            ))?))
         },
         Some(HostType::Vector3),
     );
@@ -213,7 +219,7 @@ fn vector3() -> [TypeDef; 2] {
         |call| {
             let a = call.vec3(1, "Dot")?;
             let c = call.vec3(2, "Dot")?;
-            reply(num((a.x * c.x) + (a.y * c.y) + (a.z * c.z)))
+            Ok(Some(num((a.x * c.x) + (a.y * c.y) + (a.z * c.z))))
         },
         None,
     );
@@ -222,7 +228,7 @@ fn vector3() -> [TypeDef; 2] {
         |call| {
             let a = call.vec3(1, "Distance")?;
             let c = call.vec3(2, "Distance")?;
-            reply(num(Vec3::distance(a, c)))
+            Ok(Some(num(Vec3::distance(a, c))))
         },
         None,
     );
@@ -232,7 +238,7 @@ fn vector3() -> [TypeDef; 2] {
             let a = call.vec3(1, "Lerp")?;
             let c = call.vec3(2, "Lerp")?;
             let t = call.real(3, "Lerp")?.clamp(0.0, 1.0);
-            reply(call.cx.vector3(a + ((c - a) * t))?)
+            Ok(Some(call.cx.vector3(a + ((c - a) * t))?))
         },
         Some(HostType::Vector3),
     );
@@ -240,16 +246,16 @@ fn vector3() -> [TypeDef; 2] {
     // Vector3(x, y [, z]); no argument gives the zero vector (§4.3).
     table.call = Some(std::sync::Arc::new(|call| {
         if call.is_none_or_nil(2) {
-            return reply(call.cx.vector3(Vec3::ZERO)?);
+            return Ok(Some(call.cx.vector3(Vec3::ZERO)?));
         }
 
         let x = call.real(2, "Vector3")?;
         let y = call.real(3, "Vector3")?;
         let z = narrow(call.optional_number(4, "Vector3", 0.0)?);
-        reply(call.cx.vector3(Vec3::new(x, y, z))?)
+        Ok(Some(call.cx.vector3(Vec3::new(x, y, z))?))
     }));
     table.call_result = Some(HostType::Vector3);
-    [definition, table]
+    table
 }
 
 /// The operand of a `Vector3` operator, or `invalid arguments to Vector3 <what>`.
@@ -370,12 +376,12 @@ fn vector2() -> [TypeDef; 2] {
     );
     table.call = Some(std::sync::Arc::new(|call| {
         if call.is_none_or_nil(2) {
-            return reply(call.cx.vector2(Vec2::ZERO)?);
+            return Ok(Some(call.cx.vector2(Vec2::ZERO)?));
         }
 
         let x = call.real(2, "Vector2")?;
         let y = call.real(3, "Vector2")?;
-        reply(call.cx.vector2(Vec2::new(x, y))?)
+        Ok(Some(call.cx.vector2(Vec2::new(x, y))?))
     }));
     table.call_result = Some(HostType::Vector2);
     [definition, table]
@@ -434,13 +440,17 @@ fn to_euler(q: Quat) -> Vec3 {
 }
 
 fn quaternion_argument(call: &Call, index: usize, member: &str) -> mlua::Result<Quat> {
-    call.cx
-        .try_quaternion(call.value(index))
+    try_quaternion(call.value(index))
         .map(Quat::from_parts)
         .ok_or_else(|| call.invalid(member))
 }
 
 fn quaternion() -> [TypeDef; 2] {
+    [quaternion_value_type(), quaternion_class()]
+}
+
+/// The type `Quaternion`.
+fn quaternion_value_type() -> TypeDef {
     let mut definition = type_def(HostType::Quaternion, "Quaternion");
     real_component(
         &mut definition,
@@ -491,11 +501,9 @@ fn quaternion() -> [TypeDef; 2] {
         quat_of(a).dot(quat_of(b)).abs() > 1.0 - QUATERNION_EQUALITY_TOLERANCE
     }));
     definition.multiply = Some(std::sync::Arc::new(|cx, a, b| {
-        let left = cx
-            .try_quaternion(a)
-            .map_or(Quat::new(0.0, 0.0, 0.0, 0.0), Quat::from_parts);
+        let left = try_quaternion(a).map_or(Quat::new(0.0, 0.0, 0.0, 0.0), Quat::from_parts);
         // q1 * q2 applies q2 first, then q1 (§4.3).
-        if let Some(right) = cx.try_quaternion(b) {
+        if let Some(right) = try_quaternion(b) {
             return quaternion_value(cx, left.multiply(Quat::from_parts(right)));
         }
 
@@ -515,7 +523,11 @@ fn quaternion() -> [TypeDef; 2] {
             text_of(value.w)
         )
     }));
+    definition
+}
 
+/// The class table `Quaternion`: the identity and the constructors.
+fn quaternion_class() -> TypeDef {
     let mut table = type_def(HostType::QuaternionClass, "QuaternionClasse");
     table.read_only(
         "identity",
@@ -526,16 +538,16 @@ fn quaternion() -> [TypeDef; 2] {
         "Euler",
         |call| {
             if let Some(angles) = call.cx.try_vec3(call.value(1))? {
-                return reply(quaternion_value(
+                return Ok(Some(quaternion_value(
                     call.cx,
                     from_euler(angles.x, angles.y, angles.z),
-                )?);
+                )?));
             }
 
             let x = call.real(1, "Euler")?;
             let y = call.real(2, "Euler")?;
             let z = call.real(3, "Euler")?;
-            reply(quaternion_value(call.cx, from_euler(x, y, z))?)
+            Ok(Some(quaternion_value(call.cx, from_euler(x, y, z))?))
         },
         Some(HostType::Quaternion),
     );
@@ -546,14 +558,14 @@ fn quaternion() -> [TypeDef; 2] {
             let axis = call.vec3(2, "AngleAxis")?;
             let length = axis.squared_length().sqrt();
             if length <= 1e-6 {
-                return reply(quaternion_value(call.cx, Quat::IDENTITY)?);
+                return Ok(Some(quaternion_value(call.cx, Quat::IDENTITY)?));
             }
 
             let unit = Vec3::new(axis.x / length, axis.y / length, axis.z / length);
-            reply(quaternion_value(
+            Ok(Some(quaternion_value(
                 call.cx,
                 Quat::from_axis_angle(unit, angle * RADIANS),
-            )?)
+            )?))
         },
         Some(HostType::Quaternion),
     );
@@ -573,7 +585,7 @@ fn quaternion() -> [TypeDef; 2] {
                 (a.z * (1.0 - t)) + (c.z * t),
                 (a.w * (1.0 - t)) + (c.w * t),
             );
-            reply(quaternion_value(call.cx, mixed.normalize())?)
+            Ok(Some(quaternion_value(call.cx, mixed.normalize())?))
         },
         Some(HostType::Quaternion),
     );
@@ -583,11 +595,11 @@ fn quaternion() -> [TypeDef; 2] {
             let a = quaternion_argument(call, 1, "Slerp")?;
             let c = quaternion_argument(call, 2, "Slerp")?;
             let t = call.real(3, "Slerp")?.clamp(0.0, 1.0);
-            reply(quaternion_value(call.cx, Quat::slerp(a, c, t))?)
+            Ok(Some(quaternion_value(call.cx, Quat::slerp(a, c, t))?))
         },
         Some(HostType::Quaternion),
     );
-    [definition, table]
+    table
 }
 
 fn color_of(payload: &Payload) -> LuaColor {
@@ -597,9 +609,8 @@ fn color_of(payload: &Payload) -> LuaColor {
     }
 }
 
-fn operand_color(cx: &Cx, value: &Value) -> LuaColor {
-    cx.try_color(value)
-        .unwrap_or(LuaColor::new(0.0, 0.0, 0.0, 0.0))
+fn operand_color(value: &Value) -> LuaColor {
+    try_color(value).unwrap_or(LuaColor::new(0.0, 0.0, 0.0, 0.0))
 }
 
 fn scale_color(cx: &Cx, value: LuaColor, factor: f32) -> mlua::Result<Value> {
@@ -655,23 +666,23 @@ fn color() -> [TypeDef; 2] {
     );
     definition.equal = Some(std::sync::Arc::new(|a, b| color_of(a) == color_of(b)));
     definition.add = Some(std::sync::Arc::new(|cx, a, b| {
-        let (a, c) = (operand_color(cx, a), operand_color(cx, b));
+        let (a, c) = (operand_color(a), operand_color(b));
         cx.color(LuaColor::new(a.r + c.r, a.g + c.g, a.b + c.b, a.a + c.a))
     }));
     definition.subtract = Some(std::sync::Arc::new(|cx, a, b| {
-        let (a, c) = (operand_color(cx, a), operand_color(cx, b));
+        let (a, c) = (operand_color(a), operand_color(b));
         cx.color(LuaColor::new(a.r - c.r, a.g - c.g, a.b - c.b, a.a - c.a))
     }));
     definition.multiply = Some(std::sync::Arc::new(|cx, a, b| {
         if let Some(factor) = scalar(a) {
-            return scale_color(cx, operand_color(cx, b), factor);
+            return scale_color(cx, operand_color(b), factor);
         }
 
         if let Some(factor) = scalar(b) {
-            return scale_color(cx, operand_color(cx, a), factor);
+            return scale_color(cx, operand_color(a), factor);
         }
 
-        let (a, c) = (operand_color(cx, a), operand_color(cx, b));
+        let (a, c) = (operand_color(a), operand_color(b));
         cx.color(LuaColor::new(a.r * c.r, a.g * c.g, a.b * c.b, a.a * c.a))
     }));
     definition.text = Some(std::sync::Arc::new(|p| {
@@ -701,7 +712,7 @@ fn color() -> [TypeDef; 2] {
         let g = call.real(3, "Color")?;
         let b = call.real(4, "Color")?;
         let a = narrow(call.optional_number(5, "Color", 1.0)?);
-        reply(call.cx.color(LuaColor::new(r, g, b, a))?)
+        Ok(Some(call.cx.color(LuaColor::new(r, g, b, a))?))
     }));
     table.call_result = Some(HostType::Color);
     [definition, table]
@@ -725,7 +736,7 @@ fn int3_of(payload: &Payload) -> LuaIntVector3 {
     }
 }
 
-fn int_vectors() -> [TypeDef; 4] {
+fn int_vector2() -> [TypeDef; 2] {
     let mut definition = type_def(HostType::IntVector2, "IntVector2");
     int_component(
         &mut definition,
@@ -784,15 +795,19 @@ fn int_vectors() -> [TypeDef; 4] {
     );
     table.call = Some(std::sync::Arc::new(|call| {
         if call.is_none_or_nil(2) {
-            return reply(call.cx.int_vector2(Cell::default())?);
+            return Ok(Some(call.cx.int_vector2(Cell::default())?));
         }
 
         let x = call.integer(2, "IntVector2")?;
         let y = call.integer(3, "IntVector2")?;
-        reply(call.cx.int_vector2(Cell::new(x, y))?)
+        Ok(Some(call.cx.int_vector2(Cell::new(x, y))?))
     }));
     table.call_result = Some(HostType::IntVector2);
+    [definition, table]
+}
 
+/// The types `IntVector3` and its class table.
+fn int_vector3() -> [TypeDef; 2] {
     let mut three = type_def(HostType::IntVector3, "IntVector3");
     int_component(
         &mut three,
@@ -831,13 +846,14 @@ fn int_vectors() -> [TypeDef; 4] {
         let x = call.integer(2, "IntVector3")?;
         let y = call.integer(3, "IntVector3")?;
         let z = call.integer(4, "IntVector3")?;
-        reply(
-            call.cx
-                .value(Payload::IntVector3(LuaIntVector3 { x, y, z }))?,
-        )
+        Ok(Some(call.cx.value(Payload::IntVector3(LuaIntVector3 {
+            x,
+            y,
+            z,
+        }))?))
     }));
     three_table.call_result = Some(HostType::IntVector3);
-    [definition, table, three, three_table]
+    [three, three_table]
 }
 
 /// The number an operator operand is, as a double.
@@ -908,7 +924,7 @@ fn rectangle() -> [TypeDef; 2] {
                 .map(|payload| rect_of(&payload))
                 .unwrap_or_default();
             let other = call.rect(2, "Overlaps")?;
-            reply(boolean(mine.overlaps(&other)))
+            Ok(Some(boolean(mine.overlaps(&other))))
         },
         None,
     );
@@ -929,10 +945,10 @@ fn rectangle() -> [TypeDef; 2] {
         let y = call.real(3, "Rect")?;
         let width = call.real(4, "Rect")?;
         let height = call.real(5, "Rect")?;
-        reply(
+        Ok(Some(
             call.cx
                 .value(Payload::Rect(Rect::new(x, y, width, height)))?,
-        )
+        ))
     }));
     table.call_result = Some(HostType::Rect);
     [definition, table]
