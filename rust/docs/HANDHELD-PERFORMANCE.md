@@ -147,6 +147,11 @@ displayed frame". All values are per displayed frame.
   conversion + Lua + draw-list instructions. No map relies on its iteration order (the standard
   one is random per process). x86, Zelda II world map: draw list 0.24 -> 0.14 ms, conversion
   0.14 -> 0.126 ms; captures identical (36 campaign + Zelda II, tolerance 0).
+- Device run of `5f056be` (owner): temple centre conv 1 / lua 7.4-8.7 / scene 8.1 (~45 fps),
+  outside conv 3.4 / lua 5.5 / scene 13.6 (~42 fps), Lua spikes up to 225 ms (GC). The profiler
+  now splits the scene into list / collect / scene. Lua (callgrind, temple): 84 % in UpdateS
+  and LateUpdate; each geometry read (`TopRight`, `size`...) is a HostLink round trip plus a new
+  `Vector3` userdata (allocation, metatable, finaliser); descriptors (`Offset`...) under 10 %.
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

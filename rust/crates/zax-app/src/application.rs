@@ -480,15 +480,18 @@ impl Running {
             emulated,
             self.state.last_render_size == (scene_width, scene_height),
         );
-        let mark = self.clock.start();
         if skip {
             self.state.skipped_frames += 1;
         } else {
-            render_scene(&mut self.renderer, &mut self.host, &mut self.state)?;
+            render_scene(
+                &mut self.renderer,
+                &mut self.host,
+                &mut self.state,
+                &mut self.clock,
+            )?;
             self.state.last_render_size = (scene_width, scene_height);
             self.state.scene_frames += 1;
         }
-        self.clock.stop(Stage::Scene, mark);
         let mark = self.clock.start();
         framebuffer::begin_window_pass(&self.gl, width, height);
         if let Some(view) = self.host.view() {
@@ -1045,6 +1048,7 @@ fn render_scene(
     renderer: &mut SceneRenderer,
     host: &mut AppHost,
     state: &mut RunState,
+    clock: &mut StageClock,
 ) -> Result<(), String> {
     let view = host.view().ok_or("the host has no view of the game")?;
     let target = RenderTarget {
@@ -1060,19 +1064,29 @@ fn render_scene(
     };
     // In 2D mode the renderer shows the core's picture alone (AMD-009) and reads nothing of the
     // draw list, so it is not built (Rust-only saving: the C# loop builds it every frame).
+    let started = clock.start();
     let list = if picture.is_empty() {
         session.map(GameSession::build_draw_list)
     } else {
         None
     };
+    clock.stop(Stage::DrawList, started);
     let frame = SceneFrame {
         draw_list: list,
         nes_picture: picture,
     };
+    let started = clock.start();
     renderer
         .render(&target, scene, &frame)
         .map_err(|error| error.to_string())?;
     let statistics = renderer.statistics();
+    if let Some(started) = started {
+        clock.add(Stage::Collect, statistics.collect_time);
+        clock.add(
+            Stage::Scene,
+            started.elapsed().saturating_sub(statistics.collect_time),
+        );
+    }
     if !state.shadow_map_reported
         && statistics.shadow_map_size != statistics.requested_shadow_map_size
     {

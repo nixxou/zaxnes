@@ -38,7 +38,11 @@ pub enum Stage {
     Rollback,
     /// The rest of the host's tick: commands, pacing, settings, publication.
     Emulation,
-    /// The scene: update, draw list and the GL calls of the renderer (CPU side).
+    /// The engine's draw list of the frame (`GameSession::build_draw_list`).
+    DrawList,
+    /// The renderer's collection of the tiles into its buckets (meshes, textures, matrices).
+    Collect,
+    /// The scene: update and the renderer's passes (GL calls, CPU side).
     Scene,
     /// The blit of the scene and the interface (Dear `ImGui` build and render).
     Ui,
@@ -54,7 +58,7 @@ pub enum Stage {
 
 impl Stage {
     /// Number of stages.
-    pub const COUNT: usize = 13;
+    pub const COUNT: usize = 15;
 
     /// Every stage, in frame order.
     pub const ALL: [Self; Self::COUNT] = [
@@ -65,6 +69,8 @@ impl Stage {
         Self::Lua,
         Self::Rollback,
         Self::Emulation,
+        Self::DrawList,
+        Self::Collect,
         Self::Scene,
         Self::Ui,
         Self::Audio,
@@ -84,6 +90,8 @@ impl Stage {
             Self::Lua => "lua",
             Self::Rollback => "rollback",
             Self::Emulation => "host",
+            Self::DrawList => "list",
+            Self::Collect => "collect",
             Self::Scene => "scene",
             Self::Ui => "ui",
             Self::Audio => "audio",

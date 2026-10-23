@@ -339,7 +339,9 @@ impl SceneRenderer {
         let view = scene.camera.build_view(scene.clipping, aspect);
         self.last_view = view;
 
+        let started = std::time::Instant::now();
         self.collect(scene, frame, &view)?;
+        self.passes.statistics.collect_time = started.elapsed();
         let volume = self.render_shadow_map(scene, &view)?;
         self.render_scene(target, scene, frame, &view, &volume)?;
 
