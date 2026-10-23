@@ -84,7 +84,15 @@ impl VariantTexture {
     /// The "no texture" marker the built-in profiles use: 0 by 0 with an empty indexed payload.
     #[must_use]
     pub fn null_marker() -> Self {
-        Self::new(0, 0, Some(TexturePixels::new(TextureFormat::Indexed, Vec::new(), Vec::new())))
+        Self::new(
+            0,
+            0,
+            Some(TexturePixels::new(
+                TextureFormat::Indexed,
+                Vec::new(),
+                Vec::new(),
+            )),
+        )
     }
 
     /// True for the "no texture" marker.
@@ -92,10 +100,9 @@ impl VariantTexture {
     pub fn is_null_marker(&self) -> bool {
         self.width == 0
             && self.height == 0
-            && self
-                .pixels
-                .as_ref()
-                .is_none_or(|pixels| pixels.format == TextureFormat::Indexed && pixels.data.is_empty())
+            && self.pixels.as_ref().is_none_or(|pixels| {
+                pixels.format == TextureFormat::Indexed && pixels.data.is_empty()
+            })
     }
 
     /// True when the payload has the length the size and format call for.
@@ -199,8 +206,10 @@ impl PatternVariant {
         } else {
             &self.deform_offset
         };
-        Some(matrix.as_ref().map_or(0.0, |matrix| {
-            matrix.get(3, index & 3).unwrap_or(0.0)
-        }))
+        Some(
+            matrix
+                .as_ref()
+                .map_or(0.0, |matrix| matrix.get(3, index & 3).unwrap_or(0.0)),
+        )
     }
 }

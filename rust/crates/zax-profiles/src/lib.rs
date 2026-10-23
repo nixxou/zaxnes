@@ -7,16 +7,21 @@
 //! rendering, audio or input API (REQ-ARCH-002) and reaches files only through
 //! [`catalogue::ProfileFileSystem`].
 
+pub mod catalogue;
 pub mod enums;
 pub mod export;
 pub mod format;
+pub mod import;
 pub mod layout;
+pub mod library;
 pub mod pattern;
 pub mod profile;
 pub mod script;
 pub mod script_order;
+pub mod setting_application;
 pub mod settings;
 pub mod tags;
+mod text;
 pub mod tile;
 pub mod values;
 pub mod variant;

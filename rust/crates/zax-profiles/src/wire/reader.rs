@@ -129,7 +129,11 @@ impl<'a> ProtoReader<'a> {
         Ok(value)
     }
 
-    pub(crate) fn skip(&mut self, field: u32, wire_type: WireType) -> Result<(), ProfileFormatError> {
+    pub(crate) fn skip(
+        &mut self,
+        field: u32,
+        wire_type: WireType,
+    ) -> Result<(), ProfileFormatError> {
         match wire_type {
             WireType::Varint => {
                 self.read_varint()?;
