@@ -18,7 +18,7 @@ pub const fn duration(sound: UiSound) -> f64 {
 
 /// Renders `sound` as a mono clip at `sample_rate` (at least 8000).
 #[must_use]
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // the C# casts of a positive duration times the rate
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)] // the C# casts of a positive duration times the rate; frames are far below 2^52
 pub fn render(sound: UiSound, sample_rate: u32) -> WaveAudio {
     let rate = f64::from(sample_rate.max(8000));
     let seconds = duration(sound);
