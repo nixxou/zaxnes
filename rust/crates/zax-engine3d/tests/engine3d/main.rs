@@ -5,6 +5,7 @@
 // `allow-unwrap-in-tests` in clippy.toml only grants inside `#[test]` items.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod instance_and_output_tests;
 mod intake_and_frame_tests;
 mod registry_tests;
 mod scaffold_tests;
