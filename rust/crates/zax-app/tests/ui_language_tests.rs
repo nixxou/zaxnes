@@ -2,6 +2,8 @@
 //! immediate and persisted switch to French, and an unknown value read as English
 //! (`UiLanguageTests.cs`).
 
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
 mod common;
 mod ui_harness;
 
@@ -49,7 +51,7 @@ fn assert_both_tables_have(key: &str) {
 fn amd_035_the_two_tables_have_the_same_keys_and_no_empty_value() {
     let english = strings::english_table();
     let french = strings::french_table();
-    assert!(!english.is_empty());
+    assert_ne!(0, english.len());
 
     let english_keys: HashSet<&str> = english.iter().map(|(key, _)| *key).collect();
     let french_keys: HashSet<&str> = french.iter().map(|(key, _)| *key).collect();
@@ -77,7 +79,7 @@ fn amd_035_the_two_tables_have_the_same_keys_and_no_empty_value() {
 /// exist and end up showing its raw key (AMD-035 §3).
 #[test]
 fn amd_035_every_published_key_is_in_both_tables() {
-    assert!(!keys::PUBLISHED.is_empty());
+    assert_ne!(0, keys::PUBLISHED.len());
     for key in keys::PUBLISHED {
         assert_both_tables_have(key);
     }

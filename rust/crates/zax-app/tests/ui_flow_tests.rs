@@ -1,6 +1,8 @@
 //! The flows of the interface: opening a ROM, the welcome screen, full screen, the OSD and the
 //! about block (`UiFlowTests.cs`).
 
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
 mod common;
 mod ui_harness;
 
@@ -162,7 +164,7 @@ fn req_ui_200_the_recent_roms_are_remembered_and_pruned() {
     std::fs::remove_file(&rom).expect("the ROM can be deleted");
     harness.run_with(Command::OpenRecentRom, CommandArgs::of_number(0));
 
-    assert!(recent(&harness).is_empty());
+    assert_eq!(0, recent(&harness).len());
     let shown = harness
         .host
         .notifications
@@ -445,7 +447,7 @@ fn req_ui_084_a_bad_profile_import_shows_the_exact_message() {
     let result = harness.host.games_mut().import_profile(Path::new(&bogus));
 
     assert_eq!(ProfileImportOutcome::Rejected, result.outcome);
-    assert!(!result.message.is_empty());
+    assert_ne!(result.message, "");
 
     harness.host.notifications.show_normal(&result.message);
     assert_eq!(

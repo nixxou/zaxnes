@@ -1,6 +1,8 @@
 //! The key configuration window: its rows, the capture through the rebinding session and the
 //! frame it draws (`KeyConfigWindowTests.cs`).
 
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
 mod common;
 mod ui_harness;
 
