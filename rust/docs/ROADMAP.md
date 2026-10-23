@@ -59,3 +59,25 @@ Zaxnes amendment first.
 
 Stereoscopic side-by-side / top-bottom, anaglyph, orthographic or isometric camera, built-in CRT
 or scanline filters, toon shading, native VR (OpenXR, large).
+
+## Handheld performance plan (scheduled, in this order)
+
+Measured on the RG40XXV (A53 1.512 GHz, Mali-G31, GLES 3.2, governor performance): core about
+17.4 ms per NES frame; heavy 3D profile: scene 60 ms, Lua 25 ms, conversion 15 ms per displayed
+frame (5 emulated frames). The catch-up rule (up to 5 frames, REQ-LOOP-012) then collapses the
+display to 5-10 fps.
+
+1. Structural core optimisation with bit-identical output (in progress): batched / lazy PPU and
+   APU, lighter CPU-bus-PPU call chain, 8-pixel background spans.
+2. Multi-core: emulation on its own thread, conversion + Lua + render of frame N-1 on another;
+   Lua reads a per-frame memory snapshot. Setting "emulation on a separate core".
+3. Draw-call batching (see above).
+4. Lua cost of heavy profiles.
+5. Handheld pacing: regular 30 fps mode (2 emulated frames per displayed frame) and a capped
+   catch-up, as handheld settings.
+
+Fallbacks if 1-2 are not enough: "fast PPU" (line-based, not identical) or an external core
+(FCEUmm / QuickNES, GPL-2.0+ / LGPL), both as settings, never the desktop default.
+
+Rule: every optimisation that changes any output is a setting (on/off, per platform default,
+per game where useful); optimisations with identical output need no switch.
