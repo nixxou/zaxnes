@@ -6,5 +6,16 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Builds and statically links SDL2 instead of using the system library. This is what the
+# Windows and aarch64 packages use (T14): without it, SDL2.dll must sit next to the executable.
+bundled = ["sdl2/bundled", "sdl2/static-link"]
+
+[dependencies]
+glow = "0.16"
+png = "0.17"
+sdl2 = "0.38"
+thiserror = "2"
+
 [lints]
 workspace = true
