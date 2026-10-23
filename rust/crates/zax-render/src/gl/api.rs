@@ -327,15 +327,6 @@ impl Gl {
         unsafe { self.context.uniform_4_f32(Some(&location), x, y, z, w) }
     }
 
-    pub fn uniform_mat3(&self, location: UniformLocation, cells: &[f32; 9]) {
-        // SAFETY: renderer contract; the location belongs to the program in use and the slice
-        // holds one matrix.
-        unsafe {
-            self.context
-                .uniform_matrix_3_f32_slice(Some(&location), false, cells);
-        }
-    }
-
     pub fn uniform_mat4(&self, location: UniformLocation, cells: &[f32; 16]) {
         // SAFETY: renderer contract; the location belongs to the program in use and the slice
         // holds one matrix.
@@ -382,6 +373,45 @@ impl Gl {
         }
     }
 
+    pub fn buffer_stream_data(&self, target: u32, data: &[u8]) {
+        // SAFETY: renderer contract; a buffer is bound to `target` and GL copies the slice.
+        unsafe {
+            self.context
+                .buffer_data_u8_slice(target, data, glow::STREAM_DRAW);
+        }
+    }
+
+    pub fn bind_buffer_range(
+        &self,
+        target: u32,
+        index: u32,
+        buffer: Buffer,
+        offset: i32,
+        size: i32,
+    ) {
+        // SAFETY: renderer contract; `offset` is a multiple of the implementation's alignment
+        // and `offset + size` lies inside the buffer's data.
+        unsafe {
+            self.context
+                .bind_buffer_range(target, index, Some(buffer), offset, size);
+        }
+    }
+
+    /// Binds the uniform block `block` of `program` to binding point `binding`; `false` when
+    /// the program has no such active block.
+    pub fn uniform_block_binding(&self, program: Program, block: &str, binding: u32) -> bool {
+        // SAFETY: renderer contract.
+        unsafe {
+            match self.context.get_uniform_block_index(program, block) {
+                Some(index) => {
+                    self.context.uniform_block_binding(program, index, binding);
+                    true
+                }
+                None => false,
+            }
+        }
+    }
+
     pub fn delete_buffer(&self, buffer: Buffer) {
         // SAFETY: renderer contract; the buffer is live.
         unsafe { self.context.delete_buffer(buffer) }
@@ -403,6 +433,21 @@ impl Gl {
         unsafe {
             self.context
                 .draw_elements(glow::TRIANGLES, count, glow::UNSIGNED_INT, 0);
+        }
+    }
+
+    pub fn draw_triangles_indexed_instanced(&self, count: i32, instances: i32) {
+        // SAFETY: renderer contract; the bound vertex array holds an element buffer of at least
+        // `count` 32-bit indices, all inside its vertex buffer, and the bound uniform block
+        // range holds `instances` placements.
+        unsafe {
+            self.context.draw_elements_instanced(
+                glow::TRIANGLES,
+                count,
+                glow::UNSIGNED_INT,
+                0,
+                instances,
+            );
         }
     }
 

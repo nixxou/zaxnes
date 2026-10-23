@@ -253,7 +253,12 @@ impl Running {
         let pacing_state = pacing.apply(&mut window, &model);
         let profiling = frame_profiler::requested_by_environment();
         if profiling {
-            log_profiler_startup(&model, pacing_state, catch_up(options));
+            log_profiler_startup(
+                &model,
+                pacing_state,
+                catch_up(options),
+                group_draws(options),
+            );
         }
         let (width, height) = window.drawable_size();
         // The host owns the picture of the scene: it reads it back for the thumbnails whenever
@@ -261,7 +266,8 @@ impl Running {
         let view = OffscreenFramebuffer::new(Rc::clone(&gl), to_i32(width), to_i32(height))
             .map_err(|error| error.to_string())?;
         // The linked programs are kept in the user folder, where the next start finds them.
-        let renderer = open_renderer(&gl, asset_root.as_deref(), &paths)?;
+        let mut renderer = open_renderer(&gl, asset_root.as_deref(), &paths)?;
+        renderer.set_group_opaque_draws(group_draws(options));
         let input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;
         let mut bindings_store = FileInputBindingStore::new(paths.clone(), OffsetDateTime::now_utc);
         let mut bindings = crate::input::InputBindings::new();
@@ -696,6 +702,23 @@ fn open_log_file(paths: &UserDataPaths) {
     ));
 }
 
+/// Whether the renderer reorders the opaque tiles by draw state, which batches far more of them
+/// but may change a few edge pixels where two surfaces sit at the same depth:
+/// `ZAXNES_GROUP_DRAWS=1` or `0`, else on a handheld only.
+fn group_draws(options: &AppOptions) -> bool {
+    match std::env::var(GROUP_DRAWS_VARIABLE)
+        .as_deref()
+        .map(str::trim)
+    {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => options.handheld,
+    }
+}
+
+/// The variable that forces [`group_draws`].
+const GROUP_DRAWS_VARIABLE: &str = "ZAXNES_GROUP_DRAWS";
+
 /// The scene renderer, with its linked programs kept in the user folder.
 fn open_renderer(
     gl: &Rc<glow::Context>,
@@ -715,7 +738,12 @@ fn open_renderer(
 
 /// The start-up line of the frame profiler: the machine, the build, the render settings and
 /// the pacing in force.
-fn log_profiler_startup(model: &SettingsModel, pacing: DisplayPacingState, catch_up: CatchUp) {
+fn log_profiler_startup(
+    model: &SettingsModel,
+    pacing: DisplayPacingState,
+    catch_up: CatchUp,
+    group_draws: bool,
+) {
     log(&frame_profiler::startup_report(
         &format!(
             "render scale {}, render method {}, shadows {}, MSAA setting {}, vsync {}, \
@@ -727,7 +755,7 @@ fn log_profiler_startup(model: &SettingsModel, pacing: DisplayPacingState, catch
             model.vsync(),
             model.frame_rate()
         ),
-        &format!("{pacing}, catch-up {catch_up:?}"),
+        &format!("{pacing}, catch-up {catch_up:?}, grouped draws {group_draws}"),
     ));
 }
 

@@ -2,6 +2,7 @@
 //! transparent objects, then the HUD (REQ-SCN-058), all inside a framebuffer the host provides
 //! (REQ-SCN-057).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -106,7 +107,26 @@ struct DrawGroup {
     start: usize,
     end: usize,
     view_depth: f32,
+    /// The instance runs of the group, a range of the bucket's runs.
+    runs: (usize, usize),
 }
+
+/// Consecutive items of a bucket that share every setting but their placement
+/// ([`same_draw_state`]), drawn with one instanced call; `offset` is where their placements
+/// start in the instance buffer.
+#[derive(Debug, Clone, Copy)]
+struct InstanceRun {
+    start: usize,
+    end: usize,
+    offset: usize,
+}
+
+/// Instances one draw call carries, the size of `uInstances` in `scene.vert`.
+const INSTANCES_PER_DRAW: usize = 128;
+/// Bytes of one placement in the instance block (std140: a `mat4` and four `vec4`).
+const INSTANCE_BYTES: usize = 128;
+/// The uniform buffer binding point of the instance block.
+const INSTANCE_BINDING: u32 = 0;
 
 /// The four buckets of REQ-SCN-058 and the objects of the two blended ones.
 #[derive(Debug, Default)]
@@ -117,6 +137,9 @@ struct DrawLists {
     casters: Vec<DrawItem>,
     transparent_objects: Vec<DrawGroup>,
     hud_objects: Vec<DrawGroup>,
+    opaque_runs: Vec<InstanceRun>,
+    transparent_runs: Vec<InstanceRun>,
+    hud_runs: Vec<InstanceRun>,
 }
 
 impl DrawLists {
@@ -127,6 +150,9 @@ impl DrawLists {
         self.casters.clear();
         self.transparent_objects.clear();
         self.hud_objects.clear();
+        self.opaque_runs.clear();
+        self.transparent_runs.clear();
+        self.hud_runs.clear();
     }
 }
 
@@ -146,6 +172,13 @@ struct Passes {
     /// start of each pass ([`Passes::forget_bindings`]): other code binds in between.
     bound_textures: [Option<Texture>; 2],
     bound_vertex_array: Option<glow::VertexArray>,
+    /// The placements of every scene draw of the frame, uploaded once before the scene pass.
+    instance_buffer: glow::Buffer,
+    instance_data: Vec<u8>,
+    /// Scratch space of [`group_opaque_by_state`].
+    opaque_scratch: OpaqueScratch,
+    /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`: each run starts at a multiple of it.
+    instance_alignment: usize,
     statistics: RenderStatistics,
 }
 
@@ -171,6 +204,8 @@ pub struct SceneRenderer {
     lists: DrawLists,
     passes: Passes,
     last_view: CameraView,
+    /// Whether the opaque bucket is reordered by draw state ([`group_opaque_by_state`]).
+    group_opaque: bool,
 }
 
 impl SceneRenderer {
@@ -218,9 +253,15 @@ impl SceneRenderer {
             ..RenderStatistics::default()
         };
 
+        let scene_program = ShaderProgram::create(&gl, &shaders::SCENE)?;
+        scene_program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
+        let instance_alignment =
+            usize::try_from(gl.get_integer(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT))
+                .unwrap_or(256)
+                .max(1);
         let passes = Passes {
             gl: gl.clone(),
-            scene: ShaderProgram::create(&gl, &shaders::SCENE)?,
+            scene: scene_program,
             shadow: ShaderProgram::create(&gl, &shaders::SHADOW)?,
             dummy_indexed: textures.dummy_indexed(),
             dummy_color: textures.dummy_color(),
@@ -229,6 +270,10 @@ impl SceneRenderer {
             mirrored_normal: false,
             bound_textures: [None; 2],
             bound_vertex_array: None,
+            instance_buffer: gl.create_buffer()?,
+            instance_data: Vec::new(),
+            opaque_scratch: OpaqueScratch::default(),
+            instance_alignment,
             statistics,
         };
 
@@ -241,11 +286,20 @@ impl SceneRenderer {
             picture_quad: Arc::new(interop::picture_quad()?),
             lists: DrawLists::default(),
             last_view: CameraView::default(),
+            group_opaque: false,
             textures,
             shadow_map,
             passes,
             gl,
         })
+    }
+
+    /// Reorders the opaque tiles by draw state before drawing them (Rust-only setting, off by
+    /// default): far fewer draw calls on a scene that repeats a few meshes, but where two
+    /// different opaque surfaces sit at exactly the same depth, the one drawn first is no longer
+    /// the same, so a few edge pixels may change.
+    pub fn set_group_opaque_draws(&mut self, group: bool) {
+        self.group_opaque = group;
     }
 
     /// What the last rendered frame cost (REQ-SCN-064).
@@ -621,6 +675,8 @@ impl SceneRenderer {
         }
 
         let passes = &mut self.passes;
+        passes.upload_instances(&mut self.lists, self.group_opaque);
+        let lists = &self.lists;
         if scene.settings.cull_back_faces {
             // The scene frame is left-handed and the clip position mirrors z, so the faces the
             // engine winds per REQ-E3D-505 come out clockwise (REQ-SCN-001 notes).
@@ -652,8 +708,8 @@ impl SceneRenderer {
         passes
             .scene
             .set_vec3("uLightDirection", scene.light.direction);
-        for item in &lists.opaque {
-            passes.draw_item(item, true);
+        for run in &lists.opaque_runs {
+            passes.draw_run(&lists.opaque, run, true);
         }
         passes.statistics.opaque_tiles = count(lists.opaque.len());
 
@@ -671,7 +727,10 @@ impl SceneRenderer {
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             for group in &lists.transparent_objects {
-                passes.draw_blended(&lists.transparent[group.start..group.end]);
+                passes.draw_blended(
+                    &lists.transparent,
+                    &lists.transparent_runs[group.runs.0..group.runs.1],
+                );
             }
 
             gl.disable(glow::BLEND);
@@ -691,7 +750,7 @@ impl SceneRenderer {
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             for group in &lists.hud_objects {
-                passes.draw_blended(&lists.hud[group.start..group.end]);
+                passes.draw_blended(&lists.hud, &lists.hud_runs[group.runs.0..group.runs.1]);
             }
 
             gl.disable(glow::BLEND);
@@ -805,11 +864,63 @@ impl Passes {
         self.mirrored_normal = mirrored;
     }
 
-    fn draw_item(&mut self, item: &DrawItem, opaque: bool) {
-        self.scene
-            .set_matrix4("uModel", &interop::to_numerics(&item.model));
-        let (normal, determinant) = interop::normal_matrix(&item.model);
-        self.scene.set_matrix3("uNormalMatrix", &normal);
+    /// Lays the placements of every bucket out in the instance buffer, cut into runs of
+    /// consecutive items with the same draw state (never across the objects of the two blended
+    /// buckets, whose two passes go object by object), and uploads them in one call.
+    fn upload_instances(&mut self, lists: &mut DrawLists, group_opaque: bool) {
+        if group_opaque {
+            group_opaque_by_state(&mut lists.opaque, &mut self.opaque_scratch);
+        }
+
+        let data = &mut self.instance_data;
+        let alignment = self.instance_alignment;
+        data.clear();
+
+        add_runs(
+            &lists.opaque,
+            0,
+            lists.opaque.len(),
+            &mut lists.opaque_runs,
+            data,
+            alignment,
+        );
+        for group in &mut lists.transparent_objects {
+            let first = lists.transparent_runs.len();
+            add_runs(
+                &lists.transparent,
+                group.start,
+                group.end,
+                &mut lists.transparent_runs,
+                data,
+                alignment,
+            );
+            group.runs = (first, lists.transparent_runs.len());
+        }
+        for group in &mut lists.hud_objects {
+            let first = lists.hud_runs.len();
+            add_runs(
+                &lists.hud,
+                group.start,
+                group.end,
+                &mut lists.hud_runs,
+                data,
+                alignment,
+            );
+            group.runs = (first, lists.hud_runs.len());
+        }
+
+        if !data.is_empty() {
+            self.gl
+                .bind_buffer(glow::UNIFORM_BUFFER, Some(self.instance_buffer));
+            self.gl.buffer_stream_data(glow::UNIFORM_BUFFER, data);
+        }
+    }
+
+    /// Draws the items of `run` (a run of `items`) with one instanced call: the state of its
+    /// first item, which every item of the run shares, and the placements of the run.
+    fn draw_run(&mut self, items: &[DrawItem], run: &InstanceRun, opaque: bool) {
+        let item = &items[run.start];
+        let (_, determinant) = interop::normal_matrix(&item.model);
 
         // Q-069: a placement with a negative determinant mirrors the object. Its triangles come
         // out the other way round and its cofactor normal points inwards, so both are corrected
@@ -848,7 +959,21 @@ impl Passes {
             }
         }
 
-        self.draw(item.mesh);
+        let instances = run.end - run.start;
+        self.gl.bind_buffer_range(
+            glow::UNIFORM_BUFFER,
+            INSTANCE_BINDING,
+            self.instance_buffer,
+            gl_size(run.offset),
+            gl_size(instances * INSTANCE_BYTES),
+        );
+        self.bind_mesh(item.mesh);
+        self.gl
+            .draw_triangles_indexed_instanced(item.mesh.index_count, gl_size(instances));
+        self.statistics.batches += 1;
+        self.statistics.draw_calls += count(instances);
+        self.statistics.triangles +=
+            u64::from(item.mesh.index_count.unsigned_abs() / 3) * instances as u64;
     }
 
     /// Forgets which textures and vertex array the draws left bound: the next draw binds its
@@ -865,31 +990,36 @@ impl Passes {
     /// Q-020): the first pass lays down the depth of all its tiles before any of them is
     /// blended, so the faces that close each tile mesh on itself (SPEC-04B REQ-E3D-505) at the
     /// joints inside the object are never drawn.
-    fn draw_blended(&mut self, items: &[DrawItem]) {
+    fn draw_blended(&mut self, items: &[DrawItem], runs: &[InstanceRun]) {
         self.gl.color_mask(false);
         self.gl.depth_mask(true);
         self.gl.depth_func(glow::LESS);
-        for item in items {
-            self.draw_item(item, false);
+        for run in runs {
+            self.draw_run(items, run, false);
         }
 
         self.gl.color_mask(true);
         self.gl.depth_mask(false);
         self.gl.depth_func(glow::EQUAL);
-        for item in items {
-            self.draw_item(item, false);
+        for run in runs {
+            self.draw_run(items, run, false);
         }
 
         self.gl.depth_mask(true);
         self.gl.depth_func(glow::LESS);
     }
 
-    fn draw(&mut self, mesh: GpuMesh) {
+    fn bind_mesh(&mut self, mesh: GpuMesh) {
         if self.bound_vertex_array != Some(mesh.vertex_array) {
             self.gl.bind_vertex_array(Some(mesh.vertex_array));
             self.bound_vertex_array = Some(mesh.vertex_array);
         }
+    }
+
+    fn draw(&mut self, mesh: GpuMesh) {
+        self.bind_mesh(mesh);
         self.gl.draw_triangles_indexed(mesh.index_count);
+        self.statistics.batches += 1;
         self.statistics.draw_calls += 1;
         self.statistics.triangles += u64::from(mesh.index_count.unsigned_abs() / 3);
     }
@@ -949,9 +1079,175 @@ fn group_by_object(items: &[DrawItem], groups: &mut Vec<DrawGroup>, eye: Vector3
             start,
             end,
             view_depth: Vector3::distance((min + max) * 0.5, eye),
+            runs: (0, 0),
         });
         start = end;
     }
+}
+
+/// The program state of a draw item as a hashable key: two items with equal keys can go out in
+/// one instanced call (everything but the placement and the deformation's tile position, and
+/// the same side of the mirror for Q-069's winding and normal sign).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct DrawStateKey {
+    vertex_array: glow::VertexArray,
+    index_count: i32,
+    texture: Option<Texture>,
+    color_mode: i32,
+    palette_table: i32,
+    /// Texture size, offset, tilting, flat colour and alpha, as bits.
+    floats: [u32; 10],
+    receive_shadow: bool,
+    clip: bool,
+    mirrored: bool,
+    /// The deformation but its tile position, which travels with the placement: amplitude,
+    /// size, speed and phase, as bits.
+    deform: Option<[u32; 38]>,
+}
+
+impl DrawStateKey {
+    fn of(item: &DrawItem) -> Self {
+        Self {
+            vertex_array: item.mesh.vertex_array,
+            index_count: item.mesh.index_count,
+            texture: item.texture,
+            color_mode: item.color_mode,
+            palette_table: item.palette_table,
+            floats: [
+                item.texture_size.x.to_bits(),
+                item.texture_size.y.to_bits(),
+                item.tex_offset.x.to_bits(),
+                item.tex_offset.y.to_bits(),
+                item.tex_tilting.x.to_bits(),
+                item.tex_tilting.y.to_bits(),
+                item.flat_color.x.to_bits(),
+                item.flat_color.y.to_bits(),
+                item.flat_color.z.to_bits(),
+                item.alpha.to_bits(),
+            ],
+            receive_shadow: item.receive_shadow,
+            clip: item.clip,
+            mirrored: interop::normal_matrix(&item.model).1 < 0.0,
+            deform: item.deform.as_ref().map(deform_bits),
+        }
+    }
+}
+
+/// The bits of every deformation parameter but the tile position.
+fn deform_bits(deform: &DeformParameters) -> [u32; 38] {
+    let mut bits = [0; 38];
+    let vectors = [deform.amplitude, deform.size]
+        .into_iter()
+        .flat_map(|vector| [vector.x, vector.y, vector.z]);
+    let cells = |matrix: Mat4| (0..16).map(move |cell| matrix[(cell / 4, cell % 4)]);
+    let all = vectors
+        .chain(cells(deform.speed))
+        .chain(cells(deform.phase));
+    for (slot, cell) in bits.iter_mut().zip(all) {
+        *slot = cell.to_bits();
+    }
+    bits
+}
+
+/// Reusable buffers of [`group_opaque_by_state`].
+#[derive(Debug, Default)]
+struct OpaqueScratch {
+    groups: HashMap<DrawStateKey, usize>,
+    order: Vec<(usize, usize)>,
+    items: Vec<DrawItem>,
+}
+
+/// Reorders the opaque bucket so that the items sharing a draw state are consecutive: groups
+/// in the order of their first item, items in list order inside a group. Opaque items are
+/// drawn with the depth test and without blending, so the picture does not depend on their
+/// order (only exact depth ties between two different states could), and the runs of
+/// [`add_runs`] then cover whole groups (Rust-only, draw-call batching).
+fn group_opaque_by_state(items: &mut Vec<DrawItem>, scratch: &mut OpaqueScratch) {
+    scratch.groups.clear();
+    scratch.order.clear();
+    for (index, item) in items.iter().enumerate() {
+        let next = scratch.groups.len();
+        let group = *scratch.groups.entry(DrawStateKey::of(item)).or_insert(next);
+        scratch.order.push((group, index));
+    }
+
+    if scratch.groups.len() == items.len() {
+        return;
+    }
+
+    scratch.order.sort_unstable();
+    scratch.items.clear();
+    scratch
+        .items
+        .extend(scratch.order.iter().map(|&(_, index)| items[index]));
+    std::mem::swap(items, &mut scratch.items);
+}
+
+/// Cuts `items[start..end]` into runs of at most [`INSTANCES_PER_DRAW`] consecutive items
+/// with the same draw state, appends their placements to `data` (each run at a multiple of
+/// `alignment`) and the runs to `runs`.
+fn add_runs(
+    items: &[DrawItem],
+    start: usize,
+    end: usize,
+    runs: &mut Vec<InstanceRun>,
+    data: &mut Vec<u8>,
+    alignment: usize,
+) {
+    let mut first = start;
+    while first < end {
+        let key = DrawStateKey::of(&items[first]);
+        let mut last = first + 1;
+        while last < end
+            && last - first < INSTANCES_PER_DRAW
+            && DrawStateKey::of(&items[last]) == key
+        {
+            last += 1;
+        }
+
+        let offset = data.len().next_multiple_of(alignment);
+        data.resize(offset, 0);
+        for item in &items[first..last] {
+            push_placement(data, item);
+        }
+        runs.push(InstanceRun {
+            start: first,
+            end: last,
+            offset,
+        });
+        first = last;
+    }
+}
+
+/// Appends one placement in the std140 layout of `ZaxInstance`: the model matrix as it was
+/// uploaded to `uModel` (column by column), the three columns of the normal matrix, then the
+/// deformation's tile position (zero without deformation).
+fn push_placement(data: &mut Vec<u8>, item: &DrawItem) {
+    for cell in interop::to_numerics(&item.model).to_cells() {
+        data.extend_from_slice(&cell.to_ne_bytes());
+    }
+
+    let (m, _) = interop::normal_matrix(&item.model);
+    let tile = item
+        .deform
+        .map_or(Vec3::ZERO, |deform| deform.tile_relative_to_pivot);
+    let rows = [
+        [m[0], m[3], m[6]],
+        [m[1], m[4], m[7]],
+        [m[2], m[5], m[8]],
+        [tile.x, tile.y, tile.z],
+    ];
+    for row in rows {
+        for cell in row {
+            data.extend_from_slice(&cell.to_ne_bytes());
+        }
+        data.extend_from_slice(&0.0f32.to_ne_bytes());
+    }
+}
+
+/// A size or offset for a GL call (the instance buffer stays far below `i32::MAX`).
+fn gl_size(value: usize) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 /// A count for the statistics, saturated (no frame comes near `u32::MAX` items).
