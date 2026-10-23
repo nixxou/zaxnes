@@ -11,3 +11,9 @@ workspace = true
 
 [dependencies]
 mlua = { version = "0.11", features = ["lua54", "vendored"] }
+getrandom = "0.3"
+thiserror = "2"
+zax-engine3d = { path = "../zax-engine3d" }
+zax-profiles = { path = "../zax-profiles" }
+zax-settings = { path = "../zax-settings" }
+

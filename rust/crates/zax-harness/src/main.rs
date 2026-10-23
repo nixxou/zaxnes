@@ -5,10 +5,11 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use zax_harness::{golden_core, meshes, HarnessError};
+use zax_harness::{golden_core, lua_api, meshes, HarnessError};
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
-       zax-harness meshes --profile <file|name> [options] (zax-harness help for the options)";
+       zax-harness meshes --profile <file|name> [options] (zax-harness help for the options)
+       zax-harness lua-api [--out <file>]";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -33,8 +34,15 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             println!("{}", meshes::run(&options)?);
             Ok(())
         }
+        [command, rest @ ..] if command == "lua-api" => {
+            let options = lua_api::Options::parse(rest)?;
+            if let Some(message) = lua_api::run(&options)? {
+                println!("{message}");
+            }
+            Ok(())
+        }
         [command] if matches!(command.as_str(), "help" | "--help" | "-h") => {
-            println!("{USAGE}\n\n{}", meshes::USAGE);
+            println!("{USAGE}\n\n{}\n\n{}", meshes::USAGE, lua_api::USAGE);
             Ok(())
         }
         _ => Err(HarnessError::Usage(USAGE.to_owned())),

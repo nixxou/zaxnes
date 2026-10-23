@@ -176,6 +176,18 @@ impl ConversionEngine {
         self.host.as_any_mut().downcast_mut()
     }
 
+    /// Runs `operation` on the script host as its concrete type `T` together with the engine
+    /// state, which a host needs for the calls it makes outside the frame hooks (`Start`,
+    /// `End`, `Save`, `Load`, a chunk evaluated by a test). `None` when the host is of another
+    /// type.
+    pub fn with_script_host<T: 'static, R>(
+        &mut self,
+        operation: impl FnOnce(&mut T, &mut ConversionState) -> R,
+    ) -> Option<R> {
+        let host = self.host.as_any_mut().downcast_mut::<T>()?;
+        Some(operation(host, &mut self.state))
+    }
+
     /// Replaces the Lua runtime the pipeline calls and returns the previous one.
     pub fn set_script_host(&mut self, host: Box<dyn ScriptHost>) -> Box<dyn ScriptHost> {
         std::mem::replace(&mut self.host, host)
@@ -584,6 +596,14 @@ impl ConversionState {
     /// The frame being converted, for writing.
     pub fn converting_frame_mut(&mut self) -> &mut ConversionFrame {
         &mut self.frames[self.converting]
+    }
+
+    /// The frame being converted for writing together with the settings it is positioned
+    /// with, which are two disjoint parts of the state (SPEC-05 `CalculatePos`).
+    pub fn converting_frame_and_settings_mut(
+        &mut self,
+    ) -> (&mut ConversionFrame, &ConversionSettings) {
+        (&mut self.frames[self.converting], &self.settings)
     }
 
     /// The most recently published frame, the one the renderer shows (REQ-E3D-280), or `None`

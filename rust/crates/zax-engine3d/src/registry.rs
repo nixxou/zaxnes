@@ -23,6 +23,20 @@ pub struct PatternId {
     generation: u32,
 }
 
+impl PatternId {
+    /// The registration slot of the pattern.
+    #[must_use]
+    pub const fn slot(self) -> u32 {
+        self.slot
+    }
+
+    /// The generation of the slot, which tells a pattern from a later one in the same slot.
+    #[must_use]
+    pub const fn generation(self) -> u32 {
+        self.generation
+    }
+}
+
 /// The registry of patterns (SPEC-04 §2, REQ-E3D-060 to 065).
 ///
 /// Lookup by key is a hash lookup and the candidates of an image are a list held by the image
