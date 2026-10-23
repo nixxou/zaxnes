@@ -83,20 +83,18 @@ fn index(lua: &Lua, payload: Payload, key: &Value) -> mlua::Result<Value> {
     let definition = definition_of(&cx, &payload)?;
 
     if let Value::String(name) = key {
-        if let Ok(name) = name.to_str() {
-            if let Some((position, member)) = definition.member(&name) {
-                return match &member.kind {
-                    MemberKind::Property { get, .. } => get(&cx, &payload),
-                    MemberKind::Method(_) => {
-                        let methods = lua
-                            .app_data_ref::<MethodCache>()
-                            .ok_or_else(|| cx.raise("the method table is not installed"))?;
-                        Ok(methods.0[definition.id.index()][position]
-                            .clone()
-                            .map_or(Value::Nil, Value::Function))
-                    }
-                };
-            }
+        if let Some((position, member)) = definition.member(&name.as_bytes()) {
+            return match &member.kind {
+                MemberKind::Property { get, .. } => get(&cx, &payload),
+                MemberKind::Method(_) => {
+                    let methods = lua
+                        .app_data_ref::<MethodCache>()
+                        .ok_or_else(|| cx.raise("the method table is not installed"))?;
+                    Ok(methods.0[definition.id.index()][position]
+                        .clone()
+                        .map_or(Value::Nil, Value::Function))
+                }
+            };
         }
     }
 
@@ -117,22 +115,23 @@ fn new_index(lua: &Lua, this: &Host, key: &Value, value: &Value) -> mlua::Result
     let definition = definition_of(&cx, &payload)?;
 
     if let Value::String(name) = key {
-        if let Ok(name) = name.to_str() {
-            if let Some((_, member)) = definition.member(&name) {
-                return match &member.kind {
-                    MemberKind::Property { set: Some(set), .. } => {
-                        set(&cx, &mut payload, value)?;
-                        if definition.id.is_value() {
-                            // The value is the script's own copy: the component it assigned
-                            // belongs to the userdata it assigned it to (REQ-LUA-044).
-                            this.set_payload(payload);
-                        }
-
-                        Ok(())
+        if let Some((_, member)) = definition.member(&name.as_bytes()) {
+            return match &member.kind {
+                MemberKind::Property { set: Some(set), .. } => {
+                    set(&cx, &mut payload, value)?;
+                    if definition.id.is_value() {
+                        // The value is the script's own copy: the component it assigned
+                        // belongs to the userdata it assigned it to (REQ-LUA-044).
+                        this.set_payload(payload);
                     }
-                    _ => Err(cx.raise(&format!("cannot set {name}, it is read only"))),
-                };
-            }
+
+                    Ok(())
+                }
+                _ => Err(cx.raise(&format!(
+                    "cannot set {}, it is read only",
+                    name.to_string_lossy()
+                ))),
+            };
         }
     }
 

@@ -14,27 +14,49 @@ use crate::script::ScriptHook;
 use crate::values::number_format;
 
 /// The execution budget of the hook being run (REQ-LUA-064).
+///
+/// The clock is not read when a hook starts: most hooks end before the first look at the budget,
+/// which is the first count of VM instructions that passes, and the time of that look is when
+/// the budget starts. A hook that never ends is cut off one such count late, which is a
+/// millisecond.
 pub(crate) struct Budget {
-    deadline: Cell<Option<Instant>>,
+    limit: Cell<Option<Duration>>,
+    started: Cell<Option<Instant>>,
 }
 
 impl Budget {
     pub const fn new() -> Self {
         Self {
-            deadline: Cell::new(None),
+            limit: Cell::new(None),
+            started: Cell::new(None),
         }
     }
 
-    /// True once the deadline of the running hook has passed.
-    pub fn exceeded(&self) -> bool {
-        self.deadline
-            .get()
-            .is_some_and(|deadline| Instant::now() > deadline)
+    /// Starts the budget of a hook that may run for `limit`.
+    fn arm(&self, limit: Duration) {
+        self.limit.set(Some(limit));
+        self.started.set(None);
     }
 
-    /// Lifts the deadline: whatever runs next is not cut off by the hook that just ended.
+    /// True once the running hook has used up its budget. The first look starts the clock.
+    pub fn exceeded(&self) -> bool {
+        let Some(limit) = self.limit.get() else {
+            return false;
+        };
+
+        match self.started.get() {
+            Some(started) => started.elapsed() > limit,
+            None => {
+                self.started.set(Some(Instant::now()));
+                false
+            }
+        }
+    }
+
+    /// Lifts the limit: whatever runs next is not cut off by the hook that just ended.
     pub fn lift(&self) {
-        self.deadline.set(None);
+        self.limit.set(None);
+        self.started.set(None);
     }
 }
 
@@ -42,7 +64,7 @@ impl Budget {
 /// control back is cut off as if it had raised an error, so the emulation resumes.
 pub(crate) fn with_budget<R>(lua: &Lua, limit: Duration, operation: impl FnOnce() -> R) -> R {
     if let Some(budget) = lua.app_data_ref::<Budget>() {
-        budget.deadline.set(Some(Instant::now() + limit));
+        budget.arm(limit);
     }
 
     let result = operation();

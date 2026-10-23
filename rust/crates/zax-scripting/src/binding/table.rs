@@ -68,7 +68,7 @@ pub(crate) struct TypeDef {
     pub name: &'static str,
     /// Properties and methods, in declaration order.
     pub members: Vec<Member>,
-    lookup: HashMap<&'static str, usize, BuildHasherDefault<ByteHasher>>,
+    lookup: HashMap<&'static [u8], usize, BuildHasherDefault<ByteHasher>>,
     /// The type of `obj[i]`, for the static check of REQ-LUA-051.
     pub element: Option<HostType>,
     pub indexer: Option<IndexFn>,
@@ -110,7 +110,7 @@ impl TypeDef {
     }
 
     /// The member called `name`, with its position.
-    pub fn member(&self, name: &str) -> Option<(usize, &Member)> {
+    pub fn member(&self, name: &[u8]) -> Option<(usize, &Member)> {
         let position = *self.lookup.get(name)?;
         Some((position, &self.members[position]))
     }
@@ -118,10 +118,11 @@ impl TypeDef {
     fn push(&mut self, member: Member) -> &mut Self {
         // A later declaration of a name replaces the earlier one, as the dictionary of the
         // original did.
-        if let Some(&position) = self.lookup.get(member.name) {
+        if let Some(&position) = self.lookup.get(member.name.as_bytes()) {
             self.members[position] = member;
         } else {
-            self.lookup.insert(member.name, self.members.len());
+            self.lookup
+                .insert(member.name.as_bytes(), self.members.len());
             self.members.push(member);
         }
 
@@ -185,7 +186,7 @@ impl TypeDef {
     /// mistake in the declaration itself and the first test that builds the API shows it.
     #[allow(clippy::panic)] // A declaration error must stop the build of the tables.
     pub fn alias(&mut self, name: &'static str, existing: &str) -> &mut Self {
-        let Some((position, _)) = self.member(existing) else {
+        let Some((position, _)) = self.member(existing.as_bytes()) else {
             panic!(
                 "no member '{existing}' on '{}' to alias as '{name}'",
                 self.name
