@@ -98,7 +98,7 @@ fn req_ui_205_command_names_are_stable_keys() {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')));
         assert_eq!(Some(*command), Command::from_name(command.name()));
-        assert!(!command.label_key().is_empty());
+        assert_ne!(command.label_key(), "");
     }
 }
 
@@ -260,7 +260,7 @@ fn req_ui_082_the_quick_actions_are_silent_when_they_do_nothing() {
     let mut harness = LoopHarness::create();
     harness.run(Command::QuickSave);
     harness.run(Command::QuickLoad);
-    assert!(harness.host.notifications.log().is_empty());
+    assert_eq!(harness.host.notifications.log(), []);
 }
 
 #[test]

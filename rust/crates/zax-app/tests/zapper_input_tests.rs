@@ -35,7 +35,7 @@ fn project(view: &CameraView, scene_point: Vector3) -> [f32; 2] {
     let w = gl.x * m.m14 + gl.y * m.m24 + gl.z * m.m34 + m.m44;
     let (ndc_x, ndc_y) = (x / w, y / w);
     [
-        (ndc_x + 1.0) * 0.5 * VIEWPORT[0],
+        ndc_x.midpoint(1.0) * VIEWPORT[0],
         (1.0 - ndc_y) * 0.5 * VIEWPORT[1],
     ]
 }

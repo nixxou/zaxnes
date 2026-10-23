@@ -91,7 +91,7 @@ fn req_inp_011_the_default_keyboards_are_the_table_and_an_empty_set() {
 }
 
 /// REQ-INP-020 and §4.3: the default gamepad table, with the hat on the directions, A on the
-/// south button, B on the west one, RollBack on north, FastForward on east and the right stick
+/// south button, B on the west one, `RollBack` on north, `FastForward` on east and the right stick
 /// on the rotations.
 #[test]
 fn req_inp_020_the_default_gamepad_set_is_the_table_of_section_4_3() {
@@ -848,7 +848,7 @@ fn req_ui_203_a_menu_command_can_be_bound_to_a_pad_button() {
 
     source.end_sample();
     sample(&mut source, None, &mut hub);
-    assert!(source.triggered_commands().is_empty());
+    assert_eq!(source.triggered_commands(), &[] as &[String]);
 }
 
 fn open_store(paths: &UserDataPaths) -> FileInputBindingStore {

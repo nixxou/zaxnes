@@ -82,7 +82,7 @@ fn req_inp_005_every_emulated_frame_of_a_burst_sees_the_same_sample() {
 
 /// REQ-INP-100 to REQ-INP-104: the hotkeys of the snapshot reach the command model: a short
 /// Menu press pauses, a long one resets the view without leaving Running, and a rising edge of
-/// RollBack rolls back.
+/// `RollBack` rolls back.
 #[test]
 fn req_inp_120_injected_snapshots_trigger_the_hotkeys() {
     let mut harness = launched();

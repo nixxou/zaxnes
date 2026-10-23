@@ -347,7 +347,7 @@ fn req_loop_023_archive_failures_report_the_exact_messages() {
 fn req_loop_023_a_missing_file_reports_the_system_message() {
     let root = TemporaryRoot::new("zax-pers-");
     let message = rom_file::read(&root.path().join("absent.nes")).unwrap_err();
-    assert!(!message.is_empty());
+    assert_ne!(message.as_str(), "");
     assert_ne!(INVALID_ROM_MESSAGE, message);
 }
 
