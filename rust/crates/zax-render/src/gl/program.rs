@@ -88,6 +88,12 @@ impl ShaderProgram {
         })
     }
 
+    /// Binds the uniform block `block` to binding point `binding`; `false` when the program has
+    /// no such active block.
+    pub fn bind_uniform_block(&self, block: &str, binding: u32) -> bool {
+        self.gl.uniform_block_binding(self.handle, block, binding)
+    }
+
     /// Makes the program current.
     pub fn use_program(&self) {
         self.gl.use_program(self.handle);
@@ -162,17 +168,6 @@ impl ShaderProgram {
         let cells = value.to_cells();
         if let Some(location) = self.location(name, &cells.map(f32::to_bits)) {
             self.gl.uniform_mat4(location, &cells);
-        }
-    }
-
-    /// Sets a `mat3` uniform from the nine cells, row by row.
-    pub fn set_matrix3(&mut self, name: &'static str, row_major: &[f32; 9]) {
-        if let Some(location) = self.location(name, &row_major.map(f32::to_bits)) {
-            // GLSL reads a mat3 column by column, so the row-major cells are uploaded
-            // transposed.
-            let m = row_major;
-            let cells = [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
-            self.gl.uniform_mat3(location, &cells);
         }
     }
 }

@@ -7,8 +7,12 @@ use crate::geometry;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)] // Two independent pass flags of the report.
 pub struct RenderStatistics {
-    /// Draw calls of the scene passes, shadow pass included.
+    /// Tile draws of the scene passes, shadow pass included (the draw calls of REQ-SCN-064
+    /// before batching).
     pub draw_calls: u32,
+    /// GL draw calls actually issued: consecutive tiles that share every setting but their
+    /// placement go out as one instanced call (Rust-only).
+    pub batches: u32,
     /// Triangles submitted, counted once per draw call.
     pub triangles: u64,
     /// Opaque tiles drawn.
@@ -49,6 +53,7 @@ impl Default for RenderStatistics {
     fn default() -> Self {
         Self {
             draw_calls: 0,
+            batches: 0,
             triangles: 0,
             opaque_tiles: 0,
             transparent_tiles: 0,
@@ -72,6 +77,7 @@ impl RenderStatistics {
     /// Clears the per-frame counters; the resident counts and the shadow map sizes stay.
     pub(crate) fn begin_frame(&mut self) {
         self.draw_calls = 0;
+        self.batches = 0;
         self.triangles = 0;
         self.opaque_tiles = 0;
         self.transparent_tiles = 0;

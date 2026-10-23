@@ -15,9 +15,11 @@ float zaxDeformRow(float amplitude, float size, vec3 n, vec4 speed, vec4 phase)
          * sin(uTime * speed.w + phase.w);
 }
 
-vec3 zaxDeformation(vec3 v)
+// `tile` is the tile's position relative to the pivot: uDeformTile for the shadow pass, the
+// instance's for the scene pass, whose draws carry several tiles.
+vec3 zaxDeformation(vec3 tile, vec3 v)
 {
-    vec3 p = uDeformTile + v;
+    vec3 p = tile + v;
     vec3 n = vec3(
         uDeformSize.x == 0.0 ? 0.0 : p.x / uDeformSize.x,
         uDeformSize.y == 0.0 ? 0.0 : p.y / uDeformSize.y,

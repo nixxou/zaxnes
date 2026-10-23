@@ -105,6 +105,25 @@ displayed frame". All values are per displayed frame.
   the previous captures; RTX 3060 render 0.44 -> 0.33 ms median.
   Zelda II press script (no save, registers "A"): `100:start,200:start,300:a,340:select,
   370:select,400:select,440:start,540:start,640:start`, `--run 1300`.
+- Device run of `83aa286` (owner): Zelda II temple scene 29 -> 17 ms, world map scene ~50 ms
+  (+ conv 3.6, lua 5.5) at ~14 fps, battle area scene ~10 ms. World map: 1559 draw calls for 13
+  distinct objects; 611 tiles carry a deformation (water).
+- Draw-call batching (5.3): the scene shader reads each draw's placements from a uniform block
+  (`ZaxInstances`: model matrix, normal matrix columns, deformation tile position; 128
+  instances of 128 bytes per draw, one buffer upload per frame) and consecutive items with the
+  same draw state (`DrawStateKey`: everything but the placement and the deformation tile) go
+  out as one `glDrawElementsInstanced`. Pixel-identical (Zelda II temple and world map, 36
+  campaign captures at tolerance 0). `RenderStatistics::draw_calls` still counts tile draws
+  (the goldens); `batches` counts the GL calls (`render --bench` prints "GL draws").
+  The tile list interleaves meshes (each tile emits its parts in turn), so on its own this
+  only saves ~5-8 %: temple 934 -> 888, world 1559 -> 1443.
+- Grouped opaque draws (setting, handheld default): `SceneRenderer::set_group_opaque_draws`
+  reorders the opaque bucket by draw state (groups in first-appearance order, list order inside
+  a group). Temple 934 -> 138 GL draws, world map 1559 -> 72. Opaque surfaces are depth-tested
+  without blending, so only exact depth ties between two different states change: Zelda II
+  world map 4 pixels of 86 400, campaign 22 of 36 captures differ by at most 0.002 %. On by
+  default with `--handheld`, off on desktop; `ZAXNES_GROUP_DRAWS=0/1` forces it, harness
+  `--group-draws`; the profiler start-up line shows it.
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

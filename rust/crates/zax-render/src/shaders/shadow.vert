@@ -10,7 +10,7 @@ void main()
     vec3 local = aPosition;
     if (uDeform != 0)
     {
-        local += zaxDeformation(aPosition);
+        local += zaxDeformation(uDeformTile, aPosition);
     }
 
     vec4 scene = uModel * vec4(local, 1.0);

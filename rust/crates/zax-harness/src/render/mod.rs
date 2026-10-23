@@ -65,6 +65,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --distance <d>           camera setpoint distance (default 104 / atan(FOV/2))
   --mesh <algorithm>       greedy (default), marching or multicolor (REQ-E3D-340)
   --no-shadows             render with the shadows off
+  --group-draws            reorder the opaque tiles by draw state (the handheld setting)
   --shadow-map <texels>    side of the shadow map (default 4096, AMD-034)
   --anti-alias <n>         video.anti_alias: 0 off (default), 1 MSAA 4x, 2 MSAA 8x (AMD-032)
   --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049)
@@ -124,6 +125,8 @@ pub struct Options {
     pub mesh: RenderAlgorithm,
     /// Whether shadows are on.
     pub shadows: bool,
+    /// Whether the opaque tiles are reordered by draw state.
+    pub group_draws: bool,
     /// Shadow map side asked for.
     pub shadow_map_size: i32,
     /// `video.anti_alias`, 0 to 2.
@@ -170,6 +173,7 @@ impl Options {
             distance: None,
             mesh: RenderAlgorithm::Greedy,
             shadows: true,
+            group_draws: false,
             shadow_map_size: geometry::SHADOW_MAP_SIZE,
             anti_alias: 0,
             skybox: SkyboxKind::Default,
@@ -185,6 +189,7 @@ impl Options {
         while let Some(argument) = rest.next() {
             match argument.as_str() {
                 "--no-shadows" => options.shadows = false,
+                "--group-draws" => options.group_draws = true,
                 "--sky-bodies" => options.sky_bodies = true,
                 "--explain" => options.explain = true,
                 "--list-scenes" => options.list_scenes = true,
@@ -391,6 +396,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
     let assets = NeutralSceneAssets::try_open(options.assets.as_deref())
         .map(|assets| Box::new(assets) as Box<dyn SceneAssets>);
     let mut renderer = SceneRenderer::new(context.gl(), assets)?;
+    renderer.set_group_opaque_draws(options.group_draws);
 
     let mut report = Vec::with_capacity(built.len());
     let mut text = String::new();
@@ -421,8 +427,8 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
 
         let timing = measured.map_or_else(String::new, |time| {
             format!(
-                "  {:.2} ms median, {:.2} ms p99",
-                time.median_ms, time.p99_ms
+                "  {:.2} ms median, {:.2} ms p99, {} GL draws",
+                time.median_ms, time.p99_ms, counts.batches
             )
         });
 
