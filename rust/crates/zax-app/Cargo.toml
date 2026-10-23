@@ -12,3 +12,18 @@ workspace = true
 [[bin]]
 name = "zaxnes"
 path = "src/main.rs"
+
+[dependencies]
+zax-nes = { path = "../zax-nes" }
+zax-settings = { path = "../zax-settings" }
+zax-profiles = { path = "../zax-profiles" }
+zax-scripting = { path = "../zax-scripting" }
+zax-engine3d = { path = "../zax-engine3d" }
+zax-render = { path = "../zax-render" }
+zax-platform = { path = "../zax-platform" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
+sha1 = { version = "0.11.0", default-features = false }
+zip = { version = "7.3.0", default-features = false, features = ["deflate"] }
