@@ -9,5 +9,6 @@ mod instance_and_output_tests;
 mod intake_and_frame_tests;
 mod registry_tests;
 mod scaffold_tests;
+mod state_and_mode_tests;
 mod support;
 mod test_vector_tests;
