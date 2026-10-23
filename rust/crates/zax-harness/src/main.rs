@@ -5,12 +5,13 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use zax_harness::{golden_core, lua_api, meshes, render, HarnessError};
+use zax_harness::{compare, golden_core, lua_api, meshes, render, HarnessError};
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
        zax-harness meshes --profile <file|name> [options] (zax-harness help for the options)
        zax-harness lua-api [--out <file>]
-       zax-harness render --out <dir> [--frames synthetic[:<scene>]] [options]";
+       zax-harness render --out <dir> [--frames synthetic[:<scene>]] [options]
+       zax-harness compare <reference> <capture> [--tolerance <levels>] [--min <percent>]";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -47,12 +48,18 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
             println!("{}", render::run(&options)?);
             Ok(())
         }
+        [command, rest @ ..] if command == "compare" => {
+            let options = compare::Options::parse(rest)?;
+            println!("{}", compare::run(&options)?);
+            Ok(())
+        }
         [command] if matches!(command.as_str(), "help" | "--help" | "-h") => {
             println!(
-                "{USAGE}\n\n{}\n\n{}\n\n{}",
+                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}",
                 meshes::USAGE,
                 lua_api::USAGE,
-                render::USAGE
+                render::USAGE,
+                compare::USAGE
             );
             Ok(())
         }

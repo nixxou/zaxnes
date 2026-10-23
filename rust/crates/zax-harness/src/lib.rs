@@ -2,6 +2,7 @@
 
 //! zax-harness: headless tools of the port (port of `tools/Zax.Harness`).
 
+pub mod compare;
 mod error;
 pub mod golden_core;
 pub mod lua_api;
