@@ -153,17 +153,6 @@ impl<'a> ProtoReader<'a> {
         Ok(())
     }
 
-    pub(crate) fn expect_group_end(&mut self, field: u32) -> Result<(), ProfileFormatError> {
-        let tag = self.read_varint()?;
-        if u32::try_from(field_number(tag)) != Ok(field) || WireType::of_tag(tag) != WireType::EndGroup {
-            return Err(ProfileFormatError::new(format!(
-                "Expected the end of group {field} at offset {}.",
-                self.position
-            )));
-        }
-        Ok(())
-    }
-
     /// Reads the next tag inside group `group_field`; none at the group's end tag.
     pub(crate) fn try_read_group_tag(
         &mut self,

@@ -114,6 +114,7 @@ impl VariantTexture {
 
 /// One 3D variant of a pattern (SPEC-03 §4.4).
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)] // one flag per stored field of the message
 pub struct PatternVariant {
     /// Depth in voxels (`sizeZ`).
     pub depth: i32,
