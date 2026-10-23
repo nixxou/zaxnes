@@ -7,10 +7,11 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# An offscreen EGL context (Mesa surfaceless or pbuffer) for the tests and the harness. It is
+# An offscreen GL context (EGL, Mesa surfaceless or default display, off Windows; WGL on a hidden
+# window on Windows) for the tests and the harness. It is
 # not part of the renderer's API, which takes the host's `glow::Context`; it lives here because
 # this is the crate allowed to hold `unsafe` GL code (RUST-PORT-PLAN §2).
-offscreen = ["dep:khronos-egl", "dep:libloading"]
+offscreen = ["dep:khronos-egl", "dep:libloading", "dep:windows-sys"]
 
 [dependencies]
 glow = "0.16"
@@ -18,8 +19,19 @@ png = "0.17"
 thiserror = "2"
 zax-engine3d = { path = "../zax-engine3d" }
 zax-profiles = { path = "../zax-profiles" }
+
+[target.'cfg(not(windows))'.dependencies]
 khronos-egl = { version = "6", features = ["dynamic"], optional = true }
 libloading = { version = "0.8", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_OpenGL",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 flate2 = "1"
