@@ -635,11 +635,11 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Catch-up (frames)"),
     );
-    // Rust-only (owner request): the scripts' Lua collector in its generational mode, which
-    // removes the long collection stalls. Not exposed to Lua.
+    // Rust-only (owner request): the scripts' Lua collector in its smooth tuning, which removes
+    // the long collection stalls. Not exposed to Lua.
     out.push(
         SettingDescriptor::new(
-            SettingId::EmuLuaGenerationalGc,
+            SettingId::EmuLuaSmoothGc,
             SettingKind::Bool,
             SettingValue::Bool(true),
             SettingScope::User,
@@ -647,7 +647,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Emulation,
         )
         .with_domain(Domain::switch())
-        .with_label("Generational Lua collector"),
+        .with_label("Smooth Lua collector"),
     );
     out.push(
         SettingDescriptor::new(

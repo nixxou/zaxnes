@@ -116,7 +116,7 @@ setting_ids! {
     EmuAutoTvMode => "emu.auto_tv_mode",
     EmuCore => "emu.core",
     EmuCatchUp => "emu.catch_up",
-    EmuLuaGenerationalGc => "emu.lua_generational_gc",
+    EmuLuaSmoothGc => "emu.lua_smooth_gc",
     ConvSameBgPalette => "conv.same_bg_palette",
     ConvSameSpPalette => "conv.same_sp_palette",
     ConvSpriteTolerance => "conv.sprite_tolerance",

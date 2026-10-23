@@ -203,7 +203,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.tv_mode", "Video region"),
     ("setting.emu.core", "Emulation core"),
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
-    ("setting.emu.lua_generational_gc", "Generational Lua memory collector"),
+    ("setting.emu.lua_smooth_gc", "Smooth Lua memory collection"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
     ("setting.audio.mute", "Mute"),

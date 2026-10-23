@@ -200,7 +200,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.game_speed", "Vitesse de jeu"),
     ("setting.emu.auto_tv_mode", "Région détectée automatiquement"),
     ("setting.emu.catch_up", "Rattrapage en cas de retard (frames)"),
-    ("setting.emu.lua_generational_gc", "Nettoyage mémoire Lua générationnel"),
+    ("setting.emu.lua_smooth_gc", "Nettoyage mémoire Lua lissé"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
     ("setting.audio.volume", "Volume général"),

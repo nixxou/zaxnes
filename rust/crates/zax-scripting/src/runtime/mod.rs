@@ -58,13 +58,14 @@ const GC_STEP_MULTIPLIER: i32 = 400;
 /// The size of a collector step as a power of two in bytes (the default of Lua 5.4).
 const GC_STEP_SIZE_LOG2: i32 = 13;
 
-/// Generational mode: a minor collection after the heap grew this much, in percent (the
-/// default of Lua 5.4).
-const GC_GENERATIONAL_MINOR_PERCENT: i32 = 20;
+/// Smooth tuning: the wait before a new cycle, in percent of the heap after the last.
+const GC_SMOOTH_PAUSE_PERCENT: i32 = 120;
 
-/// Generational mode: a major collection after the old generation grew this much, in percent
-/// (the default of Lua 5.4).
-const GC_GENERATIONAL_MAJOR_PERCENT: i32 = 100;
+/// Smooth tuning: the collector's speed against the allocator's, in percent.
+const GC_SMOOTH_STEP_MULTIPLIER: i32 = 400;
+
+/// Smooth tuning: the size of a collector step as a power of two in bytes.
+const GC_SMOOTH_STEP_SIZE_LOG2: i32 = 8;
 
 /// How many VM instructions pass between two looks at the execution budget.
 const BUDGET_CHECK_INSTRUCTIONS: u32 = 100_000;
@@ -452,15 +453,20 @@ impl ProfileScriptRuntime {
         &mut self.data.env.settings
     }
 
-    /// Puts the Lua collector in its generational mode (Rust-only setting
-    /// `emu.lua_generational_gc`): the hooks' short-lived values are reclaimed by cheap minor
-    /// collections instead of the long incremental cycles that stall a frame now and then.
-    /// `false` goes back to the incremental tuning the runtime starts with. Scripts see no
-    /// difference but the numbers of `collectgarbage("count")`.
-    pub fn set_generational_gc(&self, generational: bool) {
-        if generational {
-            self.lua
-                .gc_gen(GC_GENERATIONAL_MINOR_PERCENT, GC_GENERATIONAL_MAJOR_PERCENT);
+    /// Puts the Lua collector in its smooth tuning (Rust-only setting `emu.lua_smooth_gc`, on
+    /// by default): a new cycle soon after the last (pause 120 %), small steps that work hard
+    /// (256 bytes, multiplier 400 %), so the collection is spread over the frames instead of
+    /// stalling one now and then. `false` goes back to the tuning the runtime starts with.
+    /// Measured on Zelda II (x86): worst hook time 40-136 ms -> 1-2.5 ms, mean unchanged or
+    /// lower; the generational mode was worse (majors of the whole heap, 120 ms). Scripts see
+    /// no difference but the numbers of `collectgarbage("count")`.
+    pub fn set_smooth_gc(&self, smooth: bool) {
+        if smooth {
+            self.lua.gc_inc(
+                GC_SMOOTH_PAUSE_PERCENT,
+                GC_SMOOTH_STEP_MULTIPLIER,
+                GC_SMOOTH_STEP_SIZE_LOG2,
+            );
         } else {
             self.lua
                 .gc_inc(GC_PAUSE_PERCENT, GC_STEP_MULTIPLIER, GC_STEP_SIZE_LOG2);
