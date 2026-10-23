@@ -171,6 +171,14 @@ Windows the binary is a GUI program: double-click opens no console, and from a t
 is not exercised by any test). Redirecting (`zaxnes.exe --help > out.txt`) must write to the
 file, not the terminal.
 
+## 7b. Linux smoke test (automatic)
+
+`rust/build/smoke-linux.sh` runs the release `zaxnes` under Xvfb + openbox with xdotool: help and
+profile list, welcome screen, a public ROM drawing and moving, pause, save/load state, reset,
+fast forward and rewind keys, options window, French and back, the 3D default geometry, audio not
+silent (SDL disk driver), user-data files, exits with code 0 from Ctrl+Q and from a window close.
+Needs `apt install xvfb openbox xdotool imagemagick wmctrl`; exits non-zero on the first failure.
+
 ## 8. Packaging
 
 ```powershell
