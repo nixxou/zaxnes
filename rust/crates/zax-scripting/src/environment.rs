@@ -521,10 +521,80 @@ impl ScriptProfileInfo {
     }
 }
 
+/// The input and memory bridges of one machine. A host whose inputs and memory belong to the
+/// same core implements both traits on one type, which a context can then lend as one value.
+pub trait ScriptMachine: ScriptInput + ScriptMemory {}
+
+impl<T: ScriptInput + ScriptMemory + ?Sized> ScriptMachine for T {}
+
+/// What the host lends to the script API for the length of one hook call: the camera and the
+/// backdrop of the scene, and the inputs and memory of the machine.
+///
+/// The runtime never keeps these: the borrow ends with the call, so the host stays the only
+/// owner of the scene and the core and the compiler rules out conflicting access. See
+/// [`ScriptBridge::lend`](crate::ScriptBridge::lend).
+pub struct ScriptContext<'a> {
+    /// The camera exposed as `Camera` (REQ-LUA-088).
+    pub camera: &'a mut dyn ScriptCamera,
+    /// The backdrop exposed as `Backdrop` (REQ-LUA-090).
+    pub backdrop: &'a mut dyn ScriptBackdrop,
+    /// The inputs and the memory exposed as `Gamepad`, `ScriptPad` and `Script:ReadMem`
+    /// (REQ-LUA-091, 092, 094).
+    pub machine: &'a mut dyn ScriptMachine,
+}
+
+/// The detached input and memory of an environment, seen as one machine.
+struct HeadlessMachine<'a> {
+    input: &'a mut dyn ScriptInput,
+    memory: &'a mut dyn ScriptMemory,
+}
+
+impl ScriptInput for HeadlessMachine<'_> {
+    fn player_state(&self, index: usize) -> i32 {
+        self.input.player_state(index)
+    }
+
+    fn global_state(&self) -> i32 {
+        self.input.global_state()
+    }
+
+    fn port_byte(&self, port: usize) -> i32 {
+        self.input.port_byte(port)
+    }
+
+    fn port_type(&self, port: usize) -> i32 {
+        self.input.port_type(port)
+    }
+
+    fn set_port_types(&mut self, first: i32, second: i32) {
+        self.input.set_port_types(first, second);
+    }
+
+    fn zapper_offset(&self) -> Vec3 {
+        self.input.zapper_offset()
+    }
+
+    fn set_zapper_offset(&mut self, offset: Vec3) {
+        self.input.set_zapper_offset(offset);
+    }
+}
+
+impl ScriptMemory for HeadlessMachine<'_> {
+    fn read(&self, address: u16) -> u8 {
+        self.memory.read(address)
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
+        self.memory.write(address, value);
+    }
+}
+
 /// Everything the Lua runtime needs from the host besides the conversion engine.
 ///
 /// Every member has a working default, so a runtime can be created for the acceptance test of
-/// REQ-ACC-011 and for the unit tests without a window, a renderer or a ROM.
+/// REQ-ACC-011 and for the unit tests without a window, a renderer or a ROM. The camera,
+/// backdrop, input and memory members are the headless bridges: the script API uses them only
+/// when the host lends no [`ScriptContext`] to the call.
 pub struct ScriptEnvironment {
     /// The settings model exposed as `Setting` (REQ-LUA-089).
     pub settings: ScriptSettings,
@@ -542,6 +612,24 @@ pub struct ScriptEnvironment {
     pub log: Box<dyn ScriptLog>,
     /// What `NotiCenter.Notify` raises (REQ-LUA-093); ignored by default.
     pub notify: Option<Box<dyn FnMut(ScriptNotification)>>,
+}
+
+impl ScriptEnvironment {
+    /// Runs `operation` on the headless bridges.
+    pub(crate) fn with_headless_context<R>(
+        &mut self,
+        operation: impl FnOnce(&mut ScriptContext<'_>) -> R,
+    ) -> R {
+        let mut machine = HeadlessMachine {
+            input: &mut *self.input,
+            memory: &mut *self.memory,
+        };
+        operation(&mut ScriptContext {
+            camera: &mut *self.camera,
+            backdrop: &mut *self.backdrop,
+            machine: &mut machine,
+        })
+    }
 }
 
 impl Default for ScriptEnvironment {

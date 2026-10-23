@@ -36,10 +36,10 @@ use self::globals::{install_api_globals, install_base, protected_call, text_of};
 use self::hooks::{
     call_all, call_hook, input_process, update_shapes, with_budget, Audience, Budget,
 };
-use crate::binding::cx::{Cx, Lent};
+use crate::binding::cx::{with_host_context, Cx, HostLink, Lent};
 use crate::binding::dispatch;
 use crate::binding::payload::{FrameKey, InstanceTarget, Payload, ShapeTarget};
-use crate::environment::ScriptEnvironment;
+use crate::environment::{ScriptContext, ScriptEnvironment};
 use crate::error::{message_of, LuaScriptError};
 use crate::persistent_data;
 use crate::script::{LoadedScript, ScriptHook};
@@ -89,22 +89,53 @@ impl RuntimeData {
     }
 
     /// Takes the changes made to the settings model into the pipeline's own slice, when the
-    /// engine state is at hand, and answers a request for a view reset with the camera.
-    pub fn settle_settings(&mut self, conversion: Option<&mut ConversionSettings>) {
+    /// engine state is at hand. Returns whether a script asked for a view reset, which the
+    /// caller answers with the camera it has at hand.
+    #[must_use = "a requested view reset is lost unless the camera answers it"]
+    pub fn settle_settings(&mut self, conversion: Option<&mut ConversionSettings>) -> bool {
         match conversion {
             Some(conversion) => self.env.settings.sync(conversion),
             None => self.env.settings.absorb(),
         }
 
-        if self.env.settings.take_view_reset() {
-            self.env.camera.reset_view();
-        }
+        self.env.settings.take_view_reset()
     }
 
     /// Changes the epochs: every frame handle issued so far reads as gone.
     fn invalidate_handles(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
         self.pin_epoch = self.pin_epoch.wrapping_add(1);
+    }
+}
+
+/// The way for a host to lend its [`ScriptContext`] to the hooks of a runtime it has handed to
+/// the conversion engine.
+///
+/// The engine owns the runtime and calls its hooks, so the host cannot pass the context to the
+/// runtime directly. The bridge is a second handle on the same Lua state: the host lends the
+/// context for the length of a call into the engine, and every hook that runs during it reaches
+/// the context. When the call returns the context is withdrawn, so nothing outlives the borrow.
+#[derive(Clone)]
+pub struct ScriptBridge {
+    lua: Lua,
+}
+
+impl ScriptBridge {
+    /// Runs `operation` with `context` available to the script API, then withdraws it. The
+    /// operation hands its results out through what it captures. A hook that runs outside any
+    /// lend sees the headless bridges of the environment.
+    pub fn lend(&self, context: &mut ScriptContext<'_>, operation: impl FnOnce()) {
+        let lent = self.lua.scope(|scope| {
+            // Should the function not be created, the hooks of the operation fall back on the
+            // headless bridges.
+            if let Ok(call) = scope.create_function_mut(|lua, ()| HostLink::serve(lua, context)) {
+                self.lua.set_app_data(HostLink::new(call));
+            }
+            operation();
+            self.lua.remove_app_data::<HostLink>();
+            Ok(())
+        });
+        debug_assert!(lent.is_ok(), "the closure of a lend never fails");
     }
 }
 
@@ -130,6 +161,22 @@ impl ProfileScriptRuntime {
         environment: ScriptEnvironment,
         state: &mut ConversionState,
     ) -> Result<Self, LuaScriptError> {
+        Self::create_in(profile, environment, state, None)
+    }
+
+    /// Like [`ProfileScriptRuntime::create`], with the host `context` available to the chunks
+    /// while they run, which is when a chunk's main level can already reach the camera, the
+    /// inputs and the memory.
+    ///
+    /// # Errors
+    ///
+    /// The base environment could not be installed.
+    pub fn create_in(
+        profile: &GameProfile,
+        environment: ScriptEnvironment,
+        state: &mut ConversionState,
+        context: Option<&mut ScriptContext<'_>>,
+    ) -> Result<Self, LuaScriptError> {
         let mut runtime = Self {
             lua: Lua::new(),
             data: RuntimeData {
@@ -152,7 +199,7 @@ impl ProfileScriptRuntime {
             },
         };
 
-        runtime.build(profile, state).map_err(|error| {
+        runtime.build(profile, state, context).map_err(|error| {
             LuaScriptError(format!(
                 "The Lua base environment failed to install: {}",
                 message_of(&error)
@@ -161,15 +208,28 @@ impl ProfileScriptRuntime {
         Ok(runtime)
     }
 
-    fn build(&mut self, profile: &GameProfile, state: &mut ConversionState) -> mlua::Result<()> {
+    fn build(
+        &mut self,
+        profile: &GameProfile,
+        state: &mut ConversionState,
+        context: Option<&mut ScriptContext<'_>>,
+    ) -> mlua::Result<()> {
         install_base(&self.lua)?;
         dispatch::install(&self.lua)?;
         self.lua.set_app_data(Budget::new());
         install_api_globals(&self.lua)?;
 
         self.data.env.settings.mirror_all(state.settings_mut());
-        let loaded = self.run(Some(state), None, |cx| load_scripts(cx, profile))??;
-        self.data.has_frame_hooks = loaded;
+        let bridge = self.bridge();
+        let mut loaded = Ok(Ok(false));
+        let mut load = || {
+            loaded = self.run(Some(state), None, |cx| load_scripts(cx, profile));
+        };
+        match context {
+            Some(context) => bridge.lend(context, load),
+            None => load(),
+        }
+        self.data.has_frame_hooks = loaded??;
 
         self.lua.set_global_hook(
             HookTriggers::new().every_nth_instruction(BUDGET_CHECK_INSTRUCTIONS),
@@ -203,7 +263,8 @@ impl ProfileScriptRuntime {
     ) -> mlua::Result<R> {
         let mut state = state;
         if let Some(state) = state.as_deref_mut() {
-            self.data.settle_settings(Some(state.settings_mut()));
+            let view_reset = self.data.settle_settings(Some(state.settings_mut()));
+            self.answer_view_reset(view_reset);
         }
 
         let Self { lua, data } = self;
@@ -287,7 +348,40 @@ impl ProfileScriptRuntime {
     /// Copies the changes made to the settings since the last call into the pipeline's own
     /// slice (see [`ScriptSettings::sync`]).
     pub fn sync_settings(&mut self, state: &mut ConversionState) {
-        self.data.settle_settings(Some(state.settings_mut()));
+        let view_reset = self.data.settle_settings(Some(state.settings_mut()));
+        self.answer_view_reset(view_reset);
+    }
+
+    /// The bridge through which a host lends its context to the hooks of this runtime.
+    #[must_use]
+    pub fn bridge(&self) -> ScriptBridge {
+        ScriptBridge {
+            lua: self.lua.clone(),
+        }
+    }
+
+    /// Runs `operation` on the context the host lent, outside any call into Lua. A failure of
+    /// the host side is logged and gives `None`.
+    fn with_context<R: 'static>(
+        &mut self,
+        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+    ) -> Option<R> {
+        match with_host_context(&self.lua, &mut self.data, operation) {
+            Ok(answer) => Some(answer),
+            Err(error) => {
+                self.data.env.log.error(&format!(
+                    "Lua: the runtime failed: {}",
+                    message_of(&error)
+                ));
+                None
+            }
+        }
+    }
+
+    fn answer_view_reset(&mut self, requested: bool) {
+        if requested {
+            self.with_context(|context| context.camera.reset_view());
+        }
     }
 
     /// The frame counter the last [`ScriptHost::set_frame_globals`] published.
@@ -473,11 +567,14 @@ impl ProfileScriptRuntime {
     /// FPV, the tracker of SPEC-04 finds the shape again and the target follows it; when the
     /// tracker loses it, the follow stops and the target stays where it was.
     pub fn advance_camera_tracking(&mut self, state: &mut ConversionState) {
-        let data = &mut self.data;
-        if data.fpv_shape.is_none() || data.env.camera.mode() != 1 {
+        if self.data.fpv_shape.is_none() {
+            return;
+        }
+        if self.with_context(|context| context.camera.mode()) != Some(1) {
             return;
         }
 
+        let data = &mut self.data;
         let found = state.track(FrameRole::Converting).filter(|&id| {
             state
                 .converting_frame()
@@ -496,7 +593,7 @@ impl ProfileScriptRuntime {
         });
         let frame = state.converting_frame();
         let position = frame.shape(id).instances()[0].get_pos(state.settings());
-        data.env.camera.set_look_at(position);
+        self.with_context(move |context| context.camera.set_look_at(position));
     }
 
     // evaluation, for the tests and the acceptance harness
