@@ -6,15 +6,19 @@
 #   rust/build/package-linux-aarch64.sh --native   build on the device itself
 #
 # Cross toolchain (x86_64 host, Debian or Ubuntu):
-#   sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+#   sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake \
+#       libdrm-dev libgbm-dev libegl-dev libgles-dev
 #   rustup target add aarch64-unknown-linux-gnu
-#   The linker is set in rust/.cargo/config.toml, or export
-#   CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc.
+#   The linker is set in rust/.cargo/config.toml. The C and C++ dependencies (Lua, Dear ImGui,
+#   SDL2) are compiled with the compilers exported below.
 #
 # SDL2: the build links SDL2 statically (feature `bundled`), so the package needs no libSDL2 on
-# the device. Without it, build against the system library of the target instead (a sysroot with
-# PKG_CONFIG_SYSROOT_DIR and PKG_CONFIG_PATH pointing at the aarch64 .pc files) and copy
-# libSDL2-2.0.so.0 next to zaxnes, with the RG40XXV's own libraries.
+# the device. CMake uses rust/build/aarch64-sdl2.cmake (SDL2_TOOLCHAIN). The KMSDRM, GBM, EGL
+# and GLES backends are loaded with dlopen: the build only needs the (architecture independent)
+# headers of the host, but the device must provide libdrm.so.2, libgbm.so.1, libEGL.so.1 and
+# libGLESv2.so.2 (Mali userspace driver). Without `bundled`, build against the system library
+# of the target instead (a sysroot with PKG_CONFIG_SYSROOT_DIR and PKG_CONFIG_PATH pointing at
+# the aarch64 .pc files) and copy libSDL2-2.0.so.0 next to zaxnes.
 #
 # Not verified on a device yet: the notes in RG40XXV.txt are the settings to try first.
 set -euo pipefail
@@ -30,6 +34,10 @@ if [[ "${1:-}" == "--native" ]]; then
     target_args=()
 else
     target_args=(--target "$target")
+    export CC_aarch64_unknown_linux_gnu="${CC_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-gcc}"
+    export CXX_aarch64_unknown_linux_gnu="${CXX_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-g++}"
+    export AR_aarch64_unknown_linux_gnu="${AR_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-ar}"
+    export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/aarch64-sdl2.cmake}"
 fi
 
 (cd "$rust_dir" && cargo build --release -p zax-app "${features[@]}" "${target_args[@]}")
