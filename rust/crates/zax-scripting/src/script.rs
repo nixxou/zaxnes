@@ -84,6 +84,9 @@ pub struct LoadedScript {
     hooks: [Option<Function>; ScriptHook::COUNT],
     /// The instances this script's `UpdateS` must visit this frame (step 3).
     pub(crate) pending: Vec<FrameInstanceId>,
+    /// The Lua value of this script (`self`), kept once made so that a hook call finds it
+    /// without a lookup.
+    pub(crate) handle: Option<mlua::Value>,
 }
 
 impl LoadedScript {
@@ -100,6 +103,7 @@ impl LoadedScript {
             tag_string,
             enabled: source.enabled,
             failed: false,
+            handle: None,
             hooks: std::array::from_fn(|_| None),
             pending: Vec::new(),
         }
