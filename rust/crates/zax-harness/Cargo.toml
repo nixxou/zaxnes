@@ -12,6 +12,7 @@ sha2 = "0.10"
 zax-engine3d = { path = "../zax-engine3d" }
 zax-nes = { path = "../zax-nes" }
 zax-profiles = { path = "../zax-profiles" }
+zax-render = { path = "../zax-render", features = ["offscreen"] }
 zax-scripting = { path = "../zax-scripting" }
 
 [dev-dependencies]

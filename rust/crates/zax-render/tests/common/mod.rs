@@ -443,9 +443,8 @@ impl SceneFixture {
             mask_y: 0,
         };
         engine.convert(&batch, 0);
-        let published = engine.publish();
-        let background = published.palette().color(0).unwrap_or_default();
-        let time = published.time();
+        let time = engine.publish().time();
+        let background = engine.frame_color(0);
 
         let mut scene = SceneState::default();
         scene.camera.snap_to_setpoints();
