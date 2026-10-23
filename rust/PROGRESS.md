@@ -25,3 +25,55 @@ Fixes after Windows check: fake profile file system keys on separator-independen
 
 T10 fix: WGL offscreen context for Windows (hidden window, GL 3.3 core; GLES 3.0 via `WGL_EXT_create_context_es2_profile`, else a clear "unsupported" error), EGL kept elsewhere (133 zax-render + harness tests pass on llvmpipe); zax-render compiles and is clippy-clean for x86_64-pc-windows-msvc (checked in container), zax-harness stops at the `mlua-sys` build script (vendored Lua needs the MSVC toolchain); GPU tests and 8x MSAA to be run on Windows by the owner.
 Windows check (owner, b6bb4e7, RTX 3060, rustc 1.99.1): WGL GPU tests 125/125 incl. 8x MSAA and GLES 3.0 (WGL_EXT_create_context_es2_profile); synthetic render goldens 11/11 scenes 100 % on real GPU; zax-harness builds with MSVC; zax-platform `bundled` 30/30; workspace fmt/clippy clean, 1264 tests passed with --include-ignored.
+
+T15 (this container: Linux x86_64, Mesa llvmpipe EGL, SDL2 dev libs, rustc 1.99.1): Windows console attach (`zax-platform::console`, `windows_subsystem = "windows"`; module compiles and is clippy-clean for x86_64-pc-windows-msvc alone, the full `zax-platform`/`zax-app` cannot be checked for Windows here: `imgui-sys`/mlua's vendored Lua need the MSVC `lib.exe`); harness `render --bench <frames>` and `--explain` ported (`draw_list_report.rs`, `OffscreenContext::finish`), plus a new `compare` command (the measure of the golden-image tests, for C#-vs-Rust captures).
+
+## Summary
+
+### Parity
+
+| Check | Result here (Linux, llvmpipe) | Owner's machine (Windows, RTX 3060, b6bb4e7) |
+|---|---|---|
+| `rust/check.sh` (fmt, clippy pedantic `-D warnings`, `cargo test --workspace`) | clean, 0 failures | fmt/clippy clean, 1264 passed with `--include-ignored` |
+| Core goldens, `ppu_golden_tests -- --ignored` (1200 frames) | 291/291 rows | to rerun (section 2 of LOCAL-CHECKS.md) |
+| Core goldens, `zax-harness golden-core` vs `core-goldens.jsonl` | GOLDENCORE | to rerun |
+| Render synthetic (11 scenes, counts identical, pixels within 2 levels) | 9/11 at 100 %; `framing` 99.998 %, `heavy` 99.769 % (llvmpipe z-fighting of coplanar sprites) | 11/11 at 100 % |
+| Lua API dump (`lua-api` vs `goldens/lua-api.txt`) | byte-identical | byte-identical (test) |
+| MSAA 8x | not verifiable (llvmpipe caps `GL_MAX_SAMPLES` at 4; 1 ignored test) | passes |
+
+### Tests per crate (Rust, default run, this container) against the C# test projects
+
+Rust counts are `#[test]` results (rstest rows and table-driven loops count as one or many as ported); C# counts are `[Fact]`/`[Theory]` methods, with `[InlineData]` rows in brackets (grep, not a test run).
+
+| Rust crate | passed (+ ignored) | C# project | `[Fact]`/`[Theory]` methods [InlineData rows] |
+|---|---|---|---|
+| zax-nes | 383 (+5) | Zax.Nes.Tests | 349 [354] |
+| zax-settings | 177 | Zax.Settings.Tests | 90 [106] |
+| zax-profiles | 157 (+54, need `ZAXNES_PROFILES`) | Zax.Profiles.Tests | 124 [63] |
+| zax-scripting | 118 (+7) | Zax.Scripting.Tests | 44 |
+| zax-engine3d | 191 (+6) | Zax.Engine3D.Tests | 181 [13] |
+| zax-render | 124 (+1) | Zax.Render.Tests | 67 [37] |
+| zax-platform | 30 | (none; `Zax.Platform` is covered by the app and acceptance tests) | - |
+| zax-app | 386 | Zax.App.Tests + Acceptance | 328 [89] + 581 [262] |
+| zax-harness | 32 | (harness has no C# tests) | - |
+| zax-goldens | 3 | - | - |
+
+The acceptance project (581 methods) checks requirement traceability and architecture rules of the C# solution; its Rust counterparts are the integration tests of `zax-app` and the golden comparisons above, not a method-for-method port.
+
+### To check on a real machine (commands in `rust/LOCAL-CHECKS.md`)
+
+- Window, GL context (desktop 3.3 core and GLES 3.0), vsync/pacing, fullscreen, icon, single-instance lock.
+- Audio output (no crackle, pause, fast-forward), keyboard, gamepad (hot-plug, calibration).
+- GPU captures: the synthetic goldens on the real GPU, 8x MSAA, GLES 3.0 against GL 3.3.
+- Commercial ROMs and profiles through `ZAXNES_ROMS` / `ZAXNES_PROFILES` / `ZAXNES_3DSEN_INSTALL` (the ignored tests: profile corpus byte-identity 101/101, scripting and engine corpora, 3dSen import).
+- The C#-vs-Rust capture campaign: 12 games x 3 angles with `render --rom`, compared by `zax-harness compare` (tolerance 2 per channel).
+- `render --bench` below 4 ms median at 1920x1080 (not measurable on llvmpipe; here framing takes about 15 ms at 640x480 in software).
+- Windows console attach at runtime (terminal, pipe and Explorer launches), packaging (`package-windows.ps1`, `package-linux-aarch64.sh`: neither has been run), the RG40XXV.
+
+### Known gaps
+
+- Lua: `CoreScriptInput`/`CoreScriptMemory` are implemented by the app, not by `zax-scripting`; `SlotTexture` w/h uses the 8W x 8H fallback; `BuildPattern` only has the instance (state members raise "not available here"); `Camera.FpvShape` reads nil after its frame epoch changes; ViewReset goes through a flag; the C# "Disposed runtime" test is not portable; `Setting:Save/Load` from Lua run at the end of the hook.
+- Application: core error to `Stopped` not ported (no exception path); `REQ-PUB-006` system-font half not ported; `ISceneRenderer` interface not ported.
+- Render: llvmpipe differences on overlapping coplanar sprites (heavy scene, framing edge pixels); 8x MSAA unverifiable here.
+- Platform: Windows console attach and every window, audio and gamepad path were never run against real hardware by the agent; the aarch64 package and the RG40XXV are untested on a device; `zax-app`/`zax-platform` cannot be cross-checked for Windows from Linux (MSVC tools).
+- Build: `--all-features` on `zax-app`/`zax-platform` enables `bundled` (static SDL2, needs CMake and MSVC), otherwise ship SDL2.dll 2.30.x.
