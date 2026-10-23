@@ -25,8 +25,7 @@ fn plug_zapper(fixture: &mut TileFixture, aim: ZapperPosition) {
 }
 
 fn run_frame(fixture: &mut TileFixture, word: u16) {
-    fixture.core.bus_mut().input_mut().begin_frame(word);
-    fixture.core.run_frame();
+    fixture.core.run_frame(word);
 }
 
 fn read_port(fixture: &mut TileFixture) -> u8 {
@@ -73,8 +72,8 @@ fn amd_021_r2_006_a_vblank_read_sees_only_the_universal_backdrop() {
         let mut fixture = white_sprite_on_black();
         fixture.write_vram(0x3F00, &[backdrop]);
         let core = &mut fixture.core;
-        core.run_frame();
-        core.run_frame();
+        core.run_frame(0);
+        core.run_frame(0);
         // RunFrame returns at the start of the vblank, so the records of the frame just drawn
         // are complete, and no longer consulted (R2-006 supersedes Q-005 point 1).
         assert!(core.ppu().scanline() >= HEIGHT);
@@ -92,7 +91,7 @@ fn amd_021_r2_006_the_right_hand_band_is_always_the_universal_backdrop() {
         // A second white sprite covering (240, 100), so the band is not empty.
         fixture.set_sprite(1, 99, SOLID_TILE, 0x00, 240);
         let core = &mut fixture.core;
-        core.run_frame();
+        core.run_frame(0);
         // Walk into the next frame until the scan is past the capture of the sprite band of
         // line 100, which REQ-CORE-044 places on line 103.
         let mut guard = 0;
@@ -146,7 +145,7 @@ fn req_core_062_light_is_seen_from_the_line_after_the_aimed_pixel() {
     let core = &mut fixture.core;
     // One frame so that the programmed state is fully in force, then walk through the next
     // frame instruction by instruction and watch the probe line by line.
-    core.run_frame();
+    core.run_frame(0);
     while core.ppu().scanline() != 0 {
         let (cpu, bus) = core.cpu_and_bus_mut();
         cpu.step(bus);
@@ -179,8 +178,8 @@ fn req_core_062_a_pointer_outside_the_image_never_sees_light() {
     let mut fixture = white_sprite_on_black();
     fixture.write_vram(0x3F00, &[0x30]);
     let core = &mut fixture.core;
-    core.run_frame();
-    core.run_frame();
+    core.run_frame(0);
+    core.run_frame(0);
     assert!(!core.ppu().sees_light_at(-1, 103));
     assert!(!core.ppu().sees_light_at(103, -1));
     assert!(!core.ppu().sees_light_at(256, 103));

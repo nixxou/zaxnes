@@ -387,7 +387,7 @@ fn req_core_021_the_callback_fires_once_per_frame_even_with_an_empty_batch() {
     // it is there, empty, even with rendering off.
     let mut fixture = TileFixture::new();
     fixture.set_mask(0x00);
-    fixture.core.run_frame();
+    fixture.core.run_frame(0);
 
     for _ in 0..5 {
         let batch = capture_batch(&mut fixture.core);
@@ -450,7 +450,7 @@ fn req_core_033_registering_the_video_callback_changes_nothing_in_the_emulation(
 
     let mut copies = 0;
     for _ in 0..120 {
-        silent.run_frame();
+        silent.run_frame(0);
         copies += capture_batch(&mut watched).records.len();
     }
     assert!(copies > 0);
@@ -466,7 +466,7 @@ fn req_core_033_registering_the_video_callback_changes_nothing_in_the_emulation(
 
 fn write_address_on_line(fixture: &mut TileFixture, line: i32, address: u16) -> BatchCopy {
     let core = &mut fixture.core;
-    core.run_frame();
+    core.run_frame(0);
 
     let mut guard = 0;
     while (core.ppu().scanline() != line || core.ppu().dot() < 120) && guard < 400_000 {

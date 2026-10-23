@@ -144,6 +144,11 @@ impl NesBus {
         self.cartridge = cartridge;
     }
 
+    /// Detaches the cartridge and returns it.
+    pub fn take_cartridge(&mut self) -> Option<Cartridge> {
+        self.cartridge.take()
+    }
+
     /// Clears work RAM and the clock (part of power-on, REQ-CORE-004).
     pub fn reset(&mut self) {
         self.ram.fill(0);

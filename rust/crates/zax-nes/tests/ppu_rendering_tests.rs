@@ -110,8 +110,8 @@ fn req_core_112_sprite_zero_hit_needs_a_solid_pixel_in_both_layers() {
         fixture.set_scroll(0, 0);
         fixture.set_control(0x00);
         fixture.set_mask(mask);
-        fixture.core.run_frame();
-        fixture.core.run_frame();
+        fixture.core.run_frame(0);
+        fixture.core.run_frame(0);
         fixture.core.ppu().sprite_zero_hit()
     }
 
@@ -131,8 +131,8 @@ fn req_core_116_the_overflow_flag_rises_once_nine_sprites_share_a_line() {
         fixture.set_scroll(0, 0);
         fixture.set_control(0x00);
         fixture.set_mask(0x1E);
-        fixture.core.run_frame();
-        fixture.core.run_frame();
+        fixture.core.run_frame(0);
+        fixture.core.run_frame(0);
         fixture.core.ppu().sprite_overflow()
     }
 
@@ -271,7 +271,7 @@ fn req_core_112_the_scroll_registers_follow_the_documented_loopy_layout() {
 #[test]
 fn req_core_112_reading_2002_clears_the_vblank_flag_and_the_write_toggle() {
     let mut fixture = TileFixture::new();
-    fixture.core.run_frame();
+    fixture.core.run_frame(0);
 
     assert!(fixture.core.ppu().vblank_flag());
     assert_eq!(0x80, fixture.core.ppu_read(2) & 0x80);

@@ -83,7 +83,7 @@ fn check_row(row: &CoreGolden, image: &[u8], last_frame: u32) -> Result<(), Stri
     let mut audio_samples: u64 = 0;
     let mut buffer = vec![0.0f32; 8192];
     for frame in 1..=last_frame {
-        machine.run_frame();
+        machine.run_frame(0);
         loop {
             let got = machine.read_audio(&mut buffer, false).unwrap();
             if got == 0 {

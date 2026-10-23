@@ -30,9 +30,9 @@ fn produced_over(core: &mut NesCore, frames: usize, reference: Option<&mut NesCo
     let mut reference = reference;
 
     for _ in 0..frames {
-        let cycles = core.run_frame();
+        let cycles = core.run_frame(0);
         if let Some(reference) = reference.as_deref_mut() {
-            assert_eq!(reference.run_frame(), cycles);
+            assert_eq!(reference.run_frame(0), cycles);
         }
         while core.apu().available_samples() >= sink.len() {
             produced += core.read_audio(&mut sink, false).unwrap();
@@ -88,7 +88,7 @@ fn req_core_072_the_speed_factor_does_not_change_the_emulation() {
     fast.set_speed(1.5).unwrap(); // Fast forward (DEC-07-Q2).
 
     for _ in 0..120 {
-        assert_eq!(normal.run_frame(), fast.run_frame());
+        assert_eq!(normal.run_frame(0), fast.run_frame(0));
     }
 
     for address in 0..0x800u16 {
@@ -100,7 +100,7 @@ fn req_core_072_the_speed_factor_does_not_change_the_emulation() {
 fn req_core_071_a_read_is_all_or_nothing() {
     let mut core = loaded_core();
     core.set_sample_rate(48_000).unwrap();
-    core.run_frame(); // About 800 samples.
+    core.run_frame(0); // About 800 samples.
 
     let available = core.apu().available_samples();
     assert!((780..=820).contains(&available), "{available}");
@@ -118,7 +118,7 @@ fn req_core_071_a_read_is_all_or_nothing() {
 fn req_core_071_a_stereo_read_consumes_half_as_many_mono_samples() {
     let mut core = loaded_core();
     core.set_sample_rate(48_000).unwrap();
-    core.run_frame();
+    core.run_frame(0);
 
     let available = core.apu().available_samples();
     let mut buffer = [0.0f32; 512];
@@ -136,7 +136,7 @@ fn req_core_071_a_stereo_read_consumes_half_as_many_mono_samples() {
 fn req_core_071_samples_stay_inside_minus_one_and_one() {
     let mut core = loaded_core();
     for _ in 0..5 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     let mut buffer = [0.0f32; 2048];
@@ -250,7 +250,7 @@ fn req_core_071_reading_from_another_thread_does_not_corrupt_the_buffer() {
     };
 
     for _ in 0..300 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     stop.store(true, Ordering::Release);
@@ -280,7 +280,7 @@ fn req_core_071_an_overflowing_buffer_drops_the_oldest_samples() {
 
     // Far more than the buffer can hold, with nothing read in between.
     for _ in 0..60 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     assert_eq!(core.apu().buffer_capacity(), core.apu().available_samples());

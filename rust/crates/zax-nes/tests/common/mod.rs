@@ -238,7 +238,7 @@ impl BatchCopy {
 
 /// Runs one frame and returns a copy of its batch.
 pub fn capture_batch(machine: &mut NesCore) -> BatchCopy {
-    machine.run_frame();
+    machine.run_frame(0);
     BatchCopy::of(machine)
 }
 
@@ -255,7 +255,7 @@ impl TileFixture {
     pub fn with(header_byte6: u8, program: Option<&[u8]>) -> Self {
         let mut core = machine_with(&minimal_rom(header_byte6, program, None), "Vector.nes");
         for _ in 0..3 {
-            core.run_frame();
+            core.run_frame(0);
         }
         let mut fixture = Self { core };
         fixture.fill_oam(0xFF);
@@ -308,7 +308,7 @@ impl TileFixture {
 
     /// Runs one frame, then returns the batch of the next one.
     pub fn next_batch(&mut self) -> BatchCopy {
-        self.core.run_frame();
+        self.core.run_frame(0);
         capture_batch(&mut self.core)
     }
 }
@@ -359,7 +359,7 @@ pub fn run_shell_rom_with(image: &[u8], max_frames: i64, press_reset: bool) -> R
     let mut started = false;
     let mut reset_delay = 0;
     while frames < max_frames {
-        core.run_frame();
+        core.run_frame(0);
         frames += 1;
 
         if reset_delay > 0 {
@@ -426,7 +426,7 @@ pub fn run_legacy_rom(image: &[u8], max_frames: i64, result_address: u16) -> Rom
     let mut parked_at = 0u16;
     let mut parked_frames = 0;
     while frames < max_frames {
-        core.run_frame();
+        core.run_frame(0);
         frames += 1;
         let pc = core.cpu().pc;
         if is_halted(&core) && (parked_frames == 0 || pc == parked_at) {
@@ -479,4 +479,36 @@ fn shell_text(core: &NesCore) -> String {
         text.push(char::from(value));
     }
     text.trim().to_owned()
+}
+
+/// A small deterministic generator (xorshift64*), standing in for the seeded `System.Random`
+/// of the C# tests: the tests need reproducible noise, not a particular sequence.
+pub struct TestRandom(u64);
+
+impl TestRandom {
+    pub const fn new(seed: u64) -> Self {
+        Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
+    }
+
+    pub fn next_u64(&mut self) -> u64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    pub fn next_u16(&mut self) -> u16 {
+        (self.next_u64() >> 32) as u16
+    }
+
+    /// A value in `0..bound`.
+    pub fn below(&mut self, bound: usize) -> usize {
+        (self.next_u64() >> 16) as usize % bound
+    }
+
+    pub fn fill(&mut self, bytes: &mut [u8]) {
+        for byte in bytes {
+            *byte = (self.next_u64() >> 40) as u8;
+        }
+    }
 }

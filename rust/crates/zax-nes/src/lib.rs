@@ -23,7 +23,7 @@ pub use frame_batch::FrameBatch;
 pub use input::{ControllerPortType, ZapperPosition};
 pub use nametable_mirroring::NametableMirroring;
 pub use nes_bus::NesBus;
-pub use nes_core::NesCore;
+pub use nes_core::{NesCore, NoRomLoaded, StateLoaded, VideoCallback, ZapperPositionSource};
 pub use nes_region::NesRegion;
 pub use region_timing::RegionTiming;
 pub use tile_record::TileRecord;
