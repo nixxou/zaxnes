@@ -1,6 +1,8 @@
 //! What the last rendered frame cost, for the performance report of SPEC-06 REQ-SCN-064 and the
 //! debug overlay.
 
+use std::time::Duration;
+
 use crate::geometry;
 
 /// What the last rendered frame cost (REQ-SCN-064).
@@ -47,6 +49,9 @@ pub struct RenderStatistics {
     /// Opaque tiles turned transparent this frame because they hide the followed shape
     /// (REQ-SCN-022).
     pub occluders: u32,
+    /// CPU time of the collection of the tiles into the buckets (Rust-only, for the frame
+    /// profiler).
+    pub collect_time: Duration,
 }
 
 impl Default for RenderStatistics {
@@ -69,6 +74,7 @@ impl Default for RenderStatistics {
             skybox_pass: false,
             anti_alias_samples: 1,
             occluders: 0,
+            collect_time: Duration::ZERO,
         }
     }
 }
@@ -88,5 +94,6 @@ impl RenderStatistics {
         self.skybox_pass = false;
         self.anti_alias_samples = 1;
         self.occluders = 0;
+        self.collect_time = Duration::ZERO;
     }
 }
