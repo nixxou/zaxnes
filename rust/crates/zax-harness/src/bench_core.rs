@@ -225,7 +225,11 @@ fn report(options: &Options, tallies: &[Tally], whole: Tally, record_count: f64)
         options.frames,
         options.warmup,
         options.profile.as_deref().unwrap_or("none"),
-        if options.three_dimensional { "3D" } else { "profile's" }
+        if options.three_dimensional {
+            "3D"
+        } else {
+            "profile's"
+        }
     )];
     for (stage, tally) in Stage::ALL.iter().zip(tallies) {
         lines.push(format!(
