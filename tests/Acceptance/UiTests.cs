@@ -744,8 +744,12 @@ public sealed class UiTests
 
     /// <summary>
     /// AMD-010 REQ-UI-208: ten numbered slots plus the quick state are exposed in the menus, each
-    /// showing its date or « vide »; the persistence model keeps SPEC-09's 36.
+    /// showing its date or the « empty » word; the persistence model keeps SPEC-09's 36.
     /// </summary>
+    /// <remarks>
+    /// The word an empty slot shows is a translated text since AMD-035, so it is read from the
+    /// table of the language in force rather than spelled out here.
+    /// </remarks>
     [Trait("Requires", "OriginalAssets")]
     [HostFact]
     public void REQ_UI_208_ten_slots_and_the_quick_state_are_exposed()
@@ -765,14 +769,15 @@ public sealed class UiTests
         Assert.Equal(1, rows.Count(static row => row.Command == ZaxCommands.QuickLoad));
         Assert.Equal(1, rows.Count(static row => row.Command == ZaxCommands.QuickSave));
 
-        // The occupied slot shows a date, the others « vide ».
+        // The occupied slot shows a date, the others the « empty » word of the current table.
+        string empty = UiDriver.Text("EmptySlot");
         Assert.Contains(
             rows,
             row => row.Command == ZaxCommands.LoadSlot && row.Label.Contains("3", StringComparison.Ordinal)
-                && !row.Label.Contains("vide", StringComparison.Ordinal));
+                && !row.Label.Contains(empty, StringComparison.Ordinal));
         Assert.Contains(
             rows,
-            row => row.Command == ZaxCommands.LoadSlot && row.Label.Contains("vide", StringComparison.Ordinal));
+            row => row.Command == ZaxCommands.LoadSlot && row.Label.Contains(empty, StringComparison.Ordinal));
 
         // Slot 20 is still loadable through the model, as (D) requires.
         Assert.Equal(36, SaveSlotIndex.NumberedSlotCount);
@@ -864,7 +869,7 @@ public sealed class UiTests
             File.WriteAllText(Path.Combine(folder, "super mario.nes"), "x");
             File.WriteAllText(Path.Combine(folder, "zelda.nes"), "x");
 
-            object browser = UiDriver.OpenBrowser("Ouvrir une ROM", folder);
+            object browser = UiDriver.OpenBrowser(UiDriver.Text("OpenRomTitle"), folder);
 
             IReadOnlyList<(string Name, string Kind)> entries = UiDriver.BrowserEntries(browser);
             Assert.Equal("x", entries[0].Name);
@@ -883,10 +888,10 @@ public sealed class UiTests
             // The trail starts at the root and has one step per component.
             IReadOnlyList<string> trail = UiDriver.BrowserTrail(browser);
             Assert.True(trail.Count >= 2);
-            Assert.Equal("This computer", trail[0]);
+            Assert.Equal(UiDriver.Label("browser.computer"), trail[0]);
 
             // Reopening clears the search (REQ-UI-103, last sentence).
-            object reopened = UiDriver.OpenBrowser("Ouvrir une ROM", folder);
+            object reopened = UiDriver.OpenBrowser(UiDriver.Text("OpenRomTitle"), folder);
             Assert.Contains(
                 UiDriver.BrowserEntries(reopened),
                 entry => entry.Name == "zelda.nes");
@@ -922,7 +927,7 @@ public sealed class UiTests
             File.WriteAllBytes(bundle, []);
 
             object picker = UiDriver.OpenBrowser(
-                "Importer depuis 3dSen", folder, threeDSen: true);
+                UiDriver.Text("ImportThreeDSenTitle"), folder, threeDSen: true);
 
             // The bundle is listed: the dialog's own filter accepts the extension of §3.
             Assert.True(UiDriver.BrowserAccepts(picker, Path.GetFileName(bundle)));
@@ -935,7 +940,7 @@ public sealed class UiTests
             Assert.Equal(folder, UiDriver.BrowserConfirm(picker));
 
             // The ROM dialog of REQ-UI-104 still refuses to answer without a file.
-            object rom = UiDriver.OpenBrowser("Ouvrir une ROM", folder);
+            object rom = UiDriver.OpenBrowser(UiDriver.Text("OpenRomTitle"), folder);
             Assert.False(UiDriver.BrowserCanConfirm(rom));
             Assert.Null(UiDriver.BrowserConfirm(rom));
         }
@@ -961,11 +966,13 @@ public sealed class UiTests
     /// </summary>
     /// <remarks>
     /// Round 1: no menu row and no command deleted a user profile
-    /// (<c>verify/round1/R1-report-part-c.md</c>). The <c>R1-fixes</c> batch adds the row
-    /// « Supprimer le jeu… » on <c>file.delete_game</c>. AMD-010 §1 makes the <i>presentation</i>
-    /// informative — a menu row stands in for the small button on the selected tile — so what is
-    /// checked here is the function, the exact texts and the two buttons. Re-verified 2026-10-21,
-    /// <c>verify/round1/R1-recheck.md</c>.
+    /// (<c>verify/round1/R1-report-part-c.md</c>). The <c>R1-fixes</c> batch adds the row of
+    /// <c>file.delete_game</c>, whose label AMD-035 now takes from the table of the language in
+    /// force — so the row is identified by its command and its label compared with that table.
+    /// AMD-010 §1 makes the <i>presentation</i> informative — a menu row stands in for the small
+    /// button on the selected tile — so what is checked here is the function, the exact texts of
+    /// the box (which AMD-036 §1 leaves as they are in <c>en</c>) and the two buttons.
+    /// Re-verified 2026-10-21, <c>verify/round1/R1-recheck.md</c>.
     /// </remarks>
     [Trait("Requires", "OriginalAssets")]
     [HostFact] // REQ-UI-037, REQ-UI-110
@@ -983,7 +990,7 @@ public sealed class UiTests
         UiMenuRow[] offered = [.. bar.Rows().Where(static candidate =>
             candidate.Command == ZaxCommands.DeleteGame)];
         UiMenuRow row = Assert.Single(offered);
-        Assert.Contains("Supprim", row.Label, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(UiDriver.CommandLabel(ZaxCommands.DeleteGame), row.Label);
 
         // It opens the box E8 rather than deleting straight away, with the exact texts.
         host.HoldConfirmations = true;

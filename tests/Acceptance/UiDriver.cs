@@ -292,6 +292,22 @@ public sealed class UiDriver
         return value?.ToString() ?? throw new InvalidOperationException($"UiText has no '{name}'");
     }
 
+    /// <summary>
+    /// The text of the key <paramref name="key"/> in the language in force (AMD-035 §3). A test
+    /// that has to compare a label reads the expected one from here instead of spelling it out,
+    /// so that it checks the function and not the language the interface happens to be in.
+    /// </summary>
+    public static string Label(string key)
+        => (string)Type("Zax.App.Ui.UiStrings")
+            .GetMethod("Get", BindingFlags.Public | BindingFlags.Static)!
+            .Invoke(null, [key])!;
+
+    /// <summary>The label of the menu row that invokes <paramref name="command"/> (REQ-UI-205).</summary>
+    public static string CommandLabel(string command)
+        => Label((string)Type("Zax.App.Ui.UiKeys")
+            .GetMethod("Command", BindingFlags.Public | BindingFlags.Static)!
+            .Invoke(null, [command])!);
+
     /// <summary>The lines of the about block (REQ-UI-076, DEC-10-Q3).</summary>
     public static IReadOnlyList<string> AboutLines()
     {
