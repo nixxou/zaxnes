@@ -7,7 +7,16 @@ namespace Zax.Profiles.Catalogue;
 /// </param>
 /// <param name="FilePath">Full path of the <c>.3dn</c> file.</param>
 /// <param name="Header">The header fields that were read.</param>
-public sealed record UserProfile(string Id, string Title, string FilePath, ProfileHeader Header);
+/// <param name="Origin">
+/// Which of the two scanned folders the file came from (AMD-033 §2). It defaults to
+/// <see cref="ProfileOrigin.User"/>, the only folder that existed before.
+/// </param>
+public sealed record UserProfile(
+    string Id,
+    string Title,
+    string FilePath,
+    ProfileHeader Header,
+    ProfileOrigin Origin = ProfileOrigin.User);
 
 /// <summary>What an import did (SPEC-03 REQ-PROF-063, SPEC-09 REQ-PERS-041).</summary>
 public enum ProfileImportOutcome
@@ -83,17 +92,34 @@ public sealed class UserProfileFolder
     private readonly IProfileLog _log;
 
     /// <summary>Creates a view of the folder at <paramref name="directory"/>.</summary>
-    public UserProfileFolder(IProfileFileSystem files, string directory, IProfileLog? log = null)
+    /// <param name="files">The file system to read through.</param>
+    /// <param name="directory">The folder to scan.</param>
+    /// <param name="log">Where rejected files are reported.</param>
+    /// <param name="origin">
+    /// What the profiles of this folder are tagged with (AMD-033 §2). Only
+    /// <see cref="ProfileFolders"/> passes <see cref="ProfileOrigin.ProgramFolder"/>; the folder
+    /// of the executable is read-only, so <see cref="Import"/> and <see cref="Delete"/> are
+    /// never used on it.
+    /// </param>
+    public UserProfileFolder(
+        IProfileFileSystem files,
+        string directory,
+        IProfileLog? log = null,
+        ProfileOrigin origin = ProfileOrigin.User)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrEmpty(directory);
         _files = files;
         Directory = directory;
         _log = log ?? NullProfileLog.Instance;
+        Origin = origin;
     }
 
     /// <summary>The folder.</summary>
     public string Directory { get; }
+
+    /// <summary>What the profiles found here are tagged with (AMD-033 §2).</summary>
+    public ProfileOrigin Origin { get; }
 
     /// <summary>
     /// Reads every <c>*.3dn</c> of the folder and keeps the ones with a usable header and an
@@ -117,7 +143,7 @@ public sealed class UserProfileFolder
         List<UserProfile> profiles = [];
         foreach (string path in paths)
         {
-            UserProfile? profile = ReadUserProfile(path);
+            UserProfile? profile = TryRead(path);
             if (profile is null)
             {
                 continue;
@@ -213,14 +239,25 @@ public sealed class UserProfileFolder
         _files.DeleteFile(profile.FilePath);
     }
 
-    private UserProfile? ReadUserProfile(string path)
+    /// <summary>
+    /// Reads the header of one file of the folder and makes a profile of it, or returns
+    /// <see langword="null"/> when the file is unreadable, is not a profile or carries no
+    /// identifier — each of which is logged, never thrown (REQ-PROF-062).
+    /// </summary>
+    /// <remarks>
+    /// Public so that <see cref="ProfileFolders"/> can apply the merge rules of AMD-033 §2
+    /// file by file without repeating the reading rules.
+    /// </remarks>
+    public UserProfile? TryRead(string path)
     {
+        ArgumentException.ThrowIfNullOrEmpty(path);
+
         byte[] bytes;
         try
         {
             bytes = _files.ReadAllBytes(path);
         }
-        catch (IOException exception)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             _log.Warning($"{path}: unreadable file ({exception.Message})");
             return null;
@@ -244,7 +281,7 @@ public sealed class UserProfileFolder
             return null;
         }
 
-        return new UserProfile(header.Value.Id!, TitleOf(header.Value, path), path, header.Value);
+        return new UserProfile(header.Value.Id!, TitleOf(header.Value, path), path, header.Value, Origin);
     }
 
     private static UserProfile? FindById(IReadOnlyList<UserProfile>? profiles, string id)

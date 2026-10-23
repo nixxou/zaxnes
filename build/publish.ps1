@@ -169,6 +169,13 @@ Vérification non interactive :
 "@
 Set-Content -Path (Join-Path $Output 'README.txt') -Value $readme -Encoding utf8
 
+# AMD-033 §3: an empty 'profiles' folder next to Zaxnes.exe, with a line saying what to put in
+# it. It is the second folder the library scans, in every mode, and it is only ever read.
+$profilesFolder = Join-Path $Output 'profiles'
+New-Item -ItemType Directory -Force -Path $profilesFolder | Out-Null
+Set-Content -Path (Join-Path $profilesFolder 'README.txt') -Encoding utf8 `
+    -Value "Déposez ici vos profils .3dn ; ils sont chargés au démarrage. Aucun profil n'est fourni."
+
 # ---------------------------------------------------------------- 3. no asset at all (REQ-PUB-002)
 
 #. '.ico' is here for lot ICON-1: the application icon travels *inside* Zaxnes.exe — the Win32
@@ -190,7 +197,17 @@ if (Test-Path (Join-Path $Output 'assets')) {
     throw 'publish: AMD-031 — the release must carry no assets folder.'
 }
 
+# AMD-033 §3: the profiles folder ships empty — its README.txt and nothing else. A .3dn would
+# already have failed the check above; this one also catches anything else slipped in.
+$shipped = @(Get-ChildItem -Recurse -Force $profilesFolder |
+    Where-Object { $_.FullName -ne (Join-Path $profilesFolder 'README.txt') })
+if ($shipped) {
+    $names = ($shipped | ForEach-Object { $_.Name }) -join ', '
+    throw "publish: AMD-033 — profiles\ must hold README.txt alone, found: $names"
+}
+
 Write-Host 'publish: no asset file in the output (REQ-PUB-002, AMD-031 OK)'
+Write-Host 'publish: profiles\README.txt alone in profiles\ (AMD-033 OK)'
 
 $size = [math]::Round(((Get-ChildItem -Recurse -File $Output | Measure-Object -Sum Length).Sum / 1MB), 1)
 $count = (Get-ChildItem -Recurse -File $Output | Measure-Object).Count

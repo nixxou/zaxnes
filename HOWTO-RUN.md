@@ -369,6 +369,19 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 > supprimé** : vous pouvez le garder ou l'effacer vous-même. Les sauvegardes d'état écrites
 > alors restent lisibles.
 
+> **Un second dossier de profils, à côté de l'exécutable.** Quel que soit le mode — normal,
+> portable ou `--userdata` —, Zaxnes parcourt **toujours** un dossier `profiles` placé à côté de
+> `Zaxnes.exe`, en plus du vôtre. La version publiée le fournit vide, avec un `README.txt` ;
+> déposez-y vos `.3dn` et ils apparaissent dans la bibliothèque au lancement suivant. Ce dossier
+> n'est jamais écrit, déplacé ni supprimé : vos imports vont toujours dans **votre** dossier de
+> données, et Zaxnes fonctionne même s'il est en lecture seule (sous `Program Files`, par
+> exemple) ou absent. Si les deux dossiers proposent le même profil, **le vôtre l'emporte** : un
+> fichier de même nom chez vous masque entièrement l'autre, deux fichiers identiques n'en font
+> qu'un, et à identifiant égal c'est le vôtre qui est chargé, l'autre étant signalé dans le
+> journal. Le choix du profil indique d'où vient chaque entrée (« profil utilisateur » ou
+> « profil du dossier du programme »), et un jeu du dossier du programme ne se supprime pas
+> depuis l'interface.
+
 | Chemin | Contenu |
 |---|---|
 | `settings.json` | réglages : les préférences utilisateur, par clé stable (`camera.fov`, `audio.volume`, `scene.skybox`…) |
@@ -379,7 +392,7 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 | `saves/<n>.state` | fichier de sauvegarde (signature `ZAXNESAV`, l'ancienne `SEN3DSAV` reste lisible) |
 | `saves/<n>.png` | vignette 256 × 192 de l'emplacement |
 | `battery/<sha1>.srm` | RAM sauvegardée par pile, par ROM (Zelda, Final Fantasy…) |
-| `profiles/*.3dn` | profils utilisateur importés |
+| `profiles/*.3dn` | profils utilisateur importés — et, en plus, ceux du dossier `profiles` à côté de l'exécutable |
 | `covers/*.png` | jaquettes, nommées `<Titre>_3dsen_<Id>.png` |
 | `logs/` | journaux |
 

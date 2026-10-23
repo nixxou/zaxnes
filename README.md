@@ -74,6 +74,14 @@ description of AMD-030 §4 and adds no dependency. Identical profiles are skippe
 import adds nothing; a name clash gets a ` (2)` suffix. See
 [HOWTO-RUN.md §9.1](HOWTO-RUN.md) for the user-facing details.
 
+Profiles you already have can also simply be dropped next to the executable:
+`spec/changes/AMD-033-dossier-profiles-exe.md` makes Zaxnes scan a `profiles` folder beside
+`Zaxnes.exe` in every mode — normal, portable and `--userdata` — on top of your own. The published build ships
+it empty, with a `README.txt` and no profile (REQ-PUB-002 still holds). That folder is only ever
+read: imports keep writing to your data folder, a missing or read-only one is not an error, and
+your own folder wins every clash — same file name, identical contents or same profile
+identifier. The library shows which folder each profile came from.
+
 `--assets <dir>` still reads a folder of asset files **you** supply (`profiles.json`,
 `cubemaps/`, `meshes/`, `textures/`, `audio/`). It is never looked for automatically, and
 nothing in the repository or the release depends on it (REQ-PUB-001).

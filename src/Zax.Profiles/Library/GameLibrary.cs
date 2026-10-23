@@ -39,7 +39,8 @@ public sealed class GameLibraryEntry
         GameProfileSource source,
         string profilePath,
         bool is2DMode,
-        bool isDefaultThreeDimensional = false)
+        bool isDefaultThreeDimensional = false,
+        ProfileOrigin origin = ProfileOrigin.User)
     {
         Id = id;
         Title = title;
@@ -47,6 +48,7 @@ public sealed class GameLibraryEntry
         ProfilePath = profilePath;
         Is2DMode = is2DMode;
         IsDefaultThreeDimensional = isDefaultThreeDimensional;
+        Origin = origin;
     }
 
     /// <summary>Profile identifier; the key of everything stored per game. Never changes.</summary>
@@ -63,6 +65,20 @@ public sealed class GameLibraryEntry
 
     /// <summary>Path of the profile file to load for this game.</summary>
     public string ProfilePath { get; internal set; }
+
+    /// <summary>
+    /// Which folder the profile file was found in (AMD-033 §2). It is
+    /// <see cref="ProfileOrigin.User"/> for a built-in profile, which comes from the asset
+    /// folder or from the code and never from either scanned folder.
+    /// </summary>
+    public ProfileOrigin Origin { get; internal set; }
+
+    /// <summary>
+    /// True for a profile read from the <c>profiles</c> folder next to the executable, whose
+    /// file Zaxnes never writes to (AMD-033 §1).
+    /// </summary>
+    public bool IsFromProgramFolder
+        => Source == GameProfileSource.User && Origin == ProfileOrigin.ProgramFolder;
 
     /// <summary>
     /// True for the "2D Mode" game: it is shown under that name whatever the custom title, and
@@ -108,9 +124,11 @@ public sealed class GameLibraryEntry
 
     /// <summary>
     /// True when the game can be deleted: only games that come from a user profile
-    /// (REQ-PROF-065).
+    /// (REQ-PROF-065), and only from the user's own folder — deleting a game deletes its file,
+    /// and the folder next to the executable is read-only for Zaxnes (AMD-033 §1, Q-074).
     /// </summary>
-    public bool CanDelete => Source == GameProfileSource.User;
+    // Q-074
+    public bool CanDelete => Source == GameProfileSource.User && Origin == ProfileOrigin.User;
 
     /// <inheritdoc/>
     public override string ToString() => $"{Id} {DisplayTitle}";
@@ -168,7 +186,9 @@ public sealed class GameLibrary
                 profile.Title,
                 GameProfileSource.User,
                 profile.FilePath,
-                is2DMode: false), logger);
+                is2DMode: false,
+                isDefaultThreeDimensional: false,
+                profile.Origin), logger);
         }
 
         if (persisted is not null)
@@ -200,7 +220,10 @@ public sealed class GameLibrary
                 return null;
             }
 
+            // A profile imported into the user folder takes over the entry of a profile of the
+            // same identifier found next to the executable (AMD-033 §2: the user folder wins).
             existing.ProfilePath = profile.FilePath;
+            existing.Origin = profile.Origin;
             return existing;
         }
 
@@ -209,7 +232,9 @@ public sealed class GameLibrary
             profile.Title,
             GameProfileSource.User,
             profile.FilePath,
-            is2DMode: false);
+            is2DMode: false,
+            isDefaultThreeDimensional: false,
+            profile.Origin);
         Add(entry, log ?? NullProfileLog.Instance);
         return entry;
     }

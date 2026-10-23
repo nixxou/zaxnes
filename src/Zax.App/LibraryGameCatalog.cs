@@ -17,10 +17,23 @@ namespace Zax.App;
 /// <param name="Message">The message to show: the summary, or why it failed.</param>
 internal sealed record ThreeDSenImportReport(ThreeDSenImportSummary? Summary, string Message);
 
+/// <summary>Sends the lines of the profile library to the host log (AMD-033 §2).</summary>
+internal sealed class ProfileLogAdapter(Action<string> log) : IProfileLog
+{
+    /// <inheritdoc/>
+    public void Information(string message) => log(message);
+
+    /// <inheritdoc/>
+    public void Warning(string message) => log(message);
+
+    /// <inheritdoc/>
+    public void Error(string message) => log(message);
+}
+
 /// <summary>
 /// The application's library: the embedded catalogue, the user profiles of
-/// <c>&lt;root&gt;/profiles</c> and <c>library.json</c>, behind the
-/// <see cref="IGameCatalog"/> the emulation loop drives.
+/// <c>&lt;root&gt;/profiles</c> and of <c>profiles</c> next to the executable (AMD-033), and
+/// <c>library.json</c>, behind the <see cref="IGameCatalog"/> the emulation loop drives.
 /// </summary>
 /// <remarks>
 /// Profiles are loaded lazily and cached, because a profile is several megabytes of patterns and
@@ -90,8 +103,10 @@ internal sealed class LibraryGameCatalog : IGameCatalog
         IReadOnlyList<UserProfile> userProfiles = [];
         try
         {
-            UserProfileFolder folder = new(PhysicalProfileFileSystem.Instance, paths.ProfilesDirectory);
-            userProfiles = folder.Scan(catalogue.Ids as IReadOnlyCollection<string>);
+            // AMD-033 §1: the user folder and the read-only « profiles » folder next to the
+            // executable, in every mode.
+            userProfiles = ProfileFoldersOf(paths, logger)
+                .Scan(catalogue.Ids as IReadOnlyCollection<string>);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -121,6 +136,17 @@ internal sealed class LibraryGameCatalog : IGameCatalog
             paths,
             log ?? (static _ => { }));
     }
+
+    /// <summary>
+    /// The two folders scanned at every start and at every rescan (AMD-033 §1 and §2): the
+    /// user's one and <c>profiles</c> next to the executable.
+    /// </summary>
+    private static ProfileFolders ProfileFoldersOf(UserDataPaths paths, Action<string> log)
+        => new(
+            PhysicalProfileFileSystem.Instance,
+            paths.ProfilesDirectory,
+            paths.ProgramProfilesDirectory,
+            new ProfileLogAdapter(log));
 
     /// <inheritdoc/>
     public ResolvedGame? Resolve(string gameId)
@@ -219,7 +245,9 @@ internal sealed class LibraryGameCatalog : IGameCatalog
     {
         if (_library.Find(gameId) is not { CanDelete: true } entry)
         {
-            // A built-in profile and the "2D Mode" entry must not be deletable (REQ-UI-037).
+            // A built-in profile and the "2D Mode" entry must not be deletable (REQ-UI-037), and
+            // neither is a profile of the folder next to the executable: deleting a game deletes
+            // its file, and that folder is read-only for Zaxnes (AMD-033 §1, Q-074).
             return false;
         }
 
@@ -271,7 +299,10 @@ internal sealed class LibraryGameCatalog : IGameCatalog
         List<UserProfile> known = [];
         foreach (GameLibraryEntry entry in _library.Entries)
         {
-            if (entry.Source == GameProfileSource.User)
+            // Only the profiles of the user folder: the import replaces the file of the entry it
+            // takes over, and nothing next to the executable is ever deleted (AMD-033 §1). A
+            // profile of the program folder simply loses its entry to the imported one.
+            if (entry.Source == GameProfileSource.User && entry.Origin == ProfileOrigin.User)
             {
                 known.Add(new UserProfile(entry.Id, entry.Title, entry.ProfilePath, default));
             }
@@ -360,8 +391,7 @@ internal sealed class LibraryGameCatalog : IGameCatalog
         IReadOnlyList<UserProfile> profiles;
         try
         {
-            UserProfileFolder folder = new(PhysicalProfileFileSystem.Instance, _paths.ProfilesDirectory);
-            profiles = folder.Scan();
+            profiles = ProfileFoldersOf(_paths, _log).Scan();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
