@@ -243,6 +243,7 @@ impl UiHarness {
                     hub: pads,
                     real_seconds: 1.0 / 60.0,
                     frames_per_second: 60.0,
+                    profile_line: "",
                 };
                 ui.draw(imgui_ui, &mut frame);
             });

@@ -1,6 +1,8 @@
 //! The layers over the game view: the welcome screen (REQ-UI-207), the notifications
 //! (REQ-UI-206) and the frame counter (REQ-UI-095).
 
+use std::fmt::Write as _;
+
 use imgui::{Condition, Ui, WindowFlags};
 
 use super::{play, UiFrame, ZaxUi};
@@ -124,6 +126,8 @@ impl ZaxUi {
         if self.fps_countdown <= 0.0 {
             self.fps_countdown = REFRESH_SECONDS;
             self.fps_shown = frame.frames_per_second;
+            self.fps_text.clear();
+            let _ = write!(self.fps_text, "{:.1} FPS", self.fps_shown);
         }
         let flags = WindowFlags::NO_DECORATION
             | WindowFlags::ALWAYS_AUTO_RESIZE
@@ -142,7 +146,10 @@ impl ZaxUi {
             .flags(flags)
             .begin();
         if window.is_some() {
-            ui.text(format!("{:.1} FPS", self.fps_shown));
+            ui.text(&self.fps_text);
+            if !frame.profile_line.is_empty() {
+                ui.text(frame.profile_line);
+            }
         }
     }
 }

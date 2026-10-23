@@ -7,6 +7,7 @@ pub mod application;
 pub mod audio;
 pub mod emulation;
 mod flags;
+pub mod frame_profiler;
 pub mod frame_rate_counter;
 pub mod game_session;
 pub mod handheld_mode;

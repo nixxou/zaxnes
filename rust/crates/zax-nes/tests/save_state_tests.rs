@@ -356,3 +356,22 @@ fn req_core_090_the_region_is_part_of_the_state() {
 
     assert_eq!(NesRegion::Pal, core.region());
 }
+
+#[test]
+fn a_state_written_into_a_recycled_buffer_has_the_same_bytes() {
+    let mut core = loaded_core("Minimal.nes");
+    run(&mut core, 30);
+    let mut buffer = vec![0xAA; 100_000];
+    core.save_state_to(false, &mut buffer).unwrap();
+    assert_eq!(core.save_state(false).unwrap(), buffer);
+    core.save_state_to(true, &mut buffer).unwrap();
+    assert_eq!(core.save_state(true).unwrap(), buffer);
+}
+
+#[test]
+fn a_failed_write_leaves_the_buffer_untouched() {
+    let core = NesCore::new();
+    let mut buffer = vec![1, 2, 3];
+    assert!(core.save_state_to(false, &mut buffer).is_err());
+    assert_eq!(vec![1, 2, 3], buffer);
+}

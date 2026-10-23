@@ -53,6 +53,8 @@ pub struct UiFrame<'a> {
     pub real_seconds: f32,
     /// The frame rate the counter shows.
     pub frames_per_second: f32,
+    /// The frame profiler's line shown under the counter (empty when it is off).
+    pub profile_line: &'a str,
 }
 
 /// What the interface asks the application to do.
@@ -105,6 +107,7 @@ pub struct ZaxUi {
     purpose: BrowserPurpose,
     picker: Option<Box<dyn FilePicker>>,
     fps_shown: f32,
+    fps_text: String,
     fps_countdown: f32,
     held_keys: Vec<Key>,
     effects: Vec<UiEffect>,
@@ -128,6 +131,7 @@ impl ZaxUi {
             purpose: BrowserPurpose::Rom,
             picker: None,
             fps_shown: 0.0,
+            fps_text: String::from("0.0 FPS"),
             fps_countdown: 0.0,
             held_keys: Vec::new(),
             effects: Vec::new(),

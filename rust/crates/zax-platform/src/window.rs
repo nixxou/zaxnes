@@ -249,7 +249,17 @@ impl HostWindow {
 
     /// Presents the frame, then waits out the rest of the frame period when a cap is in force.
     pub fn swap_and_pace(&mut self) {
+        self.swap();
+        self.pace();
+    }
+
+    /// Presents the frame (with vsync on, this is where the wait for the refresh happens).
+    pub fn swap(&mut self) {
         self.window.gl_swap_window();
+    }
+
+    /// Sleeps until the frame cap's next frame is due; returns at once without a cap.
+    pub fn pace(&mut self) {
         let Some(period) = self.frame_cap else {
             return;
         };

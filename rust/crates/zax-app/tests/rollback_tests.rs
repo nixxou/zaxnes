@@ -22,6 +22,47 @@ fn req_loop_030_the_history_keeps_thirty_snapshots() {
     assert_eq!(CAPACITY - 2, history.count());
 }
 
+#[test]
+fn a_full_history_lends_its_oldest_buffer_to_the_next_snapshot() {
+    let mut history = RollbackHistory::new();
+    for index in 0..CAPACITY {
+        let byte = u8::try_from(index).unwrap();
+        history
+            .capture_with(|buffer| {
+                assert!(buffer.is_empty(), "no buffer to recycle before the history is full");
+                buffer.push(byte);
+                Ok::<(), ()>(())
+            })
+            .unwrap();
+    }
+    history
+        .capture_with(|buffer| {
+            assert_eq!(&[0], buffer.as_slice(), "the oldest snapshot is the one recycled");
+            buffer.clear();
+            buffer.push(99);
+            Ok::<(), ()>(())
+        })
+        .unwrap();
+    assert_eq!(CAPACITY, history.count());
+    let last = u8::try_from(CAPACITY - 1).unwrap();
+    assert_eq!(Some(vec![last]), history.take_rollback_target());
+    assert_eq!(Some(vec![1]), history.take_at(0));
+}
+
+#[test]
+fn a_failed_snapshot_leaves_the_history_as_it_was() {
+    let mut history = RollbackHistory::new();
+    for index in 0..40_u8 {
+        history.capture(vec![index]);
+    }
+    assert_eq!(Err("no ROM"), history.capture_with(|_| Err("no ROM")));
+    assert_eq!(CAPACITY, history.count());
+    assert_eq!(Some(vec![10]), history.take_at(0));
+    let mut empty = RollbackHistory::new();
+    assert_eq!(Err(()), empty.capture_with(|_| Err(())));
+    assert!(empty.is_empty());
+}
+
 #[rstest]
 #[case(0, true)]
 #[case(59, false)]
