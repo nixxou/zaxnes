@@ -49,6 +49,15 @@ use crate::persistent_data;
 use crate::script::{LoadedScript, ScriptHook};
 use crate::settings::ScriptSettings;
 
+/// The incremental collector's wait before a new cycle, in percent of the heap after the last.
+const GC_PAUSE_PERCENT: i32 = 400;
+
+/// The collector's speed against the allocator's, in percent.
+const GC_STEP_MULTIPLIER: i32 = 400;
+
+/// The size of a collector step as a power of two in bytes (the default of Lua 5.4).
+const GC_STEP_SIZE_LOG2: i32 = 13;
+
 /// How many VM instructions pass between two looks at the execution budget.
 const BUDGET_CHECK_INSTRUCTIONS: u32 = 100_000;
 
@@ -280,7 +289,12 @@ impl ProfileScriptRuntime {
             },
         };
 
-        runtime.lua.gc_inc(400, 400);
+        // Hooks make short-lived garbage by the thousand, the handles of a frame; the live heap
+        // is small, so the collector waits until the heap has grown fourfold and works harder
+        // when it runs, instead of starting a cycle every few frames.
+        runtime
+            .lua
+            .gc_inc(GC_PAUSE_PERCENT, GC_STEP_MULTIPLIER, GC_STEP_SIZE_LOG2);
         runtime.build(profile, state, context).map_err(|error| {
             LuaScriptError(format!(
                 "The Lua base environment failed to install: {}",
