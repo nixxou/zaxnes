@@ -37,7 +37,10 @@ fn run() -> i32 {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
     let options = match AppOptions::parse(&arguments) {
-        Ok(options) => options,
+        Ok(mut options) => {
+            options.system_locale = sys_locale::get_locale();
+            options
+        }
         Err(error) => {
             eprintln!("{error}");
             eprint!("{USAGE}");

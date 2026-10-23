@@ -56,3 +56,36 @@ fn the_choice_is_written_to_the_settings_file_and_read_back() {
     assert_eq!(result.status, SettingsLoadStatus::Loaded);
     assert_eq!(read.get(SettingId::UiLanguage), SettingValue::from("fr"));
 }
+
+/// The environment default (the language of the operating system) applies only while the user
+/// holds no value, and a choice equal to it is still written so that it keeps winning.
+#[test]
+fn an_environment_default_gives_way_to_the_users_choice() {
+    let mut model = SettingsModel::new();
+    model.set_environment_default(SettingId::UiLanguage, "fr");
+    assert_eq!(model.get(SettingId::UiLanguage).as_text(), "fr");
+    assert_eq!(model.user_preferences().count(), 0);
+
+    model.set(SettingId::UiLanguage, "en");
+    assert_eq!(model.get(SettingId::UiLanguage).as_text(), "en");
+    assert_eq!(model.user_preferences().count(), 1);
+
+    let mut file = SettingsFile::new(MemoryStorage::new());
+    file.save(&model).expect("the store accepts the write");
+
+    // A later launch on a French system: the saved English wins.
+    let mut next = SettingsModel::new();
+    next.set_environment_default(SettingId::UiLanguage, "fr");
+    let mut again = SettingsFile::new(file.storage().clone());
+    again.load(&mut next, time::OffsetDateTime::UNIX_EPOCH);
+    assert_eq!(next.get(SettingId::UiLanguage).as_text(), "en");
+
+    // With nothing saved the system language shows, and nothing is written for it.
+    let mut fresh = SettingsModel::new();
+    fresh.set_environment_default(SettingId::UiLanguage, "fr");
+    let mut empty = SettingsFile::new(MemoryStorage::new());
+    empty.save(&fresh).expect("the store accepts the write");
+    let mut read = SettingsModel::new();
+    SettingsFile::new(empty.storage().clone()).load(&mut read, time::OffsetDateTime::UNIX_EPOCH);
+    assert!(read.user_preferences().next().is_none());
+}

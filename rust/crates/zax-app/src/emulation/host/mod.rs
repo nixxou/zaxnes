@@ -261,7 +261,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             zapper: ZapperState::new(),
         };
         // AMD-035 §1: the language in force is the setting's, read once here and kept in step
-        // by `on_setting_changed` afterwards. There is no detection of the system's language.
+        // by `on_setting_changed` afterwards. While none is saved, the model's default is the
+        // operating-system language (set at start-up), amending AMD-035 §1.
         let language = host.settings.language();
         host.events.push(HostEvent::LanguageChanged(language));
         host.apply_speed();

@@ -443,3 +443,19 @@ fn fixed_text_keys() -> impl Iterator<Item = &'static str> {
             || *key == keys::BUTTON_NO
     })
 }
+
+/// The operating-system locale picks French when it starts with `fr`, English otherwise.
+#[rstest::rstest]
+#[case("fr", UiLanguage::French)]
+#[case("fr-FR", UiLanguage::French)]
+#[case("fr_CA.UTF-8", UiLanguage::French)]
+#[case("FR-be", UiLanguage::French)]
+#[case(" fr-CH ", UiLanguage::French)]
+#[case("en-US", UiLanguage::English)]
+#[case("de-DE", UiLanguage::English)]
+#[case("f", UiLanguage::English)]
+#[case("é", UiLanguage::English)]
+#[case("", UiLanguage::English)]
+fn the_system_locale_maps_to_a_language(#[case] locale: &str, #[case] expected: UiLanguage) {
+    assert_eq!(expected, UiLanguage::from_locale(locale));
+}

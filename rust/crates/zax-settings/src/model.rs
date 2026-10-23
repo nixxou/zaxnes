@@ -56,6 +56,7 @@ pub struct SettingsModel {
     profile: BTreeMap<SettingId, SettingValue>,
     session: BTreeMap<SettingId, SettingValue>,
     command: BTreeMap<SettingId, SettingValue>,
+    environment_defaults: BTreeMap<SettingId, SettingValue>,
     core_count: i32,
     display_refresh_rate: f32,
     tv_data: Option<serde_json::Value>,
@@ -70,6 +71,7 @@ impl Default for SettingsModel {
             profile: BTreeMap::new(),
             session: BTreeMap::new(),
             command: BTreeMap::new(),
+            environment_defaults: BTreeMap::new(),
             core_count: 1,
             display_refresh_rate: 60.0,
             tv_data: None,
@@ -126,6 +128,19 @@ impl SettingsModel {
         self.tv_data = tv_data;
     }
 
+    /// Replaces the default of `id` with one the environment suggests (the language of the
+    /// operating system for `ui.language`). It applies only while the user holds no value; the
+    /// catalogue default, which the file format compares against, is unchanged.
+    pub fn set_environment_default(&mut self, id: SettingId, value: impl Into<SettingValue>) {
+        let descriptor = catalogue::descriptor(id);
+        let clean = descriptor.domain().coerce(
+            &value.into().coerce_to(descriptor.kind()),
+            descriptor.default_value(),
+            self.core_count,
+        );
+        self.environment_defaults.insert(id, clean);
+    }
+
     /// The effective value of `id`.
     #[must_use]
     pub fn get(&self, id: SettingId) -> SettingValue {
@@ -160,7 +175,13 @@ impl SettingsModel {
             .filter_map(|descriptor| {
                 self.user
                     .get(&descriptor.id())
-                    .filter(|stored| *stored != descriptor.default_value())
+                    .filter(|stored| {
+                        // A setting with an environment default is written whenever the user
+                        // holds a value, so a choice equal to the default still wins over the
+                        // environment at the next launch.
+                        *stored != descriptor.default_value()
+                            || self.environment_defaults.contains_key(&descriptor.id())
+                    })
                     .map(|stored| (descriptor.id(), stored))
             })
     }
@@ -310,8 +331,9 @@ impl SettingsModel {
             self.user.get(&id)
         };
         stored
-            .cloned()
-            .unwrap_or_else(|| descriptor.default_value().clone())
+            .or_else(|| self.environment_defaults.get(&id))
+            .unwrap_or_else(|| descriptor.default_value())
+            .clone()
     }
 
     fn write(

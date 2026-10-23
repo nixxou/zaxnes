@@ -46,6 +46,22 @@ impl UiLanguage {
         }
     }
 
+    /// The language an operating-system locale designates: French when it starts with `fr`
+    /// (`fr-FR`, `fr_CA.UTF-8`, any case), English otherwise. Used only while no `ui.language`
+    /// has been saved.
+    #[must_use]
+    pub fn from_locale(locale: &str) -> Self {
+        let is_french = locale
+            .trim()
+            .get(..CODE_FRENCH.len())
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CODE_FRENCH));
+        if is_french {
+            Self::French
+        } else {
+            Self::English
+        }
+    }
+
     /// The language a `ui.language` text designates. Anything that is not `fr` (an empty
     /// value, a misspelling, a language this build does not have) is English (AMD-035 §1).
     #[must_use]

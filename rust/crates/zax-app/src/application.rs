@@ -19,6 +19,7 @@ use zax_render::controls;
 use zax_render::scene::{SceneFrame, SceneState};
 use zax_render::target::RenderTarget;
 use zax_render::SceneRenderer;
+use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 
 use crate::app_options::AppOptions;
@@ -47,6 +48,7 @@ use crate::render_skip;
 use crate::scene_script_bridge::{self, ConsoleScriptLog};
 use crate::ui::debug_overlay::DebugInfo;
 use crate::ui::frontend::{ImguiFrontend, Sizes};
+use crate::ui::strings::UiLanguage;
 use crate::ui::zax_ui::{UiEffect, UiFrame};
 use crate::user_data_paths::UserDataPaths;
 use crate::{neutral_assets, persistence::input_binding_store::InputBindingStore as _};
@@ -491,6 +493,13 @@ impl Running {
 fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore, SettingsModel) {
     let mut store = SettingsStore::new(paths);
     let mut model = SettingsModel::new();
+    if let Some(locale) = options.system_locale.as_deref() {
+        // Only the default: a saved `ui.language` (read next) always wins.
+        model.set_environment_default(
+            SettingId::UiLanguage,
+            UiLanguage::from_locale(locale).code(),
+        );
+    }
     store.load(&mut model, OffsetDateTime::now_utc());
     // The command line wins over the file, but only for the options it really carries (Q-066);
     // then the scene gets the values that came out of the two.
