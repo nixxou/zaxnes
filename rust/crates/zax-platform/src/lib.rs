@@ -3,6 +3,7 @@
 //! so that a libretro frontend can replace this layer wholesale.
 
 pub mod audio;
+pub mod framebuffer;
 mod gl_loader;
 pub mod icon;
 pub mod input;

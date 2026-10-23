@@ -1044,6 +1044,8 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "zax-app"
 version = "0.2.0"
 dependencies = [
+ "glow",
+ "sdl2",
  "serde",
  "serde_json",
  "sha1",
