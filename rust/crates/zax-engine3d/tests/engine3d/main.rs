@@ -9,3 +9,4 @@ mod intake_and_frame_tests;
 mod registry_tests;
 mod scaffold_tests;
 mod support;
+mod test_vector_tests;
