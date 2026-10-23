@@ -27,6 +27,13 @@ impl ShaderProgram {
         let vertex_source = shaders::assemble(&source.vertex, false, embedded);
         let fragment_source = shaders::assemble(&source.fragment, true, embedded);
 
+        if let Some(handle) = gl.cached_program(source.name, &vertex_source, &fragment_source) {
+            return Ok(Self {
+                gl: gl.clone(),
+                handle,
+                uniforms: HashMap::new(),
+            });
+        }
         let vertex = gl.compile(source.name, glow::VERTEX_SHADER, &vertex_source)?;
         let linked = gl
             .compile(source.name, glow::FRAGMENT_SHADER, &fragment_source)
@@ -37,9 +44,11 @@ impl ShaderProgram {
             });
         gl.delete_shader(vertex);
 
+        let handle = linked?;
+        gl.cache_program(source.name, &vertex_source, &fragment_source, handle);
         Ok(Self {
             gl: gl.clone(),
-            handle: linked?,
+            handle,
             uniforms: HashMap::new(),
         })
     }

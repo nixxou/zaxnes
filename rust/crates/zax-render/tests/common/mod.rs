@@ -74,6 +74,12 @@ impl GlFixture {
         SceneRenderer::new(self.context.gl(), None).expect("renderer")
     }
 
+    /// A renderer that keeps the binaries of its programs in `directory`.
+    pub fn renderer_cached(&self, directory: &std::path::Path) -> SceneRenderer {
+        SceneRenderer::with_program_cache(self.context.gl(), None, Some(directory.to_path_buf()))
+            .expect("renderer")
+    }
+
     /// A renderer whose skybox cubemaps come from `assets`.
     pub fn renderer_with(&self, assets: Box<dyn SceneAssets>) -> SceneRenderer {
         SceneRenderer::new(self.context.gl(), Some(assets)).expect("renderer")

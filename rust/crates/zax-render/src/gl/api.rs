@@ -7,13 +7,16 @@
 //! passed in was created by this context and not yet deleted, and every slice passed to an
 //! upload holds at least the bytes the format and size describe (the callers size them).
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use glow::{
-    Buffer, Framebuffer, HasContext, PixelUnpackData, Program, Renderbuffer, Shader, Texture,
-    UniformLocation, VertexArray,
+    Buffer, Framebuffer, HasContext, PixelUnpackData, Program, ProgramBinary, Renderbuffer, Shader,
+    Texture, UniformLocation, VertexArray,
 };
 use thiserror::Error;
+
+use super::program_cache::{supports_program_binary, ProgramCache};
 
 /// A GL object could not be created, compiled or linked.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -63,6 +66,8 @@ pub enum GlError {
 pub struct Gl {
     context: Rc<glow::Context>,
     embedded: bool,
+    /// The binaries of linked programs, when the driver can give them and the host asked.
+    cache: Option<Rc<ProgramCache>>,
 }
 
 impl std::fmt::Debug for Gl {
@@ -81,7 +86,33 @@ impl Gl {
     /// Wraps the host context.
     pub fn new(context: Rc<glow::Context>) -> Self {
         let embedded = context.version().is_embedded;
-        Self { context, embedded }
+        Self {
+            context,
+            embedded,
+            cache: None,
+        }
+    }
+
+    /// Keeps the binaries of the programs in `directory` for the next start, when the driver can
+    /// give them; with any other driver the programs are built from source, as before.
+    #[must_use]
+    pub fn with_program_cache(mut self, directory: PathBuf) -> Self {
+        if supports_program_binary(self.context.version(), self.context.supported_extensions()) {
+            // SAFETY: renderer contract; two string queries.
+            let (renderer, version) = unsafe {
+                (
+                    self.context.get_parameter_string(glow::RENDERER),
+                    self.context.get_parameter_string(glow::VERSION),
+                )
+            };
+            self.cache = Some(Rc::new(ProgramCache::new(directory, &renderer, &version)));
+        }
+        self
+    }
+
+    /// Whether linked programs are saved to and loaded from disk.
+    pub const fn caches_programs(&self) -> bool {
+        self.cache.is_some()
     }
 
     /// True on an OpenGL ES context, false on a desktop core one.
@@ -193,6 +224,10 @@ impl Gl {
         // here and deleted on failure.
         unsafe {
             let program = created("program", self.context.create_program())?;
+            if self.caches_programs() {
+                // Some drivers only give the binary of a program that was linked with the hint.
+                self.context.program_binary_retrievable_hint(program, true);
+            }
             self.context.attach_shader(program, vertex);
             self.context.attach_shader(program, fragment);
             self.context.link_program(program);
@@ -208,6 +243,42 @@ impl Gl {
             self.context.detach_shader(program, vertex);
             self.context.detach_shader(program, fragment);
             Ok(program)
+        }
+    }
+
+    /// The program of the binary the cache holds for these sources, when it has one and the driver
+    /// accepts it; `None` means the sources must be compiled.
+    pub fn cached_program(&self, name: &str, vertex: &str, fragment: &str) -> Option<Program> {
+        let cache = self.cache.as_ref()?;
+        let key = cache.key(name, vertex, fragment);
+        let (format, buffer) = cache.load(&key)?;
+        // SAFETY: renderer contract; the program is created here, and deleted when the driver
+        // refuses the binary.
+        unsafe {
+            let program = self.context.create_program().ok()?;
+            self.context
+                .program_binary(program, &ProgramBinary { buffer, format });
+            if self.context.get_program_link_status(program) {
+                return Some(program);
+            }
+            self.context.delete_program(program);
+        }
+        // A binary of another driver version, or a damaged one: the file is no use again.
+        cache.discard(&key);
+        None
+    }
+
+    /// Files the binary of the freshly linked `program` for the next start. A driver that gives no
+    /// binary, or a folder that cannot be written, leaves the cache without it: the next start
+    /// compiles that program again.
+    pub fn cache_program(&self, name: &str, vertex: &str, fragment: &str, program: Program) {
+        let Some(cache) = &self.cache else {
+            return;
+        };
+        // SAFETY: renderer contract; the program is live and linked.
+        let binary = unsafe { self.context.get_program_binary(program) };
+        if let Some(ProgramBinary { buffer, format }) = binary.filter(|b| !b.buffer.is_empty()) {
+            let _ = cache.store(&cache.key(name, vertex, fragment), format, &buffer);
         }
     }
 

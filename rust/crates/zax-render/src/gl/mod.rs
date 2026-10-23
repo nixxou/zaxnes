@@ -7,6 +7,7 @@ pub mod linear_buffer;
 pub mod mesh_cache;
 pub mod picture;
 pub mod program;
+pub mod program_cache;
 pub mod shaders;
 pub mod shadow_map;
 pub mod skybox;
