@@ -15,19 +15,17 @@ namespace Zax.App.Ui;
 /// that cache a list of labels watch <see cref="UiStrings.Generation"/> instead.
 /// </para>
 /// <para>
-/// The <b>notification</b> texts are deliberately absent: SPEC-10 REQ-UI-082, REQ-UI-083 and
-/// REQ-UI-084 fix them word for word, in English, and AMD-010 §3 keeps them normative. They are
-/// produced by the emulation loop and by the profile reader, and are shown verbatim. AMD-035 §1
-/// also names the notifications, which is the contradiction <c>spec/changes/Q-075.md</c>
-/// records.
+/// The <b>notification</b> texts have no property here: they are produced by the emulation loop,
+/// by the profile reader and by the settings files, in the exact English SPEC-10 REQ-UI-082 to
+/// REQ-UI-084 and SPEC-09 fix word for word. AMD-036 §1 makes that English the table entry and
+/// has <see cref="UiNotifications"/> translate the message where it is shown.
 /// </para>
 /// <para>
-/// The labels of the 19 logical actions are likewise left in English: SPEC-08 §4.1 publishes them
+/// The labels of the 19 logical actions are left in English: SPEC-08 §4.1 publishes them
 /// (<c>RotLeft</c>, <c>QuickSave</c>…) as the names of the actions, the key configuration screen
 /// shows them (REQ-UI-070) and the binding file persists them (REQ-PERS-065).
 /// </para>
 /// </remarks>
-// Q-075
 internal static class UiText
 {
     /// <summary>Product name shown in the title bar and the about block (DEC-10-Q3).</summary>

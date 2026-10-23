@@ -92,8 +92,9 @@ public sealed class ThreeDSenUiTests
 
         harness.Run(ZaxCommands.ImportThreeDSen, CommandArgs.Of(install));
 
+        // AMD-036 §1: the notification is in the language of the interface, English by default.
         Assert.Equal(
-            "3dSen : 2 profil(s) importé(s), 0 déjà présent(s), 0 en échec.",
+            "3dSen: 2 profile(s) imported, 0 already present, 0 failed.",
             harness.Host.Notifications.Current!.Value.Text);
         Assert.Equal(NotificationSeverity.Normal, harness.Host.Notifications.Current!.Value.Severity);
 
@@ -121,7 +122,7 @@ public sealed class ThreeDSenUiTests
         harness.Run(ZaxCommands.ImportThreeDSen, CommandArgs.Of(install));
 
         Assert.Equal(
-            "3dSen : 0 profil(s) importé(s), 1 déjà présent(s), 0 en échec.",
+            "3dSen: 0 profile(s) imported, 1 already present, 0 failed.",
             harness.Host.Notifications.Current!.Value.Text);
         Assert.Single(Directory.GetFiles(harness.Paths.ProfilesDirectory, "*.3dn"));
     }

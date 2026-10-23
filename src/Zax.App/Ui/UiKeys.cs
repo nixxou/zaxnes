@@ -63,6 +63,43 @@ internal static class UiKeys
     public const string ButtonResetDefaults = "button.reset_defaults";
     public const string ButtonResetBindings = "button.reset_bindings";
     public const string ButtonStopBinding = "button.stop_binding";
+    public const string ButtonYes = "button.yes";
+    public const string ButtonNo = "button.no";
+
+    // ------------------- notifications of SPEC-10 §3.10, whose English text the spec fixes
+    //                     word for word (REQ-UI-082 to REQ-UI-084, AMD-036 §1)
+
+    public const string NotifyRollBack = "notify.roll_back";
+    public const string NotifyFastForward = "notify.fast_forward";
+    public const string NotifyQuickSave = "notify.quick_save";
+    public const string NotifyQuickLoad = "notify.quick_load";
+
+    public const string NotifyCorruptedZip = "notify.corrupted_zip";
+    public const string NotifyUncompressionFailed = "notify.uncompression_failed";
+    public const string NotifyInvalidRom = "notify.invalid_rom";
+    public const string NotifyGameMissing = "notify.game_missing";
+    public const string NotifyForeignCore = "notify.foreign_core";
+
+    public const string NotifyNotA3dnFile = "notify.not_a_3dn_file";
+    public const string NotifyUnsupported3dnVersion = "notify.unsupported_3dn_version";
+    public const string NotifyObsoleteProfileFormat = "notify.obsolete_profile_format";
+
+    // ------------- notifications of the persisted files (SPEC-09 REQ-PERS-022, REQ-PERS-024)
+
+    public const string NotifySettingsUnreadable = "notify.settings_unreadable";
+    public const string NotifySettingsNewerVersion = "notify.settings_newer_version";
+    public const string NotifyGameListUnreadable = "notify.game_list_unreadable";
+    public const string NotifyGameListNewerVersion = "notify.game_list_newer_version";
+    public const string NotifyBindingsUnreadable = "notify.bindings_unreadable";
+    public const string NotifyBindingsNewerVersion = "notify.bindings_newer_version";
+
+    /// <summary>The end-of-import summary of AMD-030 §5, translated by AMD-036 §1.</summary>
+    public const string NotifyThreeDSenSummary = "notify.import_3dsen_summary";
+
+    // ------------------- confirmations of SPEC-09 REQ-PERS-042 and REQ-PERS-054 (AMD-036 §1)
+
+    public const string ConfirmDeleteGame = "confirm.delete_game";
+    public const string ConfirmDeleteSlot = "confirm.delete_slot";
 
     // --------------------------------------------------------------- hints
 

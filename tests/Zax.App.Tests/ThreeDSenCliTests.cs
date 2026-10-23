@@ -43,8 +43,8 @@ public sealed class ThreeDSenCliTests
         int code = sandbox.Run(sandbox.InstallRoot);
 
         Assert.Equal(0, code);
-        Assert.Contains("2 profil(s) importé(s)", sandbox.Output, StringComparison.Ordinal);
-        Assert.Contains("0 en échec", sandbox.Output, StringComparison.Ordinal);
+        Assert.Contains("2 profile(s) imported", sandbox.Output, StringComparison.Ordinal);
+        Assert.Contains("0 failed", sandbox.Output, StringComparison.Ordinal);
         Assert.Empty(sandbox.Errors);
         Assert.Equal(2, Directory.GetFiles(sandbox.ProfilesDirectory, "*.3dn").Length);
     }
@@ -69,7 +69,7 @@ public sealed class ThreeDSenCliTests
         sandbox.Clear();
         Assert.Equal(0, sandbox.Run(sandbox.InstallRoot));
 
-        Assert.Contains("0 profil(s) importé(s), 1 déjà présent(s)", sandbox.Output, StringComparison.Ordinal);
+        Assert.Contains("0 profile(s) imported, 1 already present", sandbox.Output, StringComparison.Ordinal);
         Assert.Single(Directory.GetFiles(sandbox.ProfilesDirectory, "*.3dn"));
     }
 
@@ -83,7 +83,7 @@ public sealed class ThreeDSenCliTests
         int code = sandbox.Run(sandbox.InstallRoot);
 
         Assert.Equal(1, code);
-        Assert.Contains("1 profil(s) importé(s), 0 déjà présent(s), 1 en échec", sandbox.Output, StringComparison.Ordinal);
+        Assert.Contains("1 profile(s) imported, 0 already present, 1 failed", sandbox.Output, StringComparison.Ordinal);
         Assert.Contains("junk", sandbox.Errors, StringComparison.Ordinal);
         Assert.Single(Directory.GetFiles(sandbox.ProfilesDirectory, "*.3dn"));
     }
@@ -116,7 +116,7 @@ public sealed class ThreeDSenCliTests
 
         Assert.Equal(1, code);
         Assert.NotEmpty(sandbox.Errors);
-        Assert.DoesNotContain("profil(s) importé(s)", sandbox.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("profile(s) imported", sandbox.Output, StringComparison.Ordinal);
         Assert.False(Directory.Exists(sandbox.ProfilesDirectory)
             && Directory.GetFiles(sandbox.ProfilesDirectory).Length > 0);
     }

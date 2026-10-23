@@ -1,6 +1,8 @@
 using Zax.App.Loop;
 using Zax.App.Persistence;
 using Zax.App.Ui;
+using Zax.Profiles.Catalogue;
+using Zax.Profiles.Import;
 using Zax.Settings;
 
 namespace Zax.App.Tests;
@@ -219,6 +221,149 @@ public sealed class UiLanguageTests
         Assert.Contains("Show this help and exit.", AppOptions.Usage, StringComparison.Ordinal);
         Assert.Contains("Usage:", AppOptions.Usage, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// AMD-036 §2: in <c>en</c>, every notification whose text SPEC-10 §3.10 and SPEC-09 fix word
+    /// for word is identical, character for character, to the text of the spec — the two spaces
+    /// of REQ-UI-084 and the missing space after the path included. The acceptance criteria of
+    /// those requirements are read with the default language, so this is what keeps them true now
+    /// that the texts live in a table.
+    /// </summary>
+    [Fact] // REQ-UI-082, REQ-UI-083, REQ-UI-084, REQ-PERS-022, REQ-PERS-024, REQ-PERS-042, REQ-PERS-054
+    public void In_english_the_fixed_texts_are_the_texts_of_the_spec()
+    {
+        using UiLanguageScope language = new(UiLanguage.English);
+
+        // REQ-UI-082: the four in-game shortcut notifications.
+        Assert.Equal("Roll Back", UiStrings.Get(UiKeys.NotifyRollBack));
+        Assert.Equal("Fast Forward", UiStrings.Get(UiKeys.NotifyFastForward));
+        Assert.Equal("Quick Save", UiStrings.Get(UiKeys.NotifyQuickSave));
+        Assert.Equal("Quick Load", UiStrings.Get(UiKeys.NotifyQuickLoad));
+
+        // REQ-UI-083: the five load and read failures.
+        Assert.Equal("Corrupted zip file", UiStrings.Get(UiKeys.NotifyCorruptedZip));
+        Assert.Equal(
+            "Uncompression is not successful", UiStrings.Get(UiKeys.NotifyUncompressionFailed));
+        Assert.Equal("Invalid rom file.", UiStrings.Get(UiKeys.NotifyInvalidRom));
+        Assert.Equal(
+            "The game profile doesn't exist anymore.", UiStrings.Get(UiKeys.NotifyGameMissing));
+        Assert.Equal("Save state used a different core.", UiStrings.Get(UiKeys.NotifyForeignCore));
+
+        // REQ-UI-084, AMD-029 §3: the three import failures, oddities included.
+        Assert.Equal("This file is not a 3dn file", UiStrings.Get(UiKeys.NotifyNotA3dnFile));
+        Assert.Equal(
+            "3dn format version 7  is not supported",
+            UiNotifications.Translate(ProfileImportMessages.UnsupportedVersion("7")));
+        Assert.Equal(
+            @"C:\x\y.3dnhas an obsolate or wrong profile format. "
+            + "This profile is not compatible with the current version of Zaxnes.",
+            UiNotifications.Translate(ProfileImportMessages.ObsoleteFormat(@"C:\x\y.3dn")));
+
+        // REQ-PERS-022 and REQ-PERS-024: the messages of the persisted files.
+        Assert.Equal(
+            "Settings file was unreadable and has been reset.",
+            UiStrings.Get(UiKeys.NotifySettingsUnreadable));
+        Assert.Equal(
+            "Settings were created by a newer version.",
+            UiStrings.Get(UiKeys.NotifySettingsNewerVersion));
+
+        // REQ-PERS-042 and REQ-PERS-054: the two questions and their buttons.
+        Assert.Equal(
+            EmulationHost.DeleteGameQuestion, UiStrings.Get(UiKeys.ConfirmDeleteGame));
+        Assert.Equal(
+            "Do you want to delete the slot 4 ?",
+            UiNotifications.Translate(EmulationHost.DeleteSlotQuestion("4")));
+        Assert.Equal("Yes", UiStrings.Get(UiKeys.ButtonYes));
+        Assert.Equal("No", UiStrings.Get(UiKeys.ButtonNo));
+
+        // Every one of them is produced in English by the module that raises it, so the English
+        // interface shows exactly what that module wrote.
+        foreach (string key in FixedTextKeys())
+        {
+            Assert.Equal(UiStrings.EnglishTable[key], UiStrings.Get(key));
+        }
+    }
+
+    /// <summary>
+    /// AMD-036 §2: in <c>fr</c>, none of those texts is still English — the message the loop
+    /// produced is translated where it is shown, values and paths kept as they are.
+    /// </summary>
+    [Fact] // AMD-036 §1, §2
+    public void In_french_the_fixed_texts_are_translated_where_they_are_shown()
+    {
+        using UiLanguageScope language = new(UiLanguage.French);
+
+        Assert.Equal("Sauvegarde rapide", UiNotifications.Translate("Quick Save"));
+        Assert.Equal("Fichier ROM invalide.", UiNotifications.Translate(RomFile.InvalidRomMessage));
+        Assert.Equal(
+            "Le profil du jeu n'existe plus.",
+            UiNotifications.Translate(SaveStateFile.GameMissingMessage));
+        Assert.Equal(
+            "Le fichier de réglages était illisible et a été réinitialisé.",
+            UiNotifications.Translate(SettingsFile.UnreadableMessage));
+
+        // The value of a patterned text is read out of the English message and put back into the
+        // French one, wherever the sentence needs it.
+        Assert.Equal(
+            "La version 7 du format 3dn n'est pas prise en charge",
+            UiNotifications.Translate(ProfileImportMessages.UnsupportedVersion("7")));
+        Assert.StartsWith(
+            @"C:\x\y.3dn a un format de profil obsolète",
+            UiNotifications.Translate(ProfileImportMessages.ObsoleteFormat(@"C:\x\y.3dn")),
+            StringComparison.Ordinal);
+
+        // The two confirmations and their buttons, through the model the box draws.
+        ConfirmDialogModel box = new();
+        box.Open(new ConfirmationRequest(
+            "Arkanoid",
+            EmulationHost.DeleteSlotQuestion("4"),
+            EmulationHost.YesLabel,
+            EmulationHost.NoLabel,
+            () => { }));
+
+        Assert.Equal("Voulez-vous supprimer l'emplacement 4 ?", box.Message);
+        Assert.Equal("Oui", box.ConfirmLabel);
+        Assert.Equal("Non", box.CancelLabel);
+
+        // A text no requirement fixes — a script notification, a file system message — is shown
+        // as it comes rather than turned into its key.
+        Assert.Equal("anything else", UiNotifications.Translate("anything else"));
+    }
+
+    /// <summary>
+    /// AMD-036 §2: the output of <c>--import-3dsen</c> is English whatever <c>ui.language</c>
+    /// says, because the command line stays English (AMD-035 §2). Only the notification the
+    /// interface shows follows the language.
+    /// </summary>
+    [Fact] // AMD-036 §1, §2, AMD-030 §5
+    public void The_3dsen_import_summary_is_english_on_the_command_line()
+    {
+        using UiLanguageScope language = new(UiLanguage.French);
+
+        ThreeDSenImportSummary summary = new(
+            @"C:\3dSen\bundle",
+            [
+                new ThreeDSenProfileResult("Pinball", ThreeDSenProfileOutcome.Imported, "Pinball.3dn", string.Empty),
+                new ThreeDSenProfileResult("Tetris", ThreeDSenProfileOutcome.AlreadyPresent, "Tetris.3dn", string.Empty),
+                new ThreeDSenProfileResult("junk", ThreeDSenProfileOutcome.Failed, string.Empty, "bad"),
+            ]);
+
+        Assert.Equal("3dSen: 1 profile(s) imported, 1 already present, 1 failed.", summary.Message);
+
+        // The same three counts, in the language of the interface, for the notification.
+        Assert.Equal(
+            "3dSen : 1 profil(s) importé(s), 1 déjà présent(s), 1 en échec.",
+            UiNotifications.ThreeDSenSummary(
+                summary.Imported, summary.AlreadyPresent, summary.Failed));
+    }
+
+    /// <summary>The keys of the texts AMD-036 §1 moved into the tables.</summary>
+    private static IEnumerable<string> FixedTextKeys()
+        => PublishedKeys().Where(key =>
+            key.StartsWith("notify.", StringComparison.Ordinal)
+            || key.StartsWith("confirm.", StringComparison.Ordinal)
+            || key == UiKeys.ButtonYes
+            || key == UiKeys.ButtonNo);
 
     private static IEnumerable<string> PublishedKeys()
     {

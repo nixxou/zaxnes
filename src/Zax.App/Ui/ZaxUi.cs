@@ -444,7 +444,10 @@ internal sealed partial class ZaxUi
             return;
         }
 
-        _host.Notifications.Show(report.Message);
+        // AMD-036 §1: the notification follows the interface language, the log stays English.
+        _host.Notifications.Show(
+            UiNotifications.ThreeDSenSummary(
+                report.Summary.Imported, report.Summary.AlreadyPresent, report.Summary.Failed));
         _log(report.Message);
 
         if (report.Summary.Imported > 0)

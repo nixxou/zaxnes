@@ -63,6 +63,47 @@ internal static partial class UiStrings
         [UiKeys.ButtonResetDefaults] = "Defaults",
         [UiKeys.ButtonResetBindings] = "Reset every key",
         [UiKeys.ButtonStopBinding] = "Stop the capture",
+        [UiKeys.ButtonYes] = "Yes",
+        [UiKeys.ButtonNo] = "No",
+
+        // ------------------------ notifications of SPEC-10 REQ-UI-082 to REQ-UI-084
+        // Word for word what the requirements write, oddities included: the two spaces
+        // before « is » and the missing space after the path (REQ-UI-084), and the product
+        // name AMD-029 §3 put at the end. AMD-036 §1 makes these the English entries.
+        [UiKeys.NotifyRollBack] = "Roll Back",
+        [UiKeys.NotifyFastForward] = "Fast Forward",
+        [UiKeys.NotifyQuickSave] = "Quick Save",
+        [UiKeys.NotifyQuickLoad] = "Quick Load",
+
+        [UiKeys.NotifyCorruptedZip] = "Corrupted zip file",
+        [UiKeys.NotifyUncompressionFailed] = "Uncompression is not successful",
+        [UiKeys.NotifyInvalidRom] = "Invalid rom file.",
+        [UiKeys.NotifyGameMissing] = "The game profile doesn't exist anymore.",
+        [UiKeys.NotifyForeignCore] = "Save state used a different core.",
+
+        [UiKeys.NotifyNotA3dnFile] = "This file is not a 3dn file",
+        [UiKeys.NotifyUnsupported3dnVersion] = "3dn format version {0}  is not supported",
+        [UiKeys.NotifyObsoleteProfileFormat] =
+            "{0}has an obsolate or wrong profile format. "
+            + "This profile is not compatible with the current version of Zaxnes.",
+
+        // ------------- notifications of the persisted files (REQ-PERS-022, REQ-PERS-024)
+        [UiKeys.NotifySettingsUnreadable] = "Settings file was unreadable and has been reset.",
+        [UiKeys.NotifySettingsNewerVersion] = "Settings were created by a newer version.",
+        [UiKeys.NotifyGameListUnreadable] = "Game list was unreadable and has been reset.",
+        [UiKeys.NotifyGameListNewerVersion] = "Game list was created by a newer version.",
+        [UiKeys.NotifyBindingsUnreadable] = "Input bindings were unreadable and have been reset.",
+        [UiKeys.NotifyBindingsNewerVersion] = "Input bindings were created by a newer version.",
+
+        // The direct translation of the French text of AMD-030 §5, which AMD-036 §1 makes
+        // the English entry and the one the command line always prints.
+        [UiKeys.NotifyThreeDSenSummary] =
+            "3dSen: {0} profile(s) imported, {1} already present, {2} failed.",
+
+        // ------------------- confirmations of REQ-PERS-042 and REQ-PERS-054, with the
+        //                     space before the question mark the requirements write
+        [UiKeys.ConfirmDeleteGame] = "Do you want to delete the game and its save states ?",
+        [UiKeys.ConfirmDeleteSlot] = "Do you want to delete the slot {0} ?",
 
         // ------------------------------------------------------------- hints
         [UiKeys.HintImportThreeDSen] =

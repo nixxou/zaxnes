@@ -27,6 +27,11 @@ internal sealed partial class EmulationHost
     /// The confirmation text of SPEC-09 REQ-PERS-042 and SPEC-10 REQ-UI-037, with its spacing
     /// before the question mark.
     /// </summary>
+    /// <remarks>
+    /// This and the three texts below are the English entries of the tables (AMD-036 §1): the
+    /// loop keeps producing them word for word, and the frontend translates them where the box
+    /// is drawn (<c>UiNotifications</c>).
+    /// </remarks>
     public const string DeleteGameQuestion = "Do you want to delete the game and its save states ?";
 
     /// <summary>Labels of the two buttons of the deletions (REQ-UI-037, REQ-UI-052).</summary>

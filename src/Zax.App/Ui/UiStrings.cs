@@ -29,12 +29,12 @@ internal enum UiLanguage
 /// </para>
 /// <para>
 /// What stays out of the tables is what AMD-035 §2 leaves out — the console log, <c>--help</c>
-/// and the command-line messages — plus the texts SPEC-10 REQ-UI-082 to REQ-UI-084 fix word for
-/// word and the titles and descriptions that come from a profile. See
-/// <c>spec/changes/Q-075.md</c> for the notification texts.
+/// and the command-line messages — and the titles and descriptions that come from a profile.
+/// The texts SPEC-10 REQ-UI-082 to REQ-UI-084 and SPEC-09 fix word for word are <b>in</b> the
+/// tables: AMD-036 §1 makes each of them the English entry, unchanged, with a French
+/// translation beside it. <see cref="UiNotifications"/> translates them where they are shown.
 /// </para>
 /// </remarks>
-// Q-075
 internal static partial class UiStrings
 {
     private static UiLanguage _language = UiLanguage.English;

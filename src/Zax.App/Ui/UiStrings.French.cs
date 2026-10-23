@@ -63,6 +63,51 @@ internal static partial class UiStrings
         [UiKeys.ButtonResetDefaults] = "Valeurs par défaut",
         [UiKeys.ButtonResetBindings] = "Réinitialiser toutes les touches",
         [UiKeys.ButtonStopBinding] = "Arrêter la capture",
+        [UiKeys.ButtonYes] = "Oui",
+        [UiKeys.ButtonNo] = "Non",
+
+        // ------------------------ notifications de SPEC-10 REQ-UI-082 à REQ-UI-084
+        // La traduction des textes que la spec fixe mot pour mot (AMD-036 §1) : les
+        // particularités de l'original appartiennent à l'entrée anglaise, pas à celle-ci.
+        [UiKeys.NotifyRollBack] = "Retour arrière",
+        [UiKeys.NotifyFastForward] = "Avance rapide",
+        [UiKeys.NotifyQuickSave] = "Sauvegarde rapide",
+        [UiKeys.NotifyQuickLoad] = "Chargement rapide",
+
+        [UiKeys.NotifyCorruptedZip] = "Archive zip corrompue",
+        [UiKeys.NotifyUncompressionFailed] = "La décompression a échoué",
+        [UiKeys.NotifyInvalidRom] = "Fichier ROM invalide.",
+        [UiKeys.NotifyGameMissing] = "Le profil du jeu n'existe plus.",
+        [UiKeys.NotifyForeignCore] = "La sauvegarde d'état vient d'un autre cœur.",
+
+        [UiKeys.NotifyNotA3dnFile] = "Ce fichier n'est pas un fichier 3dn",
+        [UiKeys.NotifyUnsupported3dnVersion] =
+            "La version {0} du format 3dn n'est pas prise en charge",
+        [UiKeys.NotifyObsoleteProfileFormat] =
+            "{0} a un format de profil obsolète ou incorrect. "
+            + "Ce profil n'est pas compatible avec la version actuelle de Zaxnes.",
+
+        // ------------- notifications des fichiers persistants (REQ-PERS-022, REQ-PERS-024)
+        [UiKeys.NotifySettingsUnreadable] =
+            "Le fichier de réglages était illisible et a été réinitialisé.",
+        [UiKeys.NotifySettingsNewerVersion] =
+            "Les réglages ont été créés par une version plus récente.",
+        [UiKeys.NotifyGameListUnreadable] =
+            "La liste des jeux était illisible et a été réinitialisée.",
+        [UiKeys.NotifyGameListNewerVersion] =
+            "La liste des jeux a été créée par une version plus récente.",
+        [UiKeys.NotifyBindingsUnreadable] =
+            "Les affectations de touches étaient illisibles et ont été réinitialisées.",
+        [UiKeys.NotifyBindingsNewerVersion] =
+            "Les affectations de touches ont été créées par une version plus récente.",
+
+        // Le texte d'AMD-030 §5 lui-même, dont l'entrée anglaise est la traduction.
+        [UiKeys.NotifyThreeDSenSummary] =
+            "3dSen : {0} profil(s) importé(s), {1} déjà présent(s), {2} en échec.",
+
+        // ------------------- confirmations de REQ-PERS-042 et REQ-PERS-054
+        [UiKeys.ConfirmDeleteGame] = "Voulez-vous supprimer le jeu et ses sauvegardes d'état ?",
+        [UiKeys.ConfirmDeleteSlot] = "Voulez-vous supprimer l'emplacement {0} ?",
 
         // ------------------------------------------------------------- hints
         [UiKeys.HintImportThreeDSen] =

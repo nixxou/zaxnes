@@ -91,9 +91,14 @@ public sealed class ThreeDSenImportSummary
     /// The end-of-import message of AMD-030 §2: how many profiles were imported, how many were
     /// already there and how many failed.
     /// </summary>
+    /// <remarks>
+    /// In English, which is what <c>--import-3dsen</c> prints and what the log records whatever
+    /// the interface language is (AMD-036 §1, AMD-035 §2). The interface builds its own
+    /// notification from the three counts instead, in the language in force.
+    /// </remarks>
     public string Message =>
-        $"3dSen : {Imported} profil(s) importé(s), {AlreadyPresent} déjà présent(s), "
-        + $"{Failed} en échec.";
+        $"3dSen: {Imported} profile(s) imported, {AlreadyPresent} already present, "
+        + $"{Failed} failed.";
 }
 
 /// <summary>

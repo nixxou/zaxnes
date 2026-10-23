@@ -174,7 +174,9 @@ public sealed class ThreeDSenImportTests
         Assert.Equal(1, summary.AlreadyPresent);
         Assert.Equal(1, summary.Failed);
         Assert.Equal(
-            "3dSen : 2 profil(s) importé(s), 1 déjà présent(s), 1 en échec.", summary.Message);
+            // AMD-036 §1: the summary of AMD-030 §5 is English here, so the command line and the
+            // log always print English; the interface builds its own from the counts.
+            "3dSen: 2 profile(s) imported, 1 already present, 1 failed.", summary.Message);
     }
 
     [Fact] // AMD-030 §4: a bundle that cannot be read writes nothing at all.
