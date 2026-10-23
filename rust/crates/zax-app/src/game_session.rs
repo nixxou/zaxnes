@@ -652,7 +652,7 @@ impl GameSession {
     /// Switches the meshing algorithm; the geometry is rebuilt (REQ-LOOP-024).
     pub fn set_render_algorithm(&mut self, model: &mut SettingsModel, algorithm: RenderAlgorithm) {
         self.lend(model, |session| {
-            session.engine.set_render_algorithm(algorithm)
+            session.engine.set_render_algorithm(algorithm);
         });
     }
 

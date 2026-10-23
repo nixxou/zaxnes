@@ -724,7 +724,7 @@ impl<C: GameCatalog> EmulationHost<C> {
                 self.apply_speed();
             }
             SettingId::AudioVolume | SettingId::AudioMute | SettingId::AudioBgMusic => {
-                self.publish_state()
+                self.publish_state();
             }
             SettingId::UiLanguage => {
                 // AMD-035 §1: the change applies immediately. Everything the interface draws
@@ -734,7 +734,7 @@ impl<C: GameCatalog> EmulationHost<C> {
                     .push(HostEvent::LanguageChanged(self.settings.language()));
             }
             SettingId::VideoSkipFrame => {
-                self.scene.borrow_mut().settings.skip_render = self.settings.skip_frame()
+                self.scene.borrow_mut().settings.skip_render = self.settings.skip_frame();
             }
             SettingId::VideoFrameRate => {
                 self.scene
