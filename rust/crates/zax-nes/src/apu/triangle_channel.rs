@@ -66,16 +66,19 @@ impl TriangleChannel {
 
     /// Clocks the timer; called every CPU cycle. The sequencer is held while either counter
     /// is zero, and at ultrasonic periods (below 2), where it would only add a DC offset.
-    pub fn clock_timer(&mut self) {
+    /// Clocks the timer; `true` when the sequencer moved (the output may have changed).
+    pub fn clock_timer(&mut self) -> bool {
         if self.timer_period < 2 || self.linear_counter == 0 || !self.length.active() {
-            return;
+            return false;
         }
 
         if self.timer == 0 {
             self.timer = self.timer_period;
             self.sequence_position = (self.sequence_position + 1) & 31;
+            true
         } else {
             self.timer -= 1;
+            false
         }
     }
 
