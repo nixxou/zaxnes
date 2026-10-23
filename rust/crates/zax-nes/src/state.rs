@@ -58,6 +58,14 @@ impl StateWriter {
         }
     }
 
+    /// Creates a writer that appends to `buffer` after emptying it: a buffer of an earlier
+    /// state is reused without a new allocation.
+    #[must_use]
+    pub fn reusing(mut buffer: Vec<u8>) -> Self {
+        buffer.clear();
+        Self { buffer }
+    }
+
     /// Number of bytes written so far.
     #[must_use]
     pub fn len(&self) -> usize {

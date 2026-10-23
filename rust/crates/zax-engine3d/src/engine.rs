@@ -4,6 +4,7 @@
 //! recognised shapes and instances, ready for the geometry of SPEC-04B.
 
 use std::ops::{Deref, DerefMut};
+use std::time::{Duration, Instant};
 
 use zax_nes::{FrameBatch, TileRecord};
 use zax_profiles::profile::GameProfile;
@@ -74,6 +75,8 @@ pub struct ConversionEngine {
     geometry: Box<dyn PatternGeometryBuilder>,
     segmenter: Segmenter,
     draw_list_builder: DrawListBuilder,
+    /// How long the frame hooks of the last conversion took, when they are timed.
+    hook_time: Option<Duration>,
 }
 
 impl Default for ConversionEngine {
@@ -136,7 +139,21 @@ impl ConversionEngine {
             geometry: Box::new(NullPatternGeometryBuilder),
             segmenter: Segmenter::default(),
             draw_list_builder: DrawListBuilder::new(),
+            hook_time: None,
         }
+    }
+
+    /// Times the frame hooks of each conversion from now on (`true`) or stops (`false`): the
+    /// host's frame profiler reads them apart from the conversion around them.
+    pub fn set_hook_timing(&mut self, enabled: bool) {
+        self.hook_time = enabled.then_some(Duration::ZERO);
+    }
+
+    /// How long the frame hooks of the last conversion took; `None` unless
+    /// [`ConversionEngine::set_hook_timing`] turned the timing on.
+    #[must_use]
+    pub const fn last_hook_time(&self) -> Option<Duration> {
+        self.hook_time
     }
 
     /// The engine state.
@@ -395,7 +412,11 @@ impl ConversionEngine {
         );
 
         // (d) Lua hooks.
+        let started = self.hook_time.map(|_| Instant::now());
         self.run_frame_hooks();
+        if let Some(started) = started {
+            self.hook_time = Some(started.elapsed());
+        }
 
         // (e) instance positions.
         self.state.calculate_positions();

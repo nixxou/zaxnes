@@ -50,6 +50,7 @@ fn frame(harness: &mut UiHarness, handheld: &mut HandheldUi, pad: &PadState, sec
             hub: pads,
             real_seconds: seconds,
             frames_per_second: 60.0,
+            profile_line: "",
         },
     );
     harness.host.set_modal_window_open(handheld.is_modal());
@@ -267,6 +268,7 @@ fn every_screen_draws_at_the_three_sizes_of_the_devices() {
                 hub: pads,
                 real_seconds: 1.0 / 60.0,
                 frames_per_second: 60.0,
+                profile_line: "",
             };
             imgui.frame(|ui| handheld.draw(ui, &frame));
             assert_eq!(screen, handheld.screen());

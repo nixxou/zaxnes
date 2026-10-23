@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 use zax_platform::audio::PREFERRED_SAMPLE_RATE;
 use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::icon;
+use zax_platform::pacing::DisplayPacingState;
 use zax_platform::input::sdl::SdlInput;
 use zax_platform::{AudioOutput, HostWindow, HostWindowSettings};
 use zax_profiles::format;
@@ -23,6 +24,7 @@ use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 
 use crate::app_options::AppOptions;
+use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock};
 use crate::audio::audio_assets::AudioAssets;
 use crate::audio::synth_audio_library::SynthAudioLibrary;
 use crate::audio::{AudioMixer, TrackRandom, UiAudioLibrary};
@@ -200,6 +202,9 @@ struct Running {
     cursor: CursorAutoHide,
     state: RunState,
     last: Instant,
+    /// The frame profiler (`ZAXNES_PROFILE=1`) and the clock of the loop's stages.
+    profiler: Option<FrameProfiler>,
+    clock: StageClock,
 }
 
 impl Running {
@@ -253,22 +258,18 @@ impl Running {
             })),
             Some(Box::new(log)),
         );
-        pacing.apply(&mut window, &model);
+        let pacing_state = pacing.apply(&mut window, &model);
+        let profiling = frame_profiler::requested_by_environment();
+        if profiling {
+            log_profiler_startup(&model, pacing_state);
+        }
         let (width, height) = window.drawable_size();
         // The host owns the picture of the scene: it reads it back for the thumbnails whenever
         // the game pauses, and the loop draws into it through the host.
         let view = OffscreenFramebuffer::new(Rc::clone(&gl), to_i32(width), to_i32(height))
             .map_err(|error| error.to_string())?;
         // The linked programs are kept in the user folder, where the next start finds them.
-        let renderer = SceneRenderer::with_program_cache(
-            Rc::clone(&gl),
-            NeutralSceneAssets::try_open(asset_root.as_deref())
-                .map(|assets| Box::new(assets) as Box<dyn SceneAssets>),
-            paths
-                .is_writable
-                .then(|| paths.root.join(SHADER_CACHE_FOLDER)),
-        )
-        .map_err(|error| error.to_string())?;
+        let renderer = open_renderer(&gl, asset_root.as_deref(), &paths)?;
         let input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;
         let mut bindings_store = FileInputBindingStore::new(paths.clone(), OffsetDateTime::now_utc);
         let mut bindings = crate::input::InputBindings::new();
@@ -288,6 +289,7 @@ impl Running {
             view,
         };
         let mut host = build_host(parts);
+        host.set_profiling(profiling);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui = ImguiFrontend::new(&gl, &host, options, height)?;
@@ -306,11 +308,15 @@ impl Running {
             cursor: CursorAutoHide::new(),
             state: RunState::new(renderer_name, version),
             last: Instant::now(),
+            profiler: profiling.then(|| FrameProfiler::new(Instant::now())),
+            clock: StageClock::new(profiling),
         })
     }
 
     /// One displayed frame. Returns false once the application is to close.
     fn frame(&mut self) -> Result<bool, String> {
+        let frame_begin = self.clock.start();
+        let mark = self.clock.start();
         if self.pump_events() {
             return Ok(false);
         }
@@ -334,14 +340,25 @@ impl Running {
             &snapshot,
             real_f,
         );
+        self.clock.stop(Stage::Input, mark);
+        let mark = self.clock.start();
         let emulated = self.host.tick(real, &snapshot);
         self.source.end_sample();
+        if let Some(mark) = mark {
+            // The emulated frames' own stages are counted apart from the rest of the tick.
+            let inner = self.host.take_stage_times();
+            self.clock
+                .add(Stage::Emulation, mark.elapsed().saturating_sub(inner.total()));
+            self.clock.merge(&inner);
+        }
+        let mark = self.clock.start();
         update_scene(&mut self.host, &mut self.state);
         {
             let scene = self.host.scene_mut();
             scene.camera.advance(real_f);
             scene.real_time += real_f;
         }
+        self.clock.stop(Stage::Scene, mark);
         forward_events(
             &mut self.host,
             &mut self.ui,
@@ -350,7 +367,9 @@ impl Running {
         );
         self.draw(emulated, width, height, real_f)?;
         self.carry_out_ui_effects();
+        let mark = self.clock.start();
         pump_audio(&mut self.host, self.audio.as_mut(), real);
+        self.clock.stop(Stage::Audio, mark);
         if self.host.quit_requested()
             || (self.options.smoke_test
                 && smoke_run_is_over(&self.options, &self.host, &self.state))
@@ -360,7 +379,18 @@ impl Running {
             }
             return Ok(false);
         }
-        self.window.swap_and_pace();
+        let mark = self.clock.start();
+        self.window.swap();
+        self.clock.stop(Stage::Swap, mark);
+        let mark = self.clock.start();
+        self.window.pace();
+        self.clock.stop(Stage::Pacer, mark);
+        if let (Some(profiler), Some(begin)) = (self.profiler.as_mut(), frame_begin) {
+            let times = self.clock.take();
+            if let Some(report) = profiler.end_frame(&times, begin.elapsed(), Instant::now()) {
+                log(&report);
+            }
+        }
         Ok(true)
     }
 
@@ -443,6 +473,7 @@ impl Running {
             emulated,
             self.state.last_render_size == (scene_width, scene_height),
         );
+        let mark = self.clock.start();
         if skip {
             self.state.skipped_frames += 1;
         } else {
@@ -450,6 +481,8 @@ impl Running {
             self.state.last_render_size = (scene_width, scene_height);
             self.state.scene_frames += 1;
         }
+        self.clock.stop(Stage::Scene, mark);
+        let mark = self.clock.start();
         framebuffer::begin_window_pass(&self.gl, width, height);
         if let Some(view) = self.host.view() {
             view.blit_to_default_framebuffer(width, view_height);
@@ -474,11 +507,13 @@ impl Running {
             real_seconds: real,
             #[allow(clippy::cast_possible_truncation)] // the C# `(float)FramesPerSecond`
             frames_per_second: debug.frames_per_second as f32,
+            profile_line: self.profiler.as_ref().map_or("", FrameProfiler::summary),
         };
         let gl = &self.gl;
         self.ui.draw(&mut frame, sizes, &debug, |path| {
             capture_window(gl, width, height, path);
         });
+        self.clock.stop(Stage::Ui, mark);
         Ok(())
     }
 
@@ -576,6 +611,41 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     options.confirm_with_interface = true;
     options.view = Some(parts.view);
     EmulationHost::new(options)
+}
+
+/// The scene renderer, with its linked programs kept in the user folder.
+fn open_renderer(
+    gl: &Rc<glow::Context>,
+    asset_root: Option<&Path>,
+    paths: &UserDataPaths,
+) -> Result<SceneRenderer, String> {
+    SceneRenderer::with_program_cache(
+        Rc::clone(gl),
+        NeutralSceneAssets::try_open(asset_root)
+            .map(|assets| Box::new(assets) as Box<dyn SceneAssets>),
+        paths
+            .is_writable
+            .then(|| paths.root.join(SHADER_CACHE_FOLDER)),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// The start-up line of the frame profiler: the machine, the build, the render settings and
+/// the pacing in force.
+fn log_profiler_startup(model: &SettingsModel, pacing: DisplayPacingState) {
+    log(&frame_profiler::startup_report(
+        &format!(
+            "render scale {}, render method {}, shadows {}, MSAA setting {}, vsync {}, \
+             frame rate setting {}",
+            model.res_scale_factor(),
+            model.render_method(),
+            model.shadow(),
+            model.anti_alias(),
+            model.vsync(),
+            model.frame_rate()
+        ),
+        &pacing.to_string(),
+    ));
 }
 
 fn log_window_icon(window: &mut HostWindow) {
@@ -857,7 +927,13 @@ fn render_scene(
     } else {
         &[]
     };
-    let list = session.map(GameSession::build_draw_list);
+    // In 2D mode the renderer shows the core's picture alone (AMD-009) and reads nothing of the
+    // draw list, so it is not built (Rust-only saving: the C# loop builds it every frame).
+    let list = if picture.is_empty() {
+        session.map(GameSession::build_draw_list)
+    } else {
+        None
+    };
     let frame = SceneFrame {
         draw_list: list,
         nes_picture: picture,

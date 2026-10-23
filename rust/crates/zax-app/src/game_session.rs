@@ -33,6 +33,7 @@ use zax_scripting::{
 use zax_settings::catalogue::{Port, SettingId};
 use zax_settings::model::SettingsModel;
 
+use crate::frame_profiler::{Stage, StageClock};
 use crate::input::input_action::InputAction;
 use crate::input::routing;
 use crate::scene_script_bridge::{self, SceneBackdropBridge, SceneCameraBridge};
@@ -167,6 +168,19 @@ pub struct SessionRequest<'a> {
     pub different_game: bool,
     /// Whether the game is played flat; `None` means "when the profile has no pattern".
     pub two_dimensional_mode: Option<bool>,
+}
+
+/// The inputs of one emulated frame.
+#[derive(Debug, Clone, Copy)]
+pub struct SessionFrame {
+    /// The first player's actions.
+    pub player_one: InputAction,
+    /// The second player's actions.
+    pub player_two: InputAction,
+    /// The Zapper byte of its port.
+    pub zapper_byte: u8,
+    /// Where the Zapper aims.
+    pub zapper_position: ZapperPosition,
 }
 
 /// One game being played.
@@ -576,20 +590,41 @@ impl GameSession {
         zapper_byte: u8,
         zapper_position: ZapperPosition,
     ) {
+        let frame = SessionFrame {
+            player_one,
+            player_two,
+            zapper_byte,
+            zapper_position,
+        };
+        self.run_frame_timed(model, scene, frame, &mut StageClock::default());
+    }
+
+    /// [`GameSession::run_frame`] with its stages timed on `clock` when the clock is on (the
+    /// frame profiler): core, tile-record capture, conversion and Lua hooks.
+    pub fn run_frame_timed(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        frame: SessionFrame,
+        clock: &mut StageClock,
+    ) {
+        if clock.enabled() != self.engine.last_hook_time().is_some() {
+            self.engine.set_hook_timing(clock.enabled());
+        }
         self.lend(model, scene, |session, scene| {
-            session.run_frame_lent(scene, player_one, player_two, zapper_byte, zapper_position);
+            session.run_frame_lent(scene, frame, clock);
         });
     }
 
-    fn run_frame_lent(
-        &mut self,
-        scene: &mut SceneState,
-        player_one: InputAction,
-        player_two: InputAction,
-        zapper_byte: u8,
-        zapper_position: ZapperPosition,
-    ) {
+    fn run_frame_lent(&mut self, scene: &mut SceneState, frame: SessionFrame, clock: &mut StageClock) {
+        let SessionFrame {
+            player_one,
+            player_two,
+            zapper_byte,
+            zapper_position,
+        } = frame;
         let counter = self.frame_counter;
+        let started = clock.start();
         #[allow(clippy::cast_precision_loss)] // the C# `FrameCounter / 60f`
         let time = counter as f32 / 60.0;
         let (pad, pad_index) = self
@@ -600,6 +635,7 @@ impl GameSession {
                 )
             })
             .unwrap_or((0, 0));
+        clock.stop(Stage::Lua, started);
         let (first, second) = routing::merge_script_pad(
             player_one,
             player_two,
@@ -626,10 +662,14 @@ impl GameSession {
                 core.port_type(1).unwrap_or_default(),
                 zapper_byte,
             );
+            let started = clock.start();
             core.run_frame(word);
+            clock.stop(Stage::Core, started);
+            let started = clock.start();
             let batch = core.frame_batch();
             records.clear();
             records.extend_from_slice(batch.records);
+            clock.stop(Stage::Capture, started);
             (batch.palette, batch.mask_x, batch.mask_y)
         };
         // The conversion is synchronous, right after the frame, as REQ-LOOP-060 (c) requires.
@@ -639,13 +679,22 @@ impl GameSession {
             mask_x,
             mask_y,
         };
+        let started = clock.start();
         self.scripted(scene, |engine| {
             engine.convert(&batch, counter);
         });
+        if let Some(started) = started {
+            // The frame hooks are timed inside the conversion and counted apart.
+            let hooks = self.engine.last_hook_time().unwrap_or_default();
+            clock.add(Stage::Conversion, started.elapsed().saturating_sub(hooks));
+            clock.add(Stage::Lua, hooks);
+        }
         self.batch_records = records;
         // The subjective camera follows the shape a script picked, through the tracker of
         // SPEC-04 (REQ-LUA-088, REQ-SCN-021).
+        let started = clock.start();
         self.with_runtime(scene, ProfileScriptRuntime::advance_camera_tracking);
+        clock.stop(Stage::Lua, started);
         self.engine.publish();
         self.frame_counter += 1;
     }

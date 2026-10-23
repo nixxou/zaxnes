@@ -54,6 +54,38 @@ impl RollbackHistory {
         self.snapshots.push_back(core_state);
     }
 
+    /// Appends the snapshot `write` puts in its buffer, as [`RollbackHistory::capture`]
+    /// does. When the history is full, `write` gets the oldest snapshot's buffer to overwrite,
+    /// so the steady state allocates nothing. `write` must leave the buffer untouched when it
+    /// fails: the oldest snapshot then stays where it was and the history is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// What `write` returns.
+    pub fn capture_with<E>(
+        &mut self,
+        write: impl FnOnce(&mut Vec<u8>) -> Result<(), E>,
+    ) -> Result<(), E> {
+        let full = self.snapshots.len() == CAPACITY;
+        let mut buffer = if full {
+            self.snapshots.pop_front().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        match write(&mut buffer) {
+            Ok(()) => {
+                self.snapshots.push_back(buffer);
+                Ok(())
+            }
+            Err(error) => {
+                if full {
+                    self.snapshots.push_front(buffer);
+                }
+                Err(error)
+            }
+        }
+    }
+
     /// Takes the snapshot a rollback restores and removes it from the history together with the
     /// last one (REQ-LOOP-032 step 2).
     ///

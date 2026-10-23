@@ -3,6 +3,8 @@
 //! publication, draw list, picture copy). No display is needed, so it runs where the device
 //! cannot be profiled (a cross build under `qemu-aarch64` gives the relative weights).
 
+use std::collections::VecDeque;
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -84,6 +86,7 @@ impl Options {
 /// The stages of an emulated frame, in the order they run.
 #[derive(Debug, Clone, Copy)]
 enum Stage {
+    Rollback,
     Core,
     Capture,
     Conversion,
@@ -94,7 +97,8 @@ enum Stage {
 }
 
 impl Stage {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
+        Self::Rollback,
         Self::Core,
         Self::Capture,
         Self::Conversion,
@@ -106,6 +110,7 @@ impl Stage {
 
     const fn name(self) -> &'static str {
         match self {
+            Self::Rollback => "rollback snapshot",
             Self::Core => "core run_frame",
             Self::Capture => "tile-record capture",
             Self::Conversion => "conversion (no Lua)",
@@ -128,6 +133,45 @@ impl Tally {
     fn add(&mut self, seconds: f64) {
         self.total += seconds;
         self.max = self.max.max(seconds);
+    }
+}
+
+/// Snapshots the rollback history of the application keeps, one every
+/// [`ROLLBACK_INTERVAL`] emulated frames (REQ-LOOP-030).
+const ROLLBACK_CAPACITY: usize = 30;
+
+/// Emulated frames between two rollback snapshots (REQ-LOOP-030).
+const ROLLBACK_INTERVAL: i64 = 60;
+
+/// The rollback snapshots as the application takes them, its oldest buffer recycled.
+#[derive(Debug, Default)]
+struct Rollback {
+    history: VecDeque<Vec<u8>>,
+    /// What a snapshot in a new allocation costs, for comparison (the loop before the reuse).
+    fresh: Tally,
+    snapshots: u32,
+}
+
+impl Rollback {
+    fn capture(&mut self, host: &Host) -> Result<(), HarnessError> {
+        let mut buffer = if self.history.len() == ROLLBACK_CAPACITY {
+            self.history.pop_front().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        host.core
+            .save_state_to(false, &mut buffer)
+            .map_err(|error| HarnessError::Rom(error.to_string()))?;
+        self.history.push_back(buffer);
+        Ok(())
+    }
+
+    fn time_fresh(&mut self, host: &Host) {
+        let started = Instant::now();
+        let state = host.core.save_state(false);
+        drop(state);
+        self.fresh.add(started.elapsed().as_secs_f64());
+        self.snapshots += 1;
     }
 }
 
@@ -158,6 +202,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
     let mut tallies = [Tally::default(); Stage::ALL.len()];
     let mut record_count = 0.0;
     let mut whole = Tally::default();
+    let mut rollback = Rollback::default();
     let total = options.warmup + options.frames;
     for counter in 0..total {
         let timed = counter >= options.warmup;
@@ -170,6 +215,12 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             }
             mark = now;
         };
+
+        let snapshot = host.core.frame_count() % ROLLBACK_INTERVAL == 0;
+        if snapshot {
+            rollback.capture(&host)?;
+        }
+        lap(Stage::Rollback, 0.0);
 
         host.core.run_frame(options.press.at(counter));
         lap(Stage::Core, 0.0);
@@ -212,9 +263,28 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             tallies[Stage::Lua as usize].add(lua);
             record_count += f64::from(u32::try_from(records.len()).unwrap_or(u32::MAX));
             whole.add(frame_start.elapsed().as_secs_f64());
+            if snapshot {
+                rollback.time_fresh(&host);
+            }
         }
     }
-    Ok(report(options, &tallies, whole, record_count))
+    let mut text = report(options, &tallies, whole, record_count);
+    if rollback.snapshots > 0 {
+        let snapshots = f64::from(rollback.snapshots);
+        let recycled = tallies[Stage::Rollback as usize];
+        let _ = write!(
+            text,
+            "\n  rollback: {} snapshots, {:.4} ms each recycled (max {:.3}), {:.4} ms each in a \
+             new allocation (max {:.3}), {} bytes",
+            rollback.snapshots,
+            recycled.total * 1000.0 / snapshots,
+            recycled.max * 1000.0,
+            rollback.fresh.total * 1000.0 / snapshots,
+            rollback.fresh.max * 1000.0,
+            rollback.history.back().map_or(0, Vec::len)
+        );
+    }
+    Ok(text)
 }
 
 fn report(options: &Options, tallies: &[Tally], whole: Tally, record_count: f64) -> String {

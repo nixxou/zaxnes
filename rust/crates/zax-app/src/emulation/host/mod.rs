@@ -30,7 +30,8 @@ use super::notification_center::NotificationCenter;
 use super::rollback_history::RollbackHistory;
 use super::speed_setting;
 use crate::audio::AudioMixer;
-use crate::game_session::{GameSession, SessionEvent};
+use crate::frame_profiler::{Stage, StageClock, StageTimes};
+use crate::game_session::{GameSession, SessionEvent, SessionFrame};
 use crate::input::routing;
 use crate::input::zapper::{ZapperInput, ZapperState};
 use crate::input::InputSnapshot;
@@ -181,6 +182,7 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     scene_scale: f32,
     elapsed: f64,
     was_running_before_suspend: bool,
+    stage_clock: StageClock,
     /// The frame clock.
     pub pacer: FramePacer,
     /// The rollback history.
@@ -254,6 +256,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             scene_scale: 1.0,
             elapsed: 0.0,
             was_running_before_suspend: false,
+            stage_clock: StageClock::default(),
             rollback: RollbackHistory::new(),
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
@@ -423,6 +426,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.pending.len()
     }
 
+    /// Times the stages of the emulated frames from now on (the frame profiler) or stops.
+    pub const fn set_profiling(&mut self, enabled: bool) {
+        self.stage_clock.set_enabled(enabled);
+    }
+
+    /// The stage times of the emulated frames since the last call: core, capture, conversion,
+    /// Lua, rollback (all zero while the profiling is off).
+    pub fn take_stage_times(&mut self) -> StageTimes {
+        self.stage_clock.take()
+    }
+
     /// The capture of the game view taken when the game was paused (REQ-LOOP-006).
     #[must_use]
     pub fn pause_thumbnail(&self) -> Option<&[u8]> {
@@ -586,13 +600,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             };
             // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
             // counter is a multiple of 60, so before that frame executes.
-            let snapshot = {
-                let core = session.core();
-                RollbackHistory::is_snapshot_frame(core.frame_count())
-                    .then(|| core.save_state(false))
-            };
-            if let Some(Ok(state)) = snapshot {
-                self.rollback.capture(state);
+            let core = session.core();
+            if RollbackHistory::is_snapshot_frame(core.frame_count()) {
+                let started = self.stage_clock.start();
+                // A failure (no ROM) leaves the history as it was, as before.
+                let _ = self
+                    .rollback
+                    .capture_with(|buffer| core.save_state_to(false, buffer));
+                self.stage_clock.stop(Stage::Rollback, started);
             }
             // REQ-INP-005: one emulated frame is one sample, fast forward included.
             self.run_session_frame(player_one, player_two);
@@ -620,13 +635,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let port_byte = self.zapper.port_byte();
         let position = self.zapper.position();
         if let Some(session) = self.session.as_mut() {
-            session.run_frame(
-                &mut self.settings,
-                &mut self.scene,
+            let frame = SessionFrame {
                 player_one,
                 player_two,
-                port_byte,
-                position,
+                zapper_byte: port_byte,
+                zapper_position: position,
+            };
+            session.run_frame_timed(
+                &mut self.settings,
+                &mut self.scene,
+                frame,
+                &mut self.stage_clock,
             );
         }
     }

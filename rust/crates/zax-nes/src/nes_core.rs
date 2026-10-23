@@ -478,10 +478,29 @@ impl NesCore {
     /// # Errors
     /// [`NoRomLoaded`] when there is nothing to save.
     pub fn save_state(&self, include_rom_image: bool) -> Result<Vec<u8>, NoRomLoaded> {
+        let rom_bytes = self.bus.cartridge().map_or(0, |cartridge| cartridge.rom().raw().len());
+        let capacity = if include_rom_image { rom_bytes } else { 0 } + 32 * 1024;
+        let mut buffer = Vec::with_capacity(capacity);
+        self.save_state_to(include_rom_image, &mut buffer)?;
+        Ok(buffer)
+    }
+
+    /// [`NesCore::save_state`] written into `buffer`, whose earlier content is replaced and
+    /// whose allocation is kept (the rollback history recycles its oldest snapshot this way).
+    /// The bytes are those of [`NesCore::save_state`]; on an error `buffer` is untouched.
+    ///
+    /// # Errors
+    ///
+    /// [`NoRomLoaded`] when no ROM is loaded.
+    pub fn save_state_to(
+        &self,
+        include_rom_image: bool,
+        buffer: &mut Vec<u8>,
+    ) -> Result<(), NoRomLoaded> {
         let cartridge = self.bus.cartridge().ok_or(NoRomLoaded)?;
         let rom = cartridge.rom();
 
-        let mut writer = StateWriter::with_capacity(rom.raw().len() + 32 * 1024);
+        let mut writer = StateWriter::reusing(std::mem::take(buffer));
         writer.write_u32(Self::STATE_MAGIC);
         writer.write_i32(Self::STATE_VERSION);
         writer.write_string(Self::CORE_NAME);
@@ -498,7 +517,8 @@ impl NesCore {
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
 
-        Ok(writer.into_vec())
+        *buffer = writer.into_vec();
+        Ok(())
     }
 
     /// Upper bound on the size of a state block for the ROM currently loaded, announced
