@@ -152,7 +152,7 @@ impl OffscreenFramebuffer {
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                glow::RGBA8.cast_signed(),
+                enum_i32(glow::RGBA8),
                 width,
                 height,
                 0,
@@ -166,7 +166,7 @@ impl OffscreenFramebuffer {
                 (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
                 (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
             ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, parameter, value.cast_signed());
+                gl.tex_parameter_i32(glow::TEXTURE_2D, parameter, enum_i32(value));
             }
             gl.framebuffer_texture_2d(
                 glow::FRAMEBUFFER,
@@ -220,6 +220,11 @@ impl Drop for OffscreenFramebuffer {
     fn drop(&mut self) {
         self.release();
     }
+}
+
+/// A GL enumerant as the signed integer the parameter calls take; they are all far below 2^31.
+fn enum_i32(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(0)
 }
 
 /// Reads the window's own framebuffer as RGB, rows top to bottom, for the capture options of
