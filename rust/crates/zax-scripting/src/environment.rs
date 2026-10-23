@@ -439,7 +439,7 @@ pub trait ScriptMemory {
 /// A flat 64 KiB scratch space: the headless default.
 #[derive(Debug, Clone)]
 pub struct DetachedScriptMemory {
-    bytes: Box<[u8; 0x1_0000]>,
+    bytes: Box<[u8]>,
 }
 
 impl DetachedScriptMemory {
@@ -447,7 +447,7 @@ impl DetachedScriptMemory {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            bytes: Box::new([0; 0x1_0000]),
+            bytes: vec![0; 0x1_0000].into_boxed_slice(),
         }
     }
 }

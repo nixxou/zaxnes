@@ -89,7 +89,7 @@ pub struct LuaXrState {
 /// `%.14g` (REQ-LUA-052, REQ-LUA-101 point 1).
 pub mod number_format {
     /// 2^63 as a double: the first magnitude a 64-bit integer cannot hold.
-    const TWO_POW_63: f64 = 9.223_372_036_854_775_8E18;
+    const TWO_POW_63: f64 = 9_223_372_036_854_775_808.0;
 
     /// Digits `%.14g` keeps.
     const SIGNIFICANT_DIGITS: usize = 14;
@@ -113,7 +113,7 @@ pub mod number_format {
 
         // An integral value that a 64-bit integer can hold is written without a decimal part,
         // as the single numeric type of the original did.
-        if value == value.floor() && value.abs() < TWO_POW_63 {
+        if value.to_bits() == value.trunc().to_bits() && value.abs() < TWO_POW_63 {
             return (value as i64).to_string();
         }
 
@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn other_numbers_use_14_significant_digits() {
         assert_eq!(to_text(0.4), "0.4");
-        assert_eq!(to_text(0.100_000_001_490_116), "0.100000001490116");
+        assert_eq!(to_text(0.100_000_001_490_116), "0.10000000149012");
         assert_eq!(to_text(1.0 / 3.0), "0.33333333333333");
         assert_eq!(to_text(1.5e-7), "1.5e-07");
         assert_eq!(to_text(1e20), "1e+20");

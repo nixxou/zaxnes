@@ -8,9 +8,9 @@ use zax_settings::catalogue::SettingId;
 
 use super::settings::with_settings;
 use super::{assigned_bool, boolean, num, type_def};
-use crate::binding::cx::{Call, Cx};
+use crate::binding::cx::{host_payload, try_color, Call, Cx};
 use crate::binding::payload::{HostType, Payload, Vec3Ref};
-use crate::binding::table::{Reply, TypeDef};
+use crate::binding::table::TypeDef;
 use crate::environment::{ScriptNotification, ScriptNotificationSeverity};
 use crate::values::number_format;
 
@@ -21,10 +21,6 @@ pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.push(video());
     types.push(profile());
     types.push(notifications());
-}
-
-fn reply(value: Value) -> mlua::Result<Reply> {
-    Ok(Some(value))
 }
 
 /// Camera's members are methods: calling one with `.` leaves the first argument in the
@@ -71,6 +67,14 @@ pub(crate) fn apply_camera_tracking(cx: &Cx) -> mlua::Result<()> {
 fn camera() -> TypeDef {
     let mut definition = type_def(HostType::CameraApi, "CameraAPI");
 
+    camera_properties(&mut definition);
+
+    camera_methods(&mut definition);
+    definition
+}
+
+/// The properties of the camera (REQ-LUA-088).
+fn camera_properties(definition: &mut TypeDef) {
     // The orientation of the current mode, as a bound vector a script may keep (REQ-LUA-044,
     // "Antarctic Adventure").
     definition.read_only(
@@ -122,7 +126,7 @@ fn camera() -> TypeDef {
                 return cx.data(|data| data.fpv_shape = None);
             }
 
-            if let Some(Payload::Shape(shape)) = cx.host(value) {
+            if let Some(Payload::Shape(shape)) = host_payload(value) {
                 cx.data(|data| data.fpv_shape = Some(shape))?;
                 return apply_camera_tracking(cx);
             }
@@ -141,7 +145,10 @@ fn camera() -> TypeDef {
         |cx, _| Ok(boolean(cx.data(|data| data.env.camera.mode())? == 0)),
         None,
     );
+}
 
+/// The methods of the camera (REQ-LUA-088).
+fn camera_methods(definition: &mut TypeDef) {
     definition.function(
         "SetTarget",
         |call| {
@@ -164,7 +171,7 @@ fn camera() -> TypeDef {
         |call| {
             require(call, HostType::CameraApi, "GetTarget")?;
             let target = call.cx.data(|data| data.env.camera.look_at())?;
-            reply(call.cx.vector3(target)?)
+            Ok(Some(call.cx.vector3(target)?))
         },
         Some(HostType::Vector3),
     );
@@ -217,7 +224,6 @@ fn camera() -> TypeDef {
         },
         None,
     );
-    definition
 }
 
 fn backdrop_axis(
@@ -266,7 +272,7 @@ fn backdrop() -> TypeDef {
         "Color",
         |cx, _| cx.color(cx.data(|data| data.env.backdrop.color())?),
         |cx, _, value| {
-            let Some(color) = cx.try_color(value) else {
+            let Some(color) = try_color(value) else {
                 return Err(cx.invalid("Color"));
             };
 
@@ -332,7 +338,7 @@ fn light() -> TypeDef {
         "Color",
         |cx, _| cx.color(cx.data(|data| data.env.settings.light_color())?),
         |cx, _, value| {
-            let Some(color) = cx.try_color(value) else {
+            let Some(color) = try_color(value) else {
                 return Err(cx.invalid("Color"));
             };
 

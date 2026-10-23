@@ -7,6 +7,7 @@
 // The vectors of SPEC-05 compare floats exactly, as the C# tests do.
 #![allow(clippy::float_cmp)]
 
+mod api_behaviour_tests;
 mod api_coverage_tests;
 mod corpus_tests;
 mod lua_access_resolver;

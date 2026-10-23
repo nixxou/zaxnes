@@ -7,9 +7,9 @@ use mlua::Value;
 use zax_settings::catalogue::SettingId;
 
 use super::{assigned_bool, boolean, num, type_def};
-use crate::binding::cx::{Call, Cx};
+use crate::binding::cx::{try_color, Call, Cx};
 use crate::binding::payload::{HostType, Payload};
-use crate::binding::table::{Reply, TypeDef};
+use crate::binding::table::TypeDef;
 use crate::settings::{
     ScriptSettings, CLIPPING_COUNT, DEFAULT_SMOOTH_TIME, LAYER_COUNT, NON_VR_SCALE, VR_SCALE,
 };
@@ -18,10 +18,6 @@ use crate::values::LuaColor;
 pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.push(setting());
     types.extend(layers());
-}
-
-fn reply(value: Value) -> mlua::Result<Reply> {
-    Ok(Some(value))
 }
 
 /// Writes through the settings of the runtime, then mirrors the change into the pipeline's own
@@ -156,6 +152,22 @@ const SETTING_CONSTANTS: [(&str, &str); 51] = [
 fn setting() -> TypeDef {
     let mut definition = type_def(HostType::SettingApi, "SettingAPI");
 
+    setting_objects(&mut definition);
+
+    setting_flags(&mut definition);
+
+    setting_values(&mut definition);
+
+    setting_derived(&mut definition);
+
+    setting_engine_mode_and_constants(&mut definition);
+
+    setting_functions(&mut definition);
+    definition
+}
+
+/// The objects `Setting` carries: the light, the layers and the clipping.
+fn setting_objects(definition: &mut TypeDef) {
     definition.read_only(
         "Light",
         |cx, _| cx.object(Payload::Table(HostType::Light)),
@@ -171,71 +183,57 @@ fn setting() -> TypeDef {
         |cx, _| cx.object(Payload::Table(HostType::Clipping)),
         Some(HostType::Clipping),
     );
+}
 
-    flag(&mut definition, "EmptyTile", SettingId::ConvEmptyTile);
-    flag(&mut definition, "BgColor", SettingId::SceneUseNesBgColor);
-    flag(
-        &mut definition,
-        "SameBgPalette",
-        SettingId::ConvSameBgPalette,
-    );
+/// The boolean settings.
+fn setting_flags(definition: &mut TypeDef) {
+    flag(definition, "EmptyTile", SettingId::ConvEmptyTile);
+    flag(definition, "BgColor", SettingId::SceneUseNesBgColor);
+    flag(definition, "SameBgPalette", SettingId::ConvSameBgPalette);
     definition.alias("SamePalette", "SameBgPalette");
-    flag(
-        &mut definition,
-        "SameSpPalette",
-        SettingId::ConvSameSpPalette,
-    );
-    flag(&mut definition, "LocalCam", SettingId::CameraLocalCam);
+    flag(definition, "SameSpPalette", SettingId::ConvSameSpPalette);
+    flag(definition, "LocalCam", SettingId::CameraLocalCam);
     definition.alias("TopDownCam", "LocalCam");
-    flag(&mut definition, "Shadow", SettingId::RenderShadow);
-    flag(&mut definition, "MapEnable", SettingId::SceneMapEnable);
-    flag(&mut definition, "Mirroring", SettingId::VrMirroring);
-    flag(&mut definition, "SkipFrame", SettingId::VideoSkipFrame);
-    flag(&mut definition, "BGMusic", SettingId::AudioBgMusic);
-    flag(&mut definition, "AutoTVMode", SettingId::EmuAutoTvMode);
+    flag(definition, "Shadow", SettingId::RenderShadow);
+    flag(definition, "MapEnable", SettingId::SceneMapEnable);
+    flag(definition, "Mirroring", SettingId::VrMirroring);
+    flag(definition, "SkipFrame", SettingId::VideoSkipFrame);
+    flag(definition, "BGMusic", SettingId::AudioBgMusic);
+    flag(definition, "AutoTVMode", SettingId::EmuAutoTvMode);
     flag(
-        &mut definition,
+        definition,
         "EmulatedMenuButton",
         SettingId::InputEmulatedMenuButton,
     );
+}
 
-    real(&mut definition, "GameSpeed", SettingId::EmuGameSpeed);
-    real(&mut definition, "SmoothTime", SettingId::CameraSmoothTime);
-    real(&mut definition, "Fov", SettingId::CameraFov);
-    real(&mut definition, "Volume", SettingId::AudioVolume);
-    real(&mut definition, "SceneRatio", SettingId::VrSceneRatio);
-    real(&mut definition, "SceneScale", SettingId::SceneSceneScale);
-    real(&mut definition, "RootScale", SettingId::SceneRootScale);
+/// The real and whole settings.
+fn setting_values(definition: &mut TypeDef) {
+    real(definition, "GameSpeed", SettingId::EmuGameSpeed);
+    real(definition, "SmoothTime", SettingId::CameraSmoothTime);
+    real(definition, "Fov", SettingId::CameraFov);
+    real(definition, "Volume", SettingId::AudioVolume);
+    real(definition, "SceneRatio", SettingId::VrSceneRatio);
+    real(definition, "SceneScale", SettingId::SceneSceneScale);
+    real(definition, "RootScale", SettingId::SceneRootScale);
 
-    whole(&mut definition, "VrRuntime", SettingId::VrRuntime);
-    whole(&mut definition, "VSync", SettingId::VideoVSync);
-    whole(&mut definition, "FrameRate", SettingId::VideoFrameRate);
+    whole(definition, "VrRuntime", SettingId::VrRuntime);
+    whole(definition, "VSync", SettingId::VideoVSync);
+    whole(definition, "FrameRate", SettingId::VideoFrameRate);
+    whole(definition, "GraphicQuality", SettingId::VideoGraphicQuality);
+    whole(definition, "RenderMode", SettingId::RenderMeshAlgo);
+    whole(definition, "RenderMethod", SettingId::VideoRenderMethod);
+    whole(definition, "ResScaleIndex", SettingId::VideoResScale);
+    whole(definition, "AntiAlias", SettingId::VideoAntiAlias);
     whole(
-        &mut definition,
-        "GraphicQuality",
-        SettingId::VideoGraphicQuality,
-    );
-    whole(&mut definition, "RenderMode", SettingId::RenderMeshAlgo);
-    whole(
-        &mut definition,
-        "RenderMethod",
-        SettingId::VideoRenderMethod,
-    );
-    whole(&mut definition, "ResScaleIndex", SettingId::VideoResScale);
-    whole(&mut definition, "AntiAlias", SettingId::VideoAntiAlias);
-    whole(
-        &mut definition,
+        definition,
         "SpriteTolerance",
         SettingId::ConvSpriteTolerance,
     );
-    whole(
-        &mut definition,
-        "ScanDirection",
-        SettingId::ConvScanDirection,
-    );
-    whole(&mut definition, "Skybox", SettingId::SceneSkybox);
-    whole(&mut definition, "Core", SettingId::EmuCore);
-    whole(&mut definition, "TVMode", SettingId::EmuTvMode);
+    whole(definition, "ScanDirection", SettingId::ConvScanDirection);
+    whole(definition, "Skybox", SettingId::SceneSkybox);
+    whole(definition, "Core", SettingId::EmuCore);
+    whole(definition, "TVMode", SettingId::EmuTvMode);
 
     // AMD-031 §3: the TV box is gone but the property stays, so a script that reads or writes
     // it runs without error. The reading is always 0 — « none ».
@@ -245,20 +243,19 @@ fn setting() -> TypeDef {
         |cx, _, value| cx.integer(value, "TVBox").map(|_| ()),
         None,
     );
-    whole(&mut definition, "SortOption", SettingId::UiSortOption);
-    whole(&mut definition, "MovieMode", SettingId::MovieMode);
-    whole(
-        &mut definition,
-        "SelectionMode",
-        SettingId::EditorSelectionMode,
-    );
-    whole(&mut definition, "ControlMethod", SettingId::VrControlMethod);
+    whole(definition, "SortOption", SettingId::UiSortOption);
+    whole(definition, "MovieMode", SettingId::MovieMode);
+    whole(definition, "SelectionMode", SettingId::EditorSelectionMode);
+    whole(definition, "ControlMethod", SettingId::VrControlMethod);
+}
 
+/// The background colour and the derived, read-only members (REQ-PERS-013).
+fn setting_derived(definition: &mut TypeDef) {
     definition.property(
         "CustomBgColor",
         |cx, _| cx.color(cx.data(|data| data.env.settings.custom_bg_color())?),
         |cx, _, value| {
-            let Some(color) = cx.try_color(value) else {
+            let Some(color) = try_color(value) else {
                 return Err(cx.invalid("CustomBgColor"));
             };
 
@@ -313,7 +310,10 @@ fn setting() -> TypeDef {
         },
         None,
     );
+}
 
+/// The engine mode, the stored members and the constants of SPEC-09 §4.3.
+fn setting_engine_mode_and_constants(definition: &mut TypeDef) {
     // The engine mode of SPEC-09 §4.1.10, read only. AMD-020 (Q-052) settles the contradiction
     // between SPEC-09, which publishes the three names, and SPEC-05 §4, which listed none of
     // them: the three are required.
@@ -344,9 +344,9 @@ fn setting() -> TypeDef {
         None,
     );
 
-    stored(&mut definition, "SavedPattern3D");
-    stored(&mut definition, "SaveAnimPattern3D");
-    stored(&mut definition, "TVData");
+    stored(definition, "SavedPattern3D");
+    stored(definition, "SaveAnimPattern3D");
+    stored(definition, "TVData");
 
     for (name, value) in SETTING_CONSTANTS {
         definition.read_only(name, move |cx, _| cx.text(value), None);
@@ -359,7 +359,10 @@ fn setting() -> TypeDef {
     );
     definition.read_only("VRScale", |_, _| Ok(num(VR_SCALE)), None);
     definition.read_only("NonVRScale", |_, _| Ok(num(NON_VR_SCALE)), None);
+}
 
+/// The methods of `Setting`.
+fn setting_functions(definition: &mut TypeDef) {
     definition.function(
         "GetInputType",
         |call| {
@@ -369,7 +372,7 @@ fn setting() -> TypeDef {
                 Ok(port) => call.cx.data(|data| data.env.input.port_type(port))?,
                 Err(_) => 0,
             };
-            reply(num(kind))
+            Ok(Some(num(kind)))
         },
         None,
     );
@@ -419,7 +422,6 @@ fn setting() -> TypeDef {
         },
         None,
     );
-    definition
 }
 
 fn layer_index(payload: &Payload) -> usize {
@@ -432,6 +434,11 @@ fn layer_index(payload: &Payload) -> usize {
 /// `Setting.Layer` and `Setting.Clipping`. Both read and write the settings model through the
 /// runtime's [`ScriptSettings`], which is the living model REQ-PERS-007 demands.
 fn layers() -> [TypeDef; 3] {
+    [layer_config(), layer(), clipping()]
+}
+
+/// `Setting.Layer`, the global `Layer` (§4.2, type `ConfigCalques`).
+fn layer_config() -> TypeDef {
     // Setting.Layer, the global Layer (§4.2, type ConfigCalques).
     let mut config = type_def(HostType::LayerConfig, "ConfigCalques");
     config.property(
@@ -476,7 +483,11 @@ fn layers() -> [TypeDef; 3] {
         let index = cx.check_bounds(index, LAYER_COUNT, "Layer")?;
         cx.value(Payload::Layer(index))
     }));
+    config
+}
 
+/// One layer (§4.2, type `Calque`).
+fn layer() -> TypeDef {
     // One layer (§4.2, type Calque).
     let mut layer = type_def(HostType::Layer, "Calque");
     layer.property(
@@ -544,7 +555,11 @@ fn layers() -> [TypeDef; 3] {
         },
         None,
     );
+    layer
+}
 
+/// `Setting.Clipping`, the global `Clipping` (§4.2, type `Découpe`).
+fn clipping() -> TypeDef {
     // Setting.Clipping, the global Clipping (§4.2, type Découpe). Index 0 is the left margin,
     // 1 the bottom, 2 the right, 3 the top (DEC-R2-T1).
     let mut clipping = type_def(HostType::Clipping, "Decoupe");
@@ -567,7 +582,7 @@ fn layers() -> [TypeDef; 3] {
             cx.color(LuaColor::new(margins.x, margins.y, margins.z, margins.w))
         },
         |cx, _, value| {
-            let Some(color) = cx.try_color(value) else {
+            let Some(color) = try_color(value) else {
                 return Err(cx.invalid("target"));
             };
 
@@ -590,5 +605,5 @@ fn layers() -> [TypeDef; 3] {
         let wanted = cx.real(value, "Clipping")?;
         with_settings(cx, |settings| settings.set_clipping(index, wanted))
     }));
-    [config, layer, clipping]
+    clipping
 }

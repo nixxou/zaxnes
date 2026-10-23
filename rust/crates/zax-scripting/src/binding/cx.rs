@@ -175,14 +175,6 @@ impl<'a> Cx<'a> {
 
     // reading
 
-    /// The payload of the host value `value`, or `None` for any other Lua value.
-    pub fn host(&self, value: &Value) -> Option<Payload> {
-        match value {
-            Value::UserData(data) => data.borrow::<Host>().ok().map(|host| host.payload),
-            _ => None,
-        }
-    }
-
     /// The number at hand. A string, even a numeric one, is refused (REQ-LUA-041).
     #[allow(clippy::cast_precision_loss)] // lua_tonumber converts an integer to a double.
     pub fn number(&self, value: &Value, member: &str) -> mlua::Result<f64> {
@@ -216,7 +208,7 @@ impl<'a> Cx<'a> {
     /// is expected, because the corpus passes one straight through (`shape:GetPos(shape.Pivot)`);
     /// it is read by copy, so the callee cannot write back through it.
     pub fn try_vec3(&self, value: &Value) -> mlua::Result<Option<Vec3>> {
-        match self.host(value) {
+        match host_payload(value) {
             Some(Payload::Vector3(vector)) => Ok(Some(vector)),
             Some(Payload::Vec3Ref(reference)) => self.read_vec3_ref(&reference).map(Some),
             Some(Payload::Vector2(vector)) => Ok(Some(Vec3::new(vector.x, vector.y, 0.0))),
@@ -232,7 +224,7 @@ impl<'a> Cx<'a> {
     /// The value at hand read as a `Vector2`.
     #[allow(clippy::cast_precision_loss)] // The C# widens an int to a float.
     pub fn try_vec2(&self, value: &Value) -> mlua::Result<Option<Vec2>> {
-        match self.host(value) {
+        match host_payload(value) {
             Some(Payload::Vector2(vector)) => Ok(Some(vector)),
             Some(Payload::IntVector2(cell)) => Ok(Some(Vec2::new(cell.x as f32, cell.y as f32))),
             Some(Payload::Vector3(_) | Payload::Vec3Ref(_)) => Ok(self
@@ -242,26 +234,10 @@ impl<'a> Cx<'a> {
         }
     }
 
-    /// The value at hand read as a `Quaternion`, as `[x, y, z, w]`.
-    pub fn try_quaternion(&self, value: &Value) -> Option<[f32; 4]> {
-        match self.host(value) {
-            Some(Payload::Quaternion(parts)) => Some(parts),
-            _ => None,
-        }
-    }
-
-    /// The value at hand read as a `Color`.
-    pub fn try_color(&self, value: &Value) -> Option<LuaColor> {
-        match self.host(value) {
-            Some(Payload::Color(color)) => Some(color),
-            _ => None,
-        }
-    }
-
     /// The value at hand read as an `IntVector2`; a real vector is truncated.
     #[allow(clippy::cast_possible_truncation)] // The C# casts the float components to int.
     pub fn try_int_vector2(&self, value: &Value) -> mlua::Result<Option<Cell>> {
-        match self.host(value) {
+        match host_payload(value) {
             Some(Payload::IntVector2(cell)) => Ok(Some(cell)),
             Some(Payload::Vector2(_) | Payload::Vector3(_) | Payload::Vec3Ref(_)) => Ok(self
                 .try_vec2(value)?
@@ -270,22 +246,46 @@ impl<'a> Cx<'a> {
         }
     }
 
-    /// The value at hand read as a `Rect`.
-    pub fn try_rect(&self, value: &Value) -> Option<Rect> {
-        match self.host(value) {
-            Some(Payload::Rect(rectangle)) => Some(rectangle),
-            _ => None,
-        }
-    }
-
     /// The value at hand as a `Rect`, or an error.
     pub fn rect(&self, value: &Value, member: &str) -> mlua::Result<Rect> {
-        self.try_rect(value).ok_or_else(|| self.invalid(member))
+        try_rect(value).ok_or_else(|| self.invalid(member))
     }
 
     /// The vector a `Vec3R` designates, or zero when its owner is gone (REQ-LUA-028).
     pub fn read_vec3_ref(&self, reference: &Vec3Ref) -> mlua::Result<Vec3> {
         super::access::read_vec3_ref(self, reference)
+    }
+}
+
+/// The payload of the host value `value`, or `None` for any other Lua value.
+pub(crate) fn host_payload(value: &Value) -> Option<Payload> {
+    match value {
+        Value::UserData(data) => data.borrow::<Host>().ok().map(|host| host.payload),
+        _ => None,
+    }
+}
+
+/// The value at hand read as a `Quaternion`, as `[x, y, z, w]`.
+pub(crate) fn try_quaternion(value: &Value) -> Option<[f32; 4]> {
+    match host_payload(value) {
+        Some(Payload::Quaternion(parts)) => Some(parts),
+        _ => None,
+    }
+}
+
+/// The value at hand read as a `Color`.
+pub(crate) fn try_color(value: &Value) -> Option<LuaColor> {
+    match host_payload(value) {
+        Some(Payload::Color(color)) => Some(color),
+        _ => None,
+    }
+}
+
+/// The value at hand read as a `Rect`.
+pub(crate) fn try_rect(value: &Value) -> Option<Rect> {
+    match host_payload(value) {
+        Some(Payload::Rect(rectangle)) => Some(rectangle),
+        _ => None,
     }
 }
 
@@ -326,7 +326,7 @@ impl<'a> Call<'a> {
 
     /// The payload of the host value at `index`.
     pub fn host(&self, index: usize) -> Option<Payload> {
-        self.cx.host(self.value(index))
+        host_payload(self.value(index))
     }
 
     /// The number at `index` (REQ-LUA-041).

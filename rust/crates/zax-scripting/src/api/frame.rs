@@ -1,14 +1,16 @@
 //! The globals `Frame`, `FrameManager`, `Palette`, `Pattern` and `Script` of SPEC-05 §4.2.
 
 use mlua::Value;
+use zax_engine3d::engine::ConversionState;
 use zax_engine3d::frame::FrameInstanceId;
 use zax_engine3d::instance::InstanceRef;
 use zax_engine3d::palette::FramePalette;
+use zax_engine3d::pattern::EnginePattern;
 use zax_engine3d::vectors::{Rect, Vec3};
 use zax_settings::catalogue::SettingId;
 
 use super::{boolean, count, num, type_def};
-use crate::binding::cx::{Call, Cx};
+use crate::binding::cx::{try_rect, Call, Cx};
 use crate::binding::payload::{
     HostType, InstanceListKind, InstanceTarget, PatternTarget, Payload, ShapeTarget,
 };
@@ -20,10 +22,6 @@ pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.push(palette());
     types.push(pattern_table());
     types.extend(script());
-}
-
-fn reply(value: Value) -> mlua::Result<Reply> {
-    Ok(Some(value))
 }
 
 /// Frame's members are methods: calling one with `.` leaves the first argument in the
@@ -94,7 +92,7 @@ fn inject(call: &Call, kind: Inject) -> mlua::Result<Reply> {
                     let corner = state
                         .find_pattern(reference)
                         .and_then(|id| state.patterns().get(id))
-                        .map(|pattern| pattern.bottom_left());
+                        .map(EnginePattern::bottom_left);
                     let shifted = corner.map_or(position, |corner| {
                         Vec3::new(position.x - corner.x, position.y - corner.y, position.z)
                     });
@@ -104,7 +102,9 @@ fn inject(call: &Call, kind: Inject) -> mlua::Result<Reply> {
 
             let id = created.map_err(|error| cx.raise(&error.to_string()))?;
             let key = cx.frame_key(false)?;
-            reply(cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?)
+            Ok(Some(cx.object(Payload::Instance(
+                InstanceTarget::Frame(key, id),
+            ))?))
         }
         Some(Payload::Pattern(PatternTarget::Registry(id))) => {
             let created = cx.state(|state| match kind {
@@ -116,9 +116,11 @@ fn inject(call: &Call, kind: Inject) -> mlua::Result<Reply> {
             match created {
                 Some(shape) => {
                     let key = cx.frame_key(false)?;
-                    reply(cx.object(Payload::Shape(ShapeTarget { key, id: shape }))?)
+                    Ok(Some(
+                        cx.object(Payload::Shape(ShapeTarget { key, id: shape }))?,
+                    ))
                 }
-                None => reply(Value::Nil),
+                None => Ok(Some(Value::Nil)),
             }
         }
         // Passing nil where an object is needed raises an ordinary Lua error (REQ-LUA-047).
@@ -129,6 +131,23 @@ fn inject(call: &Call, kind: Inject) -> mlua::Result<Reply> {
 fn frame() -> [TypeDef; 2] {
     let mut definition = type_def(HostType::FrameApi, "FrameAPI");
 
+    frame_queries(&mut definition);
+    frame_injection(&mut definition);
+
+    frame_pinned(&mut definition);
+
+    // FrameManager is the class table of the frame manager; FrameManager.Ins is Frame.
+    let mut manager = type_def(HostType::FrameManagerApi, "FrameManagerClasse");
+    manager.read_only(
+        "Ins",
+        |cx, _| cx.object(Payload::Table(HostType::FrameApi)),
+        Some(HostType::FrameApi),
+    );
+    [definition, manager]
+}
+
+/// The queries over the frame being converted (REQ-LUA-084, REQ-LUA-085).
+fn frame_queries(definition: &mut TypeDef) {
     definition.read_only(
         "shapeCount",
         |cx, _| Ok(count(cx.state(|state| state.scriptable_count())?)),
@@ -162,10 +181,9 @@ fn frame() -> [TypeDef; 2] {
                 data.instance_query
                     .extend(found.into_iter().map(|id| InstanceTarget::Frame(key, id)));
             })?;
-            reply(
-                call.cx
-                    .value(Payload::InstanceList(InstanceListKind::ShapesWithTag))?,
-            )
+            Ok(Some(call.cx.value(Payload::InstanceList(
+                InstanceListKind::ShapesWithTag,
+            ))?))
         },
         Some(HostType::InstanceList),
     );
@@ -175,7 +193,7 @@ fn frame() -> [TypeDef; 2] {
             require(call, HostType::FrameApi, "GetShapeWithTag")?;
             let tag = call.string(2, "GetShapeWithTag")?;
             let found = call.cx.state(|state| state.get_shape_with_tag(&tag))?;
-            reply(frame_instance(call.cx, found)?)
+            Ok(Some(frame_instance(call.cx, found)?))
         },
         Some(HostType::Instance),
     );
@@ -187,7 +205,7 @@ fn frame() -> [TypeDef; 2] {
             let total = call.cx.state(|state| state.scriptable_count())?;
             let position = call.cx.check_bounds(index, total, "GetShape")?;
             let found = call.cx.state(|state| state.get_shape(position))?;
-            reply(frame_instance(call.cx, found)?)
+            Ok(Some(frame_instance(call.cx, found)?))
         },
         Some(HostType::Instance),
     );
@@ -203,23 +221,29 @@ fn frame() -> [TypeDef; 2] {
             let found = call
                 .cx
                 .state(|state| state.get_shape_with_pos(x, y, &tag))?;
-            reply(frame_instance(call.cx, found)?)
+            Ok(Some(frame_instance(call.cx, found)?))
         },
         Some(HostType::Instance),
     );
+}
 
+/// The injection of shapes into the frame (REQ-LUA-086).
+fn frame_injection(definition: &mut TypeDef) {
     // The result type depends on the first argument — an instance gives an instance, a
     // pattern gives a shape (REQ-LUA-086) — so no single result type is declared and an
     // access chain through one of them stops at the static check.
     definition.function("AddNewShape", |call| inject(call, Inject::Add), None);
     definition.function("CreateNewShape", |call| inject(call, Inject::Create), None);
     definition.function("InsertShape", |call| inject(call, Inject::Insert), None);
+}
 
+/// The pinned frame (REQ-E3D-233).
+fn frame_pinned(definition: &mut TypeDef) {
     definition.function(
         "PinNewFrame",
         |call| {
             require(call, HostType::FrameApi, "PinNewFrame")?;
-            call.cx.state(|state| state.pin_new_frame())?;
+            call.cx.state(ConversionState::pin_new_frame)?;
             call.cx
                 .data(|data| data.pin_epoch = data.pin_epoch.wrapping_add(1))?;
             Ok(None)
@@ -230,7 +254,7 @@ fn frame() -> [TypeDef; 2] {
         "ReleasePinnedFrame",
         |call| {
             require(call, HostType::FrameApi, "ReleasePinnedFrame")?;
-            call.cx.state(|state| state.release_pinned_frame())?;
+            call.cx.state(ConversionState::release_pinned_frame)?;
             call.cx
                 .data(|data| data.pin_epoch = data.pin_epoch.wrapping_add(1))?;
             Ok(None)
@@ -256,7 +280,9 @@ fn frame() -> [TypeDef; 2] {
         |call| {
             require(call, HostType::FrameApi, "RestoreFromPinnedFrame")?;
             if call.is_none_or_nil(2) {
-                call.cx.state(|state| state.restore_from_pinned_frame())?;
+                call.cx.state(|state| {
+                    state.restore_from_pinned_frame();
+                })?;
             } else {
                 let rectangle = call.rect(2, "RestoreFromPinnedFrame")?;
                 call.cx
@@ -272,7 +298,7 @@ fn frame() -> [TypeDef; 2] {
         "GetShapesFromPinnedFrame",
         |call| {
             require(call, HostType::FrameApi, "GetShapesFromPinnedFrame")?;
-            let rectangle = if let Some(given) = call.cx.try_rect(call.value(2)) {
+            let rectangle = if let Some(given) = try_rect(call.value(2)) {
                 given
             } else if let (Some(origin), Some(size)) = (
                 call.cx.try_vec2(call.value(2))?,
@@ -292,19 +318,10 @@ fn frame() -> [TypeDef; 2] {
                 data.pinned_query
                     .extend(found.into_iter().map(|id| ShapeTarget { key, id }));
             })?;
-            reply(call.cx.value(Payload::ShapeList)?)
+            Ok(Some(call.cx.value(Payload::ShapeList)?))
         },
         Some(HostType::ShapeList),
     );
-
-    // FrameManager is the class table of the frame manager; FrameManager.Ins is Frame.
-    let mut manager = type_def(HostType::FrameManagerApi, "FrameManagerClasse");
-    manager.read_only(
-        "Ins",
-        |cx, _| cx.object(Payload::Table(HostType::FrameApi)),
-        Some(HostType::FrameApi),
-    );
-    [definition, manager]
 }
 
 /// The `Instance` value of a frame instance of the frame being converted, nil when there is
@@ -333,9 +350,9 @@ fn entry(call: &Call, member: &str) -> mlua::Result<usize> {
 fn read_entry(call: &Call, member: &str) -> mlua::Result<Reply> {
     let entry = entry(call, member)?;
     let current = call.optional_number(2, member, 0.0)? != 0.0;
-    reply(num(call
+    Ok(Some(num(call
         .cx
-        .state(|state| state.frame_color_index(entry, current))?))
+        .state(|state| state.frame_color_index(entry, current))?)))
 }
 
 fn palette() -> TypeDef {
@@ -369,10 +386,9 @@ fn palette() -> TypeDef {
         |call| {
             let entry = entry(call, "FrameColor")?;
             let colour = call.cx.state(|state| state.frame_color(entry))?;
-            reply(
-                call.cx
-                    .color(LuaColor::from_bytes(colour.r, colour.g, colour.b))?,
-            )
+            Ok(Some(call.cx.color(LuaColor::from_bytes(
+                colour.r, colour.g, colour.b,
+            ))?))
         },
         Some(HostType::Color),
     );
@@ -396,12 +412,12 @@ fn pattern_table() -> TypeDef {
         |call| {
             let tag = call.string(1, "GetPatternWithTag")?;
             let found = call.cx.state(|state| state.get_pattern_with_tag(&tag))?;
-            reply(match found {
+            Ok(Some(match found {
                 Some(reference) => call
                     .cx
                     .object(Payload::Instance(InstanceTarget::Pattern(reference)))?,
                 None => Value::Nil,
-            })
+            }))
         },
         Some(HostType::Instance),
     );
@@ -417,10 +433,9 @@ fn pattern_table() -> TypeDef {
                 data.pattern_query
                     .extend(found.into_iter().map(InstanceTarget::Pattern));
             })?;
-            reply(
-                call.cx
-                    .value(Payload::InstanceList(InstanceListKind::PatternsWithTag))?,
-            )
+            Ok(Some(call.cx.value(Payload::InstanceList(
+                InstanceListKind::PatternsWithTag,
+            ))?))
         },
         Some(HostType::InstanceList),
     );
@@ -442,7 +457,7 @@ fn script() -> [TypeDef; 2] {
             let position = call
                 .cx
                 .data(|data| data.scripts.iter().position(|script| script.name() == name))?;
-            reply(script_value(call.cx, position)?)
+            Ok(Some(script_value(call.cx, position)?))
         },
         Some(HostType::ScriptObj),
     );
@@ -455,14 +470,14 @@ fn script() -> [TypeDef; 2] {
                 let index = call.integer(2, "GetScript")?;
                 let total = call.cx.data(|data| data.scripts.len())?;
                 let position = usize::try_from(index).ok().filter(|&index| index < total);
-                return reply(script_value(call.cx, position)?);
+                return Ok(Some(script_value(call.cx, position)?));
             }
 
             let name = call.string(2, "GetScript")?;
             let position = call
                 .cx
                 .data(|data| data.scripts.iter().position(|script| script.name() == name))?;
-            reply(script_value(call.cx, position)?)
+            Ok(Some(script_value(call.cx, position)?))
         },
         Some(HostType::ScriptObj),
     );
@@ -471,7 +486,9 @@ fn script() -> [TypeDef; 2] {
         |call| {
             require(call, HostType::ScriptApi, "ReadMem")?;
             let address = number_format::to_address(call.number(2, "ReadMem")?);
-            reply(num(call.cx.data(|data| data.env.memory.read(address))?))
+            Ok(Some(num(call
+                .cx
+                .data(|data| data.env.memory.read(address))?)))
         },
         None,
     );
@@ -487,6 +504,12 @@ fn script() -> [TypeDef; 2] {
         None,
     );
 
+    let object = script_object();
+    [definition, object]
+}
+
+/// The `ScriptObj` type: one script of the profile.
+fn script_object() -> TypeDef {
     let mut object = type_def(HostType::ScriptObj, "ScriptObj");
     object.property(
         "Enable",
@@ -538,7 +561,7 @@ fn script() -> [TypeDef; 2] {
         },
         None,
     );
-    [definition, object]
+    object
 }
 
 fn script_value(cx: &Cx, position: Option<usize>) -> mlua::Result<Value> {

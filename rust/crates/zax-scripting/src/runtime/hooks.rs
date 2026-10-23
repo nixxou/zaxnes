@@ -218,17 +218,16 @@ pub(crate) fn input_process(cx: &Cx) -> mlua::Result<i32> {
         let selected = data
             .input_process_script
             .filter(|&index| data.script_pad_enabled && data.scripts[index].active());
-        match selected {
-            Some(index) => Some((
+        if let Some(index) = selected {
+            Some((
                 data.scripts[index].hook(ScriptHook::InputProcess).cloned(),
                 data.hook_budget,
                 data.script_pad_index,
                 index,
-            )),
-            None => {
-                data.script_pad_state = 0;
-                None
-            }
+            ))
+        } else {
+            data.script_pad_state = 0;
+            None
         }
     })?;
     let Some((Some(function), limit, pad_index, name)) = selected else {
