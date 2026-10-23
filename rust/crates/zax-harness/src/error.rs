@@ -3,6 +3,9 @@ use std::fmt;
 use zax_engine3d::error::EngineError;
 use zax_nes::apu::AudioError;
 use zax_profiles::format::ProfileLoadError;
+use zax_render::assets::png_image::PngError;
+use zax_render::offscreen::OffscreenError;
+use zax_render::RenderError;
 
 /// Why a harness command failed.
 #[derive(Debug)]
@@ -21,6 +24,12 @@ pub enum HarnessError {
     Engine(EngineError),
     /// A text export could not be formatted.
     Text(std::fmt::Error),
+    /// No offscreen GL context could be created.
+    Offscreen(OffscreenError),
+    /// The renderer failed.
+    Render(RenderError),
+    /// A capture could not be encoded.
+    Png(PngError),
 }
 
 impl fmt::Display for HarnessError {
@@ -33,6 +42,9 @@ impl fmt::Display for HarnessError {
             }
             Self::Engine(error) => write!(f, "{error}"),
             Self::Text(error) => write!(f, "{error}"),
+            Self::Offscreen(error) => write!(f, "{error}"),
+            Self::Render(error) => write!(f, "{error}"),
+            Self::Png(error) => write!(f, "{error}"),
         }
     }
 }
@@ -66,5 +78,23 @@ impl From<EngineError> for HarnessError {
 impl From<std::fmt::Error> for HarnessError {
     fn from(error: std::fmt::Error) -> Self {
         Self::Text(error)
+    }
+}
+
+impl From<OffscreenError> for HarnessError {
+    fn from(error: OffscreenError) -> Self {
+        Self::Offscreen(error)
+    }
+}
+
+impl From<RenderError> for HarnessError {
+    fn from(error: RenderError) -> Self {
+        Self::Render(error)
+    }
+}
+
+impl From<PngError> for HarnessError {
+    fn from(error: PngError) -> Self {
+        Self::Png(error)
     }
 }
