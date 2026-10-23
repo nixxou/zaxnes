@@ -130,21 +130,27 @@ impl RuntimeData {
     }
 
     /// Changes the epochs: every frame handle issued so far reads as gone.
-    fn invalidate_handles(&mut self) {
-        self.advance_epoch();
-        self.advance_pin_epoch();
+    fn invalidate_handles(&mut self) -> [FrameHandles; 2] {
+        [self.advance_epoch(), self.advance_pin_epoch()]
     }
 
     /// Ends the epoch of the frame being converted.
-    pub fn advance_epoch(&mut self) {
+    ///
+    /// Returns the handles issued in the epoch, which the caller hands to the weak object cache
+    /// so that they stay the one value of their object for as long as a script holds them.
+    #[must_use = "the retired handles must be given to the object cache"]
+    pub fn advance_epoch(&mut self) -> FrameHandles {
         self.epoch = self.epoch.wrapping_add(1);
-        self.frame_handles.clear();
+        std::mem::take(&mut self.frame_handles)
     }
 
     /// Ends the epoch of the pinned frame.
-    pub fn advance_pin_epoch(&mut self) {
+    ///
+    /// Returns the handles issued in the epoch, as [`Self::advance_epoch`] does.
+    #[must_use = "the retired handles must be given to the object cache"]
+    pub fn advance_pin_epoch(&mut self) -> FrameHandles {
         self.pin_epoch = self.pin_epoch.wrapping_add(1);
-        self.pinned_handles.clear();
+        std::mem::take(&mut self.pinned_handles)
     }
 
     /// The Lua values issued for the handles of the epoch `key` is in, or `None` when that epoch
@@ -487,8 +493,11 @@ impl ProfileScriptRuntime {
     /// Calls `Start` of every script that is not in error, active or not, in script order
     /// (REQ-LUA-020).
     pub fn invoke_start(&mut self, state: &mut ConversionState) {
-        self.data.invalidate_handles();
+        let retired = self.data.invalidate_handles();
         let result = self.run(Some(state), None, |cx| {
+            for handles in retired {
+                cx.retire(handles)?;
+            }
             call_all(cx, Audience::NotInError, ScriptHook::Start)
         });
         self.settle(result);
@@ -497,8 +506,11 @@ impl ProfileScriptRuntime {
     /// Calls `End` of every script that is not in error, active or not, in script order
     /// (REQ-LUA-021).
     pub fn invoke_end(&mut self, state: &mut ConversionState) {
-        self.data.invalidate_handles();
+        let retired = self.data.invalidate_handles();
         let result = self.run(Some(state), None, |cx| {
+            for handles in retired {
+                cx.retire(handles)?;
+            }
             call_all(cx, Audience::NotInError, ScriptHook::End)
         });
         self.settle(result);
@@ -723,7 +735,8 @@ impl ProfileScriptRuntime {
 
     fn publish_frame_globals(&mut self, frame_counter: i32, time: f32) -> mlua::Result<()> {
         self.data.frame_counter = frame_counter;
-        self.data.advance_epoch();
+        let retired = self.data.advance_epoch();
+        Cx::new(&self.lua).retire(retired)?;
         let globals = self.lua.globals();
         globals.set("frame", f64::from(frame_counter))?;
         globals.set("time", f64::from(time))
