@@ -284,3 +284,9 @@ fn prof_tmp() {
     rig.lend(&bridge, || session.evaluate(&chunk));
     assert_eq!(session.log.errors(), [] as [String; 0]);
 }
+
+#[test]
+#[ignore = "temporary profile"]
+fn prof_frames() {
+    let _ = frame_seconds(&std::env::var("PROF_US").unwrap());
+}
