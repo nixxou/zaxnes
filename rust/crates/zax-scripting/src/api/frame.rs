@@ -83,8 +83,7 @@ fn inject(call: &Call, kind: Inject) -> mlua::Result<Reply> {
                 return Err(call.invalid(member));
             };
 
-            let mut state = cx.state()?;
-            let created = match kind {
+            let created = cx.state(|state| match kind {
                 Inject::Add => state.add_new_shape_from_instance(reference, position, palette),
                 Inject::Create => {
                     state.create_new_shape_from_instance(reference, position, palette)
@@ -101,22 +100,18 @@ fn inject(call: &Call, kind: Inject) -> mlua::Result<Reply> {
                     });
                     state.create_new_shape_from_instance(reference, shifted, palette)
                 }
-            };
-            drop(state);
+            })?;
 
             let id = created.map_err(|error| cx.raise(&error.to_string()))?;
             let key = cx.frame_key(false)?;
             reply(cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?)
         }
         Some(Payload::Pattern(PatternTarget::Registry(id))) => {
-            let created = {
-                let mut state = cx.state()?;
-                match kind {
-                    Inject::Add => state.add_new_shape(id, position, palette),
-                    Inject::Create => state.create_new_shape(id, position, palette),
-                    Inject::Insert => state.insert_shape(id, position, palette),
-                }
-            };
+            let created = cx.state(|state| match kind {
+                Inject::Add => state.add_new_shape(id, position, palette),
+                Inject::Create => state.create_new_shape(id, position, palette),
+                Inject::Insert => state.insert_shape(id, position, palette),
+            })?;
 
             match created {
                 Some(shape) => {
@@ -136,18 +131,18 @@ fn frame() -> [TypeDef; 2] {
 
     definition.read_only(
         "shapeCount",
-        |cx, _| Ok(count(cx.state()?.scriptable_count())),
+        |cx, _| Ok(count(cx.state(|state| state.scriptable_count())?)),
         None,
     );
     definition.read_only(
         "frameCounter",
-        |cx, _| Ok(num(cx.data()?.frame_counter)),
+        |cx, _| Ok(num(cx.data(|data| data.frame_counter)?)),
         None,
     );
     #[allow(clippy::cast_precision_loss)] // The C# divides an int by a float.
     definition.read_only(
         "time",
-        |cx, _| Ok(num(cx.data()?.frame_counter as f32 / 60.0)),
+        |cx, _| Ok(num(cx.data(|data| data.frame_counter)? as f32 / 60.0)),
         None,
     );
 
@@ -160,13 +155,13 @@ fn frame() -> [TypeDef; 2] {
             let tag = call.string(2, "GetShapesWithTag")?;
             let key = call.cx.frame_key(false)?;
             let mut found: Vec<FrameInstanceId> = Vec::new();
-            call.cx.state()?.collect_shapes_with_tag(&tag, &mut found);
-
-            let mut data = call.cx.data()?;
-            data.instance_query.clear();
-            data.instance_query
-                .extend(found.into_iter().map(|id| InstanceTarget::Frame(key, id)));
-            drop(data);
+            call.cx
+                .state(|state| state.collect_shapes_with_tag(&tag, &mut found))?;
+            call.cx.data(|data| {
+                data.instance_query.clear();
+                data.instance_query
+                    .extend(found.into_iter().map(|id| InstanceTarget::Frame(key, id)));
+            })?;
             reply(
                 call.cx
                     .value(Payload::InstanceList(InstanceListKind::ShapesWithTag))?,
@@ -179,7 +174,7 @@ fn frame() -> [TypeDef; 2] {
         |call| {
             require(call, HostType::FrameApi, "GetShapeWithTag")?;
             let tag = call.string(2, "GetShapeWithTag")?;
-            let found = call.cx.state()?.get_shape_with_tag(&tag);
+            let found = call.cx.state(|state| state.get_shape_with_tag(&tag))?;
             reply(frame_instance(call.cx, found)?)
         },
         Some(HostType::Instance),
@@ -189,9 +184,9 @@ fn frame() -> [TypeDef; 2] {
         |call| {
             require(call, HostType::FrameApi, "GetShape")?;
             let index = call.integer(2, "GetShape")?;
-            let total = call.cx.state()?.scriptable_count();
+            let total = call.cx.state(|state| state.scriptable_count())?;
             let position = call.cx.check_bounds(index, total, "GetShape")?;
-            let found = call.cx.state()?.get_shape(position);
+            let found = call.cx.state(|state| state.get_shape(position))?;
             reply(frame_instance(call.cx, found)?)
         },
         Some(HostType::Instance),
@@ -205,7 +200,9 @@ fn frame() -> [TypeDef; 2] {
             let x = call.real(2, "GetShapeWithPos")?;
             let y = call.real(3, "GetShapeWithPos")?;
             let tag = call.optional_string(4, "GetShapeWithPos", "")?;
-            let found = call.cx.state()?.get_shape_with_pos(x, y, &tag);
+            let found = call
+                .cx
+                .state(|state| state.get_shape_with_pos(x, y, &tag))?;
             reply(frame_instance(call.cx, found)?)
         },
         Some(HostType::Instance),
@@ -222,9 +219,9 @@ fn frame() -> [TypeDef; 2] {
         "PinNewFrame",
         |call| {
             require(call, HostType::FrameApi, "PinNewFrame")?;
-            call.cx.state()?.pin_new_frame();
-            let mut data = call.cx.data()?;
-            data.pin_epoch = data.pin_epoch.wrapping_add(1);
+            call.cx.state(|state| state.pin_new_frame())?;
+            call.cx
+                .data(|data| data.pin_epoch = data.pin_epoch.wrapping_add(1))?;
             Ok(None)
         },
         None,
@@ -233,9 +230,9 @@ fn frame() -> [TypeDef; 2] {
         "ReleasePinnedFrame",
         |call| {
             require(call, HostType::FrameApi, "ReleasePinnedFrame")?;
-            call.cx.state()?.release_pinned_frame();
-            let mut data = call.cx.data()?;
-            data.pin_epoch = data.pin_epoch.wrapping_add(1);
+            call.cx.state(|state| state.release_pinned_frame())?;
+            call.cx
+                .data(|data| data.pin_epoch = data.pin_epoch.wrapping_add(1))?;
             Ok(None)
         },
         None,
@@ -249,8 +246,7 @@ fn frame() -> [TypeDef; 2] {
             let width = call.real(4, "AddRectFromPinnedFrame")?;
             let height = call.real(5, "AddRectFromPinnedFrame")?;
             call.cx
-                .state()?
-                .add_rect_from_pinned_frame(x, y, width, height);
+                .state(|state| state.add_rect_from_pinned_frame(x, y, width, height))?;
             Ok(None)
         },
         None,
@@ -260,10 +256,11 @@ fn frame() -> [TypeDef; 2] {
         |call| {
             require(call, HostType::FrameApi, "RestoreFromPinnedFrame")?;
             if call.is_none_or_nil(2) {
-                call.cx.state()?.restore_from_pinned_frame();
+                call.cx.state(|state| state.restore_from_pinned_frame())?;
             } else {
                 let rectangle = call.rect(2, "RestoreFromPinnedFrame")?;
-                call.cx.state()?.restore_from_pinned_frame_rect(rectangle);
+                call.cx
+                    .state(|state| state.restore_from_pinned_frame_rect(rectangle))?;
             }
 
             Ok(None)
@@ -289,14 +286,12 @@ fn frame() -> [TypeDef; 2] {
             let key = call.cx.frame_key(true)?;
             let mut found = Vec::new();
             call.cx
-                .state()?
-                .collect_shapes_from_pinned_frame(rectangle, &mut found);
-
-            let mut data = call.cx.data()?;
-            data.pinned_query.clear();
-            data.pinned_query
-                .extend(found.into_iter().map(|id| ShapeTarget { key, id }));
-            drop(data);
+                .state(|state| state.collect_shapes_from_pinned_frame(rectangle, &mut found))?;
+            call.cx.data(|data| {
+                data.pinned_query.clear();
+                data.pinned_query
+                    .extend(found.into_iter().map(|id| ShapeTarget { key, id }));
+            })?;
             reply(call.cx.value(Payload::ShapeList)?)
         },
         Some(HostType::ShapeList),
@@ -338,7 +333,9 @@ fn entry(call: &Call, member: &str) -> mlua::Result<usize> {
 fn read_entry(call: &Call, member: &str) -> mlua::Result<Reply> {
     let entry = entry(call, member)?;
     let current = call.optional_number(2, member, 0.0)? != 0.0;
-    reply(num(call.cx.state()?.frame_color_index(entry, current)))
+    reply(num(call
+        .cx
+        .state(|state| state.frame_color_index(entry, current))?))
 }
 
 fn palette() -> TypeDef {
@@ -362,8 +359,7 @@ fn palette() -> TypeDef {
             let value = call.integer(2, "SetColorIndex")?;
             let current = call.optional_number(3, "SetColorIndex", 0.0)? != 0.0;
             call.cx
-                .state()?
-                .set_color_index(entry, value & 0x3F, current);
+                .state(|state| state.set_color_index(entry, value & 0x3F, current))?;
             Ok(None)
         },
         None,
@@ -372,7 +368,7 @@ fn palette() -> TypeDef {
         "FrameColor",
         |call| {
             let entry = entry(call, "FrameColor")?;
-            let colour = call.cx.state()?.frame_color(entry);
+            let colour = call.cx.state(|state| state.frame_color(entry))?;
             reply(
                 call.cx
                     .color(LuaColor::from_bytes(colour.r, colour.g, colour.b))?,
@@ -383,8 +379,8 @@ fn palette() -> TypeDef {
     definition.read_only(
         "bgColor",
         |cx, _| {
-            let skybox = cx.data()?.env.settings.flag(SettingId::SceneSkyboxEnable);
-            let colour = cx.state()?.background_color(skybox);
+            let skybox = cx.data(|data| data.env.settings.flag(SettingId::SceneSkyboxEnable))?;
+            let colour = cx.state(|state| state.background_color(skybox))?;
             cx.color(LuaColor::from_bytes(colour.r, colour.g, colour.b))
         },
         Some(HostType::Color),
@@ -399,7 +395,7 @@ fn pattern_table() -> TypeDef {
         "GetPatternWithTag",
         |call| {
             let tag = call.string(1, "GetPatternWithTag")?;
-            let found = call.cx.state()?.get_pattern_with_tag(&tag);
+            let found = call.cx.state(|state| state.get_pattern_with_tag(&tag))?;
             reply(match found {
                 Some(reference) => call
                     .cx
@@ -414,13 +410,13 @@ fn pattern_table() -> TypeDef {
         |call| {
             let tag = call.string(1, "GetPatternsWithTag")?;
             let mut found = Vec::new();
-            call.cx.state()?.get_patterns_with_tag(&tag, &mut found);
-
-            let mut data = call.cx.data()?;
-            data.pattern_query.clear();
-            data.pattern_query
-                .extend(found.into_iter().map(InstanceTarget::Pattern));
-            drop(data);
+            call.cx
+                .state(|state| state.get_patterns_with_tag(&tag, &mut found))?;
+            call.cx.data(|data| {
+                data.pattern_query.clear();
+                data.pattern_query
+                    .extend(found.into_iter().map(InstanceTarget::Pattern));
+            })?;
             reply(
                 call.cx
                     .value(Payload::InstanceList(InstanceListKind::PatternsWithTag))?,
@@ -433,7 +429,11 @@ fn pattern_table() -> TypeDef {
 
 fn script() -> [TypeDef; 2] {
     let mut definition = type_def(HostType::ScriptApi, "ScriptAPI");
-    definition.read_only("Count", |cx, _| Ok(count(cx.data()?.scripts.len())), None);
+    definition.read_only(
+        "Count",
+        |cx, _| Ok(count(cx.data(|data| data.scripts.len())?)),
+        None,
+    );
     definition.function(
         "Get",
         |call| {
@@ -441,10 +441,7 @@ fn script() -> [TypeDef; 2] {
             let name = call.string(2, "Get")?;
             let position = call
                 .cx
-                .data()?
-                .scripts
-                .iter()
-                .position(|script| script.name() == name);
+                .data(|data| data.scripts.iter().position(|script| script.name() == name))?;
             reply(script_value(call.cx, position)?)
         },
         Some(HostType::ScriptObj),
@@ -456,7 +453,7 @@ fn script() -> [TypeDef; 2] {
             require(call, HostType::ScriptApi, "GetScript")?;
             if call.is_number(2) {
                 let index = call.integer(2, "GetScript")?;
-                let total = call.cx.data()?.scripts.len();
+                let total = call.cx.data(|data| data.scripts.len())?;
                 let position = usize::try_from(index).ok().filter(|&index| index < total);
                 return reply(script_value(call.cx, position)?);
             }
@@ -464,10 +461,7 @@ fn script() -> [TypeDef; 2] {
             let name = call.string(2, "GetScript")?;
             let position = call
                 .cx
-                .data()?
-                .scripts
-                .iter()
-                .position(|script| script.name() == name);
+                .data(|data| data.scripts.iter().position(|script| script.name() == name))?;
             reply(script_value(call.cx, position)?)
         },
         Some(HostType::ScriptObj),
@@ -477,7 +471,7 @@ fn script() -> [TypeDef; 2] {
         |call| {
             require(call, HostType::ScriptApi, "ReadMem")?;
             let address = number_format::to_address(call.number(2, "ReadMem")?);
-            reply(num(call.cx.data()?.env.memory.read(address)))
+            reply(num(call.cx.data(|data| data.env.memory.read(address))?))
         },
         None,
     );
@@ -487,7 +481,7 @@ fn script() -> [TypeDef; 2] {
             require(call, HostType::ScriptApi, "WriteMem")?;
             let address = number_format::to_address(call.number(2, "WriteMem")?);
             let value = number_format::to_byte(call.number(3, "WriteMem")?);
-            call.cx.data()?.env.memory.write(address, value);
+            call.cx.data(|data| data.env.memory.write(address, value))?;
             Ok(None)
         },
         None,
@@ -504,9 +498,11 @@ fn script() -> [TypeDef; 2] {
         |cx, this, value| {
             if let Payload::Script(position) = this {
                 let wanted = super::assigned_bool(value);
-                if let Some(script) = cx.data()?.scripts.get_mut(*position) {
-                    script.enabled = wanted;
-                }
+                cx.data(|data| {
+                    if let Some(script) = data.scripts.get_mut(*position) {
+                        script.enabled = wanted;
+                    }
+                })?;
             }
 
             Ok(())
@@ -561,9 +557,5 @@ fn read_script<R>(
         return Ok(fallback);
     };
 
-    Ok(cx
-        .data()?
-        .scripts
-        .get(*position)
-        .map_or(fallback, operation))
+    cx.data(|data| data.scripts.get(*position).map_or(fallback, operation))
 }

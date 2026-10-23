@@ -605,15 +605,15 @@ fn pattern() -> TypeDef {
 fn list_len(cx: &Cx, this: &Payload) -> mlua::Result<usize> {
     match this {
         Payload::InstanceList(InstanceListKind::ShapesWithTag) => {
-            Ok(cx.data()?.instance_query.len())
+            Ok(cx.data(|data| data.instance_query.len())?)
         }
         Payload::InstanceList(InstanceListKind::PatternsWithTag) => {
-            Ok(cx.data()?.pattern_query.len())
+            Ok(cx.data(|data| data.pattern_query.len())?)
         }
         Payload::InstanceList(InstanceListKind::PatternInstances(target)) => {
             instance_total(cx, target)
         }
-        Payload::ShapeList => Ok(cx.data()?.pinned_query.len()),
+        Payload::ShapeList => Ok(cx.data(|data| data.pinned_query.len())?),
         _ => Ok(0),
     }
 }
@@ -621,10 +621,10 @@ fn list_len(cx: &Cx, this: &Payload) -> mlua::Result<usize> {
 fn list_instance(cx: &Cx, this: &Payload, index: usize) -> mlua::Result<Option<InstanceTarget>> {
     Ok(match this {
         Payload::InstanceList(InstanceListKind::ShapesWithTag) => {
-            cx.data()?.instance_query.get(index).copied()
+            cx.data(|data| data.instance_query.get(index).copied())?
         }
         Payload::InstanceList(InstanceListKind::PatternsWithTag) => {
-            cx.data()?.pattern_query.get(index).copied()
+            cx.data(|data| data.pattern_query.get(index).copied())?
         }
         Payload::InstanceList(InstanceListKind::PatternInstances(target)) => {
             (index < instance_total(cx, target)?).then(|| pattern_instance(target, index))
@@ -634,7 +634,7 @@ fn list_instance(cx: &Cx, this: &Payload, index: usize) -> mlua::Result<Option<I
 }
 
 fn list_shape(cx: &Cx, index: usize) -> mlua::Result<Option<ShapeTarget>> {
-    Ok(cx.data()?.pinned_query.get(index).copied())
+    Ok(cx.data(|data| data.pinned_query.get(index).copied())?)
 }
 
 fn lists() -> [TypeDef; 2] {
@@ -722,9 +722,5 @@ fn shape_position(cx: &Cx, wanted: Option<Payload>) -> mlua::Result<Option<usize
         return Ok(None);
     };
 
-    Ok(cx
-        .data()?
-        .pinned_query
-        .iter()
-        .position(|shape| *shape == wanted))
+    cx.data(|data| data.pinned_query.iter().position(|shape| *shape == wanted))
 }

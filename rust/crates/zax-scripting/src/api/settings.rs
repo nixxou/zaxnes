@@ -31,13 +31,21 @@ pub(super) fn with_settings(
     cx: &Cx,
     operation: impl FnOnce(&mut ScriptSettings),
 ) -> mlua::Result<()> {
-    let mut data = cx.data()?;
-    operation(&mut data.env.settings);
-    if cx.has_state() {
-        data.env.settings.sync(cx.state()?.settings_mut());
-    }
+    let has_state = cx.has_state();
+    cx.data(|data| {
+        operation(&mut data.env.settings);
+        if has_state {
+            cx.state(|state| data.settle_settings(Some(state.settings_mut())))
+        } else {
+            data.settle_settings(None);
+            Ok(())
+        }
+    })?
+}
 
-    Ok(())
+/// Reads from the settings of the runtime.
+fn read_settings<R>(cx: &Cx, operation: impl FnOnce(&ScriptSettings) -> R) -> mlua::Result<R> {
+    cx.data(|data| operation(&data.env.settings))
 }
 
 fn require(call: &Call, member: &str) -> mlua::Result<()> {
@@ -51,7 +59,7 @@ fn require(call: &Call, member: &str) -> mlua::Result<()> {
 fn flag(definition: &mut TypeDef, name: &'static str, id: SettingId) {
     definition.property(
         name,
-        move |cx, _| Ok(boolean(cx.data()?.env.settings.flag(id))),
+        move |cx, _| Ok(boolean(cx.data(|data| data.env.settings.flag(id))?)),
         move |cx, _, value| {
             let wanted = assigned_bool(value);
             with_settings(cx, |settings| settings.write_flag(id, wanted))
@@ -63,7 +71,7 @@ fn flag(definition: &mut TypeDef, name: &'static str, id: SettingId) {
 fn real(definition: &mut TypeDef, name: &'static str, id: SettingId) {
     definition.property(
         name,
-        move |cx, _| Ok(num(cx.data()?.env.settings.real(id))),
+        move |cx, _| Ok(num(cx.data(|data| data.env.settings.real(id))?)),
         move |cx, _, value| {
             let wanted = cx.real(value, name)?;
             with_settings(cx, |settings| settings.write_real(id, wanted))
@@ -75,7 +83,7 @@ fn real(definition: &mut TypeDef, name: &'static str, id: SettingId) {
 fn whole(definition: &mut TypeDef, name: &'static str, id: SettingId) {
     definition.property(
         name,
-        move |cx, _| Ok(num(cx.data()?.env.settings.int(id))),
+        move |cx, _| Ok(num(cx.data(|data| data.env.settings.int(id))?)),
         move |cx, _, value| {
             let wanted = cx.integer(value, name)?;
             with_settings(cx, |settings| settings.write_int(id, wanted))
@@ -248,7 +256,7 @@ fn setting() -> TypeDef {
 
     definition.property(
         "CustomBgColor",
-        |cx, _| cx.color(cx.data()?.env.settings.custom_bg_color()),
+        |cx, _| cx.color(cx.data(|data| data.env.settings.custom_bg_color())?),
         |cx, _, value| {
             let Some(color) = cx.try_color(value) else {
                 return Err(cx.invalid("CustomBgColor"));
@@ -263,22 +271,18 @@ fn setting() -> TypeDef {
     definition.read_only(
         "TargetFramerate",
         |cx, _| {
-            Ok(num(cx
-                .data()?
-                .env
-                .settings
-                .real(SettingId::VideoTargetFramerate)))
+            Ok(num(read_settings(cx, |settings| {
+                settings.real(SettingId::VideoTargetFramerate)
+            })?))
         },
         None,
     );
     definition.read_only(
         "TargetTimePerFrame",
         |cx, _| {
-            Ok(num(cx
-                .data()?
-                .env
-                .settings
-                .real(SettingId::VideoTargetTimePerFrame)))
+            Ok(num(read_settings(cx, |settings| {
+                settings.real(SettingId::VideoTargetTimePerFrame)
+            })?))
         },
         None,
     );
@@ -286,7 +290,7 @@ fn setting() -> TypeDef {
         "SkyboxEnable",
         |cx, _| {
             Ok(boolean(
-                cx.data()?.env.settings.flag(SettingId::SceneSkyboxEnable),
+                cx.data(|data| data.env.settings.flag(SettingId::SceneSkyboxEnable))?,
             ))
         },
         None,
@@ -294,21 +298,18 @@ fn setting() -> TypeDef {
     definition.read_only(
         "ResScale",
         |cx, _| {
-            Ok(num(cx
-                .data()?
-                .env
-                .settings
-                .real(SettingId::VideoResScaleFactor)))
+            Ok(num(read_settings(cx, |settings| {
+                settings.real(SettingId::VideoResScaleFactor)
+            })?))
         },
         None,
     );
     definition.read_only(
         "ZapperEnable",
         |cx, _| {
-            let data = cx.data()?;
-            Ok(boolean(
-                data.env.input.port_type(0) == 1 || data.env.input.port_type(1) == 1,
-            ))
+            Ok(boolean(cx.data(|data| {
+                data.env.input.port_type(0) == 1 || data.env.input.port_type(1) == 1
+            })?))
         },
         None,
     );
@@ -319,14 +320,14 @@ fn setting() -> TypeDef {
     // Q-052
     definition.read_only(
         "EngineMode",
-        |cx, _| Ok(num(cx.data()?.env.settings.engine_mode())),
+        |cx, _| Ok(num(cx.data(|data| data.env.settings.engine_mode())?)),
         None,
     );
     definition.read_only(
         "IsProfileMode",
         |cx, _| {
             Ok(boolean(
-                cx.data()?.env.settings.engine_mode() == crate::settings::PROFILE_ENGINE_MODE,
+                cx.data(|data| data.env.settings.engine_mode())? == crate::settings::PROFILE_ENGINE_MODE,
             ))
         },
         None,
@@ -335,7 +336,7 @@ fn setting() -> TypeDef {
         "IsRomMode",
         |cx, _| {
             Ok(boolean(
-                cx.data()?.env.settings.engine_mode() == crate::settings::ROM_ENGINE_MODE,
+                cx.data(|data| data.env.settings.engine_mode())? == crate::settings::ROM_ENGINE_MODE,
             ))
         },
         None,
@@ -362,11 +363,10 @@ fn setting() -> TypeDef {
         |call| {
             require(call, "GetInputType")?;
             let port = call.integer(2, "GetInputType")?;
-            let kind = usize::try_from(port).map_or(0, |port| {
-                call.cx
-                    .data()
-                    .map_or(0, |data| data.env.input.port_type(port))
-            });
+            let kind = match usize::try_from(port) {
+                Ok(port) => call.cx.data(|data| data.env.input.port_type(port))?,
+                Err(_) => 0,
+            };
             reply(num(kind))
         },
         None,
@@ -377,7 +377,7 @@ fn setting() -> TypeDef {
             require(call, "SetInputType")?;
             let first = call.integer(2, "SetInputType")?;
             let second = call.integer(3, "SetInputType")?;
-            call.cx.data()?.env.input.set_port_types(first, second);
+            call.cx.data(|data| data.env.input.set_port_types(first, second))?;
             with_settings(call.cx, |settings| settings.set_port_types(first, second))?;
             Ok(None)
         },
@@ -400,7 +400,7 @@ fn setting() -> TypeDef {
 
             // Writes the settings file at once; nothing happens when the host set no hook
             // (REQ-PERS-015, P3).
-            call.cx.data()?.env.settings.request_save();
+            call.cx.data(|data| data.env.settings.request_save())?;
             Ok(None)
         },
         None,
@@ -411,7 +411,7 @@ fn setting() -> TypeDef {
             require(call, "Load")?;
 
             // Re-reads the file and applies only the user preferences it holds (REQ-PERS-015).
-            call.cx.data()?.env.settings.request_load();
+            call.cx.data(|data| data.env.settings.request_load())?;
             Ok(None)
         },
         None,
@@ -434,11 +434,9 @@ fn layers() -> [TypeDef; 3] {
     config.property(
         "DefLayer",
         |cx, _| {
-            Ok(num(cx
-                .data()?
-                .env
-                .settings
-                .int(SettingId::LayerDefaultLayer)))
+            Ok(num(read_settings(cx, |settings| {
+                settings.int(SettingId::LayerDefaultLayer)
+            })?))
         },
         |cx, _, value| {
             let wanted = cx.integer(value, "DefLayer")?;
@@ -454,7 +452,7 @@ fn layers() -> [TypeDef; 3] {
     );
     config.property(
         "Auto",
-        |cx, _| Ok(boolean(cx.data()?.env.settings.flag(SettingId::LayerAuto))),
+        |cx, _| Ok(boolean(cx.data(|data| data.env.settings.flag(SettingId::LayerAuto))?)),
         |cx, _, value| {
             let wanted = assigned_bool(value);
             with_settings(cx, |settings| {
@@ -476,7 +474,7 @@ fn layers() -> [TypeDef; 3] {
     let mut layer = type_def(HostType::Layer, "Calque");
     layer.property(
         "Offset",
-        |cx, this| Ok(num(cx.data()?.env.settings.layer_offset(layer_index(this)))),
+        |cx, this| Ok(num(cx.data(|data| data.env.settings.layer_offset(layer_index(this)))?)),
         |cx, this, value| {
             let wanted = cx.real(value, "Offset")?;
             let index = layer_index(this);
@@ -487,11 +485,9 @@ fn layers() -> [TypeDef; 3] {
     layer.property(
         "Aligned",
         |cx, this| {
-            Ok(num(cx
-                .data()?
-                .env
-                .settings
-                .layer_aligned(layer_index(this))))
+            Ok(num(read_settings(cx, |settings| {
+                settings.layer_aligned(layer_index(this))
+            })?))
         },
         |cx, this, value| {
             let wanted = cx.integer(value, "Aligned")?;
@@ -502,14 +498,14 @@ fn layers() -> [TypeDef; 3] {
     );
     layer.read_only(
         "Coef",
-        |cx, this| Ok(num(cx.data()?.env.settings.layer_coef(layer_index(this)))),
+        |cx, this| Ok(num(cx.data(|data| data.env.settings.layer_coef(layer_index(this)))?)),
         None,
     );
     layer.property(
         "CastShadow",
         |cx, this| {
             Ok(boolean(
-                cx.data()?.env.settings.layer_cast_shadow(layer_index(this)),
+                cx.data(|data| data.env.settings.layer_cast_shadow(layer_index(this)))?,
             ))
         },
         |cx, this, value| {
@@ -523,7 +519,7 @@ fn layers() -> [TypeDef; 3] {
         "RecvShadow",
         |cx, this| {
             Ok(boolean(
-                cx.data()?.env.settings.layer_recv_shadow(layer_index(this)),
+                cx.data(|data| data.env.settings.layer_recv_shadow(layer_index(this)))?,
             ))
         },
         |cx, this, value| {
@@ -540,7 +536,7 @@ fn layers() -> [TypeDef; 3] {
     for (name, index) in [("x", 0), ("y", 1), ("z", 2), ("w", 3)] {
         clipping.property(
             name,
-            move |cx, _| Ok(num(cx.data()?.env.settings.clipping(index))),
+            move |cx, _| Ok(num(cx.data(|data| data.env.settings.clipping(index))?)),
             move |cx, _, value| {
                 let wanted = cx.real(value, name)?;
                 with_settings(cx, |settings| settings.set_clipping(index, wanted))
@@ -552,7 +548,7 @@ fn layers() -> [TypeDef; 3] {
     clipping.property(
         "target",
         |cx, _| {
-            let margins = cx.data()?.env.settings.clipping_vector();
+            let margins = cx.data(|data| data.env.settings.clipping_vector())?;
             cx.color(LuaColor::new(margins.x, margins.y, margins.z, margins.w))
         },
         |cx, _, value| {
@@ -571,7 +567,7 @@ fn layers() -> [TypeDef; 3] {
     clipping.indexer = Some(Arc::new(|cx, _, key| {
         let index = cx.integer(key, "Clipping")?;
         let index = cx.check_bounds(index, CLIPPING_COUNT, "Clipping")?;
-        Ok(num(cx.data()?.env.settings.clipping(index)))
+        Ok(num(cx.data(|data| data.env.settings.clipping(index))?))
     }));
     clipping.index_setter = Some(Arc::new(|cx, _, key, value| {
         let index = cx.integer(key, "Clipping")?;

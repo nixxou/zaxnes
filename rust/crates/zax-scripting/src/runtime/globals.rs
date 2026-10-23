@@ -108,8 +108,7 @@ pub(crate) fn install_base(lua: &Lua) -> mlua::Result<()> {
                 .map(|value| text_of(lua, value))
                 .collect::<Vec<_>>()
                 .join("\t");
-            Cx::new(lua).data()?.env.log.print(&line);
-            Ok(())
+            Cx::new(lua).data(|data| data.env.log.print(&line))
         })?,
     )?;
     globals.set(
@@ -149,10 +148,7 @@ pub(crate) fn install_base(lua: &Lua) -> mlua::Result<()> {
         "RenewId",
         lua.create_function(|lua, _: MultiValue| {
             Cx::new(lua)
-                .data()?
-                .env
-                .profile
-                .renew_id()
+                .data(|data| data.env.profile.renew_id())?
                 .map_err(mlua::Error::external)
         })?,
     )?;

@@ -55,24 +55,22 @@ pub(crate) fn with_budget<R>(lua: &Lua, limit: Duration, operation: impl FnOnce(
 
 /// Marks the script in error and logs it once (REQ-LUA-061, REQ-LUA-062).
 fn fail(cx: &Cx, index: usize, hook: ScriptHook, message: &str) -> mlua::Result<()> {
-    let mut data = cx.data()?;
-    data.scripts[index].failed = true;
-    let line = format!(
-        "Lua: script '{}' hook {} raised: {message}",
-        data.scripts[index].name(),
-        hook.name()
-    );
-    data.env.log.error(&line);
-    Ok(())
+    cx.data(|data| {
+        data.scripts[index].failed = true;
+        let line = format!(
+            "Lua: script '{}' hook {} raised: {message}",
+            data.scripts[index].name(),
+            hook.name()
+        );
+        data.env.log.error(&line);
+    })
 }
 
 /// Calls `hook` of the script at `index`. An absent hook is simply not called (REQ-LUA-022).
 /// Returns the text of the error the hook raised.
 pub(crate) fn call_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result<Option<String>> {
-    let (function, limit) = {
-        let data = cx.data()?;
-        (data.scripts[index].hook(hook).cloned(), data.hook_budget)
-    };
+    let (function, limit) =
+        cx.data(|data| (data.scripts[index].hook(hook).cloned(), data.hook_budget))?;
     let Some(function) = function else {
         return Ok(None);
     };
@@ -106,16 +104,13 @@ pub(crate) fn call_all(
     audience: Audience,
     hook: ScriptHook,
 ) -> mlua::Result<Option<String>> {
-    let count = cx.data()?.scripts.len();
+    let count = cx.data(|data| data.scripts.len())?;
     let mut first = None;
     for index in 0..count {
-        let receives = {
-            let data = cx.data()?;
-            match audience {
-                Audience::NotInError => !data.scripts[index].failed(),
-                Audience::Active => data.scripts[index].active(),
-            }
-        };
+        let receives = cx.data(|data| match audience {
+            Audience::NotInError => !data.scripts[index].failed(),
+            Audience::Active => data.scripts[index].active(),
+        })?;
         if receives {
             first = first.or(call_hook(cx, index, hook)?);
         }
@@ -129,8 +124,7 @@ pub(crate) fn call_all(
 pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
     // Step 3: the per-script lists, in the instance order of REQ-E3D-220. A script turned off
     // during step 2 gets no UpdateS at all.
-    let any = {
-        let mut data = cx.data()?;
+    let any = cx.data(|data| {
         let mut any = false;
         for script in &mut data.scripts {
             script.pending.clear();
@@ -138,43 +132,42 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
         }
 
         any
-    };
+    })?;
     if !any {
         return Ok(None);
     }
 
-    let epoch = {
-        let state = cx.state()?;
-        let mut data = cx.data()?;
-        let frame = state.converting_frame();
-        for &id in frame.scriptable_instances() {
-            let instance = frame.instance(id);
-            for script in &mut data.scripts {
-                if script.active()
-                    && script.defines(ScriptHook::UpdateS)
-                    && script.is_linked_to(instance)
-                {
-                    script.pending.push(id);
+    let epoch = cx.try_state(|state| {
+        cx.data(|data| {
+            let frame = state.converting_frame();
+            for &id in frame.scriptable_instances() {
+                let instance = frame.instance(id);
+                for script in &mut data.scripts {
+                    if script.active()
+                        && script.defines(ScriptHook::UpdateS)
+                        && script.is_linked_to(instance)
+                    {
+                        script.pending.push(id);
+                    }
                 }
             }
-        }
 
-        data.epoch
-    };
+            data.epoch
+        })
+    })?;
 
     // Step 4: the calls are grouped per script, all of its instances then the next script. A
     // script turned off during this step keeps the calls left in its list; only an error drops
     // them (REQ-LUA-025 notes, REQ-LUA-061).
-    let count = cx.data()?.scripts.len();
+    let count = cx.data(|data| data.scripts.len())?;
     let mut first = None;
     for index in 0..count {
-        let pending = {
-            let mut data = cx.data()?;
-            if data.scripts[index].failed() {
-                continue;
-            }
-
-            std::mem::take(&mut data.scripts[index].pending)
+        let pending = cx.data(|data| {
+            let script = &mut data.scripts[index];
+            (!script.failed()).then(|| std::mem::take(&mut script.pending))
+        })?;
+        let Some(pending) = pending else {
+            continue;
         };
 
         let key = crate::binding::payload::FrameKey {
@@ -182,16 +175,18 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
             epoch,
         };
         for id in &pending {
-            if cx.data()?.scripts[index].failed() {
+            if cx.data(|data| data.scripts[index].failed())? {
                 break;
             }
 
             first = first.or(call_update_s(cx, index, key, *id)?);
         }
 
-        let mut data = cx.data()?;
-        data.scripts[index].pending = pending;
-        data.scripts[index].pending.clear();
+        cx.data(|data| {
+            let script = &mut data.scripts[index];
+            script.pending = pending;
+            script.pending.clear();
+        })?;
     }
 
     Ok(first)
@@ -219,24 +214,24 @@ fn call_update_s(
 /// or into the player's (REQ-LUA-032, SPEC-08 REQ-INP-071). Anything that is not a number
 /// contributes 0.
 pub(crate) fn input_process(cx: &Cx) -> mlua::Result<i32> {
-    let (function, limit, pad_index, name) = {
-        let mut data = cx.data()?;
+    let selected = cx.data(|data| {
         let selected = data
             .input_process_script
             .filter(|&index| data.script_pad_enabled && data.scripts[index].active());
-        let Some(index) = selected else {
-            data.script_pad_state = 0;
-            return Ok(0);
-        };
-
-        (
-            data.scripts[index].hook(ScriptHook::InputProcess).cloned(),
-            data.hook_budget,
-            data.script_pad_index,
-            index,
-        )
-    };
-    let Some(function) = function else {
+        match selected {
+            Some(index) => Some((
+                data.scripts[index].hook(ScriptHook::InputProcess).cloned(),
+                data.hook_budget,
+                data.script_pad_index,
+                index,
+            )),
+            None => {
+                data.script_pad_state = 0;
+                None
+            }
+        }
+    })?;
+    let Some((Some(function), limit, pad_index, name)) = selected else {
         return Ok(0);
     };
 
@@ -251,7 +246,7 @@ pub(crate) fn input_process(cx: &Cx) -> mlua::Result<i32> {
         }
     };
 
-    cx.data()?.script_pad_state = mask;
+    cx.data(|data| data.script_pad_state = mask)?;
     Ok(mask)
 }
 

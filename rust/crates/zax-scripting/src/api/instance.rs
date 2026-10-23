@@ -201,7 +201,7 @@ fn reference_pattern(cx: &Cx, target: &InstanceTarget) -> mlua::Result<Option<Pa
             .transpose()?
             .flatten()
             .flatten()),
-        InstanceTarget::Pattern(reference) => Ok(cx.state()?.find_pattern(*reference)),
+        InstanceTarget::Pattern(reference) => cx.state(|state| state.find_pattern(*reference)),
     }
 }
 
@@ -234,7 +234,7 @@ fn with_carrier<R>(
             None => None,
         },
         InstanceTarget::Pattern(reference) => {
-            let id = cx.state()?.find_pattern(reference);
+            let id = cx.state(|state| state.find_pattern(reference))?;
             match id {
                 Some(id) => {
                     cx.with_pattern(id, |pattern, _| operation(Carrier::Pattern(pattern)))?
@@ -262,7 +262,7 @@ fn with_carrier_mut(
             }
         }
         InstanceTarget::Pattern(reference) => {
-            let id = cx.state()?.find_pattern(reference);
+            let id = cx.state(|state| state.find_pattern(reference))?;
             if let Some(id) = id {
                 cx.with_pattern_mut(id, |pattern| operation(CarrierMut::Pattern(pattern)))?;
             }
@@ -1295,12 +1295,11 @@ fn slot_size(cx: &Cx, this: &Payload) -> mlua::Result<Cell> {
         return Ok(Cell::default());
     };
 
-    let found = {
-        let state = cx.state()?;
-        let found = state
+    let found = cx.state(|state| {
+        state
             .find_pattern(*owner)
-            .and_then(|id| state.patterns().get(id));
-        found.map(|pattern| Cell::new(8 * pattern.width(), 8 * pattern.height()))
-    };
+            .and_then(|id| state.patterns().get(id))
+            .map(|pattern| Cell::new(8 * pattern.width(), 8 * pattern.height()))
+    })?;
     Ok(found.unwrap_or_default())
 }

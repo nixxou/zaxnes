@@ -36,28 +36,35 @@ fn script_pad() -> TypeDef {
         "Enable",
         |call| {
             require(call, HostType::ScriptPadApi, "Enable")?;
-            call.cx.data()?.script_pad_enabled = call.boolean(2);
+            let enabled = call.boolean(2);
+            call.cx.data(|data| data.script_pad_enabled = enabled)?;
             Ok(None)
         },
         None,
     );
     definition.property(
         "PadIndex",
-        |cx, _| Ok(num(cx.data()?.script_pad_index)),
+        |cx, _| Ok(num(cx.data(|data| data.script_pad_index)?)),
         |cx, _, value| {
             let index = cx.integer(value, "PadIndex")?.clamp(0, 1);
-            cx.data()?.script_pad_index = index;
+            cx.data(|data| data.script_pad_index = index)?;
             Ok(())
         },
         None,
     );
-    definition.read_only("State", |cx, _| Ok(num(cx.data()?.script_pad_state)), None);
+    definition.read_only(
+        "State",
+        |cx, _| Ok(num(cx.data(|data| data.script_pad_state)?)),
+        None,
+    );
     definition.function(
         "Pressed",
         |call| {
             require(call, HostType::ScriptPadApi, "Pressed")?;
             let mask = call.integer(2, "Pressed")?;
-            reply(boolean(call.cx.data()?.script_pad_state & mask != 0))
+            reply(boolean(
+                call.cx.data(|data| data.script_pad_state)? & mask != 0,
+            ))
         },
         None,
     );
@@ -104,7 +111,7 @@ fn gamepad() -> [TypeDef; 2] {
     let mut pads = type_def(HostType::GamepadApi, "ManettesAPI");
     pads.read_only(
         "State",
-        |cx, _| Ok(num(cx.data()?.env.input.global_state())),
+        |cx, _| Ok(num(cx.data(|data| data.env.input.global_state())?)),
         None,
     );
     pads.function(
@@ -113,7 +120,7 @@ fn gamepad() -> [TypeDef; 2] {
             require(call, HostType::GamepadApi, "Pressed")?;
             let mask = call.integer(2, "Pressed")?;
             reply(boolean(
-                call.cx.data()?.env.input.global_state() & mask != 0,
+                call.cx.data(|data| data.env.input.global_state())? & mask != 0,
             ))
         },
         None,
@@ -124,7 +131,7 @@ fn gamepad() -> [TypeDef; 2] {
             require(call, HostType::GamepadApi, "GetInput")?;
             let port = call.integer(2, "GetInput")?;
             let port = call.cx.check_bounds(port, 2, "GetInput")?;
-            reply(num(call.cx.data()?.env.input.port_byte(port)))
+            reply(num(call.cx.data(|data| data.env.input.port_byte(port))?))
         },
         None,
     );
@@ -140,7 +147,7 @@ fn gamepad() -> [TypeDef; 2] {
     player.read_only(
         "State",
         |cx, this| match this {
-            Payload::Player(index) => Ok(num(cx.data()?.env.input.player_state(*index))),
+            Payload::Player(index) => Ok(num(cx.data(|data| data.env.input.player_state(*index))?)),
             _ => Ok(num(0)),
         },
         None,
@@ -154,7 +161,7 @@ fn gamepad() -> [TypeDef; 2] {
 
             let mask = call.integer(2, "Pressed")?;
             reply(boolean(
-                call.cx.data()?.env.input.player_state(index) & mask != 0,
+                call.cx.data(|data| data.env.input.player_state(index))? & mask != 0,
             ))
         },
         None,

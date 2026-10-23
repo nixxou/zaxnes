@@ -780,6 +780,7 @@ dependencies = [
  "mlua",
  "thiserror",
  "zax-engine3d",
+ "zax-nes",
  "zax-profiles",
  "zax-settings",
 ]

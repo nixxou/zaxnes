@@ -27,6 +27,7 @@ use mlua::{HookTriggers, Lua, MultiValue, Value, VmState};
 use zax_engine3d::engine::{ConversionState, FrameRole};
 use zax_engine3d::instance::{InstanceRef, PatternInstance};
 use zax_engine3d::script::{ScriptError, ScriptHost};
+use zax_engine3d::settings::ConversionSettings;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::script_order;
 
@@ -83,6 +84,19 @@ impl RuntimeData {
         FrameKey {
             pinned: false,
             epoch: self.epoch,
+        }
+    }
+
+    /// Takes the changes made to the settings model into the pipeline's own slice, when the
+    /// engine state is at hand, and answers a request for a view reset with the camera.
+    pub fn settle_settings(&mut self, conversion: Option<&mut ConversionSettings>) {
+        match conversion {
+            Some(conversion) => self.env.settings.sync(conversion),
+            None => self.env.settings.absorb(),
+        }
+
+        if self.env.settings.take_view_reset() {
+            self.env.camera.reset_view();
         }
     }
 
@@ -186,6 +200,10 @@ impl ProfileScriptRuntime {
         building: Option<(InstanceRef, &mut PatternInstance)>,
         operation: impl FnOnce(&Cx) -> R,
     ) -> mlua::Result<R> {
+        let state = state.map(|state| {
+            self.data.settle_settings(Some(state.settings_mut()));
+            state
+        });
         let Self { lua, data } = self;
         lua.scope(|scope| {
             let data = scope.create_any_userdata_ref_mut(data)?;
@@ -267,7 +285,7 @@ impl ProfileScriptRuntime {
     /// Copies the changes made to the settings since the last call into the pipeline's own
     /// slice (see [`ScriptSettings::sync`]).
     pub fn sync_settings(&mut self, state: &mut ConversionState) {
-        self.data.env.settings.sync(state.settings_mut());
+        self.data.settle_settings(Some(state.settings_mut()));
     }
 
     /// The frame counter the last [`ScriptHost::set_frame_globals`] published.
@@ -570,16 +588,17 @@ fn stored_float(value: &Value) -> f32 {
 fn load_scripts(cx: &Cx, profile: &GameProfile) -> mlua::Result<bool> {
     let mut loaded: Vec<Option<LoadedScript>> = Vec::new();
     let mut by_name: HashMap<String, usize> = HashMap::new();
-    let limit = cx.data()?.hook_budget;
+    let limit = cx.data(|data| data.hook_budget)?;
 
     for (file_index, source) in profile.scripts.iter().enumerate() {
         let mut script = LoadedScript::new(source, file_index);
         if let Some(&previous) = by_name.get(script.name()) {
             // REQ-LUA-003: keep the last one read and say so in the log.
-            cx.data()?.env.log.warning(&format!(
+            let line = format!(
                 "Lua: the profile carries two scripts named '{}'; the last one is kept.",
                 script.name()
-            ));
+            );
+            cx.data(|data| data.env.log.warning(&line))?;
             loaded[previous] = None;
         }
 
@@ -613,10 +632,11 @@ fn load_scripts(cx: &Cx, profile: &GameProfile) -> mlua::Result<bool> {
             || script.defines(ScriptHook::LateUpdate)
     });
 
-    let mut data = cx.data()?;
-    data.scripts = scripts;
-    data.file_order = file_order;
-    data.input_process_script = input_process_script;
+    cx.data(|data| {
+        data.scripts = scripts;
+        data.file_order = file_order;
+        data.input_process_script = input_process_script;
+    })?;
     Ok(has_frame_hooks)
 }
 
@@ -639,21 +659,20 @@ fn compile(cx: &Cx, script: &mut LoadedScript, source: &str, limit: Duration) ->
         Ok(function) => function,
         Err(error) => {
             script.failed = true;
-            cx.data()?.env.log.error(&format!(
+            let line = format!(
                 "Lua: script '{}' failed to compile: {}",
                 script.name(),
                 message_of(&error)
-            ));
+            );
+            cx.data(|data| data.env.log.error(&line))?;
             return Ok(());
         }
     };
 
     if let Err(message) = with_budget(cx.lua, limit, || protected_call(cx.lua, &function, ()))? {
         script.failed = true;
-        cx.data()?.env.log.error(&format!(
-            "Lua: script '{}' failed to run: {message}",
-            script.name()
-        ));
+        let line = format!("Lua: script '{}' failed to run: {message}", script.name());
+        cx.data(|data| data.env.log.error(&line))?;
         return Ok(());
     }
 
@@ -720,7 +739,7 @@ impl ScriptHost for ProfileScriptRuntime {
             let mut first = None;
             for &index in &linked {
                 // A script turned off by an earlier one of this call gets no hook.
-                if !cx.data()?.scripts[index].active() {
+                if !cx.data(|data| data.scripts[index].active())? {
                     continue;
                 }
 
