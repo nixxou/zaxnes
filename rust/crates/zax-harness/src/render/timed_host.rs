@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use zax_engine3d::engine::ConversionState;
 use zax_engine3d::instance::{InstanceRef, PatternInstance};
+use zax_engine3d::registry::PatternId;
 use zax_engine3d::script::{ScriptError, ScriptHost};
 use zax_scripting::ProfileScriptRuntime;
 
@@ -102,6 +103,10 @@ impl ScriptHost for TimedHost {
         instance: &mut PatternInstance,
     ) -> Result<(), ScriptError> {
         self.runtime.invoke_build_pattern(reference, instance)
+    }
+
+    fn invoke_build_patterns(&mut self, pattern: PatternId, instances: &mut [PatternInstance]) {
+        self.runtime.invoke_build_patterns(pattern, instances);
     }
 
     fn as_any(&self) -> &dyn Any {

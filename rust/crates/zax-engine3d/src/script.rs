@@ -7,6 +7,7 @@ use zax_profiles::tags;
 
 use crate::engine::ConversionState;
 use crate::instance::{InstanceRef, PatternInstance};
+use crate::registry::PatternId;
 
 /// An error a script hook raised. The pipeline counts it and carries on, because a Lua error
 /// must not interrupt the conversion (REQ-E3D-324).
@@ -73,6 +74,19 @@ pub trait ScriptHost {
         reference: InstanceRef,
         instance: &mut PatternInstance,
     ) -> Result<(), ScriptError>;
+
+    /// Calls `BuildPattern` for each of `instances`, the instances of the pattern `pattern` in
+    /// order, as [`ScriptHost::invoke_build_pattern`] does for one. A Lua error must not stop the
+    /// conversion (REQ-E3D-324): the host disables the faulty script (SPEC-05 §3.8), and the
+    /// instances that follow are still built.
+    ///
+    /// A host that has work to share between the instances overrides it.
+    fn invoke_build_patterns(&mut self, pattern: PatternId, instances: &mut [PatternInstance]) {
+        for (index, instance) in instances.iter_mut().enumerate() {
+            // The error is already logged by the host and the script disabled.
+            let _ = self.invoke_build_pattern(InstanceRef { pattern, index }, instance);
+        }
+    }
 
     /// The host as [`Any`], so that the application can reach its concrete type.
     fn as_any(&self) -> &dyn Any;
