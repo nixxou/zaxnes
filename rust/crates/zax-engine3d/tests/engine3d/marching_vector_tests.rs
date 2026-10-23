@@ -9,7 +9,9 @@ use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::{Vec2, Vec3};
 
 use super::support::assert_close;
-use super::support::geo::{self, close, close_uv, mesh_of, object_3d, object_with, rectangles, Object};
+use super::support::geo::{
+    self, close, close_uv, mesh_of, object_3d, object_with, rectangles, Object,
+};
 
 const MARCHING: RenderAlgorithm = RenderAlgorithm::Marching;
 
@@ -43,7 +45,9 @@ fn tv_m1_a_single_pixel_becomes_a_regular_octahedron() {
 
     let root = 1.0 / 3f32.sqrt();
     for vertex in mesh.vertices() {
-        assert!(expected.iter().any(|&candidate| close(candidate, vertex.position)));
+        assert!(expected
+            .iter()
+            .any(|&candidate| close(candidate, vertex.position)));
 
         // uv (0.5, 0.5) for every vertex, and normals (±1, ±1, ±1)/sqrt(3).
         assert!(close_uv(Vec2::new(0.5, 0.5), vertex.uv));
@@ -55,7 +59,11 @@ fn tv_m1_a_single_pixel_becomes_a_regular_octahedron() {
     // One listed triangle, with its outward normal.
     assert_triangle(
         &mesh,
-        [Vec3::new(-4.5, 3.5, 0.0), Vec3::new(-3.5, 3.5, -1.0), Vec3::new(-3.5, 2.5, 0.0)],
+        [
+            Vec3::new(-4.5, 3.5, 0.0),
+            Vec3::new(-3.5, 3.5, -1.0),
+            Vec3::new(-3.5, 2.5, 0.0),
+        ],
         Vec3::new(-1.0, -1.0, -1.0) * root,
     );
 
@@ -93,7 +101,10 @@ fn tv_m3_a_full_tile_gives_a_closed_surface_that_joins_its_neighbour() {
     // Two full tiles side by side, distinct as images but identical in content — a flip of a
     // symmetric tile is another image (SPEC-04 §2) — so each has its own mesh and its own
     // neighbourhood. Neither keeps a face in the junction plane.
-    let flipped = TileImageKey { flip_x: true, ..geo::solid(1) };
+    let flipped = TileImageKey {
+        flip_x: true,
+        ..geo::solid(1)
+    };
     let pair = geo::pattern(2, 1, &[Some(geo::solid(1)), Some(flipped)]);
     assert_eq!(2, pair.images().len());
 
@@ -135,7 +146,13 @@ fn tv_m4_an_opaque_empty_colour_adds_the_legacy_zero_surface() {
     // own surface; here eight of its triangles have zero area.
     let mesh = mesh_of(
         geo::tile(&["1......."]),
-        &object_with(1, Object { empty_color: 4, ..Object::default() }),
+        &object_with(
+            1,
+            Object {
+                empty_color: 4,
+                ..Object::default()
+            },
+        ),
         MARCHING,
     );
 

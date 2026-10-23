@@ -14,7 +14,13 @@ use super::support::geo::{self, close, object_with, rectangles, section, voxels,
 const GREEDY: RenderAlgorithm = RenderAlgorithm::Greedy;
 
 fn cylinder(depth: i32, geometry: Geo3DType) -> PatternInstance {
-    object_with(depth, Object { geometry, ..Object::default() })
+    object_with(
+        depth,
+        Object {
+            geometry,
+            ..Object::default()
+        },
+    )
 }
 
 fn column(height: usize) -> zax_engine3d::pattern::EnginePattern {
@@ -25,8 +31,10 @@ fn texel_at(section: &[(i32, i32, i32)], line: i32, depth: i32) -> i32 {
     section
         .iter()
         .find(|&&(l, d, _)| l == line && d == depth)
-        .map(|&(_, _, texel)| texel)
-        .unwrap_or_else(|| panic!("no voxel at ({line}, {depth})"))
+        .map_or_else(
+            || panic!("no voxel at ({line}, {depth})"),
+            |&(_, _, texel)| texel,
+        )
 }
 
 #[test]
@@ -39,14 +47,30 @@ fn tv_y1_a_row_of_eight_becomes_a_ring_of_twenty_four_voxels() {
     assert_eq!(8, effective_depth);
     assert_eq!(
         voxels(&[
-            (0, 3, 0), (0, 4, 7),
-            (1, 1, 1), (1, 2, 1), (1, 5, 6), (1, 6, 6),
-            (2, 0, 2), (2, 1, 2), (2, 6, 5), (2, 7, 5),
-            (3, 0, 3), (3, 7, 4),
-            (4, 0, 4), (4, 7, 3),
-            (5, 0, 5), (5, 1, 5), (5, 6, 2), (5, 7, 2),
-            (6, 1, 6), (6, 2, 6), (6, 5, 1), (6, 6, 1),
-            (7, 3, 7), (7, 4, 0),
+            (0, 3, 0),
+            (0, 4, 7),
+            (1, 1, 1),
+            (1, 2, 1),
+            (1, 5, 6),
+            (1, 6, 6),
+            (2, 0, 2),
+            (2, 1, 2),
+            (2, 6, 5),
+            (2, 7, 5),
+            (3, 0, 3),
+            (3, 7, 4),
+            (4, 0, 4),
+            (4, 7, 3),
+            (5, 0, 5),
+            (5, 1, 5),
+            (5, 6, 2),
+            (5, 7, 2),
+            (6, 1, 6),
+            (6, 2, 6),
+            (6, 5, 1),
+            (6, 6, 1),
+            (7, 3, 7),
+            (7, 4, 0),
         ]),
         section(&fields[0], 0, true)
     );
@@ -59,7 +83,14 @@ fn tv_y1_a_row_of_eight_becomes_a_ring_of_twenty_four_voxels() {
 fn tv_y2_a_solid_row_of_eight_fills_forty_eight_voxels() {
     // REQ-E3D-449.
     let pattern = geo::one_tile(geo::tile(&["11111111"]));
-    let instance = object_with(8, Object { geometry: Geo3DType::VCylinder, solid: true, ..Object::default() });
+    let instance = object_with(
+        8,
+        Object {
+            geometry: Geo3DType::VCylinder,
+            solid: true,
+            ..Object::default()
+        },
+    );
     let (fields, _) = geo::fields(&pattern, &instance, GREEDY);
     let section = section(&fields[0], 0, true);
 
@@ -79,7 +110,10 @@ fn tv_y2_a_solid_row_of_eight_fills_forty_eight_voxels() {
     }
 
     expected.sort_unstable();
-    let mut actual: Vec<(i32, i32)> = section.iter().map(|&(line, depth, _)| (line, depth)).collect();
+    let mut actual: Vec<(i32, i32)> = section
+        .iter()
+        .map(|&(line, depth, _)| (line, depth))
+        .collect();
     actual.sort_unstable();
     assert_eq!(48, actual.len());
     assert_eq!(expected, actual);
@@ -104,10 +138,14 @@ fn tv_y3_horizontal_cylinders_mirror_the_vertical_ones() {
     assert_eq!(4, effective_depth);
     assert_eq!(
         voxels(&[
-            (4, 3, 3), (4, 4, 0),
-            (5, 2, 2), (5, 5, 1),
-            (6, 2, 1), (6, 5, 2),
-            (7, 3, 0), (7, 4, 3),
+            (4, 3, 3),
+            (4, 4, 0),
+            (5, 2, 2),
+            (5, 5, 1),
+            (6, 2, 1),
+            (6, 5, 2),
+            (7, 3, 0),
+            (7, 4, 3),
         ]),
         section(&fields[0], 0, false)
     );
@@ -126,14 +164,22 @@ fn tv_y3_horizontal_cylinders_mirror_the_vertical_ones() {
     assert_eq!(4, shallow_depth);
     assert_eq!(
         voxels(&[
-            (0, 1, 0), (0, 2, 7),
-            (1, 1, 6), (1, 2, 1),
-            (2, 0, 5), (2, 3, 2),
-            (3, 0, 4), (3, 3, 3),
-            (4, 0, 3), (4, 3, 4),
-            (5, 0, 2), (5, 3, 5),
-            (6, 1, 1), (6, 2, 6),
-            (7, 1, 7), (7, 2, 0),
+            (0, 1, 0),
+            (0, 2, 7),
+            (1, 1, 6),
+            (1, 2, 1),
+            (2, 0, 5),
+            (2, 3, 2),
+            (3, 0, 4),
+            (3, 3, 3),
+            (4, 0, 3),
+            (4, 3, 4),
+            (5, 0, 2),
+            (5, 3, 5),
+            (6, 1, 1),
+            (6, 2, 6),
+            (7, 1, 7),
+            (7, 2, 0),
         ]),
         section(&shallow_fields[0], 0, false)
     );
@@ -146,7 +192,12 @@ fn tv_y4_solid_full_warp_fills_each_column_with_its_own_colour() {
     let warped = |depth| {
         object_with(
             depth,
-            Object { geometry: Geo3DType::VCylinder, solid: true, full_warp: true, ..Object::default() },
+            Object {
+                geometry: Geo3DType::VCylinder,
+                solid: true,
+                full_warp: true,
+                ..Object::default()
+            },
         )
     };
     let pattern = geo::one_tile(geo::tile(&["11111111"]));
@@ -165,10 +216,18 @@ fn tv_y4_solid_full_warp_fills_each_column_with_its_own_colour() {
     let (four_fields, _) = geo::fields(&four, &shallow, GREEDY);
     assert_eq!(
         voxels(&[
-            (0, 1, 0), (0, 2, 0),
-            (1, 0, 1), (1, 1, 1), (1, 2, 1), (1, 3, 1),
-            (2, 0, 2), (2, 1, 2), (2, 2, 2), (2, 3, 2),
-            (3, 1, 3), (3, 2, 3),
+            (0, 1, 0),
+            (0, 2, 0),
+            (1, 0, 1),
+            (1, 1, 1),
+            (1, 2, 1),
+            (1, 3, 1),
+            (2, 0, 2),
+            (2, 1, 2),
+            (2, 2, 2),
+            (2, 3, 2),
+            (3, 1, 3),
+            (3, 2, 3),
         ]),
         section(&four_fields[0], 0, true)
     );
@@ -202,13 +261,22 @@ fn tv_y6_anti_shadow_moves_the_texels_of_the_flanks() {
     // REQ-E3D-447.
     let pattern = geo::one_tile(geo::tile(&["12333321"]));
     let plain = cylinder(8, Geo3DType::VCylinder);
-    let shaded = object_with(8, Object { geometry: Geo3DType::VCylinder, anti_shadow: true, ..Object::default() });
+    let shaded = object_with(
+        8,
+        Object {
+            geometry: Geo3DType::VCylinder,
+            anti_shadow: true,
+            ..Object::default()
+        },
+    );
 
     let without = section(&geo::fields(&pattern, &plain, GREEDY).0[0], 0, true);
     let with = section(&geo::fields(&pattern, &shaded, GREEDY).0[0], 0, true);
 
     // Same positions, only the texels of the region 2 voxels move.
-    let positions = |list: &[(i32, i32, i32)]| -> Vec<(i32, i32)> { list.iter().map(|&(l, d, _)| (l, d)).collect() };
+    let positions = |list: &[(i32, i32, i32)]| -> Vec<(i32, i32)> {
+        list.iter().map(|&(l, d, _)| (l, d)).collect()
+    };
     assert_eq!(positions(&without), positions(&with));
 
     assert_eq!(0, texel_at(&without, 0, 3));
@@ -235,11 +303,25 @@ fn tv_y6_anti_shadow_moves_the_texels_of_the_flanks() {
 fn tv_y7_quadrant_points_of_texel_zero_are_skipped() {
     // REQ-E3D-448: the test is on the texel value, not on the transparent colour.
     let pattern = geo::one_tile(geo::tile(&["1101...."]));
-    let instance = object_with(4, Object { geometry: Geo3DType::VCylinder, empty_color: 4, ..Object::default() });
+    let instance = object_with(
+        4,
+        Object {
+            geometry: Geo3DType::VCylinder,
+            empty_color: 4,
+            ..Object::default()
+        },
+    );
     let (fields, _) = geo::fields(&pattern, &instance, GREEDY);
 
     assert_eq!(
-        voxels(&[(0, 2, 0), (1, 1, 1), (3, 0, 3), (4, 3, 3), (6, 2, 1), (7, 1, 0)]),
+        voxels(&[
+            (0, 2, 0),
+            (1, 1, 1),
+            (3, 0, 3),
+            (4, 3, 3),
+            (6, 2, 1),
+            (7, 1, 0)
+        ]),
         section(&fields[0], 0, true)
     );
 }
@@ -255,42 +337,67 @@ fn tv_y8_half_cylinders_leave_their_flat_face_open() {
     assert_eq!(7, half_v_depth);
     assert_eq!(
         voxels(&[
-            (0, 1, 0), (0, 6, 0),
-            (1, 1, 1), (1, 6, 1),
-            (2, 1, 2), (2, 2, 2), (2, 5, 2), (2, 6, 2),
-            (3, 3, 3), (3, 4, 3),
+            (0, 1, 0),
+            (0, 6, 0),
+            (1, 1, 1),
+            (1, 6, 1),
+            (2, 1, 2),
+            (2, 2, 2),
+            (2, 5, 2),
+            (2, 6, 2),
+            (3, 3, 3),
+            (3, 4, 3),
         ]),
         section(&half_v_fields[0], 0, true)
     );
     assert_eq!(26, rectangles(&geo::mesh(&row, &half_v, GREEDY, 0)));
 
-    let half_v_flipped = object_with(8, Object { geometry: Geo3DType::HalfVCylinder, flip: true, ..Object::default() });
+    let half_v_flipped = object_with(
+        8,
+        Object {
+            geometry: Geo3DType::HalfVCylinder,
+            flip: true,
+            ..Object::default()
+        },
+    );
     let (flipped_fields, flipped_depth) = geo::fields(&row, &half_v_flipped, GREEDY);
     assert_eq!(7, flipped_depth);
     assert_eq!(
         voxels(&[
-            (0, 3, 0), (0, 4, 0),
-            (1, 1, 1), (1, 2, 1), (1, 5, 1), (1, 6, 1),
-            (2, 1, 2), (2, 6, 2),
-            (3, 1, 3), (3, 6, 3),
+            (0, 3, 0),
+            (0, 4, 0),
+            (1, 1, 1),
+            (1, 2, 1),
+            (1, 5, 1),
+            (1, 6, 1),
+            (2, 1, 2),
+            (2, 6, 2),
+            (3, 1, 3),
+            (3, 6, 3),
         ]),
         section(&flipped_fields[0], 0, true)
     );
     assert_eq!(26, rectangles(&geo::mesh(&row, &half_v_flipped, GREEDY, 0)));
 
-    let half_h = cylinder(8, Geo3DType::HalfHCylinder);
-    let (half_h_fields, half_h_depth) = geo::fields(&column, &half_h, GREEDY);
-    assert_eq!(7, half_h_depth);
+    let horizontal = cylinder(8, Geo3DType::HalfHCylinder);
+    let (horizontal_fields, horizontal_depth) = geo::fields(&column, &horizontal, GREEDY);
+    assert_eq!(7, horizontal_depth);
     assert_eq!(
         voxels(&[
-            (4, 1, 3), (4, 6, 3),
-            (5, 1, 2), (5, 6, 2),
-            (6, 1, 1), (6, 2, 1), (6, 5, 1), (6, 6, 1),
-            (7, 3, 0), (7, 4, 0),
+            (4, 1, 3),
+            (4, 6, 3),
+            (5, 1, 2),
+            (5, 6, 2),
+            (6, 1, 1),
+            (6, 2, 1),
+            (6, 5, 1),
+            (6, 6, 1),
+            (7, 3, 0),
+            (7, 4, 0),
         ]),
-        section(&half_h_fields[0], 0, false)
+        section(&horizontal_fields[0], 0, false)
     );
-    assert_eq!(26, rectangles(&geo::mesh(&column, &half_h, GREEDY, 0)));
+    assert_eq!(26, rectangles(&geo::mesh(&column, &horizontal, GREEDY, 0)));
 }
 
 #[test]
@@ -302,7 +409,14 @@ fn section_control_cases_of_paragraph_5_3() {
 
     assert_eq!(3, depth);
     assert_eq!(
-        voxels(&[(0, 3, 0), (0, 4, 2), (1, 3, 1), (1, 4, 1), (2, 3, 2), (2, 4, 0)]),
+        voxels(&[
+            (0, 3, 0),
+            (0, 4, 2),
+            (1, 3, 1),
+            (1, 4, 1),
+            (2, 3, 2),
+            (2, 4, 0)
+        ]),
         section(&fields[0], 0, true)
     );
 

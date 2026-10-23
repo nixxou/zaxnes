@@ -11,15 +11,30 @@ use zax_profiles::enums::{PatternColorFlags, PatternDensity, ProfileLayer};
 
 use super::support::{cells, img, instances, permanent, Batch, PatternOptions, ProfileBuilder};
 
-fn build(registry: &mut ImageRegistry, width: u16, height: u16, keys: &[Option<TileImageKey>], self_connected: bool, permanent: bool) -> EnginePattern {
-    let images: Vec<_> = keys.iter().map(|key| key.map(|key| registry.intern(key))).collect();
+fn build(
+    registry: &mut ImageRegistry,
+    width: u16,
+    height: u16,
+    keys: &[Option<TileImageKey>],
+    self_connected: bool,
+    permanent: bool,
+) -> EnginePattern {
+    let images: Vec<_> = keys
+        .iter()
+        .map(|key| key.map(|key| registry.intern(key)))
+        .collect();
     let mut pattern = EnginePattern::new(width, height, images, permanent);
     pattern.set_self_connected(self_connected);
     pattern.add_instance(PatternInstance::new());
     pattern
 }
 
-fn closed(registry: &mut ImageRegistry, width: u16, height: u16, keys: &[TileImageKey]) -> EnginePattern {
+fn closed(
+    registry: &mut ImageRegistry,
+    width: u16,
+    height: u16,
+    keys: &[TileImageKey],
+) -> EnginePattern {
     build(registry, width, height, &cells(keys), true, true)
 }
 
@@ -29,7 +44,14 @@ fn req_e3d_061_the_relations_of_a_one_row_pattern() {
     let a = registry.intern(img::a());
     let b = registry.intern(img::b());
 
-    let open = build(&mut registry, 2, 1, &cells(&[img::a(), img::b()]), false, true);
+    let open = build(
+        &mut registry,
+        2,
+        1,
+        &cells(&[img::a(), img::b()]),
+        false,
+        true,
+    );
     assert_eq!(1, open.horizontal_pair_count());
     assert!(open.has_horizontal_pair(&a, &b));
     assert_eq!(0, open.vertical_pair_count());
@@ -70,7 +92,14 @@ fn req_e3d_062_skip_geo_ignores_the_direction() {
     let mut registry = ImageRegistry::new();
     let a = registry.intern(img::a());
     let b = registry.intern(img::b());
-    let mut pattern = build(&mut registry, 2, 1, &cells(&[img::a(), img::b()]), false, true);
+    let mut pattern = build(
+        &mut registry,
+        2,
+        1,
+        &cells(&[img::a(), img::b()]),
+        false,
+        true,
+    );
     pattern.skip_geometry = true;
 
     for direction in GrowDirection::ORDER {
@@ -119,7 +148,7 @@ fn req_e3d_064_the_pattern_pixel_box_and_its_corners() {
 
     // TopRight uses the grid width on the y axis: the kept quirk of DEC-04-Q04.
     let wide = closed(&mut registry, 3, 1, &[img::a(), img::b(), img::c()]);
-    assert_eq!(Vec2::new(23.0, ((8 * 3) - 1) as f32), wide.top_right());
+    assert_eq!(Vec2::new(23.0, f32::from((8u8 * 3) - 1)), wide.top_right());
 }
 
 #[test]
@@ -143,7 +172,14 @@ fn req_e3d_065_a_new_temporary_pattern_replaces_the_ones_that_contain_it() {
     let mut registry = ImageRegistry::new();
     let mut patterns = PatternRegistry::new();
 
-    let big = build(&mut registry, 2, 1, &cells(&[img::a(), img::b()]), true, false);
+    let big = build(
+        &mut registry,
+        2,
+        1,
+        &cells(&[img::a(), img::b()]),
+        true,
+        false,
+    );
     patterns.add(big, &mut registry);
     let small = build(&mut registry, 1, 1, &cells(&[img::a()]), true, false);
     let small = patterns.add(small, &mut registry);
@@ -179,7 +215,10 @@ fn req_e3d_091_candidates_keep_the_registration_order() {
 
     let first = permanent(&engine, 0);
     let frame = batch.convert(&mut engine, 0);
-    assert_eq!(Some(first), frame.shape(frame.shapes()[0]).reference_pattern());
+    assert_eq!(
+        Some(first),
+        frame.shape(frame.shapes()[0]).reference_pattern()
+    );
 }
 
 #[test]
@@ -453,7 +492,9 @@ fn req_e3d_090_same_background_palette_stops_the_growth() {
     engine.settings_mut().same_background_palette = true;
 
     let mut batch = Batch::new();
-    batch.bg_cell(img::a(), 10, 10).bg_cell_pal(img::a(), 11, 10, 1);
+    batch
+        .bg_cell(img::a(), 10, 10)
+        .bg_cell_pal(img::a(), 11, 10, 1);
     assert_eq!(2, batch.convert(&mut engine, 0).shapes().len());
 
     engine.settings_mut().same_background_palette = false;
@@ -464,7 +505,9 @@ fn req_e3d_090_same_background_palette_stops_the_growth() {
 fn req_e3d_253_each_tile_keeps_its_own_palette_attribute() {
     let mut engine = ProfileBuilder::new().row(&cells(&[img::a()])).load();
     let mut batch = Batch::new();
-    batch.bg_cell_pal(img::a(), 10, 10, 1).bg_cell_pal(img::a(), 11, 10, 2);
+    batch
+        .bg_cell_pal(img::a(), 10, 10, 1)
+        .bg_cell_pal(img::a(), 11, 10, 2);
 
     let frame = batch.convert(&mut engine, 0);
     let id = frame.shapes()[0];

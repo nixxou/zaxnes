@@ -33,7 +33,11 @@ fn req_e3d_001_a_batch_produces_one_frame_whose_counter_is_the_batch_counter() {
 #[case(100, 239, true)]
 #[case(100, 240, false)]
 #[case(100, -7, true)]
-fn req_e3d_002_the_clip_area_keeps_a_tile_or_not(#[case] x: i32, #[case] y: i32, #[case] kept: bool) {
+fn req_e3d_002_the_clip_area_keeps_a_tile_or_not(
+    #[case] x: i32,
+    #[case] y: i32,
+    #[case] kept: bool,
+) {
     let mut engine = ProfileBuilder::empty_engine();
     let mut batch = Batch::new();
     batch.bg(img::a(), x, y, 0);
@@ -113,7 +117,12 @@ fn req_e3d_004_an_empty_image_can_join_a_shape_when_a_pattern_holds_it() {
 #[rstest]
 #[case(-3, 13, 1, 3)]
 #[case(5, 16, 2, 3)]
-fn req_e3d_005_a_background_tile_lands_in_its_cell(#[case] x: i32, #[case] y: i32, #[case] cx: i32, #[case] cy: i32) {
+fn req_e3d_005_a_background_tile_lands_in_its_cell(
+    #[case] x: i32,
+    #[case] y: i32,
+    #[case] cx: i32,
+    #[case] cy: i32,
+) {
     assert_eq!(Cell::new(cx, cy), grid::background_cell(x, y));
 
     let mut engine = ProfileBuilder::empty_engine();
@@ -139,7 +148,11 @@ fn req_e3d_005_a_sprite_lands_in_its_cell_without_margin() {
     assert_eq!(2, frame.sprites()[0].palette());
 }
 
-fn first_image_of_first_shape(engine: &mut ConversionEngine, batch: &Batch, counter: i32) -> TileImageKey {
+fn first_image_of_first_shape(
+    engine: &mut ConversionEngine,
+    batch: &Batch,
+    counter: i32,
+) -> TileImageKey {
     let frame = batch.convert(engine, counter);
     frame.shape(frame.shapes()[0]).images()[0].key()
 }
@@ -213,11 +226,17 @@ fn req_e3d_008_the_learned_state_survives_a_relaunch_and_dies_with_the_game() {
     let learned = permanent(&engine, 1);
     let first = learning.convert(&mut engine, 1);
     assert_eq!(1, first.shapes().len());
-    assert_eq!(Some(learned), first.shape(first.shapes()[0]).reference_pattern());
+    assert_eq!(
+        Some(learned),
+        first.shape(first.shapes()[0]).reference_pattern()
+    );
 
     // Loading another game clears everything.
     engine
-        .load_profile(&ProfileBuilder::new().row(&cells(&[img::b()])).build(), true)
+        .load_profile(
+            &ProfileBuilder::new().row(&cells(&[img::b()])).build(),
+            true,
+        )
         .unwrap();
     assert_eq!(1, engine.patterns().permanent().len());
     assert_eq!(1, engine.images().count());
@@ -278,7 +297,9 @@ fn req_e3d_040_the_frame_lists_background_shapes_first() {
         assert!(frame.shape(shape).background());
     }
 
-    assert!(!frame.shape(frame.shapes()[frame.background_shape_count()]).background());
+    assert!(!frame
+        .shape(frame.shapes()[frame.background_shape_count()])
+        .background());
 }
 
 #[test]
@@ -290,7 +311,10 @@ fn req_e3d_042_every_tile_belongs_to_at_most_one_shape() {
 
     let frame = batch.convert(&mut engine, 0);
 
-    let tiles_in_shapes: usize = frame.shape_list().map(|shape| shape.tile_count()).sum();
+    let tiles_in_shapes: usize = frame
+        .shape_list()
+        .map(zax_engine3d::frame::FrameShape::tile_count)
+        .sum();
     assert!(tiles_in_shapes <= frame.background_tile_count() + frame.sprites().len());
 
     let mut seen = HashSet::new();

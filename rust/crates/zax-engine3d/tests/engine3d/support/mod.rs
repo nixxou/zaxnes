@@ -23,7 +23,6 @@ use zax_nes::{FrameBatch, TileRecord};
 use zax_profiles::enums::{ProfileLayer, TileFlip, VariantRenderStyle};
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
-use zax_profiles::settings::ProfileSettings;
 use zax_profiles::tile::{PatternGrid, ProfileTile};
 use zax_profiles::values::Vec2I;
 use zax_profiles::variant::PatternVariant;
@@ -52,7 +51,11 @@ pub mod img {
 
     /// The same image shown flipped, which is another image (SPEC-04 §2).
     pub fn flipped(image: TileImageKey, flip_x: bool, flip_y: bool) -> TileImageKey {
-        TileImageKey { flip_x, flip_y, ..image }
+        TileImageKey {
+            flip_x,
+            flip_y,
+            ..image
+        }
     }
 
     pub fn a() -> TileImageKey {
@@ -86,15 +89,9 @@ pub struct Batch {
     mask_y: i32,
 }
 
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 impl Batch {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// The records, in emission order.
-    pub fn records(&self) -> &[TileRecord] {
-        &self.records
     }
 
     /// Sets the mask the core reports (REQ-CORE-046).
@@ -135,7 +132,13 @@ impl Batch {
     }
 
     /// The same with a palette attribute.
-    pub fn bg_cell_pal(&mut self, image: TileImageKey, column: i32, row: i32, palette: u8) -> &mut Self {
+    pub fn bg_cell_pal(
+        &mut self,
+        image: TileImageKey,
+        column: i32,
+        row: i32,
+        palette: u8,
+    ) -> &mut Self {
         self.bg(image, 8 * column, 8 * row, palette)
     }
 
@@ -153,7 +156,14 @@ impl Batch {
     }
 
     /// Adds a sprite tile with its palette and priority bit.
-    pub fn sprite_full(&mut self, image: TileImageKey, x: i32, y: i32, palette: u8, hidden: bool) -> &mut Self {
+    pub fn sprite_full(
+        &mut self,
+        image: TileImageKey,
+        x: i32,
+        y: i32,
+        palette: u8,
+        hidden: bool,
+    ) -> &mut Self {
         self.records.push(TileRecord::new(
             image.low,
             image.high,
@@ -171,7 +181,11 @@ impl Batch {
     }
 
     /// Converts the batch with `engine` and publishes nothing.
-    pub fn convert<'a>(&self, engine: &'a mut ConversionEngine, counter: i32) -> &'a ConversionFrame {
+    pub fn convert<'a>(
+        &self,
+        engine: &'a mut ConversionEngine,
+        counter: i32,
+    ) -> &'a ConversionFrame {
         let batch = FrameBatch {
             records: &self.records,
             palette: self.palette,
@@ -182,7 +196,11 @@ impl Batch {
     }
 
     /// Converts the batch and publishes the frame (REQ-E3D-280).
-    pub fn convert_and_publish<'a>(&self, engine: &'a mut ConversionEngine, counter: i32) -> &'a ConversionFrame {
+    pub fn convert_and_publish<'a>(
+        &self,
+        engine: &'a mut ConversionEngine,
+        counter: i32,
+    ) -> &'a ConversionFrame {
         self.convert(engine, counter);
         engine.publish()
     }
@@ -202,7 +220,13 @@ impl Batch {
         for i in 0..64 {
             let palette = u8::try_from(i & 3).unwrap();
             let id = u32::try_from(i).unwrap() % distinct_images;
-            batch.sprite_full(img::full(id), (i * 3) % 248, 8 + ((i * 5) % 224), palette, false);
+            batch.sprite_full(
+                img::full(id),
+                (i * 3) % 248,
+                8 + ((i * 5) % 224),
+                palette,
+                false,
+            );
         }
 
         batch
@@ -253,15 +277,9 @@ impl Default for ProfileBuilder {
     }
 }
 
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 impl ProfileBuilder {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// The profile settings, so that a test can change one.
-    pub fn settings(&mut self) -> &mut ProfileSettings {
-        self.profile.settings.as_mut().unwrap()
     }
 
     /// Adds a pattern of one row: the `[A B]` of the test vectors.
@@ -270,13 +288,22 @@ impl ProfileBuilder {
     }
 
     /// Adds a pattern of one row with options.
-    pub fn row_with(&mut self, cells: &[Option<TileImageKey>], options: PatternOptions) -> &mut Self {
+    pub fn row_with(
+        &mut self,
+        cells: &[Option<TileImageKey>],
+        options: PatternOptions,
+    ) -> &mut Self {
         let width = i32::try_from(cells.len()).unwrap();
         self.pattern_with(width, 1, cells, options)
     }
 
     /// Adds a pattern.
-    pub fn pattern(&mut self, width: i32, height: i32, cells: &[Option<TileImageKey>]) -> &mut Self {
+    pub fn pattern(
+        &mut self,
+        width: i32,
+        height: i32,
+        cells: &[Option<TileImageKey>],
+    ) -> &mut Self {
         self.pattern_with(width, height, cells, PatternOptions::default())
     }
 
@@ -288,12 +315,30 @@ impl ProfileBuilder {
         cells: &[Option<TileImageKey>],
         options: PatternOptions,
     ) -> &mut Self {
+        let PatternOptions {
+            self_connected,
+            skip_geometry,
+            constraint_width,
+            constraint_height,
+            permanent,
+            tags,
+            depth,
+            layer,
+            instance_count,
+        } = options;
         let tiles = cells
             .iter()
             .map(|cell| {
                 cell.map(|key| {
-                    let flip = if key.flip_x { TileFlip::HORIZONTAL } else { TileFlip::NONE }
-                        | if key.flip_y { TileFlip::VERTICAL } else { TileFlip::NONE };
+                    let flip = if key.flip_x {
+                        TileFlip::HORIZONTAL
+                    } else {
+                        TileFlip::NONE
+                    } | if key.flip_y {
+                        TileFlip::VERTICAL
+                    } else {
+                        TileFlip::NONE
+                    };
                     Arc::new(ProfileTile::new(key.low, key.high, flip))
                 })
             })
@@ -302,25 +347,25 @@ impl ProfileBuilder {
         let mut pattern = ProfilePattern {
             grid: Some(PatternGrid::new(width, height, tiles)),
             tile_size: Some(Vec2I::new(width, height)),
-            permanent: options.permanent,
-            self_connected: options.self_connected,
-            skip_geometry: options.skip_geometry,
-            constraint_size: Vec2I::new(options.constraint_width, options.constraint_height),
+            permanent,
+            self_connected,
+            skip_geometry,
+            constraint_size: Vec2I::new(constraint_width, constraint_height),
             ..ProfilePattern::default()
         };
 
-        for _ in 0..options.instance_count {
+        for _ in 0..instance_count {
             pattern.variants.push(Arc::new(PatternVariant {
-                depth: options.depth,
-                layer: options.layer,
+                depth,
+                layer,
                 alpha: 1.0,
                 render_style: VariantRenderStyle::Normal,
-                tag_string: options.tags.clone(),
+                tag_string: tags.clone(),
                 ..PatternVariant::default()
             }));
         }
 
-        if options.permanent {
+        if permanent {
             self.profile.permanent_patterns.push(Arc::new(pattern));
         } else {
             self.profile.temporary_patterns.push(Arc::new(pattern));
@@ -354,33 +399,30 @@ impl ProfileBuilder {
     /// An engine with no pattern at all, the "empty profile" of the vectors.
     pub fn empty_engine() -> ConversionEngine {
         let mut engine = ConversionEngine::new();
-        engine.load_profile(&GameProfile::create_empty(), true).unwrap();
+        engine
+            .load_profile(&GameProfile::create_empty(), true)
+            .unwrap();
         engine
     }
 }
 
 /// Shorthand for a list of present cells.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn cells(keys: &[TileImageKey]) -> Vec<Option<TileImageKey>> {
     keys.iter().copied().map(Some).collect()
 }
 
 /// The handle of the permanent pattern `index` of an engine.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn permanent(engine: &ConversionEngine, index: usize) -> PatternId {
     engine.patterns().permanent()[index]
 }
 
-/// The pattern of a handle.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
-pub fn pattern(engine: &ConversionEngine, id: PatternId) -> &EnginePattern {
-    engine.patterns().get(id).unwrap()
-}
-
 /// The instances of a frame, in order.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn instances(frame: &ConversionFrame) -> Vec<&FrameInstance> {
-    frame.instances().iter().map(|&id| frame.instance(id)).collect()
+    frame
+        .instances()
+        .iter()
+        .map(|&id| frame.instance(id))
+        .collect()
 }
 
 type StateHook = Box<dyn FnMut(&mut ConversionState)>;
@@ -390,7 +432,6 @@ type PatternHook = Box<dyn FnMut(&mut PatternInstance)>;
 /// A script host that records what the pipeline calls and lets a test run code at each call
 /// point (REQ-E3D-320).
 #[derive(Default)]
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub struct RecordingScriptHost {
     /// The call log, in order.
     pub calls: Vec<String>,
@@ -453,7 +494,11 @@ impl ScriptHost for RecordingScriptHost {
         Ok(())
     }
 
-    fn invoke_build_pattern(&mut self, reference: InstanceRef, instance: &mut PatternInstance) -> Result<(), ScriptError> {
+    fn invoke_build_pattern(
+        &mut self,
+        reference: InstanceRef,
+        instance: &mut PatternInstance,
+    ) -> Result<(), ScriptError> {
         self.calls.push("BuildPattern".to_owned());
         self.built_patterns.push(reference);
         if let Some(hook) = &mut self.on_build_pattern {
@@ -472,13 +517,11 @@ impl ScriptHost for RecordingScriptHost {
 }
 
 /// The recording script host of an engine.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn host(engine: &ConversionEngine) -> &RecordingScriptHost {
     engine.script_host_as::<RecordingScriptHost>().unwrap()
 }
 
 /// The recording script host of an engine, for writing.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn host_mut(engine: &mut ConversionEngine) -> &mut RecordingScriptHost {
     engine.script_host_as_mut::<RecordingScriptHost>().unwrap()
 }
@@ -486,7 +529,6 @@ pub fn host_mut(engine: &mut ConversionEngine) -> &mut RecordingScriptHost {
 /// A geometry builder that records what the pipeline asks of it and lets a test drive the
 /// readiness and the progress (REQ-E3D-340, REQ-E3D-361, REQ-E3D-362).
 #[derive(Debug)]
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub struct RecordingGeometryBuilder {
     /// The patterns built, in order; a pattern rebuilt appears twice.
     pub built: Vec<PatternId>,
@@ -539,7 +581,12 @@ impl PatternGeometryBuilder for RecordingGeometryBuilder {
         !self.not_ready.contains(&instance)
     }
 
-    fn mesh_of(&mut self, _instance: InstanceRef, _image: &TileImage, _sealed_sides: u8) -> Option<Arc<TileMesh>> {
+    fn mesh_of(
+        &mut self,
+        _instance: InstanceRef,
+        _image: &TileImage,
+        _sealed_sides: u8,
+    ) -> Option<Arc<TileMesh>> {
         Some(Arc::clone(&self.stub))
     }
 
@@ -569,20 +616,19 @@ impl PatternGeometryBuilder for RecordingGeometryBuilder {
 }
 
 /// The recording geometry builder of an engine.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn recorder(engine: &ConversionEngine) -> &RecordingGeometryBuilder {
     engine.geometry_as::<RecordingGeometryBuilder>().unwrap()
 }
 
 /// The recording geometry builder of an engine, for writing.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn recorder_mut(engine: &mut ConversionEngine) -> &mut RecordingGeometryBuilder {
-    engine.geometry_as_mut::<RecordingGeometryBuilder>().unwrap()
+    engine
+        .geometry_as_mut::<RecordingGeometryBuilder>()
+        .unwrap()
 }
 
 /// Asserts that two values agree to `digits` decimal places, as xUnit's
 /// `Assert.Equal(expected, actual, precision)` does.
-#[allow(dead_code)] // Each test module uses its own part of the helpers.
 pub fn assert_close(expected: f32, actual: f32, digits: i32) {
     let tolerance = 0.5 * 10f32.powi(-digits);
     assert!(

@@ -43,7 +43,9 @@ fn req_e3d_060_every_built_in_profile_registers_all_its_patterns() {
         let expected = profile.permanent_patterns.len() + profile.temporary_patterns.len();
         let registered = patterns.permanent().len() + patterns.temporary().len();
         if registered != expected {
-            problems.push(format!("{name}: {registered} registered for {expected} in the file"));
+            problems.push(format!(
+                "{name}: {registered} registered for {expected} in the file"
+            ));
         }
 
         if patterns.permanent().len() != profile.permanent_patterns.len() {
@@ -74,7 +76,12 @@ fn profile_images(profile: &zax_profiles::profile::GameProfile) -> Vec<TileImage
 
         for tile in grid.cells().iter().flatten() {
             if images.len() < 64 {
-                images.push(TileImageKey::new(tile.low_plane, tile.high_plane, tile.flip_x(), tile.flip_y()));
+                images.push(TileImageKey::new(
+                    tile.low_plane,
+                    tile.high_plane,
+                    tile.flip_x(),
+                    tile.flip_y(),
+                ));
             }
         }
 
@@ -124,7 +131,11 @@ fn req_e3d_001_the_pipeline_runs_on_synthetic_frames_with_built_in_profiles() {
         let mut drawn_tiles = 0;
         for counter in 1..=4 {
             let mut batch = full_frame_of(&images, usize::try_from(counter).unwrap());
-            batch.mask(8, 0).palette(0, 0x0F).palette(1, 0x16).palette(17, 0x27);
+            batch
+                .mask(8, 0)
+                .palette(0, 0x0F)
+                .palette(1, 0x16)
+                .palette(17, 0x27);
             batch.convert(&mut engine, counter);
             let frame = engine.converting_frame();
 
@@ -141,7 +152,10 @@ fn req_e3d_001_the_pipeline_runs_on_synthetic_frames_with_built_in_profiles() {
             }
 
             engine.publish();
-            drawn_tiles += engine.build_draw_list_of(FrameRole::Published).tiles().len();
+            drawn_tiles += engine
+                .build_draw_list_of(FrameRole::Published)
+                .tiles()
+                .len();
         }
 
         assert!(drawn_tiles > 0, "{name}: nothing was drawn");
@@ -149,7 +163,9 @@ fn req_e3d_001_the_pipeline_runs_on_synthetic_frames_with_built_in_profiles() {
         // The learned state of a real profile round trips as well.
         let state = state_codec::write(&engine);
         let mut restored = ConversionEngine::new();
-        restored.load_profile(&neutral_assets::load(name), true).unwrap();
+        restored
+            .load_profile(&neutral_assets::load(name), true)
+            .unwrap();
         state_codec::read(&mut restored, &state).unwrap();
         assert_eq!(state, state_codec::write(&restored));
     }
@@ -171,10 +187,16 @@ fn req_e3d_060_the_built_in_profiles_carry_usable_3d_parameters() {
         .flat_map(|&id| patterns.get(id).unwrap().instances())
         .collect();
     let total = instances.len();
-    let opaque = instances.iter().filter(|instance| instance.alpha >= 1.0).count();
+    let opaque = instances
+        .iter()
+        .filter(|instance| instance.alpha >= 1.0)
+        .count();
 
     assert!(total > 0);
-    assert!(opaque > total / 2, "only {opaque} of {total} objects are opaque");
+    assert!(
+        opaque > total / 2,
+        "only {opaque} of {total} objects are opaque"
+    );
 }
 
 #[test]
@@ -216,7 +238,13 @@ fn req_e3d_360_conversion_budget_benchmark_report() {
 
     for i in 0..64 {
         let palette = u8::try_from(i & 3).unwrap();
-        batch.sprite_full(images[usize::try_from(i).unwrap() % images.len()], (i * 3) % 240, 8 + ((i * 5) % 220), palette, false);
+        batch.sprite_full(
+            images[usize::try_from(i).unwrap() % images.len()],
+            (i * 3) % 240,
+            8 + ((i * 5) % 220),
+            palette,
+            false,
+        );
     }
 
     // Warm up: the first frames learn patterns and fill the pools.

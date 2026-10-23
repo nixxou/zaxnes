@@ -10,7 +10,9 @@ use std::time::Instant;
 
 use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::instance::InstanceRef;
-use zax_profiles::enums::{MeshAlgorithm, ProfileLayer, TextureFormat, VariantGeometry, VariantRenderStyle};
+use zax_profiles::enums::{
+    MeshAlgorithm, ProfileLayer, TextureFormat, VariantGeometry, VariantRenderStyle,
+};
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::tags;
@@ -30,8 +32,8 @@ fn bump<T: Eq + Hash>(counts: &mut HashMap<T, usize>, key: T) {
     *counts.entry(key).or_default() += 1;
 }
 
-fn count<T: Eq + Hash>(counts: &HashMap<T, usize>, key: T) -> usize {
-    counts.get(&key).copied().unwrap_or(0)
+fn count<T: Eq + Hash>(counts: &HashMap<T, usize>, key: &T) -> usize {
+    counts.get(key).copied().unwrap_or(0)
 }
 
 fn is_set(value: Option<Vec3F>) -> bool {
@@ -119,11 +121,17 @@ impl Annex {
                     self.global_axis += usize::from(tag == "_gaxis");
                 }
 
-                let Some(texture) = variant.texture.as_ref().filter(|texture| !texture.is_null_marker()) else {
+                let Some(texture) = variant
+                    .texture
+                    .as_ref()
+                    .filter(|texture| !texture.is_null_marker())
+                else {
                     continue;
                 };
 
-                if texture.pixels.as_ref().map(|pixels| pixels.format) == Some(TextureFormat::Direct) {
+                if texture.pixels.as_ref().map(|pixels| pixels.format)
+                    == Some(TextureFormat::Direct)
+                {
                     self.direct_textures += 1;
                 } else {
                     self.indexed_textures += 1;
@@ -141,12 +149,106 @@ impl Annex {
     }
 
     fn assert_geometry(&self, geometry: VariantGeometry, objects: usize, profiles: usize) {
-        assert_eq!(objects, count(&self.objects_by_geometry, geometry));
+        assert_eq!(objects, count(&self.objects_by_geometry, &geometry));
         assert_eq!(
             profiles,
-            self.profiles_by_geometry.get(&geometry).map_or(0, HashSet::len)
+            self.profiles_by_geometry
+                .get(&geometry)
+                .map_or(0, HashSet::len)
         );
     }
+}
+
+/// The counts of annex A.
+fn assert_annex(annex: &Annex) {
+    // Header of annex A.
+    assert_eq!(101, annex.profiles);
+    assert_eq!(100, annex.version2);
+    assert_eq!(67832, annex.patterns);
+    assert_eq!(74389, annex.objects);
+    assert_eq!(74389, annex.built);
+
+    // Geometry types: objects and profiles that use them.
+    annex.assert_geometry(VariantGeometry::Default, 63633, 100);
+    annex.assert_geometry(VariantGeometry::VerticalCylinder, 7121, 99);
+    annex.assert_geometry(VariantGeometry::HorizontalCylinder, 2373, 87);
+    annex.assert_geometry(VariantGeometry::Cube, 872, 64);
+    annex.assert_geometry(VariantGeometry::HalfHorizontalCylinder, 246, 36);
+    annex.assert_geometry(VariantGeometry::HalfVerticalCylinder, 144, 30);
+
+    // Options.
+    assert_eq!(13475, annex.solid);
+    assert_eq!(10518, annex.full_warp);
+    assert_eq!(2568, annex.anti_shadow);
+    assert_eq!(311, annex.flip);
+
+    // Mesh algorithm and transparent colour.
+    assert_eq!(
+        73356,
+        count(&annex.algorithms, &MeshAlgorithm::FromSettings)
+    );
+    assert_eq!(400, count(&annex.algorithms, &MeshAlgorithm::Greedy));
+    assert_eq!(633, count(&annex.algorithms, &MeshAlgorithm::Marching));
+    assert_eq!(
+        0,
+        count(&annex.algorithms, &MeshAlgorithm::GreedyMulticolor)
+    );
+
+    assert_eq!(62717, count(&annex.empty_colors, &0));
+    assert_eq!(271, count(&annex.empty_colors, &1));
+    assert_eq!(109, count(&annex.empty_colors, &2));
+    assert_eq!(245, count(&annex.empty_colors, &3));
+    assert_eq!(11047, count(&annex.empty_colors, &4));
+
+    // Textures, deformation, transparency, render style.
+    assert_eq!(13539, annex.indexed_textures);
+    assert_eq!(142, annex.direct_textures);
+    assert_eq!(4, annex.resized_textures);
+    assert_eq!(289, annex.deformed);
+    assert_eq!(628, annex.translucent);
+    assert_eq!(1639, count(&annex.styles, &VariantRenderStyle::Hidden));
+    assert_eq!(72744, count(&annex.styles, &VariantRenderStyle::Normal));
+    assert_eq!(6, count(&annex.styles, &VariantRenderStyle::ShadowOnly));
+
+    // Layers and transforms.
+    assert_eq!(30762, count(&annex.layers, &ProfileLayer::Unidentified));
+    assert_eq!(156, count(&annex.layers, &ProfileLayer::Ui));
+    assert_eq!(32456, count(&annex.layers, &ProfileLayer::L1));
+    assert_eq!(9534, count(&annex.layers, &ProfileLayer::L2));
+    assert_eq!(1318, count(&annex.layers, &ProfileLayer::L3));
+    assert_eq!(163, count(&annex.layers, &ProfileLayer::L4));
+    assert_eq!(3248, annex.rotated);
+    assert_eq!(784, annex.scaled);
+    assert_eq!(15080, annex.offset);
+
+    // Tags. Annex A counts 42 objects whose tag string holds the text `_gaxis`, but one of
+    // them — in "Road Fighter (Japan)" — stores `mc._gaxis`, a single tag that is not
+    // `_gaxis`. REQ-E3D-407 asks for a tag of the comma-separated list, so 41 objects really
+    // take the swapped rotation order (Q-018).
+    assert_eq!(980, annex.no_cast);
+    assert_eq!(160, annex.no_receiv);
+    assert_eq!(406, annex.no_recv);
+    assert_eq!(42, annex.global_axis_text);
+    assert_eq!(41, annex.global_axis);
+
+    // Depth distribution of annex A.
+    for (depth, expected) in [
+        (0, 51),
+        (1, 2007),
+        (2, 26398),
+        (3, 13084),
+        (4, 10589),
+        (6, 1974),
+        (8, 5895),
+        (12, 1499),
+        (16, 3224),
+        (24, 799),
+        (32, 1687),
+        (48, 2172),
+    ] {
+        assert_eq!(expected, count(&annex.depths, &depth), "depth {depth}");
+    }
+    assert_eq!(Some(96), annex.depths.keys().copied().max());
 }
 
 #[test]
@@ -199,89 +301,7 @@ fn annex_a_every_object_of_the_101_profiles_builds_and_the_counts_match() {
     let shown: Vec<_> = problems.iter().take(20).cloned().collect();
     assert!(problems.is_empty(), "{}", shown.join("\n"));
 
-    // Header of annex A.
-    assert_eq!(101, annex.profiles);
-    assert_eq!(100, annex.version2);
-    assert_eq!(67832, annex.patterns);
-    assert_eq!(74389, annex.objects);
-    assert_eq!(74389, annex.built);
-
-    // Geometry types: objects and profiles that use them.
-    annex.assert_geometry(VariantGeometry::Default, 63633, 100);
-    annex.assert_geometry(VariantGeometry::VerticalCylinder, 7121, 99);
-    annex.assert_geometry(VariantGeometry::HorizontalCylinder, 2373, 87);
-    annex.assert_geometry(VariantGeometry::Cube, 872, 64);
-    annex.assert_geometry(VariantGeometry::HalfHorizontalCylinder, 246, 36);
-    annex.assert_geometry(VariantGeometry::HalfVerticalCylinder, 144, 30);
-
-    // Options.
-    assert_eq!(13475, annex.solid);
-    assert_eq!(10518, annex.full_warp);
-    assert_eq!(2568, annex.anti_shadow);
-    assert_eq!(311, annex.flip);
-
-    // Mesh algorithm and transparent colour.
-    assert_eq!(73356, count(&annex.algorithms, MeshAlgorithm::FromSettings));
-    assert_eq!(400, count(&annex.algorithms, MeshAlgorithm::Greedy));
-    assert_eq!(633, count(&annex.algorithms, MeshAlgorithm::Marching));
-    assert_eq!(0, count(&annex.algorithms, MeshAlgorithm::GreedyMulticolor));
-
-    assert_eq!(62717, count(&annex.empty_colors, 0));
-    assert_eq!(271, count(&annex.empty_colors, 1));
-    assert_eq!(109, count(&annex.empty_colors, 2));
-    assert_eq!(245, count(&annex.empty_colors, 3));
-    assert_eq!(11047, count(&annex.empty_colors, 4));
-
-    // Textures, deformation, transparency, render style.
-    assert_eq!(13539, annex.indexed_textures);
-    assert_eq!(142, annex.direct_textures);
-    assert_eq!(4, annex.resized_textures);
-    assert_eq!(289, annex.deformed);
-    assert_eq!(628, annex.translucent);
-    assert_eq!(1639, count(&annex.styles, VariantRenderStyle::Hidden));
-    assert_eq!(72744, count(&annex.styles, VariantRenderStyle::Normal));
-    assert_eq!(6, count(&annex.styles, VariantRenderStyle::ShadowOnly));
-
-    // Layers and transforms.
-    assert_eq!(30762, count(&annex.layers, ProfileLayer::Unidentified));
-    assert_eq!(156, count(&annex.layers, ProfileLayer::Ui));
-    assert_eq!(32456, count(&annex.layers, ProfileLayer::L1));
-    assert_eq!(9534, count(&annex.layers, ProfileLayer::L2));
-    assert_eq!(1318, count(&annex.layers, ProfileLayer::L3));
-    assert_eq!(163, count(&annex.layers, ProfileLayer::L4));
-    assert_eq!(3248, annex.rotated);
-    assert_eq!(784, annex.scaled);
-    assert_eq!(15080, annex.offset);
-
-    // Tags. Annex A counts 42 objects whose tag string holds the text `_gaxis`, but one of
-    // them — in "Road Fighter (Japan)" — stores `mc._gaxis`, a single tag that is not
-    // `_gaxis`. REQ-E3D-407 asks for a tag of the comma-separated list, so 41 objects really
-    // take the swapped rotation order (Q-018).
-    assert_eq!(980, annex.no_cast);
-    assert_eq!(160, annex.no_receiv);
-    assert_eq!(406, annex.no_recv);
-    assert_eq!(42, annex.global_axis_text);
-    assert_eq!(41, annex.global_axis);
-
-    // Depth distribution of annex A.
-    for (depth, expected) in [
-        (0, 51),
-        (1, 2007),
-        (2, 26398),
-        (3, 13084),
-        (4, 10589),
-        (6, 1974),
-        (8, 5895),
-        (12, 1499),
-        (16, 3224),
-        (24, 799),
-        (32, 1687),
-        (48, 2172),
-    ] {
-        assert_eq!(expected, count(&annex.depths, depth), "depth {depth}");
-    }
-    assert_eq!(Some(96), annex.depths.keys().copied().max());
-
+    assert_annex(&annex);
     assert!(annex.triangles > 0);
     assert!(annex.vertices > 0);
 
@@ -307,7 +327,11 @@ fn req_e3d_564_the_biggest_built_in_textures_stay_within_the_capacity() {
         let mut profile_texels = 0i64;
         for pattern in all(&profile) {
             for variant in &pattern.variants {
-                let Some(texture) = variant.texture.as_ref().filter(|texture| !texture.is_null_marker()) else {
+                let Some(texture) = variant
+                    .texture
+                    .as_ref()
+                    .filter(|texture| !texture.is_null_marker())
+                else {
                     continue;
                 };
 
@@ -323,5 +347,8 @@ fn req_e3d_564_the_biggest_built_in_textures_stay_within_the_capacity() {
     // No object goes past 512 x 512 texels, and no profile past the simultaneous budget.
     assert!(widest <= 512, "a texture is {widest} texels wide");
     assert!(tallest <= 512, "a texture is {tallest} texels tall");
-    assert!(texels <= 64 * 512 * 512, "a profile needs {texels} texels at once");
+    assert!(
+        texels <= 64 * 512 * 512,
+        "a profile needs {texels} texels at once"
+    );
 }

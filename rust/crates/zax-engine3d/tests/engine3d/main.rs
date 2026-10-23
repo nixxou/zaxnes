@@ -4,6 +4,9 @@
 // Integration-test crate: its helpers (outside `#[test]` functions) fail by unwrapping, which
 // `allow-unwrap-in-tests` in clippy.toml only grants inside `#[test]` items.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// The vectors of SPEC-04 and SPEC-04B compare floats exactly, as the C# tests do; the
+// tolerance of REQ-E3D-523 is applied where those tests apply it.
+#![allow(clippy::float_cmp)]
 
 mod corpus_tests;
 mod cylinder_vector_tests;

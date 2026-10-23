@@ -12,8 +12,7 @@ use zax_profiles::variant::{TexturePixels, VariantTexture};
 
 use super::support::geo::{
     self, assert_rectangle, close, mesh_of, object_3d, object_with, rectangles,
-    rectangles_with_normal, with_normal, Object, MINUS_X, MINUS_Y, MINUS_Z, PLUS_X, PLUS_Y,
-    PLUS_Z,
+    rectangles_with_normal, with_normal, Object, MINUS_X, MINUS_Y, MINUS_Z, PLUS_X, PLUS_Y, PLUS_Z,
 };
 
 const GREEDY: RenderAlgorithm = RenderAlgorithm::Greedy;
@@ -42,47 +41,75 @@ fn tv_g1_a_single_pixel_becomes_a_prism_of_six_rectangles() {
     assert_eq!(6, rectangles(&mesh));
     bounds(&mesh, Vec3::new(-4.0, 3.0, -0.5), Vec3::new(-3.0, 4.0, 0.5));
 
-    assert_rectangle(&mesh, MINUS_X, &[
-        (-4.0, 3.0, -0.5, 0.0, 0.0),
-        (-4.0, 3.0, 0.5, 1.0, 0.0),
-        (-4.0, 4.0, -0.5, 0.0, 1.0),
-        (-4.0, 4.0, 0.5, 1.0, 1.0),
-    ]);
-    assert_rectangle(&mesh, MINUS_Y, &[
-        (-4.0, 3.0, -0.5, 0.0, 0.0),
-        (-3.0, 3.0, -0.5, 1.0, 0.0),
-        (-4.0, 3.0, 0.5, 0.0, 1.0),
-        (-3.0, 3.0, 0.5, 1.0, 1.0),
-    ]);
-    assert_rectangle(&mesh, MINUS_Z, &[
-        (-4.0, 3.0, -0.5, 0.0, 0.0),
-        (-4.0, 4.0, -0.5, 0.0, 1.0),
-        (-3.0, 3.0, -0.5, 1.0, 0.0),
-        (-3.0, 4.0, -0.5, 1.0, 1.0),
-    ]);
-    assert_rectangle(&mesh, PLUS_X, &[
-        (-3.0, 3.0, -0.5, 0.0, 0.0),
-        (-3.0, 3.0, 0.5, 1.0, 0.0),
-        (-3.0, 4.0, -0.5, 0.0, 1.0),
-        (-3.0, 4.0, 0.5, 1.0, 1.0),
-    ]);
-    assert_rectangle(&mesh, PLUS_Y, &[
-        (-4.0, 4.0, -0.5, 0.0, 0.0),
-        (-3.0, 4.0, -0.5, 1.0, 0.0),
-        (-4.0, 4.0, 0.5, 0.0, 1.0),
-        (-3.0, 4.0, 0.5, 1.0, 1.0),
-    ]);
-    assert_rectangle(&mesh, PLUS_Z, &[
-        (-4.0, 3.0, 0.5, 0.0, 0.0),
-        (-4.0, 4.0, 0.5, 0.0, 1.0),
-        (-3.0, 3.0, 0.5, 1.0, 0.0),
-        (-3.0, 4.0, 0.5, 1.0, 1.0),
-    ]);
+    assert_rectangle(
+        &mesh,
+        MINUS_X,
+        &[
+            (-4.0, 3.0, -0.5, 0.0, 0.0),
+            (-4.0, 3.0, 0.5, 1.0, 0.0),
+            (-4.0, 4.0, -0.5, 0.0, 1.0),
+            (-4.0, 4.0, 0.5, 1.0, 1.0),
+        ],
+    );
+    assert_rectangle(
+        &mesh,
+        MINUS_Y,
+        &[
+            (-4.0, 3.0, -0.5, 0.0, 0.0),
+            (-3.0, 3.0, -0.5, 1.0, 0.0),
+            (-4.0, 3.0, 0.5, 0.0, 1.0),
+            (-3.0, 3.0, 0.5, 1.0, 1.0),
+        ],
+    );
+    assert_rectangle(
+        &mesh,
+        MINUS_Z,
+        &[
+            (-4.0, 3.0, -0.5, 0.0, 0.0),
+            (-4.0, 4.0, -0.5, 0.0, 1.0),
+            (-3.0, 3.0, -0.5, 1.0, 0.0),
+            (-3.0, 4.0, -0.5, 1.0, 1.0),
+        ],
+    );
+    assert_rectangle(
+        &mesh,
+        PLUS_X,
+        &[
+            (-3.0, 3.0, -0.5, 0.0, 0.0),
+            (-3.0, 3.0, 0.5, 1.0, 0.0),
+            (-3.0, 4.0, -0.5, 0.0, 1.0),
+            (-3.0, 4.0, 0.5, 1.0, 1.0),
+        ],
+    );
+    assert_rectangle(
+        &mesh,
+        PLUS_Y,
+        &[
+            (-4.0, 4.0, -0.5, 0.0, 0.0),
+            (-3.0, 4.0, -0.5, 1.0, 0.0),
+            (-4.0, 4.0, 0.5, 0.0, 1.0),
+            (-3.0, 4.0, 0.5, 1.0, 1.0),
+        ],
+    );
+    assert_rectangle(
+        &mesh,
+        PLUS_Z,
+        &[
+            (-4.0, 3.0, 0.5, 0.0, 0.0),
+            (-4.0, 4.0, 0.5, 0.0, 1.0),
+            (-3.0, 3.0, 0.5, 1.0, 0.0),
+            (-3.0, 4.0, 0.5, 1.0, 1.0),
+        ],
+    );
 
     // Same pixel with D = 4: the same six rectangles, z in [−2, 2].
     let deeper = mesh_of(tile, &object_3d(4), GREEDY);
     assert_eq!(6, rectangles(&deeper));
-    bounds(&deeper, Vec3::new(-4.0, 3.0, -2.0), Vec3::new(-3.0, 4.0, 2.0));
+    bounds(
+        &deeper,
+        Vec3::new(-4.0, 3.0, -2.0),
+        Vec3::new(-3.0, 4.0, 2.0),
+    );
 }
 
 #[test]
@@ -92,19 +119,31 @@ fn tv_g2_greedy_ignores_colour_and_multicolour_does_not() {
 
     let greedy = mesh_of(tile, &object_3d(2), GREEDY);
     assert_eq!(6, rectangles(&greedy));
-    bounds(&greedy, Vec3::new(-4.0, 3.0, -1.0), Vec3::new(-2.0, 4.0, 1.0));
-    assert_rectangle(&greedy, MINUS_Z, &[
-        (-4.0, 3.0, -1.0, 0.0, 0.0),
-        (-4.0, 4.0, -1.0, 0.0, 1.0),
-        (-2.0, 3.0, -1.0, 2.0, 0.0),
-        (-2.0, 4.0, -1.0, 2.0, 1.0),
-    ]);
-    assert_rectangle(&greedy, PLUS_X, &[
-        (-2.0, 3.0, -1.0, 1.0, 0.0),
-        (-2.0, 3.0, 1.0, 2.0, 0.0),
-        (-2.0, 4.0, -1.0, 1.0, 1.0),
-        (-2.0, 4.0, 1.0, 2.0, 1.0),
-    ]);
+    bounds(
+        &greedy,
+        Vec3::new(-4.0, 3.0, -1.0),
+        Vec3::new(-2.0, 4.0, 1.0),
+    );
+    assert_rectangle(
+        &greedy,
+        MINUS_Z,
+        &[
+            (-4.0, 3.0, -1.0, 0.0, 0.0),
+            (-4.0, 4.0, -1.0, 0.0, 1.0),
+            (-2.0, 3.0, -1.0, 2.0, 0.0),
+            (-2.0, 4.0, -1.0, 2.0, 1.0),
+        ],
+    );
+    assert_rectangle(
+        &greedy,
+        PLUS_X,
+        &[
+            (-2.0, 3.0, -1.0, 1.0, 0.0),
+            (-2.0, 3.0, 1.0, 2.0, 0.0),
+            (-2.0, 4.0, -1.0, 1.0, 1.0),
+            (-2.0, 4.0, 1.0, 2.0, 1.0),
+        ],
+    );
 
     let multicolor = mesh_of(tile, &object_3d(2), RenderAlgorithm::GreedyMulticolor);
     assert_eq!(10, rectangles(&multicolor));
@@ -147,18 +186,26 @@ fn tv_g4_an_l_shape_gives_ten_rectangles() {
     assert_eq!(1, rectangles_with_normal(&mesh, PLUS_Y));
     assert_eq!(2, rectangles_with_normal(&mesh, PLUS_Z));
 
-    assert_rectangle(&mesh, MINUS_X, &[
-        (-4.0, 2.0, -0.5, 0.0, 2.0),
-        (-4.0, 2.0, 0.5, 1.0, 2.0),
-        (-4.0, 4.0, -0.5, 0.0, 0.0),
-        (-4.0, 4.0, 0.5, 1.0, 0.0),
-    ]);
-    assert_rectangle(&mesh, PLUS_Y, &[
-        (-4.0, 4.0, -0.5, 0.0, 0.0),
-        (-2.0, 4.0, -0.5, 2.0, 0.0),
-        (-4.0, 4.0, 0.5, 0.0, 1.0),
-        (-2.0, 4.0, 0.5, 2.0, 1.0),
-    ]);
+    assert_rectangle(
+        &mesh,
+        MINUS_X,
+        &[
+            (-4.0, 2.0, -0.5, 0.0, 2.0),
+            (-4.0, 2.0, 0.5, 1.0, 2.0),
+            (-4.0, 4.0, -0.5, 0.0, 0.0),
+            (-4.0, 4.0, 0.5, 1.0, 0.0),
+        ],
+    );
+    assert_rectangle(
+        &mesh,
+        PLUS_Y,
+        &[
+            (-4.0, 4.0, -0.5, 0.0, 0.0),
+            (-2.0, 4.0, -0.5, 2.0, 0.0),
+            (-4.0, 4.0, 0.5, 0.0, 1.0),
+            (-2.0, 4.0, 0.5, 2.0, 1.0),
+        ],
+    );
 }
 
 #[test]
@@ -198,20 +245,28 @@ fn tv_g6_full_warp_puts_the_side_faces_on_the_back_half() {
     assert_eq!(6, rectangles(&mesh));
 
     // ±Z cover z = ∓1 over the pixel.
-    assert_rectangle(&mesh, MINUS_Z, &[
-        (-4.0, 3.0, -1.0, 0.0, 0.0),
-        (-4.0, 4.0, -1.0, 0.0, 1.0),
-        (-3.0, 3.0, -1.0, 1.0, 0.0),
-        (-3.0, 4.0, -1.0, 1.0, 1.0),
-    ]);
+    assert_rectangle(
+        &mesh,
+        MINUS_Z,
+        &[
+            (-4.0, 3.0, -1.0, 0.0, 0.0),
+            (-4.0, 4.0, -1.0, 0.0, 1.0),
+            (-3.0, 3.0, -1.0, 1.0, 0.0),
+            (-3.0, 4.0, -1.0, 1.0, 1.0),
+        ],
+    );
 
     // ±X and ±Y only exist on the back half, z in [0, 1].
-    assert_rectangle(&mesh, MINUS_X, &[
-        (-4.0, 3.0, 0.0, 0.0, 0.0),
-        (-4.0, 3.0, 1.0, 1.0, 0.0),
-        (-4.0, 4.0, 0.0, 0.0, 1.0),
-        (-4.0, 4.0, 1.0, 1.0, 1.0),
-    ]);
+    assert_rectangle(
+        &mesh,
+        MINUS_X,
+        &[
+            (-4.0, 3.0, 0.0, 0.0, 0.0),
+            (-4.0, 3.0, 1.0, 1.0, 0.0),
+            (-4.0, 4.0, 0.0, 0.0, 1.0),
+            (-4.0, 4.0, 1.0, 1.0, 1.0),
+        ],
+    );
 }
 
 #[test]
@@ -233,7 +288,11 @@ fn tv_g7_two_different_full_tiles_keep_the_wall_between_them() {
 #[test]
 fn tv_g8_multicolour_stripes_give_thirty_four_rectangles() {
     // REQ-E3D-503.
-    let mesh = mesh_of(geo::rows("12121212"), &object_3d(2), RenderAlgorithm::GreedyMulticolor);
+    let mesh = mesh_of(
+        geo::rows("12121212"),
+        &object_3d(2),
+        RenderAlgorithm::GreedyMulticolor,
+    );
 
     assert_eq!(34, rectangles(&mesh));
     assert_eq!(1, rectangles_with_normal(&mesh, MINUS_X));
@@ -261,13 +320,7 @@ fn tv_c1_a_cube_of_a_full_tile_has_twelve_rectangles() {
 fn tv_c2_a_cube_of_a_ring_has_forty_rectangles() {
     // REQ-E3D-443 with transparent texels inside the box.
     let ring = geo::tile(&[
-        "11111111",
-        "1......1",
-        "1......1",
-        "1......1",
-        "1......1",
-        "1......1",
-        "1......1",
+        "11111111", "1......1", "1......1", "1......1", "1......1", "1......1", "1......1",
         "11111111",
     ]);
     let mesh = mesh_of(ring, &cube(4), GREEDY);
@@ -299,8 +352,12 @@ fn tv_c3_two_cells_of_the_same_tile_share_one_mesh_with_both_walls() {
 
     // Both walls are present: x = −4 and x = +4.
     let left = with_normal(&mesh, MINUS_X);
-    assert!(left.iter().any(|(position, _)| (position.x + 4.0).abs() < 1e-3));
-    assert!(left.iter().any(|(position, _)| (position.x - 3.0).abs() < 1e-3));
+    assert!(left
+        .iter()
+        .any(|(position, _)| (position.x + 4.0).abs() < 1e-3));
+    assert!(left
+        .iter()
+        .any(|(position, _)| (position.x - 3.0).abs() < 1e-3));
 
     // Two different tiles instead: two meshes of eight rectangles each.
     let distinct = geo::pattern(2, 1, &[Some(geo::solid(1)), Some(geo::solid(2))]);
@@ -417,7 +474,11 @@ fn req_e3d_426_a_texture_smaller_than_the_pattern_repeats_over_it() {
     instance.texture = Some(Arc::new(VariantTexture::new(
         8,
         8,
-        Some(TexturePixels::new(TextureFormat::Indexed, build_solid_indexed(8, 8, 1), Vec::new())),
+        Some(TexturePixels::new(
+            TextureFormat::Indexed,
+            build_solid_indexed(8, 8, 1),
+            Vec::new(),
+        )),
     )));
 
     let texture = geo::texture_of(&pattern, &instance);
