@@ -31,7 +31,7 @@ impl TrackRandom {
         Self { state: seed }
     }
 
-    /// A number below `bound` (SplitMix64).
+    /// A number below `bound` (`SplitMix64`).
     pub fn next_below(&mut self, bound: usize) -> usize {
         self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.state;
@@ -45,6 +45,7 @@ impl TrackRandom {
 
 /// The mixer. It is driven from the host's thread: the audio device pulls blocks from
 /// [`fill`](Self::fill), the loop sets the state around it.
+#[allow(clippy::struct_excessive_bools)] // independent state flags of the mix, as the C# class
 pub struct AudioMixer {
     sample_rate: u32,
     emulation_gain: FadeGain,
@@ -348,7 +349,7 @@ impl AudioMixer {
             let Some(track) = self.track.as_ref() else {
                 return;
             };
-            if self.track_position >= (track.frame_count() as f64) - 1.0 {
+            if self.track_position >= frames_f64(track.frame_count()) - 1.0 {
                 // REQ-AUD-030: a track does not loop; while the music is active a different one
                 // starts straight away.
                 if self.music_active() && track_count > 1 {
@@ -376,7 +377,7 @@ impl AudioMixer {
             let Some(clip) = self.sound.as_ref() else {
                 return;
             };
-            if self.sound_position >= (clip.frame_count() as f64) - 1.0 {
+            if self.sound_position >= frames_f64(clip.frame_count()) - 1.0 {
                 self.stop_sound();
                 return;
             }
@@ -419,19 +420,21 @@ impl AudioMixer {
                     .map(|track| (candidate, track))
             });
         }
-        match chosen {
-            Some((index, track)) => {
-                self.track = Some(track);
-                self.track_index = Some(index);
-                self.track_position = 0.0;
-                self.track_changes += 1;
-            }
-            None => {
-                self.track = None;
-                self.track_index = None;
-            }
+        if let Some((index, track)) = chosen {
+            self.track = Some(track);
+            self.track_index = Some(index);
+            self.track_position = 0.0;
+            self.track_changes += 1;
+        } else {
+            self.track = None;
+            self.track_index = None;
         }
     }
+}
+
+#[allow(clippy::cast_precision_loss)] // clip lengths are far below 2^52 frames
+const fn frames_f64(frames: usize) -> f64 {
+    frames as f64
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]

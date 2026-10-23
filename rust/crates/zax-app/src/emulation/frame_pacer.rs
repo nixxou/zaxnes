@@ -18,7 +18,6 @@ pub const MAX_BACKLOG: u32 = 5;
 pub const EARLY_START_SECONDS: f64 = 0.001;
 
 /// A clock that starts at zero now and follows the system's monotonic time.
-#[must_use]
 pub fn system_clock() -> Clock {
     let start = Instant::now();
     Box::new(move || start.elapsed().as_secs_f64())
