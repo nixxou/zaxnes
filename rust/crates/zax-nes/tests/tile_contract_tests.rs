@@ -1,7 +1,5 @@
 //! The tile contract of SPEC-02 §3.5 through its test vectors V1 to V10 (§5.3), the batch
 //! plumbing and AMD-021 R2-005.
-//!
-//! `REQ_CORE_092_the_frame_batches_survive_a_savestate_round_trip` needs save states (T05).
 
 // Test indices and bytes are small: the narrowing casts cannot lose anything.
 #![allow(
@@ -13,6 +11,9 @@
 mod common;
 
 use common::{capture_batch, machine_with, minimal_rom, pattern, BatchCopy, TileFixture};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
 use zax_nes::VideoInfo;
 
 // ------------------------------------------------------------------ V1
@@ -534,4 +535,64 @@ fn amd_021_r2_005_the_end_of_line_reloads_only_reach_the_next_line() {
         assert_eq!(8 * row as i16, background[row * 32].y);
         assert_eq!(0, background[row * 32].x);
     }
+}
+
+const SEED: u64 = 1_469_598_103_934_665_603;
+
+fn mix(hash: u64, value: u64) -> u64 {
+    (hash ^ value).wrapping_mul(1_099_511_628_211)
+}
+
+#[test]
+fn req_core_092_the_frame_batches_survive_a_savestate_round_trip() {
+    // A program that rewrites OAM through DMA with changing data, so that every frame
+    // produces a different batch.
+    let program = [
+        0xA9, 0x1E, // LDA #$1E
+        0x8D, 0x01, 0x20, // STA $2001
+        0xEE, 0x00, 0x02, // INC $0200       loop
+        0xEE, 0x03, 0x02, // INC $0203
+        0xA9, 0x02, // LDA #$02
+        0x8D, 0x14, 0x40, // STA $4014       OAM DMA from page 2
+        0x4C, 0x05, 0x80, // JMP $8005
+    ];
+
+    let run = |save_restore_at_frame: Option<u16>| {
+        let mut core = machine_with(&minimal_rom(0x01, Some(&program), None), "Batches.nes");
+
+        let hash = Arc::new(AtomicU64::new(SEED));
+        let sink = Arc::clone(&hash);
+        core.set_video_callback(Some(Box::new(move |batch| {
+            let mut h = sink.load(Ordering::Relaxed);
+            for record in batch.records {
+                h = mix(h, record.plane0);
+                h = mix(h, record.plane1);
+                h = mix(h, u64::from(record.x.cast_unsigned()));
+                h = mix(h, u64::from(record.y.cast_unsigned()));
+                h = mix(h, u64::from(record.index.cast_unsigned()));
+                h = mix(h, u64::from(record.palette));
+            }
+            for &entry in &batch.palette {
+                h = mix(h, u64::from(entry));
+            }
+            h = mix(h, u64::from(batch.mask_x.cast_unsigned()));
+            h = mix(h, u64::from(batch.mask_y.cast_unsigned()));
+            sink.store(h, Ordering::Relaxed);
+        })));
+
+        for frame in 0..60u16 {
+            core.run_frame(frame);
+
+            if save_restore_at_frame == Some(frame) {
+                let state = core.save_state(true).unwrap();
+                core.try_load_state(&state, 0).unwrap();
+            }
+        }
+
+        hash.load(Ordering::Relaxed)
+    };
+
+    let straight = run(None);
+    assert_ne!(SEED, straight);
+    assert_eq!(straight, run(Some(30)));
 }

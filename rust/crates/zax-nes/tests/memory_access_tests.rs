@@ -1,6 +1,6 @@
 //! Host memory access and open bus (REQ-CORE-080 to REQ-CORE-082), at bus level.
 //!
-//! `NesCore.ReadMemory`/`WriteMemory` are `NesBus::peek`/`poke` until T05 ports the core.
+//! `NesCore::read_memory`/`write_memory` are `NesBus::peek`/`poke`.
 
 // Test indices and bytes are small: the narrowing casts cannot lose anything.
 #![allow(
@@ -11,7 +11,7 @@
 
 mod common;
 
-use common::loaded_core;
+use common::{loaded_core, machine_with, minimal, minimal_rom};
 use zax_nes::cpu::CpuBus;
 
 #[test]
@@ -60,17 +60,46 @@ fn req_core_081_registers_and_the_expansion_area_peek_as_zero() {
 
 #[test]
 fn req_core_082_writing_work_ram_has_the_same_effect_as_a_cpu_write() {
-    // The program copies $0200 to $0201 forever, so a host write at $0200 must show up
-    // at $0201 after a frame's worth of cycles (stands in for RunFrame until T05).
+    // The program copies $0200 to $0201 forever, so a host write at $0200 must show up at
+    // $0201 on the next frame.
     let program = [0xAD, 0x00, 0x02, 0x8D, 0x01, 0x02, 0x4C, 0x00, 0x80];
-    let (mut cpu, mut bus) = loaded_core(Some(&program));
+    let mut core = machine_with(&minimal_rom(0x01, Some(&program), None), "Minimal.nes");
 
-    bus.poke(0x0200, 0x5E);
-    while bus.cycle_count() < 29_781 {
-        cpu.step(&mut bus);
-    }
+    core.write_memory(0x0200, 0x5E);
+    core.run_frame(0);
 
-    assert_eq!(0x5E, bus.peek(0x0201));
+    assert_eq!(0x5E, core.read_memory(0x0201));
+}
+
+#[test]
+fn req_core_095_battery_ram_is_exported_and_imported_only_with_a_battery() {
+    let mut without_battery = loaded_machine();
+    assert!(without_battery.export_battery_ram().is_empty());
+    assert!(!without_battery.import_battery_ram(&[0; 8192]));
+
+    let mut image = minimal();
+    image[6] |= 0x02; // Battery-backed PRG-RAM.
+
+    let mut core = machine_with(&image, "Battery.nes");
+
+    core.write_memory(0x6000, 0xAB);
+    core.write_memory(0x7FFF, 0xCD);
+
+    let exported = core.export_battery_ram().to_vec();
+    assert_eq!(8192, exported.len());
+    assert_eq!(0xAB, exported[0]);
+    assert_eq!(0xCD, exported[exported.len() - 1]);
+
+    // Reload the ROM, import the save: the contents come back.
+    assert!(core.load_rom(&image, "Battery.nes").success);
+    assert_eq!(0x00, core.read_memory(0x6000));
+    assert!(core.import_battery_ram(&exported));
+    assert_eq!(0xAB, core.read_memory(0x6000));
+    assert_eq!(0xCD, core.read_memory(0x7FFF));
+
+    // And a reset no longer wipes it (REQ-CORE-095).
+    core.reset();
+    assert_eq!(0xAB, core.read_memory(0x6000));
 }
 
 #[test]

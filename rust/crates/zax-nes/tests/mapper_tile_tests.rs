@@ -1,14 +1,12 @@
 //! Tile records on boards with CHR side effects (REQ-CORE-033, REQ-CORE-039, REQ-CORE-044).
-//! The two tests that compare saved states with and without a video callback belong to the
-//! `NesCore` facade (T05).
 
 // Test values are small: the narrowing casts cannot lose anything.
 #![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
 
 mod common;
 
-use common::capture_batch;
 use common::mapper_fixture::{MapperMachine, MapperRom};
+use common::{capture_batch, test_rom};
 use zax_nes::NesCore;
 
 fn load_mmc2() -> NesCore {
@@ -131,4 +129,64 @@ fn req_core_044_other_mappers_keep_the_oam_order() {
     let batch = capture_batch(&mut core);
     let got: Vec<i32> = batch.sprites().iter().map(|r| r.index).collect();
     assert_eq!(vec![0, 1, 2], got);
+}
+
+#[test]
+fn req_core_033_capturing_records_leaves_the_mmc2_latch_alone() {
+    // Same board and same row, run twice: once with a video callback registered and once
+    // without. The machine must end up in exactly the same state (REQ-CORE-033).
+    fn run(with_callback: bool) -> Vec<u8> {
+        let mut core = load_mmc2();
+
+        let mut row = [0u8; 32];
+        row[2] = 0xFE;
+        row[5] = 0x41;
+        row[8] = 0xFD;
+        row[12] = 0x41;
+        write_vram(&mut core, 0x2000, &row);
+        core.write_memory(0x2005, 0x00);
+        core.write_memory(0x2005, 0x00);
+        core.write_memory(0x2000, 0x00);
+        core.write_memory(0x2001, 0x1E);
+
+        if with_callback {
+            core.set_video_callback(Some(Box::new(|_| {})));
+        }
+
+        for _ in 0..600 {
+            core.run_frame(0);
+        }
+
+        core.set_video_callback(None);
+        core.save_state(true).unwrap()
+    }
+
+    assert_eq!(run(false), run(true));
+}
+
+#[test]
+fn req_core_033_capturing_records_does_not_clock_the_mmc3_counter() {
+    // The criterion of REQ-CORE-033: the mmc3_test suite gives the same result with and
+    // without a video callback. The whole machine state is compared, which also covers the
+    // IRQ counter itself.
+    let Some(image) = test_rom("mmc3_test_2/rom_singles/4-scanline_timing.nes") else {
+        return;
+    };
+
+    let run = |with_callback: bool| {
+        let mut core = common::machine_with(&image, "4-scanline_timing.nes");
+
+        if with_callback {
+            core.set_video_callback(Some(Box::new(|_| {})));
+        }
+
+        for _ in 0..400 {
+            core.run_frame(0);
+        }
+
+        core.set_video_callback(None);
+        core.save_state(true).unwrap()
+    };
+
+    assert_eq!(run(false), run(true));
 }

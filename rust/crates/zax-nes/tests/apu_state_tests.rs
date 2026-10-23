@@ -1,6 +1,9 @@
 //! The APU's part of a savestate: all five channels, the frame counter and the output path
 //! (REQ-CORE-074, REQ-CORE-090, REQ-CORE-092).
 
+// Test helpers: a failed setup panics.
+#![allow(clippy::unwrap_used)]
+
 mod common;
 
 use common::{machine_with, minimal};

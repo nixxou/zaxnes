@@ -1,6 +1,5 @@
 //! Mapper behaviour on numbered-bank images (REQ-CORE-100, REQ-CORE-102, REQ-CORE-039,
-//! REQ-CORE-033, AMD-021). Save state and battery import/export tests of the C# suite
-//! belong to the `NesCore` facade (T05).
+//! REQ-CORE-033, AMD-021), including the save states and the battery RAM.
 
 // Test values are small: the narrowing casts cannot lose anything.
 #![allow(
@@ -15,6 +14,7 @@ mod common;
 use common::mapper_fixture::{load, MapperMachine, MapperRom};
 use zax_nes::cartridges::{Cartridge, ChrFetch};
 use zax_nes::NametableMirroring as Nm;
+use zax_nes::NesCore;
 
 fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     core.cartridge()
@@ -814,4 +814,91 @@ fn req_core_004_a_reset_puts_the_mapper_back_to_its_power_on_banks() {
         assert_eq!(power_on, core.prg_windows(), "mapper {mapper}");
         assert!(!core.cartridge().unwrap().irq_asserted());
     }
+}
+
+// ---------------------------------------------------------------- savestates
+
+#[test]
+fn req_core_090_the_mapper_state_survives_a_save_and_restore() {
+    for &mapper in NesCore::SUPPORTED_MAPPERS {
+        let mapper_number = usize::try_from(mapper).unwrap();
+        let mut core = MapperRom::new(mapper_number)
+            .prg(16)
+            .chr(32)
+            .battery()
+            .load();
+
+        // Move whatever the board has: a few register writes, then some frames so that any
+        // IRQ counter and latch has run.
+        for (address, value) in [
+            (0x8000, 0x01),
+            (0x8001, 0x02),
+            (0xA000, 0x03),
+            (0xB000, 0x04),
+            (0xC000, 0x05),
+            (0xC001, 0x06),
+            (0xE001, 0x07),
+            (0x6000, 0x42),
+        ] {
+            core.write_memory(address, value);
+        }
+
+        for _ in 0..2 {
+            core.run_frame(0);
+        }
+
+        let state = core.save_state(true).unwrap();
+        let windows = core.prg_windows();
+        let chr = core.chr_windows();
+
+        for _ in 0..5 {
+            core.run_frame(0);
+        }
+
+        let loaded = core.try_load_state(&state, 0).unwrap();
+        assert_eq!(state.len(), loaded.consumed, "mapper {mapper}");
+        assert_eq!(windows, core.prg_windows(), "mapper {mapper}");
+        assert_eq!(chr, core.chr_windows(), "mapper {mapper}");
+        assert_eq!(state, core.save_state(true).unwrap(), "mapper {mapper}");
+    }
+}
+
+#[test]
+fn req_core_095_battery_backed_prg_ram_is_exposed_and_survives_a_reload() {
+    for mapper in [1usize, 4, 5, 10] {
+        let select_ram_bank = |core: &mut NesCore| {
+            if mapper == 5 {
+                core.write_memory(0x5102, 0x02);
+                core.write_memory(0x5103, 0x01);
+            }
+        };
+
+        let mut core = MapperRom::new(mapper).battery().load();
+        select_ram_bank(&mut core);
+
+        core.write_memory(0x6123, 0x7E);
+        assert_eq!(0x7E, core.read_memory(0x6123), "mapper {mapper}");
+
+        let saved = core.export_battery_ram().to_vec();
+        assert!(!saved.is_empty(), "mapper {mapper}");
+
+        let mut reloaded = MapperRom::new(mapper).battery().load();
+        assert!(reloaded.import_battery_ram(&saved), "mapper {mapper}");
+
+        select_ram_bank(&mut reloaded);
+        assert_eq!(0x7E, reloaded.read_memory(0x6123), "mapper {mapper}");
+
+        // A reset no longer clears it, since the host has taken charge of it.
+        reloaded.reset();
+        select_ram_bank(&mut reloaded);
+        assert_eq!(0x7E, reloaded.read_memory(0x6123), "mapper {mapper}");
+    }
+}
+
+#[test]
+fn req_core_095_a_cartridge_without_a_battery_exposes_nothing() {
+    let mut core = load(4);
+
+    assert!(core.export_battery_ram().is_empty());
+    assert!(!core.import_battery_ram(&[1, 2, 3]));
 }

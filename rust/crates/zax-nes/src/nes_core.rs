@@ -213,6 +213,12 @@ impl NesCore {
         self.apply_region();
     }
 
+    /// Timings of the region in force (REQ-CORE-015).
+    #[must_use]
+    pub const fn timing(&self) -> RegionTiming {
+        RegionTiming::for_region(self.region)
+    }
+
     fn apply_region(&mut self) {
         let timing = RegionTiming::for_region(self.region);
         self.bus.ppu_mut().set_timing(timing);
@@ -499,12 +505,12 @@ impl NesCore {
     /// before serialisation and valid for the whole session (REQ-ARCH-013).
     #[must_use]
     pub fn max_state_size(&self) -> usize {
-        let (rom_bytes, name_bytes) = self
-            .bus
-            .cartridge()
-            .map_or((0, 0), |cartridge| {
-                (cartridge.rom().raw().len(), cartridge.rom().name().len() * 4)
-            });
+        let (rom_bytes, name_bytes) = self.bus.cartridge().map_or((0, 0), |cartridge| {
+            (
+                cartridge.rom().raw().len(),
+                cartridge.rom().name().len() * 4,
+            )
+        });
         let fixed_bytes = NesBus::RAM_SIZE
             + VRAM_SIZE
             + OAM_SIZE

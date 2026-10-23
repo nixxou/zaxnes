@@ -1,15 +1,17 @@
 //! Controller ports and the Zapper byte (REQ-CORE-022, REQ-CORE-024, REQ-CORE-060,
-//! REQ-CORE-061, REQ-CORE-062). The tests that go through the `NesCore` facade (the Zapper
-//! position source, `GetPortType` on a core) belong to T05.
+//! REQ-CORE-061, REQ-CORE-062).
 
 // Test indices are small: the narrowing casts cannot lose anything.
 #![allow(clippy::cast_possible_truncation, clippy::unwrap_used)]
 
 mod common;
 
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
+
 use common::{machine_with, minimal, minimal_rom};
 use zax_nes::input::{ControllerPortType, InputPorts};
-use zax_nes::{nes_colors, ZapperPosition};
+use zax_nes::{nes_colors, NesCore, ZapperPosition};
 
 fn controller_reader_program() -> Vec<u8> {
     // LDA #$01 / STA $4016 / LDA #$00 / STA $4016: strobe the controllers.
@@ -90,19 +92,23 @@ fn req_core_022_frontend_action_bits_never_reach_the_core() {
 #[test]
 fn req_core_024_ports_default_to_controllers_and_can_be_switched() {
     let mut core = machine_with(&minimal(), "Minimal.nes");
-    let input = core.bus_mut().input_mut();
-    assert_eq!(Ok(ControllerPortType::Controller), input.port_type(0));
-    assert_eq!(Ok(ControllerPortType::Controller), input.port_type(1));
-    input.set_port_type(1, ControllerPortType::Zapper).unwrap();
-    assert_eq!(Ok(ControllerPortType::Zapper), input.port_type(1));
-    input
-        .set_port_type(1, ControllerPortType::Controller)
+    assert_eq!(Ok(ControllerPortType::Controller), core.port_type(0));
+    assert_eq!(Ok(ControllerPortType::Controller), core.port_type(1));
+
+    core.set_port_type(1, ControllerPortType::Zapper).unwrap();
+    assert_eq!(Ok(ControllerPortType::Zapper), core.port_type(1));
+
+    core.set_port_type(1, ControllerPortType::Controller)
         .unwrap();
-    assert_eq!(Ok(ControllerPortType::Controller), input.port_type(1));
+    assert_eq!(Ok(ControllerPortType::Controller), core.port_type(1));
 }
 
 #[test]
 fn req_core_024_an_out_of_range_port_is_rejected() {
+    let mut core = NesCore::new();
+    assert!(core.port_type(2).is_err());
+    assert!(core.set_port_type(2, ControllerPortType::Zapper).is_err());
+
     let mut ports = InputPorts::new();
     assert!(ports.port_type(2).is_err());
     assert!(ports.set_port_type(2, ControllerPortType::Zapper).is_err());
@@ -181,4 +187,31 @@ fn req_core_062_the_aim_must_be_inside_the_image() {
     assert!(!ZapperPosition::new(0, 240).is_on_screen());
     assert!(!ZapperPosition::new(-1, 0).is_on_screen());
     assert!(!ZapperPosition::OFF_SCREEN.is_on_screen());
+}
+
+#[test]
+fn req_core_060_the_position_is_sampled_once_at_the_start_of_the_frame() {
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+    core.set_port_type(1, ControllerPortType::Zapper).unwrap();
+
+    let frame = Arc::new(AtomicI32::new(0));
+    let queries = Arc::new(AtomicI32::new(0));
+    let (source_frame, source_queries) = (Arc::clone(&frame), Arc::clone(&queries));
+    core.set_zapper_position_source(Some(Box::new(move |port| {
+        assert_eq!(1, port); // Only the Zapper port is queried.
+        source_queries.fetch_add(1, Ordering::Relaxed);
+        let frame = source_frame.load(Ordering::Relaxed);
+        ZapperPosition::new(frame, frame + 1)
+    })));
+
+    for current in 0..5 {
+        frame.store(current, Ordering::Relaxed);
+        core.run_frame(0);
+        assert_eq!(
+            Ok(ZapperPosition::new(current, current + 1)),
+            core.bus().input().zapper_position(1)
+        );
+    }
+
+    assert_eq!(5, queries.load(Ordering::Relaxed));
 }
