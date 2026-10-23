@@ -5,6 +5,7 @@
 pub mod compare;
 mod error;
 pub mod golden_core;
+mod json_text;
 pub mod lua_api;
 pub mod meshes;
 pub mod render;
