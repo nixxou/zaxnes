@@ -175,6 +175,7 @@ pub const HANDHELD_OPTION_FRAME_CAP: &str = "handheld.option.frame_cap";
 pub const HANDHELD_OPTION_CAMERA: &str = "handheld.option.camera";
 pub const HANDHELD_OPTION_CONTROLS: &str = "handheld.option.controls";
 pub const HANDHELD_OPTION_REGION: &str = "handheld.option.region";
+pub const HANDHELD_OPTION_CATCH_UP: &str = "handheld.option.catch_up";
 pub const HANDHELD_REGION_AUTO: &str = "handheld.region.auto";
 pub const HANDHELD_CAMERA_RESET: &str = "handheld.camera.reset";
 pub const HANDHELD_CONTROLS_PLAYER: &str = "handheld.controls.player";
@@ -351,6 +352,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_OPTION_CAMERA,
     HANDHELD_OPTION_CONTROLS,
     HANDHELD_OPTION_REGION,
+    HANDHELD_OPTION_CATCH_UP,
     HANDHELD_REGION_AUTO,
     HANDHELD_CAMERA_RESET,
     HANDHELD_CONTROLS_PLAYER,

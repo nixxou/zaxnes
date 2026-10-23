@@ -23,7 +23,7 @@ use zax_settings::model::SettingsModel;
 use super::commands::{Command, CommandArgs};
 use super::emulation_state::EmulationState;
 use super::fast_forward_state::FastForwardState;
-use super::frame_pacer::{system_clock, CatchUp, Clock, FramePacer, MAX_BACKLOG};
+use super::frame_pacer::{system_clock, CatchUp, Clock, FramePacer};
 use super::game_catalog::{GameCatalog, ResolvedGame};
 use super::hotkey_tracker::{HotkeyEvents, HotkeyTracker};
 use super::notification_center::NotificationCenter;
@@ -194,9 +194,6 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// (Rust-only "emulation on a separate core", handheld default): the game sees its inputs
     /// one displayed frame later, nothing else changes. See `GameSession::prepare_frame_timed`.
     pub separate_core: bool,
-    /// Whether the scripts' Lua collector runs in its generational mode (Rust-only, handheld
-    /// default): no long collection stalls; see `GameSession::use_generational_gc`.
-    pub lua_generational_gc: bool,
     /// The fast-forward burst.
     pub fast_forward: FastForwardState,
     /// The notification area.
@@ -205,8 +202,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub slots: SaveSlotIndex,
     /// The Zapper.
     pub zapper: ZapperState,
-    /// How far the frame clock catches up (Rust-only; REQ-LOOP-012 by default).
-    pub catch_up: CatchUp,
+    /// How far the frame clock catches up when the command line or the environment says so;
+    /// `None` follows the `emu.catch_up` setting (Rust-only).
+    pub catch_up: Option<CatchUp>,
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -272,12 +270,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             rollback: RollbackHistory::new(),
             rollback_enabled: true,
             separate_core: false,
-            lua_generational_gc: false,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
             slots,
             zapper: ZapperState::new(),
-            catch_up: CatchUp::Limit(MAX_BACKLOG),
+            catch_up: None,
         };
         // AMD-035 §1: the language in force is the setting's, read once here and kept in step
         // by `on_setting_changed` afterwards. While none is saved, the model's default is the
@@ -572,6 +569,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         frames
     }
 
+    /// The catch-up in force: the forced one, else the `emu.catch_up` setting.
+    #[must_use]
+    pub fn effective_catch_up(&self) -> CatchUp {
+        self.catch_up.unwrap_or_else(|| {
+            CatchUp::from_setting(self.settings.get(SettingId::EmuCatchUp).as_int())
+        })
+    }
+
     /// Finishes the frame the emulation thread holds or that was prepared for it, if any.
     pub fn complete_frame_in_flight(&mut self) {
         if let Some(session) = self.session.as_mut() {
@@ -633,7 +638,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 .as_float(),
         );
         self.pacer.max_backlog = self
-            .catch_up
+            .effective_catch_up()
             .frames_per_display(self.pacer.effective_rate(), displayed_rate);
         let due = self.pacer.due_frames();
         for _ in 0..due {
@@ -849,6 +854,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         match id {
             SettingId::EmuGameSpeed => self.apply_speed(),
+            SettingId::EmuLuaGenerationalGc => {
+                let generational = self.settings.get(id).as_bool();
+                if let Some(session) = &self.session {
+                    session.set_generational_gc(generational);
+                }
+            }
             SettingId::EmuTvMode => {
                 // REQ-LOOP-017: a region change is applied at once, to the core and to the
                 // cadence, even in the middle of a game.

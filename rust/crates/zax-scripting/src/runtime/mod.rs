@@ -452,13 +452,19 @@ impl ProfileScriptRuntime {
         &mut self.data.env.settings
     }
 
-    /// Switches the Lua collector to its generational mode (Rust-only setting, handheld
-    /// default): the hooks' short-lived values are reclaimed by cheap minor collections instead
-    /// of the long incremental cycles that stall a frame now and then. Scripts see no
+    /// Puts the Lua collector in its generational mode (Rust-only setting
+    /// `emu.lua_generational_gc`): the hooks' short-lived values are reclaimed by cheap minor
+    /// collections instead of the long incremental cycles that stall a frame now and then.
+    /// `false` goes back to the incremental tuning the runtime starts with. Scripts see no
     /// difference but the numbers of `collectgarbage("count")`.
-    pub fn use_generational_gc(&self) {
-        self.lua
-            .gc_gen(GC_GENERATIONAL_MINOR_PERCENT, GC_GENERATIONAL_MAJOR_PERCENT);
+    pub fn set_generational_gc(&self, generational: bool) {
+        if generational {
+            self.lua
+                .gc_gen(GC_GENERATIONAL_MINOR_PERCENT, GC_GENERATIONAL_MAJOR_PERCENT);
+        } else {
+            self.lua
+                .gc_inc(GC_PAUSE_PERCENT, GC_STEP_MULTIPLIER, GC_STEP_SIZE_LOG2);
+        }
     }
 
     /// Copies the changes made to the settings since the last call into the pipeline's own
