@@ -95,57 +95,12 @@ impl PublishedGlobals {
     pub fn install(lua: &Lua) -> mlua::Result<()> {
         let names = ["self", "shape", "shape2D", "pattern"].map(|name| lua.create_string(name));
         let [script, shape, shape_2d, pattern] = names;
-        let globals = lua.globals();
         lua.set_app_data(Self {
-            table: globals.clone(),
+            table: lua.globals(),
             names: [script?, shape?, shape_2d?, pattern?],
         });
-
-        // `shape2D` is made when a script reads it: most `UpdateS` never do, and a handle costs
-        // a userdata and a place in the object cache. The read of a global that is not there
-        // goes through this function; the globals' metatable is protected so that a script
-        // cannot replace it and lose `shape2D` without notice.
-        lua.set_app_data(LazyShape2D(Cell::new(None)));
-        let meta = lua.create_table()?;
-        meta.raw_set(
-            "__index",
-            lua.create_function(|lua, (_, key): (Value, Value)| {
-                let Value::String(name) = key else {
-                    return Ok(Value::Nil);
-                };
-                if &*name.as_bytes() != b"shape2D" {
-                    return Ok(Value::Nil);
-                }
-
-                let Some(target) = lua
-                    .app_data_ref::<LazyShape2D>()
-                    .and_then(|lazy| lazy.0.get())
-                else {
-                    return Ok(Value::Nil);
-                };
-
-                let value = Cx::new(lua).object(Payload::Shape(target))?;
-                publish(lua, Published::Shape2D, value.clone())?;
-                Ok(value)
-            })?,
-        )?;
-        meta.raw_set("__metatable", false)?;
-        globals.set_metatable(Some(meta))?;
         Ok(())
     }
-}
-
-/// The shape the global `shape2D` stands for in the `UpdateS` call under way, or the last one.
-struct LazyShape2D(Cell<Option<ShapeTarget>>);
-
-/// Withdraws `shape2D` of the previous call and names the shape the next read of it gets.
-fn defer_shape_2d(lua: &Lua, target: ShapeTarget) -> mlua::Result<()> {
-    publish(lua, Published::Shape2D, Value::Nil)?;
-    lua.app_data_ref::<LazyShape2D>()
-        .ok_or_else(|| mlua::Error::runtime("the hook globals are not installed"))?
-        .0
-        .set(Some(target));
-    Ok(())
 }
 
 /// Sets the global `which` for the hook about to run.
@@ -359,7 +314,11 @@ fn call_update_s(
         Published::Shape,
         cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?,
     )?;
-    defer_shape_2d(cx.lua, ShapeTarget { key, id: id.shape })?;
+    publish(
+        cx.lua,
+        Published::Shape2D,
+        cx.object(Payload::Shape(ShapeTarget { key, id: id.shape }))?,
+    )?;
     run_hook(cx, index, ScriptHook::UpdateS, call)
 }
 

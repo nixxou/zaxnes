@@ -516,7 +516,6 @@ fn a_host_value_is_a_table_key_req_lua_045() {
 
     session.evaluate(
         r"
-        local seen = {}
         seen[Pattern.GetPatternWithTag('t')] = 'a'
         seen[Pattern.GetPatternWithTag('s')] = 'b'
         a, b = seen[Pattern.GetPatternWithTag('t')], seen[Pattern.GetPatternWithTag('s')]
@@ -846,4 +845,73 @@ fn a_hook_can_restore_shapes_from_the_pinned_frame_req_e3d_233() {
     assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert!(session.engine.converting_frame().shapes().len() > before.saturating_sub(1));
     assert!(session.engine.converting_frame().shapes().len() >= 2);
+}
+
+// the globals table carries no metatable of the runtime, as in the C# reference
+
+#[test]
+fn the_globals_have_no_metatable_by_default() {
+    let mut session = session_with("");
+
+    assert_eq!(session.truth("getmetatable(_G) == nil"), 1.0);
+}
+
+#[test]
+fn a_script_may_set_a_metatable_on_the_globals() {
+    let mut session = session_with(
+        r"
+        setmetatable(_G, {
+          __index = function(_, name) return 'through ' .. name end,
+          __newindex = function(table, name, value) rawset(table, name, type(value) == 'number' and value * 2 or value) end,
+        })
+        function UpdateS()
+          if shape.TagStr == 't' then read = undefinedGlobal; written = 5 end
+        end
+        ",
+    );
+
+    assert_eq!(session.truth("read == 'through read'"), 0.0);
+    assert_eq!(
+        session.truth("rawget(_G, 'read') == 'through undefinedGlobal'"),
+        1.0
+    );
+    assert_eq!(session.number("return rawget(_G, 'written')"), 10.0);
+    assert_eq!(session.truth("getmetatable(_G) ~= nil"), 1.0);
+}
+
+#[test]
+fn shape2d_is_correct_in_update_s_without_a_metatable_on_the_globals() {
+    let mut session = session_with(
+        r"
+        function UpdateS()
+          if shape.TagStr ~= 't' then return end
+          same = type(shape2D) == 'userdata'
+          shape.Offset.x = 10
+          shape2D:CalculatePos()
+          pos = shape.Pos.x
+        end
+        ",
+    );
+
+    assert_eq!(session.truth("same"), 1.0);
+    assert_eq!(session.number("return pos"), 32.0 + 8.0 + 10.0);
+}
+
+#[test]
+fn shape2d_is_correct_in_update_s_with_a_metatable_on_the_globals() {
+    let mut session = session_with(
+        r"
+        setmetatable(_G, { __index = function() return 'missing' end })
+        function UpdateS()
+          if shape.TagStr ~= 't' then return end
+          same = type(shape2D) == 'userdata'
+          shape.Offset.x = 10
+          shape2D:CalculatePos()
+          pos = shape.Pos.x
+        end
+        ",
+    );
+
+    assert_eq!(session.truth("same"), 1.0);
+    assert_eq!(session.number("return pos"), 32.0 + 8.0 + 10.0);
 }
