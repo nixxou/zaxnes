@@ -3,6 +3,7 @@
 //! zax-app: the application loop of Zaxnes (port of `Zax.App`, without the user interface).
 
 mod flags;
+pub mod app_options;
 pub mod audio;
 pub mod emulation;
 pub mod frame_rate_counter;
