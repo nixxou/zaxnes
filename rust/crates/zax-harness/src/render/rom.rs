@@ -338,7 +338,11 @@ impl Host {
 
     /// Runs `operation` on the engine with the scene and the machine lent to the script API for
     /// its length. The borrows end with the call: the runtime keeps none.
-    pub(crate) fn scripted(&mut self, scene: &mut SceneState, operation: impl FnOnce(&mut ConversionEngine)) {
+    pub(crate) fn scripted(
+        &mut self,
+        scene: &mut SceneState,
+        operation: impl FnOnce(&mut ConversionEngine),
+    ) {
         let Self {
             core,
             engine,
