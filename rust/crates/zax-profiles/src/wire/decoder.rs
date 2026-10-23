@@ -243,7 +243,7 @@ impl<'a> Decoder<'a> {
                         .push(self.read_envelope(end, Self::read_variant)?);
                 }
                 schema::pattern::SELF_CONNECTED => {
-                    pattern.self_connected = self.reader.read_bool()?
+                    pattern.self_connected = self.reader.read_bool()?;
                 }
                 schema::pattern::SKIP_GEO => pattern.skip_geometry = self.reader.read_bool()?,
                 _ => {
@@ -340,10 +340,10 @@ impl<'a> Decoder<'a> {
                     variant.mesh_algorithm = MeshAlgorithm::from_raw(self.reader.read_i32()?);
                 }
                 schema::variant::DELTA_AMP => {
-                    variant.deform_amplitude = Some(self.read_vec3f_field()?)
+                    variant.deform_amplitude = Some(self.read_vec3f_field()?);
                 }
                 schema::variant::DELTA_PIVOT => {
-                    variant.deform_pivot = Some(self.read_vec3f_field()?)
+                    variant.deform_pivot = Some(self.read_vec3f_field()?);
                 }
                 schema::variant::DELTA_SPEED => {
                     let end = self.reader.read_length_limit()?;
@@ -480,7 +480,7 @@ impl<'a> Decoder<'a> {
                 s::LOCAL_CAM => settings.local_camera = self.reader.read_bool()?,
                 s::SCENE_RATIO => settings.scene_ratio = self.reader.read_f32()?,
                 s::EMULATED_MENU_BUTTON => {
-                    settings.emulated_menu_button = self.reader.read_bool()?
+                    settings.emulated_menu_button = self.reader.read_bool()?;
                 }
                 s::RENDER_METHOD => settings.render_method = self.reader.read_i32()?,
                 s::RES_SCALE_INDEX => settings.resolution_scale_index = self.reader.read_i32()?,
@@ -560,10 +560,10 @@ impl<'a> Decoder<'a> {
                     layer.aligned = LayerAlignment::from_raw(self.reader.read_i32()?);
                 }
                 schema::layer_params::CAST_SHADOW => {
-                    layer.stored_cast_shadow = self.reader.read_bool()?
+                    layer.stored_cast_shadow = self.reader.read_bool()?;
                 }
                 schema::layer_params::RECV_SHADOW => {
-                    layer.stored_recv_shadow = self.reader.read_bool()?
+                    layer.stored_recv_shadow = self.reader.read_bool()?;
                 }
                 _ => {
                     self.skip_unknown(field, wire_type)?;

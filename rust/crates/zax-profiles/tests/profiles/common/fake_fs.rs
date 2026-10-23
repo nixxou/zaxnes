@@ -45,7 +45,11 @@ impl FakeProfileFileSystem {
 
     /// Every file path, as first written.
     pub fn paths(&self) -> Vec<PathBuf> {
-        self.files.borrow().values().map(|(path, _)| path.clone()).collect()
+        self.files
+            .borrow()
+            .values()
+            .map(|(path, _)| path.clone())
+            .collect()
     }
 
     /// The paths read so far, in order.
@@ -106,7 +110,8 @@ impl ProfileFileSystem for FakeProfileFileSystem {
             .borrow()
             .values()
             .filter(|(path, _)| {
-                path.parent().is_some_and(|parent| key(parent) == normalised)
+                path.parent()
+                    .is_some_and(|parent| key(parent) == normalised)
                     && path.to_string_lossy().to_lowercase().ends_with(&extension)
             })
             .map(|(path, _)| path.clone())
@@ -123,7 +128,10 @@ impl ProfileFileSystem for FakeProfileFileSystem {
             .directories
             .borrow()
             .values()
-            .filter(|path| path.parent().is_some_and(|parent| key(parent) == normalised))
+            .filter(|path| {
+                path.parent()
+                    .is_some_and(|parent| key(parent) == normalised)
+            })
             .cloned()
             .collect())
     }

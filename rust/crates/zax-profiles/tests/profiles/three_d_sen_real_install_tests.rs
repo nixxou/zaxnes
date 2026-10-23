@@ -22,7 +22,9 @@ const PROFILE_COUNT: usize = 101;
 
 fn install_root() -> PathBuf {
     PathBuf::from(env::var_os("ZAXNES_3DSEN_INSTALL").unwrap_or_else(|| {
-        panic!("ZAXNES_3DSEN_INSTALL is not set: it names a 3dSen installation (or a stand-in) folder")
+        panic!(
+            "ZAXNES_3DSEN_INSTALL is not set: it names a 3dSen installation (or a stand-in) folder"
+        )
     }))
 }
 
@@ -41,10 +43,7 @@ fn reference_hashes() -> HashSet<String> {
 }
 
 fn hash_of(path: &Path) -> String {
-    Sha256::digest(fs::read(path).unwrap())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
 }
 
 /// AMD-030 §3
@@ -53,7 +52,9 @@ fn hash_of(path: &Path) -> String {
 fn the_bundle_is_found_from_the_installation_folder() {
     let bundle = find_bundle(&PhysicalProfileFileSystem, &install_root()).unwrap();
 
-    assert!(is_bundle_name(&bundle.file_name().unwrap().to_string_lossy()));
+    assert!(is_bundle_name(
+        &bundle.file_name().unwrap().to_string_lossy()
+    ));
     assert!(bundle.to_string_lossy().contains("StandaloneWindows"));
 }
 
@@ -114,9 +115,14 @@ fn the_import_writes_101_profiles_of_the_inventory_and_the_second_one_adds_nothi
         assert_eq!(0, first.already_present);
         assert_eq!(0, first.failed);
 
-        let written: Vec<PathBuf> = fs::read_dir(&destination).unwrap().map(|entry| entry.unwrap().path()).collect();
+        let written: Vec<PathBuf> = fs::read_dir(&destination)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
         assert_eq!(PROFILE_COUNT, written.len());
-        assert!(written.iter().all(|path| path.to_string_lossy().ends_with(UserProfileFolder::EXTENSION)));
+        assert!(written.iter().all(|path| path
+            .to_string_lossy()
+            .ends_with(UserProfileFolder::EXTENSION)));
 
         // Each produced file is, byte for byte, a profile of the reference inventory.
         for path in &written {

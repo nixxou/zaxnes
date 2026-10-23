@@ -371,7 +371,7 @@ impl Encoder {
     /// later one as a reference to that key (REQ-PROF-011).
     fn envelope<T>(&mut self, field: u32, value: &Arc<T>, write_message: fn(&mut Self, &T)) {
         let envelope = self.writer.begin_nested(field);
-        let address = Arc::as_ptr(value) as usize;
+        let address = Arc::as_ptr(value).addr();
         if let Some(existing_key) = self.keys.get(&address) {
             self.writer
                 .write_i32(schema::envelope::EXISTING_KEY, *existing_key);

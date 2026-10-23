@@ -28,8 +28,18 @@ pub fn assert_equal(expected: &GameProfile, actual: &GameProfile, source: &str) 
         assert_script(expected, actual);
     }
 
-    assert_pattern_list(&expected.permanent_patterns, &actual.permanent_patterns, &mut pairs, &format!("{source} patterns"));
-    assert_pattern_list(&expected.temporary_patterns, &actual.temporary_patterns, &mut pairs, &format!("{source} temp patterns"));
+    assert_pattern_list(
+        &expected.permanent_patterns,
+        &actual.permanent_patterns,
+        &mut pairs,
+        &format!("{source} patterns"),
+    );
+    assert_pattern_list(
+        &expected.temporary_patterns,
+        &actual.temporary_patterns,
+        &mut pairs,
+        &format!("{source} temp patterns"),
+    );
 
     assert_eq!(expected.settings.is_none(), actual.settings.is_none());
     if let (Some(expected), Some(actual)) = (&expected.settings, &actual.settings) {
@@ -53,13 +63,23 @@ fn assert_pattern_list(
 ) {
     assert_eq!(expected.len(), actual.len());
     for (index, (expected, actual)) in expected.iter().zip(actual).enumerate() {
-        if assert_same_sharing(Arc::as_ptr(expected) as usize, Arc::as_ptr(actual) as usize, pairs, &format!("{location}[{index}]")) {
+        if assert_same_sharing(
+            Arc::as_ptr(expected).addr(),
+            Arc::as_ptr(actual).addr(),
+            pairs,
+            &format!("{location}[{index}]"),
+        ) {
             assert_pattern(expected, actual, pairs, &format!("{location}[{index}]"));
         }
     }
 }
 
-fn assert_pattern(expected: &ProfilePattern, actual: &ProfilePattern, pairs: &mut Pairs, location: &str) {
+fn assert_pattern(
+    expected: &ProfilePattern,
+    actual: &ProfilePattern,
+    pairs: &mut Pairs,
+    location: &str,
+) {
     assert_eq!(expected.constraint_size, actual.constraint_size);
     assert_eq!(expected.tile_size, actual.tile_size);
     assert_eq!(expected.permanent, actual.permanent);
@@ -75,11 +95,21 @@ fn assert_pattern(expected: &ProfilePattern, actual: &ProfilePattern, pairs: &mu
         assert_eq!(expected_grid.width(), actual_grid.width());
         assert_eq!(expected_grid.height(), actual_grid.height());
         assert_eq!(expected_grid.cells().len(), actual_grid.cells().len());
-        for (index, (expected_cell, actual_cell)) in expected_grid.cells().iter().zip(actual_grid.cells()).enumerate() {
+        for (index, (expected_cell, actual_cell)) in expected_grid
+            .cells()
+            .iter()
+            .zip(actual_grid.cells())
+            .enumerate()
+        {
             assert_eq!(expected_cell.is_none(), actual_cell.is_none());
             if let (Some(expected_cell), Some(actual_cell)) = (expected_cell, actual_cell) {
                 let here = format!("{location} cell {index}");
-                if assert_same_sharing(Arc::as_ptr(expected_cell) as usize, Arc::as_ptr(actual_cell) as usize, pairs, &here) {
+                if assert_same_sharing(
+                    Arc::as_ptr(expected_cell).addr(),
+                    Arc::as_ptr(actual_cell).addr(),
+                    pairs,
+                    &here,
+                ) {
                     assert_eq!(expected_cell, actual_cell);
                 }
             }
@@ -89,7 +119,12 @@ fn assert_pattern(expected: &ProfilePattern, actual: &ProfilePattern, pairs: &mu
     assert_eq!(expected.variants.len(), actual.variants.len());
     for (index, (expected, actual)) in expected.variants.iter().zip(&actual.variants).enumerate() {
         let here = format!("{location} variant {index}");
-        if assert_same_sharing(Arc::as_ptr(expected) as usize, Arc::as_ptr(actual) as usize, pairs, &here) {
+        if assert_same_sharing(
+            Arc::as_ptr(expected).addr(),
+            Arc::as_ptr(actual).addr(),
+            pairs,
+            &here,
+        ) {
             assert_variant(expected, actual);
         }
     }
@@ -130,7 +165,12 @@ fn assert_variant(expected: &PatternVariant, actual: &PatternVariant) {
     }
 }
 
-fn assert_settings(expected: &ProfileSettings, actual: &ProfileSettings, pairs: &mut Pairs, location: &str) {
+fn assert_settings(
+    expected: &ProfileSettings,
+    actual: &ProfileSettings,
+    pairs: &mut Pairs,
+    location: &str,
+) {
     assert_eq!(expected.light.is_none(), actual.light.is_none());
     if let (Some(expected), Some(actual)) = (&expected.light, &actual.light) {
         assert_eq!(expected.direction, actual.direction);
@@ -138,8 +178,14 @@ fn assert_settings(expected: &ProfileSettings, actual: &ProfileSettings, pairs: 
         assert_eq!(expected.intensity.to_bits(), actual.intensity.to_bits());
     }
 
-    assert_eq!(expected.use_nes_background_color, actual.use_nes_background_color);
-    assert_eq!(expected.custom_background_color, actual.custom_background_color);
+    assert_eq!(
+        expected.use_nes_background_color,
+        actual.use_nes_background_color
+    );
+    assert_eq!(
+        expected.custom_background_color,
+        actual.custom_background_color
+    );
     assert_eq!(expected.clipping, actual.clipping);
     assert_eq!(expected.map_enable, actual.map_enable);
 
@@ -165,7 +211,10 @@ fn assert_settings(expected: &ProfileSettings, actual: &ProfileSettings, pairs: 
     assert_eq!(expected.mesh_algorithm, actual.mesh_algorithm);
     assert_eq!(expected.control_method, actual.control_method);
     assert_eq!(expected.shadow, actual.shadow);
-    assert_eq!(expected.same_background_palette, actual.same_background_palette);
+    assert_eq!(
+        expected.same_background_palette,
+        actual.same_background_palette
+    );
     assert_eq!(expected.sprite_tolerance, actual.sprite_tolerance);
     assert_eq!(expected.scan_direction, actual.scan_direction);
     assert_eq!(expected.skybox, actual.skybox);
@@ -176,7 +225,10 @@ fn assert_settings(expected: &ProfileSettings, actual: &ProfileSettings, pairs: 
     assert_eq!(expected.scene_ratio.to_bits(), actual.scene_ratio.to_bits());
     assert_eq!(expected.emulated_menu_button, actual.emulated_menu_button);
     assert_eq!(expected.render_method, actual.render_method);
-    assert_eq!(expected.resolution_scale_index, actual.resolution_scale_index);
+    assert_eq!(
+        expected.resolution_scale_index,
+        actual.resolution_scale_index
+    );
     assert_eq!(expected.skip_frame, actual.skip_frame);
     assert_eq!(expected.background_music, actual.background_music);
     assert_eq!(expected.anti_alias, actual.anti_alias);
@@ -187,11 +239,26 @@ fn assert_settings(expected: &ProfileSettings, actual: &ProfileSettings, pairs: 
     assert_eq!(expected.same_sprite_palette, actual.same_sprite_palette);
     assert_eq!(expected.fov.to_bits(), actual.fov.to_bits());
 
-    assert_slots(&expected.saved_patterns, &actual.saved_patterns, pairs, &format!("{location} saved patterns"));
-    assert_slots(&expected.saved_anim_patterns, &actual.saved_anim_patterns, pairs, &format!("{location} saved anim patterns"));
+    assert_slots(
+        &expected.saved_patterns,
+        &actual.saved_patterns,
+        pairs,
+        &format!("{location} saved patterns"),
+    );
+    assert_slots(
+        &expected.saved_anim_patterns,
+        &actual.saved_anim_patterns,
+        pairs,
+        &format!("{location} saved anim patterns"),
+    );
 }
 
-fn assert_slots(expected: &[RecordedPatternSlot], actual: &[RecordedPatternSlot], pairs: &mut Pairs, location: &str) {
+fn assert_slots(
+    expected: &[RecordedPatternSlot],
+    actual: &[RecordedPatternSlot],
+    pairs: &mut Pairs,
+    location: &str,
+) {
     assert_eq!(expected.len(), actual.len());
     for (index, (expected, actual)) in expected.iter().zip(actual).enumerate() {
         assert_eq!(expected.name, actual.name);
@@ -206,7 +273,10 @@ fn assert_slots(expected: &[RecordedPatternSlot], actual: &[RecordedPatternSlot]
 /// meeting of the same `expected` object it checks the very same `actual` object is there.
 fn assert_same_sharing(expected: usize, actual: usize, pairs: &mut Pairs, location: &str) -> bool {
     if let Some(known) = pairs.get(&expected) {
-        assert_eq!(*known, actual, "{location}: an object shared in one model is not shared in the other");
+        assert_eq!(
+            *known, actual,
+            "{location}: an object shared in one model is not shared in the other"
+        );
         return false;
     }
     pairs.insert(expected, actual);

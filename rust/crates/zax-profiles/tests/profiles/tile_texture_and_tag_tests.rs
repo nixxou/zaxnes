@@ -44,10 +44,22 @@ fn req_prof_031_the_flip_bits_mirror_the_displayed_pixels() {
 #[test]
 fn req_prof_031_the_colour_of_a_pixel_is_two_times_the_high_bit_plus_the_low_bit() {
     const BIT: u64 = 1 << 7;
-    assert_eq!(Some(0), ProfileTile::new(0, 0, TileFlip::NONE).color_at(0, 0));
-    assert_eq!(Some(1), ProfileTile::new(BIT, 0, TileFlip::NONE).color_at(0, 0));
-    assert_eq!(Some(2), ProfileTile::new(0, BIT, TileFlip::NONE).color_at(0, 0));
-    assert_eq!(Some(3), ProfileTile::new(BIT, BIT, TileFlip::NONE).color_at(0, 0));
+    assert_eq!(
+        Some(0),
+        ProfileTile::new(0, 0, TileFlip::NONE).color_at(0, 0)
+    );
+    assert_eq!(
+        Some(1),
+        ProfileTile::new(BIT, 0, TileFlip::NONE).color_at(0, 0)
+    );
+    assert_eq!(
+        Some(2),
+        ProfileTile::new(0, BIT, TileFlip::NONE).color_at(0, 0)
+    );
+    assert_eq!(
+        Some(3),
+        ProfileTile::new(BIT, BIT, TileFlip::NONE).color_at(0, 0)
+    );
 }
 
 #[test]
@@ -81,14 +93,38 @@ fn req_prof_035_the_null_marker_and_an_explicit_texture_are_told_apart() {
     assert!(marker.is_null_marker());
     assert!(marker.has_consistent_length());
 
-    let indexed = VariantTexture::new(8, 8, Some(TexturePixels::new(TextureFormat::Indexed, vec![0; 4], vec![])));
+    let indexed = VariantTexture::new(
+        8,
+        8,
+        Some(TexturePixels::new(
+            TextureFormat::Indexed,
+            vec![0; 4],
+            vec![],
+        )),
+    );
     assert!(!indexed.is_null_marker());
     assert!(indexed.has_consistent_length());
 
-    let too_short = VariantTexture::new(8, 8, Some(TexturePixels::new(TextureFormat::Indexed, vec![0; 3], vec![])));
+    let too_short = VariantTexture::new(
+        8,
+        8,
+        Some(TexturePixels::new(
+            TextureFormat::Indexed,
+            vec![0; 3],
+            vec![],
+        )),
+    );
     assert!(!too_short.has_consistent_length());
 
-    let direct = VariantTexture::new(2, 3, Some(TexturePixels::new(TextureFormat::Direct, vec![0; 6], vec![])));
+    let direct = VariantTexture::new(
+        2,
+        3,
+        Some(TexturePixels::new(
+            TextureFormat::Direct,
+            vec![0; 6],
+            vec![],
+        )),
+    );
     assert!(direct.has_consistent_length());
 }
 
@@ -113,7 +149,11 @@ fn req_prof_035_every_explicit_texture_of_the_corpus_has_the_stated_length() {
         let profile = neutral_assets::load_profile(&file_name).profile;
         for pattern in profile.all_patterns() {
             for variant in &pattern.variants {
-                let Some(texture) = variant.texture.as_ref().filter(|texture| !texture.is_null_marker()) else {
+                let Some(texture) = variant
+                    .texture
+                    .as_ref()
+                    .filter(|texture| !texture.is_null_marker())
+                else {
                     continue;
                 };
 
@@ -135,7 +175,10 @@ fn req_prof_035_every_explicit_texture_of_the_corpus_has_the_stated_length() {
 
 #[test]
 fn req_prof_036_a_tag_string_is_split_trimmed_and_emptied_of_blanks() {
-    let variant = PatternVariant { tag_string: Some(" char, ,!cast ".to_owned()), ..PatternVariant::default() };
+    let variant = PatternVariant {
+        tag_string: Some(" char, ,!cast ".to_owned()),
+        ..PatternVariant::default()
+    };
 
     assert_eq!(vec!["char", "!cast"], variant.tags());
     assert!(variant.has_tag("char"));
@@ -145,7 +188,10 @@ fn req_prof_036_a_tag_string_is_split_trimmed_and_emptied_of_blanks() {
 
 #[test]
 fn req_prof_036_the_special_variant_tags_are_the_five_of_the_spec() {
-    assert_eq!(["!cast", "!receiv", "!recv", "!static", "_gaxis"], tags::SPECIAL_VARIANT_TAGS);
+    assert_eq!(
+        ["!cast", "!receiv", "!recv", "!static", "_gaxis"],
+        tags::SPECIAL_VARIANT_TAGS
+    );
 }
 
 #[test]
@@ -161,8 +207,14 @@ fn req_prof_036_an_absent_tag_string_gives_no_tag() {
 #[case(-1, 4)]
 #[case(-5, 0)]
 #[case(-2, 3)]
-fn req_prof_037_a_negative_empty_colour_is_brought_back_into_0_to_4(#[case] stored: i32, #[case] expected: i32) {
-    let variant = PatternVariant { stored_empty_color: stored, ..PatternVariant::default() };
+fn req_prof_037_a_negative_empty_colour_is_brought_back_into_0_to_4(
+    #[case] stored: i32,
+    #[case] expected: i32,
+) {
+    let variant = PatternVariant {
+        stored_empty_color: stored,
+        ..PatternVariant::default()
+    };
 
     assert_eq!(expected, variant.empty_color());
     assert_eq!(stored, variant.stored_empty_color);
@@ -172,7 +224,8 @@ fn req_prof_037_a_negative_empty_colour_is_brought_back_into_0_to_4(#[case] stor
 #[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
 fn req_prof_037_no_built_in_profile_stores_a_negative_empty_colour() {
     for path in neutral_assets::profile_files() {
-        let profile = neutral_assets::load_profile(&path.file_name().unwrap().to_string_lossy()).profile;
+        let profile =
+            neutral_assets::load_profile(&path.file_name().unwrap().to_string_lossy()).profile;
         for pattern in profile.all_patterns() {
             for variant in &pattern.variants {
                 assert!((0..=4).contains(&variant.stored_empty_color));
@@ -184,7 +237,8 @@ fn req_prof_037_no_built_in_profile_stores_a_negative_empty_colour() {
 #[test]
 fn req_prof_034_the_custom_data_of_a_variant_comes_from_the_last_row_of_the_two_matrices() {
     let speed: [f32; 16] = std::array::from_fn(|index| f32::from(u8::try_from(index).unwrap()));
-    let offset: [f32; 16] = std::array::from_fn(|index| 100.0 + f32::from(u8::try_from(index).unwrap()));
+    let offset: [f32; 16] =
+        std::array::from_fn(|index| 100.0 + f32::from(u8::try_from(index).unwrap()));
 
     let variant = PatternVariant {
         deform_speed: Some(Mat4F::new(speed)),
@@ -223,7 +277,7 @@ fn req_prof_002_float_bits_survive_a_round_trip_including_negative_zero() {
     assert_eq!((-0.0_f32).to_bits(), restored.alpha.to_bits());
     assert_eq!(f32::NAN.to_bits(), scale.x.to_bits());
     assert_eq!((-0.0_f32).to_bits(), scale.y.to_bits());
-    assert_eq!(f32::NEG_INFINITY, scale.z);
+    assert_eq!(f32::NEG_INFINITY.to_bits(), scale.z.to_bits());
 
     // Bitwise equality: -0 is not 0 here, which is what keeps a rewrite byte-identical.
     assert_ne!(Vec3F::new(0.0, 0.0, 0.0), Vec3F::new(-0.0, 0.0, 0.0));

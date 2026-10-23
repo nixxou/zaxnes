@@ -1,9 +1,7 @@
-//! A builder of UnityFS bundles in every layout the reader supports (AMD-030 §4), so the
+//! A builder of `UnityFS` bundles in every layout the reader supports (AMD-030 §4), so the
 //! reader is tested without a 3dSen installation.
 
-use zax_profiles::import::{
-    UnityCompression, BUNDLE_SIGNATURE, TEXT_ASSET_CLASS_ID,
-};
+use zax_profiles::import::{UnityCompression, BUNDLE_SIGNATURE, TEXT_ASSET_CLASS_ID};
 
 use super::lz4_encoder;
 
@@ -13,6 +11,7 @@ pub const ASSET_BUNDLE_CLASS_ID: i32 = 142;
 pub const ENGINE_VERSION: &str = "2019.4.41f2";
 
 #[derive(Clone)]
+#[allow(clippy::struct_excessive_bools)] // one switch per layout variant, as in the C# options
 pub struct SyntheticBundleOptions {
     pub format_version: u32,
     pub info_compression: UnityCompression,
@@ -68,7 +67,10 @@ pub fn build(assets: &[(&str, Vec<u8>)], options: &SyntheticBundleOptions) -> Ve
     wrap(&build_serialized_file(assets, options), options)
 }
 
-pub fn build_serialized_file(assets: &[(&str, Vec<u8>)], options: &SyntheticBundleOptions) -> Vec<u8> {
+pub fn build_serialized_file(
+    assets: &[(&str, Vec<u8>)],
+    options: &SyntheticBundleOptions,
+) -> Vec<u8> {
     // 1. The object data, each object aligned on 8 bytes inside the data area.
     let mut data = ByteWriter::new(options.big_endian);
     let mut table: Vec<(usize, usize, i32)> = Vec::new();
@@ -105,12 +107,20 @@ pub fn build_serialized_file(assets: &[(&str, Vec<u8>)], options: &SyntheticBund
     metadata.i32(i32::try_from(table.len()).unwrap());
 
     // 3. The header, big-endian, then the metadata, then the data at an aligned offset.
-    let header_size = if options.serialized_version >= 22 { 20 + 28 } else { 20 };
+    let header_size = if options.serialized_version >= 22 {
+        20 + 28
+    } else {
+        20
+    };
 
     // The object table is aligned on 4 bytes from the start of the file (AMD-030 §4.3); the
     // padding is computed here and written as part of the metadata.
     let object_table_start = align(header_size + metadata.len(), 4);
-    let object_record_size = if options.serialized_version >= 22 { 24 } else { 20 };
+    let object_record_size = if options.serialized_version >= 22 {
+        24
+    } else {
+        20
+    };
     let metadata_end = object_table_start + table.len() * object_record_size;
     let data_offset = align(metadata_end, 16);
 
@@ -234,9 +244,13 @@ fn store(plain: &[u8], compression: UnityCompression) -> Vec<u8> {
 
         // LZMA is never produced: the bundles that claim it carry stored bytes and an
         // overridden compression code, which is exactly the refusal AMD-030 §4.1 asks for.
-        UnityCompression::None | UnityCompression::Lzma | UnityCompression::Unknown(_) => plain.to_vec(),
+        UnityCompression::None | UnityCompression::Lzma | UnityCompression::Unknown(_) => {
+            plain.to_vec()
+        }
     }
 }
+
+const NODE_COUNT: usize = 3;
 
 fn write_type(metadata: &mut ByteWriter, class_id: i32, options: &SyntheticBundleOptions) {
     metadata.i32(class_id);
@@ -248,11 +262,14 @@ fn write_type(metadata: &mut ByteWriter, class_id: i32, options: &SyntheticBundl
         return;
     }
 
-    const NODE_COUNT: usize = 3;
     let strings = b"m_Name\0m_Script\0";
     metadata.i32(i32::try_from(NODE_COUNT).unwrap());
     metadata.i32(i32::try_from(strings.len()).unwrap());
-    let node_size = if options.serialized_version >= 19 { 32 } else { 24 };
+    let node_size = if options.serialized_version >= 19 {
+        32
+    } else {
+        24
+    };
     metadata.bytes(&vec![0; NODE_COUNT * node_size]);
     metadata.bytes(strings);
 
@@ -301,27 +318,47 @@ impl ByteWriter {
     }
 
     fn i16(&mut self, value: i16) {
-        let encoded = if self.big_endian { value.to_be_bytes() } else { value.to_le_bytes() };
+        let encoded = if self.big_endian {
+            value.to_be_bytes()
+        } else {
+            value.to_le_bytes()
+        };
         self.bytes(&encoded);
     }
 
     fn u16(&mut self, value: u16) {
-        let encoded = if self.big_endian { value.to_be_bytes() } else { value.to_le_bytes() };
+        let encoded = if self.big_endian {
+            value.to_be_bytes()
+        } else {
+            value.to_le_bytes()
+        };
         self.bytes(&encoded);
     }
 
     fn i32(&mut self, value: i32) {
-        let encoded = if self.big_endian { value.to_be_bytes() } else { value.to_le_bytes() };
+        let encoded = if self.big_endian {
+            value.to_be_bytes()
+        } else {
+            value.to_le_bytes()
+        };
         self.bytes(&encoded);
     }
 
     fn u32(&mut self, value: u32) {
-        let encoded = if self.big_endian { value.to_be_bytes() } else { value.to_le_bytes() };
+        let encoded = if self.big_endian {
+            value.to_be_bytes()
+        } else {
+            value.to_le_bytes()
+        };
         self.bytes(&encoded);
     }
 
     fn i64(&mut self, value: i64) {
-        let encoded = if self.big_endian { value.to_be_bytes() } else { value.to_le_bytes() };
+        let encoded = if self.big_endian {
+            value.to_be_bytes()
+        } else {
+            value.to_le_bytes()
+        };
         self.bytes(&encoded);
     }
 

@@ -29,14 +29,58 @@ fn assets() -> Vec<(&'static str, Vec<u8>)> {
 }
 
 fn layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
+    [
+        stored_layouts(),
+        compressed_layouts(),
+        serialized_file_layouts(),
+    ]
+    .concat()
+}
+
+fn stored_layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
     let default = SyntheticBundleOptions::default;
     vec![
         ("stored, one block, info first", default()),
-        ("stored, info at the end", SyntheticBundleOptions { info_at_end: true, ..default() }),
-        ("stored, 8 KiB blocks", SyntheticBundleOptions { block_size: 8 * 1024, ..default() }),
+        (
+            "stored, info at the end",
+            SyntheticBundleOptions {
+                info_at_end: true,
+                ..default()
+            },
+        ),
+        (
+            "stored, 8 KiB blocks",
+            SyntheticBundleOptions {
+                block_size: 8 * 1024,
+                ..default()
+            },
+        ),
+        (
+            "bundle format version 6",
+            SyntheticBundleOptions {
+                format_version: 6,
+                ..default()
+            },
+        ),
+        (
+            "bundle format version 8",
+            SyntheticBundleOptions {
+                format_version: 8,
+                ..default()
+            },
+        ),
+    ]
+}
+
+fn compressed_layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
+    let default = SyntheticBundleOptions::default;
+    vec![
         (
             "LZ4 blocks, one block",
-            SyntheticBundleOptions { block_compression: UnityCompression::Lz4, ..default() },
+            SyntheticBundleOptions {
+                block_compression: UnityCompression::Lz4,
+                ..default()
+            },
         ),
         (
             "LZ4 blocks of 128 KiB, as measured",
@@ -64,7 +108,6 @@ fn layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
                 ..default()
             },
         ),
-        ("big-endian serialized file", SyntheticBundleOptions { big_endian: true, ..default() }),
         (
             "big-endian, LZ4, several blocks, info at the end",
             SyntheticBundleOptions {
@@ -76,16 +119,55 @@ fn layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
                 ..default()
             },
         ),
-        ("serialized file version 17", SyntheticBundleOptions { serialized_version: 17, ..default() }),
-        ("serialized file version 19", SyntheticBundleOptions { serialized_version: 19, ..default() }),
-        ("serialized file version 22", SyntheticBundleOptions { serialized_version: 22, ..default() }),
+    ]
+}
+
+fn serialized_file_layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
+    let default = SyntheticBundleOptions::default;
+    vec![
+        (
+            "big-endian serialized file",
+            SyntheticBundleOptions {
+                big_endian: true,
+                ..default()
+            },
+        ),
+        (
+            "serialized file version 17",
+            SyntheticBundleOptions {
+                serialized_version: 17,
+                ..default()
+            },
+        ),
+        (
+            "serialized file version 19",
+            SyntheticBundleOptions {
+                serialized_version: 19,
+                ..default()
+            },
+        ),
+        (
+            "serialized file version 22",
+            SyntheticBundleOptions {
+                serialized_version: 22,
+                ..default()
+            },
+        ),
         (
             "serialized file version 22, big-endian",
-            SyntheticBundleOptions { serialized_version: 22, big_endian: true, ..default() },
+            SyntheticBundleOptions {
+                serialized_version: 22,
+                big_endian: true,
+                ..default()
+            },
         ),
-        ("no type tree", SyntheticBundleOptions { type_tree: false, ..default() }),
-        ("bundle format version 6", SyntheticBundleOptions { format_version: 6, ..default() }),
-        ("bundle format version 8", SyntheticBundleOptions { format_version: 8, ..default() }),
+        (
+            "no type tree",
+            SyntheticBundleOptions {
+                type_tree: false,
+                ..default()
+            },
+        ),
     ]
 }
 
@@ -101,7 +183,10 @@ fn every_layout_yields_the_same_text_assets() {
         assert_eq!(expected.len(), read.len(), "{layout}");
         for ((name, script), asset) in expected.iter().zip(&read) {
             assert_eq!(*name, asset.name, "{layout}");
-            assert!(*script == asset.script, "{layout}: the payload of \"{name}\" came back changed.");
+            assert!(
+                *script == asset.script,
+                "{layout}: the payload of \"{name}\" came back changed."
+            );
         }
     }
 }
@@ -143,7 +228,11 @@ fn the_serialized_file_exposes_its_version_order_and_classes() {
     let expected = assets();
     let bundle = synthetic::build(
         &expected,
-        &SyntheticBundleOptions { big_endian: true, serialized_version: 21, ..SyntheticBundleOptions::default() },
+        &SyntheticBundleOptions {
+            big_endian: true,
+            serialized_version: 21,
+            ..SyntheticBundleOptions::default()
+        },
     );
     let container = UnityBundle::read(&bundle).unwrap();
 
@@ -157,11 +246,19 @@ fn the_serialized_file_exposes_its_version_order_and_classes() {
     assert_eq!(expected.len() + 1, serialized.objects.len());
     assert_eq!(
         expected.len(),
-        serialized.objects.iter().filter(|object| object.class_id == TEXT_ASSET_CLASS_ID).count()
+        serialized
+            .objects
+            .iter()
+            .filter(|object| object.class_id == TEXT_ASSET_CLASS_ID)
+            .count()
     );
     assert_eq!(
         1,
-        serialized.objects.iter().filter(|object| object.class_id == ASSET_BUNDLE_CLASS_ID).count()
+        serialized
+            .objects
+            .iter()
+            .filter(|object| object.class_id == ASSET_BUNDLE_CLASS_ID)
+            .count()
     );
 }
 
@@ -188,7 +285,11 @@ fn names_of_every_length_modulo_four_are_read() {
         ("accentué", vec![5]),
     ];
 
-    let read = read_text_assets(&synthetic::build(&assets, &SyntheticBundleOptions::default())).unwrap();
+    let read = read_text_assets(&synthetic::build(
+        &assets,
+        &SyntheticBundleOptions::default(),
+    ))
+    .unwrap();
 
     assert_eq!(assets.len(), read.len());
     for ((name, script), asset) in assets.iter().zip(&read) {
@@ -204,7 +305,10 @@ fn a_file_that_is_not_a_bundle_is_refused() {
 
     let error = read_text_assets(bytes).unwrap_err();
 
-    assert!(error.message().contains("not a Unity asset bundle"), "{error}");
+    assert!(
+        error.message().contains("not a Unity asset bundle"),
+        "{error}"
+    );
     assert!(error.message().contains("UnityWeb"), "{error}");
 }
 
@@ -214,7 +318,10 @@ fn a_truncated_bundle_is_refused() {
     let bundle = synthetic::build(&assets(), &SyntheticBundleOptions::default());
 
     for kept in [0, 4, 30, 60, 200] {
-        assert!(read_text_assets(&bundle[..kept.min(bundle.len())]).is_err(), "kept {kept}");
+        assert!(
+            read_text_assets(&bundle[..kept.min(bundle.len())]).is_err(),
+            "kept {kept}"
+        );
     }
 }
 
@@ -223,7 +330,10 @@ fn a_truncated_bundle_is_refused() {
 fn a_bundle_cut_in_its_data_blocks_is_refused() {
     let bundle = synthetic::build(
         &assets(),
-        &SyntheticBundleOptions { block_size: 8 * 1024, ..SyntheticBundleOptions::default() },
+        &SyntheticBundleOptions {
+            block_size: 8 * 1024,
+            ..SyntheticBundleOptions::default()
+        },
     );
 
     let error = read_text_assets(&bundle[..bundle.len() - 4096]).unwrap_err();
@@ -254,7 +364,9 @@ fn lzma_data_blocks_are_refused() {
     let bundle = synthetic::build(
         &assets(),
         &SyntheticBundleOptions {
-            block_compression_code: Some(u16::try_from(compression_code(UnityCompression::Lzma)).unwrap()),
+            block_compression_code: Some(
+                u16::try_from(compression_code(UnityCompression::Lzma)).unwrap(),
+            ),
             ..SyntheticBundleOptions::default()
         },
     );
@@ -269,12 +381,18 @@ fn lzma_data_blocks_are_refused() {
 fn an_unknown_compression_code_is_refused() {
     let bundle = synthetic::build(
         &assets(),
-        &SyntheticBundleOptions { block_compression_code: Some(9), ..SyntheticBundleOptions::default() },
+        &SyntheticBundleOptions {
+            block_compression_code: Some(9),
+            ..SyntheticBundleOptions::default()
+        },
     );
 
     let error = read_text_assets(&bundle).unwrap_err();
 
-    assert!(error.message().contains("unknown compression code 9"), "{error}");
+    assert!(
+        error.message().contains("unknown compression code 9"),
+        "{error}"
+    );
 }
 
 /// AMD-030 §5: a file table that points outside the decompressed stream.
@@ -290,7 +408,10 @@ fn a_file_node_out_of_range_is_refused() {
             },
         );
 
-        assert!(read_text_assets(&bundle).is_err(), "{offset_delta} {size_delta}");
+        assert!(
+            read_text_assets(&bundle).is_err(),
+            "{offset_delta} {size_delta}"
+        );
     }
 }
 
@@ -320,7 +441,10 @@ fn an_unsupported_bundle_version_is_refused() {
 
     let error = read_text_assets(&bundle).unwrap_err();
 
-    assert!(error.message().contains("version 9 is not supported"), "{error}");
+    assert!(
+        error.message().contains("version 9 is not supported"),
+        "{error}"
+    );
 }
 
 /// AMD-030 §4.1: bit 0x40 clear leaves nothing to extract.
@@ -328,7 +452,10 @@ fn an_unsupported_bundle_version_is_refused() {
 fn a_bundle_without_a_file_list_is_refused() {
     let bundle = synthetic::build(
         &assets(),
-        &SyntheticBundleOptions { file_list: false, ..SyntheticBundleOptions::default() },
+        &SyntheticBundleOptions {
+            file_list: false,
+            ..SyntheticBundleOptions::default()
+        },
     );
 
     let error = read_text_assets(&bundle).unwrap_err();
@@ -342,7 +469,10 @@ fn an_unsupported_serialized_file_version_is_refused() {
     for version in [16_u8, 23] {
         let mut serialized = synthetic::build_serialized_file(
             &assets(),
-            &SyntheticBundleOptions { serialized_version: 21, ..SyntheticBundleOptions::default() },
+            &SyntheticBundleOptions {
+                serialized_version: 21,
+                ..SyntheticBundleOptions::default()
+            },
         );
 
         // The version is the third u32 of the big-endian header.
@@ -350,14 +480,20 @@ fn an_unsupported_serialized_file_version_is_refused() {
 
         let error = UnitySerializedFile::read(&serialized).unwrap_err();
 
-        assert!(error.message().contains(&format!("version {version} is not supported")), "{error}");
+        assert!(
+            error
+                .message()
+                .contains(&format!("version {version} is not supported")),
+            "{error}"
+        );
     }
 }
 
 /// AMD-030 §5: an object table pointing past the end of the file.
 #[test]
 fn a_serialized_file_whose_object_table_is_out_of_range_is_refused() {
-    let serialized = synthetic::build_serialized_file(&assets(), &SyntheticBundleOptions::default());
+    let serialized =
+        synthetic::build_serialized_file(&assets(), &SyntheticBundleOptions::default());
 
     // Shorten the file without touching its table: every object now ends out of range.
     let cut = &serialized[..serialized.len() / 2];

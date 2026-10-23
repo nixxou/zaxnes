@@ -49,7 +49,8 @@ fn measure() -> Totals {
 
     for path in neutral_assets::profile_files() {
         totals.files += 1;
-        let profile = neutral_assets::load_profile(&path.file_name().unwrap().to_string_lossy()).profile;
+        let profile =
+            neutral_assets::load_profile(&path.file_name().unwrap().to_string_lossy()).profile;
 
         if !profile.scripts.is_empty() {
             totals.files_with_scripts += 1;
@@ -107,7 +108,11 @@ fn measure() -> Totals {
         let settings = profile.settings.as_ref().unwrap();
         let layers = settings.layers.as_ref().unwrap();
         totals.stored_layers += layers.layers.len();
-        totals.stored_cast_shadow += layers.layers.iter().filter(|layer| layer.stored_cast_shadow).count();
+        totals.stored_cast_shadow += layers
+            .layers
+            .iter()
+            .filter(|layer| layer.stored_cast_shadow)
+            .count();
 
         let slots: Vec<&ProfilePattern> = settings
             .saved_patterns
@@ -137,7 +142,8 @@ fn count_textures(totals: &mut Totals, pattern: &ProfilePattern) {
         assert!(texture.has_consistent_length(), "texture payload length");
         if texture.is_null_marker() {
             totals.null_marker_textures += 1;
-        } else if texture.pixels.as_ref().map(|pixels| pixels.format) == Some(TextureFormat::Direct) {
+        } else if texture.pixels.as_ref().map(|pixels| pixels.format) == Some(TextureFormat::Direct)
+        {
             totals.direct_textures += 1;
         } else {
             totals.indexed_textures += 1;
@@ -165,7 +171,10 @@ fn req_prof_023_every_pattern_of_field_4_is_marked_permanent() {
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
         let profile = neutral_assets::load_profile(&file_name).profile;
         for pattern in &profile.permanent_patterns {
-            assert!(pattern.permanent, "{file_name}: a field 4 pattern is temporary");
+            assert!(
+                pattern.permanent,
+                "{file_name}: a field 4 pattern is temporary"
+            );
         }
     }
 }
@@ -183,10 +192,14 @@ fn req_prof_034_the_variant_counts_match() {
 fn req_prof_034_the_distribution_of_variants_per_pattern_matches() {
     let mut histogram: HashMap<usize, usize> = HashMap::new();
     for path in neutral_assets::profile_files() {
-        let profile = neutral_assets::load_profile(&path.file_name().unwrap().to_string_lossy()).profile;
+        let profile =
+            neutral_assets::load_profile(&path.file_name().unwrap().to_string_lossy()).profile;
         for pattern in profile.all_patterns() {
             *histogram.entry(pattern.variants.len()).or_default() += 1;
-            assert!(!pattern.variants.is_empty(), "a pattern of fields 4 or 5 has no variant");
+            assert!(
+                !pattern.variants.is_empty(),
+                "a pattern of fields 4 or 5 has no variant"
+            );
         }
     }
 
@@ -251,7 +264,11 @@ fn req_prof_038_the_two_name_fields_always_agree_and_no_error_flag_is_set() {
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
         let profile = neutral_assets::load_profile(&file_name).profile;
         for script in &profile.scripts {
-            assert!(!script.stored_error_flag, "{file_name}: {:?} has the error flag", script.name);
+            assert!(
+                !script.stored_error_flag,
+                "{file_name}: {:?} has the error flag",
+                script.name
+            );
         }
     }
 }
@@ -282,7 +299,10 @@ fn req_prof_022_the_metadata_fields_are_present_as_often_as_stated() {
     // Jackal carries the title "Tennis" but the library shows the catalogue title.
     assert_eq!(
         Some("Tennis"),
-        neutral_assets::load_profile("Jackal (U).bytes").profile.title.as_deref()
+        neutral_assets::load_profile("Jackal (U).bytes")
+            .profile
+            .title
+            .as_deref()
     );
 }
 
@@ -324,7 +344,10 @@ fn req_prof_001_the_small_profiles_decode_to_the_stated_contents(
     assert_eq!(permanent_patterns, profile.permanent_patterns.len());
     assert_eq!(temporary_patterns, profile.temporary_patterns.len());
 
-    let variant_count: usize = profile.all_patterns().map(|pattern| pattern.variants.len()).sum();
+    let variant_count: usize = profile
+        .all_patterns()
+        .map(|pattern| pattern.variants.len())
+        .sum();
     assert_eq!(variants, variant_count);
     assert_eq!(distinct_tiles, profile.distinct_tile_objects().count());
 }

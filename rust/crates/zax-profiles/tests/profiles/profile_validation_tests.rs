@@ -1,8 +1,6 @@
 use rstest::rstest;
 use zax_profiles::enums::ProfileFormatVersion;
-use zax_profiles::format::{
-    self, ProfileDocument, ProfileLoadError, ProfileLoadErrorKind,
-};
+use zax_profiles::format::{self, ProfileDocument, ProfileLoadError, ProfileLoadErrorKind};
 use zax_profiles::layout::FieldPresence;
 use zax_profiles::pattern::RecordedPatternSlot;
 use zax_profiles::profile::{version_rules, GameProfile};
@@ -14,8 +12,12 @@ use super::common::recording_log::RecordingProfileLog;
 fn valid_profile() -> GameProfile {
     let mut profile = GameProfile::create_empty();
     let settings = profile.settings.as_mut().unwrap();
-    settings.saved_patterns.extend(RecordedPatternSlot::default_shape_slots());
-    settings.saved_anim_patterns.extend(RecordedPatternSlot::default_deform_slots());
+    settings
+        .saved_patterns
+        .extend(RecordedPatternSlot::default_shape_slots());
+    settings
+        .saved_anim_patterns
+        .extend(RecordedPatternSlot::default_deform_slots());
     profile
 }
 
@@ -36,7 +38,10 @@ fn req_prof_020_a_profile_whose_signature_is_not_3dn_is_refused() {
     let mut profile = valid_profile();
     profile.signature = Some("3dx".to_owned());
 
-    assert_eq!(ProfileLoadErrorKind::WrongSignature, kind_of(load(&profile)));
+    assert_eq!(
+        ProfileLoadErrorKind::WrongSignature,
+        kind_of(load(&profile))
+    );
 }
 
 #[test]
@@ -68,7 +73,10 @@ fn req_prof_021_the_version_string_is_filtered_then_classified(
 #[case("ver 2.0", "2.0")]
 #[case("3$", "3$")]
 #[case("a-b", "")]
-fn req_prof_021_filtering_keeps_only_digits_a_dot_and_a_dollar(#[case] input: &str, #[case] expected: &str) {
+fn req_prof_021_filtering_keeps_only_digits_a_dot_and_a_dollar(
+    #[case] input: &str,
+    #[case] expected: &str,
+) {
     assert_eq!(expected, version_rules::sanitize(Some(input)));
 }
 
@@ -76,7 +84,10 @@ fn req_prof_021_filtering_keeps_only_digits_a_dot_and_a_dollar(#[case] input: &s
 fn req_prof_021_a_version_1_profile_is_refused_and_a_version_2_profile_is_flagged() {
     let mut refused = valid_profile();
     refused.version_text = Some("1".to_owned());
-    assert_eq!(ProfileLoadErrorKind::UnsupportedVersion, kind_of(load(&refused)));
+    assert_eq!(
+        ProfileLoadErrorKind::UnsupportedVersion,
+        kind_of(load(&refused))
+    );
 
     let mut v2 = valid_profile();
     v2.version_text = Some("2".to_owned());
@@ -92,30 +103,53 @@ fn req_prof_025_a_profile_without_settings_is_refused() {
     let mut profile = valid_profile();
     profile.settings = None;
 
-    assert_eq!(ProfileLoadErrorKind::MissingSettings, kind_of(load(&profile)));
+    assert_eq!(
+        ProfileLoadErrorKind::MissingSettings,
+        kind_of(load(&profile))
+    );
 }
 
 #[test]
 fn req_prof_025_a_profile_whose_settings_lack_the_light_the_clipping_or_the_layers_is_refused() {
     let mut without_light = valid_profile();
     without_light.settings.as_mut().unwrap().light = None;
-    assert_eq!(ProfileLoadErrorKind::IncompleteSettings, kind_of(load(&without_light)));
+    assert_eq!(
+        ProfileLoadErrorKind::IncompleteSettings,
+        kind_of(load(&without_light))
+    );
 
     let mut without_clipping = valid_profile();
     without_clipping.settings.as_mut().unwrap().clipping = None;
-    assert_eq!(ProfileLoadErrorKind::IncompleteSettings, kind_of(load(&without_clipping)));
+    assert_eq!(
+        ProfileLoadErrorKind::IncompleteSettings,
+        kind_of(load(&without_clipping))
+    );
 
     let mut without_layers = valid_profile();
     without_layers.settings.as_mut().unwrap().layers = None;
-    assert_eq!(ProfileLoadErrorKind::IncompleteSettings, kind_of(load(&without_layers)));
+    assert_eq!(
+        ProfileLoadErrorKind::IncompleteSettings,
+        kind_of(load(&without_layers))
+    );
 }
 
 #[test]
 fn req_prof_043_a_profile_that_does_not_hold_six_layers_is_refused() {
     let mut profile = valid_profile();
-    profile.settings.as_mut().unwrap().layers.as_mut().unwrap().layers.remove(5);
+    profile
+        .settings
+        .as_mut()
+        .unwrap()
+        .layers
+        .as_mut()
+        .unwrap()
+        .layers
+        .remove(5);
 
-    assert_eq!(ProfileLoadErrorKind::WrongLayerCount, kind_of(load(&profile)));
+    assert_eq!(
+        ProfileLoadErrorKind::WrongLayerCount,
+        kind_of(load(&profile))
+    );
 }
 
 #[test]
@@ -128,10 +162,19 @@ fn req_prof_025_a_profile_without_the_memorised_slots_is_accepted_and_the_defaul
 
     let settings = result.profile.settings.as_ref().unwrap();
     let names = |slots: &[RecordedPatternSlot]| -> Vec<String> {
-        slots.iter().map(|slot| slot.name.clone().unwrap()).collect()
+        slots
+            .iter()
+            .map(|slot| slot.name.clone().unwrap())
+            .collect()
     };
-    assert_eq!(["Config1", "Config2", "Config3", "Config4", "Config5"], names(&settings.saved_patterns).as_slice());
-    assert_eq!(["Deform1", "Deform2", "Deform3", "Deform4", "Deform5"], names(&settings.saved_anim_patterns).as_slice());
+    assert_eq!(
+        ["Config1", "Config2", "Config3", "Config4", "Config5"],
+        names(&settings.saved_patterns).as_slice()
+    );
+    assert_eq!(
+        ["Deform1", "Deform2", "Deform3", "Deform4", "Deform5"],
+        names(&settings.saved_anim_patterns).as_slice()
+    );
 
     // The rebuilt slots are not written back: the file said nothing about them.
     assert_eq!(save(&profile), result.save());
@@ -158,7 +201,11 @@ fn req_prof_001_an_unknown_field_is_skipped_and_the_model_is_unchanged(#[case] w
     let result = format::load(&patched, None, None).unwrap();
 
     assert_eq!(1, result.unknown_field_count);
-    model_comparer::assert_equal(&reference.profile, &result.profile, "empty.bytes + field 99");
+    model_comparer::assert_equal(
+        &reference.profile,
+        &result.profile,
+        "empty.bytes + field 99",
+    );
 }
 
 #[test]
@@ -247,18 +294,32 @@ fn req_prof_011_a_reference_to_an_unknown_key_is_refused() {
 #[test]
 fn req_prof_011_a_key_out_of_sequence_is_refused() {
     // Root field 4 holding an envelope with the new key 4 instead of 1.
-    let bytes = [0x0a, 0x03, 0x33, 0x64, 0x6e, 0x22, 0x04, 0x10, 0x04, 0x52, 0x00];
+    let bytes = [
+        0x0a, 0x03, 0x33, 0x64, 0x6e, 0x22, 0x04, 0x10, 0x04, 0x52, 0x00,
+    ];
 
     let error = format::load(&bytes, None, None).unwrap_err();
 
     assert_eq!(ProfileLoadErrorKind::Malformed, error.kind);
-    assert!(error.message.contains("out of sequence"), "{}", error.message);
+    assert!(
+        error.message.contains("out of sequence"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]
 fn req_prof_033_a_refused_profile_is_logged() {
     let log = RecordingProfileLog::new();
-    let _ = format::load(&[0x0a, 0x03, 0x33, 0x64, 0x78], Some(&log), Some("Broken.3dn"));
+    let _ = format::load(
+        &[0x0a, 0x03, 0x33, 0x64, 0x78],
+        Some(&log),
+        Some("Broken.3dn"),
+    );
 
-    assert!(log.errors.borrow().iter().any(|line| line.starts_with("Broken.3dn:")));
+    assert!(log
+        .errors
+        .borrow()
+        .iter()
+        .any(|line| line.starts_with("Broken.3dn:")));
 }

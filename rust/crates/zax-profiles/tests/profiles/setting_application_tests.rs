@@ -38,14 +38,31 @@ fn req_prof_041_the_light_direction_and_colour_are_applied_but_not_its_intensity
 #[test]
 fn req_prof_041_the_user_settings_of_the_second_list_are_all_preserved() {
     let expected = [
-        "light.intensity", "render.mesh_algo", "vr.runtime", "scene.skybox", "emu.core",
-        "emu.game_speed", "render.shadow", "audio.volume", "video.frame_rate", "video.vsync",
-        "vr.control_method", "vr.scene_ratio", "input.emulated_menu_button",
-        "video.render_method", "video.res_scale", "video.skip_frame", "audio.bg_music",
+        "light.intensity",
+        "render.mesh_algo",
+        "vr.runtime",
+        "scene.skybox",
+        "emu.core",
+        "emu.game_speed",
+        "render.shadow",
+        "audio.volume",
+        "video.frame_rate",
+        "video.vsync",
+        "vr.control_method",
+        "vr.scene_ratio",
+        "input.emulated_menu_button",
+        "video.render_method",
+        "video.res_scale",
+        "video.skip_frame",
+        "audio.bg_music",
         // scene.tv_box stood between emu.auto_tv_mode and ui.sort_option; AMD-031 retired the
         // setting with the TV box, so there is no preference left to preserve.
-        "video.anti_alias", "vr.mirroring", "emu.auto_tv_mode",
-        "ui.sort_option", "scene.custom_bg_color", "camera.fov",
+        "video.anti_alias",
+        "vr.mirroring",
+        "emu.auto_tv_mode",
+        "ui.sort_option",
+        "scene.custom_bg_color",
+        "camera.fov",
     ];
 
     assert_eq!(expected.to_vec(), keys(&preserved_keys()));
@@ -54,12 +71,25 @@ fn req_prof_041_the_user_settings_of_the_second_list_are_all_preserved() {
 #[test]
 fn req_prof_041_the_applied_keys_cover_the_whole_first_list() {
     let expected = [
-        "light.direction", "light.color",
-        "clip.left", "clip.bottom", "clip.right", "clip.top",
-        "scene.map_enable", "layer.default_layer", "layer.auto",
-        "video.graphic_quality", "editor.saved_patterns", "editor.saved_anim_patterns",
-        "conv.same_bg_palette", "conv.same_sp_palette", "conv.sprite_tolerance",
-        "conv.scan_direction", "conv.empty_tile", "camera.local_cam", "emu.tv_mode",
+        "light.direction",
+        "light.color",
+        "clip.left",
+        "clip.bottom",
+        "clip.right",
+        "clip.top",
+        "scene.map_enable",
+        "layer.default_layer",
+        "layer.auto",
+        "video.graphic_quality",
+        "editor.saved_patterns",
+        "editor.saved_anim_patterns",
+        "conv.same_bg_palette",
+        "conv.same_sp_palette",
+        "conv.sprite_tolerance",
+        "conv.scan_direction",
+        "conv.empty_tile",
+        "camera.local_cam",
+        "emu.tv_mode",
         "scene.use_nes_bg_color",
     ];
 
@@ -71,11 +101,14 @@ fn req_prof_041_the_applied_keys_cover_the_whole_first_list() {
     for index in 0..LayerSettingsSet::LAYER_COUNT {
         for field in ["offset", "aligned", "cast_shadow", "recv_shadow"] {
             let key = format!("layer[{index}].{field}");
-            assert!(applied.iter().any(|applied| *applied == key), "{key}");
+            assert!(applied.contains(&key), "{key}");
         }
     }
 
-    assert_eq!(expected.len() + LayerSettingsSet::LAYER_COUNT * 4, applied.len());
+    assert_eq!(
+        expected.len() + LayerSettingsSet::LAYER_COUNT * 4,
+        applied.len()
+    );
 }
 
 #[test]
@@ -99,17 +132,29 @@ fn req_prof_041_loading_empty_bytes_applies_the_documented_values() {
         (SettingId::ClipRight, 4.1),
         (SettingId::ClipTop, 0.1),
     ] {
-        assert!(matches!(values[&key], Some(AppliedValue::Float(value)) if value == expected), "{key:?}");
+        assert!(
+            matches!(values[&key], Some(AppliedValue::Float(value)) if value.to_bits() == expected.to_bits()),
+            "{key:?}"
+        );
     }
-    assert!(matches!(values[&SettingId::VideoGraphicQuality], Some(AppliedValue::Int(2))));
+    assert!(matches!(
+        values[&SettingId::VideoGraphicQuality],
+        Some(AppliedValue::Int(2))
+    ));
     assert!(matches!(
         values[&SettingId::LayerDefaultLayer],
         Some(AppliedValue::Layer(ProfileLayer::L1))
     ));
-    assert!(matches!(values[&SettingId::EmuTvMode], Some(AppliedValue::TvMode(TvRegionMode::Ntsc))));
+    assert!(matches!(
+        values[&SettingId::EmuTvMode],
+        Some(AppliedValue::TvMode(TvRegionMode::Ntsc))
+    ));
 
     // Forced true whatever the profile says.
-    assert!(matches!(values[&SettingId::SceneUseNesBgColor], Some(AppliedValue::Bool(true))));
+    assert!(matches!(
+        values[&SettingId::SceneUseNesBgColor],
+        Some(AppliedValue::Bool(true))
+    ));
 
     // Never applied, so never offered here.
     assert!(!values.contains_key(&SettingId::LightIntensity));
@@ -175,7 +220,13 @@ fn req_prof_040_a_layer_without_shadow_flags_stores_them_as_false() {
 
 #[test]
 fn req_pers_013_the_layer_coefficient_follows_the_alignment() {
-    let coefficient = |aligned| LayerSettings { aligned, ..LayerSettings::default() }.coefficient();
+    let coefficient = |aligned| {
+        LayerSettings {
+            aligned,
+            ..LayerSettings::default()
+        }
+        .coefficient()
+    };
 
     assert!((coefficient(LayerAlignment::Front) - 1.0).abs() < f32::EPSILON);
     assert!(coefficient(LayerAlignment::Center).abs() < f32::EPSILON);
@@ -210,7 +261,10 @@ fn req_prof_044_the_memorised_slots_are_kept_with_their_names_and_patterns() {
     for slot in &settings.saved_patterns {
         let pattern = slot.pattern.as_ref().unwrap();
         assert!(pattern.grid.is_none());
-        assert_eq!(Some(zax_profiles::values::Vec2I::new(0, 0)), pattern.tile_size);
+        assert_eq!(
+            Some(zax_profiles::values::Vec2I::new(0, 0)),
+            pattern.tile_size
+        );
         assert_eq!(1, pattern.variants.len());
     }
 }
