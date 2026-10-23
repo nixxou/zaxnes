@@ -9,7 +9,7 @@
 use std::io;
 use std::path::Path;
 
-use zax_app::app_options::{AppOptions, RUST_ONLY_USAGE, USAGE};
+use zax_app::app_options::{self, AppOptions, RUST_ONLY_USAGE, USAGE};
 use zax_app::application::ZaxApplication;
 use zax_app::handheld_mode::{self, DisplayEnvironment};
 use zax_app::single_instance::{SingleInstance, ALREADY_RUNNING_MESSAGE};
@@ -42,6 +42,14 @@ fn run() -> i32 {
             options.system_locale = sys_locale::get_locale();
             options.handheld =
                 handheld_mode::resolve(options.handheld, &DisplayEnvironment::of_process());
+            if options.catch_up.is_none() {
+                if let Ok(value) = std::env::var("ZAXNES_CATCH_UP") {
+                    match app_options::parse_catch_up(&value) {
+                        Ok(catch_up) => options.catch_up = Some(catch_up),
+                        Err(error) => eprintln!("ZAXNES_CATCH_UP ignored: {error}"),
+                    }
+                }
+            }
             options
         }
         Err(error) => {

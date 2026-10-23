@@ -5,6 +5,8 @@ use std::str::FromStr;
 
 use zax_platform::pacing::MAXIMUM_VSYNC;
 
+use crate::emulation::frame_pacer::CatchUp;
+
 /// Frames a smoke test renders when it is not told how many.
 pub const DEFAULT_SMOKE_TEST_FRAMES: u32 = 60;
 
@@ -76,6 +78,8 @@ Rust-only options:
                           and automatic on aarch64 Linux without an X11 or Wayland display).
   --roms <dir>            Folder of .nes files the handheld ROM list shows
                           (default: the roms folder of the user data).
+  --catch-up <n>          Most emulated frames per displayed frame when the game runs late,
+                          1 to 5, or 0 for none (also ZAXNES_CATCH_UP; default 5, 0 on handhelds).
 ";
 
 /// A command line that cannot be read. The messages are those of the C# program.
@@ -124,6 +128,12 @@ pub enum OptionsError {
     /// A `--vsync` value outside 0, 1 and 2.
     #[error("--vsync expects 0, 1 or 2, got '{value}'.")]
     VSync {
+        /// The value given.
+        value: String,
+    },
+    /// A `--catch-up` value outside 0 to 5.
+    #[error("--catch-up expects 0 to 5, got '{value}'.")]
+    CatchUp {
         /// The value given.
         value: String,
     },
@@ -191,6 +201,8 @@ pub struct AppOptions {
     /// The folder the handheld ROM list shows (Rust-only); `None` for the `roms` folder of the
     /// user data.
     pub roms_directory: Option<String>,
+    /// How far the frame clock catches up (Rust-only); `None` for the platform default.
+    pub catch_up: Option<CatchUp>,
 }
 
 impl Default for AppOptions {
@@ -222,6 +234,7 @@ impl Default for AppOptions {
             ui_shot_directory: None,
             handheld: false,
             roms_directory: None,
+            catch_up: None,
         }
     }
 }
@@ -342,6 +355,9 @@ impl AppOptions {
             "--roms" => {
                 self.roms_directory = Some(next_value(arguments, index, "--roms")?.to_owned());
             }
+            "--catch-up" => {
+                self.catch_up = Some(parse_catch_up(next_value(arguments, index, "--catch-up")?)?);
+            }
             unknown => {
                 return Err(OptionsError::UnknownArgument {
                     argument: unknown.to_owned(),
@@ -414,6 +430,17 @@ fn parse_count<T: FromStr + Default + PartialOrd>(value: &str) -> Result<T, Opti
         .ok_or_else(|| OptionsError::FrameCount {
             value: value.to_owned(),
         })
+}
+
+/// The value of `--catch-up` or `ZAXNES_CATCH_UP`.
+///
+/// # Errors
+///
+/// The value is not a whole number from 0 to 5.
+pub fn parse_catch_up(value: &str) -> Result<CatchUp, OptionsError> {
+    CatchUp::parse(value).ok_or_else(|| OptionsError::CatchUp {
+        value: value.to_owned(),
+    })
 }
 
 /// A whole, non-negative number, such as a frame rate.

@@ -83,12 +83,21 @@ displayed frame". All values are per displayed frame.
   mask / fine-X checks and work per 8-dot tile with direct CHR / nametable reads (expected
   ~160 -> ~50 instructions per dot); (2) batch the APU the same way (sync on $4000-$4017 and on
   frame / DMC IRQ cycles); (3) IRQ horizons for Rambo1 and MMC5 so they batch too.
-- `rust/check.sh` was not run after `91123ec` (the session stopped): run it first.
+- `91123ec` checked on Windows afterwards: core goldens, fmt, clippy and the workspace tests
+  (`--all-features`) pass.
+- Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
+  (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
+  displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now
+  slows the game a little instead of collapsing into 5 emulated frames per displayed frame.
+  Desktop keeps REQ-LOOP-012 (5). `--catch-up <0-5>` / `ZAXNES_CATCH_UP` override it; the
+  profiler start-up line shows the value. Owner remark (FF1, no profile, 2D, still slow): in 2D
+  only the core runs, so multi-core cannot help there; the core itself must get faster.
 
 ## 5. Next steps (see `ROADMAP.md`)
 
-Execution order decided with the owner after the batched-PPU device test: 5.2 multi-core,
-5.5 pacing, 5.3 draw-call batching, 5.4 Lua, then more of 5.1, then 5.6 only if needed.
+Execution order revised with the owner (2D games without a profile are slow too, and there the
+core is the only stage): 5.5 catch-up limit (done), then more of 5.1 (core, measured in
+instructions), 5.2 multi-core, 5.3 draw-call batching, 5.4 Lua, then 5.6 only if needed.
 
 Rule: an optimisation that changes any output is a setting (on/off, platform default, per game
 where useful); an optimisation with identical output needs no switch but must pass the goldens.

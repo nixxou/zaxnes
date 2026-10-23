@@ -23,7 +23,7 @@ use zax_settings::model::SettingsModel;
 use super::commands::{Command, CommandArgs};
 use super::emulation_state::EmulationState;
 use super::fast_forward_state::FastForwardState;
-use super::frame_pacer::{system_clock, Clock, FramePacer};
+use super::frame_pacer::{system_clock, CatchUp, Clock, FramePacer, MAX_BACKLOG};
 use super::game_catalog::{GameCatalog, ResolvedGame};
 use super::hotkey_tracker::{HotkeyEvents, HotkeyTracker};
 use super::notification_center::NotificationCenter;
@@ -195,6 +195,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub slots: SaveSlotIndex,
     /// The Zapper.
     pub zapper: ZapperState,
+    /// How far the frame clock catches up (Rust-only; REQ-LOOP-012 by default).
+    pub catch_up: CatchUp,
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -262,6 +264,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             notifications: NotificationCenter::new(),
             slots,
             zapper: ZapperState::new(),
+            catch_up: CatchUp::Limit(MAX_BACKLOG),
         };
         // AMD-035 §1: the language in force is the setting's, read once here and kept in step
         // by `on_setting_changed` afterwards. While none is saved, the model's default is the
@@ -593,6 +596,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return 0;
         }
         self.apply_speed();
+        let displayed_rate = f64::from(
+            self.settings
+                .get(SettingId::VideoTargetFramerate)
+                .as_float(),
+        );
+        self.pacer.max_backlog = self
+            .catch_up
+            .frames_per_display(self.pacer.effective_rate(), displayed_rate);
         let due = self.pacer.due_frames();
         for _ in 0..due {
             let Some(session) = self.session.as_mut() else {
