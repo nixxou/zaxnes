@@ -220,6 +220,7 @@ pub struct FrameProfiler {
     stages: [Tally; Stage::COUNT],
     frame: Tally,
     frames: u32,
+    emulated: u32,
     window_start: Instant,
     summary: String,
 }
@@ -232,6 +233,7 @@ impl FrameProfiler {
             stages: [Tally::default(); Stage::COUNT],
             frame: Tally::default(),
             frames: 0,
+            emulated: 0,
             window_start: now,
             summary: String::new(),
         }
@@ -243,15 +245,21 @@ impl FrameProfiler {
         &self.summary
     }
 
-    /// Adds one displayed frame that lasted `frame` and whose stages took `times`; what no
-    /// stage covers is counted as [`Stage::Other`]. Returns the report line when the window
-    /// is over.
+    /// Adds one displayed frame that lasted `frame`, ran `emulated` emulated frames and whose
+    /// stages took `times`; what no stage covers is counted as [`Stage::Other`]. Returns the
+    /// report line when the window is over.
+    ///
+    /// The emulated frames per displayed frame show the catch-up of the frame clock: when a
+    /// displayed frame takes longer than an emulated one, the next one runs several (up to five,
+    /// REQ-LOOP-012), which makes it longer still.
     pub fn end_frame(
         &mut self,
         times: &StageTimes,
         frame: Duration,
+        emulated: u32,
         now: Instant,
     ) -> Option<String> {
+        self.emulated += emulated;
         let other = frame.saturating_sub(times.total());
         for stage in Stage::ALL {
             let duration = if stage == Stage::Other {
@@ -271,6 +279,7 @@ impl FrameProfiler {
         self.stages = [Tally::default(); Stage::COUNT];
         self.frame = Tally::default();
         self.frames = 0;
+        self.emulated = 0;
         self.window_start = now;
         Some(report)
     }
@@ -278,13 +287,17 @@ impl FrameProfiler {
     fn report(&mut self, elapsed: Duration) -> String {
         let frames = self.frames;
         let fps = f64::from(frames) / elapsed.as_secs_f64().max(f64::EPSILON);
+        let seconds = elapsed.as_secs_f64().max(f64::EPSILON);
+        let emulated_rate = f64::from(self.emulated) / seconds;
+        let per_frame = f64::from(self.emulated) / f64::from(frames.max(1));
         let mut line = format!(
-            "profile: {fps:.1} fps over {frames} frames, frame {:.2}/{:.2} ms (mean/max)",
+            "profile: {fps:.1} fps over {frames} frames, emulated {emulated_rate:.1}/s \
+             ({per_frame:.2} per displayed frame), frame {:.2}/{:.2} ms (mean/max)",
             self.frame.mean_ms(frames),
             self.frame.max_ms()
         );
         self.summary.clear();
-        let _ = write!(self.summary, "{fps:.0} fps |");
+        let _ = write!(self.summary, "{fps:.0} fps, emu {emulated_rate:.0}/s |");
         for stage in Stage::ALL {
             let tally = self.stages[stage.index()];
             let mean = tally.mean_ms(frames);
@@ -317,11 +330,32 @@ pub const fn target_cpu() -> &'static str {
 pub fn startup_report(render: &str, pacing: &str) -> String {
     let cpus = std::thread::available_parallelism().map_or(0, std::num::NonZero::get);
     format!(
-        "profile: {cpus} CPUs, {} build, {} {}, target-cpu {}; {render}; pacing: {pacing}",
+        "profile: {cpus} CPUs ({}), {} build, {} {}, target-cpu {}; {render}; pacing: {pacing}",
+        cpu_frequency_report(),
         build_profile(),
         std::env::consts::OS,
         std::env::consts::ARCH,
         target_cpu()
+    )
+}
+
+/// The first CPU's frequency governor and its current and maximum frequencies, as Linux reports
+/// them (a handheld left on a power-saving governor runs at a fraction of its speed).
+fn cpu_frequency_report() -> String {
+    let folder = std::path::Path::new("/sys/devices/system/cpu/cpu0/cpufreq");
+    let read = |name: &str| {
+        std::fs::read_to_string(folder.join(name))
+            .map_or_else(|_| "?".to_owned(), |text| text.trim().to_owned())
+    };
+    if !folder.is_dir() {
+        return "no cpufreq".to_owned();
+    }
+    format!(
+        "governor {}, {} kHz now, {} kHz max of {} kHz",
+        read("scaling_governor"),
+        read("scaling_cur_freq"),
+        read("scaling_max_freq"),
+        read("cpuinfo_max_freq")
     )
 }
 
@@ -380,7 +414,7 @@ mod tests {
             if frame == 7 {
                 this.add(Stage::Core, ms(6));
             }
-            report = profiler.end_frame(&this, ms(20), now);
+            report = profiler.end_frame(&this, ms(20), 1 + u32::from(frame % 5 == 0), now);
             if frame < 99 {
                 assert!(report.is_none(), "frame {frame} reported early");
             }
@@ -390,11 +424,15 @@ mod tests {
         }
         let report = report.expect("a report after two seconds");
         assert!(report.contains("50.0 fps over 100 frames"), "{report}");
+        assert!(
+            report.contains("emulated 60.0/s (1.20 per displayed frame)"),
+            "{report}"
+        );
         assert!(report.contains("core 10.06/16.00"), "{report}");
-        assert!(report.contains("other 6.00/6.00"), "{report}");
+        assert!(report.contains("other 5.94/6.00"), "{report}");
         assert!(report.contains("frame 20.00/20.00"), "{report}");
         assert_eq!(
-            "50 fps | core 10.1 swap 4.0 other 6.0 ms",
+            "50 fps, emu 60/s | core 10.1 swap 4.0 other 5.9 ms",
             profiler.summary()
         );
     }

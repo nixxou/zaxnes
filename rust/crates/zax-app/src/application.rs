@@ -211,27 +211,7 @@ struct Running {
 impl Running {
     fn build(options: &AppOptions) -> Result<Self, String> {
         let asset_root = neutral_assets::locate(options.asset_root.as_deref().map(Path::new));
-        let paths =
-            UserDataPaths::resolve(options.user_data_root.as_deref().map(Path::new), None, None);
-        // AMD-029 §2: the first run after the rename seeds the new root from the old one.
-        if let Some(legacy) = &paths.migrated_from {
-            log(&format!(
-                "user data copied from '{}' to '{}'; the old folder was left untouched (AMD-029).",
-                legacy.display(),
-                paths.root.display()
-            ));
-        }
-        // The file copy of the log: the start-up report and the profiler reach it even when the
-        // launcher loses the console (Rust-only).
-        if paths.is_writable {
-            if let Some(file) = app_log::open(&paths.logs_directory) {
-                log(&format!(
-                    "zaxnes {} log file '{}'",
-                    env!("CARGO_PKG_VERSION"),
-                    file.display()
-                ));
-            }
-        }
+        let paths = resolve_user_data(options);
         let (store, model) = load_settings(options, &paths);
         let catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
         if let Some(rom) = options
@@ -260,8 +240,7 @@ impl Running {
         }
         log_window_icon(&mut window);
         let gl = window.glow_context();
-        log(&window.display_report());
-        log(&framebuffer::gl_report(&gl));
+        log_display(&window, &gl);
         let (renderer_name, version) = framebuffer::gl_strings(&gl);
         let request_options = options.clone();
         let mut pacing = VideoPacing::new(
@@ -399,7 +378,7 @@ impl Running {
         self.clock.stop(Stage::Pacer, mark);
         if let (Some(profiler), Some(begin)) = (self.profiler.as_mut(), frame_begin) {
             let times = self.clock.take();
-            if let Some(report) = profiler.end_frame(&times, begin.elapsed(), Instant::now()) {
+            if let Some(report) = profiler.end_frame(&times, begin.elapsed(), emulated, Instant::now()) {
                 log(&report);
             }
         }
@@ -623,6 +602,79 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     options.confirm_with_interface = true;
     options.view = Some(parts.view);
     EmulationHost::new(options)
+}
+
+/// The user folder, and the file copy of the log opened in it. On a handheld, a root the
+/// command line names that refuses writes is replaced by the per-user folder when that one
+/// accepts them (Rust-only: the settings and the saves would otherwise be lost silently).
+fn resolve_user_data(options: &AppOptions) -> UserDataPaths {
+    let explicit = options.user_data_root.as_deref().map(Path::new);
+    let mut paths = UserDataPaths::resolve(explicit, None, None);
+    if !paths.is_writable && explicit.is_some() && options.handheld {
+        let fallback = UserDataPaths::resolve(None, None, None);
+        if fallback.is_writable {
+            app_log::error(&format!(
+                "Zaxnes: '{}' refuses writes; the user data goes to '{}' instead.",
+                paths.root.display(),
+                fallback.root.display()
+            ));
+            paths = fallback;
+        }
+    }
+    // AMD-029 §2: the first run after the rename seeds the new root from the old one.
+    if let Some(legacy) = &paths.migrated_from {
+        log(&format!(
+            "user data copied from '{}' to '{}'; the old folder was left untouched (AMD-029).",
+            legacy.display(),
+            paths.root.display()
+        ));
+    }
+    open_log_file(&paths);
+    paths
+}
+
+/// The start-up report of the display: SDL's driver and mode, the GL context it created, the GL
+/// strings, and a warning when the renderer is a software one.
+fn log_display(window: &HostWindow, gl: &glow::Context) {
+    log(&window.display_report());
+    log(&window.gl_config_report());
+    log(&framebuffer::gl_report(gl));
+    if let Some(warning) = framebuffer::software_renderer_warning(gl) {
+        log(&warning);
+    }
+}
+
+/// Opens the file copy of the log (Rust-only): in the user folder's `logs`, else next to the
+/// executable, else in the temporary folder. The start-up report and the profiler reach it even
+/// when the launcher loses the console. Says where the user data and the log are.
+fn open_log_file(paths: &UserDataPaths) {
+    let candidates = [
+        paths.logs_directory.clone(),
+        paths.executable_directory.join("logs"),
+        std::env::temp_dir(),
+    ];
+    let (file, failures) = app_log::open_first(&candidates);
+    match &file {
+        Some(file) => log(&format!(
+            "zaxnes {} ({}), log file '{}'",
+            env!("CARGO_PKG_VERSION"),
+            frame_profiler::build_profile(),
+            file.display()
+        )),
+        None => app_log::error("Zaxnes: no log file could be created; the console has the log."),
+    }
+    for failure in failures {
+        app_log::error(&format!("Zaxnes: the log file could not be created at {failure}"));
+    }
+    log(&format!(
+        "user data folder '{}' ({})",
+        paths.root.display(),
+        if paths.is_writable {
+            "writable"
+        } else {
+            "NOT writable: settings and saves will not be kept"
+        }
+    ));
 }
 
 /// The scene renderer, with its linked programs kept in the user folder.
