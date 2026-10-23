@@ -14,6 +14,23 @@ pub const BODY_SIZE: f32 = 16.0;
 /// Size of the headings (product name, about block), in pixels.
 pub const HEADING_SIZE: f32 = 22.0;
 
+/// The sizes of the two faces, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FontSizes {
+    /// The body text.
+    pub body: f32,
+    /// The headings.
+    pub heading: f32,
+}
+
+impl FontSizes {
+    /// The sizes of the desktop interface.
+    pub const DESKTOP: Self = Self {
+        body: BODY_SIZE,
+        heading: HEADING_SIZE,
+    };
+}
+
 /// U+25B8, the small triangle of "Fichier ▸ Ouvrir une ROM" (REQ-UI-207).
 pub const SMALL_RIGHT_TRIANGLE: u32 = 0x25B8;
 /// U+25BA, the pointer Segoe UI and Arial carry instead.
@@ -65,8 +82,15 @@ pub struct UiFonts {
 impl UiFonts {
     /// Adds the faces to `atlas`: the system face (the `hint` file, or the platform's) at the
     /// body size, then the bold one of the same family at the heading size. With no face, or
-    /// `built_in_only`, the built-in font of `ImGui` is the only one.
-    pub fn load(atlas: &mut FontAtlas, hint: Option<&str>, built_in_only: bool) -> Self {
+    /// `built_in_only`, the built-in font of `ImGui` is the only one; `sizes` are the desktop's
+    /// unless the handheld interface asks for others.
+    pub fn load(
+        atlas: &mut FontAtlas,
+        hint: Option<&str>,
+        built_in_only: bool,
+        sizes: Option<FontSizes>,
+    ) -> Self {
+        let wanted = sizes.unwrap_or(FontSizes::DESKTOP);
         let files = if built_in_only {
             system_fonts::FontFiles::default()
         } else {
@@ -82,13 +106,17 @@ impl UiFonts {
             Some((regular.clone(), body, bold))
         });
         let Some((body_file, body, bold)) = faces else {
-            atlas.add_font(&[FontSource::DefaultFontData { config: None }]);
+            let config = sizes.map(|sizes| FontConfig {
+                size_pixels: sizes.body,
+                ..FontConfig::default()
+            });
+            atlas.add_font(&[FontSource::DefaultFontData { config }]);
             return Self::default();
         };
-        atlas.add_font(&[face(&body, BODY_SIZE)]);
+        atlas.add_font(&[face(&body, wanted.body)]);
         // The headings use the bold file of the same family when the system has one, and the
         // regular face at the larger size otherwise.
-        let heading = atlas.add_font(&[face(bold.as_deref().unwrap_or(&body), HEADING_SIZE)]);
+        let heading = atlas.add_font(&[face(bold.as_deref().unwrap_or(&body), wanted.heading)]);
         Self {
             heading: Some(heading),
             body_file: Some(body_file),

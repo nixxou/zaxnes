@@ -13,6 +13,8 @@ pub struct ProfileMatch {
     pub id: String,
     /// Its title.
     pub title: String,
+    /// Whether it is the "2D Mode" entry, which is no 3D profile.
+    pub two_dimensional: bool,
 }
 
 /// One game of the ROM folder.

@@ -3,10 +3,13 @@
 //! `imgui-sdl2-support` crate needs `sdl2` 0.37 and the application uses 0.38, whose native
 //! `links` key makes the two impossible to build together.
 
-use imgui::{Io, Key, MouseButton};
+use imgui::{BackendFlags, ConfigFlags, Io, Key, MouseButton};
+use sdl2::controller::{Axis, Button};
 use sdl2::event::Event;
 use sdl2::keyboard::{Mod, Scancode};
 use sdl2::mouse::MouseButton as SdlButton;
+
+use super::handheld::pad::{PadButton, PadState};
 
 /// The state between events: how the window's coordinates scale to the drawable's.
 #[derive(Debug, Clone, Copy)]
@@ -15,6 +18,10 @@ pub struct SdlPlatform {
     /// Whether the pointer events are dropped: `--ui-shots` photographs the interface as it is
     /// laid out, not as the host cursor happens to hover it (the C# capture has no pointer).
     ignore_pointer: bool,
+    /// Whether the game-controller events drive the interface (the handheld mode): they feed
+    /// `ImGui`'s gamepad keys and the [`PadState`] the handheld screens read.
+    gamepad: bool,
+    pad: PadState,
 }
 
 impl Default for SdlPlatform {
@@ -30,6 +37,8 @@ impl SdlPlatform {
         Self {
             scale: [1.0, 1.0],
             ignore_pointer: false,
+            gamepad: false,
+            pad: PadState::new(),
         }
     }
 
@@ -40,12 +49,48 @@ impl SdlPlatform {
         Self {
             scale: [1.0, 1.0],
             ignore_pointer: true,
+            gamepad: false,
+            pad: PadState::new(),
         }
+    }
+
+    /// A platform for the handheld mode: no pointer, and the gamepad navigates the interface.
+    #[must_use]
+    pub const fn for_handheld() -> Self {
+        Self {
+            scale: [1.0, 1.0],
+            ignore_pointer: true,
+            gamepad: true,
+            pad: PadState::new(),
+        }
+    }
+
+    /// Declares the gamepad to `ImGui` when this platform feeds it: the navigation flag, and the
+    /// backend flag that says the keys are driven.
+    pub fn configure(&self, io: &mut Io) {
+        if self.gamepad {
+            io.config_flags |= ConfigFlags::NAV_ENABLE_GAMEPAD | ConfigFlags::NO_MOUSE;
+            io.backend_flags |= BackendFlags::HAS_GAMEPAD;
+        }
+    }
+
+    /// The gamepad as the handheld screens read it.
+    #[must_use]
+    pub const fn pad(&self) -> &PadState {
+        &self.pad
+    }
+
+    /// The gamepad, to move its clock and clear its presses.
+    pub const fn pad_mut(&mut self) -> &mut PadState {
+        &mut self.pad
     }
 
     /// Passes one SDL event on.
     #[allow(clippy::cast_precision_loss)] // pixel coordinates are far below 2^24
-    pub fn handle_event(&self, io: &mut Io, event: &Event) {
+    pub fn handle_event(&mut self, io: &mut Io, event: &Event) {
+        if self.gamepad {
+            self.handle_gamepad_event(io, event);
+        }
         if self.ignore_pointer
             && matches!(
                 event,
@@ -83,6 +128,45 @@ impl SdlPlatform {
         }
     }
 
+    /// A game-controller event: the button or the stick reaches the pad state and `ImGui`.
+    fn handle_gamepad_event(&mut self, io: &mut Io, event: &Event) {
+        match event {
+            Event::ControllerButtonDown { button, .. } => self.press(io, *button, true),
+            Event::ControllerButtonUp { button, .. } => self.press(io, *button, false),
+            Event::ControllerAxisMotion { axis, value, .. } => {
+                self.move_stick(io, *axis, *value);
+            }
+            _ => {}
+        }
+    }
+
+    fn press(&mut self, io: &mut Io, button: Button, down: bool) {
+        let Some((pad_button, key)) = pad_mapping(button) else {
+            return;
+        };
+        self.pad.set(pad_button, down);
+        if let Some(key) = key {
+            io.add_key_event(key, down);
+        }
+    }
+
+    fn move_stick(&mut self, io: &mut Io, axis: Axis, value: i16) {
+        let horizontal = match axis {
+            Axis::LeftX => true,
+            Axis::LeftY => false,
+            _ => return,
+        };
+        self.pad.set_axis(horizontal, value);
+        let (negative, positive) = if horizontal {
+            (Key::GamepadLStickLeft, Key::GamepadLStickRight)
+        } else {
+            (Key::GamepadLStickUp, Key::GamepadLStickDown)
+        };
+        let amount = f32::from(value) / f32::from(i16::MAX);
+        io.add_key_analog_event(negative, amount < 0.0, (-amount).max(0.0));
+        io.add_key_analog_event(positive, amount > 0.0, amount.max(0.0));
+    }
+
     /// Sets the size of the frame to draw and the time since the previous one.
     #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
     pub fn prepare_frame(
@@ -101,6 +185,26 @@ impl SdlPlatform {
             ];
         }
     }
+}
+
+/// The handheld button and the `ImGui` gamepad key a game-controller button stands for.
+const fn pad_mapping(button: Button) -> Option<(PadButton, Option<Key>)> {
+    Some(match button {
+        Button::DPadUp => (PadButton::Up, Some(Key::GamepadDpadUp)),
+        Button::DPadDown => (PadButton::Down, Some(Key::GamepadDpadDown)),
+        Button::DPadLeft => (PadButton::Left, Some(Key::GamepadDpadLeft)),
+        Button::DPadRight => (PadButton::Right, Some(Key::GamepadDpadRight)),
+        Button::A => (PadButton::A, Some(Key::GamepadFaceDown)),
+        Button::B => (PadButton::B, Some(Key::GamepadFaceRight)),
+        Button::X => (PadButton::X, Some(Key::GamepadFaceLeft)),
+        Button::Y => (PadButton::Y, Some(Key::GamepadFaceUp)),
+        Button::LeftShoulder => (PadButton::L1, Some(Key::GamepadL1)),
+        Button::RightShoulder => (PadButton::R1, Some(Key::GamepadR1)),
+        Button::Back => (PadButton::Select, Some(Key::GamepadBack)),
+        Button::Start => (PadButton::Start, Some(Key::GamepadStart)),
+        Button::Guide => (PadButton::Menu, None),
+        _ => return None,
+    })
 }
 
 fn button(io: &mut Io, button: SdlButton, down: bool) {
@@ -202,7 +306,7 @@ mod tests {
         context.io_mut().display_size = [800.0, 600.0];
         let _ = context.fonts().build_rgba32_texture();
 
-        let capture = SdlPlatform::for_capture();
+        let mut capture = SdlPlatform::for_capture();
         capture.handle_event(context.io_mut(), &motion());
         capture.handle_event(context.io_mut(), &press());
         context.new_frame();

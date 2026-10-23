@@ -133,6 +133,7 @@ mod tests {
         rom.profile = Some(ProfileMatch {
             id: "2d".to_owned(),
             title: "2D Mode".to_owned(),
+            two_dimensional: true,
         });
         let mut model = ProfileListModel::for_rom(&rom, &library());
         assert_eq!(0, model.selected());

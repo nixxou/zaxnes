@@ -148,6 +148,36 @@ pub const SHORTCUT_SAVE_SLOTS: &str = "shortcut.save_slots";
 pub const SHORTCUT_LOAD_SLOTS: &str = "shortcut.load_slots";
 pub const SHORTCUT_LONG_PRESS_MENU: &str = "shortcut.long_press_menu";
 
+// ------------------------------------------- handheld interface (Rust-only)
+pub const HANDHELD_GAMES_TITLE: &str = "handheld.games_title";
+pub const HANDHELD_ROMS_EMPTY: &str = "handheld.roms_empty";
+pub const HANDHELD_TAG_2D: &str = "handheld.tag_2d";
+pub const HANDHELD_PROFILE_FOR: &str = "handheld.profile_for";
+pub const HANDHELD_HINT_PLAY: &str = "handheld.hint.play";
+pub const HANDHELD_HINT_PROFILE: &str = "handheld.hint.profile";
+pub const HANDHELD_HINT_OPTIONS: &str = "handheld.hint.options";
+pub const HANDHELD_HINT_BACK: &str = "handheld.hint.back";
+pub const HANDHELD_HINT_JUMP: &str = "handheld.hint.jump";
+pub const HANDHELD_HINT_CHOOSE: &str = "handheld.hint.choose";
+pub const HANDHELD_HINT_CHANGE: &str = "handheld.hint.change";
+pub const HANDHELD_HINT_REBIND: &str = "handheld.hint.rebind";
+pub const HANDHELD_HINT_CANCEL: &str = "handheld.hint.cancel";
+pub const HANDHELD_EXIT_HOLD: &str = "handheld.exit_hold";
+pub const HANDHELD_MENU_TITLE: &str = "handheld.menu.title";
+pub const HANDHELD_MENU_RESUME: &str = "handheld.menu.resume";
+pub const HANDHELD_MENU_SAVE_STATE: &str = "handheld.menu.save_state";
+pub const HANDHELD_MENU_LOAD_STATE: &str = "handheld.menu.load_state";
+pub const HANDHELD_MENU_REWIND: &str = "handheld.menu.rewind";
+pub const HANDHELD_MENU_FAST_FORWARD: &str = "handheld.menu.fast_forward";
+pub const HANDHELD_MENU_QUIT_TO_LIST: &str = "handheld.menu.quit_to_list";
+pub const HANDHELD_MENU_EXIT: &str = "handheld.menu.exit";
+pub const HANDHELD_OPTION_RENDER_SCALE: &str = "handheld.option.render_scale";
+pub const HANDHELD_OPTION_FRAME_CAP: &str = "handheld.option.frame_cap";
+pub const HANDHELD_OPTION_CAMERA: &str = "handheld.option.camera";
+pub const HANDHELD_OPTION_CONTROLS: &str = "handheld.option.controls";
+pub const HANDHELD_CAMERA_RESET: &str = "handheld.camera.reset";
+pub const HANDHELD_CONTROLS_PLAYER: &str = "handheld.controls.player";
+
 // ------------------------------------------------- commands of REQ-UI-205
 pub const COMMAND_PREFIX: &str = "cmd.";
 
@@ -294,4 +324,32 @@ pub const PUBLISHED: &[&str] = &[
     SHORTCUT_SAVE_SLOTS,
     SHORTCUT_LOAD_SLOTS,
     SHORTCUT_LONG_PRESS_MENU,
+    HANDHELD_GAMES_TITLE,
+    HANDHELD_ROMS_EMPTY,
+    HANDHELD_TAG_2D,
+    HANDHELD_PROFILE_FOR,
+    HANDHELD_HINT_PLAY,
+    HANDHELD_HINT_PROFILE,
+    HANDHELD_HINT_OPTIONS,
+    HANDHELD_HINT_BACK,
+    HANDHELD_HINT_JUMP,
+    HANDHELD_HINT_CHOOSE,
+    HANDHELD_HINT_CHANGE,
+    HANDHELD_HINT_REBIND,
+    HANDHELD_HINT_CANCEL,
+    HANDHELD_EXIT_HOLD,
+    HANDHELD_MENU_TITLE,
+    HANDHELD_MENU_RESUME,
+    HANDHELD_MENU_SAVE_STATE,
+    HANDHELD_MENU_LOAD_STATE,
+    HANDHELD_MENU_REWIND,
+    HANDHELD_MENU_FAST_FORWARD,
+    HANDHELD_MENU_QUIT_TO_LIST,
+    HANDHELD_MENU_EXIT,
+    HANDHELD_OPTION_RENDER_SCALE,
+    HANDHELD_OPTION_FRAME_CAP,
+    HANDHELD_OPTION_CAMERA,
+    HANDHELD_OPTION_CONTROLS,
+    HANDHELD_CAMERA_RESET,
+    HANDHELD_CONTROLS_PLAYER,
 ];
