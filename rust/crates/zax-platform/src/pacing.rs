@@ -153,17 +153,41 @@ mod tests {
         let off = apply(&mut surface, 0, 60);
         assert_eq!(surface.swap_interval, 0);
         assert_eq!(surface.frame_cap, 60);
-        assert_eq!(off, DisplayPacingState { vsync: 0, swap_interval: 0, frame_cap: 60, fell_back_to_every_refresh: false });
+        assert_eq!(
+            off,
+            DisplayPacingState {
+                vsync: 0,
+                swap_interval: 0,
+                frame_cap: 60,
+                fell_back_to_every_refresh: false
+            }
+        );
 
         let every = apply(&mut surface, 1, 60);
         assert_eq!(surface.swap_interval, 1);
         assert_eq!(surface.frame_cap, 0);
-        assert_eq!(every, DisplayPacingState { vsync: 1, swap_interval: 1, frame_cap: 0, fell_back_to_every_refresh: false });
+        assert_eq!(
+            every,
+            DisplayPacingState {
+                vsync: 1,
+                swap_interval: 1,
+                frame_cap: 0,
+                fell_back_to_every_refresh: false
+            }
+        );
 
         let other = apply(&mut surface, 2, 120);
         assert_eq!(surface.swap_interval, 2);
         assert_eq!(surface.frame_cap, 0);
-        assert_eq!(other, DisplayPacingState { vsync: 2, swap_interval: 2, frame_cap: 0, fell_back_to_every_refresh: false });
+        assert_eq!(
+            other,
+            DisplayPacingState {
+                vsync: 2,
+                swap_interval: 2,
+                frame_cap: 0,
+                fell_back_to_every_refresh: false
+            }
+        );
 
         // Out of domain is clamped, and an uncapped request stays uncapped.
         assert_eq!(apply(&mut surface, 9, 0).swap_interval, 2);
@@ -212,7 +236,10 @@ mod tests {
         assert!(settings.is_vsync_enabled());
         assert_eq!(settings.vsync, 2);
         assert_eq!(settings.target_frame_rate, 120);
-        let off = HostWindowSettings { vsync: 0, ..HostWindowSettings::default() };
+        let off = HostWindowSettings {
+            vsync: 0,
+            ..HostWindowSettings::default()
+        };
         assert!(!off.is_vsync_enabled());
     }
 }

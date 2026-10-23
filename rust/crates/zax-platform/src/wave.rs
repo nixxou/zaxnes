@@ -196,7 +196,7 @@ mod tests {
 
     fn wave(format: u16, channels: u16, rate: u32, bits: u16, data: &[u8]) -> Vec<u8> {
         let mut out = b"RIFF".to_vec();
-        out.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(36 + u32::try_from(data.len()).unwrap()).to_le_bytes());
         out.extend_from_slice(b"WAVEfmt ");
         out.extend_from_slice(&16u32.to_le_bytes());
         out.extend_from_slice(&format.to_le_bytes());
@@ -206,7 +206,7 @@ mod tests {
         out.extend_from_slice(&(channels * bits / 8).to_le_bytes());
         out.extend_from_slice(&bits.to_le_bytes());
         out.extend_from_slice(b"data");
-        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&u32::try_from(data.len()).unwrap().to_le_bytes());
         out.extend_from_slice(data);
         out
     }
@@ -229,11 +229,25 @@ mod tests {
     fn pcm8_24_32_and_float_decode() {
         let a = decode(&wave(FORMAT_PCM, 1, 8000, 8, &[128, 255, 0])).unwrap();
         assert_eq!(a.samples, [0.0, 127.0 / 128.0, -1.0]);
-        let a = decode(&wave(FORMAT_PCM, 1, 8000, 24, &[0, 0, 0x80, 0xFF, 0xFF, 0x7F])).unwrap();
+        let a = decode(&wave(
+            FORMAT_PCM,
+            1,
+            8000,
+            24,
+            &[0, 0, 0x80, 0xFF, 0xFF, 0x7F],
+        ))
+        .unwrap();
         assert_eq!(a.samples, [-1.0, 8_388_607.0 / 8_388_608.0]);
         let a = decode(&wave(FORMAT_PCM, 1, 8000, 32, &i32::MIN.to_le_bytes())).unwrap();
         assert_eq!(a.samples, [-1.0]);
-        let a = decode(&wave(FORMAT_IEEE_FLOAT, 1, 8000, 32, &0.25f32.to_le_bytes())).unwrap();
+        let a = decode(&wave(
+            FORMAT_IEEE_FLOAT,
+            1,
+            8000,
+            32,
+            &0.25f32.to_le_bytes(),
+        ))
+        .unwrap();
         assert_eq!(a.samples, [0.25]);
     }
 
@@ -255,7 +269,10 @@ mod tests {
         ));
         assert!(matches!(
             decode(&wave(2, 1, 8000, 4, &[0, 0])),
-            Err(WaveError::UnsupportedEncoding { format: 2, bits_per_sample: 4 })
+            Err(WaveError::UnsupportedEncoding {
+                format: 2,
+                bits_per_sample: 4
+            })
         ));
     }
 }

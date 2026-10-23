@@ -69,13 +69,21 @@ impl PhysicalControl {
     /// The key at physical position `code`.
     #[must_use]
     pub fn key(code: i32) -> Self {
-        Self { kind: PhysicalControlKind::Key, code, direction: 0 }
+        Self {
+            kind: PhysicalControlKind::Key,
+            code,
+            direction: 0,
+        }
     }
 
     /// Gamepad button `code`.
     #[must_use]
     pub fn button(code: i32) -> Self {
-        Self { kind: PhysicalControlKind::Button, code, direction: 0 }
+        Self {
+            kind: PhysicalControlKind::Button,
+            code,
+            direction: 0,
+        }
     }
 
     /// The positive half of axis `index`.
@@ -103,7 +111,11 @@ impl PhysicalControl {
     /// Trigger `index` (0 left, 1 right).
     #[must_use]
     pub fn trigger(index: i32) -> Self {
-        Self { kind: PhysicalControlKind::Trigger, code: index, direction: 0 }
+        Self {
+            kind: PhysicalControlKind::Trigger,
+            code: index,
+            direction: 0,
+        }
     }
 
     /// Reads back what `Display` wrote. An unknown or malformed text yields [`Self::NONE`],
@@ -160,7 +172,12 @@ impl fmt::Display for PhysicalControl {
             PhysicalControlKind::Key => write!(f, "key:{}", self.code),
             PhysicalControlKind::Button => write!(f, "button:{}", self.code),
             PhysicalControlKind::Axis => {
-                write!(f, "axis:{}{}", self.code, if self.direction < 0 { '-' } else { '+' })
+                write!(
+                    f,
+                    "axis:{}{}",
+                    self.code,
+                    if self.direction < 0 { '-' } else { '+' }
+                )
             }
             PhysicalControlKind::Trigger => write!(f, "trigger:{}", self.code),
             PhysicalControlKind::None => Ok(()),
@@ -176,7 +193,7 @@ impl fmt::Display for PhysicalControl {
 /// A pad with no standard mapping reports raw indices instead and therefore has no useful
 /// defaults (REQ-INP-021).
 pub mod standard_gamepad {
-    /// South face button (A on Xbox, Cross on PlayStation).
+    /// South face button (A on Xbox, Cross on `PlayStation`).
     pub const SOUTH: i32 = 0;
     /// East face button (B on Xbox, Circle).
     pub const EAST: i32 = 1;
@@ -246,7 +263,9 @@ mod tests {
     /// A malformed entry degrades to "unbound".
     #[test]
     fn req_inp_052_a_malformed_control_is_unbound() {
-        for text in ["", "axis:2", "mouse:0", "key:", "key:abc", "nonsense", "key:-3", ":4"] {
+        for text in [
+            "", "axis:2", "mouse:0", "key:", "key:abc", "nonsense", "key:-3", ":4",
+        ] {
             assert!(!PhysicalControl::parse(text).is_bound(), "{text:?}");
         }
     }

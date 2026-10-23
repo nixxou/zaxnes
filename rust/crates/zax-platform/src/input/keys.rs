@@ -182,6 +182,9 @@ impl Key {
     /// The key at the physical position `scancode`, if it has a code.
     #[must_use]
     pub fn from_scancode(scancode: Scancode) -> Option<Key> {
-        Key::ALL.iter().copied().find(|key| key.scancode() == Some(scancode))
+        Key::ALL
+            .iter()
+            .copied()
+            .find(|key| key.scancode() == Some(scancode))
     }
 }

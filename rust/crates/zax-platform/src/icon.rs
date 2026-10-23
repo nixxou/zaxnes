@@ -64,7 +64,12 @@ impl fmt::Display for WindowIconState {
             );
         }
         let sizes: Vec<String> = self.sizes.iter().map(u32::to_string).collect();
-        write!(f, "window icon: {} size(s) {} px", self.sizes.len(), sizes.join(", "))?;
+        write!(
+            f,
+            "window icon: {} size(s) {} px",
+            self.sizes.len(),
+            sizes.join(", ")
+        )?;
         if self.rejected > 0 {
             write!(f, ", {} unusable image(s) dropped", self.rejected)?;
         }
@@ -84,6 +89,7 @@ fn not_applied(rejected: usize, failure: impl Into<String>) -> WindowIconState {
 /// Offers `images` to `target`, smallest first, keeping only the well-formed ones.
 ///
 /// `target` is `None` when there is no window.
+#[must_use]
 pub fn apply(
     target: Option<&mut dyn WindowIconTarget>,
     images: &[WindowIconImage],
@@ -95,8 +101,11 @@ pub fn apply(
         return not_applied(0, "no icon resource was decoded");
     }
 
-    let mut usable: Vec<WindowIconImage> =
-        images.iter().filter(|i| i.is_well_formed()).cloned().collect();
+    let mut usable: Vec<WindowIconImage> = images
+        .iter()
+        .filter(|i| i.is_well_formed())
+        .cloned()
+        .collect();
     let rejected = images.len() - usable.len();
     if usable.is_empty() {
         return not_applied(rejected, "every icon resource was malformed");
@@ -124,13 +133,34 @@ pub fn apply(
 pub const SIZES: [u32; 7] = [16, 24, 32, 48, 64, 128, 256];
 
 const EMBEDDED: [(u32, &[u8]); 7] = [
-    (16, include_bytes!("../../../../branding/zaxnes-icon-16.png")),
-    (24, include_bytes!("../../../../branding/zaxnes-icon-24.png")),
-    (32, include_bytes!("../../../../branding/zaxnes-icon-32.png")),
-    (48, include_bytes!("../../../../branding/zaxnes-icon-48.png")),
-    (64, include_bytes!("../../../../branding/zaxnes-icon-64.png")),
-    (128, include_bytes!("../../../../branding/zaxnes-icon-128.png")),
-    (256, include_bytes!("../../../../branding/zaxnes-icon-256.png")),
+    (
+        16,
+        include_bytes!("../../../../branding/zaxnes-icon-16.png"),
+    ),
+    (
+        24,
+        include_bytes!("../../../../branding/zaxnes-icon-24.png"),
+    ),
+    (
+        32,
+        include_bytes!("../../../../branding/zaxnes-icon-32.png"),
+    ),
+    (
+        48,
+        include_bytes!("../../../../branding/zaxnes-icon-48.png"),
+    ),
+    (
+        64,
+        include_bytes!("../../../../branding/zaxnes-icon-64.png"),
+    ),
+    (
+        128,
+        include_bytes!("../../../../branding/zaxnes-icon-128.png"),
+    ),
+    (
+        256,
+        include_bytes!("../../../../branding/zaxnes-icon-256.png"),
+    ),
 ];
 
 /// The embedded PNG of `size` px, if that size is part of [`SIZES`].
@@ -174,7 +204,11 @@ pub fn decode_png(bytes: &[u8], expected_size: u32) -> Result<WindowIconImage, S
         png::ColorType::Grayscale => buffer.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         png::ColorType::Indexed => return Err("indexed PNG left unexpanded".to_owned()),
     };
-    Ok(WindowIconImage { width: info.width, height: info.height, pixels })
+    Ok(WindowIconImage {
+        width: info.width,
+        height: info.height,
+        pixels,
+    })
 }
 
 /// Decodes every embedded size, smallest first. The second value lists the problems, one per
@@ -220,7 +254,11 @@ mod tests {
     }
 
     fn square(size: u32) -> WindowIconImage {
-        WindowIconImage { width: size, height: size, pixels: vec![7; (size * size * 4) as usize] }
+        WindowIconImage {
+            width: size,
+            height: size,
+            pixels: vec![7; (size * size * 4) as usize],
+        }
     }
 
     /// ICON-1 §3
@@ -237,7 +275,10 @@ mod tests {
         for image in &images {
             assert!(SIZES.contains(&image.width));
             assert_eq!(image.width, image.height);
-            assert_eq!(image.pixels.len(), (image.width * image.height * 4) as usize);
+            assert_eq!(
+                image.pixels.len(),
+                (image.width * image.height * 4) as usize
+            );
             assert!(image.is_well_formed());
         }
 
@@ -251,7 +292,11 @@ mod tests {
             let mut distinct = image.pixels.clone();
             distinct.sort_unstable();
             distinct.dedup();
-            assert!(distinct.len() > 2, "the {} px icon has no content", image.width);
+            assert!(
+                distinct.len() > 2,
+                "the {} px icon has no content",
+                image.width
+            );
         }
     }
 
@@ -301,7 +346,11 @@ mod tests {
 
         let malformed = apply(
             Some(&mut window),
-            &[WindowIconImage { width: 16, height: 16, pixels: vec![1, 2, 3] }],
+            &[WindowIconImage {
+                width: 16,
+                height: 16,
+                pixels: vec![1, 2, 3],
+            }],
         );
         assert!(!malformed.applied);
         assert_eq!(malformed.rejected, 1);
@@ -309,7 +358,11 @@ mod tests {
 
         // A mixed list keeps the usable images and counts the dropped ones.
         let (images, _) = load_embedded();
-        let mut mixed_input = vec![WindowIconImage { width: 8, height: 8, pixels: Vec::new() }];
+        let mut mixed_input = vec![WindowIconImage {
+            width: 8,
+            height: 8,
+            pixels: Vec::new(),
+        }];
         mixed_input.extend(images);
         let mixed = apply(Some(&mut window), &mixed_input);
         assert!(mixed.applied);

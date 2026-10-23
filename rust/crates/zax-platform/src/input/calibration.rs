@@ -101,7 +101,10 @@ mod tests {
     use super::*;
 
     fn near(actual: f32, expected: f32, tolerance: f32) {
-        assert!((actual - expected).abs() <= tolerance, "{actual} vs {expected}");
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "{actual} vs {expected}"
+        );
     }
 
     /// REQ-INP-030 — AMD-021 R2-011 (Q-048, Q-058): the threshold is 0.34 of the shaped value.
@@ -116,7 +119,10 @@ mod tests {
 
         // The exact bound is 0.438 of raw travel (0.2 + 0.34 × 0.7).
         for travel in [0.30, 0.34, 0.40, 0.4379] {
-            assert!(!is_pressed(half_axis(-travel, 0.0, -1)), "{travel} of travel must stay released");
+            assert!(
+                !is_pressed(half_axis(-travel, 0.0, -1)),
+                "{travel} of travel must stay released"
+            );
         }
         assert!(is_pressed(half_axis(-0.4381, 0.0, -1)));
         assert!(is_pressed(half_axis(-0.60, 0.0, -1)));
