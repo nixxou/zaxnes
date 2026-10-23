@@ -105,6 +105,14 @@ impl Mapper for Mmc2 {
         Ok(())
     }
 
+    fn chr_view<'m>(
+        &self,
+        _memory: &'m crate::cartridges::CartridgeMemory,
+    ) -> Option<crate::cartridges::ChrView<'m>> {
+        // Its fetches have side effects or another source: the PPU takes the full path.
+        None
+    }
+
     fn mapper_number(&self) -> i32 {
         self.mapper_number
     }

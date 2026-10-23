@@ -8,8 +8,11 @@
 //! 257, the vertical reload at dots 280 to 304 of the pre-render line, the sprite pattern
 //! fetches at dots 257 to 320 and two more tiles prefetched at dots 321 to 336.
 
-use super::{Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE_I32, VISIBLE_SCANLINES};
-use crate::cartridges::ChrFetch;
+use super::{
+    map_nametable, Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE_I32,
+    VISIBLE_SCANLINES,
+};
+use crate::cartridges::{Cartridge, ChrFetch};
 
 impl Ppu2C02 {
     /// The 256 x 240 indexed image of the frame just rendered: one NES colour index per
@@ -70,6 +73,128 @@ impl Ppu2C02 {
             let x = (dot - 1) as usize;
             self.render_pixel(x);
         }
+    }
+
+    /// Runs `count` dots of a visible line with rendering on, all within dots 2 to 255, as
+    /// that many [`Ppu2C02::step_dot`] calls would. Each of these dots does the same fixed
+    /// work (shift, background fetch step, sprite evaluation from dot 65, pixel), so the
+    /// per-dot dispatch is skipped and the fetches read CHR and console VRAM directly.
+    ///
+    /// Returns `false`, having run nothing, when the cartridge's fetches have side effects or
+    /// another source ([`Cartridge::chr_view`], a nametable the cartridge serves itself).
+    pub(super) fn run_visible_span(&mut self, count: i64, cartridge: Option<&Cartridge>) -> bool {
+        let Some(cartridge) = cartridge else {
+            return false;
+        };
+        let Some(chr) = cartridge.chr_view() else {
+            return false;
+        };
+
+        // The start of each logical nametable in console VRAM, as `read_nametable_inner`
+        // finds it.
+        let mut nametables = [0usize; 4];
+        for (table, start) in (0u16..).zip(nametables.iter_mut()) {
+            let page = cartridge.nametable_page(i32::from(table));
+            if page == Cartridge::SERVED_BY_CARTRIDGE {
+                return false;
+            }
+
+            *start = usize::try_from(page).map_or_else(
+                |_| map_nametable(0x2000 + (table << 10), cartridge.mirroring()),
+                |page| page << 10,
+            );
+        }
+
+        let nametable_byte = |vram: &[u8], address: u16| {
+            vram[nametables[usize::from((address >> 10) & 0x03)] | (usize::from(address) & 0x03FF)]
+        };
+
+        // PPUMASK and fine X cannot change inside a batch of dots.
+        let pixels = SpanPixels::of(self.mask, i32::from(self.fine_x));
+        #[allow(clippy::cast_sign_loss)] // Visible line, 0..240.
+        let row = self.scanline as usize * SCREEN_WIDTH;
+
+        for _ in 0..count {
+            self.ppu_clock += 1;
+            self.dot += 1;
+            let dot = self.dot;
+
+            self.shift_background();
+            match (dot - 1) & 0x07 {
+                0 => {
+                    self.load_background_shifters();
+                    self.nametable_latch = nametable_byte(&self.vram, 0x2000 | (self.v & 0x0FFF));
+                }
+                2 => {
+                    let address = 0x23C0
+                        | (self.v & 0x0C00)
+                        | ((self.v >> 4) & 0x38)
+                        | ((self.v >> 2) & 0x07);
+                    let shift = ((self.v >> 4) & 0x04) | (self.v & 0x02);
+                    self.attribute_latch = (nametable_byte(&self.vram, address) >> shift) & 0x03;
+                }
+                4 => self.pattern_low_latch = chr.read(self.pattern_address(0)),
+                6 => self.pattern_high_latch = chr.read(self.pattern_address(8)),
+                7 => self.increment_coarse_x(),
+                _ => {}
+            }
+
+            if dot >= 65 {
+                self.run_sprite_evaluation(dot);
+            }
+
+            #[allow(clippy::cast_sign_loss)] // dot is 2..=255 here.
+            let x = (dot - 1) as usize & 0xFF;
+            let color = self.span_pixel(x, &pixels);
+            if let Some(pixel) = self.pixels.get_mut(row + x) {
+                *pixel = color;
+            }
+        }
+
+        true
+    }
+
+    /// The colour of pixel `x` of a span, as [`Ppu2C02::render_pixel`] composes it.
+    fn span_pixel(&mut self, x: usize, pixels: &SpanPixels) -> u8 {
+        let left = x >= 8;
+
+        let mut background = 0u8;
+        if pixels.background && (left || pixels.background_left) {
+            let shift = pixels.shift;
+            let pixel = ((self.pattern_shift_low >> shift) & 1)
+                | (((self.pattern_shift_high >> shift) & 1) << 1);
+            let palette = ((self.attribute_shift_low >> shift) & 1)
+                | (((self.attribute_shift_high >> shift) & 1) << 1);
+            #[allow(clippy::cast_possible_truncation)] // Two 2-bit fields.
+            let entry = ((palette << 2) | pixel) as u8;
+            background = entry;
+        }
+
+        let mut sprite = 0u8;
+        if pixels.sprites && (left || pixels.sprites_left) {
+            if self.sprite_line_stale {
+                self.rebuild_sprite_line();
+            }
+
+            sprite = self.sprite_line[x];
+        }
+
+        let background_opaque = (background & 0x03) != 0;
+        if (sprite & SPRITE_ZERO) != 0 && background_opaque && x != SCREEN_WIDTH - 1 {
+            self.sprite_zero_hit = true;
+        }
+
+        let entry = if (sprite & SPRITE_OPAQUE) != 0
+            && (!background_opaque || (sprite & SPRITE_BEHIND) == 0)
+        {
+            0x10 | (sprite & 0x0F)
+        } else if background_opaque {
+            background
+        } else {
+            0
+        };
+
+        self.palette[usize::from(entry & 0x1F)] & pixels.color_mask
     }
 
     /// The work of one dot of a line that renders (a visible line when `VISIBLE`, else the
@@ -554,6 +679,32 @@ impl Ppu2C02 {
         let line = self.scanline as usize;
         if let Some(pixel) = self.pixels.get_mut((line * SCREEN_WIDTH) + x) {
             *pixel = color;
+        }
+    }
+}
+
+/// What PPUMASK and fine X decide for every pixel of a span (they cannot change inside one).
+#[allow(clippy::struct_excessive_bools)] // The four independent layer switches of PPUMASK.
+struct SpanPixels {
+    background: bool,
+    background_left: bool,
+    sprites: bool,
+    sprites_left: bool,
+    /// $30 with the greyscale bit (REQ-CORE-047), else $3F (palette entries are 6 bits).
+    color_mask: u8,
+    /// The background shifters' bit of the current pixel.
+    shift: i32,
+}
+
+impl SpanPixels {
+    fn of(mask: u8, fine_x: i32) -> Self {
+        Self {
+            background: (mask & 0x08) != 0,
+            background_left: (mask & 0x02) != 0,
+            sprites: (mask & 0x10) != 0,
+            sprites_left: (mask & 0x04) != 0,
+            color_mask: if (mask & 0x01) != 0 { 0x30 } else { 0x3F },
+            shift: 15 - (fine_x & 0x07),
         }
     }
 }
