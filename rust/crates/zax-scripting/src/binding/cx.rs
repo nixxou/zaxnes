@@ -22,9 +22,72 @@ pub(crate) struct Lent {
     pub build: Option<(InstanceRef, AnyUserData)>,
 }
 
-/// A request for the host context: run against the lent [`ScriptContext`], and answer with a
-/// boxed value.
-type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Box<dyn Any>>;
+/// What the host answers to a request. The common answers are held in place; only an answer of
+/// another type is boxed.
+pub(crate) enum Answer {
+    Unit,
+    Real(f32),
+    Int(i32),
+    Flag(bool),
+    Vector(Vec3),
+    Boxed(Box<dyn Any>),
+}
+
+/// A type the host can answer a request with.
+pub(crate) trait Reply: Sized + 'static {
+    fn pack(self) -> Answer;
+    fn unpack(answer: Answer) -> Option<Self>;
+}
+
+macro_rules! reply {
+    ($($type:ty => $variant:ident),* $(,)?) => {$(
+        impl Reply for $type {
+            fn pack(self) -> Answer {
+                Answer::$variant(self)
+            }
+
+            fn unpack(answer: Answer) -> Option<Self> {
+                match answer {
+                    Answer::$variant(value) => Some(value),
+                    _ => None,
+                }
+            }
+        }
+    )*};
+}
+
+macro_rules! boxed_reply {
+    ($($type:ty),* $(,)?) => {$(
+        impl Reply for $type {
+            fn pack(self) -> Answer {
+                Answer::Boxed(Box::new(self))
+            }
+
+            fn unpack(answer: Answer) -> Option<Self> {
+                match answer {
+                    Answer::Boxed(value) => value.downcast::<Self>().ok().map(|value| *value),
+                    _ => None,
+                }
+            }
+        }
+    )*};
+}
+
+reply!(f32 => Real, i32 => Int, bool => Flag, Vec3 => Vector);
+boxed_reply!(u8, LuaColor);
+
+impl Reply for () {
+    fn pack(self) -> Answer {
+        Answer::Unit
+    }
+
+    fn unpack(answer: Answer) -> Option<Self> {
+        matches!(answer, Answer::Unit).then_some(())
+    }
+}
+
+/// A request for the host context: run against the lent [`ScriptContext`], and answer.
+type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Answer>;
 
 /// A change of the host the script asked for, which nothing in the script waits for.
 type HostWrite = Box<dyn FnOnce(&mut ScriptContext<'_>)>;
@@ -42,7 +105,7 @@ const QUEUED_WRITES_LIMIT: usize = 256;
 pub(crate) struct HostLink {
     call: Function,
     pending: RefCell<Option<HostRequest>>,
-    answer: RefCell<Option<Box<dyn Any>>>,
+    answer: RefCell<Option<Answer>>,
     writes: RefCell<Vec<HostWrite>>,
 }
 
@@ -98,25 +161,26 @@ impl HostLink {
     }
 
     /// Runs `operation` on the lent context.
-    fn run<R: 'static>(
+    fn run<R: Reply>(
         &self,
         operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
     ) -> mlua::Result<R> {
         self.pending
-            .replace(Some(Box::new(move |context| Box::new(operation(context)))));
+            .replace(Some(Box::new(move |context| operation(context).pack())));
         self.call.call::<()>(())?;
         self.answer
             .take()
-            .ok_or_else(|| mlua::Error::runtime("the host context gave no answer"))?
-            .downcast::<R>()
-            .map(|answer| *answer)
-            .map_err(|_| mlua::Error::runtime("the host context gave another answer"))
+            .ok_or_else(|| mlua::Error::runtime("the host context gave no answer"))
+            .and_then(|answer| {
+                R::unpack(answer)
+                    .ok_or_else(|| mlua::Error::runtime("the host context gave another answer"))
+            })
     }
 }
 
 /// Runs `operation` on the host context lent to `lua`, or on the headless bridges of the
 /// runtime's environment when the host lent none.
-pub(crate) fn with_host_context<R: 'static>(
+pub(crate) fn with_host_context<R: Reply>(
     lua: &Lua,
     data: &mut RuntimeData,
     operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
@@ -160,7 +224,7 @@ impl<'a> Cx<'a> {
 
     /// Runs `operation` on the camera, backdrop, inputs and memory the host lent to this call.
     /// The operation outlives the borrow of the host, so it owns what it captures.
-    pub fn host<R: 'static>(
+    pub fn host<R: Reply>(
         &self,
         operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
     ) -> mlua::Result<R> {

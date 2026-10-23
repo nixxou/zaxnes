@@ -39,7 +39,7 @@ use self::hooks::{
     call_all, call_hook, input_process, publish, update_shapes, with_budget, Audience, Budget,
     Published, PublishedGlobals,
 };
-use crate::binding::cx::{with_host_context, Cx, HostLink, Lent};
+use crate::binding::cx::{with_host_context, Cx, HostLink, Lent, Reply};
 use crate::binding::dispatch;
 use crate::binding::payload::{FrameKey, InstanceTarget, Payload, ShapeTarget};
 use crate::binding::table::ByteHasher;
@@ -424,7 +424,7 @@ impl ProfileScriptRuntime {
 
     /// Runs `operation` on the context the host lent, outside any call into Lua. A failure of
     /// the host side is logged and gives `None`.
-    fn with_context<R: 'static>(
+    fn with_context<R: Reply>(
         &mut self,
         operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
     ) -> Option<R> {
