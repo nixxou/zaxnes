@@ -88,7 +88,10 @@ impl LinearColorBuffer {
     pub fn begin_pass(&mut self, width: i32, height: i32, samples: i32) -> Result<(), GlError> {
         let (w, h) = (width.max(1), height.max(1));
         let wanted = geometry::clamp_anti_alias_samples(samples, self.max_samples);
-        if self.attachments.is_none() || w != self.width || h != self.height || wanted != self.samples
+        if self.attachments.is_none()
+            || w != self.width
+            || h != self.height
+            || wanted != self.samples
         {
             self.release();
             self.attachments = Some(allocate(&self.gl, w, h)?);
@@ -98,8 +101,8 @@ impl LinearColorBuffer {
         }
 
         let framebuffer = match (&self.samples_attachments, &self.attachments) {
-            (Some(sampled), _) => Some(sampled.framebuffer),
-            (None, attachments) => attachments.as_ref().map(|a| a.framebuffer),
+            (Some(multisampled), _) => Some(multisampled.framebuffer),
+            (None, single) => single.as_ref().map(|a| a.framebuffer),
         };
         self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
         self.gl.viewport(self.width, self.height);
@@ -123,7 +126,10 @@ impl LinearColorBuffer {
             gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
 
-        gl.bind_framebuffer(glow::FRAMEBUFFER, target.framebuffer.map(glow::NativeFramebuffer));
+        gl.bind_framebuffer(
+            glow::FRAMEBUFFER,
+            target.framebuffer.map(glow::NativeFramebuffer),
+        );
         gl.viewport(target.width, target.height);
         gl.disable(glow::SCISSOR_TEST);
         gl.disable(glow::BLEND);

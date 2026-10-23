@@ -52,37 +52,37 @@ impl ShaderProgram {
     /// Location of `name`, or `None` when the uniform is not active.
     fn location(&mut self, name: &'static str) -> Option<UniformLocation> {
         let (gl, handle) = (&self.gl, self.handle);
-        self.uniforms
+        *self
+            .uniforms
             .entry(name)
             .or_insert_with(|| gl.uniform_location(handle, name))
-            .clone()
     }
 
     /// Sets an integer uniform.
     pub fn set_i32(&mut self, name: &'static str, value: i32) {
         if let Some(location) = self.location(name) {
-            self.gl.uniform_i32(&location, value);
+            self.gl.uniform_i32(location, value);
         }
     }
 
     /// Sets a float uniform.
     pub fn set_f32(&mut self, name: &'static str, value: f32) {
         if let Some(location) = self.location(name) {
-            self.gl.uniform_f32(&location, value);
+            self.gl.uniform_f32(location, value);
         }
     }
 
     /// Sets a `vec2` uniform.
     pub fn set_vec2(&mut self, name: &'static str, value: Vector2) {
         if let Some(location) = self.location(name) {
-            self.gl.uniform_vec2(&location, value.x, value.y);
+            self.gl.uniform_vec2(location, value.x, value.y);
         }
     }
 
     /// Sets a `vec3` uniform.
     pub fn set_vec3(&mut self, name: &'static str, value: Vector3) {
         if let Some(location) = self.location(name) {
-            self.gl.uniform_vec3(&location, value.x, value.y, value.z);
+            self.gl.uniform_vec3(location, value.x, value.y, value.z);
         }
     }
 
@@ -90,7 +90,7 @@ impl ShaderProgram {
     pub fn set_vec4(&mut self, name: &'static str, value: Vector4) {
         if let Some(location) = self.location(name) {
             self.gl
-                .uniform_vec4(&location, value.x, value.y, value.z, value.w);
+                .uniform_vec4(location, value.x, value.y, value.z, value.w);
         }
     }
 
@@ -99,7 +99,7 @@ impl ShaderProgram {
     /// shaders expect.
     pub fn set_matrix4(&mut self, name: &'static str, value: &Matrix4x4) {
         if let Some(location) = self.location(name) {
-            self.gl.uniform_mat4(&location, &value.to_cells());
+            self.gl.uniform_mat4(location, &value.to_cells());
         }
     }
 
@@ -110,7 +110,7 @@ impl ShaderProgram {
             // transposed.
             let m = row_major;
             let cells = [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]];
-            self.gl.uniform_mat3(&location, &cells);
+            self.gl.uniform_mat3(location, &cells);
         }
     }
 }

@@ -112,14 +112,14 @@ impl RenderSettings {
         self.anti_alias_samples = value.clamp(1, geometry::MAX_ANTI_ALIAS_SAMPLES);
     }
 
-    /// VSync (REQ-SCN-061, SPEC-09): 0 off, 1 every refresh, 2 every other refresh. Applying it
+    /// `VSync` (REQ-SCN-061, SPEC-09): 0 off, 1 every refresh, 2 every other refresh. Applying it
     /// is the host's business; the renderer accepts any rate.
     #[must_use]
     pub const fn vsync(&self) -> i32 {
         self.vsync
     }
 
-    /// Sets VSync, clamped to 0..2.
+    /// Sets `VSync`, clamped to 0..2.
     pub fn set_vsync(&mut self, value: i32) {
         self.vsync = value.clamp(0, 2);
     }

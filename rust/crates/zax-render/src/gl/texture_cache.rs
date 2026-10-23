@@ -46,7 +46,13 @@ pub struct TextureCache {
 impl TextureCache {
     /// Creates the cache, its palette texture and its two dummies.
     pub fn new(gl: &Gl) -> Result<Self, GlError> {
-        let palette = create(gl, glow::RGB8, PALETTE_WIDTH, glow::RGB, glow::UNSIGNED_BYTE)?;
+        let palette = create(
+            gl,
+            glow::RGB8,
+            PALETTE_WIDTH,
+            glow::RGB,
+            glow::UNSIGNED_BYTE,
+        )?;
         let dummy_indexed = create(gl, glow::R8UI, 1, glow::RED_INTEGER, glow::UNSIGNED_BYTE)?;
         let dummy_color = create(gl, glow::RGBA8, 1, glow::RGBA, glow::UNSIGNED_BYTE)?;
         Ok(Self {
@@ -96,8 +102,13 @@ impl TextureCache {
 
         self.gl.bind_texture(glow::TEXTURE_2D, Some(self.palette));
         self.gl.pixel_store(glow::UNPACK_ALIGNMENT, 1);
-        self.gl
-            .tex_sub_image_2d(glow::TEXTURE_2D, PALETTE_WIDTH, 1, glow::RGB, &self.palette_bytes);
+        self.gl.tex_sub_image_2d(
+            glow::TEXTURE_2D,
+            PALETTE_WIDTH,
+            1,
+            glow::RGB,
+            &self.palette_bytes,
+        );
         self.gl.pixel_store(glow::UNPACK_ALIGNMENT, 4);
         self.gl.bind_texture(glow::TEXTURE_2D, None);
     }

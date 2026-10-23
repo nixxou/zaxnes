@@ -139,7 +139,9 @@ pub fn assemble(stage: &Stage, fragment: bool, embedded: bool) -> String {
     }
 
     // The "×2" of REQ-SCN-051 as the sRGB curve gives it (AMD-019, Q-045).
-    source.push_str(&format!("#define ZAX_SRGB_DOUBLE {:?}\n", sky::SRGB_DOUBLE));
+    source.push_str("#define ZAX_SRGB_DOUBLE ");
+    source.push_str(&sky::SRGB_DOUBLE.to_string());
+    source.push('\n');
     for part in stage.parts {
         source.push('\n');
         source.push_str(part);
