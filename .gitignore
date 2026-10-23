@@ -96,3 +96,7 @@ portable.txt
 # since Windows matches these patterns without regard to case.
 /assets-neutral/
 /assets/
+
+# Rust port
+rust/target/
+rust/test-roms/

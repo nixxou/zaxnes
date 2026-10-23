@@ -1,0 +1,495 @@
+global Backdrop BackdropAPI
+global Camera CameraAPI
+global Clipping Decoupe
+global Color ColorClasse
+global Frame FrameAPI
+global FrameManager FrameManagerClasse
+global Gamepad ManettesAPI
+global Gamepad1 Joueur
+global Gamepad2 Joueur
+global IntVector2 IntVector2Classe
+global IntVector3 IntVector3Classe
+global Layer ConfigCalques
+global Light Lumiere
+global NotiCenter NotiAPI
+global Palette PaletteAPI
+global Pattern PatternAPI
+global Profile ProfilAPI
+global Quaternion QuaternionClasse
+global Rect RectClasse
+global Script ScriptAPI
+global ScriptPad ScriptPadAPI
+global Setting SettingAPI
+global Vector2 Vector2Classe
+global Vector3 Vector3Classe
+global Video VideoAPI
+global ZapperOffset Vec3R
+global pattern Instance
+global self ScriptObj
+global shape Instance
+global shape2D Shape
+global GetPData fonction
+global RenewId fonction
+global SetPData fonction
+global clear fonction
+global print fonction
+const Align.BACK 2
+const Align.CENTER 1
+const Align.COUNT 3
+const Align.FRONT 0
+const CamMode.FPV 1
+const CamMode.TPV 0
+const TLayer.COUNT 6
+const TLayer.L1 2
+const TLayer.L2 3
+const TLayer.L3 4
+const TLayer.L4 5
+const TLayer.UI 1
+const TLayer.UNIDENTIFIED 0
+member BackdropAPI.Color prop LE Color
+member BackdropAPI.Enable prop LE 
+member BackdropAPI.Offset prop L Vec3R
+member BackdropAPI.OfsX prop LE 
+member BackdropAPI.OfsY prop LE 
+member BackdropAPI.OfsZ prop LE 
+member BackdropAPI.RecvShadow prop LE 
+member BackdropAPI.Size prop L Vec3R
+member BackdropAPI.SizeX prop LE 
+member BackdropAPI.SizeY prop LE 
+member BackdropAPI.SizeZ prop LE 
+member CData.[i] index LE 
+member Calque.Aligned prop LE 
+member Calque.CastShadow prop LE 
+member Calque.Coef prop L 
+member Calque.Offset prop LE 
+member Calque.RecvShadow prop LE 
+member CameraAPI.Distance prop LE 
+member CameraAPI.FpvShape prop LE Shape
+member CameraAPI.GetTarget appel - Vector3
+member CameraAPI.IsFPV prop L 
+member CameraAPI.IsTPV prop L 
+member CameraAPI.LookAt prop LE Vector3
+member CameraAPI.Mode prop LE 
+member CameraAPI.ResetView appel - 
+member CameraAPI.Rot prop L Vec3R
+member CameraAPI.SetFPV appel - 
+member CameraAPI.SetTPV appel - 
+member CameraAPI.SetTarget appel - 
+member CameraAPI.Target prop L Vec3R
+member CameraAPI.ToggleMode appel - 
+member Color.a prop LE 
+member Color.b prop LE 
+member Color.g prop LE 
+member Color.r prop LE 
+member ColorClasse.() appel - Color
+member ColorClasse.black prop L Color
+member ColorClasse.white prop L Color
+member ConfigCalques.[i] index L Calque
+member ConfigCalques.Auto prop LE 
+member ConfigCalques.DefLayer prop LE 
+member Decoupe.[i] index LE 
+member Decoupe.target prop LE Color
+member Decoupe.w prop LE 
+member Decoupe.x prop LE 
+member Decoupe.y prop LE 
+member Decoupe.z prop LE 
+member FrameAPI.AddNewShape appel - 
+member FrameAPI.AddRectFromPinnedFrame appel - 
+member FrameAPI.CreateNewShape appel - 
+member FrameAPI.GetShape appel - Instance
+member FrameAPI.GetShapeWithPos appel - Instance
+member FrameAPI.GetShapeWithTag appel - Instance
+member FrameAPI.GetShapesFromPinnedFrame appel - Liste<Shape>
+member FrameAPI.GetShapesWithTag appel - Liste<Instance>
+member FrameAPI.InsertShape appel - 
+member FrameAPI.PinNewFrame appel - 
+member FrameAPI.ReleasePinnedFrame appel - 
+member FrameAPI.RestoreFromPinnedFrame appel - 
+member FrameAPI.frameCounter prop L 
+member FrameAPI.shapeCount prop L 
+member FrameAPI.time prop L 
+member FrameManagerClasse.Ins prop L FrameAPI
+member Instance.Alpha prop LE 
+member Instance.AnimEnable prop L 
+member Instance.BL prop L Vector3
+member Instance.Bg prop L 
+member Instance.BottomLeft prop L Vector3
+member Instance.CData prop L CData
+member Instance.CalculatePos appel - 
+member Instance.CastShadow prop LE 
+member Instance.CastingShadow prop L 
+member Instance.Center prop LE Vector3
+member Instance.ContainsTag appel - 
+member Instance.DeformAmp prop L Vec3R
+member Instance.DeformOffset prop L Mat4R
+member Instance.DeformPivot prop L Vec3R
+member Instance.DeformSpeed prop L Mat4R
+member Instance.Enable prop LE 
+member Instance.GetDeform appel - Vector3
+member Instance.GetDeformation appel - Vector3
+member Instance.GetOriginalPos appel - Vector3
+member Instance.GetPos appel - Vector3
+member Instance.GetPosWoLayer appel - Vector3
+member Instance.Index prop L 
+member Instance.IsStatic prop LE 
+member Instance.LAxis prop LE 
+member Instance.Layer prop LE 
+member Instance.Offset prop L Vec3R
+member Instance.OriPos prop L Vector3
+member Instance.OriPosWoLayer prop L Vector3
+member Instance.Overlap appel - 
+member Instance.OverlapRect appel - 
+member Instance.Palette prop LE 
+member Instance.Pivot prop L Vec3R
+member Instance.Pos prop L Vector3
+member Instance.ReceivingShadow prop L 
+member Instance.RecvShadow prop LE 
+member Instance.RenderStyle prop LE 
+member Instance.Rot prop L Vec3R
+member Instance.Scale prop L Vec3R
+member Instance.Shape2D prop L Shape
+member Instance.Size prop L Vector3
+member Instance.Sp prop L 
+member Instance.TR prop L Vector3
+member Instance.TagStr prop L 
+member Instance.TopRight prop L Vector3
+member Instance.UI prop LE 
+member Instance.alpha prop LE 
+member Instance.antiShadow prop LE 
+member Instance.constraintHeight prop LE 
+member Instance.constraintSize prop LE IntVector2
+member Instance.constraintWidth prop LE 
+member Instance.customPalette prop LE 
+member Instance.emptyColor prop LE 
+member Instance.fillrate prop LE 
+member Instance.flip prop LE 
+member Instance.fullWarp prop LE 
+member Instance.geo prop LE 
+member Instance.index prop L 
+member Instance.layer prop LE 
+member Instance.offset prop L Vec3R
+member Instance.pattern prop LE Pattern
+member Instance.pivot prop L Vec3R
+member Instance.refPattern prop L Pattern
+member Instance.refPattern3D prop LE Instance
+member Instance.rot prop L Vec3R
+member Instance.scale prop L Vec3R
+member Instance.selfConnected prop LE 
+member Instance.shape prop L Shape
+member Instance.size prop L Vector3
+member Instance.sizeZ prop LE 
+member Instance.skipGeo prop LE 
+member Instance.slot prop LE SlotTexture
+member Instance.solid prop LE 
+member Instance.tSize prop L IntVector2
+member Instance.texOffset prop L Vec2R
+member Instance.texTilting prop L Vec2R
+member Instance.ui prop LE 
+member IntVector2.x prop LE 
+member IntVector2.y prop LE 
+member IntVector2Classe.() appel - IntVector2
+member IntVector2Classe.one prop L IntVector2
+member IntVector2Classe.zero prop L IntVector2
+member IntVector3.x prop LE 
+member IntVector3.y prop LE 
+member IntVector3.z prop LE 
+member IntVector3Classe.() appel - IntVector3
+member Joueur.Pressed appel - 
+member Joueur.State prop L 
+member Liste<Instance>.[i] index L Instance
+member Liste<Instance>.Contains appel - 
+member Liste<Instance>.Count prop L 
+member Liste<Instance>.IndexOf appel - 
+member Liste<Shape>.[i] index L Shape
+member Liste<Shape>.Contains appel - 
+member Liste<Shape>.Count prop L 
+member Liste<Shape>.IndexOf appel - 
+member Lumiere.Color prop LE Color
+member Lumiere.Direction prop LE Vector3
+member Lumiere.Intensity prop LE 
+member ManettesAPI.[i] index L Joueur
+member ManettesAPI.GetInput appel - 
+member ManettesAPI.Pressed appel - 
+member ManettesAPI.State prop L 
+member Mat4R.[i] index LE 
+member Mat4R.m00 prop LE 
+member Mat4R.m01 prop LE 
+member Mat4R.m02 prop LE 
+member Mat4R.m03 prop LE 
+member Mat4R.m10 prop LE 
+member Mat4R.m11 prop LE 
+member Mat4R.m12 prop LE 
+member Mat4R.m13 prop LE 
+member Mat4R.m20 prop LE 
+member Mat4R.m21 prop LE 
+member Mat4R.m22 prop LE 
+member Mat4R.m23 prop LE 
+member Mat4R.m30 prop LE 
+member Mat4R.m31 prop LE 
+member Mat4R.m32 prop LE 
+member Mat4R.m33 prop LE 
+member NotiAPI.Notify appel - 
+member NotiAPI.Show appel - 
+member PaletteAPI.FrameColor appel - Color
+member PaletteAPI.FrameColorIndex appel - 
+member PaletteAPI.GetColorIndex appel - 
+member PaletteAPI.SetColorIndex appel - 
+member PaletteAPI.bgColor prop L Color
+member Pattern.[i] index L Instance
+member Pattern.BL prop L Vector2
+member Pattern.BottomLeft prop L Vector2
+member Pattern.CSize prop LE IntVector2
+member Pattern.Disable prop LE 
+member Pattern.SelfConnected prop LE 
+member Pattern.Size prop L Vector2
+member Pattern.SkipGeo prop LE 
+member Pattern.TR prop L Vector2
+member Pattern.TopRight prop L Vector2
+member Pattern.constraintSize prop LE IntVector2
+member Pattern.count prop L 
+member Pattern.pattern3D prop L Instance
+member Pattern.pattern3DList prop L Liste<Instance>
+member Pattern.permanent prop L 
+member Pattern.tSize prop L IntVector2
+member PatternAPI.GetPatternWithTag appel - Instance
+member PatternAPI.GetPatternsWithTag appel - Liste<Instance>
+member ProfilAPI.Des prop LE 
+member ProfilAPI.GameDev prop LE 
+member ProfilAPI.Id prop L 
+member ProfilAPI.IsV2Format prop L 
+member ProfilAPI.Maker prop LE 
+member ProfilAPI.RenewId appel - 
+member ProfilAPI.Title prop LE 
+member ProfilAPI.Ver prop L 
+member Quaternion.eulerAngles prop L Vector3
+member Quaternion.w prop LE 
+member Quaternion.x prop LE 
+member Quaternion.y prop LE 
+member Quaternion.z prop LE 
+member QuaternionClasse.AngleAxis appel - Quaternion
+member QuaternionClasse.Euler appel - Quaternion
+member QuaternionClasse.Lerp appel - Quaternion
+member QuaternionClasse.Slerp appel - Quaternion
+member QuaternionClasse.identity prop L Quaternion
+member Rect.Overlaps appel - 
+member Rect.height prop LE 
+member Rect.width prop LE 
+member Rect.x prop LE 
+member Rect.y prop LE 
+member RectClasse.() appel - Rect
+member ScriptAPI.Count prop L 
+member ScriptAPI.Get appel - ScriptObj
+member ScriptAPI.GetScript appel - ScriptObj
+member ScriptAPI.ReadMem appel - 
+member ScriptAPI.WriteMem appel - 
+member ScriptObj.Enable prop LE 
+member ScriptObj.Error prop L 
+member ScriptObj.Name prop L 
+member ScriptObj.TagStr prop L 
+member ScriptObj.enable prop LE 
+member ScriptObj.name prop L 
+member ScriptPadAPI.Enable appel - 
+member ScriptPadAPI.HandPos appel - Vector3
+member ScriptPadAPI.Head prop L XRState
+member ScriptPadAPI.LH prop L XRState
+member ScriptPadAPI.LeftHand prop L XRState
+member ScriptPadAPI.PadIndex prop LE 
+member ScriptPadAPI.Pressed appel - 
+member ScriptPadAPI.RH prop L XRState
+member ScriptPadAPI.RightHand prop L XRState
+member ScriptPadAPI.RotPos appel - Vector3
+member ScriptPadAPI.State prop L 
+member SettingAPI.AntiAlias prop LE 
+member SettingAPI.AntiAliasId prop L 
+member SettingAPI.AutoTVMode prop LE 
+member SettingAPI.AutoTVModeId prop L 
+member SettingAPI.BGMusic prop LE 
+member SettingAPI.BgColor prop LE 
+member SettingAPI.BgColorId prop L 
+member SettingAPI.BgMusicId prop L 
+member SettingAPI.Clipping prop L Decoupe
+member SettingAPI.ClippingElementId prop L 
+member SettingAPI.ClippingId prop L 
+member SettingAPI.ControlMethod prop LE 
+member SettingAPI.ControlMethodId prop L 
+member SettingAPI.Core prop LE 
+member SettingAPI.CoreId prop L 
+member SettingAPI.CustomBgColor prop LE Color
+member SettingAPI.CustomBgColorId prop L 
+member SettingAPI.DefaultSmoothTime prop L 
+member SettingAPI.EmptyTile prop LE 
+member SettingAPI.EmptyTileId prop L 
+member SettingAPI.EmuMenuId prop L 
+member SettingAPI.EmulatedMenuButton prop LE 
+member SettingAPI.EngineMode prop L 
+member SettingAPI.Fov prop LE 
+member SettingAPI.FovId prop L 
+member SettingAPI.FrameRate prop LE 
+member SettingAPI.FrameRateId prop L 
+member SettingAPI.GameSpeed prop LE 
+member SettingAPI.GameSpeedId prop L 
+member SettingAPI.GetInputType appel - 
+member SettingAPI.GraphicQuality prop LE 
+member SettingAPI.GraphicQualityId prop L 
+member SettingAPI.InputTypeId prop L 
+member SettingAPI.IsProfileMode prop L 
+member SettingAPI.IsRomMode prop L 
+member SettingAPI.Layer prop L ConfigCalques
+member SettingAPI.LayerAlignedId prop L 
+member SettingAPI.LayerAutoId prop L 
+member SettingAPI.LayerDefLayerId prop L 
+member SettingAPI.LayerId prop L 
+member SettingAPI.LayerOffsetId prop L 
+member SettingAPI.Light prop L Lumiere
+member SettingAPI.LightColorId prop L 
+member SettingAPI.LightDirectionId prop L 
+member SettingAPI.LightId prop L 
+member SettingAPI.LightIntensityId prop L 
+member SettingAPI.Load appel - 
+member SettingAPI.LocalCam prop LE 
+member SettingAPI.LocalCamId prop L 
+member SettingAPI.MapEnable prop LE 
+member SettingAPI.MapEnableId prop L 
+member SettingAPI.Mirroring prop LE 
+member SettingAPI.MirroringId prop L 
+member SettingAPI.MovieMode prop LE 
+member SettingAPI.MovieModeId prop L 
+member SettingAPI.NonVRScale prop L 
+member SettingAPI.PreVrRuntimeId prop L 
+member SettingAPI.RenderMethod prop LE 
+member SettingAPI.RenderMethodId prop L 
+member SettingAPI.RenderMode prop LE 
+member SettingAPI.RenderModeId prop L 
+member SettingAPI.ResScale prop L 
+member SettingAPI.ResScaleId prop L 
+member SettingAPI.ResScaleIndex prop LE 
+member SettingAPI.RootScale prop LE 
+member SettingAPI.SameBgPalette prop LE 
+member SettingAPI.SameBgPaletteId prop L 
+member SettingAPI.SamePalette prop LE 
+member SettingAPI.SameSpPalette prop LE 
+member SettingAPI.SameSpPaletteId prop L 
+member SettingAPI.Save appel - 
+member SettingAPI.SaveAnimPattern3D prop LE 
+member SettingAPI.SavedAnimPattern3DId prop L 
+member SettingAPI.SavedPattern3D prop LE 
+member SettingAPI.SavedPattern3DId prop L 
+member SettingAPI.ScanDirection prop LE 
+member SettingAPI.ScanDirectionId prop L 
+member SettingAPI.SceneRatio prop LE 
+member SettingAPI.SceneRatioId prop L 
+member SettingAPI.SceneScale prop LE 
+member SettingAPI.SceneScaleId prop L 
+member SettingAPI.SelectionMode prop LE 
+member SettingAPI.SelectionModeId prop L 
+member SettingAPI.SetInputType appel - 
+member SettingAPI.SetRuntime appel - 
+member SettingAPI.Shadow prop LE 
+member SettingAPI.ShadowId prop L 
+member SettingAPI.SkipFrame prop LE 
+member SettingAPI.SkipFrameId prop L 
+member SettingAPI.Skybox prop LE 
+member SettingAPI.SkyboxEnable prop L 
+member SettingAPI.SkyboxId prop L 
+member SettingAPI.SmoothTime prop LE 
+member SettingAPI.SortOption prop LE 
+member SettingAPI.SortOptionId prop L 
+member SettingAPI.SpriteTolerance prop LE 
+member SettingAPI.SpriteToleranceId prop L 
+member SettingAPI.TVBox prop LE 
+member SettingAPI.TVBoxId prop L 
+member SettingAPI.TVData prop LE 
+member SettingAPI.TVMode prop LE 
+member SettingAPI.TVModeId prop L 
+member SettingAPI.TargetFramerate prop L 
+member SettingAPI.TargetTimePerFrame prop L 
+member SettingAPI.TopDownCam prop LE 
+member SettingAPI.VRScale prop L 
+member SettingAPI.VSync prop LE 
+member SettingAPI.VSyncId prop L 
+member SettingAPI.Volume prop LE 
+member SettingAPI.VolumeId prop L 
+member SettingAPI.VrRuntime prop LE 
+member SettingAPI.VrRuntimeId prop L 
+member SettingAPI.ZapperEnable prop L 
+member Shape.[i] index L Instance
+member Shape.Age prop L 
+member Shape.AtBorder prop L 
+member Shape.BL prop L Vector2
+member Shape.Bg prop L 
+member Shape.BottomLeft prop L Vector2
+member Shape.CalculatePos appel - 
+member Shape.Completed prop L 
+member Shape.Count prop L 
+member Shape.Distance appel - 
+member Shape.End prop L IntVector2
+member Shape.Hidden prop L 
+member Shape.InsCount prop L 
+member Shape.Inside prop L 
+member Shape.Palette prop L 
+member Shape.Shape3D appel - Instance
+member Shape.Size prop L IntVector2
+member Shape.Start prop L IntVector2
+member Shape.TEnd prop L IntVector2
+member Shape.TR prop L Vector2
+member Shape.TSize prop L IntVector2
+member Shape.TStart prop L IntVector2
+member Shape.TileCount prop L 
+member Shape.TopRight prop L Vector2
+member Shape.bg prop L 
+member Shape.center prop L Vector3
+member Shape.geo prop L 
+member Shape.hidden prop L 
+member Shape.layer prop L 
+member Shape.pEnd prop L IntVector2
+member Shape.pStart prop L IntVector2
+member Shape.palIndex prop L 
+member Shape.pattern prop L Pattern
+member Shape.refPattern prop L Pattern
+member Shape.shape3D prop L Instance
+member Shape.sizeZ prop L 
+member Shape.tEnd prop L IntVector2
+member Shape.tSize prop L IntVector2
+member Shape.tStart prop L IntVector2
+member SlotTexture.h prop L 
+member SlotTexture.w prop L 
+member Vec2R.[i] index LE 
+member Vec2R.content prop LE Vector2
+member Vec2R.x prop LE 
+member Vec2R.y prop LE 
+member Vec3R.[i] index LE 
+member Vec3R.content prop LE Vector3
+member Vec3R.x prop LE 
+member Vec3R.y prop LE 
+member Vec3R.z prop LE 
+member Vector2.magnitude prop L 
+member Vector2.x prop LE 
+member Vector2.y prop LE 
+member Vector2Classe.() appel - Vector2
+member Vector2Classe.one prop L Vector2
+member Vector2Classe.zero prop L Vector2
+member Vector3.magnitude prop L 
+member Vector3.normalized prop L Vector3
+member Vector3.sqrMagnitude prop L 
+member Vector3.x prop LE 
+member Vector3.y prop LE 
+member Vector3.z prop LE 
+member Vector3Classe.() appel - Vector3
+member Vector3Classe.Cross appel - Vector3
+member Vector3Classe.Distance appel - 
+member Vector3Classe.Dot appel - 
+member Vector3Classe.Lerp appel - Vector3
+member Vector3Classe.back prop L Vector3
+member Vector3Classe.down prop L Vector3
+member Vector3Classe.forward prop L Vector3
+member Vector3Classe.left prop L Vector3
+member Vector3Classe.one prop L Vector3
+member Vector3Classe.right prop L Vector3
+member Vector3Classe.up prop L Vector3
+member Vector3Classe.zero prop L Vector3
+member VideoAPI.SceneScale prop LE 
+member XRState.acc prop LE Vector3
+member XRState.pos prop LE Vector3
+member XRState.rot prop LE Vector3
+member XRState.vel prop LE Vector3
+# 35 globals, 44 types, 429 members
