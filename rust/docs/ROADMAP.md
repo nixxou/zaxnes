@@ -60,7 +60,11 @@ Zaxnes amendment first.
 Stereoscopic side-by-side / top-bottom, anaglyph, orthographic or isometric camera, built-in CRT
 or scanline filters, toon shading, native VR (OpenXR, large).
 
-## Handheld performance plan (scheduled, in this order)
+## Handheld performance plan (scheduled)
+
+Current order (after the batched-PPU device test, core ~15.6 ms per NES frame): multi-core,
+handheld pacing, draw-call batching, Lua, more core work, fallbacks. The numbered list below is
+the original order.
 
 Measured on the RG40XXV (A53 1.512 GHz, Mali-G31, GLES 3.2, governor performance): core about
 17.4 ms per NES frame; heavy 3D profile: scene 60 ms, Lua 25 ms, conversion 15 ms per displayed

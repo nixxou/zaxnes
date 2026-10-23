@@ -64,15 +64,24 @@ RG40XXV handheld (PortMaster port).
 
 ## 3. Work, in order (one step at a time; verify; commit; device check)
 
-1. Structural core optimisation, bit-identical (see HANDHELD-PERFORMANCE.md 5.1). Start by
-   profiling instruction counts with callgrind on `zax-harness bench-core` (x86) and confirm
-   relative gains with the aarch64 build under qemu. Target: core <= 9 ms per NES frame on the
-   device (>= 2x).
-2. Multi-core emulation thread (5.2), as a setting, default on for handheld.
-3. Draw-call batching (5.3), pixel-identical, measured with `render --explain` and the
-   `drawCalls` / `--bench` numbers.
-4. Lua costs (5.4): profiling per hook/script/API, incremental GC per frame, dedicated userdata.
-5. Handheld pacing settings (5.5).
+Priority changed after the last device measurement (core ~15.6 ms per NES frame on the A53 after
+the batched PPU, `91123ec`; x86 gains of 1.4-2x gave only ~11 % on the device): the core now fits
+the 16.6 ms budget on its own, so multi-core comes first.
+
+1. Multi-core emulation thread (HANDHELD-PERFORMANCE.md 5.2), as a setting ("emulation on a
+   separate core"), default on for handheld, off on desktop until the owner approves. Emulation
+   of frame N on its own thread; conversion, Lua and render of frame N-1 on the main thread; Lua
+   reads a per-frame snapshot of NES memory (check SPEC-05 / SPEC-07 and the C# for when hooks see
+   memory and how savestates, rewind, input latency and pause interact). Expected: close to 60
+   emulated frames/s on the device for light profiles.
+2. Handheld pacing settings (5.5): regular 30 fps mode and capped catch-up, so a late frame no
+   longer collapses into 5 emulated frames per displayed frame.
+3. Draw-call batching (5.3), pixel-identical, measured with `render --explain`, `drawCalls` and
+   `--bench` (heavy 3D profile: scene 70-95 ms per displayed frame on the device).
+4. Lua costs (5.4): profiling per hook/script/API, incremental GC per frame (spikes up to
+   500 ms seen), dedicated userdata.
+5. More structural core work, bit-identical (5.1 and section 4 "Recommended next core steps"),
+   measured with callgrind `--cache-sim=yes` and on the device, not only x86 wall time.
 6. Only if still too slow: fast PPU or external core (5.6), as settings, after asking the owner.
 
 For each step: say what you will do and the expected gain, do it, report measured before/after
