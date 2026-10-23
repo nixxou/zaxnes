@@ -26,6 +26,10 @@ impl A12Watcher {
     /// of the sprite fetch phase and of the $2006 writes `mmc3_test` uses.
     const FILTER_DOTS: i64 = 10;
 
+    /// Fewest PPU dots between two rises that count: A12 must have been low for
+    /// `FILTER_DOTS` after being high for at least one.
+    pub const MIN_RISE_INTERVAL: i64 = Self::FILTER_DOTS + 1;
+
     /// Creates a watcher in its power-on state.
     #[must_use]
     pub const fn new() -> Self {

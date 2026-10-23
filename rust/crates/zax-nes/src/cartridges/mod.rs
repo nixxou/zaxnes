@@ -258,6 +258,13 @@ impl Cartridge {
         self.board.irq_asserted()
     }
 
+    /// PPU dots during which the IRQ line cannot change through the PPU's activity, `None`
+    /// when the board gives no bound (see [`Mapper::ppu_irq_horizon`]).
+    #[must_use]
+    pub fn ppu_irq_horizon(&self) -> Option<i64> {
+        self.board.ppu_irq_horizon()
+    }
+
     /// CPU cycles elapsed since power-on, as the cartridge sees them.
     ///
     /// Boards that time anything in CPU cycles read it: the MMC1 shift register ignores a

@@ -127,6 +127,21 @@ impl Mapper for Mmc3 {
         self.irq_pending
     }
 
+    /// The line only rises when the counter reaches 0 with IRQs on, and the counter only
+    /// moves on an A12 rise, which come at least `MIN_RISE_INTERVAL` dots apart.
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        if self.irq_pending || !self.irq_enabled {
+            return Some(i64::MAX);
+        }
+
+        let clocks_to_zero = if self.irq_counter == 0 || self.irq_reload {
+            1 + i64::from(self.irq_latch)
+        } else {
+            i64::from(self.irq_counter)
+        };
+        Some((clocks_to_zero - 1) * A12Watcher::MIN_RISE_INTERVAL)
+    }
+
     fn prg_ram_enabled(&self) -> bool {
         if self.is_mmc6 {
             self.select & 0x20 != 0

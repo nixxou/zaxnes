@@ -34,6 +34,13 @@ pub struct NesBus {
     in_dmc_dma: bool,
     oam_dma_count: i64,
     dmc_dma_count: i64,
+    /// CPU cycles the PPU still owes: while `deferred_ppu` is on, the PPU runs in batches,
+    /// caught up before anything that could see or change it (see [`NesBus::sync_ppu`]).
+    ppu_lag: u32,
+    /// The cycle at which the PPU must be caught up whatever happens: the cycle where its
+    /// NMI line or the cartridge's IRQ line may next change.
+    ppu_deadline: i64,
+    deferred_ppu: bool,
 }
 
 impl NesBus {
@@ -63,6 +70,9 @@ impl NesBus {
             in_dmc_dma: false,
             oam_dma_count: 0,
             dmc_dma_count: 0,
+            ppu_lag: 0,
+            ppu_deadline: 0,
+            deferred_ppu: false,
         }
     }
 
@@ -157,12 +167,18 @@ impl NesBus {
         self.in_dmc_dma = false;
         self.oam_dma_count = 0;
         self.dmc_dma_count = 0;
+        self.ppu_lag = 0;
+        self.ppu_deadline = 0;
     }
 
     /// Advances the whole machine by one CPU cycle.
     pub fn tick(&mut self) {
         self.cycles += 1;
-        self.ppu.step_cpu_cycle(self.cartridge.as_mut());
+        self.ppu_lag += 1;
+        if self.cycles >= self.ppu_deadline {
+            self.catch_up_ppu();
+        }
+
         self.apu.step_cpu_cycle();
         if let Some(cartridge) = self.cartridge.as_mut() {
             cartridge.step_cpu_cycle();
@@ -171,6 +187,69 @@ impl NesBus {
         if self.apu.needs_dmc_dma() && !self.in_dmc_dma {
             self.perform_dmc_dma();
         }
+    }
+
+    /// Catches the PPU up before an access that may see or change it. The access itself
+    /// may move the NMI line ($2000), the vblank flag ($2002) or the cartridge's IRQ, so
+    /// the next cycle is run in step and recomputes the deadline.
+    pub fn sync_ppu(&mut self) {
+        self.catch_up_ppu();
+        self.ppu_deadline = self.cycles + 1;
+    }
+
+    /// Runs the cycles the PPU owes, then sets the next deadline.
+    ///
+    /// Batching is exact because nothing outside the PPU can tell when its dots ran as long
+    /// as it is caught up before: every CPU access to $2000-$3FFF, $4014 and the controller
+    /// ports (the Zapper looks at the picture), every cartridge write (banks, mirroring),
+    /// the cycle where /NMI may change (the vblank flag rises or falls), and every cycle
+    /// where the cartridge's IRQ line could follow the PPU (see
+    /// [`Cartridge::ppu_irq_horizon`]). Outside [`NesBus::defer_ppu`] the PPU runs on every
+    /// cycle, as before.
+    fn catch_up_ppu(&mut self) {
+        if self.ppu_lag > 0 {
+            self.ppu.run_cpu_cycles(self.ppu_lag, self.cartridge.as_mut());
+            self.ppu_lag = 0;
+        }
+
+        self.ppu_deadline = if self.deferred_ppu {
+            self.cycles + self.ppu_horizon()
+        } else {
+            self.cycles + 1
+        };
+    }
+
+    /// CPU cycles the PPU may lag from now on, at least 1.
+    fn ppu_horizon(&self) -> i64 {
+        // The PPU's sample of /NMI lags its line by a dot or two: when they differ, the
+        // next cycle must be run in step.
+        if self.ppu.nmi_line_sample() != self.ppu.nmi_asserted() {
+            return 1;
+        }
+
+        // A cycle is at most four dots (PAL averages 3.2); a margin of two cycles covers
+        // the dot or two by which the sample trails and the odd frame's skipped dot.
+        let nmi = self.ppu.dots_until_nmi_change() / 4 - 2;
+        let irq = self
+            .cartridge
+            .as_ref()
+            .map_or(i64::MAX, |cartridge| match cartridge.ppu_irq_horizon() {
+                Some(dots) => dots / 4 - 2,
+                None => 0,
+            });
+        nmi.min(irq).max(1)
+    }
+
+    /// Lets the PPU run in batches until [`NesBus::end_deferred_ppu`] (the frame loop).
+    pub fn defer_ppu(&mut self) {
+        self.deferred_ppu = true;
+        self.sync_ppu();
+    }
+
+    /// Catches the PPU up and returns to running it on every cycle.
+    pub fn end_deferred_ppu(&mut self) {
+        self.deferred_ppu = false;
+        self.sync_ppu();
     }
 
     /// Fetches one DMC sample byte, halting the CPU for [`NesBus::DMC_DMA_CYCLES`] cycles
@@ -202,6 +281,7 @@ impl NesBus {
     /// detection included (REQ-CORE-061, REQ-CORE-062); this is the reference's
     /// `InputPorts.Read` with its light probe wired to the PPU.
     pub fn read_input_port(&mut self, port: usize, open_bus: u8) -> u8 {
+        self.sync_ppu();
         let ppu = &self.ppu;
         self.input
             .read(port, open_bus, |aim| ppu.sees_light_at(aim.x, aim.y))
@@ -213,6 +293,7 @@ impl NesBus {
         }
 
         if address < 0x4000 {
+            self.sync_ppu();
             // The PPU drives its own data-bus latch for the undefined bits, separate from
             // the CPU's open bus (nesdev, "PPU registers"; ppu_open_bus).
             return self.ppu.read(address & 0x07, self.cartridge.as_mut());
@@ -242,6 +323,7 @@ impl NesBus {
         }
 
         if address < 0x4000 {
+            self.sync_ppu();
             self.ppu
                 .write(address & 0x07, value, self.cartridge.as_mut());
             return;
@@ -256,6 +338,7 @@ impl NesBus {
             return;
         }
 
+        self.sync_ppu();
         if let Some(cartridge) = self.cartridge.as_mut() {
             cartridge.cpu_write(address, value);
         }
@@ -285,6 +368,7 @@ impl NesBus {
             self.open_bus = value;
 
             self.tick();
+            self.sync_ppu();
             self.ppu.write_oam_dma(value);
         }
     }
@@ -368,6 +452,8 @@ impl NesBus {
         self.oam_dma_count = reader.read_i64()?;
         self.dmc_dma_count = reader.read_i64()?;
         self.in_dmc_dma = false;
+        self.ppu_lag = 0;
+        self.ppu_deadline = 0;
         Ok(())
     }
 }

@@ -289,6 +289,10 @@ impl Mapper for Mmc5 {
         self.irq_pending && self.irq_enabled
     }
 
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        None
+    }
+
     fn prg_ram_writable(&self) -> bool {
         (self.protect1 & 0x03) == 0x02 && (self.protect2 & 0x03) == 0x01
     }

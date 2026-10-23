@@ -312,12 +312,14 @@ impl NesCore {
         let start_cycle = self.bus.cycle_count();
 
         self.bus.ppu_mut().clear_frame_boundary();
+        self.bus.defer_ppu();
         loop {
             self.cpu.step(&mut self.bus);
             if self.bus.ppu().vblank_just_started() {
                 break;
             }
         }
+        self.bus.end_deferred_ppu();
 
         self.frame_count += 1;
 

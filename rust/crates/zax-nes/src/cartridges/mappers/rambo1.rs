@@ -121,6 +121,10 @@ impl Mapper for Rambo1 {
         self.irq_pending
     }
 
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        None
+    }
+
     fn reset(&mut self, _memory: &mut CartridgeMemory) {
         self.bank = [0; 16];
         self.select = 0;

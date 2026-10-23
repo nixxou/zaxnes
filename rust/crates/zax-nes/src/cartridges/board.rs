@@ -128,6 +128,10 @@ impl Mapper for Board {
         dispatch!(self, b => b.irq_asserted())
     }
 
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        dispatch!(self, b => b.ppu_irq_horizon())
+    }
+
     fn prg_ram_enabled(&self) -> bool {
         dispatch!(self, b => b.prg_ram_enabled())
     }

@@ -110,6 +110,15 @@ pub trait Mapper {
         false
     }
 
+    /// PPU dots during which the IRQ line cannot change through what the PPU does (address
+    /// bus, scanline signals), so that the PPU may run behind the CPU for that long:
+    /// `Some(i64::MAX)` for a board that does not follow the PPU, `None` when no bound is
+    /// known (the PPU then runs in step with the CPU). A board that overrides
+    /// [`Mapper::on_ppu_address_bus`] or [`Mapper::on_ppu_scanline`] overrides this too.
+    fn ppu_irq_horizon(&self) -> Option<i64> {
+        Some(i64::MAX)
+    }
+
     /// True when $6000-$7FFF is readable and writable.
     fn prg_ram_enabled(&self) -> bool {
         true

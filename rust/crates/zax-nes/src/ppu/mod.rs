@@ -492,6 +492,27 @@ impl Ppu2C02 {
         }
     }
 
+    /// Advances the PPU by the dots of `cycles` CPU cycles, exactly as that many calls of
+    /// [`Ppu2C02::step_cpu_cycle`] would.
+    pub fn run_cpu_cycles(&mut self, cycles: u32, mut cartridge: Option<&mut Cartridge>) {
+        for _ in 0..cycles {
+            self.step_cpu_cycle(cartridge.as_deref_mut());
+        }
+    }
+
+    /// Dots from the current one to the next dot where the vblank flag may rise or fall on
+    /// its own (dot 1 of the vblank line and of the pre-render line), at least 1.
+    #[must_use]
+    pub fn dots_until_nmi_change(&self) -> i64 {
+        let frame = i64::from(self.timing.scanlines_per_frame) * i64::from(DOTS_PER_SCANLINE);
+        let here = i64::from(self.scanline) * i64::from(DOTS_PER_SCANLINE) + i64::from(self.dot);
+        let until = |scanline: i32| {
+            let there = i64::from(scanline) * i64::from(DOTS_PER_SCANLINE) + 1;
+            (there - here).rem_euclid(frame).max(1)
+        };
+        until(self.timing.vblank_scanline).min(until(self.pre_render_scanline()))
+    }
+
     /// Clears the one-step frame boundary flag; the core calls this each frame.
     pub fn clear_frame_boundary(&mut self) {
         self.vblank_just_started = false;
