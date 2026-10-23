@@ -196,9 +196,9 @@ fn req_prof_036_the_special_variant_tags_are_the_five_of_the_spec() {
 
 #[test]
 fn req_prof_036_an_absent_tag_string_gives_no_tag() {
-    assert!(tags::parse(None).is_empty());
-    assert!(tags::parse(Some("")).is_empty());
-    assert!(tags::parse(Some(" , , ")).is_empty());
+    assert_eq!(tags::parse(None), [] as [&str; 0]);
+    assert_eq!(tags::parse(Some("")), [] as [&str; 0]);
+    assert_eq!(tags::parse(Some(" , , ")), [] as [&str; 0]);
 }
 
 #[rstest::rstest]

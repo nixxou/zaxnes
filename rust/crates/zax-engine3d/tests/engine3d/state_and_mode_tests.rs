@@ -264,7 +264,7 @@ fn dec_r2_t5_the_learned_state_round_trips() {
     // Something really was learned.
     let profile_count = usize::try_from(engine.patterns().profile_pattern_count()).unwrap();
     assert!(engine.patterns().permanent().len() > profile_count - 1);
-    assert!(!engine.patterns().temporary().is_empty());
+    assert_ne!(engine.patterns().temporary(), []);
     assert!(engine.images().count() > engine.profile_image_count());
 
     let tracked = engine.published_frame().unwrap().shapes()[0];
@@ -349,13 +349,13 @@ fn req_e3d_380_two_dimensional_mode_starts_from_an_empty_registry() {
     assert_eq!(1, engine.patterns().permanent().len());
 
     engine.unload();
-    assert!(engine.patterns().permanent().is_empty());
+    assert_eq!(engine.patterns().permanent(), []);
     assert_eq!(0, engine.images().count());
 
     engine
         .load_profile(&GameProfile::create_empty(), true)
         .unwrap();
-    assert!(engine.patterns().permanent().is_empty());
+    assert_eq!(engine.patterns().permanent(), []);
 }
 
 #[test]

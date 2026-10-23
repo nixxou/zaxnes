@@ -843,7 +843,7 @@ fn a_hook_can_restore_shapes_from_the_pinned_frame_req_e3d_233() {
 
     session.frame(&Batch::new().bg_cell(img::c(), 1, 1), 2);
 
-    assert!(session.log.errors().is_empty());
+    assert_eq!(session.log.errors(), [] as [std::string::String; 0]);
     assert!(session.engine.converting_frame().shapes().len() > before.saturating_sub(1));
     assert!(session.engine.converting_frame().shapes().len() >= 2);
 }

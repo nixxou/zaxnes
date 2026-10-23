@@ -362,7 +362,7 @@ fn tv_e3d_07_a_border_tile_only_learns_a_temporary_pattern_req_e3d_160() {
         assert!(shape.at_border());
         let reference = shape.reference_pattern();
         let image = shape.images()[0];
-        assert!(engine.patterns().permanent().is_empty());
+        assert_eq!(engine.patterns().permanent(), []);
         assert_eq!(1, engine.patterns().temporary().len());
         assert_eq!(Some(engine.patterns().temporary()[0]), reference);
         assert!(!engine.images().is_known(&image));
@@ -508,7 +508,7 @@ fn tv_e3d_11_clipping_req_e3d_002_003_005() {
 
     let frame = batch.convert(&mut engine, 0);
 
-    assert!(frame.sprites().is_empty());
+    assert_eq!(frame.sprites(), []);
     let kept = frame.background_at_cell(Cell::new(1, 1)).unwrap();
     assert_eq!(-7, kept.x());
     assert_eq!(-7, kept.y());
@@ -626,7 +626,7 @@ fn tv_e3d_14_injected_shape_req_e3d_230() {
     let shape = frame.shape(id);
     assert!(!shape.background());
     assert!(!shape.scriptable());
-    assert!(frame.scriptable_instances().is_empty());
+    assert_eq!(frame.scriptable_instances(), []);
 
     let tile = frame.shape_tiles(id).next().unwrap();
     assert_eq!(10, tile.x());

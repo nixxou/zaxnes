@@ -267,7 +267,7 @@ fn a_write_that_fails_leaves_no_partial_file() {
     assert_eq!(0, summary.imported);
     assert_eq!(1, summary.failed);
     assert!(summary.results[0].message.contains("could not be written"));
-    assert!(inner.paths().is_empty());
+    assert_eq!(inner.paths(), [] as [std::path::PathBuf; 0]);
 }
 
 /// AMD-030 §5: the temporary file goes away when the move fails.
@@ -289,7 +289,7 @@ fn a_move_that_fails_removes_the_temporary_file() {
         .unwrap();
 
     assert_eq!(1, summary.failed);
-    assert!(inner.paths().is_empty());
+    assert_eq!(inner.paths(), [] as [std::path::PathBuf; 0]);
 }
 
 /// AMD-030 §2: the end-of-import message.

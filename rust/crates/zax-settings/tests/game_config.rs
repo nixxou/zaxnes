@@ -62,7 +62,7 @@ fn a_rom_can_be_forgotten() {
     file.note_rom_opened(r"D:\roms\gone.nes");
     file.set_profile_for(r"D:\roms\gone.nes", "7");
     assert!(file.forget_rom(r"D:\roms\gone.nes"));
-    assert!(file.recent_roms().is_empty());
+    assert_eq!(file.recent_roms(), Vec::<String>::new());
     assert_eq!(file.profile_for(r"D:\roms\gone.nes"), None);
     assert!(!file.forget_rom(r"D:\roms\gone.nes"));
 }
@@ -86,7 +86,7 @@ fn an_unreadable_file_is_set_aside() {
         .storage()
         .names()
         .any(|name| name == "games.json.corrupt-20261021-090000"));
-    assert!(file.recent_roms().is_empty());
+    assert_eq!(file.recent_roms(), Vec::<String>::new());
 }
 
 /// REQ-PERS-024: a file from a newer version is read at best and left alone.
@@ -134,7 +134,7 @@ fn an_absent_file_starts_empty_without_a_notification() {
     let result = file.load(now());
     assert_eq!(result.status, SettingsLoadStatus::Absent);
     assert_eq!(result.message, None);
-    assert!(file.recent_roms().is_empty());
+    assert_eq!(file.recent_roms(), Vec::<String>::new());
 }
 
 /// REQ-PERS-031: no setting is remembered per game. The file beside the library carries the recent list

@@ -163,7 +163,7 @@ fn req_e3d_065_a_learned_permanent_pattern_swallows_the_temporary_subsets() {
     let permanent = closed(&mut registry, 2, 1, &[img::a(), img::b()]);
     patterns.add(permanent, &mut registry);
 
-    assert!(patterns.temporary().is_empty());
+    assert_eq!(patterns.temporary(), []);
     assert_eq!(1, patterns.permanent().len());
 }
 
@@ -336,11 +336,11 @@ fn req_e3d_093_a_tile_whose_patterns_are_all_disabled_is_not_displayed() {
 
     engine.pattern_mut(pattern).unwrap().disabled = true;
     let frame = batch.convert(&mut engine, 2);
-    assert!(frame.shapes().is_empty());
+    assert_eq!(frame.shapes(), []);
 
     // The image stays known, so pass 2 does not learn a pattern for it.
     assert_eq!(1, engine.patterns().permanent().len());
-    assert!(engine.patterns().temporary().is_empty());
+    assert_eq!(engine.patterns().temporary(), []);
 
     engine.pattern_mut(pattern).unwrap().disabled = false;
     assert_eq!(1, batch.convert(&mut engine, 3).shapes().len());
@@ -481,7 +481,7 @@ fn req_e3d_131_a_germ_without_a_candidate_stays_free_in_pass_s2() {
     batch.sprite(img::a(), 100, 50);
     let frame = batch.convert(&mut engine, 0);
 
-    assert!(frame.shapes().is_empty());
+    assert_eq!(frame.shapes(), []);
     assert_eq!(1, frame.sprites().len());
     assert!(frame.sprites()[0].is_free());
 }

@@ -8,7 +8,7 @@ const FORBIDDEN_PREFIXES: [&str; 6] = ["glow", "sdl2", "imgui", "wgpu", "winit",
 #[test]
 fn module_is_identified() {
     assert_eq!("Zax.Engine3D", zax_engine3d::MODULE_NAME);
-    assert!(!zax_engine3d::MODULE_ROLE.trim().is_empty());
+    assert_ne!(zax_engine3d::MODULE_ROLE.trim(), "");
 }
 
 #[test]

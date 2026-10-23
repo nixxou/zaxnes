@@ -76,7 +76,7 @@ fn q001_a_corrupt_savestate_reports_the_typed_cause() {
     let error = core.try_load_state(halved, 0).unwrap_err();
 
     assert_eq!(StateLoadFailure::CorruptState, error.failure);
-    assert!(!error.message.is_empty());
+    assert_ne!(error.message, "");
     assert!(!core.is_running());
 }
 

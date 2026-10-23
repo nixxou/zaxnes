@@ -147,7 +147,7 @@ fn req_e3d_001_the_pipeline_runs_on_synthetic_frames_with_built_in_profiles() {
                     .patterns()
                     .get(shape.reference_pattern().unwrap())
                     .unwrap();
-                assert!(!shape.tiles().is_empty());
+                assert_ne!(shape.tiles(), []);
                 assert_eq!(pattern.instances().len(), shape.instances().len());
             }
 

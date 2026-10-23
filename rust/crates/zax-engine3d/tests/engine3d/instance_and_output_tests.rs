@@ -379,7 +379,7 @@ fn req_e3d_233_a_pinned_frame_restores_its_shapes_where_a_rectangle_overlaps() {
     );
     assert!(restored.restored_from_pinned_frame());
     assert!(!restored.scriptable());
-    assert!(second.scriptable_instances().is_empty());
+    assert_eq!(second.scriptable_instances(), []);
 
     // Only the tiles whose 8 x 8 cell overlaps a rectangle are drawn.
     assert!(second.tile_overlaps_pinned_rects(second.shape_tiles(restored_id).next().unwrap()));
@@ -403,7 +403,7 @@ fn req_e3d_233_without_a_pinned_frame_the_calls_do_nothing() {
     Batch::new().convert(&mut engine, 1);
 
     engine.add_rect_from_pinned_frame(0.0, 0.0, 256.0, 248.0);
-    assert!(engine.converting_frame().pinned_rects().is_empty());
+    assert_eq!(engine.converting_frame().pinned_rects(), []);
     assert_eq!(0, engine.restore_from_pinned_frame());
 
     engine.release_pinned_frame();
@@ -449,7 +449,7 @@ fn req_e3d_281_clearing_the_frames_empties_everything() {
 
     assert!(engine.published_frame().is_none());
     assert!(engine.pinned_frame().is_none());
-    assert!(engine.converting_frame().shapes().is_empty());
+    assert_eq!(engine.converting_frame().shapes(), []);
     assert_eq!(0, engine.converting_frame().counter());
 }
 
