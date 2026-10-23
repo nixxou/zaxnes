@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use mlua::{HookTriggers, Lua, MultiValue, Value, VmState};
 use zax_engine3d::engine::{ConversionState, FrameRole};
+use zax_engine3d::frame::ShapeId;
 use zax_engine3d::instance::{InstanceRef, PatternInstance};
 use zax_engine3d::script::{ScriptError, ScriptHost};
 use zax_engine3d::settings::ConversionSettings;
@@ -311,6 +312,13 @@ impl ProfileScriptRuntime {
     #[must_use]
     pub const fn script_pad_state(&self) -> i32 {
         self.data.script_pad_state
+    }
+
+    /// The shape the subjective camera follows (`Camera.FpvShape`), which the renderer needs to
+    /// find the occluders (SPEC-06 REQ-SCN-022).
+    #[must_use]
+    pub fn fpv_shape(&self) -> Option<ShapeId> {
+        self.data.fpv_shape.map(|target| target.id)
     }
 
     /// How long one hook call may run before it is cut off (REQ-LUA-064).
