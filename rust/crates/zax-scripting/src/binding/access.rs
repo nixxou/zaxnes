@@ -62,21 +62,21 @@ const fn role_of(key: FrameKey) -> FrameRole {
 impl Cx<'_> {
     /// The key a handle to the frame being converted (or the pinned frame) gets now.
     pub fn frame_key(&self, pinned: bool) -> mlua::Result<FrameKey> {
-        let data = self.data()?;
-        Ok(FrameKey {
+        self.data(|data| FrameKey {
             pinned,
             epoch: if pinned { data.pin_epoch } else { data.epoch },
         })
     }
 
     fn is_current(&self, key: FrameKey) -> mlua::Result<bool> {
-        let data = self.data()?;
-        Ok(key.epoch
-            == if key.pinned {
-                data.pin_epoch
-            } else {
-                data.epoch
-            })
+        self.data(|data| {
+            key.epoch
+                == if key.pinned {
+                    data.pin_epoch
+                } else {
+                    data.epoch
+                }
+        })
     }
 
     /// Runs `operation` on the instance `target` names, or returns `None` when it is gone.
@@ -87,27 +87,40 @@ impl Cx<'_> {
     ) -> mlua::Result<Option<R>> {
         match *target {
             InstanceTarget::Pattern(reference) => {
-                if let Some(building) = self.build_target(reference)? {
-                    return Ok(Some(operation(InstanceView::Pattern(&building))));
+                let mut pending = Some(operation);
+                let built = self
+                    .build_target(reference, |building| {
+                        pending
+                            .take()
+                            .map(|operation| operation(InstanceView::Pattern(building)))
+                    })?
+                    .flatten();
+                if built.is_some() {
+                    return Ok(built);
                 }
 
-                let state = self.state()?;
-                Ok(state
-                    .patterns()
-                    .instance(reference)
-                    .map(|instance| operation(InstanceView::Pattern(instance))))
+                let Some(operation) = pending else {
+                    return Ok(None);
+                };
+                self.state(|state| {
+                    state
+                        .patterns()
+                        .instance(reference)
+                        .map(|instance| operation(InstanceView::Pattern(instance)))
+                })
             }
             InstanceTarget::Frame(key, id) => {
                 if !self.is_current(key)? {
                     return Ok(None);
                 }
 
-                let state = self.state()?;
-                let state = &*state;
-                Ok(state
-                    .frame(role_of(key))
-                    .and_then(|frame| frame.get_instance(id))
-                    .map(|instance| operation(InstanceView::Frame { instance, state })))
+                self.state(|state| {
+                    let state: &ConversionState = state;
+                    state
+                        .frame(role_of(key))
+                        .and_then(|frame| frame.get_instance(id))
+                        .map(|instance| operation(InstanceView::Frame { instance, state }))
+                })
             }
         }
     }
@@ -121,26 +134,35 @@ impl Cx<'_> {
     ) -> mlua::Result<Option<R>> {
         match *target {
             InstanceTarget::Pattern(reference) => {
-                if let Some(mut building) = self.build_target(reference)? {
-                    return Ok(Some(operation(&mut building)));
+                let mut pending = Some(operation);
+                let built = self.build_target(reference, |building| {
+                    pending.take().map(|operation| operation(building))
+                })?;
+                if built.is_some() {
+                    return Ok(built.flatten());
                 }
 
-                let mut state = self.state()?;
-                Ok(state
-                    .pattern_mut(reference.pattern)
-                    .and_then(|pattern| pattern.instances_mut().get_mut(reference.index))
-                    .map(operation))
+                let Some(operation) = pending else {
+                    return Ok(None);
+                };
+                self.state(|state| {
+                    state
+                        .pattern_mut(reference.pattern)
+                        .and_then(|pattern| pattern.instances_mut().get_mut(reference.index))
+                        .map(operation)
+                })
             }
             InstanceTarget::Frame(key, id) => {
                 if key.pinned || !self.is_current(key)? {
                     return Ok(None);
                 }
 
-                let mut state = self.state()?;
-                Ok(state
-                    .converting_frame_mut()
-                    .get_instance_mut(id)
-                    .map(|instance| operation(instance)))
+                self.state(|state| {
+                    state
+                        .converting_frame_mut()
+                        .get_instance_mut(id)
+                        .map(|instance| operation(instance))
+                })
             }
         }
     }
@@ -160,11 +182,12 @@ impl Cx<'_> {
             return Ok(None);
         }
 
-        let mut state = self.state()?;
-        let (frame, settings) = state.converting_frame_and_settings_mut();
-        Ok(frame
-            .get_instance_mut(id)
-            .map(|instance| operation(instance, settings)))
+        self.state(|state| {
+            let (frame, settings) = state.converting_frame_and_settings_mut();
+            frame
+                .get_instance_mut(id)
+                .map(|instance| operation(instance, settings))
+        })
     }
 
     /// Runs `operation` on two frame instances at once, or returns `None` when either is gone
@@ -187,20 +210,20 @@ impl Cx<'_> {
             return Ok(None);
         }
 
-        let state = self.state()?;
-        let first = state
-            .frame(role_of(first_key))
-            .and_then(|frame| frame.get_instance(first_id));
-        let second = state
-            .frame(role_of(second_key))
-            .and_then(|frame| frame.get_instance(second_id));
-        Ok(first
-            .zip(second)
-            .map(|(first, second)| operation(first, second)))
+        self.state(|state| {
+            let first = state
+                .frame(role_of(first_key))
+                .and_then(|frame| frame.get_instance(first_id));
+            let second = state
+                .frame(role_of(second_key))
+                .and_then(|frame| frame.get_instance(second_id));
+            first
+                .zip(second)
+                .map(|(first, second)| operation(first, second))
+        })
     }
 
-    /// Runs `operation` on the first instance of two shapes at once, or returns `None` when
-    /// either shape is gone.
+    /// Runs `operation` on two shapes at once, or returns `None` when either is gone.
     pub fn with_shape_pair<R>(
         &self,
         first: &ShapeTarget,
@@ -211,16 +234,17 @@ impl Cx<'_> {
             return Ok(None);
         }
 
-        let state = self.state()?;
-        let first = state
-            .frame(role_of(first.key))
-            .and_then(|frame| frame.get_shape(first.id));
-        let second = state
-            .frame(role_of(second.key))
-            .and_then(|frame| frame.get_shape(second.id));
-        Ok(first
-            .zip(second)
-            .map(|(first, second)| operation(first, second)))
+        self.state(|state| {
+            let first_shape = state
+                .frame(role_of(first.key))
+                .and_then(|frame| frame.get_shape(first.id));
+            let second_shape = state
+                .frame(role_of(second.key))
+                .and_then(|frame| frame.get_shape(second.id));
+            first_shape
+                .zip(second_shape)
+                .map(|(first, second)| operation(first, second))
+        })
     }
 
     /// Runs `operation` on the shape `target` names, or returns `None` when it is gone.
@@ -233,13 +257,14 @@ impl Cx<'_> {
             return Ok(None);
         }
 
-        let state = self.state()?;
-        let state = &*state;
-        Ok(state.frame(role_of(target.key)).and_then(|frame| {
-            frame
-                .get_shape(target.id)
-                .map(|shape| operation(shape, frame, state))
-        }))
+        self.state(|state| {
+            let state: &ConversionState = state;
+            state.frame(role_of(target.key)).and_then(|frame| {
+                frame
+                    .get_shape(target.id)
+                    .map(|shape| operation(shape, frame, state))
+            })
+        })
     }
 
     /// Runs `operation` on the shape `target` names for writing. The pinned frame is never
@@ -253,11 +278,12 @@ impl Cx<'_> {
             return Ok(None);
         }
 
-        let mut state = self.state()?;
-        Ok(state
-            .converting_frame_mut()
-            .get_shape_mut(target.id)
-            .map(operation))
+        self.state(|state| {
+            state
+                .converting_frame_mut()
+                .get_shape_mut(target.id)
+                .map(operation)
+        })
     }
 
     /// Runs `operation` on the shape `target` names for writing, together with the settings its
@@ -271,11 +297,12 @@ impl Cx<'_> {
             return Ok(None);
         }
 
-        let mut state = self.state()?;
-        let (frame, settings) = state.converting_frame_and_settings_mut();
-        Ok(frame
-            .get_shape_mut(target.id)
-            .map(|shape| operation(shape, settings)))
+        self.state(|state| {
+            let (frame, settings) = state.converting_frame_and_settings_mut();
+            frame
+                .get_shape_mut(target.id)
+                .map(|shape| operation(shape, settings))
+        })
     }
 
     /// Runs `operation` on the registry pattern `id`, or returns `None` when it is gone.
@@ -284,12 +311,13 @@ impl Cx<'_> {
         id: PatternId,
         operation: impl FnOnce(&EnginePattern, &ConversionState) -> R,
     ) -> mlua::Result<Option<R>> {
-        let state = self.state()?;
-        let state = &*state;
-        Ok(state
-            .patterns()
-            .get(id)
-            .map(|pattern| operation(pattern, state)))
+        self.state(|state| {
+            let state: &ConversionState = state;
+            state
+                .patterns()
+                .get(id)
+                .map(|pattern| operation(pattern, state))
+        })
     }
 
     /// Runs `operation` on the registry pattern `id` for writing.
@@ -298,8 +326,7 @@ impl Cx<'_> {
         id: PatternId,
         operation: impl FnOnce(&mut EnginePattern) -> R,
     ) -> mlua::Result<Option<R>> {
-        let mut state = self.state()?;
-        Ok(state.pattern_mut(id).map(operation))
+        self.state(|state| state.pattern_mut(id).map(operation))
     }
 }
 
@@ -316,11 +343,11 @@ pub(crate) fn read_vec3_ref(cx: &Cx, reference: &Vec3Ref) -> mlua::Result<Vec3> 
                 InstanceVec::DeformPivot => instance.deform_pivot,
             })?
             .unwrap_or_default()),
-        Vec3Ref::CameraRotation => Ok(cx.data()?.env.camera.angles()),
-        Vec3Ref::CameraTarget => Ok(cx.data()?.env.camera.look_at()),
-        Vec3Ref::ZapperOffset => Ok(cx.data()?.env.input.zapper_offset()),
-        Vec3Ref::BackdropSize => Ok(cx.data()?.env.backdrop.size()),
-        Vec3Ref::BackdropOffset => Ok(cx.data()?.env.backdrop.offset()),
+        Vec3Ref::CameraRotation => cx.data(|data| data.env.camera.angles()),
+        Vec3Ref::CameraTarget => cx.data(|data| data.env.camera.look_at()),
+        Vec3Ref::ZapperOffset => cx.data(|data| data.env.input.zapper_offset()),
+        Vec3Ref::BackdropSize => cx.data(|data| data.env.backdrop.size()),
+        Vec3Ref::BackdropOffset => cx.data(|data| data.env.backdrop.offset()),
     }
 }
 
@@ -337,11 +364,11 @@ pub(crate) fn write_vec3_ref(cx: &Cx, reference: &Vec3Ref, value: Vec3) -> mlua:
                 InstanceVec::DeformPivot => instance.deform_pivot = value,
             })?;
         }
-        Vec3Ref::CameraRotation => cx.data()?.env.camera.set_angles(value),
-        Vec3Ref::CameraTarget => cx.data()?.env.camera.set_look_at(value),
-        Vec3Ref::ZapperOffset => cx.data()?.env.input.set_zapper_offset(value),
-        Vec3Ref::BackdropSize => cx.data()?.env.backdrop.set_size(value),
-        Vec3Ref::BackdropOffset => cx.data()?.env.backdrop.set_offset(value),
+        Vec3Ref::CameraRotation => cx.data(|data| data.env.camera.set_angles(value))?,
+        Vec3Ref::CameraTarget => cx.data(|data| data.env.camera.set_look_at(value))?,
+        Vec3Ref::ZapperOffset => cx.data(|data| data.env.input.set_zapper_offset(value))?,
+        Vec3Ref::BackdropSize => cx.data(|data| data.env.backdrop.set_size(value))?,
+        Vec3Ref::BackdropOffset => cx.data(|data| data.env.backdrop.set_offset(value))?,
     }
 
     Ok(())

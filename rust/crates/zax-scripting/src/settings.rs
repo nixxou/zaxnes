@@ -92,7 +92,7 @@ pub struct ScriptSettings {
     light: ScriptLight,
     pending: Vec<SettingId>,
     changed: Option<Box<dyn FnMut(SettingId)>>,
-    view_reset: Option<Box<dyn FnMut()>>,
+    view_reset: bool,
     save_requested: Option<Box<dyn FnMut()>>,
     load_requested: Option<Box<dyn FnMut()>>,
 }
@@ -113,7 +113,7 @@ impl ScriptSettings {
             light,
             pending: Vec::new(),
             changed: None,
-            view_reset: None,
+            view_reset: false,
             save_requested: None,
             load_requested: None,
         }
@@ -137,10 +137,11 @@ impl ScriptSettings {
         self.changed = Some(Box::new(callback));
     }
 
-    /// Sets what a view reset asks of the host (SPEC-06 REQ-SCN-012): a change of field of view
-    /// or of scene ratio triggers it (REQ-PERS-011, REQ-LUA-095).
-    pub fn set_on_view_reset(&mut self, callback: impl FnMut() + 'static) {
-        self.view_reset = Some(Box::new(callback));
+    /// True once since the last call when a change of field of view or of the kept scene ratio
+    /// asks for a view reset (SPEC-06 REQ-SCN-012, REQ-PERS-011, REQ-LUA-095). The runtime
+    /// answers it with [`ScriptCamera::reset_view`](crate::ScriptCamera::reset_view).
+    pub fn take_view_reset(&mut self) -> bool {
+        std::mem::take(&mut self.view_reset)
     }
 
     /// Sets what `Setting:Save()` asks of the host: write the settings file now (REQ-PERS-015).
@@ -424,9 +425,7 @@ impl ScriptSettings {
             // A change of field of view or of the kept scene ratio resets the view
             // (REQ-SCN-002, REQ-SCN-012, REQ-PERS-011).
             if matches!(id, SettingId::CameraFov | SettingId::VrSceneRatio) {
-                if let Some(callback) = &mut self.view_reset {
-                    callback();
-                }
+                self.view_reset = true;
             }
         }
     }

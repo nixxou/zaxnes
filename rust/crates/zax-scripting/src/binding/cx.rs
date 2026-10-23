@@ -1,9 +1,9 @@
 //! The context of a call from Lua into the host: access to the runtime and the engine state
 //! the call was made under, argument checking (REQ-LUA-041) and error raising.
 
-use mlua::{AnyUserData, Lua, MultiValue, Table, UserDataRefMut, Value};
+use mlua::{AnyUserData, Lua, MultiValue, Table, Value};
 use zax_engine3d::engine::ConversionState;
-use zax_engine3d::instance::InstanceRef;
+use zax_engine3d::instance::{InstanceRef, PatternInstance};
 use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
 use super::payload::{Host, Payload, Vec3Ref};
@@ -35,45 +35,53 @@ impl<'a> Cx<'a> {
         mlua::Error::runtime(format!("{what} is not available here"))
     }
 
-    /// The runtime's data.
-    pub fn data(&self) -> mlua::Result<UserDataRefMut<RuntimeData>> {
-        let lent = self
-            .lua
+    fn lent(&self) -> mlua::Result<mlua::AppDataRef<'_, Lent>> {
+        self.lua
             .app_data_ref::<Lent>()
-            .ok_or_else(|| Self::not_available("the script API"))?;
-        lent.data.borrow_mut::<RuntimeData>()
+            .ok_or_else(|| Self::not_available("the script API"))
     }
 
-    /// The engine state, which only a hook with access to it has.
-    pub fn state(&self) -> mlua::Result<UserDataRefMut<ConversionState>> {
-        let lent = self
-            .lua
-            .app_data_ref::<Lent>()
-            .ok_or_else(|| Self::not_available("the script API"))?;
+    /// Runs `operation` on the runtime's data. The data is lent to the Lua state for the
+    /// length of a call into it, so it can only be reached through a closure.
+    pub fn data<R>(&self, operation: impl FnOnce(&mut RuntimeData) -> R) -> mlua::Result<R> {
+        self.lent()?
+            .data
+            .borrow_mut_scoped::<RuntimeData, R>(operation)
+    }
+
+    /// Runs `operation` on the engine state, which only a hook with access to it has.
+    pub fn state<R>(&self, operation: impl FnOnce(&mut ConversionState) -> R) -> mlua::Result<R> {
+        let lent = self.lent()?;
         lent.state
             .as_ref()
             .ok_or_else(|| Self::not_available("the conversion state"))?
-            .borrow_mut::<ConversionState>()
+            .borrow_mut_scoped::<ConversionState, R>(operation)
+    }
+
+    /// Runs `operation`, which may fail with a Lua error of its own, on the engine state.
+    pub fn try_state<R>(
+        &self,
+        operation: impl FnOnce(&mut ConversionState) -> mlua::Result<R>,
+    ) -> mlua::Result<R> {
+        self.state(operation)?
     }
 
     /// True when the call was made with the engine state at hand.
     pub fn has_state(&self) -> bool {
-        self.lua
-            .app_data_ref::<Lent>()
-            .is_some_and(|lent| lent.state.is_some())
+        self.lent().is_ok_and(|lent| lent.state.is_some())
     }
 
-    /// The pattern instance being built, when `reference` is it.
-    pub fn build_target(
+    /// Runs `operation` on the pattern instance being built, when `reference` is it.
+    pub fn build_target<R>(
         &self,
         reference: InstanceRef,
-    ) -> mlua::Result<Option<UserDataRefMut<zax_engine3d::instance::PatternInstance>>> {
-        let lent = self
-            .lua
-            .app_data_ref::<Lent>()
-            .ok_or_else(|| Self::not_available("the script API"))?;
+        operation: impl FnOnce(&mut PatternInstance) -> R,
+    ) -> mlua::Result<Option<R>> {
+        let lent = self.lent()?;
         match &lent.build {
-            Some((building, target)) if *building == reference => Ok(Some(target.borrow_mut()?)),
+            Some((building, target)) if *building == reference => Ok(Some(
+                target.borrow_mut_scoped::<PatternInstance, R>(operation)?,
+            )),
             _ => Ok(None),
         }
     }

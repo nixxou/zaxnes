@@ -40,7 +40,7 @@ fn require(call: &Call, kind: HostType, member: &str) -> mlua::Result<()> {
 /// Points the subjective camera at the followed shape, if any and if it is still part of the
 /// frame being converted (`Camera.FpvShape`, REQ-LUA-088).
 pub(crate) fn apply_camera_tracking(cx: &Cx) -> mlua::Result<()> {
-    let Some(shape) = cx.data()?.fpv_shape else {
+    let Some(shape) = cx.data(|data| data.fpv_shape)? else {
         return Ok(());
     };
 
@@ -61,8 +61,10 @@ pub(crate) fn apply_camera_tracking(cx: &Cx) -> mlua::Result<()> {
     } else {
         FrameRole::Converting
     };
-    cx.state()?.start_tracker(role, shape.id);
-    cx.data()?.env.camera.set_look_at(position);
+    cx.state(|state| {
+        state.start_tracker(role, shape.id);
+    })?;
+    cx.data(|data| data.env.camera.set_look_at(position))?;
     Ok(())
 }
 
@@ -83,51 +85,45 @@ fn camera() -> TypeDef {
     );
     definition.property(
         "Distance",
-        |cx, _| Ok(num(cx.data()?.env.camera.distance())),
+        |cx, _| Ok(num(cx.data(|data| data.env.camera.distance())?)),
         |cx, _, value| {
             let distance = cx.real(value, "Distance")?;
-            cx.data()?.env.camera.set_distance(distance);
-            Ok(())
+            cx.data(|data| data.env.camera.set_distance(distance))
         },
         None,
     );
     definition.property(
         "Mode",
-        |cx, _| Ok(num(cx.data()?.env.camera.mode())),
+        |cx, _| Ok(num(cx.data(|data| data.env.camera.mode())?)),
         |cx, _, value| {
             let mode = cx.integer(value, "Mode")?.clamp(0, 1);
-            cx.data()?.env.camera.set_mode(mode);
-            Ok(())
+            cx.data(|data| data.env.camera.set_mode(mode))
         },
         None,
     );
     definition.property(
         "LookAt",
-        |cx, _| cx.vector3(cx.data()?.env.camera.look_at()),
+        |cx, _| cx.vector3(cx.data(|data| data.env.camera.look_at())?),
         |cx, _, value| {
             let target = cx.vec3(value, "LookAt")?;
-            cx.data()?.env.camera.set_look_at(target);
-            Ok(())
+            cx.data(|data| data.env.camera.set_look_at(target))
         },
         Some(HostType::Vector3),
     );
     definition.property(
         "FpvShape",
         |cx, _| {
-            let shape = {
-                let data = cx.data()?;
-                data.fpv_shape.filter(|shape| shape.key.epoch == data.epoch)
-            };
+            let shape =
+                cx.data(|data| data.fpv_shape.filter(|shape| shape.key.epoch == data.epoch))?;
             shape.map_or(Ok(Value::Nil), |shape| cx.object(Payload::Shape(shape)))
         },
         |cx, _, value| {
             if matches!(value, Value::Nil) {
-                cx.data()?.fpv_shape = None;
-                return Ok(());
+                return cx.data(|data| data.fpv_shape = None);
             }
 
             if let Some(Payload::Shape(shape)) = cx.host(value) {
-                cx.data()?.fpv_shape = Some(shape);
+                cx.data(|data| data.fpv_shape = Some(shape))?;
                 return apply_camera_tracking(cx);
             }
 
@@ -137,12 +133,12 @@ fn camera() -> TypeDef {
     );
     definition.read_only(
         "IsFPV",
-        |cx, _| Ok(boolean(cx.data()?.env.camera.mode() == 1)),
+        |cx, _| Ok(boolean(cx.data(|data| data.env.camera.mode())? == 1)),
         None,
     );
     definition.read_only(
         "IsTPV",
-        |cx, _| Ok(boolean(cx.data()?.env.camera.mode() == 0)),
+        |cx, _| Ok(boolean(cx.data(|data| data.env.camera.mode())? == 0)),
         None,
     );
 
@@ -158,7 +154,7 @@ fn camera() -> TypeDef {
                     call.real(4, "SetTarget")?,
                 ),
             };
-            call.cx.data()?.env.camera.set_look_at(target);
+            call.cx.data(|data| data.env.camera.set_look_at(target))?;
             Ok(None)
         },
         None,
@@ -167,7 +163,7 @@ fn camera() -> TypeDef {
         "GetTarget",
         |call| {
             require(call, HostType::CameraApi, "GetTarget")?;
-            let target = call.cx.data()?.env.camera.look_at();
+            let target = call.cx.data(|data| data.env.camera.look_at())?;
             reply(call.cx.vector3(target)?)
         },
         Some(HostType::Vector3),
@@ -176,13 +172,13 @@ fn camera() -> TypeDef {
         "SetFPV",
         |call| {
             require(call, HostType::CameraApi, "SetFPV")?;
-            call.cx.data()?.env.camera.set_mode(1);
+            call.cx.data(|data| data.env.camera.set_mode(1))?;
             if call.is_none_or_nil(2) {
                 return Ok(None);
             }
 
             if let Some(Payload::Shape(shape)) = call.host(2) {
-                call.cx.data()?.fpv_shape = Some(shape);
+                call.cx.data(|data| data.fpv_shape = Some(shape))?;
                 apply_camera_tracking(call.cx)?;
                 return Ok(None);
             }
@@ -195,7 +191,7 @@ fn camera() -> TypeDef {
         "SetTPV",
         |call| {
             require(call, HostType::CameraApi, "SetTPV")?;
-            call.cx.data()?.env.camera.set_mode(0);
+            call.cx.data(|data| data.env.camera.set_mode(0))?;
             Ok(None)
         },
         None,
@@ -204,9 +200,10 @@ fn camera() -> TypeDef {
         "ToggleMode",
         |call| {
             require(call, HostType::CameraApi, "ToggleMode")?;
-            let mut data = call.cx.data()?;
-            let mode = if data.env.camera.mode() == 0 { 1 } else { 0 };
-            data.env.camera.set_mode(mode);
+            call.cx.data(|data| {
+                let mode = i32::from(data.env.camera.mode() == 0);
+                data.env.camera.set_mode(mode);
+            })?;
             Ok(None)
         },
         None,
@@ -215,7 +212,7 @@ fn camera() -> TypeDef {
         "ResetView",
         |call| {
             require(call, HostType::CameraApi, "ResetView")?;
-            call.cx.data()?.env.camera.reset_view();
+            call.cx.data(|data| data.env.camera.reset_view())?;
             Ok(None)
         },
         None,
@@ -233,21 +230,21 @@ fn backdrop_axis(
     definition.property(
         name,
         move |cx, _| {
-            let value = read(&*cx.data()?);
+            let value = cx.data(|data| read(data))?;
             Ok(num([value.x, value.y, value.z][axis]))
         },
         move |cx, _, value| {
             let component = cx.real(value, name)?;
-            let mut data = cx.data()?;
-            let mut current = read(&data);
-            match axis {
-                0 => current.x = component,
-                1 => current.y = component,
-                _ => current.z = component,
-            }
+            cx.data(|data| {
+                let mut current = read(data);
+                match axis {
+                    0 => current.x = component,
+                    1 => current.y = component,
+                    _ => current.z = component,
+                }
 
-            write(&mut data, current);
-            Ok(())
+                write(data, current);
+            })
         },
         None,
     );
@@ -258,35 +255,31 @@ fn backdrop() -> TypeDef {
     let mut definition = type_def(HostType::BackdropApi, "BackdropAPI");
     definition.property(
         "Enable",
-        |cx, _| Ok(boolean(cx.data()?.env.backdrop.enabled())),
+        |cx, _| Ok(boolean(cx.data(|data| data.env.backdrop.enabled())?)),
         |cx, _, value| {
-            cx.data()?.env.backdrop.set_enabled(assigned_bool(value));
-            Ok(())
+            let enabled = assigned_bool(value);
+            cx.data(|data| data.env.backdrop.set_enabled(enabled))
         },
         None,
     );
     definition.property(
         "Color",
-        |cx, _| cx.color(cx.data()?.env.backdrop.color()),
+        |cx, _| cx.color(cx.data(|data| data.env.backdrop.color())?),
         |cx, _, value| {
             let Some(color) = cx.try_color(value) else {
                 return Err(cx.invalid("Color"));
             };
 
-            cx.data()?.env.backdrop.set_color(color);
-            Ok(())
+            cx.data(|data| data.env.backdrop.set_color(color))
         },
         Some(HostType::Color),
     );
     definition.property(
         "RecvShadow",
-        |cx, _| Ok(boolean(cx.data()?.env.backdrop.receive_shadow())),
+        |cx, _| Ok(boolean(cx.data(|data| data.env.backdrop.receive_shadow())?)),
         |cx, _, value| {
-            cx.data()?
-                .env
-                .backdrop
-                .set_receive_shadow(assigned_bool(value));
-            Ok(())
+            let receive = assigned_bool(value);
+            cx.data(|data| data.env.backdrop.set_receive_shadow(receive))
         },
         None,
     );
@@ -328,7 +321,7 @@ fn light() -> TypeDef {
     let mut definition = type_def(HostType::Light, "Lumiere");
     definition.property(
         "Direction",
-        |cx, _| cx.vector3(cx.data()?.env.settings.light_direction()),
+        |cx, _| cx.vector3(cx.data(|data| data.env.settings.light_direction())?),
         |cx, _, value| {
             let direction = cx.vec3(value, "Direction")?;
             with_settings(cx, |settings| settings.set_light_direction(direction))
@@ -337,7 +330,7 @@ fn light() -> TypeDef {
     );
     definition.property(
         "Color",
-        |cx, _| cx.color(cx.data()?.env.settings.light_color()),
+        |cx, _| cx.color(cx.data(|data| data.env.settings.light_color())?),
         |cx, _, value| {
             let Some(color) = cx.try_color(value) else {
                 return Err(cx.invalid("Color"));
@@ -349,7 +342,7 @@ fn light() -> TypeDef {
     );
     definition.property(
         "Intensity",
-        |cx, _| Ok(num(cx.data()?.env.settings.light_intensity())),
+        |cx, _| Ok(num(cx.data(|data| data.env.settings.light_intensity())?)),
         |cx, _, value| {
             let intensity = cx.real(value, "Intensity")?;
             with_settings(cx, |settings| settings.set_light_intensity(intensity))
@@ -365,11 +358,9 @@ fn video() -> TypeDef {
     definition.property(
         "SceneScale",
         |cx, _| {
-            Ok(num(cx
-                .data()?
-                .env
-                .settings
-                .real(SettingId::SceneSceneScale)))
+            Ok(num(cx.data(|data| {
+                data.env.settings.real(SettingId::SceneSceneScale)
+            })?))
         },
         |cx, _, value| {
             let scale = cx.real(value, "SceneScale")?;
@@ -393,13 +384,12 @@ fn profile() -> TypeDef {
         definition.property(
             name,
             move |cx, _| {
-                let text = read(&cx.data()?.env.profile).to_owned();
+                let text = cx.data(|data| read(&data.env.profile).to_owned())?;
                 cx.text(&text)
             },
             move |cx, _, value| {
                 let text = cx.string(value, name)?;
-                write(&mut cx.data()?.env.profile, text);
-                Ok(())
+                cx.data(|data| write(&mut data.env.profile, text))
             },
             None,
         );
@@ -423,7 +413,7 @@ fn profile() -> TypeDef {
     definition.read_only(
         "Id",
         |cx, _| {
-            let id = cx.data()?.env.profile.id.clone();
+            let id = cx.data(|data| data.env.profile.id.clone())?;
             cx.text(&id)
         },
         None,
@@ -431,14 +421,14 @@ fn profile() -> TypeDef {
     definition.read_only(
         "Ver",
         |cx, _| {
-            let version = cx.data()?.env.profile.version.clone();
+            let version = cx.data(|data| data.env.profile.version.clone())?;
             cx.text(&version)
         },
         None,
     );
     definition.read_only(
         "IsV2Format",
-        |cx, _| Ok(boolean(cx.data()?.env.profile.is_v2_format())),
+        |cx, _| Ok(boolean(cx.data(|data| data.env.profile.is_v2_format())?)),
         None,
     );
     definition.function(
@@ -446,10 +436,7 @@ fn profile() -> TypeDef {
         |call| {
             require(call, HostType::ProfileApi, "RenewId")?;
             call.cx
-                .data()?
-                .env
-                .profile
-                .renew_id()
+                .data(|data| data.env.profile.renew_id())?
                 .map_err(mlua::Error::external)?;
             Ok(None)
         },
@@ -460,15 +447,15 @@ fn profile() -> TypeDef {
 
 /// Raises a notification for the host (REQ-LUA-093).
 fn notify(cx: &Cx, message: String, seconds: f32, severity: i32) -> mlua::Result<()> {
-    if let Some(callback) = cx.data()?.env.notify.as_mut() {
-        callback(ScriptNotification {
-            message,
-            seconds,
-            severity: ScriptNotificationSeverity::from_raw(severity),
-        });
-    }
-
-    Ok(())
+    cx.data(|data| {
+        if let Some(callback) = data.env.notify.as_mut() {
+            callback(ScriptNotification {
+                message,
+                seconds,
+                severity: ScriptNotificationSeverity::from_raw(severity),
+            });
+        }
+    })
 }
 
 /// Notifications (REQ-LUA-093): table functions, called with `.`.

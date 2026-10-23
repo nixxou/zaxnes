@@ -17,3 +17,6 @@ zax-engine3d = { path = "../zax-engine3d" }
 zax-profiles = { path = "../zax-profiles" }
 zax-settings = { path = "../zax-settings" }
 
+
+[dev-dependencies]
+zax-nes = { path = "../zax-nes" }
