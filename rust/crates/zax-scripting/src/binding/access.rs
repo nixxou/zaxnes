@@ -343,11 +343,11 @@ pub(crate) fn read_vec3_ref(cx: &Cx, reference: &Vec3Ref) -> mlua::Result<Vec3> 
                 InstanceVec::DeformPivot => instance.deform_pivot,
             })?
             .unwrap_or_default()),
-        Vec3Ref::CameraRotation => cx.data(|data| data.env.camera.angles()),
-        Vec3Ref::CameraTarget => cx.data(|data| data.env.camera.look_at()),
-        Vec3Ref::ZapperOffset => cx.data(|data| data.env.input.zapper_offset()),
-        Vec3Ref::BackdropSize => cx.data(|data| data.env.backdrop.size()),
-        Vec3Ref::BackdropOffset => cx.data(|data| data.env.backdrop.offset()),
+        Vec3Ref::CameraRotation => cx.host(move |ctx| ctx.camera.angles()),
+        Vec3Ref::CameraTarget => cx.host(move |ctx| ctx.camera.look_at()),
+        Vec3Ref::ZapperOffset => cx.host(move |ctx| ctx.machine.zapper_offset()),
+        Vec3Ref::BackdropSize => cx.host(move |ctx| ctx.backdrop.size()),
+        Vec3Ref::BackdropOffset => cx.host(move |ctx| ctx.backdrop.offset()),
     }
 }
 
@@ -364,11 +364,11 @@ pub(crate) fn write_vec3_ref(cx: &Cx, reference: &Vec3Ref, value: Vec3) -> mlua:
                 InstanceVec::DeformPivot => instance.deform_pivot = value,
             })?;
         }
-        Vec3Ref::CameraRotation => cx.data(|data| data.env.camera.set_angles(value))?,
-        Vec3Ref::CameraTarget => cx.data(|data| data.env.camera.set_look_at(value))?,
-        Vec3Ref::ZapperOffset => cx.data(|data| data.env.input.set_zapper_offset(value))?,
-        Vec3Ref::BackdropSize => cx.data(|data| data.env.backdrop.set_size(value))?,
-        Vec3Ref::BackdropOffset => cx.data(|data| data.env.backdrop.set_offset(value))?,
+        Vec3Ref::CameraRotation => cx.host(move |ctx| ctx.camera.set_angles(value))?,
+        Vec3Ref::CameraTarget => cx.host(move |ctx| ctx.camera.set_look_at(value))?,
+        Vec3Ref::ZapperOffset => cx.host(move |ctx| ctx.machine.set_zapper_offset(value))?,
+        Vec3Ref::BackdropSize => cx.host(move |ctx| ctx.backdrop.set_size(value))?,
+        Vec3Ref::BackdropOffset => cx.host(move |ctx| ctx.backdrop.set_offset(value))?,
     }
 
     Ok(())

@@ -6,11 +6,13 @@
 //! The settings model belongs to the host. The Lua runtime keeps a model of its own inside
 //! `Setting`, so the session lends the host's model to the runtime for the length of each call
 //! that can run a script (`lend`), by exchanging it with a placeholder, and gives it back
-//! afterwards. The core and the scene are shared with the script bridges, which are `'static`
-//! trait objects of the scripting crate; see [`SharedCore`].
+//! afterwards.
+//!
+//! The session owns the core and the script inputs; the host owns the scene and passes it to
+//! every call that can run a script. The runtime keeps none of them: each call into the
+//! conversion engine that can reach a hook borrows them for its length (`scripted`), through
+//! the [`ScriptBridge`] of the runtime, so the compiler rules out a conflicting access.
 
-use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::rc::Rc;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 use zax_engine3d::draw_list::FrameDrawList;
@@ -23,21 +25,17 @@ use zax_nes::rom::RomLoadResult;
 use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord, ZapperPosition};
 use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
+use zax_render::scene::SceneState;
 use zax_scripting::{
-    LuaScriptError, ProfileScriptRuntime, ScriptEnvironment, ScriptInput, ScriptLight, ScriptLog,
-    ScriptMemory, ScriptProfileInfo, ScriptSettings,
+    LuaScriptError, ProfileScriptRuntime, ScriptBridge, ScriptContext, ScriptEnvironment,
+    ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptProfileInfo, ScriptSettings,
 };
 use zax_settings::catalogue::{Port, SettingId};
 use zax_settings::model::SettingsModel;
 
 use crate::input::input_action::InputAction;
 use crate::input::routing;
-use crate::scene_script_bridge::{self, SceneBackdropBridge, SceneCameraBridge, SharedScene};
-
-/// The core, shared between the session and the script bridges that read and write its memory
-/// and its ports. The core is never running while a script executes (the conversion runs after
-/// `run_frame` has returned), so the borrows never overlap.
-pub type SharedCore = Rc<RefCell<NesCore>>;
+use crate::scene_script_bridge::{self, SceneBackdropBridge, SceneCameraBridge};
 
 /// Why a session could not be created.
 #[derive(Debug, thiserror::Error)]
@@ -69,78 +67,71 @@ fn notify(sender: &Sender<SessionEvent>, event: SessionEvent) {
     }
 }
 
-/// The state the script input bridge shares with the session.
+/// What the scripts read of the inputs and write of the Zapper aim.
 #[derive(Debug, Default)]
-struct ScriptInputCells {
-    players: Cell<[i32; 2]>,
-    zapper_offset: Cell<Vec3>,
+struct ScriptInputState {
+    players: [i32; 2],
+    zapper_offset: Vec3,
 }
 
-/// The inputs as scripts see them: the players' action masks, the ports of the core and the
-/// Zapper aim offset.
-struct CoreScriptInput {
-    core: SharedCore,
-    cells: Rc<ScriptInputCells>,
+/// The machine as scripts see it, borrowed for one call into the engine: the players' action
+/// masks, the ports and the CPU address space of the core, and the Zapper aim offset.
+struct CoreMachine<'a> {
+    core: &'a mut NesCore,
+    input: &'a mut ScriptInputState,
 }
 
-impl ScriptInput for CoreScriptInput {
+impl ScriptInput for CoreMachine<'_> {
     fn player_state(&self, index: usize) -> i32 {
-        self.cells.players.get().get(index).copied().unwrap_or(0)
+        self.input.players.get(index).copied().unwrap_or(0)
     }
 
     fn global_state(&self) -> i32 {
-        let [one, two] = self.cells.players.get();
+        let [one, two] = self.input.players;
         one | two
     }
 
     fn port_byte(&self, port: usize) -> i32 {
         if port < 2 {
-            i32::from(self.core.borrow().bus().input().port_byte(port))
+            i32::from(self.core.bus().input().port_byte(port))
         } else {
             0
         }
     }
 
     fn port_type(&self, port: usize) -> i32 {
-        self.core
-            .borrow()
-            .port_type(port)
-            .map_or(0, |kind| kind as i32)
+        self.core.port_type(port).map_or(0, |kind| kind as i32)
     }
 
     fn set_port_types(&mut self, first: i32, second: i32) {
-        let mut core = self.core.borrow_mut();
         for (port, kind) in [first, second].into_iter().enumerate() {
             let kind = if kind.clamp(0, 1) == 1 {
                 ControllerPortType::Zapper
             } else {
                 ControllerPortType::Controller
             };
-            if core.set_port_type(port, kind).is_err() {
+            if self.core.set_port_type(port, kind).is_err() {
                 // Both ports exist, so this cannot happen; the type is simply not changed.
             }
         }
     }
 
     fn zapper_offset(&self) -> Vec3 {
-        self.cells.zapper_offset.get()
+        self.input.zapper_offset
     }
 
     fn set_zapper_offset(&mut self, offset: Vec3) {
-        self.cells.zapper_offset.set(offset);
+        self.input.zapper_offset = offset;
     }
 }
 
-/// The core's CPU address space as scripts see it.
-struct CoreScriptMemory(SharedCore);
-
-impl ScriptMemory for CoreScriptMemory {
+impl ScriptMemory for CoreMachine<'_> {
     fn read(&self, address: u16) -> u8 {
-        self.0.borrow().read_memory(address)
+        self.core.read_memory(address)
     }
 
     fn write(&mut self, address: u16, value: u8) {
-        self.0.borrow_mut().write_memory(address, value);
+        self.core.write_memory(address, value);
     }
 }
 
@@ -151,7 +142,7 @@ pub struct SessionRequest<'a> {
     /// The title to show when the profile has none.
     pub title: &'a str,
     /// The scene the camera and backdrop bridges drive.
-    pub scene: SharedScene,
+    pub scene: &'a mut SceneState,
     /// Where `print` and the script errors go.
     pub log: Box<dyn ScriptLog>,
     /// Whether the profile's settings are applied to the model: true for a different game
@@ -163,9 +154,10 @@ pub struct SessionRequest<'a> {
 
 /// One game being played.
 pub struct GameSession {
-    core: SharedCore,
+    core: NesCore,
     engine: ConversionEngine,
-    input: Rc<ScriptInputCells>,
+    bridge: ScriptBridge,
+    input: ScriptInputState,
     events: Receiver<SessionEvent>,
     title: String,
     frame_counter: i32,

@@ -1,12 +1,15 @@
 //! The context of a call from Lua into the host: access to the runtime and the engine state
 //! the call was made under, argument checking (REQ-LUA-041) and error raising.
 
-use mlua::{AnyUserData, Lua, MultiValue, Table, Value};
+use std::any::Any;
+
+use mlua::{AnyUserData, Function, Lua, MultiValue, Table, Value};
 use zax_engine3d::engine::ConversionState;
 use zax_engine3d::instance::{InstanceRef, PatternInstance};
 use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
 use super::payload::{Host, Payload, Vec3Ref};
+use crate::environment::ScriptContext;
 use crate::runtime::RuntimeData;
 use crate::values::{number_format, LuaColor};
 
@@ -16,6 +19,67 @@ pub(crate) struct Lent {
     pub data: AnyUserData,
     pub state: Option<AnyUserData>,
     pub build: Option<(InstanceRef, AnyUserData)>,
+}
+
+/// A request for the host context: run against the lent [`ScriptContext`], and answer with a
+/// boxed value.
+type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Box<dyn Any>>;
+
+/// The way to the [`ScriptContext`] a host lent for the length of a call. The context is
+/// borrowed, so it cannot be stored in the Lua state: what is stored is a function, valid for the
+/// scope of the lend, which runs the pending request against the context.
+pub(crate) struct HostLink {
+    pub call: Function,
+    pending: Option<HostRequest>,
+    answer: Option<Box<dyn Any>>,
+}
+
+impl HostLink {
+    pub const fn new(call: Function) -> Self {
+        Self {
+            call,
+            pending: None,
+            answer: None,
+        }
+    }
+
+    /// The body of the function behind [`HostLink::call`].
+    pub fn serve(lua: &Lua, context: &mut ScriptContext<'_>) -> mlua::Result<()> {
+        let request = lua
+            .app_data_mut::<Self>()
+            .and_then(|mut link| link.pending.take())
+            .ok_or_else(|| mlua::Error::runtime("no request for the host context"))?;
+        let answer = request(context);
+        lua.app_data_mut::<Self>()
+            .ok_or_else(|| mlua::Error::runtime("the host context was withdrawn"))?
+            .answer = Some(answer);
+        Ok(())
+    }
+}
+
+/// Runs `operation` on the host context lent to `lua`, or on the headless bridges of the
+/// runtime's environment when the host lent none.
+pub(crate) fn with_host_context<R: 'static>(
+    lua: &Lua,
+    data: &mut RuntimeData,
+    operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+) -> mlua::Result<R> {
+    let Some(call) = lua.app_data_ref::<HostLink>().map(|link| link.call.clone()) else {
+        return Ok(data.env.with_headless_context(operation));
+    };
+
+    lua.app_data_mut::<HostLink>()
+        .ok_or_else(|| mlua::Error::runtime("the host context was withdrawn"))?
+        .pending = Some(Box::new(move |context| Box::new(operation(context))));
+    call.call::<()>(())?;
+    let answer = lua
+        .app_data_mut::<HostLink>()
+        .and_then(|mut link| link.answer.take())
+        .ok_or_else(|| mlua::Error::runtime("the host context gave no answer"))?;
+    answer
+        .downcast::<R>()
+        .map(|answer| *answer)
+        .map_err(|_| mlua::Error::runtime("the host context gave another answer"))
 }
 
 /// The weak table that maps a reference object to its Lua value.
@@ -47,6 +111,15 @@ impl<'a> Cx<'a> {
         self.lent()?
             .data
             .borrow_mut_scoped::<RuntimeData, R>(operation)
+    }
+
+    /// Runs `operation` on the camera, backdrop, inputs and memory the host lent to this call.
+    /// The operation outlives the borrow of the host, so it owns what it captures.
+    pub fn host<R: 'static>(
+        &self,
+        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+    ) -> mlua::Result<R> {
+        self.data(|data| with_host_context(self.lua, data, operation))?
     }
 
     /// Runs `operation` on the engine state, which only a hook with access to it has.

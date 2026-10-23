@@ -24,12 +24,12 @@ mod values;
 pub use environment::{
     CollectingScriptLog, DetachedScriptBackdrop, DetachedScriptCamera, DetachedScriptInput,
     DetachedScriptMemory, NullScriptLog, ScriptBackdrop, ScriptCamera, ScriptEnvironment,
-    ScriptInput, ScriptLog, ScriptMemory, ScriptNotification, ScriptNotificationSeverity,
+    ScriptContext, ScriptInput, ScriptLog, ScriptMachine, ScriptMemory, ScriptNotification, ScriptNotificationSeverity,
     ScriptProfileInfo,
 };
 pub use error::LuaScriptError;
 pub use lua_runtime::LuaRuntime;
-pub use runtime::ProfileScriptRuntime;
+pub use runtime::{ProfileScriptRuntime, ScriptBridge};
 pub use script::{LoadedScript, ScriptHook};
 pub use settings::{ScriptLight, ScriptSettings};
 pub use surface::{ScriptApiMember, ScriptApiSurface, ScriptApiType};

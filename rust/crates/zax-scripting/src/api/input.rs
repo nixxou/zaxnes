@@ -106,7 +106,7 @@ fn gamepad() -> [TypeDef; 2] {
     let mut pads = type_def(HostType::GamepadApi, "ManettesAPI");
     pads.read_only(
         "State",
-        |cx, _| Ok(num(cx.data(|data| data.env.input.global_state())?)),
+        |cx, _| Ok(num(cx.host(move |ctx| ctx.machine.global_state())?)),
         None,
     );
     pads.function(
@@ -115,7 +115,7 @@ fn gamepad() -> [TypeDef; 2] {
             require(call, HostType::GamepadApi, "Pressed")?;
             let mask = call.integer(2, "Pressed")?;
             Ok(Some(boolean(
-                call.cx.data(|data| data.env.input.global_state())? & mask != 0,
+                call.cx.host(move |ctx| ctx.machine.global_state())? & mask != 0,
             )))
         },
         None,
@@ -128,7 +128,7 @@ fn gamepad() -> [TypeDef; 2] {
             let port = call.cx.check_bounds(port, 2, "GetInput")?;
             Ok(Some(num(call
                 .cx
-                .data(|data| data.env.input.port_byte(port))?)))
+                .host(move |ctx| ctx.machine.port_byte(port))?)))
         },
         None,
     );
@@ -144,7 +144,10 @@ fn gamepad() -> [TypeDef; 2] {
     player.read_only(
         "State",
         |cx, this| match this {
-            Payload::Player(index) => Ok(num(cx.data(|data| data.env.input.player_state(*index))?)),
+            Payload::Player(index) => {
+                let index = *index;
+                Ok(num(cx.host(move |ctx| ctx.machine.player_state(index))?))
+            }
             _ => Ok(num(0)),
         },
         None,
@@ -158,7 +161,7 @@ fn gamepad() -> [TypeDef; 2] {
 
             let mask = call.integer(2, "Pressed")?;
             Ok(Some(boolean(
-                call.cx.data(|data| data.env.input.player_state(index))? & mask != 0,
+                call.cx.host(move |ctx| ctx.machine.player_state(index))? & mask != 0,
             )))
         },
         None,

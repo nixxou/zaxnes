@@ -488,7 +488,7 @@ fn script() -> [TypeDef; 2] {
             let address = number_format::to_address(call.number(2, "ReadMem")?);
             Ok(Some(num(call
                 .cx
-                .data(|data| data.env.memory.read(address))?)))
+                .host(move |ctx| ctx.machine.read(address))?)))
         },
         None,
     );
@@ -498,7 +498,7 @@ fn script() -> [TypeDef; 2] {
             require(call, HostType::ScriptApi, "WriteMem")?;
             let address = number_format::to_address(call.number(2, "WriteMem")?);
             let value = number_format::to_byte(call.number(3, "WriteMem")?);
-            call.cx.data(|data| data.env.memory.write(address, value))?;
+            call.cx.host(move |ctx| ctx.machine.write(address, value))?;
             Ok(None)
         },
         None,

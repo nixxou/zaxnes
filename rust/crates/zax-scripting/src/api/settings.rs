@@ -28,15 +28,18 @@ pub(super) fn with_settings(
     operation: impl FnOnce(&mut ScriptSettings),
 ) -> mlua::Result<()> {
     let has_state = cx.has_state();
-    cx.data(|data| {
+    let view_reset = cx.data(|data| {
         operation(&mut data.env.settings);
         if has_state {
             cx.state(|state| data.settle_settings(Some(state.settings_mut())))
         } else {
-            data.settle_settings(None);
-            Ok(())
+            Ok(data.settle_settings(None))
         }
-    })?
+    })??;
+    if view_reset {
+        cx.host(|ctx| ctx.camera.reset_view())?;
+    }
+    Ok(())
 }
 
 /// Reads from the settings of the runtime.
@@ -304,8 +307,8 @@ fn setting_derived(definition: &mut TypeDef) {
     definition.read_only(
         "ZapperEnable",
         |cx, _| {
-            Ok(boolean(cx.data(|data| {
-                data.env.input.port_type(0) == 1 || data.env.input.port_type(1) == 1
+            Ok(boolean(cx.host(|ctx| {
+                ctx.machine.port_type(0) == 1 || ctx.machine.port_type(1) == 1
             })?))
         },
         None,
@@ -369,7 +372,7 @@ fn setting_functions(definition: &mut TypeDef) {
             require(call, "GetInputType")?;
             let port = call.integer(2, "GetInputType")?;
             let kind = match usize::try_from(port) {
-                Ok(port) => call.cx.data(|data| data.env.input.port_type(port))?,
+                Ok(port) => call.cx.host(move |ctx| ctx.machine.port_type(port))?,
                 Err(_) => 0,
             };
             Ok(Some(num(kind)))
@@ -383,7 +386,7 @@ fn setting_functions(definition: &mut TypeDef) {
             let first = call.integer(2, "SetInputType")?;
             let second = call.integer(3, "SetInputType")?;
             call.cx
-                .data(|data| data.env.input.set_port_types(first, second))?;
+                .host(move |ctx| ctx.machine.set_port_types(first, second))?;
             with_settings(call.cx, |settings| settings.set_port_types(first, second))?;
             Ok(None)
         },

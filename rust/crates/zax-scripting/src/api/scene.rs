@@ -11,7 +11,7 @@ use super::{assigned_bool, boolean, num, type_def};
 use crate::binding::cx::{host_payload, try_color, Call, Cx};
 use crate::binding::payload::{HostType, Payload, Vec3Ref};
 use crate::binding::table::TypeDef;
-use crate::environment::{ScriptNotification, ScriptNotificationSeverity};
+use crate::environment::{ScriptContext, ScriptNotification, ScriptNotificationSeverity};
 use crate::values::number_format;
 
 pub(super) fn declare(types: &mut Vec<TypeDef>) {
@@ -60,7 +60,7 @@ pub(crate) fn apply_camera_tracking(cx: &Cx) -> mlua::Result<()> {
     cx.state(|state| {
         state.start_tracker(role, shape.id);
     })?;
-    cx.data(|data| data.env.camera.set_look_at(position))?;
+    cx.host(move |ctx| ctx.camera.set_look_at(position))?;
     Ok(())
 }
 
@@ -89,28 +89,28 @@ fn camera_properties(definition: &mut TypeDef) {
     );
     definition.property(
         "Distance",
-        |cx, _| Ok(num(cx.data(|data| data.env.camera.distance())?)),
+        |cx, _| Ok(num(cx.host(move |ctx| ctx.camera.distance())?)),
         |cx, _, value| {
             let distance = cx.real(value, "Distance")?;
-            cx.data(|data| data.env.camera.set_distance(distance))
+            cx.host(move |ctx| ctx.camera.set_distance(distance))
         },
         None,
     );
     definition.property(
         "Mode",
-        |cx, _| Ok(num(cx.data(|data| data.env.camera.mode())?)),
+        |cx, _| Ok(num(cx.host(move |ctx| ctx.camera.mode())?)),
         |cx, _, value| {
             let mode = cx.integer(value, "Mode")?.clamp(0, 1);
-            cx.data(|data| data.env.camera.set_mode(mode))
+            cx.host(move |ctx| ctx.camera.set_mode(mode))
         },
         None,
     );
     definition.property(
         "LookAt",
-        |cx, _| cx.vector3(cx.data(|data| data.env.camera.look_at())?),
+        |cx, _| cx.vector3(cx.host(move |ctx| ctx.camera.look_at())?),
         |cx, _, value| {
             let target = cx.vec3(value, "LookAt")?;
-            cx.data(|data| data.env.camera.set_look_at(target))
+            cx.host(move |ctx| ctx.camera.set_look_at(target))
         },
         Some(HostType::Vector3),
     );
@@ -137,12 +137,12 @@ fn camera_properties(definition: &mut TypeDef) {
     );
     definition.read_only(
         "IsFPV",
-        |cx, _| Ok(boolean(cx.data(|data| data.env.camera.mode())? == 1)),
+        |cx, _| Ok(boolean(cx.host(move |ctx| ctx.camera.mode())? == 1)),
         None,
     );
     definition.read_only(
         "IsTPV",
-        |cx, _| Ok(boolean(cx.data(|data| data.env.camera.mode())? == 0)),
+        |cx, _| Ok(boolean(cx.host(move |ctx| ctx.camera.mode())? == 0)),
         None,
     );
 }
@@ -161,7 +161,7 @@ fn camera_methods(definition: &mut TypeDef) {
                     call.real(4, "SetTarget")?,
                 ),
             };
-            call.cx.data(|data| data.env.camera.set_look_at(target))?;
+            call.cx.host(move |ctx| ctx.camera.set_look_at(target))?;
             Ok(None)
         },
         None,
@@ -170,7 +170,7 @@ fn camera_methods(definition: &mut TypeDef) {
         "GetTarget",
         |call| {
             require(call, HostType::CameraApi, "GetTarget")?;
-            let target = call.cx.data(|data| data.env.camera.look_at())?;
+            let target = call.cx.host(move |ctx| ctx.camera.look_at())?;
             Ok(Some(call.cx.vector3(target)?))
         },
         Some(HostType::Vector3),
@@ -179,7 +179,7 @@ fn camera_methods(definition: &mut TypeDef) {
         "SetFPV",
         |call| {
             require(call, HostType::CameraApi, "SetFPV")?;
-            call.cx.data(|data| data.env.camera.set_mode(1))?;
+            call.cx.host(move |ctx| ctx.camera.set_mode(1))?;
             if call.is_none_or_nil(2) {
                 return Ok(None);
             }
@@ -198,7 +198,7 @@ fn camera_methods(definition: &mut TypeDef) {
         "SetTPV",
         |call| {
             require(call, HostType::CameraApi, "SetTPV")?;
-            call.cx.data(|data| data.env.camera.set_mode(0))?;
+            call.cx.host(move |ctx| ctx.camera.set_mode(0))?;
             Ok(None)
         },
         None,
@@ -207,9 +207,9 @@ fn camera_methods(definition: &mut TypeDef) {
         "ToggleMode",
         |call| {
             require(call, HostType::CameraApi, "ToggleMode")?;
-            call.cx.data(|data| {
-                let mode = i32::from(data.env.camera.mode() == 0);
-                data.env.camera.set_mode(mode);
+            call.cx.host(|ctx| {
+                let mode = i32::from(ctx.camera.mode() == 0);
+                ctx.camera.set_mode(mode);
             })?;
             Ok(None)
         },
@@ -219,7 +219,7 @@ fn camera_methods(definition: &mut TypeDef) {
         "ResetView",
         |call| {
             require(call, HostType::CameraApi, "ResetView")?;
-            call.cx.data(|data| data.env.camera.reset_view())?;
+            call.cx.host(move |ctx| ctx.camera.reset_view())?;
             Ok(None)
         },
         None,
@@ -230,26 +230,26 @@ fn backdrop_axis(
     definition: &mut TypeDef,
     name: &'static str,
     axis: usize,
-    read: fn(&crate::runtime::RuntimeData) -> Vec3,
-    write: fn(&mut crate::runtime::RuntimeData, Vec3),
+    read: fn(&mut ScriptContext<'_>) -> Vec3,
+    write: fn(&mut ScriptContext<'_>, Vec3),
 ) {
     definition.property(
         name,
         move |cx, _| {
-            let value = cx.data(|data| read(data))?;
+            let value = cx.host(read)?;
             Ok(num([value.x, value.y, value.z][axis]))
         },
         move |cx, _, value| {
             let component = cx.real(value, name)?;
-            cx.data(|data| {
-                let mut current = read(data);
+            cx.host(move |ctx| {
+                let mut current = read(ctx);
                 match axis {
                     0 => current.x = component,
                     1 => current.y = component,
                     _ => current.z = component,
                 }
 
-                write(data, current);
+                write(ctx, current);
             })
         },
         None,
@@ -261,31 +261,31 @@ fn backdrop() -> TypeDef {
     let mut definition = type_def(HostType::BackdropApi, "BackdropAPI");
     definition.property(
         "Enable",
-        |cx, _| Ok(boolean(cx.data(|data| data.env.backdrop.enabled())?)),
+        |cx, _| Ok(boolean(cx.host(move |ctx| ctx.backdrop.enabled())?)),
         |cx, _, value| {
             let enabled = assigned_bool(value);
-            cx.data(|data| data.env.backdrop.set_enabled(enabled))
+            cx.host(move |ctx| ctx.backdrop.set_enabled(enabled))
         },
         None,
     );
     definition.property(
         "Color",
-        |cx, _| cx.color(cx.data(|data| data.env.backdrop.color())?),
+        |cx, _| cx.color(cx.host(move |ctx| ctx.backdrop.color())?),
         |cx, _, value| {
             let Some(color) = try_color(value) else {
                 return Err(cx.invalid("Color"));
             };
 
-            cx.data(|data| data.env.backdrop.set_color(color))
+            cx.host(move |ctx| ctx.backdrop.set_color(color))
         },
         Some(HostType::Color),
     );
     definition.property(
         "RecvShadow",
-        |cx, _| Ok(boolean(cx.data(|data| data.env.backdrop.receive_shadow())?)),
+        |cx, _| Ok(boolean(cx.host(move |ctx| ctx.backdrop.receive_shadow())?)),
         |cx, _, value| {
             let receive = assigned_bool(value);
-            cx.data(|data| data.env.backdrop.set_receive_shadow(receive))
+            cx.host(move |ctx| ctx.backdrop.set_receive_shadow(receive))
         },
         None,
     );
@@ -294,8 +294,8 @@ fn backdrop() -> TypeDef {
             &mut definition,
             name,
             axis,
-            |data| data.env.backdrop.size(),
-            |data, value| data.env.backdrop.set_size(value),
+            |ctx| ctx.backdrop.size(),
+            |ctx, value| ctx.backdrop.set_size(value),
         );
     }
 
@@ -304,8 +304,8 @@ fn backdrop() -> TypeDef {
             &mut definition,
             name,
             axis,
-            |data| data.env.backdrop.offset(),
-            |data, value| data.env.backdrop.set_offset(value),
+            |ctx| ctx.backdrop.offset(),
+            |ctx, value| ctx.backdrop.set_offset(value),
         );
     }
 
