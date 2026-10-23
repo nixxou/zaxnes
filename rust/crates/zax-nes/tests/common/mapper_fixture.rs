@@ -10,7 +10,7 @@
 )]
 
 use zax_nes::cartridges::ChrFetch;
-use zax_nes::Machine;
+use zax_nes::NesCore;
 
 /// Description of a mapper test image.
 #[derive(Debug, Clone, Copy)]
@@ -105,8 +105,8 @@ impl MapperRom {
     }
 
     /// Loads the image and checks the mapper number.
-    pub fn load(&self) -> Machine {
-        let mut core = Machine::new();
+    pub fn load(&self) -> NesCore {
+        let mut core = NesCore::new();
         let load = core.load_rom(&self.image(), &format!("Mapper{}.nes", self.mapper));
         assert!(load.success, "{:?}", load.error);
         assert_eq!(
@@ -118,7 +118,7 @@ impl MapperRom {
 }
 
 /// `MapperFixture.Load(mapper)` with the defaults.
-pub fn load(mapper: usize) -> Machine {
+pub fn load(mapper: usize) -> NesCore {
     MapperRom::new(mapper).load()
 }
 
@@ -132,7 +132,7 @@ pub trait MapperMachine {
     fn mmc3_bank(&mut self, register: u8, value: u8);
 }
 
-impl MapperMachine for Machine {
+impl MapperMachine for NesCore {
     fn prg_windows(&self) -> [u8; 4] {
         [0x8100, 0xA100, 0xC100, 0xE100].map(|address| self.read_memory(address))
     }

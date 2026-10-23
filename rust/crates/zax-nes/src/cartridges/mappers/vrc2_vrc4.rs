@@ -1,5 +1,6 @@
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mappers 21, 22, 23, 25 and 27, Konami VRC2 and VRC4 (REQ-CORE-100): the same silicon
@@ -114,6 +115,39 @@ impl Vrc2Vrc4 {
 
 impl Mapper for Vrc2Vrc4 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        for value in self.chr {
+            writer.write_i32(value);
+        }
+        writer.write_u8(self.prg0);
+        writer.write_u8(self.prg1);
+        writer.write_bool(self.swap_prg);
+        writer.write_u8(self.irq_latch);
+        writer.write_i32(self.irq_counter);
+        writer.write_i32(self.prescaler);
+        writer.write_bool(self.irq_enabled);
+        writer.write_bool(self.irq_enable_after_ack);
+        writer.write_bool(self.irq_cycle_mode);
+        writer.write_bool(self.irq_pending);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        for value in &mut self.chr {
+            *value = reader.read_i32()?;
+        }
+        self.prg0 = reader.read_u8()?;
+        self.prg1 = reader.read_u8()?;
+        self.swap_prg = reader.read_bool()?;
+        self.irq_latch = reader.read_u8()?;
+        self.irq_counter = reader.read_i32()?;
+        self.prescaler = reader.read_i32()?;
+        self.irq_enabled = reader.read_bool()?;
+        self.irq_enable_after_ack = reader.read_bool()?;
+        self.irq_cycle_mode = reader.read_bool()?;
+        self.irq_pending = reader.read_bool()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         self.mapper_number

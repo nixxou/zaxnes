@@ -1,3 +1,5 @@
+use crate::state::{InvalidState, StateReader, StateWriter};
+
 /// The length counter the four tone channels share (nesdev, "APU Length Counter").
 ///
 /// Two write-ordering quirks are visible to the CPU and are measured by blargg's frame
@@ -74,5 +76,29 @@ impl LengthCounter {
         }
 
         self.value = Self::TABLE[usize::from(register >> 3)];
+    }
+}
+
+impl LengthCounter {
+    /// Appends the state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.value);
+        writer.write_bool(self.halt);
+        writer.write_bool(self.enabled);
+        writer.write_i64(self.clocked_at_cycle);
+        writer.write_u8(self.value_before_clock);
+    }
+
+    /// Restores the state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.value = reader.read_u8()?;
+        self.halt = reader.read_bool()?;
+        self.enabled = reader.read_bool()?;
+        self.clocked_at_cycle = reader.read_i64()?;
+        self.value_before_clock = reader.read_u8()?;
+        Ok(())
     }
 }

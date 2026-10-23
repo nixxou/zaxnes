@@ -6,12 +6,12 @@ mod common;
 
 use common::TileFixture;
 use zax_nes::ppu::SCREEN_WIDTH;
-use zax_nes::Machine;
+use zax_nes::NesCore;
 
 /// Pattern $FF: plane 0 all ones, plane 1 all zeros, so every pixel is colour 1.
 const SOLID_TILE: u8 = 0xFF;
 
-fn pixel_at(core: &Machine, x: usize, y: usize) -> u8 {
+fn pixel_at(core: &NesCore, x: usize, y: usize) -> u8 {
     core.pixel_frame()[(y * SCREEN_WIDTH) + x]
 }
 

@@ -1,4 +1,5 @@
 use super::{AddressingMode, CpuBus, CpuOperation, OpcodeInfo, OpcodeTable, OperandAccess};
+use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The 6502 core of the 2A03 (REQ-CORE-110, REQ-CORE-111).
 ///
@@ -941,4 +942,42 @@ impl Cpu6502 {
 #[inline]
 const fn word(lo: u8, hi: u8) -> u16 {
     u16::from_le_bytes([lo, hi])
+}
+
+impl Cpu6502 {
+    /// Appends the CPU state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.a);
+        writer.write_u8(self.x);
+        writer.write_u8(self.y);
+        writer.write_u8(self.s);
+        writer.write_u16(self.pc);
+        writer.write_u8(self.p);
+        writer.write_bool(self.nmi_line);
+        writer.write_bool(self.nmi_pending);
+        writer.write_bool(self.irq_sample);
+        writer.write_bool(self.poll_nmi);
+        writer.write_bool(self.poll_irq);
+        writer.write_bool(self.jammed);
+    }
+
+    /// Restores the CPU state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.a = reader.read_u8()?;
+        self.x = reader.read_u8()?;
+        self.y = reader.read_u8()?;
+        self.s = reader.read_u8()?;
+        self.pc = reader.read_u16()?;
+        self.p = reader.read_u8()?;
+        self.nmi_line = reader.read_bool()?;
+        self.nmi_pending = reader.read_bool()?;
+        self.irq_sample = reader.read_bool()?;
+        self.poll_nmi = reader.read_bool()?;
+        self.poll_irq = reader.read_bool()?;
+        self.jammed = reader.read_bool()?;
+        Ok(())
+    }
 }

@@ -1,6 +1,7 @@
 //! Controller ports (port of `src/Zax.Nes/Input`): the standard pad, the Zapper and the two
 //! ports at $4016 and $4017 (REQ-CORE-022, REQ-CORE-024, REQ-CORE-060, REQ-CORE-061).
 
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::RegionTiming;
 
 /// What is plugged into a controller port (REQ-CORE-024).
@@ -241,5 +242,47 @@ impl InputPorts {
             self.shift[port] = self.port_byte(port);
             self.shift_count[port] = 0;
         }
+    }
+}
+
+impl InputPorts {
+    /// Appends the port state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_u16(self.input_word);
+        writer.write_bool(self.strobe);
+        for port in 0..Self::PORT_COUNT {
+            writer.write_u8(self.types[port] as u8);
+            writer.write_u8(self.shift[port]);
+            writer.write_u32(self.shift_count[port]);
+            writer.write_i32(self.zapper[port].x);
+            writer.write_i32(self.zapper[port].y);
+        }
+    }
+
+    /// Restores the port state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or names an unknown device.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.input_word = reader.read_u16()?;
+        self.strobe = reader.read_bool()?;
+        for port in 0..Self::PORT_COUNT {
+            self.types[port] = match reader.read_u8()? {
+                0 => ControllerPortType::Controller,
+                1 => ControllerPortType::Zapper,
+                other => {
+                    return Err(InvalidState::corrupt(format!(
+                        "Corrupt savestate: unknown controller port type {other}."
+                    )))
+                }
+            };
+            self.shift[port] = reader.read_u8()?;
+            self.shift_count[port] = reader.read_u32()?;
+            let x = reader.read_i32()?;
+            let y = reader.read_i32()?;
+            self.zapper[port] = ZapperPosition::new(x, y);
+        }
+
+        Ok(())
     }
 }

@@ -13,6 +13,10 @@ macro_rules! banked {
         fn banks(&self) -> Option<&$crate::cartridges::BankWindows> {
             Some(&self.banks)
         }
+
+        fn banks_mut(&mut self) -> Option<&mut $crate::cartridges::BankWindows> {
+            Some(&mut self.banks)
+        }
     };
 }
 
@@ -45,6 +49,7 @@ pub use rambo1::Rambo1;
 pub use vrc2_vrc4::Vrc2Vrc4;
 
 use super::{BankWindows, CartridgeMemory, ChrFetch};
+use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The behaviour a board adds to the shared cartridge state (REQ-CORE-100). Every method has
 /// the default of a board that does nothing special; banked boards expose their
@@ -56,6 +61,45 @@ pub trait Mapper {
     /// The bank windows of a banked board.
     fn banks(&self) -> Option<&BankWindows> {
         None
+    }
+
+    /// The bank windows of a banked board, mutably.
+    fn banks_mut(&mut self) -> Option<&mut BankWindows> {
+        None
+    }
+
+    /// Appends the registers of the board, beyond its bank windows, to `writer`
+    /// (REQ-CORE-090).
+    fn save_registers(&self, _writer: &mut StateWriter) {}
+
+    /// Restores the registers written by [`Mapper::save_registers`] (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    fn load_registers(&mut self, _reader: &mut StateReader) -> Result<(), InvalidState> {
+        Ok(())
+    }
+
+    /// Appends the bank windows and the registers of the board to `writer`
+    /// (REQ-CORE-090).
+    fn save_state(&self, writer: &mut StateWriter) {
+        if let Some(banks) = self.banks() {
+            banks.save_state(writer);
+        }
+
+        self.save_registers(writer);
+    }
+
+    /// Restores what [`Mapper::save_state`] wrote (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        if let Some(banks) = self.banks_mut() {
+            banks.load_state(reader)?;
+        }
+
+        self.load_registers(reader)
     }
 
     /// Puts the registers back to their power-on values and recomputes the windows.

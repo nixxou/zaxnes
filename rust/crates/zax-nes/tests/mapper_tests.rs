@@ -16,7 +16,7 @@ use common::mapper_fixture::{load, MapperMachine, MapperRom};
 use zax_nes::cartridges::{Cartridge, ChrFetch};
 use zax_nes::NametableMirroring as Nm;
 
-fn peek(core: &zax_nes::Machine, address: u16) -> u8 {
+fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
     core.cartridge()
         .unwrap()
         .ppu_peek(address, ChrFetch::Background)
@@ -37,7 +37,7 @@ fn req_core_102_any_other_mapper_is_refused() {
     // message of REQ-CORE-011 like any other number outside the table.
     for mapper in [6usize, 19, 69, 116, 200] {
         assert!(!Cartridge::is_supported(mapper as i32));
-        let mut core = zax_nes::Machine::new();
+        let mut core = zax_nes::NesCore::new();
         let load = core.load_rom(&MapperRom::new(mapper).image(), "Other.nes");
         assert!(!load.success);
         assert!(load.error.unwrap().contains(&mapper.to_string()));
@@ -322,7 +322,7 @@ fn req_core_100_mmc5_serves_background_fetches_from_the_second_set_with_tall_spr
         core.write_memory(0x5128 + register, 16 + register as u8);
     }
 
-    let peek = |core: &zax_nes::Machine, address, fetch| {
+    let peek = |core: &zax_nes::NesCore, address, fetch| {
         core.cartridge().unwrap().ppu_peek(address, fetch)
     };
     // 8x8 sprites: the set written last serves everything.
@@ -586,7 +586,7 @@ fn req_core_100_vrc4_builds_each_chr_bank_from_two_nibbles() {
     assert_eq!(0x1F, core.chr_bank(0x1C00));
 }
 
-fn action53_select(core: &mut zax_nes::Machine, register: u8, value: u8) {
+fn action53_select(core: &mut zax_nes::NesCore, register: u8, value: u8) {
     core.write_memory(0x5000, register);
     core.write_memory(0x8000, value);
 }

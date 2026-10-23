@@ -1,3 +1,4 @@
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::RegionTiming;
 
 /// Timer periods in CPU cycles per output bit, NTSC (nesdev).
@@ -200,5 +201,49 @@ impl DmcChannel {
         let rates = self.rates;
         *self = Self::default();
         self.rates = rates;
+    }
+}
+
+impl DmcChannel {
+    /// Appends the state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_usize(self.rate_index);
+        writer.write_i32(self.timer);
+        writer.write_bool(self.irq_enabled);
+        writer.write_bool(self.looping);
+        writer.write_u16(self.sample_address);
+        writer.write_i32(self.sample_length);
+        writer.write_u16(self.current_address);
+        writer.write_i32(self.bytes_remaining);
+        writer.write_u8(self.sample_buffer);
+        writer.write_bool(self.buffer_empty);
+        writer.write_u8(self.shift_register);
+        writer.write_i32(self.bits_remaining);
+        writer.write_bool(self.silence);
+        writer.write_i32(self.output);
+        writer.write_bool(self.irq_flag);
+    }
+
+    /// Restores the state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.rate_index = reader.read_index(self.rates.len())?;
+        self.timer = reader.read_i32()?;
+        self.irq_enabled = reader.read_bool()?;
+        self.looping = reader.read_bool()?;
+        self.sample_address = reader.read_u16()?;
+        self.sample_length = reader.read_i32()?;
+        self.current_address = reader.read_u16()?;
+        self.bytes_remaining = reader.read_i32()?;
+        self.sample_buffer = reader.read_u8()?;
+        self.buffer_empty = reader.read_bool()?;
+        self.shift_register = reader.read_u8()?;
+        self.bits_remaining = reader.read_i32()?;
+        self.silence = reader.read_bool()?;
+        self.output = reader.read_i32()?;
+        self.irq_flag = reader.read_bool()?;
+        Ok(())
     }
 }

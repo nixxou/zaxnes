@@ -3,6 +3,7 @@ use crate::cartridges::Cartridge;
 use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
+use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// Size of CPU work RAM.
 const RAM_SIZE: usize = 2048;
@@ -337,5 +338,31 @@ impl CpuBus for NesBus {
 
     fn cycle_count(&self) -> i64 {
         self.cycles
+    }
+}
+
+impl NesBus {
+    /// Appends the bus state (work RAM, open bus, clock and DMA counters) to `writer`
+    /// (REQ-CORE-090). The chips and the cartridge the bus owns save themselves.
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_blob(&self.ram);
+        writer.write_u8(self.open_bus);
+        writer.write_i64(self.cycles);
+        writer.write_i64(self.oam_dma_count);
+        writer.write_i64(self.dmc_dma_count);
+    }
+
+    /// Restores the bus state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or its RAM block has the wrong size.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_blob_into(&mut self.ram)?;
+        self.open_bus = reader.read_u8()?;
+        self.cycles = reader.read_i64()?;
+        self.oam_dma_count = reader.read_i64()?;
+        self.dmc_dma_count = reader.read_i64()?;
+        self.in_dmc_dma = false;
+        Ok(())
     }
 }

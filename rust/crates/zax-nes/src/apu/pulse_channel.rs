@@ -1,5 +1,6 @@
 use super::envelope::Envelope;
 use super::length_counter::LengthCounter;
+use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The duty sequences of nesdev, "APU Pulse", eight steps each.
 const DUTY_SEQUENCES: [u8; 32] = [
@@ -144,5 +145,45 @@ impl PulseChannel {
     /// Back to the power-on state.
     pub fn reset(&mut self) {
         *self = Self::new(self.is_first);
+    }
+}
+
+impl PulseChannel {
+    /// Appends the state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        self.envelope.save_state(writer);
+        self.length.save_state(writer);
+
+        writer.write_usize(self.duty);
+        writer.write_usize(self.sequence_position);
+        writer.write_i32(self.timer_period);
+        writer.write_i32(self.timer);
+        writer.write_bool(self.sweep_enabled);
+        writer.write_bool(self.sweep_negate);
+        writer.write_bool(self.sweep_reload);
+        writer.write_i32(self.sweep_period);
+        writer.write_i32(self.sweep_shift);
+        writer.write_i32(self.sweep_divider);
+    }
+
+    /// Restores the state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.envelope.load_state(reader)?;
+        self.length.load_state(reader)?;
+
+        self.duty = reader.read_index(DUTY_SEQUENCES.len() / 8)?;
+        self.sequence_position = reader.read_index(8)?;
+        self.timer_period = reader.read_i32()?;
+        self.timer = reader.read_i32()?;
+        self.sweep_enabled = reader.read_bool()?;
+        self.sweep_negate = reader.read_bool()?;
+        self.sweep_reload = reader.read_bool()?;
+        self.sweep_period = reader.read_i32()?;
+        self.sweep_shift = reader.read_i32()?;
+        self.sweep_divider = reader.read_i32()?;
+        Ok(())
     }
 }

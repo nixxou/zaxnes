@@ -16,24 +16,24 @@ use std::collections::HashSet;
 use std::f64::consts::PI;
 
 use common::minimal;
-use zax_nes::{Machine, RegionTiming};
+use zax_nes::{NesCore, RegionTiming};
 
-fn core_at(sample_rate: i32) -> Machine {
-    let mut core = Machine::new();
+fn core_at(sample_rate: i32) -> NesCore {
+    let mut core = NesCore::new();
     assert!(core.load_rom(&minimal(), "Audio.nes").success);
     core.set_sample_rate(sample_rate).unwrap();
     core
 }
 
-fn core() -> Machine {
+fn core() -> NesCore {
     core_at(48_000)
 }
 
-fn level(core: &Machine) -> f64 {
+fn level(core: &NesCore) -> f64 {
     core.apu().mixed_level()
 }
 
-fn start_pulse1(core: &mut Machine, period: i32) {
+fn start_pulse1(core: &mut NesCore, period: i32) {
     core.write_memory(0x4015, 0x01);
     core.write_memory(0x4000, 0xBF); // Duty 2 (50 %), length halted, constant volume 15.
     core.write_memory(0x4001, 0x08); // Negate with shift 0: the target never exceeds $7FF.
@@ -42,7 +42,7 @@ fn start_pulse1(core: &mut Machine, period: i32) {
     core.write_memory(0x4017, 0x40); // Four-step, IRQ inhibited: nothing else perturbs it.
 }
 
-fn pulse_frequency(core: &Machine, period: i32) -> f64 {
+fn pulse_frequency(core: &NesCore, period: i32) -> f64 {
     let timing = RegionTiming::for_region(core.region());
     let cycles_per_frame = f64::from(RegionTiming::DOTS_PER_SCANLINE)
         * f64::from(timing.scanlines_per_frame)
@@ -52,7 +52,7 @@ fn pulse_frequency(core: &Machine, period: i32) -> f64 {
     f64::from(timing.nominal_frames_per_second) * cycles_per_frame / (16.0 * f64::from(period + 1))
 }
 
-fn capture(core: &mut Machine, count: usize, skip: usize) -> Vec<f32> {
+fn capture(core: &mut NesCore, count: usize, skip: usize) -> Vec<f32> {
     let mut samples = Vec::with_capacity(count + skip);
     let mut block = [0.0f32; 64];
 
@@ -74,7 +74,7 @@ fn assert_near(actual: f64, expected: f64) {
     );
 }
 
-fn peak_over(core: &mut Machine, cycles: usize) -> f64 {
+fn peak_over(core: &mut NesCore, cycles: usize) -> f64 {
     let mut peak = f64::NEG_INFINITY;
     for _ in 0..cycles {
         core.bus_mut().tick();

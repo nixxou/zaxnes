@@ -1,5 +1,6 @@
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mapper 16, Bandai FCG: registers at $6000-$FFFF decoded on the low nibble, a 16-bit
@@ -39,6 +40,25 @@ impl BandaiFcg {
 
 impl Mapper for BandaiFcg {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_raw(&self.chr);
+        writer.write_u8(self.prg);
+        writer.write_i32(self.irq_latch);
+        writer.write_i32(self.irq_counter);
+        writer.write_bool(self.irq_enabled);
+        writer.write_bool(self.irq_pending);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_into(&mut self.chr)?;
+        self.prg = reader.read_u8()?;
+        self.irq_latch = reader.read_i32()?;
+        self.irq_counter = reader.read_i32()?;
+        self.irq_enabled = reader.read_bool()?;
+        self.irq_pending = reader.read_bool()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         16

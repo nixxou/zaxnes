@@ -1,5 +1,6 @@
 use super::envelope::Envelope;
 use super::length_counter::LengthCounter;
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::RegionTiming;
 
 /// Timer periods in CPU cycles, NTSC (nesdev).
@@ -100,5 +101,33 @@ impl NoiseChannel {
         let periods = self.periods;
         *self = Self::default();
         self.periods = periods;
+    }
+}
+
+impl NoiseChannel {
+    /// Appends the state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        self.envelope.save_state(writer);
+        self.length.save_state(writer);
+
+        writer.write_usize(self.period_index);
+        writer.write_i32(self.timer);
+        writer.write_bool(self.short_mode);
+        writer.write_i32(self.shift_register);
+    }
+
+    /// Restores the state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.envelope.load_state(reader)?;
+        self.length.load_state(reader)?;
+
+        self.period_index = reader.read_index(self.periods.len())?;
+        self.timer = reader.read_i32()?;
+        self.short_mode = reader.read_bool()?;
+        self.shift_register = reader.read_i32()?;
+        Ok(())
     }
 }

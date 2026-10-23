@@ -15,16 +15,16 @@ use std::sync::Arc;
 
 use common::minimal;
 use zax_nes::apu::{Apu2A03, AudioError};
-use zax_nes::{Machine, NesRegion};
+use zax_nes::{NesCore, NesRegion};
 
-fn loaded_core() -> Machine {
-    let mut core = Machine::new();
+fn loaded_core() -> NesCore {
+    let mut core = NesCore::new();
     assert!(core.load_rom(&minimal(), "Audio.nes").success);
     core
 }
 
 /// Runs `frames` frames, draining in blocks of 4096, and counts every sample produced.
-fn produced_over(core: &mut Machine, frames: usize, reference: Option<&mut Machine>) -> usize {
+fn produced_over(core: &mut NesCore, frames: usize, reference: Option<&mut NesCore>) -> usize {
     let mut produced = 0;
     let mut sink = vec![0.0f32; 4096];
     let mut reference = reference;

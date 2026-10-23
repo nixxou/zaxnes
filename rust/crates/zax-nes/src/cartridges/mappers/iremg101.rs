@@ -1,5 +1,6 @@
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mapper 32, Irem G-101: two 8 KiB PRG banks, eight 1 KiB CHR banks, PRG swap mode.
@@ -42,6 +43,21 @@ impl IremG101 {
 
 impl Mapper for IremG101 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_raw(&self.chr);
+        writer.write_u8(self.prg0);
+        writer.write_u8(self.prg1);
+        writer.write_bool(self.swap_prg);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_into(&mut self.chr)?;
+        self.prg0 = reader.read_u8()?;
+        self.prg1 = reader.read_u8()?;
+        self.swap_prg = reader.read_bool()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         32

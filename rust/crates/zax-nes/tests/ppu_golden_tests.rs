@@ -18,7 +18,7 @@ use std::sync::Mutex;
 
 use sha2::{Digest, Sha256};
 use zax_goldens::{goldens_dir, read_core_goldens, CoreGolden};
-use zax_nes::{Machine, TileRecord};
+use zax_nes::{NesCore, TileRecord};
 
 /// Rows allowed to differ, reported but not failed. Empty: every row matches.
 const PENDING_T04: &[&str] = &[];
@@ -59,7 +59,7 @@ fn check_row(row: &CoreGolden, image: &[u8], last_frame: u32) -> Result<(), Stri
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let mut machine = Machine::new();
+    let mut machine = NesCore::new();
     let load = machine.load_rom(image, &name);
     if load.success != row.load_ok {
         return Err(format!(
@@ -137,7 +137,7 @@ fn check_row(row: &CoreGolden, image: &[u8], last_frame: u32) -> Result<(), Stri
 }
 
 /// The blargg shell protocol snapshot after the last frame, read as the golden tool does.
-fn check_blargg(row: &CoreGolden, machine: &Machine) -> Result<(), String> {
+fn check_blargg(row: &CoreGolden, machine: &NesCore) -> Result<(), String> {
     let signed = machine.read_memory(0x6001) == 0xDE
         && machine.read_memory(0x6002) == 0xB0
         && machine.read_memory(0x6003) == 0x61;

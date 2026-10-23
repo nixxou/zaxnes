@@ -10,7 +10,7 @@ use crate::{FrameBatch, NametableMirroring, NesBus, NesRegion, RegionTiming, Til
 /// one frame" (the part of `NesCore` the PPU goldens need, REQ-CORE-003, REQ-CORE-004,
 /// REQ-CORE-020). The `NesCore` facade wraps it.
 #[derive(Debug, Clone)]
-pub struct Machine {
+pub struct NesCore {
     cpu: Cpu6502,
     bus: NesBus,
     region: NesRegion,
@@ -18,13 +18,13 @@ pub struct Machine {
     frame_count: i64,
 }
 
-impl Default for Machine {
+impl Default for NesCore {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Machine {
+impl NesCore {
     /// Creates a machine with no ROM loaded, in NTSC.
     #[must_use]
     pub fn new() -> Self {

@@ -18,6 +18,7 @@ pub use board::Board;
 pub use chr_fetch::ChrFetch;
 
 use crate::rom::{InesHeader, RomImage, RomLoadError, RomLoadFailure};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 use mappers::Mapper;
 
@@ -448,5 +449,35 @@ impl Cartridge {
         }
 
         self.memory.chr_ram.fill(0);
+    }
+}
+
+impl Cartridge {
+    /// Appends the cartridge state, memories and mapper registers, to `writer`
+    /// (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_blob(&self.memory.prg_ram);
+        writer.write_blob(&self.memory.chr_ram);
+        writer.write_u8(self.memory.mirroring as u8);
+        writer.write_i64(self.memory.cpu_cycle);
+        self.board.save_state(writer);
+    }
+
+    /// Restores the cartridge state from `reader` (REQ-CORE-091). The cartridge must have
+    /// been created from the same ROM image the state was saved with.
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_blob_into(&mut self.memory.prg_ram)?;
+        reader.read_blob_into(&mut self.memory.chr_ram)?;
+        let mirroring = reader.read_u8()?;
+        self.memory.mirroring = NametableMirroring::from_u8(mirroring).ok_or_else(|| {
+            InvalidState::corrupt(format!(
+                "Corrupt savestate: unknown nametable layout {mirroring}."
+            ))
+        })?;
+        self.memory.cpu_cycle = reader.read_i64()?;
+        self.board.load_state(reader)
     }
 }

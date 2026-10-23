@@ -90,17 +90,17 @@ fn req_core_081_unmapped_reads_return_the_open_bus() {
 // ---------------------------------------------------------------- PPU side (T02)
 
 /// The minimal ROM loaded in a machine (C# `LoadedCore`).
-fn loaded_machine() -> zax_nes::Machine {
+fn loaded_machine() -> zax_nes::NesCore {
     common::machine_with(&common::minimal(), "Minimal.nes")
 }
 
-fn write_palette(core: &mut zax_nes::Machine, address: u16, value: u8) {
+fn write_palette(core: &mut zax_nes::NesCore, address: u16, value: u8) {
     core.write_memory(0x2006, (address >> 8) as u8);
     core.write_memory(0x2006, address as u8);
     core.write_memory(0x2007, value);
 }
 
-fn capture_palette(core: &mut zax_nes::Machine) -> [u8; 32] {
+fn capture_palette(core: &mut zax_nes::NesCore) -> [u8; 32] {
     core.run_frame();
     core.frame_batch().palette
 }

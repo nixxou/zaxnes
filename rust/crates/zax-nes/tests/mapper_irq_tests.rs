@@ -11,11 +11,11 @@
 mod common;
 
 use common::mapper_fixture::{MapperMachine, MapperRom};
-use zax_nes::Machine;
+use zax_nes::NesCore;
 
 /// Ticks the bus until the cartridge asserts its IRQ; the number of ticks, or -1 when none
 /// comes within `budget`.
-fn tick_until_irq(core: &mut Machine, budget: i64) -> i64 {
+fn tick_until_irq(core: &mut NesCore, budget: i64) -> i64 {
     for cycle in 1..=budget {
         core.bus_mut().tick();
         if core.cartridge().unwrap().irq_asserted() {
@@ -26,13 +26,13 @@ fn tick_until_irq(core: &mut Machine, budget: i64) -> i64 {
     -1
 }
 
-fn irq(core: &Machine) -> bool {
+fn irq(core: &NesCore) -> bool {
     core.cartridge().unwrap().irq_asserted()
 }
 
 // ---------------------------------------------------------------- MMC3 and RAMBO-1
 
-fn enable_scanline_counting(core: &mut Machine) {
+fn enable_scanline_counting(core: &mut NesCore) {
     core.write_memory(0x2000, 0x08);
     core.write_memory(0x2001, 0x18);
 }
@@ -134,7 +134,7 @@ fn req_core_100_the_rambo1_counter_can_run_on_the_cpu_clock() {
 
 // ---------------------------------------------------------------- VRC4
 
-fn write_vrc(core: &mut Machine, mapper: usize, group: u16, index: u16, value: u8) {
+fn write_vrc(core: &mut NesCore, mapper: usize, group: u16, index: u16, value: u8) {
     let offset = match mapper {
         21 => ((index & 1) << 1) | ((index & 2) << 1),
         22 | 25 => ((index & 1) << 1) | ((index & 2) >> 1),

@@ -1,3 +1,4 @@
+use crate::state::{InvalidState, StateReader, StateWriter};
 use std::f64::consts::PI;
 use std::sync::OnceLock;
 
@@ -250,4 +251,45 @@ fn sinc(x: f64) -> f64 {
 fn blackman(x: f64) -> f64 {
     let t = x + 0.5;
     0.42 - (0.5 * (2.0 * PI * t).cos()) + (0.08 * (4.0 * PI * t).cos())
+}
+
+impl BandLimitedResampler {
+    /// Appends the state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        for value in self.ring {
+            writer.write_f64(value);
+        }
+
+        writer.write_u32(self.fraction);
+        writer.write_i64(self.position);
+        writer.write_i64(self.emitted);
+        writer.write_f64(self.signal);
+        writer.write_f64(self.level);
+        writer.write_f64(self.high_pass_previous);
+        writer.write_f64(self.high_pass_output);
+    }
+
+    /// Restores the state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        for value in &mut self.ring {
+            *value = reader.read_f64()?;
+        }
+
+        self.fraction = reader.read_u32()?;
+        self.position = reader.read_i64()?;
+        self.emitted = reader.read_i64()?;
+        self.signal = reader.read_f64()?;
+        self.level = reader.read_f64()?;
+        self.high_pass_previous = reader.read_f64()?;
+        self.high_pass_output = reader.read_f64()?;
+        Ok(())
+    }
+}
+
+impl BandLimitedResampler {
+    /// Bytes a saved resampler state occupies, for the APU's `MAX_STATE_SIZE`.
+    pub const STATE_SIZE: usize = RING_SIZE * 8 + 4 + 8 + 8 + 4 * 8;
 }

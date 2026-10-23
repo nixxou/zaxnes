@@ -14,11 +14,11 @@ mod common;
 
 use common::{from_header_vector, minimal, minimal_rom};
 use zax_nes::rom::{InesHeader, RomLoadFailure};
-use zax_nes::{Machine, NametableMirroring, NesRegion};
+use zax_nes::{NametableMirroring, NesCore, NesRegion};
 
 #[test]
 fn req_core_010_minimal_test_rom_loads() {
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&minimal(), "Minimal.nes");
     assert!(result.success, "{:?}", result.error);
     assert_eq!(None, result.error);
@@ -32,7 +32,7 @@ fn req_core_010_equivalent_nes20_header_loads() {
     // Same cartridge announced as NES 2.0: byte 7 bits 2 and 3 become %10, and the size
     // MSB nibbles of byte 9 stay zero.
     image[7] = 0x08;
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&image, "Minimal20.nes");
     assert!(result.success, "{:?}", result.error);
     assert_eq!(NesRegion::Ntsc, result.region);
@@ -40,7 +40,7 @@ fn req_core_010_equivalent_nes20_header_loads() {
 
 #[test]
 fn req_core_011_missing_signature_is_rejected() {
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&[0; 16], "Zeroes.nes");
     assert!(!result.success);
     assert_eq!(RomLoadFailure::CorruptHeader, result.failure);
@@ -51,7 +51,7 @@ fn req_core_011_missing_signature_is_rejected() {
 #[test]
 fn req_core_011_truncated_image_is_rejected() {
     let image = minimal();
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&image[..image.len() - 1], "Truncated.nes");
     assert!(!result.success);
     assert_eq!(RomLoadFailure::TruncatedFile, result.failure);
@@ -65,7 +65,7 @@ fn req_core_011_unsupported_mapper_is_rejected_with_its_number() {
     let mut image = minimal();
     image[6] = 0x80;
     image[7] = 0xC0;
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&image, "Mapper200.nes");
     assert!(!result.success);
     assert_eq!(RomLoadFailure::UnsupportedMapper, result.failure);
@@ -75,7 +75,7 @@ fn req_core_011_unsupported_mapper_is_rejected_with_its_number() {
 
 #[test]
 fn req_core_011_header_shorter_than_16_bytes_is_rejected() {
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&[0x4E, 0x45, 0x53, 0x1A], "Short.nes");
     assert!(!result.success);
     assert!(result.error.is_some());
@@ -91,7 +91,7 @@ fn req_core_041_random_bytes_never_throw() {
             .wrapping_add(1_442_695_040_888_963_407);
         (state >> 33) as u32
     };
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     for attempt in 0..400 {
         let length = (next() % 300) as usize;
         let mut image: Vec<u8> = (0..length).map(|_| next() as u8).collect();
@@ -204,7 +204,7 @@ fn req_core_013_nes20_region_bits() {
 fn req_core_013_detected_region_is_not_applied_by_the_core() {
     let mut image = minimal();
     image[9] = 0x01; // iNES 1.0 PAL flag.
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&image, "Pal.nes");
     assert!(result.success, "{:?}", result.error);
     assert_eq!(NesRegion::Pal, result.region);
@@ -224,7 +224,7 @@ fn req_core_012_trainer_is_skipped_and_loaded_at_7000() {
     }
     image[16 + 512..].copy_from_slice(&minimal[16..]);
 
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     let result = core.load_rom(&image, "Trainer.nes");
     assert!(result.success, "{:?}", result.error);
 
@@ -238,7 +238,7 @@ fn req_core_012_trainer_is_skipped_and_loaded_at_7000() {
 
 #[test]
 fn req_core_014_rom_name_is_kept() {
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     assert!(core.load_rom(&minimal(), "Test.nes").success);
     assert_eq!(Some("Test.nes"), core.rom_name());
 }
@@ -247,6 +247,6 @@ fn req_core_014_rom_name_is_kept() {
 fn req_core_012_trailing_bytes_beyond_the_announced_size_are_ignored() {
     let mut image = minimal_rom(0x01, None, None);
     image.extend_from_slice(&[0; 128]);
-    let mut core = Machine::new();
+    let mut core = NesCore::new();
     assert!(core.load_rom(&image, "WithTitle.nes").success);
 }

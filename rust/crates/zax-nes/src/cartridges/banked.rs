@@ -1,3 +1,5 @@
+use crate::state::{InvalidState, StateReader, StateWriter};
+
 /// Bank windows of every switching board: four 8 KiB PRG windows at $8000-$FFFF and eight
 /// 1 KiB CHR windows at $0000-$1FFF (port of `BankedCartridge`, REQ-CORE-100).
 ///
@@ -217,4 +219,36 @@ const fn slot_bank(slot: usize) -> i32 {
 /// last bank.
 fn wrap(bank: i32, count: i32) -> usize {
     usize::try_from(bank.rem_euclid(count)).unwrap_or(0)
+}
+
+impl BankWindows {
+    /// Appends the window tables to `writer` (REQ-CORE-090); the bank counts follow from the
+    /// ROM and are not stored.
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        for slot in 0..Self::PRG_WINDOWS {
+            writer.write_usize(self.prg_offset[slot]);
+            writer.write_bool(self.prg_is_ram[slot]);
+        }
+
+        for offset in self.chr_offset {
+            writer.write_usize(offset);
+        }
+    }
+
+    /// Restores the window tables from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds a negative offset.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        for slot in 0..Self::PRG_WINDOWS {
+            self.prg_offset[slot] = reader.read_usize()?;
+            self.prg_is_ram[slot] = reader.read_bool()?;
+        }
+
+        for offset in &mut self.chr_offset {
+            *offset = reader.read_usize()?;
+        }
+
+        Ok(())
+    }
 }

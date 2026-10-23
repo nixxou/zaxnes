@@ -1,3 +1,4 @@
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::TileRecord;
 
 /// The tile records captured during one frame, with the capacity limits of REQ-CORE-032.
@@ -89,5 +90,77 @@ impl TileBuffer {
         }
 
         self.records.push(record);
+    }
+}
+
+impl TileBuffer {
+    /// Appends the buffer to `writer` (REQ-CORE-090).
+    ///
+    /// The records are part of the state because the Zapper's light detection reads them
+    /// back during the vblank that follows the frame (REQ-CORE-062), so a restore has to
+    /// reproduce them exactly (REQ-CORE-092).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_usize(self.records.len());
+        writer.write_usize(self.background_count);
+        writer.write_usize(self.sprite_count);
+
+        for record in &self.records {
+            writer.write_u64(record.plane0);
+            writer.write_u64(record.plane1);
+            writer.write_i16(record.x);
+            writer.write_i16(record.y);
+            writer.write_i32(record.index);
+            writer.write_u8(record.palette);
+            writer.write_u8(
+                u8::from(record.mirror_h)
+                    | (u8::from(record.mirror_v) << 1)
+                    | (u8::from(record.hidden) << 2)
+                    | (u8::from(record.background) << 3),
+            );
+        }
+    }
+
+    /// Restores the buffer from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or the record count is impossible.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        let count = reader.read_usize()?;
+        if count > Self::CAPACITY {
+            return Err(InvalidState::corrupt(
+                "Corrupt savestate: impossible tile record count.",
+            ));
+        }
+
+        self.background_count = reader.read_usize()?;
+        self.sprite_count = reader.read_usize()?;
+        self.dropped_background = 0;
+        self.dropped_sprites = 0;
+        self.records.clear();
+
+        for _ in 0..count {
+            let plane0 = reader.read_u64()?;
+            let plane1 = reader.read_u64()?;
+            let x = reader.read_i16()?;
+            let y = reader.read_i16()?;
+            let index = reader.read_i32()?;
+            let palette = reader.read_u8()?;
+            let flags = reader.read_u8()?;
+
+            self.records.push(TileRecord::new(
+                plane0,
+                plane1,
+                x,
+                y,
+                index,
+                flags & 1 != 0,
+                flags & 2 != 0,
+                flags & 4 != 0,
+                palette,
+                flags & 8 != 0,
+            ));
+        }
+
+        Ok(())
     }
 }

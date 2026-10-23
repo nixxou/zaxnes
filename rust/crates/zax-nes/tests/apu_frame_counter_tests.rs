@@ -6,15 +6,15 @@
 mod common;
 
 use common::{machine_with, minimal};
-use zax_nes::{Machine, NesRegion, RegionTiming};
+use zax_nes::{NesCore, NesRegion, RegionTiming};
 
 const NTSC_FOUR_STEP_PERIOD: usize = 29830;
 
-fn loaded_core() -> Machine {
+fn loaded_core() -> NesCore {
     machine_with(&minimal(), "Apu.nes")
 }
 
-fn tick(core: &mut Machine, cycles: usize) {
+fn tick(core: &mut NesCore, cycles: usize) {
     for _ in 0..cycles {
         core.bus_mut().tick();
     }

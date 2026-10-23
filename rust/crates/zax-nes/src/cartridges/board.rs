@@ -7,6 +7,7 @@ use super::mappers::{
     Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch};
+use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The mapper of a cartridge, with its registers (REQ-CORE-100).
 // Created once at load time, so the size of the MMC5 variant (its ExRAM) costs nothing.
@@ -105,6 +106,18 @@ impl Mapper for Board {
 
     fn banks(&self) -> Option<&BankWindows> {
         dispatch!(self, b => b.banks())
+    }
+
+    fn banks_mut(&mut self) -> Option<&mut BankWindows> {
+        dispatch!(self, b => b.banks_mut())
+    }
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        dispatch!(self, b => b.save_registers(writer));
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        dispatch!(self, b => b.load_registers(reader))
     }
 
     fn reset(&mut self, memory: &mut CartridgeMemory) {

@@ -19,7 +19,7 @@ use zax_nes::cpu::{Cpu6502, CpuBus};
 use zax_nes::input::InputPorts;
 use zax_nes::ppu::Ppu2C02;
 use zax_nes::rom::RomImage;
-use zax_nes::{Machine, NesBus, TileRecord};
+use zax_nes::{NesBus, NesCore, TileRecord};
 
 /// A flat 64 KiB memory with no device on it, used to measure instruction behaviour and
 /// cycle counts in isolation. Every access costs exactly one cycle, like the real bus.
@@ -189,8 +189,8 @@ pub fn loaded_core(program: Option<&[u8]>) -> (Cpu6502, NesBus) {
 }
 
 /// A machine with `image` loaded.
-pub fn machine_with(image: &[u8], name: &str) -> Machine {
-    let mut machine = Machine::new();
+pub fn machine_with(image: &[u8], name: &str) -> NesCore {
+    let mut machine = NesCore::new();
     let load = machine.load_rom(image, name);
     assert!(load.success, "{:?}", load.error);
     machine
@@ -207,7 +207,7 @@ pub struct BatchCopy {
 
 impl BatchCopy {
     /// Copies the batch of the frame `machine` just ran.
-    pub fn of(machine: &Machine) -> Self {
+    pub fn of(machine: &NesCore) -> Self {
         let batch = machine.frame_batch();
         Self {
             records: batch.records.to_vec(),
@@ -237,7 +237,7 @@ impl BatchCopy {
 }
 
 /// Runs one frame and returns a copy of its batch.
-pub fn capture_batch(machine: &mut Machine) -> BatchCopy {
+pub fn capture_batch(machine: &mut NesCore) -> BatchCopy {
     machine.run_frame();
     BatchCopy::of(machine)
 }
@@ -247,7 +247,7 @@ pub fn capture_batch(machine: &mut Machine) -> BatchCopy {
 /// through memory writes to $2000-$2007 (REQ-CORE-082), then one frame, and the batch of
 /// the frame after that is the one to look at.
 pub struct TileFixture {
-    pub core: Machine,
+    pub core: NesCore,
 }
 
 impl TileFixture {
@@ -457,7 +457,7 @@ pub fn run_legacy_rom(image: &[u8], max_frames: i64, result_address: u16) -> Rom
 }
 
 /// Whether the CPU sits in a `jmp` to itself.
-fn is_halted(core: &Machine) -> bool {
+fn is_halted(core: &NesCore) -> bool {
     let pc = core.cpu().pc;
     if core.read_memory(pc) != 0x4C {
         return false;
@@ -469,7 +469,7 @@ fn is_halted(core: &Machine) -> bool {
     target == pc
 }
 
-fn shell_text(core: &Machine) -> String {
+fn shell_text(core: &NesCore) -> String {
     let mut text = String::new();
     for address in 0x6004u16..0x7FFF {
         let value = core.read_memory(address);
