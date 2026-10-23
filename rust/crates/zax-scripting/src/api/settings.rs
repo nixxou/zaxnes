@@ -37,7 +37,7 @@ pub(super) fn with_settings(
         }
     })??;
     if view_reset {
-        cx.host(|ctx| ctx.camera.reset_view())?;
+        cx.host_write(|ctx| ctx.camera.reset_view())?;
     }
     Ok(())
 }
@@ -386,7 +386,7 @@ fn setting_functions(definition: &mut TypeDef) {
             let first = call.integer(2, "SetInputType")?;
             let second = call.integer(3, "SetInputType")?;
             call.cx
-                .host(move |ctx| ctx.machine.set_port_types(first, second))?;
+                .host_write(move |ctx| ctx.machine.set_port_types(first, second))?;
             with_settings(call.cx, |settings| settings.set_port_types(first, second))?;
             Ok(None)
         },

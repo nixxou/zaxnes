@@ -498,7 +498,8 @@ fn script() -> [TypeDef; 2] {
             require(call, HostType::ScriptApi, "WriteMem")?;
             let address = number_format::to_address(call.number(2, "WriteMem")?);
             let value = number_format::to_byte(call.number(3, "WriteMem")?);
-            call.cx.host(move |ctx| ctx.machine.write(address, value))?;
+            call.cx
+                .host_write(move |ctx| ctx.machine.write(address, value))?;
             Ok(None)
         },
         None,

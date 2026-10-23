@@ -60,7 +60,7 @@ pub(crate) fn apply_camera_tracking(cx: &Cx) -> mlua::Result<()> {
     cx.state(|state| {
         state.start_tracker(role, shape.id);
     })?;
-    cx.host(move |ctx| ctx.camera.set_look_at(position))?;
+    cx.host_write(move |ctx| ctx.camera.set_look_at(position))?;
     Ok(())
 }
 
@@ -92,7 +92,7 @@ fn camera_properties(definition: &mut TypeDef) {
         |cx, _| Ok(num(cx.host(move |ctx| ctx.camera.distance())?)),
         |cx, _, value| {
             let distance = cx.real(value, "Distance")?;
-            cx.host(move |ctx| ctx.camera.set_distance(distance))
+            cx.host_write(move |ctx| ctx.camera.set_distance(distance))
         },
         None,
     );
@@ -101,7 +101,7 @@ fn camera_properties(definition: &mut TypeDef) {
         |cx, _| Ok(num(cx.host(move |ctx| ctx.camera.mode())?)),
         |cx, _, value| {
             let mode = cx.integer(value, "Mode")?.clamp(0, 1);
-            cx.host(move |ctx| ctx.camera.set_mode(mode))
+            cx.host_write(move |ctx| ctx.camera.set_mode(mode))
         },
         None,
     );
@@ -110,7 +110,7 @@ fn camera_properties(definition: &mut TypeDef) {
         |cx, _| cx.vector3(cx.host(move |ctx| ctx.camera.look_at())?),
         |cx, _, value| {
             let target = cx.vec3(value, "LookAt")?;
-            cx.host(move |ctx| ctx.camera.set_look_at(target))
+            cx.host_write(move |ctx| ctx.camera.set_look_at(target))
         },
         Some(HostType::Vector3),
     );
@@ -161,7 +161,8 @@ fn camera_methods(definition: &mut TypeDef) {
                     call.real(4, "SetTarget")?,
                 ),
             };
-            call.cx.host(move |ctx| ctx.camera.set_look_at(target))?;
+            call.cx
+                .host_write(move |ctx| ctx.camera.set_look_at(target))?;
             Ok(None)
         },
         None,
@@ -179,7 +180,7 @@ fn camera_methods(definition: &mut TypeDef) {
         "SetFPV",
         |call| {
             require(call, HostType::CameraApi, "SetFPV")?;
-            call.cx.host(move |ctx| ctx.camera.set_mode(1))?;
+            call.cx.host_write(move |ctx| ctx.camera.set_mode(1))?;
             if call.is_none_or_nil(2) {
                 return Ok(None);
             }
@@ -198,7 +199,7 @@ fn camera_methods(definition: &mut TypeDef) {
         "SetTPV",
         |call| {
             require(call, HostType::CameraApi, "SetTPV")?;
-            call.cx.host(move |ctx| ctx.camera.set_mode(0))?;
+            call.cx.host_write(move |ctx| ctx.camera.set_mode(0))?;
             Ok(None)
         },
         None,
@@ -219,7 +220,7 @@ fn camera_methods(definition: &mut TypeDef) {
         "ResetView",
         |call| {
             require(call, HostType::CameraApi, "ResetView")?;
-            call.cx.host(move |ctx| ctx.camera.reset_view())?;
+            call.cx.host_write(move |ctx| ctx.camera.reset_view())?;
             Ok(None)
         },
         None,
@@ -264,7 +265,7 @@ fn backdrop() -> TypeDef {
         |cx, _| Ok(boolean(cx.host(move |ctx| ctx.backdrop.enabled())?)),
         |cx, _, value| {
             let enabled = assigned_bool(value);
-            cx.host(move |ctx| ctx.backdrop.set_enabled(enabled))
+            cx.host_write(move |ctx| ctx.backdrop.set_enabled(enabled))
         },
         None,
     );
@@ -276,7 +277,7 @@ fn backdrop() -> TypeDef {
                 return Err(cx.invalid("Color"));
             };
 
-            cx.host(move |ctx| ctx.backdrop.set_color(color))
+            cx.host_write(move |ctx| ctx.backdrop.set_color(color))
         },
         Some(HostType::Color),
     );
@@ -285,7 +286,7 @@ fn backdrop() -> TypeDef {
         |cx, _| Ok(boolean(cx.host(move |ctx| ctx.backdrop.receive_shadow())?)),
         |cx, _, value| {
             let receive = assigned_bool(value);
-            cx.host(move |ctx| ctx.backdrop.set_receive_shadow(receive))
+            cx.host_write(move |ctx| ctx.backdrop.set_receive_shadow(receive))
         },
         None,
     );
