@@ -152,7 +152,8 @@ fn save_state_writes_the_chosen_slot_and_the_game_goes_on() {
 fn quit_to_the_rom_list_stops_the_game() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     play(&mut harness, &mut handheld);
-    for _ in 0..7 {
+    // Quit to ROM list is the seventh row (no Rewind row on the handheld).
+    for _ in 0..6 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);
@@ -233,7 +234,8 @@ fn the_options_change_the_settings_of_the_host() {
 fn the_options_of_the_menu_go_back_to_the_menu() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     play(&mut harness, &mut handheld);
-    for _ in 0..6 {
+    // Options is the sixth row (no Rewind row on the handheld).
+    for _ in 0..5 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);

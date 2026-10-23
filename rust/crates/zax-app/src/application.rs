@@ -289,6 +289,8 @@ impl Running {
         let mut host = build_host(parts);
         host.set_profiling(profiling);
         host.catch_up = catch_up(options);
+        // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
+        host.rollback_enabled = !options.handheld;
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui = ImguiFrontend::new(&gl, &host, options, height)?;

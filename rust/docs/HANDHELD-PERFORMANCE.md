@@ -124,6 +124,9 @@ displayed frame". All values are per displayed frame.
   world map 4 pixels of 86 400, campaign 22 of 36 captures differ by at most 0.002 %. On by
   default with `--handheld`, off on desktop; `ZAXNES_GROUP_DRAWS=0/1` forces it, harness
   `--group-draws`; the profiler start-up line shows it.
+- Device run of `cf00717` (owner): temple core 12.8 / lua 7.3 / conv 1.1 / scene 9 ms (~32 fps),
+  world map 12.7 / 4.7 / 3.4 / 13.8 (~28 fps, scene was 50), battle 12.7 / 1 / 0.8 / 5.7
+  (~47 fps). The core is now the largest stage everywhere. Rewind removed on handhelds (owner).
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now

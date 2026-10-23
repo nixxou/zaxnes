@@ -245,7 +245,6 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_MENU_RESUME, "Resume"),
     (keys::HANDHELD_MENU_SAVE_STATE, "Save state"),
     (keys::HANDHELD_MENU_LOAD_STATE, "Load state"),
-    (keys::HANDHELD_MENU_REWIND, "Rewind"),
     (keys::HANDHELD_MENU_FAST_FORWARD, "Fast forward"),
     (keys::HANDHELD_MENU_QUIT_TO_LIST, "Quit to ROM list"),
     (keys::HANDHELD_MENU_EXIT, "Exit to launcher"),

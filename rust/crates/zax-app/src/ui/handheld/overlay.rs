@@ -13,8 +13,6 @@ pub enum OverlayItem {
     SaveState,
     /// Load the state of the chosen slot.
     LoadState,
-    /// Go back in time.
-    Rewind,
     /// Fast forward on or off.
     FastForward,
     /// The camera preset.
@@ -28,11 +26,10 @@ pub enum OverlayItem {
 }
 
 /// The rows, in order.
-pub const ITEMS: [OverlayItem; 9] = [
+pub const ITEMS: [OverlayItem; 8] = [
     OverlayItem::Resume,
     OverlayItem::SaveState,
     OverlayItem::LoadState,
-    OverlayItem::Rewind,
     OverlayItem::FastForward,
     OverlayItem::Camera,
     OverlayItem::Options,
@@ -78,8 +75,6 @@ pub enum OverlayCommand {
     SaveState(i32),
     /// Load this numbered slot.
     LoadState(i32),
-    /// Go back in time.
-    Rewind,
     /// Fast forward on or off.
     ToggleFastForward,
     /// Apply this camera preset.
@@ -185,7 +180,6 @@ impl OverlayModel {
             OverlayItem::Resume => OverlayCommand::Resume,
             OverlayItem::SaveState => OverlayCommand::SaveState(self.slot),
             OverlayItem::LoadState => OverlayCommand::LoadState(self.slot),
-            OverlayItem::Rewind => OverlayCommand::Rewind,
             OverlayItem::FastForward => OverlayCommand::ToggleFastForward,
             OverlayItem::Camera => OverlayCommand::SetCamera(self.camera),
             OverlayItem::Options => OverlayCommand::Options,
@@ -241,7 +235,6 @@ mod tests {
     fn every_row_answers_its_command() {
         let mut model = OverlayModel::new();
         for (item, command) in [
-            (OverlayItem::Rewind, OverlayCommand::Rewind),
             (OverlayItem::FastForward, OverlayCommand::ToggleFastForward),
             (OverlayItem::Options, OverlayCommand::Options),
             (OverlayItem::QuitToList, OverlayCommand::QuitToList),
