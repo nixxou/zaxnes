@@ -34,6 +34,7 @@ use crate::emulation::host::{
 };
 use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
 use crate::frame_rate_counter::FrameRateCounter;
+use crate::game_session::GameSession;
 use crate::input::cursor_auto_hide::CursorAutoHide;
 use crate::input::input_action::to_camera_actions;
 use crate::input::{routing, DesktopInputSource, DeviceRefs, InputSnapshot};
@@ -203,8 +204,36 @@ impl ZaxApplication {
         }
     }
 
-    fn run_inner(&self, mut ui: Box<dyn ApplicationUi>) -> Result<i32, String> {
-        let options = &self.options;
+    fn run_inner(&self, ui: Box<dyn ApplicationUi>) -> Result<i32, String> {
+        let mut running = Running::build(&self.options, ui)?;
+        while running.frame()? {}
+        Ok(running.finish())
+    }
+}
+
+/// Everything a run owns once the window is open.
+struct Running {
+    options: AppOptions,
+    ui: Box<dyn ApplicationUi>,
+    window: HostWindow,
+    gl: Rc<glow::Context>,
+    offscreen: Rc<RefCell<OffscreenFramebuffer>>,
+    renderer: SceneRenderer,
+    input: SdlInput,
+    source: DesktopInputSource,
+    audio: Option<AudioOutput>,
+    host: AppHost,
+    scene: SharedScene,
+    pacing: VideoPacing,
+    modal_flag: Rc<Cell<bool>>,
+    counter: FrameRateCounter,
+    cursor: CursorAutoHide,
+    state: RunState,
+    last: Instant,
+}
+
+impl Running {
+    fn build(options: &AppOptions, ui: Box<dyn ApplicationUi>) -> Result<Self, String> {
         let asset_root = neutral_assets::locate(options.asset_root.as_deref().map(Path::new));
         let paths =
             UserDataPaths::resolve(options.user_data_root.as_deref().map(Path::new), None, None);
@@ -216,23 +245,8 @@ impl ZaxApplication {
                 paths.root.display()
             ));
         }
-        let mut store = SettingsStore::new(&paths);
-        let mut model = SettingsModel::new();
-        store.load(&mut model, OffsetDateTime::now_utc());
-        // The command line wins over the file, but only for the options it really carries
-        // (Q-066); then the scene gets the values that came out of the two.
-        command_line_settings::apply(options, &mut model);
-        if !paths.is_writable {
-            eprintln!(
-                "Zaxnes: {}",
-                paths.unwritable_message.clone().unwrap_or_default()
-            );
-        }
-        let catalog = LibraryGameCatalog::open(
-            asset_root.as_deref(),
-            &paths,
-            Box::new(|message| log(message)),
-        );
+        let (store, model) = load_settings(options, &paths);
+        let catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
         if let Some(rom) = options
             .rom_path
             .as_deref()
@@ -244,38 +258,30 @@ impl ZaxApplication {
         let scene: SharedScene = Rc::default();
         publish_settings_to_scene(&model, &scene);
 
-        let pacing = pacing_request(options, &model);
+        let request = pacing_request(options, &model);
         let mut window = HostWindow::create(&HostWindowSettings {
             title: "Zaxnes".to_owned(),
             width: options.width,
             height: options.height,
-            vsync: pacing.vsync,
-            target_frame_rate: pacing.target_frame_rate,
+            vsync: request.vsync,
+            target_frame_rate: request.target_frame_rate,
             fullscreen: should_open_fullscreen(options, model.fullscreen()),
         })
         .map_err(|error| error.to_string())?;
         if options.smoke_test {
             println!("{}", smoke_banner(options));
         }
-        let (images, problems) = icon::load_embedded();
-        let state = icon::apply(Some(&mut window), &images);
-        let detail = if problems.is_empty() {
-            String::new()
-        } else {
-            format!(" [{}]", problems.join("; "))
-        };
-        log(&format!("{state}{detail}"));
-
+        log_window_icon(&mut window);
         let gl = window.glow_context();
         let (renderer_name, version) = framebuffer::gl_strings(&gl);
         let request_options = options.clone();
-        let mut video_pacing = VideoPacing::new(
+        let mut pacing = VideoPacing::new(
             Some(Box::new(move |model| {
                 pacing_request(&request_options, model)
             })),
-            Some(Box::new(|message| log(message))),
+            Some(Box::new(log)),
         );
-        video_pacing.apply(&mut window, &model);
+        pacing.apply(&mut window, &model);
         let (width, height) = window.drawable_size();
         // The host reads the buffer back for the thumbnails whenever the game pauses, so the
         // loop and the host's capture closure share it; the borrows are momentary.
@@ -283,174 +289,282 @@ impl ZaxApplication {
             OffscreenFramebuffer::new(Rc::clone(&gl), to_i32(width), to_i32(height))
                 .map_err(|error| error.to_string())?,
         ));
-        let mut renderer = SceneRenderer::new(
+        let renderer = SceneRenderer::new(
             Rc::clone(&gl),
             NeutralSceneAssets::try_open(asset_root.as_deref())
                 .map(|assets| Box::new(assets) as Box<dyn SceneAssets>),
         )
         .map_err(|error| error.to_string())?;
-
-        let mut input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;
+        let input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;
         let mut bindings_store = FileInputBindingStore::new(paths.clone(), OffsetDateTime::now_utc);
         let mut bindings = crate::input::InputBindings::new();
         bindings_store.load(&mut bindings);
-        let mut source = DesktopInputSource::new(bindings, Box::new(bindings_store));
+        let source = DesktopInputSource::new(bindings, Box::new(bindings_store));
 
-        let (mut audio, sample_rate) = open_audio(options, window.sdl());
-        let library: Box<dyn UiAudioLibrary> =
-            match AudioAssets::try_open(asset_root.as_deref(), |message| log(message)) {
-                Some(files) => Box::new(files),
-                None => Box::new(SynthAudioLibrary::new(sample_rate)),
-            };
-        let mut mixer = AudioMixer::new(sample_rate, Some(library), TrackRandom::new(seed()));
-        mixer.set_volume(model.effective_volume());
-        mixer.set_menu_music_enabled(model.menu_music());
-
-        let modal = Rc::new(Cell::new(false));
-        let mut host_options =
-            EmulationHostOptions::new(paths.clone(), model, Rc::clone(&scene), catalog);
-        host_options.mixer = Some(mixer);
-        host_options.script_log = Some(Box::new(|| Box::new(ConsoleScriptLog)));
-        host_options.audio_device_open = audio.is_some();
-        host_options.log = Some(Box::new(|message| log(message)));
-        host_options.settings_store = Some(store);
-        host_options.confirm_with_interface = true;
-        let probe = Rc::clone(&modal);
-        host_options.modal_window_open = Some(Box::new(move || probe.get()));
-        let capture = Rc::clone(&offscreen);
-        host_options.capture_thumbnail = Some(Box::new(move || {
-            capture.borrow().read_scaled_rgb(
-                to_i32_usize(THUMBNAIL_WIDTH),
-                to_i32_usize(THUMBNAIL_HEIGHT),
-            )
-        }));
-        let mut host = EmulationHost::new(host_options);
+        let (audio, sample_rate) = open_audio(options, window.sdl());
+        let modal_flag = Rc::new(Cell::new(false));
+        let parts = HostParts {
+            paths: &paths,
+            model,
+            scene: &scene,
+            catalog,
+            store,
+            asset_root: asset_root.as_deref(),
+            sample_rate,
+            audio_open: audio.is_some(),
+            offscreen: &offscreen,
+            modal_flag: &modal_flag,
+        };
+        let mut host = build_host(parts);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
+        Ok(Self {
+            options: options.clone(),
+            ui,
+            window,
+            gl,
+            offscreen,
+            renderer,
+            input,
+            source,
+            audio,
+            host,
+            scene,
+            pacing,
+            modal_flag,
+            counter: FrameRateCounter::new(),
+            cursor: CursorAutoHide::new(),
+            state: RunState::new(renderer_name, version),
+            last: Instant::now(),
+        })
+    }
 
-        let mut counter = FrameRateCounter::new();
-        let mut cursor = CursorAutoHide::new();
-        let mut state = RunState::new(renderer_name, version);
-        let mut last = Instant::now();
-        'frames: loop {
-            let mut closing = false;
-            window.pump_events(|event| {
-                ui.handle_event(event);
-                input.handle_event(event);
-                match event {
-                    Event::Quit { .. } => closing = true,
-                    Event::Window {
-                        win_event: WindowEvent::FocusLost,
-                        ..
-                    } => host.suspend(),
-                    Event::Window {
-                        win_event: WindowEvent::FocusGained,
-                        ..
-                    } => host.resume_from_suspend(),
-                    _ => {}
-                }
-            });
-            if closing {
-                break 'frames;
-            }
-            let now = Instant::now();
-            let delta = now.duration_since(last).as_secs_f64();
-            last = now;
-            counter.add(delta);
-            state.rendered_frames += 1;
-            let real = delta.clamp(0.0, 0.25);
-            #[allow(clippy::cast_possible_truncation)] // the C# `(float)` of a clamped delta
-            let real_f = real as f32;
-            modal.set(ui.is_modal());
-            let (width, height) = window.drawable_size();
-            let (width, height) = (to_i32(width), to_i32(height));
-            source.keyboard_captured_by_ui = ui.wants_keyboard();
-            source.pointer_over_ui = ui.wants_pointer();
-            #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
-            {
-                source.render_target_size = [width as f32, height as f32];
-            }
-            let snapshot = source.sample(
-                real_f,
-                DeviceRefs {
-                    keyboard: Some(&input.keyboard),
-                    pointer: Some(&mut input.pointer),
-                    hub: &mut input.gamepads,
-                },
-            );
-            for command in source.triggered_commands() {
-                if let Some(command) = Command::from_name(command) {
-                    host.enqueue(command, CommandArgs::default());
-                }
-            }
-            handle_camera_input(&host, &scene, &snapshot, real_f, &mut state);
-            update_cursor(&mut cursor, &host, &mut input, &snapshot, real_f);
-            let emulated = host.tick(real, &snapshot);
-            source.end_sample();
-            update_scene(&mut host, &scene, &mut state);
-            {
-                let mut scene = scene.borrow_mut();
-                scene.camera.advance(real_f);
-                scene.real_time += real_f;
-            }
-            forward_events(&mut host, &mut ui, &mut window, &mut video_pacing);
-            let view_height = (height - to_i32_f(ui.chrome_height())).max(1);
-            let (scene_width, scene_height) = render_scaling::scene_size(
-                width,
-                view_height,
-                host.settings().render_method(),
-                host.settings().res_scale_factor(),
-            );
-            offscreen
-                .borrow_mut()
-                .resize(scene_width, scene_height)
-                .map_err(|error| error.to_string())?;
-            let skip = render_skip::should_skip(
-                scene.borrow().settings.skip_render,
-                host.state() == EmulationState::Running,
-                emulated,
-                state.last_render_size == (scene_width, scene_height),
-            );
-            if skip {
-                state.skipped_frames += 1;
-            } else {
-                render_scene(
-                    &mut renderer,
-                    &offscreen.borrow(),
-                    &scene,
-                    &mut host,
-                    &mut state,
-                )?;
-                state.last_render_size = (scene_width, scene_height);
-                state.scene_frames += 1;
-            }
-            framebuffer::begin_window_pass(&gl, width, height);
-            offscreen
-                .borrow()
-                .blit_to_default_framebuffer(width, view_height);
-            ui.draw(&mut host, real_f);
-            pump_audio(&mut host, audio.as_mut(), real);
-            if host.quit_requested()
-                || (options.smoke_test && smoke_run_is_over(options, &host, &state))
-            {
-                if let Some(shot) = options.smoke_shot_path.as_deref() {
-                    capture_window(&gl, width, height, Path::new(shot));
-                }
-                break 'frames;
-            }
-            window.swap_and_pace();
+    /// One displayed frame. Returns false once the application is to close.
+    fn frame(&mut self) -> Result<bool, String> {
+        if self.pump_events() {
+            return Ok(false);
         }
-        // REQ-LOOP-052: the current game is stopped (End hook), the settings and the slot
-        // metadata are written, and nothing is auto-saved.
-        ui.close_capture();
-        let emulated_frames = host.emulated_frames();
-        host.shutdown();
+        let now = Instant::now();
+        let delta = now.duration_since(self.last).as_secs_f64();
+        self.last = now;
+        self.counter.add(delta);
+        self.state.rendered_frames += 1;
+        let real = delta.clamp(0.0, 0.25);
+        #[allow(clippy::cast_possible_truncation)] // the C# `(float)` of a clamped delta
+        let real_f = real as f32;
+        self.modal_flag.set(self.ui.is_modal());
+        let (width, height) = self.window.drawable_size();
+        let (width, height) = (to_i32(width), to_i32(height));
+        let snapshot = self.sample_input(real_f, width, height);
+        handle_camera_input(&self.host, &self.scene, &snapshot, real_f, &mut self.state);
+        update_cursor(
+            &mut self.cursor,
+            &self.host,
+            &mut self.input,
+            &snapshot,
+            real_f,
+        );
+        let emulated = self.host.tick(real, &snapshot);
+        self.source.end_sample();
+        update_scene(&mut self.host, &self.scene, &mut self.state);
+        {
+            let mut scene = self.scene.borrow_mut();
+            scene.camera.advance(real_f);
+            scene.real_time += real_f;
+        }
+        forward_events(
+            &mut self.host,
+            &mut self.ui,
+            &mut self.window,
+            &mut self.pacing,
+        );
+        self.draw(emulated, width, height, real_f)?;
+        pump_audio(&mut self.host, self.audio.as_mut(), real);
+        if self.host.quit_requested()
+            || (self.options.smoke_test
+                && smoke_run_is_over(&self.options, &self.host, &self.state))
+        {
+            if let Some(shot) = self.options.smoke_shot_path.as_deref() {
+                capture_window(&self.gl, width, height, Path::new(shot));
+            }
+            return Ok(false);
+        }
+        self.window.swap_and_pace();
+        Ok(true)
+    }
+
+    /// Feeds the window's events to the interface and the input layer. Returns whether the
+    /// window is closing.
+    fn pump_events(&mut self) -> bool {
+        let mut closing = false;
+        let (ui, input, host) = (&mut self.ui, &mut self.input, &mut self.host);
+        self.window.pump_events(|event| {
+            ui.handle_event(event);
+            input.handle_event(event);
+            match event {
+                Event::Quit { .. } => closing = true,
+                Event::Window {
+                    win_event: WindowEvent::FocusLost,
+                    ..
+                } => host.suspend(),
+                Event::Window {
+                    win_event: WindowEvent::FocusGained,
+                    ..
+                } => host.resume_from_suspend(),
+                _ => {}
+            }
+        });
+        closing
+    }
+
+    fn sample_input(&mut self, real: f32, width: i32, height: i32) -> InputSnapshot {
+        self.source.keyboard_captured_by_ui = self.ui.wants_keyboard();
+        self.source.pointer_over_ui = self.ui.wants_pointer();
+        #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
+        {
+            self.source.render_target_size = [width as f32, height as f32];
+        }
+        let snapshot = self.source.sample(
+            real,
+            DeviceRefs {
+                keyboard: Some(&self.input.keyboard),
+                pointer: Some(&mut self.input.pointer),
+                hub: &mut self.input.gamepads,
+            },
+        );
+        for command in self.source.triggered_commands() {
+            if let Some(command) = Command::from_name(command) {
+                self.host.enqueue(command, CommandArgs::default());
+            }
+        }
+        snapshot
+    }
+
+    /// Draws the scene into the offscreen buffer (unless the render-skip rule keeps the
+    /// previous image), blits it under the interface and draws the interface.
+    fn draw(&mut self, emulated: u32, width: i32, height: i32, real: f32) -> Result<(), String> {
+        let view_height = (height - to_i32_f(self.ui.chrome_height())).max(1);
+        let (scene_width, scene_height) = render_scaling::scene_size(
+            width,
+            view_height,
+            self.host.settings().render_method(),
+            self.host.settings().res_scale_factor(),
+        );
+        self.offscreen
+            .borrow_mut()
+            .resize(scene_width, scene_height)
+            .map_err(|error| error.to_string())?;
+        let skip = render_skip::should_skip(
+            self.scene.borrow().settings.skip_render,
+            self.host.state() == EmulationState::Running,
+            emulated,
+            self.state.last_render_size == (scene_width, scene_height),
+        );
+        if skip {
+            self.state.skipped_frames += 1;
+        } else {
+            render_scene(
+                &mut self.renderer,
+                &self.offscreen.borrow(),
+                &self.scene,
+                &mut self.host,
+                &mut self.state,
+            )?;
+            self.state.last_render_size = (scene_width, scene_height);
+            self.state.scene_frames += 1;
+        }
+        framebuffer::begin_window_pass(&self.gl, width, height);
+        self.offscreen
+            .borrow()
+            .blit_to_default_framebuffer(width, view_height);
+        self.ui.draw(&mut self.host, real);
+        Ok(())
+    }
+
+    /// REQ-LOOP-052: the current game is stopped (End hook), the settings and the slot metadata
+    /// are written, and nothing is auto-saved.
+    fn finish(mut self) -> i32 {
+        self.ui.close_capture();
+        let emulated_frames = self.host.emulated_frames();
+        self.host.shutdown();
         // REQ-INP-050 / REQ-PERS-065: the bindings are written at exit as well as after each
         // change.
-        source.flush_changes();
-        host.games().save();
-        Ok(finish(options, &state, emulated_frames))
+        self.source.flush_changes();
+        self.host.games().save();
+        finish(&self.options, &self.state, emulated_frames)
     }
+}
+
+fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore, SettingsModel) {
+    let mut store = SettingsStore::new(paths);
+    let mut model = SettingsModel::new();
+    store.load(&mut model, OffsetDateTime::now_utc());
+    // The command line wins over the file, but only for the options it really carries (Q-066);
+    // then the scene gets the values that came out of the two.
+    command_line_settings::apply(options, &mut model);
+    if !paths.is_writable {
+        eprintln!(
+            "Zaxnes: {}",
+            paths.unwritable_message.clone().unwrap_or_default()
+        );
+    }
+    (store, model)
+}
+
+struct HostParts<'a> {
+    paths: &'a UserDataPaths,
+    model: SettingsModel,
+    scene: &'a SharedScene,
+    catalog: LibraryGameCatalog,
+    store: SettingsStore,
+    asset_root: Option<&'a Path>,
+    sample_rate: u32,
+    audio_open: bool,
+    offscreen: &'a Rc<RefCell<OffscreenFramebuffer>>,
+    modal_flag: &'a Rc<Cell<bool>>,
+}
+
+fn build_host(parts: HostParts<'_>) -> AppHost {
+    let library: Box<dyn UiAudioLibrary> = match AudioAssets::try_open(parts.asset_root, log) {
+        Some(files) => Box::new(files),
+        None => Box::new(SynthAudioLibrary::new(parts.sample_rate)),
+    };
+    let mut mixer = AudioMixer::new(parts.sample_rate, Some(library), TrackRandom::new(seed()));
+    mixer.set_volume(parts.model.effective_volume());
+    mixer.set_menu_music_enabled(parts.model.menu_music());
+    let mut options = EmulationHostOptions::new(
+        parts.paths.clone(),
+        parts.model,
+        Rc::clone(parts.scene),
+        parts.catalog,
+    );
+    options.mixer = Some(mixer);
+    options.script_log = Some(Box::new(|| Box::new(ConsoleScriptLog)));
+    options.audio_device_open = parts.audio_open;
+    options.log = Some(Box::new(log));
+    options.settings_store = Some(parts.store);
+    options.confirm_with_interface = true;
+    let probe = Rc::clone(parts.modal_flag);
+    options.modal_window_open = Some(Box::new(move || probe.get()));
+    let capture = Rc::clone(parts.offscreen);
+    options.capture_thumbnail = Some(Box::new(move || {
+        capture.borrow().read_scaled_rgb(
+            to_i32_usize(THUMBNAIL_WIDTH),
+            to_i32_usize(THUMBNAIL_HEIGHT),
+        )
+    }));
+    EmulationHost::new(options)
+}
+
+fn log_window_icon(window: &mut HostWindow) {
+    let (images, problems) = icon::load_embedded();
+    let state = icon::apply(Some(window), &images);
+    let detail = if problems.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", problems.join("; "))
+    };
+    log(&format!("{state}{detail}"));
 }
 
 struct RunState {
@@ -725,7 +839,7 @@ fn render_scene(
     } else {
         &[]
     };
-    let list = host.session_mut().map(|session| session.build_draw_list());
+    let list = host.session_mut().map(GameSession::build_draw_list);
     let frame = SceneFrame {
         draw_list: list,
         nes_picture: picture,
