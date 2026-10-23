@@ -521,6 +521,7 @@ version = "0.2.0"
 name = "zax-engine3d"
 version = "0.2.0"
 dependencies = [
+ "rstest",
  "thiserror",
  "zax-nes",
  "zax-profiles",

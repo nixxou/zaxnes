@@ -11,5 +11,8 @@ thiserror = "2"
 zax-nes = { path = "../zax-nes" }
 zax-profiles = { path = "../zax-profiles" }
 
+[dev-dependencies]
+rstest = "0.26"
+
 [lints]
 workspace = true

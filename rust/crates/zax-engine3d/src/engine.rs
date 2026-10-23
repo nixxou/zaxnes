@@ -18,6 +18,7 @@ use crate::geometry::builder::{
 use crate::grid;
 use crate::image::{ImageRegistry, TileImageKey};
 use crate::instance::InstanceRef;
+use crate::pattern::EnginePattern;
 use crate::palette::Rgb24;
 use crate::registry::{PatternId, PatternRegistry};
 use crate::script::{NullScriptHost, ScriptHost};
@@ -538,6 +539,12 @@ impl ConversionState {
     /// updates the candidate lists of its images.
     pub fn registries_mut(&mut self) -> (&mut PatternRegistry, &mut ImageRegistry) {
         (&mut self.patterns, &mut self.images)
+    }
+
+    /// The pattern of a handle, for writing (the script API changes recognition flags and
+    /// instances in place), or `None` when it was dropped.
+    pub fn pattern_mut(&mut self, id: PatternId) -> Option<&mut EnginePattern> {
+        self.patterns.get_mut(id)
     }
 
     /// Removes every permanent pattern that carries `tag` (SPEC-05 `Pattern.RemoveWithTag`).
