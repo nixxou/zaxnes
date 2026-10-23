@@ -16,9 +16,12 @@ pub struct FakeProfileFileSystem {
     unreadable: RefCell<BTreeSet<String>>,
 }
 
+/// A separator-independent, case-insensitive key: `a/b` and `a\b` (what `Path::join` builds on
+/// Windows) name the same entry on every platform.
 fn key(path: &Path) -> String {
     path.to_string_lossy()
-        .trim_end_matches(['/', '\\'])
+        .replace('\\', "/")
+        .trim_end_matches('/')
         .to_lowercase()
 }
 
@@ -181,5 +184,20 @@ impl ProfileFileSystem for FakeProfileFileSystem {
         self.copy_file(source, destination, overwrite)?;
         self.files.borrow_mut().remove(&key(source));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn separators_do_not_change_which_entry_a_path_names() {
+        let fake = FakeProfileFileSystem::new();
+        let joined = Path::new("install").join("data").join("file.bundle");
+        fake.add_text(&joined, "x");
+        assert!(fake.file_exists(Path::new("install/data/file.bundle")));
+        assert!(fake.file_exists(Path::new("install\\data\\file.bundle")));
+        assert!(fake.directory_exists(Path::new("install/data/")));
     }
 }
