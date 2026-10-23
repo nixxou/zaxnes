@@ -219,6 +219,11 @@ fn frame_seconds(extra: &str) -> f64 {
 #[ignore = "benchmark: run in release with --ignored --nocapture"]
 fn perf_frames() {
     let hooks = frame_seconds("");
+    let empty = frame_seconds("function UpdateS() end");
+    println!(
+        "empty UpdateS: {:.2} us per call",
+        (empty - hooks) * 1e6 / f64::from(SHAPES)
+    );
     let full = frame_seconds(UPDATE_S);
     println!(
         "frame with Update and LateUpdate: {:.1} us; with {SHAPES} UpdateS calls on top: {:.1} us, \

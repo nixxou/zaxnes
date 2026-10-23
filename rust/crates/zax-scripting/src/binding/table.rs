@@ -68,7 +68,7 @@ pub(crate) struct TypeDef {
     pub name: &'static str,
     /// Properties and methods, in declaration order.
     pub members: Vec<Member>,
-    lookup: HashMap<&'static str, usize, BuildHasherDefault<NameHasher>>,
+    lookup: HashMap<&'static str, usize, BuildHasherDefault<ByteHasher>>,
     /// The type of `obj[i]`, for the static check of REQ-LUA-051.
     pub element: Option<HostType>,
     pub indexer: Option<IndexFn>,
@@ -230,12 +230,12 @@ impl Api {
     }
 }
 
-/// FNV-1a over the bytes of a member name: the names are short and fixed, so the keyed hash of
-/// the standard library costs more than the lookup is worth.
+/// FNV-1a over bytes: member names and handle keys are short and not chosen by an adversary, so
+/// the keyed hash of the standard library costs more than the lookup is worth.
 #[derive(Default)]
-struct NameHasher(u64);
+pub(crate) struct ByteHasher(u64);
 
-impl Hasher for NameHasher {
+impl Hasher for ByteHasher {
     fn finish(&self) -> u64 {
         self.0
     }
