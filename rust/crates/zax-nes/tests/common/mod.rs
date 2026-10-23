@@ -9,6 +9,8 @@
     clippy::cast_possible_truncation
 )]
 
+pub mod mapper_fixture;
+
 use std::ops::{Index, IndexMut};
 
 use zax_nes::apu::Apu2A03;

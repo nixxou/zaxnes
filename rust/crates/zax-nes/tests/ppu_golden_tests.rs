@@ -1,5 +1,5 @@
-//! Golden parity of the core with the C# reference: for every row of `core-goldens.jsonl`
-//! whose ROM is mapper 0, `pixel_sha256`, `tiles_sha256`, `cycles` and
+//! Golden parity of the core with the C# reference: for every row of `core-goldens.jsonl`,
+//! `pixel_sha256`, `tiles_sha256`, `cycles` and
 //! `audio_i16_sha256_samples` must match at every checkpoint, and `blargg_status` /
 //! `blargg_text` after the last golden frame (run protocol, audio quantisation and tile
 //! serialisation: `rust/goldens/README.md`).
@@ -20,10 +20,8 @@ use sha2::{Digest, Sha256};
 use zax_goldens::{goldens_dir, read_core_goldens, CoreGolden};
 use zax_nes::{Machine, TileRecord};
 
-/// Rows that still differ because input is a stub until T04: `dma_4016_read` branches on
-/// the bits it reads from $4016 (the real controller returns 1 after the eighth read, the
-/// stub 0), which moves the frame boundary by one cycle. Reported, not failed.
-const PENDING_T04: &[&str] = &["dmc_dma_during_read4/dma_4016_read.nes"];
+/// Rows allowed to differ, reported but not failed. Empty: every row matches.
+const PENDING_T04: &[&str] = &[];
 
 fn hex(digest: &[u8]) -> String {
     use std::fmt::Write as _;
@@ -70,6 +68,13 @@ fn check_row(row: &CoreGolden, image: &[u8], last_frame: u32) -> Result<(), Stri
         ));
     }
     if !load.success {
+        let failure = format!("{:?}", load.failure);
+        if Some(&failure) != row.load_failure.as_ref() {
+            return Err(format!(
+                "load_failure {failure} vs golden {:?}",
+                row.load_failure
+            ));
+        }
         return Ok(());
     }
 
@@ -163,10 +168,6 @@ fn check_blargg(row: &CoreGolden, machine: &Machine) -> Result<(), String> {
 
 fn run_goldens(last_frame: u32) {
     let rows = read_core_goldens(&goldens_dir().join("core-goldens.jsonl")).expect("goldens load");
-    let rows: Vec<CoreGolden> = rows
-        .into_iter()
-        .filter(|row| row.mapper == Some(0))
-        .collect();
     let rom_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-roms");
     if !rom_dir.is_dir() {
         eprintln!("skipped: {} not found", rom_dir.display());
@@ -209,7 +210,7 @@ fn run_goldens(last_frame: u32) {
     let missing = missing.into_inner().unwrap();
     let pending = pending.into_inner().unwrap();
     eprintln!(
-        "mapper-0 goldens up to frame {last_frame}: {} of {} rows matched, {} pending T04 (input stub): {:?}, {} ROMs missing",
+        "goldens up to frame {last_frame}: {} of {} rows matched, {} pending: {:?}, {} ROMs missing",
         matched.load(Ordering::Relaxed),
         rows.len(),
         pending.len(),
@@ -225,12 +226,12 @@ fn run_goldens(last_frame: u32) {
 }
 
 #[test]
-fn golden_mapper_0_pixels_tiles_audio_and_cycles_match_up_to_frame_60() {
+fn golden_pixels_tiles_audio_and_cycles_match_up_to_frame_60() {
     run_goldens(60);
 }
 
 #[test]
-#[ignore = "slow: 222 ROMs x 1200 frames; run with --release -- --ignored"]
-fn golden_mapper_0_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200() {
+#[ignore = "slow: 291 ROMs x 1200 frames; run with --release -- --ignored"]
+fn golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200() {
     run_goldens(1200);
 }

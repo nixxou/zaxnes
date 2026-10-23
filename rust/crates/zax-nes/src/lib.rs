@@ -19,6 +19,7 @@ mod tile_record;
 mod video_info;
 
 pub use frame_batch::FrameBatch;
+pub use input::{ControllerPortType, ZapperPosition};
 pub use machine::Machine;
 pub use nametable_mirroring::NametableMirroring;
 pub use nes_bus::NesBus;
