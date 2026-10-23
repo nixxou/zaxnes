@@ -492,7 +492,8 @@ pub struct RecordingGeometryBuilder {
     pub reported_progress: GeometryProgress,
     /// The object counts `begin_mass_build` was told, in order.
     pub mass_builds: Vec<usize>,
-    stub: Arc<TileMesh>,
+    /// The mesh it hands out for every tile.
+    pub stub: Arc<TileMesh>,
 }
 
 impl Default for RecordingGeometryBuilder {
