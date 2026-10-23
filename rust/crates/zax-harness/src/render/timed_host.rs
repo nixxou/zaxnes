@@ -35,6 +35,13 @@ impl TimedHost {
         self.per_frame.len()
     }
 
+    /// Hook time of the frame being run, or of the last one once its `LateUpdate` returned, in
+    /// milliseconds (zero while the runtime has no frame hook).
+    #[must_use]
+    pub const fn current_frame(&self) -> f64 {
+        self.current
+    }
+
     /// Mean hook time of a frame, in milliseconds.
     #[must_use]
     #[allow(clippy::cast_precision_loss)] // A frame count is far below 2^52.
