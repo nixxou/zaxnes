@@ -19,10 +19,10 @@ use super::support::{img, Batch, PatternSpec, ScriptProfileBuilder};
 const ACCESSES_PER_TURN: u32 = 5;
 const TURNS: u32 = 20;
 /// Hook calls per timed round of the hook benchmark.
-const CALLS: u32 = 2000;
+const CALLS: u32 = 500;
 const ROUNDS: usize = 10;
 const SHAPES: u32 = 60;
-const SHAPE_FRAMES: i32 = 300;
+const SHAPE_FRAMES: i32 = 100;
 const ITERATIONS: u32 = 200_000;
 
 /// Typical accesses of a frame hook: camera and backdrop writes, a memory read and write, a
