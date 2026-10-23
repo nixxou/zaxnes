@@ -1,6 +1,9 @@
 //! Life cycle and the operation set of REQ-CORE-002 (REQ-CORE-001 to REQ-CORE-006,
 //! REQ-CORE-031).
 
+// Test helpers: a failed setup panics.
+#![allow(clippy::unwrap_used)]
+
 mod common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -157,7 +160,11 @@ fn req_core_001_two_instances_are_independent() {
     // Two cores, two different ROMs, run alternately: each must produce exactly what it
     // produces alone (REQ-ARCH-011).
     let rom_a = minimal_rom(0x01, None, None);
-    let rom_b = minimal_rom(0x00, Some(&[0xA9, 0x37, 0x8D, 0x10, 0x03, 0x4C, 0x00, 0x80]), None);
+    let rom_b = minimal_rom(
+        0x00,
+        Some(&[0xA9, 0x37, 0x8D, 0x10, 0x03, 0x4C, 0x00, 0x80]),
+        None,
+    );
 
     let alone_a = run_alone(&rom_a, 600);
     let alone_b = run_alone(&rom_b, 600);

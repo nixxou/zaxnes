@@ -98,7 +98,6 @@ fn req_core_111_the_five_cpu_interrupts_parts_pass() {
 }
 
 #[test]
-#[ignore = "cpu_interrupts.nes is an MMC1 (mapper 1) ROM: enable once the mapper is ported"]
 fn req_core_111_the_combined_cpu_interrupts_rom_passes() {
     assert_shell_pass("cpu_interrupts_v2/", &["cpu_interrupts.nes"]);
 }

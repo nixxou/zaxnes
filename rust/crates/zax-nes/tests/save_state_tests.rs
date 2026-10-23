@@ -1,6 +1,9 @@
 //! Savestates: self-containment, partial restore, failure modes and determinism
 //! (REQ-CORE-090 to REQ-CORE-093, REQ-ARCH-012, REQ-ARCH-013).
 
+// Test helpers: a failed setup panics.
+#![allow(clippy::unwrap_used)]
+
 mod common;
 
 use common::{machine_with, minimal_rom, TestRandom};
@@ -285,7 +288,10 @@ fn req_core_093_a_lightweight_block_is_refused_when_no_rom_is_loaded() {
 
     let mut empty = NesCore::new();
     let error = empty.try_load_state(&light, 0).unwrap_err();
-    assert!(error.message.to_lowercase().contains("no rom image"), "{error}");
+    assert!(
+        error.message.to_lowercase().contains("no rom image"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -301,7 +307,10 @@ fn req_core_014_the_stored_rom_name_comes_back_after_loading_another_rom() {
 
     let state = core.save_state(true).unwrap();
 
-    assert!(core.load_rom(&minimal_rom(0x00, None, None), "Other.nes").success);
+    assert!(
+        core.load_rom(&minimal_rom(0x00, None, None), "Other.nes")
+            .success
+    );
     assert_eq!(Some("Other.nes"), core.rom_name());
 
     let loaded = core.try_load_state(&state, 0).unwrap();

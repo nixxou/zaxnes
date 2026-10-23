@@ -74,6 +74,16 @@ fn req_core_011_unsupported_mapper_is_rejected_with_its_number() {
 }
 
 #[test]
+fn req_core_102_only_implemented_mappers_are_accepted() {
+    // The table of REQ-CORE-100, and nothing else: the list itself is checked in
+    // mapper_tests, here only that it is the gate the loader uses.
+    assert!(!NesCore::SUPPORTED_MAPPERS.contains(&116));
+    assert!(!NesCore::SUPPORTED_MAPPERS.contains(&200));
+    assert!(NesCore::SUPPORTED_MAPPERS.contains(&0));
+    assert!(NesCore::SUPPORTED_MAPPERS.contains(&228));
+}
+
+#[test]
 fn req_core_011_header_shorter_than_16_bytes_is_rejected() {
     let mut core = NesCore::new();
     let result = core.load_rom(&[0x4E, 0x45, 0x53, 0x1A], "Short.nes");

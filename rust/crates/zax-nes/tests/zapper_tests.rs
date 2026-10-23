@@ -1,5 +1,4 @@
-//! The Zapper's light detection (REQ-CORE-060 to REQ-CORE-062, AMD-021 R2-006). The test that
-//! reads the position through the `NesCore` position source belongs to T05.
+//! The Zapper's light detection (REQ-CORE-060 to REQ-CORE-062, AMD-021 R2-006).
 
 // Test values are small: the casts cannot lose anything.
 #![allow(
@@ -9,6 +8,9 @@
 )]
 
 mod common;
+
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use common::TileFixture;
 use zax_nes::input::ControllerPortType;
@@ -251,4 +253,38 @@ fn req_core_062_exactly_nine_of_the_64_colours_are_dark() {
     // The six unused bits of a colour byte are ignored.
     assert!(nes_colors::is_dark(0x4F));
     assert!(!nes_colors::is_dark(0x70));
+}
+
+#[test]
+fn req_core_060_the_position_is_sampled_once_at_the_start_of_each_frame() {
+    let mut fixture = TileFixture::new();
+    let core = &mut fixture.core;
+    core.set_port_type(1, ControllerPortType::Zapper).unwrap();
+
+    let queried = Arc::new(Mutex::new(Vec::new()));
+    let frame = Arc::new(AtomicI32::new(0));
+    let (source_queried, source_frame) = (Arc::clone(&queried), Arc::clone(&frame));
+    core.set_zapper_position_source(Some(Box::new(move |port| {
+        source_queried.lock().unwrap().push(port);
+        let frame = source_frame.load(Ordering::Relaxed);
+        ZapperPosition::new(10 + frame, 20 + frame)
+    })));
+
+    core.run_frame(0);
+    assert_eq!(vec![1], *queried.lock().unwrap());
+    assert_eq!(
+        Ok(ZapperPosition::new(10, 20)),
+        core.bus().input().zapper_position(1)
+    );
+
+    // Port 0 is still a controller, so it is not queried; the stored position for the next
+    // frame is the one supplied before that frame's call.
+    frame.store(1, Ordering::Relaxed);
+    queried.lock().unwrap().clear();
+    core.run_frame(0);
+    assert_eq!(vec![1], *queried.lock().unwrap());
+    assert_eq!(
+        Ok(ZapperPosition::new(11, 21)),
+        core.bus().input().zapper_position(1)
+    );
 }
