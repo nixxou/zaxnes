@@ -11,7 +11,7 @@ pub const BUNDLE_PREFIX: &str = "defaultprofiles_assets_all_";
 /// File extension of a bundle.
 pub const BUNDLE_EXTENSION: &str = ".bundle";
 
-const STREAMING_PATH: &str = "StreamingAssets/aa";
+const STREAMING_PATH: [&str; 2] = ["StreamingAssets", "aa"];
 const DATA_SUFFIX: &str = "_Data";
 
 /// The platform folders under `StreamingAssets/aa`, in the order they are tried (AMD-030 §3.1).
@@ -26,7 +26,8 @@ pub const PLATFORMS: [&str; 4] = [
 #[must_use]
 pub fn expected_layout() -> String {
     format!(
-        "<installation>/<nom>{DATA_SUFFIX}/{STREAMING_PATH}/<{}>/{BUNDLE_PREFIX}*{BUNDLE_EXTENSION}",
+        "<installation>/<nom>{DATA_SUFFIX}/{}/<{}>/{BUNDLE_PREFIX}*{BUNDLE_EXTENSION}",
+        STREAMING_PATH.join("/"),
         PLATFORMS.join("|")
     )
 }
@@ -90,7 +91,10 @@ pub fn is_bundle_name(file_name: &str) -> bool {
 fn find_under(files: &dyn ProfileFileSystem, data_folders: &[PathBuf]) -> Option<PathBuf> {
     PLATFORMS.iter().find_map(|platform| {
         data_folders.iter().find_map(|data| {
-            let folder = data.join(STREAMING_PATH).join(platform);
+            let folder = STREAMING_PATH
+                .iter()
+                .fold(data.clone(), |folder, part| folder.join(part))
+                .join(platform);
             first_bundle_in(files, &folder)
         })
     })
