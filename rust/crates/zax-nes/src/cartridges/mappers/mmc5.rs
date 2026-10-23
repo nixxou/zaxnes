@@ -1,5 +1,5 @@
 use super::{windows_for, Mapper};
-use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch};
+use crate::cartridges::{wrap_offset, BankWindows, CartridgeMemory, ChrFetch};
 use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::RegionTiming;
 
@@ -204,11 +204,11 @@ impl Mmc5 {
             return if ram.is_empty() {
                 0
             } else {
-                ram[offset % ram.len()]
+                ram[wrap_offset(offset, ram.len())]
             };
         }
 
-        chr_rom[offset % chr_rom.len()]
+        chr_rom[wrap_offset(offset, chr_rom.len())]
     }
 
     fn nametable_mode(&self, address: u16) -> i32 {
@@ -393,7 +393,7 @@ impl Mapper for Mmc5 {
             let ram = memory.chr_ram_mut();
             if !ram.is_empty() {
                 let len = ram.len();
-                ram[offset % len] = value;
+                ram[wrap_offset(offset, len)] = value;
             }
         }
     }

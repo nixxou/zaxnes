@@ -1,3 +1,4 @@
+use super::wrap_offset;
 use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// Bank windows of every switching board: four 8 KiB PRG windows at $8000-$FFFF and eight
@@ -149,11 +150,11 @@ impl BankWindows {
             return Some(if ram.is_empty() {
                 0
             } else {
-                ram[offset % ram.len()]
+                ram[wrap_offset(offset, ram.len())]
             });
         }
 
-        Some(rom[offset % rom.len()])
+        Some(rom[wrap_offset(offset, rom.len())])
     }
 
     /// Writes a PRG window that currently shows PRG-RAM (MMC5); `false` when the window
@@ -176,9 +177,10 @@ impl BankWindows {
 
         if !prg_ram.is_empty() && writable {
             let len = prg_ram.len();
-            prg_ram[(self.prg_offset[slot]
-                + (usize::from(address) & (Self::PRG_WINDOW_SIZE - 1)))
-                % len] = value;
+            prg_ram[wrap_offset(
+                self.prg_offset[slot] + (usize::from(address) & (Self::PRG_WINDOW_SIZE - 1)),
+                len,
+            )] = value;
         }
 
         true
@@ -192,14 +194,14 @@ impl BankWindows {
             return 0;
         }
 
-        chr[self.chr_offset(address) % chr.len()]
+        chr[wrap_offset(self.chr_offset(address), chr.len())]
     }
 
     /// Writes CHR-RAM through the window table; the caller skips it on a CHR-ROM board.
     pub fn write_chr(&self, address: u16, value: u8, chr_ram: &mut [u8]) {
         if !chr_ram.is_empty() {
             let len = chr_ram.len();
-            chr_ram[self.chr_offset(address) % len] = value;
+            chr_ram[wrap_offset(self.chr_offset(address), len)] = value;
         }
     }
 

@@ -1,5 +1,5 @@
 use super::Mapper;
-use crate::cartridges::{CartridgeMemory, ChrFetch};
+use crate::cartridges::{wrap_offset, CartridgeMemory, ChrFetch};
 
 /// iNES mapper 0, NROM (REQ-CORE-100).
 ///
@@ -25,7 +25,7 @@ impl Mapper for Nrom {
         }
 
         let prg = memory.rom().prg_rom();
-        Some(prg[usize::from(address - 0x8000) % prg.len()])
+        Some(prg[wrap_offset(usize::from(address - 0x8000), prg.len())])
     }
 
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
