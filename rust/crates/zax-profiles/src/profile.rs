@@ -83,8 +83,9 @@ impl GameProfile {
 
     /// Sorts the scripts by name (REQ-PROF-024).
     pub fn sort_scripts(&mut self) {
-        self.scripts
-            .sort_by(|left, right| script_order::compare_names(left.name.as_deref(), right.name.as_deref()));
+        self.scripts.sort_by(|left, right| {
+            script_order::compare_names(left.name.as_deref(), right.name.as_deref())
+        });
     }
 
     /// A new empty profile with the default settings.

@@ -5,9 +5,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use super::cipher;
 use super::schema;
 use super::writer::ProtoWriter;
-use super::cipher;
 use crate::layout::{is_present, FieldMask, FieldPresence};
 use crate::pattern::{ProfilePattern, RecordedPatternSlot};
 use crate::profile::GameProfile;
@@ -78,7 +78,11 @@ impl Encoder {
         self.optional_string(recorded, schema::root::ID, profile.id.as_deref());
         self.optional_string(recorded, schema::root::TITLE, profile.title.as_deref());
         self.optional_string(recorded, schema::root::MAKER, profile.author.as_deref());
-        self.optional_string(recorded, schema::root::GAME_DEV, profile.publisher.as_deref());
+        self.optional_string(
+            recorded,
+            schema::root::GAME_DEV,
+            profile.publisher.as_deref(),
+        );
         self.optional_string(recorded, schema::root::DES, profile.description.as_deref());
     }
 
@@ -90,7 +94,11 @@ impl Encoder {
         self.optional_string(recorded, schema::script::SOURCE, script.source.as_deref());
         // Field 5 repeats the name (REQ-PROF-038); both fields are written from the model.
         self.optional_string(recorded, schema::script::NAME_AGAIN, script.name.as_deref());
-        self.optional_string(recorded, schema::script::TAG_STR, script.tag_string.as_deref());
+        self.optional_string(
+            recorded,
+            schema::script::TAG_STR,
+            script.tag_string.as_deref(),
+        );
     }
 
     fn write_pattern(&mut self, pattern: &ProfilePattern) {
@@ -117,13 +125,29 @@ impl Encoder {
         }
         self.bool_field(recorded, schema::pattern::PERMANENT, pattern.permanent);
         self.i32_field(recorded, schema::pattern::PIXEL_COUNT, pattern.pixel_count);
-        self.i32_field(recorded, schema::pattern::COLOR_FLAGS, pattern.color_flags.bits());
-        self.i32_field(recorded, schema::pattern::TILE_DENSITY, pattern.tile_density.raw());
-        self.i32_field(recorded, schema::pattern::PIXEL_DENSITY, pattern.pixel_density.raw());
+        self.i32_field(
+            recorded,
+            schema::pattern::COLOR_FLAGS,
+            pattern.color_flags.bits(),
+        );
+        self.i32_field(
+            recorded,
+            schema::pattern::TILE_DENSITY,
+            pattern.tile_density.raw(),
+        );
+        self.i32_field(
+            recorded,
+            schema::pattern::PIXEL_DENSITY,
+            pattern.pixel_density.raw(),
+        );
         for variant in &pattern.variants {
             self.envelope(schema::pattern::VARIANTS, variant, Self::write_variant);
         }
-        self.bool_field(recorded, schema::pattern::SELF_CONNECTED, pattern.self_connected);
+        self.bool_field(
+            recorded,
+            schema::pattern::SELF_CONNECTED,
+            pattern.self_connected,
+        );
         self.bool_field(recorded, schema::pattern::SKIP_GEO, pattern.skip_geometry);
     }
 
@@ -131,12 +155,16 @@ impl Encoder {
         let recorded = tile.recorded_fields;
         let scope = self.writer.begin_nested(schema::cell::PLANES);
         if self.allowed(recorded, schema::tile_planes::LOW_PLANE) {
-            self.writer
-                .write_i64(schema::tile_planes::LOW_PLANE, cipher::encode(tile.low_plane));
+            self.writer.write_i64(
+                schema::tile_planes::LOW_PLANE,
+                cipher::encode(tile.low_plane),
+            );
         }
         if self.allowed(recorded, schema::tile_planes::HIGH_PLANE) {
-            self.writer
-                .write_i64(schema::tile_planes::HIGH_PLANE, cipher::encode(tile.high_plane));
+            self.writer.write_i64(
+                schema::tile_planes::HIGH_PLANE,
+                cipher::encode(tile.high_plane),
+            );
         }
         self.i32_field(recorded, schema::tile_planes::FLIP, tile.flip.bits());
         self.writer.end_nested(scope);
@@ -303,7 +331,11 @@ impl Encoder {
                 self.writer.end_nested(scope);
             }
         }
-        self.i32_field(recorded, schema::layers::DEF_LAYER, layers.default_layer.raw());
+        self.i32_field(
+            recorded,
+            schema::layers::DEF_LAYER,
+            layers.default_layer.raw(),
+        );
         self.bool_field(recorded, schema::layers::AUTO, layers.auto);
     }
 
@@ -311,8 +343,16 @@ impl Encoder {
         let recorded = layer.recorded_fields;
         self.f32_field(recorded, schema::layer_params::OFFSET, layer.offset);
         self.i32_field(recorded, schema::layer_params::ALIGNED, layer.aligned.raw());
-        self.bool_field(recorded, schema::layer_params::CAST_SHADOW, layer.stored_cast_shadow);
-        self.bool_field(recorded, schema::layer_params::RECV_SHADOW, layer.stored_recv_shadow);
+        self.bool_field(
+            recorded,
+            schema::layer_params::CAST_SHADOW,
+            layer.stored_cast_shadow,
+        );
+        self.bool_field(
+            recorded,
+            schema::layer_params::RECV_SHADOW,
+            layer.stored_recv_shadow,
+        );
     }
 
     fn write_recorded_slot(&mut self, slot: &RecordedPatternSlot) {
@@ -329,12 +369,7 @@ impl Encoder {
 
     /// Writes `value` as an envelope: its first occurrence as a new key with the message, any
     /// later one as a reference to that key (REQ-PROF-011).
-    fn envelope<T>(
-        &mut self,
-        field: u32,
-        value: &Arc<T>,
-        write_message: fn(&mut Self, &T),
-    ) {
+    fn envelope<T>(&mut self, field: u32, value: &Arc<T>, write_message: fn(&mut Self, &T)) {
         let envelope = self.writer.begin_nested(field);
         let address = Arc::as_ptr(value) as usize;
         if let Some(existing_key) = self.keys.get(&address) {
@@ -403,7 +438,8 @@ impl Encoder {
 
     fn write_argb(&mut self, field: u32, value: ArgbColor) {
         let scope = self.writer.begin_nested(field);
-        self.writer.write_i32(schema::values::ARGB_VALUE, value.packed);
+        self.writer
+            .write_i32(schema::values::ARGB_VALUE, value.packed);
         self.writer.end_nested(scope);
     }
 

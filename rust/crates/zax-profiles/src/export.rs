@@ -42,7 +42,10 @@ pub fn new_identifier() -> Result<String, IdentifierError> {
 /// # Errors
 ///
 /// A missing identifier could not be generated.
-pub fn normalize(profile: &mut GameProfile, rom_file_name: Option<&str>) -> Result<(), IdentifierError> {
+pub fn normalize(
+    profile: &mut GameProfile,
+    rom_file_name: Option<&str>,
+) -> Result<(), IdentifierError> {
     profile.signature = Some(REQUIRED_SIGNATURE.to_owned());
     profile.version_text = Some(CURRENT_VERSION_TEXT.to_owned());
 

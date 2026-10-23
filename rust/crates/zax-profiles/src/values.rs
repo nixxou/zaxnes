@@ -89,7 +89,12 @@ impl Vec4F {
     }
 
     fn bits(self) -> [u32; 4] {
-        [self.x.to_bits(), self.y.to_bits(), self.z.to_bits(), self.w.to_bits()]
+        [
+            self.x.to_bits(),
+            self.y.to_bits(),
+            self.z.to_bits(),
+            self.w.to_bits(),
+        ]
     }
 }
 

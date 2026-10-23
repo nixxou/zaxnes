@@ -1,6 +1,5 @@
 //! Field numbers of the profile messages (SPEC-03 §4) and the set of fields each one holds.
 
-
 pub(super) mod root {
     use crate::layout::FieldMask;
 

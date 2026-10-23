@@ -98,11 +98,7 @@ pub enum FieldPresence {
 }
 
 /// Whether `node` (with its recorded field set) writes `field` under `presence`.
-pub(crate) fn is_present(
-    presence: FieldPresence,
-    recorded: Option<FieldMask>,
-    field: u32,
-) -> bool {
+pub(crate) fn is_present(presence: FieldPresence, recorded: Option<FieldMask>, field: u32) -> bool {
     match (presence, recorded) {
         (FieldPresence::AsRecorded, Some(mask)) => mask.contains(field),
         _ => true,
