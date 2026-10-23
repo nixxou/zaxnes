@@ -1,5 +1,7 @@
 //! Port of `EmulationStateMachineTests.cs`.
 
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
 mod common;
 
 use common::{LoopHarness, SyntheticRom, START_UNIX_SECONDS};
