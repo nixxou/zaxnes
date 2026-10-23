@@ -215,10 +215,10 @@ impl UserData for Host {
             let cx = Cx::new(lua);
             let payload = payload_of(&this)?;
             let definition = definition_of(&cx, &payload)?;
-            Ok(definition
-                .text
-                .as_ref()
-                .map_or_else(|| definition.name.to_owned(), |text| text(&payload)))
+            definition.text.as_ref().map_or_else(
+                || Ok(definition.name.to_owned()),
+                |text| text(&cx, &payload),
+            )
         });
         methods.add_meta_function(MetaMethod::Add, |lua, (left, right): (Value, Value)| {
             operate(lua, &left, &right, |definition| definition.add.as_ref())

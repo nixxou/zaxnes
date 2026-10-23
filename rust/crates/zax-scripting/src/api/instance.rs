@@ -14,6 +14,7 @@ use zax_engine3d::settings::{Geo3DType, ZLayer};
 use zax_engine3d::vectors::{Cell, Vec2, Vec3};
 use zax_profiles::tags;
 
+use super::values::text_of;
 use super::{assigned_bool, boolean, count, num, type_def};
 use crate::binding::access::{
     read_matrix, read_vec2_ref, read_vec3_ref, write_matrix, write_vec2_ref, write_vec3_ref,
@@ -1158,7 +1159,17 @@ fn bound_vec3() -> TypeDef {
 
         write_vec3_ref(cx, &reference, current)
     }));
-    vec3.text = Some(Arc::new(|_| "Vec3R".to_owned()));
+    vec3.text = Some(Arc::new(|cx, payload| {
+        let reference =
+            vec3_ref_of(payload).ok_or_else(|| cx.raise("invalid arguments to ToString"))?;
+        let value = read_vec3_ref(cx, &reference)?;
+        Ok(format!(
+            "({}, {}, {})",
+            text_of(value.x),
+            text_of(value.y),
+            text_of(value.z)
+        ))
+    }));
     vec3
 }
 

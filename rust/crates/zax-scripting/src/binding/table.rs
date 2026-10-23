@@ -41,7 +41,7 @@ pub(crate) type OperatorFn =
 pub(crate) type EqualFn = Shared<dyn Fn(&Payload, &Payload) -> bool + Send + Sync>;
 
 /// `tostring(a)`.
-pub(crate) type TextFn = Shared<dyn Fn(&Payload) -> String + Send + Sync>;
+pub(crate) type TextFn = Shared<dyn Fn(&Cx, &Payload) -> mlua::Result<String> + Send + Sync>;
 
 /// How a member is used.
 #[derive(Clone)]

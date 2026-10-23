@@ -934,7 +934,9 @@ impl ConversionState {
     /// frame whose box overlaps one of the frame's rectangles (REQ-E3D-233). Returns how many
     /// were restored.
     pub fn restore_from_pinned_frame(&mut self) -> usize {
-        let Some(pinned) = self.pinned else {
+        // The frame being converted is never the pinned one while a frame is converted; outside
+        // a conversion they can be the same buffer, and there is nothing to restore into itself.
+        let Some(pinned) = self.pinned.filter(|&pinned| pinned != self.converting) else {
             return 0;
         };
 
