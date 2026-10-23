@@ -58,6 +58,8 @@ Rust counts are `#[test]` results (rstest rows and table-driven loops count as o
 | zax-harness | 32 | (harness has no C# tests) | - |
 | zax-goldens | 3 | - | - |
 
+Lua hook binding overhead (release, `cargo test -p zax-scripting --release --test scripting perf -- --ignored --nocapture --test-threads=1`, x86-64, synthetic profile of 60 shapes): per hook call before/after the binding rework, `Update` with 100 API accesses 45 -> 27.5 us (445 -> 275 ns per access), `BuildPattern` 2.2 -> 1.55 us (1.4 -> 0.93 us of setup, unchanged from 50 to 500 instances), `UpdateS` 4.85 -> 3.0 us (hook overhead 1.8 -> 1.1 us), a frame of `Update` + `LateUpdate` + 60 `UpdateS` 397 -> 253 us (1.57x). What is left is the per-callback cost of mlua (about 1000 instructions per Lua-to-host call, see the benchmark), not the interpreter.
+
 Fixes after Windows check 3: render.json string escaping; --ui-shots ignores host cursor.
 
 Harness ROM parity (Windows check 3): profile settings go to the engine only, the script settings model keeps its defaults (local camera, `Setting` reads, one-margin clip writes); a script's FOV/SceneScale write no longer resets the camera (C# harness wires no ViewReset).
