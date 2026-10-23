@@ -15,7 +15,6 @@ use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord};
 use zax_profiles::profile::GameProfile;
-use zax_profiles::setting_application;
 use zax_render::camera::{CameraMode, SceneCamera};
 use zax_render::scene::{BackdropState, SceneState, SkyboxKind};
 use zax_scripting::{
@@ -251,40 +250,21 @@ impl Host {
         Ok(())
     }
 
-    /// REQ-LUA-015 steps 2 and 3: the profile's settings land in the model, then the patterns
-    /// are built with their `BuildPattern` hooks.
+    /// REQ-LUA-015 steps 2 and 3: the profile's settings, then the patterns with their
+    /// `BuildPattern` hooks. As the C# harness does (`ConversionEngine.LoadProfile` with its
+    /// settings), the profile's settings go straight into the engine's slice and the settings
+    /// model the scripts see keeps its defaults: neither the scene (local camera, background)
+    /// nor a script reading or writing `Setting` sees the profile's values, the light included.
     fn load_profile(
         &mut self,
         profile: &GameProfile,
         scene: &mut SceneState,
     ) -> Result<(), HarnessError> {
-        // The C# harness never applies the light of a profile: the scene light stays at its
-        // default until a script writes it, so the profile's light is left out.
-        let values: Vec<_> = profile
-            .settings
-            .as_ref()
-            .map(setting_application::to_setting_values)
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|(id, _)| {
-                !matches!(
-                    id,
-                    SettingId::LightDirection | SettingId::LightColor | SettingId::LightIntensity
-                )
-            })
-            .collect();
-        self.engine.with_script_host::<TimedHost, _>(|host, _| {
-            host.runtime
-                .settings_mut()
-                .model_mut()
-                .apply_profile(values);
-        });
+        // What the chunks wrote reaches the engine first, so the profile's settings win over it.
         self.sync_settings(scene);
-
-        // The settings were applied through the model, so the engine must not copy them again.
         let mut loaded = Ok(());
         self.scripted(scene, |engine| {
-            loaded = engine.load_profile(profile, false);
+            loaded = engine.load_profile(profile, true);
         });
         loaded?;
         self.sync_settings(scene);
