@@ -19,4 +19,5 @@ pub mod render_scaling;
 pub mod render_skip;
 pub mod scene_script_bridge;
 pub mod single_instance;
+pub mod ui;
 pub mod user_data_paths;
