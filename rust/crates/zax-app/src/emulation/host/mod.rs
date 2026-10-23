@@ -194,6 +194,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// (Rust-only "emulation on a separate core", handheld default): the game sees its inputs
     /// one displayed frame later, nothing else changes. See `GameSession::prepare_frame_timed`.
     pub separate_core: bool,
+    /// Whether, with [`EmulationHost::separate_core`], the next frame may start before the
+    /// scripts of the last one have run, for a profile whose scripts leave the core alone
+    /// (`GameSession::can_run_ahead`): "emulation ahead", on by default.
+    pub core_ahead: bool,
     /// The fast-forward burst.
     pub fast_forward: FastForwardState,
     /// The notification area.
@@ -270,6 +274,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             rollback: RollbackHistory::new(),
             rollback_enabled: true,
             separate_core: false,
+            core_ahead: true,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
             slots,
@@ -535,9 +540,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// load or the queued commands and the emulated frames that are due. Returns how many
     /// emulated frames ran.
     pub fn tick(&mut self, real_seconds: f64, snapshot: &InputSnapshot) -> u32 {
-        // The frame the emulation thread ran during the last drawing is finished before
-        // anything of this tick can read or change the core.
-        self.complete_frame_in_flight();
+        // The core the emulation thread held during the last drawing comes back before anything
+        // of this tick can read or change it: finished, or only captured with emulation ahead.
+        self.take_core_back();
         self.elapsed += real_seconds;
         // The notification timer is real time: neither the pause nor the game speed affect it
         // (REQ-UI-080).
@@ -554,10 +559,25 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return 0;
         }
         self.apply_commands();
+        let ahead = self.runs_ahead();
+        if ahead {
+            // Emulation ahead: the core leaves during the frames, so what reads or changes it
+            // runs before them.
+            self.advance_battery(real_seconds);
+            self.correct_audio_drift();
+            self.dispatch_setting_changes();
+        }
         let frames = self.run_due_frames(snapshot.player_one, snapshot.player_two);
-        self.advance_battery(real_seconds);
-        self.correct_audio_drift();
-        self.dispatch_setting_changes();
+        if ahead {
+            // A frame captured with nothing due since is converted all the same.
+            if let Some(session) = self.session.as_mut() {
+                session.finish_captured(&mut self.settings, &mut self.scene, &mut self.stage_clock);
+            }
+        } else {
+            self.advance_battery(real_seconds);
+            self.correct_audio_drift();
+            self.dispatch_setting_changes();
+        }
         if let Some(store) = &mut self.settings_store {
             store.tick(&self.settings, self.elapsed);
         }
@@ -567,6 +587,29 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             session.launch_prepared();
         }
         frames
+    }
+
+    /// Whether this tick runs its frames ahead: the core on its own thread, emulation ahead on,
+    /// and a profile whose scripts leave the core alone.
+    fn runs_ahead(&self) -> bool {
+        self.separate_core
+            && self.core_ahead
+            && self
+                .session
+                .as_ref()
+                .is_some_and(GameSession::can_run_ahead)
+    }
+
+    /// Brings the core back from the emulation thread: with emulation ahead its frame is only
+    /// captured (converted after the next frame has left), otherwise it is finished.
+    fn take_core_back(&mut self) {
+        if self.runs_ahead() {
+            if let Some(session) = self.session.as_mut() {
+                session.capture_in_flight(&mut self.stage_clock);
+            }
+        } else {
+            self.complete_frame_in_flight();
+        }
     }
 
     /// The catch-up in force: the forced one, else the `emu.catch_up` setting.
@@ -641,9 +684,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .effective_catch_up()
             .frames_per_display(self.pacer.effective_rate(), displayed_rate);
         let due = self.pacer.due_frames();
+        let ahead = self.runs_ahead();
         for _ in 0..due {
-            // A frame prepared by the previous round runs and is finished first.
-            self.complete_frame_in_flight();
+            // The frame of the previous round comes back first.
+            self.take_core_back();
             let Some(session) = self.session.as_mut() else {
                 break;
             };
@@ -658,24 +702,63 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     .capture_with(|buffer| core.save_state_to(false, buffer));
                 self.stage_clock.stop(Stage::Rollback, started);
             }
+            if ahead {
+                // The accounting touches the core: it comes before the frame leaves.
+                self.count_emulated_frame();
+                self.launch_ahead_frame(player_one, player_two);
+                continue;
+            }
             // REQ-INP-005: one emulated frame is one sample, fast forward included.
             if self.separate_core {
                 self.prepare_session_frame(player_one, player_two);
             } else {
                 self.run_session_frame(player_one, player_two);
             }
-            self.emulated_frames += 1;
-            if self.fast_forward.is_active() {
-                self.fast_forward.on_frame_run();
-                if !self.fast_forward.is_active() {
-                    // The factor goes back to the setting as soon as the burst ends, so a held
-                    // key re-arms without a visible step (REQ-LOOP-016).
-                    self.apply_speed();
-                }
+            self.count_emulated_frame();
+        }
+        if !ahead {
+            self.dispatch_setting_changes();
+        }
+        due
+    }
+
+    /// The accounting of one emulated frame: the count, and the fast-forward burst.
+    fn count_emulated_frame(&mut self) {
+        self.emulated_frames += 1;
+        if self.fast_forward.is_active() {
+            self.fast_forward.on_frame_run();
+            if !self.fast_forward.is_active() {
+                // The factor goes back to the setting as soon as the burst ends, so a held key
+                // re-arms without a visible step (REQ-LOOP-016).
+                self.apply_speed();
             }
         }
-        self.dispatch_setting_changes();
-        due
+    }
+
+    /// Emulation ahead: the next frame leaves for the emulation thread, then the frame captured
+    /// before it is converted here while it runs.
+    fn launch_ahead_frame(
+        &mut self,
+        player_one: crate::input::InputAction,
+        player_two: crate::input::InputAction,
+    ) {
+        let port_byte = self.zapper.port_byte();
+        let position = self.zapper.position();
+        if let Some(session) = self.session.as_mut() {
+            let frame = SessionFrame {
+                player_one,
+                player_two,
+                zapper_byte: port_byte,
+                zapper_position: position,
+            };
+            session.launch_ahead(
+                &mut self.settings,
+                &mut self.scene,
+                frame,
+                &mut self.stage_clock,
+            );
+            session.finish_captured(&mut self.settings, &mut self.scene, &mut self.stage_clock);
+        }
     }
 
     /// Runs one emulated frame of the session right now, outside the frame clock: no rollback

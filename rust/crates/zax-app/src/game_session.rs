@@ -214,6 +214,35 @@ struct FramePipeline {
     in_flight: bool,
     /// The picture of the last finished frame, kept while the core is away.
     picture: Vec<u8>,
+    /// Whether the profile's scripts leave the core alone (no input hook, no memory or port
+    /// access), so that the next frame may run while the scripts of the last one do
+    /// ([`GameSession::launch_ahead`]).
+    ahead_allowed: bool,
+    /// The palette and edge masks of a frame captured but not converted yet; its tile records
+    /// are in `GameSession::batch_records`.
+    pending: Option<([u8; 32], i32, i32)>,
+}
+
+/// The members of the script API that read or drive the core: a profile whose scripts name
+/// none of them cannot tell whether the next frame has already started.
+const CORE_MEMBERS: [&str; 7] = [
+    "InputProcess",
+    "ReadMem",
+    "WriteMem",
+    "GetInput",
+    "GetInputType",
+    "SetInputType",
+    "ZapperEnable",
+];
+
+/// Whether no script of `profile` names a member of [`CORE_MEMBERS`].
+fn scripts_leave_the_core_alone(profile: &GameProfile) -> bool {
+    profile.scripts.iter().all(|script| {
+        script
+            .source
+            .as_deref()
+            .is_none_or(|source| CORE_MEMBERS.iter().all(|member| !source.contains(member)))
+    })
 }
 
 impl GameSession {
@@ -289,6 +318,7 @@ impl GameSession {
             batch_records: Vec::new(),
             pipeline: FramePipeline::default(),
         };
+        session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
         // The runtime holds the model from here until the last line of this function.
         let loaded = session.load_profile(profile, different_game, scene);
         session.exchange_model(model);
@@ -486,7 +516,88 @@ impl GameSession {
     /// Whether a ROM is loaded.
     #[must_use]
     pub fn has_rom(&self) -> bool {
-        self.core.is_running()
+        self.pipeline.in_flight || self.core.is_running()
+    }
+
+    /// Whether the next frame may run on the emulation thread while the scripts of the last one
+    /// run here: the profile's scripts leave the core alone.
+    #[must_use]
+    pub const fn can_run_ahead(&self) -> bool {
+        self.pipeline.ahead_allowed
+    }
+
+    /// Takes the core back from the emulation thread, if it is away, and captures the frame it
+    /// ran (tile records, palette, picture) for [`GameSession::finish_captured`]: the core is
+    /// free again for the host, the conversion of the frame comes later. "Emulation ahead".
+    pub fn capture_in_flight(&mut self, clock: &mut StageClock) {
+        if !self.pipeline.in_flight {
+            return;
+        }
+        self.pipeline.in_flight = false;
+        let Some(finished) = self.pipeline.worker.as_ref().and_then(CoreWorker::finish) else {
+            crate::app_log::error("Zaxnes: the emulation thread stopped during a frame.");
+            return;
+        };
+        self.pipeline.spare = Some(std::mem::replace(&mut self.core, finished.core));
+        clock.add(Stage::Core, finished.elapsed);
+        let captured = self.capture_batch(clock);
+        self.pipeline.pending = Some(captured);
+        self.pipeline.picture.clear();
+        self.pipeline
+            .picture
+            .extend_from_slice(self.core.pixel_frame());
+    }
+
+    /// Starts the next frame on the emulation thread at once ("emulation ahead"): its input word
+    /// (the scripts have no input hook) and the core leave now, and the frame captured before it
+    /// is converted afterwards by [`GameSession::finish_captured`], while it runs.
+    pub fn launch_ahead(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        frame: SessionFrame,
+        clock: &mut StageClock,
+    ) {
+        if clock.enabled() != self.engine.last_hook_time().is_some() {
+            self.engine.set_hook_timing(clock.enabled());
+        }
+        let word = self.lend(model, scene, |session, scene| {
+            session.begin_frame_lent(scene, frame, clock)
+        });
+        self.pipeline.prepared = Some(word);
+        self.launch_prepared();
+        if !self.pipeline.in_flight {
+            // No thread: the frame captured before is converted first, then this one runs here
+            // and is captured like one that came back.
+            if let Some(word) = self.pipeline.prepared.take() {
+                self.finish_captured(model, scene, clock);
+                let started = clock.start();
+                self.core.run_frame(word);
+                clock.stop(Stage::Core, started);
+                let captured = self.capture_batch(clock);
+                self.pipeline.pending = Some(captured);
+                self.pipeline.picture.clear();
+                self.pipeline
+                    .picture
+                    .extend_from_slice(self.core.pixel_frame());
+            }
+        }
+    }
+
+    /// Converts the frame [`GameSession::capture_in_flight`] captured, if any: conversion, frame
+    /// hooks, camera tracking, publication.
+    pub fn finish_captured(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        clock: &mut StageClock,
+    ) {
+        let Some((palette, mask_x, mask_y)) = self.pipeline.pending.take() else {
+            return;
+        };
+        self.lend(model, scene, |session, scene| {
+            session.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
+        });
     }
 
     /// Puts the frame counter back to zero.
@@ -697,11 +808,14 @@ impl GameSession {
             return;
         };
 
-        // The 2D mode shows the core's picture while the next frame runs.
-        self.pipeline.picture.clear();
-        self.pipeline
-            .picture
-            .extend_from_slice(self.core.pixel_frame());
+        // The 2D mode shows the core's picture while the next frame runs (emulation ahead has
+        // kept the picture of the frame it captured).
+        if self.pipeline.pending.is_none() {
+            self.pipeline.picture.clear();
+            self.pipeline
+                .picture
+                .extend_from_slice(self.core.pixel_frame());
+        }
         let core = std::mem::replace(&mut self.core, spare);
         match worker.start(core, word) {
             Ok(()) => self.pipeline.in_flight = true,
@@ -731,12 +845,17 @@ impl GameSession {
             self.pipeline.spare = Some(std::mem::replace(&mut self.core, finished.core));
             clock.add(Stage::Core, finished.elapsed);
         } else if let Some(word) = self.pipeline.prepared.take() {
+            // A frame captured ahead of this one is converted first: its records are pending.
+            self.finish_captured(model, scene, clock);
             let started = clock.start();
             self.core.run_frame(word);
             clock.stop(Stage::Core, started);
         } else {
+            self.finish_captured(model, scene, clock);
             return;
         }
+        // The frame before the one that came back, captured ahead, is converted first.
+        self.finish_captured(model, scene, clock);
         self.lend(model, scene, |session, scene| {
             session.finish_frame_lent(scene, clock);
         });
@@ -796,17 +915,33 @@ impl GameSession {
     /// The tile capture, the conversion and the frame hooks of the frame the core just ran (the
     /// second half of a frame).
     fn finish_frame_lent(&mut self, scene: &mut SceneState, clock: &mut StageClock) {
+        let (palette, mask_x, mask_y) = self.capture_batch(clock);
+        self.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
+    }
+
+    /// Copies the tile records of the frame the core just ran into `batch_records`; returns its
+    /// palette and edge masks.
+    fn capture_batch(&mut self, clock: &mut StageClock) -> ([u8; 32], i32, i32) {
+        let started = clock.start();
+        let batch = self.core.frame_batch();
+        self.batch_records.clear();
+        self.batch_records.extend_from_slice(batch.records);
+        let captured = (batch.palette, batch.mask_x, batch.mask_y);
+        clock.stop(Stage::Capture, started);
+        captured
+    }
+
+    /// The conversion, frame hooks and camera tracking of the captured frame.
+    fn convert_batch_lent(
+        &mut self,
+        scene: &mut SceneState,
+        clock: &mut StageClock,
+        palette: [u8; 32],
+        mask_x: i32,
+        mask_y: i32,
+    ) {
         let counter = self.frame_counter;
-        let mut records = std::mem::take(&mut self.batch_records);
-        let (palette, mask_x, mask_y) = {
-            let core = &mut self.core;
-            let started = clock.start();
-            let batch = core.frame_batch();
-            records.clear();
-            records.extend_from_slice(batch.records);
-            clock.stop(Stage::Capture, started);
-            (batch.palette, batch.mask_x, batch.mask_y)
-        };
+        let records = std::mem::take(&mut self.batch_records);
         // The conversion is synchronous, right after the frame, as REQ-LOOP-060 (c) requires.
         let batch = FrameBatch {
             records: &records,
@@ -874,7 +1009,7 @@ impl GameSession {
     /// Copies the core's 256 x 240 indexed picture into `destination`.
     pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) {
         destination.clear();
-        if self.pipeline.in_flight {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
             destination.extend_from_slice(&self.pipeline.picture);
         } else {
             destination.extend_from_slice(self.core.pixel_frame());
@@ -940,5 +1075,40 @@ impl GameSession {
     /// Ends the game and drops the session.
     pub fn dispose(mut self, model: &mut SettingsModel, scene: &mut SceneState) {
         self.end(model, scene);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use zax_profiles::script::ProfileScript;
+
+    use super::*;
+
+    fn profile(sources: &[&str]) -> GameProfile {
+        GameProfile {
+            scripts: sources
+                .iter()
+                .map(|source| ProfileScript {
+                    source: Some((*source).to_owned()),
+                    ..ProfileScript::default()
+                })
+                .collect(),
+            ..GameProfile::default()
+        }
+    }
+
+    #[test]
+    fn only_scripts_that_leave_the_core_alone_run_ahead() {
+        assert!(scripts_leave_the_core_alone(&GameProfile::default()));
+        assert!(scripts_leave_the_core_alone(&profile(&[
+            "function UpdateS() shape.Offset.z = 2 end"
+        ])));
+        for member in CORE_MEMBERS {
+            let source = format!("function Update() local v = Script.{member} end");
+            assert!(
+                !scripts_leave_the_core_alone(&profile(&["function Start() end", &source])),
+                "{member}"
+            );
+        }
     }
 }

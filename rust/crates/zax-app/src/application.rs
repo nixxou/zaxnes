@@ -293,10 +293,7 @@ impl Running {
         };
         let mut host = build_host(parts);
         host.set_profiling(profiling);
-        host.catch_up = options.catch_up;
-        // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
-        host.rollback_enabled = !options.handheld;
-        host.separate_core = separate_core(options);
+        configure_pacing(&mut host, options);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui = ImguiFrontend::new(&gl, &host, options, height)?;
@@ -703,6 +700,17 @@ fn open_log_file(paths: &UserDataPaths) {
             "NOT writable: settings and saves will not be kept"
         }
     ));
+}
+
+/// The Rust-only choices of the host's loop: forced catch-up, rewind, emulation thread and
+/// emulation ahead.
+fn configure_pacing(host: &mut AppHost, options: &AppOptions) {
+    host.catch_up = options.catch_up;
+    // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
+    host.rollback_enabled = !options.handheld;
+    host.separate_core = separate_core(options);
+    // `ZAXNES_CORE_AHEAD=0` keeps the next frame waiting for the scripts of the last one.
+    host.core_ahead = std::env::var("ZAXNES_CORE_AHEAD").map_or(true, |value| value.trim() != "0");
 }
 
 /// Whether the renderer reorders the opaque tiles by draw state, which batches far more of them

@@ -163,6 +163,21 @@ displayed frame". All values are per displayed frame.
   max 62.8 -> 2.7 ms; world map mean 0.48 -> 0.41, max 40.7 -> 1.2 ms. Scripts see no difference
   but `collectgarbage("count")` (none of the corpus calls it). Desktop default unchanged
   (incremental) pending the owner's approval.
+- Device run of `9f9136e`: catch-up 2 made heavy scenes worse (2 emulated per displayed frame,
+  ~22 fps, still under 50 emulated/s): the second frame waits for the emulation thread in
+  series. Per emulated frame the chain core (13) -> conversion + hooks (~7 outside) -> next
+  frame is serial, ~20 ms: ~50 emulated/s whatever the display rate (the 30 fps cap needs
+  2 x 20 + render > 33 ms). Handheld catch-up back to none; `emu.catch_up` is a setting.
+- Emulation ahead (with the separate core, auto): when no script of the profile names a member
+  that reads or drives the core (`InputProcess`, `ReadMem`, `WriteMem`, `GetInput`,
+  `GetInputType`, `SetInputType`, `ZapperEnable`; Zelda II names none), the next frame no longer
+  waits for the scripts of the last one. Tick: take the core back and capture frame N (records,
+  palette, picture), hotkeys / commands / battery / audio drift / settings (core idle), then per
+  due frame launch N+1 and convert N + its hooks while it runs, then render N. Same latency as
+  the separate core alone; the scripts cannot observe the core, so the game is the same
+  (`separate_core_tests.rs`: frames identical with and without ahead). Expected per emulated
+  frame: max(core 13, conversion + hooks + render) instead of core + conversion + hooks.
+  `ZAXNES_CORE_AHEAD=0` disables it.
 - Catch-up limit (pacing 5.5, first half): on a handheld the frame clock no longer catches up
   (`CatchUp::Off`: a displayed frame runs only the frames it stands for, effective rate over
   displayed rate rounded up, so 1 at 60 Hz, 2 at 30 Hz or in fast forward). A late frame now
