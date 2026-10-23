@@ -325,6 +325,19 @@ fn a_change_of_field_of_view_resets_the_view_req_pers_011() {
 }
 
 #[test]
+fn a_host_without_view_reset_keeps_the_view_on_a_change_of_field_of_view() {
+    let mut settings = zax_scripting::ScriptSettings::default();
+    settings.write_real(zax_settings::catalogue::SettingId::CameraFov, 90.0);
+    assert!(settings.take_view_reset());
+
+    // The C# harness wires no `ViewReset`: the same write asks for nothing.
+    settings.set_resets_view(false);
+    settings.write_real(zax_settings::catalogue::SettingId::CameraFov, 60.0);
+    settings.write_real(zax_settings::catalogue::SettingId::VrSceneRatio, 2.0);
+    assert!(!settings.take_view_reset());
+}
+
+#[test]
 fn camera_reset_view_restores_the_default_req_scn_012() {
     let mut session = blank();
 

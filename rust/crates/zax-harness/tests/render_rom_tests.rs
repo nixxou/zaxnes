@@ -489,3 +489,53 @@ fn only_a_script_moves_the_light_of_the_capture() {
     ));
     assert_ne!(capture("scripted", &profile), plain);
 }
+
+/// Saves `profile` under `root` and captures the ROM with it, returning the picture and the
+/// entry of `render.json`.
+fn capture_with(
+    rom: &Path,
+    root: &Path,
+    name: &str,
+    profile: &GameProfile,
+    extra: &[&str],
+) -> (Vec<u8>, Value) {
+    let file = root.join(format!("{name}.3dn"));
+    fs::write(&file, format::save(profile, FieldPresence::All)).unwrap();
+    let out = root.join(name);
+    let mut values = vec![
+        "--rom",
+        path_text(rom),
+        "--profile",
+        path_text(&file),
+        "--size",
+        "320x240",
+    ];
+    values.extend_from_slice(extra);
+    let entry = render(&out, &values).swap_remove(0);
+    (fs::read(out.join("nestest.png")).unwrap(), entry)
+}
+
+#[test]
+fn a_script_changing_the_field_of_view_keeps_the_camera_it_placed() {
+    let Some(rom) = test_rom() else { return };
+    let root = directory("render-rom-fov-write");
+    let mut profile = profile_for(&menu_glyph(&rom, &root));
+    let mut capture = |name: &str, source: &str| {
+        profile.scripts = vec![ProfileScript::new(
+            Some("camera"),
+            true,
+            Some(source),
+            Some(""),
+        )];
+        capture_with(&rom, &root, name, &profile, &[]).0
+    };
+    let placed = capture("placed", "function Start() Camera.Distance = 400 end");
+
+    // The C# harness wires no `ViewReset`, so the write does not put the camera back at its
+    // default; the capture's `--fov` then replaces the field of view itself.
+    let refocused = capture(
+        "refocused",
+        "function Start() Camera.Distance = 400 Setting.Fov = 60 Video.SceneScale = 2 end",
+    );
+    assert_eq!(refocused, placed);
+}
