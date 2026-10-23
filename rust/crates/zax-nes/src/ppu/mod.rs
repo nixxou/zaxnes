@@ -540,7 +540,10 @@ impl Ppu2C02 {
             }
 
             let span = self.visible_span_ahead(count);
-            if span > 0 && self.run_visible_span(span, cart.as_deref()) {
+            if span > 0 {
+                if !self.run_visible_span(span, cart.as_deref()) {
+                    self.run_visible_span_through_bus(span, cart);
+                }
                 count -= span;
             } else {
                 self.step_dot(cart);

@@ -154,6 +154,35 @@ impl Ppu2C02 {
         true
     }
 
+    /// [`Ppu2C02::run_visible_span`] for a cartridge whose fetches have side effects or another
+    /// source (MMC2/MMC4 latches, MMC3 and Rambo1 watching A12, MMC5): the same loop, with each
+    /// fetch through the full bus path ([`Ppu2C02::background_fetch`]), so the board sees the same
+    /// addresses at the same PPU clock as with [`Ppu2C02::step_dot`].
+    pub(super) fn run_visible_span_through_bus(&mut self, count: i64, cart: Cart<'_, '_>) {
+        let pixels = SpanPixels::of(self.mask, i32::from(self.fine_x));
+        #[allow(clippy::cast_sign_loss)] // Visible line, 0..240.
+        let row = self.scanline as usize * SCREEN_WIDTH;
+
+        for _ in 0..count {
+            self.ppu_clock += 1;
+            self.dot += 1;
+            let dot = self.dot;
+
+            self.shift_background();
+            self.background_fetch(dot, cart);
+            if dot >= 65 {
+                self.run_sprite_evaluation(dot);
+            }
+
+            #[allow(clippy::cast_sign_loss)] // dot is 2..=255 here.
+            let x = (dot - 1) as usize & 0xFF;
+            let color = self.span_pixel(x, &pixels);
+            if let Some(pixel) = self.pixels.get_mut(row + x) {
+                *pixel = color;
+            }
+        }
+    }
+
     /// The colour of pixel `x` of a span, as [`Ppu2C02::render_pixel`] composes it.
     fn span_pixel(&mut self, x: usize, pixels: &SpanPixels) -> u8 {
         let left = x >= 8;
