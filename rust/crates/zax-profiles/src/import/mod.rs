@@ -18,7 +18,8 @@ pub use importer::{
     ThreeDSenImportSummary, ThreeDSenImporter, ThreeDSenProfileOutcome, ThreeDSenProfileResult,
 };
 pub use installation::{
-    find_bundle, is_bundle_name, locate_bundle, BUNDLE_EXTENSION, BUNDLE_PREFIX, PLATFORMS,
+    expected_layout, find_bundle, is_bundle_name, locate_bundle, BUNDLE_EXTENSION, BUNDLE_PREFIX,
+    PLATFORMS,
 };
 pub use lz4::decode as decode_lz4_block;
 pub use profile_bundle::read_text_assets;

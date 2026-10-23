@@ -15,7 +15,11 @@ fn sort(names: &[&str]) -> Vec<String> {
 }
 
 fn script_names(profile: &GameProfile) -> Vec<Option<&str>> {
-    profile.scripts.iter().map(|script| script.name.as_deref()).collect()
+    profile
+        .scripts
+        .iter()
+        .map(|script| script.name.as_deref())
+        .collect()
 }
 
 #[test]
@@ -23,8 +27,23 @@ fn req_prof_024_punctuation_sorts_before_digits_which_sort_before_letters() {
     // The Excitebike example: the underscore comes before the digit 7, which an ordinal sort
     // would get the other way round and would change that profile's hook order.
     assert_eq!(
-        ["bike", "camera", "ground", "ramp_rotation", "ramp7", "scene"],
-        sort(&["scene", "ramp7", "ramp_rotation", "camera", "bike", "ground"]).as_slice()
+        [
+            "bike",
+            "camera",
+            "ground",
+            "ramp_rotation",
+            "ramp7",
+            "scene"
+        ],
+        sort(&[
+            "scene",
+            "ramp7",
+            "ramp_rotation",
+            "camera",
+            "bike",
+            "ground"
+        ])
+        .as_slice()
     );
 }
 
@@ -40,7 +59,9 @@ fn req_prof_024_a_shorter_name_comes_first_when_the_primary_keys_agree() {
 
 #[test]
 fn req_prof_024_the_comparison_is_a_total_order() {
-    let names = ["bg", "BG", "bg1", "bg'", "b g", "bg_", "Bg", "a", "A9", "a_"];
+    let names = [
+        "bg", "BG", "bg1", "bg'", "b g", "bg_", "Bg", "a", "A9", "a_",
+    ];
     let sorted = sort(&names);
 
     for pair in sorted.windows(2) {
@@ -91,7 +112,14 @@ fn req_prof_024_excitebike_keeps_the_documented_order_after_loading() {
     let profile = neutral_assets::load_profile("Excitebike.bytes").profile;
 
     assert_eq!(
-        vec![Some("bike"), Some("camera"), Some("ground"), Some("ramp_rotation"), Some("ramp7"), Some("scene")],
+        vec![
+            Some("bike"),
+            Some("camera"),
+            Some("ground"),
+            Some("ramp_rotation"),
+            Some("ramp7"),
+            Some("scene")
+        ],
         script_names(&profile)
     );
 }
@@ -102,14 +130,21 @@ fn req_prof_024_loading_sorts_the_scripts() {
     // of REQ-LUA-004.
     let mut profile = GameProfile::default();
     for name in ["scene", "bike", "ramp7", "ramp_rotation"] {
-        profile.scripts.push(ProfileScript::new(Some(name), true, None, None));
+        profile
+            .scripts
+            .push(ProfileScript::new(Some(name), true, None, None));
     }
     profile.settings = GameProfile::create_empty().settings;
 
     let result = format::load(&format::save(&profile, FieldPresence::All), None, None).unwrap();
 
     assert_eq!(
-        vec![Some("bike"), Some("ramp_rotation"), Some("ramp7"), Some("scene")],
+        vec![
+            Some("bike"),
+            Some("ramp_rotation"),
+            Some("ramp7"),
+            Some("scene")
+        ],
         script_names(&result.profile)
     );
 }
@@ -119,13 +154,23 @@ fn req_prof_024_loading_sorts_the_scripts() {
 fn req_prof_036_script_tags_bind_to_the_variants_that_share_one() {
     // Mega Man 2: the script "gear" carries the tags "gear,gear1".
     let profile = neutral_assets::load_profile("Mega Man 2.bytes").profile;
-    let gear = profile.scripts.iter().find(|script| script.name.as_deref() == Some("gear")).unwrap();
+    let gear = profile
+        .scripts
+        .iter()
+        .find(|script| script.name.as_deref() == Some("gear"))
+        .unwrap();
 
     assert_eq!(vec!["gear", "gear1"], gear.tags());
     assert!(!gear.binds_to_every_variant());
 
-    let tagged = PatternVariant { tag_string: Some("gear1".to_owned()), ..PatternVariant::default() };
-    let other = PatternVariant { tag_string: Some("hud".to_owned()), ..PatternVariant::default() };
+    let tagged = PatternVariant {
+        tag_string: Some("gear1".to_owned()),
+        ..PatternVariant::default()
+    };
+    let other = PatternVariant {
+        tag_string: Some("hud".to_owned()),
+        ..PatternVariant::default()
+    };
     assert!(gear.binds(&tagged));
     assert!(!gear.binds(&other));
 }
@@ -138,5 +183,8 @@ fn req_prof_036_a_star_in_the_tag_string_binds_a_script_to_everything() {
 
     assert_eq!(Some("*"), build.tag_string.as_deref());
     assert!(build.binds_to_every_variant());
-    assert!(build.binds(&PatternVariant { tag_string: None, ..PatternVariant::default() }));
+    assert!(build.binds(&PatternVariant {
+        tag_string: None,
+        ..PatternVariant::default()
+    }));
 }

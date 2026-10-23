@@ -75,14 +75,20 @@ impl ProfileFileSystem for PhysicalProfileFileSystem {
 
     fn copy_file(&self, source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
         if !overwrite && destination.exists() {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, destination.display().to_string()));
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                destination.display().to_string(),
+            ));
         }
         fs::copy(source, destination).map(|_| ())
     }
 
     fn move_file(&self, source: &Path, destination: &Path, overwrite: bool) -> io::Result<()> {
         if !overwrite && destination.exists() {
-            return Err(io::Error::new(io::ErrorKind::AlreadyExists, destination.display().to_string()));
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                destination.display().to_string(),
+            ));
         }
         fs::rename(source, destination)
     }

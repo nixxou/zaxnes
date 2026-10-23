@@ -44,7 +44,10 @@ fn a_repetitive_block_compresses() {
     );
 
     let mut decoded = vec![0; plain.len()];
-    assert_eq!(plain.len(), decode_lz4_block(&compressed, &mut decoded).unwrap());
+    assert_eq!(
+        plain.len(),
+        decode_lz4_block(&compressed, &mut decoded).unwrap()
+    );
     assert_eq!(plain, decoded);
 }
 
@@ -115,7 +118,10 @@ fn a_block_that_decodes_to_more_than_announced_is_refused() {
 
     let error = decode_lz4_block(&block, &mut decoded).unwrap_err();
 
-    assert!(error.message().contains("more than the announced 4 bytes"), "{error}");
+    assert!(
+        error.message().contains("more than the announced 4 bytes"),
+        "{error}"
+    );
 }
 
 /// AMD-030 §5: a match longer than the room left.

@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use time::macros::datetime;
 use time::OffsetDateTime;
 use zax_profiles::catalogue::{
-    import_messages, ProfileCatalogue, ProfileCatalogueError, ProfileFileSystem, ProfileImportOutcome,
-    UserDataLayout, UserProfile, UserProfileFolder, DEMO_EDITION, FULL_EDITION,
+    import_messages, ProfileCatalogue, ProfileCatalogueError, ProfileFileSystem,
+    ProfileImportOutcome, UserDataLayout, UserProfile, UserProfileFolder, DEMO_EDITION,
+    FULL_EDITION,
 };
 use zax_profiles::format::{self, ProfileHeader};
 use zax_profiles::layout::FieldPresence;
@@ -68,14 +69,21 @@ fn catalogue_of(files: &FakeProfileFileSystem, entries: &[(&str, &str, &str)]) -
 }
 
 fn titles(entries: &[&zax_profiles::library::GameLibraryEntry]) -> Vec<String> {
-    entries.iter().map(|entry| entry.display_title().to_owned()).collect()
+    entries
+        .iter()
+        .map(|entry| entry.display_title().to_owned())
+        .collect()
 }
 
 #[test]
 #[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
 fn req_prof_060_the_full_edition_of_the_catalogue_holds_the_101_built_in_games() {
-    let catalogue =
-        ProfileCatalogue::load(&PhysicalProfileFileSystem, &neutral_assets::catalogue_file(), FULL_EDITION).unwrap();
+    let catalogue = ProfileCatalogue::load(
+        &PhysicalProfileFileSystem,
+        &neutral_assets::catalogue_file(),
+        FULL_EDITION,
+    )
+    .unwrap();
 
     assert_eq!(101, catalogue.entries().len());
     assert_eq!(101, catalogue.ids().len());
@@ -89,21 +97,32 @@ fn req_prof_060_the_full_edition_of_the_catalogue_holds_the_101_built_in_games()
 #[test]
 #[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
 fn req_prof_061_the_game_of_identifier_47_is_the_2d_mode_entry() {
-    let catalogue =
-        ProfileCatalogue::load(&PhysicalProfileFileSystem, &neutral_assets::catalogue_file(), FULL_EDITION).unwrap();
+    let catalogue = ProfileCatalogue::load(
+        &PhysicalProfileFileSystem,
+        &neutral_assets::catalogue_file(),
+        FULL_EDITION,
+    )
+    .unwrap();
 
     let two_d = catalogue.find("47").unwrap();
     assert_eq!("2D Mode", two_d.title);
     assert_eq!("profiles/empty.bytes", two_d.file);
     assert!(two_d.is_2d_mode());
-    assert!(std::ptr::eq(two_d, catalogue.two_dimensional_mode().unwrap()));
+    assert!(std::ptr::eq(
+        two_d,
+        catalogue.two_dimensional_mode().unwrap()
+    ));
 }
 
 #[test]
 #[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
 fn req_prof_060_every_catalogue_entry_points_at_a_profile_that_loads() {
-    let catalogue =
-        ProfileCatalogue::load(&PhysicalProfileFileSystem, &neutral_assets::catalogue_file(), FULL_EDITION).unwrap();
+    let catalogue = ProfileCatalogue::load(
+        &PhysicalProfileFileSystem,
+        &neutral_assets::catalogue_file(),
+        FULL_EDITION,
+    )
+    .unwrap();
 
     for entry in catalogue.entries() {
         if let Err(error) = catalogue.load_profile(&PhysicalProfileFileSystem, entry, None) {
@@ -117,8 +136,12 @@ fn req_prof_060_every_catalogue_entry_points_at_a_profile_that_loads() {
 #[test]
 #[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
 fn req_prof_060_the_demo_edition_is_data_the_application_does_not_use() {
-    let demo =
-        ProfileCatalogue::load(&PhysicalProfileFileSystem, &neutral_assets::catalogue_file(), DEMO_EDITION).unwrap();
+    let demo = ProfileCatalogue::load(
+        &PhysicalProfileFileSystem,
+        &neutral_assets::catalogue_file(),
+        DEMO_EDITION,
+    )
+    .unwrap();
 
     assert_eq!(20, demo.entries().len());
     assert_ne!("Arkanoid", demo.find("1").unwrap().title);
@@ -147,10 +170,18 @@ fn req_prof_060_an_unreadable_catalogue_is_reported_not_swallowed() {
 fn req_prof_062_a_user_profile_without_a_title_is_named_after_its_file() {
     let files = FakeProfileFileSystem::new();
     let layout = UserDataLayout::with_default_names(Path::new(ROOT));
-    files.add_file(&layout.profiles_directory().join("Foo.3dn"), &make_profile(Some("abc123def456"), None));
+    files.add_file(
+        &layout.profiles_directory().join("Foo.3dn"),
+        &make_profile(Some("abc123def456"), None),
+    );
 
     let log = RecordingProfileLog::new();
-    let folder = UserProfileFolder::new(&files, layout.profiles_directory(), Some(&log), zax_profiles::catalogue::ProfileOrigin::User);
+    let folder = UserProfileFolder::new(
+        &files,
+        layout.profiles_directory(),
+        Some(&log),
+        zax_profiles::catalogue::ProfileOrigin::User,
+    );
     let profiles = folder.scan(&[]).unwrap();
 
     assert_eq!(1, profiles.len());
@@ -162,8 +193,14 @@ fn req_prof_062_a_user_profile_without_a_title_is_named_after_its_file() {
 fn req_prof_062_a_second_profile_with_the_same_identifier_is_ignored() {
     let files = FakeProfileFileSystem::new();
     let layout = UserDataLayout::with_default_names(Path::new(ROOT));
-    files.add_file(&layout.profiles_directory().join("Aaa.3dn"), &make_profile(Some("dup"), Some("First")));
-    files.add_file(&layout.profiles_directory().join("Bbb.3dn"), &make_profile(Some("dup"), Some("Second")));
+    files.add_file(
+        &layout.profiles_directory().join("Aaa.3dn"),
+        &make_profile(Some("dup"), Some("First")),
+    );
+    files.add_file(
+        &layout.profiles_directory().join("Bbb.3dn"),
+        &make_profile(Some("dup"), Some("Second")),
+    );
 
     let log = RecordingProfileLog::new();
     let folder = user_folder(&files, layout.profiles_directory(), Some(&log));
@@ -193,7 +230,10 @@ fn user_folder<'a>(
 fn req_prof_062_an_identifier_that_belongs_to_a_built_in_profile_is_ignored() {
     let files = FakeProfileFileSystem::new();
     let layout = UserDataLayout::with_default_names(Path::new(ROOT));
-    files.add_file(&layout.profiles_directory().join("Clash.3dn"), &make_profile(Some("1"), Some("Mine")));
+    files.add_file(
+        &layout.profiles_directory().join("Clash.3dn"),
+        &make_profile(Some("1"), Some("Mine")),
+    );
 
     let log = RecordingProfileLog::new();
     let folder = user_folder(&files, layout.profiles_directory(), Some(&log));
@@ -210,8 +250,14 @@ fn req_prof_062_an_unreadable_or_foreign_file_is_ignored_and_the_others_are_kept
     let directory = layout.profiles_directory();
     files.add_file(&directory.join("a-good.3dn"), &good);
     files.add_file(&directory.join("b-truncated.3dn"), &good[..good.len() / 2]);
-    files.add_file(&directory.join("c-foreign.3dn"), &[0x0a, 0x03, 0x33, 0x64, 0x78]);
-    files.add_file(&directory.join("d-noid.3dn"), &make_profile(None, Some("No identifier")));
+    files.add_file(
+        &directory.join("c-foreign.3dn"),
+        &[0x0a, 0x03, 0x33, 0x64, 0x78],
+    );
+    files.add_file(
+        &directory.join("d-noid.3dn"),
+        &make_profile(None, Some("No identifier")),
+    );
 
     let log = RecordingProfileLog::new();
     let folder = user_folder(&files, directory, Some(&log));
@@ -323,7 +369,10 @@ fn req_prof_064_the_library_lists_every_profile_and_remembers_the_chosen_rom() {
     let files = FakeProfileFileSystem::new();
     let catalogue = catalogue_of(
         &files,
-        &[("1", "Arkanoid", "profiles/ark.bytes"), ("47", "2D Mode", "profiles/empty.bytes")],
+        &[
+            ("1", "Arkanoid", "profiles/ark.bytes"),
+            ("47", "2D Mode", "profiles/empty.bytes"),
+        ],
     );
 
     let mut library = GameLibrary::build(&catalogue, &[], None, None);
@@ -410,7 +459,10 @@ fn req_pers_035_the_library_file_is_reconciled_with_the_available_profiles() {
     let layout = UserDataLayout::with_default_names(Path::new(ROOT));
     let catalogue = catalogue_of(
         &files,
-        &[("1", "Arkanoid", "profiles/ark.bytes"), ("2", "Balloon", "profiles/bf.bytes")],
+        &[
+            ("1", "Arkanoid", "profiles/ark.bytes"),
+            ("2", "Balloon", "profiles/bf.bytes"),
+        ],
     );
 
     let store = GameLibraryStore::new(&files, None);
@@ -460,7 +512,9 @@ fn req_prof_064_the_rom_association_survives_a_save_and_a_reload() {
     let mut library = GameLibrary::build(&catalogue, &[], None, None);
     library.set_rom_path("1", "/roms/nestest.nes");
     library.mark_played("1", 1_760_950_000);
-    store.save(layout.library_file(), &mut library.to_file()).unwrap();
+    store
+        .save(layout.library_file(), &mut library.to_file())
+        .unwrap();
 
     let loaded = store.load(layout.library_file(), OffsetDateTime::UNIX_EPOCH);
     let reloaded = GameLibrary::build(&catalogue, &[], loaded.as_ref(), None);
@@ -469,7 +523,10 @@ fn req_prof_064_the_rom_association_survives_a_save_and_a_reload() {
     assert_eq!(1_760_950_000, reloaded.find("1").unwrap().last_played);
     assert_eq!(
         GameLibraryFile::CURRENT_SCHEMA_VERSION,
-        store.load(layout.library_file(), OffsetDateTime::UNIX_EPOCH).unwrap().schema_version
+        store
+            .load(layout.library_file(), OffsetDateTime::UNIX_EPOCH)
+            .unwrap()
+            .schema_version
     );
 }
 
@@ -484,7 +541,10 @@ fn req_pers_037_an_unreadable_library_is_set_aside_and_the_library_is_rebuilt() 
     let loaded = store.load(layout.library_file(), datetime!(2026-10-20 18:30:05 UTC));
 
     assert!(loaded.is_none());
-    assert!(files.file_exists(&PathBuf::from(format!("{}.corrupt-20261020-183005", layout.library_file().display()))));
+    assert!(files.file_exists(&PathBuf::from(format!(
+        "{}.corrupt-20261020-183005",
+        layout.library_file().display()
+    ))));
     assert!(log.any_contains("unreadable library"));
 }
 
@@ -519,15 +579,25 @@ fn req_pers_033_the_library_sorts_by_title_or_by_last_played() {
     let files = FakeProfileFileSystem::new();
     let catalogue = catalogue_of(
         &files,
-        &[("1", "Zelda", "profiles/z.bytes"), ("2", "Arkanoid", "profiles/a.bytes"), ("3", "Metroid", "profiles/m.bytes")],
+        &[
+            ("1", "Zelda", "profiles/z.bytes"),
+            ("2", "Arkanoid", "profiles/a.bytes"),
+            ("3", "Metroid", "profiles/m.bytes"),
+        ],
     );
 
     let mut library = GameLibrary::build(&catalogue, &[], None, None);
     library.mark_played("1", 300);
     library.mark_played("3", 500);
 
-    assert_eq!(["Arkanoid", "Metroid", "Zelda"], titles(&library.sorted(LibrarySortOption::Alphabetical)).as_slice());
-    assert_eq!(["Metroid", "Zelda", "Arkanoid"], titles(&library.sorted(LibrarySortOption::Recent)).as_slice());
+    assert_eq!(
+        ["Arkanoid", "Metroid", "Zelda"],
+        titles(&library.sorted(LibrarySortOption::Alphabetical)).as_slice()
+    );
+    assert_eq!(
+        ["Metroid", "Zelda", "Arkanoid"],
+        titles(&library.sorted(LibrarySortOption::Recent)).as_slice()
+    );
 }
 
 #[test]
@@ -552,8 +622,12 @@ fn req_arch_033_the_user_data_layout_is_built_from_an_injected_root() {
 #[test]
 #[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
 fn req_acc_010_the_whole_library_can_be_built_from_the_real_catalogue() {
-    let catalogue =
-        ProfileCatalogue::load(&PhysicalProfileFileSystem, &neutral_assets::catalogue_file(), FULL_EDITION).unwrap();
+    let catalogue = ProfileCatalogue::load(
+        &PhysicalProfileFileSystem,
+        &neutral_assets::catalogue_file(),
+        FULL_EDITION,
+    )
+    .unwrap();
 
     let log = RecordingProfileLog::new();
     let library = GameLibrary::build(&catalogue, &[], None, Some(&log));
@@ -561,5 +635,12 @@ fn req_acc_010_the_whole_library_can_be_built_from_the_real_catalogue() {
     assert_eq!(101, library.entries().len());
     assert!(log.warnings.borrow().is_empty());
     assert!(log.errors.borrow().is_empty());
-    assert_eq!(1, library.entries().iter().filter(|entry| entry.is_2d_mode()).count());
+    assert_eq!(
+        1,
+        library
+            .entries()
+            .iter()
+            .filter(|entry| entry.is_2d_mode())
+            .count()
+    );
 }

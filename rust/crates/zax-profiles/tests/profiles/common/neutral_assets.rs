@@ -29,7 +29,10 @@ pub fn profile_files() -> Vec<PathBuf> {
     let mut files: Vec<PathBuf> = fs::read_dir(profiles_directory())
         .unwrap()
         .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|extension| extension == "bytes"))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "bytes")
+        })
         .collect();
     files.sort();
     files

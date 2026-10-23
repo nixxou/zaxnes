@@ -26,10 +26,13 @@ pub fn compress(input: &[u8]) -> Vec<u8> {
             let distance = position - candidate;
             if distance > 0
                 && distance <= MAXIMUM_OFFSET
-                && input[candidate..candidate + MINIMUM_MATCH] == input[position..position + MINIMUM_MATCH]
+                && input[candidate..candidate + MINIMUM_MATCH]
+                    == input[position..position + MINIMUM_MATCH]
             {
                 let mut length = MINIMUM_MATCH;
-                while position + length < limit && input[candidate + length] == input[position + length] {
+                while position + length < limit
+                    && input[candidate + length] == input[position + length]
+                {
                     length += 1;
                 }
 

@@ -33,7 +33,11 @@ fn req_prof_001_every_built_in_profile_decodes_with_no_unknown_field() {
     let mut count = 0;
     for path in neutral_assets::profile_files() {
         count += 1;
-        match format::load(&std::fs::read(&path).unwrap(), None, Some(&path.to_string_lossy())) {
+        match format::load(
+            &std::fs::read(&path).unwrap(),
+            None,
+            Some(&path.to_string_lossy()),
+        ) {
             Ok(document) => unknown_fields += document.unknown_field_count,
             Err(error) => failures.push(format!("{}: {error}", path.display())),
         }
@@ -63,7 +67,11 @@ fn req_prof_051_the_canonical_writer_reproduces_every_built_in_profile_byte_for_
         if rewritten == original {
             identical += 1;
         } else {
-            failures.push(format!("{}: {}", path.display(), describe_first_difference(&original, &rewritten)));
+            failures.push(format!(
+                "{}: {}",
+                path.display(),
+                describe_first_difference(&original, &rewritten)
+            ));
         }
     }
 
@@ -78,7 +86,8 @@ fn req_prof_050_decoding_a_rewritten_profile_gives_the_same_model() {
         let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
         let first = neutral_assets::load_profile(&file_name);
         let rewritten = first.save();
-        let second = format::load(&rewritten, None, Some(&file_name)).unwrap_or_else(|error| panic!("{file_name}: {error}"));
+        let second = format::load(&rewritten, None, Some(&file_name))
+            .unwrap_or_else(|error| panic!("{file_name}: {error}"));
         model_comparer::assert_equal(&first.profile, &second.profile, &file_name);
     }
 }
@@ -90,7 +99,12 @@ fn req_prof_011_shared_tiles_are_resolved_to_the_same_object() {
     let filled_cells: usize = document
         .profile
         .all_patterns()
-        .map(|pattern| pattern.grid.as_ref().map_or(0, PatternGrid::filled_cell_count))
+        .map(|pattern| {
+            pattern
+                .grid
+                .as_ref()
+                .map_or(0, PatternGrid::filled_cell_count)
+        })
         .sum();
 
     let distinct_objects = document.profile.distinct_tile_objects().count();
@@ -98,7 +112,10 @@ fn req_prof_011_shared_tiles_are_resolved_to_the_same_object() {
     // 516 tile objects carry 1 085 filled cells: the rest are shared references
     // (REQ-PROF-011, §5.3).
     assert_eq!(516, distinct_objects);
-    assert!(filled_cells > distinct_objects, "tiles are expected to be shared");
+    assert!(
+        filled_cells > distinct_objects,
+        "tiles are expected to be shared"
+    );
 }
 
 #[test]
@@ -110,11 +127,19 @@ fn req_prof_004_a_profile_built_in_memory_writes_every_scalar() {
         tile_size: Some(Vec2I::new(1, 1)),
         permanent: true,
         skip_geometry: false,
-        variants: vec![Arc::new(PatternVariant { depth: 3, alpha: 1.0, ..PatternVariant::default() })],
+        variants: vec![Arc::new(PatternVariant {
+            depth: 3,
+            alpha: 1.0,
+            ..PatternVariant::default()
+        })],
         grid: Some(PatternGrid::new(
             1,
             1,
-            vec![Some(Arc::new(ProfileTile::new(0x0020_2018_0000_0000, 0x103A_3C18_0000_0000, TileFlip::NONE)))],
+            vec![Some(Arc::new(ProfileTile::new(
+                0x0020_2018_0000_0000,
+                0x103A_3C18_0000_0000,
+                TileFlip::NONE,
+            )))],
         )),
         ..ProfilePattern::default()
     };
@@ -130,7 +155,13 @@ fn req_prof_004_a_profile_built_in_memory_writes_every_scalar() {
     assert_eq!(Vec2I::UNCONSTRAINED, restored.constraint_size);
     assert_eq!(1, restored.variants.len());
     assert_eq!(3, restored.variants[0].depth);
-    assert_eq!(0x103A_3C18_0000_0000, restored.grid.as_ref().unwrap().cells()[0].as_ref().unwrap().high_plane);
+    assert_eq!(
+        0x103A_3C18_0000_0000,
+        restored.grid.as_ref().unwrap().cells()[0]
+            .as_ref()
+            .unwrap()
+            .high_plane
+    );
 
     // All twelve pattern fields were written, so the layout records no deviation.
     assert_eq!(None, restored.recorded_fields);
@@ -143,5 +174,8 @@ fn req_prof_051_the_recorded_field_sets_are_only_the_ones_the_files_leave_out() 
     let settings_fields = empty.profile.settings.as_ref().unwrap().recorded_fields;
 
     // empty.bytes stores settings fields 1 to 23 only (§5.4).
-    assert_eq!((1..=23).collect::<Vec<u32>>(), settings_fields.unwrap().fields());
+    assert_eq!(
+        (1..=23).collect::<Vec<u32>>(),
+        settings_fields.unwrap().fields()
+    );
 }

@@ -21,7 +21,11 @@ use zax_settings::catalogue::SettingId;
 use super::common::neutral_assets;
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(" ")
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn save(profile: &GameProfile) -> Vec<u8> {
@@ -68,7 +72,9 @@ fn req_prof_020_the_built_in_profiles_all_start_with_the_signature() {
 #[test]
 fn req_prof_038_a_script_is_written_as_the_stated_bytes() {
     let mut profile = GameProfile::default();
-    profile.scripts.push(ProfileScript::new(Some("Build"), true, None, None));
+    profile
+        .scripts
+        .push(ProfileScript::new(Some("Build"), true, None, None));
 
     assert!(hex(&save(&profile)).contains("0a 05 42 75 69 6c 64 10 01 18 00"));
 }
@@ -107,7 +113,11 @@ fn req_prof_011_the_twelfth_key_goes_to_the_twelfth_new_object() {
     // One pattern (key 1), then eleven new tiles (keys 2 to 12), then a cell that names the
     // tile of key 12 again. That reproduces both cell vectors of §5.1 and shows the keys are
     // handed out in prefix order over the whole file.
-    let shared = Arc::new(ProfileTile::new(0x0020_2018_0000_0000, 0x103A_3C18_0000_0000, TileFlip::NONE));
+    let shared = Arc::new(ProfileTile::new(
+        0x0020_2018_0000_0000,
+        0x103A_3C18_0000_0000,
+        TileFlip::NONE,
+    ));
     let mut cells: Vec<Option<Arc<ProfileTile>>> = (1..=10)
         .map(|plane| Some(Arc::new(ProfileTile::new(plane, 0, TileFlip::NONE))))
         .collect();
@@ -164,15 +174,43 @@ fn req_prof_002_an_opaque_black_colour_is_written_as_the_stated_varint() {
 }
 
 #[rstest]
-#[case(0x0000_0000_0000_0000, 0x6212_9680_01C2_3EB3, 7_066_876_241_827_217_075)]
+#[case(
+    0x0000_0000_0000_0000,
+    0x6212_9680_01C2_3EB3,
+    7_066_876_241_827_217_075
+)]
 #[case(0xFFFF_FFFF_FFFF_FFFF, 0x9DED_697F_FE3D_C14C, -7_066_876_241_827_217_076)]
-#[case(0x0000_0000_0000_0001, 0x6212_96C0_01C2_3EB3, 7_066_876_516_705_124_019)]
-#[case(0x8000_0000_0000_0000, 0x6212_96A0_01C2_3EB3, 7_066_876_379_266_170_547)]
-#[case(0x0000_0000_0000_00FF, 0x6212_A940_01C2_3EB3, 7_066_896_857_670_237_875)]
-#[case(0x0102_0408_1020_4080, 0x6A02_B680_4143_3CB7, 7_638_868_579_940_777_143)]
+#[case(
+    0x0000_0000_0000_0001,
+    0x6212_96C0_01C2_3EB3,
+    7_066_876_516_705_124_019
+)]
+#[case(
+    0x8000_0000_0000_0000,
+    0x6212_96A0_01C2_3EB3,
+    7_066_876_379_266_170_547
+)]
+#[case(
+    0x0000_0000_0000_00FF,
+    0x6212_A940_01C2_3EB3,
+    7_066_896_857_670_237_875
+)]
+#[case(
+    0x0102_0408_1020_4080,
+    0x6A02_B680_4143_3CB7,
+    7_638_868_579_940_777_143
+)]
 #[case(0x071F_3F7F_7FFF_FFFF, 0x9DED_6941_C60D_E16C, -7_066_876_509_057_851_028)]
-#[case(0xC0F0_F8FC_FCFE_FEFE, 0x5DAD_2930_3DFC_018C, 6_750_096_703_673_336_204)]
-#[case(0xC381_8100_0081_81C3, 0x4272_E670_E1A2_7EB3, 4_788_142_726_344_507_059)]
+#[case(
+    0xC0F0_F8FC_FCFE_FEFE,
+    0x5DAD_2930_3DFC_018C,
+    6_750_096_703_673_336_204
+)]
+#[case(
+    0xC381_8100_0081_81C3,
+    0x4272_E670_E1A2_7EB3,
+    4_788_142_726_344_507_059
+)]
 fn req_prof_030_the_plane_encoding_matches_the_test_vectors(
     #[case] plane: u64,
     #[case] stored_unsigned: u64,
@@ -218,7 +256,10 @@ fn req_prof_031_the_tile_of_key_12_of_balloon_fight_draws_the_expected_pattern()
     assert_eq!(Some(Vec2I::new(1, 1)), second.tile_size);
     assert!(second.permanent);
     assert_eq!(0, second.pixel_count);
-    assert_eq!(PatternColorFlags::COLOR2 | PatternColorFlags::COLOR3, second.color_flags);
+    assert_eq!(
+        PatternColorFlags::COLOR2 | PatternColorFlags::COLOR3,
+        second.color_flags
+    );
     assert_eq!(PatternDensity::Solid, second.tile_density);
     assert_eq!(PatternDensity::Low, second.pixel_density);
     assert!(!second.self_connected);
@@ -285,7 +326,11 @@ fn req_prof_003_empty_bytes_decodes_to_the_values_of_section_5_4() {
     assert_eq!(Some("Build"), script.name.as_deref());
     assert_eq!(Some("*"), script.tag_string.as_deref());
     assert!(script.enabled);
-    assert!(script.source.as_deref().unwrap().starts_with("function BuildPattern()"));
+    assert!(script
+        .source
+        .as_deref()
+        .unwrap()
+        .starts_with("function BuildPattern()"));
 
     let settings = profile.settings.as_ref().unwrap();
     let light = settings.light.as_ref().unwrap();
@@ -293,7 +338,10 @@ fn req_prof_003_empty_bytes_decodes_to_the_values_of_section_5_4() {
     assert_eq!(Some(ArgbColor::new(-1)), light.color);
     assert!((light.intensity - 0.85911).abs() < 0.00001);
     assert!(settings.use_nes_background_color);
-    assert_eq!(Some(ArgbColor::new(-16_777_216)), settings.custom_background_color);
+    assert_eq!(
+        Some(ArgbColor::new(-16_777_216)),
+        settings.custom_background_color
+    );
     assert_eq!(Some(Vec4F::new(4.1, 16.1, 4.1, 0.1)), settings.clipping);
     let layers = settings.layers.as_ref().unwrap();
     assert_eq!(ProfileLayer::L1, layers.default_layer);
@@ -322,9 +370,15 @@ fn req_prof_003_empty_bytes_decodes_to_the_values_of_section_5_4() {
     }
 
     let names = |slots: &[zax_profiles::pattern::RecordedPatternSlot]| -> Vec<String> {
-        slots.iter().map(|slot| slot.name.clone().unwrap()).collect()
+        slots
+            .iter()
+            .map(|slot| slot.name.clone().unwrap())
+            .collect()
     };
-    assert_eq!(["Road", "BG", "Top", "Loop", "Body"], names(&settings.saved_patterns).as_slice());
+    assert_eq!(
+        ["Road", "BG", "Top", "Loop", "Body"],
+        names(&settings.saved_patterns).as_slice()
+    );
     assert_eq!(
         ["Deform1", "Deform2", "Deform3", "Deform4", "Deform5"],
         names(&settings.saved_anim_patterns).as_slice()
@@ -398,7 +452,9 @@ fn amd_031_the_tv_box_field_survives_a_round_trip_and_applies_nothing(#[case] st
     assert!(!key_is_listed(applied_keys()));
     assert!(!key_is_listed(preserved_keys()));
     assert!(SettingId::from_key("scene.tv_box").is_none());
-    assert!(!values_to_apply(document.profile.settings.as_ref().unwrap())
-        .keys()
-        .any(|id| id.key() == "scene.tv_box"));
+    assert!(
+        !values_to_apply(document.profile.settings.as_ref().unwrap())
+            .keys()
+            .any(|id| id.key() == "scene.tv_box")
+    );
 }
