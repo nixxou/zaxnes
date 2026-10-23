@@ -193,3 +193,29 @@ rust/build/package-linux-aarch64.sh --native   # on the device itself
 Unzip the Windows package on a machine without Rust or SDL2 and start `zaxnes.exe`. For the
 RG40XXV, copy the aarch64 package to the device and follow `RG40XXV.txt` (GLES 3.0 is selected
 automatically on aarch64 Linux; `ZAXNES_GLES=1` forces it elsewhere).
+
+### 8b. Linux aarch64 (RG40XXV), cross build and parity under qemu
+
+```sh
+rustup target add aarch64-unknown-linux-gnu
+sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake qemu-user qemu-user-binfmt \
+    libc6-arm64-cross libdrm-dev libgbm-dev libegl-dev libgles-dev
+export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ \
+       AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar SDL2_TOOLCHAIN=$PWD/rust/build/aarch64-sdl2.cmake
+cd rust   # the linker comes from .cargo/config.toml
+cargo build --release --target aarch64-unknown-linux-gnu -p zax-nes -p zax-harness
+cargo build --release --target aarch64-unknown-linux-gnu -p zax-app --features bundled
+Q="qemu-aarch64 -L /usr/aarch64-linux-gnu"
+$Q target/aarch64-unknown-linux-gnu/release/zax-harness golden-core test-roms out.jsonl 60   # about 5 min
+$Q target/aarch64-unknown-linux-gnu/release/zaxnes --help
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="$Q" cargo test --release --target aarch64-unknown-linux-gnu -p zax-nes
+```
+
+Compare the JSONL with `goldens/core-goldens.jsonl` as parsed JSON, checkpoint by checkpoint (a 60
+frame run only shares the frame 1 and 60 checkpoints). 1200 frames cost about 95 min per full run.
+The bundled SDL2 is configured with KMSDRM, GBM, EGL and GLES2 (loaded by dlopen: the device needs
+libdrm.so.2, libgbm.so.1, libEGL.so.1, libGLESv2.so.2); libsamplerate is off (no aarch64 library here).
+
+Still to check on the device (nothing graphical or audible ran under qemu): the KMSDRM window
+(`SDL_VIDEODRIVER=KMSDRM`), the GLES 3.0 context on the Mali-G31, the controls, the audio (ALSA)
+and the performance (frame time at 640x480 on the Cortex-A53).

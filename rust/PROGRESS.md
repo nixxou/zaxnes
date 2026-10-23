@@ -58,6 +58,8 @@ Rust counts are `#[test]` results (rstest rows and table-driven loops count as o
 | zax-harness | 32 | (harness has no C# tests) | - |
 | zax-goldens | 3 | - | - |
 
+aarch64 (qemu-user): cross build OK (zax-nes, zax-harness, zax-app with bundled SDL2 incl. KMSDRM/EGL/GLES2); golden-core bit-identical to the x86_64 goldens (290 ROMs at 60 frames, 72 ROMs APU/mappers/blargg at 1200 frames); zax-nes, zax-engine3d, zax-settings, zax-profiles, zax-scripting tests pass; `zaxnes --help` OK; the device itself is untested.
+
 Linux smoke (`rust/build/smoke-linux.sh`, Xvfb/llvmpipe, release): window, frames, 2D and 3D render, audio, pause, save/load state, reset, options, FR/EN, rewind/ff keys, user-data files and clean exits all verified; no bug found. Notes: keys must be held about one frame (the keyboard is polled per frame), and loading a state ends in Running as in C#.
 
 Lua hook binding overhead (release, `cargo test -p zax-scripting --release --test scripting perf -- --ignored --nocapture --test-threads=1`, x86-64, synthetic profile of 60 shapes): per hook call before/after the binding rework, `Update` with 100 API accesses 45 -> 27.5 us (445 -> 275 ns per access), `BuildPattern` 2.2 -> 1.55 us (1.4 -> 0.93 us of setup, unchanged from 50 to 500 instances), `UpdateS` 4.85 -> 3.7 us (hook overhead 1.8 -> 1.2 us), a frame of `Update` + `LateUpdate` + 60 `UpdateS` 397 -> 300 us (1.3x; keeping a frame handle the one value of its object after its epoch, as the C# binder does, costs about 45 us of it: the handles of an epoch are handed to the weak object cache when it ends) What is left is the per-callback cost of mlua (about 1000 instructions per Lua-to-host call, see the benchmark), not the interpreter.
@@ -76,7 +78,7 @@ The acceptance project (581 methods) checks requirement traceability and archite
 - Commercial ROMs and profiles through `ZAXNES_ROMS` / `ZAXNES_PROFILES` / `ZAXNES_3DSEN_INSTALL` (the ignored tests: profile corpus byte-identity 101/101, scripting and engine corpora, 3dSen import).
 - The C#-vs-Rust capture campaign: 12 games x 3 angles with `render --rom`, compared by `zax-harness compare` (tolerance 2 per channel).
 - `render --bench` below 4 ms median at 1920x1080 (not measurable on llvmpipe; here framing takes about 15 ms at 640x480 in software).
-- Windows console attach at runtime (terminal, pipe and Explorer launches), packaging (`package-windows.ps1`, `package-linux-aarch64.sh`: neither has been run), the RG40XXV.
+- Windows console attach at runtime (terminal, pipe and Explorer launches), packaging (`package-windows.ps1` has not been run; `package-linux-aarch64.sh` is aligned with the working cross build but its packaging step was not run), the RG40XXV.
 
 ### Known gaps
 
