@@ -133,8 +133,12 @@ impl ScriptBridge {
                 self.lua.set_app_data(HostLink::new(call));
             }
             operation();
+            let flushed = self
+                .lua
+                .app_data_ref::<HostLink>()
+                .map_or(Ok(()), |link| link.flush());
             self.lua.remove_app_data::<HostLink>();
-            Ok(())
+            flushed
         });
         debug_assert!(lent.is_ok(), "the closure of a lend never fails");
     }
@@ -285,7 +289,11 @@ impl ProfileScriptRuntime {
 
             lua.set_app_data(Lent { data, state, build });
             let result = operation(&Cx::new(lua));
+            let flushed = lua
+                .app_data_ref::<HostLink>()
+                .map_or(Ok(()), |link| link.flush());
             lua.remove_app_data::<Lent>();
+            flushed?;
             Ok(result)
         })
     }

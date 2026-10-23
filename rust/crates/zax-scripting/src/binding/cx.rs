@@ -26,13 +26,24 @@ pub(crate) struct Lent {
 /// boxed value.
 type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Box<dyn Any>>;
 
+/// A change of the host the script asked for, which nothing in the script waits for.
+type HostWrite = Box<dyn FnOnce(&mut ScriptContext<'_>)>;
+
+/// How many writes wait for the next request before they are made anyway.
+const QUEUED_WRITES_LIMIT: usize = 256;
+
 /// The way to the [`ScriptContext`] a host lent for the length of a call. The context is
 /// borrowed, so it cannot be stored in the Lua state: what is stored is a function, valid for the
 /// scope of the lend, which runs the pending request against the context.
+///
+/// A write does not wait for the host: it is queued, and the host makes it before the next
+/// request, so that every read sees the writes before it, and at the end of the call into Lua.
+/// A write costs a queue entry where a request costs a call into Lua.
 pub(crate) struct HostLink {
     call: Function,
     pending: RefCell<Option<HostRequest>>,
     answer: RefCell<Option<Box<dyn Any>>>,
+    writes: RefCell<Vec<HostWrite>>,
 }
 
 impl HostLink {
@@ -41,6 +52,7 @@ impl HostLink {
             call,
             pending: RefCell::new(None),
             answer: RefCell::new(None),
+            writes: RefCell::new(Vec::new()),
         }
     }
 
@@ -49,12 +61,40 @@ impl HostLink {
         let link = lua
             .app_data_ref::<Self>()
             .ok_or_else(|| mlua::Error::runtime("the host context was withdrawn"))?;
-        let request = link
-            .pending
-            .take()
-            .ok_or_else(|| mlua::Error::runtime("no request for the host context"))?;
-        link.answer.replace(Some(request(context)));
+        let mut writes = link.writes.take();
+        for write in writes.drain(..) {
+            write(context);
+        }
+
+        link.writes.replace(writes);
+        if let Some(request) = link.pending.take() {
+            link.answer.replace(Some(request(context)));
+        }
+
         Ok(())
+    }
+
+    /// Queues `write` for the next request, or makes it now when too many wait.
+    fn queue(&self, write: HostWrite) -> mlua::Result<()> {
+        let waiting = {
+            let mut writes = self.writes.borrow_mut();
+            writes.push(write);
+            writes.len()
+        };
+        if waiting >= QUEUED_WRITES_LIMIT {
+            self.flush()?;
+        }
+
+        Ok(())
+    }
+
+    /// Makes the queued writes.
+    pub fn flush(&self) -> mlua::Result<()> {
+        if self.writes.borrow().is_empty() {
+            return Ok(());
+        }
+
+        self.call.call::<()>(())
     }
 
     /// Runs `operation` on the lent context.
@@ -126,6 +166,19 @@ impl<'a> Cx<'a> {
     ) -> mlua::Result<R> {
         if let Some(link) = self.lua.app_data_ref::<HostLink>() {
             return link.run(operation);
+        }
+
+        self.data(|data| with_host_context(self.lua, data, operation))?
+    }
+
+    /// Makes `operation`, a change of the camera, the backdrop or the machine that has no answer,
+    /// before the next request to the host, and at the latest when the call into Lua ends.
+    pub fn host_write(
+        &self,
+        operation: impl FnOnce(&mut ScriptContext<'_>) + 'static,
+    ) -> mlua::Result<()> {
+        if let Some(link) = self.lua.app_data_ref::<HostLink>() {
+            return link.queue(Box::new(operation));
         }
 
         self.data(|data| with_host_context(self.lua, data, operation))?

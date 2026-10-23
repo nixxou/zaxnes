@@ -364,11 +364,11 @@ pub(crate) fn write_vec3_ref(cx: &Cx, reference: &Vec3Ref, value: Vec3) -> mlua:
                 InstanceVec::DeformPivot => instance.deform_pivot = value,
             })?;
         }
-        Vec3Ref::CameraRotation => cx.host(move |ctx| ctx.camera.set_angles(value))?,
-        Vec3Ref::CameraTarget => cx.host(move |ctx| ctx.camera.set_look_at(value))?,
-        Vec3Ref::ZapperOffset => cx.host(move |ctx| ctx.machine.set_zapper_offset(value))?,
-        Vec3Ref::BackdropSize => cx.host(move |ctx| ctx.backdrop.set_size(value))?,
-        Vec3Ref::BackdropOffset => cx.host(move |ctx| ctx.backdrop.set_offset(value))?,
+        Vec3Ref::CameraRotation => cx.host_write(move |ctx| ctx.camera.set_angles(value))?,
+        Vec3Ref::CameraTarget => cx.host_write(move |ctx| ctx.camera.set_look_at(value))?,
+        Vec3Ref::ZapperOffset => cx.host_write(move |ctx| ctx.machine.set_zapper_offset(value))?,
+        Vec3Ref::BackdropSize => cx.host_write(move |ctx| ctx.backdrop.set_size(value))?,
+        Vec3Ref::BackdropOffset => cx.host_write(move |ctx| ctx.backdrop.set_offset(value))?,
     }
 
     Ok(())
