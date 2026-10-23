@@ -32,7 +32,7 @@ use zax_render::scene::SkyboxKind;
 use zax_render::statistics::RenderStatistics;
 use zax_render::SceneRenderer;
 
-use crate::HarnessError;
+use crate::{json_text, HarnessError};
 use input_script::InputScript;
 use rom::RomRequest;
 use scenes::SyntheticScene;
@@ -582,8 +582,8 @@ fn describe(
          \"drawCalls\": {}, \"triangles\": {}, \"residentMeshes\": {}, \"antiAliasSamples\": {}, \
          \"shadowMapSize\": {}, \"requestedShadowMapSize\": {}, \"distinctColors\": {}, \
          \"backgroundPixels\": {}, \"meanLuma\": {:.4}{bench} }}",
-        scene.name,
-        scene.description,
+        json_text::escape(&scene.name),
+        json_text::escape(&scene.description),
         options.width,
         options.height,
         render.opaque_tiles,

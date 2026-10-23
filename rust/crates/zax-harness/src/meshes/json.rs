@@ -35,7 +35,7 @@ impl Writer {
     }
 
     fn string(&mut self, depth: usize, name: &str, value: &str) -> fmt::Result {
-        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped = crate::json_text::escape(value);
         self.raw(depth, name, format_args!("\"{escaped}\""))
     }
 

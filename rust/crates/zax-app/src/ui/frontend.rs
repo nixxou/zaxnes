@@ -76,7 +76,11 @@ impl ImguiFrontend {
         Ok(Self {
             context,
             renderer,
-            platform: SdlPlatform::new(),
+            platform: if shots.is_some() {
+                SdlPlatform::for_capture()
+            } else {
+                SdlPlatform::new()
+            },
             ui,
             shots,
         })

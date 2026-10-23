@@ -12,6 +12,9 @@ use sdl2::mouse::MouseButton as SdlButton;
 #[derive(Debug, Clone, Copy)]
 pub struct SdlPlatform {
     scale: [f32; 2],
+    /// Whether the pointer events are dropped: `--ui-shots` photographs the interface as it is
+    /// laid out, not as the host cursor happens to hover it (the C# capture has no pointer).
+    ignore_pointer: bool,
 }
 
 impl Default for SdlPlatform {
@@ -24,12 +27,36 @@ impl SdlPlatform {
     /// A platform whose coordinates are the window's.
     #[must_use]
     pub const fn new() -> Self {
-        Self { scale: [1.0, 1.0] }
+        Self {
+            scale: [1.0, 1.0],
+            ignore_pointer: false,
+        }
+    }
+
+    /// A platform for the screenshot capture: the cursor, the buttons and the wheel of the host
+    /// never reach the interface.
+    #[must_use]
+    pub const fn for_capture() -> Self {
+        Self {
+            scale: [1.0, 1.0],
+            ignore_pointer: true,
+        }
     }
 
     /// Passes one SDL event on.
     #[allow(clippy::cast_precision_loss)] // pixel coordinates are far below 2^24
     pub fn handle_event(&self, io: &mut Io, event: &Event) {
+        if self.ignore_pointer
+            && matches!(
+                event,
+                Event::MouseMotion { .. }
+                    | Event::MouseButtonDown { .. }
+                    | Event::MouseButtonUp { .. }
+                    | Event::MouseWheel { .. }
+            )
+        {
+            return;
+        }
         match event {
             Event::MouseMotion { x, y, .. } => {
                 io.add_mouse_pos_event([*x as f32 * self.scale[0], *y as f32 * self.scale[1]]);
@@ -137,4 +164,56 @@ fn imgui_key(scancode: Scancode) -> Option<Key> {
         Scancode::Z => Key::Z,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn motion() -> Event {
+        Event::MouseMotion {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            mousestate: sdl2::mouse::MouseState::from_sdl_state(0),
+            x: 120,
+            y: 80,
+            xrel: 0,
+            yrel: 0,
+        }
+    }
+
+    fn press() -> Event {
+        Event::MouseButtonDown {
+            timestamp: 0,
+            window_id: 0,
+            which: 0,
+            mouse_btn: SdlButton::Left,
+            clicks: 1,
+            x: 120,
+            y: 80,
+        }
+    }
+
+    /// Dear `ImGui` allows one context per process, so both platforms are checked in turn.
+    #[test]
+    fn a_capture_platform_ignores_the_host_cursor_and_buttons() {
+        let mut context = imgui::Context::create();
+        context.io_mut().display_size = [800.0, 600.0];
+        let _ = context.fonts().build_rgba32_texture();
+
+        let capture = SdlPlatform::for_capture();
+        capture.handle_event(context.io_mut(), &motion());
+        capture.handle_event(context.io_mut(), &press());
+        context.new_frame();
+        // The pointer stays where Dear ImGui starts it: nowhere (far off screen).
+        let position = context.io().mouse_pos;
+        assert!(position[0] < -1.0e6 && position[1] < -1.0e6, "{position:?}");
+        assert!(!context.io().mouse_down[0]);
+        let _ = context.render();
+
+        SdlPlatform::new().handle_event(context.io_mut(), &motion());
+        context.new_frame();
+        assert_eq!(context.io().mouse_pos, [120.0, 80.0]);
+    }
 }

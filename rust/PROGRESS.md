@@ -58,6 +58,8 @@ Rust counts are `#[test]` results (rstest rows and table-driven loops count as o
 | zax-harness | 32 | (harness has no C# tests) | - |
 | zax-goldens | 3 | - | - |
 
+Fixes after Windows check 3: render.json string escaping; --ui-shots ignores host cursor.
+
 The acceptance project (581 methods) checks requirement traceability and architecture rules of the C# solution; its Rust counterparts are the integration tests of `zax-app` and the golden comparisons above, not a method-for-method port.
 
 ### To check on a real machine (commands in `rust/LOCAL-CHECKS.md`)
