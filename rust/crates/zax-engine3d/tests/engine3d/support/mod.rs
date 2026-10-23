@@ -572,3 +572,14 @@ pub fn recorder(engine: &ConversionEngine) -> &RecordingGeometryBuilder {
 pub fn recorder_mut(engine: &mut ConversionEngine) -> &mut RecordingGeometryBuilder {
     engine.geometry_as_mut::<RecordingGeometryBuilder>().unwrap()
 }
+
+/// Asserts that two values agree to `digits` decimal places, as xUnit's
+/// `Assert.Equal(expected, actual, precision)` does.
+#[allow(dead_code)] // Each test module uses its own part of the helpers.
+pub fn assert_close(expected: f32, actual: f32, digits: i32) {
+    let tolerance = 0.5 * 10f32.powi(-digits);
+    assert!(
+        (expected - actual).abs() <= tolerance,
+        "expected {expected}, got {actual} (to {digits} digits)"
+    );
+}
