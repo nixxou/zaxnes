@@ -157,9 +157,11 @@ fn amd_033_the_reading_and_rejection_rules_apply_to_the_second_folder() {
         .scan(&["1"])
         .unwrap();
 
-    assert_eq!(1, profiles.len());
-    assert_eq!("good", profiles[0].id);
-    assert_eq!(ProfileOrigin::ProgramFolder, profiles[0].origin);
+    // AMD-037: the identifier-less file is kept under a derived identifier.
+    assert_eq!(2, profiles.len());
+    assert_eq!("No identifier", profiles[0].title);
+    assert_eq!("good", profiles[1].id);
+    assert_eq!(ProfileOrigin::ProgramFolder, profiles[1].origin);
     assert!(log.any_contains("duplicated profile"));
     assert!(log.any_contains("carries no identifier"));
     assert!(log.any_contains(import_messages::NOT_A_3DN_FILE));

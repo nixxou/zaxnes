@@ -199,6 +199,17 @@ impl ProfileCatalogue {
         }
     }
 
+    /// The bytes of the profile files of the entries, to recognise a user copy of a built-in
+    /// profile (AMD-037). Entries without a file, and files that cannot be read, are left out.
+    #[must_use]
+    pub fn built_in_contents(&self, files: &dyn ProfileFileSystem) -> Vec<Vec<u8>> {
+        self.entries
+            .iter()
+            .filter(|entry| !entry.file.is_empty())
+            .filter_map(|entry| files.read_all_bytes(&self.profile_path(entry)).ok())
+            .collect()
+    }
+
     /// Loads the profile of `entry`.
     ///
     /// # Errors

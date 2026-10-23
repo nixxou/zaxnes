@@ -61,13 +61,27 @@ impl<'a> ProfileFolders<'a> {
     /// The user folder exists but could not be listed. A program folder that cannot be listed
     /// is a warning, not an error.
     pub fn scan(&self, reserved_ids: &[&str]) -> io::Result<Vec<UserProfile>> {
+        self.scan_excluding(reserved_ids, &[])
+    }
+
+    /// [`Self::scan`], where a file whose bytes are those of one of `built_in_contents` adds
+    /// nothing (AMD-037).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::scan`].
+    pub fn scan_excluding(
+        &self,
+        reserved_ids: &[&str],
+        built_in_contents: &[Vec<u8>],
+    ) -> io::Result<Vec<UserProfile>> {
         let user = UserProfileFolder::new(
             self.files,
             &self.user_directory,
             Some(self.log),
             ProfileOrigin::User,
         );
-        let mut profiles = user.scan(reserved_ids)?;
+        let mut profiles = user.scan_excluding(reserved_ids, built_in_contents)?;
 
         let Some(program_directory) = &self.program_directory else {
             return Ok(profiles);
@@ -103,9 +117,12 @@ impl<'a> ProfileFolders<'a> {
                 // Same name: the user's file alone counts, and this one is not even read.
                 continue;
             }
-            let Some(profile) = program.try_read(&path) else {
+            let Some((profile, bytes)) = program.read(&path) else {
                 continue;
             };
+            if program.is_built_in_copy(&path, &bytes, built_in_contents) {
+                continue;
+            }
             if !taken.insert(profile.id.clone()) {
                 // Byte-identical files are the same profile twice and appear once, with nothing
                 // to report; two different files for one identifier are worth a line.
