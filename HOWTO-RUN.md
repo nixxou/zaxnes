@@ -652,3 +652,21 @@ dotnet test -c Release --filter "Requires=UserRoms"     (avec ZAXNES_ROMS défin
 Les noms de fichiers attendus sont ceux des dumps No-Intro (par exemple
 `Super Mario Bros. 3 (USA).nes`) ; un test ignoré nomme dans son motif le fichier qu'il n'a pas
 trouvé.
+
+### 12.1 Pointer les vérifications d'import sur une installation de 3dSen
+
+Deux autres variables servent aux vérifications facultatives de l'import depuis 3dSen (`AMD-030`)
+et des identifiants dérivés (`AMD-037`) :
+
+| Variable | Ce qu'elle nomme | Comportement sans elle |
+| --- | --- | --- |
+| **`ZAXNES_3DSEN_INSTALL`** | le dossier d'une installation de 3dSen (celui qui tient `3dSen.exe`) | les tests cherchent le lot d'entrée de `cleanroom/verify/p8-input` ; absent lui aussi, ils sont **ignorés** |
+| **`ZAXNES_PROFILES`** | le dossier d'assets du catalogue en usage, celui qui tient `profiles.json` et les 101 profils | les tests prennent `assets-neutral` à côté de la solution ; absent lui aussi, ils sont **ignorés** |
+
+```
+$env:ZAXNES_3DSEN_INSTALL = "D:\Jeux\3dSenPC"
+$env:ZAXNES_PROFILES = "D:\cleanroom\assets-neutral"
+dotnet test tests\Zax.Profiles.Tests -c Release --filter "FullyQualifiedName~AMD_037"
+```
+
+Ces tests portent `Requires=OriginalAssets` : la suite publique ne les lance pas.

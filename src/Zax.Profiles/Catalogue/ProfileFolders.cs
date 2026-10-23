@@ -31,6 +31,7 @@ public sealed class ProfileFolders
 {
     private readonly IProfileFileSystem _files;
     private readonly IProfileLog _log;
+    private readonly IBuiltInProfileIndex? _builtIns;
 
     /// <summary>Creates a view over the two folders.</summary>
     /// <param name="files">The file system to read through.</param>
@@ -40,17 +41,23 @@ public sealed class ProfileFolders
     /// none to scan. The same folder under both names counts as one.
     /// </param>
     /// <param name="log">Where skipped files are reported.</param>
+    /// <param name="builtIns">
+    /// The profile files of the catalogue in use, so that a file of either folder which is one of
+    /// them byte for byte adds no game (AMD-037 §2). Null when there is nothing to compare with.
+    /// </param>
     public ProfileFolders(
         IProfileFileSystem files,
         string userDirectory,
         string? programDirectory = null,
-        IProfileLog? log = null)
+        IProfileLog? log = null,
+        IBuiltInProfileIndex? builtIns = null)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrEmpty(userDirectory);
 
         _files = files;
         _log = log ?? NullProfileLog.Instance;
+        _builtIns = builtIns;
         UserDirectory = userDirectory;
         ProgramDirectory = string.IsNullOrEmpty(programDirectory)
             || IsSameDirectory(userDirectory, programDirectory)
@@ -73,7 +80,7 @@ public sealed class ProfileFolders
     /// </param>
     public IReadOnlyList<UserProfile> Scan(IReadOnlyCollection<string>? reservedIds = null)
     {
-        UserProfileFolder user = new(_files, UserDirectory, _log);
+        UserProfileFolder user = new(_files, UserDirectory, _log, ProfileOrigin.User, _builtIns);
         List<UserProfile> profiles = [.. user.Scan(reservedIds)];
 
         if (ProgramDirectory is null)
@@ -98,7 +105,8 @@ public sealed class ProfileFolders
             pathById[profile.Id] = profile.FilePath;
         }
 
-        UserProfileFolder program = new(_files, ProgramDirectory, _log, ProfileOrigin.ProgramFolder);
+        UserProfileFolder program = new(
+            _files, ProgramDirectory, _log, ProfileOrigin.ProgramFolder, _builtIns);
         List<string> paths = [.. ListFiles(ProgramDirectory)];
         paths.Sort(StringComparer.Ordinal);
 

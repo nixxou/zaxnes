@@ -176,15 +176,20 @@ public sealed class CatalogueAndLibraryTests
             Path.Combine(layout.ProfilesDirectory, "b-truncated.3dn"),
             good.AsSpan(0, good.Length / 2).ToArray());
         files.AddFile(Path.Combine(layout.ProfilesDirectory, "c-foreign.3dn"), [0x0a, 0x03, 0x33, 0x64, 0x78]);
-        files.AddFile(Path.Combine(layout.ProfilesDirectory, "d-noid.3dn"), MakeProfile(null, "No identifier"));
+        byte[] noId = MakeProfile(null, "No identifier");
+        files.AddFile(Path.Combine(layout.ProfilesDirectory, "d-noid.3dn"), noId);
 
         RecordingProfileLog log = new();
         UserProfileFolder folder = new(files, layout.ProfilesDirectory, log);
-        UserProfile profile = Assert.Single(folder.Scan());
+        IReadOnlyList<UserProfile> scanned = folder.Scan();
 
-        Assert.Equal("good", profile.Id);
+        // AMD-037 §2: the file without an identifier is no longer among the ignored ones; it
+        // takes the identifier derived from its content.
+        Assert.Equal(2, scanned.Count);
+        Assert.Equal("good", scanned[0].Id);
+        Assert.Equal(UserProfileFolder.DerivedIdentifier(noId), scanned[1].Id);
+        Assert.True(scanned[1].IdIsDerived);
         Assert.True(log.AnyContains(ProfileImportMessages.NotA3dnFile));
-        Assert.True(log.AnyContains("carries no identifier"));
     }
 
     [Fact]

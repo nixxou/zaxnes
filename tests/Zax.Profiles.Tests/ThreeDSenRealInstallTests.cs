@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Zax.Profiles.Catalogue;
 using Zax.Profiles.Import;
+using Zax.Profiles.Library;
 
 namespace Zax.Profiles.Tests;
 
@@ -18,12 +19,53 @@ internal static class ThreeDSenInstall
     /// <summary>How many profiles the installation holds (AMD-030 §6).</summary>
     public const int ProfileCount = 101;
 
+    /// <summary>
+    /// How many of them carry no <c>Id</c> and take an identifier derived from their content
+    /// (AMD-037 §1).
+    /// </summary>
+    public const int WithoutIdentifierCount = 45;
+
+    /// <summary>
+    /// The environment variable naming an installed 3dSen, when the tests are to be run against
+    /// one rather than against the stand-in of <c>cleanroom/verify/p8-input</c>.
+    /// </summary>
+    public const string InstallVariable = "ZAXNES_3DSEN_INSTALL";
+
+    /// <summary>
+    /// The environment variable naming the asset folder holding <c>profiles.json</c> and the 101
+    /// built-in profiles, for the tests that need the catalogue in use (AMD-037 §4).
+    /// </summary>
+    public const string CatalogueVariable = "ZAXNES_PROFILES";
+
     /// <summary>The message a skipped test reports.</summary>
     public const string MissingMessage =
-        "The stand-in 3dSen installation of cleanroom/verify/p8-input is not available next to the solution.";
+        "No 3dSen installation is available: neither " + InstallVariable
+        + " nor the stand-in of cleanroom/verify/p8-input.";
+
+    /// <summary>The message a test needing the catalogue assets reports when skipped.</summary>
+    public const string MissingCatalogueMessage =
+        "No catalogue asset folder is available: neither " + CatalogueVariable
+        + " nor assets-neutral next to the solution.";
 
     /// <summary>The installation folder, or null when it is not there.</summary>
     public static string? Root { get; } = Locate();
+
+    /// <summary>
+    /// The asset folder of the catalogue in use, or null when there is none: what
+    /// <see cref="CatalogueVariable"/> names, else <c>assets-neutral</c>.
+    /// </summary>
+    public static string? CatalogueRoot { get; } = LocateCatalogue();
+
+    /// <summary>The catalogue file of <see cref="CatalogueRoot"/>, or null.</summary>
+    public static string? CatalogueFile
+        => CatalogueRoot is null ? null : Path.Combine(CatalogueRoot, "profiles.json");
+
+    /// <summary>True when an installation is available at all.</summary>
+    public static bool InstallAvailable => Root is not null;
+
+    /// <summary>True when the catalogue assets are available too.</summary>
+    public static bool CatalogueAvailable
+        => Root is not null && CatalogueFile is not null && File.Exists(CatalogueFile);
 
     /// <summary>True when both the installation and the reference inventory are available.</summary>
     public static bool Available => Root is not null && NeutralAssets.Root is not null;
@@ -60,6 +102,14 @@ internal static class ThreeDSenInstall
 
     private static string? Locate()
     {
+        // An installed 3dSen when the variable names one; the stand-in otherwise, which holds
+        // the same bundle and is the only one a clean-side session may read.
+        string? named = Environment.GetEnvironmentVariable(InstallVariable);
+        if (!string.IsNullOrWhiteSpace(named) && Directory.Exists(named))
+        {
+            return named;
+        }
+
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
         while (directory is not null)
         {
@@ -74,6 +124,49 @@ internal static class ThreeDSenInstall
         }
 
         return null;
+    }
+
+    private static string? LocateCatalogue()
+    {
+        string? named = Environment.GetEnvironmentVariable(CatalogueVariable);
+        return !string.IsNullOrWhiteSpace(named) && Directory.Exists(named)
+            ? named
+            : NeutralAssets.Root;
+    }
+}
+
+/// <summary>
+/// A fact that is skipped when no 3dSen installation is available (AMD-037 §4, second bullet).
+/// </summary>
+public sealed class ThreeDSenInstallFactAttribute : FactAttribute
+{
+    /// <summary>Creates the attribute.</summary>
+    public ThreeDSenInstallFactAttribute()
+    {
+        if (!ThreeDSenInstall.InstallAvailable)
+        {
+            Skip = ThreeDSenInstall.MissingMessage;
+        }
+    }
+}
+
+/// <summary>
+/// A fact that is skipped when the installation or the catalogue assets are not available
+/// (AMD-037 §4, second bullet).
+/// </summary>
+public sealed class ThreeDSenCatalogueFactAttribute : FactAttribute
+{
+    /// <summary>Creates the attribute.</summary>
+    public ThreeDSenCatalogueFactAttribute()
+    {
+        if (!ThreeDSenInstall.InstallAvailable)
+        {
+            Skip = ThreeDSenInstall.MissingMessage;
+        }
+        else if (!ThreeDSenInstall.CatalogueAvailable)
+        {
+            Skip = ThreeDSenInstall.MissingCatalogueMessage;
+        }
     }
 }
 
@@ -188,6 +281,125 @@ public sealed class ThreeDSenRealInstallTests
             Assert.Equal(ThreeDSenInstall.ProfileCount, second.AlreadyPresent);
             Assert.Equal(0, second.Failed);
             Assert.Equal(ThreeDSenInstall.ProfileCount, Directory.GetFiles(destination).Length);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(destination)!, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// AMD-037 §4, second bullet, first case: with no asset folder, the 101 imported profiles all
+    /// appear in the library and not one is left out for want of an identifier. The 45 that carry
+    /// none take the identifier derived from their content, and a second start finds the same
+    /// ones since no file was rewritten.
+    /// </summary>
+    [ThreeDSenInstallFact] // REQ-PROF-062, REQ-PROF-064
+    public void AMD_037_the_101_imported_profiles_all_appear_without_an_asset_folder()
+    {
+        string destination = Path.Combine(
+            Path.GetTempPath(), "zax-fix7-" + Guid.NewGuid().ToString("N"), "profiles");
+        try
+        {
+            ThreeDSenImportSummary summary =
+                new ThreeDSenImporter(PhysicalProfileFileSystem.Instance, destination)
+                    .ImportFrom(ThreeDSenInstall.Root!);
+            Assert.Equal(ThreeDSenInstall.ProfileCount, summary.Imported);
+
+            // No asset folder: the catalogue is the two generic entries written in code
+            // (AMD-024 REQ-PUB-001, Q-065), so nothing of it can hide a user profile.
+            ProfileCatalogue catalogue = BuiltInCatalogue.Create();
+            RecordingProfileLog log = new();
+            IReadOnlyList<UserProfile> profiles = new ProfileFolders(
+                    PhysicalProfileFileSystem.Instance,
+                    destination,
+                    programDirectory: null,
+                    log,
+                    BuiltInProfileIndex.For(PhysicalProfileFileSystem.Instance, catalogue))
+                .Scan(catalogue.Ids);
+
+            Assert.Equal(ThreeDSenInstall.ProfileCount, profiles.Count);
+            Assert.Equal(
+                ThreeDSenInstall.ProfileCount,
+                profiles.Select(profile => profile.Id).Distinct(StringComparer.Ordinal).Count());
+            Assert.DoesNotContain(
+                log.Warnings,
+                line => line.Contains("no identifier", StringComparison.Ordinal));
+
+            // AMD-037 §1: 56 of the profiles carry an Id, 45 do not.
+            Assert.Equal(
+                ThreeDSenInstall.WithoutIdentifierCount,
+                profiles.Count(profile => profile.IdIsDerived));
+            Assert.All(
+                profiles.Where(profile => profile.IdIsDerived),
+                profile => Assert.Equal(12, profile.Id.Length));
+
+            GameLibrary library = GameLibrary.Build(catalogue, profiles);
+            Assert.Equal(
+                ThreeDSenInstall.ProfileCount + BuiltInCatalogue.Entries.Count,
+                library.Entries.Count);
+
+            // Nothing was rewritten, so the next start derives the very same identifiers
+            // (AMD-037 §2, AMD-030 §5).
+            IReadOnlyList<UserProfile> again = new ProfileFolders(
+                PhysicalProfileFileSystem.Instance, destination).Scan(catalogue.Ids);
+            Assert.Equal(
+                profiles.Select(profile => profile.Id),
+                again.Select(profile => profile.Id));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(destination)!, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// AMD-037 §4, second bullet, second case: with the asset folder of the catalogue, no game
+    /// appears twice — every imported file is a built-in profile byte for byte, so each is
+    /// reported once and adds nothing.
+    /// </summary>
+    [ThreeDSenCatalogueFact] // REQ-PROF-060, REQ-PROF-062
+    public void AMD_037_with_the_catalogue_assets_no_game_appears_twice()
+    {
+        string destination = Path.Combine(
+            Path.GetTempPath(), "zax-fix7-" + Guid.NewGuid().ToString("N"), "profiles");
+        try
+        {
+            ThreeDSenImportSummary summary =
+                new ThreeDSenImporter(PhysicalProfileFileSystem.Instance, destination)
+                    .ImportFrom(ThreeDSenInstall.Root!);
+            Assert.Equal(ThreeDSenInstall.ProfileCount, summary.Imported);
+
+            ProfileCatalogue catalogue = ProfileCatalogue.Load(
+                PhysicalProfileFileSystem.Instance, ThreeDSenInstall.CatalogueFile!);
+            RecordingProfileLog log = new();
+            IReadOnlyList<UserProfile> profiles = new ProfileFolders(
+                    PhysicalProfileFileSystem.Instance,
+                    destination,
+                    programDirectory: null,
+                    log,
+                    BuiltInProfileIndex.For(PhysicalProfileFileSystem.Instance, catalogue))
+                .Scan(catalogue.Ids);
+
+            // Each of the 101 files is one of the catalogue's own profiles: none adds a game,
+            // and each is reported once.
+            Assert.Empty(profiles);
+            Assert.Equal(
+                ThreeDSenInstall.ProfileCount,
+                log.Informations.Count(line => line.Contains(
+                    "identical to the built-in profile", StringComparison.Ordinal)));
+
+            GameLibrary library = GameLibrary.Build(catalogue, profiles);
+            Assert.Equal(catalogue.Entries.Count, library.Entries.Count);
+            Assert.Equal(
+                library.Entries.Count,
+                library.Entries.Select(entry => entry.Id).Distinct(StringComparer.Ordinal).Count());
+            Assert.Equal(
+                library.Entries.Count,
+                library.Entries
+                    .Select(entry => entry.DisplayTitle)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Count());
         }
         finally
         {

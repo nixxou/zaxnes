@@ -29,6 +29,27 @@ public interface IProfileFileSystem
     /// <summary>Reads a file whole.</summary>
     byte[] ReadAllBytes(string path);
 
+    /// <summary>
+    /// How many bytes a file holds, or -1 when it cannot be told. Used to tell at once that a
+    /// user profile is <b>not</b> a copy of a built-in one, without reading either file
+    /// (AMD-037 §2, <see cref="BuiltInProfileIndex"/>).
+    /// </summary>
+    /// <remarks>
+    /// The default reads the whole file, which every implementation may replace by whatever its
+    /// storage tells more cheaply.
+    /// </remarks>
+    long FileLength(string path)
+    {
+        try
+        {
+            return ReadAllBytes(path).LongLength;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return -1;
+        }
+    }
+
     /// <summary>Reads a UTF-8 text file whole.</summary>
     string ReadAllText(string path);
 
@@ -88,6 +109,20 @@ public sealed class PhysicalProfileFileSystem : IProfileFileSystem
 
     /// <inheritdoc/>
     public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
+
+    /// <inheritdoc/>
+    public long FileLength(string path)
+    {
+        try
+        {
+            FileInfo info = new(path);
+            return info.Exists ? info.Length : -1;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return -1;
+        }
+    }
 
     /// <inheritdoc/>
     public string ReadAllText(string path) => File.ReadAllText(path);

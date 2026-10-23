@@ -119,17 +119,22 @@ public sealed class ProgramProfilesFolderTests
     {
         FakeProfileFileSystem files = new();
         files.AddFile(Path.Combine(ProgramFolder, "a-builtin.3dn"), MakeProfile("1", "Not Arkanoid"));
-        files.AddFile(Path.Combine(ProgramFolder, "b-noid.3dn"), MakeProfile(null, "No identifier"));
+        byte[] noId = MakeProfile(null, "No identifier");
+        files.AddFile(Path.Combine(ProgramFolder, "b-noid.3dn"), noId);
         files.AddFile(Path.Combine(ProgramFolder, "c-foreign.3dn"), [0x0a, 0x03, 0x33, 0x64, 0x78]);
         files.AddFile(Path.Combine(ProgramFolder, "d-good.3dn"), MakeProfile("good", "Good"));
 
         RecordingProfileLog log = new();
-        UserProfile profile = Assert.Single(new ProfileFolders(files, UserFolder, ProgramFolder, log).Scan(["1"]));
+        IReadOnlyList<UserProfile> scanned =
+            new ProfileFolders(files, UserFolder, ProgramFolder, log).Scan(["1"]);
 
-        Assert.Equal("good", profile.Id);
-        Assert.Equal(ProfileOrigin.ProgramFolder, profile.Origin);
+        // AMD-037 §2 applies to this folder too: the file without an identifier is kept under
+        // the identifier derived from its content, the other two rejections stand.
+        Assert.Equal(2, scanned.Count);
+        Assert.Equal(UserProfileFolder.DerivedIdentifier(noId), scanned[0].Id);
+        Assert.Equal("good", scanned[1].Id);
+        Assert.All(scanned, profile => Assert.Equal(ProfileOrigin.ProgramFolder, profile.Origin));
         Assert.True(log.AnyContains("duplicated profile"));
-        Assert.True(log.AnyContains("carries no identifier"));
         Assert.True(log.AnyContains(ProfileImportMessages.NotA3dnFile));
     }
 

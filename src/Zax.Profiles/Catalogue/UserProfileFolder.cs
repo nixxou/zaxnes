@@ -1,7 +1,13 @@
+using System.Security.Cryptography;
+
 namespace Zax.Profiles.Catalogue;
 
 /// <summary>A user profile found in the user profile folder (SPEC-03 REQ-PROF-062).</summary>
-/// <param name="Id">Identifier, from field 7 of the file.</param>
+/// <param name="Id">
+/// Identifier: field 7 of the file, or — when that field is absent or empty — the identifier
+/// derived from the bytes of the file (AMD-037 §2,
+/// <see cref="UserProfileFolder.DerivedIdentifier"/>).
+/// </param>
 /// <param name="Title">
 /// Title: field 8, or the file name without its extension when field 8 is empty or absent.
 /// </param>
@@ -11,12 +17,18 @@ namespace Zax.Profiles.Catalogue;
 /// Which of the two scanned folders the file came from (AMD-033 §2). It defaults to
 /// <see cref="ProfileOrigin.User"/>, the only folder that existed before.
 /// </param>
+/// <param name="IdIsDerived">
+/// True when <paramref name="Id"/> was derived from the content because the file carries none
+/// (AMD-037 §2). The file is never rewritten, so the identifier is computed again at every
+/// read.
+/// </param>
 public sealed record UserProfile(
     string Id,
     string Title,
     string FilePath,
     ProfileHeader Header,
-    ProfileOrigin Origin = ProfileOrigin.User);
+    ProfileOrigin Origin = ProfileOrigin.User,
+    bool IdIsDerived = false);
 
 /// <summary>What an import did (SPEC-03 REQ-PROF-063, SPEC-09 REQ-PERS-041).</summary>
 public enum ProfileImportOutcome
@@ -70,6 +82,20 @@ public static class ProfileImportMessages
     /// <summary>Logged when a profile is skipped because its identifier is already taken.</summary>
     public static string DuplicatedProfile(string path, string id)
         => $"{path}: duplicated profile, the identifier \"{id}\" is already in the library";
+
+    /// <summary>
+    /// Logged once per file when a scanned profile carries no identifier and takes the one
+    /// derived from its content instead of being ignored (AMD-037 §2).
+    /// </summary>
+    public static string DerivedIdentifier(string path, string id)
+        => $"{path}: the profile carries no identifier; using \"{id}\", derived from its content";
+
+    /// <summary>
+    /// Logged once per file when a user profile is, byte for byte, a built-in profile of the
+    /// catalogue in use: it adds no game (AMD-037 §2).
+    /// </summary>
+    public static string SameAsBuiltIn(string path, string id)
+        => $"{path}: identical to the built-in profile \"{id}\"; no game added";
 }
 
 /// <summary>
@@ -78,18 +104,32 @@ public static class ProfileImportMessages
 /// REQ-PERS-041).
 /// </summary>
 /// <remarks>
+/// <para>
 /// Only the header fields of each file are read, which is all a library entry needs; the
 /// patterns, the scripts and the settings are skipped. A file that cannot be read, that is not
 /// a profile or whose identifier is already in the library is ignored and logged, and never
 /// stops the program from starting.
+/// </para>
+/// <para>
+/// A file carrying no identifier is <b>not</b> ignored: it takes the identifier derived from its
+/// content (AMD-037 §2, <see cref="DerivedIdentifier"/>). Only the import of a chosen file still
+/// refuses it (REQ-PROF-063).
+/// </para>
 /// </remarks>
 public sealed class UserProfileFolder
 {
     /// <summary>Extension of a user profile file.</summary>
     public const string Extension = ".3dn";
 
+    /// <summary>
+    /// How many bytes of the SHA-256 digest a derived identifier encodes (AMD-037 §2): nine
+    /// bytes, which is twelve base64 characters and no padding.
+    /// </summary>
+    public const int DerivedIdentifierBytes = 9;
+
     private readonly IProfileFileSystem _files;
     private readonly IProfileLog _log;
+    private readonly IBuiltInProfileIndex? _builtIns;
 
     /// <summary>Creates a view of the folder at <paramref name="directory"/>.</summary>
     /// <param name="files">The file system to read through.</param>
@@ -101,11 +141,16 @@ public sealed class UserProfileFolder
     /// of the executable is read-only, so <see cref="Import"/> and <see cref="Delete"/> are
     /// never used on it.
     /// </param>
+    /// <param name="builtIns">
+    /// The profile files of the catalogue in use, so that a user file which is one of them
+    /// byte for byte adds no game (AMD-037 §2). Null when there is nothing to compare with.
+    /// </param>
     public UserProfileFolder(
         IProfileFileSystem files,
         string directory,
         IProfileLog? log = null,
-        ProfileOrigin origin = ProfileOrigin.User)
+        ProfileOrigin origin = ProfileOrigin.User,
+        IBuiltInProfileIndex? builtIns = null)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrEmpty(directory);
@@ -113,6 +158,24 @@ public sealed class UserProfileFolder
         Directory = directory;
         _log = log ?? NullProfileLog.Instance;
         Origin = origin;
+        _builtIns = builtIns;
+    }
+
+    /// <summary>
+    /// The identifier derived from the bytes of a profile file (AMD-037 §2): the first nine
+    /// bytes of their SHA-256 digest in standard base64, which is twelve characters of
+    /// <c>A–Z a–z 0–9 + /</c> with no padding — the format of REQ-PROF-052.
+    /// </summary>
+    /// <remarks>
+    /// It is a pure function of the content: the file is never rewritten, and the same file read
+    /// again at the next start yields the same identifier. A catalogue identifier can never be
+    /// mistaken for one of these, being one to three digits long (AMD-037 §3).
+    /// </remarks>
+    public static string DerivedIdentifier(ReadOnlySpan<byte> bytes)
+    {
+        Span<byte> digest = stackalloc byte[SHA256.HashSizeInBytes];
+        SHA256.HashData(bytes, digest);
+        return Convert.ToBase64String(digest[..DerivedIdentifierBytes]);
     }
 
     /// <summary>The folder.</summary>
@@ -123,7 +186,7 @@ public sealed class UserProfileFolder
 
     /// <summary>
     /// Reads every <c>*.3dn</c> of the folder and keeps the ones with a usable header and an
-    /// identifier that is still free.
+    /// identifier — carried or derived (AMD-037 §2) — that is still free.
     /// </summary>
     /// <param name="reservedIds">
     /// Identifiers already taken, the built-in ones first: a built-in profile always wins over
@@ -241,12 +304,19 @@ public sealed class UserProfileFolder
 
     /// <summary>
     /// Reads the header of one file of the folder and makes a profile of it, or returns
-    /// <see langword="null"/> when the file is unreadable, is not a profile or carries no
-    /// identifier — each of which is logged, never thrown (REQ-PROF-062).
+    /// <see langword="null"/> when the file is unreadable, is not a profile, or is byte for byte
+    /// a built-in profile of the catalogue — each of which is logged, never thrown
+    /// (REQ-PROF-062, AMD-037 §2).
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// A file without an identifier is kept and takes the one derived from its content
+    /// (AMD-037 §2); it is no longer a reason to return <see langword="null"/>.
+    /// </para>
+    /// <para>
     /// Public so that <see cref="ProfileFolders"/> can apply the merge rules of AMD-033 §2
     /// file by file without repeating the reading rules.
+    /// </para>
     /// </remarks>
     public UserProfile? TryRead(string path)
     {
@@ -275,13 +345,25 @@ public sealed class UserProfileFolder
             return null;
         }
 
-        if (!header.Value.HasId)
+        // AMD-037 §2: a user file that is a built-in profile of the catalogue in use adds no
+        // game — the built-in one is shown once, with its catalogue metadata. True with or
+        // without an identifier, and checked before one is derived.
+        if (_builtIns?.FindByContent(bytes) is { } builtInId)
         {
-            _log.Warning($"{path}: ignored, the profile carries no identifier");
+            _log.Information(ProfileImportMessages.SameAsBuiltIn(path, builtInId));
             return null;
         }
 
-        return new UserProfile(header.Value.Id!, TitleOf(header.Value, path), path, header.Value, Origin);
+        // AMD-037 §2: no identifier in the file is no longer a reason to ignore the game; the
+        // identifier comes from the content instead, and the file is left untouched.
+        bool derived = !header.Value.HasId;
+        string id = derived ? DerivedIdentifier(bytes) : header.Value.Id!;
+        if (derived)
+        {
+            _log.Information(ProfileImportMessages.DerivedIdentifier(path, id));
+        }
+
+        return new UserProfile(id, TitleOf(header.Value, path), path, header.Value, Origin, derived);
     }
 
     private static UserProfile? FindById(IReadOnlyList<UserProfile>? profiles, string id)

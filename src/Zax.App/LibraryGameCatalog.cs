@@ -46,18 +46,21 @@ internal sealed class LibraryGameCatalog : IGameCatalog
     private readonly GameLibraryStore _store;
     private readonly UserDataPaths _paths;
     private readonly Action<string> _log;
+    private readonly IBuiltInProfileIndex? _builtIns;
     private readonly Dictionary<string, GameProfile> _profiles = new(StringComparer.Ordinal);
 
     private LibraryGameCatalog(
         GameLibrary library,
         GameLibraryStore store,
         UserDataPaths paths,
-        Action<string> log)
+        Action<string> log,
+        IBuiltInProfileIndex? builtIns = null)
     {
         _library = library;
         _store = store;
         _paths = paths;
         _log = log;
+        _builtIns = builtIns;
     }
 
     /// <summary>The library model, for the UI and the tests.</summary>
@@ -100,12 +103,17 @@ internal sealed class LibraryGameCatalog : IGameCatalog
         GameLibraryStore store = new(PhysicalProfileFileSystem.Instance);
         GameLibraryFile? persisted = store.Load(paths.LibraryFile, DateTimeOffset.UtcNow);
 
+        // AMD-037 §2: the profile files of the catalogue in use, so that a user profile which is
+        // one of them byte for byte does not double the game.
+        IBuiltInProfileIndex? builtIns = BuiltInProfileIndex.For(
+            PhysicalProfileFileSystem.Instance, catalogue);
+
         IReadOnlyList<UserProfile> userProfiles = [];
         try
         {
             // AMD-033 §1: the user folder and the read-only « profiles » folder next to the
             // executable, in every mode.
-            userProfiles = ProfileFoldersOf(paths, logger)
+            userProfiles = ProfileFoldersOf(paths, logger, builtIns)
                 .Scan(catalogue.Ids as IReadOnlyCollection<string>);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -115,7 +123,7 @@ internal sealed class LibraryGameCatalog : IGameCatalog
 
         GameLibrary library = GameLibrary.Build(catalogue, userProfiles, persisted);
 
-        return new LibraryGameCatalog(library, store, paths, logger);
+        return new LibraryGameCatalog(library, store, paths, logger, builtIns);
     }
 
     /// <summary>
@@ -141,12 +149,16 @@ internal sealed class LibraryGameCatalog : IGameCatalog
     /// The two folders scanned at every start and at every rescan (AMD-033 §1 and §2): the
     /// user's one and <c>profiles</c> next to the executable.
     /// </summary>
-    private static ProfileFolders ProfileFoldersOf(UserDataPaths paths, Action<string> log)
+    private static ProfileFolders ProfileFoldersOf(
+        UserDataPaths paths,
+        Action<string> log,
+        IBuiltInProfileIndex? builtIns)
         => new(
             PhysicalProfileFileSystem.Instance,
             paths.ProfilesDirectory,
             paths.ProgramProfilesDirectory,
-            new ProfileLogAdapter(log));
+            new ProfileLogAdapter(log),
+            builtIns);
 
     /// <inheritdoc/>
     public ResolvedGame? Resolve(string gameId)
@@ -384,14 +396,16 @@ internal sealed class LibraryGameCatalog : IGameCatalog
     /// <summary>
     /// Rescans the folder of imported profiles and adds to the library what is not there yet,
     /// which is what makes a fresh import visible at once (AMD-030 §2). A profile whose
-    /// identifier belongs to a built-in one is left out, as SPEC-09 REQ-PERS-030 requires.
+    /// identifier belongs to a built-in one is left out, as SPEC-09 REQ-PERS-030 requires, and
+    /// so is one whose bytes are those of a built-in profile (AMD-037 §2); a profile carrying no
+    /// identifier is added under the one derived from its content, not ignored.
     /// </summary>
     private void AddImportedProfiles()
     {
         IReadOnlyList<UserProfile> profiles;
         try
         {
-            profiles = ProfileFoldersOf(_paths, _log).Scan();
+            profiles = ProfileFoldersOf(_paths, _log, _builtIns).Scan();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
