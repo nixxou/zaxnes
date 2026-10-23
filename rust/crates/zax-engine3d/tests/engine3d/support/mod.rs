@@ -1,6 +1,7 @@
 //! Helpers of the engine tests, ported from `TestSupport.cs` and `GeometrySupport.cs`.
 
 pub mod geo;
+pub mod neutral_assets;
 
 use std::any::Any;
 use std::collections::HashSet;

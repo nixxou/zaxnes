@@ -5,7 +5,9 @@
 // `allow-unwrap-in-tests` in clippy.toml only grants inside `#[test]` items.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+mod corpus_tests;
 mod cylinder_vector_tests;
+mod geometry_corpus_tests;
 mod geometry_lifetime_tests;
 mod geometry_placement_tests;
 mod geometry_vector_tests;
