@@ -18,6 +18,7 @@ mod noise_channel;
 mod pulse_channel;
 mod triangle_channel;
 
+use crate::state::{InvalidState, StateReader, StateWriter};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::RegionTiming;
@@ -766,5 +767,66 @@ impl Apu2A03 {
     /// [`AudioError::OddStereoBuffer`] when `stereo` and the length is odd.
     pub fn read_samples(&self, destination: &mut [f32], stereo: bool) -> Result<usize, AudioError> {
         lock(&self.ring).read(destination, stereo)
+    }
+}
+
+impl Apu2A03 {
+    /// Bytes the APU's part of a savestate occupies at most (REQ-ARCH-013).
+    pub const MAX_STATE_SIZE: usize = 512 + BandLimitedResampler::STATE_SIZE;
+
+    /// Appends the APU state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        self.pulse1.save_state(writer);
+        self.pulse2.save_state(writer);
+        self.triangle.save_state(writer);
+        self.noise.save_state(writer);
+        self.dmc.save_state(writer);
+
+        writer.write_i64(self.cycles);
+        writer.write_bool(self.apu_cycle);
+        writer.write_i32(self.frame_counter);
+        writer.write_usize(self.frame_step);
+        writer.write_bool(self.five_step_mode);
+        writer.write_bool(self.irq_inhibited);
+        writer.write_bool(self.frame_irq_flag);
+        writer.write_bool(self.frame_irq_pending);
+        writer.write_i32(self.pending_sequencer_reset);
+        writer.write_u8(self.readable_status);
+        writer.write_i32(self.level_key);
+        writer.write_f64(self.level);
+
+        self.resampler.save_state(writer);
+    }
+
+    /// Restores the APU state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.pulse1.load_state(reader)?;
+        self.pulse2.load_state(reader)?;
+        self.triangle.load_state(reader)?;
+        self.noise.load_state(reader)?;
+        self.dmc.load_state(reader)?;
+
+        self.cycles = reader.read_i64()?;
+        self.apu_cycle = reader.read_bool()?;
+        self.frame_counter = reader.read_i32()?;
+        self.frame_step = reader.read_index(NTSC_FIVE_STEP.len())?;
+        self.five_step_mode = reader.read_bool()?;
+        self.irq_inhibited = reader.read_bool()?;
+        self.frame_irq_flag = reader.read_bool()?;
+        self.frame_irq_pending = reader.read_bool()?;
+        self.pending_sequencer_reset = reader.read_i32()?;
+        self.readable_status = reader.read_u8()?;
+        self.level_key = reader.read_i32()?;
+        self.level = reader.read_f64()?;
+
+        self.resampler.load_state(reader)?;
+
+        // Pending audio is dropped on restore (REQ-CORE-074); the resampler's own history was
+        // restored above, so the sound picks up from the state that was saved (Q-006).
+        self.drop_pending_samples();
+        Ok(())
     }
 }

@@ -1,4 +1,5 @@
 use super::length_counter::LengthCounter;
+use crate::state::{InvalidState, StateReader, StateWriter};
 
 /// The 32-step staircase of nesdev, "APU Triangle".
 const SEQUENCE: [u8; 32] = [
@@ -94,5 +95,37 @@ impl TriangleChannel {
     /// Back to the power-on state.
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+}
+
+impl TriangleChannel {
+    /// Appends the state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        self.length.save_state(writer);
+
+        writer.write_usize(self.sequence_position);
+        writer.write_i32(self.timer_period);
+        writer.write_i32(self.timer);
+        writer.write_bool(self.control);
+        writer.write_u8(self.linear_reload_value);
+        writer.write_u8(self.linear_counter);
+        writer.write_bool(self.linear_reload);
+    }
+
+    /// Restores the state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.length.load_state(reader)?;
+
+        self.sequence_position = reader.read_index(SEQUENCE.len())?;
+        self.timer_period = reader.read_i32()?;
+        self.timer = reader.read_i32()?;
+        self.control = reader.read_bool()?;
+        self.linear_reload_value = reader.read_u8()?;
+        self.linear_counter = reader.read_u8()?;
+        self.linear_reload = reader.read_bool()?;
+        Ok(())
     }
 }

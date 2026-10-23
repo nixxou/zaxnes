@@ -20,6 +20,7 @@
 
 mod ppu_bus_access;
 mod render;
+mod state;
 mod tile_buffer;
 mod tiles;
 
@@ -40,6 +41,10 @@ pub const OAM_SIZE: usize = 256;
 
 /// Size of palette RAM, in bytes (REQ-CORE-045).
 pub const PALETTE_SIZE: usize = 32;
+
+/// Upper bound on the bytes the tile records of one frame occupy in a savestate, so that
+/// the host can announce a state size before serialising (REQ-ARCH-013).
+pub const MAX_TILE_RECORD_STATE_SIZE: usize = 12 + TileBuffer::CAPACITY * 26;
 
 /// Width of the optional 2D image, in pixels (REQ-CORE-048).
 pub const SCREEN_WIDTH: usize = 256;

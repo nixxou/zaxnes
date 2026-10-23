@@ -4,7 +4,7 @@
 mod common;
 
 use common::{machine_with, run_legacy_rom, run_shell_rom, test_rom, RomRun};
-use zax_nes::Machine;
+use zax_nes::NesCore;
 
 fn describe(run: &RomRun) -> String {
     format!(
@@ -34,7 +34,7 @@ fn assert_shell_pass(folder: &str, roms: &[&str], max_frames: i64) {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-fn screen_text(core: &Machine) -> String {
+fn screen_text(core: &NesCore) -> String {
     let vram = core.ppu().vram();
     let mut text = String::new();
     for row in 0..30 {
@@ -298,7 +298,7 @@ fn req_core_100_each_public_rom_of_a_required_mapper_boots_and_draws() {
         let Some(image) = test_rom(rom) else {
             continue;
         };
-        let mut core = Machine::new();
+        let mut core = NesCore::new();
         let load = core.load_rom(&image, rom);
         assert!(load.success, "{rom}: {:?}", load.error);
         assert_eq!(mapper, core.cartridge().unwrap().mapper_number(), "{rom}");

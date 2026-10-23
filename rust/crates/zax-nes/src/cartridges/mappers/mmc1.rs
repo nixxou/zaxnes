@@ -1,5 +1,6 @@
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mapper 1, MMC1 (SxROM), SUROM and SOROM included (REQ-CORE-100).
@@ -77,6 +78,27 @@ impl Mmc1 {
 
 impl Mapper for Mmc1 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_i32(self.shift);
+        writer.write_i32(self.shift_count);
+        writer.write_u8(self.control);
+        writer.write_u8(self.chr0);
+        writer.write_u8(self.chr1);
+        writer.write_u8(self.prg);
+        writer.write_i64(self.last_write_cycle);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.shift = reader.read_i32()?;
+        self.shift_count = reader.read_i32()?;
+        self.control = reader.read_u8()?;
+        self.chr0 = reader.read_u8()?;
+        self.chr1 = reader.read_u8()?;
+        self.prg = reader.read_u8()?;
+        self.last_write_cycle = reader.read_i64()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         1

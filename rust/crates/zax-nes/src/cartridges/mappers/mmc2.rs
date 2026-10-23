@@ -1,5 +1,6 @@
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mappers 9 (MMC2) and 10 (MMC4): two 4 KiB CHR windows, each with a latch that the
@@ -88,6 +89,21 @@ impl Mmc2 {
 
 impl Mapper for Mmc2 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_raw(&self.chr);
+        writer.write_u8(self.prg);
+        writer.write_i32(i32::from(self.latch_low));
+        writer.write_i32(i32::from(self.latch_high));
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_into(&mut self.chr)?;
+        self.prg = reader.read_u8()?;
+        self.latch_low = u8::from(reader.read_index(2)? == 1);
+        self.latch_high = u8::from(reader.read_index(2)? == 1);
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         self.mapper_number

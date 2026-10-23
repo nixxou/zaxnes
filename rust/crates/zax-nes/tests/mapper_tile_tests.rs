@@ -9,9 +9,9 @@ mod common;
 
 use common::capture_batch;
 use common::mapper_fixture::{MapperMachine, MapperRom};
-use zax_nes::Machine;
+use zax_nes::NesCore;
 
-fn load_mmc2() -> Machine {
+fn load_mmc2() -> NesCore {
     let mut core = MapperRom::new(9).prg(8).chr(64).load();
     for _ in 0..3 {
         core.run_frame();
@@ -23,7 +23,7 @@ fn load_mmc2() -> Machine {
     core
 }
 
-fn write_vram(core: &mut Machine, address: u16, values: &[u8]) {
+fn write_vram(core: &mut NesCore, address: u16, values: &[u8]) {
     core.write_memory(0x2006, (address >> 8) as u8);
     core.write_memory(0x2006, address as u8);
     for &value in values {

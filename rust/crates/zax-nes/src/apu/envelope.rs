@@ -1,3 +1,5 @@
+use crate::state::{InvalidState, StateReader, StateWriter};
+
 /// The volume envelope of a pulse channel or of the noise channel (nesdev, "APU Envelope").
 ///
 /// The loop flag and the length counter's halt flag are the same bit of the same register;
@@ -50,5 +52,31 @@ impl Envelope {
         } else {
             self.divider -= 1;
         }
+    }
+}
+
+impl Envelope {
+    /// Appends the state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.period);
+        writer.write_bool(self.constant_volume);
+        writer.write_bool(self.looping);
+        writer.write_bool(self.start);
+        writer.write_u8(self.divider);
+        writer.write_u8(self.decay);
+    }
+
+    /// Restores the state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.period = reader.read_u8()?;
+        self.constant_volume = reader.read_bool()?;
+        self.looping = reader.read_bool()?;
+        self.start = reader.read_bool()?;
+        self.divider = reader.read_u8()?;
+        self.decay = reader.read_u8()?;
+        Ok(())
     }
 }

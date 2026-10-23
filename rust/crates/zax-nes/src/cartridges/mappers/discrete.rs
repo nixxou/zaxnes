@@ -2,6 +2,7 @@
 
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mapper 2, UxROM: a write in $8000-$FFFF selects the 16 KiB bank at $8000, the last
@@ -29,6 +30,15 @@ impl UxRom {
 
 impl Mapper for UxRom {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.bank);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.bank = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         2
@@ -70,6 +80,15 @@ impl CnRom {
 
 impl Mapper for CnRom {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.bank);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.bank = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         3
@@ -117,6 +136,15 @@ impl AxRom {
 impl Mapper for AxRom {
     banked!();
 
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.register);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.register = reader.read_u8()?;
+        Ok(())
+    }
+
     fn mapper_number(&self) -> i32 {
         7
     }
@@ -158,6 +186,15 @@ impl GxRom {
 
 impl Mapper for GxRom {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.register);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.register = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         66
@@ -201,6 +238,15 @@ impl CpRom {
 impl Mapper for CpRom {
     banked!();
 
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.bank);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.bank = reader.read_u8()?;
+        Ok(())
+    }
+
     fn mapper_number(&self) -> i32 {
         13
     }
@@ -241,6 +287,15 @@ impl ColorDreams {
 
 impl Mapper for ColorDreams {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.register);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.register = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         11
@@ -295,6 +350,19 @@ impl Codemasters {
 
 impl Mapper for Codemasters {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.bank);
+        writer.write_bool(self.single_screen);
+        writer.write_bool(self.single_screen_b);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.bank = reader.read_u8()?;
+        self.single_screen = reader.read_bool()?;
+        self.single_screen_b = reader.read_bool()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         71
@@ -357,6 +425,15 @@ impl UnRom512 {
 
 impl Mapper for UnRom512 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.register);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.register = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         30

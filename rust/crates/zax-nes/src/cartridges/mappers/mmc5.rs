@@ -1,5 +1,6 @@
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory, ChrFetch};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::RegionTiming;
 
 /// iNES mapper 5, MMC5 (REQ-CORE-100): four PRG modes with RAM or ROM per window, four CHR
@@ -218,6 +219,67 @@ impl Mmc5 {
 
 impl Mapper for Mmc5 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_blob(&self.ex_ram);
+        for value in self.chr_a {
+            writer.write_i32(value);
+        }
+        for value in self.chr_b {
+            writer.write_i32(value);
+        }
+        writer.write_raw(&self.prg_bank);
+        writer.write_i32(self.prg_mode);
+        writer.write_i32(self.chr_mode);
+        writer.write_i32(self.chr_upper);
+        writer.write_i32(self.ex_ram_mode);
+        writer.write_i32(self.nametable_mapping);
+        writer.write_u8(self.fill_tile);
+        writer.write_u8(self.fill_attribute);
+        writer.write_u8(self.ram_bank);
+        writer.write_i32(self.protect1);
+        writer.write_i32(self.protect2);
+        writer.write_bool(self.last_set_was_b);
+        writer.write_bool(self.sprite_size16);
+        writer.write_i32(self.irq_target);
+        writer.write_bool(self.irq_enabled);
+        writer.write_bool(self.irq_pending);
+        writer.write_bool(self.in_frame);
+        writer.write_i32(self.scanline_counter);
+        writer.write_u8(self.multiplicand);
+        writer.write_u8(self.multiplier);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_blob_into(&mut self.ex_ram)?;
+        for value in &mut self.chr_a {
+            *value = reader.read_i32()?;
+        }
+        for value in &mut self.chr_b {
+            *value = reader.read_i32()?;
+        }
+        reader.read_into(&mut self.prg_bank)?;
+        self.prg_mode = reader.read_i32()?;
+        self.chr_mode = reader.read_i32()?;
+        self.chr_upper = reader.read_i32()?;
+        self.ex_ram_mode = reader.read_i32()?;
+        self.nametable_mapping = reader.read_i32()?;
+        self.fill_tile = reader.read_u8()?;
+        self.fill_attribute = reader.read_u8()?;
+        self.ram_bank = reader.read_u8()?;
+        self.protect1 = reader.read_i32()?;
+        self.protect2 = reader.read_i32()?;
+        self.last_set_was_b = reader.read_bool()?;
+        self.sprite_size16 = reader.read_bool()?;
+        self.irq_target = reader.read_i32()?;
+        self.irq_enabled = reader.read_bool()?;
+        self.irq_pending = reader.read_bool()?;
+        self.in_frame = reader.read_bool()?;
+        self.scanline_counter = reader.read_i32()?;
+        self.multiplicand = reader.read_u8()?;
+        self.multiplier = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         5

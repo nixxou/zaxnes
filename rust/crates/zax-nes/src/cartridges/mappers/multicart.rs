@@ -2,6 +2,7 @@
 
 use super::{windows_for, Mapper};
 use crate::cartridges::{BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 const fn horizontal_if(bit: bool) -> NametableMirroring {
@@ -44,6 +45,19 @@ impl Mapper034 {
 
 impl Mapper for Mapper034 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.prg_bank);
+        writer.write_u8(self.chr_low);
+        writer.write_u8(self.chr_high);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.prg_bank = reader.read_u8()?;
+        self.chr_low = reader.read_u8()?;
+        self.chr_high = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         34
@@ -132,6 +146,17 @@ impl Mapper015 {
 impl Mapper for Mapper015 {
     banked!();
 
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_i32(self.mode);
+        writer.write_u8(self.value);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.mode = reader.read_i32()?;
+        self.value = reader.read_u8()?;
+        Ok(())
+    }
+
     fn mapper_number(&self) -> i32 {
         15
     }
@@ -185,6 +210,15 @@ impl Multicart225 {
 impl Mapper for Multicart225 {
     banked!();
 
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_i32(self.latch);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.latch = reader.read_i32()?;
+        Ok(())
+    }
+
     fn mapper_number(&self) -> i32 {
         225
     }
@@ -233,6 +267,17 @@ impl Caltron6In1 {
 
 impl Mapper for Caltron6In1 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.outer);
+        writer.write_u8(self.chr_low);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.outer = reader.read_u8()?;
+        self.chr_low = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         41
@@ -311,6 +356,17 @@ impl Action52 {
 
 impl Mapper for Action52 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_i32(self.latch);
+        writer.write_u8(self.value);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.latch = reader.read_i32()?;
+        self.value = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         228
@@ -400,6 +456,23 @@ impl Action53 {
 impl Mapper for Action53 {
     banked!();
 
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_i32(self.select);
+        writer.write_u8(self.chr_bank);
+        writer.write_u8(self.inner_prg);
+        writer.write_u8(self.mode);
+        writer.write_u8(self.outer_prg);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.select = reader.read_i32()?;
+        self.chr_bank = reader.read_u8()?;
+        self.inner_prg = reader.read_u8()?;
+        self.mode = reader.read_u8()?;
+        self.outer_prg = reader.read_u8()?;
+        Ok(())
+    }
+
     fn mapper_number(&self) -> i32 {
         28
     }
@@ -484,6 +557,15 @@ impl JalecoJ87 {
 
 impl Mapper for JalecoJ87 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_u8(self.register);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.register = reader.read_u8()?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         self.mapper_number

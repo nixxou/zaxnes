@@ -1,5 +1,6 @@
 use super::{windows_for, Mapper};
 use crate::cartridges::{A12Watcher, BankWindows, CartridgeMemory};
+use crate::state::{InvalidState, StateReader, StateWriter};
 use crate::NametableMirroring;
 
 /// iNES mapper 64, Tengen RAMBO-1: MMC3-like with a third PRG register, 1 KiB CHR mode and a
@@ -84,6 +85,33 @@ impl Rambo1 {
 
 impl Mapper for Rambo1 {
     banked!();
+
+    fn save_registers(&self, writer: &mut StateWriter) {
+        writer.write_raw(&self.bank);
+        writer.write_u8(self.select);
+        writer.write_u8(self.irq_latch);
+        writer.write_i32(self.irq_counter);
+        writer.write_i32(self.cycle_divider);
+        writer.write_bool(self.cycle_mode);
+        writer.write_bool(self.irq_reload);
+        writer.write_bool(self.irq_enabled);
+        writer.write_bool(self.irq_pending);
+        self.a12.save_state(writer);
+    }
+
+    fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        reader.read_into(&mut self.bank)?;
+        self.select = reader.read_u8()?;
+        self.irq_latch = reader.read_u8()?;
+        self.irq_counter = reader.read_i32()?;
+        self.cycle_divider = reader.read_i32()?;
+        self.cycle_mode = reader.read_bool()?;
+        self.irq_reload = reader.read_bool()?;
+        self.irq_enabled = reader.read_bool()?;
+        self.irq_pending = reader.read_bool()?;
+        self.a12.load_state(reader)?;
+        Ok(())
+    }
 
     fn mapper_number(&self) -> i32 {
         64

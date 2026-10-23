@@ -15,7 +15,7 @@ mod common;
 use std::collections::HashSet;
 
 use common::{machine_with, minimal};
-use zax_nes::{Machine, NesBus, NesRegion};
+use zax_nes::{NesBus, NesCore, NesRegion};
 
 /// A pulse at volume 15 through the linear mixer.
 const PULSE_FULL: f64 = 1.526 * 0.00752 * 15.0;
@@ -23,29 +23,29 @@ const PULSE_FULL: f64 = 1.526 * 0.00752 * 15.0;
 /// $4001 value that keeps the sweep from muting: negate with shift 0.
 const SWEEP_NEVER_MUTES: u8 = 0x08;
 
-fn core_in(region: NesRegion) -> Machine {
-    let mut machine = Machine::new();
+fn core_in(region: NesRegion) -> NesCore {
+    let mut machine = NesCore::new();
     machine.set_region(region);
     assert!(machine.load_rom(&minimal(), "Apu.nes").success);
     machine.set_region(region);
     machine
 }
 
-fn core() -> Machine {
+fn core() -> NesCore {
     machine_with(&minimal(), "Apu.nes")
 }
 
-fn tick(core: &mut Machine, cycles: usize) {
+fn tick(core: &mut NesCore, cycles: usize) {
     for _ in 0..cycles {
         core.bus_mut().tick();
     }
 }
 
-fn level(core: &Machine) -> f64 {
+fn level(core: &NesCore) -> f64 {
     core.apu().mixed_level()
 }
 
-fn peak(core: &mut Machine, cycles: usize) -> f64 {
+fn peak(core: &mut NesCore, cycles: usize) -> f64 {
     let mut peak = f64::NEG_INFINITY;
     for _ in 0..cycles {
         core.bus_mut().tick();
@@ -54,7 +54,7 @@ fn peak(core: &mut Machine, cycles: usize) -> f64 {
     peak
 }
 
-fn high_fraction(core: &mut Machine, cycles: usize) -> f64 {
+fn high_fraction(core: &mut NesCore, cycles: usize) -> f64 {
     let mut high = 0;
     for _ in 0..cycles {
         core.bus_mut().tick();
@@ -65,7 +65,7 @@ fn high_fraction(core: &mut Machine, cycles: usize) -> f64 {
     f64::from(high) / cycles as f64
 }
 
-fn transitions(core: &mut Machine, cycles: usize) -> i32 {
+fn transitions(core: &mut NesCore, cycles: usize) -> i32 {
     let mut previous = level(core);
     let mut changes = 0;
     for _ in 0..cycles {
@@ -78,7 +78,7 @@ fn transitions(core: &mut Machine, cycles: usize) -> i32 {
     changes
 }
 
-fn start_pulse1(core: &mut Machine, duty: u8, period: i32, sweep: u8) {
+fn start_pulse1(core: &mut NesCore, duty: u8, period: i32, sweep: u8) {
     core.write_memory(0x4015, 0x01);
     core.write_memory(0x4000, (duty << 6) | 0x10 | 0x0F);
     core.write_memory(0x4001, sweep);
@@ -277,7 +277,7 @@ fn req_core_073_the_triangle_is_held_when_its_period_is_ultrasonic() {
 // ---------------------------------------------------------------- noise
 
 /// One sample per shift at the shortest period (4 CPU cycles).
-fn noise_pattern(core: &mut Machine, shifts: usize) -> Vec<bool> {
+fn noise_pattern(core: &mut NesCore, shifts: usize) -> Vec<bool> {
     let mut pattern = vec![false; shifts];
     core.bus_mut().tick();
     pattern[0] = level(core) > 0.0;
@@ -289,7 +289,7 @@ fn noise_pattern(core: &mut Machine, shifts: usize) -> Vec<bool> {
     pattern
 }
 
-fn start_noise(core: &mut Machine, period: u8) {
+fn start_noise(core: &mut NesCore, period: u8) {
     core.write_memory(0x4015, 0x08);
     core.write_memory(0x400C, 0x1F); // Constant volume 15, no halt.
     core.write_memory(0x400E, period);
@@ -350,7 +350,7 @@ fn req_core_015_the_noise_period_table_follows_the_region() {
     }
 }
 
-fn cycles_to_next_transition(core: &mut Machine) -> i32 {
+fn cycles_to_next_transition(core: &mut NesCore) -> i32 {
     let start = level(core);
     for cycles in 1..=400_000 {
         core.bus_mut().tick();
@@ -378,7 +378,7 @@ fn req_core_073_a_write_to_4011_loads_the_dmc_output_level_directly() {
     assert_near(level(&core), 1.526 * 0.00335 * 127.0);
 }
 
-fn start_dmc(core: &mut Machine, rate: u8, length: u8, irq: bool, looping: bool) {
+fn start_dmc(core: &mut NesCore, rate: u8, length: u8, irq: bool, looping: bool) {
     core.write_memory(
         0x4010,
         (if irq { 0x80 } else { 0 }) | (if looping { 0x40 } else { 0 }) | rate,

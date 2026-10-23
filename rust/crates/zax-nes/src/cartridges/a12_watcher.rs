@@ -1,3 +1,5 @@
+use crate::state::{InvalidState, StateReader, StateWriter};
+
 /// Detects the rises of PPU address line A12 that clock an MMC3-style scanline counter
 /// (REQ-CORE-114).
 ///
@@ -49,5 +51,23 @@ impl A12Watcher {
     pub fn reset(&mut self) {
         self.high = false;
         self.low_since = 0;
+    }
+}
+
+impl A12Watcher {
+    /// Appends the watcher state to `writer` (REQ-CORE-090).
+    pub fn save_state(&self, writer: &mut StateWriter) {
+        writer.write_bool(self.high);
+        writer.write_i64(self.low_since);
+    }
+
+    /// Restores the watcher state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.high = reader.read_bool()?;
+        self.low_since = reader.read_i64()?;
+        Ok(())
     }
 }
