@@ -185,13 +185,13 @@ impl GameSession {
             different_game,
             two_dimensional_mode,
         } = request;
-        let core: SharedCore = Rc::new(RefCell::new(NesCore::new()));
+        let mut core = NesCore::new();
+        let mut input = ScriptInputState::default();
         let mut engine = ConversionEngine::new();
         engine.use_geometry();
         engine.two_dimensional_mode = two_dimensional_mode.unwrap_or(
             profile.permanent_patterns.is_empty() && profile.temporary_patterns.is_empty(),
         );
-        let cells = Rc::new(ScriptInputCells::default());
         let (sender, events) = channel();
         let mut settings = ScriptSettings::new(
             std::mem::replace(model, SettingsModel::new()),
@@ -205,16 +205,9 @@ impl GameSession {
             .set_on_load_requested(move || notify(&sender, SessionEvent::ReloadSettingsRequested));
         // The scene starts from the settings as they stand; the profile's own then reach it
         // through the changes the model reports.
-        scene_script_bridge::push_settings(settings.model(), &mut scene.borrow_mut());
+        scene_script_bridge::push_settings(settings.model(), scene);
         let environment = ScriptEnvironment {
             settings,
-            camera: Box::new(SceneCameraBridge(Rc::clone(&scene))),
-            backdrop: Box::new(SceneBackdropBridge(Rc::clone(&scene))),
-            input: Box::new(CoreScriptInput {
-                core: Rc::clone(&core),
-                cells: Rc::clone(&cells),
-            }),
-            memory: Box::new(CoreScriptMemory(Rc::clone(&core))),
             log,
             profile: ScriptProfileInfo {
                 title: profile.title.clone().unwrap_or_else(|| title.to_owned()),
@@ -225,14 +218,35 @@ impl GameSession {
                 version: profile.version_text.clone().unwrap_or_default(),
             },
             notify: None,
+            ..ScriptEnvironment::default()
         };
-        // REQ-LUA-015 step 1: every chunk runs before anything else.
-        let runtime = ProfileScriptRuntime::create(profile, environment, engine.state_mut())?;
+        // REQ-LUA-015 step 1: every chunk runs before anything else, with the scene and the
+        // machine at hand.
+        let runtime = {
+            let mut camera = SceneCameraBridge(&mut scene.camera);
+            let mut backdrop = SceneBackdropBridge(&mut scene.backdrop);
+            let mut machine = CoreMachine {
+                core: &mut core,
+                input: &mut input,
+            };
+            ProfileScriptRuntime::create_in(
+                profile,
+                environment,
+                engine.state_mut(),
+                Some(&mut ScriptContext {
+                    camera: &mut camera,
+                    backdrop: &mut backdrop,
+                    machine: &mut machine,
+                }),
+            )?
+        };
+        let bridge = runtime.bridge();
         engine.set_script_host(Box::new(runtime));
         let mut session = Self {
             core,
             engine,
-            input: cells,
+            bridge,
+            input,
             events,
             title: title.to_owned(),
             frame_counter: 0,
@@ -241,7 +255,7 @@ impl GameSession {
             batch_records: Vec::new(),
         };
         // The runtime holds the model from here until the last line of this function.
-        let loaded = session.load_profile(profile, different_game);
+        let loaded = session.load_profile(profile, different_game, scene);
         session.exchange_model(model);
         loaded?;
         Ok(session)
