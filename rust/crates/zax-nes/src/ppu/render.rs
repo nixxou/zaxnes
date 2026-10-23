@@ -8,10 +8,7 @@
 //! 257, the vertical reload at dots 280 to 304 of the pre-render line, the sprite pattern
 //! fetches at dots 257 to 320 and two more tiles prefetched at dots 321 to 336.
 
-use super::{
-    Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE_I32,
-    VISIBLE_SCANLINES,
-};
+use super::{Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE_I32, VISIBLE_SCANLINES};
 use crate::cartridges::ChrFetch;
 
 impl Ppu2C02 {
@@ -460,7 +457,11 @@ impl Ppu2C02 {
             let zero = slot == 0 && self.sprite_zero_loaded;
             let flags = SPRITE_OPAQUE
                 | ((attribute & 0x03) << 2)
-                | if (attribute & 0x20) != 0 { SPRITE_BEHIND } else { 0 }
+                | if (attribute & 0x20) != 0 {
+                    SPRITE_BEHIND
+                } else {
+                    0
+                }
                 | if zero { SPRITE_ZERO } else { 0 };
             let start = usize::from(self.sprite_x[slot]);
             for (column, cell) in self.sprite_line.iter_mut().skip(start).take(8).enumerate() {
@@ -468,7 +469,11 @@ impl Ppu2C02 {
                     continue;
                 }
 
-                let bit = if (attribute & 0x40) != 0 { column } else { 7 - column };
+                let bit = if (attribute & 0x40) != 0 {
+                    column
+                } else {
+                    7 - column
+                };
                 let pixel = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
                 if pixel != 0 {
                     *cell = flags | pixel;
