@@ -30,7 +30,7 @@ fn amd_021_r2_005_smb3_emits_no_background_row_at_the_split_line() {
     let mut at_split_line = 0;
     let mut smallest_gap = i32::MAX;
     for frame in 0..5_000 {
-        core.run_frame();
+        core.run_frame(0);
         let ys: BTreeSet<i32> = core
             .frame_batch()
             .records

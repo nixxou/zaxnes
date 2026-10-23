@@ -101,7 +101,7 @@ fn write_palette(core: &mut zax_nes::NesCore, address: u16, value: u8) {
 }
 
 fn capture_palette(core: &mut zax_nes::NesCore) -> [u8; 32] {
-    core.run_frame();
+    core.run_frame(0);
     core.frame_batch().palette
 }
 
@@ -110,7 +110,7 @@ fn req_core_081_peeking_2002_does_not_clear_the_vblank_flag() {
     let mut core = loaded_machine();
 
     // A frame ends at the start of vblank, so the flag is set here.
-    core.run_frame();
+    core.run_frame(0);
     assert!(core.ppu().vblank_flag());
 
     // The host accessor returns 0 for $2000-$401F and leaves the PPU alone.
@@ -133,7 +133,7 @@ fn req_core_082_writing_the_palette_through_2006_and_2007_shows_up_in_the_batch(
 
     // Three frames first, as SPEC-02 §5.1 asks, then program the palette.
     for _ in 0..3 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     core.write_memory(0x2006, 0x3F);
@@ -147,7 +147,7 @@ fn req_core_082_writing_the_palette_through_2006_and_2007_shows_up_in_the_batch(
 fn req_core_045_palette_vector_v7() {
     let mut core = loaded_machine();
     for _ in 0..3 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     write_palette(&mut core, 0x3F00, 0x0F);
@@ -170,7 +170,7 @@ fn req_core_045_palette_vector_v7() {
 fn req_core_045_palette_entries_are_six_bits_wide() {
     let mut core = loaded_machine();
     for _ in 0..3 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     write_palette(&mut core, 0x3F03, 0xFF);

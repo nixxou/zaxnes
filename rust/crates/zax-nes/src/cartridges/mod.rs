@@ -211,6 +211,12 @@ impl Cartridge {
         &self.memory
     }
 
+    /// Consumes the cartridge and returns the ROM image it was built from.
+    #[must_use]
+    pub fn into_rom(self) -> RomImage {
+        self.memory.rom
+    }
+
     /// The board and its registers.
     #[must_use]
     pub const fn board(&self) -> &Board {

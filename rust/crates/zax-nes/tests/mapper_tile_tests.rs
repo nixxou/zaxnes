@@ -14,7 +14,7 @@ use zax_nes::NesCore;
 fn load_mmc2() -> NesCore {
     let mut core = MapperRom::new(9).prg(8).chr(64).load();
     for _ in 0..3 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     // CHR for the $0000 window: 4 KiB bank 1 under latch $FD, bank 2 under latch $FE.
@@ -54,7 +54,7 @@ fn req_core_039_an_mmc2_row_carries_the_pattern_each_latch_selected() {
     core.write_memory(0x2005, 0x00);
     core.write_memory(0x2000, 0x00); // Background patterns at $0000.
     core.write_memory(0x2001, 0x0A); // Background on, left column shown.
-    core.run_frame();
+    core.run_frame(0);
     let batch = capture_batch(&mut core);
     let first: Vec<_> = batch
         .background()
@@ -72,7 +72,7 @@ fn req_core_044_mappers_9_and_10_emit_the_sprites_of_a_capture_by_x() {
     for mapper in [9usize, 10] {
         let mut core = MapperRom::new(mapper).prg(8).chr(64).load();
         for _ in 0..3 {
-            core.run_frame();
+            core.run_frame(0);
         }
 
         // Four sprites in the same eight-line band, in decreasing x: the records must come
@@ -93,7 +93,7 @@ fn req_core_044_mappers_9_and_10_emit_the_sprites_of_a_capture_by_x() {
         }
 
         core.write_memory(0x2001, 0x1E);
-        core.run_frame();
+        core.run_frame(0);
         let batch = capture_batch(&mut core);
         let sprites = batch.sprites();
         assert_eq!(4, sprites.len(), "mapper {mapper}");
@@ -109,7 +109,7 @@ fn req_core_044_mappers_9_and_10_emit_the_sprites_of_a_capture_by_x() {
 fn req_core_044_other_mappers_keep_the_oam_order() {
     let mut core = MapperRom::new(4).prg(8).chr(64).load();
     for _ in 0..3 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     core.write_memory(0x2003, 0x00);
@@ -127,7 +127,7 @@ fn req_core_044_other_mappers_keep_the_oam_order() {
     }
 
     core.write_memory(0x2001, 0x1E);
-    core.run_frame();
+    core.run_frame(0);
     let batch = capture_batch(&mut core);
     let got: Vec<i32> = batch.sprites().iter().map(|r| r.index).collect();
     assert_eq!(vec![0, 1, 2], got);

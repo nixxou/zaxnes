@@ -1,21 +1,56 @@
 use crate::apu::{Apu2A03, AudioError, AudioReader};
 use crate::cartridges::Cartridge;
 use crate::cpu::{Cpu6502, CpuBus};
-use crate::input::InputPorts;
-use crate::ppu::Ppu2C02;
-use crate::rom::{RomImage, RomLoadResult};
-use crate::{FrameBatch, NametableMirroring, NesBus, NesRegion, RegionTiming, TileRecord};
+use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
+use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
+use crate::rom::{InesHeader, RomImage, RomLoadResult};
+use crate::state::{InvalidState, StateLoadFailure, StateReader, StateWriter};
+use crate::{
+    FrameBatch, NametableMirroring, NesBus, NesRegion, RegionTiming, TileRecord, VideoInfo,
+};
 
-/// The machine without its host-facing services: CPU, bus, ROM loading, power-on and "run
-/// one frame" (the part of `NesCore` the PPU goldens need, REQ-CORE-003, REQ-CORE-004,
-/// REQ-CORE-020). The `NesCore` facade wraps it.
-#[derive(Debug, Clone)]
+/// Receives one frame batch per emulated frame (REQ-CORE-030). The emulation behaves
+/// identically with or without it (REQ-CORE-033).
+pub type VideoCallback = Box<dyn FnMut(&FrameBatch<'_>) + Send>;
+
+/// Supplies the Zapper's aimed position, queried once per frame for each Zapper port
+/// (REQ-CORE-060).
+pub type ZapperPositionSource = Box<dyn FnMut(usize) -> ZapperPosition + Send>;
+
+/// What a successful "restore state" reports (REQ-CORE-091).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateLoaded {
+    /// Bytes the block occupied, so the host can read on.
+    pub consumed: usize,
+    /// The ROM name stored in the block.
+    pub rom_name: String,
+}
+
+/// Why a savestate could not be written: no ROM is loaded, so there is no state to save.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoRomLoaded;
+
+impl std::fmt::Display for NoRomLoaded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("No ROM is loaded: there is no state to save.")
+    }
+}
+
+impl std::error::Error for NoRomLoaded {}
+
+/// One NES machine, seen from the host (REQ-CORE-001, REQ-CORE-002).
+///
+/// Everything an instance needs lives in the instance, so two cores in one process are
+/// independent (REQ-ARCH-011, REQ-CORE-001). Nothing advances unless the host calls
+/// [`NesCore::run_frame`]: the core owns no clock and no thread (REQ-ARCH-010).
 pub struct NesCore {
     cpu: Cpu6502,
     bus: NesBus,
     region: NesRegion,
     battery_ram_imported: bool,
     frame_count: i64,
+    video_callback: Option<VideoCallback>,
+    zapper_position_source: Option<ZapperPositionSource>,
 }
 
 impl Default for NesCore {
@@ -34,7 +69,48 @@ impl NesCore {
             region: NesRegion::Ntsc,
             battery_ram_imported: false,
             frame_count: 0,
+            video_callback: None,
+            zapper_position_source: None,
         }
+    }
+
+    /// Name of the core, recorded at the head of savestate files (REQ-CORE-120). There is
+    /// exactly one core.
+    pub const CORE_NAME: &'static str = "Zaxnes";
+
+    /// The name the core carried under the « Sen » working name. Still accepted when reading
+    /// a state block, never written: AMD-029 §2 keeps states written before the rename
+    /// loadable (Q-070).
+    pub const LEGACY_CORE_NAME: &'static str = "Sen";
+
+    /// Message a savestate written by a different core is refused with (REQ-CORE-120).
+    pub const FOREIGN_CORE_MESSAGE: &'static str = "Save state used a different core.";
+
+    /// Magic that opens a core savestate block, "SEN0". Kept as it is across the rename of
+    /// AMD-029: it is a format datum, and changing it would refuse every block written
+    /// before (Q-070).
+    pub const STATE_MAGIC: u32 = 0x304E_4553;
+
+    /// Version of the savestate format. Bumped whenever the block layout changes; L1c added
+    /// the APU channel, mixer and resampler state and L1d the mapper bank windows, latches
+    /// and IRQ counters (REQ-CORE-090).
+    pub const STATE_VERSION: i32 = 4;
+
+    /// Tile grid dimensions: always (33, 31, 128) (REQ-CORE-031).
+    pub const VIDEO_INFO: VideoInfo = VideoInfo::STANDARD;
+
+    /// Mapper numbers this build accepts (REQ-CORE-100, REQ-CORE-102).
+    pub const SUPPORTED_MAPPERS: &'static [i32] = Cartridge::SUPPORTED_MAPPERS;
+
+    /// Registers the receiver of the frame batches, or unregisters it with `None`
+    /// (REQ-CORE-030, REQ-CORE-033).
+    pub fn set_video_callback(&mut self, callback: Option<VideoCallback>) {
+        self.video_callback = callback;
+    }
+
+    /// Registers the source of the Zapper's aimed position (REQ-CORE-060).
+    pub fn set_zapper_position_source(&mut self, source: Option<ZapperPositionSource>) {
+        self.zapper_position_source = source;
     }
 
     /// Loads a ROM image (REQ-CORE-010) and powers the machine on. On failure the instance
@@ -82,9 +158,29 @@ impl NesCore {
         }
     }
 
-    /// Marks PRG-RAM as imported battery RAM, so that a reset keeps it (REQ-CORE-095).
-    pub fn set_battery_ram_imported(&mut self, imported: bool) {
-        self.battery_ram_imported = imported;
+    /// Battery-backed PRG-RAM, for a host that wants to persist it (REQ-CORE-095). Empty
+    /// when no ROM is loaded or the ROM has no battery.
+    #[must_use]
+    pub fn export_battery_ram(&self) -> &[u8] {
+        self.bus.cartridge().map_or(&[], Cartridge::battery_ram)
+    }
+
+    /// Loads battery-backed PRG-RAM (REQ-CORE-095). Once imported, a reset no longer clears
+    /// it. Returns `false` when no ROM is loaded or it has no battery-backed PRG-RAM.
+    pub fn import_battery_ram(&mut self, data: &[u8]) -> bool {
+        let Some(cartridge) = self.bus.cartridge_mut() else {
+            return false;
+        };
+
+        let target = cartridge.battery_ram_mut();
+        if target.is_empty() {
+            return false;
+        }
+
+        let count = data.len().min(target.len());
+        target[..count].copy_from_slice(&data[..count]);
+        self.battery_ram_imported = true;
+        true
     }
 
     fn power_on(&mut self) {
@@ -186,12 +282,25 @@ impl NesCore {
         self.bus.apu()
     }
 
-    /// Runs one frame: from where the previous one stopped to the start of the next vblank
-    /// (REQ-CORE-020). Returns the CPU cycles it took, 0 when no ROM is loaded
+    /// Runs one frame with `input_word` (REQ-CORE-020, REQ-CORE-022): port 1 in bits 0 to
+    /// 7, port 2 in bits 8 to 15; for a controller the order is A, B, Select, Start, Up,
+    /// Down, Left, Right (SPEC-02 §4.4).
+    ///
+    /// The frame runs from where the previous one stopped to the start of the next vblank;
+    /// the video callback is then invoked once, synchronously, even when the batch is empty
+    /// (REQ-CORE-021). Returns the CPU cycles the frame took, 0 when no ROM is loaded
     /// (REQ-CORE-005).
-    pub fn run_frame(&mut self) -> i64 {
+    pub fn run_frame(&mut self, input_word: u16) -> i64 {
         if self.bus.cartridge().is_none() {
             return 0;
+        }
+
+        self.bus.input_mut().begin_frame(input_word);
+
+        // The aimed position is sampled once, at the start of the frame, and stays fixed
+        // for its whole duration (REQ-CORE-060).
+        if let Some(source) = self.zapper_position_source.as_mut() {
+            self.bus.input_mut().aim_zappers(source);
         }
 
         let start_cycle = self.bus.cycle_count();
@@ -205,13 +314,21 @@ impl NesCore {
         }
 
         self.frame_count += 1;
+
+        if let Some(callback) = self.video_callback.as_mut() {
+            callback(&Self::batch_of(self.bus.ppu()));
+        }
+
         self.bus.cycle_count() - start_cycle
     }
 
     /// The batch of the frame just run (REQ-CORE-030).
     #[must_use]
     pub fn frame_batch(&self) -> FrameBatch<'_> {
-        let ppu = self.bus.ppu();
+        Self::batch_of(self.bus.ppu())
+    }
+
+    fn batch_of(ppu: &Ppu2C02) -> FrameBatch<'_> {
         FrameBatch {
             records: ppu.tile_records(),
             palette: ppu.snapshot_palette(),
@@ -230,6 +347,31 @@ impl NesCore {
     #[must_use]
     pub fn tile_records(&self) -> &[TileRecord] {
         self.bus.ppu().tile_records()
+    }
+
+    /// Sets the frame counter (REQ-CORE-006).
+    pub fn set_frame_count(&mut self, value: i64) {
+        self.frame_count = value;
+    }
+
+    /// The device plugged into `port` (REQ-CORE-024).
+    ///
+    /// # Errors
+    /// [`InvalidPort`] when `port` is not 0 or 1.
+    pub fn port_type(&self, port: usize) -> Result<ControllerPortType, InvalidPort> {
+        self.bus.input().port_type(port)
+    }
+
+    /// Plugs `kind` into `port`; allowed at any time between two frames (REQ-CORE-024).
+    ///
+    /// # Errors
+    /// [`InvalidPort`] when `port` is not 0 or 1.
+    pub fn set_port_type(
+        &mut self,
+        port: usize,
+        kind: ControllerPortType,
+    ) -> Result<(), InvalidPort> {
+        self.bus.input_mut().set_port_type(port, kind)
     }
 
     /// Frames run since the last power-on.
@@ -311,5 +453,168 @@ impl NesCore {
     /// The cartridge, mutably.
     pub fn cartridge_mut(&mut self) -> Option<&mut Cartridge> {
         self.bus.cartridge_mut()
+    }
+
+    // ---------------------------------------------------------------- savestates
+
+    /// The savestate format version, as a host writes it in the metadata header of a
+    /// savestate file (SPEC-09 REQ-PERS-056 point 2).
+    #[must_use]
+    pub const fn state_format_version() -> i32 {
+        Self::STATE_VERSION
+    }
+
+    /// Returns a self-contained state block, ROM image and ROM name included
+    /// (REQ-CORE-090). `include_rom_image` false is for the in-memory rollback history of
+    /// SPEC-07, which trades self-containment for size; such a block must never be written
+    /// to disk (REQ-CORE-093).
+    ///
+    /// # Errors
+    /// [`NoRomLoaded`] when there is nothing to save.
+    pub fn save_state(&self, include_rom_image: bool) -> Result<Vec<u8>, NoRomLoaded> {
+        let cartridge = self.bus.cartridge().ok_or(NoRomLoaded)?;
+        let rom = cartridge.rom();
+
+        let mut writer = StateWriter::with_capacity(rom.raw().len() + 32 * 1024);
+        writer.write_u32(Self::STATE_MAGIC);
+        writer.write_i32(Self::STATE_VERSION);
+        writer.write_string(Self::CORE_NAME);
+        writer.write_bool(include_rom_image);
+        writer.write_string(rom.name());
+        writer.write_blob(if include_rom_image { rom.raw() } else { &[] });
+        writer.write_u8(self.region as u8);
+        writer.write_i64(self.frame_count);
+
+        self.bus.save_state(&mut writer);
+        self.cpu.save_state(&mut writer);
+        self.bus.ppu().save_state(&mut writer);
+        self.bus.apu().save_state(&mut writer);
+        self.bus.input().save_state(&mut writer);
+        cartridge.save_state(&mut writer);
+
+        Ok(writer.into_vec())
+    }
+
+    /// Upper bound on the size of a state block for the ROM currently loaded, announced
+    /// before serialisation and valid for the whole session (REQ-ARCH-013).
+    #[must_use]
+    pub fn max_state_size(&self) -> usize {
+        let (rom_bytes, name_bytes) = self
+            .bus
+            .cartridge()
+            .map_or((0, 0), |cartridge| {
+                (cartridge.rom().raw().len(), cartridge.rom().name().len() * 4)
+            });
+        let fixed_bytes = NesBus::RAM_SIZE
+            + VRAM_SIZE
+            + OAM_SIZE
+            + PALETTE_SIZE
+            + 64 * 1024 // PRG-RAM: 8 KiB usually, up to 64 KiB on MMC5.
+            + InesHeader::DEFAULT_CHR_RAM_SIZE
+            + 1024 // MMC5 ExRAM.
+            + MAX_TILE_RECORD_STATE_SIZE
+            + Apu2A03::MAX_STATE_SIZE
+            + 4096; // headers, registers, counters and the length prefixes
+
+        rom_bytes + fixed_bytes + 256 + name_bytes
+    }
+
+    /// Restores the state block that starts at `offset` in `data`, which may hold other
+    /// data around it (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] for an invalid or truncated block, or one written by another core
+    /// ([`StateLoadFailure::ForeignCore`]); the core is then left stopped (REQ-CORE-005).
+    pub fn try_load_state(
+        &mut self,
+        data: &[u8],
+        offset: usize,
+    ) -> Result<StateLoaded, InvalidState> {
+        let loaded = self.restore_state(data, offset);
+        if loaded.is_err() {
+            self.close_rom();
+        }
+
+        loaded
+    }
+
+    fn restore_state(&mut self, data: &[u8], offset: usize) -> Result<StateLoaded, InvalidState> {
+        let mut reader = StateReader::new(data, offset)?;
+
+        if reader.read_u32()? != Self::STATE_MAGIC {
+            return Err(InvalidState::corrupt(
+                "Corrupt savestate: wrong magic number.",
+            ));
+        }
+
+        let version = reader.read_i32()?;
+        if version != Self::STATE_VERSION {
+            return Err(InvalidState::corrupt(format!(
+                "Corrupt savestate: format version {version} is not supported (expected {}).",
+                Self::STATE_VERSION
+            )));
+        }
+
+        let core_name = reader.read_string()?;
+        if core_name != Self::CORE_NAME && core_name != Self::LEGACY_CORE_NAME {
+            // REQ-CORE-120 fixes this message to the character; it is one of the few
+            // literal strings of the spec (AMD-002, answer to Q-001).
+            return Err(InvalidState {
+                failure: StateLoadFailure::ForeignCore,
+                message: Self::FOREIGN_CORE_MESSAGE.to_owned(),
+            });
+        }
+
+        let has_rom_image = reader.read_bool()?;
+        let stored_name = reader.read_string()?;
+        let rom_bytes = reader.read_blob()?;
+        let region_byte = reader.read_u8()?;
+        let region = NesRegion::from_u8(region_byte).ok_or_else(|| {
+            InvalidState::corrupt(format!("Corrupt savestate: unknown region {region_byte}."))
+        })?;
+        let frame_count = reader.read_i64()?;
+
+        let rom = if has_rom_image {
+            // The block is self-contained: it restores even with no ROM loaded
+            // (REQ-CORE-090).
+            RomImage::try_load(&rom_bytes, &stored_name)
+                .map_err(|error| InvalidState::corrupt(format!("Corrupt savestate: {error}")))?
+        } else {
+            // Without an image the block restores onto the ROM already loaded. The old
+            // cartridge is taken apart: the state replaces everything it held, and a failure
+            // leaves the core stopped anyway.
+            self.bus
+                .take_cartridge()
+                .map(Cartridge::into_rom)
+                .ok_or_else(|| {
+                    InvalidState::corrupt(
+                        "Corrupt savestate: the block carries no ROM image and none is loaded.",
+                    )
+                })?
+        };
+
+        let mut cartridge = Cartridge::create(rom)
+            .map_err(|error| InvalidState::corrupt(format!("Corrupt savestate: {error}")))?;
+
+        // Everything is read into the live objects only once the header checks out, so that
+        // a truncation leaves the core stopped rather than half-restored.
+        self.bus.load_state(&mut reader)?;
+        self.cpu.load_state(&mut reader)?;
+        self.bus.ppu_mut().load_state(&mut reader)?;
+        self.bus.apu_mut().load_state(&mut reader)?;
+        self.bus.input_mut().load_state(&mut reader)?;
+        cartridge.load_state(&mut reader)?;
+
+        self.battery_ram_imported = false;
+        self.bus.attach(Some(cartridge));
+        self.region = region;
+        self.apply_region();
+        self.frame_count = frame_count;
+        self.bus.apu_mut().drop_pending_samples(); // REQ-CORE-074, Q-006.
+
+        Ok(StateLoaded {
+            consumed: reader.consumed(),
+            rom_name: stored_name,
+        })
     }
 }

@@ -207,8 +207,7 @@ fn req_core_111_cpu_timing_test6_passes_with_the_unofficial_instructions() {
     };
     let mut core = machine_with(&image, "cpu_timing_test.nes");
     for _ in 0..1200 {
-        core.bus_mut().input_mut().begin_frame(0x0002); // B held: official plus undocumented.
-        core.run_frame();
+        core.run_frame(0x0002);
     }
 
     let screen = screen_text(&core);
@@ -264,7 +263,7 @@ fn req_core_100_cnrom_runs_cpu_dummy_reads() {
     };
     let mut core = machine_with(&image, "cpu_dummy_reads.nes");
     for _ in 0..600 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     assert!(screen_text(&core).to_uppercase().contains("PASSED"));
@@ -303,7 +302,7 @@ fn req_core_100_each_public_rom_of_a_required_mapper_boots_and_draws() {
         assert!(load.success, "{rom}: {:?}", load.error);
         assert_eq!(mapper, core.cartridge().unwrap().mapper_number(), "{rom}");
         for _ in 0..180 {
-            core.run_frame();
+            core.run_frame(0);
         }
 
         // Something was drawn: a ROM that crashed or hung before switching rendering on would
@@ -321,7 +320,7 @@ fn req_core_100_action53_powers_on_with_the_last_bank_at_c000() {
     };
     let mut core = machine_with(&image, "test28.nes");
     for _ in 0..200 {
-        core.run_frame();
+        core.run_frame(0);
     }
 
     assert!(!screen_text(&core).contains("DOES NOT POWER ON"));

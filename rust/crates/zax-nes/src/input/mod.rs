@@ -152,6 +152,15 @@ impl InputPorts {
         Ok(())
     }
 
+    /// Asks `source` for the aim of every port that has a Zapper plugged in (REQ-CORE-060).
+    pub fn aim_zappers(&mut self, mut source: impl FnMut(usize) -> ZapperPosition) {
+        for port in 0..Self::PORT_COUNT {
+            if self.types[port] == ControllerPortType::Zapper {
+                self.zapper[port] = source(port);
+            }
+        }
+    }
+
     /// Where the Zapper of `port` is aimed.
     ///
     /// # Errors

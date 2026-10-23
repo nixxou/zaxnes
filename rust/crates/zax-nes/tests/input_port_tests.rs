@@ -37,8 +37,7 @@ fn read(ports: &mut InputPorts, port: usize, open_bus: u8, light: bool) -> u8 {
 fn req_core_022_input_word_0x0081_reads_a_then_right_on_port_one() {
     let image = minimal_rom(0x01, Some(&controller_reader_program()), None);
     let mut core = machine_with(&image, "Pads.nes");
-    core.bus_mut().input_mut().begin_frame(0x0081);
-    core.run_frame();
+    core.run_frame(0x0081);
     // Serial order: A, B, Select, Start, Up, Down, Left, Right.
     let expected = [1u8, 0, 0, 0, 0, 0, 0, 1];
     for (i, want) in expected.iter().enumerate() {
@@ -50,8 +49,7 @@ fn req_core_022_input_word_0x0081_reads_a_then_right_on_port_one() {
 fn req_core_022_input_word_0x0800_presses_start_on_port_two() {
     let image = minimal_rom(0x01, Some(&controller_reader_program()), None);
     let mut core = machine_with(&image, "Pads.nes");
-    core.bus_mut().input_mut().begin_frame(0x0800);
-    core.run_frame();
+    core.run_frame(0x0800);
     // Bit 11 is bit 3 of port 2's byte: Start, the fourth bit read on $4017.
     let expected = [0u8, 0, 0, 1, 0, 0, 0, 0];
     for (i, want) in expected.iter().enumerate() {
