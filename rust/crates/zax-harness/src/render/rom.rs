@@ -106,7 +106,8 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         push_scripted_light(model, &mut scene);
     }
 
-    let picture = host.core.pixel_frame().to_vec();
+    let mut picture = Vec::new();
+    host.core.wide_picture_into(&mut picture);
     let mut engine = host.engine;
     scene.camera.snap_to_setpoints();
     scene.game_running = true;

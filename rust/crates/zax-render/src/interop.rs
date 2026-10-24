@@ -7,6 +7,8 @@
 //! column, so uploading the fields of a [`Matrix4x4`] in field order hands GLSL its transpose,
 //! that is the column-vector matrix the shaders use — which is why the conversion transposes.
 
+use std::sync::Arc;
+
 use zax_engine3d::geometry::tile_mesh::{MeshVertex, TileMesh, TriangleCountError};
 use zax_engine3d::vectors::{Mat4, Vec2, Vec3};
 
@@ -152,22 +154,73 @@ pub fn unit_box() -> Result<TileMesh, TriangleCountError> {
 ///
 /// [`TriangleCountError`] never in practice: the quad is two whole triangles.
 pub fn picture_quad() -> Result<TileMesh, TriangleCountError> {
-    const WIDTH: f32 = 256.0;
+    picture_quad_wide(0)
+}
+
+/// The width in pixels of a 2D-mode picture of `len` colour indices (240 rows): 256, or wider by
+/// a widescreen margin on each side; `None` for any other size.
+#[must_use]
+pub const fn picture_width(len: usize) -> Option<usize> {
+    if len == 0 || len % 240 != 0 {
+        return None;
+    }
+    let width = len / 240;
+    if width < 256 || (width - 256) % 2 != 0 {
+        return None;
+    }
+    Some(width)
+}
+
+/// The quad for the widescreen 2D-mode picture `picture`, reusing `cached` when it was made for
+/// the same margin; `None` for a 256-pixel picture.
+///
+/// # Errors
+///
+/// [`TriangleCountError`] never in practice: the quad is two whole triangles.
+pub fn wide_quad_for(
+    picture: &[u8],
+    cached: Option<(u16, Arc<TileMesh>)>,
+) -> Result<Option<(u16, Arc<TileMesh>)>, TriangleCountError> {
+    let Some(width) = picture_width(picture.len()) else {
+        return Ok(None);
+    };
+    let Ok(margin) = u16::try_from((width - 256) / 2) else {
+        return Ok(None);
+    };
+    if margin == 0 {
+        return Ok(None);
+    }
+    if let Some(cached) = cached.filter(|(cached, _)| *cached == margin) {
+        return Ok(Some(cached));
+    }
+    Ok(Some((margin, Arc::new(picture_quad_wide(margin)?))))
+}
+
+/// [`picture_quad`] for a widescreen picture: `margin` more pixels on each side, x from
+/// -margin to 256 + margin, the texture coordinates still in texels of the wider picture.
+///
+/// # Errors
+///
+/// [`TriangleCountError`] never in practice: the quad is two whole triangles.
+pub fn picture_quad_wide(margin: u16) -> Result<TileMesh, TriangleCountError> {
     const HEIGHT: f32 = 240.0;
+    let left = -f32::from(margin);
+    let width = 256.0 + (2.0 * f32::from(margin));
     let top = geometry::SCENE_HEIGHT;
     let bottom = geometry::SCENE_HEIGHT - HEIGHT;
     let normal = Vec3::new(0.0, 0.0, -1.0);
 
     // Same winding as the −Z face of the unit box (REQ-E3D-505): bottom-left, top-left,
     // top-right, bottom-right.
+    let right = left + width;
     let vertices = vec![
-        MeshVertex::new(Vec3::new(0.0, bottom, 0.0), normal, Vec2::new(0.0, HEIGHT)),
-        MeshVertex::new(Vec3::new(0.0, top, 0.0), normal, Vec2::new(0.0, 0.0)),
-        MeshVertex::new(Vec3::new(WIDTH, top, 0.0), normal, Vec2::new(WIDTH, 0.0)),
+        MeshVertex::new(Vec3::new(left, bottom, 0.0), normal, Vec2::new(0.0, HEIGHT)),
+        MeshVertex::new(Vec3::new(left, top, 0.0), normal, Vec2::new(0.0, 0.0)),
+        MeshVertex::new(Vec3::new(right, top, 0.0), normal, Vec2::new(width, 0.0)),
         MeshVertex::new(
-            Vec3::new(WIDTH, bottom, 0.0),
+            Vec3::new(right, bottom, 0.0),
             normal,
-            Vec2::new(WIDTH, HEIGHT),
+            Vec2::new(width, HEIGHT),
         ),
     ];
     TileMesh::new(vertices, vec![0, 1, 2, 0, 2, 3])

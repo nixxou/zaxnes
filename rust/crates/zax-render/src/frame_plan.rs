@@ -53,7 +53,6 @@ pub const INSTANCES_PER_DRAW: usize = 128;
 pub const INSTANCE_BYTES: usize = 128;
 
 /// The 256 × 240 size of the NES picture of the 2D mode.
-const PICTURE_WIDTH: f32 = 256.0;
 const PICTURE_HEIGHT: f32 = 240.0;
 
 /// Where a backend keeps the GPU copies of the meshes, the textures and the NES picture: the
@@ -247,6 +246,9 @@ impl<M, T> Default for FramePlan<M, T> {
 pub struct FixedMeshes<'a> {
     pub unit_box: &'a Arc<TileMesh>,
     pub picture_quad: &'a Arc<TileMesh>,
+    /// The quad of a widescreen 2D-mode picture, made for the margin of the displayed picture
+    /// (`interop::wide_quad_for`); `None` when the picture is 256 pixels wide.
+    pub wide_picture_quad: Option<&'a Arc<TileMesh>>,
 }
 
 impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
@@ -275,7 +277,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         // AMD-009 (Q-022): in 2D mode the core's pixel frame is shown on the NES plane instead
         // of a recomposition of the tile records.
         if scene.two_dimensional_mode
-            && self.collect_picture_quad(residency, fixed.picture_quad, frame.nes_picture)?
+            && self.collect_picture_quad(residency, fixed, frame.nes_picture)?
         {
             return Ok(());
         }
@@ -316,9 +318,20 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
     fn collect_picture_quad<R: Residency<Mesh = M, Texture = T>>(
         &mut self,
         residency: &mut R,
-        quad: &Arc<TileMesh>,
+        fixed: FixedMeshes<'_>,
         picture: &[u8],
     ) -> Result<bool, R::Error> {
+        let Some(width) = crate::interop::picture_width(picture.len()) else {
+            return Ok(false);
+        };
+        let quad = if width == 256 {
+            fixed.picture_quad
+        } else {
+            match fixed.wide_picture_quad {
+                Some(quad) => quad,
+                None => return Ok(false),
+            }
+        };
         let Some(texture) = residency.picture(picture)? else {
             return Ok(false);
         };
@@ -329,7 +342,8 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         self.lists.opaque.push(DrawItem {
             color_mode: 1,
             texture: Some(texture),
-            texture_size: Vector2::new(PICTURE_WIDTH, PICTURE_HEIGHT),
+            #[allow(clippy::cast_precision_loss)] // 256 to 512.
+            texture_size: Vector2::new(width as f32, PICTURE_HEIGHT),
             // Nothing else is in the scene in 2D mode, so the quad neither casts nor receives.
             receive_shadow: false,
             clip: true,

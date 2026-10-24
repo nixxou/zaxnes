@@ -12,7 +12,9 @@
 //! Zapper no longer reads them there — AMD-021 R2-006 makes the vblank and the pre-render
 //! line see the universal backdrop only.
 
-use super::{palette_index, Cart, Ppu2C02, TileBuffer, SCREEN_WIDTH_I32, VISIBLE_SCANLINES};
+use super::{
+    palette_index, Cart, Ppu2C02, TileBuffer, SCREEN_WIDTH, SCREEN_WIDTH_I32, VISIBLE_SCANLINES,
+};
 use crate::cartridges::{Cartridge, ChrFetch};
 use crate::{nes_colors, NametableMirroring, TileRecord};
 
@@ -487,6 +489,90 @@ impl Ppu2C02 {
             .or(behind_entry)
             .unwrap_or(0);
         self.palette[palette_index(0x3F00 | chosen)]
+    }
+}
+
+impl Ppu2C02 {
+    /// The picture of the frame just drawn, as wide as its widescreen margin: one NES colour
+    /// index per pixel, row 0 first, `256 + 2 * margin` pixels a row (the 2D mode). The 256
+    /// middle columns are the PPU's own picture; the sides are composed from the tile records
+    /// in the NES order (a sprite in front, then the background, then a sprite behind, a lower
+    /// sprite number winning) over the universal backdrop.
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) {
+        let margin = usize::try_from(self.frame_margin.max(0)).unwrap_or(0);
+        let width = SCREEN_WIDTH + (2 * margin);
+        let height = super::SCREEN_HEIGHT;
+        out.clear();
+        if margin == 0 {
+            out.extend_from_slice(&self.pixels);
+            return;
+        }
+
+        // The PPU blanks its first 8 columns when the game asks for it, which in a wide picture
+        // would be a black band in the middle: they are composed too.
+        let composed_from = if self.left_column_masked() { 8 } else { 0 };
+        // Palette entries of the sides (0 = nothing), composed first, then turned into colours. A
+        // sprite behind is painted first so that an opaque background pixel covers it.
+        out.resize(width * height, 0);
+        let paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
+            for py in 0..8i32 {
+                let y = i32::from(record.y) + py;
+                let Ok(row) = usize::try_from(y) else {
+                    continue;
+                };
+                if row >= height {
+                    continue;
+                }
+                for px in 0..8i32 {
+                    let x = i32::from(record.x) + px;
+                    if (composed_from..SCREEN_WIDTH_I32).contains(&x) {
+                        continue;
+                    }
+                    let Ok(column) = usize::try_from(x + self.frame_margin) else {
+                        continue;
+                    };
+                    if column >= width {
+                        continue;
+                    }
+                    #[allow(clippy::cast_sign_loss)] // 0..8.
+                    let Some(pixel) = record.displayed_pixel(px as usize, py as usize) else {
+                        continue;
+                    };
+                    let slot = &mut out[(row * width) + column];
+                    if pixel != 0 {
+                        *slot = base + (record.palette * 4) + pixel;
+                    }
+                }
+            }
+        };
+        let records = self.tiles.records();
+        for record in records.iter().filter(|r| !r.background && r.hidden).rev() {
+            paint(record, 0x10, out);
+        }
+        for record in records.iter().filter(|r| r.background) {
+            paint(record, 0x00, out);
+        }
+        let mut front: Vec<&TileRecord> = records
+            .iter()
+            .filter(|r| !r.background && !r.hidden)
+            .collect();
+        front.sort_by_key(|record| std::cmp::Reverse(record.index % 64));
+        for record in front {
+            paint(record, 0x10, out);
+        }
+
+        for row in 0..height {
+            let line = &mut out[row * width..(row + 1) * width];
+            for (column, slot) in line.iter_mut().enumerate() {
+                #[allow(clippy::cast_sign_loss)] // 0 or 8.
+                let first = margin + composed_from as usize;
+                if (first..margin + SCREEN_WIDTH).contains(&column) {
+                    *slot = self.pixels[(row * SCREEN_WIDTH) + column - margin];
+                } else {
+                    *slot = self.palette[palette_index(0x3F00 | u16::from(*slot))];
+                }
+            }
+        }
     }
 }
 
