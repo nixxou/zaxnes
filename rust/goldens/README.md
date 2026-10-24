@@ -41,4 +41,4 @@ Blargg statuses are a snapshot, not a pass/fail list: `0` = passed, `0x80` = sti
 
 ## tool/
 
-Source of the C# program that produced `core-goldens.jsonl` (`dotnet run -c Release --project rust/goldens/tool -- <test-roms dir> <out.jsonl> 1200`; the `mapper` key was added afterwards from the iNES header). It references `src/Zax.Nes` of this repository.
+Source of the C# program that produced `core-goldens.jsonl` (`dotnet run -c Release --project rust/goldens/tool -- <test-roms dir> <out.jsonl> 1200`; the `mapper` key was added afterwards from the iNES header). It references `src/Zax.Nes`, which is on the `archive-dotnetversion` branch.

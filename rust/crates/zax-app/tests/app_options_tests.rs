@@ -1,14 +1,7 @@
-//! The command line (`AppOptions.cs`): the parsing of the arguments, and the usage text, which
-//! must be the text of the C# program.
+//! The command line: the parsing of the arguments and the usage text.
 #![allow(clippy::expect_used, clippy::unwrap_used)] // test code
 
 use zax_app::app_options::{AppOptions, OptionsError, RUST_ONLY_USAGE, USAGE};
-
-/// The C# program's options, read to compare the usage text with it.
-const CSHARP_OPTIONS: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../src/Zax.App/AppOptions.cs"
-);
 
 fn parse(arguments: &[&str]) -> AppOptions {
     AppOptions::parse(arguments).expect("the arguments parse")
@@ -96,38 +89,6 @@ fn app_options_rejects_what_it_cannot_parse() {
         AppOptions::parse(&["--size", "big"]),
         Err(OptionsError::Size { .. })
     ));
-}
-
-/// The usage text is the text of the C# program, byte for byte. The comparison needs the C#
-/// source of the repository; without it the test says so and passes.
-#[test]
-fn the_usage_text_is_the_text_of_the_csharp_program() {
-    let Ok(source) = std::fs::read_to_string(CSHARP_OPTIONS) else {
-        eprintln!("skipped: {CSHARP_OPTIONS} is not there");
-        return;
-    };
-    let expected =
-        csharp_usage_literal(&source).expect("the C# source holds the raw string literal of Usage");
-    assert_eq!(USAGE, expected);
-}
-
-/// The text of the raw string literal `Usage` of `AppOptions.cs`: its lines without the
-/// indentation of the literal, and without the line break before the closing delimiter.
-fn csharp_usage_literal(source: &str) -> Option<String> {
-    const INDENT: &str = "        ";
-    let mut body: Vec<&str> = source
-        .lines()
-        .skip_while(|line| !line.contains("public static string Usage =>"))
-        .skip(2)
-        .take_while(|line| !line.trim_start().starts_with("\"\"\""))
-        .collect();
-    body.pop()?;
-    let mut text = String::new();
-    for line in body {
-        text.push_str(line.strip_prefix(INDENT).unwrap_or(line));
-        text.push('\n');
-    }
-    Some(text)
 }
 
 /// REQ-PUB-006: the font can be named, or the built-in one forced back on the command line.

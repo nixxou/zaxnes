@@ -1,7 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\src\Zax.Profiles\Zax.Profiles.csproj" />
-  </ItemGroup>
-
-</Project>

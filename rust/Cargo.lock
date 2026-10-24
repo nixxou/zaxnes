@@ -1248,7 +1248,7 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
 name = "zax-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "glow",
  "imgui",
@@ -1274,7 +1274,7 @@ dependencies = [
 
 [[package]]
 name = "zax-engine3d"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rstest",
  "thiserror",
@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "zax-goldens"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1292,7 +1292,7 @@ dependencies = [
 
 [[package]]
 name = "zax-harness"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "sha2",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "zax-nes"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "sha2",
  "zax-goldens",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "zax-platform"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "glow",
  "imgui",
@@ -1327,7 +1327,7 @@ dependencies = [
 
 [[package]]
 name = "zax-profiles"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "getrandom",
  "rstest",
@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "zax-render"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "flate2",
  "glow",
@@ -1358,7 +1358,7 @@ dependencies = [
 
 [[package]]
 name = "zax-scripting"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "getrandom",
  "mlua",
@@ -1371,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "zax-settings"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rstest",
  "serde_json",

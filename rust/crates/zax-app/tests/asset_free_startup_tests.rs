@@ -207,8 +207,8 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
     ];
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
-        .find(|folder| folder.join("Zax.sln").is_file())
-        .expect("the repository root holds Zax.sln");
+        .find(|folder| folder.join("rust").join("Cargo.toml").is_file())
+        .expect("the repository root holds rust/Cargo.toml");
 
     let mut stowaways: Vec<String> = Vec::new();
     let mut branding = 0;

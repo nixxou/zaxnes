@@ -53,11 +53,12 @@ with any `--userdata` folder and copy its `profiles/` folder to the card.
     everything the program printed. If the port folder cannot be written, it is
     `/tmp/zaxnes-log.txt`.
   - `ports/zaxnes/logs/zaxnes.log`: the program's own copy (SDL video driver, GL context,
-    GL_RENDERER and a WARNING when it is a software renderer, the user data folder, and for now
-    the frame profiler every two seconds). If that folder cannot be written, the program tries
+    GL_RENDERER and a WARNING when it is a software renderer, the user data folder, and the
+    frame profiler every two seconds when it is on). If that folder cannot be written, the program tries
     `ports/zaxnes/logs/` next to the binary, then the system's temporary folder, and says so
     on the console.
-- The frame profiler (temporary diagnostic, `ZAXNES_PROFILE=1` in `Zaxnes.sh`): each line gives
+- The frame profiler (Options > Performance measures, off by default; or `ZAXNES_PROFILE=1` in
+  `Zaxnes.sh`): each line gives
   the mean/max milliseconds of every stage of a frame (input, core, capture, conversion, Lua,
   rollback, host, scene, UI, audio, swap, sleep) and the frame rate; with "Show the FPS" on, a
   short version is drawn under the counter.

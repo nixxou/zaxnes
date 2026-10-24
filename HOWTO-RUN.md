@@ -3,7 +3,7 @@
 Zaxnes est un émulateur NES qui affiche les jeux **en 3D**. Ce document explique comment
 l'installer, l'utiliser et où il range ses fichiers.
 
-Zaxnes est distribué sous **GPL v3** (`impl/LICENSE`). **Aucune ROM n'est fournie** : vous devez
+Zaxnes est distribué sous **GPL v3** (fichier `LICENSE`). **Aucune ROM n'est fournie** : vous devez
 utiliser une ROM dont vous disposez légalement.
 
 ---
@@ -12,9 +12,9 @@ utiliser une ROM dont vous disposez légalement.
 
 | Élément | Version |
 |---|---|
-| Système | Windows 10/11 x64 |
-| SDK (pour compiler) | .NET 10 |
-| Carte graphique | OpenGL 3.3 core (toute carte depuis ~2010) |
+| Système | Windows 10/11 x64, Linux x86_64 (glibc 2.31 ou plus récente), consoles PortMaster aarch64 |
+| Compilateur (pour compiler) | Rust, version fixée par `rust/rust-toolchain.toml` |
+| Carte graphique | OpenGL 3.3 core (toute carte depuis ~2010) ; OpenGL ES 3.0 sur console |
 | Audio | facultatif ; sans périphérique, Zaxnes démarre en silence |
 
 **Zaxnes n'a besoin d'aucun fichier d'asset** (AMD-024, phase P7a) et n'en livre aucun : le
@@ -34,31 +34,33 @@ disposez légalement d'un profil `.3dn`, **Fichier ▸ Importer un profil…** l
 (`profiles.json`, `cubemaps/`, `meshes/`, `textures/`, `audio/`, `fonts/`). Ce dossier n'est
 **jamais cherché automatiquement** : seule l'option le désigne.
 
-Pour compiler, depuis `cleanroom/impl/` :
+La version Windows est un seul fichier, `zaxnes.exe`, sans rien à installer. La version Linux
+utilise la bibliothèque SDL2 du système (paquet `libsdl2-2.0-0` sur Debian et Ubuntu). La version
+console s'installe comme un port PortMaster (voir `rust/build/portmaster/README.md`).
+
+Pour compiler, depuis le dossier `rust/` du dépôt :
 
 ```
-dotnet build -c Release
+cargo build --release -p zax-app --features bundled
 ```
 
-Pour lancer la suite de tests (les tests de rendu créent une fenêtre OpenGL cachée) :
+Pour lancer la suite de tests :
 
 ```
-dotnet test -c Release                                      tout
-dotnet test -c Release --filter "Requires!=OriginalAssets"  la moitié publique
+cargo test --workspace
 ```
 
-Les tests qui ont besoin des assets **d'origine** extraits (les 101 profils intégrés et leurs
-cubemaps, meshes et textures) portent `[Trait("Requires", "OriginalAssets")]` et sont *ignorés*,
-non échoués, quand ce dossier n'est pas là. Ceux qui ont besoin d'une ROM commerciale portent
-`[Trait("Requires", "UserRoms")]` et lisent le dossier nommé par la variable d'environnement
-`ZAXNES_ROMS` : voir la section 12.
+Les tests qui ont besoin d'une ROM commerciale, des profils de l'utilisateur ou d'une
+installation de 3dSen sont marqués `#[ignore]` et lisent les dossiers nommés par des variables
+d'environnement : voir la section 12.
 
 ## 2. Démarrer
 
 Lancez simplement l'exécutable :
 
 ```
-src\Zax.App\bin\Release\net10.0\Zaxnes.exe
+zaxnes.exe          (Windows)
+./zaxnes            (Linux)
 ```
 
 Sans argument, Zaxnes ouvre son **écran d'accueil** : il rappelle le chemin **Fichier ▸ Ouvrir une
@@ -384,7 +386,7 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 
 > **Un second dossier de profils, à côté de l'exécutable.** Quel que soit le mode — normal,
 > portable ou `--userdata` —, Zaxnes parcourt **toujours** un dossier `profiles` placé à côté de
-> `Zaxnes.exe`, en plus du vôtre. La version publiée le fournit vide, avec un `README.txt` ;
+> `zaxnes.exe`, en plus du vôtre. La version publiée le fournit vide, avec un `README.txt` ;
 > déposez-y vos `.3dn` et ils apparaissent dans la bibliothèque au lancement suivant. Ce dossier
 > n'est jamais écrit, déplacé ni supprimé : vos imports vont toujours dans **votre** dossier de
 > données, et Zaxnes fonctionne même s'il est en lecture seule (sous `Program Files`, par
@@ -546,7 +548,7 @@ bibliothèque, sans redémarrage, avec le titre que porte le profil lui-même.
 En ligne de commande, sans ouvrir de fenêtre :
 
 ```
-Zaxnes.exe --import-3dsen "C:\Program Files (x86)\Steam\steamapps\common\3dSen"
+zaxnes.exe --import-3dsen "C:\Program Files (x86)\Steam\steamapps\common\3dSen"
 ```
 
 Le code de sortie est `0` quand tout s'est bien passé, `1` quand aucun bundle n'a été trouvé, que
@@ -565,11 +567,11 @@ Détails utiles :
 
 ## 10. Captures hors écran, sans fenêtre
 
-L'outil `Zax.Harness` rend des scènes dans un contexte OpenGL **caché** et écrit des PNG. Il
+L'outil `zax-harness` (crate `rust/crates/zax-harness`) rend des scènes dans un contexte OpenGL **caché** et écrit des PNG. Il
 sert à vérifier le rendu sans ROM et à mesurer les temps de frame.
 
 ```
-tools\Zax.Harness\bin\Release\net10.0\Zax.Harness.exe render --out captures
+cargo run --release -p zax-harness -- render --out captures
 ```
 
 Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
@@ -579,25 +581,14 @@ Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-sce
 et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
 
-La commande `stress` rejoue en boucle le banc de mesure des jeux de référence — plusieurs jeux
-à la suite dans un seul contexte GL — pour traquer une faute intermittente (`spec/changes/Q-062.md`).
-Elle signale toute exception dès son lancer, avec la pile vue du site de lancer :
-
-```
-Zax.Harness.exe stress --games 3 --warmup 600 --frames 1800
-Zax.Harness.exe stress --no-gl        (émulation et conversion seules)
-Zax.Harness.exe stress --threaded     (émulation sur un fil, rendu sur le fil du contexte GL)
-```
-
 La commande `lua-api` écrit l'API que les scripts voient réellement, une ligne par membre :
 
 ```
-Zax.Harness.exe lua-api --out api.txt
+cargo run --release -p zax-harness -- lua-api --out api.txt
 ```
 
-Du côté de l'interface, `Zaxnes --ui-shots <dossier>` place l'interface dans chacun de ses
-écrans, relit la fenêtre et écrit un PNG par écran. C'est ce qui produit les captures de
-`verify/round1/l9/`.
+Du côté de l'interface, `zaxnes --ui-shots <dossier>` place l'interface dans chacun de ses
+écrans, relit la fenêtre et écrit un PNG par écran.
 
 ## 11. Ce qui n'est pas encore là
 
@@ -623,32 +614,21 @@ restés indécis ont été tranchés depuis par `AMD-022` (`spec/changes/Q-059.m
 
 ## 12. Pointer les vérifications sur votre dossier de ROMs
 
-**Aucune ROM n'est fournie et aucun chemin de machine n'est écrit dans ce dépôt.** Les
-vérifications qui ont besoin d'une vraie ROM lisent le dossier nommé par la variable
-d'environnement **`ZAXNES_ROMS`** :
+**Aucune ROM n'est fournie et aucun chemin de machine n'est écrit dans ce dépôt.** Les tests qui
+ont besoin de fichiers de l'utilisateur sont marqués `#[ignore]` et lisent les dossiers nommés
+par des variables d'environnement :
+
+| Variable | Dossier | Utilisée par |
+| --- | --- | --- |
+| `ZAXNES_ROMS` | vos ROMs `.nes` | les tests qui jouent une ROM commerciale |
+| `ZAXNES_PROFILES` | le dossier qui contient `profiles/` | les tests des profils, des scripts et du moteur 3D |
+| `ZAXNES_3DSEN_INSTALL` | une installation de 3dSen PC | les tests de l'import 3dSen |
 
 ```
-setx ZAXNES_ROMS "D:\mes-roms\nes"        (une fois pour toutes ; rouvrir la console ensuite)
-$env:ZAXNES_ROMS = "D:\mes-roms\nes"      (pour la session de console en cours)
-```
-
-| Ce que la variable sert | Comportement sans elle |
-| --- | --- |
-| `build\publish.ps1` : les deux lancements de vérification qui jouent une ROM (`REQ-PUB-001`) | ils sont **ignorés** avec un avertissement ; la publication, elle, se fait entièrement |
-| les tests qui demandent une ROM commerciale (`REQ-ACC-020`, `REQ-ACC-030`, `REQ-CORE-062`, `REQ-CORE-114`, `REQ-LUA-110`…) | ils sont **ignorés** (`skipped`), pas en échec, avec un motif qui nomme `ZAXNES_ROMS` |
-| `Zax.Harness.exe stress` | la commande s'arrête avec un message demandant `--roms` ou la variable |
-
-Le dossier se donne aussi en ligne de commande, ce qui l'emporte sur la variable :
-`publish.ps1 -Roms <dossier>` et `Zax.Harness.exe stress --roms <dossier>`.
-
-Les tests qui ont besoin d'une ROM de l'utilisateur portent le trait `Requires=UserRoms`, ceux
-qui ont besoin des profils extraits `Requires=OriginalAssets` ; la suite publique est donc :
-
-```
-dotnet test -c Release --filter "Requires!=OriginalAssets&Requires!=UserRoms"
-dotnet test -c Release --filter "Requires=UserRoms"     (avec ZAXNES_ROMS défini)
+$env:ZAXNES_ROMS = "D:\mes-roms\nes"      (PowerShell, pour la session en cours)
+export ZAXNES_ROMS=$HOME/roms/nes          (shell POSIX)
+cargo test --workspace -- --include-ignored
 ```
 
 Les noms de fichiers attendus sont ceux des dumps No-Intro (par exemple
-`Super Mario Bros. 3 (USA).nes`) ; un test ignoré nomme dans son motif le fichier qu'il n'a pas
-trouvé.
+`Super Mario Bros. 3 (USA).nes`). Le détail est dans `rust/LOCAL-CHECKS.md`.
