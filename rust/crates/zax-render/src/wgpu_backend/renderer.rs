@@ -558,7 +558,7 @@ impl WgpuSceneRenderer {
 
         #[allow(clippy::cast_precision_loss)] // Target sizes are far below 2^24.
         let aspect = target.width as f32 / target.height as f32;
-        let view = scene.camera.build_view(scene.clipping, aspect);
+        let view = scene.camera.build_view(scene.view_clipping(), aspect);
         self.last_view = view;
 
         let started = std::time::Instant::now();

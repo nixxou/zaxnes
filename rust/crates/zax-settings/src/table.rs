@@ -615,6 +615,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_libretro(enabled_disabled()),
     );
     emulation_rust_only(out);
+    video_rust_only(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1193,5 +1194,29 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         )
         .with_text_options(&[LANGUAGE_ENGLISH, LANGUAGE_FRENCH])
         .with_label("Language"),
+    );
+}
+
+fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): how much wider than 256 pixels the picture of a ROM made for
+    // the widescreen extension may be (zax-nes::wide). The other ROMs never see it. Not exposed
+    // to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoWidescreen,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Off"),
+            opt(1, "Window"),
+            opt(2, "3:2"),
+            opt(3, "16:10"),
+            opt(4, "16:9"),
+        ]))
+        .with_label("Widescreen"),
     );
 }

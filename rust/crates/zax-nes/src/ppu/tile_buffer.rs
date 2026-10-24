@@ -10,6 +10,9 @@ use crate::TileRecord;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TileBuffer {
     records: Vec<TileRecord>,
+    /// Background records the current frame may hold: [`TileBuffer::MAX_BACKGROUND`], or more
+    /// when the widescreen extension captures extra columns.
+    background_limit: usize,
     background_count: usize,
     sprite_count: usize,
     dropped_background: usize,
@@ -29,14 +32,20 @@ impl TileBuffer {
     /// Maximum number of sprite records in one frame (REQ-CORE-032).
     pub const MAX_SPRITES: usize = 128;
 
-    /// Maximum number of records in one frame.
-    pub const CAPACITY: usize = Self::MAX_BACKGROUND + Self::MAX_SPRITES;
+    /// Maximum number of background records in one widescreen frame: 31 rows of the 33
+    /// columns plus the extra columns of the widest margin on both sides.
+    #[allow(clippy::cast_sign_loss)] // A positive constant.
+    pub const MAX_WIDE_BACKGROUND: usize = 31 * (33 + 2 * crate::wide::MAX_EXTRA_COLUMNS as usize);
+
+    /// Maximum number of records in one frame, widescreen included.
+    pub const CAPACITY: usize = Self::MAX_WIDE_BACKGROUND + Self::MAX_SPRITES;
 
     /// Creates an empty buffer with its full capacity reserved.
     #[must_use]
     pub fn new() -> Self {
         Self {
             records: Vec::with_capacity(Self::CAPACITY),
+            background_limit: Self::MAX_BACKGROUND,
             background_count: 0,
             sprite_count: 0,
             dropped_background: 0,
@@ -62,6 +71,13 @@ impl TileBuffer {
         self.dropped_sprites
     }
 
+    /// Sets how many extra background columns each side of the frame being captured has, which
+    /// raises the background limit accordingly (widescreen extension).
+    pub fn set_extra_columns(&mut self, extra: i32) {
+        let extra = usize::try_from(extra.clamp(0, crate::wide::MAX_EXTRA_COLUMNS)).unwrap_or(0);
+        self.background_limit = 31 * (33 + 2 * extra);
+    }
+
     /// Empties the buffer at the start of a rendered frame.
     pub fn clear(&mut self) {
         self.records.clear();
@@ -74,7 +90,7 @@ impl TileBuffer {
     /// Appends `record`, dropping it when its kind is full.
     pub fn add(&mut self, record: TileRecord) {
         if record.background {
-            if self.background_count >= Self::MAX_BACKGROUND {
+            if self.background_count >= self.background_limit {
                 self.dropped_background += 1;
                 return;
             }

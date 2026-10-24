@@ -208,6 +208,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.pipeline", "Scripts in parallel with the drawing"),
     ("setting.video.dynamic_resolution", "Automatic resolution"),
     ("setting.video.backend", "Graphics API (at the next start)"),
+    ("setting.video.widescreen", "Widescreen (ROMs made for it)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
     ("setting.audio.mute", "Mute"),

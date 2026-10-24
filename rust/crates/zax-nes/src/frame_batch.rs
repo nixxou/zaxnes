@@ -18,4 +18,8 @@ pub struct FrameBatch<'a> {
     /// Width in NES pixels of the unreliable bands on the top *and* bottom edges
     /// (REQ-CORE-046).
     pub mask_y: i32,
+    /// Widescreen margin of the frame, in NES pixels on each side: 0 for a standard frame.
+    /// Background records then reach `-margin - 7` and sprite records `-margin`, and both go
+    /// up to `255 + margin`.
+    pub margin: i32,
 }

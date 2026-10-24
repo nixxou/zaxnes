@@ -51,13 +51,18 @@ impl Ppu2C02 {
 
     pub(super) fn reset_tile_state(&mut self) {
         self.tiles.clear();
+        self.frame_margin = 0;
+        self.tiles.set_extra_columns(0);
         self.mask_x = 0;
         self.mask_y = 0;
     }
 
-    /// Starts a new rendered frame: the record list of the previous one is dropped.
+    /// Starts a new rendered frame: the record list of the previous one is dropped, and the
+    /// widescreen margin of the new one is latched.
     pub(super) fn begin_rendered_frame(&mut self) {
         self.tiles.clear();
+        self.frame_margin = self.wide.margin();
+        self.tiles.set_extra_columns(self.frame_margin / 8);
     }
 
     /// Runs the captures owed by visible line `line` at its first dot: the sprite band, and
@@ -145,15 +150,32 @@ impl Ppu2C02 {
         #[allow(clippy::cast_possible_truncation)] // line is 0..240.
         let y = (line - 1) as i16;
 
-        for k in 0..=32u16 {
-            let x = (8 * i32::from(k)) - fine_x_scroll;
-            if x >= SCREEN_WIDTH_I32 {
-                // k = 32 with fine X at 0: a row has 32 records, otherwise 33
-                // (REQ-CORE-038).
+        // Widescreen extension: `extra` more columns on each side, read on through the
+        // horizontally neighbouring nametables (a 512-pixel plane that wraps), and only those
+        // inside the visible range of this band kept. Standard frames have extra = 0.
+        let extra = self.frame_margin / 8;
+        let (visible_low, visible_high) = if extra > 0 {
+            self.wide.visible_range()
+        } else {
+            (0, SCREEN_WIDTH_I32)
+        };
+        let row_width = 33 + (2 * extra);
+
+        for k in -extra..=(32 + extra) {
+            let x = (8 * k) - fine_x_scroll;
+            if x >= SCREEN_WIDTH_I32 + (8 * extra) {
+                // k = 32 + extra with fine X at 0: a row has 32 records, otherwise 33
+                // (REQ-CORE-038), plus the extra columns.
                 continue;
             }
 
-            let mut column = coarse_x + k;
+            if extra > 0 && (x + 8 <= visible_low || x >= visible_high) {
+                continue;
+            }
+
+            let wrapped = (i32::from(coarse_x) + k).rem_euclid(64);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..64.
+            let mut column = wrapped as u16;
             let mut table = nametable;
             if column > 31 {
                 // The horizontally neighbouring nametable, mirroring then applied.
@@ -178,13 +200,13 @@ impl Ppu2C02 {
                 cartridge.advance_chr_latch(i32::from(pattern_table), i32::from(tile));
             }
 
-            #[allow(clippy::cast_possible_truncation)] // x is -7..256.
+            #[allow(clippy::cast_possible_truncation)] // x is -103..352.
             let record = TileRecord::new(
                 plane0,
                 plane1,
                 x as i16,
                 y,
-                (row_index * 33) + i32::from(k),
+                (row_index * row_width) + k + extra,
                 false,
                 false,
                 false,
@@ -240,8 +262,19 @@ impl Ppu2C02 {
             let tile = u16::from(self.oam[(n * 4) + 1]);
             let attribute = self.oam[(n * 4) + 2];
             let oam_x = self.oam[(n * 4) + 3];
+            let x = if self.frame_margin > 0 {
+                let x = self.wide.sprite_x(n, oam_x);
+                let (visible_low, visible_high) = self.wide.visible_range();
+                if x + 8 <= visible_low || x >= visible_high {
+                    continue;
+                }
+                x
+            } else {
+                i32::from(oam_x)
+            };
             let sprite = SpriteAttributes {
-                x: oam_x,
+                #[allow(clippy::cast_possible_truncation)] // -32768..32767 by construction.
+                x: x as i16,
                 mirror_h: (attribute & 0x40) != 0,
                 mirror_v: (attribute & 0x80) != 0,
                 hidden: (attribute & 0x20) != 0,
@@ -319,7 +352,7 @@ impl Ppu2C02 {
         self.tiles.add(TileRecord::new(
             plane0,
             plane1,
-            i16::from(sprite.x),
+            sprite.x,
             y,
             index,
             sprite.mirror_h,
@@ -460,7 +493,7 @@ impl Ppu2C02 {
 /// The OAM fields one sprite capture copies into its records.
 #[allow(clippy::struct_excessive_bools)] // The three attribute flags of the OAM byte.
 struct SpriteAttributes {
-    x: u8,
+    x: i16,
     mirror_h: bool,
     mirror_v: bool,
     hidden: bool,

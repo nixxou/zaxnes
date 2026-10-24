@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use sdl2::event::{Event, WindowEvent};
 use time::OffsetDateTime;
 use zax_engine3d::draw_list::FrameDrawList;
+use zax_engine3d::frame::ConversionFrame;
 use zax_platform::audio::PREFERRED_SAMPLE_RATE;
 use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::icon;
@@ -1417,8 +1418,37 @@ fn update_cursor(
     }
 }
 
+/// The widescreen margin, in NES pixels on each side, that the `video.widescreen` choice offers
+/// a ROM made for the extension: none, enough to fill the scene's `size` (width, height) with a
+/// 240-line picture, or enough for a fixed ratio. Always a whole number of tiles, at most
+/// [`zax_nes::wide::MAX_MARGIN`].
+fn widescreen_margin(choice: i32, size: (i32, i32)) -> i32 {
+    #[allow(clippy::cast_precision_loss)] // Window sizes.
+    let ratio = match choice {
+        1 if size.1 > 0 => size.0 as f32 / size.1 as f32,
+        2 => 3.0 / 2.0,
+        3 => 16.0 / 10.0,
+        4 => 16.0 / 9.0,
+        _ => return 0,
+    };
+    let each_side = (240.0 * ratio - 256.0) / 2.0;
+    if each_side <= 0.0 {
+        return 0;
+    }
+    #[allow(clippy::cast_possible_truncation)] // Clamped to 0..=96 right after.
+    let tiles = (each_side / 8.0).ceil() as i32;
+    (tiles * 8).clamp(0, zax_nes::wide::MAX_MARGIN)
+}
+
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
+    let widescreen = widescreen_margin(
+        host.settings().get(SettingId::VideoWidescreen).as_int(),
+        state.last_render_size,
+    );
+    if let Some(session) = host.session_mut() {
+        session.core_mut().set_widescreen_margin(widescreen);
+    }
     let (session, scene) = host.session_and_scene_mut();
     let Some(session) = session else {
         scene.two_dimensional_mode = false;
@@ -1428,6 +1458,12 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     scene.nes_background_color = session.nes_background_color();
     scene.emulated_time = session.emulated_time();
     scene.clipping = session.engine().settings().clipping;
+    #[allow(clippy::cast_precision_loss)] // 0..=96.
+    let margin = session
+        .engine()
+        .published_frame()
+        .map_or(0, ConversionFrame::margin) as f32;
+    scene.margin = margin;
     // AMD-009 (Q-022): the 2D mode shows the core's pixel frame on the NES plane. AMD-017
     // (Q-037) adds the hot F11 toggle to the "2D Mode" profile of REQ-SCN-055: the host combines
     // the two, and nothing of the session is reloaded to switch.

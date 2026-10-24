@@ -18,6 +18,7 @@ pub mod rom;
 pub mod state;
 mod tile_record;
 mod video_info;
+pub mod wide;
 
 pub use frame_batch::FrameBatch;
 pub use input::{ControllerPortType, ZapperPosition};

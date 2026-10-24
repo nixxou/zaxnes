@@ -236,6 +236,8 @@ pub struct FrameShape {
     restored_from_pinned_frame: bool,
     restored_from: Option<ShapeId>,
     mask: Cell,
+    /// Widescreen margin of the batch, in pixels on each side (0 for a standard frame).
+    margin: i32,
     /// The script layer's handle cache (SPEC-05 REQ-LUA-043).
     pub script_handle: ScriptHandleSlot,
     /// Size constraint of the frame pattern, copied from the reference pattern.
@@ -374,11 +376,12 @@ impl FrameShape {
     }
 
     /// True when the shape is fully away from the unreliable border bands (REQ-E3D-045):
-    /// `pStart.x > mX`, `pEnd.x + mX < 255`, `pStart.y > mY` and `pEnd.y + mY < 239`.
+    /// `pStart.x > mX`, `pEnd.x + mX < 255`, `pStart.y > mY` and `pEnd.y + mY < 239`. On a
+    /// widescreen frame the left and right edges are those of the wider picture.
     #[must_use]
     pub const fn inside(&self) -> bool {
-        self.pixel_start.x > self.mask.x
-            && self.pixel_end.x + self.mask.x < 255
+        self.pixel_start.x > self.mask.x - self.margin
+            && self.pixel_end.x + self.mask.x < 255 + self.margin
             && self.pixel_start.y > self.mask.y
             && self.pixel_end.y + self.mask.y < 239
     }
@@ -458,9 +461,10 @@ impl FrameShape {
         }
     }
 
-    fn reset(&mut self, background: bool, mask: Cell) {
+    fn reset(&mut self, background: bool, mask: Cell, margin: i32) {
         self.background = background;
         self.mask = mask;
+        self.margin = margin;
         self.tiles.clear();
         self.images.clear();
         self.instances.clear();
@@ -818,6 +822,7 @@ pub struct ConversionFrame {
     pinned_rects: Vec<Rect>,
     palette: FramePalette,
     mask: Cell,
+    margin: i32,
     counter: i32,
     background_shape_count: usize,
     background_tile_count: usize,
@@ -837,7 +842,7 @@ impl ConversionFrame {
     pub fn new() -> Self {
         let mut background_cells = Vec::with_capacity(grid::CELL_COUNT);
         for y in 0..grid::HEIGHT {
-            for x in 0..grid::WIDTH {
+            for x in -grid::WIDE_COLUMNS..grid::STANDARD_WIDTH + grid::WIDE_COLUMNS {
                 background_cells.push(FrameTile::new(Cell::new(x, y), grid::index(x, y), true));
             }
         }
@@ -857,6 +862,7 @@ impl ConversionFrame {
             pinned_rects: Vec::new(),
             palette: FramePalette::default(),
             mask: Cell::default(),
+            margin: 0,
             counter: 0,
             background_shape_count: 0,
             background_tile_count: 0,
@@ -1001,6 +1007,12 @@ impl ConversionFrame {
         self.mask
     }
 
+    /// The widescreen margin of the batch, in pixels on each side: 0 for a standard frame.
+    #[must_use]
+    pub const fn margin(&self) -> i32 {
+        self.margin
+    }
+
     /// Number of emulated frames since the game started (REQ-E3D-043).
     #[must_use]
     pub const fn counter(&self) -> i32 {
@@ -1078,12 +1090,12 @@ impl ConversionFrame {
 
     /// Empties the frame: no shape, no tile, counter 0 (REQ-E3D-281).
     pub fn clear(&mut self) {
-        self.begin_batch(0, Cell::default());
+        self.begin_batch(0, Cell::default(), 0);
         self.palette.clear();
     }
 
     /// Starts a new batch: same pools, no shape, no tile.
-    pub(crate) fn begin_batch(&mut self, counter: i32, mask: Cell) {
+    pub(crate) fn begin_batch(&mut self, counter: i32, mask: Cell, margin: i32) {
         self.shape_pool.extend_from_slice(&self.shapes);
         self.shapes.clear();
         self.extra_count = 0;
@@ -1098,6 +1110,7 @@ impl ConversionFrame {
         self.script_error_count = 0;
         self.counter = counter;
         self.mask = mask;
+        self.margin = margin;
         for tile in self
             .background_cells
             .iter_mut()
@@ -1166,8 +1179,8 @@ impl ConversionFrame {
             self.shape_store.push(FrameShape::default());
             ShapeId(self.shape_store.len() - 1)
         });
-        let mask = self.mask;
-        self.shape_mut(id).reset(background, mask);
+        let (mask, margin) = (self.mask, self.margin);
+        self.shape_mut(id).reset(background, mask, margin);
         id
     }
 
