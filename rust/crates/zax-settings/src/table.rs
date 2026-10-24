@@ -1253,6 +1253,13 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
             opt(4, "+20 %"),
             opt(5, "+25 %"),
             opt(6, "+30 %"),
+            opt(7, "+40 %"),
+            opt(8, "+50 %"),
+            opt(9, "+75 %"),
+            opt(10, "+100 %"),
+            opt(11, "+150 %"),
+            opt(12, "+200 %"),
+            opt(13, "+300 %"),
         ]))
         .with_label("Widescreen extra width"),
     );
