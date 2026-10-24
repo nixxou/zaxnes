@@ -26,6 +26,8 @@ pub mod sky;
 pub mod smoothing;
 pub mod statistics;
 pub mod target;
+#[cfg(feature = "wgpu")]
+pub mod wgpu_backend;
 
 pub use gl::api::GlError;
 pub use renderer::{RenderError, SceneRenderer};

@@ -12,13 +12,24 @@ publish.workspace = true
 # not part of the renderer's API, which takes the host's `glow::Context`; it lives here because
 # this is the crate allowed to hold `unsafe` GL code (RUST-PORT-PLAN §2).
 offscreen = ["dep:khronos-egl", "dep:libloading", "dep:windows-sys"]
+# The wgpu backend of the renderer (Vulkan, and DirectX 12 on Windows), desktop only: the
+# handheld package never turns it on.
+wgpu = ["dep:wgpu", "dep:pollster"]
 
 [dependencies]
 glow = "0.16"
 png = "0.17"
+pollster = { version = "0.4", optional = true }
 thiserror = "2"
 zax-engine3d = { path = "../zax-engine3d" }
 zax-profiles = { path = "../zax-profiles" }
+wgpu = { version = "29.0.4", optional = true, default-features = false, features = [
+    "std",
+    "parking_lot",
+    "dx12",
+    "vulkan",
+    "wgsl",
+] }
 
 [target.'cfg(not(windows))'.dependencies]
 khronos-egl = { version = "6", features = ["dynamic"], optional = true }

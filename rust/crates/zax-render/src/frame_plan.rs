@@ -198,6 +198,12 @@ pub struct FramePlan<M, T> {
     pub instance_data: Vec<u8>,
     /// Opaque tiles drawn transparent this frame because they hide the target (REQ-SCN-022).
     pub occluders: u32,
+    /// The casters cut into instanced runs ([`Self::lay_out_casters`]), and their placements
+    /// (the wgpu backend's; the GL path draws the casters one by one).
+    #[cfg_attr(not(feature = "wgpu"), allow(dead_code))]
+    pub caster_runs: Vec<InstanceRun>,
+    #[cfg_attr(not(feature = "wgpu"), allow(dead_code))]
+    pub caster_data: Vec<u8>,
     scratch: OpaqueScratch<M, T>,
 }
 
@@ -207,6 +213,8 @@ impl<M, T> Default for FramePlan<M, T> {
             lists: DrawLists::default(),
             instance_data: Vec::new(),
             occluders: 0,
+            caster_runs: Vec::new(),
+            caster_data: Vec::new(),
             scratch: OpaqueScratch::default(),
         }
     }
@@ -500,6 +508,51 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             scratch.order_range(group.start, group.end, false);
             add_runs(&lists.hud, scratch, &mut lists.hud_runs, data, alignment);
             group.runs = (first, lists.hud_runs.len());
+        }
+    }
+}
+
+impl<M: Copy + Eq, T> FramePlan<M, T> {
+    /// Cuts the casters into runs of at most [`INSTANCES_PER_DRAW`] consecutive casters that
+    /// share their mesh, their deformation but its tile position, and their side of the mirror,
+    /// and lays their placements out in [`Self::caster_data`] (each run at a multiple of
+    /// `alignment`). The casters keep their order, so the depth map is the same as drawn one by
+    /// one.
+    #[cfg_attr(not(feature = "wgpu"), allow(dead_code))]
+    pub fn lay_out_casters(&mut self, alignment: usize) {
+        let casters = &self.lists.casters;
+        let (runs, data) = (&mut self.caster_runs, &mut self.caster_data);
+        runs.clear();
+        data.clear();
+        let key = |item: &DrawItem<M, T>| {
+            (
+                item.mesh,
+                interop::determinant(&item.model) < 0.0,
+                item.deform.as_ref().map(deform_bits),
+            )
+        };
+        let mut first = 0;
+        while first < casters.len() {
+            let shared = key(&casters[first]);
+            let mut last = first + 1;
+            while last < casters.len()
+                && last - first < INSTANCES_PER_DRAW
+                && key(&casters[last]) == shared
+            {
+                last += 1;
+            }
+
+            let offset = data.len().next_multiple_of(alignment);
+            data.resize(offset, 0);
+            for item in &casters[first..last] {
+                push_placement(data, item);
+            }
+            runs.push(InstanceRun {
+                first,
+                count: last - first,
+                offset,
+            });
+            first = last;
         }
     }
 }

@@ -37,6 +37,8 @@ pub enum HarnessError {
     Png(PngError),
     /// Captures differ from the reference by more than the comparison allows.
     Mismatch(String),
+    /// The wgpu device or renderer failed.
+    Gpu(String),
 }
 
 impl fmt::Display for HarnessError {
@@ -48,7 +50,8 @@ impl fmt::Display for HarnessError {
             | Self::Profile(message)
             | Self::Format(message)
             | Self::Rom(message)
-            | Self::Mismatch(message) => f.write_str(message),
+            | Self::Mismatch(message)
+            | Self::Gpu(message) => f.write_str(message),
             Self::Script(error) => write!(f, "{error}"),
             Self::Engine(error) => write!(f, "{error}"),
             Self::Text(error) => write!(f, "{error}"),
