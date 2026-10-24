@@ -373,6 +373,12 @@ impl HostWindow {
         self.swap_interval
     }
 
+    /// The period of the frame cap in force, if any.
+    #[must_use]
+    pub const fn frame_cap(&self) -> Option<Duration> {
+        self.frame_cap
+    }
+
     /// Sleeps until the frame cap's next frame is due; returns at once without a cap.
     pub fn pace(&mut self) {
         let Some(period) = self.frame_cap else {

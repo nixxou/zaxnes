@@ -242,6 +242,13 @@ impl SceneRenderer {
         self.timer.is_some()
     }
 
+    /// Keeps the renderer's own buffers at least `width` × `height`, whatever size the target
+    /// has: a host whose target size changes often (the automatic resolution) avoids a
+    /// reallocation at each change. `(0, 0)` gives the room back.
+    pub const fn reserve_target(&mut self, width: i32, height: i32) {
+        self.linear.reserve(width, height);
+    }
+
     /// What the last rendered frame cost (REQ-SCN-064).
     #[must_use]
     pub const fn statistics(&self) -> &RenderStatistics {

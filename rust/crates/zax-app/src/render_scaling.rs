@@ -7,6 +7,8 @@
 //! "Render Tex", it is the view scaled by `video.res_scale_factor` (1, 2/3, 1/2, 1/3 or 1/4) and
 //! the blit stretches it back, filtered bilinearly (REQ-SCN-063).
 
+use std::time::Duration;
+
 /// The render method that draws at the view's own resolution.
 pub const DIRECT_METHOD: i32 = 0;
 /// The render method the resolution scale applies to.
@@ -44,173 +46,163 @@ fn scaled(size: i32, factor: f32) -> i32 {
     ((size as f32 * factor).round() as i32).max(1)
 }
 
-/// The scales of the automatic resolution (`video.dynamic_resolution`, Rust-only), native first.
-const DYNAMIC_SCALES: [f32; 4] = [1.0, 5.0 / 6.0, 2.0 / 3.0, 0.5];
+/// The lowest scale of the automatic resolution (`video.dynamic_resolution`, Rust-only).
+const LOWEST_SCALE: f32 = 0.5;
 
-/// The scale the automatic resolution starts at: the handheld default before it existed.
-const DYNAMIC_START: usize = 2;
+/// The scale it starts at: the handheld default before it existed.
+const START_SCALE: f32 = 2.0 / 3.0;
 
-/// Share of the frame budget above which the GPU is late.
-const BUSY_SHARE: f64 = 0.85;
+/// A rise: one hundredth of the view, every few frames (+1 % every 50 ms at 60 Hz).
+const RISE_STEP: f32 = 0.01;
+const RISE_FRAMES: u32 = 3;
 
-/// Late measures in a row that lower the scale.
-const BUSY_MEASURES: u32 = 3;
+/// Within this of the scale that last fell, one rise a second only: the scale does not keep
+/// climbing back into the same late frames.
+const NEAR_FAILED: f32 = 0.025;
+const NEAR_RISE_FRAMES: u32 = 60;
 
-/// Share of the frame budget the next scale up has to fit in, estimated from its pixel count.
-const ROOM_SHARE: f64 = 0.7;
+/// Frames after which the scale that fell is forgotten (10 s at 60 Hz).
+const FORGET_FRAMES: u32 = 600;
 
-/// Measures in a row with that room that raise the scale (about a second at 60 Hz).
-const ROOM_MEASURES: u32 = 60;
+/// A fall multiplies the scale by this.
+const FALL_FACTOR: f32 = 0.9;
 
-/// Measures in a row without a late one, at a reduced scale, before the next scale up is tried
-/// whatever the estimate says (about 5 s at 60 Hz). A handheld's GPU lowers its clock when the
-/// load is light, so the time it measures overstates the cost of the next scale: the estimate
-/// alone would never let the scale rise.
-const PROBE_MEASURES: u32 = 300;
+/// Frames late because of the drawing, within [`FALL_WINDOW`] frames of the first, that make
+/// the scale fall: a lone hitch does not.
+const FALL_MISSES: u32 = 2;
+const FALL_WINDOW: u32 = 10;
 
-/// The longest wait before a probe, which doubles after each probe that did not hold (about
-/// 80 s at 60 Hz).
-const PROBE_MEASURES_MAX: u32 = 4800;
+/// Frames without a rise after a fall.
+const PAUSE_FRAMES: u32 = 30;
 
-/// Measures after a rise during which the GPU may bring its clock up: the scale then falls
-/// back only after [`SETTLE_BUSY_MEASURES`] late measures in a row.
-const SETTLE_MEASURES: u32 = 90;
+/// A frame is late past this share of its budget (a missed vertical blank lasts two).
+const LATE_SHARE: f64 = 1.25;
 
-/// Late measures in a row that lower the scale while it settles after a rise.
-const SETTLE_BUSY_MEASURES: u32 = 10;
+/// The CPU work of a late frame above this share of its budget is what made it late.
+const WORK_SHARE: f64 = 0.9;
 
-/// The automatic resolution: the render scale follows the GPU time of the scene passes, one
-/// step at a time, with a margin between lowering and raising so that it does not flicker. It
-/// rises when the next scale fits by estimate for a second, or, every few seconds without a
-/// late frame, by trying it: a try that does not hold falls back and the next waits twice as
-/// long.
-#[derive(Debug, Clone)]
-pub struct DynamicResolution {
-    step: usize,
-    busy: u32,
-    room: u32,
-    /// Measures in a row without a late one.
-    calm: u32,
-    /// The calm measures the next probe waits for.
-    probe_wait: u32,
-    /// Measures since the last rise, while it settles.
-    settling: Option<u32>,
-    /// Whether the last rise was a probe.
-    probed: bool,
+/// How a displayed frame went, for the automatic resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameOutcome {
+    /// On time.
+    OnTime,
+    /// Late while the work of the CPU fit in the budget: the drawing made it late (the GPU, or
+    /// the driver waiting for it), which a lower resolution relieves.
+    LateDrawing,
+    /// Late because the work of the CPU alone took the budget (the emulation, the scripts, the
+    /// conversion): a lower resolution would not help.
+    LateWork,
 }
 
-impl Default for DynamicResolution {
+/// The outcome of a displayed frame that lasted `interval` (start to start, the swap included)
+/// and whose work before the swap took `work`, for a frame `budget`.
+#[must_use]
+pub fn frame_outcome(interval: Duration, work: Duration, budget: Duration) -> FrameOutcome {
+    let budget = budget.as_secs_f64();
+    if interval.as_secs_f64() <= budget * LATE_SHARE {
+        FrameOutcome::OnTime
+    } else if work.as_secs_f64() > budget * WORK_SHARE {
+        FrameOutcome::LateWork
+    } else {
+        FrameOutcome::LateDrawing
+    }
+}
+
+/// The automatic resolution: a scale of the view between 50 and 100 %, which climbs by 1 %
+/// every few frames on time and falls by a tenth when frames come late because of the drawing.
+/// Near the scale that last fell it climbs slowly, so that it settles just under what the GPU
+/// holds instead of swinging around it; frames late because of the CPU leave it alone.
+#[derive(Debug, Clone)]
+pub struct AutomaticScale {
+    scale: f32,
+    /// Frames on time since the last change.
+    since_change: u32,
+    /// Frames late because of the drawing in the current window, and the window's age.
+    misses: u32,
+    window: u32,
+    /// The scale that last fell, and the frames since.
+    failed: Option<(f32, u32)>,
+    /// Frames left without a rise.
+    pause: u32,
+}
+
+impl Default for AutomaticScale {
     fn default() -> Self {
         Self {
-            step: DYNAMIC_START,
-            busy: 0,
-            room: 0,
-            calm: 0,
-            probe_wait: PROBE_MEASURES,
-            settling: None,
-            probed: false,
+            scale: START_SCALE,
+            since_change: 0,
+            misses: 0,
+            window: 0,
+            failed: None,
+            pause: 0,
         }
     }
 }
 
-impl DynamicResolution {
+impl AutomaticScale {
     /// The scale in force.
     #[must_use]
     pub const fn factor(&self) -> f32 {
-        DYNAMIC_SCALES[self.step]
+        self.scale
     }
 
-    /// Takes one measure: the GPU time of a frame's scene passes, for a frame `budget`. Returns
-    /// whether the scale changed.
-    pub fn record(&mut self, gpu: std::time::Duration, budget: std::time::Duration) -> bool {
-        let share = gpu.as_secs_f64() / budget.as_secs_f64().max(f64::EPSILON);
-        let settled = self.settle();
-        if share > BUSY_SHARE {
-            self.room = 0;
-            self.calm = 0;
-            self.busy += 1;
-            let needed = if settled {
-                BUSY_MEASURES
-            } else {
-                SETTLE_BUSY_MEASURES
-            };
-            if self.busy >= needed && self.step + 1 < DYNAMIC_SCALES.len() {
-                if !settled && self.probed {
-                    // The try did not hold: the next one waits longer.
-                    self.probe_wait = (self.probe_wait * 2).min(PROBE_MEASURES_MAX);
+    /// Takes the outcome of one displayed frame. Returns whether the scale changed.
+    pub fn record(&mut self, outcome: FrameOutcome) -> bool {
+        if let Some((_, age)) = &mut self.failed {
+            *age += 1;
+            if *age >= FORGET_FRAMES {
+                self.failed = None;
+            }
+        }
+        if self.misses > 0 {
+            self.window += 1;
+            if self.window > FALL_WINDOW {
+                self.misses = 0;
+            }
+        }
+        match outcome {
+            FrameOutcome::LateDrawing => {
+                if self.misses == 0 {
+                    self.window = 0;
                 }
-                self.step += 1;
-                self.busy = 0;
-                self.settling = None;
-                self.probed = false;
-                return true;
+                self.misses += 1;
+                if self.misses < FALL_MISSES {
+                    return false;
+                }
+                let from = self.scale;
+                self.scale = (from * FALL_FACTOR).max(LOWEST_SCALE);
+                self.misses = 0;
+                self.since_change = 0;
+                self.pause = PAUSE_FRAMES;
+                self.failed = Some((from, 0));
+                return self.scale < from;
             }
+            FrameOutcome::LateWork => return false,
+            FrameOutcome::OnTime => {}
+        }
+        if self.pause > 0 {
+            self.pause -= 1;
             return false;
         }
-        self.busy = 0;
-        self.calm += 1;
-        let Some(up) = self.step.checked_sub(1) else {
-            return false;
-        };
-        let ratio = f64::from(DYNAMIC_SCALES[up] / DYNAMIC_SCALES[self.step]);
-        if share * ratio * ratio < ROOM_SHARE {
-            self.room += 1;
-            if self.room >= ROOM_MEASURES {
-                self.rise(up, false);
-                return true;
-            }
-        } else {
-            self.room = 0;
-        }
-        if self.calm >= self.probe_wait {
-            self.rise(up, true);
-            return true;
-        }
-        false
-    }
-
-    /// Counts one measure of the settling after a rise; true once it is over (or when there
-    /// was none). A probe that held through it resets the wait of the next one.
-    fn settle(&mut self) -> bool {
-        let Some(measures) = self.settling else {
-            return true;
-        };
-        if measures + 1 < SETTLE_MEASURES {
-            self.settling = Some(measures + 1);
+        if self.scale >= 1.0 {
             return false;
         }
-        self.settling = None;
-        if std::mem::take(&mut self.probed) {
-            self.probe_wait = PROBE_MEASURES;
+        self.since_change += 1;
+        let near = self
+            .failed
+            .is_some_and(|(failed, _)| self.scale + RISE_STEP > failed - NEAR_FAILED);
+        let every = if near { NEAR_RISE_FRAMES } else { RISE_FRAMES };
+        if self.since_change < every {
+            return false;
         }
+        self.since_change = 0;
+        self.scale = (self.scale + RISE_STEP).min(1.0);
         true
     }
-
-    fn rise(&mut self, up: usize, probed: bool) {
-        self.step = up;
-        self.room = 0;
-        self.calm = 0;
-        self.busy = 0;
-        self.settling = Some(0);
-        self.probed = probed;
-    }
-}
-
-/// The longest GPU time of a frame's scene passes that is taken as a measure: a timer that
-/// returns more (a driver that answers with the largest value of the result, as some do) or
-/// nothing at all is not measuring.
-pub const PLAUSIBLE_GPU_TIME: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// Whether `gpu` can be a GPU time of a frame's scene passes.
-#[must_use]
-pub fn plausible_gpu_time(gpu: std::time::Duration) -> bool {
-    !gpu.is_zero() && gpu < PLAUSIBLE_GPU_TIME
 }
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
 
     const BUDGET: Duration = Duration::from_micros(16_667);
@@ -219,107 +211,98 @@ mod tests {
         Duration::from_millis(value)
     }
 
-    #[test]
-    fn the_scale_drops_after_three_late_frames_and_stops_at_one_half() {
-        let mut scale = DynamicResolution::default();
-        assert!((scale.factor() - 2.0 / 3.0).abs() < 1.0e-6);
-        assert!(!scale.record(ms(16), BUDGET));
-        assert!(!scale.record(ms(16), BUDGET));
-        assert!(scale.record(ms(16), BUDGET));
-        assert!((scale.factor() - 0.5).abs() < 1.0e-6);
-        for _ in 0..10 {
-            scale.record(ms(30), BUDGET);
-        }
-        assert!((scale.factor() - 0.5).abs() < 1.0e-6);
+    fn close(scale: &AutomaticScale, expected: f32) -> bool {
+        (scale.factor() - expected).abs() < 1.0e-4
     }
 
     #[test]
-    fn the_scale_rises_when_the_next_step_fits_for_a_second() {
-        let mut scale = DynamicResolution::default();
-        // 2/3 -> 5/6 costs (5/4)^2 = 1.5625 times more: 7 ms becomes 10.9 ms, under 70 %.
-        for _ in 0..ROOM_MEASURES - 1 {
-            assert!(!scale.record(ms(7), BUDGET));
-        }
-        assert!(scale.record(ms(7), BUDGET));
-        assert!((scale.factor() - 5.0 / 6.0).abs() < 1.0e-6);
-        // 9 ms at 5/6 would be 13 ms at native: over 70 % of the budget, it stays.
-        for _ in 0..ROOM_MEASURES * 2 {
-            assert!(!scale.record(ms(9), BUDGET));
-        }
-        assert!((scale.factor() - 5.0 / 6.0).abs() < 1.0e-6);
+    fn a_frame_is_late_by_the_drawing_only_when_the_cpu_work_fit() {
+        assert_eq!(FrameOutcome::OnTime, frame_outcome(ms(17), ms(16), BUDGET));
+        assert_eq!(
+            FrameOutcome::LateDrawing,
+            frame_outcome(ms(33), ms(9), BUDGET)
+        );
+        assert_eq!(
+            FrameOutcome::LateWork,
+            frame_outcome(ms(33), ms(16), BUDGET)
+        );
     }
 
     #[test]
-    fn without_room_by_estimate_the_next_scale_is_tried_after_five_calm_seconds() {
-        let mut scale = DynamicResolution::default();
-        // 10 ms at 2/3 would be 15.6 ms at 5/6: no room by estimate, but no late frame either.
-        for _ in 0..PROBE_MEASURES - 1 {
-            assert!(!scale.record(ms(10), BUDGET));
+    fn the_scale_climbs_one_percent_every_three_frames_up_to_native() {
+        let mut scale = AutomaticScale::default();
+        assert!(close(&scale, 2.0 / 3.0));
+        assert!(!scale.record(FrameOutcome::OnTime));
+        assert!(!scale.record(FrameOutcome::OnTime));
+        assert!(scale.record(FrameOutcome::OnTime));
+        assert!(close(&scale, 2.0 / 3.0 + 0.01));
+        for _ in 0..200 {
+            scale.record(FrameOutcome::OnTime);
         }
-        assert!(scale.record(ms(10), BUDGET));
-        assert!((scale.factor() - 5.0 / 6.0).abs() < 1.0e-6);
+        assert!(close(&scale, 1.0));
+        assert!(!scale.record(FrameOutcome::OnTime));
     }
 
     #[test]
-    fn a_try_that_does_not_hold_falls_back_and_the_next_waits_twice_as_long() {
-        let mut scale = DynamicResolution::default();
-        for _ in 0..PROBE_MEASURES {
-            scale.record(ms(10), BUDGET);
+    fn two_frames_late_by_the_drawing_make_it_fall_a_tenth_then_pause() {
+        let mut scale = AutomaticScale::default();
+        // A lone hitch does nothing.
+        assert!(!scale.record(FrameOutcome::LateDrawing));
+        for _ in 0..FALL_WINDOW {
+            scale.record(FrameOutcome::LateWork);
         }
-        assert!((scale.factor() - 5.0 / 6.0).abs() < 1.0e-6);
-        // While it settles, three late frames are not enough to fall back...
-        for _ in 0..BUSY_MEASURES {
-            assert!(!scale.record(ms(16), BUDGET));
+        assert!(!scale.record(FrameOutcome::LateDrawing));
+        // A second one within the window falls.
+        assert!(scale.record(FrameOutcome::LateDrawing));
+        assert!(close(&scale, 2.0 / 3.0 * 0.9));
+        // No rise during the pause.
+        for _ in 0..PAUSE_FRAMES {
+            assert!(!scale.record(FrameOutcome::OnTime));
         }
-        // ...ten are.
-        for _ in BUSY_MEASURES..SETTLE_BUSY_MEASURES - 1 {
-            assert!(!scale.record(ms(16), BUDGET));
-        }
-        assert!(scale.record(ms(16), BUDGET));
-        assert!((scale.factor() - 2.0 / 3.0).abs() < 1.0e-6);
-        // The next try waits twice as long.
-        for _ in 0..PROBE_MEASURES * 2 - 1 {
-            assert!(!scale.record(ms(10), BUDGET));
-        }
-        assert!(scale.record(ms(10), BUDGET));
-        assert!((scale.factor() - 5.0 / 6.0).abs() < 1.0e-6);
+        assert!(!scale.record(FrameOutcome::OnTime));
+        assert!(!scale.record(FrameOutcome::OnTime));
+        assert!(scale.record(FrameOutcome::OnTime));
     }
 
     #[test]
-    fn a_try_that_holds_reaches_native_and_resets_the_wait() {
-        let mut scale = DynamicResolution::default();
-        for _ in 0..PROBE_MEASURES {
-            scale.record(ms(10), BUDGET);
+    fn frames_late_because_of_the_cpu_leave_the_scale_alone() {
+        let mut scale = AutomaticScale::default();
+        for _ in 0..1000 {
+            assert!(!scale.record(FrameOutcome::LateWork));
         }
-        // It holds through the settling, then the next try comes after the base wait.
-        for _ in 0..PROBE_MEASURES - 1 {
-            assert!(!scale.record(ms(11), BUDGET));
-        }
-        assert!(scale.record(ms(11), BUDGET));
-        assert!((scale.factor() - 1.0).abs() < 1.0e-6);
-        // At native there is nothing above.
-        for _ in 0..PROBE_MEASURES * 2 {
-            assert!(!scale.record(ms(11), BUDGET));
-        }
+        assert!(close(&scale, 2.0 / 3.0));
     }
 
     #[test]
-    fn only_a_plausible_gpu_time_is_a_measure() {
-        assert!(plausible_gpu_time(ms(12)));
-        assert!(!plausible_gpu_time(Duration::ZERO));
-        assert!(!plausible_gpu_time(Duration::from_nanos(u64::from(
-            u32::MAX
-        ))));
+    fn near_the_scale_that_fell_it_climbs_slowly_until_it_is_forgotten() {
+        let mut scale = AutomaticScale::default();
+        for _ in 0..200 {
+            scale.record(FrameOutcome::OnTime);
+        }
+        assert!(scale.record(FrameOutcome::LateDrawing) || scale.record(FrameOutcome::LateDrawing));
+        assert!(close(&scale, 0.9));
+        for _ in 0..PAUSE_FRAMES {
+            scale.record(FrameOutcome::OnTime);
+        }
+        // From 0.90 to 0.97, one rise every three frames: 21 frames.
+        for _ in 0..21 {
+            scale.record(FrameOutcome::OnTime);
+        }
+        assert!(close(&scale, 0.97));
+        // Within 2.5 % of 1.0, which fell: one rise a second.
+        for _ in 0..NEAR_RISE_FRAMES - 1 {
+            assert!(!scale.record(FrameOutcome::OnTime));
+        }
+        assert!(scale.record(FrameOutcome::OnTime));
+        assert!(close(&scale, 0.98));
     }
 
     #[test]
-    fn a_late_frame_resets_the_count_to_rise() {
-        let mut scale = DynamicResolution::default();
-        for _ in 0..ROOM_MEASURES - 1 {
-            scale.record(ms(7), BUDGET);
+    fn the_scale_never_falls_under_one_half() {
+        let mut scale = AutomaticScale::default();
+        for _ in 0..100 {
+            scale.record(FrameOutcome::LateDrawing);
         }
-        scale.record(ms(16), BUDGET);
-        assert!(!scale.record(ms(7), BUDGET));
-        assert!((scale.factor() - 2.0 / 3.0).abs() < 1.0e-6);
+        assert!(close(&scale, 0.5));
     }
 }
