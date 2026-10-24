@@ -41,6 +41,8 @@ fn req_ui_202_every_user_preference_is_shown() {
         .filter(|descriptor| {
             !shown.contains(&descriptor.id())
                 && !options::EXCLUDED.contains(&descriptor.id())
+                // The graphics API is only offered where Vulkan and DirectX 12 are built in.
+                && (cfg!(feature = "wgpu") || descriptor.id() != SettingId::VideoBackend)
                 && !matches!(
                     descriptor.theme(),
                     SettingTheme::Vr
