@@ -98,6 +98,17 @@ impl MarginDecoder for Zelda2 {
             _ => false,
         }
     }
+
+    /// The world map only: the side view is as tall as the screen.
+    fn decode_extra_row(
+        &self,
+        memory: &DecoderMemory<'_>,
+        row: &BackgroundRow,
+        columns: &mut dyn Iterator<Item = i32>,
+        out: &mut Vec<DecodedTile>,
+    ) -> bool {
+        memory.ram(GAME_MODE) == MODE_WORLD_MAP && world_map(memory, *row, columns, out)
+    }
 }
 
 /// Byte at CPU `address` with PRG bank `bank` at `$8000` and the last bank at `$C000`.

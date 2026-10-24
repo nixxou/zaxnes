@@ -64,6 +64,13 @@ const NAMETABLE_MARGIN: i32 = 128;
 /// The widest margin a ROM can ask for or be told of through its 8-bit registers.
 const MAX_ROM_MARGIN: i32 = 248;
 
+/// The tallest margin, in pixels above and below, the core will ever capture: 30 tile rows. Only
+/// a margin decoder fills it, from rows past the ones the PPU drew.
+pub const MAX_VERTICAL_MARGIN: i32 = 240;
+
+/// Extra background rows above and below at the tallest margin.
+pub const MAX_EXTRA_ROWS: i32 = MAX_VERTICAL_MARGIN / 8;
+
 /// Extra background columns on each side at the widest margin.
 pub const MAX_EXTRA_COLUMNS: i32 = MAX_MARGIN / 8;
 
@@ -72,6 +79,8 @@ pub const MAX_EXTRA_COLUMNS: i32 = MAX_MARGIN / 8;
 pub struct WideExtension {
     /// Margin the host offers on each side, in pixels, a multiple of 8 (0 = off).
     host_margin: i32,
+    /// Margin the host offers above and below, in pixels, a multiple of 8 (0 = off).
+    host_vertical_margin: i32,
     /// How many bytes of [`UNLOCK`] have been written in a row.
     unlock_progress: u8,
     unlocked: bool,
@@ -111,6 +120,7 @@ impl WideExtension {
     pub fn new() -> Self {
         Self {
             host_margin: 0,
+            host_vertical_margin: 0,
             unlock_progress: 0,
             unlocked: false,
             requested_margin: 0,
@@ -132,6 +142,23 @@ impl WideExtension {
     /// and capped at [`MAX_MARGIN`]. It survives resets and state loads: it is a host setting.
     pub fn set_host_margin(&mut self, pixels: i32) {
         self.host_margin = (pixels.clamp(0, MAX_MARGIN) / 8) * 8;
+    }
+
+    /// Sets the margin the host offers above and below, in pixels: rounded down to a multiple of
+    /// 8 and capped at [`MAX_VERTICAL_MARGIN`]. Only a margin decoder fills it.
+    pub fn set_host_vertical_margin(&mut self, pixels: i32) {
+        self.host_vertical_margin = (pixels.clamp(0, MAX_VERTICAL_MARGIN) / 8) * 8;
+    }
+
+    /// The margin captured above and below, in pixels: the host's when a margin decoder fills
+    /// the margins, otherwise 0.
+    #[must_use]
+    pub const fn vertical_margin(&self) -> i32 {
+        if self.decoded {
+            self.host_vertical_margin
+        } else {
+            0
+        }
     }
 
     /// Tells the extension a margin decoder fills the margins of this game.
@@ -204,6 +231,7 @@ impl WideExtension {
     pub fn reset(&mut self) {
         *self = Self {
             host_margin: self.host_margin,
+            host_vertical_margin: self.host_vertical_margin,
             decoded: self.decoded,
             ..Self::new()
         };

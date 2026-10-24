@@ -101,6 +101,20 @@ pub trait MarginDecoder: Sync {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool;
+
+    /// Decodes the whole of `row`, a row the PPU did not draw: above or below the screen, in
+    /// the vertical margin (its `line` is then negative or past 239, and its PPU address is the
+    /// one it would have on the plane of two stacked nametables). Returns `false`, as by
+    /// default, when the decoder cannot: the vertical margin then stays empty.
+    fn decode_extra_row(
+        &self,
+        _memory: &DecoderMemory<'_>,
+        _row: &BackgroundRow,
+        _columns: &mut dyn Iterator<Item = i32>,
+        _out: &mut Vec<DecodedTile>,
+    ) -> bool {
+        false
+    }
 }
 
 /// The decoder made for the ROM a built-in patch named `patch` applies to, if any.

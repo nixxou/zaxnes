@@ -35,7 +35,8 @@ impl TileBuffer {
     /// Maximum number of background records in one widescreen frame: 31 rows of the 33
     /// columns plus the extra columns of the widest margin on both sides.
     #[allow(clippy::cast_sign_loss)] // A positive constant.
-    pub const MAX_WIDE_BACKGROUND: usize = 31 * (33 + 2 * crate::wide::MAX_EXTRA_COLUMNS as usize);
+    pub const MAX_WIDE_BACKGROUND: usize = (31 + 2 * crate::wide::MAX_EXTRA_ROWS as usize)
+        * (33 + 2 * crate::wide::MAX_EXTRA_COLUMNS as usize);
 
     /// Maximum number of records in one frame, widescreen included.
     pub const CAPACITY: usize = Self::MAX_WIDE_BACKGROUND + Self::MAX_SPRITES;
@@ -74,8 +75,14 @@ impl TileBuffer {
     /// Sets how many extra background columns each side of the frame being captured has, which
     /// raises the background limit accordingly (widescreen extension).
     pub fn set_extra_columns(&mut self, extra: i32) {
+        self.set_extra_area(extra, 0);
+    }
+
+    /// Room for `extra` more columns on each side and `rows` more rows above and below.
+    pub fn set_extra_area(&mut self, extra: i32, rows: i32) {
         let extra = usize::try_from(extra.clamp(0, crate::wide::MAX_EXTRA_COLUMNS)).unwrap_or(0);
-        self.background_limit = 31 * (33 + 2 * extra);
+        let rows = usize::try_from(rows.clamp(0, crate::wide::MAX_EXTRA_ROWS)).unwrap_or(0);
+        self.background_limit = (31 + (2 * rows)) * (33 + (2 * extra));
     }
 
     /// Empties the buffer at the start of a rendered frame.

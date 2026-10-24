@@ -449,6 +449,7 @@ impl SceneFixture {
             mask_y: 0,
             margin: 0,
             visible_rows: zax_nes::STANDARD_ROWS,
+            margin_y: 0,
         };
         engine.convert(&batch, 0);
         let time = engine.publish().time();

@@ -41,12 +41,18 @@ tile of the row's pattern table and a sub-palette. A row it does not handle (sta
 it does not know) keeps the columns captured from the nametables. The centre 256 pixels always
 come from the PPU.
 
+A decoder may also read rows the PPU did not draw (`MarginDecoder::decode_extra_row`): the
+host's vertical margin (`NesCore::set_widescreen_vertical_margin`, at most 240 pixels above and
+below; the app makes the picture as much taller as `video.widescreen_extra` makes it wider) is
+filled with rows above the first background row of the frame and below the last, whole width.
+`FrameBatch::margin_y` says how far they reach.
+
 A decoder belongs to a built-in patch (`wide_decode::for_patch`) and runs while the built-in
 patches are on. With a decoder the host margin applies whatever the ROM asked for. Decoders:
 
 | Game | Decodes |
 |---|---|
-| Zelda II (USA) | side view (level RAM at `$6000`), world map (run-length map in PRG-RAM); adapted from z2rs (MIT) |
+| Zelda II (USA) | side view (level RAM at `$6000`), world map (run-length map in PRG-RAM, vertical margin too); adapted from z2rs (MIT) |
 
 `NesCore::set_widescreen_margin(pixels)` is the same thing for other hosts.
 

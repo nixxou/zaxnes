@@ -33,4 +33,7 @@ pub struct FrameBatch<'a> {
     /// The range of x each band of the frame showed tiles in: [`STANDARD_ROWS`] for a standard
     /// frame, from `-margin` to `256 + margin` at most for a widescreen one.
     pub visible_rows: VisibleRows,
+    /// Widescreen margin above and below, in NES pixels: background records then reach
+    /// `-margin_y - 8` and `239 + margin_y`. 0 unless a margin decoder fills it.
+    pub margin_y: i32,
 }

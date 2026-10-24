@@ -238,6 +238,8 @@ pub struct FrameShape {
     mask: Cell,
     /// Widescreen margin of the batch, in pixels on each side (0 for a standard frame).
     margin: i32,
+    /// Vertical widescreen margin of the batch, in pixels above and below.
+    margin_y: i32,
     /// The script layer's handle cache (SPEC-05 REQ-LUA-043).
     pub script_handle: ScriptHandleSlot,
     /// Size constraint of the frame pattern, copied from the reference pattern.
@@ -382,8 +384,8 @@ impl FrameShape {
     pub const fn inside(&self) -> bool {
         self.pixel_start.x > self.mask.x - self.margin
             && self.pixel_end.x + self.mask.x < 255 + self.margin
-            && self.pixel_start.y > self.mask.y
-            && self.pixel_end.y + self.mask.y < 239
+            && self.pixel_start.y > self.mask.y - self.margin_y
+            && self.pixel_end.y + self.mask.y < 239 + self.margin_y
     }
 
     /// The negation of [`FrameShape::inside`] (REQ-E3D-045).
@@ -461,10 +463,11 @@ impl FrameShape {
         }
     }
 
-    fn reset(&mut self, background: bool, mask: Cell, margin: i32) {
+    fn reset(&mut self, background: bool, mask: Cell, (margin, margin_y): (i32, i32)) {
         self.background = background;
         self.mask = mask;
         self.margin = margin;
+        self.margin_y = margin_y;
         self.tiles.clear();
         self.images.clear();
         self.instances.clear();
@@ -825,6 +828,8 @@ pub struct ConversionFrame {
     margin: i32,
     /// The visible range of each band of the batch (`FrameBatch::visible_rows`).
     visible_rows: zax_nes::VisibleRows,
+    /// Vertical widescreen margin of the batch, in pixels above and below.
+    margin_y: i32,
     counter: i32,
     background_shape_count: usize,
     background_tile_count: usize,
@@ -843,7 +848,7 @@ impl ConversionFrame {
     #[must_use]
     pub fn new() -> Self {
         let mut background_cells = Vec::with_capacity(grid::CELL_COUNT);
-        for y in 0..grid::HEIGHT {
+        for y in -grid::WIDE_ROWS..grid::HEIGHT + grid::WIDE_ROWS {
             for x in -grid::WIDE_COLUMNS..grid::STANDARD_WIDTH + grid::WIDE_COLUMNS {
                 background_cells.push(FrameTile::new(Cell::new(x, y), grid::index(x, y), true));
             }
@@ -866,6 +871,7 @@ impl ConversionFrame {
             mask: Cell::default(),
             margin: 0,
             visible_rows: zax_nes::STANDARD_ROWS,
+            margin_y: 0,
             counter: 0,
             background_shape_count: 0,
             background_tile_count: 0,
@@ -1019,6 +1025,18 @@ impl ConversionFrame {
     /// Sets the visible range of each band of the batch, after [`ConversionFrame::begin_batch`].
     pub(crate) fn set_visible_rows(&mut self, rows: &zax_nes::VisibleRows) {
         self.visible_rows = *rows;
+    }
+
+    /// Sets the vertical widescreen margin of the batch, after
+    /// [`ConversionFrame::begin_batch`] and before any shape is made.
+    pub(crate) fn set_vertical_margin(&mut self, margin_y: i32) {
+        self.margin_y = margin_y;
+    }
+
+    /// The vertical widescreen margin of the batch, in pixels above and below.
+    #[must_use]
+    pub const fn margin_y(&self) -> i32 {
+        self.margin_y
     }
 
     /// [`FrameShape::is_finished`] on a widescreen frame, whose bands may show fewer columns
@@ -1214,8 +1232,8 @@ impl ConversionFrame {
             self.shape_store.push(FrameShape::default());
             ShapeId(self.shape_store.len() - 1)
         });
-        let (mask, margin) = (self.mask, self.margin);
-        self.shape_mut(id).reset(background, mask, margin);
+        let (mask, margins) = (self.mask, (self.margin, self.margin_y));
+        self.shape_mut(id).reset(background, mask, margins);
         id
     }
 

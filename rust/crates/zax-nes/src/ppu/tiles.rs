@@ -63,6 +63,7 @@ impl Ppu2C02 {
     pub(super) fn reset_tile_state(&mut self) {
         self.tiles.clear();
         self.frame_margin = 0;
+        self.frame_vertical_margin = 0;
         self.visible_rows = crate::STANDARD_ROWS;
         self.captured_rows = [None; 31];
         self.tiles.set_extra_columns(0);
@@ -75,7 +76,9 @@ impl Ppu2C02 {
     pub(super) fn begin_rendered_frame(&mut self) {
         self.tiles.clear();
         self.frame_margin = self.wide.margin();
-        self.tiles.set_extra_columns(self.frame_margin / 8);
+        self.frame_vertical_margin = self.wide.vertical_margin();
+        self.tiles
+            .set_extra_area(self.frame_margin / 8, self.frame_vertical_margin / 8);
         #[allow(clippy::cast_possible_truncation)] // At most 128.
         let margin = self.frame_margin as i16;
         self.visible_rows = [(-margin, 256 + margin); 30];
@@ -324,6 +327,8 @@ impl Ppu2C02 {
             }
         }
 
+        self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
+
         // The decoded rows lose their nametable margins, then get the decoded ones.
         self.tiles.retain_background(|record| {
             let row = usize::try_from(record.index / row_width).unwrap_or(usize::MAX);
@@ -332,6 +337,78 @@ impl Ppu2C02 {
         });
         for record in records {
             self.tiles.add(record);
+        }
+    }
+
+    /// The rows of the vertical margin: `frame_vertical_margin / 8` rows above the first
+    /// background row of the frame and as many below the last, whole width, for a decoder that
+    /// can read rows the PPU did not draw ([`MarginDecoder::decode_extra_row`]).
+    fn decode_extra_rows(
+        &self,
+        decoder: &dyn MarginDecoder,
+        memory: &DecoderMemory<'_>,
+        cart: Option<&Cartridge>,
+        tiles: &mut Vec<DecodedTile>,
+        records: &mut Vec<TileRecord>,
+    ) {
+        let rows = self.frame_vertical_margin / 8;
+        let first = self.captured_rows.iter().flatten().next();
+        let last = self.captured_rows.iter().flatten().last();
+        let (Some(first), Some(last)) = (first, last) else {
+            return;
+        };
+        let extra = self.frame_margin / 8;
+        for (from, step) in [(first, -1), (last, 1)] {
+            for distance in 1..=rows {
+                let offset = step * distance;
+                // The row `offset` rows away on the plane of two stacked nametables of 30 rows.
+                let stacked = (i32::from(from.row.nametable_y()) * 30)
+                    + i32::from(from.row.coarse_y())
+                    + offset;
+                let stacked = stacked.rem_euclid(60);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..60.
+                let (table, coarse_y) = ((stacked / 30) as u16, (stacked % 30) as u16);
+                let row = BackgroundRow {
+                    line: from.row.line + (8 * offset),
+                    v: (from.row.v & !0x0BE0) | (table << 11) | (coarse_y << 5),
+                    fine_x: from.row.fine_x,
+                };
+                let fine_x = i32::from(row.fine_x);
+                let last_column = 32 + extra - i32::from(fine_x == 0);
+                tiles.clear();
+                if !decoder.decode_extra_row(memory, &row, &mut (-extra..=last_column), tiles) {
+                    return;
+                }
+                #[allow(clippy::cast_possible_truncation)] // Within 240 pixels of the screen.
+                let y = from.y + (8 * offset) as i16;
+                for &DecodedTile {
+                    column,
+                    tile,
+                    palette,
+                } in tiles.iter()
+                {
+                    let (plane0, plane1) = self.read_pattern_planes(
+                        from.pattern_table + (u16::from(tile) * 16),
+                        ChrFetch::Background,
+                        cart,
+                    );
+                    #[allow(clippy::cast_possible_truncation)] // -519..768.
+                    let x = ((8 * column) - fine_x) as i16;
+                    // Rows past the frame: the record index is not a row of the frame.
+                    records.push(TileRecord::new(
+                        plane0,
+                        plane1,
+                        x,
+                        y,
+                        -1,
+                        false,
+                        false,
+                        false,
+                        palette & 3,
+                        true,
+                    ));
+                }
+            }
         }
     }
 
