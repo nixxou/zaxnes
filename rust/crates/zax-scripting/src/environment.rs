@@ -612,6 +612,9 @@ pub struct ScriptEnvironment {
     pub log: Box<dyn ScriptLog>,
     /// What `NotiCenter.Notify` raises (REQ-LUA-093); ignored by default.
     pub notify: Option<Box<dyn FnMut(ScriptNotification)>>,
+    /// The fast Lua binding (Rust-only setting, `unsafe` C metamethods; see `binding::raw`).
+    /// Off by default; `ZAXNES_FAST_LUA=1` turns it on for a run of the tests.
+    pub fast_binding: bool,
 }
 
 impl ScriptEnvironment {
@@ -643,6 +646,7 @@ impl Default for ScriptEnvironment {
             profile: ScriptProfileInfo::default(),
             log: Box::new(NullScriptLog),
             notify: None,
+            fast_binding: std::env::var("ZAXNES_FAST_LUA").is_ok_and(|value| value.trim() == "1"),
         }
     }
 }

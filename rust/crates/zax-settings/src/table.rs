@@ -614,6 +614,26 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_field("33")
         .with_libretro(enabled_disabled()),
     );
+    emulation_rust_only(out);
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCore,
+            SettingKind::Int,
+            SettingValue::Int(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        // Rule 2 of REQ-PERS-003: the remainder of the division by the number of cores, which is
+        // exactly 1 in v1, so the effective value is always 0.
+        .with_domain(Domain::core_index())
+        .with_lua("Core")
+        .with_field("22"),
+    );
+}
+
+/// The emulation settings of the Rust port alone, in their place in the catalogue.
+fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
     // Rust-only (owner request): how many emulated frames a displayed frame may run when the
     // game is late, 0 for none; REQ-LOOP-012's five by default. Not exposed to Lua.
     out.push(
@@ -649,20 +669,19 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Smooth Lua collector"),
     );
+    // Rust-only (owner request): the scripts reach the host values through C metamethods instead
+    // of `mlua`'s userdata; same results, less time per access. Not exposed to Lua.
     out.push(
         SettingDescriptor::new(
-            SettingId::EmuCore,
-            SettingKind::Int,
-            SettingValue::Int(0),
+            SettingId::EmuLuaFastBinding,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
             SettingScope::User,
-            SettingEffect::Immediate,
+            SettingEffect::NextGameLoad,
             SettingTheme::Emulation,
         )
-        // Rule 2 of REQ-PERS-003: the remainder of the division by the number of cores, which is
-        // exactly 1 in v1, so the effective value is always 0.
-        .with_domain(Domain::core_index())
-        .with_lua("Core")
-        .with_field("22"),
+        .with_domain(Domain::switch())
+        .with_label("Fast Lua binding"),
     );
 }
 
