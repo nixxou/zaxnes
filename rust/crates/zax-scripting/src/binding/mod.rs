@@ -4,5 +4,6 @@
 pub(crate) mod access;
 pub(crate) mod cx;
 pub(crate) mod dispatch;
+pub(crate) mod lend;
 pub(crate) mod payload;
 pub(crate) mod table;

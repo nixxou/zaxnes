@@ -1,4 +1,4 @@
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 //! zax-scripting: the Lua 5.4 runtime of the profile scripts (SPEC-05).
 //!
