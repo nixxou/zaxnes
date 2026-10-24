@@ -4,6 +4,7 @@
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use imgui::DrawData;
 use sdl2::event::Event;
 use zax_platform::imgui_renderer::ImguiRenderer;
 use zax_platform::input::{Key, KeyboardDevice};
@@ -19,7 +20,6 @@ use super::shots::{ShotStep, UiShots};
 use super::zax_ui::{UiEffect, UiFrame, ZaxUi};
 use crate::app_options::AppOptions;
 use crate::application::AppHost;
-use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::host::HostEvent;
 use crate::input::{DesktopInputSource, InputBindings};
 
@@ -32,10 +32,28 @@ pub struct Sizes {
     pub drawable: (u32, u32),
 }
 
+/// What the interface is drawn with: the GL renderer of this crate, or the window's wgpu
+/// display, which draws the data [`ImguiFrontend::draw_data`] gives it.
+pub enum UiGraphics<'a> {
+    Gl(&'a Rc<glow::Context>),
+    #[cfg(feature = "wgpu")]
+    Wgpu(&'a mut zax_platform::wgpu_display::WgpuDisplay),
+}
+
+/// What the screenshot plan asks after a frame is drawn.
+#[derive(Debug, Default)]
+pub struct ShotRequest {
+    /// The window is to be captured into this file.
+    pub capture: Option<PathBuf>,
+    /// The plan is over: the program quits.
+    pub finished: bool,
+}
+
 /// `ImGui` over the window.
 pub struct ImguiFrontend {
     context: imgui::Context,
-    renderer: ImguiRenderer,
+    /// The GL renderer; none when the window's wgpu display draws the interface.
+    renderer: Option<ImguiRenderer>,
     platform: SdlPlatform,
     ui: ZaxUi,
     /// The gamepad-only interface, which takes the place of `ui` in the handheld mode; `ui` stays
@@ -52,8 +70,11 @@ impl ImguiFrontend {
     ///
     /// # Errors
     /// The renderer could not be built, or the folder of the screenshots could not be created.
+    // The wgpu variant hands over a unique borrow; the GL one, the only one without the
+    // feature, a shared one.
+    #[cfg_attr(not(feature = "wgpu"), allow(clippy::needless_pass_by_value))]
     pub fn new(
-        gl: &Rc<glow::Context>,
+        graphics: UiGraphics<'_>,
         host: &AppHost,
         options: &AppOptions,
         drawable_height: u32,
@@ -75,8 +96,16 @@ impl ImguiFrontend {
                 FontSizes::DESKTOP
             },
         );
-        let renderer =
-            ImguiRenderer::new(gl, context.fonts()).map_err(|error| error.to_string())?;
+        let renderer = match graphics {
+            UiGraphics::Gl(gl) => {
+                Some(ImguiRenderer::new(gl, context.fonts()).map_err(|error| error.to_string())?)
+            }
+            #[cfg(feature = "wgpu")]
+            UiGraphics::Wgpu(display) => {
+                display.upload_fonts(context.fonts());
+                None
+            }
+        };
         // REQ-UI-207: the renderer has just built the font atlas, so the glyph tables exist; this
         // is the earliest moment a missing code point can be pointed at a glyph that is in it.
         fonts.remap_missing_glyphs(context.fonts());
@@ -218,23 +247,19 @@ impl ImguiFrontend {
         }
     }
 
-    /// Draws the interface over the game view, then the screenshot plan if there is one.
-    pub fn draw(
-        &mut self,
-        frame: &mut UiFrame<'_>,
-        sizes: Sizes,
-        debug: &DebugInfo<'_>,
-        capture: impl FnOnce(&std::path::Path),
-    ) {
-        self.build(frame, sizes, debug);
-        self.render();
-        if let Some(shots) = &mut self.shots {
-            if let ShotStep::Capture(path) = shots.advance(&mut self.ui, self.handheld.as_mut()) {
-                capture(&path);
-            }
-            if shots.finished() {
-                frame.host.enqueue(Command::Quit, CommandArgs::default());
-            }
+    /// The step of the screenshot plan after a drawn frame, if there is a plan: the file to
+    /// capture the window into, and whether the plan is over (the caller then quits).
+    pub fn advance_shots(&mut self) -> ShotRequest {
+        let Some(shots) = &mut self.shots else {
+            return ShotRequest::default();
+        };
+        let capture = match shots.advance(&mut self.ui, self.handheld.as_mut()) {
+            ShotStep::Capture(path) => Some(path),
+            ShotStep::Wait => None,
+        };
+        ShotRequest {
+            capture,
+            finished: shots.finished(),
         }
     }
 
@@ -271,9 +296,17 @@ impl ImguiFrontend {
         self.platform.pad_mut().end_frame();
     }
 
-    /// Draws the interface [`ImguiFrontend::build`] built.
+    /// Draws the interface [`ImguiFrontend::build`] built, with the GL renderer (a wgpu window
+    /// draws [`ImguiFrontend::draw_data`] itself).
     pub fn render(&mut self) {
-        self.renderer.render(self.context.render());
+        if let Some(renderer) = &self.renderer {
+            renderer.render(self.context.render());
+        }
+    }
+
+    /// The draw data of the interface [`ImguiFrontend::build`] built, for a wgpu window.
+    pub fn draw_data(&mut self) -> &DrawData {
+        self.context.render()
     }
 
     /// Takes one event of the host.

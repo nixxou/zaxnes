@@ -80,6 +80,8 @@ Rust-only options:
                           (default: the roms folder of the user data).
   --catch-up <n>          Most emulated frames per displayed frame when the game runs late,
                           1 to 5, or 0 for none (also ZAXNES_CATCH_UP; default 5, 0 on handhelds).
+  --backend <api>         Graphics API for this run: gl, vulkan or dx12 (video.backend; Vulkan
+                          and DirectX 12 in the desktop builds only).
 ";
 
 /// A command line that cannot be read. The messages are those of the C# program.
@@ -140,6 +142,12 @@ pub enum OptionsError {
     /// A skybox name that is not one of the four.
     #[error("--skybox expects default, color, gradient or fantasy.")]
     Skybox,
+    /// A graphics API that is not one of the three.
+    #[error("--backend expects gl, vulkan or dx12, got '{value}'.")]
+    Backend {
+        /// The value given.
+        value: String,
+    },
 }
 
 /// The options of one run.
@@ -203,6 +211,9 @@ pub struct AppOptions {
     pub roms_directory: Option<String>,
     /// How far the frame clock catches up (Rust-only); `None` for the platform default.
     pub catch_up: Option<CatchUp>,
+    /// The graphics API of this run, as a `video.backend` value (Rust-only); `None` for the
+    /// setting.
+    pub backend: Option<i32>,
 }
 
 impl Default for AppOptions {
@@ -235,6 +246,7 @@ impl Default for AppOptions {
             handheld: false,
             roms_directory: None,
             catch_up: None,
+            backend: None,
         }
     }
 }
@@ -354,6 +366,19 @@ impl AppOptions {
             "--handheld" => self.handheld = true,
             "--roms" => {
                 self.roms_directory = Some(next_value(arguments, index, "--roms")?.to_owned());
+            }
+            "--backend" => {
+                let value = next_value(arguments, index, "--backend")?;
+                self.backend = Some(match value.to_ascii_lowercase().as_str() {
+                    "gl" | "opengl" => 0,
+                    "vulkan" => 1,
+                    "dx12" => 2,
+                    _ => {
+                        return Err(OptionsError::Backend {
+                            value: value.to_owned(),
+                        })
+                    }
+                });
             }
             "--catch-up" => {
                 self.catch_up = Some(parse_catch_up(next_value(arguments, index, "--catch-up")?)?);

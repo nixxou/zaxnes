@@ -14,13 +14,24 @@ bundled = ["sdl2/bundled", "sdl2/static-link"]
 # NEEDED libSDL2-2.0.so.0 and resolves it on the device, so the firmware's SDL2 (patched for its
 # GPU driver) is used. The built library is not shipped (handheld package).
 firmware-sdl = ["sdl2/bundled"]
+# A window drawn through wgpu (Vulkan, DirectX 12) instead of GL, desktop only: the handheld
+# package never turns it on.
+wgpu = ["dep:wgpu", "dep:pollster", "sdl2/raw-window-handle"]
 
 [dependencies]
 glow = "0.16"
 imgui = "0.12"
 png = "0.17"
+pollster = { version = "0.4", optional = true }
 sdl2 = "0.38"
 thiserror = "2"
+wgpu = { version = "29.0.4", optional = true, default-features = false, features = [
+    "std",
+    "parking_lot",
+    "dx12",
+    "vulkan",
+    "wgsl",
+] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console"] }

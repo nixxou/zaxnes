@@ -1,4 +1,5 @@
-//! The application window and its GL context.
+//! The application window and its GL context, or, for the wgpu renderer (feature `wgpu`), its
+//! wgpu display ([`WindowGraphics::Wgpu`]).
 //!
 //! Desktop GL 3.3 core (forward compatible), or GLES 3.0 when `ZAXNES_GLES=1` or on aarch64
 //! Linux (see [`GlFlavor`]). SDL is linked dynamically against the system SDL2 by default.
@@ -39,6 +40,19 @@ pub struct HostWindowSettings {
     /// Whether the window opens full screen, which is what the persisted `ui.fullscreen` of
     /// SPEC-09 REQ-PERS-067 restores. The size is then the windowed size the window goes back to.
     pub fullscreen: bool,
+    /// What draws into the window.
+    pub graphics: WindowGraphics,
+}
+
+/// What draws into the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowGraphics {
+    /// A GL context SDL creates with the window, current on this thread.
+    #[default]
+    Gl,
+    /// A wgpu display on the window ([`HostWindow::wgpu`]), which [`HostWindow::swap`] presents.
+    #[cfg(feature = "wgpu")]
+    Wgpu(crate::wgpu_display::GpuApi),
 }
 
 impl Default for HostWindowSettings {
@@ -51,6 +65,7 @@ impl Default for HostWindowSettings {
             vsync: 1,
             target_frame_rate: 0,
             fullscreen: false,
+            graphics: WindowGraphics::Gl,
         }
     }
 }
@@ -100,10 +115,12 @@ impl GlFlavor {
     }
 }
 
-/// Owns the application window and its GL context.
+/// Owns the application window and its GL context, or its wgpu display.
 pub struct HostWindow {
-    // Field order is drop order: the context goes before the window and SDL.
-    gl_context: GLContext,
+    // Field order is drop order: the display and the context go before the window and SDL.
+    #[cfg(feature = "wgpu")]
+    display: Option<crate::wgpu_display::WgpuDisplay>,
+    gl_context: Option<GLContext>,
     window: Window,
     event_pump: EventPump,
     video: VideoSubsystem,
@@ -111,6 +128,8 @@ pub struct HostWindow {
     flavor: GlFlavor,
     frame_cap: Option<Duration>,
     next_frame: Instant,
+    /// The swap interval the pacing put in force: 0 or 1, or 2 with a GL context.
+    swap_interval: i32,
 }
 
 impl HostWindow {
@@ -146,18 +165,37 @@ impl HostWindow {
             attributes.set_double_buffer(true);
         }
 
+        let gl = settings.graphics == WindowGraphics::Gl;
         let mut builder = video.window(&settings.title, settings.width, settings.height);
-        builder.opengl().resizable().position_centered();
+        if gl {
+            builder.opengl();
+        }
+        builder.resizable().position_centered();
         if settings.fullscreen {
             // SPEC-09 REQ-PERS-067: the persisted full-screen state is restored at launch, on
             // the window itself (AMD-032 §6).
             builder.fullscreen_desktop();
         }
         let window = builder.build()?;
-        let gl_context = window.gl_create_context()?;
+        let gl_context = if gl {
+            Some(window.gl_create_context()?)
+        } else {
+            None
+        };
         let event_pump = sdl.event_pump()?;
 
+        #[cfg(feature = "wgpu")]
+        let display = match settings.graphics {
+            // SAFETY: the display is the first field of the window it is stored in, so it is
+            // dropped before the SDL window it draws on.
+            WindowGraphics::Wgpu(api) => Some(unsafe {
+                crate::wgpu_display::WgpuDisplay::new(&window, api, settings.vsync > 0)?
+            }),
+            WindowGraphics::Gl => None,
+        };
         let mut host = Self {
+            #[cfg(feature = "wgpu")]
+            display,
             gl_context,
             window,
             event_pump,
@@ -166,6 +204,7 @@ impl HostWindow {
             flavor,
             frame_cap: None,
             next_frame: Instant::now(),
+            swap_interval: 0,
         };
         host.apply_pacing(settings.vsync, settings.target_frame_rate);
         Ok(host)
@@ -183,11 +222,12 @@ impl HostWindow {
         self.flavor
     }
 
-    /// The `glow` context the renderer draws with, over this window's GL context.
+    /// The `glow` context the renderer draws with, over this window's GL context (a
+    /// [`WindowGraphics::Gl`] window).
     #[must_use]
     pub fn glow_context(&self) -> Rc<glow::Context> {
         // The context created with the window is current on this thread.
-        debug_assert!(self.gl_context.is_current());
+        debug_assert!(self.gl_context.as_ref().is_some_and(GLContext::is_current));
         gl_loader::glow_context(&self.video)
     }
 
@@ -217,6 +257,9 @@ impl HostWindow {
     #[must_use]
     pub fn gl_config_report(&self) -> String {
         use sdl2::sys::SDL_GLattr as Attribute;
+        if self.gl_context.is_none() {
+            return "no GL context: the window is drawn through a surface".to_owned();
+        }
         // The `sdl2` getters panic when the driver refuses a query (Mesa refuses the stencil
         // size of the default framebuffer, for one), so SDL is asked directly and a refused
         // attribute reads "?".
@@ -299,9 +342,35 @@ impl HostWindow {
         self.pace();
     }
 
-    /// Presents the frame (with vsync on, this is where the wait for the refresh happens).
+    /// Presents the frame (with vsync on, this is where the wait for the refresh happens). A
+    /// [`WindowGraphics::Surface`] window has nothing to swap: its owner presents.
     pub fn swap(&mut self) {
-        self.window.gl_swap_window();
+        if self.gl_context.is_some() {
+            self.window.gl_swap_window();
+        }
+        #[cfg(feature = "wgpu")]
+        if let Some(display) = &mut self.display {
+            display.present();
+        }
+    }
+
+    /// The wgpu display of a [`WindowGraphics::Wgpu`] window.
+    #[cfg(feature = "wgpu")]
+    #[must_use]
+    pub const fn wgpu(&self) -> Option<&crate::wgpu_display::WgpuDisplay> {
+        self.display.as_ref()
+    }
+
+    /// The wgpu display of a [`WindowGraphics::Wgpu`] window, to draw a frame.
+    #[cfg(feature = "wgpu")]
+    pub const fn wgpu_mut(&mut self) -> Option<&mut crate::wgpu_display::WgpuDisplay> {
+        self.display.as_mut()
+    }
+
+    /// The swap interval the pacing put in force: 0 (no vsync), 1, or 2 with a GL context.
+    #[must_use]
+    pub const fn vsync_interval(&self) -> i32 {
+        self.swap_interval
     }
 
     /// Sleeps until the frame cap's next frame is due; returns at once without a cap.
@@ -334,10 +403,25 @@ impl DisplaySurface for HostWindow {
     }
 
     fn try_set_swap_interval(&mut self, interval: i32) -> bool {
-        // SDL is called directly: the `sdl2` wrapper's `SwapInterval::from` panics on 2, the
-        // every-other-refresh interval of `video.vsync` 2.
-        // SAFETY: a plain SDL call on the window's GL context, current on this thread.
-        unsafe { sdl2::sys::SDL_GL_SetSwapInterval(interval) == 0 }
+        let applied = if self.gl_context.is_some() {
+            // SDL is called directly: the `sdl2` wrapper's `SwapInterval::from` panics on 2,
+            // the every-other-refresh interval of `video.vsync` 2.
+            // SAFETY: a plain SDL call on the window's GL context, current on this thread.
+            unsafe { sdl2::sys::SDL_GL_SetSwapInterval(interval) == 0 }
+        } else {
+            // A surface presents with vsync or without (Q-066 falls back for 2).
+            #[cfg(feature = "wgpu")]
+            if interval <= 1 {
+                if let Some(display) = &mut self.display {
+                    display.set_vsync(interval > 0);
+                }
+            }
+            interval <= 1
+        };
+        if applied {
+            self.swap_interval = interval;
+        }
+        applied
     }
 }
 

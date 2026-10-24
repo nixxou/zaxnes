@@ -22,7 +22,7 @@ $root = Split-Path -Parent $rust
 
 Push-Location $rust
 try {
-    cargo build --release -p zax-app --features bundled
+    cargo build --release -p zax-app --features bundled,wgpu
     if ($LASTEXITCODE -ne 0) { throw "package: cargo build failed ($LASTEXITCODE)" }
 }
 finally {

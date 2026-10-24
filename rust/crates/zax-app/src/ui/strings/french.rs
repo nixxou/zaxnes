@@ -204,6 +204,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.lua_optimized", "Lua optimisé (unsafe)"),
     ("setting.emu.pipeline", "Scripts en parallèle du dessin"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
+    ("setting.video.backend", "API graphique (au prochain démarrage)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
     ("setting.audio.volume", "Volume général"),

@@ -120,6 +120,7 @@ setting_ids! {
     EmuLuaOptimized => "emu.lua_optimized",
     EmuPipeline => "emu.pipeline",
     VideoDynamicResolution => "video.dynamic_resolution",
+    VideoBackend => "video.backend",
     ConvSameBgPalette => "conv.same_bg_palette",
     ConvSameSpPalette => "conv.same_sp_palette",
     ConvSpriteTolerance => "conv.sprite_tolerance",
