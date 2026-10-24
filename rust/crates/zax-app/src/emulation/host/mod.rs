@@ -48,7 +48,7 @@ pub use games::{
     delete_slot_question, ConfirmationRequest, ConfirmedAction, DELETE_GAME_QUESTION, NO_LABEL,
     YES_LABEL,
 };
-pub use jobs::LoadKind;
+pub use jobs::{LoadKind, SlotPatchStatus};
 
 /// Width of the save state and cover thumbnails.
 pub const THUMBNAIL_WIDTH: usize = 256;
@@ -204,6 +204,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub notifications: NotificationCenter,
     /// The save slots.
     pub slots: SaveSlotIndex,
+    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
+    slot_patch_cache:
+        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
     /// The Zapper.
     pub zapper: ZapperState,
     /// How far the frame clock catches up when the command line or the environment says so;
@@ -292,6 +295,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
             slots,
+            slot_patch_cache: std::cell::RefCell::default(),
             zapper: ZapperState::new(),
             catch_up: None,
             defer_conversion: false,
@@ -1071,7 +1075,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         let view = {
             let scene = &self.scene;
-            scene.camera.build_view(scene.clipping, aspect)
+            scene.camera.build_view(scene.view_clipping(), aspect)
         };
         let offset = self
             .session

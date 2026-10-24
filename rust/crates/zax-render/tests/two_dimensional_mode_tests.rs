@@ -37,6 +37,7 @@ fn amd_009_the_pixel_frame_replaces_the_tile_list_with_a_single_quad() {
     let frame = SceneFrame {
         draw_list: Some(&built.draw_list),
         nes_picture: &picture,
+        nes_picture_height: 0,
     };
     gl.render(&mut renderer, &built.scene, &frame);
 
@@ -152,6 +153,7 @@ fn amd_009_a_picture_of_the_wrong_size_falls_back_to_the_tile_list() {
     let frame = SceneFrame {
         draw_list: Some(&built.draw_list),
         nes_picture: &short,
+        nes_picture_height: 0,
     };
     gl.render(&mut renderer, &built.scene, &frame);
 
@@ -174,6 +176,7 @@ fn frame(picture: &[u8]) -> SceneFrame<'_> {
     SceneFrame {
         draw_list: None,
         nes_picture: picture,
+        nes_picture_height: 0,
     }
 }
 

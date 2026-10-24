@@ -5,7 +5,7 @@ use imgui::Ui;
 use super::ZaxUi;
 use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs};
-use crate::ui::menu_bar::{Menu, MenuBarModel, MenuItem, MenuItemKind};
+use crate::ui::menu_bar::{Menu, MenuBarModel, MenuItem, MenuItemKind, MenuWarning};
 
 impl ZaxUi {
     /// Draws the bar and returns its height.
@@ -51,6 +51,17 @@ fn draw_items(ui: &Ui, items: &[MenuItem], host: &AppHost) -> Option<(Command, C
         }
         let enabled = MenuBarModel::is_enabled(item, host);
         let ticked = MenuBarModel::is_checked(item, host);
+        // A state made with the built-in hack set the other way (orange) or with another
+        // version of it (red).
+        let _warning = match item.warning {
+            MenuWarning::None => None,
+            MenuWarning::Switch => {
+                Some(ui.push_style_color(imgui::StyleColor::Text, [1.0, 0.65, 0.2, 1.0]))
+            }
+            MenuWarning::Blocked => {
+                Some(ui.push_style_color(imgui::StyleColor::Text, [0.95, 0.35, 0.3, 1.0]))
+            }
+        };
         let activated = ui
             .menu_item_config(&item.label)
             .shortcut(&item.shortcut)

@@ -51,6 +51,15 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --run <n>                emulated frames to run before capturing (default 120)
   --sav <file>             battery-backed PRG-RAM to import before the run (REQ-CORE-095)
   --dump-frame <file.json> write the captured frame as a '--frames' JSON file
+  --widescreen <pixels>    widescreen margin the host offers on each side (default 0)
+  --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
+  --no-builtin-patches     restore --load-state without the built-in ROM patches
+  --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
+                           as the widescreen margin makes them
+  --load-state <file>      restore a state block (written by --save-state) after the reset
+  --save-state <file>      write the state block of the machine after the run
+  --dump-mem <file>        write CPU $0000-$07FF, $6000-$7FFF, then $5000-$5FFF (14 KiB)
+                           after the run
   --press <spec>           port 1 buttons to hold, a comma separated list of
                            <first>[-<last>]:<buttons>, the frames counting from the reset and
                            the buttons being a|b|select|start|up|down|left|right joined by '+'
@@ -109,6 +118,20 @@ pub struct Options {
     pub battery: Option<PathBuf>,
     /// Where to write the captured frame as JSON.
     pub dump_frame: Option<PathBuf>,
+    /// Widescreen margin offered on each side, in pixels.
+    pub widescreen: i32,
+    /// Widescreen margin offered above and below, in pixels.
+    pub widescreen_y: i32,
+    /// Whether --load-state restores with the built-in ROM patches.
+    pub builtin_patches: bool,
+    /// Where to write the composed tile records of the last frame.
+    pub png_nes: Option<PathBuf>,
+    /// State block restored after the reset.
+    pub load_state: Option<PathBuf>,
+    /// Where to write the state block after the run.
+    pub save_state: Option<PathBuf>,
+    /// Where to write the work RAM and the cartridge RAM after the run.
+    pub dump_mem: Option<PathBuf>,
     /// The profile file or title.
     pub profile: Option<String>,
     /// Asset folder for the skybox cubemaps.
@@ -168,6 +191,13 @@ impl Options {
             press: InputScript::default(),
             battery: None,
             dump_frame: None,
+            widescreen: 0,
+            widescreen_y: 0,
+            builtin_patches: true,
+            png_nes: None,
+            load_state: None,
+            save_state: None,
+            dump_mem: None,
             profile: None,
             assets: None,
             width: 640,
@@ -194,6 +224,7 @@ impl Options {
         while let Some(argument) = rest.next() {
             match argument.as_str() {
                 "--no-shadows" => options.shadows = false,
+                "--no-builtin-patches" => options.builtin_patches = false,
                 "--group-draws" => options.group_draws = true,
                 "--sky-bodies" => options.sky_bodies = true,
                 "--explain" => options.explain = true,
@@ -240,6 +271,12 @@ impl Options {
             }
             "--sav" => self.battery = Some(PathBuf::from(value)),
             "--dump-frame" => self.dump_frame = Some(PathBuf::from(value)),
+            "--widescreen" => self.widescreen = integer(value)?,
+            "--widescreen-y" => self.widescreen_y = integer(value)?,
+            "--png-nes" => self.png_nes = Some(PathBuf::from(value)),
+            "--load-state" => self.load_state = Some(PathBuf::from(value)),
+            "--save-state" => self.save_state = Some(PathBuf::from(value)),
+            "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
             "--profile" => self.profile = Some(value.to_owned()),
             "--assets" => self.assets = Some(PathBuf::from(value)),
             "--size" => (self.width, self.height) = parse_size(value)?,
@@ -500,6 +537,13 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             input: &options.press,
             battery: options.battery.as_deref(),
             dump_frame: options.dump_frame.as_deref(),
+            widescreen: options.widescreen,
+            widescreen_y: options.widescreen_y,
+            builtin_patches: options.builtin_patches,
+            png_nes: options.png_nes.as_deref(),
+            load_state: options.load_state.as_deref(),
+            save_state: options.save_state.as_deref(),
+            dump_mem: options.dump_mem.as_deref(),
         })?]);
     }
 

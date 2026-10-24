@@ -51,6 +51,12 @@ pub struct NesCore {
     frame_count: i64,
     video_callback: Option<VideoCallback>,
     zapper_position_source: Option<ZapperPositionSource>,
+    /// The image the host handed over when a built-in patch was applied to it: savestates
+    /// carry this one, so that restoring one applies the patch of the running build.
+    original_image: Option<Vec<u8>>,
+    builtin_patch: Option<&'static str>,
+    /// Whether the built-in patches apply at all (on by default).
+    builtin_patches_enabled: bool,
 }
 
 impl Default for NesCore {
@@ -71,7 +77,86 @@ impl NesCore {
             frame_count: 0,
             video_callback: None,
             zapper_position_source: None,
+            original_image: None,
+            builtin_patch: None,
+            builtin_patches_enabled: true,
         }
+    }
+
+    /// Turns the built-in patches on or off for the next [`NesCore::load_rom`] and state
+    /// restore; the ROM loaded keeps what it has.
+    pub fn set_builtin_patches(&mut self, enabled: bool) {
+        self.builtin_patches_enabled = enabled;
+    }
+
+    /// Whether the state block at `offset` in `data` can be restored with the built-in patches as
+    /// they are set: a block made by a ROM a built-in patch applies to must have been made with
+    /// the patch (widescreen extension running) when the patches are on, and without it when they
+    /// are off; any other block fits. `None` when `data` holds no readable block there.
+    #[must_use]
+    pub fn state_fits_builtin_patches(&self, data: &[u8], offset: usize) -> Option<bool> {
+        let wide = Self::state_uses_widescreen(data, offset)?;
+        let mut reader = StateReader::new(data, offset).ok()?;
+        reader.read_u32().ok()?;
+        reader.read_i32().ok()?;
+        reader.read_string().ok()?;
+        let has_rom_image = reader.read_bool().ok()?;
+        reader.read_string().ok()?;
+        let rom = reader.read_blob().ok()?;
+        let patchable = has_rom_image && crate::builtin_patches::matches(&rom);
+        Some(wide == (patchable && self.builtin_patches_enabled))
+    }
+
+    /// The built-in patch made for the ROM image the state block at `offset` in `data` carries,
+    /// whether or not it ran: `None` for a block without an image or with an image no patch is
+    /// made for.
+    #[must_use]
+    pub fn state_builtin_patch(
+        data: &[u8],
+        offset: usize,
+    ) -> Option<&'static crate::builtin_patches::BuiltinPatch> {
+        let mut reader = StateReader::new(data, offset).ok()?;
+        reader.read_u32().ok()?;
+        reader.read_i32().ok()?;
+        reader.read_string().ok()?;
+        if !reader.read_bool().ok()? {
+            return None;
+        }
+        reader.read_string().ok()?;
+        let rom = reader.read_blob().ok()?;
+        crate::builtin_patches::patch_for(&rom)
+    }
+
+    /// Whether the state block at `offset` in `data` was made by a ROM running the widescreen
+    /// extension (format 5 or 6: `Some(true)`) or by one without it (4: `Some(false)`); `None`
+    /// when `data` holds no block of this core there. A ROM patched by a built-in patch needs
+    /// states of the first kind, the unpatched ROM states of the second.
+    #[must_use]
+    pub fn state_uses_widescreen(data: &[u8], offset: usize) -> Option<bool> {
+        let header = data.get(offset..offset.checked_add(8)?)?;
+        if u32::from_le_bytes([header[0], header[1], header[2], header[3]]) != Self::STATE_MAGIC {
+            return None;
+        }
+        match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
+            Self::STATE_VERSION => Some(false),
+            Self::WIDE_STATE_VERSION | Self::WIDE_STATE_VERSION_5 => Some(true),
+            _ => None,
+        }
+    }
+
+    /// The image the host loaded, before the built-in patch applied to it; `None` when no
+    /// built-in patch applied (the cartridge's image is then the host's). Hosts identify the
+    /// game by this one (battery RAM, savestate headers), so a new version of a patch is the
+    /// same game.
+    #[must_use]
+    pub fn original_image(&self) -> Option<&[u8]> {
+        self.original_image.as_deref()
+    }
+
+    /// The built-in patch applied to the ROM loaded, if any (see [`crate::builtin_patches`]).
+    #[must_use]
+    pub const fn builtin_patch(&self) -> Option<&'static str> {
+        self.builtin_patch
     }
 
     /// Name of the core, recorded at the head of savestate files (REQ-CORE-120). There is
@@ -96,6 +181,13 @@ impl NesCore {
     /// and IRQ counters (REQ-CORE-090).
     pub const STATE_VERSION: i32 = 4;
 
+    /// Version of a block that also carries the widescreen extension registers: written only
+    /// once a ROM unlocked the extension, so every other block keeps [`Self::STATE_VERSION`].
+    pub const WIDE_STATE_VERSION: i32 = 6;
+
+    /// The earlier widescreen block, without the PRG window registers; still read.
+    pub const WIDE_STATE_VERSION_5: i32 = 5;
+
     /// Tile grid dimensions: always (33, 31, 128) (REQ-CORE-031).
     pub const VIDEO_INFO: VideoInfo = VideoInfo::STANDARD;
 
@@ -117,7 +209,17 @@ impl NesCore {
     /// is left stopped (REQ-CORE-011, Q-002). The detected region is returned, not applied
     /// (REQ-CORE-013).
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
-        let cartridge = match RomImage::try_load(image, name).and_then(Cartridge::create) {
+        // A ROM a built-in patch was made for is patched in memory (the host's copy is left
+        // alone); the original is kept for the savestates.
+        let patched = if self.builtin_patches_enabled {
+            crate::builtin_patches::apply(image)
+        } else {
+            None
+        };
+        let loaded = patched
+            .as_ref()
+            .map_or(image, |patched| patched.image.as_slice());
+        let cartridge = match RomImage::try_load(loaded, name).and_then(Cartridge::create) {
             Ok(cartridge) => cartridge,
             Err(error) => {
                 self.close_rom();
@@ -127,6 +229,8 @@ impl NesCore {
 
         let region = cartridge.rom().announced_region();
         self.battery_ram_imported = false;
+        self.builtin_patch = patched.as_ref().map(|patched| patched.name);
+        self.original_image = patched.map(|_| image.to_vec());
         self.bus.attach(Some(cartridge));
         self.power_on();
         RomLoadResult::ok(region)
@@ -135,6 +239,8 @@ impl NesCore {
     /// Stops the emulation (REQ-CORE-005).
     pub fn close_rom(&mut self) {
         self.battery_ram_imported = false;
+        self.original_image = None;
+        self.builtin_patch = None;
         self.bus.attach(None);
         self.bus.apu_mut().discard_samples();
     }
@@ -311,6 +417,10 @@ impl NesCore {
 
         let start_cycle = self.bus.cycle_count();
 
+        // A game with a margin decoder gets the host's margin whatever its ROM asks for.
+        let decoder = self.builtin_patch.and_then(crate::wide_decode::for_patch);
+        self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
+
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
         loop {
@@ -320,6 +430,9 @@ impl NesCore {
             }
         }
         self.bus.end_deferred_ppu();
+        if let Some(decoder) = decoder {
+            self.decode_margins(decoder);
+        }
 
         self.frame_count += 1;
 
@@ -328,6 +441,20 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// Has `decoder` fill the margins of the frame just run from the game's memory.
+    fn decode_margins(&mut self, decoder: &dyn crate::wide_decode::MarginDecoder) {
+        let (ram, ppu, cartridge) = self.bus.decoder_parts();
+        let Some(cartridge) = cartridge else {
+            return;
+        };
+        let memory = crate::wide_decode::DecoderMemory {
+            ram,
+            prg_ram: cartridge.memory().prg_ram(),
+            prg_rom: cartridge.rom().prg_rom(),
+        };
+        ppu.decode_margins(decoder, &memory, Some(cartridge));
     }
 
     /// The batch of the frame just run (REQ-CORE-030).
@@ -342,13 +469,47 @@ impl NesCore {
             palette: ppu.snapshot_palette(),
             mask_x: ppu.mask_x(),
             mask_y: ppu.mask_y(),
+            margin: ppu.frame_margin(),
+            visible_rows: ppu.visible_rows(),
+            margin_y: ppu.frame_vertical_margin(),
         }
+    }
+
+    /// Sets the widescreen margin the host offers on each side, in pixels (0 = off). A ROM sees
+    /// it only through the widescreen extension it has to unlock; nothing changes for the
+    /// others. Rounded down to a multiple of 8 and capped at [`crate::wide::MAX_MARGIN`].
+    pub fn set_widescreen_margin(&mut self, pixels: i32) {
+        self.bus.ppu_mut().wide_mut().set_host_margin(pixels);
+    }
+
+    /// Sets the margin the host offers above and below, in pixels (0 = off). Only a game with
+    /// a margin decoder that reads rows past the screen fills it. Rounded down to a multiple of
+    /// 8 and capped at [`crate::wide::MAX_VERTICAL_MARGIN`].
+    pub fn set_widescreen_vertical_margin(&mut self, pixels: i32) {
+        self.bus
+            .ppu_mut()
+            .wide_mut()
+            .set_host_vertical_margin(pixels);
+    }
+
+    /// The widescreen margin the host offers on each side, in pixels.
+    #[must_use]
+    pub fn widescreen_margin(&self) -> i32 {
+        self.bus.ppu().wide().host_margin()
     }
 
     /// The 256 x 240 indexed image of the frame just run (REQ-CORE-048).
     #[must_use]
     pub fn pixel_frame(&self) -> &[u8] {
         self.bus.ppu().pixel_frame()
+    }
+
+    /// The picture of the frame just run, widened by its widescreen margins (the sides, top and
+    /// bottom composed from the tile records), into `out`: `256 + 2 * margin` NES colour indices
+    /// a row, `240 + 2 * margin_y` rows; returns the number of rows. The plain
+    /// [`NesCore::pixel_frame`] without a margin.
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
+        self.bus.ppu().wide_picture_into(out)
     }
 
     /// The tile records of the frame just run.
@@ -505,13 +666,19 @@ impl NesCore {
         let cartridge = self.bus.cartridge().ok_or(NoRomLoaded)?;
         let rom = cartridge.rom();
 
+        let wide = self.bus.ppu().wide();
         let mut writer = StateWriter::reusing(std::mem::take(buffer));
         writer.write_u32(Self::STATE_MAGIC);
-        writer.write_i32(Self::STATE_VERSION);
+        writer.write_i32(if wide.unlocked() {
+            Self::WIDE_STATE_VERSION
+        } else {
+            Self::STATE_VERSION
+        });
         writer.write_string(Self::CORE_NAME);
         writer.write_bool(include_rom_image);
         writer.write_string(rom.name());
-        writer.write_blob(if include_rom_image { rom.raw() } else { &[] });
+        let image = self.original_image.as_deref().unwrap_or_else(|| rom.raw());
+        writer.write_blob(if include_rom_image { image } else { &[] });
         writer.write_u8(self.region as u8);
         writer.write_i64(self.frame_count);
 
@@ -521,6 +688,9 @@ impl NesCore {
         self.bus.apu().save_state(&mut writer);
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
+        if wide.unlocked() {
+            wide.save_state(&mut writer);
+        }
 
         *buffer = writer.into_vec();
         Ok(())
@@ -579,7 +749,10 @@ impl NesCore {
         }
 
         let version = reader.read_i32()?;
-        if version != Self::STATE_VERSION {
+        if version != Self::STATE_VERSION
+            && version != Self::WIDE_STATE_VERSION
+            && version != Self::WIDE_STATE_VERSION_5
+        {
             return Err(InvalidState::corrupt(format!(
                 "Corrupt savestate: format version {version} is not supported (expected {}).",
                 Self::STATE_VERSION
@@ -599,17 +772,37 @@ impl NesCore {
         let has_rom_image = reader.read_bool()?;
         let stored_name = reader.read_string()?;
         let rom_bytes = reader.read_blob()?;
+        let rom_patch = if has_rom_image {
+            crate::builtin_patches::patch_for(&rom_bytes)
+        } else {
+            None
+        };
+        let patchable = rom_patch.is_some();
         let region_byte = reader.read_u8()?;
         let region = NesRegion::from_u8(region_byte).ok_or_else(|| {
             InvalidState::corrupt(format!("Corrupt savestate: unknown region {region_byte}."))
         })?;
         let frame_count = reader.read_i64()?;
 
+        let mut patch = (self.original_image.take(), self.builtin_patch);
         let rom = if has_rom_image {
             // The block is self-contained: it restores even with no ROM loaded
-            // (REQ-CORE-090).
-            RomImage::try_load(&rom_bytes, &stored_name)
-                .map_err(|error| InvalidState::corrupt(format!("Corrupt savestate: {error}")))?
+            // (REQ-CORE-090). A ROM a built-in patch was made for gets the patch of this build.
+            let patched = if self.builtin_patches_enabled {
+                crate::builtin_patches::apply(&rom_bytes)
+            } else {
+                None
+            };
+            let image = patched
+                .as_ref()
+                .map_or(rom_bytes.as_slice(), |p| p.image.as_slice());
+            let rom = RomImage::try_load(image, &stored_name)
+                .map_err(|error| InvalidState::corrupt(format!("Corrupt savestate: {error}")))?;
+            patch = match patched {
+                Some(patched) => (Some(rom_bytes), Some(patched.name)),
+                None => (None, None),
+            };
+            rom
         } else {
             // Without an image the block restores onto the ROM already loaded. The old
             // cartridge is taken apart: the state replaces everything it held, and a failure
@@ -635,8 +828,29 @@ impl NesCore {
         self.bus.apu_mut().load_state(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         cartridge.load_state(&mut reader)?;
+        // A state of the hack restored without it: the original ROM never unlocks the
+        // extension, which must not stay as the hack left it (four nametables, margins).
+        let unpatched_hack = patch.1.is_none() && patchable;
+        let wide = self.bus.ppu_mut().wide_mut();
+        if (version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5)
+            && !unpatched_hack
+        {
+            wide.load_state(&mut reader, version == Self::WIDE_STATE_VERSION)?;
+        } else {
+            wide.reset();
+        }
+
+        // A state made the other way (the patch ran and does not now, or the reverse).
+        let made_with_patch =
+            version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5;
+        if patchable && made_with_patch != patch.1.is_some() {
+            if let Some(fix) = rom_patch.and_then(|known| known.after_other_way_state) {
+                fix(self.bus.ram_mut());
+            }
+        }
 
         self.battery_ram_imported = false;
+        (self.original_image, self.builtin_patch) = patch;
         self.bus.attach(Some(cartridge));
         self.region = region;
         self.apply_region();

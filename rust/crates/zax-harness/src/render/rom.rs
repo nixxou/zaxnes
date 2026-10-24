@@ -15,6 +15,7 @@ use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord};
 use zax_profiles::profile::GameProfile;
+use zax_render::assets::png_image;
 use zax_render::camera::{CameraMode, SceneCamera};
 use zax_render::scene::{BackdropState, SceneState, SkyboxKind};
 use zax_scripting::{
@@ -48,6 +49,20 @@ pub struct RomRequest<'a> {
     pub battery: Option<&'a Path>,
     /// Where to write the captured frame as a `--frames` JSON file.
     pub dump_frame: Option<&'a Path>,
+    /// Widescreen margin offered on each side, in pixels.
+    pub widescreen: i32,
+    /// Widescreen margin offered above and below, in pixels.
+    pub widescreen_y: i32,
+    /// Whether the state of `load_state` is restored with the built-in ROM patches.
+    pub builtin_patches: bool,
+    /// Where to write the composed tile records of the last frame.
+    pub png_nes: Option<&'a Path>,
+    /// State block restored after the reset.
+    pub load_state: Option<&'a Path>,
+    /// Where to write the state block after the run.
+    pub save_state: Option<&'a Path>,
+    /// Where to write the work RAM and the cartridge RAM after the run.
+    pub dump_mem: Option<&'a Path>,
 }
 
 /// Runs the ROM and builds the scene of its last frame.
@@ -67,6 +82,15 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         mesh: request.mesh,
         force_three_dimensional: false,
     })?;
+    host.core.set_builtin_patches(request.builtin_patches);
+    host.core.set_widescreen_margin(request.widescreen);
+    host.core
+        .set_widescreen_vertical_margin(request.widescreen_y);
+    if let Some(path) = request.load_state {
+        host.core
+            .try_load_state(&fs::read(path)?, 0)
+            .map_err(|error| HarnessError::Rom(error.message))?;
+    }
     let frames = request.frames.max(1);
     let mut records = Vec::new();
     for counter in 0..frames {
@@ -75,6 +99,8 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 
     host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_end);
     report_scripts(&host.engine);
+
+    write_run_outputs(&mut host, request)?;
 
     if let Some(path) = request.dump_frame {
         let batch = host.core.frame_batch();
@@ -87,11 +113,22 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         push_scripted_light(model, &mut scene);
     }
 
-    let picture = host.core.pixel_frame().to_vec();
+    let mut picture = Vec::new();
+    let picture_height = host.core.wide_picture_into(&mut picture);
     let mut engine = host.engine;
     scene.camera.snap_to_setpoints();
     scene.game_running = true;
     scene.clipping = engine.settings().clipping;
+    #[allow(clippy::cast_precision_loss)] // 0..=128.
+    let margin = engine
+        .published_frame()
+        .map_or(0, zax_engine3d::frame::ConversionFrame::margin) as f32;
+    scene.margin = margin;
+    #[allow(clippy::cast_precision_loss)] // 0..=240.
+    let margin_y = engine
+        .published_frame()
+        .map_or(0, zax_engine3d::frame::ConversionFrame::margin_y) as f32;
+    scene.margin_y = margin_y;
     scene.nes_background_color = engine.frame_color(0);
     scene.emulated_time = engine
         .published_frame()
@@ -113,7 +150,58 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         engine,
         draw_list,
         nes_picture: picture,
+        nes_picture_height: picture_height,
     })
+}
+
+/// The outputs of `--save-state`, `--dump-mem` and `--png-nes`, written after the run.
+fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), HarnessError> {
+    if let Some(path) = request.save_state {
+        let state = host
+            .core
+            .save_state(true)
+            .map_err(|_| HarnessError::Rom("no ROM to save".to_owned()))?;
+        fs::write(path, state)?;
+        println!("render: state written to {}", path.display());
+    }
+
+    if let Some(path) = request.dump_mem {
+        let memory: Vec<u8> = (0..0x0800u16)
+            .chain(0x6000..=0x7FFF)
+            .chain(0x5000..=0x5FFF)
+            .map(|address| host.core.read_memory(address))
+            .collect();
+        fs::write(path, memory)?;
+        let pc = host.core.cpu_and_bus_mut().0.pc;
+        let around: Vec<u8> = (0..6u16)
+            .map(|offset| host.core.read_memory(pc.wrapping_add(offset)))
+            .collect();
+        let (cpu, _) = host.core.cpu_and_bus_mut();
+        println!(
+            "render: memory written to {} (PC ${:04X} A ${:02X} X ${:02X} Y ${:02X} S ${:02X}{}, at PC {:02X?})",
+            path.display(),
+            cpu.pc,
+            cpu.a,
+            cpu.x,
+            cpu.y,
+            cpu.s,
+            if cpu.jammed() { " JAMMED" } else { "" },
+            around
+        );
+    }
+
+    if let Some(path) = request.png_nes {
+        let batch = host.core.frame_batch();
+        let (width, pixels) = compose_records(&batch);
+        let width = u32::try_from(width).unwrap_or(256);
+        fs::write(path, png_image::encode_rgba(width, 240, &pixels)?)?;
+        println!(
+            "render: records composed to {} ({width} x 240, margin {})",
+            path.display(),
+            batch.margin
+        );
+    }
+    Ok(())
 }
 
 /// `render.mesh_algo` as the settings catalogue numbers the algorithms.
@@ -320,6 +408,9 @@ impl Host {
             palette: batch.palette,
             mask_x: batch.mask_x,
             mask_y: batch.mask_y,
+            margin: batch.margin,
+            visible_rows: batch.visible_rows,
+            margin_y: batch.margin_y,
         };
         let counter = i32::try_from(counter)
             .map_err(|_| HarnessError::Usage("--run: too many frames".to_owned()))?;
@@ -605,4 +696,64 @@ fn push_scripted_light(model: &SettingsModel, scene: &mut SceneState) {
     scene.light.direction =
         zax_render::numerics::Vector3::new(direction.x, direction.y, direction.z);
     scene.light.color = color_of(model, SettingId::LightColor);
+}
+
+/// The tile records of `batch` composed flat as the NES would show them, `margin` pixels wider
+/// on each side: the backdrop, the sprites behind the background, the background, then the
+/// sprites in front, a lower sprite index winning. Returns the width and the RGBA pixels.
+fn compose_records(batch: &FrameBatch<'_>) -> (usize, Vec<u8>) {
+    let margin = usize::try_from(batch.margin.max(0)).unwrap_or(0);
+    let width = 256 + (2 * margin);
+    let mut entries = vec![0u8; width * 240];
+    let mut paint = |record: &TileRecord, base: u8| {
+        for py in 0..8 {
+            for px in 0..8 {
+                let Some(pixel) = record.displayed_pixel(px, py) else {
+                    continue;
+                };
+                if pixel == 0 {
+                    continue;
+                }
+                #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..8.
+                let (x, y) = (
+                    i32::from(record.x) + px as i32 + batch.margin,
+                    i32::from(record.y) + py as i32,
+                );
+                let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+                    continue;
+                };
+                if x < width && y < 240 {
+                    entries[(y * width) + x] = base + (record.palette * 4) + pixel;
+                }
+            }
+        }
+    };
+
+    let mut sprites: Vec<&TileRecord> = batch.records.iter().filter(|r| !r.background).collect();
+    sprites.sort_by_key(|record| std::cmp::Reverse(record.index % 64));
+    for record in sprites.iter().filter(|record| record.hidden) {
+        paint(record, 0x10);
+    }
+    for record in batch.records.iter().filter(|record| record.background) {
+        paint(record, 0);
+    }
+    for record in sprites.iter().filter(|record| !record.hidden) {
+        paint(record, 0x10);
+    }
+
+    let pixels = entries
+        .iter()
+        .flat_map(|&entry| {
+            let index = if entry.trailing_zeros() >= 2 {
+                0
+            } else {
+                entry
+            };
+            let color = zax_engine3d::palette::nes_color(usize::from(
+                batch.palette[usize::from(index & 0x1F)] & 0x3F,
+            ));
+            [color.r, color.g, color.b, 255]
+        })
+        .collect();
+    (width, pixels)
 }

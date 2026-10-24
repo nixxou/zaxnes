@@ -79,8 +79,8 @@ impl Residency for GlResidency<'_> {
         self.textures.get(texture)
     }
 
-    fn picture(&mut self, picture: &[u8]) -> Result<Option<Texture>, GlError> {
-        self.picture.upload(picture)
+    fn picture(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
+        self.picture.upload(picture, height)
     }
 }
 
@@ -126,6 +126,8 @@ pub struct SceneRenderer {
     linear: LinearColorBuffer,
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
+    /// The quad of the last widescreen 2D-mode picture, by margin.
+    wide_picture_quad: Option<interop::WidePictureQuad>,
     plan: FramePlan<GpuMesh, Texture>,
     passes: Passes,
     last_view: CameraView,
@@ -210,6 +212,7 @@ impl SceneRenderer {
             linear: LinearColorBuffer::new(&gl)?,
             unit_box: Arc::new(interop::unit_box()?),
             picture_quad: Arc::new(interop::picture_quad()?),
+            wide_picture_quad: None,
             plan: FramePlan::default(),
             last_view: CameraView::default(),
             group_opaque: false,
@@ -283,7 +286,7 @@ impl SceneRenderer {
 
         #[allow(clippy::cast_precision_loss)] // Target sizes are far below 2^24.
         let aspect = target.width as f32 / target.height as f32;
-        let view = scene.camera.build_view(scene.clipping, aspect);
+        let view = scene.camera.build_view(scene.view_clipping(), aspect);
         self.last_view = view;
 
         let started = std::time::Instant::now();
@@ -292,9 +295,15 @@ impl SceneRenderer {
             textures: &mut self.textures,
             picture: &mut self.picture,
         };
+        self.wide_picture_quad = interop::wide_quad_for(
+            frame.nes_picture,
+            frame.nes_picture_height,
+            self.wide_picture_quad.take(),
+        )?;
         let fixed = FixedMeshes {
             unit_box: &self.unit_box,
             picture_quad: &self.picture_quad,
+            wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
         };
         let collected = self
             .plan

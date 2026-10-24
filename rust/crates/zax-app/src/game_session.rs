@@ -229,6 +229,10 @@ pub struct SessionFrame {
     pub zapper_position: ZapperPosition,
 }
 
+/// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palette,
+/// edge masks, widescreen margin and visible rows.
+type CapturedBatch = ([u8; 32], i32, i32, (i32, zax_nes::VisibleRows, i32));
+
 /// One game being played.
 pub struct GameSession {
     core: Box<NesCore>,
@@ -241,6 +245,9 @@ pub struct GameSession {
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
     pipeline: FramePipeline,
+    /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
+    /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
+    strict_wide_edges: bool,
 }
 
 /// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
@@ -258,13 +265,15 @@ struct FramePipeline {
     in_flight: bool,
     /// The picture of the last finished frame, kept while the core is away.
     picture: Vec<u8>,
+    /// Its rows.
+    picture_height: usize,
     /// Whether the profile's scripts leave the core alone (no input hook, no memory or port
     /// access), so that the next frame may run while the scripts of the last one do
     /// ([`GameSession::launch_ahead`]).
     ahead_allowed: bool,
     /// The palette and edge masks of a frame captured but not converted yet; its tile records
     /// are in `GameSession::batch_records`.
-    pending: Option<([u8; 32], i32, i32)>,
+    pending: Option<CapturedBatch>,
     /// The RAM of the captured frame, for the scripts' `ReadMem` while the core is away.
     memory: MemorySnapshot,
 }
@@ -371,6 +380,7 @@ impl GameSession {
             started: false,
             aimed: None,
             batch_records: Vec::new(),
+            strict_wide_edges: false,
             pipeline: FramePipeline::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
@@ -505,6 +515,11 @@ impl GameSession {
         &mut self.core
     }
 
+    /// Sets `video.widescreen_strict_edges` (see the field `strict_wide_edges`).
+    pub fn set_strict_wide_edges(&mut self, strict: bool) {
+        self.strict_wide_edges = strict;
+    }
+
     /// The conversion engine.
     #[must_use]
     pub const fn engine(&self) -> &ConversionEngine {
@@ -562,9 +577,13 @@ impl GameSession {
         self.core.timing().nominal_frames_per_second
     }
 
-    /// Loads a ROM image into the core (REQ-LOOP-021 step 4).
+    /// Loads a ROM image into the core (REQ-LOOP-021 step 4). The core patches a ROM a
+    /// built-in patch was made for (the file is left alone).
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
         let result = self.core.load_rom(image, name);
+        if let Some(patch) = self.core.builtin_patch() {
+            crate::app_log::line(&format!("{name}: built-in patch applied ({patch})."));
+        }
         if result.success {
             self.frame_counter = 0;
         }
@@ -605,10 +624,7 @@ impl GameSession {
             .memory
             .ram
             .copy_from_slice(self.core.bus().ram());
-        self.pipeline.picture.clear();
-        self.pipeline
-            .picture
-            .extend_from_slice(self.core.pixel_frame());
+        self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
     }
 
     /// Starts the next frame on the emulation thread at once ("emulation ahead"): its input word
@@ -639,10 +655,8 @@ impl GameSession {
                 clock.stop(Stage::Core, started);
                 let captured = self.capture_batch(clock);
                 self.pipeline.pending = Some(captured);
-                self.pipeline.picture.clear();
-                self.pipeline
-                    .picture
-                    .extend_from_slice(self.core.pixel_frame());
+                self.pipeline.picture_height =
+                    self.core.wide_picture_into(&mut self.pipeline.picture);
             }
         }
     }
@@ -655,11 +669,11 @@ impl GameSession {
         scene: &mut SceneState,
         clock: &mut StageClock,
     ) {
-        let Some((palette, mask_x, mask_y)) = self.pipeline.pending.take() else {
+        let Some((palette, mask_x, mask_y, margin)) = self.pipeline.pending.take() else {
             return;
         };
         self.lend(model, scene, |session, scene| {
-            session.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
+            session.convert_batch_lent(scene, clock, palette, (mask_x, mask_y), margin);
         });
         if self.pipeline.memory.missed.swap(false, Ordering::Relaxed) {
             // A script read cartridge space, which the copy does not hold: from now on the next
@@ -909,10 +923,7 @@ impl GameSession {
         // The 2D mode shows the core's picture while the next frame runs (emulation ahead has
         // kept the picture of the frame it captured).
         if self.pipeline.pending.is_none() {
-            self.pipeline.picture.clear();
-            self.pipeline
-                .picture
-                .extend_from_slice(self.core.pixel_frame());
+            self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
         }
         let core = std::mem::replace(&mut self.core, spare);
         match worker.start(core, word) {
@@ -1014,18 +1025,23 @@ impl GameSession {
     /// The tile capture, the conversion and the frame hooks of the frame the core just ran (the
     /// second half of a frame).
     fn finish_frame_lent(&mut self, scene: &mut SceneState, clock: &mut StageClock) {
-        let (palette, mask_x, mask_y) = self.capture_batch(clock);
-        self.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
+        let (palette, mask_x, mask_y, margin) = self.capture_batch(clock);
+        self.convert_batch_lent(scene, clock, palette, (mask_x, mask_y), margin);
     }
 
     /// Copies the tile records of the frame the core just ran into `batch_records`; returns its
-    /// palette and edge masks.
-    fn capture_batch(&mut self, clock: &mut StageClock) -> ([u8; 32], i32, i32) {
+    /// palette, edge masks and widescreen margin.
+    fn capture_batch(&mut self, clock: &mut StageClock) -> CapturedBatch {
         let started = clock.start();
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
-        let captured = (batch.palette, batch.mask_x, batch.mask_y);
+        let captured = (
+            batch.palette,
+            batch.mask_x,
+            batch.mask_y,
+            (batch.margin, batch.visible_rows, batch.margin_y),
+        );
         clock.stop(Stage::Capture, started);
         captured
     }
@@ -1036,9 +1052,17 @@ impl GameSession {
         scene: &mut SceneState,
         clock: &mut StageClock,
         palette: [u8; 32],
-        mask_x: i32,
-        mask_y: i32,
+        (mask_x, mask_y): (i32, i32),
+        (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
     ) {
+        let visible_rows = if self.strict_wide_edges || margin == 0 {
+            visible_rows
+        } else {
+            // Every band counts as drawn across the whole margin.
+            #[allow(clippy::cast_possible_truncation)] // At most 512.
+            let margin = margin as i16;
+            [(-margin, 256 + margin); 30]
+        };
         let counter = self.frame_counter;
         let records = std::mem::take(&mut self.batch_records);
         // The conversion is synchronous, right after the frame, as REQ-LOOP-060 (c) requires.
@@ -1047,6 +1071,9 @@ impl GameSession {
             palette,
             mask_x,
             mask_y,
+            margin,
+            visible_rows,
+            margin_y,
         };
         let started = clock.start();
         self.scripted(scene, |engine| {
@@ -1105,13 +1132,15 @@ impl GameSession {
         self.engine.two_dimensional_mode
     }
 
-    /// Copies the core's 256 x 240 indexed picture into `destination`.
-    pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) {
+    /// Copies the core's indexed picture (256 x 240, larger with widescreen margins) into
+    /// `destination`; returns its rows.
+    pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) -> usize {
         destination.clear();
         if self.pipeline.in_flight || self.pipeline.pending.is_some() {
             destination.extend_from_slice(&self.pipeline.picture);
+            self.pipeline.picture_height
         } else {
-            destination.extend_from_slice(self.core.pixel_frame());
+            self.core.wide_picture_into(destination)
         }
     }
 

@@ -12,9 +12,20 @@
 //! Zapper no longer reads them there — AMD-021 R2-006 makes the vblank and the pre-render
 //! line see the universal backdrop only.
 
-use super::{palette_index, Cart, Ppu2C02, TileBuffer, SCREEN_WIDTH_I32, VISIBLE_SCANLINES};
+use super::{
+    palette_index, Cart, Ppu2C02, TileBuffer, SCREEN_WIDTH, SCREEN_WIDTH_I32, VISIBLE_SCANLINES,
+};
 use crate::cartridges::{Cartridge, ChrFetch};
+use crate::wide_decode::{BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 use crate::{nes_colors, NametableMirroring, TileRecord};
+
+/// Where a background row of the frame was read from, kept for a margin decoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CapturedRow {
+    row: BackgroundRow,
+    y: i16,
+    pattern_table: u16,
+}
 
 impl Ppu2C02 {
     /// Upper bound on the bytes the tile records of one frame occupy in a savestate, so that
@@ -51,13 +62,27 @@ impl Ppu2C02 {
 
     pub(super) fn reset_tile_state(&mut self) {
         self.tiles.clear();
+        self.frame_margin = 0;
+        self.frame_vertical_margin = 0;
+        self.visible_rows = crate::STANDARD_ROWS;
+        self.captured_rows = [None; 31];
+        self.tiles.set_extra_columns(0);
         self.mask_x = 0;
         self.mask_y = 0;
     }
 
-    /// Starts a new rendered frame: the record list of the previous one is dropped.
+    /// Starts a new rendered frame: the record list of the previous one is dropped, and the
+    /// widescreen margin of the new one is latched.
     pub(super) fn begin_rendered_frame(&mut self) {
         self.tiles.clear();
+        self.frame_margin = self.wide.margin();
+        self.frame_vertical_margin = self.wide.vertical_margin();
+        self.tiles
+            .set_extra_area(self.frame_margin / 8, self.frame_vertical_margin / 8);
+        #[allow(clippy::cast_possible_truncation)] // At most 128.
+        let margin = self.frame_margin as i16;
+        self.visible_rows = [(-margin, 256 + margin); 30];
+        self.captured_rows = [None; 31];
     }
 
     /// Runs the captures owed by visible line `line` at its first dot: the sprite band, and
@@ -99,7 +124,7 @@ impl Ppu2C02 {
     /// maskX and maskY, decided from the state at the start of visible line 0
     /// (REQ-CORE-046).
     fn compute_masks(&mut self, cartridge: Option<&Cartridge>) {
-        (self.mask_x, self.mask_y) = match Self::mirroring_of(cartridge) {
+        (self.mask_x, self.mask_y) = match self.layout_of(cartridge) {
             NametableMirroring::Horizontal => (8, 0),
             NametableMirroring::Vertical => (0, 8),
             _ => (0, 0),
@@ -128,7 +153,7 @@ impl Ppu2C02 {
 
         // Exception of the original: no row is captured on line 0 under vertical mirroring
         // (REQ-CORE-037, justification).
-        if line == 0 && Self::mirroring_of(cart.as_deref()) == NametableMirroring::Vertical {
+        if line == 0 && self.layout_of(cart.as_deref()) == NametableMirroring::Vertical {
             return;
         }
 
@@ -144,16 +169,57 @@ impl Ppu2C02 {
         let row_index = line / 8;
         #[allow(clippy::cast_possible_truncation)] // line is 0..240.
         let y = (line - 1) as i16;
+        if let Some(slot) = usize::try_from(row_index)
+            .ok()
+            .and_then(|row| self.captured_rows.get_mut(row))
+        {
+            *slot = Some(CapturedRow {
+                row: BackgroundRow {
+                    line,
+                    v: self.v_row_start,
+                    fine_x: self.fine_x,
+                },
+                y,
+                pattern_table,
+            });
+        }
 
-        for k in 0..=32u16 {
-            let x = (8 * i32::from(k)) - fine_x_scroll;
-            if x >= SCREEN_WIDTH_I32 {
-                // k = 32 with fine X at 0: a row has 32 records, otherwise 33
-                // (REQ-CORE-038).
+        // Widescreen extension: `extra` more columns on each side, read on through the
+        // horizontally neighbouring nametables (a 512-pixel plane that wraps), and only those
+        // inside the visible range of this band kept. Standard frames have extra = 0.
+        let extra = self.frame_margin / 8;
+        let (visible_low, visible_high) = if extra > 0 {
+            self.wide.visible_range()
+        } else {
+            (0, SCREEN_WIDTH_I32)
+        };
+        let row_width = 33 + (2 * extra);
+        if extra > 0 {
+            if let Some(row) = usize::try_from(line / 8)
+                .ok()
+                .and_then(|row| self.visible_rows.get_mut(row))
+            {
+                #[allow(clippy::cast_possible_truncation)] // -128 to 384.
+                let range = (visible_low as i16, visible_high as i16);
+                *row = range;
+            }
+        }
+
+        for k in -extra..=(32 + extra) {
+            let x = (8 * k) - fine_x_scroll;
+            if x >= SCREEN_WIDTH_I32 + (8 * extra) {
+                // k = 32 + extra with fine X at 0: a row has 32 records, otherwise 33
+                // (REQ-CORE-038), plus the extra columns.
                 continue;
             }
 
-            let mut column = coarse_x + k;
+            if extra > 0 && (x + 8 <= visible_low || x >= visible_high) {
+                continue;
+            }
+
+            let wrapped = (i32::from(coarse_x) + k).rem_euclid(64);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..64.
+            let mut column = wrapped as u16;
             let mut table = nametable;
             if column > 31 {
                 // The horizontally neighbouring nametable, mirroring then applied.
@@ -178,13 +244,13 @@ impl Ppu2C02 {
                 cartridge.advance_chr_latch(i32::from(pattern_table), i32::from(tile));
             }
 
-            #[allow(clippy::cast_possible_truncation)] // x is -7..256.
+            #[allow(clippy::cast_possible_truncation)] // x is -519..768.
             let record = TileRecord::new(
                 plane0,
                 plane1,
                 x as i16,
                 y,
-                (row_index * 33) + i32::from(k),
+                (row_index * row_width) + k + extra,
                 false,
                 false,
                 false,
@@ -192,6 +258,157 @@ impl Ppu2C02 {
                 true,
             );
             self.tiles.add(record);
+        }
+    }
+
+    /// Replaces the margins of the frame just captured with the tiles `decoder` reads from the
+    /// game's memory, row by row; a row the decoder does not handle keeps its nametable
+    /// columns. The centre 256 pixels are left as captured.
+    pub(crate) fn decode_margins(
+        &mut self,
+        decoder: &dyn MarginDecoder,
+        memory: &DecoderMemory<'_>,
+        cart: Option<&Cartridge>,
+    ) {
+        let extra = self.frame_margin / 8;
+        if extra == 0 {
+            return;
+        }
+        let row_width = 33 + (2 * extra);
+        let mut decoded_rows = [false; 31];
+        let mut tiles = Vec::new();
+        let mut records = Vec::new();
+        for (row_index, captured) in self.captured_rows.iter().enumerate() {
+            let Some(captured) = captured else {
+                continue;
+            };
+            let fine_x = i32::from(captured.row.fine_x);
+            // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose
+            // pixels begin at 256 - fine X, and goes on while it starts left of the edge.
+            let last = 32 + extra - i32::from(fine_x == 0);
+            let mut columns = (-extra..0).chain(32..=last);
+            tiles.clear();
+            if !decoder.decode_row(memory, &captured.row, &mut columns, &mut tiles) {
+                continue;
+            }
+            decoded_rows[row_index] = true;
+            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
+            let row_number = row_index as i32;
+            for &DecodedTile {
+                column,
+                tile,
+                palette,
+            } in &tiles
+            {
+                let (plane0, plane1) = self.read_pattern_planes(
+                    captured.pattern_table + (u16::from(tile) * 16),
+                    ChrFetch::Background,
+                    cart,
+                );
+                #[allow(clippy::cast_possible_truncation)] // -519..768.
+                let x = ((8 * column) - fine_x) as i16;
+                records.push(TileRecord::new(
+                    plane0,
+                    plane1,
+                    x,
+                    captured.y,
+                    (row_number * row_width) + column + extra,
+                    false,
+                    false,
+                    false,
+                    palette & 3,
+                    true,
+                ));
+            }
+            if let Some(range) = self.visible_rows.get_mut(row_index) {
+                #[allow(clippy::cast_possible_truncation)] // At most 512.
+                let margin = self.frame_margin as i16;
+                *range = (-margin, 256 + margin);
+            }
+        }
+
+        self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
+
+        // The decoded rows lose their nametable margins, then get the decoded ones.
+        self.tiles.retain_background(|record| {
+            let row = usize::try_from(record.index / row_width).unwrap_or(usize::MAX);
+            let column = (record.index % row_width) - extra;
+            !decoded_rows.get(row).copied().unwrap_or(false) || (0..32).contains(&column)
+        });
+        for record in records {
+            self.tiles.add(record);
+        }
+    }
+
+    /// The rows of the vertical margin: `frame_vertical_margin / 8` rows above the first
+    /// background row of the frame and as many below the last, whole width, for a decoder that
+    /// can read rows the PPU did not draw ([`MarginDecoder::decode_extra_row`]).
+    fn decode_extra_rows(
+        &self,
+        decoder: &dyn MarginDecoder,
+        memory: &DecoderMemory<'_>,
+        cart: Option<&Cartridge>,
+        tiles: &mut Vec<DecodedTile>,
+        records: &mut Vec<TileRecord>,
+    ) {
+        let rows = self.frame_vertical_margin / 8;
+        let first = self.captured_rows.iter().flatten().next();
+        let last = self.captured_rows.iter().flatten().last();
+        let (Some(first), Some(last)) = (first, last) else {
+            return;
+        };
+        let extra = self.frame_margin / 8;
+        for (from, step) in [(first, -1), (last, 1)] {
+            for distance in 1..=rows {
+                let offset = step * distance;
+                // The row `offset` rows away on the plane of two stacked nametables of 30 rows.
+                let stacked = (i32::from(from.row.nametable_y()) * 30)
+                    + i32::from(from.row.coarse_y())
+                    + offset;
+                let stacked = stacked.rem_euclid(60);
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..60.
+                let (table, coarse_y) = ((stacked / 30) as u16, (stacked % 30) as u16);
+                let row = BackgroundRow {
+                    line: from.row.line + (8 * offset),
+                    v: (from.row.v & !0x0BE0) | (table << 11) | (coarse_y << 5),
+                    fine_x: from.row.fine_x,
+                };
+                let fine_x = i32::from(row.fine_x);
+                let last_column = 32 + extra - i32::from(fine_x == 0);
+                tiles.clear();
+                if !decoder.decode_extra_row(memory, &row, &mut (-extra..=last_column), tiles) {
+                    return;
+                }
+                #[allow(clippy::cast_possible_truncation)] // Within 240 pixels of the screen.
+                let y = from.y + (8 * offset) as i16;
+                for &DecodedTile {
+                    column,
+                    tile,
+                    palette,
+                } in tiles.iter()
+                {
+                    let (plane0, plane1) = self.read_pattern_planes(
+                        from.pattern_table + (u16::from(tile) * 16),
+                        ChrFetch::Background,
+                        cart,
+                    );
+                    #[allow(clippy::cast_possible_truncation)] // -519..768.
+                    let x = ((8 * column) - fine_x) as i16;
+                    // Rows past the frame: the record index is not a row of the frame.
+                    records.push(TileRecord::new(
+                        plane0,
+                        plane1,
+                        x,
+                        y,
+                        -1,
+                        false,
+                        false,
+                        false,
+                        palette & 3,
+                        true,
+                    ));
+                }
+            }
         }
     }
 
@@ -240,8 +457,19 @@ impl Ppu2C02 {
             let tile = u16::from(self.oam[(n * 4) + 1]);
             let attribute = self.oam[(n * 4) + 2];
             let oam_x = self.oam[(n * 4) + 3];
+            let x = if self.frame_margin > 0 {
+                let x = self.wide.sprite_x(n, oam_x);
+                let (visible_low, visible_high) = self.wide.visible_range();
+                if x + 8 <= visible_low || x >= visible_high {
+                    continue;
+                }
+                x
+            } else {
+                i32::from(oam_x)
+            };
             let sprite = SpriteAttributes {
-                x: oam_x,
+                #[allow(clippy::cast_possible_truncation)] // -32768..32767 by construction.
+                x: x as i16,
                 mirror_h: (attribute & 0x40) != 0,
                 mirror_v: (attribute & 0x80) != 0,
                 hidden: (attribute & 0x20) != 0,
@@ -319,7 +547,7 @@ impl Ppu2C02 {
         self.tiles.add(TileRecord::new(
             plane0,
             plane1,
-            i16::from(sprite.x),
+            sprite.x,
             y,
             index,
             sprite.mirror_h,
@@ -457,10 +685,99 @@ impl Ppu2C02 {
     }
 }
 
+impl Ppu2C02 {
+    /// The picture of the frame just drawn, as wide as its widescreen margin: one NES colour
+    /// index per pixel, row 0 first, `256 + 2 * margin` pixels a row (the 2D mode). The 256
+    /// middle columns are the PPU's own picture; the sides are composed from the tile records
+    /// in the NES order (a sprite in front, then the background, then a sprite behind, a lower
+    /// sprite number winning) over the universal backdrop.
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
+        let margin = usize::try_from(self.frame_margin.max(0)).unwrap_or(0);
+        let margin_y = usize::try_from(self.frame_vertical_margin.max(0)).unwrap_or(0);
+        let width = SCREEN_WIDTH + (2 * margin);
+        let height = super::SCREEN_HEIGHT + (2 * margin_y);
+        out.clear();
+        if margin == 0 && margin_y == 0 {
+            out.extend_from_slice(&self.pixels);
+            return height;
+        }
+
+        // The PPU blanks its first 8 columns when the game asks for it, which in a wide picture
+        // would be a black band in the middle: they are composed too.
+        let composed_from = if self.left_column_masked() { 8 } else { 0 };
+        let screen_rows = margin_y..margin_y + super::SCREEN_HEIGHT;
+        // Palette entries of the sides (0 = nothing), composed first, then turned into colours. A
+        // sprite behind is painted first so that an opaque background pixel covers it.
+        out.resize(width * height, 0);
+        let paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
+            for py in 0..8i32 {
+                let Ok(row) =
+                    usize::try_from(i32::from(record.y) + py + self.frame_vertical_margin)
+                else {
+                    continue;
+                };
+                if row >= height {
+                    continue;
+                }
+                for px in 0..8i32 {
+                    let x = i32::from(record.x) + px;
+                    if screen_rows.contains(&row) && (composed_from..SCREEN_WIDTH_I32).contains(&x)
+                    {
+                        continue;
+                    }
+                    let Ok(column) = usize::try_from(x + self.frame_margin) else {
+                        continue;
+                    };
+                    if column >= width {
+                        continue;
+                    }
+                    #[allow(clippy::cast_sign_loss)] // 0..8.
+                    let Some(pixel) = record.displayed_pixel(px as usize, py as usize) else {
+                        continue;
+                    };
+                    let slot = &mut out[(row * width) + column];
+                    if pixel != 0 {
+                        *slot = base + (record.palette * 4) + pixel;
+                    }
+                }
+            }
+        };
+        let records = self.tiles.records();
+        for record in records.iter().filter(|r| !r.background && r.hidden).rev() {
+            paint(record, 0x10, out);
+        }
+        for record in records.iter().filter(|r| r.background) {
+            paint(record, 0x00, out);
+        }
+        let mut front: Vec<&TileRecord> = records
+            .iter()
+            .filter(|r| !r.background && !r.hidden)
+            .collect();
+        front.sort_by_key(|record| std::cmp::Reverse(record.index % 64));
+        for record in front {
+            paint(record, 0x10, out);
+        }
+
+        #[allow(clippy::cast_sign_loss)] // 0 or 8.
+        let first = margin + composed_from as usize;
+        for row in 0..height {
+            let line = &mut out[row * width..(row + 1) * width];
+            for (column, slot) in line.iter_mut().enumerate() {
+                if screen_rows.contains(&row) && (first..margin + SCREEN_WIDTH).contains(&column) {
+                    *slot = self.pixels[((row - margin_y) * SCREEN_WIDTH) + column - margin];
+                } else {
+                    *slot = self.palette[palette_index(0x3F00 | u16::from(*slot))];
+                }
+            }
+        }
+        height
+    }
+}
+
 /// The OAM fields one sprite capture copies into its records.
 #[allow(clippy::struct_excessive_bools)] // The three attribute flags of the OAM byte.
 struct SpriteAttributes {
-    x: u8,
+    x: i16,
     mirror_h: bool,
     mirror_v: bool,
     hidden: bool,

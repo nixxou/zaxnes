@@ -230,6 +230,13 @@ pub struct SceneState {
     /// The four clip margins `(c0, c1, c2, c3)` in scene units (REQ-SCN-003, DEC-R2-T1). They
     /// come from the profile at game load and Lua can change them during the game.
     pub clipping: Vec4F,
+    /// Widescreen margin of the displayed frame, in NES pixels on each side (0 for a standard
+    /// frame). The visible rectangle reaches this far past both sides of the 256-pixel picture,
+    /// and the left and right clip margins count from those wider edges.
+    pub margin: f32,
+    /// Vertical widescreen margin of the displayed frame, in NES pixels above and below: the
+    /// top and bottom clip margins count from those taller edges.
+    pub margin_y: f32,
     /// Whether a game is running. Outside that state the 3D scene is not displayed: only the
     /// background or the skybox stays visible behind the UI (REQ-SCN-047).
     pub game_running: bool,
@@ -262,6 +269,8 @@ impl Default for SceneState {
             backdrop: BackdropState::default(),
             camera: SceneCamera::new(),
             clipping: ConversionSettings::DEFAULT_CLIPPING,
+            margin: 0.0,
+            margin_y: 0.0,
             game_running: false,
             use_nes_background_color: true,
             nes_background_color: Rgb24::default(),
@@ -290,7 +299,20 @@ impl SceneState {
     /// The visible rectangle of the current clip margins (REQ-SCN-039).
     #[must_use]
     pub fn visible_rectangle(&self) -> VisibleRect {
-        VisibleRect::from_clipping(self.clipping)
+        VisibleRect::from_clipping(self.view_clipping())
+    }
+
+    /// The clip margins measured from the edges of the displayed picture: the profile's
+    /// margins, with the left and right ones moved out by the widescreen margin (a negative
+    /// margin reaches past the 256-pixel picture).
+    #[must_use]
+    pub fn view_clipping(&self) -> Vec4F {
+        Vec4F::new(
+            self.clipping.x - self.margin,
+            self.clipping.y - self.margin_y,
+            self.clipping.z - self.margin,
+            self.clipping.w - self.margin_y,
+        )
     }
 }
 
@@ -303,6 +325,8 @@ pub struct SceneFrame<'a> {
     /// The 256 × 240 pixel frame the core produced for the **displayed** frame, one NES colour
     /// index per pixel, row 0 first (SPEC-02 REQ-CORE-048). Only read in 2D mode.
     pub nes_picture: &'a [u8],
+    /// The rows of `nes_picture`: 240, more with a vertical widescreen margin (0 reads as 240).
+    pub nes_picture_height: usize,
 }
 
 impl<'a> SceneFrame<'a> {
@@ -312,6 +336,7 @@ impl<'a> SceneFrame<'a> {
         Self {
             draw_list: Some(draw_list),
             nes_picture: &[],
+            nes_picture_height: 0,
         }
     }
 }

@@ -92,6 +92,7 @@ impl Ppu2C02 {
 
         // The start of each logical nametable in console VRAM, as `read_nametable_inner`
         // finds it.
+        let layout = self.layout_of(Some(cartridge));
         let mut nametables = [0usize; 4];
         for (table, start) in (0u16..).zip(nametables.iter_mut()) {
             let page = cartridge.nametable_page(i32::from(table));
@@ -100,7 +101,7 @@ impl Ppu2C02 {
             }
 
             *start = usize::try_from(page).map_or_else(
-                |_| map_nametable(0x2000 + (table << 10), cartridge.mirroring()),
+                |_| map_nametable(0x2000 + (table << 10), layout),
                 |page| page << 10,
             );
         }

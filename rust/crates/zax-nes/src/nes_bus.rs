@@ -4,6 +4,7 @@ use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
 use crate::state::{InvalidState, StateReader, StateWriter};
+use crate::wide::WideExtension;
 
 /// Size of CPU work RAM.
 const RAM_SIZE: usize = 2048;
@@ -82,7 +83,12 @@ impl NesBus {
         self.open_bus
     }
 
-    /// CPU work RAM.
+    /// CPU work RAM, for writing.
+    pub fn ram_mut(&mut self) -> &mut [u8; RAM_SIZE] {
+        &mut self.ram
+    }
+
+    /// CPU RAM.
     #[must_use]
     pub const fn ram(&self) -> &[u8; RAM_SIZE] {
         &self.ram
@@ -173,6 +179,16 @@ impl NesBus {
 
     /// Advances the whole machine by one CPU cycle.
     pub fn tick(&mut self) {
+        // Widescreen extension overclock: the PPU and the APU stay still for this cycle. The
+        // cartridge still sees it: MMC1 tells consecutive writes apart by their cycle, and a
+        // bank switch is five writes in a row.
+        if self.ppu.wide_mut().take_stall_cycle() {
+            if let Some(cartridge) = self.cartridge.as_mut() {
+                cartridge.step_cpu_cycle();
+            }
+            return;
+        }
+
         self.cycles += 1;
         self.ppu_lag += 1;
         if self.cycles >= self.ppu_deadline {
@@ -310,6 +326,15 @@ impl NesBus {
             };
         }
 
+        if WideExtension::claims(address) {
+            if let Some(value) = self.wide_window_read(address) {
+                return value;
+            }
+            if let Some(value) = self.ppu.wide().read(address) {
+                return value;
+            }
+        }
+
         self.cartridge
             .as_mut()
             .and_then(|cartridge| cartridge.try_cpu_read(address))
@@ -339,6 +364,11 @@ impl NesBus {
         }
 
         self.sync_ppu();
+        if WideExtension::claims(address) {
+            // The window only listens: the cartridge still gets the write.
+            self.ppu.wide_mut().write(address, value);
+        }
+
         if let Some(cartridge) = self.cartridge.as_mut() {
             cartridge.cpu_write(address, value);
         }
@@ -371,6 +401,20 @@ impl NesBus {
             self.sync_ppu();
             self.ppu.write_oam_dma(value);
         }
+
+        self.ppu.wide_mut().latch_sprites();
+    }
+
+    /// A read of the widescreen extension's PRG window: the byte of PRG-ROM it shows there.
+    /// CPU RAM, the PPU and the cartridge at once, for a margin decoder.
+    pub(crate) fn decoder_parts(&mut self) -> (&[u8], &mut Ppu2C02, Option<&Cartridge>) {
+        (&self.ram, &mut self.ppu, self.cartridge.as_ref())
+    }
+
+    fn wide_window_read(&self, address: u16) -> Option<u8> {
+        let offset = self.ppu.wide().prg_window(address)?;
+        let prg = self.cartridge.as_ref()?.rom().prg_rom();
+        prg.get(offset % prg.len().max(1)).copied()
     }
 
     /// Writes a byte exactly as a CPU write would, without advancing emulated time
@@ -407,6 +451,15 @@ impl CpuBus for NesBus {
 
         if address < 0x4020 {
             return 0;
+        }
+
+        if WideExtension::claims(address) {
+            if let Some(value) = self.wide_window_read(address) {
+                return value;
+            }
+            if let Some(value) = self.ppu.wide().read(address) {
+                return value;
+            }
         }
 
         self.cartridge

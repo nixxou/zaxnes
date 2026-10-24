@@ -395,13 +395,23 @@ impl ConversionEngine {
         let index = state.acquire_frame();
         state.converting = index;
         let frame = &mut state.frames[index];
-        frame.begin_batch(frame_counter, Cell::new(batch.mask_x, batch.mask_y));
+        let margin = batch.margin.clamp(0, zax_nes::wide::MAX_MARGIN);
+        frame.begin_batch(frame_counter, Cell::new(batch.mask_x, batch.mask_y), margin);
+        frame.set_visible_rows(&batch.visible_rows);
+        let margin_y = batch.margin_y.clamp(0, zax_nes::wide::MAX_VERTICAL_MARGIN);
+        frame.set_vertical_margin(margin_y);
 
         // (a) frame palette.
         frame.palette_mut().load_from(&batch.palette);
 
         // (b) filtering and placement of the tiles.
-        intake(frame, &mut state.images, &state.settings, batch.records);
+        intake(
+            frame,
+            &mut state.images,
+            &state.settings,
+            batch.records,
+            margin,
+        );
 
         // (c) segmentation.
         let mut context = SegmentContext {
@@ -494,11 +504,13 @@ fn intake(
     images: &mut ImageRegistry,
     settings: &ConversionSettings,
     records: &[TileRecord],
+    margin: i32,
 ) {
     let clip = settings.clipping;
+    let margin_y = frame.margin_y();
     for record in records {
         let (x, y) = (i32::from(record.x), i32::from(record.y));
-        if !is_inside_clip_area(x, y, clip) {
+        if !is_inside_tall_clip_area(x, y, clip, (margin, margin_y)) {
             continue;
         }
 
@@ -515,7 +527,10 @@ fn intake(
             }
 
             let cell = grid::background_cell(x, y);
-            if cell.x <= 0 || cell.y <= 0 || cell.x >= grid::WIDTH - 1 || cell.y >= grid::HEIGHT - 1
+            if cell.x <= -grid::WIDE_COLUMNS
+                || cell.y <= -grid::WIDE_ROWS
+                || cell.x >= grid::STANDARD_WIDTH + grid::WIDE_COLUMNS - 1
+                || cell.y >= grid::HEIGHT + grid::WIDE_ROWS - 1
             {
                 // The grid has one cell of margin on each side precisely so that growth never
                 // needs a bounds test (SPEC-04 §2). With the clip margins of §4.2 no tile can
@@ -547,10 +562,33 @@ fn intake(
 #[must_use]
 #[allow(clippy::cast_precision_loss)] // C# int-to-float comparisons of screen coordinates.
 pub fn is_inside_clip_area(x: i32, y: i32, clipping: Vec4F) -> bool {
-    (x + 8) as f32 > clipping.x
-        && x as f32 <= 256.0 - clipping.z
-        && (y + 8) as f32 > clipping.w
-        && y as f32 <= 248.0 - clipping.y
+    is_inside_wide_clip_area(x, y, clipping, 0)
+}
+
+/// [`is_inside_clip_area`] on a widescreen frame whose picture reaches `margin` pixels past
+/// either side: the left and right margins of the clipping count from the wider edges.
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // C# int-to-float comparisons of screen coordinates.
+pub fn is_inside_wide_clip_area(x: i32, y: i32, clipping: Vec4F, margin: i32) -> bool {
+    is_inside_tall_clip_area(x, y, clipping, (margin, 0))
+}
+
+/// [`is_inside_wide_clip_area`] on a frame that also reaches `margin_y` pixels above and below:
+/// the top and bottom margins of the clipping count from the taller edges.
+#[must_use]
+#[allow(clippy::cast_precision_loss)] // C# int-to-float comparisons of screen coordinates.
+pub fn is_inside_tall_clip_area(
+    x: i32,
+    y: i32,
+    clipping: Vec4F,
+    (margin, margin_y): (i32, i32),
+) -> bool {
+    let margin = margin as f32;
+    let margin_y = margin_y as f32;
+    (x + 8) as f32 > clipping.x - margin
+        && x as f32 <= 256.0 + margin - clipping.z
+        && (y + 8) as f32 > clipping.w - margin_y
+        && y as f32 <= 248.0 + margin_y - clipping.y
 }
 
 impl ConversionState {
