@@ -115,3 +115,23 @@ fn the_rust_only_options_parse_and_are_listed_apart_from_the_csharp_usage() {
     assert!(!USAGE.contains("--handheld"));
     assert!(RUST_ONLY_USAGE.contains("--handheld") && RUST_ONLY_USAGE.contains("--roms"));
 }
+
+/// Rust-only: `--backend` names the graphics API of the run, `--load-state` a slot to load once
+/// the game has started.
+#[test]
+fn the_graphics_api_and_the_state_to_load_parse() {
+    let options = parse(&["--backend", "Vulkan", "--load-state", "3"]);
+    assert_eq!(Some(1), options.backend);
+    assert_eq!(Some(3), options.load_state);
+    assert_eq!(Some(0), parse(&["--backend", "gl"]).backend);
+    assert_eq!(Some(2), parse(&["--backend", "dx12"]).backend);
+    assert!(matches!(
+        AppOptions::parse(&["--backend", "metal"]),
+        Err(OptionsError::Backend { .. })
+    ));
+    assert!(matches!(
+        AppOptions::parse(&["--load-state", "first"]),
+        Err(OptionsError::Index { .. })
+    ));
+    assert!(RUST_ONLY_USAGE.contains("--backend") && RUST_ONLY_USAGE.contains("--load-state"));
+}
