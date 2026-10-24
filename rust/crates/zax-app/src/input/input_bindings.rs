@@ -12,12 +12,23 @@ pub struct InputBindings {
     gamepads: Vec<(String, BindingSet)>,
     last_gamepads: [Option<String>; PLAYER_COUNT],
     structure_revision: u64,
+    /// Whether the pads get the handheld defaults (`default_bindings::handheld_gamepad_set`).
+    handheld: bool,
 }
 
 impl Default for InputBindings {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Whether two sets hold the same bindings, in whatever order.
+fn same_bindings(left: &BindingSet, right: &BindingSet) -> bool {
+    left.bindings().len() == right.bindings().len()
+        && left
+            .bindings()
+            .iter()
+            .all(|binding| right.bindings().contains(binding))
 }
 
 fn same_identity(left: &str, right: &str) -> bool {
@@ -36,6 +47,30 @@ impl InputBindings {
             gamepads: Vec::new(),
             last_gamepads: [None, None],
             structure_revision: 0,
+            handheld: false,
+        }
+    }
+
+    /// Gives the pads the handheld defaults from now on. A pad whose saved set is still the
+    /// desktop default, which an earlier version gave every pad, gets them at once; a set the
+    /// player changed is kept.
+    pub fn use_handheld_defaults(&mut self) {
+        self.handheld = true;
+        let desktop = default_bindings::create_gamepad(true);
+        let handheld = default_bindings::create_handheld_gamepad(true);
+        for (_, set) in &mut self.gamepads {
+            if same_bindings(set, &desktop) {
+                set.replace(handheld.bindings().iter().cloned());
+            }
+        }
+    }
+
+    /// The default set of a `standard` pad (or an empty one) on this device.
+    fn default_gamepad(&self, standard: bool) -> BindingSet {
+        if self.handheld {
+            default_bindings::create_handheld_gamepad(standard)
+        } else {
+            default_bindings::create_gamepad(standard)
         }
     }
 
@@ -93,10 +128,8 @@ impl InputBindings {
         let position = if let Some(position) = existing {
             position
         } else {
-            self.gamepads.push((
-                identity.to_owned(),
-                default_bindings::create_gamepad(standard),
-            ));
+            let defaults = self.default_gamepad(standard);
+            self.gamepads.push((identity.to_owned(), defaults));
             self.structure_revision += 1;
             self.gamepads.len() - 1
         };
@@ -133,7 +166,7 @@ impl InputBindings {
 
     /// Puts the pad `identity` back to the defaults of a `standard` pad.
     pub fn reset_gamepad(&mut self, identity: &str, standard: bool) {
-        let defaults = default_bindings::create_gamepad(standard);
+        let defaults = self.default_gamepad(standard);
         self.gamepad_mut(identity, standard)
             .replace(defaults.bindings().iter().cloned());
     }

@@ -262,5 +262,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_OPTION_PIPELINE, "Scripts en parallèle"),
     (keys::HANDHELD_REGION_AUTO, "Auto (ROM)"),
     (keys::HANDHELD_CAMERA_RESET, "Vue par défaut"),
+    (keys::HANDHELD_CAMERA_KEPT, "Caméra mémorisée"),
+    (keys::HANDHELD_CAMERA_RESTORED, "Caméra restaurée"),
     (keys::HANDHELD_CONTROLS_PLAYER, "Manette du joueur 1"),
 ];

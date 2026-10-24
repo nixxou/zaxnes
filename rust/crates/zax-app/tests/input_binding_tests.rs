@@ -997,3 +997,74 @@ fn req_inp_048_bindings_are_global() {
     assert_eq!(bindings.keyboard(0).get_action(InputAction::A), key(Key::K));
     assert_eq!(input_action::PLAYER_COUNT, 2);
 }
+
+/// A handheld console (Rust-only, owner request): NES A and B on the buttons labelled A and B,
+/// zoom on the shoulders, fast forward on R2, no rewind; X, Y and L2 stay free for the handheld
+/// interface.
+#[test]
+fn a_handheld_pad_gets_the_handheld_defaults() {
+    let mut bindings = InputBindings::new();
+    bindings.use_handheld_defaults();
+    let set = bindings.gamepad_mut("handheld pad", true);
+
+    assert_eq!(
+        set.get_action(InputAction::A),
+        PhysicalControl::button(pad_map::SOUTH)
+    );
+    assert_eq!(
+        set.get_action(InputAction::B),
+        PhysicalControl::button(pad_map::EAST)
+    );
+    assert_eq!(
+        set.get_action(InputAction::ZOOM_OUT),
+        PhysicalControl::button(pad_map::LEFT_BUMPER)
+    );
+    assert_eq!(
+        set.get_action(InputAction::ZOOM_IN),
+        PhysicalControl::button(pad_map::RIGHT_BUMPER)
+    );
+    assert_eq!(
+        set.get_action(InputAction::FAST_FORWARD),
+        PhysicalControl::trigger(pad_map::RIGHT_TRIGGER)
+    );
+    assert!(!set.get_action(InputAction::ROLL_BACK).is_bound());
+    for free in [pad_map::WEST, pad_map::NORTH] {
+        assert!(set
+            .bindings()
+            .iter()
+            .all(|(_, control)| *control != PhysicalControl::button(free)));
+    }
+    assert!(set
+        .bindings()
+        .iter()
+        .all(|(_, control)| *control != PhysicalControl::trigger(pad_map::LEFT_TRIGGER)));
+}
+
+/// A pad an earlier version saved with the desktop defaults moves to the handheld defaults; one
+/// the player changed is kept.
+#[test]
+fn a_saved_desktop_default_pad_moves_to_the_handheld_defaults() {
+    let mut bindings = InputBindings::new();
+    bindings.gamepad_mut("untouched", true);
+    bindings
+        .gamepad_mut("changed", true)
+        .set_action(InputAction::A, PhysicalControl::button(pad_map::NORTH));
+
+    bindings.use_handheld_defaults();
+
+    assert_eq!(
+        bindings
+            .gamepad_mut("untouched", true)
+            .get_action(InputAction::B),
+        PhysicalControl::button(pad_map::EAST)
+    );
+    let changed = bindings.gamepad_mut("changed", true);
+    assert_eq!(
+        changed.get_action(InputAction::A),
+        PhysicalControl::button(pad_map::NORTH)
+    );
+    assert_eq!(
+        changed.get_action(InputAction::B),
+        PhysicalControl::button(pad_map::WEST)
+    );
+}

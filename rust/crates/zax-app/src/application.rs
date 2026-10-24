@@ -292,8 +292,7 @@ impl Running {
         renderer.set_group_opaque_draws(group_draws(options));
         let input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;
         let mut bindings_store = FileInputBindingStore::new(paths.clone(), OffsetDateTime::now_utc);
-        let mut bindings = crate::input::InputBindings::new();
-        bindings_store.load(&mut bindings);
+        let bindings = load_bindings(&mut bindings_store, options);
         let source = DesktopInputSource::new(bindings, Box::new(bindings_store));
 
         let (audio, sample_rate) = open_audio(options, window.sdl());
@@ -926,6 +925,19 @@ const SEPARATE_CORE_VARIABLE: &str = "ZAXNES_SEPARATE_CORE";
 
 /// The variable that forces [`group_draws`].
 const GROUP_DRAWS_VARIABLE: &str = "ZAXNES_GROUP_DRAWS";
+
+/// The saved bindings, with the handheld defaults on a handheld.
+fn load_bindings(
+    store: &mut FileInputBindingStore,
+    options: &AppOptions,
+) -> crate::input::InputBindings {
+    let mut bindings = crate::input::InputBindings::new();
+    store.load(&mut bindings);
+    if options.handheld {
+        bindings.use_handheld_defaults();
+    }
+    bindings
+}
 
 /// The scene renderer, with its linked programs kept in the user folder.
 fn open_renderer(

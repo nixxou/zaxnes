@@ -179,6 +179,8 @@ pub const HANDHELD_OPTION_CATCH_UP: &str = "handheld.option.catch_up";
 pub const HANDHELD_OPTION_PIPELINE: &str = "handheld.option.pipeline";
 pub const HANDHELD_REGION_AUTO: &str = "handheld.region.auto";
 pub const HANDHELD_CAMERA_RESET: &str = "handheld.camera.reset";
+pub const HANDHELD_CAMERA_KEPT: &str = "handheld.camera.kept";
+pub const HANDHELD_CAMERA_RESTORED: &str = "handheld.camera.restored";
 pub const HANDHELD_CONTROLS_PLAYER: &str = "handheld.controls.player";
 
 // ------------------------------------------------- commands of REQ-UI-205
@@ -357,5 +359,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_OPTION_PIPELINE,
     HANDHELD_REGION_AUTO,
     HANDHELD_CAMERA_RESET,
+    HANDHELD_CAMERA_KEPT,
+    HANDHELD_CAMERA_RESTORED,
     HANDHELD_CONTROLS_PLAYER,
 ];

@@ -14,6 +14,24 @@ No game, ROM or profile is included.
 4. Start Zaxnes from the Ports menu. Hold Select+Start for one second to quit (or "Exit to
    launcher" in the in-game menu): the settings and saves are written before it closes.
 
+## Controls in game
+
+| Button | Action |
+|---|---|
+| D-pad, A, B, Select, Start | the NES pad (A and B are the buttons labelled A and B) |
+| X | default camera view |
+| Y | 2D / 3D |
+| L1 / R1 | zoom out / zoom in |
+| Right stick | turn the camera |
+| R2 | fast forward |
+| L2 held | keep the camera angle and zoom |
+| L2 short press | put the kept camera angle and zoom back |
+| Menu (or Select+Start tapped) | in-game menu |
+| Select+Start held one second | quit |
+
+A pad saved with the old default layout moves to this one; a layout changed in Options >
+Controls is kept.
+
 ## Profiles from 3dSen (convert on a PC first)
 
 Profiles come from your own copy of 3dSen PC. On a PC, with the desktop build of Zaxnes:

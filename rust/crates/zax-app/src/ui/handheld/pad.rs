@@ -31,10 +31,12 @@ pub enum PadButton {
     Start,
     /// The menu (guide) button.
     Menu,
+    /// The left trigger, pressed past half way.
+    L2,
 }
 
 impl PadButton {
-    const COUNT: usize = 13;
+    const COUNT: usize = 14;
 
     pub const ALL: [Self; Self::COUNT] = [
         Self::Up,
@@ -50,6 +52,7 @@ impl PadButton {
         Self::Select,
         Self::Start,
         Self::Menu,
+        Self::L2,
     ];
 
     const fn index(self) -> usize {
