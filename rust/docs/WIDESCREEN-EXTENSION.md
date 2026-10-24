@@ -36,6 +36,7 @@ are answered by the window only once it is unlocked.
 | `$5003` | R/W | margin the game asks for on each side, in pixels |
 | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels (power-on `$FF`) |
 | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels (power-on `$FF`) |
+| `$5006` | R/W | overclock: extra CPU time each frame, in scanlines (power-on 0) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
 | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code: the CPU runs code from it, whatever bank the mapper shows (power-on 0) |
 
@@ -53,6 +54,12 @@ are answered by the window only once it is unlocked.
   the next page from 0, so a game writes the high byte of every sprite it places off the standard
   picture, every frame, and the others stay at 0. A sprite at x = -16 is `$FF:$F0`; at x = 300,
   `$01:$2C`. Sprites past the visible range are dropped, like background tiles.
+* Overclock: when the PPU finishes the picture (start of line 240) the PPU and the APU stay
+  still for `$5006` x 114 CPU cycles while the CPU runs on (the cartridge still counts them, so
+  that MMC1 keeps telling consecutive writes apart): the frame logic gets
+  that much more time before the NMI, and the picture, the sound and their timing do not
+  change. Showing and running enemies in the margins costs CPU time the console does not have;
+  this is where it comes from.
 * The 64-sprite OAM and the eight-sprites-per-line limit are unchanged (the core already captures
   every sprite, eight per line or not).
 

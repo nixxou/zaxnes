@@ -628,6 +628,9 @@ impl Ppu2C02 {
 
         self.dot = 0;
         self.scanline += 1;
+        if self.scanline == VISIBLE_SCANLINES {
+            self.wide.arm_overclock();
+        }
 
         if self.scanline < self.timing.scanlines_per_frame {
             return;
