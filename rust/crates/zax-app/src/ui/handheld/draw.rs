@@ -9,9 +9,11 @@ use super::layout::{self, Hint, Metrics};
 use super::options::{self, ROWS};
 use super::overlay::{OverlayItem, ITEMS};
 use super::rom_list::{first_visible, ProfileMatch, RomEntry, RomListModel};
-use super::{HandheldUi, Screen};
+use super::states::{SlotState, StatesMode};
+use super::{slot_state, HandheldUi, Screen, STATE_PICTURE_ID};
 use crate::input::BindingDeviceKind;
 use crate::persistence::save_slots::numbered_slot_id;
+use crate::ui::confirm_dialog::ConfirmationView;
 use crate::ui::menu_bar;
 use crate::ui::zax_ui::{UiFrame, ZaxUi};
 use crate::ui::{key_config, keys, strings, text};
@@ -26,6 +28,12 @@ const PROFILE: [f32; 4] = [0.45, 0.92, 0.55, 1.0];
 const PROFILE_ON_FOCUS: [f32; 4] = [0.02, 0.32, 0.08, 1.0];
 const BAR: [f32; 4] = [0.1, 0.1, 0.16, 1.0];
 const WARNING: [f32; 4] = [1.0, 0.45, 0.35, 1.0];
+/// The save state screen when it saves, and when it loads: two colours apart from each other and
+/// from the orange and red of the states that do not load as they are.
+const SAVE_ACCENT: [f32; 4] = [0.84, 0.46, 1.0, 1.0];
+const LOAD_ACCENT: [f32; 4] = [0.36, 0.68, 1.0, 1.0];
+/// A state made with the built-in patches set the other way (it loads once they are switched).
+const OTHER_MODE: [f32; 4] = [1.0, 0.62, 0.2, 1.0];
 
 /// A few games for the screenshots of a machine with no ROM folder.
 pub(super) fn sample_roms() -> RomListModel {
@@ -96,12 +104,25 @@ impl Painter<'_> {
 
     /// One row of a list: `left` clipped to leave room for `right`.
     fn row(&self, slot: usize, selected: bool, left: &str, right: (&str, [f32; 4])) {
+        let x1 = self.size[0] - self.metrics.padding * 0.5;
+        self.row_to(slot, (selected, FOCUS), left, right, x1);
+    }
+
+    /// One row of a list that ends at `x1`, its focus bar of `focus` when selected.
+    fn row_to(
+        &self,
+        slot: usize,
+        (selected, focus): (bool, [f32; 4]),
+        left: &str,
+        right: (&str, [f32; 4]),
+        x1: f32,
+    ) {
         let metrics = &self.metrics;
         let top = self.row_top(slot);
-        let (x0, x1) = (metrics.padding * 0.5, self.size[0] - metrics.padding * 0.5);
+        let x0 = metrics.padding * 0.5;
         if selected {
             self.list
-                .add_rect([x0, top], [x1, top + metrics.row], FOCUS)
+                .add_rect([x0, top], [x1, top + metrics.row], focus)
                 .filled(true)
                 .rounding(metrics.padding * 0.4)
                 .build();
@@ -131,6 +152,15 @@ impl Painter<'_> {
 
     /// The bar of hints at the bottom.
     fn hints(&self, hints: &[Hint]) {
+        let texts: Vec<(&str, String)> = hints
+            .iter()
+            .map(|hint| (hint.button, strings::get(hint.meaning)))
+            .collect();
+        self.hint_texts(&texts);
+    }
+
+    /// The bar of hints at the bottom, each a button and what it does, already in words.
+    fn hint_texts(&self, hints: &[(&str, String)]) {
         let metrics = &self.metrics;
         let top = self.size[1] - metrics.hint_band();
         self.list
@@ -139,12 +169,11 @@ impl Painter<'_> {
             .build();
         let y = top + metrics.padding;
         let mut x = metrics.padding;
-        for hint in hints {
-            let meaning = strings::get(hint.meaning);
-            self.text(x, y, FOCUS, hint.button);
-            x += self.width(hint.button) + metrics.padding * 0.5;
-            self.text(x, y, TEXT, &meaning);
-            x += self.width(&meaning) + metrics.padding * 1.6;
+        for (button, meaning) in hints {
+            self.text(x, y, FOCUS, button);
+            x += self.width(button) + metrics.padding * 0.5;
+            self.text(x, y, TEXT, meaning);
+            x += self.width(meaning) + metrics.padding * 1.6;
         }
     }
 
@@ -186,13 +215,18 @@ impl HandheldUi {
     pub fn draw(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
         let size = ui.io().display_size;
         self.metrics = Metrics::for_height(size[1]);
+        self.follow_the_state_picture(frame.host);
         match self.screen {
             Screen::Home => self.draw_home(ui),
             Screen::Profiles => self.draw_profiles(ui),
             Screen::Options => self.draw_options(ui, frame),
             Screen::Controls => self.draw_controls(ui, frame),
             Screen::Overlay => self.draw_overlay(ui, frame),
+            Screen::States => self.draw_states(ui, frame),
             Screen::InGame => {}
+        }
+        if let Some(question) = ZaxUi::confirmation(frame.host) {
+            self.draw_confirmation(ui, question);
         }
         self.draw_exit_hold(ui);
         let margin = self.metrics.hint_band() + self.metrics.padding;
@@ -461,6 +495,177 @@ impl HandheldUi {
             OverlayItem::Camera => format!("< {} >", options::camera_label(self.overlay.camera())),
             _ => String::new(),
         }
+    }
+
+    /// The save state screen: the slots on the left, the thumbnail of the selected one on the
+    /// right, in the colour of what A does (save or load), which the title says too.
+    fn draw_states(&self, ui: &Ui, frame: &UiFrame<'_>) {
+        let Some(_window) = full_screen(ui, "##states", BACKGROUND) else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let metrics = &self.metrics;
+        let states = self.states();
+        let (accent, title) = match states.mode() {
+            StatesMode::Save => (SAVE_ACCENT, keys::HANDHELD_STATES_SAVE_TITLE),
+            StatesMode::Load => (LOAD_ACCENT, keys::HANDHELD_STATES_LOAD_TITLE),
+        };
+        let size = painter.size;
+        let band = metrics.title_band();
+        painter
+            .list
+            .add_rect([0.0, 0.0], [size[0], band], BAR)
+            .filled(true)
+            .build();
+        painter
+            .list
+            .add_rect([0.0, band - metrics.padding * 0.3], [size[0], band], accent)
+            .filled(true)
+            .build();
+        {
+            let _heading = painter.heading.map(|font| ui.push_font(font));
+            painter.text(
+                metrics.padding,
+                metrics.padding,
+                accent,
+                &strings::get(title),
+            );
+        }
+
+        // The slots, on the left.
+        let split = (size[0] * 0.56).round();
+        let total = crate::persistence::save_slots::EXPOSED_SLOT_COUNT;
+        let rows = metrics.visible_rows(size[1]);
+        let first = first_visible(states.selected_index(), rows, total);
+        for (row, index) in (first..total).take(rows).enumerate() {
+            let slot = i32::try_from(index + 1).unwrap_or(1);
+            let record = frame.host.slots.find(&numbered_slot_id(slot));
+            let colour = match slot_state(frame.host, slot) {
+                SlotState::Empty => DIM,
+                SlotState::Fits => TEXT,
+                SlotState::OtherMode => OTHER_MODE,
+                SlotState::OtherVersion => WARNING,
+            };
+            let label = menu_bar::slot_label(slot, record);
+            let (name, date) = label.split_once(" — ").unwrap_or((label.as_str(), ""));
+            painter.row_to(
+                row,
+                (index == states.selected_index(), accent),
+                name,
+                (date, colour),
+                split - metrics.padding * 0.5,
+            );
+        }
+
+        self.draw_state_preview(&painter, frame, accent, split);
+        painter.hints(layout::states_hints(states.mode()));
+    }
+
+    /// The thumbnail of the selected slot, framed in `accent`, right of `split`; under it, why
+    /// the state does not load as it is, when it does not.
+    fn draw_state_preview(
+        &self,
+        painter: &Painter<'_>,
+        frame: &UiFrame<'_>,
+        accent: [f32; 4],
+        split: f32,
+    ) {
+        let ui = painter.ui;
+        let metrics = &self.metrics;
+        let size = painter.size;
+        let states = self.states();
+        let left = split + metrics.padding * 0.5;
+        let right = size[0] - metrics.padding;
+        let top = painter.row_top(0);
+        let bottom = size[1] - metrics.hint_band() - metrics.padding;
+        let width = (right - left).max(1.0);
+        let height = (width * 0.75).min((bottom - top - 2.0 * metrics.row).max(1.0));
+        let width = height / 0.75;
+        let x = left + ((right - left) - width) * 0.5;
+        painter
+            .list
+            .add_rect(
+                [x - 3.0, top - 3.0],
+                [x + width + 3.0, top + height + 3.0],
+                accent,
+            )
+            .rounding(metrics.padding * 0.3)
+            .thickness(3.0)
+            .build();
+        let slot = states.slot();
+        if self.state_picture_shown() {
+            painter
+                .list
+                .add_image(
+                    imgui::TextureId::new(STATE_PICTURE_ID),
+                    [x, top],
+                    [x + width, top + height],
+                )
+                .build();
+        } else {
+            let empty = !frame.host.slots.is_occupied(&numbered_slot_id(slot));
+            let message = if empty {
+                text::empty_slot()
+            } else {
+                strings::get(keys::HANDHELD_STATES_NO_PICTURE)
+            };
+            let message_x = x + (width - painter.width(&message)) * 0.5;
+            painter.text(
+                message_x,
+                top + (height - metrics.font) * 0.5,
+                DIM,
+                &message,
+            );
+        }
+        // Under it, why the state does not load as it is, when it does not.
+        let caption = match slot_state(frame.host, slot) {
+            SlotState::OtherMode => Some((keys::SLOT_OTHER_PATCH, OTHER_MODE)),
+            SlotState::OtherVersion => Some((keys::SLOT_OTHER_HACK_VERSION, WARNING)),
+            SlotState::Empty | SlotState::Fits => None,
+        };
+        if let Some((key, colour)) = caption {
+            ui.set_cursor_pos([left, top + height + metrics.padding]);
+            let _wrap = ui.push_text_wrap_pos_with_pos(right);
+            let _colour = ui.push_style_color(StyleColor::Text, colour);
+            ui.text_wrapped(strings::get(key));
+        }
+    }
+
+    /// A question of the host, over the screen: its title and text, A to agree, B to decline.
+    fn draw_confirmation(&self, ui: &Ui, question: ConfirmationView<'_>) {
+        let size = ui.io().display_size;
+        let metrics = &self.metrics;
+        let Some(_window) = full_screen(ui, "##question", [0.0, 0.0, 0.0, 0.75]) else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let width = (size[0] - 4.0 * metrics.padding).min(metrics.font * 26.0);
+        let left = (size[0] - width) * 0.5;
+        let top = size[1] * 0.2;
+        let bottom = size[1] - metrics.hint_band() - 2.0 * metrics.padding;
+        painter
+            .list
+            .add_rect([left, top], [left + width, bottom], PANEL)
+            .filled(true)
+            .rounding(metrics.padding)
+            .build();
+        {
+            let _heading = painter.heading.map(|font| ui.push_font(font));
+            painter.text(
+                left + metrics.padding,
+                top + metrics.padding,
+                FOCUS,
+                question.title(),
+            );
+        }
+        ui.set_cursor_pos([left + metrics.padding, top + metrics.title_band()]);
+        let _wrap = ui.push_text_wrap_pos_with_pos(left + width - metrics.padding);
+        let _colour = ui.push_style_color(StyleColor::Text, TEXT);
+        ui.text_wrapped(question.message());
+        painter.hint_texts(&[
+            ("A", question.confirm_label()),
+            ("B", question.cancel_label()),
+        ]);
     }
 
     /// While Select + Start is held: how long until the application quits.

@@ -2,6 +2,7 @@
 //! camera preset. A press of a button answers with the [`OverlayCommand`] it means.
 
 use super::pad::PadButton;
+use super::states::StatesMode;
 use crate::persistence::save_slots::EXPOSED_SLOT_COUNT;
 
 /// A row of the menu.
@@ -71,10 +72,8 @@ impl CameraPreset {
 pub enum OverlayCommand {
     /// Close the menu and go on.
     Resume,
-    /// Save to this numbered slot.
-    SaveState(i32),
-    /// Load this numbered slot.
-    LoadState(i32),
+    /// Open the save state screen, to save or to load, on this numbered slot.
+    ChooseState(StatesMode, i32),
     /// Fast forward on or off.
     ToggleFastForward,
     /// Apply this camera preset.
@@ -136,6 +135,11 @@ impl OverlayModel {
         self.camera
     }
 
+    /// Makes `slot` the numbered slot the state rows show (the last one used).
+    pub const fn set_slot(&mut self, slot: i32) {
+        self.slot = slot;
+    }
+
     /// Opens the menu again on its first row; the slot and the camera stay.
     pub const fn reopen(&mut self) {
         self.selected = 0;
@@ -178,8 +182,8 @@ impl OverlayModel {
     fn activate(&self) -> OverlayCommand {
         match self.selected() {
             OverlayItem::Resume => OverlayCommand::Resume,
-            OverlayItem::SaveState => OverlayCommand::SaveState(self.slot),
-            OverlayItem::LoadState => OverlayCommand::LoadState(self.slot),
+            OverlayItem::SaveState => OverlayCommand::ChooseState(StatesMode::Save, self.slot),
+            OverlayItem::LoadState => OverlayCommand::ChooseState(StatesMode::Load, self.slot),
             OverlayItem::FastForward => OverlayCommand::ToggleFastForward,
             OverlayItem::Camera => OverlayCommand::SetCamera(self.camera),
             OverlayItem::Options => OverlayCommand::Options,
@@ -218,7 +222,7 @@ mod tests {
         go_to(&mut model, OverlayItem::SaveState);
         model.handle(PadButton::Right);
         assert_eq!(
-            Some(OverlayCommand::SaveState(2)),
+            Some(OverlayCommand::ChooseState(StatesMode::Save, 2)),
             model.handle(PadButton::A)
         );
         model.handle(PadButton::Left);
@@ -226,7 +230,7 @@ mod tests {
         assert_eq!(10, model.slot());
         go_to(&mut model, OverlayItem::LoadState);
         assert_eq!(
-            Some(OverlayCommand::LoadState(10)),
+            Some(OverlayCommand::ChooseState(StatesMode::Load, 10)),
             model.handle(PadButton::A)
         );
     }

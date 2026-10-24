@@ -8,6 +8,7 @@ use imgui::DrawData;
 use sdl2::event::Event;
 use zax_platform::imgui_renderer::ImguiRenderer;
 use zax_platform::input::{Key, KeyboardDevice};
+use zax_platform::ui_image::PictureUpdate;
 
 use super::debug_overlay::{self, DebugInfo};
 use super::fonts::{FontSizes, UiFonts};
@@ -62,6 +63,8 @@ pub struct ImguiFrontend {
     shots: Option<UiShots>,
     /// The keyboard as a pad of the handheld interface.
     keyboard_pad: KeyboardPad,
+    /// The changes of the interface's pictures not handed to the renderer yet.
+    pictures: Vec<PictureUpdate>,
 }
 
 impl ImguiFrontend {
@@ -153,6 +156,7 @@ impl ImguiFrontend {
             handheld,
             shots,
             keyboard_pad: KeyboardPad::new(),
+            pictures: Vec::new(),
         })
     }
 
@@ -286,6 +290,7 @@ impl ImguiFrontend {
                 handheld.update(self.platform.pad(), frame.real_seconds, frame);
             }
             handheld.draw(ui, frame);
+            self.pictures.extend(handheld.take_picture_updates());
             self.ui.draw_fps_counter(ui, frame);
         } else {
             self.ui.draw(ui, frame);
@@ -299,9 +304,16 @@ impl ImguiFrontend {
     /// Draws the interface [`ImguiFrontend::build`] built, with the GL renderer (a wgpu window
     /// draws [`ImguiFrontend::draw_data`] itself).
     pub fn render(&mut self) {
-        if let Some(renderer) = &self.renderer {
+        if let Some(renderer) = &mut self.renderer {
+            renderer.update_pictures(&std::mem::take(&mut self.pictures));
             renderer.render(self.context.render());
         }
+    }
+
+    /// The changes of the interface's pictures since the last call, for a renderer that is not
+    /// the front end's own (wgpu).
+    pub fn take_picture_updates(&mut self) -> Vec<PictureUpdate> {
+        std::mem::take(&mut self.pictures)
     }
 
     /// The draw data of the interface [`ImguiFrontend::build`] built, for a wgpu window.

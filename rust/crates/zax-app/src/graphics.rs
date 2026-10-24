@@ -346,6 +346,7 @@ impl Graphics {
                     _ => None,
                 };
                 if let Some(display) = window.wgpu_mut() {
+                    display.update_pictures(&ui.take_picture_updates());
                     display.draw((size(width), size(height)), layer, Some(ui.draw_data()));
                 }
             }

@@ -34,6 +34,11 @@ In the game list, X chooses the profile of the selected ROM: the three closest t
 then "2D Mode" and the 3D default, then every profile by title (left/right move by a page). The
 choice is kept for that ROM.
 
+In the in-game menu, left/right on "Save state" or "Load state" picks the slot, and A opens the
+list of the slots, with the date and the picture of each: purple to save, blue to load, as the
+title says. A state made with the built-in patches set the other way shows in orange (Zaxnes
+asks before switching them), one of another version of the built-in hack in red (it cannot load).
+
 A pad saved with the old default layout moves to this one; a layout changed in Options >
 Controls is kept.
 

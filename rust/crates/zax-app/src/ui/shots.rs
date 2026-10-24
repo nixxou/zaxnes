@@ -37,7 +37,7 @@ const DESKTOP_PLAN: [(&str, Screen); 7] = [
 ];
 
 /// The handheld screens, photographed at the size of the window (640x480 for the devices).
-const HANDHELD_PLAN: [(&str, Screen); 5] = [
+const HANDHELD_PLAN: [(&str, Screen); 7] = [
     ("handheld-accueil", Screen::Handheld(HandheldScreen::Home)),
     (
         "handheld-profils",
@@ -52,6 +52,14 @@ const HANDHELD_PLAN: [(&str, Screen); 5] = [
         Screen::Handheld(HandheldScreen::Controls),
     ),
     ("handheld-menu", Screen::Handheld(HandheldScreen::Overlay)),
+    (
+        "handheld-etats-charger",
+        Screen::Handheld(HandheldScreen::States),
+    ),
+    (
+        "handheld-etats-sauver",
+        Screen::Handheld(HandheldScreen::States),
+    ),
 ];
 
 /// What a frame of the plan asks of the application.

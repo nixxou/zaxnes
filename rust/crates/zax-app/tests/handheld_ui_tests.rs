@@ -13,6 +13,7 @@ use ui_harness::{ImGuiHarness, UiHarness};
 use zax_app::emulation::emulation_state::EmulationState;
 use zax_app::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
 use zax_app::ui::handheld::pad::{PadButton, PadState};
+use zax_app::ui::handheld::states::StatesMode;
 use zax_app::ui::handheld::{HandheldUi, Screen};
 use zax_app::ui::zax_ui::UiFrame;
 
@@ -141,9 +142,44 @@ fn save_state_writes_the_chosen_slot_and_the_game_goes_on() {
     play(&mut harness, &mut handheld);
     tap(&mut harness, &mut handheld, PadButton::Down); // save state
     tap(&mut harness, &mut handheld, PadButton::Right); // slot 2
+                                                        // A opens the slots on the one the menu showed; A again saves there.
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(Screen::States, handheld.screen());
+    assert_eq!(StatesMode::Save, handheld.states().mode());
+    assert_eq!(2, handheld.states().slot());
     tap(&mut harness, &mut handheld, PadButton::A);
     harness.settle();
     assert!(harness.host.slots.is_occupied("2"));
+    assert_eq!(Screen::InGame, handheld.screen());
+    assert_eq!(EmulationState::Running, harness.host.state());
+}
+
+#[test]
+fn the_load_screen_loads_a_state_and_leaves_an_empty_slot_alone() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    play(&mut harness, &mut handheld);
+    tap(&mut harness, &mut handheld, PadButton::Down); // save state
+    tap(&mut harness, &mut handheld, PadButton::A);
+    tap(&mut harness, &mut handheld, PadButton::A); // saves in slot 1
+    harness.settle();
+    assert!(harness.host.slots.is_occupied("1"));
+
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    tap(&mut harness, &mut handheld, PadButton::Down);
+    tap(&mut harness, &mut handheld, PadButton::Down); // load state
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(Screen::States, handheld.screen());
+    assert_eq!(StatesMode::Load, handheld.states().mode());
+    // Slot 2 is empty: A loads nothing and the screen stays.
+    tap(&mut harness, &mut handheld, PadButton::Down);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(Screen::States, handheld.screen());
+    // B goes back to the menu; the load of slot 1 resumes the game.
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Overlay, handheld.screen());
+    tap(&mut harness, &mut handheld, PadButton::A);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    harness.settle();
     assert_eq!(Screen::InGame, handheld.screen());
     assert_eq!(EmulationState::Running, harness.host.state());
 }

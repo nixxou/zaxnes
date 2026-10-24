@@ -1,8 +1,10 @@
 //! Draws the Dear `ImGui` draw data with `glow` (the C# `ImGuiController` of `Silk.NET`). The
 //! upstream `imgui-glow-renderer` still builds on `glow` 0.14 and the application uses 0.16, so
 //! the few calls it needs live here, where the GL `unsafe` is allowed. Desktop GL 3.3 core and
-//! GLES 3.0 share the program; the font atlas is the only texture.
+//! GLES 3.0 share the program; the textures are the font atlas and the interface's pictures
+//! (`ui_image`).
 
+use std::collections::HashMap;
 use std::mem::size_of;
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -10,6 +12,7 @@ use std::rc::Rc;
 use glow::HasContext;
 use imgui::{DrawCmd, DrawCmdParams, DrawData, DrawIdx, DrawVert, FontAtlas, TextureId};
 
+use crate::ui_image::{PictureUpdate, FONT_TEXTURE_ID};
 use crate::PlatformError;
 
 const VERTEX_SHADER: &str = "\
@@ -36,9 +39,6 @@ void main() {
 }
 ";
 
-/// The id the font atlas carries; no other texture is ever drawn.
-const FONT_TEXTURE_ID: usize = 1;
-
 /// The GL objects the interface is drawn with.
 pub struct ImguiRenderer {
     gl: Rc<glow::Context>,
@@ -48,6 +48,8 @@ pub struct ImguiRenderer {
     vertex_buffer: glow::Buffer,
     index_buffer: glow::Buffer,
     font_texture: glow::Texture,
+    /// The interface's pictures, by texture id.
+    pictures: HashMap<usize, glow::Texture>,
 }
 
 /// The GL state the interface changes, put back after it is drawn so that the next scene pass
@@ -106,7 +108,8 @@ impl ImguiRenderer {
             gl.vertex_attrib_pointer_f32(color, 4, glow::UNSIGNED_BYTE, true, stride, 16);
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
-            let font_texture = upload_atlas(gl, fonts)?;
+            let atlas = fonts.build_rgba32_texture();
+            let font_texture = upload_rgba(gl, atlas.width, atlas.height, atlas.data)?;
             Self {
                 gl: Rc::clone(gl),
                 program,
@@ -115,10 +118,40 @@ impl ImguiRenderer {
                 vertex_buffer,
                 index_buffer,
                 font_texture,
+                pictures: HashMap::new(),
             }
         };
         fonts.tex_id = TextureId::new(FONT_TEXTURE_ID);
         Ok(renderer)
+    }
+
+    /// Applies the changes of the interface's pictures; a picture whose pixels do not fill its
+    /// size is left out.
+    ///
+    /// The context must be current on the calling thread.
+    pub fn update_pictures(&mut self, updates: &[PictureUpdate]) {
+        for update in updates {
+            if let Some(texture) = self.pictures.remove(&update.id) {
+                // SAFETY: deletes a texture this renderer made, on its context.
+                unsafe { self.gl.delete_texture(texture) };
+            }
+            let Some(picture) = update.picture.as_ref().filter(|picture| picture.is_whole()) else {
+                continue;
+            };
+            if let Ok(texture) = upload_rgba(&self.gl, picture.width, picture.height, &picture.rgba)
+            {
+                self.pictures.insert(update.id, texture);
+            }
+        }
+    }
+
+    /// The texture of the texture id `id`: the font atlas, or one of the pictures.
+    fn texture(&self, id: usize) -> Option<glow::Texture> {
+        if id == FONT_TEXTURE_ID {
+            Some(self.font_texture)
+        } else {
+            self.pictures.get(&id).copied()
+        }
     }
 
     /// Draws `draw_data` over the window's framebuffer.
@@ -140,6 +173,7 @@ impl ImguiRenderer {
             let saved = SavedState::read(gl);
             self.set_up(draw_data, width, height);
             let clip_offset = draw_data.display_pos;
+            let mut bound = FONT_TEXTURE_ID;
             for list in draw_data.draw_lists() {
                 gl.buffer_data_u8_slice(
                     glow::ARRAY_BUFFER,
@@ -154,9 +188,22 @@ impl ImguiRenderer {
                 for command in list.commands() {
                     if let DrawCmd::Elements {
                         count,
-                        cmd_params: DrawCmdParams { clip_rect, .. },
+                        cmd_params:
+                            DrawCmdParams {
+                                clip_rect,
+                                texture_id,
+                                ..
+                            },
                     } = command
                     {
+                        let id = texture_id.id();
+                        let Some(texture) = self.texture(id) else {
+                            continue;
+                        };
+                        if id != bound {
+                            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                            bound = id;
+                        }
                         let clip = [
                             (clip_rect[0] - clip_offset[0]) * scale_x,
                             (clip_rect[1] - clip_offset[1]) * scale_y,
@@ -249,6 +296,9 @@ impl Drop for ImguiRenderer {
             self.gl.delete_buffer(self.vertex_buffer);
             self.gl.delete_buffer(self.index_buffer);
             self.gl.delete_texture(self.font_texture);
+            for (_, texture) in self.pictures.drain() {
+                self.gl.delete_texture(texture);
+            }
         }
     }
 }
@@ -322,13 +372,18 @@ fn attribute(gl: &glow::Context, program: glow::Program, name: &str) -> Result<u
     }
 }
 
-/// Builds the font atlas as RGBA and uploads it.
+/// Uploads `width` x `height` RGBA pixels as a texture filtered bilinearly.
 ///
 /// The context must be current on the calling thread.
-fn upload_atlas(gl: &glow::Context, fonts: &mut FontAtlas) -> Result<glow::Texture, PlatformError> {
-    // SAFETY: plain GL calls on the context the caller made current.
+fn upload_rgba(
+    gl: &glow::Context,
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+) -> Result<glow::Texture, PlatformError> {
+    // SAFETY: plain GL calls on the context the caller made current; `pixels` holds the
+    // `width * height * 4` bytes the upload reads.
     unsafe {
-        let atlas = fonts.build_rgba32_texture();
         let texture = gl.create_texture().map_err(PlatformError::from)?;
         let previous = gl.get_parameter_i32(glow::TEXTURE_BINDING_2D);
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
@@ -349,12 +404,12 @@ fn upload_atlas(gl: &glow::Context, fonts: &mut FontAtlas) -> Result<glow::Textu
             glow::TEXTURE_2D,
             0,
             i32::try_from(glow::RGBA8).unwrap_or(0),
-            i32::try_from(atlas.width).unwrap_or(0),
-            i32::try_from(atlas.height).unwrap_or(0),
+            i32::try_from(width).unwrap_or(0),
+            i32::try_from(height).unwrap_or(0),
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(Some(atlas.data)),
+            glow::PixelUnpackData::Slice(Some(pixels)),
         );
         gl.bind_texture(glow::TEXTURE_2D, texture_of(previous));
         Ok(texture)

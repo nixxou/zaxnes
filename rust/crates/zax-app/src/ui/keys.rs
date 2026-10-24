@@ -188,6 +188,12 @@ pub const HANDHELD_CAMERA_RESET: &str = "handheld.camera.reset";
 pub const HANDHELD_CAMERA_KEPT: &str = "handheld.camera.kept";
 pub const HANDHELD_CAMERA_RESTORED: &str = "handheld.camera.restored";
 pub const HANDHELD_CONTROLS_PLAYER: &str = "handheld.controls.player";
+pub const HANDHELD_STATES_SAVE_TITLE: &str = "handheld.states.save_title";
+pub const HANDHELD_STATES_LOAD_TITLE: &str = "handheld.states.load_title";
+pub const HANDHELD_STATES_NO_PICTURE: &str = "handheld.states.no_picture";
+pub const HANDHELD_HINT_SAVE_HERE: &str = "handheld.hint.save_here";
+pub const HANDHELD_HINT_LOAD: &str = "handheld.hint.load";
+pub const HANDHELD_HINT_PAGE: &str = "handheld.hint.page";
 
 // ------------------------------------------------- commands of REQ-UI-205
 pub const COMMAND_PREFIX: &str = "cmd.";
@@ -374,4 +380,10 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_CAMERA_KEPT,
     HANDHELD_CAMERA_RESTORED,
     HANDHELD_CONTROLS_PLAYER,
+    HANDHELD_STATES_SAVE_TITLE,
+    HANDHELD_STATES_LOAD_TITLE,
+    HANDHELD_STATES_NO_PICTURE,
+    HANDHELD_HINT_SAVE_HERE,
+    HANDHELD_HINT_LOAD,
+    HANDHELD_HINT_PAGE,
 ];
