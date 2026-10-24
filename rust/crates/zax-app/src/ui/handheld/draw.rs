@@ -289,7 +289,11 @@ impl HandheldUi {
         };
         let painter = self.painter(ui);
         painter.title(&text::options_title(), "");
-        for (slot, row) in ROWS.iter().enumerate() {
+        // The list scrolls with the selection when it is longer than the screen.
+        let rows = self.metrics.visible_rows(painter.size[1]);
+        let selected = self.options.selected_index();
+        let first = first_visible(selected, rows, ROWS.len());
+        for (slot, (index, row)) in ROWS.iter().enumerate().skip(first).take(rows).enumerate() {
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
                 options::OptionRow::Controls => String::new(),
@@ -297,7 +301,7 @@ impl HandheldUi {
             };
             painter.row(
                 slot,
-                slot == self.options.selected_index(),
+                index == selected,
                 &options::label(*row),
                 (&shown, DIM),
             );
@@ -324,7 +328,16 @@ impl HandheldUi {
             painter.hints(layout::hints(Screen::Controls));
             return;
         }
-        for (slot, row) in rows.iter().enumerate() {
+        // The list scrolls with the selection when it is longer than the screen.
+        let visible = self.metrics.visible_rows(painter.size[1]);
+        let first = first_visible(self.controls.selected, visible, rows.len());
+        for (slot, (index, row)) in rows
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(visible)
+            .enumerate()
+        {
             let listening = key_config::is_listening_for(session, row, BindingDeviceKind::Gamepad);
             let binding = if listening {
                 text::press_a_control()
@@ -333,7 +346,7 @@ impl HandheldUi {
             };
             painter.row(
                 slot,
-                slot == self.controls.selected,
+                index == self.controls.selected,
                 &row.label,
                 (&binding, DIM),
             );

@@ -39,8 +39,9 @@ use self::hooks::{
     call_all, call_hook, input_process, publish, update_shapes, with_budget, Audience, Budget,
     Published, PublishedGlobals,
 };
-use crate::binding::cx::{with_host_context, Cx, Epochs, HostLink, Lent};
+use crate::binding::cx::{with_host_context, Cx, Epochs, HostLink};
 use crate::binding::dispatch;
+use crate::binding::lend;
 use crate::binding::payload::{FrameKey, FrameSlot, InstanceTarget, Payload, ShapeTarget};
 use crate::binding::table::IdHasher;
 use crate::environment::{ScriptContext, ScriptEnvironment};
@@ -374,26 +375,12 @@ impl ProfileScriptRuntime {
         }
 
         let Self { lua, data } = self;
-        lua.scope(|scope| {
-            let data = scope.create_any_userdata_ref_mut(data)?;
-            let state = state
-                .map(|state| scope.create_any_userdata_ref_mut(state))
-                .transpose()?;
-            let build = building
-                .map(|(reference, instance)| {
-                    scope
-                        .create_any_userdata_ref_mut(instance)
-                        .map(|handle| (reference, handle))
-                })
-                .transpose()?;
-
-            lua.set_app_data(Lent { data, state, build });
-            let result = operation(&Cx::new(lua));
-            let flushed = flush_host_writes(lua);
-            lua.remove_app_data::<Lent>();
-            flushed?;
-            Ok(result)
-        })
+        let lent = lend::lend(lua, data, state, building);
+        let result = operation(&Cx::new(lua));
+        let flushed = flush_host_writes(lua);
+        drop(lent);
+        flushed?;
+        Ok(result)
     }
 
     /// Reports a failure of the host side of a call: the script errors were logged where they
@@ -1015,14 +1002,9 @@ impl ScriptHost for ProfileScriptRuntime {
         // The runtime and the scope are lent once for all the instances; each one is lent in
         // turn as the instance being built.
         let Self { lua, data } = self;
-        let outcome = lua.scope(|scope| {
-            let data = scope.create_any_userdata_ref_mut(data)?;
+        let outcome = (|| -> mlua::Result<Option<mlua::Error>> {
+            let lent = lend::lend(lua, data, None, None);
             let mut failure = None;
-            lua.set_app_data(Lent {
-                data,
-                state: None,
-                build: None,
-            });
             let cx = Cx::new(lua);
             for (index, instance) in instances.iter_mut().enumerate() {
                 let reference = InstanceRef { pattern, index };
@@ -1038,22 +1020,21 @@ impl ScriptHost for ProfileScriptRuntime {
                     continue;
                 }
 
-                let build = scope.create_any_userdata_ref_mut(instance)?;
-                if let Some(mut lent) = lua.app_data_mut::<Lent>() {
-                    lent.build = Some((reference, build));
-                }
+                let building = lend::lend_build(lua, reference, instance)
+                    .map_err(|_| mlua::Error::runtime("the script API is not available here"))?;
 
                 // The script that raised an error was logged and disabled by the hook call.
                 if let Err(error) = build_pattern(&cx, reference, &linked) {
                     failure.get_or_insert(error);
                 }
+                drop(building);
             }
 
             let flushed = flush_host_writes(lua);
-            lua.remove_app_data::<Lent>();
+            drop(lent);
             flushed?;
             Ok(failure)
-        });
+        })();
         if let Some(error) = outcome.unwrap_or_else(Some) {
             self.settle(Err(error));
         }
