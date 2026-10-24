@@ -33,6 +33,8 @@ pub enum OptionRow {
     FrameCap,
     /// The frame counter.
     ShowFps,
+    /// The frame profiler.
+    Profiler,
     /// The camera preset.
     Camera,
     /// How many emulated frames a displayed frame may run when the game is late.
@@ -48,13 +50,14 @@ pub enum OptionRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 12] = [
+pub const ROWS: [OptionRow; 13] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
     OptionRow::FrameCap,
     OptionRow::ShowFps,
+    OptionRow::Profiler,
     OptionRow::Camera,
     OptionRow::CatchUp,
     OptionRow::LuaOptimized,
@@ -192,6 +195,10 @@ impl HandheldOptionsModel {
                 let next = *cycled(&FRAME_CAPS, &frame_cap(settings), step);
                 settings.set_vsync(if next == 30 { 2 } else { 1 });
             }
+            OptionRow::Profiler => {
+                let on = settings.get(SettingId::UiProfiler).as_bool();
+                settings.set(SettingId::UiProfiler, SettingValue::Bool(!on));
+            }
             OptionRow::ShowFps => {
                 let on = settings.show_fps();
                 settings.set_show_fps(!on);
@@ -228,6 +235,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Shadows => text::label_of(catalogue::descriptor(SettingId::RenderShadow)),
         OptionRow::FrameCap => strings::get(keys::HANDHELD_OPTION_FRAME_CAP),
         OptionRow::ShowFps => text::label_of(catalogue::descriptor(SettingId::UiShowFps)),
+        OptionRow::Profiler => text::label_of(catalogue::descriptor(SettingId::UiProfiler)),
         OptionRow::Camera => strings::get(keys::HANDHELD_OPTION_CAMERA),
         OptionRow::CatchUp => strings::get(keys::HANDHELD_OPTION_CATCH_UP),
         OptionRow::LuaOptimized => {
@@ -255,6 +263,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::Shadows => switch(settings.shadow()),
         OptionRow::FrameCap => format!("{} fps", frame_cap(settings)),
         OptionRow::ShowFps => switch(settings.show_fps()),
+        OptionRow::Profiler => switch(settings.get(SettingId::UiProfiler).as_bool()),
         OptionRow::Camera => camera_label(camera),
         OptionRow::CatchUp => match catch_up(settings) {
             0 => text::label_of_option("None"),

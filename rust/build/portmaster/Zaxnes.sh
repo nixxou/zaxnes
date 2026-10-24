@@ -40,9 +40,7 @@ echo "Zaxnes launch: controlfolder=$controlfolder cfw=$CFW_NAME device=$DEVICE_N
 export XDG_DATA_HOME="$GAMEDIR"
 export SDL_GAMECONTROLLERCONFIG="$sdl_controllerconfig"
 export ZAXNES_GLES=1
-# TEMPORARY DIAGNOSTIC: the frame profiler writes the cost of each stage of the frame to the log
-# every two seconds (and next to the FPS counter). Remove once the handheld frame rate is known.
-export ZAXNES_PROFILE=1
+# The frame profiler is the "Performance measures" option (or ZAXNES_PROFILE=1 here).
 
 # No gptokeyb: the program reads the pad through SDL and has its own exit (Select+Start held
 # one second, or "Exit to launcher" in the in-game menu), which saves the settings, the battery
