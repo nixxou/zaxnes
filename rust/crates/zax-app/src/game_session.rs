@@ -264,7 +264,7 @@ struct FramePipeline {
     ahead_allowed: bool,
     /// The palette and edge masks of a frame captured but not converted yet; its tile records
     /// are in `GameSession::batch_records`.
-    pending: Option<([u8; 32], i32, i32)>,
+    pending: Option<([u8; 32], i32, i32, i32)>,
     /// The RAM of the captured frame, for the scripts' `ReadMem` while the core is away.
     memory: MemorySnapshot,
 }
@@ -646,11 +646,11 @@ impl GameSession {
         scene: &mut SceneState,
         clock: &mut StageClock,
     ) {
-        let Some((palette, mask_x, mask_y)) = self.pipeline.pending.take() else {
+        let Some((palette, mask_x, mask_y, margin)) = self.pipeline.pending.take() else {
             return;
         };
         self.lend(model, scene, |session, scene| {
-            session.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
+            session.convert_batch_lent(scene, clock, palette, (mask_x, mask_y), margin);
         });
         if self.pipeline.memory.missed.swap(false, Ordering::Relaxed) {
             // A script read cartridge space, which the copy does not hold: from now on the next
@@ -1005,18 +1005,18 @@ impl GameSession {
     /// The tile capture, the conversion and the frame hooks of the frame the core just ran (the
     /// second half of a frame).
     fn finish_frame_lent(&mut self, scene: &mut SceneState, clock: &mut StageClock) {
-        let (palette, mask_x, mask_y) = self.capture_batch(clock);
-        self.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
+        let (palette, mask_x, mask_y, margin) = self.capture_batch(clock);
+        self.convert_batch_lent(scene, clock, palette, (mask_x, mask_y), margin);
     }
 
     /// Copies the tile records of the frame the core just ran into `batch_records`; returns its
-    /// palette and edge masks.
-    fn capture_batch(&mut self, clock: &mut StageClock) -> ([u8; 32], i32, i32) {
+    /// palette, edge masks and widescreen margin.
+    fn capture_batch(&mut self, clock: &mut StageClock) -> ([u8; 32], i32, i32, i32) {
         let started = clock.start();
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
-        let captured = (batch.palette, batch.mask_x, batch.mask_y);
+        let captured = (batch.palette, batch.mask_x, batch.mask_y, batch.margin);
         clock.stop(Stage::Capture, started);
         captured
     }
@@ -1027,8 +1027,8 @@ impl GameSession {
         scene: &mut SceneState,
         clock: &mut StageClock,
         palette: [u8; 32],
-        mask_x: i32,
-        mask_y: i32,
+        (mask_x, mask_y): (i32, i32),
+        margin: i32,
     ) {
         let counter = self.frame_counter;
         let records = std::mem::take(&mut self.batch_records);
@@ -1038,6 +1038,7 @@ impl GameSession {
             palette,
             mask_x,
             mask_y,
+            margin,
         };
         let started = clock.start();
         self.scripted(scene, |engine| {

@@ -121,6 +121,7 @@ setting_ids! {
     EmuPipeline => "emu.pipeline",
     VideoDynamicResolution => "video.dynamic_resolution",
     VideoBackend => "video.backend",
+    VideoWidescreen => "video.widescreen",
     ConvSameBgPalette => "conv.same_bg_palette",
     ConvSameSpPalette => "conv.same_sp_palette",
     ConvSpriteTolerance => "conv.sprite_tolerance",

@@ -28,6 +28,7 @@ pub use ppu_bus_access::PpuBusAccess;
 pub use tile_buffer::TileBuffer;
 
 use crate::cartridges::{Cartridge, ChrFetch};
+use crate::wide::WideExtension;
 use crate::{NametableMirroring, RegionTiming, TileRecord};
 
 /// The cartridge as the internal PPU paths pass it around.
@@ -176,6 +177,11 @@ pub struct Ppu2C02 {
     sprite_order: [usize; 64],
     mask_x: i32,
     mask_y: i32,
+
+    // Widescreen extension (wide.rs); `frame_margin` is its margin latched when the frame
+    // being captured began, so that every band of one frame has the same columns.
+    wide: WideExtension,
+    frame_margin: i32,
 }
 
 impl Default for Ppu2C02 {
@@ -246,6 +252,8 @@ impl Ppu2C02 {
             sprite_order: [0; 64],
             mask_x: 0,
             mask_y: 0,
+            wide: WideExtension::new(),
+            frame_margin: 0,
         }
     }
 
@@ -464,6 +472,7 @@ impl Ppu2C02 {
         self.nmi_line_sample = false;
 
         self.reset_render_state();
+        self.wide.reset();
         self.reset_tile_state();
 
         // Just after a load or a reset the first frame starts at the beginning of vblank,
@@ -1090,6 +1099,24 @@ impl Ppu2C02 {
     #[must_use]
     pub fn tile_records(&self) -> &[TileRecord] {
         self.tiles.records()
+    }
+
+    /// The widescreen extension.
+    #[must_use]
+    pub const fn wide(&self) -> &WideExtension {
+        &self.wide
+    }
+
+    /// The widescreen extension, for the bus and the host.
+    pub fn wide_mut(&mut self) -> &mut WideExtension {
+        &mut self.wide
+    }
+
+    /// The widescreen margin, in pixels on each side, of the frame whose records are held: 0
+    /// for a standard 256-pixel frame.
+    #[must_use]
+    pub const fn frame_margin(&self) -> i32 {
+        self.frame_margin
     }
 }
 

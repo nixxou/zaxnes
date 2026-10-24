@@ -1071,7 +1071,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         let view = {
             let scene = &self.scene;
-            scene.camera.build_view(scene.clipping, aspect)
+            scene.camera.build_view(scene.view_clipping(), aspect)
         };
         let offset = self
             .session

@@ -320,6 +320,7 @@ impl Host {
             palette: batch.palette,
             mask_x: batch.mask_x,
             mask_y: batch.mask_y,
+            margin: batch.margin,
         };
         let counter = i32::try_from(counter)
             .map_err(|_| HarnessError::Usage("--run: too many frames".to_owned()))?;

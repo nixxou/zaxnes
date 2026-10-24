@@ -96,6 +96,10 @@ impl NesCore {
     /// and IRQ counters (REQ-CORE-090).
     pub const STATE_VERSION: i32 = 4;
 
+    /// Version of a block that also carries the widescreen extension registers: written only
+    /// once a ROM unlocked the extension, so every other block keeps [`Self::STATE_VERSION`].
+    pub const WIDE_STATE_VERSION: i32 = 5;
+
     /// Tile grid dimensions: always (33, 31, 128) (REQ-CORE-031).
     pub const VIDEO_INFO: VideoInfo = VideoInfo::STANDARD;
 
@@ -342,7 +346,21 @@ impl NesCore {
             palette: ppu.snapshot_palette(),
             mask_x: ppu.mask_x(),
             mask_y: ppu.mask_y(),
+            margin: ppu.frame_margin(),
         }
+    }
+
+    /// Sets the widescreen margin the host offers on each side, in pixels (0 = off). A ROM sees
+    /// it only through the widescreen extension it has to unlock; nothing changes for the
+    /// others. Rounded down to a multiple of 8 and capped at [`crate::wide::MAX_MARGIN`].
+    pub fn set_widescreen_margin(&mut self, pixels: i32) {
+        self.bus.ppu_mut().wide_mut().set_host_margin(pixels);
+    }
+
+    /// The widescreen margin the host offers on each side, in pixels.
+    #[must_use]
+    pub fn widescreen_margin(&self) -> i32 {
+        self.bus.ppu().wide().host_margin()
     }
 
     /// The 256 x 240 indexed image of the frame just run (REQ-CORE-048).
@@ -505,9 +523,14 @@ impl NesCore {
         let cartridge = self.bus.cartridge().ok_or(NoRomLoaded)?;
         let rom = cartridge.rom();
 
+        let wide = self.bus.ppu().wide();
         let mut writer = StateWriter::reusing(std::mem::take(buffer));
         writer.write_u32(Self::STATE_MAGIC);
-        writer.write_i32(Self::STATE_VERSION);
+        writer.write_i32(if wide.unlocked() {
+            Self::WIDE_STATE_VERSION
+        } else {
+            Self::STATE_VERSION
+        });
         writer.write_string(Self::CORE_NAME);
         writer.write_bool(include_rom_image);
         writer.write_string(rom.name());
@@ -521,6 +544,9 @@ impl NesCore {
         self.bus.apu().save_state(&mut writer);
         self.bus.input().save_state(&mut writer);
         cartridge.save_state(&mut writer);
+        if wide.unlocked() {
+            wide.save_state(&mut writer);
+        }
 
         *buffer = writer.into_vec();
         Ok(())
@@ -579,7 +605,7 @@ impl NesCore {
         }
 
         let version = reader.read_i32()?;
-        if version != Self::STATE_VERSION {
+        if version != Self::STATE_VERSION && version != Self::WIDE_STATE_VERSION {
             return Err(InvalidState::corrupt(format!(
                 "Corrupt savestate: format version {version} is not supported (expected {}).",
                 Self::STATE_VERSION
@@ -635,6 +661,12 @@ impl NesCore {
         self.bus.apu_mut().load_state(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         cartridge.load_state(&mut reader)?;
+        let wide = self.bus.ppu_mut().wide_mut();
+        if version == Self::WIDE_STATE_VERSION {
+            wide.load_state(&mut reader)?;
+        } else {
+            wide.reset();
+        }
 
         self.battery_ram_imported = false;
         self.bus.attach(Some(cartridge));

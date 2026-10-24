@@ -4,6 +4,7 @@ use crate::cpu::CpuBus;
 use crate::input::InputPorts;
 use crate::ppu::Ppu2C02;
 use crate::state::{InvalidState, StateReader, StateWriter};
+use crate::wide::WideExtension;
 
 /// Size of CPU work RAM.
 const RAM_SIZE: usize = 2048;
@@ -310,6 +311,12 @@ impl NesBus {
             };
         }
 
+        if WideExtension::claims(address) {
+            if let Some(value) = self.ppu.wide().read(address) {
+                return value;
+            }
+        }
+
         self.cartridge
             .as_mut()
             .and_then(|cartridge| cartridge.try_cpu_read(address))
@@ -339,6 +346,11 @@ impl NesBus {
         }
 
         self.sync_ppu();
+        if WideExtension::claims(address) {
+            // The window only listens: the cartridge still gets the write.
+            self.ppu.wide_mut().write(address, value);
+        }
+
         if let Some(cartridge) = self.cartridge.as_mut() {
             cartridge.cpu_write(address, value);
         }
@@ -371,6 +383,8 @@ impl NesBus {
             self.sync_ppu();
             self.ppu.write_oam_dma(value);
         }
+
+        self.ppu.wide_mut().latch_sprites();
     }
 
     /// Writes a byte exactly as a CPU write would, without advancing emulated time
@@ -407,6 +421,12 @@ impl CpuBus for NesBus {
 
         if address < 0x4020 {
             return 0;
+        }
+
+        if WideExtension::claims(address) {
+            if let Some(value) = self.ppu.wide().read(address) {
+                return value;
+            }
         }
 
         self.cartridge

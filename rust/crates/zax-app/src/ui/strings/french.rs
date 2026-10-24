@@ -205,6 +205,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.pipeline", "Scripts en parallèle du dessin"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
     ("setting.video.backend", "API graphique (au prochain démarrage)"),
+    ("setting.video.widescreen", "Écran large (ROM prévues pour)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),
     ("setting.audio.volume", "Volume général"),
