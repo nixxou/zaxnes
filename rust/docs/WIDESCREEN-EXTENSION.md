@@ -39,6 +39,8 @@ are answered by the window only once it is unlocked.
 | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines (power-on 0) |
 | `$5007` | R/W | bit 0: four separate nametables (2 x 2, the console's 4 KiB of VRAM), whatever mirroring the cartridge selects (power-on 0) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
+| `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` (power-on 0) |
+| `$5009` | R/W | PRG window: first 256-byte page of that bank it shows (power-on 0) |
 | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code: the CPU runs code from it, whatever bank the mapper shows (power-on 0) |
 
 * The margin in use is `min($5003, $5002)`, rounded down to a multiple of 8. It is latched at the
@@ -64,6 +66,9 @@ are answered by the window only once it is unlocked.
 * Four nametables (`$5007` bit 0): with a horizontally mirrored cartridge the two nametables are
   stacked and the picture can only wrap 256 pixels wide; with four the plane is 512 x 480, so a
   game that scrolls both ways (a world map) can keep columns drawn past both sides.
+* PRG window (`$5008`/`$5009`): 2 KiB of PRG-ROM shown at `$5800`-`$5FFF` whatever bank the
+  mapper has at `$8000`, so code the fixed bank calls can live in any bank; being ROM, it is
+  always the code of the ROM loaded (a copy in RAM would travel in savestates).
 * The 64-sprite OAM and the eight-sprites-per-line limit are unchanged (the core already captures
   every sprite, eight per line or not).
 

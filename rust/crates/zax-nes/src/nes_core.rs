@@ -51,6 +51,10 @@ pub struct NesCore {
     frame_count: i64,
     video_callback: Option<VideoCallback>,
     zapper_position_source: Option<ZapperPositionSource>,
+    /// The image the host handed over when a built-in patch was applied to it: savestates
+    /// carry this one, so that restoring one applies the patch of the running build.
+    original_image: Option<Vec<u8>>,
+    builtin_patch: Option<&'static str>,
 }
 
 impl Default for NesCore {
@@ -71,7 +75,24 @@ impl NesCore {
             frame_count: 0,
             video_callback: None,
             zapper_position_source: None,
+            original_image: None,
+            builtin_patch: None,
         }
+    }
+
+    /// The image the host loaded, before the built-in patch applied to it; `None` when no
+    /// built-in patch applied (the cartridge's image is then the host's). Hosts identify the
+    /// game by this one (battery RAM, savestate headers), so a new version of a patch is the
+    /// same game.
+    #[must_use]
+    pub fn original_image(&self) -> Option<&[u8]> {
+        self.original_image.as_deref()
+    }
+
+    /// The built-in patch applied to the ROM loaded, if any (see [`crate::builtin_patches`]).
+    #[must_use]
+    pub const fn builtin_patch(&self) -> Option<&'static str> {
+        self.builtin_patch
     }
 
     /// Name of the core, recorded at the head of savestate files (REQ-CORE-120). There is
@@ -98,7 +119,10 @@ impl NesCore {
 
     /// Version of a block that also carries the widescreen extension registers: written only
     /// once a ROM unlocked the extension, so every other block keeps [`Self::STATE_VERSION`].
-    pub const WIDE_STATE_VERSION: i32 = 5;
+    pub const WIDE_STATE_VERSION: i32 = 6;
+
+    /// The earlier widescreen block, without the PRG window registers; still read.
+    pub const WIDE_STATE_VERSION_5: i32 = 5;
 
     /// Tile grid dimensions: always (33, 31, 128) (REQ-CORE-031).
     pub const VIDEO_INFO: VideoInfo = VideoInfo::STANDARD;
@@ -121,7 +145,13 @@ impl NesCore {
     /// is left stopped (REQ-CORE-011, Q-002). The detected region is returned, not applied
     /// (REQ-CORE-013).
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
-        let cartridge = match RomImage::try_load(image, name).and_then(Cartridge::create) {
+        // A ROM a built-in patch was made for is patched in memory (the host's copy is left
+        // alone); the original is kept for the savestates.
+        let patched = crate::builtin_patches::apply(image);
+        let loaded = patched
+            .as_ref()
+            .map_or(image, |patched| patched.image.as_slice());
+        let cartridge = match RomImage::try_load(loaded, name).and_then(Cartridge::create) {
             Ok(cartridge) => cartridge,
             Err(error) => {
                 self.close_rom();
@@ -131,6 +161,8 @@ impl NesCore {
 
         let region = cartridge.rom().announced_region();
         self.battery_ram_imported = false;
+        self.builtin_patch = patched.as_ref().map(|patched| patched.name);
+        self.original_image = patched.map(|_| image.to_vec());
         self.bus.attach(Some(cartridge));
         self.power_on();
         RomLoadResult::ok(region)
@@ -139,6 +171,8 @@ impl NesCore {
     /// Stops the emulation (REQ-CORE-005).
     pub fn close_rom(&mut self) {
         self.battery_ram_imported = false;
+        self.original_image = None;
+        self.builtin_patch = None;
         self.bus.attach(None);
         self.bus.apu_mut().discard_samples();
     }
@@ -534,7 +568,8 @@ impl NesCore {
         writer.write_string(Self::CORE_NAME);
         writer.write_bool(include_rom_image);
         writer.write_string(rom.name());
-        writer.write_blob(if include_rom_image { rom.raw() } else { &[] });
+        let image = self.original_image.as_deref().unwrap_or_else(|| rom.raw());
+        writer.write_blob(if include_rom_image { image } else { &[] });
         writer.write_u8(self.region as u8);
         writer.write_i64(self.frame_count);
 
@@ -605,7 +640,10 @@ impl NesCore {
         }
 
         let version = reader.read_i32()?;
-        if version != Self::STATE_VERSION && version != Self::WIDE_STATE_VERSION {
+        if version != Self::STATE_VERSION
+            && version != Self::WIDE_STATE_VERSION
+            && version != Self::WIDE_STATE_VERSION_5
+        {
             return Err(InvalidState::corrupt(format!(
                 "Corrupt savestate: format version {version} is not supported (expected {}).",
                 Self::STATE_VERSION
@@ -631,11 +669,21 @@ impl NesCore {
         })?;
         let frame_count = reader.read_i64()?;
 
+        let mut patch = (self.original_image.take(), self.builtin_patch);
         let rom = if has_rom_image {
             // The block is self-contained: it restores even with no ROM loaded
-            // (REQ-CORE-090).
-            RomImage::try_load(&rom_bytes, &stored_name)
-                .map_err(|error| InvalidState::corrupt(format!("Corrupt savestate: {error}")))?
+            // (REQ-CORE-090). A ROM a built-in patch was made for gets the patch of this build.
+            let patched = crate::builtin_patches::apply(&rom_bytes);
+            let image = patched
+                .as_ref()
+                .map_or(rom_bytes.as_slice(), |p| p.image.as_slice());
+            let rom = RomImage::try_load(image, &stored_name)
+                .map_err(|error| InvalidState::corrupt(format!("Corrupt savestate: {error}")))?;
+            patch = match patched {
+                Some(patched) => (Some(rom_bytes), Some(patched.name)),
+                None => (None, None),
+            };
+            rom
         } else {
             // Without an image the block restores onto the ROM already loaded. The old
             // cartridge is taken apart: the state replaces everything it held, and a failure
@@ -662,13 +710,14 @@ impl NesCore {
         self.bus.input_mut().load_state(&mut reader)?;
         cartridge.load_state(&mut reader)?;
         let wide = self.bus.ppu_mut().wide_mut();
-        if version == Self::WIDE_STATE_VERSION {
-            wide.load_state(&mut reader)?;
+        if version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5 {
+            wide.load_state(&mut reader, version == Self::WIDE_STATE_VERSION)?;
         } else {
             wide.reset();
         }
 
         self.battery_ram_imported = false;
+        (self.original_image, self.builtin_patch) = patch;
         self.bus.attach(Some(cartridge));
         self.region = region;
         self.apply_region();

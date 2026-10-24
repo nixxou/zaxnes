@@ -544,6 +544,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub(super) fn current_rom_fingerprint(&self) -> Option<String> {
         let session = self.session.as_ref()?;
         let core = session.core();
+        // A ROM patched in memory by a built-in patch is identified by the player's ROM, so
+        // that its battery RAM survives a new version of the patch.
+        if let Some(original) = core.original_image() {
+            let rom = zax_nes::rom::RomImage::try_load(original, "").ok()?;
+            return Some(save_state_file::rom_fingerprint(
+                rom.prg_rom(),
+                rom.chr_rom(),
+            ));
+        }
         let cartridge = core.cartridge()?;
         Some(save_state_file::rom_fingerprint(
             cartridge.rom().prg_rom(),
