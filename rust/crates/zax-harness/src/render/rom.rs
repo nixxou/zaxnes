@@ -18,7 +18,7 @@ use zax_profiles::profile::GameProfile;
 use zax_render::camera::{CameraMode, SceneCamera};
 use zax_render::scene::{BackdropState, SceneState, SkyboxKind};
 use zax_scripting::{
-    LoadedScript, LuaColor, ProfileScriptRuntime, ScriptBackdrop, ScriptBridge, ScriptCamera,
+    lend_context, LoadedScript, LuaColor, ProfileScriptRuntime, ScriptBackdrop, ScriptCamera,
     ScriptContext, ScriptEnvironment, ScriptInput, ScriptLight, ScriptLog, ScriptMemory,
     ScriptProfileInfo, ScriptSettings,
 };
@@ -176,12 +176,11 @@ pub(crate) struct Startup<'a> {
     pub force_three_dimensional: bool,
 }
 
-/// The machine and the engine, with the bridge that lends the scene and the machine to the Lua
+/// The machine and the engine; the scene and the machine are lent to the Lua
 /// runtime the engine owns.
 pub(crate) struct Host {
     pub(crate) core: NesCore,
     pub(crate) engine: ConversionEngine,
-    bridge: Option<ScriptBridge>,
     zapper_offset: Vec3,
 }
 
@@ -224,7 +223,6 @@ impl Host {
         let mut host = Self {
             core,
             engine,
-            bridge: None,
             zapper_offset: Vec3::default(),
         };
         host.install_runtime(profile, model, &mut scene)?;
@@ -279,7 +277,6 @@ impl Host {
         if std::env::var("ZAXNES_LUA_GC").is_ok_and(|value| value.trim() == "smooth") {
             runtime.set_smooth_gc(true);
         }
-        self.bridge = Some(runtime.bridge());
         self.engine
             .set_script_host(Box::new(TimedHost::new(runtime)));
         Ok(())
@@ -351,12 +348,10 @@ impl Host {
         let Self {
             core,
             engine,
-            bridge,
             zapper_offset,
         } = self;
-        with_context(scene, core, zapper_offset, |context| match bridge {
-            Some(bridge) => bridge.lend(context, || operation(engine)),
-            None => operation(engine),
+        with_context(scene, core, zapper_offset, |context| {
+            lend_context(engine, |engine| engine, context, operation);
         });
     }
 

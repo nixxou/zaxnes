@@ -4,10 +4,11 @@
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sdl2::event::{Event, WindowEvent};
 use time::OffsetDateTime;
+use zax_engine3d::draw_list::FrameDrawList;
 use zax_platform::audio::PREFERRED_SAMPLE_RATE;
 use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::icon;
@@ -34,7 +35,8 @@ use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::frame_pacer::CatchUp;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::host::{
-    EmulationHost, EmulationHostOptions, GameView, HostEvent, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH,
+    DeferredParts, EmulationHost, EmulationHostOptions, GameView, HostEvent, THUMBNAIL_HEIGHT,
+    THUMBNAIL_WIDTH,
 };
 use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
 use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock};
@@ -48,6 +50,7 @@ use crate::persistence::app_settings::AppSettings;
 use crate::persistence::command_line_settings;
 use crate::persistence::input_binding_store::FileInputBindingStore;
 use crate::persistence::settings_store::SettingsStore;
+use crate::pipeline::{PipelineGovernor, PipelineMode};
 use crate::render_scaling;
 use crate::render_skip;
 use crate::scene_script_bridge::{self, ConsoleScriptLog};
@@ -208,6 +211,20 @@ struct Running {
     /// The frame profiler (`ZAXNES_PROFILE=1`) and the clock of the loop's stages.
     profiler: Option<FrameProfiler>,
     clock: StageClock,
+    /// The pipelined frames (`emu.pipeline`).
+    pipeline: Pipelined,
+}
+
+/// The state of the pipelined frames between two displayed frames.
+#[derive(Default)]
+struct Pipelined {
+    /// Whether the next frame is pipelined.
+    governor: PipelineGovernor,
+    /// The list a pipelined frame draws while the next one is built.
+    displayed: FrameDrawList,
+    /// Whether the engine holds a list newer than `displayed` (built by the last conversion or
+    /// drawn by the direct path), which the next pipelined frame takes.
+    list_waiting: bool,
 }
 
 impl Running {
@@ -314,12 +331,14 @@ impl Running {
             last: Instant::now(),
             profiler: profiling.then(|| FrameProfiler::new(Instant::now())),
             clock: StageClock::new(profiling),
+            pipeline: Pipelined::default(),
         })
     }
 
     /// One displayed frame. Returns false once the application is to close.
     fn frame(&mut self) -> Result<bool, String> {
         let frame_begin = self.clock.start();
+        let busy_begin = Instant::now();
         let mark = self.clock.start();
         if self.pump_events() {
             return Ok(false);
@@ -345,6 +364,8 @@ impl Running {
             real_f,
         );
         self.clock.stop(Stage::Input, mark);
+        let pipelined = self.next_frame_pipelined();
+        self.host.defer_conversion = pipelined;
         let mark = self.clock.start();
         let emulated = self.host.tick(real, &snapshot);
         self.source.end_sample();
@@ -371,11 +392,20 @@ impl Running {
             &mut self.window,
             &mut self.pacing,
         );
-        self.draw(emulated, width, height, real_f)?;
+        let overlap = if pipelined {
+            self.draw_pipelined(emulated, width, height, real_f)?
+        } else {
+            self.draw(emulated, width, height, real_f)?;
+            Duration::ZERO
+        };
         self.carry_out_ui_effects();
         let mark = self.clock.start();
         pump_audio(&mut self.host, self.audio.as_mut(), real);
         self.clock.stop(Stage::Audio, mark);
+        let budget = self.frame_budget();
+        self.pipeline
+            .governor
+            .record(pipelined, busy_begin.elapsed(), overlap, budget);
         if self.host.quit_requested()
             || (self.options.smoke_test
                 && smoke_run_is_over(&self.options, &self.host, &self.state))
@@ -460,9 +490,9 @@ impl Running {
         snapshot
     }
 
-    /// Draws the scene into the offscreen buffer (unless the render-skip rule keeps the
-    /// previous image), blits it under the interface and draws the interface.
-    fn draw(&mut self, emulated: u32, width: i32, height: i32, real: f32) -> Result<(), String> {
+    /// Sizes the view for the window and decides whether the render-skip rule keeps the
+    /// previous image.
+    fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
         let view_height = (height - to_i32_f(self.ui.chrome_height())).max(1);
         let (scene_width, scene_height) = render_scaling::scene_size(
             width,
@@ -481,23 +511,19 @@ impl Running {
             emulated,
             self.state.last_render_size == (scene_width, scene_height),
         );
-        if skip {
-            self.state.skipped_frames += 1;
-        } else {
-            render_scene(
-                &mut self.renderer,
-                &mut self.host,
-                &mut self.state,
-                &mut self.clock,
-            )?;
-            self.state.last_render_size = (scene_width, scene_height);
-            self.state.scene_frames += 1;
-        }
-        let mark = self.clock.start();
-        framebuffer::begin_window_pass(&self.gl, width, height);
-        if let Some(view) = self.host.view() {
-            view.blit_to_default_framebuffer(width, view_height);
-        }
+        Ok(ViewPlan {
+            view_height,
+            size: (scene_width, scene_height),
+            skip,
+        })
+    }
+
+    /// Runs `operation` on the interface with the frame it is drawn for.
+    fn with_ui_frame(
+        &mut self,
+        real: f32,
+        operation: impl FnOnce(&mut ImguiFrontend, &mut UiFrame<'_>, Sizes, &DebugInfo<'_>),
+    ) {
         let debug = DebugInfo {
             frames_per_second: self.counter.frames_per_second(),
             frame_milliseconds: self.counter.frame_milliseconds(),
@@ -520,9 +546,163 @@ impl Running {
             frames_per_second: debug.frames_per_second as f32,
             profile_line: self.profiler.as_ref().map_or("", FrameProfiler::summary),
         };
-        let gl = &self.gl;
-        self.ui.draw(&mut frame, sizes, &debug, |path| {
-            capture_window(gl, width, height, path);
+        operation(&mut self.ui, &mut frame, sizes, &debug);
+    }
+
+    /// Whether the next frame is pipelined: `emu.pipeline`, for a game running in 3D whose
+    /// scripts leave the core alone, with no modal window and no screenshot plan.
+    fn next_frame_pipelined(&mut self) -> bool {
+        let allows = self.host.can_defer_conversion()
+            && !self.host.showing_two_dimensional()
+            && !self.ui.is_modal()
+            && !self.ui.has_shots();
+        self.pipeline
+            .governor
+            .next_frame(PipelineMode::of(self.host.settings()), allows)
+    }
+
+    /// The time one displayed frame may take: the swap interval at the display's refresh rate.
+    fn frame_budget(&self) -> Duration {
+        let refresh = self
+            .window
+            .window()
+            .display_mode()
+            .map_or(60, |mode| mode.refresh_rate)
+            .max(1);
+        let interval = self.host.settings().vsync().max(1);
+        Duration::from_secs_f64(f64::from(interval) / f64::from(refresh))
+    }
+
+    /// The pipelined frame: the interface is built first, then the conversion the tick left
+    /// over runs on its own thread while the list of the frame before is drawn with the scene
+    /// as it stood. Returns how long the conversion ran beside the drawing.
+    fn draw_pipelined(
+        &mut self,
+        emulated: u32,
+        width: i32,
+        height: i32,
+        real: f32,
+    ) -> Result<Duration, String> {
+        let ViewPlan {
+            view_height,
+            size: (scene_width, scene_height),
+            skip,
+        } = self.plan_view(emulated, width, height)?;
+        let mark = self.clock.start();
+        self.with_ui_frame(real, |ui, frame, sizes, debug| {
+            ui.build(frame, sizes, debug);
+        });
+        self.clock.stop(Stage::Ui, mark);
+        // The scene as the frame drawn now left it; the conversion thread changes the live one.
+        let scene = self.host.scene().clone();
+        let Some(DeferredParts {
+            session,
+            settings,
+            scene: live_scene,
+            view,
+        }) = self.host.deferred_parts()
+        else {
+            framebuffer::begin_window_pass(&self.gl, width, height);
+            self.ui.render();
+            return Ok(Duration::ZERO);
+        };
+        let view = view.ok_or("the host has no view of the game")?;
+        if std::mem::take(&mut self.pipeline.list_waiting) {
+            session.exchange_draw_list(&mut self.pipeline.displayed);
+        }
+        // Without a new frame the conversion thread has nothing to do.
+        let convert = session.has_captured_frame();
+        self.pipeline.list_waiting = convert;
+        let mut converting = StageClock::new(self.clock.enabled());
+        let converting_clock = &mut converting;
+        let (renderer, clock, ui, gl, displayed) = (
+            &mut self.renderer,
+            &mut self.clock,
+            &mut self.ui,
+            &self.gl,
+            &self.pipeline.displayed,
+        );
+        let shadow_reported = &mut self.state.shadow_map_reported;
+        let (converted, wait, drawn) = std::thread::scope(|threads| {
+            let conversion = convert.then(|| {
+                threads.spawn(move || {
+                    let started = Instant::now();
+                    session.convert_deferred(settings, live_scene, converting_clock);
+                    started.elapsed()
+                })
+            });
+            let drawn = if skip {
+                Ok(())
+            } else {
+                let target = RenderTarget {
+                    framebuffer: view.handle(),
+                    width: view.width(),
+                    height: view.height(),
+                };
+                let frame = SceneFrame {
+                    draw_list: Some(displayed),
+                    nes_picture: &[],
+                };
+                draw_scene(renderer, &target, &scene, &frame, shadow_reported, clock)
+            };
+            let mark = clock.start();
+            framebuffer::begin_window_pass(gl, width, height);
+            view.blit_to_default_framebuffer(width, view_height);
+            ui.render();
+            clock.stop(Stage::Ui, mark);
+            let waiting = Instant::now();
+            let converted = conversion.map_or(Duration::ZERO, |conversion| {
+                conversion
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            });
+            (converted, waiting.elapsed(), drawn)
+        });
+        drawn?;
+        self.clock.merge(&converting.take());
+        self.clock.add(Stage::Wait, wait);
+        if skip {
+            self.state.skipped_frames += 1;
+        } else {
+            self.state.last_render_size = (scene_width, scene_height);
+            self.state.scene_frames += 1;
+        }
+        Ok(converted.saturating_sub(wait))
+    }
+
+    /// Draws the scene into the offscreen buffer (unless the render-skip rule keeps the
+    /// previous image), blits it under the interface and draws the interface.
+    fn draw(&mut self, emulated: u32, width: i32, height: i32, real: f32) -> Result<(), String> {
+        let ViewPlan {
+            view_height,
+            size: (scene_width, scene_height),
+            skip,
+        } = self.plan_view(emulated, width, height)?;
+        if skip {
+            self.state.skipped_frames += 1;
+        } else {
+            render_scene(
+                &mut self.renderer,
+                &mut self.host,
+                &mut self.state,
+                &mut self.clock,
+            )?;
+            self.state.last_render_size = (scene_width, scene_height);
+            self.state.scene_frames += 1;
+            // The engine's list is the one drawn now: a pipelined frame that follows draws it
+            // again while the next is built.
+            self.pipeline.list_waiting = !self.host.showing_two_dimensional();
+        }
+        let mark = self.clock.start();
+        framebuffer::begin_window_pass(&self.gl, width, height);
+        if let Some(view) = self.host.view() {
+            view.blit_to_default_framebuffer(width, view_height);
+        }
+        let gl = Rc::clone(&self.gl);
+        self.with_ui_frame(real, |ui, frame, sizes, debug| {
+            ui.draw(frame, sizes, debug, |path| {
+                capture_window(&gl, width, height, path);
+            });
         });
         self.clock.stop(Stage::Ui, mark);
         Ok(())
@@ -798,6 +978,14 @@ fn log_window_icon(window: &mut HostWindow) {
         format!(" [{}]", problems.join("; "))
     };
     log(&format!("{state}{detail}"));
+}
+
+/// The view of one displayed frame: its height under the menu bar, the scene size and whether
+/// the render-skip rule keeps the previous image.
+struct ViewPlan {
+    view_height: i32,
+    size: (i32, i32),
+    skip: bool,
 }
 
 struct RunState {
@@ -1080,9 +1268,28 @@ fn render_scene(
         draw_list: list,
         nes_picture: picture,
     };
+    draw_scene(
+        renderer,
+        &target,
+        scene,
+        &frame,
+        &mut state.shadow_map_reported,
+        clock,
+    )
+}
+
+/// Renders `frame` with `scene` into `target`, timing the collection and the passes.
+fn draw_scene(
+    renderer: &mut SceneRenderer,
+    target: &RenderTarget,
+    scene: &SceneState,
+    frame: &SceneFrame<'_>,
+    shadow_map_reported: &mut bool,
+    clock: &mut StageClock,
+) -> Result<(), String> {
     let started = clock.start();
     renderer
-        .render(&target, scene, &frame)
+        .render(target, scene, frame)
         .map_err(|error| error.to_string())?;
     let statistics = renderer.statistics();
     if let Some(started) = started {
@@ -1092,10 +1299,8 @@ fn render_scene(
             started.elapsed().saturating_sub(statistics.collect_time),
         );
     }
-    if !state.shadow_map_reported
-        && statistics.shadow_map_size != statistics.requested_shadow_map_size
-    {
-        state.shadow_map_reported = true;
+    if !*shadow_map_reported && statistics.shadow_map_size != statistics.requested_shadow_map_size {
+        *shadow_map_reported = true;
         log(&format!(
             "the hardware refused a {}-texel shadow map; it is {} texels (AMD-034).",
             statistics.requested_shadow_map_size, statistics.shadow_map_size

@@ -7,8 +7,8 @@ use std::time::Instant;
 use zax_engine3d::engine::{ConversionEngine, ConversionState};
 use zax_engine3d::script::{ScriptError, ScriptHost};
 use zax_scripting::{
-    CollectingScriptLog, DetachedScriptBackdrop, DetachedScriptCamera, ProfileScriptRuntime,
-    ScriptBridge, ScriptContext, ScriptEnvironment, ScriptLight, ScriptSettings,
+    lend_context, CollectingScriptLog, DetachedScriptBackdrop, DetachedScriptCamera,
+    ProfileScriptRuntime, ScriptContext, ScriptEnvironment, ScriptLight, ScriptSettings,
 };
 use zax_settings::model::SettingsModel;
 
@@ -74,17 +74,22 @@ impl Rig {
         }
     }
 
-    fn lend<R>(&mut self, bridge: &ScriptBridge, operation: impl FnOnce() -> R) -> R {
-        let mut result = None;
-        bridge.lend(
+    fn lend<T, R>(
+        &mut self,
+        owner: &mut T,
+        engine_of: impl FnOnce(&T) -> &ConversionEngine,
+        operation: impl FnOnce(&mut T) -> R,
+    ) -> R {
+        lend_context(
+            owner,
+            engine_of,
             &mut ScriptContext {
                 camera: &mut self.camera,
                 backdrop: &mut self.backdrop,
                 machine: &mut self.machine,
             },
-            || result = Some(operation()),
-        );
-        result.expect("the lend runs its operation")
+            operation,
+        )
     }
 }
 
@@ -113,11 +118,14 @@ fn load_seconds(instances: u32, linked: bool, hook: &str) -> f64 {
         ..ScriptEnvironment::default()
     };
     let runtime = ProfileScriptRuntime::create(profile, environment, engine.state_mut()).unwrap();
-    let bridge = runtime.bridge();
     engine.set_script_host(Box::new(runtime));
     let mut rig = Rig::new();
     let started = Instant::now();
-    rig.lend(&bridge, || engine.load_profile(profile, true).unwrap());
+    rig.lend(
+        &mut engine,
+        |engine| engine,
+        |engine| engine.load_profile(profile, true).unwrap(),
+    );
     let elapsed = started.elapsed().as_secs_f64();
     assert_eq!(log.errors(), [] as [String; 0]);
     elapsed
@@ -154,23 +162,26 @@ fn perf_frame_hooks() {
         )
         .start();
     let mut rig = Rig::new();
-    let bridge = session.runtime(|runtime, _| runtime.bridge());
     let hooks: [(&str, Hook); 2] = [
         ("Update", ProfileScriptRuntime::invoke_update),
         ("LateUpdate", ProfileScriptRuntime::invoke_late_update),
     ];
     for (name, hook) in hooks {
-        let seconds = rig.lend(&bridge, || {
-            session.runtime(|runtime, state| {
-                best((0..ROUNDS).map(|_| {
-                    let started = Instant::now();
-                    for _ in 0..CALLS {
-                        hook(runtime, state).unwrap();
-                    }
-                    started.elapsed().as_secs_f64()
-                }))
-            })
-        });
+        let seconds = rig.lend(
+            &mut session,
+            |session| &session.engine,
+            |session| {
+                session.runtime(|runtime, state| {
+                    best((0..ROUNDS).map(|_| {
+                        let started = Instant::now();
+                        for _ in 0..CALLS {
+                            hook(runtime, state).unwrap();
+                        }
+                        started.elapsed().as_secs_f64()
+                    }))
+                })
+            },
+        );
         let per_call = seconds / f64::from(CALLS);
         let accesses = ACCESSES_PER_TURN * TURNS;
         println!(
@@ -196,7 +207,6 @@ fn frame_seconds(extra: &str) -> f64 {
         )
         .start();
     let mut rig = Rig::new();
-    let bridge = session.runtime(|runtime, _| runtime.bridge());
     let mut batch = Batch::new();
     for index in 0..i32::try_from(SHAPES).unwrap() {
         batch = batch.sprite(img::c(), 24 * (index % 10), 32 * (index / 10));
@@ -205,9 +215,13 @@ fn frame_seconds(extra: &str) -> f64 {
     let seconds = best((0..5).map(|round| {
         let started = Instant::now();
         for counter in 1..=SHAPE_FRAMES {
-            rig.lend(&bridge, || {
-                session.frame(&batch, round * SHAPE_FRAMES + counter);
-            });
+            rig.lend(
+                &mut session,
+                |session| &session.engine,
+                |session| {
+                    session.frame(&batch, round * SHAPE_FRAMES + counter);
+                },
+            );
         }
         started.elapsed().as_secs_f64() / f64::from(SHAPE_FRAMES)
     }));
@@ -242,7 +256,6 @@ fn perf_accesses() {
         .script("frame", "x = 0")
         .start();
     let mut rig = Rig::new();
-    let bridge = session.runtime(|runtime, _| runtime.bridge());
     let loops = [
         ("empty loop", ""),
         ("Camera.Distance read", "local a = Camera.Distance"),
@@ -257,11 +270,15 @@ fn perf_accesses() {
     for (name, body) in loops {
         let chunk = format!("local v = Vector3(1, 2, 3) for i = 1, {ITERATIONS} do {body} end");
         let seconds = best((0..5).map(|_| {
-            rig.lend(&bridge, || {
-                let started = Instant::now();
-                session.evaluate(&chunk);
-                started.elapsed().as_secs_f64()
-            })
+            rig.lend(
+                &mut session,
+                |session| &session.engine,
+                |session| {
+                    let started = Instant::now();
+                    session.evaluate(&chunk);
+                    started.elapsed().as_secs_f64()
+                },
+            )
         }));
         println!("{name}: {:.0} ns", seconds / f64::from(ITERATIONS) * 1e9);
     }

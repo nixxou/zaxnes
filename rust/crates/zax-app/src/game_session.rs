@@ -11,9 +11,9 @@
 //! The session owns the core and the script inputs; the host owns the scene and passes it to
 //! every call that can run a script. The runtime keeps none of them: each call into the
 //! conversion engine that can reach a hook borrows them for its length (`scripted`), through
-//! the [`ScriptBridge`] of the runtime, so the compiler rules out a conflicting access.
+//! `zax_scripting::lend_context`, so the compiler rules out a conflicting access.
 
-use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 use zax_engine3d::draw_list::FrameDrawList;
@@ -28,7 +28,7 @@ use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
 use zax_scripting::{
-    LuaScriptError, ProfileScriptRuntime, ScriptBridge, ScriptContext, ScriptEnvironment,
+    lend_context, LuaScriptError, ProfileScriptRuntime, ScriptContext, ScriptEnvironment,
     ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptProfileInfo, ScriptSettings,
 };
 use zax_settings::catalogue::{Port, SettingId};
@@ -93,14 +93,14 @@ struct CoreMachine<'a> {
 struct MemorySnapshot {
     ram: [u8; NesBus::RAM_SIZE],
     /// Whether a read asked for something the copy does not hold (cartridge space).
-    missed: Cell<bool>,
+    missed: AtomicBool,
 }
 
 impl Default for MemorySnapshot {
     fn default() -> Self {
         Self {
             ram: [0; NesBus::RAM_SIZE],
-            missed: Cell::new(false),
+            missed: AtomicBool::new(false),
         }
     }
 }
@@ -115,7 +115,7 @@ impl MemorySnapshot {
         if address < 0x4020 {
             return 0;
         }
-        self.missed.set(true);
+        self.missed.store(true, Ordering::Relaxed);
         0
     }
 }
@@ -233,7 +233,6 @@ pub struct SessionFrame {
 pub struct GameSession {
     core: Box<NesCore>,
     engine: ConversionEngine,
-    bridge: ScriptBridge,
     input: ScriptInputState,
     events: Receiver<SessionEvent>,
     title: String,
@@ -352,12 +351,10 @@ impl GameSession {
         let runtime = with_context(scene, &mut core, &mut input, None, |context| {
             ProfileScriptRuntime::create_in(profile, environment, engine.state_mut(), Some(context))
         })?;
-        let bridge = runtime.bridge();
         engine.set_script_host(Box::new(runtime));
         let mut session = Self {
             core: Box::new(core),
             engine,
-            bridge,
             input,
             events,
             title: title.to_owned(),
@@ -431,7 +428,6 @@ impl GameSession {
         let Self {
             core,
             input,
-            bridge,
             engine,
             pipeline,
             ..
@@ -439,7 +435,7 @@ impl GameSession {
         // While the core is away, the scripts read the RAM copied when their frame came back.
         let snapshot = pipeline.in_flight.then_some(&pipeline.memory);
         with_context(scene, core, input, snapshot, |context| {
-            bridge.lend(context, || operation(engine));
+            lend_context(engine, |engine| engine, context, operation);
         });
     }
 
@@ -655,7 +651,7 @@ impl GameSession {
         self.lend(model, scene, |session, scene| {
             session.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
         });
-        if self.pipeline.memory.missed.replace(false) {
+        if self.pipeline.memory.missed.swap(false, Ordering::Relaxed) {
             // A script read cartridge space, which the copy does not hold: from now on the next
             // frame waits for the scripts again.
             self.pipeline.ahead_allowed = false;
@@ -663,6 +659,33 @@ impl GameSession {
                 "Zaxnes: a script read cartridge memory; emulation ahead is off for this game.",
             );
         }
+    }
+
+    /// The conversion a pipelined frame left to its own thread ([`EmulationHost`]'s
+    /// `defer_conversion`): the captured frame is converted, then its draw list is built.
+    ///
+    /// [`EmulationHost`]: crate::emulation::host::EmulationHost
+    pub fn convert_deferred(
+        &mut self,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        clock: &mut StageClock,
+    ) {
+        self.finish_captured(model, scene, clock);
+        let started = clock.start();
+        self.engine.build_draw_list();
+        clock.stop(Stage::DrawList, started);
+    }
+
+    /// Whether a frame was captured and waits for its conversion.
+    #[must_use]
+    pub const fn has_captured_frame(&self) -> bool {
+        self.pipeline.pending.is_some()
+    }
+
+    /// Swaps the draw list built last with `list`, which the caller then draws.
+    pub fn exchange_draw_list(&mut self, list: &mut zax_engine3d::draw_list::FrameDrawList) {
+        self.engine.exchange_draw_list(list);
     }
 
     /// Puts the frame counter back to zero.
@@ -1142,6 +1165,15 @@ impl GameSession {
         self.end(model, scene);
     }
 }
+
+// The pipelined frames (`emu.pipeline`) lend the session, the settings and the scene to the
+// conversion thread for the length of a frame.
+const _: fn() = || {
+    fn send<T: Send>() {}
+    send::<GameSession>();
+    send::<SettingsModel>();
+    send::<SceneState>();
+};
 
 #[cfg(test)]
 mod tests {

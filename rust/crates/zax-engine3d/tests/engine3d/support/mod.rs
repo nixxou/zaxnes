@@ -425,9 +425,9 @@ pub fn instances(frame: &ConversionFrame) -> Vec<&FrameInstance> {
         .collect()
 }
 
-type StateHook = Box<dyn FnMut(&mut ConversionState)>;
-type ShapeHook = Box<dyn FnMut(&mut FrameInstance) -> Result<(), ScriptError>>;
-type PatternHook = Box<dyn FnMut(&mut PatternInstance)>;
+type StateHook = Box<dyn FnMut(&mut ConversionState) + Send>;
+type ShapeHook = Box<dyn FnMut(&mut FrameInstance) -> Result<(), ScriptError> + Send>;
+type PatternHook = Box<dyn FnMut(&mut PatternInstance) + Send>;
 
 /// A script host that records what the pipeline calls and lets a test run code at each call
 /// point (REQ-E3D-320).

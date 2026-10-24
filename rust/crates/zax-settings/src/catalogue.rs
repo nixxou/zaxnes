@@ -118,6 +118,7 @@ setting_ids! {
     EmuCatchUp => "emu.catch_up",
     EmuLuaSmoothGc => "emu.lua_smooth_gc",
     EmuLuaFastBinding => "emu.lua_fast_binding",
+    EmuPipeline => "emu.pipeline",
     ConvSameBgPalette => "conv.same_bg_palette",
     ConvSameSpPalette => "conv.same_sp_palette",
     ConvSpriteTolerance => "conv.sprite_tolerance",

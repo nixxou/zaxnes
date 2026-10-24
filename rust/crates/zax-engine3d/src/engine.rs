@@ -326,6 +326,12 @@ impl ConversionEngine {
             .build(&state.frames[index], &mut sources)
     }
 
+    /// Swaps the list built last with `list` (see [`DrawListBuilder::exchange`]): a host that
+    /// draws one frame while the next is built keeps the list it draws.
+    pub fn exchange_draw_list(&mut self, list: &mut FrameDrawList) {
+        self.draw_list_builder.exchange(list);
+    }
+
     /// The list built by the last call of [`ConversionEngine::build_draw_list`] or
     /// [`ConversionEngine::build_draw_list_of`].
     #[must_use]

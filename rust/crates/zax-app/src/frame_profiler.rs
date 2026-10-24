@@ -44,6 +44,9 @@ pub enum Stage {
     Collect,
     /// The scene: update and the renderer's passes (GL calls, CPU side).
     Scene,
+    /// Pipelined frames: the main thread waiting for the conversion thread, which runs the
+    /// conversion, the Lua and the draw list stages beside the drawing.
+    Wait,
     /// The blit of the scene and the interface (Dear `ImGui` build and render).
     Ui,
     /// The audio pump.
@@ -58,7 +61,7 @@ pub enum Stage {
 
 impl Stage {
     /// Number of stages.
-    pub const COUNT: usize = 15;
+    pub const COUNT: usize = 16;
 
     /// Every stage, in frame order.
     pub const ALL: [Self; Self::COUNT] = [
@@ -72,6 +75,7 @@ impl Stage {
         Self::DrawList,
         Self::Collect,
         Self::Scene,
+        Self::Wait,
         Self::Ui,
         Self::Audio,
         Self::Swap,
@@ -93,6 +97,7 @@ impl Stage {
             Self::DrawList => "list",
             Self::Collect => "collect",
             Self::Scene => "scene",
+            Self::Wait => "wait",
             Self::Ui => "ui",
             Self::Audio => "audio",
             Self::Swap => "swap",

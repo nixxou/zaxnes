@@ -91,11 +91,11 @@ pub struct ScriptSettings {
     model: SettingsModel,
     light: ScriptLight,
     pending: Vec<SettingId>,
-    changed: Option<Box<dyn FnMut(SettingId)>>,
+    changed: Option<Box<dyn FnMut(SettingId) + Send>>,
     view_reset: bool,
     resets_view: bool,
-    save_requested: Option<Box<dyn FnMut()>>,
-    load_requested: Option<Box<dyn FnMut()>>,
+    save_requested: Option<Box<dyn FnMut() + Send>>,
+    load_requested: Option<Box<dyn FnMut() + Send>>,
 }
 
 impl Default for ScriptSettings {
@@ -135,7 +135,7 @@ impl ScriptSettings {
 
     /// Sets what is told, with the identifier of SPEC-09 §4.1, after a value really changed
     /// (REQ-PERS-009), so that the host can apply the effect it owns.
-    pub fn set_on_changed(&mut self, callback: impl FnMut(SettingId) + 'static) {
+    pub fn set_on_changed(&mut self, callback: impl FnMut(SettingId) + Send + 'static) {
         self.changed = Some(Box::new(callback));
     }
 
@@ -155,13 +155,13 @@ impl ScriptSettings {
 
     /// Sets what `Setting:Save()` asks of the host: write the settings file now (REQ-PERS-015).
     /// Without it the call does nothing.
-    pub fn set_on_save_requested(&mut self, callback: impl FnMut() + 'static) {
+    pub fn set_on_save_requested(&mut self, callback: impl FnMut() + Send + 'static) {
         self.save_requested = Some(Box::new(callback));
     }
 
     /// Sets what `Setting:Load()` asks of the host: re-read the settings file and apply only
     /// the user preferences it holds (REQ-PERS-015).
-    pub fn set_on_load_requested(&mut self, callback: impl FnMut() + 'static) {
+    pub fn set_on_load_requested(&mut self, callback: impl FnMut() + Send + 'static) {
         self.load_requested = Some(Box::new(callback));
     }
 

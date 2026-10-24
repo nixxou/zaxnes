@@ -25,7 +25,10 @@ pub struct ScriptError(pub String);
 /// A hook may fail: the pipeline counts the error in
 /// [`ConversionFrame::script_error_count`](crate::frame::ConversionFrame::script_error_count)
 /// and carries on (REQ-E3D-324).
-pub trait ScriptHost {
+///
+/// `Send`: the engine, runtime included, may be handed to another thread for the length of a
+/// frame (the host's pipelined frames).
+pub trait ScriptHost: Send {
     /// True when at least one script defines a frame hook. The pipeline uses it only to skip
     /// work; the result must not depend on it.
     fn has_frame_hooks(&self) -> bool;
@@ -93,6 +96,12 @@ pub trait ScriptHost {
 
     /// The host as [`Any`], for writing.
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// The host behind this one when it wraps another (a timing wrapper), this host otherwise:
+    /// what a host lends its context to.
+    fn inner(&self) -> &dyn Any {
+        self.as_any()
+    }
 }
 
 /// A script host that does nothing, used when no profile script is loaded and by the tests of

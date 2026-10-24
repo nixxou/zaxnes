@@ -17,6 +17,9 @@
 //! [`ProfileScriptRuntime::run`].
 
 mod globals;
+mod handoff;
+
+pub use handoff::lend_context;
 mod hooks;
 
 use std::any::Any;
@@ -205,38 +208,6 @@ impl RuntimeData {
     }
 }
 
-/// The way for a host to lend its [`ScriptContext`] to the hooks of a runtime it has handed to
-/// the conversion engine.
-///
-/// The engine owns the runtime and calls its hooks, so the host cannot pass the context to the
-/// runtime directly. The bridge is a second handle on the same Lua state: the host lends the
-/// context for the length of a call into the engine, and every hook that runs during it reaches
-/// the context. When the call returns the context is withdrawn, so nothing outlives the borrow.
-#[derive(Clone)]
-pub struct ScriptBridge {
-    lua: Lua,
-}
-
-impl ScriptBridge {
-    /// Runs `operation` with `context` available to the script API, then withdraws it. The
-    /// operation hands its results out through what it captures. A hook that runs outside any
-    /// lend sees the headless bridges of the environment.
-    pub fn lend(&self, context: &mut ScriptContext<'_>, operation: impl FnOnce()) {
-        let lent = self.lua.scope(|scope| {
-            // Should the function not be created, the hooks of the operation fall back on the
-            // headless bridges.
-            if let Ok(call) = scope.create_function_mut(|lua, ()| HostLink::serve(lua, context)) {
-                self.lua.set_app_data(HostLink::new(call));
-            }
-            operation();
-            let flushed = flush_host_writes(&self.lua);
-            self.lua.remove_app_data::<HostLink>();
-            flushed
-        });
-        debug_assert!(lent.is_ok(), "the closure of a lend never fails");
-    }
-}
-
 /// The Lua runtime of one profile.
 pub struct ProfileScriptRuntime {
     lua: Lua,
@@ -327,13 +298,15 @@ impl ProfileScriptRuntime {
         PublishedGlobals::install(&self.lua)?;
 
         self.data.env.settings.mirror_all(state.settings_mut());
-        let bridge = self.bridge();
+        // A second handle on the state for the length of the chunks' lend, dropped with this
+        // call (see `handoff`).
+        let lua = self.lua.clone();
         let mut loaded = Ok(Ok(false));
         let mut load = || {
             loaded = self.run(Some(state), None, |cx| load_scripts(cx, profile));
         };
         match context {
-            Some(context) => bridge.lend(context, load),
+            Some(context) => handoff::lend_on(&lua, context, load),
             None => load(),
         }
         self.data.has_frame_hooks = loaded??;
@@ -467,19 +440,11 @@ impl ProfileScriptRuntime {
         self.answer_view_reset(view_reset);
     }
 
-    /// The bridge through which a host lends its context to the hooks of this runtime.
-    #[must_use]
-    pub fn bridge(&self) -> ScriptBridge {
-        ScriptBridge {
-            lua: self.lua.clone(),
-        }
-    }
-
     /// Runs `operation` on the context the host lent, outside any call into Lua. A failure of
     /// the host side is logged and gives `None`.
-    fn with_context<R: 'static>(
+    fn with_context<R: Send + 'static>(
         &mut self,
-        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + Send + 'static,
     ) -> Option<R> {
         match with_host_context(&self.lua, &mut self.data, operation) {
             Ok(answer) => Some(answer),

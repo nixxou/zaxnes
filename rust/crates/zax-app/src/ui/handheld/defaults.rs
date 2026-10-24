@@ -1,5 +1,5 @@
-//! The render defaults of a handheld console (Mali-G31 class GPU, 1 GB of memory), applied as
-//! environment defaults: they hold only while the user has saved no value of their own.
+//! The render defaults of a handheld console (Mali-G31 class GPU, 1 GB of memory), and its
+//! pipelined frames, applied as environment defaults: they hold only while the user has saved no value of their own.
 //!
 //! Gaps against the research notes (`docs/HANDHELD-RESEARCH.md` §5.4), reported rather than
 //! invented: the render scale is the nearest of the catalogue's steps (2/3, not 0.75); the
@@ -16,8 +16,11 @@ use crate::render_scaling::RENDER_TEXTURE_METHOD;
 /// The scale step "2/3" of `video.res_scale`.
 const TWO_THIRDS: i32 = 1;
 
+/// The choice "Auto" of `emu.pipeline`.
+const PIPELINE_AUTO: i32 = 1;
+
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 5] {
+fn defaults() -> [(SettingId, SettingValue); 6] {
     [
         (
             SettingId::VideoRenderMethod,
@@ -28,6 +31,8 @@ fn defaults() -> [(SettingId, SettingValue); 5] {
         (SettingId::VideoAntiAlias, SettingValue::Enum(0)),
         // Swap every refresh: 60 frames per second on the 60 Hz screens of the handhelds.
         (SettingId::VideoVSync, SettingValue::Enum(1)),
+        // The scripts of a late frame run beside the drawing (owner request): "Auto".
+        (SettingId::EmuPipeline, SettingValue::Enum(PIPELINE_AUTO)),
     ]
 }
 
@@ -53,6 +58,7 @@ mod tests {
         assert!((model.res_scale_factor() - 2.0 / 3.0).abs() < 1.0e-6);
         assert_eq!(0, model.anti_alias());
         assert_eq!(1, model.vsync());
+        assert_eq!(PIPELINE_AUTO, model.get(SettingId::EmuPipeline).as_int());
     }
 
     #[test]

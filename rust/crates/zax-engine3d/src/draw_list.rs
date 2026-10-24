@@ -240,6 +240,12 @@ impl DrawListBuilder {
         &self.list
     }
 
+    /// Swaps the list of the last build with `list`: the caller keeps the built list while the
+    /// builder fills the other one next time (its storage is reused).
+    pub fn exchange(&mut self, list: &mut FrameDrawList) {
+        std::mem::swap(&mut self.list, list);
+    }
+
     /// Builds the draw list of `frame`.
     pub fn build(
         &mut self,

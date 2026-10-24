@@ -37,6 +37,8 @@ pub enum OptionRow {
     Camera,
     /// How many emulated frames a displayed frame may run when the game is late.
     CatchUp,
+    /// The scripts beside the drawing: off, automatic (while late) or always.
+    Pipeline,
     /// The TV region: automatic (from the ROM header, at the next game start), NTSC or PAL.
     Region,
     /// The gamepad bindings.
@@ -44,7 +46,7 @@ pub enum OptionRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 10] = [
+pub const ROWS: [OptionRow; 11] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -53,6 +55,7 @@ pub const ROWS: [OptionRow; 10] = [
     OptionRow::ShowFps,
     OptionRow::Camera,
     OptionRow::CatchUp,
+    OptionRow::Pipeline,
     OptionRow::Region,
     OptionRow::Controls,
 ];
@@ -62,6 +65,13 @@ const CATCH_UPS: [i32; 6] = [0, 1, 2, 3, 4, 5];
 
 fn catch_up(settings: &SettingsModel) -> i32 {
     settings.get(SettingId::EmuCatchUp).as_int()
+}
+
+/// The values of the pipeline row (`emu.pipeline`): off, auto, always.
+const PIPELINES: [i32; 3] = [0, 1, 2];
+
+fn pipeline(settings: &SettingsModel) -> i32 {
+    settings.get(SettingId::EmuPipeline).as_int()
 }
 
 /// The choices of the region row.
@@ -188,6 +198,10 @@ impl HandheldOptionsModel {
                 let next = *cycled(&CATCH_UPS, &catch_up(settings), step);
                 settings.set(SettingId::EmuCatchUp, SettingValue::Enum(next));
             }
+            OptionRow::Pipeline => {
+                let next = *cycled(&PIPELINES, &pipeline(settings), step);
+                settings.set(SettingId::EmuPipeline, SettingValue::Enum(next));
+            }
             OptionRow::Region => {
                 cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
             }
@@ -209,6 +223,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::ShowFps => text::label_of(catalogue::descriptor(SettingId::UiShowFps)),
         OptionRow::Camera => strings::get(keys::HANDHELD_OPTION_CAMERA),
         OptionRow::CatchUp => strings::get(keys::HANDHELD_OPTION_CATCH_UP),
+        OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
     }
@@ -232,6 +247,11 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             0 => text::label_of_option("None"),
             frames => frames.to_string(),
         },
+        OptionRow::Pipeline => text::label_of_option(match pipeline(settings) {
+            1 => "Auto",
+            2 => "Always",
+            _ => "Off",
+        }),
         OptionRow::Region => match RegionChoice::of(settings) {
             RegionChoice::Auto => strings::get(keys::HANDHELD_REGION_AUTO),
             RegionChoice::Ntsc => "NTSC".to_owned(),
