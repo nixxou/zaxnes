@@ -212,13 +212,28 @@ struct Running {
 
 /// The state of the automatic resolution between two displayed frames.
 #[derive(Default)]
+#[allow(clippy::struct_excessive_bools)] // Independent facts of the run, not a state machine.
 struct AutomaticResolution {
     governor: render_scaling::DynamicResolution,
     /// Whether the renderer times its passes: the setting is on and the context can.
     timing: bool,
     /// Whether the log said once that the context cannot time GPU work.
     reported: bool,
+    /// Whether the log said once that the timer returned a value that is no measure.
+    reported_implausible: bool,
+    /// Results the timer returned since timing started, and how many were no measure: when
+    /// none of the first ones is, the timer is given up.
+    results: u32,
+    rejected: u32,
+    /// Whether the timer was given up for this run.
+    given_up: bool,
+    /// The measures of the profiler's window: count, sum and maximum, and the results rejected.
+    window: (u32, Duration, Duration, u32),
 }
+
+/// Results of the GPU timer without a single measure after which the automatic resolution gives
+/// the timer up for the run (about 5 s at 60 Hz).
+const GPU_RESULTS_BEFORE_GIVING_UP: u32 = 300;
 
 /// The state of the pipelined frames between two displayed frames.
 #[derive(Default)]
@@ -468,6 +483,9 @@ impl Running {
                 &hooks,
                 profiler.reported_frames(),
             ));
+            if let Some(line) = self.gpu_report() {
+                log(&line);
+            }
         }
     }
 
@@ -643,9 +661,10 @@ impl Running {
     /// the governor the measure that arrived during this frame.
     fn follow_the_gpu(&mut self, budget: Duration) {
         let settings = self.host.settings();
-        let wanted = settings.get(SettingId::VideoDynamicResolution).as_bool()
-            && render_scaling::scale_applies(settings.render_method());
         let resolution = &mut self.resolution;
+        let wanted = settings.get(SettingId::VideoDynamicResolution).as_bool()
+            && render_scaling::scale_applies(settings.render_method())
+            && !resolution.given_up;
         if wanted != resolution.timing {
             resolution.timing = self.graphics.set_gpu_timing(wanted);
             if wanted && !resolution.timing && !std::mem::replace(&mut resolution.reported, true) {
@@ -655,16 +674,63 @@ impl Running {
         if !resolution.timing {
             return;
         }
-        if let Some(gpu) = self.graphics.statistics().gpu_time {
-            if resolution.governor.record(gpu, budget) {
+        let Some(gpu) = self.graphics.statistics().gpu_time else {
+            return;
+        };
+        resolution.results += 1;
+        if !render_scaling::plausible_gpu_time(gpu) {
+            resolution.rejected += 1;
+            resolution.window.3 += 1;
+            if !std::mem::replace(&mut resolution.reported_implausible, true) {
                 log(&format!(
-                    "automatic resolution: scale {:.2} (GPU {:.1} ms for a {:.1} ms frame)",
-                    resolution.governor.factor(),
-                    gpu.as_secs_f64() * 1000.0,
-                    budget.as_secs_f64() * 1000.0
+                    "automatic resolution: the GPU timer returned {:.1} ms, which is no measure; \
+                     such results are left out.",
+                    gpu.as_secs_f64() * 1000.0
                 ));
             }
+            if resolution.rejected == resolution.results
+                && resolution.results >= GPU_RESULTS_BEFORE_GIVING_UP
+            {
+                resolution.given_up = true;
+                resolution.timing = self.graphics.set_gpu_timing(false);
+                log(&format!(
+                    "automatic resolution: the GPU timer gave no measure in {} results; the \
+                     scale stays at {:.2}.",
+                    resolution.results,
+                    resolution.governor.factor()
+                ));
+            }
+            return;
         }
+        let window = &mut resolution.window;
+        window.0 += 1;
+        window.1 += gpu;
+        window.2 = window.2.max(gpu);
+        if resolution.governor.record(gpu, budget) {
+            log(&format!(
+                "automatic resolution: scale {:.2} (GPU {:.1} ms for a {:.1} ms frame)",
+                resolution.governor.factor(),
+                gpu.as_secs_f64() * 1000.0,
+                budget.as_secs_f64() * 1000.0
+            ));
+        }
+    }
+
+    /// The GPU line of a profiler report while the automatic resolution times the GPU: the
+    /// measures of the window and the scale in force. Starts the next window.
+    fn gpu_report(&mut self) -> Option<String> {
+        let resolution = &mut self.resolution;
+        let (count, sum, max, rejected) = std::mem::take(&mut resolution.window);
+        if !resolution.timing {
+            return None;
+        }
+        let mean = sum.as_secs_f64() * 1000.0 / f64::from(count.max(1));
+        Some(format!(
+            "profile gpu: scene passes {mean:.2}/{:.2} ms (mean/max) over {count} measures, \
+             {rejected} result(s) left out | automatic resolution scale {:.2}",
+            max.as_secs_f64() * 1000.0,
+            resolution.governor.factor()
+        ))
     }
 
     /// The time one displayed frame may take: the swap interval at the display's refresh rate.
@@ -1158,9 +1224,10 @@ fn log_profiler_startup(
 ) {
     log(&frame_profiler::startup_report(
         &format!(
-            "render scale {}, render method {}, shadows {}, MSAA setting {}, vsync {}, \
-             frame rate setting {}",
+            "render scale {}, automatic resolution {}, render method {}, shadows {}, \
+             MSAA setting {}, vsync {}, frame rate setting {}",
             model.res_scale_factor(),
+            model.get(SettingId::VideoDynamicResolution).as_bool(),
             model.render_method(),
             model.shadow(),
             model.anti_alias(),

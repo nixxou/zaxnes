@@ -581,6 +581,13 @@ impl Gl {
         unsafe { self.context.end_query(glow::TIME_ELAPSED) }
     }
 
+    /// The oldest error the context recorded since the last call, cleared (`NO_ERROR` when
+    /// none).
+    pub fn take_error(&self) -> u32 {
+        // SAFETY: renderer contract; a plain state query.
+        unsafe { self.context.get_error() }
+    }
+
     /// Whether the result of `query` is there, without waiting for it.
     pub fn query_ready(&self, query: Query) -> bool {
         // SAFETY: renderer contract; the query is live and has ended.
