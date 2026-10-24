@@ -37,6 +37,7 @@ are answered by the window only once it is unlocked.
 | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels (power-on `$FF`) |
 | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels (power-on `$FF`) |
 | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines (power-on 0) |
+| `$5007` | R/W | bit 0: four separate nametables (2 x 2, the console's 4 KiB of VRAM), whatever mirroring the cartridge selects (power-on 0) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
 | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code: the CPU runs code from it, whatever bank the mapper shows (power-on 0) |
 
@@ -60,6 +61,9 @@ are answered by the window only once it is unlocked.
   that much more time before the NMI, and the picture, the sound and their timing do not
   change. Showing and running enemies in the margins costs CPU time the console does not have;
   this is where it comes from.
+* Four nametables (`$5007` bit 0): with a horizontally mirrored cartridge the two nametables are
+  stacked and the picture can only wrap 256 pixels wide; with four the plane is 512 x 480, so a
+  game that scrolls both ways (a world map) can keep columns drawn past both sides.
 * The 64-sprite OAM and the eight-sprites-per-line limit are unchanged (the core already captures
   every sprite, eight per line or not).
 

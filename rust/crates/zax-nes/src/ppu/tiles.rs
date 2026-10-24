@@ -104,7 +104,7 @@ impl Ppu2C02 {
     /// maskX and maskY, decided from the state at the start of visible line 0
     /// (REQ-CORE-046).
     fn compute_masks(&mut self, cartridge: Option<&Cartridge>) {
-        (self.mask_x, self.mask_y) = match Self::mirroring_of(cartridge) {
+        (self.mask_x, self.mask_y) = match self.layout_of(cartridge) {
             NametableMirroring::Horizontal => (8, 0),
             NametableMirroring::Vertical => (0, 8),
             _ => (0, 0),
@@ -133,7 +133,7 @@ impl Ppu2C02 {
 
         // Exception of the original: no row is captured on line 0 under vertical mirroring
         // (REQ-CORE-037, justification).
-        if line == 0 && Self::mirroring_of(cart.as_deref()) == NametableMirroring::Vertical {
+        if line == 0 && self.layout_of(cart.as_deref()) == NametableMirroring::Vertical {
             return;
         }
 

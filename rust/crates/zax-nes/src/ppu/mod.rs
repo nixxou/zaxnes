@@ -377,6 +377,17 @@ impl Ppu2C02 {
         cartridge.map_or(NametableMirroring::Horizontal, Cartridge::mirroring)
     }
 
+    /// The nametable layout in force: the cartridge's, unless the widescreen extension asks
+    /// for four separate nametables.
+    #[must_use]
+    pub fn layout_of(&self, cartridge: Option<&Cartridge>) -> NametableMirroring {
+        if self.wide.four_screen() {
+            NametableMirroring::FourScreen
+        } else {
+            Self::mirroring_of(cartridge)
+        }
+    }
+
     /// Object attribute memory.
     #[must_use]
     pub const fn oam(&self) -> &[u8; OAM_SIZE] {
@@ -1071,7 +1082,7 @@ impl Ppu2C02 {
             return self.vram[(page << 10) | (usize::from(address) & 0x03FF)];
         }
 
-        self.vram[map_nametable(address, Self::mirroring_of(cartridge))]
+        self.vram[map_nametable(address, self.layout_of(cartridge))]
     }
 
     fn write_nametable_byte(&mut self, address: u16, value: u8, cart: Cart<'_, '_>) {
@@ -1088,7 +1099,8 @@ impl Ppu2C02 {
             return;
         }
 
-        self.vram[map_nametable(address, Self::mirroring_of(cart.as_deref()))] = value;
+        let layout = self.layout_of(cart.as_deref());
+        self.vram[map_nametable(address, layout)] = value;
     }
 
     /// Maps a nametable address to an offset in the 4 KiB VRAM, using the layout
