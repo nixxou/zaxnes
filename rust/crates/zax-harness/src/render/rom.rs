@@ -109,6 +109,22 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
             .map(|address| host.core.read_memory(address))
             .collect();
         fs::write(path, memory)?;
+        let pc = host.core.cpu_and_bus_mut().0.pc;
+        let around: Vec<u8> = (0..6u16)
+            .map(|offset| host.core.read_memory(pc.wrapping_add(offset)))
+            .collect();
+        let (cpu, _) = host.core.cpu_and_bus_mut();
+        println!(
+            "render: memory written to {} (PC ${:04X} A ${:02X} X ${:02X} Y ${:02X} S ${:02X}{}, at PC {:02X?})",
+            path.display(),
+            cpu.pc,
+            cpu.a,
+            cpu.x,
+            cpu.y,
+            cpu.s,
+            if cpu.jammed() { " JAMMED" } else { "" },
+            around
+        );
     }
 
     if let Some(path) = request.png_nes {

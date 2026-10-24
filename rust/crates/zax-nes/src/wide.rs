@@ -15,12 +15,17 @@
 //! | `$5003` | R/W | the margin the game asks for on each side, in pixels |
 //! | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels |
 //! | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels |
+//! | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines, before the vblank |
 //! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
 //! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it) |
 //!
 //! The margin in use is `min($5003, $5002)` rounded down to a multiple of 8. `$5004` and
 //! `$5005` are read each time a band of tiles is captured, so a game can hide the sides behind
 //! a status bar or past the end of a level by writing them mid-frame.
+//!
+//! The overclock (`$5006`) holds the PPU and the APU still for that many
+//! scanlines' worth of CPU cycles when the picture is done (line 240), so the game's frame
+//! logic gets more time before the NMI while the picture and the sound stay as they were.
 
 use crate::state::{InvalidState, StateReader, StateWriter};
 
@@ -38,6 +43,9 @@ const FIRST_RAM: u16 = 0x5200;
 
 /// Bytes of RAM in the window.
 const RAM_SIZE: usize = 0x0E00;
+
+/// CPU cycles one overclock scanline stands for: 341 dots at three dots per cycle, rounded up.
+const CYCLES_PER_SCANLINE: u32 = 114;
 
 /// Version the ROM reads at `$5001`.
 const VERSION: u8 = 1;
@@ -66,6 +74,10 @@ pub struct WideExtension {
     active_high: [u8; 64],
     /// RAM at `$5200`-`$5FFF`.
     scratch: Vec<u8>,
+    /// Overclock register: extra scanlines of CPU time per frame.
+    overclock: u8,
+    /// CPU cycles of the current overclock still to run with the machine held.
+    stall: u32,
 }
 
 impl Default for WideExtension {
@@ -88,6 +100,8 @@ impl WideExtension {
             pending_high: [0; 64],
             active_high: [0; 64],
             scratch: vec![0; RAM_SIZE],
+            overclock: 0,
+            stall: 0,
         }
     }
 
@@ -173,6 +187,7 @@ impl WideExtension {
             0x5003 => Some(self.requested_margin),
             0x5004 => Some(self.left_extent),
             0x5005 => Some(self.right_extent),
+            0x5006 => Some(self.overclock),
             FIRST_RAM..=LAST_REGISTER => {
                 self.scratch.get(usize::from(address - FIRST_RAM)).copied()
             }
@@ -196,6 +211,7 @@ impl WideExtension {
             0x5003 => self.requested_margin = value,
             0x5004 => self.left_extent = value,
             0x5005 => self.right_extent = value,
+            0x5006 => self.overclock = value,
             0x5100..=0x51FF => {
                 self.pending_high[usize::from(address & 0xFF) / 4] = value;
             }
@@ -232,6 +248,25 @@ impl WideExtension {
         self.pending_high = [0; 64];
     }
 
+    /// The PPU just finished the picture (start of line 240): the overclock, if any, starts.
+    pub fn arm_overclock(&mut self) {
+        if self.unlocked && self.overclock > 0 {
+            self.stall = u32::from(self.overclock) * CYCLES_PER_SCANLINE;
+        }
+    }
+
+    /// Takes one CPU cycle of the overclock: true when the machine must stay still for it (the
+    /// CPU alone runs it).
+    #[inline]
+    pub fn take_stall_cycle(&mut self) -> bool {
+        if self.stall == 0 {
+            return false;
+        }
+
+        self.stall -= 1;
+        true
+    }
+
     /// Appends the register state (the host margin excluded) to `writer`.
     pub fn save_state(&self, writer: &mut StateWriter) {
         writer.write_u8(self.unlock_progress);
@@ -242,6 +277,8 @@ impl WideExtension {
         writer.write_blob(&self.pending_high);
         writer.write_blob(&self.active_high);
         writer.write_blob(&self.scratch);
+        writer.write_u8(self.overclock);
+        writer.write_u32(self.stall);
     }
 
     /// Restores the register state written by [`WideExtension::save_state`].
@@ -257,6 +294,8 @@ impl WideExtension {
         reader.read_blob_into(&mut self.pending_high)?;
         reader.read_blob_into(&mut self.active_high)?;
         reader.read_blob_into(&mut self.scratch)?;
+        self.overclock = reader.read_u8()?;
+        self.stall = reader.read_u32()?;
         Ok(())
     }
 }
@@ -322,6 +361,17 @@ mod tests {
         assert_eq!(wide.sprite_x(5, 0xF0), -16);
         wide.latch_sprites();
         assert_eq!(wide.sprite_x(5, 0xF0), 0xF0);
+    }
+
+    #[test]
+    fn overclock_holds_the_machine_for_whole_scanlines() {
+        let mut wide = unlocked(0);
+        wide.arm_overclock();
+        assert!(!wide.take_stall_cycle());
+        wide.write(0x5006, 2);
+        wide.arm_overclock();
+        let held = std::iter::from_fn(|| wide.take_stall_cycle().then_some(())).count();
+        assert_eq!(held, 228);
     }
 
     #[test]

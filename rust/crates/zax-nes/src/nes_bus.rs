@@ -174,6 +174,16 @@ impl NesBus {
 
     /// Advances the whole machine by one CPU cycle.
     pub fn tick(&mut self) {
+        // Widescreen extension overclock: the PPU and the APU stay still for this cycle. The
+        // cartridge still sees it: MMC1 tells consecutive writes apart by their cycle, and a
+        // bank switch is five writes in a row.
+        if self.ppu.wide_mut().take_stall_cycle() {
+            if let Some(cartridge) = self.cartridge.as_mut() {
+                cartridge.step_cpu_cycle();
+            }
+            return;
+        }
+
         self.cycles += 1;
         self.ppu_lag += 1;
         if self.cycles >= self.ppu_deadline {
