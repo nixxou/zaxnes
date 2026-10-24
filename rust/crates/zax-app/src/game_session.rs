@@ -229,6 +229,10 @@ pub struct SessionFrame {
     pub zapper_position: ZapperPosition,
 }
 
+/// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palette,
+/// edge masks, widescreen margin and visible rows.
+type CapturedBatch = ([u8; 32], i32, i32, (i32, zax_nes::VisibleRows));
+
 /// One game being played.
 pub struct GameSession {
     core: Box<NesCore>,
@@ -264,7 +268,7 @@ struct FramePipeline {
     ahead_allowed: bool,
     /// The palette and edge masks of a frame captured but not converted yet; its tile records
     /// are in `GameSession::batch_records`.
-    pending: Option<([u8; 32], i32, i32, i32)>,
+    pending: Option<CapturedBatch>,
     /// The RAM of the captured frame, for the scripts' `ReadMem` while the core is away.
     memory: MemorySnapshot,
 }
@@ -1006,12 +1010,20 @@ impl GameSession {
 
     /// Copies the tile records of the frame the core just ran into `batch_records`; returns its
     /// palette, edge masks and widescreen margin.
-    fn capture_batch(&mut self, clock: &mut StageClock) -> ([u8; 32], i32, i32, i32) {
+    fn capture_batch(
+        &mut self,
+        clock: &mut StageClock,
+    ) -> CapturedBatch {
         let started = clock.start();
         let batch = self.core.frame_batch();
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
-        let captured = (batch.palette, batch.mask_x, batch.mask_y, batch.margin);
+        let captured = (
+            batch.palette,
+            batch.mask_x,
+            batch.mask_y,
+            (batch.margin, batch.visible_rows),
+        );
         clock.stop(Stage::Capture, started);
         captured
     }
@@ -1023,7 +1035,7 @@ impl GameSession {
         clock: &mut StageClock,
         palette: [u8; 32],
         (mask_x, mask_y): (i32, i32),
-        margin: i32,
+        (margin, visible_rows): (i32, zax_nes::VisibleRows),
     ) {
         let counter = self.frame_counter;
         let records = std::mem::take(&mut self.batch_records);
@@ -1034,6 +1046,7 @@ impl GameSession {
             mask_x,
             mask_y,
             margin,
+            visible_rows,
         };
         let started = clock.start();
         self.scripted(scene, |engine| {

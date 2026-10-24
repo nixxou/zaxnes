@@ -1,5 +1,13 @@
 use crate::TileRecord;
 
+/// For each band of 8 lines (row 0 = lines 0 to 7), the range of screen x `[low, high)` the
+/// tiles of that band could show in: what the game keeps drawn there. A shape that reaches the
+/// edge of its band's range may be cut there.
+pub type VisibleRows = [(i16, i16); 30];
+
+/// The rows of a standard 256-pixel frame.
+pub const STANDARD_ROWS: VisibleRows = [(0, 256); 30];
+
 /// The ordered tile records of one emulated frame, together with the frame palette and the
 /// unreliable border widths, handed to the video callback (REQ-CORE-030).
 ///
@@ -22,4 +30,7 @@ pub struct FrameBatch<'a> {
     /// Background records then reach `-margin - 7` and sprite records `-margin`, and both go
     /// up to `255 + margin`.
     pub margin: i32,
+    /// The range of x each band of the frame showed tiles in: [`STANDARD_ROWS`] for a standard
+    /// frame, from `-margin` to `256 + margin` at most for a widescreen one.
+    pub visible_rows: VisibleRows,
 }

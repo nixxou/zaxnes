@@ -54,6 +54,7 @@ impl Ppu2C02 {
     pub(super) fn reset_tile_state(&mut self) {
         self.tiles.clear();
         self.frame_margin = 0;
+        self.visible_rows = crate::STANDARD_ROWS;
         self.tiles.set_extra_columns(0);
         self.mask_x = 0;
         self.mask_y = 0;
@@ -65,6 +66,9 @@ impl Ppu2C02 {
         self.tiles.clear();
         self.frame_margin = self.wide.margin();
         self.tiles.set_extra_columns(self.frame_margin / 8);
+        #[allow(clippy::cast_possible_truncation)] // At most 128.
+        let margin = self.frame_margin as i16;
+        self.visible_rows = [(-margin, 256 + margin); 30];
     }
 
     /// Runs the captures owed by visible line `line` at its first dot: the sprite band, and
@@ -162,6 +166,16 @@ impl Ppu2C02 {
             (0, SCREEN_WIDTH_I32)
         };
         let row_width = 33 + (2 * extra);
+        if extra > 0 {
+            if let Some(row) = usize::try_from(line / 8)
+                .ok()
+                .and_then(|row| self.visible_rows.get_mut(row))
+            {
+                #[allow(clippy::cast_possible_truncation)] // -128 to 384.
+                let range = (visible_low as i16, visible_high as i16);
+                *row = range;
+            }
+        }
 
         for k in -extra..=(32 + extra) {
             let x = (8 * k) - fine_x_scroll;

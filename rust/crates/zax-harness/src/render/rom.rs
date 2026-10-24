@@ -396,6 +396,7 @@ impl Host {
             mask_x: batch.mask_x,
             mask_y: batch.mask_y,
             margin: batch.margin,
+            visible_rows: batch.visible_rows,
         };
         let counter = i32::try_from(counter)
             .map_err(|_| HarnessError::Usage("--run: too many frames".to_owned()))?;
