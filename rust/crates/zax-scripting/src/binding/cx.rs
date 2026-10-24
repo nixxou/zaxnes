@@ -224,11 +224,21 @@ fn lua_key(key: u64) -> i64 {
 /// The context of one call from Lua into the host.
 pub(crate) struct Cx<'a> {
     pub lua: &'a Lua,
+    /// The deferral of the host value a fast getter returns (`raw::Deferred`).
+    defer: Option<&'a std::cell::Cell<super::raw::Deferred>>,
 }
 
 impl<'a> Cx<'a> {
     pub const fn new(lua: &'a Lua) -> Self {
-        Self { lua }
+        Self { lua, defer: None }
+    }
+
+    /// A context whose first host value is deferred into `cell` (`raw::Deferred`).
+    pub const fn deferring(lua: &'a Lua, cell: &'a std::cell::Cell<super::raw::Deferred>) -> Self {
+        Self {
+            lua,
+            defer: Some(cell),
+        }
     }
 
     fn not_available(what: &str) -> mlua::Error {
@@ -429,12 +439,23 @@ impl<'a> Cx<'a> {
 
     /// A fresh Lua value for `payload`.
     pub fn value(&self, payload: Payload) -> mlua::Result<Value> {
-        if super::raw::enabled(self.lua) {
-            return super::raw::value(self.lua, payload);
+        if let Some(cell) = self.defer {
+            if let Some(mark) = super::raw::Deferred::take(cell, payload) {
+                return Ok(mark);
+            }
+        }
+        if let Some(metatable) = super::raw::metatable_key(self.lua) {
+            return super::raw::value(self.lua, metatable, payload);
         }
         Ok(Value::UserData(
             self.lua.create_userdata(Host::new(payload))?,
         ))
+    }
+
+    /// A Lua value for `payload` that the host keeps (an object cache): never deferred, since
+    /// the deferral mark must not outlive the getter that made it.
+    fn kept_value(&self, payload: Payload) -> mlua::Result<Value> {
+        Cx::new(self.lua).value(payload)
     }
 
     /// The Lua value of a reference object: the same object always gives the same value
@@ -454,7 +475,7 @@ impl<'a> Cx<'a> {
             return Ok(Value::UserData(existing));
         }
 
-        let created = self.value(payload)?;
+        let created = self.kept_value(payload)?;
         cache.objects.raw_set(&key, &created)?;
         Ok(created)
     }
@@ -475,7 +496,7 @@ impl<'a> Cx<'a> {
         match known {
             Some(Some(handle)) => return Ok(handle),
             Some(None) => {
-                let created = self.value(payload)?;
+                let created = self.kept_value(payload)?;
                 self.data(|data| {
                     if let Some(handles) = data.handles_of(frame) {
                         handles.insert(slot, created.clone());
@@ -494,7 +515,7 @@ impl<'a> Cx<'a> {
             return Ok(Value::UserData(existing));
         }
 
-        let created = self.value(payload)?;
+        let created = self.kept_value(payload)?;
         handles.raw_set(lua_key(slot.member), &created)?;
         Ok(created)
     }
@@ -648,7 +669,28 @@ pub(crate) fn try_rect(value: &Value) -> Option<Rect> {
 pub(crate) struct Call<'a> {
     pub cx: &'a Cx<'a>,
     values: &'a MultiValue,
+    /// The receiver of a call of the raw binding, read from its block; `values` then holds the
+    /// arguments from 2 on.
+    receiver: Option<Receiver<'a>>,
     nil: Value,
+}
+
+/// The receiver of a raw method call: its payload at hand, its Lua value made only when a method
+/// asks for it.
+pub(crate) struct Receiver<'a> {
+    payload: Payload,
+    value: std::cell::OnceCell<Value>,
+    make: &'a dyn Fn() -> Value,
+}
+
+impl<'a> Receiver<'a> {
+    pub fn new(payload: Payload, make: &'a dyn Fn() -> Value) -> Self {
+        Self {
+            payload,
+            value: std::cell::OnceCell::new(),
+            make,
+        }
+    }
 }
 
 impl<'a> Call<'a> {
@@ -656,16 +698,38 @@ impl<'a> Call<'a> {
         Self {
             cx,
             values,
+            receiver: None,
+            nil: Value::Nil,
+        }
+    }
+
+    /// A call of the raw binding: `receiver` is argument 1, `rest` the arguments from 2 on.
+    pub const fn with_receiver(
+        cx: &'a Cx<'a>,
+        receiver: Receiver<'a>,
+        rest: &'a MultiValue,
+    ) -> Self {
+        Self {
+            cx,
+            values: rest,
+            receiver: Some(receiver),
             nil: Value::Nil,
         }
     }
 
     /// The argument `index` (1-based), nil when the script passed fewer.
     pub fn value(&self, index: usize) -> &Value {
-        index
-            .checked_sub(1)
-            .and_then(|position| self.values.get(position))
-            .unwrap_or(&self.nil)
+        let Some(receiver) = &self.receiver else {
+            return index
+                .checked_sub(1)
+                .and_then(|position| self.values.get(position))
+                .unwrap_or(&self.nil);
+        };
+        match index {
+            0 => &self.nil,
+            1 => receiver.value.get_or_init(|| (receiver.make)()),
+            _ => self.values.get(index - 2).unwrap_or(&self.nil),
+        }
     }
 
     /// True when the argument is absent or nil.
@@ -680,7 +744,10 @@ impl<'a> Call<'a> {
 
     /// The payload of the host value at `index`.
     pub fn host(&self, index: usize) -> Option<Payload> {
-        host_payload(self.value(index))
+        match &self.receiver {
+            Some(receiver) if index == 1 => Some(receiver.payload),
+            _ => host_payload(self.value(index)),
+        }
     }
 
     /// The number at `index` (REQ-LUA-041).
