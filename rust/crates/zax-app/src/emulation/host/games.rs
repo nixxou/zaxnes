@@ -27,6 +27,13 @@ pub enum ConfirmedAction {
     DeleteGame(String),
     /// Delete the slot with this identifier.
     DeleteSlot(String),
+    /// Turn the built-in hack on (`hack`) or off, then load the slot.
+    LoadSlotSwitchingHack {
+        /// The slot.
+        slot_id: String,
+        /// Whether the hack is turned on.
+        hack: bool,
+    },
 }
 
 /// A question the interface puts to the user before a deletion (REQ-UI-110).
@@ -77,7 +84,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.confirmation = None;
     }
 
-    fn confirm(&mut self, request: ConfirmationRequest) -> bool {
+    pub(super) fn confirm(&mut self, request: ConfirmationRequest) -> bool {
         if self.confirm_with_interface {
             self.confirmation = Some(request);
         } else {
@@ -92,6 +99,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.delete_game(&game_id);
             }
             ConfirmedAction::DeleteSlot(slot_id) => self.delete_slot(&slot_id),
+            ConfirmedAction::LoadSlotSwitchingHack { slot_id, hack } => {
+                self.load_slot_switching_hack(&slot_id, hack);
+            }
         }
     }
 

@@ -25,6 +25,7 @@ pub const MENU_CAMERA_ORBITAL: &str = "menu.camera.orbital";
 pub const MENU_CAMERA_FIRST_PERSON: &str = "menu.camera.first_person";
 pub const SLOT_EMPTY: &str = "slot.empty";
 pub const SLOT_OTHER_PATCH: &str = "slot.other_patch";
+pub const SLOT_OTHER_HACK_VERSION: &str = "slot.other_hack_version";
 pub const SLOT_QUICK: &str = "slot.quick";
 pub const SLOT_PREFIX: &str = "slot.prefix";
 
@@ -57,6 +58,9 @@ pub const NOTIFY_QUICK_SAVE: &str = "notify.quick_save";
 pub const NOTIFY_QUICK_LOAD: &str = "notify.quick_load";
 pub const NOTIFY_CORRUPTED_ZIP: &str = "notify.corrupted_zip";
 pub const NOTIFY_STATE_OTHER_PATCH: &str = "notify.state_other_patch";
+pub const NOTIFY_STATE_OTHER_HACK_VERSION: &str = "notify.state_other_hack_version";
+pub const CONFIRM_TURN_HACK_ON: &str = "confirm.turn_hack_on";
+pub const CONFIRM_TURN_HACK_OFF: &str = "confirm.turn_hack_off";
 pub const NOTIFY_UNCOMPRESSION_FAILED: &str = "notify.uncompression_failed";
 pub const NOTIFY_INVALID_ROM: &str = "notify.invalid_rom";
 pub const NOTIFY_GAME_MISSING: &str = "notify.game_missing";
@@ -237,6 +241,7 @@ pub const PUBLISHED: &[&str] = &[
     MENU_CAMERA_FIRST_PERSON,
     SLOT_EMPTY,
     SLOT_OTHER_PATCH,
+    SLOT_OTHER_HACK_VERSION,
     SLOT_QUICK,
     SLOT_PREFIX,
     WINDOW_OPTIONS,
@@ -263,6 +268,9 @@ pub const PUBLISHED: &[&str] = &[
     NOTIFY_QUICK_LOAD,
     NOTIFY_CORRUPTED_ZIP,
     NOTIFY_STATE_OTHER_PATCH,
+    NOTIFY_STATE_OTHER_HACK_VERSION,
+    CONFIRM_TURN_HACK_ON,
+    CONFIRM_TURN_HACK_OFF,
     NOTIFY_UNCOMPRESSION_FAILED,
     NOTIFY_INVALID_ROM,
     NOTIFY_GAME_MISSING,

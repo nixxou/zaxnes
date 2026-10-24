@@ -48,7 +48,7 @@ pub use games::{
     delete_slot_question, ConfirmationRequest, ConfirmedAction, DELETE_GAME_QUESTION, NO_LABEL,
     YES_LABEL,
 };
-pub use jobs::LoadKind;
+pub use jobs::{LoadKind, SlotPatchStatus};
 
 /// Width of the save state and cover thumbnails.
 pub const THUMBNAIL_WIDTH: usize = 256;
@@ -205,7 +205,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The save slots.
     pub slots: SaveSlotIndex,
     /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
-    slot_patch_cache: std::cell::RefCell<std::collections::HashMap<(String, i64, bool), bool>>,
+    slot_patch_cache:
+        std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
     /// The Zapper.
     pub zapper: ZapperState,
     /// How far the frame clock catches up when the command line or the environment says so;

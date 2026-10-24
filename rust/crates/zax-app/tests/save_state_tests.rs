@@ -346,3 +346,46 @@ fn req_pers_050_the_model_holds_thirty_seven_slots() {
     assert!(!save_slots::is_valid_slot_id("0"));
     assert!(!save_slots::is_valid_slot_id("37"));
 }
+
+#[test]
+fn the_header_carries_the_hack_the_version_and_a_thumbnail() {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    harness.run_frames(30);
+    harness.run_with(Command::SaveSlot, CommandArgs::of_number(3));
+    let file = std::fs::read(harness.paths.slot_state_file("3")).unwrap();
+    let content = save_state_file::try_read(&file).expect("a readable state");
+    // The test ROM has no built-in patch.
+    assert_eq!(Some(false), content.header.is_hack);
+    assert_eq!(None, content.header.hack_version);
+    assert_eq!(
+        Some(env!("CARGO_PKG_VERSION")),
+        content.header.app_version.as_deref()
+    );
+    assert!(content.header.saved_at_local.is_some());
+    assert_eq!(&[0xFF, 0xD8], &content.thumbnail[..2], "a JPEG");
+}
+
+#[test]
+fn a_file_without_a_thumbnail_still_reads() {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    harness.run_frames(30);
+    let mut content = harness.host.capture_save_state("1").unwrap();
+    content.thumbnail.clear();
+    let read = save_state_file::try_read(&save_state_file::write(&content)).unwrap();
+    assert_eq!(content, read);
+}
+
+#[test]
+fn a_wide_thumbnail_keeps_the_centre_in_4_3() {
+    // 432 x 240: the 320 columns of the centre are kept.
+    let picture = vec![0x21u8; 432 * 240];
+    let jpeg = save_state_file::thumbnail_jpeg(&picture).unwrap();
+    // The SOF0 frame header holds height then width.
+    let at = jpeg.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
+    let height = u16::from_be_bytes([jpeg[at + 5], jpeg[at + 6]]);
+    let width = u16::from_be_bytes([jpeg[at + 7], jpeg[at + 8]]);
+    assert_eq!((320, 240), (width, height));
+    assert!(save_state_file::thumbnail_jpeg(&[0; 100]).is_none());
+}

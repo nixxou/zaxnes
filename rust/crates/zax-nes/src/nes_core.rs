@@ -107,6 +107,26 @@ impl NesCore {
         Some(wide == (patchable && self.builtin_patches_enabled))
     }
 
+    /// The built-in patch made for the ROM image the state block at `offset` in `data` carries,
+    /// whether or not it ran: `None` for a block without an image or with an image no patch is
+    /// made for.
+    #[must_use]
+    pub fn state_builtin_patch(
+        data: &[u8],
+        offset: usize,
+    ) -> Option<&'static crate::builtin_patches::BuiltinPatch> {
+        let mut reader = StateReader::new(data, offset).ok()?;
+        reader.read_u32().ok()?;
+        reader.read_i32().ok()?;
+        reader.read_string().ok()?;
+        if !reader.read_bool().ok()? {
+            return None;
+        }
+        reader.read_string().ok()?;
+        let rom = reader.read_blob().ok()?;
+        crate::builtin_patches::patch_for(&rom)
+    }
+
     /// Whether the state block at `offset` in `data` was made by a ROM running the widescreen
     /// extension (format 5 or 6: `Some(true)`) or by one without it (4: `Some(false)`); `None`
     /// when `data` holds no block of this core there. A ROM patched by a built-in patch needs
@@ -751,6 +771,7 @@ impl NesCore {
         let has_rom_image = reader.read_bool()?;
         let stored_name = reader.read_string()?;
         let rom_bytes = reader.read_blob()?;
+        let patchable = has_rom_image && crate::builtin_patches::matches(&rom_bytes);
         let region_byte = reader.read_u8()?;
         let region = NesRegion::from_u8(region_byte).ok_or_else(|| {
             InvalidState::corrupt(format!("Corrupt savestate: unknown region {region_byte}."))
@@ -801,8 +822,13 @@ impl NesCore {
         self.bus.apu_mut().load_state(&mut reader)?;
         self.bus.input_mut().load_state(&mut reader)?;
         cartridge.load_state(&mut reader)?;
+        // A state of the hack restored without it: the original ROM never unlocks the
+        // extension, which must not stay as the hack left it (four nametables, margins).
+        let unpatched_hack = patch.1.is_none() && patchable;
         let wide = self.bus.ppu_mut().wide_mut();
-        if version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5 {
+        if (version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5)
+            && !unpatched_hack
+        {
             wide.load_state(&mut reader, version == Self::WIDE_STATE_VERSION)?;
         } else {
             wide.reset();

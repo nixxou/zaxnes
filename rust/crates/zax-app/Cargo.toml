@@ -52,6 +52,7 @@ wgpu = { version = "29.0.4", optional = true, default-features = false, features
 sys-locale = "0.3.2"
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"], optional = true }
 imgui = { version = "0.12", features = ["tables-api"] }
+jpeg-encoder = "0.7"
 
 [dev-dependencies]
 rstest = "0.26"
