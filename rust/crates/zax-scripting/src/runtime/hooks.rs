@@ -2,6 +2,7 @@
 //! and what an error in a hook does (REQ-LUA-060 to REQ-LUA-064).
 
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use mlua::{Function, Lua, MultiValue, Table, Value};
@@ -12,6 +13,36 @@ use crate::binding::cx::Cx;
 use crate::binding::payload::{InstanceTarget, Payload, ShapeTarget};
 use crate::script::ScriptHook;
 use crate::values::number_format;
+
+/// Whether the hook calls are timed per script (the frame profiler of the application). Read
+/// before each call, so that the timing costs one load while it is off.
+pub(crate) static TIMED: AtomicBool = AtomicBool::new(false);
+
+/// The time and the number of calls of each hook of each script since the last take, kept in
+/// the Lua state's app data while the timing is on.
+#[derive(Debug, Default)]
+pub(crate) struct HookTimes(pub Vec<[(Duration, u32); ScriptHook::COUNT]>);
+
+/// Runs `call`, a call of `hook` of the script at `index`, timing it when [`TIMED`].
+fn timed<R>(cx: &Cx, index: usize, hook: ScriptHook, call: impl FnOnce() -> R) -> R {
+    if !TIMED.load(Ordering::Relaxed) {
+        return call();
+    }
+    let started = Instant::now();
+    let result = call();
+    let elapsed = started.elapsed();
+    if let Some(mut times) = cx.lua.app_data_mut::<HookTimes>() {
+        if times.0.len() <= index {
+            times
+                .0
+                .resize(index + 1, [(Duration::ZERO, 0); ScriptHook::COUNT]);
+        }
+        let slot = &mut times.0[index][hook as usize];
+        slot.0 += elapsed;
+        slot.1 += 1;
+    }
+    result
+}
 
 /// The execution budget of the hook being run (REQ-LUA-064).
 ///
@@ -185,7 +216,7 @@ fn run_hook(
 /// Returns the text of the error the hook raised.
 pub(crate) fn call_hook(cx: &Cx, index: usize, hook: ScriptHook) -> mlua::Result<Option<String>> {
     match prepare_hook(cx, index, hook)? {
-        Some(call) => run_hook(cx, index, hook, &call),
+        Some(call) => timed(cx, index, hook, || run_hook(cx, index, hook, &call)),
         None => Ok(None),
     }
 }
@@ -309,17 +340,19 @@ fn call_update_s(
     key: crate::binding::payload::FrameKey,
     id: FrameInstanceId,
 ) -> mlua::Result<Option<String>> {
-    publish(
-        cx.lua,
-        Published::Shape,
-        cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?,
-    )?;
-    publish(
-        cx.lua,
-        Published::Shape2D,
-        cx.object(Payload::Shape(ShapeTarget { key, id: id.shape }))?,
-    )?;
-    run_hook(cx, index, ScriptHook::UpdateS, call)
+    timed(cx, index, ScriptHook::UpdateS, || {
+        publish(
+            cx.lua,
+            Published::Shape,
+            cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?,
+        )?;
+        publish(
+            cx.lua,
+            Published::Shape2D,
+            cx.object(Payload::Shape(ShapeTarget { key, id: id.shape }))?,
+        )?;
+        run_hook(cx, index, ScriptHook::UpdateS, call)
+    })
 }
 
 /// Calls `InputProcess` of the script that owns the script pad and returns the action mask to
@@ -346,8 +379,10 @@ pub(crate) fn input_process(cx: &Cx) -> mlua::Result<i32> {
         return Ok(0);
     };
 
-    let outcome = with_budget(cx.lua, limit, || {
-        protected_call(cx.lua, &function, f64::from(pad_index))
+    let outcome = timed(cx, name, ScriptHook::InputProcess, || {
+        with_budget(cx.lua, limit, || {
+            protected_call(cx.lua, &function, f64::from(pad_index))
+        })
     })?;
     let mask = match outcome {
         Ok(results) => mask_of(&results),

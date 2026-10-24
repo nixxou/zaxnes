@@ -3,11 +3,17 @@
 //! mean and the maximum of each stage go to the log, with the frame rate achieved. The same
 //! figures, shortened, are shown next to the FPS counter.
 //!
+//! The stages overlap when the frame is pipelined (the emulation and the conversion run on
+//! threads of their own), so a second line gives how long each thread was busy per displayed
+//! frame, and how many frames were pipelined.
+//!
 //! The per-frame path allocates nothing: the stages are summed in fixed arrays, and only the
 //! report of each two-second window builds its strings.
 
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};
+
+use zax_scripting::HookTime;
 
 /// The environment variable that turns the profiler on (`1`).
 pub const ENVIRONMENT_VARIABLE: &str = "ZAXNES_PROFILE";
@@ -111,33 +117,92 @@ impl Stage {
     }
 }
 
-/// Time spent in each stage.
+/// A thread of the frame loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Thread {
+    /// The main thread, from the start of the frame to the swap (its waits for the conversion
+    /// included).
+    Main,
+    /// The conversion thread of a pipelined frame: conversion, Lua frame hooks, draw list.
+    Conversion,
+    /// The emulation thread ("emulation ahead"): the core's frames run there.
+    Emulation,
+}
+
+impl Thread {
+    /// Number of threads.
+    pub const COUNT: usize = 3;
+
+    /// Every thread.
+    pub const ALL: [Self; Self::COUNT] = [Self::Main, Self::Conversion, Self::Emulation];
+
+    /// The short name the reports use.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Main => "main",
+            Self::Conversion => "conversion",
+            Self::Emulation => "emulation",
+        }
+    }
+
+    const fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// Time spent in each stage, how long each thread was busy, and how many frames were pipelined.
+/// The thread times are apart from the stages: they overlap them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct StageTimes([Duration; Stage::COUNT]);
+pub struct StageTimes {
+    stages: [Duration; Stage::COUNT],
+    threads: [Duration; Thread::COUNT],
+    pipelined: u32,
+}
 
 impl StageTimes {
     /// Adds `duration` to `stage`.
     pub fn add(&mut self, stage: Stage, duration: Duration) {
-        self.0[stage.index()] += duration;
+        self.stages[stage.index()] += duration;
     }
 
     /// The time of `stage`.
     #[must_use]
     pub const fn get(&self, stage: Stage) -> Duration {
-        self.0[stage.index()]
+        self.stages[stage.index()]
     }
 
-    /// Adds every stage of `other`.
+    /// Adds `duration` to the busy time of `thread`.
+    pub fn add_thread(&mut self, thread: Thread, duration: Duration) {
+        self.threads[thread.index()] += duration;
+    }
+
+    /// The busy time of `thread`.
+    #[must_use]
+    pub const fn thread(&self, thread: Thread) -> Duration {
+        self.threads[thread.index()]
+    }
+
+    /// Counts one pipelined frame.
+    pub const fn count_pipelined(&mut self) {
+        self.pipelined += 1;
+    }
+
+    /// Adds every stage, thread time and pipelined frame of `other`.
     pub fn merge(&mut self, other: &Self) {
-        for (mine, theirs) in self.0.iter_mut().zip(other.0) {
+        for (mine, theirs) in self.stages.iter_mut().zip(other.stages) {
             *mine += theirs;
         }
+        for (mine, theirs) in self.threads.iter_mut().zip(other.threads) {
+            *mine += theirs;
+        }
+        self.pipelined += other.pipelined;
     }
 
     /// The sum of every stage.
     #[must_use]
     pub fn total(&self) -> Duration {
-        self.0.iter().sum()
+        self.stages.iter().sum()
     }
 }
 
@@ -189,6 +254,20 @@ impl StageClock {
         }
     }
 
+    /// Adds `duration` to the busy time of `thread` (when it is on).
+    pub fn add_thread(&mut self, thread: Thread, duration: Duration) {
+        if self.enabled {
+            self.times.add_thread(thread, duration);
+        }
+    }
+
+    /// Counts the frame as pipelined (when it is on).
+    pub const fn count_pipelined(&mut self) {
+        if self.enabled {
+            self.times.count_pipelined();
+        }
+    }
+
     /// Adds the stage times another clock took (when it is on).
     pub fn merge(&mut self, times: &StageTimes) {
         if self.enabled {
@@ -231,11 +310,15 @@ const SHOWN_MINIMUM_MS: f64 = 0.05;
 #[derive(Debug)]
 pub struct FrameProfiler {
     stages: [Tally; Stage::COUNT],
+    threads: [Tally; Thread::COUNT],
+    pipelined: u32,
     frame: Tally,
     frames: u32,
     emulated: u32,
     window_start: Instant,
     summary: String,
+    thread_report: String,
+    reported_frames: u32,
 }
 
 impl FrameProfiler {
@@ -244,12 +327,29 @@ impl FrameProfiler {
     pub fn new(now: Instant) -> Self {
         Self {
             stages: [Tally::default(); Stage::COUNT],
+            threads: [Tally::default(); Thread::COUNT],
+            pipelined: 0,
             frame: Tally::default(),
             frames: 0,
             emulated: 0,
             window_start: now,
             summary: String::new(),
+            thread_report: String::new(),
+            reported_frames: 0,
         }
+    }
+
+    /// The thread line of the last report: the busy time of each thread per displayed frame,
+    /// and the share of pipelined frames (empty before the first report).
+    #[must_use]
+    pub fn thread_report(&self) -> &str {
+        &self.thread_report
+    }
+
+    /// The displayed frames the last report covered.
+    #[must_use]
+    pub const fn reported_frames(&self) -> u32 {
+        self.reported_frames
     }
 
     /// The short line shown next to the FPS counter (empty before the first report).
@@ -282,6 +382,10 @@ impl FrameProfiler {
             };
             self.stages[stage.index()].add(duration);
         }
+        for thread in Thread::ALL {
+            self.threads[thread.index()].add(times.thread(thread));
+        }
+        self.pipelined += times.pipelined;
         self.frame.add(frame);
         self.frames += 1;
         let elapsed = now.duration_since(self.window_start);
@@ -290,6 +394,8 @@ impl FrameProfiler {
         }
         let report = self.report(elapsed);
         self.stages = [Tally::default(); Stage::COUNT];
+        self.threads = [Tally::default(); Thread::COUNT];
+        self.pipelined = 0;
         self.frame = Tally::default();
         self.frames = 0;
         self.emulated = 0;
@@ -320,8 +426,63 @@ impl FrameProfiler {
             }
         }
         self.summary.push_str(" ms");
+
+        self.reported_frames = frames;
+        self.thread_report.clear();
+        let _ = write!(
+            self.thread_report,
+            "profile threads: pipelined {} of {frames} frames | busy per displayed frame \
+             (mean/max ms)",
+            self.pipelined
+        );
+        for thread in Thread::ALL {
+            let tally = self.threads[thread.index()];
+            let _ = write!(
+                self.thread_report,
+                " | {} {:.2}/{:.2}",
+                thread.label(),
+                tally.mean_ms(frames),
+                tally.max_ms()
+            );
+        }
+        let wait = self.stages[Stage::Wait.index()];
+        let _ = write!(
+            self.thread_report,
+            " (main waits {:.2}/{:.2} of it)",
+            wait.mean_ms(frames),
+            wait.max_ms()
+        );
         line
     }
+}
+
+/// Hooks a Lua line lists at most, the longest first.
+const LUA_REPORT_HOOKS: usize = 8;
+
+/// The Lua line of a report: the time of the longest hooks per displayed frame over the
+/// `frames` of the window, with their number of calls, and the total of every hook.
+#[must_use]
+pub fn lua_report(hooks: &[HookTime], frames: u32) -> String {
+    let per_frame = |time: Duration| time.as_secs_f64() * 1000.0 / f64::from(frames.max(1));
+    let total: Duration = hooks.iter().map(|hook| hook.time).sum();
+    let mut line = format!(
+        "profile lua: {:.2} ms per displayed frame in the hooks (script.hook ms calls)",
+        per_frame(total)
+    );
+    for hook in hooks.iter().take(LUA_REPORT_HOOKS) {
+        let _ = write!(
+            line,
+            " | {}.{} {:.2} {}",
+            hook.script,
+            hook.hook.name(),
+            per_frame(hook.time),
+            hook.calls
+        );
+    }
+    if hooks.len() > LUA_REPORT_HOOKS {
+        let _ = write!(line, " | {} more", hooks.len() - LUA_REPORT_HOOKS);
+    }
+    line
 }
 
 /// The `target-cpu` the binary was built for, as the build script found it in the flags.
@@ -442,6 +603,54 @@ mod tests {
         assert_eq!(
             "50 fps, emu 60/s | core 10.1 swap 4.0 other 5.9 ms",
             profiler.summary()
+        );
+    }
+
+    #[test]
+    fn the_thread_line_gives_the_busy_times_and_the_pipelined_frames() {
+        let start = Instant::now();
+        let mut profiler = FrameProfiler::new(start);
+        let mut now = start;
+        for frame in 0..100 {
+            now += ms(20);
+            let mut times = StageTimes::default();
+            times.add_thread(Thread::Main, ms(12));
+            times.add_thread(Thread::Conversion, ms(9));
+            times.add(Stage::Wait, ms(3));
+            if frame % 2 == 0 {
+                times.count_pipelined();
+                times.add_thread(Thread::Emulation, ms(10));
+            }
+            if profiler.end_frame(&times, ms(20), 1, now).is_some() {
+                break;
+            }
+        }
+        let line = profiler.thread_report();
+        assert!(line.contains("pipelined 50 of 100 frames"), "{line}");
+        assert!(line.contains("main 12.00/12.00"), "{line}");
+        assert!(line.contains("conversion 9.00/9.00"), "{line}");
+        assert!(line.contains("emulation 5.00/10.00"), "{line}");
+        assert!(line.contains("main waits 3.00/3.00"), "{line}");
+        assert_eq!(100, profiler.reported_frames());
+    }
+
+    #[test]
+    fn the_lua_line_lists_the_longest_hooks_per_displayed_frame() {
+        let hook = |script: &str, hook, time, calls| HookTime {
+            script: script.to_owned(),
+            hook,
+            time: ms(time),
+            calls,
+        };
+        let hooks = [
+            hook("Enemies", zax_scripting::ScriptHook::UpdateS, 600, 4000),
+            hook("Camera", zax_scripting::ScriptHook::LateUpdate, 100, 100),
+        ];
+        let line = lua_report(&hooks, 100);
+        assert_eq!(
+            "profile lua: 7.00 ms per displayed frame in the hooks (script.hook ms calls) \
+             | Enemies.UpdateS 6.00 4000 | Camera.LateUpdate 1.00 100",
+            line
         );
     }
 

@@ -16,7 +16,7 @@ use time::OffsetDateTime;
 use zax_nes::NesRegion;
 use zax_nes::RegionTiming;
 use zax_render::geometry as render_geometry;
-use zax_scripting::{NullScriptLog, ScriptLog};
+use zax_scripting::{HookTime, NullScriptLog, ScriptLog};
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 
@@ -469,6 +469,24 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Times the stages of the emulated frames from now on (the frame profiler) or stops.
     pub const fn set_profiling(&mut self, enabled: bool) {
         self.stage_clock.set_enabled(enabled);
+    }
+
+    /// The time of each Lua hook of each script of the game being played since the last call,
+    /// the longest first. Turns their timing on or off (`timed`) first, so that a runtime made
+    /// since the last call (a reloaded profile) follows.
+    pub fn take_lua_hook_times(&mut self, timed: bool) -> Vec<HookTime> {
+        let Some(session) = self.session.as_mut() else {
+            return Vec::new();
+        };
+        session
+            .with_runtime(&mut self.scene, |runtime, _| {
+                let taken = runtime.take_hook_times();
+                if runtime.keeps_hook_times() != timed {
+                    runtime.set_hook_times(timed);
+                }
+                taken
+            })
+            .unwrap_or_default()
     }
 
     /// The stage times of the emulated frames since the last call: core, capture, conversion,

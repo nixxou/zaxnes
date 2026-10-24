@@ -35,7 +35,7 @@ use zax_settings::catalogue::{Port, SettingId};
 use zax_settings::model::SettingsModel;
 
 use crate::core_worker::CoreWorker;
-use crate::frame_profiler::{Stage, StageClock};
+use crate::frame_profiler::{Stage, StageClock, Thread};
 use crate::input::input_action::InputAction;
 use crate::input::routing;
 use crate::scene_script_bridge::{self, SceneBackdropBridge, SceneCameraBridge};
@@ -589,6 +589,7 @@ impl GameSession {
         };
         self.pipeline.spare = Some(std::mem::replace(&mut self.core, finished.core));
         clock.add(Stage::Core, finished.elapsed);
+        clock.add_thread(Thread::Emulation, finished.elapsed);
         let captured = self.capture_batch(clock);
         self.pipeline.pending = Some(captured);
         self.pipeline
@@ -932,6 +933,7 @@ impl GameSession {
             };
             self.pipeline.spare = Some(std::mem::replace(&mut self.core, finished.core));
             clock.add(Stage::Core, finished.elapsed);
+            clock.add_thread(Thread::Emulation, finished.elapsed);
         } else if let Some(word) = self.pipeline.prepared.take() {
             // A frame captured ahead of this one is converted first: its records are pending.
             self.finish_captured(model, scene, clock);

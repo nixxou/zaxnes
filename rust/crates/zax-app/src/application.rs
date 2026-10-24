@@ -36,7 +36,7 @@ use crate::emulation::frame_pacer::CatchUp;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::host::{DeferredParts, EmulationHost, EmulationHostOptions, HostEvent};
 use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
-use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock};
+use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock, Thread};
 use crate::frame_rate_counter::FrameRateCounter;
 use crate::game_session::GameSession;
 use crate::graphics::{Backend, Graphics, SceneView};
@@ -425,6 +425,10 @@ impl Running {
         self.pipeline
             .governor
             .record(pipelined, busy_begin.elapsed(), overlap, budget);
+        self.clock.add_thread(Thread::Main, busy_begin.elapsed());
+        if pipelined {
+            self.clock.count_pipelined();
+        }
         self.follow_the_gpu(budget);
         if self.host.quit_requested()
             || (self.options.smoke_test
@@ -442,15 +446,29 @@ impl Running {
         let mark = self.clock.start();
         self.window.pace();
         self.clock.stop(Stage::Pacer, mark);
-        if let (Some(profiler), Some(begin)) = (self.profiler.as_mut(), frame_begin) {
-            let times = self.clock.take();
-            if let Some(report) =
-                profiler.end_frame(&times, begin.elapsed(), emulated, Instant::now())
-            {
-                log(&report);
-            }
+        if let Some(begin) = frame_begin {
+            self.end_profiled_frame(begin, emulated);
         }
         Ok(true)
+    }
+
+    /// Hands the frame that began at `begin` to the profiler and logs its report when a window
+    /// is over: the stages, the threads, then the Lua hooks.
+    fn end_profiled_frame(&mut self, begin: Instant, emulated: u32) {
+        let Some(profiler) = self.profiler.as_mut() else {
+            return;
+        };
+        let times = self.clock.take();
+        if let Some(report) = profiler.end_frame(&times, begin.elapsed(), emulated, Instant::now())
+        {
+            log(&report);
+            log(profiler.thread_report());
+            let hooks = self.host.take_lua_hook_times(true);
+            log(&frame_profiler::lua_report(
+                &hooks,
+                profiler.reported_frames(),
+            ));
+        }
     }
 
     /// Feeds the window's events to the interface and the input layer. Returns whether the
@@ -601,6 +619,7 @@ impl Running {
         self.profiler = wanted.then(|| FrameProfiler::new(Instant::now()));
         self.clock = StageClock::new(wanted);
         self.host.set_profiling(wanted);
+        self.host.take_lua_hook_times(wanted);
         log(if wanted {
             "frame profiler on"
         } else {
@@ -746,6 +765,7 @@ impl Running {
         drawn?;
         self.clock.merge(&converting.take());
         self.clock.add(Stage::Wait, wait);
+        self.clock.add_thread(Thread::Conversion, converted);
         if skip {
             self.state.skipped_frames += 1;
         } else {

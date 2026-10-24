@@ -40,7 +40,7 @@ use zax_profiles::script_order;
 use self::globals::{install_api_globals, install_base, protected_call, text_of};
 use self::hooks::{
     call_all, call_hook, input_process, publish, update_shapes, with_budget, Audience, Budget,
-    Published, PublishedGlobals,
+    HookTimes, Published, PublishedGlobals, TIMED,
 };
 use crate::binding::cx::{with_host_context, Cx, Epochs, HostLink, Lent};
 use crate::binding::dispatch;
@@ -209,6 +209,19 @@ impl RuntimeData {
             (key.epoch == self.epoch).then_some(&mut self.frame_handles)
         }
     }
+}
+
+/// The time one hook of one script took since the last take (the frame profiler).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookTime {
+    /// The script's name.
+    pub script: String,
+    /// The hook.
+    pub hook: ScriptHook,
+    /// The time of its calls.
+    pub time: Duration,
+    /// How many times it was called.
+    pub calls: u32,
 }
 
 /// The Lua runtime of one profile.
@@ -1053,6 +1066,52 @@ impl ScriptHost for ProfileScriptRuntime {
 }
 
 impl ProfileScriptRuntime {
+    /// Turns the timing of every hook call, per script, on or off (the frame profiler). The
+    /// switch is shared by every runtime of the process; the times are kept per runtime.
+    pub fn set_hook_times(&mut self, enabled: bool) {
+        TIMED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+        if enabled {
+            if self.lua.app_data_ref::<HookTimes>().is_none() {
+                self.lua.set_app_data(HookTimes::default());
+            }
+        } else {
+            self.lua.remove_app_data::<HookTimes>();
+        }
+    }
+
+    /// Whether this runtime keeps hook times.
+    #[must_use]
+    pub fn keeps_hook_times(&self) -> bool {
+        self.lua.app_data_ref::<HookTimes>().is_some()
+    }
+
+    /// The hook times since the last take, the longest first, and a fresh start.
+    pub fn take_hook_times(&mut self) -> Vec<HookTime> {
+        let Some(mut times) = self.lua.app_data_mut::<HookTimes>() else {
+            return Vec::new();
+        };
+        let mut taken = Vec::new();
+        for (index, hooks) in times.0.iter_mut().enumerate() {
+            for (hook, slot) in ScriptHook::ALL.into_iter().zip(hooks.iter_mut()) {
+                let (time, calls) = std::mem::take(slot);
+                if calls > 0 {
+                    taken.push(HookTime {
+                        script: self
+                            .data
+                            .scripts
+                            .get(index)
+                            .map_or_else(|| format!("#{index}"), |script| script.name().to_owned()),
+                        hook,
+                        time,
+                        calls,
+                    });
+                }
+            }
+        }
+        taken.sort_by_key(|hook| std::cmp::Reverse(hook.time));
+        taken
+    }
+
     /// The result of a hook sequence for the pipeline: the first error a script raised.
     fn finish(
         &mut self,
