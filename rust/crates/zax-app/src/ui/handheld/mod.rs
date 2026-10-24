@@ -82,6 +82,8 @@ pub struct HandheldUi {
     heading_font: Option<imgui::FontId>,
     effects: Vec<UiEffect>,
     camera_memory: CameraMemory,
+    /// How long Y has been held in game, while it is, and whether the hold already acted.
+    flat_view: Option<(f32, bool)>,
 }
 
 /// L2 in game (Rust-only, owner request): held, it keeps the camera's angles and distance; a
@@ -96,7 +98,7 @@ struct CameraMemory {
     saved: Option<(Vector3, f32)>,
 }
 
-/// How long L2 is held to keep the camera.
+/// How long L2 is held to keep the camera, and Y to see the game in 2D from the front.
 const CAMERA_KEEP_SECONDS: f32 = 0.6;
 
 impl HandheldUi {
@@ -119,6 +121,7 @@ impl HandheldUi {
             heading_font: None,
             effects: Vec::new(),
             camera_memory: CameraMemory::default(),
+            flat_view: None,
         };
         ui.refresh_roms(host);
         ui
@@ -210,8 +213,33 @@ impl HandheldUi {
         self.update_combo(pad, seconds, frame.host);
         self.update_capture(seconds, frame);
         self.update_camera_memory(pad, seconds, frame.host);
+        self.update_flat_view(pad, seconds, frame.host);
         for button in pad.presses() {
             self.press(button, frame);
+        }
+    }
+
+    /// Y in game (owner request): a short press switches between 2D and 3D; a hold shows the game
+    /// in 2D seen from the front, as on a television (default view).
+    fn update_flat_view(&mut self, pad: &PadState, seconds: f32, host: &mut AppHost) {
+        if self.screen != Screen::InGame {
+            self.flat_view = None;
+            return;
+        }
+        if pad.is_held(PadButton::Y) {
+            let (held, acted) = self.flat_view.get_or_insert((0.0, false));
+            *held += seconds;
+            if *held >= CAMERA_KEEP_SECONDS && !*acted {
+                *acted = true;
+                if !host.showing_two_dimensional() {
+                    host.enqueue(Command::ToggleTwoDimensional, CommandArgs::default());
+                }
+                host.enqueue(Command::ResetView, CommandArgs::default());
+            }
+        } else if let Some((_, acted)) = self.flat_view.take() {
+            if !acted {
+                host.enqueue(Command::ToggleTwoDimensional, CommandArgs::default());
+            }
         }
     }
 
@@ -338,16 +366,15 @@ impl HandheldUi {
                     self.carry_out_overlay(command, frame.host);
                 }
             }
-            // X: the default view; Y: 2D or 3D (owner request).
-            Screen::InGame => match button {
-                PadButton::X => frame
-                    .host
-                    .enqueue(Command::ResetView, CommandArgs::default()),
-                PadButton::Y => frame
-                    .host
-                    .enqueue(Command::ToggleTwoDimensional, CommandArgs::default()),
-                _ => {}
-            },
+            // X: the default view (owner request); Y and L2 are held buttons, followed by
+            // `update_flat_view` and `update_camera_memory`.
+            Screen::InGame => {
+                if button == PadButton::X {
+                    frame
+                        .host
+                        .enqueue(Command::ResetView, CommandArgs::default());
+                }
+            }
         }
     }
 

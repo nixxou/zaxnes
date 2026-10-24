@@ -21,6 +21,7 @@ No game, ROM or profile is included.
 | D-pad, A, B, Select, Start | the NES pad (A and B are the buttons labelled A and B) |
 | X | default camera view |
 | Y | 2D / 3D |
+| Y held | 2D seen from the front (default view) |
 | L1 / R1 | zoom out / zoom in |
 | Right stick | turn the camera |
 | R2 | fast forward |
@@ -28,6 +29,10 @@ No game, ROM or profile is included.
 | L2 short press | put the kept camera angle and zoom back |
 | Menu (or Select+Start tapped) | in-game menu |
 | Select+Start held one second | quit |
+
+In the game list, X chooses the profile of the selected ROM: the three closest titles first,
+then "2D Mode" and the 3D default, then every profile by title (left/right move by a page). The
+choice is kept for that ROM.
 
 A pad saved with the old default layout moves to this one; a layout changed in Options >
 Controls is kept.
