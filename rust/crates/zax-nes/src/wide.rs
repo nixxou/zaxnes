@@ -16,6 +16,7 @@
 //! | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels |
 //! | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels |
 //! | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines, before the vblank |
+//! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring |
 //! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
 //! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it) |
 //!
@@ -76,6 +77,8 @@ pub struct WideExtension {
     scratch: Vec<u8>,
     /// Overclock register: extra scanlines of CPU time per frame.
     overclock: u8,
+    /// Layout register: bit 0 asks for four separate nametables.
+    layout: u8,
     /// CPU cycles of the current overclock still to run with the machine held.
     stall: u32,
 }
@@ -101,6 +104,7 @@ impl WideExtension {
             active_high: [0; 64],
             scratch: vec![0; RAM_SIZE],
             overclock: 0,
+            layout: 0,
             stall: 0,
         }
     }
@@ -188,6 +192,7 @@ impl WideExtension {
             0x5004 => Some(self.left_extent),
             0x5005 => Some(self.right_extent),
             0x5006 => Some(self.overclock),
+            0x5007 => Some(self.layout),
             FIRST_RAM..=LAST_REGISTER => {
                 self.scratch.get(usize::from(address - FIRST_RAM)).copied()
             }
@@ -212,6 +217,7 @@ impl WideExtension {
             0x5004 => self.left_extent = value,
             0x5005 => self.right_extent = value,
             0x5006 => self.overclock = value,
+            0x5007 => self.layout = value,
             0x5100..=0x51FF => {
                 self.pending_high[usize::from(address & 0xFF) / 4] = value;
             }
@@ -248,6 +254,13 @@ impl WideExtension {
         self.pending_high = [0; 64];
     }
 
+    /// Whether the ROM asked for four separate nametables (2 x 2): the 4 KiB of console VRAM
+    /// are all used, whatever the mirroring the cartridge selects.
+    #[must_use]
+    pub const fn four_screen(&self) -> bool {
+        self.unlocked && (self.layout & 1) != 0
+    }
+
     /// The PPU just finished the picture (start of line 240): the overclock, if any, starts.
     pub fn arm_overclock(&mut self) {
         if self.unlocked && self.overclock > 0 {
@@ -278,6 +291,7 @@ impl WideExtension {
         writer.write_blob(&self.active_high);
         writer.write_blob(&self.scratch);
         writer.write_u8(self.overclock);
+        writer.write_u8(self.layout);
         writer.write_u32(self.stall);
     }
 
@@ -295,6 +309,7 @@ impl WideExtension {
         reader.read_blob_into(&mut self.active_high)?;
         reader.read_blob_into(&mut self.scratch)?;
         self.overclock = reader.read_u8()?;
+        self.layout = reader.read_u8()?;
         self.stall = reader.read_u32()?;
         Ok(())
     }
