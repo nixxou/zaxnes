@@ -354,8 +354,10 @@ struct InstanceLook {
     receive_shadow: bool,
     texture: Option<Arc<ObjectTexture>>,
     format: TextureFormat,
-    rotation: Mat4,
-    scale: Vec3,
+    /// `Pos . R . S` of REQ-E3D-406, the part of the transform every tile of the instance
+    /// shares; each tile only multiplies it by its own translation, in the same order as the
+    /// whole product, so the floats are those of the full product.
+    placement: Mat4,
     size: Vec3,
     deform_pivot: Vec3,
 }
@@ -409,8 +411,9 @@ impl InstanceLook {
                 && layer_setting.receive_shadow,
             texture,
             format,
-            rotation: rotation_of(instance),
-            scale: scale_of(instance, shape, settings),
+            placement: Mat4::translation(instance.pos)
+                * rotation_of(instance)
+                * Mat4::scale_matrix(scale_of(instance, shape, settings)),
             size,
             deform_pivot: deform_pivot(instance, shape, size, sources.format_version_2),
         }
@@ -433,10 +436,7 @@ impl InstanceLook {
         );
 
         // P = Pos + R . (S (T - Pos + v)) : REQ-E3D-406.
-        let transform = Mat4::translation(anchor)
-            * self.rotation
-            * Mat4::scale_matrix(self.scale)
-            * Mat4::translation(tile_center - anchor);
+        let transform = self.placement * Mat4::translation(tile_center - anchor);
 
         // REQ-E3D-560: the palette table is customPalette when it is set, and otherwise the
         // palette of **each tile of the frame** (plus 4 for a sprite shape) — not the shape's
