@@ -771,7 +771,12 @@ impl NesCore {
         let has_rom_image = reader.read_bool()?;
         let stored_name = reader.read_string()?;
         let rom_bytes = reader.read_blob()?;
-        let patchable = has_rom_image && crate::builtin_patches::matches(&rom_bytes);
+        let rom_patch = if has_rom_image {
+            crate::builtin_patches::patch_for(&rom_bytes)
+        } else {
+            None
+        };
+        let patchable = rom_patch.is_some();
         let region_byte = reader.read_u8()?;
         let region = NesRegion::from_u8(region_byte).ok_or_else(|| {
             InvalidState::corrupt(format!("Corrupt savestate: unknown region {region_byte}."))
@@ -832,6 +837,15 @@ impl NesCore {
             wide.load_state(&mut reader, version == Self::WIDE_STATE_VERSION)?;
         } else {
             wide.reset();
+        }
+
+        // A state made the other way (the patch ran and does not now, or the reverse).
+        let made_with_patch =
+            version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5;
+        if patchable && made_with_patch != patch.1.is_some() {
+            if let Some(fix) = rom_patch.and_then(|known| known.after_other_way_state) {
+                fix(self.bus.ram_mut());
+            }
         }
 
         self.battery_ram_imported = false;

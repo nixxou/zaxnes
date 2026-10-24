@@ -53,6 +53,8 @@ pub struct RomRequest<'a> {
     pub widescreen: i32,
     /// Widescreen margin offered above and below, in pixels.
     pub widescreen_y: i32,
+    /// Whether the state of `load_state` is restored with the built-in ROM patches.
+    pub builtin_patches: bool,
     /// Where to write the composed tile records of the last frame.
     pub png_nes: Option<&'a Path>,
     /// State block restored after the reset.
@@ -80,6 +82,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         mesh: request.mesh,
         force_three_dimensional: false,
     })?;
+    host.core.set_builtin_patches(request.builtin_patches);
     host.core.set_widescreen_margin(request.widescreen);
     host.core
         .set_widescreen_vertical_margin(request.widescreen_y);
@@ -155,7 +158,7 @@ fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), Ha
     if let Some(path) = request.save_state {
         let state = host
             .core
-            .save_state(false)
+            .save_state(true)
             .map_err(|_| HarnessError::Rom("no ROM to save".to_owned()))?;
         fs::write(path, state)?;
         println!("render: state written to {}", path.display());
