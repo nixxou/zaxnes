@@ -88,10 +88,14 @@ impl WgpuDisplay {
                 .into_iter()
                 .filter(|adapter| adapter.is_surface_supported(&surface))
                 .collect();
-        let names: Vec<String> = candidates
-            .iter()
-            .map(|adapter| adapter.get_info().name)
-            .collect();
+        let mut names: Vec<String> = Vec::new();
+        for adapter in &candidates {
+            // DirectX 12 lists an adapter once per output: each name is said once.
+            let name = adapter.get_info().name;
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
         let wanted = std::env::var("ZAXNES_GPU")
             .ok()
             .map(|name| name.to_lowercase())
