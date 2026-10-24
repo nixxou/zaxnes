@@ -5,7 +5,11 @@
 
 mod common;
 
-use common::LoopHarness;
+use common::{LoopHarness, SyntheticRom};
+use zax_app::emulation::commands::{Command, CommandArgs};
+use zax_app::persistence::app_settings::AppSettings as _;
+use zax_profiles::profile::GameProfile;
+use zax_profiles::script::ProfileScript;
 
 /// What a run leaves: emulated frames, the counter the ROM increments, the picture.
 fn run(separate_core: bool, ticks: usize) -> (i64, u8, Vec<u8>) {
@@ -75,4 +79,48 @@ fn the_shutdown_takes_the_core_back_first() {
     }
     harness.host.shutdown();
     assert!(harness.host.session().is_none());
+}
+
+/// The camera's field of view after each tick, set by a script from the RAM byte the ROM keeps
+/// incrementing: what the scripts read of the core, frame after frame.
+fn script_reads(ahead: bool, ticks: usize) -> Vec<u32> {
+    let mut harness = LoopHarness::create();
+    harness.host.separate_core = true;
+    harness.host.core_ahead = ahead;
+    let mut profile = GameProfile::create_empty();
+    profile.scripts.push(ProfileScript {
+        name: Some("reader".to_owned()),
+        enabled: true,
+        source: Some(
+            "function LateUpdate()
+  Setting.Fov = 45 + Script:ReadMem(0x10) % 40
+end
+"
+            .to_owned(),
+        ),
+        ..ProfileScript::default()
+    });
+    let rom = harness.write_rom(&SyntheticRom::counter(), "g1.nes");
+    harness
+        .catalog()
+        .add_with("g1", Some(&rom), Some(profile), false, None);
+    harness.run_with(Command::LaunchGame, CommandArgs::of_text("g1"));
+    (0..ticks)
+        .map(|_| {
+            harness.tick_frame();
+            harness.host.settings().fov().to_bits()
+        })
+        .collect()
+}
+
+#[test]
+fn a_script_reading_memory_sees_the_same_bytes_ahead() {
+    let serial = script_reads(false, 120);
+    let ahead = script_reads(true, 120);
+    // The ROM moves the byte all the time, so the values do change from frame to frame.
+    assert!(
+        serial.windows(2).any(|pair| pair[0] != pair[1]),
+        "{serial:?}"
+    );
+    assert_eq!(serial, ahead);
 }

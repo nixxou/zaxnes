@@ -13,6 +13,7 @@
 //! conversion engine that can reach a hook borrows them for its length (`scripted`), through
 //! the [`ScriptBridge`] of the runtime, so the compiler rules out a conflicting access.
 
+use std::cell::Cell;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 use zax_engine3d::draw_list::FrameDrawList;
@@ -22,7 +23,7 @@ use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
 use zax_nes::rom::RomLoadResult;
-use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord, ZapperPosition};
+use zax_nes::{ControllerPortType, FrameBatch, NesBus, NesCore, TileRecord, ZapperPosition};
 use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
@@ -81,6 +82,42 @@ struct ScriptInputState {
 struct CoreMachine<'a> {
     core: &'a mut NesCore,
     input: &'a mut ScriptInputState,
+    /// The console RAM of the frame being converted while the core runs the next one
+    /// (emulation ahead); `None` reads the core itself.
+    snapshot: Option<&'a MemorySnapshot>,
+}
+
+/// The console RAM as it stood at the end of a captured frame, which the scripts' `ReadMem`
+/// reads while the core is away running the next frame: the same bytes a read of the core would
+/// have given right after that frame.
+struct MemorySnapshot {
+    ram: [u8; NesBus::RAM_SIZE],
+    /// Whether a read asked for something the copy does not hold (cartridge space).
+    missed: Cell<bool>,
+}
+
+impl Default for MemorySnapshot {
+    fn default() -> Self {
+        Self {
+            ram: [0; NesBus::RAM_SIZE],
+            missed: Cell::new(false),
+        }
+    }
+}
+
+impl MemorySnapshot {
+    /// What `NesCore::read_memory` would read: the RAM and its mirrors, 0 for $2000-$401F
+    /// (REQ-CORE-081); the cartridge space is not held, which `missed` records.
+    fn read(&self, address: u16) -> u8 {
+        if address < 0x2000 {
+            return self.ram[usize::from(address) & (NesBus::RAM_SIZE - 1)];
+        }
+        if address < 0x4020 {
+            return 0;
+        }
+        self.missed.set(true);
+        0
+    }
 }
 
 impl ScriptInput for CoreMachine<'_> {
@@ -129,7 +166,10 @@ impl ScriptInput for CoreMachine<'_> {
 
 impl ScriptMemory for CoreMachine<'_> {
     fn read(&self, address: u16) -> u8 {
-        self.core.read_memory(address)
+        match self.snapshot {
+            Some(snapshot) => snapshot.read(address),
+            None => self.core.read_memory(address),
+        }
     }
 
     fn write(&mut self, address: u16, value: u8) {
@@ -142,11 +182,16 @@ fn with_context<R>(
     scene: &mut SceneState,
     core: &mut NesCore,
     input: &mut ScriptInputState,
+    snapshot: Option<&MemorySnapshot>,
     operation: impl FnOnce(&mut ScriptContext<'_>) -> R,
 ) -> R {
     let mut camera = SceneCameraBridge(&mut scene.camera);
     let mut backdrop = SceneBackdropBridge(&mut scene.backdrop);
-    let mut machine = CoreMachine { core, input };
+    let mut machine = CoreMachine {
+        core,
+        input,
+        snapshot,
+    };
     operation(&mut ScriptContext {
         camera: &mut camera,
         backdrop: &mut backdrop,
@@ -221,13 +266,15 @@ struct FramePipeline {
     /// The palette and edge masks of a frame captured but not converted yet; its tile records
     /// are in `GameSession::batch_records`.
     pending: Option<([u8; 32], i32, i32)>,
+    /// The RAM of the captured frame, for the scripts' `ReadMem` while the core is away.
+    memory: MemorySnapshot,
 }
 
 /// The members of the script API that read or drive the core: a profile whose scripts name
-/// none of them cannot tell whether the next frame has already started.
-const CORE_MEMBERS: [&str; 7] = [
+/// none of them cannot tell whether the next frame has already started. `ReadMem` is not one:
+/// it reads the RAM copied when the frame came back ([`MemorySnapshot`]).
+const CORE_MEMBERS: [&str; 6] = [
     "InputProcess",
-    "ReadMem",
     "WriteMem",
     "GetInput",
     "GetInputType",
@@ -300,7 +347,7 @@ impl GameSession {
         };
         // REQ-LUA-015 step 1: every chunk runs before anything else, with the scene and the
         // machine at hand.
-        let runtime = with_context(scene, &mut core, &mut input, |context| {
+        let runtime = with_context(scene, &mut core, &mut input, None, |context| {
             ProfileScriptRuntime::create_in(profile, environment, engine.state_mut(), Some(context))
         })?;
         let bridge = runtime.bridge();
@@ -360,6 +407,7 @@ impl GameSession {
             CoreMachine {
                 core: &mut self.core,
                 input: &mut self.input,
+                snapshot: None,
             }
             .set_port_types(first, second);
         }
@@ -383,9 +431,12 @@ impl GameSession {
             input,
             bridge,
             engine,
+            pipeline,
             ..
         } = self;
-        with_context(scene, core, input, |context| {
+        // While the core is away, the scripts read the RAM copied when their frame came back.
+        let snapshot = pipeline.in_flight.then_some(&pipeline.memory);
+        with_context(scene, core, input, snapshot, |context| {
             bridge.lend(context, || operation(engine));
         });
     }
@@ -542,6 +593,10 @@ impl GameSession {
         clock.add(Stage::Core, finished.elapsed);
         let captured = self.capture_batch(clock);
         self.pipeline.pending = Some(captured);
+        self.pipeline
+            .memory
+            .ram
+            .copy_from_slice(self.core.bus().ram());
         self.pipeline.picture.clear();
         self.pipeline
             .picture
@@ -598,6 +653,14 @@ impl GameSession {
         self.lend(model, scene, |session, scene| {
             session.convert_batch_lent(scene, clock, palette, mask_x, mask_y);
         });
+        if self.pipeline.memory.missed.replace(false) {
+            // A script read cartridge space, which the copy does not hold: from now on the next
+            // frame waits for the scripts again.
+            self.pipeline.ahead_allowed = false;
+            crate::app_log::error(
+                "Zaxnes: a script read cartridge memory; emulation ahead is off for this game.",
+            );
+        }
     }
 
     /// Puts the frame counter back to zero.
@@ -1102,6 +1165,10 @@ mod tests {
         assert!(scripts_leave_the_core_alone(&GameProfile::default()));
         assert!(scripts_leave_the_core_alone(&profile(&[
             "function UpdateS() shape.Offset.z = 2 end"
+        ])));
+        // `ReadMem` reads the copy of the RAM taken when the frame came back.
+        assert!(scripts_leave_the_core_alone(&profile(&[
+            "function Update() local lane = Script:ReadMem(0x70) end"
         ])));
         for member in CORE_MEMBERS {
             let source = format!("function Update() local v = Script.{member} end");
