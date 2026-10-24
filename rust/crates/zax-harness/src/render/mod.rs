@@ -53,6 +53,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --dump-frame <file.json> write the captured frame as a '--frames' JSON file
   --widescreen <pixels>    widescreen margin the host offers on each side (default 0)
   --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
+  --no-builtin-patches     restore --load-state without the built-in ROM patches
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            as the widescreen margin makes them
   --load-state <file>      restore a state block (written by --save-state) after the reset
@@ -121,6 +122,8 @@ pub struct Options {
     pub widescreen: i32,
     /// Widescreen margin offered above and below, in pixels.
     pub widescreen_y: i32,
+    /// Whether --load-state restores with the built-in ROM patches.
+    pub builtin_patches: bool,
     /// Where to write the composed tile records of the last frame.
     pub png_nes: Option<PathBuf>,
     /// State block restored after the reset.
@@ -190,6 +193,7 @@ impl Options {
             dump_frame: None,
             widescreen: 0,
             widescreen_y: 0,
+            builtin_patches: true,
             png_nes: None,
             load_state: None,
             save_state: None,
@@ -220,6 +224,7 @@ impl Options {
         while let Some(argument) = rest.next() {
             match argument.as_str() {
                 "--no-shadows" => options.shadows = false,
+                "--no-builtin-patches" => options.builtin_patches = false,
                 "--group-draws" => options.group_draws = true,
                 "--sky-bodies" => options.sky_bodies = true,
                 "--explain" => options.explain = true,
@@ -534,6 +539,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             dump_frame: options.dump_frame.as_deref(),
             widescreen: options.widescreen,
             widescreen_y: options.widescreen_y,
+            builtin_patches: options.builtin_patches,
             png_nes: options.png_nes.as_deref(),
             load_state: options.load_state.as_deref(),
             save_state: options.save_state.as_deref(),

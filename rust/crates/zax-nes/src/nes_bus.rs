@@ -83,7 +83,12 @@ impl NesBus {
         self.open_bus
     }
 
-    /// CPU work RAM.
+    /// CPU work RAM, for writing.
+    pub fn ram_mut(&mut self) -> &mut [u8; RAM_SIZE] {
+        &mut self.ram
+    }
+
+    /// CPU RAM.
     #[must_use]
     pub const fn ram(&self) -> &[u8; RAM_SIZE] {
         &self.ram

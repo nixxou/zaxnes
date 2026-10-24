@@ -18,6 +18,10 @@ pub struct BuiltinPatch {
     pub source_crc: u32,
     /// The BPS patch.
     pub bps: &'static [u8],
+    /// Puts right, in CPU RAM, a machine restored from a state made the other way (with the
+    /// patch while it is off, or without it while it is on): the video memory of one is not laid
+    /// out as the other expects, so the game is sent back to a step that redraws it.
+    pub after_other_way_state: Option<fn(&mut [u8])>,
 }
 
 /// Name of the Zelda II (USA) widescreen patch.
@@ -28,7 +32,19 @@ pub const PATCHES: [BuiltinPatch; 1] = [BuiltinPatch {
     name: ZELDA2_USA,
     source_crc: 0xBA32_2865,
     bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
+    after_other_way_state: Some(zelda2_after_other_way_state),
 }];
+
+/// Zelda II: the world map is laid out in four nametables by the hack and in two by the game, and
+/// only redrawn when it is entered; a map state made the other way goes back through
+/// the game's own map initialisation (game mode 2), which redraws it around Link.
+fn zelda2_after_other_way_state(ram: &mut [u8]) {
+    const GAME_MODE: usize = 0x0736;
+    const WORLD_MAP: u8 = 0x05;
+    if let Some(mode) = ram.get_mut(GAME_MODE).filter(|mode| **mode == WORLD_MAP) {
+        *mode = 0x02;
+    }
+}
 
 impl BuiltinPatch {
     /// The patch's version: the CRC-32 of the ROM data it produces, which any change to the
