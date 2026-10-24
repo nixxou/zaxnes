@@ -175,7 +175,7 @@ struct Passes {
     /// The placements of every scene draw of the frame, uploaded once before the scene pass.
     instance_buffer: glow::Buffer,
     instance_data: Vec<u8>,
-    /// Scratch space of [`group_opaque_by_state`].
+    /// Scratch space of [`group_by_state`].
     opaque_scratch: OpaqueScratch,
     /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`: each run starts at a multiple of it.
     instance_alignment: usize,
@@ -204,7 +204,8 @@ pub struct SceneRenderer {
     lists: DrawLists,
     passes: Passes,
     last_view: CameraView,
-    /// Whether the opaque bucket is reordered by draw state ([`group_opaque_by_state`]).
+    /// Whether the opaque bucket and the tiles of each transparent object are reordered by draw
+    /// state ([`group_by_state`]).
     group_opaque: bool,
 }
 
@@ -871,7 +872,14 @@ impl Passes {
     /// buckets, whose two passes go object by object), and uploads them in one call.
     fn upload_instances(&mut self, lists: &mut DrawLists, group_opaque: bool) {
         if group_opaque {
-            group_opaque_by_state(&mut lists.opaque, &mut self.opaque_scratch);
+            group_by_state(&mut lists.opaque, &mut self.opaque_scratch);
+            for group in &lists.transparent_objects {
+                group_by_state(
+                    &mut lists.transparent[group.start..group.end],
+                    &mut self.opaque_scratch,
+                );
+            }
+            // The HUD is left alone: its tiles share one plane, where an overlap is an exact tie.
         }
 
         let data = &mut self.instance_data;
@@ -1151,7 +1159,7 @@ fn deform_bits(deform: &DeformParameters) -> [u32; 38] {
     bits
 }
 
-/// Reusable buffers of [`group_opaque_by_state`].
+/// Reusable buffers of [`group_by_state`].
 #[derive(Debug, Default)]
 struct OpaqueScratch {
     groups: FastMap<DrawStateKey, usize>,
@@ -1159,12 +1167,15 @@ struct OpaqueScratch {
     items: Vec<DrawItem>,
 }
 
-/// Reorders the opaque bucket so that the items sharing a draw state are consecutive: groups
-/// in the order of their first item, items in list order inside a group. Opaque items are
-/// drawn with the depth test and without blending, so the picture does not depend on their
-/// order (only exact depth ties between two different states could), and the runs of
-/// [`add_runs`] then cover whole groups (Rust-only, draw-call batching).
-fn group_opaque_by_state(items: &mut Vec<DrawItem>, scratch: &mut OpaqueScratch) {
+/// Reorders `items` so that the items sharing a draw state are consecutive: groups in the
+/// order of their first item, items in list order inside a group, and the runs of [`add_runs`]
+/// then cover whole groups (Rust-only, draw-call batching).
+///
+/// Opaque items are drawn with the depth test and without blending, so the picture does not
+/// depend on their order; the tiles of one blended object go through a depth-only pass, then
+/// a colour pass where the depth is equal, so inside an object the order does not matter either.
+/// Only exact depth ties between two different states could come out differently.
+fn group_by_state(items: &mut [DrawItem], scratch: &mut OpaqueScratch) {
     scratch.groups.clear();
     scratch.order.clear();
     for (index, item) in items.iter().enumerate() {
@@ -1182,7 +1193,7 @@ fn group_opaque_by_state(items: &mut Vec<DrawItem>, scratch: &mut OpaqueScratch)
     scratch
         .items
         .extend(scratch.order.iter().map(|&(_, index)| items[index]));
-    std::mem::swap(items, &mut scratch.items);
+    items.copy_from_slice(&scratch.items);
 }
 
 /// Cuts `items[start..end]` into runs of at most [`INSTANCES_PER_DRAW`] consecutive items
