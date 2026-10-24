@@ -260,6 +260,8 @@ pub struct WgpuSceneRenderer {
     textures: TextureStore,
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
+    /// The quad of the last widescreen 2D-mode picture, by margin.
+    wide_picture_quad: Option<(u16, Arc<TileMesh>)>,
     plan: FramePlan<MeshHandle, TextureHandle>,
     layouts: Layouts,
     scene_module: wgpu::ShaderModule,
@@ -446,6 +448,7 @@ impl WgpuSceneRenderer {
             textures: TextureStore::default(),
             unit_box: Arc::new(interop::unit_box()?),
             picture_quad: Arc::new(interop::picture_quad()?),
+            wide_picture_quad: None,
             plan: FramePlan::default(),
             scene_pipelines: FastMap::default(),
             shadow_pipelines: FastMap::default(),
@@ -568,9 +571,12 @@ impl WgpuSceneRenderer {
             meshes: &mut self.meshes,
             textures: &mut self.textures,
         };
+        self.wide_picture_quad =
+            interop::wide_quad_for(frame.nes_picture, self.wide_picture_quad.take())?;
         let fixed = FixedMeshes {
             unit_box: &self.unit_box,
             picture_quad: &self.picture_quad,
+            wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
         };
         let Ok(()) = self
             .plan

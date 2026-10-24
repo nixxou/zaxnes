@@ -600,10 +600,7 @@ impl GameSession {
             .memory
             .ram
             .copy_from_slice(self.core.bus().ram());
-        self.pipeline.picture.clear();
-        self.pipeline
-            .picture
-            .extend_from_slice(self.core.pixel_frame());
+        self.core.wide_picture_into(&mut self.pipeline.picture);
     }
 
     /// Starts the next frame on the emulation thread at once ("emulation ahead"): its input word
@@ -634,10 +631,7 @@ impl GameSession {
                 clock.stop(Stage::Core, started);
                 let captured = self.capture_batch(clock);
                 self.pipeline.pending = Some(captured);
-                self.pipeline.picture.clear();
-                self.pipeline
-                    .picture
-                    .extend_from_slice(self.core.pixel_frame());
+                self.core.wide_picture_into(&mut self.pipeline.picture);
             }
         }
     }
@@ -904,10 +898,7 @@ impl GameSession {
         // The 2D mode shows the core's picture while the next frame runs (emulation ahead has
         // kept the picture of the frame it captured).
         if self.pipeline.pending.is_none() {
-            self.pipeline.picture.clear();
-            self.pipeline
-                .picture
-                .extend_from_slice(self.core.pixel_frame());
+            self.core.wide_picture_into(&mut self.pipeline.picture);
         }
         let core = std::mem::replace(&mut self.core, spare);
         match worker.start(core, word) {
@@ -1107,7 +1098,7 @@ impl GameSession {
         if self.pipeline.in_flight || self.pipeline.pending.is_some() {
             destination.extend_from_slice(&self.pipeline.picture);
         } else {
-            destination.extend_from_slice(self.core.pixel_frame());
+            self.core.wide_picture_into(destination);
         }
     }
 

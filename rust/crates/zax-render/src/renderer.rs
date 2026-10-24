@@ -126,6 +126,8 @@ pub struct SceneRenderer {
     linear: LinearColorBuffer,
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
+    /// The quad of the last widescreen 2D-mode picture, by margin.
+    wide_picture_quad: Option<(u16, Arc<TileMesh>)>,
     plan: FramePlan<GpuMesh, Texture>,
     passes: Passes,
     last_view: CameraView,
@@ -210,6 +212,7 @@ impl SceneRenderer {
             linear: LinearColorBuffer::new(&gl)?,
             unit_box: Arc::new(interop::unit_box()?),
             picture_quad: Arc::new(interop::picture_quad()?),
+            wide_picture_quad: None,
             plan: FramePlan::default(),
             last_view: CameraView::default(),
             group_opaque: false,
@@ -285,9 +288,12 @@ impl SceneRenderer {
             textures: &mut self.textures,
             picture: &mut self.picture,
         };
+        self.wide_picture_quad =
+            interop::wide_quad_for(frame.nes_picture, self.wide_picture_quad.take())?;
         let fixed = FixedMeshes {
             unit_box: &self.unit_box,
             picture_quad: &self.picture_quad,
+            wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
         };
         let collected = self
             .plan

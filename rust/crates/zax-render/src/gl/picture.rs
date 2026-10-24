@@ -18,15 +18,14 @@ pub const WIDTH: usize = 256;
 /// Height of the pixel frame.
 pub const HEIGHT: usize = 240;
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // 256 and 240.
-const SIZE: (i32, i32) = (WIDTH as i32, HEIGHT as i32);
-
 /// The picture texture, created on first upload; released when dropped.
 #[derive(Debug)]
 pub struct NesPictureTexture {
     gl: Gl,
     pixels: Vec<u8>,
     handle: Option<Texture>,
+    /// Width of the texture allocated: 256, or wider for a widescreen picture.
+    width: usize,
 }
 
 impl NesPictureTexture {
@@ -36,15 +35,24 @@ impl NesPictureTexture {
             gl: gl.clone(),
             pixels: vec![0; WIDTH * HEIGHT * 4],
             handle: None,
+            width: WIDTH,
         }
     }
 
-    /// Uploads `indices` (256 × 240 NES colour indices, row 0 first) and returns the texture,
-    /// or `None` when the frame has the wrong size.
+    /// Uploads `indices` (NES colour indices, row 0 first, 240 rows of 256 or of a widescreen
+    /// width) and returns the texture, or `None` when the frame has no such size.
     pub fn upload(&mut self, indices: &[u8]) -> Result<Option<Texture>, GlError> {
-        if indices.len() < WIDTH * HEIGHT {
+        let Some(picture_width) = crate::interop::picture_width(indices.len()) else {
             return Ok(None);
+        };
+        if picture_width != self.width {
+            // Another width: a new texture of the right size.
+            if let Some(handle) = self.handle.take() {
+                self.gl.delete_texture(handle);
+            }
+            self.width = picture_width;
         }
+        self.pixels.resize(picture_width * HEIGHT * 4, 0);
 
         for (pixel, &index) in self.pixels.chunks_exact_mut(4).zip(indices) {
             let color = nes_color(usize::from(index));
@@ -52,7 +60,8 @@ impl NesPictureTexture {
         }
 
         let gl = &self.gl;
-        let (width, height) = SIZE;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // At most 512.
+        let (width, height) = (picture_width as i32, HEIGHT as i32);
         let existing = self.handle;
         let handle = match existing {
             Some(handle) => handle,
