@@ -38,7 +38,22 @@ impl GpuTimer {
             };
             queries.push(query);
         }
-        let queries = queries.try_into().ok()?;
+        let queries: [Query; QUERIES] = queries.try_into().ok()?;
+        // Some OpenGL ES drivers list the extension and refuse the query: one is tried first,
+        // its errors told apart from those recorded before.
+        for _ in 0..16 {
+            if gl.take_error() == glow::NO_ERROR {
+                break;
+            }
+        }
+        gl.begin_time_elapsed(queries[0]);
+        gl.end_time_elapsed();
+        if gl.take_error() != glow::NO_ERROR {
+            for query in queries {
+                gl.delete_query(query);
+            }
+            return None;
+        }
         Some(Self {
             queries,
             pending: [false; QUERIES],
