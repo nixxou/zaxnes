@@ -20,8 +20,15 @@ pub(crate) fn api() -> &'static Api {
 /// per Lua state so that `obj:Method` costs no allocation.
 struct MethodCache(Vec<Vec<Option<Function>>>);
 
-/// Installs the per-state parts of the binding: the weak object cache and the method functions.
-pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
+/// The function of method `position` of type `id`, from the per-state cache.
+pub(crate) fn method_function(lua: &Lua, id: HostType, position: usize) -> Option<Function> {
+    lua.app_data_ref::<MethodCache>()
+        .and_then(|methods| methods.0[id.index()][position].clone())
+}
+
+/// Installs the per-state parts of the binding: the weak object cache and the method functions;
+/// with `fast`, the raw host values of [`super::raw`] (the "fast Lua binding" setting).
+pub(crate) fn install(lua: &Lua, fast: bool) -> mlua::Result<()> {
     lua.set_app_data(HostCache::new(lua)?);
     super::lend::install(lua);
 
@@ -50,17 +57,117 @@ pub(crate) fn install(lua: &Lua) -> mlua::Result<()> {
     }
 
     lua.set_app_data(MethodCache(methods));
+    if fast {
+        install_raw(lua)?;
+    }
     Ok(())
+}
+
+/// Builds the metatable of the raw host values from the safe binding's functions.
+fn install_raw(lua: &Lua) -> mlua::Result<()> {
+    let name = lua
+        .create_userdata(Host::new(Payload::Table(HostType::ScriptApi)))?
+        .type_name()?
+        .unwrap_or_else(|| "Host".to_owned());
+    let index_fallback = lua.create_function(|lua, (this, key): (Value, Value)| {
+        let cx = Cx::new(lua);
+        let payload =
+            host_payload(&this).ok_or_else(|| cx.raise("attempt to index a userdata value"))?;
+        index(lua, payload, &key)
+    })?;
+    let new_index_fallback =
+        lua.create_function(|lua, (this, key, value): (Value, Value, Value)| {
+            new_index(lua, &this, &key, &value)
+        })?;
+    let mut others = Vec::new();
+    others.push((
+        "__eq",
+        lua.create_function(|_, (left, right): (Value, Value)| Ok(equal(&left, &right)))?,
+    ));
+    others.push((
+        "__call",
+        lua.create_function(|lua, values: MultiValue| call_host(lua, &values))?,
+    ));
+    others.push((
+        "__tostring",
+        lua.create_function(|lua, this: Value| text_of(lua, &this))?,
+    ));
+    others.push((
+        "__add",
+        lua.create_function(|lua, (left, right): (Value, Value)| {
+            operate(lua, &left, &right, |definition| definition.add.as_ref())
+        })?,
+    ));
+    others.push((
+        "__sub",
+        lua.create_function(|lua, (left, right): (Value, Value)| {
+            operate(lua, &left, &right, |definition| {
+                definition.subtract.as_ref()
+            })
+        })?,
+    ));
+    others.push((
+        "__mul",
+        lua.create_function(|lua, (left, right): (Value, Value)| {
+            operate(lua, &left, &right, |definition| {
+                definition.multiply.as_ref()
+            })
+        })?,
+    ));
+    others.push((
+        "__div",
+        lua.create_function(|lua, (left, right): (Value, Value)| {
+            operate(lua, &left, &right, |definition| definition.divide.as_ref())
+        })?,
+    ));
+    others.push((
+        "__unm",
+        lua.create_function(|lua, (operand, other): (Value, Value)| {
+            operate(lua, &operand, &other, |definition| {
+                definition.negate.as_ref()
+            })
+        })?,
+    ));
+    super::raw::install(
+        lua,
+        super::raw::Fallbacks {
+            index: index_fallback,
+            new_index: new_index_fallback,
+            others,
+            name,
+        },
+    )
+}
+
+/// `obj(...)`: the constructor of the type, when it has one.
+fn call_host(lua: &Lua, values: &MultiValue) -> mlua::Result<MultiValue> {
+    let cx = Cx::new(lua);
+    let call = Call::new(&cx, values);
+    let payload = call
+        .host(1)
+        .ok_or_else(|| cx.raise("attempt to call a userdata value"))?;
+    let constructor = definition_of(&cx, &payload)?
+        .call
+        .as_ref()
+        .ok_or_else(|| cx.raise("attempt to call a userdata value"))?;
+    Ok(constructor(&call)?.into_iter().collect::<MultiValue>())
+}
+
+/// `tostring(obj)`: the text of the type, or its name.
+fn text_of(lua: &Lua, this: &Value) -> mlua::Result<String> {
+    let cx = Cx::new(lua);
+    let payload = host_payload(this).ok_or_else(|| cx.raise("this value has no description"))?;
+    let definition = definition_of(&cx, &payload)?;
+    definition.text.as_ref().map_or_else(
+        || Ok(definition.name.to_owned()),
+        |text| text(&cx, &payload),
+    )
 }
 
 fn definition_of(cx: &Cx, payload: &Payload) -> mlua::Result<&'static TypeDef> {
     api()
         .get(payload.host_type())
         .ok_or_else(|| cx.raise("this value has no description"))
-}
-
-fn payload_of(this: &AnyUserData) -> mlua::Result<Payload> {
-    Ok(this.borrow::<Host>()?.payload())
 }
 
 /// The text a key stands for in an error message.
@@ -110,9 +217,10 @@ fn index(lua: &Lua, payload: Payload, key: &Value) -> mlua::Result<Value> {
 
 /// `obj[key] = value`: a writable member, a numeric index, or the exact errors of REQ-LUA-042
 /// and TV-LUA-13.
-fn new_index(lua: &Lua, this: &Host, key: &Value, value: &Value) -> mlua::Result<()> {
+fn new_index(lua: &Lua, this: &Value, key: &Value, value: &Value) -> mlua::Result<()> {
     let cx = Cx::new(lua);
-    let mut payload = this.payload();
+    let mut payload =
+        host_payload(this).ok_or_else(|| cx.raise("attempt to index a userdata value"))?;
     let definition = definition_of(&cx, &payload)?;
 
     if let Value::String(name) = key {
@@ -123,7 +231,7 @@ fn new_index(lua: &Lua, this: &Host, key: &Value, value: &Value) -> mlua::Result
                     if definition.id.is_value() {
                         // The value is the script's own copy: the component it assigned
                         // belongs to the userdata it assigned it to (REQ-LUA-044).
-                        this.set_payload(payload);
+                        set_host_payload(this, payload);
                     }
 
                     Ok(())
@@ -143,6 +251,17 @@ fn new_index(lua: &Lua, this: &Host, key: &Value, value: &Value) -> mlua::Result
     }
 
     Err(cx.raise(&format!("cannot set {}, no such field", key_text(key))))
+}
+
+/// Rewrites the payload of the host value `this`.
+fn set_host_payload(this: &Value, payload: Payload) {
+    if let Value::UserData(data) = this {
+        if let Ok(host) = data.borrow::<Host>() {
+            host.set_payload(payload);
+        } else {
+            super::raw::set_payload(data, payload);
+        }
+    }
 }
 
 fn equal(left: &Value, right: &Value) -> bool {
@@ -184,33 +303,18 @@ impl UserData for Host {
         methods.add_meta_method(MetaMethod::Index, |lua, this, key: Value| {
             index(lua, this.payload(), &key)
         });
-        methods.add_meta_method(
+        methods.add_meta_function(
             MetaMethod::NewIndex,
-            |lua, this, (key, value): (Value, Value)| new_index(lua, this, &key, &value),
+            |lua, (this, key, value): (Value, Value, Value)| new_index(lua, &this, &key, &value),
         );
         methods.add_meta_function(MetaMethod::Eq, |_, (left, right): (Value, Value)| {
             Ok(equal(&left, &right))
         });
         methods.add_meta_function(MetaMethod::Call, |lua, values: MultiValue| {
-            let cx = Cx::new(lua);
-            let call = Call::new(&cx, &values);
-            let payload = call
-                .host(1)
-                .ok_or_else(|| cx.raise("attempt to call a userdata value"))?;
-            let constructor = definition_of(&cx, &payload)?
-                .call
-                .as_ref()
-                .ok_or_else(|| cx.raise("attempt to call a userdata value"))?;
-            Ok(constructor(&call)?.into_iter().collect::<MultiValue>())
+            call_host(lua, &values)
         });
         methods.add_meta_function(MetaMethod::ToString, |lua, this: AnyUserData| {
-            let cx = Cx::new(lua);
-            let payload = payload_of(&this)?;
-            let definition = definition_of(&cx, &payload)?;
-            definition.text.as_ref().map_or_else(
-                || Ok(definition.name.to_owned()),
-                |text| text(&cx, &payload),
-            )
+            text_of(lua, &Value::UserData(this))
         });
         methods.add_meta_function(MetaMethod::Add, |lua, (left, right): (Value, Value)| {
             operate(lua, &left, &right, |definition| definition.add.as_ref())

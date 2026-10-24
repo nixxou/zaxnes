@@ -193,6 +193,14 @@ displayed frame". All values are per displayed frame.
   Desktop keeps REQ-LOOP-012 (5). `--catch-up <0-5>` / `ZAXNES_CATCH_UP` override it; the
   profiler start-up line shows the value. Owner remark (FF1, no profile, 2D, still slow): in 2D
   only the core runs, so multi-core cannot help there; the core itself must get faster.
+- Lua binding (owner decision to allow `unsafe` in zax-scripting, documented modules only).
+  Step 0 (`binding/lend.rs`): the runtime data, engine state and instance being built are lent
+  as pointers instead of mlua scoped userdata (Zelda 1 Lua 0.62 -> 0.60 ms x86). Step A
+  (`binding/raw.rs`, setting `emu.lua_fast_binding`, on by default, next game load): host values
+  are bare userdata blocks with one shared metatable whose `__index` / `__newindex` are C
+  functions; getters, setters and method lookups skip mlua's userdata entry, the rest falls back
+  to the safe binding. Same API dump, all tests pass in both modes (`ZAXNES_FAST_LUA=1`). x86
+  Zelda 1 (original GC tuning): Lua 0.62 -> 0.52 ms/frame, worst frame 36 -> 3 ms.
 
 ## 5. Next steps (see `ROADMAP.md`)
 

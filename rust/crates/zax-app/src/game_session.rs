@@ -319,6 +319,7 @@ impl GameSession {
             profile.permanent_patterns.is_empty() && profile.temporary_patterns.is_empty(),
         );
         let (sender, events) = channel();
+        let fast_binding = model.get(SettingId::EmuLuaFastBinding).as_bool();
         let mut settings = ScriptSettings::new(
             std::mem::replace(model, SettingsModel::new()),
             ScriptLight::Model,
@@ -343,6 +344,7 @@ impl GameSession {
                 id: profile.id.clone().unwrap_or_default(),
                 version: profile.version_text.clone().unwrap_or_default(),
             },
+            fast_binding,
             ..ScriptEnvironment::default()
         };
         // REQ-LUA-015 step 1: every chunk runs before anything else, with the scene and the

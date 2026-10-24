@@ -377,6 +377,9 @@ impl<'a> Cx<'a> {
 
     /// A fresh Lua value for `payload`.
     pub fn value(&self, payload: Payload) -> mlua::Result<Value> {
+        if super::raw::enabled(self.lua) {
+            return super::raw::value(self.lua, payload);
+        }
         Ok(Value::UserData(
             self.lua.create_userdata(Host::new(payload))?,
         ))
@@ -556,7 +559,13 @@ impl<'a> Cx<'a> {
 /// The payload of the host value `value`, or `None` for any other Lua value.
 pub(crate) fn host_payload(value: &Value) -> Option<Payload> {
     match value {
-        Value::UserData(data) => data.borrow::<Host>().ok().map(|host| host.payload()),
+        Value::UserData(data) => match data.type_id() {
+            Some(id) if id == std::any::TypeId::of::<Host>() => {
+                data.borrow::<Host>().ok().map(|host| host.payload())
+            }
+            Some(_) => None,
+            None => super::raw::payload_of(data),
+        },
         _ => None,
     }
 }

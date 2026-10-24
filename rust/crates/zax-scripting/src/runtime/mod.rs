@@ -321,7 +321,7 @@ impl ProfileScriptRuntime {
         context: Option<&mut ScriptContext<'_>>,
     ) -> mlua::Result<()> {
         install_base(&self.lua)?;
-        dispatch::install(&self.lua)?;
+        dispatch::install(&self.lua, self.data.env.fast_binding)?;
         self.lua.set_app_data(Budget::new());
         install_api_globals(&self.lua)?;
         PublishedGlobals::install(&self.lua)?;
