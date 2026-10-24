@@ -41,6 +41,8 @@ pub enum OptionRow {
     CatchUp,
     /// The optimised Lua paths (`unsafe`), on or off.
     LuaOptimized,
+    /// The experimental Lua paths (they need the optimised ones), on or off.
+    LuaExperimental,
     /// The scripts beside the drawing: off, automatic (while late) or always.
     Pipeline,
     /// The TV region: automatic (from the ROM header, at the next game start), NTSC or PAL.
@@ -50,7 +52,7 @@ pub enum OptionRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 13] = [
+pub const ROWS: [OptionRow; 14] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -61,6 +63,7 @@ pub const ROWS: [OptionRow; 13] = [
     OptionRow::Camera,
     OptionRow::CatchUp,
     OptionRow::LuaOptimized,
+    OptionRow::LuaExperimental,
     OptionRow::Pipeline,
     OptionRow::Region,
     OptionRow::Controls,
@@ -212,6 +215,10 @@ impl HandheldOptionsModel {
                 let on = settings.get(SettingId::EmuLuaOptimized).as_bool();
                 settings.set(SettingId::EmuLuaOptimized, SettingValue::Bool(!on));
             }
+            OptionRow::LuaExperimental => {
+                let on = settings.get(SettingId::EmuLuaExperimental).as_bool();
+                settings.set(SettingId::EmuLuaExperimental, SettingValue::Bool(!on));
+            }
             OptionRow::Pipeline => {
                 let next = *cycled(&PIPELINES, &pipeline(settings), step);
                 settings.set(SettingId::EmuPipeline, SettingValue::Enum(next));
@@ -240,6 +247,9 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::CatchUp => strings::get(keys::HANDHELD_OPTION_CATCH_UP),
         OptionRow::LuaOptimized => {
             text::label_of(catalogue::descriptor(SettingId::EmuLuaOptimized))
+        }
+        OptionRow::LuaExperimental => {
+            text::label_of(catalogue::descriptor(SettingId::EmuLuaExperimental))
         }
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
@@ -270,6 +280,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             frames => frames.to_string(),
         },
         OptionRow::LuaOptimized => switch(settings.get(SettingId::EmuLuaOptimized).as_bool()),
+        OptionRow::LuaExperimental => switch(settings.get(SettingId::EmuLuaExperimental).as_bool()),
         OptionRow::Pipeline => text::label_of_option(match pipeline(settings) {
             1 => "Auto",
             2 => "Always",

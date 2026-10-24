@@ -21,6 +21,7 @@ mod handoff;
 
 pub use handoff::lend_context;
 mod hooks;
+mod light_shapes;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -840,17 +841,27 @@ fn load_scripts(cx: &Cx, profile: &GameProfile) -> mlua::Result<bool> {
             loaded[previous] = None;
         }
 
-        compile(
-            cx,
-            &mut script,
-            source.source.as_deref().unwrap_or_default(),
-            limit,
-        )?;
+        let text = source.source.as_deref().unwrap_or_default();
+        compile(cx, &mut script, text, limit)?;
+        script.light_update_s = light_shapes::update_s_takes_light_shape(text);
         by_name.insert(script.name().to_owned(), loaded.len());
         loaded.push(Some(script));
     }
 
     let mut scripts: Vec<LoadedScript> = loaded.into_iter().flatten().collect();
+    // The light shapes: with the experimental Lua, on top of the optimised Lua, unless the
+    // profile touches the language's mechanics anywhere.
+    let asked = cx.data(|data| data.env.optimized && data.env.experimental)?;
+    let light_allowed = asked
+        && light_shapes::profile_allows_light_shapes(
+            profile
+                .scripts
+                .iter()
+                .map(|script| script.source.as_deref().unwrap_or_default()),
+        );
+    for script in &mut scripts {
+        script.light_update_s &= light_allowed;
+    }
     scripts
         .sort_by(|left, right| script_order::compare_names(Some(left.name()), Some(right.name())));
 
@@ -1077,6 +1088,17 @@ impl ProfileScriptRuntime {
         } else {
             self.lua.remove_app_data::<HookTimes>();
         }
+    }
+
+    /// The scripts whose `UpdateS` takes a light `shape`, in script order.
+    #[must_use]
+    pub fn light_update_s_scripts(&self) -> Vec<&str> {
+        self.data
+            .scripts
+            .iter()
+            .filter(|script| script.light_update_s)
+            .map(LoadedScript::name)
+            .collect()
     }
 
     /// Whether this runtime keeps hook times.

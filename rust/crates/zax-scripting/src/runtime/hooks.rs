@@ -298,9 +298,9 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
     for index in 0..count {
         let pending = cx.data(|data| {
             let script = &mut data.scripts[index];
-            (!script.failed()).then(|| std::mem::take(&mut script.pending))
+            (!script.failed()).then(|| (std::mem::take(&mut script.pending), script.light_update_s))
         })?;
-        let Some(pending) = pending else {
+        let Some((pending, light)) = pending else {
             continue;
         };
 
@@ -309,18 +309,29 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
             epoch,
         };
         let call = prepare_hook(cx, index, ScriptHook::UpdateS)?;
+        let mut last = None;
         for id in &pending {
             let Some(call) = &call else {
                 break;
             };
 
             // Only an error puts a script in error, and it ends the calls of its list.
-            let error = call_update_s(cx, index, call, key, *id)?;
+            last = Some(*id);
+            let error = if light {
+                call_update_s_light(cx, index, call, key, *id)?
+            } else {
+                call_update_s(cx, index, call, key, *id)?
+            };
             let failed = error.is_some();
             first = first.or(error);
             if failed {
                 break;
             }
+        }
+        // After a light list, `shape` and `shape2D` hold the handles of the last instance
+        // called, as after the normal calls: what reads them next sees the same values.
+        if let (true, Some(id)) = (light, last) {
+            publish_shape(cx, key, id)?;
         }
 
         cx.data(|data| {
@@ -341,15 +352,44 @@ fn call_update_s(
     id: FrameInstanceId,
 ) -> mlua::Result<Option<String>> {
     timed(cx, index, ScriptHook::UpdateS, || {
+        publish_shape(cx, key, id)?;
+        run_hook(cx, index, ScriptHook::UpdateS, call)
+    })
+}
+
+/// Publishes the handles of the instance `id` as `shape` and `shape2D`.
+fn publish_shape(
+    cx: &Cx,
+    key: crate::binding::payload::FrameKey,
+    id: FrameInstanceId,
+) -> mlua::Result<()> {
+    publish(
+        cx.lua,
+        Published::Shape,
+        cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?,
+    )?;
+    publish(
+        cx.lua,
+        Published::Shape2D,
+        cx.object(Payload::Shape(ShapeTarget { key, id: id.shape }))?,
+    )
+}
+
+/// One `UpdateS` call of a script whose hook takes a light `shape` (`light_shapes`): a value of
+/// the instance's handle made for the call alone, not kept among the handles of the frame, and
+/// no `shape2D`, which the hook never reads.
+fn call_update_s_light(
+    cx: &Cx,
+    index: usize,
+    call: &HookCall,
+    key: crate::binding::payload::FrameKey,
+    id: FrameInstanceId,
+) -> mlua::Result<Option<String>> {
+    timed(cx, index, ScriptHook::UpdateS, || {
         publish(
             cx.lua,
             Published::Shape,
-            cx.object(Payload::Instance(InstanceTarget::Frame(key, id)))?,
-        )?;
-        publish(
-            cx.lua,
-            Published::Shape2D,
-            cx.object(Payload::Shape(ShapeTarget { key, id: id.shape }))?,
+            cx.value(Payload::Instance(InstanceTarget::Frame(key, id)))?,
         )?;
         run_hook(cx, index, ScriptHook::UpdateS, call)
     })

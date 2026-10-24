@@ -685,6 +685,21 @@ fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Optimized Lua (unsafe)"),
     );
+    // Rust-only (owner request): the experimental Lua paths, on top of the optimised Lua (which
+    // they need): the UpdateS hooks that only use fields of `shape`, as read from the source
+    // when the profile loads, receive a light `shape` and no `shape2D`. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuLuaExperimental,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::NextGameLoad,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Experimental Lua optimization"),
+    );
     // Rust-only (owner request): the scripts and the conversion of a frame run on their own
     // thread while the frame before it is drawn, one displayed frame later; "Auto" does so only
     // while the frames are late. Not exposed to Lua.

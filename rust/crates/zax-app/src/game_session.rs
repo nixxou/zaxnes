@@ -319,6 +319,7 @@ impl GameSession {
         );
         let (sender, events) = channel();
         let optimized = model.get(SettingId::EmuLuaOptimized).as_bool();
+        let experimental = model.get(SettingId::EmuLuaExperimental).as_bool();
         let mut settings = ScriptSettings::new(
             std::mem::replace(model, SettingsModel::new()),
             ScriptLight::Model,
@@ -344,6 +345,7 @@ impl GameSession {
                 version: profile.version_text.clone().unwrap_or_default(),
             },
             optimized,
+            experimental,
             ..ScriptEnvironment::default()
         };
         // REQ-LUA-015 step 1: every chunk runs before anything else, with the scene and the
@@ -351,6 +353,13 @@ impl GameSession {
         let runtime = with_context(scene, &mut core, &mut input, None, |context| {
             ProfileScriptRuntime::create_in(profile, environment, engine.state_mut(), Some(context))
         })?;
+        let light = runtime.light_update_s_scripts();
+        if !light.is_empty() {
+            crate::app_log::line(&format!(
+                "Zaxnes: Lua: the UpdateS of {} take(s) the light shape.",
+                light.join(", ")
+            ));
+        }
         engine.set_script_host(Box::new(runtime));
         let mut session = Self {
             core: Box::new(core),

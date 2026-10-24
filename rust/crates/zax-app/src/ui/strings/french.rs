@@ -202,6 +202,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.catch_up", "Rattrapage en cas de retard (frames)"),
     ("setting.emu.lua_smooth_gc", "Nettoyage mémoire Lua lissé"),
     ("setting.emu.lua_optimized", "Lua optimisé (unsafe)"),
+    (
+        "setting.emu.lua_experimental",
+        "Optimisation Lua expérimentale (nécessite Lua optimisé)",
+    ),
     ("setting.emu.pipeline", "Scripts en parallèle du dessin"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
     ("setting.video.backend", "API graphique (au prochain démarrage)"),

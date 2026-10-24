@@ -118,6 +118,7 @@ setting_ids! {
     EmuCatchUp => "emu.catch_up",
     EmuLuaSmoothGc => "emu.lua_smooth_gc",
     EmuLuaOptimized => "emu.lua_optimized",
+    EmuLuaExperimental => "emu.lua_experimental",
     EmuPipeline => "emu.pipeline",
     VideoDynamicResolution => "video.dynamic_resolution",
     VideoBackend => "video.backend",
