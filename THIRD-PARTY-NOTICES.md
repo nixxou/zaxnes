@@ -8,7 +8,7 @@ Zaxnes est une **réimplémentation indépendante**, sans lien avec Geod Studio 
 
 ### 3DNes_Engine — (c) Geod Studio — GNU GPL v3
 
-Une partie du moteur de conversion 2D vers 3D (`src/Zax.Engine3D`) est **adaptée de
+Une partie du moteur de conversion 2D vers 3D (`rust/crates/zax-engine3d`) est **adaptée de
 3DNes_Engine**, une version antérieure et publique du moteur de conversion publiée par son
 auteur sous GNU GPL v3. Les fichiers concernés portent l'en-tête :
 
@@ -17,30 +17,11 @@ auteur sous GNU GPL v3. Les fichiers concernés portent l'en-tête :
 3DNes_Engine est distribué sous GNU GPL v3 ; c'est cette licence qui impose à Zaxnes d'être
 lui-même sous GPL v3. Le texte complet de la licence est dans `LICENSE`.
 
-## Paquets livrés avec cette version
-
-La liste exacte est dans `Zax.App.deps.json`.
-
-| Paquet | Version | Licence |
-|---|---|---|
-| Silk.NET.Core, .Maths, .OpenGL, .OpenGL.Extensions.ImGui, .Windowing(.Common/.Glfw), .Input(.Common/.Extensions/.Glfw), .GLFW, .OpenAL | 2.23.0 | MIT |
-| Ultz.Native.GLFW — binaire natif de **GLFW** (`glfw3.dll`) | 3.4.0 | zlib/libpng |
-| Silk.NET.OpenAL.Soft.Native — binaire natif d'**OpenAL Soft** (`soft_oal.dll`) | 1.23.1 | LGPL v2.1 |
-| ImGui.NET — et le binaire natif **Dear ImGui / cimgui** (`cimgui.dll`) | 1.90.8.1 | MIT |
-| KeraLua — et le binaire natif **Lua 5.4** (`lua54.dll`) | 1.4.11 | MIT |
-| Microsoft.Extensions.DependencyModel | 9.0.9 | MIT |
-| Microsoft.DotNet.PlatformAbstractions | 3.1.6 | Apache 2.0 |
-| Runtime .NET 10 (Microsoft), inclus car la version est autonome | 10.0 | MIT |
-
-**OpenAL Soft** est sous LGPL v2.1 et est livré comme bibliothèque dynamique séparée
-(`soft_oal.dll`) : elle est remplaçable par une autre version compatible, ce que la LGPL
-demande. Zaxnes fonctionne sans elle, en silence (`--no-audio`).
-
 **Dear ImGui** embarque sa police intégrée (Proggy Clean, domaine public), que Zaxnes utilise en
 repli quand aucune police système n'est trouvée (AMD-024 REQ-PUB-006).
 
 Le format de profil `.3dn` est lu et écrit par un codec écrit pour ce projet
-(`src/Zax.Profiles/Wire/`) ; aucune bibliothèque protobuf n'est livrée.
+(`rust/crates/zax-profiles/src/wire/`) ; aucune bibliothèque protobuf n'est livrée.
 
 ## Assets
 
@@ -53,15 +34,16 @@ menu** (REQ-PUB-005, révisée le 2026-10-21). Les profils de jeu et les ROMs ne
 L'inventaire complet, fichier par fichier, est dans
 [`ASSETS-LICENSES.md`](ASSETS-LICENSES.md).
 
-## Port Rust (`rust/`)
+## Paquets livrés avec cette version
 
-Le binaire `zaxnes` du port Rust est lié aux paquets suivants (graphe de dépendances normales
-de `zax-app`, fonctionnalité `bundled` : SDL2 est alors lié statiquement). Liste produite par
+Le binaire `zaxnes` est lié aux paquets suivants (graphe de dépendances normales de `zax-app`,
+fonctionnalité `bundled` : SDL2 est alors lié statiquement, comme dans la version Windows ; les
+versions Linux et PortMaster utilisent la bibliothèque SDL2 du système, sous licence zlib). Liste produite par
 `cargo tree -p zax-app --features bundled -e normal --format "{p}|{l}"` ; les paquets de
 l’espace de travail (code de Zaxnes) ne sont pas listés. Les sources de Dear ImGui, de Lua 5.4
 et de SDL2 voyagent dans leurs paquets `imgui-sys`, `mlua-sys` et `sdl2-sys`.
 
-La version Rust ne livre aucun paquet LGPL : OpenAL n’est plus utilisé.
+Aucun paquet LGPL n’est livré.
 
 | Paquet | Version | Licence |
 |---|---|---|

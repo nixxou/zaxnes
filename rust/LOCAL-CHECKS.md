@@ -1,8 +1,9 @@
 # Local checks (what only a real machine can confirm)
 
-Run from the repository root unless a block says otherwise. `rust/` holds the Rust workspace, the
-C# solution is at the root. Blocks are given for PowerShell (Windows) then for a POSIX shell
-(Linux); the same environment variables work in both.
+Run from the repository root unless a block says otherwise. `rust/` holds the Rust workspace.
+The blocks that run the C# reference (`dotnet ...`, `tools/Zax.Harness`) need a checkout of the
+`archive-dotnetversion` branch, which holds the C# solution. Blocks are given for PowerShell
+(Windows) then for a POSIX shell (Linux); the same environment variables work in both.
 
 ## 0. Environment
 

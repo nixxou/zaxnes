@@ -1,5 +1,0 @@
-# Public test ROMs, their reference logs and their documentation are downloaded by the
-# verifier (see README.md) and never committed to this repository.
-*
-!.gitignore
-!README.md
