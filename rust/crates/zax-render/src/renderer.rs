@@ -116,8 +116,10 @@ struct DrawGroup {
 /// start in the instance buffer.
 #[derive(Debug, Clone, Copy)]
 struct InstanceRun {
-    start: usize,
-    end: usize,
+    /// The bucket index of the first item, whose state every item of the run shares.
+    first: usize,
+    /// How many items the run draws.
+    count: usize,
     offset: usize,
 }
 
@@ -175,7 +177,7 @@ struct Passes {
     /// The placements of every scene draw of the frame, uploaded once before the scene pass.
     instance_buffer: glow::Buffer,
     instance_data: Vec<u8>,
-    /// Scratch space of [`group_by_state`].
+    /// Scratch space of the draw state labels and drawing orders.
     opaque_scratch: OpaqueScratch,
     /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`: each run starts at a multiple of it.
     instance_alignment: usize,
@@ -205,7 +207,7 @@ pub struct SceneRenderer {
     passes: Passes,
     last_view: CameraView,
     /// Whether the opaque bucket and the tiles of each transparent object are reordered by draw
-    /// state ([`group_by_state`]).
+    /// state ([`OpaqueScratch::order_range`]).
     group_opaque: bool,
 }
 
@@ -871,51 +873,42 @@ impl Passes {
     /// consecutive items with the same draw state (never across the objects of the two blended
     /// buckets, whose two passes go object by object), and uploads them in one call.
     fn upload_instances(&mut self, lists: &mut DrawLists, group_opaque: bool) {
-        if group_opaque {
-            group_by_state(&mut lists.opaque, &mut self.opaque_scratch);
-            for group in &lists.transparent_objects {
-                group_by_state(
-                    &mut lists.transparent[group.start..group.end],
-                    &mut self.opaque_scratch,
-                );
-            }
-            // The HUD is left alone: its tiles share one plane, where an overlap is an exact tie.
-        }
-
+        let scratch = &mut self.opaque_scratch;
         let data = &mut self.instance_data;
         let alignment = self.instance_alignment;
         data.clear();
 
+        // Opaque: one object, the whole bucket.
+        scratch.label(&lists.opaque);
+        scratch.order_range(0, lists.opaque.len(), group_opaque);
         add_runs(
             &lists.opaque,
-            0,
-            lists.opaque.len(),
+            scratch,
             &mut lists.opaque_runs,
             data,
             alignment,
         );
+
+        // Blended objects: the runs never cross an object; the tiles of a transparent object
+        // may be grouped, the HUD's never (its tiles share one plane, an overlap is a tie).
+        scratch.label(&lists.transparent);
         for group in &mut lists.transparent_objects {
             let first = lists.transparent_runs.len();
+            scratch.order_range(group.start, group.end, group_opaque);
             add_runs(
                 &lists.transparent,
-                group.start,
-                group.end,
+                scratch,
                 &mut lists.transparent_runs,
                 data,
                 alignment,
             );
             group.runs = (first, lists.transparent_runs.len());
         }
+        scratch.label(&lists.hud);
         for group in &mut lists.hud_objects {
             let first = lists.hud_runs.len();
-            add_runs(
-                &lists.hud,
-                group.start,
-                group.end,
-                &mut lists.hud_runs,
-                data,
-                alignment,
-            );
+            scratch.order_range(group.start, group.end, false);
+            add_runs(&lists.hud, scratch, &mut lists.hud_runs, data, alignment);
             group.runs = (first, lists.hud_runs.len());
         }
 
@@ -929,7 +922,7 @@ impl Passes {
     /// Draws the items of `run` (a run of `items`) with one instanced call: the state of its
     /// first item, which every item of the run shares, and the placements of the run.
     fn draw_run(&mut self, items: &[DrawItem], run: &InstanceRun, opaque: bool) {
-        let item = &items[run.start];
+        let item = &items[run.first];
         let (_, determinant) = interop::normal_matrix(&item.model);
 
         // Q-069: a placement with a negative determinant mirrors the object. Its triangles come
@@ -969,7 +962,7 @@ impl Passes {
             }
         }
 
-        let instances = run.end - run.start;
+        let instances = run.count;
         self.gl.bind_buffer_range(
             glow::UNIFORM_BUFFER,
             INSTANCE_BINDING,
@@ -1159,73 +1152,93 @@ fn deform_bits(deform: &DeformParameters) -> [u32; 38] {
     bits
 }
 
-/// Reusable buffers of [`group_by_state`].
+/// The draw state labels of a bucket and the drawing order of one object of it, reused from
+/// frame to frame: the items themselves never move.
 #[derive(Debug, Default)]
 struct OpaqueScratch {
-    groups: FastMap<DrawStateKey, usize>,
-    order: Vec<(usize, usize)>,
-    items: Vec<DrawItem>,
+    groups: FastMap<DrawStateKey, u32>,
+    /// The draw state label of each item of the bucket: equal labels, equal state.
+    labels: Vec<u32>,
+    /// The bucket indices of the object being cut into runs, in drawing order.
+    order: Vec<u32>,
+    sort: Vec<(u32, u32)>,
+    /// The rank of each state inside the object being ordered.
+    ranks: FastMap<u32, u32>,
 }
 
-/// Reorders `items` so that the items sharing a draw state are consecutive: groups in the
-/// order of their first item, items in list order inside a group, and the runs of [`add_runs`]
-/// then cover whole groups (Rust-only, draw-call batching).
-///
-/// Opaque items are drawn with the depth test and without blending, so the picture does not
-/// depend on their order; the tiles of one blended object go through a depth-only pass, then
-/// a colour pass where the depth is equal, so inside an object the order does not matter either.
-/// Only exact depth ties between two different states could come out differently.
-fn group_by_state(items: &mut [DrawItem], scratch: &mut OpaqueScratch) {
-    scratch.groups.clear();
-    scratch.order.clear();
-    for (index, item) in items.iter().enumerate() {
-        let next = scratch.groups.len();
-        let group = *scratch.groups.entry(DrawStateKey::of(item)).or_insert(next);
-        scratch.order.push((group, index));
+impl OpaqueScratch {
+    /// Labels every item of `items` with its draw state (one key per item).
+    fn label(&mut self, items: &[DrawItem]) {
+        self.groups.clear();
+        self.labels.clear();
+        for item in items {
+            let next = u32::try_from(self.groups.len()).unwrap_or(u32::MAX);
+            self.labels
+                .push(*self.groups.entry(DrawStateKey::of(item)).or_insert(next));
+        }
     }
 
-    if scratch.groups.len() == items.len() {
-        return;
-    }
+    /// The drawing order of the object `start..end` of the labelled bucket: list order, or,
+    /// with `group`, the items of one state together (states in the order of their first item,
+    /// list order inside a state; Rust-only, draw-call batching).
+    ///
+    /// Opaque items are drawn with the depth test and without blending, so the picture does not
+    /// depend on their order; the tiles of one blended object go through a depth-only pass, then
+    /// a colour pass where the depth is equal, so inside an object the order does not matter
+    /// either. Only exact depth ties between two different states could come out differently.
+    fn order_range(&mut self, start: usize, end: usize, group: bool) {
+        self.order.clear();
+        let index = |position: usize| u32::try_from(position).unwrap_or(u32::MAX);
+        if !group {
+            self.order.extend((start..end).map(index));
+            return;
+        }
 
-    scratch.order.sort_unstable();
-    scratch.items.clear();
-    scratch
-        .items
-        .extend(scratch.order.iter().map(|&(_, index)| items[index]));
-    items.copy_from_slice(&scratch.items);
+        // States numbered by first appearance inside the object, so that the order does not
+        // depend on the label numbering of the whole bucket.
+        self.sort.clear();
+        self.ranks.clear();
+        for position in start..end {
+            let next = index(self.ranks.len());
+            let rank = *self.ranks.entry(self.labels[position]).or_insert(next);
+            self.sort.push((rank, index(position)));
+        }
+        self.sort.sort_unstable();
+        self.order
+            .extend(self.sort.iter().map(|&(_, position)| position));
+    }
 }
 
-/// Cuts `items[start..end]` into runs of at most [`INSTANCES_PER_DRAW`] consecutive items
-/// with the same draw state, appends their placements to `data` (each run at a multiple of
-/// `alignment`) and the runs to `runs`.
+/// Cuts the object `scratch.order` of `items` into runs of at most [`INSTANCES_PER_DRAW`]
+/// consecutive items (in drawing order) with the same draw state label, appends their placements
+/// to `data` (each run at a multiple of `alignment`) and the runs to `runs`.
 fn add_runs(
     items: &[DrawItem],
-    start: usize,
-    end: usize,
+    scratch: &OpaqueScratch,
     runs: &mut Vec<InstanceRun>,
     data: &mut Vec<u8>,
     alignment: usize,
 ) {
-    let mut first = start;
-    while first < end {
-        let key = DrawStateKey::of(&items[first]);
+    let order = &scratch.order;
+    let mut first = 0;
+    while first < order.len() {
+        let label = scratch.labels[order[first] as usize];
         let mut last = first + 1;
-        while last < end
+        while last < order.len()
             && last - first < INSTANCES_PER_DRAW
-            && DrawStateKey::of(&items[last]) == key
+            && scratch.labels[order[last] as usize] == label
         {
             last += 1;
         }
 
         let offset = data.len().next_multiple_of(alignment);
         data.resize(offset, 0);
-        for item in &items[first..last] {
-            push_placement(data, item);
+        for &position in &order[first..last] {
+            push_placement(data, &items[position as usize]);
         }
         runs.push(InstanceRun {
-            start: first,
-            end: last,
+            first: order[first] as usize,
+            count: last - first,
             offset,
         });
         first = last;
