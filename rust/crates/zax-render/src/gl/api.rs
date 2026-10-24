@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use glow::{
-    Buffer, Framebuffer, HasContext, PixelUnpackData, Program, ProgramBinary, Renderbuffer, Shader,
-    Texture, UniformLocation, VertexArray,
+    Buffer, Framebuffer, HasContext, PixelUnpackData, Program, ProgramBinary, Query, Renderbuffer,
+    Shader, Texture, UniformLocation, VertexArray,
 };
 use thiserror::Error;
 
@@ -77,6 +77,9 @@ impl std::fmt::Debug for Gl {
             .finish_non_exhaustive()
     }
 }
+
+/// `GL_GPU_DISJOINT_EXT`.
+const GPU_DISJOINT: u32 = 0x8FBB;
 
 fn created<T>(kind: &'static str, result: Result<T, String>) -> Result<T, GlError> {
     result.map_err(|message| GlError::Create { kind, message })
@@ -544,6 +547,66 @@ impl Gl {
     }
 
     // ------------------------------------------------------------ framebuffers
+
+    /// Whether the context times GPU work: OpenGL 3.3 has timer queries, OpenGL ES needs
+    /// `GL_EXT_disjoint_timer_query`.
+    pub fn supports_timer_queries(&self) -> bool {
+        !self.embedded
+            || self
+                .context
+                .supported_extensions()
+                .contains("GL_EXT_disjoint_timer_query")
+    }
+
+    pub fn create_query(&self) -> Result<Query, GlError> {
+        // SAFETY: renderer contract; creates a new object.
+        created("query", unsafe { self.context.create_query() })
+    }
+
+    pub fn delete_query(&self, query: Query) {
+        // SAFETY: renderer contract; the query is live.
+        unsafe { self.context.delete_query(query) }
+    }
+
+    /// Starts timing the GPU work that follows into `query`.
+    pub fn begin_time_elapsed(&self, query: Query) {
+        // SAFETY: renderer contract; the query is live and no other time query is open
+        // (`GpuTimer` opens one at a time).
+        unsafe { self.context.begin_query(glow::TIME_ELAPSED, query) }
+    }
+
+    /// Ends the open time query.
+    pub fn end_time_elapsed(&self) {
+        // SAFETY: renderer contract; `GpuTimer` only ends the query it opened.
+        unsafe { self.context.end_query(glow::TIME_ELAPSED) }
+    }
+
+    /// Whether the result of `query` is there, without waiting for it.
+    pub fn query_ready(&self, query: Query) -> bool {
+        // SAFETY: renderer contract; the query is live and has ended.
+        unsafe {
+            self.context
+                .get_query_parameter_u32(query, glow::QUERY_RESULT_AVAILABLE)
+                != 0
+        }
+    }
+
+    /// The nanoseconds `query` measured; its result is available.
+    pub fn query_nanoseconds(&self, query: Query) -> u32 {
+        // SAFETY: renderer contract; the query is live and its result available, so reading it
+        // does not wait.
+        unsafe {
+            self.context
+                .get_query_parameter_u32(query, glow::QUERY_RESULT)
+        }
+    }
+
+    /// Whether the GPU went through a disjoint period (OpenGL ES): the last results are not to
+    /// be trusted.
+    pub fn gpu_disjoint(&self) -> bool {
+        // SAFETY: renderer contract; a plain state query of the extension the timer requires.
+        self.embedded && unsafe { self.context.get_parameter_i32(GPU_DISJOINT) } != 0
+    }
 
     pub fn create_framebuffer(&self) -> Result<Framebuffer, GlError> {
         // SAFETY: renderer contract; creates a new object.

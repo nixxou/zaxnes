@@ -248,7 +248,10 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::Volume => format!("{} %", volume_percent(settings.volume())),
         OptionRow::RenderScale => render_scale_options()
             .get(render_scale_index(settings))
-            .map_or_else(String::new, |label| text::label_of_option(label)),
+            .map_or_else(
+                || text::label_of_option("Auto"),
+                |label| text::label_of_option(label),
+            ),
         OptionRow::Shadows => switch(settings.shadow()),
         OptionRow::FrameCap => format!("{} fps", frame_cap(settings)),
         OptionRow::ShowFps => switch(settings.show_fps()),
@@ -344,8 +347,11 @@ fn render_scale_options() -> Vec<&'static str> {
 }
 
 /// The index of the resolution scale in force: the scale only applies to the "Render Tex"
-/// method, so the other method is "Native".
+/// method, so the other method is "Native"; the automatic resolution comes after the scales.
 fn render_scale_index(settings: &SettingsModel) -> usize {
+    if settings.get(SettingId::VideoDynamicResolution).as_bool() {
+        return render_scale_options().len();
+    }
     if settings.render_method() == RENDER_TEXTURE_METHOD {
         usize::try_from(settings.get(SettingId::VideoResScale).as_int()).unwrap_or(0)
     } else {
@@ -354,11 +360,20 @@ fn render_scale_index(settings: &SettingsModel) -> usize {
 }
 
 fn set_render_scale(settings: &mut SettingsModel, step: i32) {
-    let count = i32::try_from(render_scale_options().len())
+    let scales = i32::try_from(render_scale_options().len())
         .unwrap_or(1)
         .max(1);
     let here = i32::try_from(render_scale_index(settings)).unwrap_or(0);
-    let next = (here + step).rem_euclid(count);
+    let next = (here + step).rem_euclid(scales + 1);
+    let automatic = next == scales;
+    settings.set(
+        SettingId::VideoDynamicResolution,
+        SettingValue::Bool(automatic),
+    );
+    if automatic {
+        settings.set_render_method(RENDER_TEXTURE_METHOD);
+        return;
+    }
     settings.set(SettingId::VideoResScale, SettingValue::Enum(next));
     settings.set_render_method(if next > 0 {
         RENDER_TEXTURE_METHOD
@@ -428,7 +443,16 @@ mod tests {
         model.handle(PadButton::Left, &mut settings);
         assert_eq!(DIRECT_METHOD, settings.render_method());
         assert!((settings.res_scale_factor() - 1.0).abs() < 1.0e-6);
+        // Before Native comes the automatic resolution, then the smallest scale.
         model.handle(PadButton::Left, &mut settings);
+        assert!(settings.get(SettingId::VideoDynamicResolution).as_bool());
+        assert_eq!(RENDER_TEXTURE_METHOD, settings.render_method());
+        assert_eq!(
+            "Auto",
+            value_text(OptionRow::RenderScale, &settings, CameraPreset::Orbit)
+        );
+        model.handle(PadButton::Left, &mut settings);
+        assert!(!settings.get(SettingId::VideoDynamicResolution).as_bool());
         assert_eq!(
             4,
             settings.get(SettingId::VideoResScale).as_int(),

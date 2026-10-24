@@ -52,6 +52,9 @@ pub struct RenderStatistics {
     /// CPU time of the collection of the tiles into the buckets (Rust-only, for the frame
     /// profiler).
     pub collect_time: Duration,
+    /// GPU time of the scene passes of an earlier frame, when a measure arrived during this one
+    /// (Rust-only, for the dynamic resolution); `None` without one or without timer queries.
+    pub gpu_time: Option<Duration>,
 }
 
 impl Default for RenderStatistics {
@@ -75,6 +78,7 @@ impl Default for RenderStatistics {
             anti_alias_samples: 1,
             occluders: 0,
             collect_time: Duration::ZERO,
+            gpu_time: None,
         }
     }
 }
@@ -94,6 +98,7 @@ impl RenderStatistics {
         self.skybox_pass = false;
         self.anti_alias_samples = 1;
         self.occluders = 0;
+        self.gpu_time = None;
         self.collect_time = Duration::ZERO;
     }
 }

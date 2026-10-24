@@ -704,6 +704,20 @@ fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Pipelined frames"),
     );
+    // Rust-only (owner request): the scene's render scale follows the GPU time, between native
+    // and 1/2, instead of `video.res_scale` (render texture method only). Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoDynamicResolution,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Automatic resolution"),
+    );
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

@@ -20,6 +20,7 @@ use crate::camera::CameraView;
 use crate::color;
 use crate::geometry;
 use crate::gl::api::{Gl, GlError};
+use crate::gl::gpu_timer::GpuTimer;
 use crate::gl::linear_buffer::LinearColorBuffer;
 use crate::gl::mesh_cache::{GpuMesh, MeshCache};
 use crate::gl::picture::{self, NesPictureTexture};
@@ -209,6 +210,8 @@ pub struct SceneRenderer {
     /// Whether the opaque bucket and the tiles of each transparent object are reordered by draw
     /// state ([`OpaqueScratch::order_range`]).
     group_opaque: bool,
+    /// The GPU time of the scene passes, when the context can measure it.
+    timer: Option<GpuTimer>,
 }
 
 impl SceneRenderer {
@@ -290,6 +293,7 @@ impl SceneRenderer {
             lists: DrawLists::default(),
             last_view: CameraView::default(),
             group_opaque: false,
+            timer: None,
             textures,
             shadow_map,
             passes,
@@ -303,6 +307,19 @@ impl SceneRenderer {
     /// the same, so a few edge pixels may change.
     pub fn set_group_opaque_draws(&mut self, group: bool) {
         self.group_opaque = group;
+    }
+
+    /// Turns the GPU timing of the scene passes on or off (`RenderStatistics::gpu_time`, the
+    /// measure of the dynamic resolution). Returns whether the context times GPU work.
+    pub fn set_gpu_timing(&mut self, enabled: bool) -> bool {
+        if enabled {
+            if self.timer.is_none() {
+                self.timer = GpuTimer::new(&self.gl);
+            }
+        } else if let Some(timer) = self.timer.take() {
+            timer.delete(&self.gl);
+        }
+        self.timer.is_some()
     }
 
     /// What the last rendered frame cost (REQ-SCN-064).
@@ -345,8 +362,15 @@ impl SceneRenderer {
         let started = std::time::Instant::now();
         self.collect(scene, frame, &view)?;
         self.passes.statistics.collect_time = started.elapsed();
+        if let Some(timer) = &mut self.timer {
+            self.passes.statistics.gpu_time = timer.collect(&self.gl);
+            timer.begin(&self.gl);
+        }
         let volume = self.render_shadow_map(scene, &view)?;
         self.render_scene(target, scene, frame, &view, &volume)?;
+        if let Some(timer) = &mut self.timer {
+            timer.end(&self.gl);
+        }
 
         let statistics = &mut self.passes.statistics;
         statistics.resident_meshes = count(self.meshes.count());
