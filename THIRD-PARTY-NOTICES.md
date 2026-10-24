@@ -17,6 +17,43 @@ auteur sous GNU GPL v3. Les fichiers concernés portent l'en-tête :
 3DNes_Engine est distribué sous GNU GPL v3 ; c'est cette licence qui impose à Zaxnes d'être
 lui-même sous GPL v3. Le texte complet de la licence est dans `LICENSE`.
 
+### z2rs — (c) 2026 troyedwardsjr — licence MIT
+
+Le décodeur des marges du mode écran large de *Zelda II* (`rust/crates/zax-nes/src/wide_decode/zelda2.rs`)
+est **adapté de z2rs** (<https://github.com/troyedwardsjr/z2rs>, fichiers
+`crates/z2-core/src/wide_margins.rs` et `overworld_map.rs`), publié sous la licence MIT
+suivante :
+
+    MIT License
+
+    Copyright (c) 2026 troyedwardsjr
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+### z2disassembly — FiendsOfTheElements — CC0 1.0
+
+Le correctif écran large de *Zelda II* que Zaxnes applique en mémoire
+(`rust/crates/zax-nes/patches/zelda2-usa-widescreen.bps`) est construit à partir du désassemblage
+*z2disassembly* (<https://github.com/FiendsOfTheElements/z2disassembly>), versé au domaine public
+par ses auteurs (CC0 1.0). Le correctif ne contient pas la ROM : il s'applique à la copie du
+joueur.
+
 **Dear ImGui** embarque sa police intégrée (Proggy Clean, domaine public), que Zaxnes utilise en
 repli quand aucune police système n'est trouvée (AMD-024 REQ-PUB-006).
 
@@ -46,6 +83,11 @@ pour les deux cibles ; les paquets de l’espace de travail (code de Zaxnes) ne 
 et de SDL2 voyagent dans leurs paquets `imgui-sys`, `mlua-sys` et `sdl2-sys`.
 
 Aucun paquet LGPL n’est livré.
+
+Les vignettes des sauvegardes d'état sont encodées en JPEG par le paquet `jpeg-encoder`, dont
+une partie relève de la licence de l'Independent JPEG Group, qui demande cette mention : *this
+software is based in part on the work of the Independent JPEG Group* (ce logiciel est fondé en
+partie sur les travaux de l'Independent JPEG Group).
 
 | Paquet | Version | Licence |
 |---|---|---|
@@ -97,6 +139,7 @@ Aucun paquet LGPL n’est livré.
 | imgui-sys | 0.12.0 | MIT OR Apache-2.0 |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
+| jpeg-encoder | 0.7.1 | (MIT OR Apache-2.0) AND IJG |
 | lazy_static | 1.5.1 | MIT OR Apache-2.0 |
 | libc | 0.2.191 | MIT OR Apache-2.0 |
 | libloading | 0.8.9 | ISC |
