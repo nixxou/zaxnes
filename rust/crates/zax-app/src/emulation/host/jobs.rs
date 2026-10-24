@@ -9,7 +9,9 @@ use zax_engine3d::state_codec;
 use zax_nes::{NesCore, NesRegion};
 use zax_profiles::enums::TvRegionMode;
 use zax_settings::catalogue::SettingId;
+use zax_settings::values::SettingValue;
 
+use super::games::{ConfirmationRequest, ConfirmedAction, NO_LABEL, YES_LABEL};
 use super::{EmulationHost, GameView};
 use crate::audio::audio_mixer::AudioSampleSource;
 use crate::emulation::commands::{Command, CommandArgs};
@@ -61,6 +63,21 @@ impl LoadJob {
             different_game: false,
         }
     }
+}
+
+/// How a save state stands against the built-in hack as set (Rust-only, owner request).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotPatchStatus {
+    /// It loads as it is (also any state of a ROM no built-in patch is made for).
+    Fits,
+    /// Made with the hack (`hack`) or without it while the setting says the other: it loads once
+    /// the hack is switched to match (orange in the menus).
+    OtherMode {
+        /// Whether the state needs the hack on.
+        hack: bool,
+    },
+    /// Made with another version of the hack: it cannot load (red in the menus).
+    OtherVersion,
 }
 
 /// How a stage ended.
@@ -189,6 +206,34 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.fail_job(CORRUPTED_MESSAGE);
             return;
         };
+        match self.state_patch_status(&state) {
+            SlotPatchStatus::Fits => {}
+            // The hack's code of another version would run on this memory: refused.
+            SlotPatchStatus::OtherVersion => {
+                self.notifications
+                    .show_error(save_state_file::OTHER_HACK_VERSION_MESSAGE);
+                return;
+            }
+            // Made the other way: the hack is switched to match, once the player agrees.
+            SlotPatchStatus::OtherMode { hack } => {
+                self.confirm(ConfirmationRequest {
+                    title: game.title.clone(),
+                    message: if hack {
+                        save_state_file::TURN_HACK_ON_QUESTION
+                    } else {
+                        save_state_file::TURN_HACK_OFF_QUESTION
+                    }
+                    .to_owned(),
+                    confirm_label: YES_LABEL.to_owned(),
+                    cancel_label: NO_LABEL.to_owned(),
+                    action: ConfirmedAction::LoadSlotSwitchingHack {
+                        slot_id: slot_id.to_owned(),
+                        hack,
+                    },
+                });
+                return;
+            }
+        }
         let mut job = LoadJob::new(LoadKind::LoadSlot);
         job.game = Some(game);
         slot_id.clone_into(&mut job.slot_id);
@@ -304,8 +349,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let Some(rom) = job.rom.as_ref() else {
                     return Step::Failed(INVALID_ROM_MESSAGE.to_owned());
                 };
+                let builtin_patches = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
                 let result = match self.session.as_mut() {
-                    Some(session) => session.load_rom(&rom.image, &rom.name),
+                    Some(session) => {
+                        session.core_mut().set_builtin_patches(builtin_patches);
+                        session.load_rom(&rom.image, &rom.name)
+                    }
                     None => return Step::Failed(INVALID_ROM_MESSAGE.to_owned()),
                 };
                 if !result.success {
@@ -396,9 +445,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         game: &ResolvedGame,
         state: &SaveStateContent,
     ) -> Step {
+        let builtin_patches = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
         let Some(session) = self.session.as_mut() else {
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
+        // The state carries the original ROM: the hack applies to it as the setting says now.
+        session.core_mut().set_builtin_patches(builtin_patches);
         if let Err(error) = session.restore_core(&state.core) {
             self.log(&format!("savestate refused: {error}"));
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
@@ -541,9 +593,82 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         crate::scene_script_bridge::push_settings(&self.settings, scene);
     }
 
+    /// How `state` stands against the built-in hack as the settings have it.
+    #[must_use]
+    pub fn state_patch_status(&self, state: &SaveStateContent) -> SlotPatchStatus {
+        // Only a ROM a built-in patch is made for has a side to be on.
+        let Some(patch) = NesCore::state_builtin_patch(&state.core, 0) else {
+            return SlotPatchStatus::Fits;
+        };
+        // Files older than the header fields: the core block tells whether the hack ran.
+        let hack = state
+            .header
+            .is_hack
+            .unwrap_or_else(|| NesCore::state_uses_widescreen(&state.core, 0).unwrap_or(false));
+        if hack {
+            let current = format!("{:08X}", patch.version());
+            if state
+                .header
+                .hack_version
+                .as_ref()
+                .is_some_and(|version| !version.eq_ignore_ascii_case(&current))
+            {
+                return SlotPatchStatus::OtherVersion;
+            }
+        }
+        if hack == self.settings.get(SettingId::EmuBuiltinPatches).as_bool() {
+            SlotPatchStatus::Fits
+        } else {
+            SlotPatchStatus::OtherMode { hack }
+        }
+    }
+
+    /// [`EmulationHost::state_patch_status`] of the state of slot `slot_id`; remembered per slot,
+    /// save time and setting, so that a menu can ask every frame.
+    pub fn slot_patch_status(&self, slot_id: &str) -> SlotPatchStatus {
+        let Some(record) = self
+            .slots
+            .find(slot_id)
+            .filter(|record| record.is_occupied())
+        else {
+            return SlotPatchStatus::Fits;
+        };
+        let enabled = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
+        let key = (slot_id.to_owned(), record.saved_at, enabled);
+        if let Some(&status) = self.slot_patch_cache.borrow().get(&key) {
+            return status;
+        }
+        let status = std::fs::read(self.paths.slot_state_file(slot_id))
+            .ok()
+            .and_then(|bytes| save_state_file::try_read(&bytes))
+            .map_or(SlotPatchStatus::Fits, |state| {
+                self.state_patch_status(&state)
+            });
+        self.slot_patch_cache.borrow_mut().insert(key, status);
+        status
+    }
+
+    /// Turns the built-in hack on or off as `hack` says, then loads `slot_id`: the answer to the
+    /// question [`EmulationHost::load_slot`] asks for a state made the other way.
+    pub(super) fn load_slot_switching_hack(&mut self, slot_id: &str, hack: bool) {
+        self.settings
+            .set(SettingId::EmuBuiltinPatches, SettingValue::Bool(hack));
+        self.dispatch_setting_changes();
+        self.load_slot(slot_id);
+    }
+
     pub(super) fn current_rom_fingerprint(&self) -> Option<String> {
         let session = self.session.as_ref()?;
         let core = session.core();
+        // A ROM patched in memory by a built-in patch is identified by the player's ROM, so
+        // that its battery RAM survives a new version of the patch.
+        if let Some(original) = core.original_image() {
+            let rom = zax_nes::rom::RomImage::try_load(original, "").ok()?;
+            return Some(save_state_file::rom_fingerprint(
+                rom.prg_rom(),
+                rom.chr_rom(),
+            ));
+        }
         let cartridge = core.cartridge()?;
         Some(save_state_file::rom_fingerprint(
             cartridge.rom().prg_rom(),

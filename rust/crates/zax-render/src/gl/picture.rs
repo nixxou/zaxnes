@@ -18,15 +18,14 @@ pub const WIDTH: usize = 256;
 /// Height of the pixel frame.
 pub const HEIGHT: usize = 240;
 
-#[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // 256 and 240.
-const SIZE: (i32, i32) = (WIDTH as i32, HEIGHT as i32);
-
 /// The picture texture, created on first upload; released when dropped.
 #[derive(Debug)]
 pub struct NesPictureTexture {
     gl: Gl,
     pixels: Vec<u8>,
     handle: Option<Texture>,
+    /// Size of the texture allocated: 256 x 240, or larger for a widescreen picture.
+    size: (usize, usize),
 }
 
 impl NesPictureTexture {
@@ -36,15 +35,24 @@ impl NesPictureTexture {
             gl: gl.clone(),
             pixels: vec![0; WIDTH * HEIGHT * 4],
             handle: None,
+            size: (WIDTH, HEIGHT),
         }
     }
 
-    /// Uploads `indices` (256 × 240 NES colour indices, row 0 first) and returns the texture,
-    /// or `None` when the frame has the wrong size.
-    pub fn upload(&mut self, indices: &[u8]) -> Result<Option<Texture>, GlError> {
-        if indices.len() < WIDTH * HEIGHT {
+    /// Uploads `indices` (NES colour indices, row 0 first, `height` rows of 256 or of a
+    /// widescreen width) and returns the texture, or `None` when the frame has no such size.
+    pub fn upload(&mut self, indices: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
+        let Some(size) = crate::interop::picture_size(indices.len(), height) else {
             return Ok(None);
+        };
+        if size != self.size {
+            // Another size: a new texture of the right size.
+            if let Some(handle) = self.handle.take() {
+                self.gl.delete_texture(handle);
+            }
+            self.size = size;
         }
+        self.pixels.resize(size.0 * size.1 * 4, 0);
 
         for (pixel, &index) in self.pixels.chunks_exact_mut(4).zip(indices) {
             let color = nes_color(usize::from(index));
@@ -52,7 +60,8 @@ impl NesPictureTexture {
         }
 
         let gl = &self.gl;
-        let (width, height) = SIZE;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // At most 1280.
+        let (width, height) = (size.0 as i32, size.1 as i32);
         let existing = self.handle;
         let handle = match existing {
             Some(handle) => handle,

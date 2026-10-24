@@ -236,6 +236,9 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             palette,
             mask_x,
             mask_y,
+            margin: 0,
+            visible_rows: zax_nes::STANDARD_ROWS,
+            margin_y: 0,
         };
         let frame_counter = i32::try_from(counter)
             .map_err(|_| HarnessError::Usage("--frames: too many frames".to_owned()))?;

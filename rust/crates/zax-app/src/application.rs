@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use sdl2::event::{Event, WindowEvent};
 use time::OffsetDateTime;
 use zax_engine3d::draw_list::FrameDrawList;
+use zax_engine3d::frame::ConversionFrame;
 use zax_platform::audio::PREFERRED_SAMPLE_RATE;
 use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::icon;
@@ -541,6 +542,7 @@ impl Running {
     /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
         let view_height = (height - to_i32_f(self.ui.chrome_height())).max(1);
+        self.state.view_size = (width.max(1), view_height);
         let automatic = self.resolution.active;
         let factor = if automatic {
             self.resolution.governor.factor()
@@ -811,6 +813,7 @@ impl Running {
                 let frame = SceneFrame {
                     draw_list: Some(displayed),
                     nes_picture: &[],
+                    nes_picture_height: 0,
                 };
                 draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
             };
@@ -1259,11 +1262,17 @@ struct RunState {
     scene_frames: u64,
     skipped_frames: u64,
     last_render_size: (i32, i32),
+    /// The size of the view the scene fills, before any resolution scale: its ratio is the
+    /// picture's, which the widescreen margins follow (the scene's own size moves with the
+    /// automatic resolution, and its rounding with it).
+    view_size: (i32, i32),
     renderer_name: String,
     version: String,
     shadow_map_reported: bool,
     drag_origin: Option<[f32; 2]>,
     picture: Vec<u8>,
+    /// Its rows.
+    picture_height: usize,
 }
 
 impl RunState {
@@ -1273,11 +1282,13 @@ impl RunState {
             scene_frames: 0,
             skipped_frames: 0,
             last_render_size: (0, 0),
+            view_size: (0, 0),
             renderer_name,
             version,
             shadow_map_reported: false,
             drag_origin: None,
             picture: Vec::new(),
+            picture_height: 0,
         }
     }
 }
@@ -1481,8 +1492,71 @@ fn update_cursor(
     }
 }
 
+/// The percentages of the `video.widescreen_extra` choices, by index.
+const WIDESCREEN_EXTRA_PERCENT: [u16; 14] =
+    [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300];
+
+/// The widescreen margin, in NES pixels on each side, that the `video.widescreen` choice offers
+/// a ROM made for the extension: none, enough to fill the view's `size` (width, height, before
+/// any resolution scale) with a 240-line picture, or enough for a fixed ratio; then `extra`
+/// (`video.widescreen_extra`, an index into [`WIDESCREEN_EXTRA_PERCENT`]) wider, so that the 3D
+/// objects at the edges of the view are already whole when they come into sight. Always a
+/// whole number of tiles, at most [`zax_nes::wide::MAX_MARGIN`].
+///
+/// Returns the margins on each side and above and below: the picture keeps the chosen ratio,
+/// so `extra` makes it as much taller as wider (only a margin decoder fills the height).
+fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
+    #[allow(clippy::cast_precision_loss)] // Window sizes.
+    let ratio = match choice {
+        1 if size.1 > 0 => size.0 as f32 / size.1 as f32,
+        2 => 3.0 / 2.0,
+        3 => 16.0 / 10.0,
+        4 => 16.0 / 9.0,
+        _ => return (0, 0),
+    };
+    let percent = usize::try_from(extra)
+        .ok()
+        .and_then(|index| WIDESCREEN_EXTRA_PERCENT.get(index))
+        .copied()
+        .unwrap_or(0);
+    let bonus = 1.0 + (f32::from(percent) / 100.0);
+    let whole_tiles = |pixels: f32, max: i32| {
+        #[allow(clippy::cast_possible_truncation)] // Clamped right after.
+        let tiles = (pixels.max(0.0) / 8.0).ceil() as i32;
+        (tiles * 8).clamp(0, max)
+    };
+    (
+        whole_tiles(
+            (240.0 * ratio * bonus - 256.0) / 2.0,
+            zax_nes::wide::MAX_MARGIN,
+        ),
+        whole_tiles(
+            240.0 * (bonus - 1.0) / 2.0,
+            zax_nes::wide::MAX_VERTICAL_MARGIN,
+        ),
+    )
+}
+
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
+    let (widescreen, widescreen_y) = widescreen_margin(
+        host.settings().get(SettingId::VideoWidescreen).as_int(),
+        host.settings()
+            .get(SettingId::VideoWidescreenExtra)
+            .as_int(),
+        state.view_size,
+    );
+    let strict_edges = host
+        .settings()
+        .get(SettingId::VideoWidescreenStrictEdges)
+        .as_bool();
+    if let Some(session) = host.session_mut() {
+        session.core_mut().set_widescreen_margin(widescreen);
+        session
+            .core_mut()
+            .set_widescreen_vertical_margin(widescreen_y);
+        session.set_strict_wide_edges(strict_edges);
+    }
     let (session, scene) = host.session_and_scene_mut();
     let Some(session) = session else {
         scene.two_dimensional_mode = false;
@@ -1492,12 +1566,24 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     scene.nes_background_color = session.nes_background_color();
     scene.emulated_time = session.emulated_time();
     scene.clipping = session.engine().settings().clipping;
+    #[allow(clippy::cast_precision_loss)] // 0..=128.
+    let margin = session
+        .engine()
+        .published_frame()
+        .map_or(0, ConversionFrame::margin) as f32;
+    scene.margin = margin;
+    #[allow(clippy::cast_precision_loss)] // 0..=240.
+    let margin_y = session
+        .engine()
+        .published_frame()
+        .map_or(0, ConversionFrame::margin_y) as f32;
+    scene.margin_y = margin_y;
     // AMD-009 (Q-022): the 2D mode shows the core's pixel frame on the NES plane. AMD-017
     // (Q-037) adds the hot F11 toggle to the "2D Mode" profile of REQ-SCN-055: the host combines
     // the two, and nothing of the session is reloaded to switch.
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
-        session.copy_nes_picture(&mut state.picture);
+        state.picture_height = session.copy_nes_picture(&mut state.picture);
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
     scene.followed_shape = session.followed_shape();
@@ -1528,6 +1614,7 @@ fn render_scene(
     let frame = SceneFrame {
         draw_list: list,
         nes_picture: picture,
+        nes_picture_height: state.picture_height,
     };
     draw_scene(
         graphics,

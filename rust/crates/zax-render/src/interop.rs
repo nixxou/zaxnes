@@ -7,6 +7,8 @@
 //! column, so uploading the fields of a [`Matrix4x4`] in field order hands GLSL its transpose,
 //! that is the column-vector matrix the shaders use — which is why the conversion transposes.
 
+use std::sync::Arc;
+
 use zax_engine3d::geometry::tile_mesh::{MeshVertex, TileMesh, TriangleCountError};
 use zax_engine3d::vectors::{Mat4, Vec2, Vec3};
 
@@ -152,22 +154,87 @@ pub fn unit_box() -> Result<TileMesh, TriangleCountError> {
 ///
 /// [`TriangleCountError`] never in practice: the quad is two whole triangles.
 pub fn picture_quad() -> Result<TileMesh, TriangleCountError> {
-    const WIDTH: f32 = 256.0;
-    const HEIGHT: f32 = 240.0;
-    let top = geometry::SCENE_HEIGHT;
-    let bottom = geometry::SCENE_HEIGHT - HEIGHT;
+    picture_quad_wide(0, 0)
+}
+
+/// The width and height in pixels of a 2D-mode picture of `len` colour indices in `height` rows
+/// (0 reads as 240): 256 x 240, or wider and taller by widescreen margins on each side; `None`
+/// for any other size.
+#[must_use]
+pub const fn picture_size(len: usize, height: usize) -> Option<(usize, usize)> {
+    let height = if height == 0 { 240 } else { height };
+    if len == 0 || height < 240 || (height - 240) % 2 != 0 || len % height != 0 {
+        return None;
+    }
+    let width = len / height;
+    if width < 256 || (width - 256) % 2 != 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
+/// A widescreen 2D-mode quad and the margins (sides, top and bottom) it was made for.
+pub type WidePictureQuad = ((u16, u16), Arc<TileMesh>);
+
+/// The quad for the widescreen 2D-mode picture `picture`, reusing `cached` when it was made for
+/// the same margin; `None` for a 256-pixel picture.
+///
+/// # Errors
+///
+/// [`TriangleCountError`] never in practice: the quad is two whole triangles.
+pub fn wide_quad_for(
+    picture: &[u8],
+    height: usize,
+    cached: Option<WidePictureQuad>,
+) -> Result<Option<WidePictureQuad>, TriangleCountError> {
+    let Some((width, height)) = picture_size(picture.len(), height) else {
+        return Ok(None);
+    };
+    let (Ok(margin), Ok(margin_y)) = (
+        u16::try_from((width - 256) / 2),
+        u16::try_from((height - 240) / 2),
+    ) else {
+        return Ok(None);
+    };
+    if margin == 0 && margin_y == 0 {
+        return Ok(None);
+    }
+    let margins = (margin, margin_y);
+    if let Some(cached) = cached.filter(|(cached, _)| *cached == margins) {
+        return Ok(Some(cached));
+    }
+    Ok(Some((
+        margins,
+        Arc::new(picture_quad_wide(margin, margin_y)?),
+    )))
+}
+
+/// [`picture_quad`] for a widescreen picture: `margin` more pixels on each side, x from
+/// -margin to 256 + margin, and `margin_y` more above and below, the texture coordinates still in
+/// texels of the larger picture.
+///
+/// # Errors
+///
+/// [`TriangleCountError`] never in practice: the quad is two whole triangles.
+pub fn picture_quad_wide(margin: u16, margin_y: u16) -> Result<TileMesh, TriangleCountError> {
+    let left = -f32::from(margin);
+    let width = 256.0 + (2.0 * f32::from(margin));
+    let height = 240.0 + (2.0 * f32::from(margin_y));
+    let top = geometry::SCENE_HEIGHT + f32::from(margin_y);
+    let bottom = top - height;
     let normal = Vec3::new(0.0, 0.0, -1.0);
 
     // Same winding as the −Z face of the unit box (REQ-E3D-505): bottom-left, top-left,
     // top-right, bottom-right.
+    let right = left + width;
     let vertices = vec![
-        MeshVertex::new(Vec3::new(0.0, bottom, 0.0), normal, Vec2::new(0.0, HEIGHT)),
-        MeshVertex::new(Vec3::new(0.0, top, 0.0), normal, Vec2::new(0.0, 0.0)),
-        MeshVertex::new(Vec3::new(WIDTH, top, 0.0), normal, Vec2::new(WIDTH, 0.0)),
+        MeshVertex::new(Vec3::new(left, bottom, 0.0), normal, Vec2::new(0.0, height)),
+        MeshVertex::new(Vec3::new(left, top, 0.0), normal, Vec2::new(0.0, 0.0)),
+        MeshVertex::new(Vec3::new(right, top, 0.0), normal, Vec2::new(width, 0.0)),
         MeshVertex::new(
-            Vec3::new(WIDTH, bottom, 0.0),
+            Vec3::new(right, bottom, 0.0),
             normal,
-            Vec2::new(WIDTH, HEIGHT),
+            Vec2::new(width, height),
         ),
     ];
     TileMesh::new(vertices, vec![0, 1, 2, 0, 2, 3])

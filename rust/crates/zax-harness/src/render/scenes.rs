@@ -50,6 +50,8 @@ pub struct SyntheticScene {
     pub draw_list: FrameDrawList,
     /// The 256 x 240 colour indices of the core's picture, empty without a ROM.
     pub nes_picture: Vec<u8>,
+    /// Its rows (0 reads as 240).
+    pub nes_picture_height: usize,
 }
 
 impl SyntheticScene {
@@ -58,6 +60,7 @@ impl SyntheticScene {
     pub fn frame(&self) -> SceneFrame<'_> {
         SceneFrame {
             nes_picture: &self.nes_picture,
+            nes_picture_height: self.nes_picture_height,
             ..SceneFrame::with_draw_list(&self.draw_list)
         }
     }
@@ -458,6 +461,9 @@ impl Builder {
             palette: self.palette,
             mask_x: 0,
             mask_y: 0,
+            margin: 0,
+            visible_rows: zax_nes::STANDARD_ROWS,
+            margin_y: 0,
         };
         engine.convert(&batch, 0);
         let time = engine.publish().time();
@@ -478,6 +484,7 @@ impl Builder {
             engine,
             draw_list,
             nes_picture: Vec::new(),
+            nes_picture_height: 0,
         })
     }
 }

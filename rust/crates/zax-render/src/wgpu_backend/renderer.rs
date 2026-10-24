@@ -260,6 +260,8 @@ pub struct WgpuSceneRenderer {
     textures: TextureStore,
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
+    /// The quad of the last widescreen 2D-mode picture, by margin.
+    wide_picture_quad: Option<interop::WidePictureQuad>,
     plan: FramePlan<MeshHandle, TextureHandle>,
     layouts: Layouts,
     scene_module: wgpu::ShaderModule,
@@ -327,8 +329,14 @@ impl Residency for WgpuResidency<'_> {
         Ok(self.textures.get(self.device, self.queue, texture))
     }
 
-    fn picture(&mut self, picture: &[u8]) -> Result<Option<TextureHandle>, Self::Error> {
-        Ok(self.textures.picture(self.device, self.queue, picture))
+    fn picture(
+        &mut self,
+        picture: &[u8],
+        height: usize,
+    ) -> Result<Option<TextureHandle>, Self::Error> {
+        Ok(self
+            .textures
+            .picture(self.device, self.queue, picture, height))
     }
 }
 
@@ -446,6 +454,7 @@ impl WgpuSceneRenderer {
             textures: TextureStore::default(),
             unit_box: Arc::new(interop::unit_box()?),
             picture_quad: Arc::new(interop::picture_quad()?),
+            wide_picture_quad: None,
             plan: FramePlan::default(),
             scene_pipelines: FastMap::default(),
             shadow_pipelines: FastMap::default(),
@@ -558,7 +567,7 @@ impl WgpuSceneRenderer {
 
         #[allow(clippy::cast_precision_loss)] // Target sizes are far below 2^24.
         let aspect = target.width as f32 / target.height as f32;
-        let view = scene.camera.build_view(scene.clipping, aspect);
+        let view = scene.camera.build_view(scene.view_clipping(), aspect);
         self.last_view = view;
 
         let started = std::time::Instant::now();
@@ -568,9 +577,15 @@ impl WgpuSceneRenderer {
             meshes: &mut self.meshes,
             textures: &mut self.textures,
         };
+        self.wide_picture_quad = interop::wide_quad_for(
+            frame.nes_picture,
+            frame.nes_picture_height,
+            self.wide_picture_quad.take(),
+        )?;
         let fixed = FixedMeshes {
             unit_box: &self.unit_box,
             picture_quad: &self.picture_quad,
+            wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
         };
         let Ok(()) = self
             .plan

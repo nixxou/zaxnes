@@ -28,6 +28,7 @@ pub use ppu_bus_access::PpuBusAccess;
 pub use tile_buffer::TileBuffer;
 
 use crate::cartridges::{Cartridge, ChrFetch};
+use crate::wide::WideExtension;
 use crate::{NametableMirroring, RegionTiming, TileRecord};
 
 /// The cartridge as the internal PPU paths pass it around.
@@ -176,6 +177,17 @@ pub struct Ppu2C02 {
     sprite_order: [usize; 64],
     mask_x: i32,
     mask_y: i32,
+
+    // Widescreen extension (wide.rs); `frame_margin` is its margin latched when the frame
+    // being captured began, so that every band of one frame has the same columns.
+    wide: WideExtension,
+    frame_margin: i32,
+    /// The visible range of each band of the frame being captured (`FrameBatch::visible_rows`).
+    visible_rows: crate::VisibleRows,
+    /// The vertical widescreen margin of the frame being captured, latched with `frame_margin`.
+    frame_vertical_margin: i32,
+    /// The background rows of the frame being captured, by row index, for a margin decoder.
+    captured_rows: [Option<tiles::CapturedRow>; 31],
 }
 
 impl Default for Ppu2C02 {
@@ -246,6 +258,11 @@ impl Ppu2C02 {
             sprite_order: [0; 64],
             mask_x: 0,
             mask_y: 0,
+            wide: WideExtension::new(),
+            frame_margin: 0,
+            visible_rows: crate::STANDARD_ROWS,
+            captured_rows: [None; 31],
+            frame_vertical_margin: 0,
         }
     }
 
@@ -369,6 +386,17 @@ impl Ppu2C02 {
         cartridge.map_or(NametableMirroring::Horizontal, Cartridge::mirroring)
     }
 
+    /// The nametable layout in force: the cartridge's, unless the widescreen extension asks
+    /// for four separate nametables.
+    #[must_use]
+    pub fn layout_of(&self, cartridge: Option<&Cartridge>) -> NametableMirroring {
+        if self.wide.four_screen() {
+            NametableMirroring::FourScreen
+        } else {
+            Self::mirroring_of(cartridge)
+        }
+    }
+
     /// Object attribute memory.
     #[must_use]
     pub const fn oam(&self) -> &[u8; OAM_SIZE] {
@@ -464,6 +492,7 @@ impl Ppu2C02 {
         self.nmi_line_sample = false;
 
         self.reset_render_state();
+        self.wide.reset();
         self.reset_tile_state();
 
         // Just after a load or a reset the first frame starts at the beginning of vblank,
@@ -619,6 +648,9 @@ impl Ppu2C02 {
 
         self.dot = 0;
         self.scanline += 1;
+        if self.scanline == VISIBLE_SCANLINES {
+            self.wide.arm_overclock();
+        }
 
         if self.scanline < self.timing.scanlines_per_frame {
             return;
@@ -1059,7 +1091,7 @@ impl Ppu2C02 {
             return self.vram[(page << 10) | (usize::from(address) & 0x03FF)];
         }
 
-        self.vram[map_nametable(address, Self::mirroring_of(cartridge))]
+        self.vram[map_nametable(address, self.layout_of(cartridge))]
     }
 
     fn write_nametable_byte(&mut self, address: u16, value: u8, cart: Cart<'_, '_>) {
@@ -1076,7 +1108,8 @@ impl Ppu2C02 {
             return;
         }
 
-        self.vram[map_nametable(address, Self::mirroring_of(cart.as_deref()))] = value;
+        let layout = self.layout_of(cart.as_deref());
+        self.vram[map_nametable(address, layout)] = value;
     }
 
     /// Maps a nametable address to an offset in the 4 KiB VRAM, using the layout
@@ -1090,6 +1123,37 @@ impl Ppu2C02 {
     #[must_use]
     pub fn tile_records(&self) -> &[TileRecord] {
         self.tiles.records()
+    }
+
+    /// The widescreen extension.
+    #[must_use]
+    pub const fn wide(&self) -> &WideExtension {
+        &self.wide
+    }
+
+    /// The widescreen extension, for the bus and the host.
+    pub fn wide_mut(&mut self) -> &mut WideExtension {
+        &mut self.wide
+    }
+
+    /// The widescreen margin, in pixels on each side, of the frame whose records are held: 0
+    /// for a standard 256-pixel frame.
+    #[must_use]
+    pub const fn frame_margin(&self) -> i32 {
+        self.frame_margin
+    }
+
+    /// The vertical widescreen margin, in pixels above and below, of the frame whose records
+    /// are held.
+    #[must_use]
+    pub const fn frame_vertical_margin(&self) -> i32 {
+        self.frame_vertical_margin
+    }
+
+    /// The visible range of each band of the frame whose records are held.
+    #[must_use]
+    pub const fn visible_rows(&self) -> crate::VisibleRows {
+        self.visible_rows
     }
 }
 

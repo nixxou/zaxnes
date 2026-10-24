@@ -615,6 +615,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_libretro(enabled_disabled()),
     );
     emulation_rust_only(out);
+    video_rust_only(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1208,5 +1209,87 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         )
         .with_text_options(&[LANGUAGE_ENGLISH, LANGUAGE_FRENCH])
         .with_label("Language"),
+    );
+}
+
+fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): the built-in patches of zax-nes::builtin_patches (the Zelda II
+    // widescreen hack). Read when a ROM is loaded; states made the other way do not fit. Not
+    // exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuBuiltinPatches,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_label("Built-in ROM patches"),
+    );
+    // Rust-only (owner request): how much wider than 256 pixels the picture of a ROM made for
+    // the widescreen extension may be (zax-nes::wide). The other ROMs never see it. Not exposed
+    // to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoWidescreen,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Off"),
+            opt(1, "Window"),
+            opt(2, "3:2"),
+            opt(3, "16:10"),
+            opt(4, "16:9"),
+        ]))
+        .with_label("Widescreen"),
+    );
+    // Rust-only (owner request): a percentage added to the widescreen picture's width, so that the
+    // objects at the edges of the 3D view are already whole when they come into sight. Not
+    // exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoWidescreenExtra,
+            SettingKind::Enum,
+            SettingValue::Enum(2),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "+0 %"),
+            opt(1, "+5 %"),
+            opt(2, "+10 %"),
+            opt(3, "+15 %"),
+            opt(4, "+20 %"),
+            opt(5, "+25 %"),
+            opt(6, "+30 %"),
+            opt(7, "+40 %"),
+            opt(8, "+50 %"),
+            opt(9, "+75 %"),
+            opt(10, "+100 %"),
+            opt(11, "+150 %"),
+            opt(12, "+200 %"),
+            opt(13, "+300 %"),
+        ]))
+        .with_label("Widescreen extra width"),
+    );
+    // Rust-only (owner request): a shape cut where the game stops drawing a band of the
+    // widescreen picture is left unfinished (temporary pattern) until it is whole. Off by
+    // default: a one-tile object standing there would stay temporary. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoWidescreenStrictEdges,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_label("Widescreen: wait for whole objects at the drawn edges"),
     );
 }

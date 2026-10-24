@@ -1,6 +1,10 @@
 //! The save state file (SPEC-09 REQ-PERS-050 to 058): a signature, a version and five sections,
 //! each prefixed by its length. The core, the scripts' persistent data, the camera and the
 //! learned conversion state are opaque blocks here; the header is JSON.
+//!
+//! Rust-only additions (owner request): a sixth, optional section holds a JPEG thumbnail of the
+//! 2D picture, and the header says whether the built-in hack ran, which version of it, the
+//! application version and the local date and time. Files without them still read.
 
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -20,6 +24,17 @@ pub const LEGACY_SIGNATURE: &[u8; 8] = b"SEN3DSAV";
 pub const FORMAT_VERSION: i32 = 1;
 /// Notification text of an unreadable state (REQ-LOOP-046).
 pub const CORRUPTED_MESSAGE: &str = "Corrupted save state.";
+
+/// The message shown when a state was made with the built-in ROM patches set the other way.
+pub const OTHER_PATCH_MESSAGE: &str =
+    "This save state was made with the built-in ROM patches set the other way.";
+/// The message shown when a state was made with another version of the built-in hack.
+pub const OTHER_HACK_VERSION_MESSAGE: &str =
+    "This save state was made with another version of the built-in hack: it cannot be loaded.";
+/// The question asked before a state made with the built-in hack loads while it is off.
+pub const TURN_HACK_ON_QUESTION: &str = "To play this save state, the built-in hack will be turned on: the game reloads, then the save state loads. Continue?";
+/// The question asked before a state made without the built-in hack loads while it is on.
+pub const TURN_HACK_OFF_QUESTION: &str = "To play this save state, the built-in hack will be turned off: the game reloads, then the save state loads. Continue?";
 /// Notification text of a state whose game is gone (REQ-LOOP-044).
 pub const GAME_MISSING_MESSAGE: &str = "The game profile doesn't exist anymore.";
 /// Largest header the reader accepts.
@@ -46,6 +61,21 @@ pub struct SaveStateHeader {
     pub saved_at: i64,
     /// The slot it was saved to.
     pub slot_id: String,
+    /// Whether the game ran with a built-in patch (`None` in files older than the field).
+    #[serde(default)]
+    pub is_hack: Option<bool>,
+    /// The built-in patch's name, when one ran.
+    #[serde(default)]
+    pub hack_name: Option<String>,
+    /// The built-in patch's version (`BuiltinPatch::version`, 8 hex digits), when one ran.
+    #[serde(default)]
+    pub hack_version: Option<String>,
+    /// The version of the application that wrote the file.
+    #[serde(default)]
+    pub app_version: Option<String>,
+    /// The local date and time of the save, as the player read it.
+    #[serde(default)]
+    pub saved_at_local: Option<String>,
 }
 
 /// Everything a state file holds.
@@ -61,6 +91,8 @@ pub struct SaveStateContent {
     pub camera: Vec<u8>,
     /// The learned conversion state.
     pub conversion: Vec<u8>,
+    /// A JPEG thumbnail of the 2D picture, or empty.
+    pub thumbnail: Vec<u8>,
 }
 
 /// Serialises `content` into a state file.
@@ -75,7 +107,9 @@ pub fn write(content: &SaveStateContent) -> Vec<u8> {
             + content.core.len()
             + content.lua.len()
             + content.camera.len()
-            + content.conversion.len(),
+            + content.conversion.len()
+            + 4
+            + content.thumbnail.len(),
     );
     file.extend_from_slice(SIGNATURE);
     file.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
@@ -89,20 +123,49 @@ pub fn write(content: &SaveStateContent) -> Vec<u8> {
         file.extend_from_slice(&section_length(section).to_le_bytes());
         file.extend_from_slice(section);
     }
+    if !content.thumbnail.is_empty() {
+        file.extend_from_slice(&section_length(&content.thumbnail).to_le_bytes());
+        file.extend_from_slice(&content.thumbnail);
+    }
     file
 }
 
 fn header_json(header: &SaveStateHeader) -> Vec<u8> {
-    serde_json::json!({
+    let mut json = serde_json::json!({
         "coreId": header.core_id,
         "coreStateVersion": header.core_state_version,
         "gameId": header.game_id,
         "romSha1": header.rom_sha1,
         "savedAt": header.saved_at,
         "slotId": header.slot_id,
-    })
-    .to_string()
-    .into_bytes()
+    });
+    let optional = [
+        ("isHack", header.is_hack.map(serde_json::Value::Bool)),
+        (
+            "hackName",
+            header.hack_name.clone().map(serde_json::Value::String),
+        ),
+        (
+            "hackVersion",
+            header.hack_version.clone().map(serde_json::Value::String),
+        ),
+        (
+            "appVersion",
+            header.app_version.clone().map(serde_json::Value::String),
+        ),
+        (
+            "savedAtLocal",
+            header.saved_at_local.clone().map(serde_json::Value::String),
+        ),
+    ];
+    if let Some(object) = json.as_object_mut() {
+        for (key, value) in optional {
+            if let Some(value) = value {
+                object.insert(key.to_owned(), value);
+            }
+        }
+    }
+    json.to_string().into_bytes()
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // sections are far below 2 GiB, as the C# int
@@ -129,6 +192,11 @@ pub fn try_read(file: &[u8]) -> Option<SaveStateContent> {
     let lua = read_section(&mut cursor)?;
     let camera = read_section(&mut cursor)?;
     let conversion = read_section(&mut cursor)?;
+    let thumbnail = if cursor.is_empty() {
+        &[][..]
+    } else {
+        read_section(&mut cursor)?
+    };
     // Trailing bytes mean the file does not match the format it claims.
     if !cursor.is_empty() {
         return None;
@@ -146,6 +214,7 @@ pub fn try_read(file: &[u8]) -> Option<SaveStateContent> {
         lua: lua.to_vec(),
         camera: camera.to_vec(),
         conversion: conversion.to_vec(),
+        thumbnail: thumbnail.to_vec(),
     })
 }
 
@@ -167,6 +236,55 @@ pub fn max_file_size(core_max_state_size: usize) -> usize {
         // exists (REQ-ARCH-013, last sentence).
         + 4
         + state_codec::RESERVED_CAPACITY
+        + 4
+        + MAX_THUMBNAIL_BYTES
+}
+
+/// Largest thumbnail section: a 320 x 240 JPEG stays far below it.
+pub const MAX_THUMBNAIL_BYTES: usize = 256 * 1024;
+
+/// The JPEG thumbnail of a 2D picture of NES colour indices, 240 rows of `picture.len() / 240`
+/// pixels: wider than 4:3, the centre 320 columns only. `None` for a picture of no such size.
+#[must_use]
+pub fn thumbnail_jpeg(picture: &[u8]) -> Option<Vec<u8>> {
+    const HEIGHT: usize = 240;
+    const WIDTH_4_3: usize = 320;
+    if picture.is_empty() || picture.len() % HEIGHT != 0 {
+        return None;
+    }
+    let width = picture.len() / HEIGHT;
+    let kept = width.min(WIDTH_4_3);
+    let left = (width - kept) / 2;
+    let mut rgb = Vec::with_capacity(kept * HEIGHT * 3);
+    for row in picture.chunks_exact(width) {
+        for &index in &row[left..left + kept] {
+            let color = zax_engine3d::palette::nes_color(usize::from(index));
+            rgb.extend_from_slice(&[color.r, color.g, color.b]);
+        }
+    }
+    let mut jpeg = Vec::new();
+    jpeg_encoder::Encoder::new(&mut jpeg, 85)
+        .encode(
+            &rgb,
+            u16::try_from(kept).ok()?,
+            u16::try_from(HEIGHT).ok()?,
+            jpeg_encoder::ColorType::Rgb,
+        )
+        .ok()?;
+    Some(jpeg)
+}
+
+/// The local date and time of `unix_seconds` with seconds, for the header.
+#[must_use]
+pub fn local_date_time(unix_seconds: i64) -> String {
+    const WITH_SECONDS: &[FormatItem<'static>] =
+        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    let offset = UtcOffset::current_local_offset().unwrap_or(UtcOffset::UTC);
+    OffsetDateTime::from_unix_timestamp(unix_seconds)
+        .map(|time| time.to_offset(offset))
+        .ok()
+        .and_then(|time| time.format(WITH_SECONDS).ok())
+        .unwrap_or_default()
 }
 
 /// Whether `head` is one of the two signatures.

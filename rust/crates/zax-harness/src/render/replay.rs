@@ -39,6 +39,9 @@ pub fn from_json(
             palette: frame.palette,
             mask_x: 0,
             mask_y: 0,
+            margin: 0,
+            visible_rows: zax_nes::STANDARD_ROWS,
+            margin_y: 0,
         },
         0,
     );
@@ -64,5 +67,6 @@ pub fn from_json(
         engine,
         draw_list,
         nes_picture: Vec::new(),
+        nes_picture_height: 0,
     })
 }
