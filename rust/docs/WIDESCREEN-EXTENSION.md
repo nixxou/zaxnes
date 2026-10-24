@@ -16,10 +16,14 @@ ones.
 | Choice | Margin offered on each side | Picture |
 |---|---|---|
 | Off | 0 | 256 x 240 |
-| Window | enough to fill the window at 240 lines, up to 96 | up to 448 x 240 |
+| Window | enough to fill the window at 240 lines | |
 | 3:2 | 56 | 368 x 240 |
 | 16:10 | 64 | 384 x 240 |
 | 16:9 | 88 | 432 x 240 |
+
+`video.widescreen_extra` (+0 % to +30 %, +10 % by default) widens the picture beyond the ratio,
+so that the 3D objects at the edges of the view are already whole when they come into sight. The
+margin is at most 128 pixels on each side (a 512 x 240 picture).
 
 `NesCore::set_widescreen_margin(pixels)` is the same thing for other hosts.
 

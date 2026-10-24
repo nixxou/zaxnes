@@ -122,6 +122,8 @@ setting_ids! {
     VideoDynamicResolution => "video.dynamic_resolution",
     VideoBackend => "video.backend",
     VideoWidescreen => "video.widescreen",
+    VideoWidescreenExtra => "video.widescreen_extra",
+    EmuBuiltinPatches => "emu.builtin_patches",
     ConvSameBgPalette => "conv.same_bg_palette",
     ConvSameSpPalette => "conv.same_sp_palette",
     ConvSpriteTolerance => "conv.sprite_tolerance",

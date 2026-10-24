@@ -65,6 +65,18 @@ pub fn apply(image: &[u8]) -> Option<PatchedRom> {
         })
 }
 
+/// Whether a built-in patch is made for `image` (iNES header or not).
+#[must_use]
+pub fn matches(image: &[u8]) -> bool {
+    let header_size = if image.starts_with(b"NES") && image.len() > HEADER_SIZE {
+        HEADER_SIZE
+    } else {
+        0
+    };
+    let crc = crc32(&image[header_size..]);
+    PATCHES.iter().any(|patch| patch.source_crc == crc)
+}
+
 /// Why a BPS patch did not apply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BpsError {

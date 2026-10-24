@@ -51,6 +51,10 @@ fn draw_items(ui: &Ui, items: &[MenuItem], host: &AppHost) -> Option<(Command, C
         }
         let enabled = MenuBarModel::is_enabled(item, host);
         let ticked = MenuBarModel::is_checked(item, host);
+        // A state made with the built-in ROM patches set the other way: shown in red.
+        let _warning = item
+            .warning
+            .then(|| ui.push_style_color(imgui::StyleColor::Text, [0.95, 0.35, 0.3, 1.0]));
         let activated = ui
             .menu_item_config(&item.label)
             .shortcut(&item.shortcut)

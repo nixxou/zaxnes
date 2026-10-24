@@ -53,9 +53,10 @@ const CYCLES_PER_SCANLINE: u32 = 114;
 /// Version the ROM reads at `$5001`.
 const VERSION: u8 = 1;
 
-/// The widest margin, in pixels on each side, the core will ever capture: twelve tile columns,
-/// a 448 x 240 picture (about 1.87:1, wider than 16:9).
-pub const MAX_MARGIN: i32 = 96;
+/// The widest margin, in pixels on each side, the core will ever capture: sixteen tile columns,
+/// a 512 x 240 picture (16:9 with a bonus of 20 %, so that the 3D objects at the edges of a wide
+/// window are already whole).
+pub const MAX_MARGIN: i32 = 128;
 
 /// Extra background columns on each side at the widest margin.
 pub const MAX_EXTRA_COLUMNS: i32 = MAX_MARGIN / 8;
@@ -194,7 +195,7 @@ impl WideExtension {
         match address {
             0x5000 => Some(UNLOCK[0]),
             0x5001 => Some(VERSION),
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..=96.
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..=128.
             0x5002 => Some(self.host_margin as u8),
             0x5003 => Some(self.requested_margin),
             0x5004 => Some(self.left_extent),

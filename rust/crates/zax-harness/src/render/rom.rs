@@ -111,7 +111,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     scene.camera.snap_to_setpoints();
     scene.game_running = true;
     scene.clipping = engine.settings().clipping;
-    #[allow(clippy::cast_precision_loss)] // 0..=96.
+    #[allow(clippy::cast_precision_loss)] // 0..=128.
     let margin = engine
         .published_frame()
         .map_or(0, zax_engine3d::frame::ConversionFrame::margin) as f32;
