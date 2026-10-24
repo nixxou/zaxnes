@@ -27,6 +27,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::MENU_CAMERA_FIRST_PERSON, "Première personne (FPV)"),
     (keys::SLOT_EMPTY, "vide"),
     (keys::SLOT_OTHER_PATCH, "faite avec les patchs intégrés réglés autrement"),
+    (keys::SLOT_OTHER_HACK_VERSION, "faite avec une autre version du hack intégré"),
     (keys::SLOT_QUICK, "État rapide"),
     (keys::SLOT_PREFIX, "Emplacement"),
     // ----------------------------------------------------- window titles
@@ -56,6 +57,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::NOTIFY_QUICK_LOAD, "Chargement rapide"),
     (keys::NOTIFY_CORRUPTED_ZIP, "Archive zip corrompue"),
     (keys::NOTIFY_STATE_OTHER_PATCH, "Cette sauvegarde a été faite avec les patchs de ROM intégrés réglés autrement."),
+    (keys::NOTIFY_STATE_OTHER_HACK_VERSION, "Cette sauvegarde a été faite avec une autre version du hack intégré : elle ne peut pas être chargée."),
+    (keys::CONFIRM_TURN_HACK_ON, "Pour jouer à cette sauvegarde, le hack intégré va être activé : le jeu sera rechargé, puis la sauvegarde chargée. Continuer ?"),
+    (keys::CONFIRM_TURN_HACK_OFF, "Pour jouer à cette sauvegarde, le hack intégré va être désactivé : le jeu sera rechargé, puis la sauvegarde chargée. Continuer ?"),
     (keys::NOTIFY_UNCOMPRESSION_FAILED, "La décompression a échoué"),
     (keys::NOTIFY_INVALID_ROM, "Fichier ROM invalide."),
     (keys::NOTIFY_GAME_MISSING, "Le profil du jeu n'existe plus."),

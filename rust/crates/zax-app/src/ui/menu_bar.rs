@@ -14,6 +14,7 @@ use super::strings;
 use super::text;
 use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs, Shortcut};
+use crate::emulation::host::SlotPatchStatus;
 use crate::emulation::speed_setting;
 use crate::persistence::app_settings::{AppSettings, TvRegionSetting};
 use crate::persistence::save_slots::{
@@ -97,9 +98,21 @@ pub struct MenuItem {
     pub selection: Option<Selection>,
     /// For a submenu, what it lists.
     pub submenu: Option<Submenu>,
-    /// Shown in the warning colour: a save state made with the built-in ROM patches set the
-    /// other way.
-    pub warning: bool,
+    /// Shown in a warning colour: a save state made with the built-in hack set the other way
+    /// (orange) or with another version of it (red).
+    pub warning: MenuWarning,
+}
+
+/// The warning colour of a menu item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MenuWarning {
+    /// None.
+    #[default]
+    None,
+    /// Orange: it works once something is switched (the built-in hack).
+    Switch,
+    /// Red: it cannot work.
+    Blocked,
 }
 
 impl MenuItem {
@@ -112,7 +125,7 @@ impl MenuItem {
             shortcut: String::new(),
             selection: None,
             submenu: None,
-            warning: false,
+            warning: MenuWarning::None,
         }
     }
 
@@ -400,13 +413,21 @@ fn slot_items(numbered: Command, quick: Command, host: &AppHost) -> Vec<MenuItem
     let mut items = Vec::with_capacity(EXPOSED_SLOT_COUNT + 2);
     for slot in 1..=slot_count() {
         let id = numbered_slot_id(slot);
-        let fits = host.slot_fits_builtin_patches(&id);
+        let status = host.slot_patch_status(&id);
         let mut label = slot_label(slot, host.slots.find(&id));
-        if !fits {
-            label = format!("{label} ({})", text::slot_other_patch());
-        }
+        let warning = match status {
+            SlotPatchStatus::Fits => MenuWarning::None,
+            SlotPatchStatus::OtherMode { .. } => {
+                label = format!("{label} ({})", text::slot_other_patch());
+                MenuWarning::Switch
+            }
+            SlotPatchStatus::OtherVersion => {
+                label = format!("{label} ({})", text::slot_other_hack_version());
+                MenuWarning::Blocked
+            }
+        };
         let mut item = MenuItem::of(numbered, Some(label), CommandArgs::of_number(slot));
-        item.warning = !fits;
+        item.warning = warning;
         items.push(item);
     }
     items.push(MenuItem::rule());

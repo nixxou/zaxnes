@@ -28,6 +28,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::MENU_CAMERA_FIRST_PERSON, "First person (FPV)"),
     (keys::SLOT_EMPTY, "empty"),
     (keys::SLOT_OTHER_PATCH, "made with the built-in patches set the other way"),
+    (keys::SLOT_OTHER_HACK_VERSION, "made with another version of the built-in hack"),
     (keys::SLOT_QUICK, "Quick state"),
     (keys::SLOT_PREFIX, "Slot"),
     // ----------------------------------------------------- window titles
@@ -57,6 +58,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::NOTIFY_QUICK_LOAD, "Quick Load"),
     (keys::NOTIFY_CORRUPTED_ZIP, "Corrupted zip file"),
     (keys::NOTIFY_STATE_OTHER_PATCH, "This save state was made with the built-in ROM patches set the other way."),
+    (keys::NOTIFY_STATE_OTHER_HACK_VERSION, "This save state was made with another version of the built-in hack: it cannot be loaded."),
+    (keys::CONFIRM_TURN_HACK_ON, "To play this save state, the built-in hack will be turned on: the game reloads, then the save state loads. Continue?"),
+    (keys::CONFIRM_TURN_HACK_OFF, "To play this save state, the built-in hack will be turned off: the game reloads, then the save state loads. Continue?"),
     (keys::NOTIFY_UNCOMPRESSION_FAILED, "Uncompression is not successful"),
     (keys::NOTIFY_INVALID_ROM, "Invalid rom file."),
     (keys::NOTIFY_GAME_MISSING, "The game profile doesn't exist anymore."),

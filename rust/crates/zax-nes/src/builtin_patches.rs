@@ -30,6 +30,20 @@ pub const PATCHES: [BuiltinPatch; 1] = [BuiltinPatch {
     bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
 }];
 
+impl BuiltinPatch {
+    /// The patch's version: the CRC-32 of the ROM data it produces, which any change to the
+    /// hack changes (read from the BPS footer).
+    #[must_use]
+    pub fn version(&self) -> u32 {
+        self.bps
+            .len()
+            .checked_sub(8)
+            .and_then(|at| self.bps.get(at..at + 4))
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map_or(0, u32::from_le_bytes)
+    }
+}
+
 /// A ROM image with the built-in patch it matched applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchedRom {
@@ -66,6 +80,18 @@ pub fn apply(image: &[u8]) -> Option<PatchedRom> {
                 name: patch.name,
             })
         })
+}
+
+/// The built-in patch made for `image` (iNES header or not), if any.
+#[must_use]
+pub fn patch_for(image: &[u8]) -> Option<&'static BuiltinPatch> {
+    let header_size = if image.starts_with(b"NES") && image.len() > HEADER_SIZE {
+        HEADER_SIZE
+    } else {
+        0
+    };
+    let crc = crc32(&image[header_size..]);
+    PATCHES.iter().find(|patch| patch.source_crc == crc)
 }
 
 /// Whether a built-in patch is made for `image` (iNES header or not).

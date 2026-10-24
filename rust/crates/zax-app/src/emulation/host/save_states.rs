@@ -1,7 +1,7 @@
 //! Save states and rollback (SPEC-07 §3.4, SPEC-09 REQ-PERS-050 to REQ-PERS-058).
 
 use zax_engine3d::state_codec;
-use zax_nes::NesCore;
+use zax_nes::{builtin_patches, NesCore};
 use zax_render::assets::png_image;
 
 use super::{EmulationHost, GameView, THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH};
@@ -31,6 +31,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let core = session.core().save_state(true).ok()?;
         let camera = save_state_file::write_camera(&self.scene.camera.capture());
         let conversion = state_codec::write(session.engine());
+        let hack = session
+            .core()
+            .original_image()
+            .and_then(builtin_patches::patch_for);
+        let mut picture = Vec::new();
+        session.copy_nes_picture(&mut picture);
+        let thumbnail = save_state_file::thumbnail_jpeg(&picture).unwrap_or_default();
         Some(SaveStateContent {
             header: SaveStateHeader {
                 core_id: NesCore::CORE_NAME.to_owned(),
@@ -39,11 +46,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 rom_sha1: fingerprint,
                 saved_at,
                 slot_id: slot_id.to_owned(),
+                is_hack: Some(hack.is_some()),
+                hack_name: hack.map(|patch| patch.name.to_owned()),
+                hack_version: hack.map(|patch| format!("{:08X}", patch.version())),
+                app_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                saved_at_local: Some(save_state_file::local_date_time(saved_at)),
             },
             core,
             lua,
             camera,
             conversion,
+            thumbnail,
         })
     }
 
