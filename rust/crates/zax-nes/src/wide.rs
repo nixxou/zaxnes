@@ -58,6 +58,9 @@ const VERSION: u8 = 1;
 /// anything to show: the nametables wrap there.
 pub const MAX_MARGIN: i32 = 512;
 
+/// The widest margin the nametables can show: past it they wrap.
+const NAMETABLE_MARGIN: i32 = 128;
+
 /// The widest margin a ROM can ask for or be told of through its 8-bit registers.
 const MAX_ROM_MARGIN: i32 = 248;
 
@@ -148,18 +151,30 @@ impl WideExtension {
         self.unlocked
     }
 
-    /// The margin captured on each side, in pixels: 0 unless the ROM unlocked the window and
-    /// asked for one and the host offers one.
+    /// The margin captured on each side, in pixels: the host's when a margin decoder fills the
+    /// margins, otherwise [`WideExtension::rom_margin`].
     #[must_use]
     pub fn margin(&self) -> i32 {
         if self.decoded {
-            return self.host_margin;
+            return self.host_margin.max(self.rom_margin());
         }
+        self.rom_margin()
+    }
+
+    /// The margin the nametables and sprites may show on each side, in pixels: 0 unless the
+    /// ROM unlocked the window and asked for one and the host offers one, at most the 128 the
+    /// nametables hold.
+    #[must_use]
+    pub fn rom_margin(&self) -> i32 {
         if !self.unlocked {
             return 0;
         }
 
-        (i32::from(self.requested_margin).min(self.host_margin) / 8) * 8
+        (i32::from(self.requested_margin)
+            .min(self.host_margin)
+            .min(NAMETABLE_MARGIN)
+            / 8)
+            * 8
     }
 
     /// The range of screen x a tile may start at and still show: `[low, high)`, `low` being the
@@ -167,7 +182,7 @@ impl WideExtension {
     /// reference (0 = left edge of the 256-pixel picture).
     #[must_use]
     pub fn visible_range(&self) -> (i32, i32) {
-        let margin = self.margin();
+        let margin = self.rom_margin();
         (
             -margin.min(i32::from(self.left_extent)),
             256 + margin.min(i32::from(self.right_extent)),
@@ -177,7 +192,7 @@ impl WideExtension {
     /// The screen x of OAM sprite `sprite` (0..64) whose OAM x byte is `low`.
     #[must_use]
     pub fn sprite_x(&self, sprite: usize, low: u8) -> i32 {
-        let high = if self.margin() > 0 {
+        let high = if self.rom_margin() > 0 {
             self.active_high.get(sprite).copied().unwrap_or(0)
         } else {
             0
