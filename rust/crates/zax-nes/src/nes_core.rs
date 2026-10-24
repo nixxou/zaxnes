@@ -504,11 +504,12 @@ impl NesCore {
         self.bus.ppu().pixel_frame()
     }
 
-    /// The picture of the frame just run, widened by its widescreen margin on each side (the
-    /// sides composed from the tile records), into `out`: `256 + 2 * margin` NES colour indices
-    /// a row, 240 rows. The plain [`NesCore::pixel_frame`] without a margin.
-    pub fn wide_picture_into(&self, out: &mut Vec<u8>) {
-        self.bus.ppu().wide_picture_into(out);
+    /// The picture of the frame just run, widened by its widescreen margins (the sides, top and
+    /// bottom composed from the tile records), into `out`: `256 + 2 * margin` NES colour indices
+    /// a row, `240 + 2 * margin_y` rows; returns the number of rows. The plain
+    /// [`NesCore::pixel_frame`] without a margin.
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
+        self.bus.ppu().wide_picture_into(out)
     }
 
     /// The tile records of the frame just run.

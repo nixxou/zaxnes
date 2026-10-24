@@ -67,5 +67,6 @@ pub fn from_json(
         engine,
         draw_list,
         nes_picture: Vec::new(),
+        nes_picture_height: 0,
     })
 }
