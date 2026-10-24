@@ -322,6 +322,9 @@ impl NesBus {
         }
 
         if WideExtension::claims(address) {
+            if let Some(value) = self.wide_window_read(address) {
+                return value;
+            }
             if let Some(value) = self.ppu.wide().read(address) {
                 return value;
             }
@@ -397,6 +400,13 @@ impl NesBus {
         self.ppu.wide_mut().latch_sprites();
     }
 
+    /// A read of the widescreen extension's PRG window: the byte of PRG-ROM it shows there.
+    fn wide_window_read(&self, address: u16) -> Option<u8> {
+        let offset = self.ppu.wide().prg_window(address)?;
+        let prg = self.cartridge.as_ref()?.rom().prg_rom();
+        prg.get(offset % prg.len().max(1)).copied()
+    }
+
     /// Writes a byte exactly as a CPU write would, without advancing emulated time
     /// (REQ-CORE-082).
     pub fn poke(&mut self, address: u16, value: u8) {
@@ -434,6 +444,9 @@ impl CpuBus for NesBus {
         }
 
         if WideExtension::claims(address) {
+            if let Some(value) = self.wide_window_read(address) {
+                return value;
+            }
             if let Some(value) = self.ppu.wide().read(address) {
                 return value;
             }

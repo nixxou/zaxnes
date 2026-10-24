@@ -18,7 +18,9 @@
 //! | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines, before the vblank |
 //! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring |
 //! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
-//! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it) |
+//! | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
+//! | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
+//! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it); `$5800`-`$5FFF` shows PRG-ROM instead while the window is on |
 //!
 //! The margin in use is `min($5003, $5002)` rounded down to a multiple of 8. `$5004` and
 //! `$5005` are read each time a band of tiles is captured, so a game can hide the sides behind
@@ -79,6 +81,10 @@ pub struct WideExtension {
     overclock: u8,
     /// Layout register: bit 0 asks for four separate nametables.
     layout: u8,
+    /// PRG window: bit 7 on, bits 0-6 the 16 KiB bank.
+    window_bank: u8,
+    /// PRG window: first page of the bank.
+    window_page: u8,
     /// CPU cycles of the current overclock still to run with the machine held.
     stall: u32,
 }
@@ -105,6 +111,8 @@ impl WideExtension {
             scratch: vec![0; RAM_SIZE],
             overclock: 0,
             layout: 0,
+            window_bank: 0,
+            window_page: 0,
             stall: 0,
         }
     }
@@ -193,6 +201,8 @@ impl WideExtension {
             0x5005 => Some(self.right_extent),
             0x5006 => Some(self.overclock),
             0x5007 => Some(self.layout),
+            0x5008 => Some(self.window_bank),
+            0x5009 => Some(self.window_page),
             FIRST_RAM..=LAST_REGISTER => {
                 self.scratch.get(usize::from(address - FIRST_RAM)).copied()
             }
@@ -218,6 +228,8 @@ impl WideExtension {
             0x5005 => self.right_extent = value,
             0x5006 => self.overclock = value,
             0x5007 => self.layout = value,
+            0x5008 => self.window_bank = value,
+            0x5009 => self.window_page = value,
             0x5100..=0x51FF => {
                 self.pending_high[usize::from(address & 0xFF) / 4] = value;
             }
@@ -252,6 +264,22 @@ impl WideExtension {
 
         self.active_high = self.pending_high;
         self.pending_high = [0; 64];
+    }
+
+    /// The offset in PRG-ROM a CPU read of `address` sees through the PRG window, or `None`
+    /// when the window is off or `address` is outside it. The offset may be past the end of
+    /// a small PRG-ROM: the caller wraps it.
+    #[must_use]
+    pub fn prg_window(&self, address: u16) -> Option<usize> {
+        if !self.unlocked || self.window_bank & 0x80 == 0 || !(0x5800..=0x5FFF).contains(&address) {
+            return None;
+        }
+
+        Some(
+            (usize::from(self.window_bank & 0x7F) * 0x4000)
+                + (usize::from(self.window_page) * 0x100)
+                + usize::from(address - 0x5800),
+        )
     }
 
     /// Whether the ROM asked for four separate nametables (2 x 2): the 4 KiB of console VRAM
@@ -292,14 +320,21 @@ impl WideExtension {
         writer.write_blob(&self.scratch);
         writer.write_u8(self.overclock);
         writer.write_u8(self.layout);
+        writer.write_u8(self.window_bank);
+        writer.write_u8(self.window_page);
         writer.write_u32(self.stall);
     }
 
-    /// Restores the register state written by [`WideExtension::save_state`].
+    /// Restores the register state written by [`WideExtension::save_state`]; `with_window`
+    /// false reads the earlier block, without the PRG window registers (the window stays off).
     ///
     /// # Errors
     /// [`InvalidState`] when the block is truncated.
-    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+    pub fn load_state(
+        &mut self,
+        reader: &mut StateReader,
+        with_window: bool,
+    ) -> Result<(), InvalidState> {
         self.unlock_progress = reader.read_u8()?.min(3);
         self.unlocked = reader.read_bool()?;
         self.requested_margin = reader.read_u8()?;
@@ -310,6 +345,13 @@ impl WideExtension {
         reader.read_blob_into(&mut self.scratch)?;
         self.overclock = reader.read_u8()?;
         self.layout = reader.read_u8()?;
+        if with_window {
+            self.window_bank = reader.read_u8()?;
+            self.window_page = reader.read_u8()?;
+        } else {
+            self.window_bank = 0;
+            self.window_page = 0;
+        }
         self.stall = reader.read_u32()?;
         Ok(())
     }
@@ -387,6 +429,17 @@ mod tests {
         wide.arm_overclock();
         let held = std::iter::from_fn(|| wide.take_stall_cycle().then_some(())).count();
         assert_eq!(held, 228);
+    }
+
+    #[test]
+    fn the_prg_window_maps_a_bank_page() {
+        let mut wide = unlocked(0);
+        assert_eq!(wide.prg_window(0x5800), None);
+        wide.write(0x5008, 0x80);
+        wide.write(0x5009, 0x2B);
+        assert_eq!(wide.prg_window(0x5800), Some(0x2B00));
+        assert_eq!(wide.prg_window(0x5FFF), Some(0x2B00 + 0x7FF));
+        assert_eq!(wide.prg_window(0x57FF), None);
     }
 
     #[test]
