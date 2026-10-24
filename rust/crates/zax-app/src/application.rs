@@ -206,6 +206,8 @@ struct Running {
     pipeline: Pipelined,
     /// The automatic resolution (`video.dynamic_resolution`).
     resolution: AutomaticResolution,
+    /// The save state slot `--load-state` asks for, until the game accepts the load.
+    pending_state_load: Option<i32>,
 }
 
 /// The state of the automatic resolution between two displayed frames.
@@ -346,12 +348,14 @@ impl Running {
             clock: StageClock::new(profiling),
             pipeline: Pipelined::default(),
             resolution: AutomaticResolution::default(),
+            pending_state_load: options.load_state,
         })
     }
 
     /// One displayed frame. Returns false once the application is to close.
     fn frame(&mut self) -> Result<bool, String> {
         self.follow_the_profiler_setting();
+        self.load_the_asked_state();
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
@@ -568,6 +572,22 @@ impl Running {
             profile_line: self.profiler.as_ref().map_or("", FrameProfiler::summary),
         };
         operation(&mut self.ui, &mut frame, sizes, &debug);
+    }
+
+    /// `--load-state`: loads the slot once the game runs and the host accepts the load (the
+    /// game loads in the background, and a slot of another game is refused).
+    fn load_the_asked_state(&mut self) {
+        let Some(slot) = self.pending_state_load else {
+            return;
+        };
+        let args = CommandArgs::of_number(slot);
+        if self.host.state() == EmulationState::Running
+            && self.host.can_execute(Command::LoadSlot, &args)
+        {
+            self.host.enqueue(Command::LoadSlot, args);
+            self.pending_state_load = None;
+            log(&format!("save state slot {slot} loaded (--load-state)."));
+        }
     }
 
     /// Turns the frame profiler on or off with `ui.profiler` (`ZAXNES_PROFILE=1` keeps it on):

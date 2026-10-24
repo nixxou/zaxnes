@@ -82,6 +82,7 @@ Rust-only options:
                           1 to 5, or 0 for none (also ZAXNES_CATCH_UP; default 5, 0 on handhelds).
   --backend <api>         Graphics API for this run: gl, vulkan or dx12 (video.backend; Vulkan
                           and DirectX 12 in the desktop builds only).
+  --load-state <n>        Load save state slot n of the game once it has started (with --rom).
 ";
 
 /// A command line that cannot be read. The messages are those of the C# program.
@@ -214,6 +215,8 @@ pub struct AppOptions {
     /// The graphics API of this run, as a `video.backend` value (Rust-only); `None` for the
     /// setting.
     pub backend: Option<i32>,
+    /// The save state slot to load once the game has started (Rust-only).
+    pub load_state: Option<i32>,
 }
 
 impl Default for AppOptions {
@@ -247,6 +250,7 @@ impl Default for AppOptions {
             roms_directory: None,
             catch_up: None,
             backend: None,
+            load_state: None,
         }
     }
 }
@@ -366,6 +370,10 @@ impl AppOptions {
             "--handheld" => self.handheld = true,
             "--roms" => {
                 self.roms_directory = Some(next_value(arguments, index, "--roms")?.to_owned());
+            }
+            "--load-state" => {
+                let value = next_value(arguments, index, "--load-state")?;
+                self.load_state = Some(parse_index(value, "--load-state")?);
             }
             "--backend" => {
                 let value = next_value(arguments, index, "--backend")?;
