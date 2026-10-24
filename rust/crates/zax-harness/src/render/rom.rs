@@ -93,6 +93,55 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_end);
     report_scripts(&host.engine);
 
+    write_run_outputs(&mut host, request)?;
+
+    if let Some(path) = request.dump_frame {
+        let batch = host.core.frame_batch();
+        fs::write(path, frame_json::write(batch.records, &batch.palette)?)?;
+        println!("render: frame written to {}", path.display());
+    }
+
+    // What a script wrote to the light during the run (the C# harness bridges it live).
+    if let Some(model) = host.model() {
+        push_scripted_light(model, &mut scene);
+    }
+
+    let picture = host.core.pixel_frame().to_vec();
+    let mut engine = host.engine;
+    scene.camera.snap_to_setpoints();
+    scene.game_running = true;
+    scene.clipping = engine.settings().clipping;
+    #[allow(clippy::cast_precision_loss)] // 0..=96.
+    let margin = engine
+        .published_frame()
+        .map_or(0, zax_engine3d::frame::ConversionFrame::margin) as f32;
+    scene.margin = margin;
+    scene.nes_background_color = engine.frame_color(0);
+    scene.emulated_time = engine
+        .published_frame()
+        .map_or(0.0, zax_engine3d::frame::ConversionFrame::time);
+
+    // AMD-009 (Q-022): without a profile the scene shows the core's pixel frame.
+    scene.two_dimensional_mode = engine.two_dimensional_mode;
+    let draw_list = engine.build_draw_list().clone();
+
+    Ok(SyntheticScene {
+        name: Path::new(&file_name)
+            .file_stem()
+            .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned()),
+        description: format!(
+            "{file_name} after {frames} emulated frames, profile '{}'",
+            profile.title.as_deref().unwrap_or("2D Mode")
+        ),
+        scene,
+        engine,
+        draw_list,
+        nes_picture: picture,
+    })
+}
+
+/// The outputs of `--save-state`, `--dump-mem` and `--png-nes`, written after the run.
+fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), HarnessError> {
     if let Some(path) = request.save_state {
         let state = host
             .core
@@ -138,50 +187,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
             batch.margin
         );
     }
-
-    if let Some(path) = request.dump_frame {
-        let batch = host.core.frame_batch();
-        fs::write(path, frame_json::write(batch.records, &batch.palette)?)?;
-        println!("render: frame written to {}", path.display());
-    }
-
-    // What a script wrote to the light during the run (the C# harness bridges it live).
-    if let Some(model) = host.model() {
-        push_scripted_light(model, &mut scene);
-    }
-
-    let picture = host.core.pixel_frame().to_vec();
-    let mut engine = host.engine;
-    scene.camera.snap_to_setpoints();
-    scene.game_running = true;
-    scene.clipping = engine.settings().clipping;
-    #[allow(clippy::cast_precision_loss)] // 0..=96.
-    let margin = engine
-        .published_frame()
-        .map_or(0, zax_engine3d::frame::ConversionFrame::margin) as f32;
-    scene.margin = margin;
-    scene.nes_background_color = engine.frame_color(0);
-    scene.emulated_time = engine
-        .published_frame()
-        .map_or(0.0, zax_engine3d::frame::ConversionFrame::time);
-
-    // AMD-009 (Q-022): without a profile the scene shows the core's pixel frame.
-    scene.two_dimensional_mode = engine.two_dimensional_mode;
-    let draw_list = engine.build_draw_list().clone();
-
-    Ok(SyntheticScene {
-        name: Path::new(&file_name)
-            .file_stem()
-            .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned()),
-        description: format!(
-            "{file_name} after {frames} emulated frames, profile '{}'",
-            profile.title.as_deref().unwrap_or("2D Mode")
-        ),
-        scene,
-        engine,
-        draw_list,
-        nes_picture: picture,
-    })
+    Ok(())
 }
 
 /// `render.mesh_algo` as the settings catalogue numbers the algorithms.
