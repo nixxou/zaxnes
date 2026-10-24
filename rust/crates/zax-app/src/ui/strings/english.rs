@@ -213,6 +213,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.ui.fullscreen", "Full screen"),
     ("setting.ui.show_fps", "Show the FPS"),
+    ("setting.ui.profiler", "Performance measures (log)"),
     ("setting.ui.sort_option", "Library sort order"),
     ("setting.ui.language", "Language"),
     // ----------------------------------- labels of the enumerated values

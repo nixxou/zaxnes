@@ -150,6 +150,7 @@ setting_ids! {
     AppEngineMode => "app.engine_mode",
     AudioMute => "audio.mute",
     UiShowFps => "ui.show_fps",
+    UiProfiler => "ui.profiler",
     UiLanguage => "ui.language",
 }
 

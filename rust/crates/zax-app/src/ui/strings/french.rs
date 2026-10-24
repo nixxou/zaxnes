@@ -211,6 +211,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.audio.mute", "Muet"),
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.ui.fullscreen", "Plein écran"),
+    ("setting.ui.profiler", "Mesures de performance (journal)"),
     ("setting.ui.show_fps", "Afficher les FPS"),
     ("setting.ui.sort_option", "Tri de la bibliothèque"),
     ("setting.ui.language", "Langue"),

@@ -208,7 +208,8 @@ struct Running {
     cursor: CursorAutoHide,
     state: RunState,
     last: Instant,
-    /// The frame profiler (`ZAXNES_PROFILE=1`) and the clock of the loop's stages.
+    /// The frame profiler (`ui.profiler`, or `ZAXNES_PROFILE=1`) and the clock of the loop's
+    /// stages.
     profiler: Option<FrameProfiler>,
     clock: StageClock,
     /// The pipelined frames (`emu.pipeline`).
@@ -281,7 +282,8 @@ impl Running {
             Some(Box::new(log)),
         );
         let pacing_state = pacing.apply(&mut window, &model);
-        let profiling = frame_profiler::requested_by_environment();
+        let profiling = frame_profiler::requested_by_environment()
+            || model.get(SettingId::UiProfiler).as_bool();
         if profiling {
             log_profiler_startup(
                 &model,
@@ -349,6 +351,7 @@ impl Running {
 
     /// One displayed frame. Returns false once the application is to close.
     fn frame(&mut self) -> Result<bool, String> {
+        self.follow_the_profiler_setting();
         let frame_begin = self.clock.start();
         let busy_begin = Instant::now();
         let mark = self.clock.start();
@@ -565,6 +568,24 @@ impl Running {
             profile_line: self.profiler.as_ref().map_or("", FrameProfiler::summary),
         };
         operation(&mut self.ui, &mut frame, sizes, &debug);
+    }
+
+    /// Turns the frame profiler on or off with `ui.profiler` (`ZAXNES_PROFILE=1` keeps it on):
+    /// off, the loop measures nothing and writes no profile line.
+    fn follow_the_profiler_setting(&mut self) {
+        let wanted = frame_profiler::requested_by_environment()
+            || self.host.settings().get(SettingId::UiProfiler).as_bool();
+        if wanted == self.profiler.is_some() {
+            return;
+        }
+        self.profiler = wanted.then(|| FrameProfiler::new(Instant::now()));
+        self.clock = StageClock::new(wanted);
+        self.host.set_profiling(wanted);
+        log(if wanted {
+            "frame profiler on"
+        } else {
+            "frame profiler off"
+        });
     }
 
     /// Whether the next frame is pipelined: `emu.pipeline`, for a game running in 3D whose
