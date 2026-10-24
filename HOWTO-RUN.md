@@ -253,6 +253,10 @@ La version console reste en OpenGL ES.
 - Le journal liste les cartes graphiques capables de dessiner dans la fenêtre. Sur une machine à
   plusieurs cartes, la variable d'environnement **`ZAXNES_GPU`** en choisit une par un morceau de
   son nom (`ZAXNES_GPU=3060`) ; sans elle, c'est celle que le système recommande.
+- Sur les cartes qui le permettent (tableaux de textures et dessin indirect), Vulkan et DirectX 12
+  regroupent les dessins de la scène en quelques appels, ce qui allège beaucoup le processeur. En
+  cas de doute sur un pilote, `ZAXNES_WGPU_BATCHING=0` revient à un appel par groupe de tuiles ;
+  l'image est la même.
 - En Vulkan et DirectX 12, les ciels « Gradient » et « Fantasy » sont toujours les ciels calculés
   (`--assets` et ses cubemaps restent propres à OpenGL), et la résolution automatique garde
   l'échelle choisie (elle n'est pas encore mesurée sur ces API).

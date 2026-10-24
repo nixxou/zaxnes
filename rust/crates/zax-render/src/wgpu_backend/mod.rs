@@ -6,4 +6,4 @@ pub mod headless;
 mod renderer;
 mod resources;
 
-pub use renderer::{WgpuRenderError, WgpuSceneRenderer, WgpuTarget};
+pub use renderer::{WgpuRenderError, WgpuSceneRenderer, WgpuTarget, BATCHING_FEATURES};

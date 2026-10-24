@@ -25,6 +25,28 @@ use crate::occlusion::{self, Occlusion};
 use crate::scene::{SceneFrame, SceneState};
 use crate::shadow_volume::ShadowVolume;
 
+/// How a backend lays one placement out in its instance data. A type of its own per layout, so
+/// that the layout code is compiled for each backend with the write inlined.
+pub trait Placement: Copy {
+    /// Appends the placement of an item from its model matrix and deformation.
+    fn write(self, data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>);
+}
+
+/// The std140 `ZaxInstance` of the GL scene shader: the model matrix, the three columns of the
+/// normal matrix and the deformation's tile position.
+#[derive(Debug, Clone, Copy)]
+pub struct Std140Placement;
+
+impl Placement for Std140Placement {
+    #[inline]
+    fn write(self, data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
+        push_std140_placement(data, model, deform);
+    }
+}
+
+/// The placements of the GL path.
+pub const STD140_PLACEMENT: Std140Placement = Std140Placement;
+
 /// Instances one draw call carries, the size of `uInstances` in `scene.vert`.
 pub const INSTANCES_PER_DRAW: usize = 128;
 /// Bytes of one placement in the instance block (std140: a `mat4` and four `vec4`).
@@ -470,7 +492,12 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
     /// buckets, whose two passes go object by object), each run starting at a multiple of
     /// `alignment`. With `group_opaque`, the opaque bucket and the tiles of each transparent
     /// object are reordered by draw state first ([`OpaqueScratch::order_range`]).
-    pub fn lay_out_instances(&mut self, group_opaque: bool, alignment: usize) {
+    pub fn lay_out_instances(
+        &mut self,
+        group_opaque: bool,
+        alignment: usize,
+        placement: impl Placement,
+    ) {
         let lists = &mut self.lists;
         let scratch = &mut self.scratch;
         let data = &mut self.instance_data;
@@ -484,7 +511,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             scratch,
             &mut lists.opaque_runs,
             data,
-            alignment,
+            (alignment, placement),
         );
 
         // Blended objects: the runs never cross an object; the tiles of a transparent object
@@ -498,7 +525,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 scratch,
                 &mut lists.transparent_runs,
                 data,
-                alignment,
+                (alignment, placement),
             );
             group.runs = (first, lists.transparent_runs.len());
         }
@@ -506,7 +533,13 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         for group in &mut lists.hud_objects {
             let first = lists.hud_runs.len();
             scratch.order_range(group.start, group.end, false);
-            add_runs(&lists.hud, scratch, &mut lists.hud_runs, data, alignment);
+            add_runs(
+                &lists.hud,
+                scratch,
+                &mut lists.hud_runs,
+                data,
+                (alignment, placement),
+            );
             group.runs = (first, lists.hud_runs.len());
         }
     }
@@ -519,7 +552,7 @@ impl<M: Copy + Eq, T> FramePlan<M, T> {
     /// `alignment`). The casters keep their order, so the depth map is the same as drawn one by
     /// one.
     #[cfg_attr(not(feature = "wgpu"), allow(dead_code))]
-    pub fn lay_out_casters(&mut self, alignment: usize) {
+    pub fn lay_out_casters(&mut self, alignment: usize, placement: impl Placement) {
         let casters = &self.lists.casters;
         let (runs, data) = (&mut self.caster_runs, &mut self.caster_data);
         runs.clear();
@@ -545,7 +578,7 @@ impl<M: Copy + Eq, T> FramePlan<M, T> {
             let offset = data.len().next_multiple_of(alignment);
             data.resize(offset, 0);
             for item in &casters[first..last] {
-                push_placement(data, item);
+                placement.write(data, &item.model, item.deform.as_ref());
             }
             runs.push(InstanceRun {
                 first,
@@ -789,7 +822,7 @@ fn add_runs<M, T>(
     scratch: &OpaqueScratch<M, T>,
     runs: &mut Vec<InstanceRun>,
     data: &mut Vec<u8>,
-    alignment: usize,
+    (alignment, placement): (usize, impl Placement),
 ) {
     let order = &scratch.order;
     let mut first = 0;
@@ -806,7 +839,8 @@ fn add_runs<M, T>(
         let offset = data.len().next_multiple_of(alignment);
         data.resize(offset, 0);
         for &position in &order[first..last] {
-            push_placement(data, &items[position as usize]);
+            let item = &items[position as usize];
+            placement.write(data, &item.model, item.deform.as_ref());
         }
         runs.push(InstanceRun {
             first: order[first] as usize,
@@ -820,15 +854,13 @@ fn add_runs<M, T>(
 /// Appends one placement in the std140 layout of `ZaxInstance`: the model matrix as it was
 /// uploaded to `uModel` (column by column), the three columns of the normal matrix, then the
 /// deformation's tile position (zero without deformation).
-fn push_placement<M, T>(data: &mut Vec<u8>, item: &DrawItem<M, T>) {
-    for cell in interop::to_numerics(&item.model).to_cells() {
+fn push_std140_placement(data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
+    for cell in interop::to_numerics(model).to_cells() {
         data.extend_from_slice(&cell.to_ne_bytes());
     }
 
-    let (m, _) = interop::normal_matrix(&item.model);
-    let tile = item
-        .deform
-        .map_or(Vec3::ZERO, |deform| deform.tile_relative_to_pivot);
+    let (m, _) = interop::normal_matrix(model);
+    let tile = deform.map_or(Vec3::ZERO, |deform| deform.tile_relative_to_pivot);
     let rows = [
         [m[0], m[3], m[6]],
         [m[1], m[4], m[7]],

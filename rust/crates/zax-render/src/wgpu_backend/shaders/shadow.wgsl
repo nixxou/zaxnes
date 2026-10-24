@@ -19,10 +19,10 @@ fn vs_main(
     let instance = instances[instance_index];
     let draw = draws[run_of[instance_index]];
     var local = position;
-    if (draw.modes2.x != 0) {
-        local += zax_deformation(draw, instance.deform_tile.xyz, position, shadow_frame.params.x);
+    if (draw.modes2.x >= 0) {
+        local += zax_deformation(deforms[draw.modes2.x], instance.deform_tile.xyz, position, shadow_frame.params.x);
     }
 
-    let scene = instance.model * vec4<f32>(local, 1.0);
+    let scene = zax_place(instance, local);
     return zax_clip(shadow_frame.light_view_projection * vec4<f32>(scene.x, scene.y, -scene.z, 1.0));
 }

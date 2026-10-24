@@ -24,10 +24,29 @@ impl GpuApi {
             Self::Dx12 => wgpu::Backends::DX12,
         }
     }
+
+    /// The instance flags of the build, but on Vulkan without the check wgpu runs on every
+    /// indirect draw: the renderer writes the arguments from the meshes it binds, and Vulkan
+    /// takes them as they are. DirectX 12 keeps it, as wgpu rewrites the arguments there.
+    fn instance_flags(self) -> wgpu::InstanceFlags {
+        match self {
+            Self::Vulkan => {
+                wgpu::InstanceFlags::default() - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL
+            }
+            Self::Dx12 => wgpu::InstanceFlags::default(),
+        }
+    }
 }
 
 /// The id the font atlas carries; no other texture is ever drawn by the interface.
 const FONT_TEXTURE_ID: usize = 1;
+
+/// The features the scene renderer's batched draws need (`zax_render`'s `BATCHING_FEATURES`),
+/// asked for whenever the adapter has them.
+const BATCHING_FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE
+    .union(wgpu::Features::TEXTURE_BINDING_ARRAY)
+    .union(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
+    .union(wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY);
 
 /// The scene picture and the height of the window it fills, from the bottom up (the menu bar
 /// keeps the rest).
@@ -71,6 +90,7 @@ impl WgpuDisplay {
     ) -> Result<Self, PlatformError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: api.backends(),
+            flags: api.instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         // SAFETY: the handles are read from a live window; the caller keeps it alive for as
@@ -117,8 +137,12 @@ impl WgpuDisplay {
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("zax display"),
             required_features: adapter.features()
-                & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-            required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+                & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES | BATCHING_FEATURES),
+            required_limits: wgpu::Limits {
+                max_binding_array_elements_per_shader_stage:
+                    adapter.limits().max_binding_array_elements_per_shader_stage,
+                ..wgpu::Limits::default().using_resolution(adapter.limits())
+            },
             ..wgpu::DeviceDescriptor::default()
         }))
         .map_err(|error| PlatformError::new(format!("no {api:?} device: {error}")))?;
