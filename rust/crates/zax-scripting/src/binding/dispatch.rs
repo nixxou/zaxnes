@@ -30,7 +30,6 @@ pub(crate) fn method_function(lua: &Lua, id: HostType, position: usize) -> Optio
 /// with `fast`, the raw host values of [`super::raw`] (the "fast Lua binding" setting).
 pub(crate) fn install(lua: &Lua, fast: bool) -> mlua::Result<()> {
     lua.set_app_data(HostCache::new(lua)?);
-    super::lend::install(lua);
 
     let mut methods = Vec::with_capacity(HostType::COUNT);
     for _ in 0..HostType::COUNT {
@@ -65,6 +64,7 @@ pub(crate) fn install(lua: &Lua, fast: bool) -> mlua::Result<()> {
 
 /// Builds the metatable of the raw host values from the safe binding's functions.
 fn install_raw(lua: &Lua) -> mlua::Result<()> {
+    super::lend::install(lua);
     let name = lua
         .create_userdata(Host::new(Payload::Table(HostType::ScriptApi)))?
         .type_name()?
@@ -219,8 +219,24 @@ fn index(lua: &Lua, payload: Payload, key: &Value) -> mlua::Result<Value> {
 /// and TV-LUA-13.
 fn new_index(lua: &Lua, this: &Value, key: &Value, value: &Value) -> mlua::Result<()> {
     let cx = Cx::new(lua);
-    let mut payload =
+    let payload =
         host_payload(this).ok_or_else(|| cx.raise("attempt to index a userdata value"))?;
+    if let Some(assigned) = assign(lua, payload, key, value)? {
+        set_host_payload(this, assigned);
+    }
+    Ok(())
+}
+
+/// `obj[key] = value` on the host value of `payload`. Returns the payload the value now holds
+/// when it is a value type: the script's own copy, whose assigned component belongs to the
+/// userdata it was assigned to (REQ-LUA-044).
+fn assign(
+    lua: &Lua,
+    mut payload: Payload,
+    key: &Value,
+    value: &Value,
+) -> mlua::Result<Option<Payload>> {
+    let cx = Cx::new(lua);
     let definition = definition_of(&cx, &payload)?;
 
     if let Value::String(name) = key {
@@ -228,13 +244,7 @@ fn new_index(lua: &Lua, this: &Value, key: &Value, value: &Value) -> mlua::Resul
             return match &member.kind {
                 MemberKind::Property { set: Some(set), .. } => {
                     set(&cx, &mut payload, value)?;
-                    if definition.id.is_value() {
-                        // The value is the script's own copy: the component it assigned
-                        // belongs to the userdata it assigned it to (REQ-LUA-044).
-                        set_host_payload(this, payload);
-                    }
-
-                    Ok(())
+                    Ok(definition.id.is_value().then_some(payload))
                 }
                 _ => Err(cx.raise(&format!(
                     "cannot set {}, it is read only",
@@ -246,7 +256,7 @@ fn new_index(lua: &Lua, this: &Value, key: &Value, value: &Value) -> mlua::Resul
 
     if is_number(key) {
         if let Some(setter) = &definition.index_setter {
-            return setter(&cx, &payload, key, value);
+            return setter(&cx, &payload, key, value).map(|()| None);
         }
     }
 
@@ -303,9 +313,14 @@ impl UserData for Host {
         methods.add_meta_method(MetaMethod::Index, |lua, this, key: Value| {
             index(lua, this.payload(), &key)
         });
-        methods.add_meta_function(
+        methods.add_meta_method(
             MetaMethod::NewIndex,
-            |lua, (this, key, value): (Value, Value, Value)| new_index(lua, &this, &key, &value),
+            |lua, this, (key, value): (Value, Value)| {
+                if let Some(assigned) = assign(lua, this.payload(), &key, &value)? {
+                    this.set_payload(assigned);
+                }
+                Ok(())
+            },
         );
         methods.add_meta_function(MetaMethod::Eq, |_, (left, right): (Value, Value)| {
             Ok(equal(&left, &right))
