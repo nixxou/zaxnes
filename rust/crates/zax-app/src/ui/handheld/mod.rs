@@ -13,9 +13,11 @@ pub mod overlay;
 pub mod pad;
 pub mod profile_list;
 pub mod rom_list;
+pub mod states;
 
 use std::path::{Path, PathBuf};
 
+use zax_platform::ui_image::{PictureUpdate, UiPicture, FIRST_PICTURE_ID};
 use zax_render::numerics::Vector3;
 use zax_settings::catalogue::SettingId;
 
@@ -26,18 +28,23 @@ use self::overlay::{CameraPreset, OverlayCommand, OverlayModel};
 use self::pad::{PadButton, PadState};
 use self::profile_list::{ProfileListCommand, ProfileListModel};
 use self::rom_list::{ProfileMatch, RomEntry, RomListCommand, RomListModel};
+use self::states::{SlotState, StatesCommand, StatesMode, StatesModel};
 use super::key_config::{self, KeyConfigModel, KeyConfigRow};
 use super::profile_chooser::{ProfileChoice, ProfileChooserModel};
 use super::zax_ui::{UiEffect, UiFrame};
 use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::game_catalog::GameCatalog as _;
-use crate::emulation::host::HostEvent;
+use crate::emulation::host::{HostEvent, SlotPatchStatus};
 use crate::input::BindingDeviceKind;
+use crate::persistence::save_slots::numbered_slot_id;
 use crate::ui::{keys, strings};
 
 /// Seconds a binding waits for a button before it gives up.
 pub const CAPTURE_SECONDS: f32 = 5.0;
+
+/// The texture id of the thumbnail the save state screen shows.
+pub const STATE_PICTURE_ID: usize = FIRST_PICTURE_ID;
 
 /// The screen in front.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +59,8 @@ pub enum Screen {
     Controls,
     /// The in-game menu.
     Overlay,
+    /// The save state slots, to save or to load (from the in-game menu).
+    States,
     /// The game itself, with no interface.
     InGame,
 }
@@ -84,6 +93,13 @@ pub struct HandheldUi {
     camera_memory: CameraMemory,
     /// How long Y has been held in game, while it is, and whether the hold already acted.
     flat_view: Option<(f32, bool)>,
+    states: StatesModel,
+    /// The slot and the save time of the thumbnail shown, and whether it has one.
+    shown_picture: Option<(i32, i64, bool)>,
+    /// The changes of the pictures, for the renderer.
+    pictures: Vec<PictureUpdate>,
+    /// Whether the host waits for an answer to a question, which the interface then asks.
+    confirming: bool,
 }
 
 /// L2 in game (Rust-only, owner request): held, it keeps the camera's angles and distance; a
@@ -122,6 +138,10 @@ impl HandheldUi {
             effects: Vec::new(),
             camera_memory: CameraMemory::default(),
             flat_view: None,
+            states: StatesModel::new(StatesMode::Save, 1),
+            shown_picture: None,
+            pictures: Vec::new(),
+            confirming: false,
         };
         ui.refresh_roms(host);
         ui
@@ -141,7 +161,12 @@ impl HandheldUi {
     /// Whether the interface holds the input: everything but the game.
     #[must_use]
     pub fn is_modal(&self) -> bool {
-        self.screen != Screen::InGame
+        self.screen != Screen::InGame || self.confirming
+    }
+
+    /// The changes of the interface's pictures since the last call, for the renderer.
+    pub fn take_picture_updates(&mut self) -> Vec<PictureUpdate> {
+        std::mem::take(&mut self.pictures)
     }
 
     /// What the interface asked of the application since the last call.
@@ -209,6 +234,7 @@ impl HandheldUi {
 
     /// One frame of input: the exit combination, the menu button and the presses of the screen.
     pub fn update(&mut self, pad: &PadState, seconds: f32, frame: &mut UiFrame<'_>) {
+        self.confirming = frame.host.pending_confirmation().is_some();
         self.follow_the_game(frame.host);
         self.update_combo(pad, seconds, frame.host);
         self.update_capture(seconds, frame);
@@ -272,12 +298,51 @@ impl HandheldUi {
         }
     }
 
+    /// The thumbnail of the slot selected on the save state screen, read again when the
+    /// selection or the slot's state changes.
+    fn follow_the_state_picture(&mut self, host: &AppHost) {
+        // Called by the drawing, which runs in the screenshot runs too.
+        if self.screen != Screen::States {
+            return;
+        }
+        let slot = self.states.slot();
+        let record = host.slots.find(&numbered_slot_id(slot));
+        let saved_at = record
+            .filter(|record| record.is_occupied())
+            .map_or(0, |record| record.saved_at);
+        if self
+            .shown_picture
+            .is_some_and(|(shown, at, _)| (shown, at) == (slot, saved_at))
+        {
+            return;
+        }
+        let picture = (saved_at != 0).then(|| state_picture(host, slot)).flatten();
+        self.shown_picture = Some((slot, saved_at, picture.is_some()));
+        self.pictures.push(PictureUpdate {
+            id: STATE_PICTURE_ID,
+            picture,
+        });
+    }
+
+    /// Whether the save state screen has a thumbnail to show for its selected slot.
+    #[must_use]
+    pub fn state_picture_shown(&self) -> bool {
+        self.shown_picture
+            .is_some_and(|(slot, _, shown)| shown && slot == self.states.slot())
+    }
+
+    /// The save state screen.
+    #[must_use]
+    pub const fn states(&self) -> &StatesModel {
+        &self.states
+    }
+
     /// The screen follows the game: it hides when one runs and comes back when it stops.
     fn follow_the_game(&mut self, host: &AppHost) {
         let playing = host.current_game_id().is_some() || host.is_loading();
         match (playing, self.screen) {
             (true, Screen::Home | Screen::Profiles) => self.screen = Screen::InGame,
-            (false, Screen::InGame | Screen::Overlay) => self.show_home(host),
+            (false, Screen::InGame | Screen::Overlay | Screen::States) => self.show_home(host),
             _ => {}
         }
     }
@@ -324,6 +389,18 @@ impl HandheldUi {
     }
 
     fn press(&mut self, button: PadButton, frame: &mut UiFrame<'_>) {
+        // A question of the host (a save state made with the built-in patches set the other
+        // way, for instance) is answered first: A agrees, B declines.
+        if frame.host.pending_confirmation().is_some() {
+            match button {
+                PadButton::A => {
+                    frame.host.confirm_pending();
+                }
+                PadButton::B | PadButton::Menu => frame.host.cancel_pending(),
+                _ => {}
+            }
+            return;
+        }
         // The press that ends a capture bound the button: it is not a press of the screen.
         if self.screen == Screen::Controls && self.controls.capture_left.is_some() {
             if button == PadButton::Menu {
@@ -364,6 +441,13 @@ impl HandheldUi {
             Screen::Overlay => {
                 if let Some(command) = self.overlay.handle(button) {
                     self.carry_out_overlay(command, frame.host);
+                }
+            }
+            Screen::States => {
+                let host = &*frame.host;
+                let command = self.states.handle(button, |slot| slot_state(host, slot));
+                if let Some(command) = command {
+                    self.carry_out_states(command, frame.host);
                 }
             }
             // X: the default view (owner request); Y and L2 are held buttons, followed by
@@ -458,13 +542,9 @@ impl HandheldUi {
         };
         match command {
             OverlayCommand::Resume => close(self, host),
-            OverlayCommand::SaveState(slot) => {
-                host.enqueue(Command::SaveSlot, CommandArgs::of_number(slot));
-                close(self, host);
-            }
-            OverlayCommand::LoadState(slot) => {
-                host.enqueue(Command::LoadSlot, CommandArgs::of_number(slot));
-                close(self, host);
+            OverlayCommand::ChooseState(mode, slot) => {
+                self.states = StatesModel::new(mode, slot);
+                self.screen = Screen::States;
             }
             OverlayCommand::ToggleFastForward => {
                 close(self, host);
@@ -478,6 +558,22 @@ impl HandheldUi {
             }
             OverlayCommand::ExitToLauncher => host.enqueue(Command::Quit, CommandArgs::default()),
         }
+    }
+
+    fn carry_out_states(&mut self, command: StatesCommand, host: &mut AppHost) {
+        let (command, slot) = match command {
+            StatesCommand::Back => {
+                self.screen = Screen::Overlay;
+                return;
+            }
+            StatesCommand::Save(slot) => (Command::SaveSlot, slot),
+            StatesCommand::Load(slot) => (Command::LoadSlot, slot),
+        };
+        // The menu then shows the slot used last.
+        self.overlay.set_slot(slot);
+        host.enqueue(command, CommandArgs::of_number(slot));
+        host.enqueue(Command::Resume, CommandArgs::default());
+        self.screen = Screen::InGame;
     }
 
     /// The rows of the list of bindings: the NES buttons of player one.
@@ -552,6 +648,16 @@ impl HandheldUi {
                 self.overlay.reopen();
                 self.screen = Screen::Overlay;
             }
+            // Twice in a row: the screen that loads, then the one that saves.
+            Screen::States => {
+                let mode = if self.screen == Screen::States {
+                    StatesMode::Save
+                } else {
+                    StatesMode::Load
+                };
+                self.states = StatesModel::new(mode, 1);
+                self.screen = Screen::States;
+            }
             Screen::Home | Screen::InGame => self.screen = screen,
         }
     }
@@ -566,6 +672,31 @@ impl HandheldUi {
     pub const fn combo(&self) -> &ExitCombo {
         &self.combo
     }
+}
+
+/// How the numbered slot `slot` stands for the game being played.
+fn slot_state(host: &AppHost, slot: i32) -> SlotState {
+    let id = numbered_slot_id(slot);
+    if !host.slots.is_occupied(&id) {
+        return SlotState::Empty;
+    }
+    match host.slot_patch_status(&id) {
+        SlotPatchStatus::Fits => SlotState::Fits,
+        SlotPatchStatus::OtherMode { .. } => SlotState::OtherMode,
+        SlotPatchStatus::OtherVersion => SlotState::OtherVersion,
+    }
+}
+
+/// The thumbnail of the numbered slot `slot`, as the renderer takes it: none when it has no
+/// readable one.
+fn state_picture(host: &AppHost, slot: i32) -> Option<UiPicture> {
+    let file = host.paths().slot_thumbnail_file(&numbered_slot_id(slot));
+    let image = zax_render::assets::png_image::decode(&std::fs::read(file).ok()?).ok()?;
+    Some(UiPicture {
+        width: u32::try_from(image.width).ok()?,
+        height: u32::try_from(image.height).ok()?,
+        rgba: image.pixels,
+    })
 }
 
 /// Whether the setting "Menu = Select + Start" makes a tap of the combination open the menu.

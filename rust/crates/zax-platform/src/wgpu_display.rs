@@ -4,10 +4,12 @@
 //! and the present that the GL swap was. The surface is non-sRGB, as the GL window: the scene
 //! picture already holds sRGB values and the interface colours are written as they are.
 
+use std::collections::HashMap;
 use std::mem::size_of;
 
 use imgui::{DrawCmd, DrawCmdParams, DrawData, DrawVert, FontAtlas, TextureId};
 
+use crate::ui_image::{PictureUpdate, FONT_TEXTURE_ID};
 use crate::PlatformError;
 
 /// The graphics API wgpu draws through.
@@ -37,9 +39,6 @@ impl GpuApi {
         }
     }
 }
-
-/// The id the font atlas carries; no other texture is ever drawn by the interface.
-const FONT_TEXTURE_ID: usize = 1;
 
 /// The features the scene renderer's batched draws need (`zax_render`'s `BATCHING_FEATURES`),
 /// asked for whenever the adapter has them.
@@ -247,6 +246,12 @@ impl WgpuDisplay {
     pub fn upload_fonts(&mut self, fonts: &mut FontAtlas) {
         self.interface
             .upload_fonts(&self.device, &self.queue, fonts);
+    }
+
+    /// Applies the changes of the interface's pictures (`ui_image`).
+    pub fn update_pictures(&mut self, updates: &[PictureUpdate]) {
+        self.interface
+            .update_pictures(&self.device, &self.queue, updates);
     }
 
     /// Draws a frame of `width` x `height` pixels: black, the scene layer if there is one, then
@@ -609,6 +614,8 @@ struct InterfaceRenderer {
     projection: wgpu::Buffer,
     sampler: wgpu::Sampler,
     group: Option<wgpu::BindGroup>,
+    /// The bind groups of the interface's pictures, by texture id.
+    pictures: HashMap<usize, wgpu::BindGroup>,
     vertices: Option<wgpu::Buffer>,
     indices: Option<wgpu::Buffer>,
     vertex_data: Vec<u8>,
@@ -717,6 +724,7 @@ impl InterfaceRenderer {
                 ..wgpu::SamplerDescriptor::default()
             }),
             group: None,
+            pictures: HashMap::new(),
             vertices: None,
             indices: None,
             vertex_data: Vec::new(),
@@ -726,13 +734,48 @@ impl InterfaceRenderer {
 
     fn upload_fonts(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, fonts: &mut FontAtlas) {
         let atlas = fonts.build_rgba32_texture();
+        self.group =
+            Some(self.texture_group(device, queue, (atlas.width, atlas.height), atlas.data));
+        fonts.tex_id = TextureId::new(FONT_TEXTURE_ID);
+    }
+
+    /// Applies the changes of the interface's pictures; a picture whose pixels do not fill its
+    /// size is left out.
+    fn update_pictures(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        updates: &[PictureUpdate],
+    ) {
+        for update in updates {
+            self.pictures.remove(&update.id);
+            if let Some(picture) = update.picture.as_ref().filter(|picture| picture.is_whole()) {
+                let group = self.texture_group(
+                    device,
+                    queue,
+                    (picture.width, picture.height),
+                    &picture.rgba,
+                );
+                self.pictures.insert(update.id, group);
+            }
+        }
+    }
+
+    /// A texture of `width` x `height` RGBA `pixels` and the bind group that draws with it.
+    fn texture_group(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        (width, height): (u32, u32),
+        pixels: &[u8],
+    ) -> wgpu::BindGroup {
         let size = wgpu::Extent3d {
-            width: atlas.width,
-            height: atlas.height,
+            width,
+            height,
             depth_or_array_layers: 1,
         };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("zax interface font"),
+            label: Some("zax interface texture"),
             size,
             mip_level_count: 1,
             sample_count: 1,
@@ -748,16 +791,16 @@ impl InterfaceRenderer {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            atlas.data,
+            pixels,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(atlas.width * 4),
-                rows_per_image: Some(atlas.height),
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
             },
             size,
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("zax interface"),
             layout: &self.layout,
             entries: &[
@@ -774,8 +817,16 @@ impl InterfaceRenderer {
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
             ],
-        }));
-        fonts.tex_id = TextureId::new(FONT_TEXTURE_ID);
+        })
+    }
+
+    /// The bind group of the texture id `id`: the font atlas, or one of the pictures.
+    fn group_of(&self, id: usize) -> Option<&wgpu::BindGroup> {
+        if id == FONT_TEXTURE_ID {
+            self.group.as_ref()
+        } else {
+            self.pictures.get(&id)
+        }
     }
 
     /// Uploads the projection and every list's vertices and indices, one after the other.
@@ -850,6 +901,7 @@ impl InterfaceRenderer {
         let clip_offset = data.display_pos;
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, group, &[]);
+        let mut bound = FONT_TEXTURE_ID;
         pass.set_vertex_buffer(0, vertices.slice(..));
         pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint16);
         let (mut vertex_base, mut index_base) = (0_i32, 0_u32);
@@ -860,14 +912,22 @@ impl InterfaceRenderer {
                     cmd_params:
                         DrawCmdParams {
                             clip_rect,
+                            texture_id,
                             idx_offset,
                             vtx_offset,
-                            ..
                         },
                 } = command
                 else {
                     continue;
                 };
+                let id = texture_id.id();
+                let Some(texture_group) = self.group_of(id) else {
+                    continue;
+                };
+                if id != bound {
+                    pass.set_bind_group(0, texture_group, &[]);
+                    bound = id;
+                }
                 let left = ((clip_rect[0] - clip_offset[0]) * scale_x).max(0.0);
                 let top = ((clip_rect[1] - clip_offset[1]) * scale_y).max(0.0);
                 let right = ((clip_rect[2] - clip_offset[0]) * scale_x).min(width as f32);

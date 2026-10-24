@@ -11,6 +11,7 @@ pub mod imgui_glyphs;
 pub mod imgui_renderer;
 pub mod input;
 pub mod pacing;
+pub mod ui_image;
 pub mod wave;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_display;

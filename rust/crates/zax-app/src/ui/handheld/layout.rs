@@ -105,6 +105,16 @@ const CONTROLS_HINTS: &[Hint] = &[
     hint("A", keys::HANDHELD_HINT_REBIND),
     hint("B", keys::HANDHELD_HINT_BACK),
 ];
+const STATES_SAVE_HINTS: &[Hint] = &[
+    hint("A", keys::HANDHELD_HINT_SAVE_HERE),
+    hint("</>", keys::HANDHELD_HINT_PAGE),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
+const STATES_LOAD_HINTS: &[Hint] = &[
+    hint("A", keys::HANDHELD_HINT_LOAD),
+    hint("</>", keys::HANDHELD_HINT_PAGE),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
 const OVERLAY_HINTS: &[Hint] = &[
     hint("A", keys::HANDHELD_HINT_CHOOSE),
     hint("</>", keys::HANDHELD_HINT_CHANGE),
@@ -120,7 +130,17 @@ pub const fn hints(screen: Screen) -> &'static [Hint] {
         Screen::Options => OPTIONS_HINTS,
         Screen::Controls => CONTROLS_HINTS,
         Screen::Overlay => OVERLAY_HINTS,
+        Screen::States => STATES_SAVE_HINTS,
         Screen::InGame => &[],
+    }
+}
+
+/// The hints of the save state screen, which say whether A saves or loads.
+#[must_use]
+pub const fn states_hints(mode: super::states::StatesMode) -> &'static [Hint] {
+    match mode {
+        super::states::StatesMode::Save => STATES_SAVE_HINTS,
+        super::states::StatesMode::Load => STATES_LOAD_HINTS,
     }
 }
 
@@ -163,6 +183,7 @@ mod tests {
             Screen::Options,
             Screen::Controls,
             Screen::Overlay,
+            Screen::States,
         ] {
             assert!(!hints(screen).is_empty(), "{screen:?}");
         }
@@ -170,6 +191,8 @@ mod tests {
             hints(Screen::Home),
             hints(Screen::Overlay),
             hints(Screen::Options),
+            STATES_SAVE_HINTS,
+            STATES_LOAD_HINTS,
             CAPTURE_HINTS,
         ]
         .concat()
