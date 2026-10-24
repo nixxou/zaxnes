@@ -10,6 +10,7 @@ use zax_engine3d::frame::FrameInstanceId;
 
 use super::globals::{protected_call, protected_hook_call};
 use crate::binding::cx::Cx;
+use crate::binding::dispatch::set_host_payload;
 use crate::binding::payload::{InstanceTarget, Payload, ShapeTarget};
 use crate::script::ScriptHook;
 use crate::values::number_format;
@@ -310,6 +311,8 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
         };
         let call = prepare_hook(cx, index, ScriptHook::UpdateS)?;
         let mut last = None;
+        // The light `shape` of the list: one value, which each call points at its instance.
+        let mut light_shape = None;
         for id in &pending {
             let Some(call) = &call else {
                 break;
@@ -318,7 +321,7 @@ pub(crate) fn update_shapes(cx: &Cx) -> mlua::Result<Option<String>> {
             // Only an error puts a script in error, and it ends the calls of its list.
             last = Some(*id);
             let error = if light {
-                call_update_s_light(cx, index, call, key, *id)?
+                call_update_s_light(cx, (index, call), key, *id, &mut light_shape)?
             } else {
                 call_update_s(cx, index, call, key, *id)?
             };
@@ -375,22 +378,27 @@ fn publish_shape(
     )
 }
 
-/// One `UpdateS` call of a script whose hook takes a light `shape` (`light_shapes`): a value of
-/// the instance's handle made for the call alone, not kept among the handles of the frame, and
-/// no `shape2D`, which the hook never reads.
+/// One `UpdateS` call of a script whose hook takes a light `shape` (`light_shapes`): `shape` is a
+/// value of the instance's handle that is not kept among the handles of the frame, and there is
+/// no `shape2D`, which the hook never reads. The value is made and published at the first call
+/// of the list (`light_shape`), then pointed at the instance of each call: the hook neither
+/// keeps it, nor assigns the global, nor runs other code, so it cannot tell.
 fn call_update_s_light(
     cx: &Cx,
-    index: usize,
-    call: &HookCall,
+    (index, call): (usize, &HookCall),
     key: crate::binding::payload::FrameKey,
     id: FrameInstanceId,
+    light_shape: &mut Option<Value>,
 ) -> mlua::Result<Option<String>> {
     timed(cx, index, ScriptHook::UpdateS, || {
-        publish(
-            cx.lua,
-            Published::Shape,
-            cx.value(Payload::Instance(InstanceTarget::Frame(key, id)))?,
-        )?;
+        let payload = Payload::Instance(InstanceTarget::Frame(key, id));
+        if let Some(shape) = light_shape.as_ref() {
+            set_host_payload(shape, payload);
+        } else {
+            let shape = cx.value(payload)?;
+            publish(cx.lua, Published::Shape, shape.clone())?;
+            *light_shape = Some(shape);
+        }
         run_hook(cx, index, ScriptHook::UpdateS, call)
     })
 }
