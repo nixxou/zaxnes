@@ -37,9 +37,10 @@ ROM or a game profile.**
 | `Zaxnes-<version>-portmaster-aarch64.zip` | PortMaster handhelds (aarch64) | unzip into the `ports` folder of the SD card |
 
 The desktop builds draw with **OpenGL 3.3** by default, or with **Vulkan** or (on Windows)
-**DirectX 12** (Options ▸ Video ▸ Graphics API, or `--backend vulkan|dx12`), which lets
-post-processing tools such as ReShade read the depth of the 3D scene; see
-[HOWTO-RUN.md](HOWTO-RUN.md). The handheld build uses **OpenGL ES 3.0**.
+**DirectX 12** (Options ▸ Video ▸ Graphics API, or `--backend vulkan|dx12`). In Vulkan,
+post-processing tools such as ReShade read the depth of the 3D scene (ReShade and DirectX 12 do
+not work together yet); see [HOWTO-RUN.md](HOWTO-RUN.md). The handheld build uses
+**OpenGL ES 3.0**.
 
 ## No ROMs, no profiles, no assets from another program
 

@@ -257,14 +257,21 @@ La version console reste en OpenGL ES.
   (`--assets` et ses cubemaps restent propres à OpenGL), et la résolution automatique garde
   l'échelle choisie (elle n'est pas encore mesurée sur ces API).
 
-**ReShade.** En Vulkan ou en DirectX 12, ReShade trouve la profondeur de la scène 3D, ce qui
-ouvre les effets qui en dépendent (occlusion ambiante, profondeur de champ, brouillard…). Pour
-qu'il la reconnaisse :
+**ReShade.** En **Vulkan**, ReShade trouve la profondeur de la scène 3D, ce qui ouvre les effets
+qui en dépendent (occlusion ambiante, profondeur de champ, brouillard…) :
 
-- désactivez l'**anticrénelage** (MSAA) de Zaxnes : ReShade lit mal une profondeur multiéchantillonnée ;
-- dans l'add-on *Generic Depth* de ReShade, si aucune profondeur n'est choisie, désactivez
-  l'heuristique de rapport largeur/hauteur : la scène occupe la fenêtre moins la barre de menus ;
-- la profondeur n'est **pas inversée** (`RESHADE_DEPTH_INPUT_IS_REVERSED=0`).
+- installez ReShade sur `zaxnes.exe` en choisissant **Vulkan** dans l'installeur, et lancez Zaxnes
+  avec l'API graphique Vulkan ;
+- la profondeur de Zaxnes n'est **pas inversée** : ajoutez la définition globale
+  `RESHADE_DEPTH_INPUT_IS_REVERSED=0` (ReShade suppose 1 par défaut ; sans elle, les effets lisent
+  une profondeur vide). La caméra va de 0,3 à 5 000 unités ; une valeur de
+  `RESHADE_DEPTH_LINEARIZATION_FAR_PLANE` autour de 1000 donne une profondeur bien contrastée ;
+- désactivez l'**anticrénelage** (MSAA) de Zaxnes : ReShade lit mal une profondeur
+  multiéchantillonnée ; l'anticrénelage de ReShade (SMAA) prend le relais.
+
+**DirectX 12 et ReShade ne vont pas ensemble pour l'instant** : la bibliothèque de rendu de Zaxnes
+crée au démarrage une fabrique DXGI « media » que ReShade prend pour une fabrique ordinaire, et le
+programme s'arrête net. Avec ReShade, utilisez Vulkan.
 
 Les effets de ReShade s'appliquent à toute l'image de la fenêtre, barre de menus comprise.
 
