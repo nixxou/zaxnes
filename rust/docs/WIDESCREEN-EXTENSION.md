@@ -25,7 +25,7 @@ ones.
 
 ## ROM side: registers
 
-The window is `$5000`-`$51FF`. Writes still reach the cartridge (the window only listens); reads
+The window is `$5000`-`$5FFF`. Writes still reach the cartridge (the window only listens); reads
 are answered by the window only once it is unlocked.
 
 | Address | Access | Meaning |
@@ -37,6 +37,7 @@ are answered by the window only once it is unlocked.
 | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels (power-on `$FF`) |
 | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels (power-on `$FF`) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
+| `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code: the CPU runs code from it, whatever bank the mapper shows (power-on 0) |
 
 * The margin in use is `min($5003, $5002)`, rounded down to a multiple of 8. It is latched at the
   start of each frame, so every band of a frame has the same columns.

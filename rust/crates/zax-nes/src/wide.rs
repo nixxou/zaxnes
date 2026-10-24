@@ -16,6 +16,7 @@
 //! | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels |
 //! | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels |
 //! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
+//! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it) |
 //!
 //! The margin in use is `min($5003, $5002)` rounded down to a multiple of 8. `$5004` and
 //! `$5005` are read each time a band of tiles is captured, so a game can hide the sides behind
@@ -30,7 +31,13 @@ const UNLOCK: [u8; 4] = *b"WIDE";
 pub const FIRST_REGISTER: u16 = 0x5000;
 
 /// Last address of the register window.
-pub const LAST_REGISTER: u16 = 0x51FF;
+pub const LAST_REGISTER: u16 = 0x5FFF;
+
+/// First address of the RAM of the window.
+const FIRST_RAM: u16 = 0x5200;
+
+/// Bytes of RAM in the window.
+const RAM_SIZE: usize = 0x0E00;
 
 /// Version the ROM reads at `$5001`.
 const VERSION: u8 = 1;
@@ -57,6 +64,8 @@ pub struct WideExtension {
     pending_high: [u8; 64],
     /// Sprite x high bytes of the sprites now in OAM.
     active_high: [u8; 64],
+    /// RAM at `$5200`-`$5FFF`.
+    scratch: Vec<u8>,
 }
 
 impl Default for WideExtension {
@@ -68,7 +77,7 @@ impl Default for WideExtension {
 impl WideExtension {
     /// The extension of a core with widescreen off.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             host_margin: 0,
             unlock_progress: 0,
@@ -78,6 +87,7 @@ impl WideExtension {
             right_extent: 0xFF,
             pending_high: [0; 64],
             active_high: [0; 64],
+            scratch: vec![0; RAM_SIZE],
         }
     }
 
@@ -163,6 +173,9 @@ impl WideExtension {
             0x5003 => Some(self.requested_margin),
             0x5004 => Some(self.left_extent),
             0x5005 => Some(self.right_extent),
+            FIRST_RAM..=LAST_REGISTER => {
+                self.scratch.get(usize::from(address - FIRST_RAM)).copied()
+            }
             _ => None,
         }
     }
@@ -185,6 +198,11 @@ impl WideExtension {
             0x5005 => self.right_extent = value,
             0x5100..=0x51FF => {
                 self.pending_high[usize::from(address & 0xFF) / 4] = value;
+            }
+            FIRST_RAM..=LAST_REGISTER => {
+                if let Some(byte) = self.scratch.get_mut(usize::from(address - FIRST_RAM)) {
+                    *byte = value;
+                }
             }
             _ => {}
         }
@@ -223,6 +241,7 @@ impl WideExtension {
         writer.write_u8(self.right_extent);
         writer.write_blob(&self.pending_high);
         writer.write_blob(&self.active_high);
+        writer.write_blob(&self.scratch);
     }
 
     /// Restores the register state written by [`WideExtension::save_state`].
@@ -237,6 +256,7 @@ impl WideExtension {
         self.right_extent = reader.read_u8()?;
         reader.read_blob_into(&mut self.pending_high)?;
         reader.read_blob_into(&mut self.active_high)?;
+        reader.read_blob_into(&mut self.scratch)?;
         Ok(())
     }
 }
@@ -302,5 +322,15 @@ mod tests {
         assert_eq!(wide.sprite_x(5, 0xF0), -16);
         wide.latch_sprites();
         assert_eq!(wide.sprite_x(5, 0xF0), 0xF0);
+    }
+
+    #[test]
+    fn scratch_ram_answers_once_unlocked() {
+        let mut wide = WideExtension::new();
+        wide.write(0x5280, 7);
+        assert_eq!(wide.read(0x5280), None);
+        let mut wide = unlocked(0);
+        wide.write(0x5280, 7);
+        assert_eq!(wide.read(0x5280), Some(7));
     }
 }
