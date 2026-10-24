@@ -11,35 +11,50 @@ struct Draw {
     flat_alpha: vec4<f32>,
     // xy the texture size, zw the texture offset.
     texture: vec4<f32>,
-    // xy the texture tilting, z the normal sign (Q-069).
+    // xy the texture tilting, z the normal sign (Q-069), w the light (0 the scene's, 1 the
+    // HUD's).
     tilting: vec4<f32>,
-    // xyz the light direction of the bucket.
-    light: vec4<f32>,
     // Colour mode, palette table, clip, receive shadow.
     modes: vec4<i32>,
-    // x: whether the deformation applies.
+    // x: the deformation of the run in `deforms`, or -1; y: the texture of the batched draws.
     modes2: vec4<i32>,
-    deform_amplitude: vec4<f32>,
-    deform_size: vec4<f32>,
-    // Unused: the tile position of the deformation travels with the instance.
-    deform_tile: vec4<f32>,
-    deform_speed: array<vec4<f32>, 3>,
-    deform_phase: array<vec4<f32>, 3>,
-    // Unused: the placement travels with the instance.
-    model: mat4x4<f32>,
 }
 
-// The placement of each instance of a batched draw: the model matrix, the columns of the normal
-// (cofactor) matrix and the tile position of the deformation (xyz).
+// The parameters of an animated deformation but its tile position, which travels with the
+// instance: only the runs that are deformed have one.
+struct Deform {
+    amplitude: vec4<f32>,
+    size: vec4<f32>,
+    speed: array<vec4<f32>, 3>,
+    phase: array<vec4<f32>, 3>,
+}
+
+// The placement of each instance of a batched draw: the first three rows of the model matrix
+// (an affine placement) and the tile position of the deformation (xyz).
 struct Instance {
-    model: mat4x4<f32>,
-    normal: array<vec4<f32>, 3>,
+    rows: array<vec4<f32>, 3>,
     deform_tile: vec4<f32>,
+}
+
+// The scene position of `local` placed by `instance`.
+fn zax_place(instance: Instance, local: vec3<f32>) -> vec3<f32> {
+    let p = vec4<f32>(local, 1.0);
+    return vec3<f32>(dot(instance.rows[0], p), dot(instance.rows[1], p), dot(instance.rows[2], p));
+}
+
+// The normal matrix of REQ-SCN-028 applied to `n`: the cofactor matrix of the placement's 3 x 3
+// block, whose rows are the cross products of its rows (interop::normal_matrix).
+fn zax_place_normal(instance: Instance, n: vec3<f32>) -> vec3<f32> {
+    let r0 = instance.rows[0].xyz;
+    let r1 = instance.rows[1].xyz;
+    let r2 = instance.rows[2].xyz;
+    return vec3<f32>(dot(cross(r1, r2), n), dot(cross(r2, r0), n), dot(cross(r0, r1), n));
 }
 
 @group(1) @binding(0) var<storage, read> draws: array<Draw>;
 @group(1) @binding(1) var<storage, read> instances: array<Instance>;
 @group(1) @binding(2) var<storage, read> run_of: array<u32>;
+@group(1) @binding(3) var<storage, read> deforms: array<Deform>;
 
 fn zax_to_linear(c: f32) -> f32 {
     return select(pow((c + 0.055) / 1.055, 2.4), c / 12.92, c <= 0.04045);
@@ -77,16 +92,16 @@ fn zax_deform_row(amplitude: f32, size: f32, n: vec3<f32>, speed: vec4<f32>, pha
 }
 
 // `tile` is the tile's position relative to the pivot.
-fn zax_deformation(draw: Draw, tile: vec3<f32>, v: vec3<f32>, time: f32) -> vec3<f32> {
+fn zax_deformation(deform: Deform, tile: vec3<f32>, v: vec3<f32>, time: f32) -> vec3<f32> {
     let p = tile + v;
-    let size = draw.deform_size.xyz;
+    let size = deform.size.xyz;
     let n = vec3<f32>(
         select(p.x / size.x, 0.0, size.x == 0.0),
         select(p.y / size.y, 0.0, size.y == 0.0),
         select(p.z / size.z, 0.0, size.z == 0.0));
-    let amplitude = draw.deform_amplitude.xyz;
+    let amplitude = deform.amplitude.xyz;
     return vec3<f32>(
-        zax_deform_row(amplitude.x, size.x, n, draw.deform_speed[0], draw.deform_phase[0], time),
-        zax_deform_row(amplitude.y, size.y, n, draw.deform_speed[1], draw.deform_phase[1], time),
-        zax_deform_row(amplitude.z, size.z, n, draw.deform_speed[2], draw.deform_phase[2], time));
+        zax_deform_row(amplitude.x, size.x, n, deform.speed[0], deform.phase[0], time),
+        zax_deform_row(amplitude.y, size.y, n, deform.speed[1], deform.phase[1], time),
+        zax_deform_row(amplitude.z, size.z, n, deform.speed[2], deform.phase[2], time));
 }

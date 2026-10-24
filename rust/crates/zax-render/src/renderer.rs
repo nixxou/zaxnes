@@ -19,6 +19,7 @@ use crate::camera::CameraView;
 use crate::color;
 use crate::frame_plan::{
     DrawItem, FixedMeshes, FramePlan, InstanceRun, Residency, SceneConstants, INSTANCE_BYTES,
+    STD140_PLACEMENT,
 };
 use crate::geometry;
 use crate::gl::api::{Gl, GlError};
@@ -428,8 +429,11 @@ impl SceneRenderer {
             return Ok(());
         }
 
-        self.plan
-            .lay_out_instances(self.group_opaque, self.passes.instance_alignment);
+        self.plan.lay_out_instances(
+            self.group_opaque,
+            self.passes.instance_alignment,
+            STD140_PLACEMENT,
+        );
         let passes = &mut self.passes;
         passes.upload_instances(&self.plan.instance_data);
         let lists = &self.plan.lists;

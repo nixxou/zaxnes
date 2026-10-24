@@ -287,6 +287,9 @@ pub struct TextureStore {
     /// Bumped whenever a slot is released or reused, so that the bind groups built on it are
     /// rebuilt.
     generation: u64,
+    /// Bumped whenever a slot is filled or released, so that the texture arrays of the batched
+    /// draws are rebuilt.
+    revision: u64,
 }
 
 impl TextureStore {
@@ -303,6 +306,23 @@ impl TextureStore {
     /// Changes whenever a slot is released: the bind groups of the textures are stale.
     pub const fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Changes whenever a slot is filled or released: the texture arrays are stale.
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Number of slots, the highest resident slot plus one at most.
+    pub fn slot_count(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// The view in each slot, `None` for a free slot.
+    pub fn slot_views(&self) -> impl Iterator<Item = Option<&wgpu::TextureView>> {
+        self.slots
+            .iter()
+            .map(|slot| slot.as_ref().map(|entry| &entry.view))
     }
 
     /// The view of a resident texture.
@@ -365,6 +385,7 @@ impl TextureStore {
         };
         let handle = TextureHandle(place(&mut self.slots, &mut self.free, entry));
         self.by_address.insert(key, handle);
+        self.revision += 1;
         handle
     }
 
@@ -412,6 +433,7 @@ impl TextureStore {
         };
         let handle = TextureHandle(place(&mut self.slots, &mut self.free, entry));
         self.picture = Some(handle);
+        self.revision += 1;
         Some(handle)
     }
 
@@ -434,6 +456,7 @@ impl TextureStore {
         });
         if released {
             self.generation += 1;
+            self.revision += 1;
         }
     }
 
@@ -445,6 +468,7 @@ impl TextureStore {
         }
         self.by_address.clear();
         self.generation += 1;
+        self.revision += 1;
     }
 }
 

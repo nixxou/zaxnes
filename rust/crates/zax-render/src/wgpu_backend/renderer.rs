@@ -7,8 +7,13 @@
 //! baked into pipelines, so each combination the GL path switches to is a pipeline of its own.
 //! Every mesh lives in one atlas, and the per-draw uniforms of the GL path become one block per
 //! instanced run in a storage buffer that each instance finds through `run_of`: a pass binds
-//! everything once, and a draw call is the call alone, which keeps wgpu's per-command cost low. The clip depth of GL (-1..1) is remapped to wgpu's (0..1) in the vertex shaders,
-//! which keeps the stored depths, and the shadow map, rendered top down, is read at 1 - y.
+//! everything once, and a draw call is the call alone, which keeps wgpu's per-command cost low.
+//! When the device can, the draws are batched: every resident texture is bound at once in two
+//! texture arrays, each run's draw call is a set of indirect arguments, and the runs that share a
+//! pipeline go out in one multi-draw, in their order. Otherwise each run is a draw call of its
+//! own, its textures bound before it. The clip depth of GL (-1..1) is remapped to wgpu's (0..1)
+//! in the vertex shaders, which keeps the stored depths, and the shadow map, rendered top down,
+//! is read at 1 - y.
 
 use std::sync::Arc;
 
@@ -17,13 +22,13 @@ use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::geometry::tile_mesh::{TileMesh, TriangleCountError};
 use zax_engine3d::hashing::FastMap;
 use zax_engine3d::palette::{FramePalette, Rgb24};
-use zax_engine3d::vectors::Mat4;
+use zax_engine3d::vectors::{Mat4, Vec3};
 
 use super::resources::{self, MeshHandle, MeshStore, TextureHandle, TextureStore, VERTEX_STRIDE};
 use crate::camera::CameraView;
 use crate::color;
 use crate::frame_plan::{
-    DrawItem, FixedMeshes, FramePlan, InstanceRun, Residency, SceneConstants, INSTANCE_BYTES,
+    DrawItem, FixedMeshes, FramePlan, InstanceRun, Placement, Residency, SceneConstants,
 };
 use crate::geometry;
 use crate::interop;
@@ -39,14 +44,48 @@ const LINEAR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// `DEPTH_COMPONENT24`, so that coplanar faces tie the same way.
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
-/// Bytes of the per-draw block (`Draw` in common.wgsl).
-const DRAW_BYTES: u64 = 304;
+/// Bytes of the per-run block (`Draw` in common.wgsl).
+const DRAW_BLOCK: usize = 80;
+/// The same, as a buffer size.
+const DRAW_BYTES: u64 = DRAW_BLOCK as u64;
+/// Bytes of one placement (`Instance` in common.wgsl): the three rows of the affine placement
+/// and the deformation's tile position; the shader derives the normal matrix itself.
+const AFFINE_BYTES: usize = 64;
+
+/// The placements of the wgpu backend.
+#[derive(Debug, Clone, Copy)]
+struct AffinePlacement;
+
+impl Placement for AffinePlacement {
+    #[inline]
+    fn write(self, data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
+        push_affine_placement(data, model, deform);
+    }
+}
+
+const AFFINE_PLACEMENT: AffinePlacement = AffinePlacement;
+
+/// Bytes of a deformation (`Deform` in common.wgsl), which only deformed runs have.
+const DEFORM_BYTES: u64 = 128;
 /// Bytes of the frame block (`Frame` in scene.wgsl).
-const FRAME_BYTES: u64 = 224;
+const FRAME_BYTES: u64 = 256;
 /// Bytes of the shadow frame block (`ShadowFrame` in shadow.wgsl).
 const SHADOW_FRAME_BYTES: u64 = 80;
 /// Bytes of the sky block (`Sky` in sky.wgsl).
 const SKY_BYTES: u64 = 19 * 16;
+/// Bytes of the indirect arguments of one run (index count, instance count, first index, base
+/// vertex, first instance).
+const INDIRECT_BYTES: u64 = 20;
+/// Textures each array of the batched draws holds at most: index 0 is the dummy, the texture of
+/// slot `s` sits at `s + 1`.
+const BINDLESS_TEXTURES: u32 = 16384;
+
+/// The device features the batched draws need: indirect draws that start at any instance, and
+/// arrays of textures, indexed per draw and partly filled.
+pub const BATCHING_FEATURES: wgpu::Features = wgpu::Features::INDIRECT_FIRST_INSTANCE
+    .union(wgpu::Features::TEXTURE_BINDING_ARRAY)
+    .union(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
+    .union(wgpu::Features::PARTIALLY_BOUND_BINDING_ARRAY);
 
 /// Why the wgpu renderer could not draw a frame.
 #[derive(Debug, thiserror::Error)]
@@ -82,6 +121,8 @@ struct SceneKey {
     cull: bool,
     mirrored: bool,
     samples: u32,
+    /// The pipeline of the batched draws, which reads the texture arrays.
+    batched: bool,
 }
 
 /// The linear buffer and its depth, multisampled when anti-aliasing is on.
@@ -115,18 +156,29 @@ struct Layouts {
 struct GrowingBuffer {
     buffer: wgpu::Buffer,
     size: u64,
+    usage: wgpu::BufferUsages,
 }
 
 impl GrowingBuffer {
     fn new(device: &wgpu::Device, label: &'static str, size: u64) -> Self {
+        Self::with_usage(device, label, size, wgpu::BufferUsages::STORAGE)
+    }
+
+    fn with_usage(
+        device: &wgpu::Device,
+        label: &'static str,
+        size: u64,
+        usage: wgpu::BufferUsages,
+    ) -> Self {
         Self {
             buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
                 size,
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage: usage | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
             size,
+            usage,
         }
     }
 
@@ -135,8 +187,65 @@ impl GrowingBuffer {
         if needed <= self.size {
             return false;
         }
-        *self = Self::new(device, label, needed.next_power_of_two());
+        *self = Self::with_usage(device, label, needed.next_power_of_two(), self.usage);
         true
+    }
+}
+
+/// What the batched draws add: the scene shader that reads the texture arrays, its layouts, the
+/// arrays themselves (with the texture revision they were built on) and the indirect arguments.
+#[derive(Debug)]
+struct Batching {
+    module: wgpu::ShaderModule,
+    textures: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    group: Option<(u64, wgpu::BindGroup)>,
+    indirect: GrowingBuffer,
+    shadow_indirect: GrowingBuffer,
+    data: Vec<u8>,
+}
+
+impl Batching {
+    fn new(device: &wgpu::Device, layouts: &Layouts, module: wgpu::ShaderModule) -> Self {
+        let array = |binding, sample_type| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: std::num::NonZeroU32::new(BINDLESS_TEXTURES),
+        };
+        let textures = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("zax texture arrays"),
+            entries: &[
+                array(0, wgpu::TextureSampleType::Uint),
+                array(1, wgpu::TextureSampleType::Float { filterable: false }),
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("zax scene batched"),
+            bind_group_layouts: &[Some(&layouts.frame), Some(&layouts.draw), Some(&textures)],
+            immediate_size: 0,
+        });
+        let indirect = |label| {
+            GrowingBuffer::with_usage(
+                device,
+                label,
+                INDIRECT_BYTES * 256,
+                wgpu::BufferUsages::INDIRECT,
+            )
+        };
+        Self {
+            module,
+            textures,
+            pipeline_layout,
+            group: None,
+            indirect: indirect("zax indirect"),
+            shadow_indirect: indirect("zax shadow indirect"),
+            data: Vec::new(),
+        }
     }
 }
 
@@ -169,9 +278,12 @@ pub struct WgpuSceneRenderer {
     shadow_instances: GrowingBuffer,
     run_of: GrowingBuffer,
     shadow_run_of: GrowingBuffer,
+    deforms: GrowingBuffer,
+    shadow_deforms: GrowingBuffer,
     draw_data: Vec<u8>,
     shadow_draw_data: Vec<u8>,
     run_of_data: Vec<u8>,
+    deform_data: Vec<u8>,
     palette: wgpu::Texture,
     palette_view: wgpu::TextureView,
     palette_bytes: Vec<u8>,
@@ -188,6 +300,7 @@ pub struct WgpuSceneRenderer {
     sky_group: wgpu::BindGroup,
     texture_groups: FastMap<(Option<TextureHandle>, Option<TextureHandle>), wgpu::BindGroup>,
     texture_generation: u64,
+    batching: Option<Batching>,
     statistics: RenderStatistics,
     last_view: CameraView,
     group_opaque: bool,
@@ -250,7 +363,7 @@ impl WgpuSceneRenderer {
                 source: wgpu::ShaderSource::Wgsl(source.into()),
             })
         };
-        let scene_module = module("zax scene", &[SCENE]);
+        let scene_module = module("zax scene", &[SCENE, TEXTURES_BOUND]);
         let shadow_module = module("zax shadow", &[SHADOW]);
         let sky_module = module("zax sky", &[SKY]);
         let resolve_module = module("zax resolve", &[RESOLVE]);
@@ -260,12 +373,14 @@ impl WgpuSceneRenderer {
         let sky_buffer = uniform_buffer(&device, "zax sky", SKY_BYTES);
         let draws = GrowingBuffer::new(&device, "zax draws", DRAW_BYTES * 256);
         let shadow_draws = GrowingBuffer::new(&device, "zax shadow draws", DRAW_BYTES * 256);
-        let instance_bytes = INSTANCE_BYTES as u64;
+        let instance_bytes = AFFINE_BYTES as u64;
         let instances = GrowingBuffer::new(&device, "zax instances", instance_bytes * 1024);
         let shadow_instances =
             GrowingBuffer::new(&device, "zax shadow instances", instance_bytes * 1024);
         let run_of = GrowingBuffer::new(&device, "zax run of", 4 * 1024);
         let shadow_run_of = GrowingBuffer::new(&device, "zax shadow run of", 4 * 1024);
+        let deforms = GrowingBuffer::new(&device, "zax deforms", DEFORM_BYTES * 16);
+        let shadow_deforms = GrowingBuffer::new(&device, "zax shadow deforms", DEFORM_BYTES * 16);
 
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 64.
         let palette_width = FramePalette::ENTRY_COUNT as u32;
@@ -295,16 +410,28 @@ impl WgpuSceneRenderer {
         let shadow_map = shadow_map(&device, shadow_map_size);
 
         let frame_group = frame_group(&device, &layouts, &frame_buffer, &palette_view, &shadow_map);
-        let scene_draw_group = draw_group(&device, &layouts, [&draws, &instances, &run_of]);
+        let scene_draw_group =
+            draw_group(&device, &layouts, [&draws, &instances, &run_of, &deforms]);
         let shadow_frame_group =
             single_buffer_group(&device, &layouts.shadow_frame, &shadow_frame_buffer, None);
         let shadow_draw_group = draw_group(
             &device,
             &layouts,
-            [&shadow_draws, &shadow_instances, &shadow_run_of],
+            [
+                &shadow_draws,
+                &shadow_instances,
+                &shadow_run_of,
+                &shadow_deforms,
+            ],
         );
         let sky_group = single_buffer_group(&device, &layouts.sky, &sky_buffer, None);
         let resolve_pipeline = resolve_pipeline(&device, &layouts, &resolve_module, target_format);
+        let batching = batching_supported(adapter, &device).then(|| {
+            let arrays =
+                TEXTURES_BINDLESS.replace("ZAX_BINDLESS_TEXTURES", &BINDLESS_TEXTURES.to_string());
+            let module = module("zax scene batched", &[SCENE, &arrays]);
+            Batching::new(&device, &layouts, module)
+        });
 
         #[allow(clippy::cast_possible_wrap)] // The side is at most the device limit.
         let statistics = RenderStatistics {
@@ -333,9 +460,12 @@ impl WgpuSceneRenderer {
             shadow_instances,
             run_of,
             shadow_run_of,
+            deforms,
+            shadow_deforms,
             draw_data: Vec::new(),
             shadow_draw_data: Vec::new(),
             run_of_data: Vec::new(),
+            deform_data: Vec::new(),
             palette,
             palette_view,
             palette_bytes: vec![0; FramePalette::ENTRY_COUNT * 4],
@@ -352,6 +482,7 @@ impl WgpuSceneRenderer {
             sky_group,
             texture_groups: FastMap::default(),
             texture_generation: 0,
+            batching,
             statistics,
             last_view: CameraView::default(),
             group_opaque: false,
@@ -385,6 +516,13 @@ impl WgpuSceneRenderer {
     #[must_use]
     pub const fn statistics(&self) -> &RenderStatistics {
         &self.statistics
+    }
+
+    /// Whether the draws go out batched, in multi-draws over the texture arrays, rather than
+    /// one draw call per run.
+    #[must_use]
+    pub const fn batched_draws(&self) -> bool {
+        self.batching.is_some()
     }
 
     /// The camera view the last rendered frame used.
@@ -490,15 +628,28 @@ impl WgpuSceneRenderer {
             .write_buffer(&self.shadow_frame_buffer, 0, &frame);
 
         // The casters go out in instanced runs, in their order (one draw block per run).
-        self.plan.lay_out_casters(INSTANCE_BYTES);
+        self.plan.lay_out_casters(AFFINE_BYTES, AFFINE_PLACEMENT);
         self.shadow_draw_data.clear();
         self.run_of_data.clear();
+        self.deform_data.clear();
         for (entry, run) in self.plan.caster_runs.iter().enumerate() {
-            push_shadow_draw(
-                &mut self.shadow_draw_data,
-                &self.plan.lists.casters[run.first],
-            );
+            let caster = &self.plan.lists.casters[run.first];
+            push_shadow_draw(&mut self.shadow_draw_data, &mut self.deform_data, caster);
             push_run_of(&mut self.run_of_data, run, entry);
+        }
+        if let Some(batching) = &mut self.batching {
+            batching.data.clear();
+            for run in &self.plan.caster_runs {
+                let caster = &self.plan.lists.casters[run.first];
+                push_indirect(&mut batching.data, &self.meshes, caster.mesh, run);
+            }
+            batching.shadow_indirect.reserve(
+                &self.device,
+                "zax shadow indirect",
+                batching.data.len() as u64,
+            );
+            self.queue
+                .write_buffer(&batching.shadow_indirect.buffer, 0, &batching.data);
         }
         let grew = [
             self.shadow_draws.reserve(
@@ -516,6 +667,11 @@ impl WgpuSceneRenderer {
                 "zax shadow run of",
                 self.run_of_data.len() as u64,
             ),
+            self.shadow_deforms.reserve(
+                &self.device,
+                "zax shadow deforms",
+                self.deform_data.len() as u64,
+            ),
         ];
         if grew.contains(&true) {
             self.shadow_draw_group = draw_group(
@@ -525,6 +681,7 @@ impl WgpuSceneRenderer {
                     &self.shadow_draws,
                     &self.shadow_instances,
                     &self.shadow_run_of,
+                    &self.shadow_deforms,
                 ],
             );
         }
@@ -534,6 +691,10 @@ impl WgpuSceneRenderer {
             .write_buffer(&self.shadow_instances.buffer, 0, &self.plan.caster_data);
         self.queue
             .write_buffer(&self.shadow_run_of.buffer, 0, &self.run_of_data);
+        if !self.deform_data.is_empty() {
+            self.queue
+                .write_buffer(&self.shadow_deforms.buffer, 0, &self.deform_data);
+        }
 
         for mirrored in [false, true] {
             if !self.shadow_pipelines.contains_key(&mirrored) {
@@ -563,27 +724,44 @@ impl WgpuSceneRenderer {
         let (vertices, indices) = self.meshes.buffers();
         pass.set_vertex_buffer(0, vertices.slice(..));
         pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+        let indirect = self
+            .batching
+            .as_ref()
+            .map(|batching| &batching.shadow_indirect.buffer);
         let mut current = None;
-        for run in &self.plan.caster_runs {
+        // The runs since the last pipeline change, drawn in one multi-draw when batched.
+        let mut pending = 0..0;
+        for (entry, run) in self.plan.caster_runs.iter().enumerate() {
             let caster = &self.plan.lists.casters[run.first];
             // Q-069: a mirrored caster winds the other way round.
             let mirrored = interop::determinant(&caster.model) < 0.0;
             if current != Some(mirrored) {
+                if let Some(indirect) = indirect {
+                    multi_draw(&mut pass, indirect, &pending);
+                }
+                pending = entry..entry;
                 pass.set_pipeline(&self.shadow_pipelines[&mirrored]);
                 current = Some(mirrored);
             }
             let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
-            let (first_index, base_vertex) = self.meshes.range(caster.mesh);
-            let base = instance_base(run);
-            pass.draw_indexed(
-                first_index..first_index + caster.mesh.index_count,
-                base_vertex,
-                base..base + instances,
-            );
+            if indirect.is_some() {
+                pending.end = entry + 1;
+            } else {
+                let (first_index, base_vertex) = self.meshes.range(caster.mesh);
+                let base = instance_base(run);
+                pass.draw_indexed(
+                    first_index..first_index + caster.mesh.index_count,
+                    base_vertex,
+                    base..base + instances,
+                );
+            }
             self.statistics.batches += 1;
             self.statistics.draw_calls += instances;
             self.statistics.triangles +=
                 u64::from(caster.mesh.index_count / 3) * u64::from(instances);
+        }
+        if let Some(indirect) = indirect {
+            multi_draw(&mut pass, indirect, &pending);
         }
         drop(pass);
 
@@ -658,12 +836,15 @@ impl WgpuSceneRenderer {
         self.statistics.skybox_pass = sky;
 
         let drawing = !self.plan.lists.nothing_to_draw();
+        let batched = drawing && self.prepare_texture_arrays();
         if drawing {
             self.plan
-                .lay_out_instances(self.group_opaque, INSTANCE_BYTES);
-            self.upload_draws(&constants);
-            self.prepare_pipelines(scene.settings.cull_back_faces, wanted);
-            self.prepare_texture_groups();
+                .lay_out_instances(self.group_opaque, AFFINE_BYTES, AFFINE_PLACEMENT);
+            self.upload_draws(&constants, batched);
+            self.prepare_pipelines(scene.settings.cull_back_faces, wanted, batched);
+            if !batched {
+                self.prepare_texture_groups();
+            }
         }
 
         let linear = self
@@ -722,6 +903,20 @@ impl WgpuSceneRenderer {
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
             let cull = scene.settings.cull_back_faces;
             let lists = &self.plan.lists;
+            let indirect = match (&self.batching, batched) {
+                (
+                    Some(Batching {
+                        group: Some((_, group)),
+                        indirect,
+                        ..
+                    }),
+                    true,
+                ) => {
+                    pass.set_bind_group(2, group, &[]);
+                    Some(&indirect.buffer)
+                }
+                _ => None,
+            };
             let mut draw = Drawer {
                 pass: &mut pass,
                 pipelines: &self.scene_pipelines,
@@ -732,20 +927,31 @@ impl WgpuSceneRenderer {
                 samples: wanted,
                 current: None,
                 bound_textures: None,
+                indirect,
+                pending: None,
             };
 
+            // The indirect arguments follow the run lists: opaque, transparent, then HUD.
+            let transparent_base = lists.opaque_runs.len();
+            let hud_base = transparent_base + lists.transparent_runs.len();
             // 1. Opaque objects.
-            for run in &lists.opaque_runs {
-                draw.run(&lists.opaque, run, SceneMode::Opaque);
+            for (entry, run) in lists.opaque_runs.iter().enumerate() {
+                draw.run(&lists.opaque, run, entry, SceneMode::Opaque);
             }
             // 2. Transparent objects, farthest first, depth first then colour (REQ-SCN-040).
             for group in &lists.transparent_objects {
-                draw.blended(&lists.transparent, &lists.transparent_runs, group.runs);
+                draw.blended(
+                    &lists.transparent,
+                    &lists.transparent_runs,
+                    group.runs,
+                    transparent_base,
+                );
             }
             // 3. HUD (REQ-SCN-044).
             for group in &lists.hud_objects {
-                draw.blended(&lists.hud, &lists.hud_runs, group.runs);
+                draw.blended(&lists.hud, &lists.hud_runs, group.runs, hud_base);
             }
+            draw.flush();
 
             let statistics = &mut *draw.statistics;
             statistics.opaque_tiles = count(lists.opaque.len());
@@ -857,41 +1063,54 @@ impl WgpuSceneRenderer {
     }
 
     /// Uploads the placements, one draw block per instanced run (the opaque runs, the
-    /// transparent runs, then the HUD runs, in the order of the plan's run lists) and the run of
-    /// each instance.
-    fn upload_draws(&mut self, constants: &SceneConstants) {
+    /// transparent runs, then the HUD runs, in the order of the plan's run lists), the run of
+    /// each instance and, when `batched`, the indirect arguments of each run in the same order.
+    fn upload_draws(&mut self, constants: &SceneConstants, batched: bool) {
         let lists = &self.plan.lists;
-        let (draws, run_of) = (&mut self.draw_data, &mut self.run_of_data);
+        let (draws, run_of, deforms) = (
+            &mut self.draw_data,
+            &mut self.run_of_data,
+            &mut self.deform_data,
+        );
         draws.clear();
         run_of.clear();
+        deforms.clear();
         let shadow_enabled = constants.shadow_enabled;
+        // The light of each bucket: the scene's, the scene's, the HUD's (REQ-SCN-029/044).
         let buckets = [
-            (
-                &lists.opaque,
-                &lists.opaque_runs,
-                constants.light_direction,
-                true,
-            ),
-            (
-                &lists.transparent,
-                &lists.transparent_runs,
-                constants.light_direction,
-                false,
-            ),
-            (
-                &lists.hud,
-                &lists.hud_runs,
-                constants.hud_light_direction,
-                false,
-            ),
+            (&lists.opaque, &lists.opaque_runs, false, true),
+            (&lists.transparent, &lists.transparent_runs, false, false),
+            (&lists.hud, &lists.hud_runs, true, false),
         ];
         let mut entry = 0;
-        for (items, runs, light, opaque) in buckets {
+        for (items, runs, hud, opaque) in buckets {
             for run in runs {
-                push_draw(draws, &items[run.first], light, opaque, shadow_enabled);
+                let look = DrawLook {
+                    hud,
+                    opaque,
+                    shadow_enabled,
+                };
+                push_draw(draws, deforms, &items[run.first], look);
                 push_run_of(run_of, run, entry);
                 entry += 1;
             }
+        }
+        if let (Some(batching), true) = (&mut self.batching, batched) {
+            batching.data.clear();
+            for (items, runs) in [
+                (&lists.opaque, &lists.opaque_runs),
+                (&lists.transparent, &lists.transparent_runs),
+                (&lists.hud, &lists.hud_runs),
+            ] {
+                for run in runs {
+                    push_indirect(&mut batching.data, &self.meshes, items[run.first].mesh, run);
+                }
+            }
+            batching
+                .indirect
+                .reserve(&self.device, "zax indirect", batching.data.len() as u64);
+            self.queue
+                .write_buffer(&batching.indirect.buffer, 0, &batching.data);
         }
 
         let instances = &self.plan.instance_data;
@@ -902,12 +1121,14 @@ impl WgpuSceneRenderer {
                 .reserve(&self.device, "zax instances", instances.len() as u64),
             self.run_of
                 .reserve(&self.device, "zax run of", self.run_of_data.len() as u64),
+            self.deforms
+                .reserve(&self.device, "zax deforms", self.deform_data.len() as u64),
         ];
         if grew.contains(&true) {
             self.draw_group = draw_group(
                 &self.device,
                 &self.layouts,
-                [&self.draws, &self.instances, &self.run_of],
+                [&self.draws, &self.instances, &self.run_of, &self.deforms],
             );
         }
         self.queue
@@ -916,9 +1137,13 @@ impl WgpuSceneRenderer {
             .write_buffer(&self.instances.buffer, 0, instances);
         self.queue
             .write_buffer(&self.run_of.buffer, 0, &self.run_of_data);
+        if !self.deform_data.is_empty() {
+            self.queue
+                .write_buffer(&self.deforms.buffer, 0, &self.deform_data);
+        }
     }
 
-    fn prepare_pipelines(&mut self, cull: bool, samples: u32) {
+    fn prepare_pipelines(&mut self, cull: bool, samples: u32, batched: bool) {
         let lists = &self.plan.lists;
         let mut wanted = Vec::new();
         let mut want = |items: &[WgpuDrawItem], runs: &[InstanceRun], modes: &[SceneMode]| {
@@ -930,6 +1155,7 @@ impl WgpuSceneRenderer {
                         cull,
                         mirrored,
                         samples,
+                        batched,
                     });
                 }
             }
@@ -940,10 +1166,64 @@ impl WgpuSceneRenderer {
         want(&lists.hud, &lists.hud_runs, &blended);
         for key in wanted {
             if !self.scene_pipelines.contains_key(&key) {
-                let pipeline = scene_pipeline(&self.device, &self.layouts, &self.scene_module, key);
+                let (layout, module) = match (&self.batching, key.batched) {
+                    (Some(batching), true) => (&batching.pipeline_layout, &batching.module),
+                    _ => (&self.layouts.scene_pipeline, &self.scene_module),
+                };
+                let pipeline = scene_pipeline(&self.device, layout, module, key);
                 self.scene_pipelines.insert(key, pipeline);
             }
         }
+    }
+
+    /// Readies the texture arrays of the batched draws for the resident textures. False when
+    /// the frame goes out one draw call per run: the device cannot batch, or more textures are
+    /// resident than the arrays hold.
+    fn prepare_texture_arrays(&mut self) -> bool {
+        let Some(batching) = &mut self.batching else {
+            return false;
+        };
+        if self.textures.slot_count() >= BINDLESS_TEXTURES as usize {
+            return false;
+        }
+        let revision = self.textures.revision();
+        if batching
+            .group
+            .as_ref()
+            .is_some_and(|(built, _)| *built == revision)
+        {
+            return true;
+        }
+
+        let mut indexed = vec![&self.dummy_indexed];
+        let mut direct = vec![&self.dummy_color];
+        for view in self.textures.slot_views() {
+            let format = view.map(|view| view.texture().format());
+            indexed.push(match view {
+                Some(view) if format == Some(wgpu::TextureFormat::R8Uint) => view,
+                _ => &self.dummy_indexed,
+            });
+            direct.push(match view {
+                Some(view) if format == Some(wgpu::TextureFormat::Rgba8Unorm) => view,
+                _ => &self.dummy_color,
+            });
+        }
+        let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("zax texture arrays"),
+            layout: &batching.textures,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureViewArray(&indexed),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureViewArray(&direct),
+                },
+            ],
+        });
+        batching.group = Some((revision, group));
+        true
     }
 
     fn prepare_texture_groups(&mut self) {
@@ -996,7 +1276,17 @@ fn texture_key(item: &WgpuDrawItem) -> (Option<TextureHandle>, Option<TextureHan
     (on(0), on(1))
 }
 
-/// Issues the draws of the scene buckets.
+/// Where the texture of a draw item sits in the texture arrays of the batched draws: the slot
+/// of the texture its colour mode reads plus one, or 0, the dummies.
+fn texture_slot(item: &WgpuDrawItem) -> i32 {
+    let (indexed, direct) = texture_key(item);
+    indexed
+        .or(direct)
+        .map_or(0, |handle| i32::try_from(handle.0 + 1).unwrap_or(0))
+}
+
+/// Issues the draws of the scene buckets: one draw call per run, or, with indirect arguments,
+/// one multi-draw per stretch of runs that share a pipeline.
 struct Drawer<'p, 'a> {
     pass: &'p mut wgpu::RenderPass<'a>,
     pipelines: &'p FastMap<SceneKey, wgpu::RenderPipeline>,
@@ -1007,29 +1297,46 @@ struct Drawer<'p, 'a> {
     samples: u32,
     current: Option<SceneKey>,
     bound_textures: Option<(Option<TextureHandle>, Option<TextureHandle>)>,
+    /// The indirect arguments of the runs when the draws are batched.
+    indirect: Option<&'p wgpu::Buffer>,
+    /// The pipeline and the runs (indirect entries) not drawn yet.
+    pending: Option<(SceneKey, std::ops::Range<usize>)>,
 }
 
 impl Drawer<'_, '_> {
-    /// Draws `run` of `items` in `mode`.
-    fn run(&mut self, items: &[WgpuDrawItem], run: &InstanceRun, mode: SceneMode) {
+    /// Draws `run` of `items` in `mode`; `entry` is the run's place in the indirect arguments.
+    fn run(&mut self, items: &[WgpuDrawItem], run: &InstanceRun, entry: usize, mode: SceneMode) {
         let item = &items[run.first];
         let key = SceneKey {
             mode,
             cull: self.cull,
             mirrored: interop::normal_matrix(&item.model).1 < 0.0,
             samples: self.samples,
+            batched: self.indirect.is_some(),
         };
-        if self.current != Some(key) {
-            self.pass.set_pipeline(&self.pipelines[&key]);
-            self.current = Some(key);
+        let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
+        self.statistics.batches += 1;
+        self.statistics.draw_calls += instances;
+        self.statistics.triangles += u64::from(item.mesh.index_count / 3) * u64::from(instances);
+
+        if self.indirect.is_some() {
+            match &mut self.pending {
+                Some((pending, runs)) if *pending == key && runs.end == entry => runs.end += 1,
+                _ => {
+                    self.flush();
+                    self.pending = Some((key, entry..entry + 1));
+                }
+            }
+            return;
         }
+
+        self.bind(key);
         let textures = texture_key(item);
         if self.bound_textures != Some(textures) {
             self.pass
                 .set_bind_group(2, &self.texture_groups[&textures], &[]);
             self.bound_textures = Some(textures);
         }
-        let instances = u32::try_from(run.count).unwrap_or(u32::MAX);
         let (first_index, base_vertex) = self.meshes.range(item.mesh);
         let base = instance_base(run);
         self.pass.draw_indexed(
@@ -1037,25 +1344,77 @@ impl Drawer<'_, '_> {
             base_vertex,
             base..base + instances,
         );
-        self.statistics.batches += 1;
-        self.statistics.draw_calls += instances;
-        self.statistics.triangles += u64::from(item.mesh.index_count / 3) * u64::from(instances);
     }
 
-    /// Draws one blended object, the runs `range` of `runs` (REQ-SCN-040, AMD-012).
-    fn blended(&mut self, items: &[WgpuDrawItem], runs: &[InstanceRun], range: (usize, usize)) {
+    /// Draws one blended object, the runs `range` of `runs` (REQ-SCN-040, AMD-012), whose
+    /// indirect arguments start at `base`.
+    fn blended(
+        &mut self,
+        items: &[WgpuDrawItem],
+        runs: &[InstanceRun],
+        range: (usize, usize),
+        base: usize,
+    ) {
         for mode in [SceneMode::DepthOnly, SceneMode::ColorEqual] {
-            for run in &runs[range.0..range.1] {
-                self.run(items, run, mode);
+            for (index, run) in runs[range.0..range.1].iter().enumerate() {
+                self.run(items, run, base + range.0 + index, mode);
             }
         }
     }
+
+    /// Draws the runs not drawn yet, when batched.
+    fn flush(&mut self) {
+        let (Some(indirect), Some((key, runs))) = (self.indirect, self.pending.take()) else {
+            return;
+        };
+        self.bind(key);
+        multi_draw(self.pass, indirect, &runs);
+    }
+
+    fn bind(&mut self, key: SceneKey) {
+        if self.current != Some(key) {
+            self.pass.set_pipeline(&self.pipelines[&key]);
+            self.current = Some(key);
+        }
+    }
+}
+
+/// Draws the runs `entries` of `indirect` in one multi-draw.
+fn multi_draw(
+    pass: &mut wgpu::RenderPass<'_>,
+    indirect: &wgpu::Buffer,
+    entries: &std::ops::Range<usize>,
+) {
+    if entries.is_empty() {
+        return;
+    }
+    pass.multi_draw_indexed_indirect(
+        indirect,
+        entries.start as u64 * INDIRECT_BYTES,
+        u32::try_from(entries.len()).unwrap_or(u32::MAX),
+    );
+}
+
+/// Whether the batched draws can be used: the device has their features, executes indirect
+/// draws and takes texture arrays as long as theirs. `ZAXNES_WGPU_BATCHING=0` turns them off.
+fn batching_supported(adapter: &wgpu::Adapter, device: &wgpu::Device) -> bool {
+    if std::env::var_os("ZAXNES_WGPU_BATCHING").is_some_and(|value| value == "0") {
+        return false;
+    }
+    device.features().contains(BATCHING_FEATURES)
+        && adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION)
+        && device.limits().max_binding_array_elements_per_shader_stage >= 2 * BINDLESS_TEXTURES
 }
 
 // --------------------------------------------------------------------- shaders
 
 const COMMON: &str = include_str!("shaders/common.wgsl");
 const SCENE: &str = include_str!("shaders/scene.wgsl");
+const TEXTURES_BOUND: &str = include_str!("shaders/textures_bound.wgsl");
+const TEXTURES_BINDLESS: &str = include_str!("shaders/textures_bindless.wgsl");
 const SHADOW: &str = include_str!("shaders/shadow.wgsl");
 const SKY: &str = include_str!("shaders/sky.wgsl");
 const RESOLVE: &str = include_str!("shaders/resolve.wgsl");
@@ -1117,6 +1476,7 @@ impl Layouts {
                 storage(0, both),
                 storage(1, wgpu::ShaderStages::VERTEX),
                 storage(2, wgpu::ShaderStages::VERTEX),
+                storage(3, wgpu::ShaderStages::VERTEX),
             ],
         );
         let textures = layout(
@@ -1184,7 +1544,7 @@ const fn front_face(mirrored: bool) -> wgpu::FrontFace {
 
 fn scene_pipeline(
     device: &wgpu::Device,
-    layouts: &Layouts,
+    layout: &wgpu::PipelineLayout,
     module: &wgpu::ShaderModule,
     key: SceneKey,
 ) -> wgpu::RenderPipeline {
@@ -1218,7 +1578,7 @@ fn scene_pipeline(
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("zax scene"),
-        layout: Some(&layouts.scene_pipeline),
+        layout: Some(layout),
         vertex: wgpu::VertexState {
             module,
             entry_point: Some("vs_main"),
@@ -1410,11 +1770,11 @@ fn frame_group(
     })
 }
 
-/// The draw blocks, the placements and the run of each instance of a pass.
+/// The draw blocks, the placements, the run of each instance and the deformations of a pass.
 fn draw_group(
     device: &wgpu::Device,
     layouts: &Layouts,
-    [draws, instances, run_of]: [&GrowingBuffer; 3],
+    [draws, instances, run_of, deforms]: [&GrowingBuffer; 4],
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("zax draw"),
@@ -1431,6 +1791,10 @@ fn draw_group(
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: run_of.buffer.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: deforms.buffer.as_entire_binding(),
             },
         ],
     })
@@ -1522,14 +1886,53 @@ fn max_samples(adapter: &wgpu::Adapter, device: &wgpu::Device) -> u32 {
         .unwrap_or(1)
 }
 
-/// The first instance of `run` in the placements (each placement is `INSTANCE_BYTES` long).
+/// The first instance of `run` in the placements (each placement is `AFFINE_BYTES` long).
 fn instance_base(run: &InstanceRun) -> u32 {
-    u32::try_from(run.offset / INSTANCE_BYTES).unwrap_or(u32::MAX)
+    u32::try_from(run.offset / AFFINE_BYTES).unwrap_or(u32::MAX)
+}
+
+/// Appends one placement: the first three rows of the model matrix (the affine part the shader
+/// applies) and the deformation's tile position.
+fn push_affine_placement(data: &mut Vec<u8>, model: &Mat4, deform: Option<&DeformParameters>) {
+    let tile = deform.map_or(Vec3::ZERO, |deform| deform.tile_relative_to_pivot);
+    let cells = [
+        model[(0, 0)],
+        model[(0, 1)],
+        model[(0, 2)],
+        model[(0, 3)],
+        model[(1, 0)],
+        model[(1, 1)],
+        model[(1, 2)],
+        model[(1, 3)],
+        model[(2, 0)],
+        model[(2, 1)],
+        model[(2, 2)],
+        model[(2, 3)],
+        tile.x,
+        tile.y,
+        tile.z,
+        0.0,
+    ];
+    let mut block = [0_u8; AFFINE_BYTES];
+    for (slot, value) in block.chunks_exact_mut(4).zip(cells) {
+        slot.copy_from_slice(&value.to_ne_bytes());
+    }
+    data.extend_from_slice(&block);
+}
+
+/// Appends the indirect arguments of `run`, whose instances are all of `mesh`.
+fn push_indirect(data: &mut Vec<u8>, meshes: &MeshStore, mesh: MeshHandle, run: &InstanceRun) {
+    let (first_index, base_vertex) = meshes.range(mesh);
+    data.extend_from_slice(&mesh.index_count.to_ne_bytes());
+    data.extend_from_slice(&count(run.count).to_ne_bytes());
+    data.extend_from_slice(&first_index.to_ne_bytes());
+    data.extend_from_slice(&base_vertex.to_ne_bytes());
+    data.extend_from_slice(&instance_base(run).to_ne_bytes());
 }
 
 /// Appends the draw block index `entry` once per instance of `run`, at the run's place.
 fn push_run_of(data: &mut Vec<u8>, run: &InstanceRun, entry: usize) {
-    let base = run.offset / INSTANCE_BYTES * 4;
+    let base = run.offset / AFFINE_BYTES * 4;
     if data.len() < base {
         data.resize(base, 0);
     }
@@ -1546,12 +1949,6 @@ fn count(value: usize) -> u32 {
 // --------------------------------------------------------------------- uniform blocks
 
 fn push_vec4(data: &mut Vec<u8>, values: [f32; 4]) {
-    for value in values {
-        data.extend_from_slice(&value.to_ne_bytes());
-    }
-}
-
-fn push_ivec4(data: &mut Vec<u8>, values: [i32; 4]) {
     for value in values {
         data.extend_from_slice(&value.to_ne_bytes());
     }
@@ -1587,11 +1984,17 @@ fn frame_bytes(constants: &SceneConstants) -> Vec<u8> {
             constants.normal_offset,
         ],
     );
+    push_vec4(&mut data, vec3(constants.light_direction, 0.0));
+    push_vec4(&mut data, vec3(constants.hud_light_direction, 0.0));
     data
 }
 
-/// The deformation part of a draw block: flag, amplitude, size, tile, speed, phase.
-fn push_deformation(data: &mut Vec<u8>, deform: Option<&DeformParameters>) {
+/// Appends `deform` to the deformations and returns its index, or -1 without one.
+fn push_deformation(deforms: &mut Vec<u8>, deform: Option<&DeformParameters>) -> i32 {
+    let Some(parameters) = deform else {
+        return -1;
+    };
+    let index = i32::try_from(deforms.len() as u64 / DEFORM_BYTES).unwrap_or(i32::MAX);
     let rows = |matrix: &Mat4, data: &mut Vec<u8>| {
         for row in 0..3 {
             push_vec4(
@@ -1605,69 +2008,67 @@ fn push_deformation(data: &mut Vec<u8>, deform: Option<&DeformParameters>) {
             );
         }
     };
-    if let Some(parameters) = deform {
-        push_ivec4(data, [1, 0, 0, 0]);
-        push_vec4(data, vec3(parameters.amplitude.into(), 0.0));
-        push_vec4(data, vec3(parameters.size.into(), 0.0));
-        push_vec4(data, vec3(parameters.tile_relative_to_pivot.into(), 0.0));
-        rows(&parameters.speed, data);
-        rows(&parameters.phase, data);
-    } else {
-        push_ivec4(data, [0; 4]);
-        data.resize(data.len() + 9 * 16, 0);
-    }
+    push_vec4(deforms, vec3(parameters.amplitude.into(), 0.0));
+    push_vec4(deforms, vec3(parameters.size.into(), 0.0));
+    rows(&parameters.speed, deforms);
+    rows(&parameters.phase, deforms);
+    index
+}
+
+/// Which light and alpha a run of the scene pass takes, and whether shadows are received.
+#[derive(Debug, Clone, Copy)]
+struct DrawLook {
+    hud: bool,
+    opaque: bool,
+    shadow_enabled: bool,
 }
 
 /// The draw block of one instanced run of the scene pass (the uniforms `Passes::draw_run` sets
-/// on the GL path).
-fn push_draw(
-    data: &mut Vec<u8>,
-    item: &WgpuDrawItem,
-    light: Vector3,
-    opaque: bool,
-    shadow_enabled: bool,
-) {
+/// on the GL path), written in one piece.
+fn push_draw(data: &mut Vec<u8>, deforms: &mut Vec<u8>, item: &WgpuDrawItem, look: DrawLook) {
     let mirrored = interop::normal_matrix(&item.model).1 < 0.0;
-    let alpha = if opaque { 1.0 } else { item.alpha };
-    push_vec4(data, vec3(item.flat_color, alpha));
-    push_vec4(
-        data,
-        [
-            item.texture_size.x,
-            item.texture_size.y,
-            item.tex_offset.x,
-            item.tex_offset.y,
-        ],
-    );
-    push_vec4(
-        data,
-        [
-            item.tex_tilting.x,
-            item.tex_tilting.y,
-            if mirrored { -1.0 } else { 1.0 },
-            0.0,
-        ],
-    );
-    push_vec4(data, vec3(light, 0.0));
-    push_ivec4(
-        data,
-        [
-            item.color_mode,
-            item.palette_table,
-            i32::from(item.clip),
-            i32::from(shadow_enabled && item.receive_shadow),
-        ],
-    );
-    push_deformation(data, item.deform.as_ref());
-    push_matrix(data, &Matrix4x4::IDENTITY);
+    let alpha = if look.opaque { 1.0 } else { item.alpha };
+    let floats = [
+        item.flat_color.x,
+        item.flat_color.y,
+        item.flat_color.z,
+        alpha,
+        item.texture_size.x,
+        item.texture_size.y,
+        item.tex_offset.x,
+        item.tex_offset.y,
+        item.tex_tilting.x,
+        item.tex_tilting.y,
+        if mirrored { -1.0 } else { 1.0 },
+        if look.hud { 1.0 } else { 0.0 },
+    ];
+    let deform = push_deformation(deforms, item.deform.as_ref());
+    let ints = [
+        item.color_mode,
+        item.palette_table,
+        i32::from(item.clip),
+        i32::from(look.shadow_enabled && item.receive_shadow),
+        deform,
+        texture_slot(item),
+        0,
+        0,
+    ];
+    let mut block = [0_u8; DRAW_BLOCK];
+    for (slot, value) in block.chunks_exact_mut(4).zip(floats) {
+        slot.copy_from_slice(&value.to_ne_bytes());
+    }
+    for (slot, value) in block[48..].chunks_exact_mut(4).zip(ints) {
+        slot.copy_from_slice(&value.to_ne_bytes());
+    }
+    data.extend_from_slice(&block);
 }
 
-/// The draw block of one caster of the shadow pass: its placement and its deformation.
-fn push_shadow_draw(data: &mut Vec<u8>, caster: &WgpuDrawItem) {
-    // Colours, texture, tilting, light and modes: unused by the shadow pass.
-    data.resize(data.len() + 5 * 16, 0);
-    push_deformation(data, caster.deform.as_ref());
-    push_matrix(data, &interop::to_numerics(&caster.model));
+/// The draw block of one run of casters of the shadow pass: only its deformation matters.
+fn push_shadow_draw(data: &mut Vec<u8>, deforms: &mut Vec<u8>, caster: &WgpuDrawItem) {
+    let deform = push_deformation(deforms, caster.deform.as_ref());
+    let mut block = [0_u8; DRAW_BLOCK];
+    block[64..68].copy_from_slice(&deform.to_ne_bytes());
+    data.extend_from_slice(&block);
 }
 
 /// The sky block of the Gradient or the Fantasy sky (`SkyboxPass::draw` of the GL path).

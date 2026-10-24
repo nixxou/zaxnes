@@ -11,15 +11,16 @@ struct Frame {
     light_ambient: vec4<f32>,
     // x time, y shadow strength, z shadow bias, w normal offset.
     params: vec4<f32>,
+    // The light direction of the scene buckets, then the HUD's.
+    light: array<vec4<f32>, 2>,
 }
 
 @group(0) @binding(0) var<uniform> frame: Frame;
 @group(0) @binding(1) var palette: texture_2d<f32>;
 @group(0) @binding(2) var shadow_map: texture_depth_2d;
 
-
-@group(2) @binding(0) var index_texture: texture_2d<u32>;
-@group(2) @binding(1) var color_texture: texture_2d<f32>;
+// The textures of group 2 and zax_index_texel / zax_color_texel come from textures_bound.wgsl
+// or textures_bindless.wgsl, appended by the renderer.
 
 struct VertexOut {
     @builtin(position) position: vec4<f32>,
@@ -40,17 +41,16 @@ fn vs_main(
     let run = run_of[instance_index];
     let draw = draws[run];
     var local = position;
-    if (draw.modes2.x != 0) {
-        local += zax_deformation(draw, instance.deform_tile.xyz, position, frame.params.x);
+    if (draw.modes2.x >= 0) {
+        local += zax_deformation(deforms[draw.modes2.x], instance.deform_tile.xyz, position, frame.params.x);
     }
 
-    let scene = instance.model * vec4<f32>(local, 1.0);
+    let scene = zax_place(instance, local);
     var out: VertexOut;
     out.scene = scene.xyz;
     // REQ-SCN-028: the normal is the mesh normal, unchanged by the deformation. The sign is -1
     // for a mirrored placement, whose cofactor matrix points the normal inwards (Q-069).
-    let normal_matrix = mat3x3<f32>(instance.normal[0].xyz, instance.normal[1].xyz, instance.normal[2].xyz);
-    out.normal = draw.tilting.z * (normal_matrix * normal);
+    out.normal = draw.tilting.z * zax_place_normal(instance, normal);
     out.uv = uv;
     out.run = run;
     out.position = zax_clip(frame.view_projection * vec4<f32>(scene.x, scene.y, -scene.z, 1.0));
@@ -82,18 +82,18 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         let texel = vec2<i32>(zax_mod(floor(uv), size));
         if (color_mode == 0) {
             // REQ-SCN-034: the index selects 4 * P + (t mod 4) in the frame palette.
-            let value = textureLoad(index_texture, texel, 0).r;
+            let value = zax_index_texel(draw, texel);
             let entry = clamp(draw.modes.y, 0, 15) * 4 + i32(value & 3u);
             albedo = textureLoad(palette, vec2<i32>(entry, 0), 0).rgb;
         } else {
-            let direct = textureLoad(color_texture, texel, 0);
+            let direct = zax_color_texel(draw, texel);
             albedo = direct.rgb;
             texel_alpha = direct.a;
         }
     }
 
     let n = normalize(in.normal);
-    let l = normalize(-draw.light.xyz);
+    let l = normalize(-frame.light[i32(draw.tilting.w)].xyz);
     let ndl = max(0.0, dot(n, l));
 
     var shadow = 1.0;

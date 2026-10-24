@@ -20,6 +20,18 @@ impl GpuApi {
             Self::Dx12 => wgpu::Backends::DX12,
         }
     }
+
+    /// The instance flags of the build, but on Vulkan without the check wgpu runs on every
+    /// indirect draw: the renderer writes the arguments from the meshes it binds, and Vulkan
+    /// takes them as they are. DirectX 12 keeps it, as wgpu rewrites the arguments there.
+    fn instance_flags(self) -> wgpu::InstanceFlags {
+        match self {
+            Self::Vulkan => {
+                wgpu::InstanceFlags::default() - wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL
+            }
+            Self::Dx12 => wgpu::InstanceFlags::default(),
+        }
+    }
 }
 
 /// Why the headless device could not be made.
@@ -53,6 +65,7 @@ impl HeadlessGpu {
     pub fn new(api: GpuApi, width: u32, height: u32) -> Result<Self, HeadlessError> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: api.backends(),
+            flags: api.instance_flags(),
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -65,8 +78,13 @@ impl HeadlessGpu {
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: Some("zax headless"),
                 required_features: adapter.features()
-                    & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
-                required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),
+                    & (wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                        | super::BATCHING_FEATURES),
+                required_limits: wgpu::Limits {
+                    max_binding_array_elements_per_shader_stage:
+                        adapter.limits().max_binding_array_elements_per_shader_stage,
+                    ..wgpu::Limits::default().using_resolution(adapter.limits())
+                },
                 ..wgpu::DeviceDescriptor::default()
             }))?;
 
