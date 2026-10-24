@@ -1420,9 +1420,13 @@ fn update_cursor(
 
 /// The widescreen margin, in NES pixels on each side, that the `video.widescreen` choice offers
 /// a ROM made for the extension: none, enough to fill the scene's `size` (width, height) with a
-/// 240-line picture, or enough for a fixed ratio; then `extra` (`video.widescreen_extra`, steps
-/// of 5 %) wider, so that the 3D objects at the edges of the view are already whole when they come
+/// 240-line picture, or enough for a fixed ratio; then `extra` (`video.widescreen_extra`, an
+/// index into [`WIDESCREEN_EXTRA_PERCENT`]) wider, so that the 3D objects at the edges of the view are already whole when they come
 /// into sight. Always a whole number of tiles, at most [`zax_nes::wide::MAX_MARGIN`].
+/// The percentages of the `video.widescreen_extra` choices, by index.
+const WIDESCREEN_EXTRA_PERCENT: [u16; 14] =
+    [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300];
+
 fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> i32 {
     #[allow(clippy::cast_precision_loss)] // Window sizes.
     let ratio = match choice {
@@ -1432,8 +1436,12 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> i32 {
         4 => 16.0 / 9.0,
         _ => return 0,
     };
-    #[allow(clippy::cast_precision_loss)] // 0..=6.
-    let bonus = 1.0 + (extra.clamp(0, 6) as f32 * 0.05);
+    let percent = usize::try_from(extra)
+        .ok()
+        .and_then(|index| WIDESCREEN_EXTRA_PERCENT.get(index))
+        .copied()
+        .unwrap_or(0);
+    let bonus = 1.0 + (f32::from(percent) / 100.0);
     let each_side = (240.0 * ratio * bonus - 256.0) / 2.0;
     if each_side <= 0.0 {
         return 0;
