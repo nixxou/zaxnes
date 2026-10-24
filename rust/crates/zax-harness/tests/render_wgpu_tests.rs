@@ -31,14 +31,14 @@ fn check(backend: &str) {
         backend.to_owned(),
     ];
     let options = Options::parse(&arguments).unwrap();
-    match render::run(&options) {
-        Ok(_) => {}
-        Err(HarnessError::Gpu(message)) if message.starts_with("no ") => {
+    let result = render::run(&options);
+    if let Err(HarnessError::Gpu(message)) = &result {
+        if message.starts_with("no ") {
             eprintln!("skipped: {message}");
             return;
         }
-        Err(error) => panic!("{backend}: {error}"),
     }
+    result.unwrap();
 
     let expected = read_render(&goldens().join("render.json")).unwrap();
     let actual = read_render(&output.join("render.json")).unwrap();
@@ -48,7 +48,11 @@ fn check(backend: &str) {
     for (golden, mine) in expected.iter().zip(&actual) {
         assert_eq!(golden.scene, mine.scene);
         assert_eq!(
-            (golden.opaque_tiles, golden.transparent_tiles, golden.hud_tiles),
+            (
+                golden.opaque_tiles,
+                golden.transparent_tiles,
+                golden.hud_tiles
+            ),
             (mine.opaque_tiles, mine.transparent_tiles, mine.hud_tiles),
             "tiles of '{}'",
             golden.scene

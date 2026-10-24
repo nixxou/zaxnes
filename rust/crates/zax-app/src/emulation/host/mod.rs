@@ -407,6 +407,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         (self.session.as_mut(), &self.scene)
     }
 
+    /// As [`Self::session_and_scene`], with the view of the game the scene is drawn into.
+    pub fn session_scene_and_view(
+        &mut self,
+    ) -> (Option<&mut GameSession>, &SceneState, Option<&V>) {
+        (self.session.as_mut(), &self.scene, self.view.as_ref())
+    }
+
     /// The session for reading and the scene for writing, for what the session publishes to the
     /// scene.
     pub fn session_and_scene_mut(&mut self) -> (Option<&GameSession>, &mut SceneState) {

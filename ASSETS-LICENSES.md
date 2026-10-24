@@ -75,6 +75,7 @@ Le détail des paquets et des binaires natifs livrés est dans
 | Dear ImGui (`imgui`, `imgui-sys`) | MIT |
 | Lua 5.4 et `mlua` | MIT |
 | `glow` (accès à OpenGL) | MIT OR Apache-2.0 OR Zlib |
+| `wgpu` et `naga` (rendu Vulkan / DirectX 12 des versions de bureau) | MIT OR Apache-2.0 |
 | 3DNes_Engine, dont une partie du moteur de conversion 2D→3D est adaptée | GNU GPL v3 |
 
 ## 4. Licence de Zaxnes

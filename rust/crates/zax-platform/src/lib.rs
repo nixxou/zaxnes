@@ -12,13 +12,15 @@ pub mod imgui_renderer;
 pub mod input;
 pub mod pacing;
 pub mod wave;
+#[cfg(feature = "wgpu")]
+pub mod wgpu_display;
 pub mod window;
 
 pub use audio::AudioOutput;
 pub use icon::{WindowIconImage, WindowIconState, WindowIconTarget};
 pub use pacing::{DisplayPacingState, DisplaySurface};
 pub use wave::{WaveAudio, WaveError};
-pub use window::{GlFlavor, HostWindow, HostWindowSettings};
+pub use window::{GlFlavor, HostWindow, HostWindowSettings, WindowGraphics};
 
 /// Stable identifier of this module.
 pub const MODULE_NAME: &str = "Zax.Platform";

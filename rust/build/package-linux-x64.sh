@@ -10,6 +10,8 @@
 # distribution's SDL2 knows its display server (X11 or Wayland), audio server and GPU driver.
 # SDL2 is compiled once from the pinned source of the sdl2-sys crate, with every backend off
 # (rust/build/x86_64-sdl2-zig.cmake), only to give the linker its symbols; it is not packaged.
+# The Vulkan renderer (feature `wgpu`, `--backend vulkan`) loads the system's libvulkan.so.1 at
+# run time, when it is chosen: it is no link dependency.
 #   pip install ziglang && cargo install cargo-zigbuild --locked
 #   sudo apt install cmake
 set -euo pipefail
@@ -24,7 +26,7 @@ out_dir="$target_dir/package"
 version="$(sed -n 's/^version = "\(.*\)"/\1/p' "$rust_dir/Cargo.toml" | head -n 1)"
 
 export SDL2_TOOLCHAIN="${SDL2_TOOLCHAIN:-$script_dir/x86_64-sdl2-zig.cmake}"
-(cd "$rust_dir" && cargo zigbuild --locked --release -p zax-app --features firmware-sdl \
+(cd "$rust_dir" && cargo zigbuild --locked --release -p zax-app --features firmware-sdl,wgpu \
     --target "$target.$glibc")
 binary="$target_dir/$target/release/zaxnes"
 

@@ -696,7 +696,9 @@ impl WgpuSceneRenderer {
                 view: &linear.depth,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
+                    // Kept, not discarded: the depth of the scene is what post-processing tools
+                    // such as ReShade read once the pass is over.
+                    store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
             }),

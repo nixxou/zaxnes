@@ -36,7 +36,10 @@ ROM or a game profile.**
 | `Zaxnes-<version>-linux-x64.tar.gz` | Linux x86_64, glibc 2.31 or newer | needs the system's SDL2 (`libsdl2-2.0-0` on Debian/Ubuntu) |
 | `Zaxnes-<version>-portmaster-aarch64.zip` | PortMaster handhelds (aarch64) | unzip into the `ports` folder of the SD card |
 
-The desktop builds need **OpenGL 3.3**; the handheld build uses **OpenGL ES 3.0**.
+The desktop builds draw with **OpenGL 3.3** by default, or with **Vulkan** or (on Windows)
+**DirectX 12** (Options ▸ Video ▸ Graphics API, or `--backend vulkan|dx12`), which lets
+post-processing tools such as ReShade read the depth of the 3D scene; see
+[HOWTO-RUN.md](HOWTO-RUN.md). The handheld build uses **OpenGL ES 3.0**.
 
 ## No ROMs, no profiles, no assets from another program
 
@@ -83,6 +86,7 @@ The code is a Cargo workspace in [`rust/`](rust) (the toolchain is pinned by
 cd rust
 cargo build --release -p zax-app                      # target/release/zaxnes, system SDL2
 cargo build --release -p zax-app --features bundled   # SDL2 built and linked statically
+cargo build --release -p zax-app --features bundled,wgpu   # with Vulkan and DirectX 12
 cargo run --release -p zax-app -- --rom <game.nes> --profile "3D par défaut (sans profil)"
 ```
 
@@ -127,7 +131,7 @@ calls "run one frame", so that a libretro frontend can host the same code later.
 | `zax-engine3d` | 2D → 3D conversion: shape recognition, geometry, draw list |
 | `zax-scripting` | Lua 5.4 runtime of the profiles' scripts |
 | `zax-settings` | settings model: keys, domains, defaults, persistence |
-| `zax-render` | OpenGL 3.3 / GLES 3.0 renderer drawing into a host-provided framebuffer |
+| `zax-render` | OpenGL 3.3 / GLES 3.0 renderer drawing into a host-provided framebuffer, and the wgpu (Vulkan, DirectX 12) renderer of the desktop builds |
 | `zax-platform` | window, GL context, input devices and audio output (SDL2) |
 | `zax-app` | the `zaxnes` program: frame loop, Dear ImGui interface, handheld interface |
 | `zax-harness` | headless tools: offscreen captures, mesh export, the Lua API listing |

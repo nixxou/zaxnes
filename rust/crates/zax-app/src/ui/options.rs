@@ -152,6 +152,10 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
     if EXCLUDED.contains(&id) {
         return false;
     }
+    // The graphics API is a choice only where Vulkan and DirectX 12 are built in.
+    if id == SettingId::VideoBackend && !cfg!(feature = "wgpu") {
+        return false;
+    }
     if INCLUDED_PROFILE.contains(&id) {
         return true;
     }

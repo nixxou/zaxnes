@@ -240,6 +240,34 @@ de réglages.
 - chaque changement de valeur joue **une fois** le son de validation, **sauf** les curseurs
   **Vitesse** (onglet Émulation) et **FOV** (onglet Caméra), qui sont muets.
 
+### API graphique : OpenGL, Vulkan, DirectX 12
+
+Les versions Windows et Linux x86_64 savent dessiner en **OpenGL** (par défaut), en **Vulkan** ou,
+sous Windows, en **DirectX 12**. Le choix se fait dans l'onglet **Vidéo**, ligne **« API graphique
+(au prochain démarrage) »**, ou pour un seul lancement avec `--backend gl`, `--backend vulkan` ou
+`--backend dx12`. Les trois donnent la même image ; seul le chemin vers la carte graphique change.
+La version console reste en OpenGL ES.
+
+- Si Vulkan ou DirectX 12 ne peut pas s'ouvrir (pilote absent, par exemple), Zaxnes démarre en
+  OpenGL et le journal dit pourquoi.
+- Le journal liste les cartes graphiques capables de dessiner dans la fenêtre. Sur une machine à
+  plusieurs cartes, la variable d'environnement **`ZAXNES_GPU`** en choisit une par un morceau de
+  son nom (`ZAXNES_GPU=3060`) ; sans elle, c'est celle que le système recommande.
+- En Vulkan et DirectX 12, les ciels « Gradient » et « Fantasy » sont toujours les ciels calculés
+  (`--assets` et ses cubemaps restent propres à OpenGL), et la résolution automatique garde
+  l'échelle choisie (elle n'est pas encore mesurée sur ces API).
+
+**ReShade.** En Vulkan ou en DirectX 12, ReShade trouve la profondeur de la scène 3D, ce qui
+ouvre les effets qui en dépendent (occlusion ambiante, profondeur de champ, brouillard…). Pour
+qu'il la reconnaisse :
+
+- désactivez l'**anticrénelage** (MSAA) de Zaxnes : ReShade lit mal une profondeur multiéchantillonnée ;
+- dans l'add-on *Generic Depth* de ReShade, si aucune profondeur n'est choisie, désactivez
+  l'heuristique de rapport largeur/hauteur : la scène occupe la fenêtre moins la barre de menus ;
+- la profondeur n'est **pas inversée** (`RESHADE_DEPTH_INPUT_IS_REVERSED=0`).
+
+Les effets de ReShade s'appliquent à toute l'image de la fenêtre, barre de menus comprise.
+
 ### Langue de l'interface
 
 L'onglet **Interface** porte le réglage **Langue** (`ui.language`), qui vaut `en` (« English »)

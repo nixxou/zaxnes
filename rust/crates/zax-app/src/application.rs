@@ -14,12 +14,12 @@ use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::icon;
 use zax_platform::input::sdl::SdlInput;
 use zax_platform::pacing::DisplayPacingState;
+use zax_platform::WindowGraphics;
 use zax_platform::{AudioOutput, HostWindow, HostWindowSettings};
 use zax_profiles::format;
 use zax_render::assets::{NeutralSceneAssets, SceneAssets};
 use zax_render::controls;
 use zax_render::scene::{SceneFrame, SceneState};
-use zax_render::target::RenderTarget;
 use zax_render::SceneRenderer;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -34,14 +34,12 @@ use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::frame_pacer::CatchUp;
 use crate::emulation::game_catalog::GameCatalog;
-use crate::emulation::host::{
-    DeferredParts, EmulationHost, EmulationHostOptions, GameView, HostEvent, THUMBNAIL_HEIGHT,
-    THUMBNAIL_WIDTH,
-};
+use crate::emulation::host::{DeferredParts, EmulationHost, EmulationHostOptions, HostEvent};
 use crate::emulation::video_pacing::{VideoPacing, VideoPacingRequest};
 use crate::frame_profiler::{self, FrameProfiler, Stage, StageClock};
 use crate::frame_rate_counter::FrameRateCounter;
 use crate::game_session::GameSession;
+use crate::graphics::{Backend, Graphics, SceneView};
 use crate::input::cursor_auto_hide::CursorAutoHide;
 use crate::input::input_action::to_camera_actions;
 use crate::input::{routing, DesktopInputSource, DeviceRefs, InputSnapshot};
@@ -55,7 +53,7 @@ use crate::render_scaling;
 use crate::render_skip;
 use crate::scene_script_bridge::{self, ConsoleScriptLog};
 use crate::ui::debug_overlay::DebugInfo;
-use crate::ui::frontend::{ImguiFrontend, Sizes};
+use crate::ui::frontend::{ImguiFrontend, Sizes, UiGraphics};
 use crate::ui::handheld;
 use crate::ui::strings::UiLanguage;
 use crate::ui::zax_ui::{UiEffect, UiFrame};
@@ -64,16 +62,7 @@ use crate::{neutral_assets, persistence::input_binding_store::InputBindingStore 
 
 /// The host the application runs: over the library, with the offscreen picture of the scene as
 /// its view of the game.
-pub type AppHost = EmulationHost<LibraryGameCatalog, OffscreenFramebuffer>;
-
-impl GameView for OffscreenFramebuffer {
-    fn capture_thumbnail(&mut self) -> Option<Vec<u8>> {
-        self.read_scaled_rgb(
-            to_i32_usize(THUMBNAIL_WIDTH),
-            to_i32_usize(THUMBNAIL_HEIGHT),
-        )
-    }
-}
+pub type AppHost = EmulationHost<LibraryGameCatalog, SceneView>;
 
 /// The folder of the user data where the linked shader programs are kept.
 const SHADER_CACHE_FOLDER: &str = "shader-cache";
@@ -196,13 +185,14 @@ impl ZaxApplication {
 struct Running {
     options: AppOptions,
     ui: ImguiFrontend,
-    window: HostWindow,
-    gl: Rc<glow::Context>,
-    renderer: SceneRenderer,
+    // Field order is drop order: the renderer and the host (whose view is the scene picture)
+    // go before the window, whose GL context or wgpu device they were made on.
+    graphics: Graphics,
     input: SdlInput,
     source: DesktopInputSource,
     audio: Option<AudioOutput>,
     host: AppHost,
+    window: HostWindow,
     pacing: VideoPacing,
     counter: FrameRateCounter,
     cursor: CursorAutoHide,
@@ -241,6 +231,7 @@ struct Pipelined {
 }
 
 impl Running {
+    #[allow(clippy::too_many_lines)] // The start-up sequence, in its order.
     fn build(options: &AppOptions) -> Result<Self, String> {
         let asset_root = neutral_assets::locate(options.asset_root.as_deref().map(Path::new));
         let paths = resolve_user_data(options);
@@ -258,22 +249,21 @@ impl Running {
         publish_settings_to_scene(&model, &mut scene);
 
         let request = pacing_request(options, &model);
-        let mut window = HostWindow::create(&HostWindowSettings {
+        let window_settings = HostWindowSettings {
             title: "Zaxnes".to_owned(),
             width: options.width,
             height: options.height,
             vsync: request.vsync,
             target_frame_rate: request.target_frame_rate,
             fullscreen: should_open_fullscreen(options, model.fullscreen()),
-        })
-        .map_err(|error| error.to_string())?;
+            graphics: WindowGraphics::Gl,
+        };
+        let mut window = open_window(options, &model, &window_settings)?;
         if options.smoke_test {
             println!("{}", smoke_banner(options));
         }
         log_window_icon(&mut window);
-        let gl = window.glow_context();
-        log_display(&window, &gl);
-        let (renderer_name, version) = framebuffer::gl_strings(&gl);
+        let (renderer_name, version) = log_display(&window);
         let request_options = options.clone();
         let mut pacing = VideoPacing::new(
             Some(Box::new(move |model| {
@@ -299,11 +289,13 @@ impl Running {
         let (width, height) = window.drawable_size();
         // The host owns the picture of the scene: it reads it back for the thumbnails whenever
         // the game pauses, and the loop draws into it through the host.
-        let view = OffscreenFramebuffer::new(Rc::clone(&gl), to_i32(width), to_i32(height))
-            .map_err(|error| error.to_string())?;
-        // The linked programs are kept in the user folder, where the next start finds them.
-        let mut renderer = open_renderer(&gl, asset_root.as_deref(), &paths)?;
-        renderer.set_group_opaque_draws(group_draws(options));
+        let (graphics, view) = open_graphics(
+            &window,
+            asset_root.as_deref(),
+            &paths,
+            group_draws(options),
+            (to_i32(width), to_i32(height)),
+        )?;
         let input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;
         let mut bindings_store = FileInputBindingStore::new(paths.clone(), OffsetDateTime::now_utc);
         let bindings = load_bindings(&mut bindings_store, options);
@@ -326,17 +318,25 @@ impl Running {
         configure_pacing(&mut host, options);
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
-        let ui = ImguiFrontend::new(&gl, &host, options, height)?;
+        let ui_graphics = match &graphics {
+            Graphics::Gl { gl, .. } => UiGraphics::Gl(gl),
+            #[cfg(feature = "wgpu")]
+            Graphics::Wgpu(_) => UiGraphics::Wgpu(
+                window
+                    .wgpu_mut()
+                    .ok_or("the wgpu renderer has no wgpu window")?,
+            ),
+        };
+        let ui = ImguiFrontend::new(ui_graphics, &host, options, height)?;
         Ok(Self {
             options: options.clone(),
             ui,
-            window,
-            gl,
-            renderer,
+            graphics,
             input,
             source,
             audio,
             host,
+            window,
             pacing,
             counter: FrameRateCounter::new(),
             cursor: CursorAutoHide::new(),
@@ -427,7 +427,8 @@ impl Running {
                 && smoke_run_is_over(&self.options, &self.host, &self.state))
         {
             if let Some(shot) = self.options.smoke_shot_path.as_deref() {
-                capture_window(&self.gl, width, height, Path::new(shot));
+                self.graphics
+                    .capture_window(&self.window, width, height, Path::new(shot));
             }
             return Ok(false);
         }
@@ -524,8 +525,7 @@ impl Running {
         self.host
             .view_mut()
             .ok_or("the host has no view of the game")?
-            .resize(scene_width, scene_height)
-            .map_err(|error| error.to_string())?;
+            .resize(scene_width, scene_height)?;
         let skip = render_skip::should_skip(
             self.host.scene().settings.skip_render,
             self.host.state() == EmulationState::Running,
@@ -551,7 +551,7 @@ impl Running {
             rendered_frames: self.state.rendered_frames,
             scene_frames: self.state.scene_frames,
             skipped_frames: self.state.skipped_frames,
-            statistics: self.renderer.statistics(),
+            statistics: self.graphics.statistics(),
             gl_renderer: &self.state.renderer_name,
         };
         let sizes = Sizes {
@@ -608,7 +608,7 @@ impl Running {
             && render_scaling::scale_applies(settings.render_method());
         let resolution = &mut self.resolution;
         if wanted != resolution.timing {
-            resolution.timing = self.renderer.set_gpu_timing(wanted);
+            resolution.timing = self.graphics.set_gpu_timing(wanted);
             if wanted && !resolution.timing && !std::mem::replace(&mut resolution.reported, true) {
                 log("the GPU cannot time its work: the automatic resolution keeps the set scale.");
             }
@@ -616,7 +616,7 @@ impl Running {
         if !resolution.timing {
             return;
         }
-        if let Some(gpu) = self.renderer.statistics().gpu_time {
+        if let Some(gpu) = self.graphics.statistics().gpu_time {
             if resolution.governor.record(gpu, budget) {
                 log(&format!(
                     "automatic resolution: scale {:.2} (GPU {:.1} ms for a {:.1} ms frame)",
@@ -669,8 +669,13 @@ impl Running {
             view,
         }) = self.host.deferred_parts()
         else {
-            framebuffer::begin_window_pass(&self.gl, width, height);
-            self.ui.render();
+            self.graphics.draw_window(
+                &mut self.window,
+                None,
+                &mut self.ui,
+                (width, height),
+                view_height,
+            );
             return Ok(Duration::ZERO);
         };
         let view = view.ok_or("the host has no view of the game")?;
@@ -682,11 +687,11 @@ impl Running {
         self.pipeline.list_waiting = convert;
         let mut converting = StageClock::new(self.clock.enabled());
         let converting_clock = &mut converting;
-        let (renderer, clock, ui, gl, displayed) = (
-            &mut self.renderer,
+        let (graphics, clock, ui, window, displayed) = (
+            &mut self.graphics,
             &mut self.clock,
             &mut self.ui,
-            &self.gl,
+            &mut self.window,
             &self.pipeline.displayed,
         );
         let shadow_reported = &mut self.state.shadow_map_reported;
@@ -701,21 +706,14 @@ impl Running {
             let drawn = if skip {
                 Ok(())
             } else {
-                let target = RenderTarget {
-                    framebuffer: view.handle(),
-                    width: view.width(),
-                    height: view.height(),
-                };
                 let frame = SceneFrame {
                     draw_list: Some(displayed),
                     nes_picture: &[],
                 };
-                draw_scene(renderer, &target, &scene, &frame, shadow_reported, clock)
+                draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
             };
             let mark = clock.start();
-            framebuffer::begin_window_pass(gl, width, height);
-            view.blit_to_default_framebuffer(width, view_height);
-            ui.render();
+            graphics.draw_window(window, Some(view), ui, (width, height), view_height);
             clock.stop(Stage::Ui, mark);
             let waiting = Instant::now();
             let converted = conversion.map_or(Duration::ZERO, |conversion| {
@@ -749,7 +747,7 @@ impl Running {
             self.state.skipped_frames += 1;
         } else {
             render_scene(
-                &mut self.renderer,
+                &mut self.graphics,
                 &mut self.host,
                 &mut self.state,
                 &mut self.clock,
@@ -761,16 +759,24 @@ impl Running {
             self.pipeline.list_waiting = !self.host.showing_two_dimensional();
         }
         let mark = self.clock.start();
-        framebuffer::begin_window_pass(&self.gl, width, height);
-        if let Some(view) = self.host.view() {
-            view.blit_to_default_framebuffer(width, view_height);
-        }
-        let gl = Rc::clone(&self.gl);
         self.with_ui_frame(real, |ui, frame, sizes, debug| {
-            ui.draw(frame, sizes, debug, |path| {
-                capture_window(&gl, width, height, path);
-            });
+            ui.build(frame, sizes, debug);
         });
+        self.graphics.draw_window(
+            &mut self.window,
+            self.host.view(),
+            &mut self.ui,
+            (width, height),
+            view_height,
+        );
+        let shot = self.ui.advance_shots();
+        if let Some(path) = shot.capture {
+            self.graphics
+                .capture_window(&self.window, width, height, &path);
+        }
+        if shot.finished {
+            self.host.enqueue(Command::Quit, CommandArgs::default());
+        }
         self.clock.stop(Stage::Ui, mark);
         Ok(())
     }
@@ -851,7 +857,7 @@ struct HostParts<'a> {
     asset_root: Option<&'a Path>,
     sample_rate: u32,
     audio_open: bool,
-    view: OffscreenFramebuffer,
+    view: SceneView,
 }
 
 fn build_host(parts: HostParts<'_>) -> AppHost {
@@ -903,15 +909,91 @@ fn resolve_user_data(options: &AppOptions) -> UserDataPaths {
     paths
 }
 
-/// The start-up report of the display: SDL's driver and mode, the GL context it created, the GL
-/// strings, and a warning when the renderer is a software one.
-fn log_display(window: &HostWindow, gl: &glow::Context) {
+/// The start-up report of the display: SDL's driver and mode, the GL context it created and the
+/// GL strings, with a warning when the renderer is a software one, or the wgpu adapter. Returns
+/// the renderer's name and version for the statistics.
+fn log_display(window: &HostWindow) -> (String, String) {
     log(&window.display_report());
+    #[cfg(feature = "wgpu")]
+    if let Some(display) = window.wgpu() {
+        log(&display.report());
+        return (display.adapter_name(), "wgpu".to_owned());
+    }
+    let gl = window.glow_context();
     log(&window.gl_config_report());
-    log(&framebuffer::gl_report(gl));
-    if let Some(warning) = framebuffer::software_renderer_warning(gl) {
+    log(&framebuffer::gl_report(&gl));
+    if let Some(warning) = framebuffer::software_renderer_warning(&gl) {
         log(&warning);
     }
+    framebuffer::gl_strings(&gl)
+}
+
+/// The window for the graphics API `video.backend` (or `--backend`) asks: a GL one, or a wgpu
+/// one in the desktop builds. A wgpu window that cannot be made (no Vulkan driver, say) falls
+/// back to GL, and the log says why.
+fn open_window(
+    options: &AppOptions,
+    model: &SettingsModel,
+    settings: &HostWindowSettings,
+) -> Result<HostWindow, String> {
+    let asked = Backend::from_setting(
+        options
+            .backend
+            .unwrap_or_else(|| model.get(SettingId::VideoBackend).as_int()),
+    );
+    let (backend, why) = asked.available();
+    if let Some(why) = why {
+        log(&format!("{asked:?} asked: {why}; using {backend:?}."));
+    }
+    let graphics = backend.window_graphics();
+    if graphics == WindowGraphics::Gl {
+        return HostWindow::create(settings).map_err(|error| error.to_string());
+    }
+    match HostWindow::create(&HostWindowSettings {
+        graphics,
+        ..settings.clone()
+    }) {
+        Ok(window) => Ok(window),
+        Err(error) => {
+            log(&format!(
+                "{backend:?} could not be opened ({error}); using OpenGL."
+            ));
+            HostWindow::create(settings).map_err(|error| error.to_string())
+        }
+    }
+}
+
+/// The scene renderer of the window's graphics and the picture it draws into.
+fn open_graphics(
+    window: &HostWindow,
+    asset_root: Option<&Path>,
+    paths: &UserDataPaths,
+    group: bool,
+    (width, height): (i32, i32),
+) -> Result<(Graphics, SceneView), String> {
+    #[cfg(feature = "wgpu")]
+    if let Some(display) = window.wgpu() {
+        if asset_root.is_some() {
+            log("the skybox cubemaps of an asset folder are a GL-only option: the wgpu renderer draws the procedural skies.");
+        }
+        let mut renderer = zax_render::wgpu_backend::WgpuSceneRenderer::new(
+            display.adapter(),
+            display.device().clone(),
+            display.queue().clone(),
+            crate::graphics::WgpuView::FORMAT,
+        )
+        .map_err(|error| error.to_string())?;
+        renderer.set_group_opaque_draws(group);
+        let view = crate::graphics::WgpuView::new(display.device(), display.queue(), width, height);
+        return Ok((Graphics::Wgpu(Box::new(renderer)), SceneView::Wgpu(view)));
+    }
+    let gl = window.glow_context();
+    let view = OffscreenFramebuffer::new(Rc::clone(&gl), width, height)
+        .map_err(|error| error.to_string())?;
+    // The linked programs are kept in the user folder, where the next start finds them.
+    let mut renderer = open_renderer(&gl, asset_root, paths)?;
+    renderer.set_group_opaque_draws(group);
+    Ok((Graphics::Gl { gl, renderer }, SceneView::Gl(view)))
 }
 
 /// Opens the file copy of the log (Rust-only): in the user folder's `logs`, else next to the
@@ -1318,18 +1400,13 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
 }
 
 fn render_scene(
-    renderer: &mut SceneRenderer,
+    graphics: &mut Graphics,
     host: &mut AppHost,
     state: &mut RunState,
     clock: &mut StageClock,
 ) -> Result<(), String> {
-    let view = host.view().ok_or("the host has no view of the game")?;
-    let target = RenderTarget {
-        framebuffer: view.handle(),
-        width: view.width(),
-        height: view.height(),
-    };
-    let (session, scene) = host.session_and_scene();
+    let (session, scene, view) = host.session_scene_and_view();
+    let view = view.ok_or("the host has no view of the game")?;
     let picture: &[u8] = if scene.two_dimensional_mode {
         &state.picture
     } else {
@@ -1349,8 +1426,8 @@ fn render_scene(
         nes_picture: picture,
     };
     draw_scene(
-        renderer,
-        &target,
+        graphics,
+        view,
         scene,
         &frame,
         &mut state.shadow_map_reported,
@@ -1358,20 +1435,18 @@ fn render_scene(
     )
 }
 
-/// Renders `frame` with `scene` into `target`, timing the collection and the passes.
+/// Renders `frame` with `scene` into `view`, timing the collection and the passes.
 fn draw_scene(
-    renderer: &mut SceneRenderer,
-    target: &RenderTarget,
+    graphics: &mut Graphics,
+    view: &SceneView,
     scene: &SceneState,
     frame: &SceneFrame<'_>,
     shadow_map_reported: &mut bool,
     clock: &mut StageClock,
 ) -> Result<(), String> {
     let started = clock.start();
-    renderer
-        .render(target, scene, frame)
-        .map_err(|error| error.to_string())?;
-    let statistics = renderer.statistics();
+    graphics.render(view, scene, frame)?;
+    let statistics = graphics.statistics();
     if let Some(started) = started {
         clock.add(Stage::Collect, statistics.collect_time);
         clock.add(
@@ -1440,26 +1515,6 @@ fn pump_audio(host: &mut AppHost, audio: Option<&mut AudioOutput>, real: f64) {
         // behaves identically in silence.
         None => mixer.advance(real),
     }
-}
-
-pub(crate) fn capture_window(gl: &glow::Context, width: i32, height: i32, path: &Path) {
-    let rgb = framebuffer::read_window_rgb(gl, width, height);
-    let encoded = zax_render::assets::png_image::encode_rgb(
-        u32::try_from(width).unwrap_or(0),
-        u32::try_from(height).unwrap_or(0),
-        &rgb,
-    );
-    match encoded {
-        Ok(png) => match std::fs::write(path, png) {
-            Ok(()) => log(&format!("captured {}", path.display())),
-            Err(error) => log(&format!("the capture could not be written: {error}")),
-        },
-        Err(error) => log(&format!("the capture could not be encoded: {error}")),
-    }
-}
-
-fn to_i32_usize(value: usize) -> i32 {
-    i32::try_from(value).unwrap_or(i32::MAX)
 }
 
 /// Opens `folder` in the desktop's file manager (REQ-PERS-072). A failure is logged and nothing
