@@ -10,7 +10,7 @@ use zax_engine3d::instance::{InstanceRef, PatternInstance};
 use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
 use super::lend::{self, LendError, LendSlot};
-use super::payload::{FrameKey, FrameSlot, Host, Payload, Vec3Ref};
+use super::payload::{FrameKey, FrameSlot, Host, HostType, Payload, Vec3Ref};
 use crate::environment::ScriptContext;
 use crate::runtime::{Retired, RuntimeData};
 use crate::values::{number_format, LuaColor};
@@ -136,6 +136,11 @@ const SWEEP_INTERVAL: u32 = 128;
 pub(crate) struct HostCache {
     /// The weak table of the objects that are not handles into a frame, by cache key.
     pub objects: Table,
+    /// The one object of each API table (`Setting.Clipping`, `Setting.Light`...), by type,
+    /// kept for the life of the state: a script reaches them on every call, and this spares the
+    /// key string and the lookup of `objects`. There is one per type, so keeping them changes
+    /// nothing a script can see.
+    tables: RefCell<Vec<Option<Value>>>,
     /// The tables of the handles of epochs that are over, by group of [`FrameSlot`]. Each is
     /// weak and keyed by the member, so that retiring a handle makes no string.
     retired: Table,
@@ -175,6 +180,7 @@ impl HostCache {
         objects.set_metatable(Some(weak.clone()))?;
         Ok(Self {
             objects,
+            tables: RefCell::new(vec![None; HostType::COUNT]),
             retired: lua.create_table()?,
             weak,
             retirements: std::cell::Cell::new(0),
@@ -463,6 +469,16 @@ impl<'a> Cx<'a> {
     pub fn object(&self, payload: Payload) -> mlua::Result<Value> {
         if let (Some(frame), Some(slot)) = (payload.frame_key(), payload.frame_slot()) {
             return self.frame_object(payload, frame, slot);
+        }
+
+        if let Payload::Table(kind) = payload {
+            let cache = self.cache()?;
+            if let Some(existing) = cache.tables.borrow()[kind.index()].clone() {
+                return Ok(existing);
+            }
+            let created = self.kept_value(payload)?;
+            cache.tables.borrow_mut()[kind.index()] = Some(created.clone());
+            return Ok(created);
         }
 
         let Some(key) = payload.cache_key() else {
