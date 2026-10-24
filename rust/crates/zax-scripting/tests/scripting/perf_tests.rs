@@ -248,6 +248,36 @@ fn perf_frames() {
     );
 }
 
+/// The loop of the "Legend Of Zelda" scripts `ui` and `underground`: every shape walks every
+/// shape of the frame, reading two vectors and writing one, so the cost grows with the square of
+/// the shape count.
+const QUADRATIC_S: &str = "
+function UpdateS()
+  if shape.TagStr ~= 's' then return end
+  local bottom = shape.BottomLeft.y
+  for i = 0, Frame.shapeCount - 1 do
+    local s = Frame:GetShape(i)
+    if s.BottomLeft.y >= bottom and s.BottomLeft.x < 256 then
+      s.Offset.y = s.Offset.y + 0
+    end
+  end
+end
+";
+
+#[test]
+#[ignore = "benchmark: run in release with --ignored --nocapture"]
+fn perf_quadratic() {
+    let hooks = frame_seconds("");
+    let quadratic = frame_seconds(QUADRATIC_S);
+    let turns = f64::from(SHAPES * SHAPES);
+    println!(
+        "{SHAPES} shapes each walking the {SHAPES} shapes: {:.1} us per frame, {:.0} ns per turn \
+         (GetShape, two vector reads, one vector write)",
+        (quadratic - hooks) * 1e6,
+        (quadratic - hooks) / turns * 1e9
+    );
+}
+
 #[test]
 #[ignore = "benchmark: run in release with --ignored --nocapture"]
 fn perf_accesses() {

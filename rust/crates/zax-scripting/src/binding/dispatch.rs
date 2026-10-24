@@ -20,12 +20,6 @@ pub(crate) fn api() -> &'static Api {
 /// per Lua state so that `obj:Method` costs no allocation.
 struct MethodCache(Vec<Vec<Option<Function>>>);
 
-/// The function of method `position` of type `id`, from the per-state cache.
-pub(crate) fn method_function(lua: &Lua, id: HostType, position: usize) -> Option<Function> {
-    lua.app_data_ref::<MethodCache>()
-        .and_then(|methods| methods.0[id.index()][position].clone())
-}
-
 /// Installs the per-state parts of the binding: the weak object cache and the method functions;
 /// with `fast`, the raw host values of [`super::raw`] (the "fast Lua binding" setting).
 pub(crate) fn install(lua: &Lua, fast: bool) -> mlua::Result<()> {
@@ -128,6 +122,16 @@ fn install_raw(lua: &Lua) -> mlua::Result<()> {
             })
         })?,
     ));
+    let methods = lua.create_table()?;
+    if let Some(cache) = lua.app_data_ref::<MethodCache>() {
+        for (type_index, functions) in cache.0.iter().enumerate() {
+            for (position, function) in functions.iter().enumerate() {
+                if let Some(function) = function {
+                    methods.raw_set(super::raw::method_key(type_index, position), function)?;
+                }
+            }
+        }
+    }
     super::raw::install(
         lua,
         super::raw::Fallbacks {
@@ -135,6 +139,7 @@ fn install_raw(lua: &Lua) -> mlua::Result<()> {
             new_index: new_index_fallback,
             others,
             name,
+            methods,
         },
     )
 }
@@ -186,7 +191,7 @@ fn is_number(value: &Value) -> bool {
 
 /// `obj[key]`: a member first, then the numeric indexer; an unknown member reads as nil, without
 /// an error (REQ-LUA-042).
-fn index(lua: &Lua, payload: Payload, key: &Value) -> mlua::Result<Value> {
+pub(crate) fn index(lua: &Lua, payload: Payload, key: &Value) -> mlua::Result<Value> {
     let cx = Cx::new(lua);
     let definition = definition_of(&cx, &payload)?;
 
@@ -230,7 +235,7 @@ fn new_index(lua: &Lua, this: &Value, key: &Value, value: &Value) -> mlua::Resul
 /// `obj[key] = value` on the host value of `payload`. Returns the payload the value now holds
 /// when it is a value type: the script's own copy, whose assigned component belongs to the
 /// userdata it was assigned to (REQ-LUA-044).
-fn assign(
+pub(crate) fn assign(
     lua: &Lua,
     mut payload: Payload,
     key: &Value,

@@ -225,6 +225,11 @@ impl Api {
         self.types[id.index()].as_ref()
     }
 
+    /// The type at position `index` of the tables indexed by type.
+    pub fn by_index(&self, index: usize) -> Option<&TypeDef> {
+        self.types.get(index)?.as_ref()
+    }
+
     /// Every declared type.
     pub fn declared(&self) -> impl Iterator<Item = &TypeDef> {
         self.types.iter().flatten()
