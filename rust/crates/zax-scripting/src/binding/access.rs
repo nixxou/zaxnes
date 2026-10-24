@@ -59,6 +59,25 @@ const fn role_of(key: FrameKey) -> FrameRole {
     }
 }
 
+/// The frame a handle reads: one of the engine's, or the published frame when its counter is
+/// the given one.
+#[derive(Debug, Clone, Copy)]
+enum ReadFrom {
+    Role(FrameRole),
+    Published(i32),
+}
+
+impl ReadFrom {
+    fn frame(self, state: &ConversionState) -> Option<&ConversionFrame> {
+        match self {
+            Self::Role(role) => state.frame(role),
+            Self::Published(counter) => state
+                .frame(FrameRole::Published)
+                .filter(|frame| frame.counter() == counter),
+        }
+    }
+}
+
 impl Cx<'_> {
     /// The key a handle to the frame being converted (or the pinned frame) gets now.
     pub fn frame_key(&self, pinned: bool) -> mlua::Result<FrameKey> {
@@ -70,6 +89,23 @@ impl Cx<'_> {
 
     fn is_current(&self, key: FrameKey) -> mlua::Result<bool> {
         Ok(key.epoch == self.epoch_of(key.pinned)?)
+    }
+
+    /// Where a handle reads from: its own frame while its epoch runs; for a handle of the epoch
+    /// just over, that frame while it is still the published one (REQ-LUA-028: a handle kept
+    /// past its frame reads the values of its last frame, as the reference's objects do; the
+    /// "Zelda II" scripts keep their platforms from one frame to the next); nothing otherwise.
+    fn read_from(&self, key: FrameKey) -> mlua::Result<Option<ReadFrom>> {
+        let epochs = self.epochs()?;
+        if key.epoch == epochs.of(key.pinned) {
+            return Ok(Some(ReadFrom::Role(role_of(key))));
+        }
+        Ok(match epochs.previous_counter {
+            Some(counter) if !key.pinned && key.epoch.wrapping_add(1) == epochs.frame => {
+                Some(ReadFrom::Published(counter))
+            }
+            _ => None,
+        })
     }
 
     /// Runs `operation` on the instance `target` names, or returns `None` when it is gone.
@@ -103,14 +139,13 @@ impl Cx<'_> {
                 })
             }
             InstanceTarget::Frame(key, id) => {
-                if !self.is_current(key)? {
+                let Some(from) = self.read_from(key)? else {
                     return Ok(None);
-                }
+                };
 
                 self.state(|state| {
                     let state: &ConversionState = state;
-                    state
-                        .frame(role_of(key))
+                    from.frame(state)
                         .and_then(|frame| frame.get_instance(id))
                         .map(|instance| operation(InstanceView::Frame { instance, state }))
                 })
@@ -199,16 +234,18 @@ impl Cx<'_> {
             return Ok(None);
         };
 
-        if !self.is_current(first_key)? || !self.is_current(second_key)? {
+        let (Some(first_from), Some(second_from)) =
+            (self.read_from(first_key)?, self.read_from(second_key)?)
+        else {
             return Ok(None);
-        }
+        };
 
         self.state(|state| {
-            let first = state
-                .frame(role_of(first_key))
+            let first = first_from
+                .frame(state)
                 .and_then(|frame| frame.get_instance(first_id));
-            let second = state
-                .frame(role_of(second_key))
+            let second = second_from
+                .frame(state)
                 .and_then(|frame| frame.get_instance(second_id));
             first
                 .zip(second)
@@ -223,16 +260,18 @@ impl Cx<'_> {
         second: &ShapeTarget,
         operation: impl FnOnce(&FrameShape, &FrameShape) -> R,
     ) -> mlua::Result<Option<R>> {
-        if !self.is_current(first.key)? || !self.is_current(second.key)? {
+        let (Some(first_from), Some(second_from)) =
+            (self.read_from(first.key)?, self.read_from(second.key)?)
+        else {
             return Ok(None);
-        }
+        };
 
         self.state(|state| {
-            let first_shape = state
-                .frame(role_of(first.key))
+            let first_shape = first_from
+                .frame(state)
                 .and_then(|frame| frame.get_shape(first.id));
-            let second_shape = state
-                .frame(role_of(second.key))
+            let second_shape = second_from
+                .frame(state)
                 .and_then(|frame| frame.get_shape(second.id));
             first_shape
                 .zip(second_shape)
@@ -246,13 +285,13 @@ impl Cx<'_> {
         target: &ShapeTarget,
         operation: impl FnOnce(&FrameShape, &ConversionFrame, &ConversionState) -> R,
     ) -> mlua::Result<Option<R>> {
-        if !self.is_current(target.key)? {
+        let Some(from) = self.read_from(target.key)? else {
             return Ok(None);
-        }
+        };
 
         self.state(|state| {
             let state: &ConversionState = state;
-            state.frame(role_of(target.key)).and_then(|frame| {
+            from.frame(state).and_then(|frame| {
                 frame
                     .get_shape(target.id)
                     .map(|shape| operation(shape, frame, state))
