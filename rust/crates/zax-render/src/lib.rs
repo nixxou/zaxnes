@@ -11,6 +11,7 @@ pub mod assets;
 pub mod camera;
 pub mod color;
 pub mod controls;
+mod frame_plan;
 pub mod geometry;
 mod gl;
 pub mod interop;

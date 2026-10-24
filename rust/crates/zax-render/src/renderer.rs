@@ -1,6 +1,7 @@
 //! The OpenGL renderer of SPEC-06: shadow map, background or skybox, opaque objects, sorted
 //! transparent objects, then the HUD (REQ-SCN-058), all inside a framebuffer the host provides
-//! (REQ-SCN-057).
+//! (REQ-SCN-057). What a frame draws is worked out by [`crate::frame_plan`]; this module turns
+//! the plan into GL calls.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -8,30 +9,30 @@ use std::sync::Arc;
 
 use glow::Texture;
 use thiserror::Error;
-use zax_engine3d::draw_list::{DeformParameters, DrawTile, MaterialClass, SceneContainer};
-use zax_engine3d::frame::FrameInstanceId;
+use zax_engine3d::draw_list::DeformParameters;
+use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::geometry::tile_mesh::{TileMesh, TriangleCountError};
-use zax_engine3d::hashing::FastMap;
-use zax_engine3d::vectors::{Mat4, Vec3};
-use zax_profiles::enums::TextureFormat;
+use zax_engine3d::vectors::Mat4;
 
 use crate::assets::SceneAssets;
 use crate::camera::CameraView;
 use crate::color;
+use crate::frame_plan::{
+    DrawItem, FixedMeshes, FramePlan, InstanceRun, Residency, SceneConstants, INSTANCE_BYTES,
+};
 use crate::geometry;
 use crate::gl::api::{Gl, GlError};
 use crate::gl::gpu_timer::GpuTimer;
 use crate::gl::linear_buffer::LinearColorBuffer;
 use crate::gl::mesh_cache::{GpuMesh, MeshCache};
-use crate::gl::picture::{self, NesPictureTexture};
+use crate::gl::picture::NesPictureTexture;
 use crate::gl::program::ShaderProgram;
 use crate::gl::shaders;
 use crate::gl::shadow_map::ShadowMap;
 use crate::gl::skybox::SkyboxPass;
 use crate::gl::texture_cache::TextureCache;
 use crate::interop;
-use crate::numerics::{Vector2, Vector3, Vector4};
-use crate::occlusion::{self, Occlusion};
+use crate::numerics::Vector4;
 use crate::scene::{SceneFrame, SceneState};
 use crate::shadow_volume::ShadowVolume;
 use crate::statistics::RenderStatistics;
@@ -51,111 +52,34 @@ pub enum RenderError {
     Mesh(#[from] TriangleCountError),
 }
 
-/// One tile, backdrop or picture quad ready to draw.
-#[derive(Debug, Clone, Copy)]
-struct DrawItem {
-    mesh: GpuMesh,
-    model: Mat4,
-    /// 0 indexed texture, 1 direct texture, 2 flat colour.
-    color_mode: i32,
-    texture: Option<Texture>,
-    texture_size: Vector2,
-    palette_table: i32,
-    tex_offset: Vector2,
-    tex_tilting: Vector2,
-    flat_color: Vector3,
-    alpha: f32,
-    receive_shadow: bool,
-    clip: bool,
-    deform: Option<DeformParameters>,
-    /// The shape instance the tile belongs to (SPEC-04B REQ-E3D-641), the object the depth pass
-    /// and the sort of AMD-012 work on. `None` for the backdrop and the 2D-mode quad, which are
-    /// single objects anyway.
-    instance: Option<FrameInstanceId>,
-    /// Local bounding box of the mesh (REQ-E3D-640).
-    bounds_min: Vec3,
-    bounds_max: Vec3,
-}
+/// A draw item of the GL renderer: its mesh is a vertex array, its texture a GL texture.
+type GlDrawItem = DrawItem<GpuMesh, Texture>;
 
-impl DrawItem {
-    /// A flat or textured item with the neutral texture parameters.
-    fn plain(mesh: GpuMesh, model: Mat4, bounds: (Vec3, Vec3)) -> Self {
-        Self {
-            mesh,
-            model,
-            color_mode: 0,
-            texture: None,
-            texture_size: Vector2::ONE,
-            palette_table: 0,
-            tex_offset: Vector2::default(),
-            tex_tilting: Vector2::ONE,
-            flat_color: Vector3::ZERO,
-            alpha: 1.0,
-            receive_shadow: false,
-            clip: false,
-            deform: None,
-            instance: None,
-            bounds_min: bounds.0,
-            bounds_max: bounds.1,
-        }
-    }
-}
-
-/// One blended object of AMD-012: a run of a bucket and the distance from the eye to the centre
-/// of its transformed bounding box.
-#[derive(Debug, Clone, Copy)]
-struct DrawGroup {
-    start: usize,
-    end: usize,
-    view_depth: f32,
-    /// The instance runs of the group, a range of the bucket's runs.
-    runs: (usize, usize),
-}
-
-/// Consecutive items of a bucket that share every setting but their placement
-/// ([`same_draw_state`]), drawn with one instanced call; `offset` is where their placements
-/// start in the instance buffer.
-#[derive(Debug, Clone, Copy)]
-struct InstanceRun {
-    /// The bucket index of the first item, whose state every item of the run shares.
-    first: usize,
-    /// How many items the run draws.
-    count: usize,
-    offset: usize,
-}
-
-/// Instances one draw call carries, the size of `uInstances` in `scene.vert`.
-const INSTANCES_PER_DRAW: usize = 128;
-/// Bytes of one placement in the instance block (std140: a `mat4` and four `vec4`).
-const INSTANCE_BYTES: usize = 128;
 /// The uniform buffer binding point of the instance block.
 const INSTANCE_BINDING: u32 = 0;
 
-/// The four buckets of REQ-SCN-058 and the objects of the two blended ones.
-#[derive(Debug, Default)]
-struct DrawLists {
-    opaque: Vec<DrawItem>,
-    transparent: Vec<DrawItem>,
-    hud: Vec<DrawItem>,
-    casters: Vec<DrawItem>,
-    transparent_objects: Vec<DrawGroup>,
-    hud_objects: Vec<DrawGroup>,
-    opaque_runs: Vec<InstanceRun>,
-    transparent_runs: Vec<InstanceRun>,
-    hud_runs: Vec<InstanceRun>,
+/// The GL caches the plan asks for the resident meshes and textures.
+struct GlResidency<'a> {
+    meshes: &'a mut MeshCache,
+    textures: &'a mut TextureCache,
+    picture: &'a mut NesPictureTexture,
 }
 
-impl DrawLists {
-    fn clear(&mut self) {
-        self.opaque.clear();
-        self.transparent.clear();
-        self.hud.clear();
-        self.casters.clear();
-        self.transparent_objects.clear();
-        self.hud_objects.clear();
-        self.opaque_runs.clear();
-        self.transparent_runs.clear();
-        self.hud_runs.clear();
+impl Residency for GlResidency<'_> {
+    type Mesh = GpuMesh;
+    type Texture = Texture;
+    type Error = GlError;
+
+    fn mesh(&mut self, mesh: &Arc<TileMesh>) -> Result<Option<GpuMesh>, GlError> {
+        self.meshes.get(mesh)
+    }
+
+    fn texture(&mut self, texture: &Arc<ObjectTexture>) -> Result<Texture, GlError> {
+        self.textures.get(texture)
+    }
+
+    fn picture(&mut self, picture: &[u8]) -> Result<Option<Texture>, GlError> {
+        self.picture.upload(picture)
     }
 }
 
@@ -170,16 +94,13 @@ struct Passes {
     shadow_enabled: bool,
     mirrored_winding: bool,
     mirrored_normal: bool,
-    /// The textures [`Passes::draw_item`] left on units 0 and 1, and the vertex array
+    /// The textures [`Passes::draw_run`] left on units 0 and 1, and the vertex array
     /// [`Passes::draw`] left bound, so that a draw only rebinds what changed. Forgotten at the
     /// start of each pass ([`Passes::forget_bindings`]): other code binds in between.
     bound_textures: [Option<Texture>; 2],
     bound_vertex_array: Option<glow::VertexArray>,
     /// The placements of every scene draw of the frame, uploaded once before the scene pass.
     instance_buffer: glow::Buffer,
-    instance_data: Vec<u8>,
-    /// Scratch space of the draw state labels and drawing orders.
-    opaque_scratch: OpaqueScratch,
     /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`: each run starts at a multiple of it.
     instance_alignment: usize,
     statistics: RenderStatistics,
@@ -204,11 +125,11 @@ pub struct SceneRenderer {
     linear: LinearColorBuffer,
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
-    lists: DrawLists,
+    plan: FramePlan<GpuMesh, Texture>,
     passes: Passes,
     last_view: CameraView,
     /// Whether the opaque bucket and the tiles of each transparent object are reordered by draw
-    /// state ([`OpaqueScratch::order_range`]).
+    /// state (`FramePlan::lay_out_instances`).
     group_opaque: bool,
     /// The GPU time of the scene passes, when the context can measure it.
     timer: Option<GpuTimer>,
@@ -277,8 +198,6 @@ impl SceneRenderer {
             bound_textures: [None; 2],
             bound_vertex_array: None,
             instance_buffer: gl.create_buffer()?,
-            instance_data: Vec::new(),
-            opaque_scratch: OpaqueScratch::default(),
             instance_alignment,
             statistics,
         };
@@ -290,7 +209,7 @@ impl SceneRenderer {
             linear: LinearColorBuffer::new(&gl)?,
             unit_box: Arc::new(interop::unit_box()?),
             picture_quad: Arc::new(interop::picture_quad()?),
-            lists: DrawLists::default(),
+            plan: FramePlan::default(),
             last_view: CameraView::default(),
             group_opaque: false,
             timer: None,
@@ -360,7 +279,20 @@ impl SceneRenderer {
         self.last_view = view;
 
         let started = std::time::Instant::now();
-        self.collect(scene, frame, &view)?;
+        let mut residency = GlResidency {
+            meshes: &mut self.meshes,
+            textures: &mut self.textures,
+            picture: &mut self.picture,
+        };
+        let fixed = FixedMeshes {
+            unit_box: &self.unit_box,
+            picture_quad: &self.picture_quad,
+        };
+        let collected = self
+            .plan
+            .collect(&mut residency, fixed, scene, frame, &view);
+        self.passes.statistics.occluders = self.plan.occluders;
+        collected?;
         self.passes.statistics.collect_time = started.elapsed();
         if let Some(timer) = &mut self.timer {
             self.passes.statistics.gpu_time = timer.collect(&self.gl);
@@ -388,200 +320,6 @@ impl SceneRenderer {
         self.textures.clear();
     }
 
-    // ----------------------------------------------------------------- collection
-
-    /// Turns the tile list of REQ-E3D-641 into the four buckets of REQ-SCN-058, applying the
-    /// renderer-side sprite nudge of REQ-SCN-037 and the material rules of REQ-SCN-040/041.
-    fn collect(
-        &mut self,
-        scene: &SceneState,
-        frame: &SceneFrame<'_>,
-        view: &CameraView,
-    ) -> Result<(), GlError> {
-        self.lists.clear();
-
-        // REQ-SCN-047: outside a running game the 3D scene is not displayed at all.
-        if !scene.game_running {
-            return Ok(());
-        }
-
-        // AMD-009 (Q-022): in 2D mode the core's pixel frame is shown on the NES plane instead
-        // of a recomposition of the tile records.
-        if scene.two_dimensional_mode && self.collect_picture_quad(frame.nes_picture)? {
-            return Ok(());
-        }
-
-        if let Some(list) = frame.draw_list {
-            let hud_matrix = interop::hud_matrix(view);
-            let occlusion = Occlusion::for_scene(scene, view);
-            for tile in list.tiles() {
-                self.collect_tile(tile, &hud_matrix, &occlusion)?;
-            }
-        }
-
-        if scene.backdrop.enabled {
-            self.collect_backdrop(scene)?;
-        }
-
-        // AMD-012 (Q-020 revised): the depth pass and the sort of the transparent objects are
-        // per whole object, so the faces between the tiles of one translucent object stay
-        // invisible. REQ-SCN-040: they are drawn after the opaque ones, farthest first.
-        group_by_object(
-            &self.lists.transparent,
-            &mut self.lists.transparent_objects,
-            view.eye,
-        );
-        self.lists
-            .transparent_objects
-            .sort_by(|a, b| b.view_depth.total_cmp(&a.view_depth));
-
-        // REQ-SCN-044 blends the HUD "as in REQ-SCN-040", so its objects get the same
-        // treatment; their order stays the list order, since the HUD is not sorted by distance.
-        group_by_object(&self.lists.hud, &mut self.lists.hud_objects, view.eye);
-        Ok(())
-    }
-
-    /// The textured quad of the 2D mode (AMD-009): the core's 256 × 240 picture mapped on the
-    /// NES plane of REQ-E3D-410, shaded like any other front-facing tile. False when the
-    /// picture has the wrong size.
-    fn collect_picture_quad(&mut self, picture: &[u8]) -> Result<bool, GlError> {
-        let Some(texture) = self.picture.upload(picture)? else {
-            return Ok(false);
-        };
-        let Some(mesh) = self.meshes.get(&self.picture_quad)? else {
-            return Ok(false);
-        };
-
-        #[allow(clippy::cast_precision_loss)] // 256 and 240.
-        let size = Vector2::new(picture::WIDTH as f32, picture::HEIGHT as f32);
-        let quad = &self.picture_quad;
-        self.lists.opaque.push(DrawItem {
-            color_mode: 1,
-            texture: Some(texture),
-            texture_size: size,
-            // Nothing else is in the scene in 2D mode, so the quad neither casts nor receives.
-            receive_shadow: false,
-            clip: true,
-            ..DrawItem::plain(mesh, Mat4::IDENTITY, (quad.bounds_min(), quad.bounds_max()))
-        });
-        Ok(true)
-    }
-
-    fn collect_tile(
-        &mut self,
-        tile: &DrawTile,
-        hud_matrix: &Mat4,
-        occlusion: &Occlusion,
-    ) -> Result<(), GlError> {
-        let Some(mesh) = tile.mesh.as_ref().filter(|mesh| !mesh.is_empty()) else {
-            return Ok(());
-        };
-        let Some(resident) = self.meshes.get(mesh)? else {
-            return Ok(());
-        };
-
-        // REQ-SCN-037: the renderer is the sole owner of the ±0.1 sprite depth nudge, applied
-        // in the object's local frame, before the scale and the rotation, exactly once.
-        let nudge = match (tile.sprite, tile.behind_background) {
-            (false, _) => 0.0,
-            (true, true) => geometry::SPRITE_NUDGE,
-            (true, false) => -geometry::SPRITE_NUDGE,
-        };
-        let mut model = tile.transform;
-        if nudge != 0.0 {
-            model = model * Mat4::translation(Vec3::new(0.0, 0.0, nudge));
-        }
-
-        let hud = tile.container == SceneContainer::Interface;
-        if hud {
-            // REQ-SCN-045: the HUD lives in a plane attached to the camera.
-            model = *hud_matrix * model;
-        }
-
-        // REQ-SCN-022: in FPV, an opaque tile of another shape that crosses the eye-to-target
-        // segment is drawn transparent at 0.5 for this frame only.
-        let occluder =
-            tile.material == MaterialClass::Opaque && !hud && occlusion.hides(tile, mesh, &model);
-        let material = if occluder {
-            self.passes.statistics.occluders += 1;
-            MaterialClass::Transparent
-        } else {
-            tile.material
-        };
-
-        let texture = match &tile.texture {
-            Some(texture) => Some(self.textures.get(texture)?),
-            None => None,
-        };
-        #[allow(clippy::cast_precision_loss)] // Texture sizes are small.
-        let texture_size = tile.texture.as_ref().map_or(Vector2::ONE, |texture| {
-            Vector2::new(texture.width() as f32, texture.height() as f32)
-        });
-
-        let item = DrawItem {
-            mesh: resident,
-            model,
-            color_mode: i32::from(tile.texture_format == TextureFormat::Direct),
-            texture,
-            texture_size,
-            palette_table: tile.palette_table,
-            tex_offset: tile.tex_offset.into(),
-            tex_tilting: tile.tex_tilting.into(),
-            flat_color: Vector3::ZERO,
-            alpha: if occluder {
-                geometry::OCCLUDER_ALPHA
-            } else if hud || material == MaterialClass::Transparent {
-                tile.alpha
-            } else {
-                1.0
-            },
-            // AMD-021 R2-010 (REQ-SCN-032 "should" becomes "must not"): a tile rendered in
-            // transparency — the FPV occluder of REQ-SCN-022 included — and a HUD tile receive
-            // no shadow at all, whatever the flags of their motif and of their layer.
-            receive_shadow: tile.receive_shadow && !hud && material != MaterialClass::Transparent,
-            clip: !hud,
-            deform: tile.deform,
-            instance: Some(tile.instance),
-            bounds_min: mesh.bounds_min(),
-            bounds_max: mesh.bounds_max(),
-        };
-
-        // A tile only casts while it is rendered opaque (REQ-SCN-032, REQ-SCN-040).
-        if tile.cast_shadow && !occluder {
-            self.lists.casters.push(item);
-        }
-
-        match material {
-            // REQ-SCN-041 style 2: not drawn, but always casts its shadow.
-            MaterialClass::ShadowOnly => {}
-            MaterialClass::Transparent => self.lists.transparent.push(item),
-            MaterialClass::Interface => self.lists.hud.push(item),
-            MaterialClass::Opaque => self.lists.opaque.push(item),
-        }
-
-        Ok(())
-    }
-
-    fn collect_backdrop(&mut self, scene: &SceneState) -> Result<(), GlError> {
-        let backdrop = &scene.backdrop;
-        let Some(resident) = self.meshes.get(&self.unit_box)? else {
-            return Ok(());
-        };
-
-        let center = geometry::CENTER + backdrop.offset;
-        let model = Mat4::translation(center.into()) * Mat4::scale_matrix(backdrop.size.into());
-        let unit = &self.unit_box;
-        self.lists.opaque.push(DrawItem {
-            color_mode: 2,
-            flat_color: color::to_vector(backdrop.color),
-            // REQ-SCN-048: never casts, receives when asked, never clipped by R.
-            receive_shadow: scene.settings.shadows && backdrop.receive_shadow,
-            clip: false,
-            ..DrawItem::plain(resident, model, (unit.bounds_min(), unit.bounds_max()))
-        });
-        Ok(())
-    }
-
     // ----------------------------------------------------------------- shadow pass
 
     fn render_shadow_map(
@@ -589,7 +327,8 @@ impl SceneRenderer {
         scene: &SceneState,
         view: &CameraView,
     ) -> Result<ShadowVolume, GlError> {
-        if !scene.settings.shadows || self.lists.casters.is_empty() {
+        let casters = &self.plan.lists.casters;
+        if !scene.settings.shadows || casters.is_empty() {
             return Ok(ShadowVolume::EMPTY);
         }
 
@@ -598,20 +337,7 @@ impl SceneRenderer {
         passes.statistics.shadow_map_size = self.shadow_map.size();
         passes.statistics.requested_shadow_map_size = self.shadow_map.requested();
 
-        let mut min = Vector3::splat(f32::MAX);
-        let mut max = Vector3::splat(f32::MIN);
-        for caster in &self.lists.casters {
-            let point = Vector3::from(caster.model.transform_point(Vec3::ZERO));
-            min = Vector3::min(min, point);
-            max = Vector3::max(max, point);
-        }
-
-        // The tiles are at most 48 units across in their local frame (REQ-E3D-523), so padding
-        // the anchors is enough and costs one matrix instead of one per vertex.
-        min -= Vector3::splat(64.0);
-        max += Vector3::splat(64.0);
-
-        let volume = ShadowVolume::fit(min, max, view.eye, scene.light.direction);
+        let volume = self.plan.shadow_volume(scene, view);
         if !volume.has_content {
             return Ok(ShadowVolume::EMPTY);
         }
@@ -640,7 +366,7 @@ impl SceneRenderer {
             .set_matrix4("uLightViewProjection", &volume.view_projection);
         passes.shadow.set_f32("uTime", scene.emulated_time);
 
-        for caster in &self.lists.casters {
+        for caster in casters {
             // Q-069: a mirrored caster winds the other way round, so the far side of the solid
             // is only selected once the winding is corrected.
             passes.set_winding(interop::determinant(&caster.model) < 0.0, false);
@@ -652,7 +378,7 @@ impl SceneRenderer {
         }
 
         passes.set_winding(false, false);
-        passes.statistics.shadow_casters = count(self.lists.casters.len());
+        passes.statistics.shadow_casters = count(casters.len());
         passes.statistics.shadow_pass = true;
         Ok(volume)
     }
@@ -697,15 +423,16 @@ impl SceneRenderer {
         // (REQ-SCN-047).
         self.passes.statistics.skybox_pass = self.skybox.draw(scene, frame, view)?;
 
-        let lists = &self.lists;
-        if lists.opaque.is_empty() && lists.transparent.is_empty() && lists.hud.is_empty() {
+        if self.plan.lists.nothing_to_draw() {
             self.linear.resolve_to(target);
             return Ok(());
         }
 
+        self.plan
+            .lay_out_instances(self.group_opaque, self.passes.instance_alignment);
         let passes = &mut self.passes;
-        passes.upload_instances(&mut self.lists, self.group_opaque);
-        let lists = &self.lists;
+        passes.upload_instances(&self.plan.instance_data);
+        let lists = &self.plan.lists;
         if scene.settings.cull_back_faces {
             // The scene frame is left-handed and the clip position mirrors z, so the faces the
             // engine winds per REQ-E3D-505 come out clockwise (REQ-SCN-001 notes).
@@ -717,12 +444,9 @@ impl SceneRenderer {
         }
 
         let mut common = CommonUniforms {
-            scene,
+            constants: SceneConstants::new(scene, view, volume, self.shadow_map.size()),
             frame,
-            view,
-            volume,
             textures: &mut self.textures,
-            shadow_map_size: self.shadow_map.size(),
             shadow_texture: self.shadow_map.depth_texture(),
         };
 
@@ -736,7 +460,7 @@ impl SceneRenderer {
         // 1. Opaque objects.
         passes
             .scene
-            .set_vec3("uLightDirection", scene.light.direction);
+            .set_vec3("uLightDirection", common.constants.light_direction);
         for run in &lists.opaque_runs {
             passes.draw_run(&lists.opaque, run, true);
         }
@@ -752,7 +476,7 @@ impl SceneRenderer {
             common.bind(passes);
             passes
                 .scene
-                .set_vec3("uLightDirection", scene.light.direction);
+                .set_vec3("uLightDirection", common.constants.light_direction);
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             for group in &lists.transparent_objects {
@@ -772,10 +496,9 @@ impl SceneRenderer {
         if !lists.hud.is_empty() {
             passes.scene.use_program();
             common.bind(passes);
-            passes.scene.set_vec3(
-                "uLightDirection",
-                view.hud_light_direction(scene.light.direction),
-            );
+            passes
+                .scene
+                .set_vec3("uLightDirection", common.constants.hud_light_direction);
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             for group in &lists.hud_objects {
@@ -796,18 +519,16 @@ impl SceneRenderer {
 
 /// The uniforms every scene sub-pass binds again after `use_program`.
 struct CommonUniforms<'a> {
-    scene: &'a SceneState,
+    constants: SceneConstants,
     frame: &'a SceneFrame<'a>,
-    view: &'a CameraView,
-    volume: &'a ShadowVolume,
     textures: &'a mut TextureCache,
-    shadow_map_size: i32,
     shadow_texture: Texture,
 }
 
 impl CommonUniforms<'_> {
     fn bind(&mut self, passes: &mut Passes) {
         let (gl, program) = (&passes.gl, &mut passes.scene);
+        let constants = &self.constants;
 
         // The palette is refreshed first: the upload binds its own texture, so it has to happen
         // before the sampler units are set up (REQ-E3D-565).
@@ -816,37 +537,16 @@ impl CommonUniforms<'_> {
             self.textures.upload_palette(list.palette());
         }
 
-        program.set_matrix4("uViewProjection", &self.view.view_projection());
-        program.set_f32("uTime", self.scene.emulated_time);
-        program.set_f32("uAmbient", color::ambient_linear());
-        program.set_f32("uShadowStrength", color::SHADOW_FACTOR);
-
-        let light = color::rgb_to_linear(self.scene.light.color)
-            * color::to_linear(self.scene.settings.light_intensity());
-        program.set_vec3("uLightLinear", light);
-
-        let rect = self.scene.visible_rectangle();
-        program.set_vec4(
-            "uClipRect",
-            Vector4::new(rect.min_x, rect.min_y, rect.max_x, rect.max_y),
-        );
-
-        let volume = self.volume;
-        program.set_matrix4("uLightViewProjection", &volume.view_projection);
-        // The depth bias of the shadow test, in scene units: the 0.02 unit of REQ-SCN-031,
-        // raised to one texel of the current map when a texel is coarser than that (Q-032,
-        // amended by AMD-034 §2). Q-025 fills the map with back faces only, and the wall that
-        // closes a tile against its neighbour is a back face too, inside the solid: a receiver
-        // one texel from a joint reads it and darkens (the seam of REQ-SCN-065). The error is
-        // proportional to the texel, so the bias has to be too.
-        let bias = if volume.has_content {
-            geometry::shadow_bias(volume.texel_size(self.shadow_map_size)) / volume.depth_range
-        } else {
-            0.0
-        };
-        program.set_f32("uShadowBias", bias);
-        program.set_f32("uNormalOffset", geometry::SHADOW_NORMAL_OFFSET);
-        passes.shadow_enabled = volume.has_content;
+        program.set_matrix4("uViewProjection", &constants.view_projection);
+        program.set_f32("uTime", constants.time);
+        program.set_f32("uAmbient", constants.ambient);
+        program.set_f32("uShadowStrength", constants.shadow_strength);
+        program.set_vec3("uLightLinear", constants.light_linear);
+        program.set_vec4("uClipRect", constants.clip_rect);
+        program.set_matrix4("uLightViewProjection", &constants.light_view_projection);
+        program.set_f32("uShadowBias", constants.shadow_bias);
+        program.set_f32("uNormalOffset", constants.normal_offset);
+        passes.shadow_enabled = constants.shadow_enabled;
 
         program.set_i32("uIndexTexture", 0);
         program.set_i32("uColorTexture", 1);
@@ -893,49 +593,8 @@ impl Passes {
         self.mirrored_normal = mirrored;
     }
 
-    /// Lays the placements of every bucket out in the instance buffer, cut into runs of
-    /// consecutive items with the same draw state (never across the objects of the two blended
-    /// buckets, whose two passes go object by object), and uploads them in one call.
-    fn upload_instances(&mut self, lists: &mut DrawLists, group_opaque: bool) {
-        let scratch = &mut self.opaque_scratch;
-        let data = &mut self.instance_data;
-        let alignment = self.instance_alignment;
-        data.clear();
-
-        // Opaque: one object, the whole bucket.
-        scratch.label(&lists.opaque);
-        scratch.order_range(0, lists.opaque.len(), group_opaque);
-        add_runs(
-            &lists.opaque,
-            scratch,
-            &mut lists.opaque_runs,
-            data,
-            alignment,
-        );
-
-        // Blended objects: the runs never cross an object; the tiles of a transparent object
-        // may be grouped, the HUD's never (its tiles share one plane, an overlap is a tie).
-        scratch.label(&lists.transparent);
-        for group in &mut lists.transparent_objects {
-            let first = lists.transparent_runs.len();
-            scratch.order_range(group.start, group.end, group_opaque);
-            add_runs(
-                &lists.transparent,
-                scratch,
-                &mut lists.transparent_runs,
-                data,
-                alignment,
-            );
-            group.runs = (first, lists.transparent_runs.len());
-        }
-        scratch.label(&lists.hud);
-        for group in &mut lists.hud_objects {
-            let first = lists.hud_runs.len();
-            scratch.order_range(group.start, group.end, false);
-            add_runs(&lists.hud, scratch, &mut lists.hud_runs, data, alignment);
-            group.runs = (first, lists.hud_runs.len());
-        }
-
+    /// Uploads the placements the plan laid out, in one call.
+    fn upload_instances(&mut self, data: &[u8]) {
         if !data.is_empty() {
             self.gl
                 .bind_buffer(glow::UNIFORM_BUFFER, Some(self.instance_buffer));
@@ -945,7 +604,7 @@ impl Passes {
 
     /// Draws the items of `run` (a run of `items`) with one instanced call: the state of its
     /// first item, which every item of the run shares, and the placements of the run.
-    fn draw_run(&mut self, items: &[DrawItem], run: &InstanceRun, opaque: bool) {
+    fn draw_run(&mut self, items: &[GlDrawItem], run: &InstanceRun, opaque: bool) {
         let item = &items[run.first];
         let (_, determinant) = interop::normal_matrix(&item.model);
 
@@ -1017,7 +676,7 @@ impl Passes {
     /// Q-020): the first pass lays down the depth of all its tiles before any of them is
     /// blended, so the faces that close each tile mesh on itself (SPEC-04B REQ-E3D-505) at the
     /// joints inside the object are never drawn.
-    fn draw_blended(&mut self, items: &[DrawItem], runs: &[InstanceRun]) {
+    fn draw_blended(&mut self, items: &[GlDrawItem], runs: &[InstanceRun]) {
         self.gl.color_mask(false);
         self.gl.depth_mask(true);
         self.gl.depth_func(glow::LESS);
@@ -1078,221 +737,6 @@ fn matrix_row(matrix: &Mat4, row: usize) -> Vector4 {
         matrix[(row, 2)],
         matrix[(row, 3)],
     )
-}
-
-/// Cuts `items` into the objects of AMD-012 — the runs of tiles that share one shape instance,
-/// which SPEC-04B REQ-E3D-641 delivers consecutively — and measures each one by the distance
-/// from the eye to the centre of its transformed bounding box.
-fn group_by_object(items: &[DrawItem], groups: &mut Vec<DrawGroup>, eye: Vector3) {
-    groups.clear();
-    let mut start = 0;
-    while start < items.len() {
-        let instance = items[start].instance;
-        let length = items[start + 1..]
-            .iter()
-            .take_while(|item| instance.is_some() && item.instance == instance)
-            .count();
-        let end = start + 1 + length;
-
-        let mut min = Vector3::splat(f32::MAX);
-        let mut max = Vector3::splat(f32::MIN);
-        for item in &items[start..end] {
-            let (low, high) = occlusion::box_bounds(item.bounds_min, item.bounds_max, &item.model);
-            min = Vector3::min(min, low);
-            max = Vector3::max(max, high);
-        }
-
-        groups.push(DrawGroup {
-            start,
-            end,
-            view_depth: Vector3::distance((min + max) * 0.5, eye),
-            runs: (0, 0),
-        });
-        start = end;
-    }
-}
-
-/// The program state of a draw item as a hashable key: two items with equal keys can go out in
-/// one instanced call (everything but the placement and the deformation's tile position, and
-/// the same side of the mirror for Q-069's winding and normal sign).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct DrawStateKey {
-    vertex_array: glow::VertexArray,
-    index_count: i32,
-    texture: Option<Texture>,
-    color_mode: i32,
-    palette_table: i32,
-    /// Texture size, offset, tilting, flat colour and alpha, as bits.
-    floats: [u32; 10],
-    receive_shadow: bool,
-    clip: bool,
-    mirrored: bool,
-    /// The deformation but its tile position, which travels with the placement: amplitude,
-    /// size, speed and phase, as bits.
-    deform: Option<[u32; 38]>,
-}
-
-impl DrawStateKey {
-    fn of(item: &DrawItem) -> Self {
-        Self {
-            vertex_array: item.mesh.vertex_array,
-            index_count: item.mesh.index_count,
-            texture: item.texture,
-            color_mode: item.color_mode,
-            palette_table: item.palette_table,
-            floats: [
-                item.texture_size.x.to_bits(),
-                item.texture_size.y.to_bits(),
-                item.tex_offset.x.to_bits(),
-                item.tex_offset.y.to_bits(),
-                item.tex_tilting.x.to_bits(),
-                item.tex_tilting.y.to_bits(),
-                item.flat_color.x.to_bits(),
-                item.flat_color.y.to_bits(),
-                item.flat_color.z.to_bits(),
-                item.alpha.to_bits(),
-            ],
-            receive_shadow: item.receive_shadow,
-            clip: item.clip,
-            mirrored: interop::normal_matrix(&item.model).1 < 0.0,
-            deform: item.deform.as_ref().map(deform_bits),
-        }
-    }
-}
-
-/// The bits of every deformation parameter but the tile position.
-fn deform_bits(deform: &DeformParameters) -> [u32; 38] {
-    let mut bits = [0; 38];
-    let vectors = [deform.amplitude, deform.size]
-        .into_iter()
-        .flat_map(|vector| [vector.x, vector.y, vector.z]);
-    let cells = |matrix: Mat4| (0..16).map(move |cell| matrix[(cell / 4, cell % 4)]);
-    let all = vectors
-        .chain(cells(deform.speed))
-        .chain(cells(deform.phase));
-    for (slot, cell) in bits.iter_mut().zip(all) {
-        *slot = cell.to_bits();
-    }
-    bits
-}
-
-/// The draw state labels of a bucket and the drawing order of one object of it, reused from
-/// frame to frame: the items themselves never move.
-#[derive(Debug, Default)]
-struct OpaqueScratch {
-    groups: FastMap<DrawStateKey, u32>,
-    /// The draw state label of each item of the bucket: equal labels, equal state.
-    labels: Vec<u32>,
-    /// The bucket indices of the object being cut into runs, in drawing order.
-    order: Vec<u32>,
-    sort: Vec<(u32, u32)>,
-    /// The rank of each state inside the object being ordered.
-    ranks: FastMap<u32, u32>,
-}
-
-impl OpaqueScratch {
-    /// Labels every item of `items` with its draw state (one key per item).
-    fn label(&mut self, items: &[DrawItem]) {
-        self.groups.clear();
-        self.labels.clear();
-        for item in items {
-            let next = u32::try_from(self.groups.len()).unwrap_or(u32::MAX);
-            self.labels
-                .push(*self.groups.entry(DrawStateKey::of(item)).or_insert(next));
-        }
-    }
-
-    /// The drawing order of the object `start..end` of the labelled bucket: list order, or,
-    /// with `group`, the items of one state together (states in the order of their first item,
-    /// list order inside a state; Rust-only, draw-call batching).
-    ///
-    /// Opaque items are drawn with the depth test and without blending, so the picture does not
-    /// depend on their order; the tiles of one blended object go through a depth-only pass, then
-    /// a colour pass where the depth is equal, so inside an object the order does not matter
-    /// either. Only exact depth ties between two different states could come out differently.
-    fn order_range(&mut self, start: usize, end: usize, group: bool) {
-        self.order.clear();
-        let index = |position: usize| u32::try_from(position).unwrap_or(u32::MAX);
-        if !group {
-            self.order.extend((start..end).map(index));
-            return;
-        }
-
-        // States numbered by first appearance inside the object, so that the order does not
-        // depend on the label numbering of the whole bucket.
-        self.sort.clear();
-        self.ranks.clear();
-        for position in start..end {
-            let next = index(self.ranks.len());
-            let rank = *self.ranks.entry(self.labels[position]).or_insert(next);
-            self.sort.push((rank, index(position)));
-        }
-        self.sort.sort_unstable();
-        self.order
-            .extend(self.sort.iter().map(|&(_, position)| position));
-    }
-}
-
-/// Cuts the object `scratch.order` of `items` into runs of at most [`INSTANCES_PER_DRAW`]
-/// consecutive items (in drawing order) with the same draw state label, appends their placements
-/// to `data` (each run at a multiple of `alignment`) and the runs to `runs`.
-fn add_runs(
-    items: &[DrawItem],
-    scratch: &OpaqueScratch,
-    runs: &mut Vec<InstanceRun>,
-    data: &mut Vec<u8>,
-    alignment: usize,
-) {
-    let order = &scratch.order;
-    let mut first = 0;
-    while first < order.len() {
-        let label = scratch.labels[order[first] as usize];
-        let mut last = first + 1;
-        while last < order.len()
-            && last - first < INSTANCES_PER_DRAW
-            && scratch.labels[order[last] as usize] == label
-        {
-            last += 1;
-        }
-
-        let offset = data.len().next_multiple_of(alignment);
-        data.resize(offset, 0);
-        for &position in &order[first..last] {
-            push_placement(data, &items[position as usize]);
-        }
-        runs.push(InstanceRun {
-            first: order[first] as usize,
-            count: last - first,
-            offset,
-        });
-        first = last;
-    }
-}
-
-/// Appends one placement in the std140 layout of `ZaxInstance`: the model matrix as it was
-/// uploaded to `uModel` (column by column), the three columns of the normal matrix, then the
-/// deformation's tile position (zero without deformation).
-fn push_placement(data: &mut Vec<u8>, item: &DrawItem) {
-    for cell in interop::to_numerics(&item.model).to_cells() {
-        data.extend_from_slice(&cell.to_ne_bytes());
-    }
-
-    let (m, _) = interop::normal_matrix(&item.model);
-    let tile = item
-        .deform
-        .map_or(Vec3::ZERO, |deform| deform.tile_relative_to_pivot);
-    let rows = [
-        [m[0], m[3], m[6]],
-        [m[1], m[4], m[7]],
-        [m[2], m[5], m[8]],
-        [tile.x, tile.y, tile.z],
-    ];
-    for row in rows {
-        for cell in row {
-            data.extend_from_slice(&cell.to_ne_bytes());
-        }
-        data.extend_from_slice(&0.0f32.to_ne_bytes());
-    }
 }
 
 /// A size or offset for a GL call (the instance buffer stays far below `i32::MAX`).

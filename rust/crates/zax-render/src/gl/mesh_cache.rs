@@ -28,7 +28,7 @@ const FLOATS_PER_VERTEX: usize = 8;
 const STRIDE: i32 = 32;
 
 /// A mesh ready to draw: its vertex array and its index count.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GpuMesh {
     /// The vertex array object.
     pub vertex_array: VertexArray,
