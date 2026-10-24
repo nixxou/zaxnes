@@ -123,4 +123,8 @@ impl ScriptHost for TimedHost {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
+
+    fn inner(&self) -> &dyn Any {
+        self.runtime.as_any()
+    }
 }

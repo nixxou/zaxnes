@@ -65,7 +65,10 @@ impl GeometryProgress {
 /// (REQ-E3D-340), always *after* the `BuildPattern` hooks (REQ-E3D-322). A shape whose
 /// geometry is not ready stays in the frame and is seen by scripts but is not drawn
 /// (REQ-E3D-361, SPEC-04B REQ-E3D-601).
-pub trait PatternGeometryBuilder {
+///
+/// `Send`: the engine, builder included, may be handed to another thread for the length of a
+/// frame (the host's pipelined frames).
+pub trait PatternGeometryBuilder: Send {
     /// Builds, or rebuilds, the geometry of every instance of pattern `id`. `global` is the
     /// global mesh algorithm an instance with `rm = 0` takes (REQ-E3D-500). The build may
     /// write the effective depth back into the instances (REQ-E3D-452).

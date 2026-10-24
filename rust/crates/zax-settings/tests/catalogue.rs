@@ -46,8 +46,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     assert!(specified.is_subset(&model));
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
-    // emu.catch_up, emu.lua_fast_binding and emu.lua_smooth_gc: Rust-only settings (owner
-    // request).
+    // emu.catch_up, emu.lua_fast_binding, emu.lua_smooth_gc and emu.pipeline: Rust-only
+    // settings (owner request).
     assert_eq!(
         additions,
         [
@@ -55,6 +55,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.catch_up",
             "emu.lua_fast_binding",
             "emu.lua_smooth_gc",
+            "emu.pipeline",
             "ui.language",
             "ui.show_fps"
         ]

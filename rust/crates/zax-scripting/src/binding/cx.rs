@@ -17,10 +17,10 @@ use crate::values::{number_format, LuaColor};
 
 /// A request for the host context: run against the lent [`ScriptContext`], and answer with a
 /// boxed value.
-type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Box<dyn Any>>;
+type HostRequest = Box<dyn FnOnce(&mut ScriptContext<'_>) -> Box<dyn Any + Send> + Send>;
 
 /// A change of the host the script asked for, which nothing in the script waits for.
-type HostWrite = Box<dyn FnOnce(&mut ScriptContext<'_>)>;
+type HostWrite = Box<dyn FnOnce(&mut ScriptContext<'_>) + Send>;
 
 /// How many writes wait for the next request before they are made anyway.
 const QUEUED_WRITES_LIMIT: usize = 256;
@@ -35,7 +35,7 @@ const QUEUED_WRITES_LIMIT: usize = 256;
 pub(crate) struct HostLink {
     call: Function,
     pending: RefCell<Option<HostRequest>>,
-    answer: RefCell<Option<Box<dyn Any>>>,
+    answer: RefCell<Option<Box<dyn Any + Send>>>,
     writes: RefCell<Vec<HostWrite>>,
 }
 
@@ -91,9 +91,9 @@ impl HostLink {
     }
 
     /// Runs `operation` on the lent context.
-    fn run<R: 'static>(
+    fn run<R: Send + 'static>(
         &self,
-        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + Send + 'static,
     ) -> mlua::Result<R> {
         self.pending
             .replace(Some(Box::new(move |context| Box::new(operation(context)))));
@@ -109,10 +109,10 @@ impl HostLink {
 
 /// Runs `operation` on the host context lent to `lua`, or on the headless bridges of the
 /// runtime's environment when the host lent none.
-pub(crate) fn with_host_context<R: 'static>(
+pub(crate) fn with_host_context<R: Send + 'static>(
     lua: &Lua,
     data: &mut RuntimeData,
-    operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+    operation: impl FnOnce(&mut ScriptContext<'_>) -> R + Send + 'static,
 ) -> mlua::Result<R> {
     match lua.app_data_ref::<HostLink>() {
         Some(link) => link.run(operation),
@@ -243,9 +243,9 @@ impl<'a> Cx<'a> {
 
     /// Runs `operation` on the camera, backdrop, inputs and memory the host lent to this call.
     /// The operation outlives the borrow of the host, so it owns what it captures.
-    pub fn host<R: 'static>(
+    pub fn host<R: Send + 'static>(
         &self,
-        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + 'static,
+        operation: impl FnOnce(&mut ScriptContext<'_>) -> R + Send + 'static,
     ) -> mlua::Result<R> {
         if let Some(link) = self.lua.app_data_ref::<HostLink>() {
             return link.run(operation);
@@ -258,7 +258,7 @@ impl<'a> Cx<'a> {
     /// before the next request to the host, and at the latest when the call into Lua ends.
     pub fn host_write(
         &self,
-        operation: impl FnOnce(&mut ScriptContext<'_>) + 'static,
+        operation: impl FnOnce(&mut ScriptContext<'_>) + Send + 'static,
     ) -> mlua::Result<()> {
         if let Some(link) = self.lua.app_data_ref::<HostLink>() {
             return link.queue(Box::new(operation));

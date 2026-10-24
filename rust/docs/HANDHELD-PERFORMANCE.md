@@ -201,6 +201,14 @@ displayed frame". All values are per displayed frame.
   functions; getters, setters and method lookups skip mlua's userdata entry, the rest falls back
   to the safe binding. Same API dump, all tests pass in both modes (`ZAXNES_FAST_LUA=1`). x86
   Zelda 1 (original GC tuning): Lua 0.62 -> 0.52 ms/frame, worst frame 36 -> 3 ms.
+- Device run of `f0be2a5` (owner): satisfying except one heavy corner of the Zelda map. There the
+  main thread does per NES frame ~7.3 ms Lua + 2.2 conversion, and per displayed frame ~4.2 ms
+  list/collect + 7.5 ms scene: ~21 ms against 16.6, while the core thread fits (11.7 ms).
+- Pipelined frames (`emu.pipeline`, handheld default Auto): the Lua, the conversion and the
+  draw list of a frame run on a third thread while the main thread draws the frame before. Auto
+  switches on after 3 late frames (85 % of the budget) and off after 2 s of light frames (60 %).
+  The Lua runtime changes thread by a documented `unsafe impl Send` (no lock: mlua's `send`
+  feature cost +16 % Lua time). Profiler: `wait` is the main thread waiting for that thread.
 
 ## 5. Next steps (see `ROADMAP.md`)
 

@@ -2,8 +2,7 @@
 //! settings, the backdrop, the inputs, the core memory, the notifications, the profile metadata
 //! and the log (SPEC-05 REQ-LUA-088 to REQ-LUA-095).
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use zax_engine3d::vectors::Vec3;
 
@@ -46,7 +45,7 @@ pub struct ScriptNotification {
 }
 
 /// Where the runtime writes `print` output and script errors (REQ-LUA-052, REQ-LUA-061).
-pub trait ScriptLog {
+pub trait ScriptLog: Send {
     /// One `print` line, channel "Lua", information level (REQ-LUA-052).
     fn print(&mut self, line: &str);
 
@@ -80,7 +79,7 @@ struct CollectedLines {
 /// same lines, so the host keeps one handle and gives the other to the runtime.
 #[derive(Debug, Clone, Default)]
 pub struct CollectingScriptLog {
-    lines: Rc<RefCell<CollectedLines>>,
+    lines: Arc<Mutex<CollectedLines>>,
 }
 
 impl CollectingScriptLog {
@@ -90,47 +89,52 @@ impl CollectingScriptLog {
         Self::default()
     }
 
+    /// The lines; a panic while they were held left them as they were.
+    fn lines(&self) -> MutexGuard<'_, CollectedLines> {
+        self.lines.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The `print` lines, in order.
     #[must_use]
     pub fn prints(&self) -> Vec<String> {
-        self.lines.borrow().prints.clone()
+        self.lines().prints.clone()
     }
 
     /// The error lines, in order.
     #[must_use]
     pub fn errors(&self) -> Vec<String> {
-        self.lines.borrow().errors.clone()
+        self.lines().errors.clone()
     }
 
     /// The warning lines, in order.
     #[must_use]
     pub fn warnings(&self) -> Vec<String> {
-        self.lines.borrow().warnings.clone()
+        self.lines().warnings.clone()
     }
 
     /// Forgets every line.
     pub fn clear(&self) {
-        *self.lines.borrow_mut() = CollectedLines::default();
+        *self.lines() = CollectedLines::default();
     }
 }
 
 impl ScriptLog for CollectingScriptLog {
     fn print(&mut self, line: &str) {
-        self.lines.borrow_mut().prints.push(line.to_owned());
+        self.lines().prints.push(line.to_owned());
     }
 
     fn error(&mut self, line: &str) {
-        self.lines.borrow_mut().errors.push(line.to_owned());
+        self.lines().errors.push(line.to_owned());
     }
 
     fn warning(&mut self, line: &str) {
-        self.lines.borrow_mut().warnings.push(line.to_owned());
+        self.lines().warnings.push(line.to_owned());
     }
 }
 
 /// The camera as scripts see it (SPEC-05 REQ-LUA-088, `CameraAPI`). The host binds it to the
 /// real camera of SPEC-06; [`DetachedScriptCamera`] is the headless stand-in.
-pub trait ScriptCamera {
+pub trait ScriptCamera: Send {
     /// Orientation of the current mode in degrees, `(pitch, yaw, roll)`.
     fn angles(&self) -> Vec3;
 
@@ -245,7 +249,7 @@ impl ScriptCamera for DetachedScriptCamera {
 }
 
 /// The backdrop as scripts see it (SPEC-05 REQ-LUA-090, SPEC-06 REQ-SCN-048).
-pub trait ScriptBackdrop {
+pub trait ScriptBackdrop: Send {
     /// Whether the panel is displayed; false by default.
     fn enabled(&self) -> bool;
 
@@ -358,7 +362,7 @@ impl ScriptBackdrop for DetachedScriptBackdrop {
 
 /// The inputs as scripts see them: the two players' action masks, the port bytes, the port
 /// types and the Zapper aim offset (SPEC-05 REQ-LUA-091, 092, SPEC-08 §4.1).
-pub trait ScriptInput {
+pub trait ScriptInput: Send {
     /// Action mask of player `index` (0 or 1), SPEC-08 REQ-INP-002; 0 for any other index.
     fn player_state(&self, index: usize) -> i32;
 
@@ -428,7 +432,7 @@ impl ScriptInput for DetachedScriptInput {
 
 /// Side-effect-free access to the core's CPU address space (SPEC-05 REQ-LUA-094, SPEC-02
 /// REQ-CORE-080).
-pub trait ScriptMemory {
+pub trait ScriptMemory: Send {
     /// Reads the byte at the 16-bit CPU address `address`.
     fn read(&self, address: u16) -> u8;
 
@@ -532,7 +536,7 @@ impl<T: ScriptInput + ScriptMemory + ?Sized> ScriptMachine for T {}
 ///
 /// The runtime never keeps these: the borrow ends with the call, so the host stays the only
 /// owner of the scene and the core and the compiler rules out conflicting access. See
-/// [`ScriptBridge::lend`](crate::ScriptBridge::lend).
+/// [`lend_context`](crate::lend_context).
 pub struct ScriptContext<'a> {
     /// The camera exposed as `Camera` (REQ-LUA-088).
     pub camera: &'a mut dyn ScriptCamera,
@@ -611,7 +615,7 @@ pub struct ScriptEnvironment {
     /// Where `print` and the error messages go (REQ-LUA-052, 061).
     pub log: Box<dyn ScriptLog>,
     /// What `NotiCenter.Notify` raises (REQ-LUA-093); ignored by default.
-    pub notify: Option<Box<dyn FnMut(ScriptNotification)>>,
+    pub notify: Option<Box<dyn FnMut(ScriptNotification) + Send>>,
     /// The fast Lua binding (Rust-only setting, `unsafe` C metamethods; see `binding::raw`).
     /// Off by default; `ZAXNES_FAST_LUA=1` turns it on for a run of the tests.
     pub fast_binding: bool,

@@ -683,6 +683,25 @@ fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Fast Lua binding"),
     );
+    // Rust-only (owner request): the scripts and the conversion of a frame run on their own
+    // thread while the frame before it is drawn, one displayed frame later; "Auto" does so only
+    // while the frames are late. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPipeline,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Off"),
+            opt(1, "Auto"),
+            opt(2, "Always"),
+        ]))
+        .with_label("Pipelined frames"),
+    );
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

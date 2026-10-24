@@ -1,8 +1,8 @@
 //! The host context a host lends to the script API for the length of a call.
 
 use zax_scripting::{
-    DetachedScriptBackdrop, DetachedScriptCamera, DetachedScriptInput, DetachedScriptMemory,
-    ScriptBackdrop, ScriptCamera, ScriptContext, ScriptInput, ScriptMemory,
+    lend_context, DetachedScriptBackdrop, DetachedScriptCamera, DetachedScriptInput,
+    DetachedScriptMemory, ScriptBackdrop, ScriptCamera, ScriptContext, ScriptInput, ScriptMemory,
 };
 
 use super::support::ScriptProfileBuilder;
@@ -61,15 +61,15 @@ fn a_lent_context_serves_the_script_api_for_the_length_of_the_lend() {
     let mut backdrop = DetachedScriptBackdrop::new();
     let mut machine = Machine::default();
     machine.memory.write(0x10, 7);
-    let bridge = session.runtime(|runtime, _| runtime.bridge());
-
-    bridge.lend(
+    lend_context(
+        &mut session,
+        |session| &session.engine,
         &mut ScriptContext {
             camera: &mut camera,
             backdrop: &mut backdrop,
             machine: &mut machine,
         },
-        || {
+        |session| {
             session.evaluate("Camera.Distance = 77; Backdrop.Enable = true; Script:WriteMem(0x11, Script:ReadMem(0x10) + 1)");
         },
     );

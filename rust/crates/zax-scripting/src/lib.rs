@@ -29,7 +29,7 @@ pub use environment::{
 };
 pub use error::LuaScriptError;
 pub use lua_runtime::LuaRuntime;
-pub use runtime::{ProfileScriptRuntime, ScriptBridge};
+pub use runtime::{lend_context, ProfileScriptRuntime};
 pub use script::{LoadedScript, ScriptHook};
 pub use settings::{ScriptLight, ScriptSettings};
 pub use surface::{ScriptApiMember, ScriptApiSurface, ScriptApiType};

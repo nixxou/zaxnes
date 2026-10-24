@@ -226,6 +226,27 @@ impl ImguiFrontend {
         debug: &DebugInfo<'_>,
         capture: impl FnOnce(&std::path::Path),
     ) {
+        self.build(frame, sizes, debug);
+        self.render();
+        if let Some(shots) = &mut self.shots {
+            if let ShotStep::Capture(path) = shots.advance(&mut self.ui, self.handheld.as_mut()) {
+                capture(&path);
+            }
+            if shots.finished() {
+                frame.host.enqueue(Command::Quit, CommandArgs::default());
+            }
+        }
+    }
+
+    /// Whether a screenshot plan drives the interface.
+    #[must_use]
+    pub const fn has_shots(&self) -> bool {
+        self.shots.is_some()
+    }
+
+    /// Builds the interface of the frame, which [`ImguiFrontend::render`] then draws: a
+    /// pipelined frame builds it before the host is lent to the conversion thread.
+    pub fn build(&mut self, frame: &mut UiFrame<'_>, sizes: Sizes, debug: &DebugInfo<'_>) {
         self.platform.prepare_frame(
             self.context.io_mut(),
             sizes.window,
@@ -248,15 +269,11 @@ impl ImguiFrontend {
             }
         }
         self.platform.pad_mut().end_frame();
+    }
+
+    /// Draws the interface [`ImguiFrontend::build`] built.
+    pub fn render(&mut self) {
         self.renderer.render(self.context.render());
-        if let Some(shots) = &mut self.shots {
-            if let ShotStep::Capture(path) = shots.advance(&mut self.ui, self.handheld.as_mut()) {
-                capture(&path);
-            }
-            if shots.finished() {
-                frame.host.enqueue(Command::Quit, CommandArgs::default());
-            }
-        }
     }
 
     /// Takes one event of the host.

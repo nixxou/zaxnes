@@ -209,6 +209,20 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// How far the frame clock catches up when the command line or the environment says so;
     /// `None` follows the `emu.catch_up` setting (Rust-only).
     pub catch_up: Option<CatchUp>,
+    /// Whether this tick leaves the conversion of its last frame to the caller, which runs it
+    /// on a thread of its own ([`EmulationHost::deferred_parts`], `GameSession::convert_deferred`)
+    /// while it draws the frame before: the pipelined frames of `emu.pipeline` (Rust-only). Only
+    /// honoured when [`EmulationHost::can_defer_conversion`].
+    pub defer_conversion: bool,
+}
+
+/// What the conversion of a pipelined frame works on, and the view the main thread draws into
+/// meanwhile.
+pub struct DeferredParts<'a, V> {
+    pub session: &'a mut GameSession,
+    pub settings: &'a mut SettingsModel,
+    pub scene: &'a mut SceneState,
+    pub view: Option<&'a V>,
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -280,6 +294,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             slots,
             zapper: ZapperState::new(),
             catch_up: None,
+            defer_conversion: false,
         };
         // AMD-035 §1: the language in force is the setting's, read once here and kept in step
         // by `on_setting_changed` afterwards. While none is saved, the model's default is the
@@ -568,7 +583,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.dispatch_setting_changes();
         }
         let frames = self.run_due_frames(snapshot.player_one, snapshot.player_two);
-        if ahead {
+        if ahead && !self.defers() {
             // A frame captured with nothing due since is converted all the same.
             if let Some(session) = self.session.as_mut() {
                 session.finish_captured(&mut self.settings, &mut self.scene, &mut self.stage_clock);
@@ -587,6 +602,25 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             session.launch_prepared();
         }
         frames
+    }
+
+    /// Whether a tick may leave the conversion of its last frame to the caller
+    /// ([`EmulationHost::defer_conversion`]): a game running with its frames ahead.
+    #[must_use]
+    pub fn can_defer_conversion(&self) -> bool {
+        self.state == EmulationState::Running && self.runs_ahead()
+    }
+
+    /// The session, the settings and the scene for the conversion a tick left over, and the view;
+    /// `None` without a session.
+    pub fn deferred_parts(&mut self) -> Option<DeferredParts<'_, V>> {
+        let session = self.session.as_mut()?;
+        Some(DeferredParts {
+            session,
+            settings: &mut self.settings,
+            scene: &mut self.scene,
+            view: self.view.as_ref(),
+        })
     }
 
     /// Whether this tick runs its frames ahead: the core on its own thread, emulation ahead on,
@@ -685,7 +719,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .frames_per_display(self.pacer.effective_rate(), displayed_rate);
         let due = self.pacer.due_frames();
         let ahead = self.runs_ahead();
-        for _ in 0..due {
+        for round in 0..due {
             // The frame of the previous round comes back first.
             self.take_core_back();
             let Some(session) = self.session.as_mut() else {
@@ -705,7 +739,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             if ahead {
                 // The accounting touches the core: it comes before the frame leaves.
                 self.count_emulated_frame();
-                self.launch_ahead_frame(player_one, player_two);
+                // The last frame of a pipelined tick is converted by the caller.
+                let convert = round + 1 < due || !self.defers();
+                self.launch_ahead_frame(player_one, player_two, convert);
                 continue;
             }
             // REQ-INP-005: one emulated frame is one sample, fast forward included.
@@ -735,12 +771,18 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// Whether this tick leaves its last conversion to the caller.
+    fn defers(&self) -> bool {
+        self.defer_conversion && self.runs_ahead()
+    }
+
     /// Emulation ahead: the next frame leaves for the emulation thread, then the frame captured
-    /// before it is converted here while it runs.
+    /// before it is converted here while it runs, when `convert`.
     fn launch_ahead_frame(
         &mut self,
         player_one: crate::input::InputAction,
         player_two: crate::input::InputAction,
+        convert: bool,
     ) {
         let port_byte = self.zapper.port_byte();
         let position = self.zapper.position();
@@ -757,7 +799,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 frame,
                 &mut self.stage_clock,
             );
-            session.finish_captured(&mut self.settings, &mut self.scene, &mut self.stage_clock);
+            if convert {
+                session.finish_captured(&mut self.settings, &mut self.scene, &mut self.stage_clock);
+            }
         }
     }
 
