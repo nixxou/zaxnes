@@ -16,6 +16,7 @@ pub mod rom_list;
 
 use std::path::{Path, PathBuf};
 
+use zax_render::numerics::Vector3;
 use zax_settings::catalogue::SettingId;
 
 use self::exit_combo::{ComboEvent, ExitCombo};
@@ -33,6 +34,7 @@ use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::game_catalog::GameCatalog as _;
 use crate::emulation::host::HostEvent;
 use crate::input::BindingDeviceKind;
+use crate::ui::{keys, strings};
 
 /// Seconds a binding waits for a button before it gives up.
 pub const CAPTURE_SECONDS: f32 = 5.0;
@@ -79,7 +81,23 @@ pub struct HandheldUi {
     metrics: Metrics,
     heading_font: Option<imgui::FontId>,
     effects: Vec<UiEffect>,
+    camera_memory: CameraMemory,
 }
+
+/// L2 in game (Rust-only, owner request): held, it keeps the camera's angles and distance; a
+/// short press puts them back.
+#[derive(Debug, Default)]
+struct CameraMemory {
+    /// How long L2 has been held, while it is.
+    held: Option<f32>,
+    /// Whether this hold already kept the camera.
+    kept: bool,
+    /// The kept angles and distance.
+    saved: Option<(Vector3, f32)>,
+}
+
+/// How long L2 is held to keep the camera.
+const CAMERA_KEEP_SECONDS: f32 = 0.6;
 
 impl HandheldUi {
     /// The interface for a display `height` pixels high, listing the ROMs of `roms_directory`.
@@ -100,6 +118,7 @@ impl HandheldUi {
             metrics: Metrics::for_height(height),
             heading_font: None,
             effects: Vec::new(),
+            camera_memory: CameraMemory::default(),
         };
         ui.refresh_roms(host);
         ui
@@ -190,8 +209,38 @@ impl HandheldUi {
         self.follow_the_game(frame.host);
         self.update_combo(pad, seconds, frame.host);
         self.update_capture(seconds, frame);
+        self.update_camera_memory(pad, seconds, frame.host);
         for button in pad.presses() {
             self.press(button, frame);
+        }
+    }
+
+    /// L2 in game: a hold keeps the camera, a short press puts it back.
+    fn update_camera_memory(&mut self, pad: &PadState, seconds: f32, host: &mut AppHost) {
+        let memory = &mut self.camera_memory;
+        if self.screen != Screen::InGame {
+            memory.held = None;
+            memory.kept = false;
+            return;
+        }
+        if pad.is_held(PadButton::L2) {
+            let held = memory.held.get_or_insert(0.0);
+            *held += seconds;
+            if *held >= CAMERA_KEEP_SECONDS && !memory.kept {
+                memory.kept = true;
+                let current = host.scene().camera.current();
+                memory.saved = Some((current.angles, current.distance()));
+                host.notifications
+                    .show_normal(&strings::get(keys::HANDHELD_CAMERA_KEPT));
+            }
+        } else if memory.held.take().is_some() && !std::mem::take(&mut memory.kept) {
+            if let Some((angles, distance)) = memory.saved {
+                let setpoint = host.scene_mut().camera.current_mut();
+                setpoint.angles = angles;
+                setpoint.set_distance(distance);
+                host.notifications
+                    .show_normal(&strings::get(keys::HANDHELD_CAMERA_RESTORED));
+            }
         }
     }
 
@@ -289,7 +338,16 @@ impl HandheldUi {
                     self.carry_out_overlay(command, frame.host);
                 }
             }
-            Screen::InGame => {}
+            // X: the default view; Y: 2D or 3D (owner request).
+            Screen::InGame => match button {
+                PadButton::X => frame
+                    .host
+                    .enqueue(Command::ResetView, CommandArgs::default()),
+                PadButton::Y => frame
+                    .host
+                    .enqueue(Command::ToggleTwoDimensional, CommandArgs::default()),
+                _ => {}
+            },
         }
     }
 

@@ -129,6 +129,76 @@ pub fn create_keyboard(player: usize) -> BindingSet {
     }
 }
 
+/// The defaults of a handheld console's pad (Rust-only, owner request), whose face buttons the
+/// platform names by their labels (A right, B bottom, X top, Y left): NES A and B on A and B,
+/// zoom on the shoulders, fast forward on R2. X, Y and L2 are the handheld interface's (default
+/// view, 2D/3D, camera memory); no rewind on a handheld.
+#[must_use]
+pub fn handheld_gamepad_set() -> [(InputAction, PhysicalControl); 15] {
+    [
+        (
+            InputAction::LEFT,
+            PhysicalControl::button(standard_gamepad::D_PAD_LEFT),
+        ),
+        (
+            InputAction::RIGHT,
+            PhysicalControl::button(standard_gamepad::D_PAD_RIGHT),
+        ),
+        (
+            InputAction::UP,
+            PhysicalControl::button(standard_gamepad::D_PAD_UP),
+        ),
+        (
+            InputAction::DOWN,
+            PhysicalControl::button(standard_gamepad::D_PAD_DOWN),
+        ),
+        (
+            InputAction::A,
+            PhysicalControl::button(standard_gamepad::SOUTH),
+        ),
+        (
+            InputAction::B,
+            PhysicalControl::button(standard_gamepad::EAST),
+        ),
+        (
+            InputAction::SELECT,
+            PhysicalControl::button(standard_gamepad::BACK),
+        ),
+        (
+            InputAction::START,
+            PhysicalControl::button(standard_gamepad::START),
+        ),
+        (
+            InputAction::FAST_FORWARD,
+            PhysicalControl::trigger(standard_gamepad::RIGHT_TRIGGER),
+        ),
+        (
+            InputAction::ROT_LEFT,
+            PhysicalControl::axis_negative(standard_gamepad::RIGHT_STICK_X),
+        ),
+        (
+            InputAction::ROT_RIGHT,
+            PhysicalControl::axis_positive(standard_gamepad::RIGHT_STICK_X),
+        ),
+        (
+            InputAction::ROT_UP,
+            PhysicalControl::axis_positive(standard_gamepad::RIGHT_STICK_Y),
+        ),
+        (
+            InputAction::ROT_DOWN,
+            PhysicalControl::axis_negative(standard_gamepad::RIGHT_STICK_Y),
+        ),
+        (
+            InputAction::ZOOM_OUT,
+            PhysicalControl::button(standard_gamepad::LEFT_BUMPER),
+        ),
+        (
+            InputAction::ZOOM_IN,
+            PhysicalControl::button(standard_gamepad::RIGHT_BUMPER),
+        ),
+    ]
+}
+
 /// A gamepad set: the standard defaults when `standard`, otherwise empty (a pad without a
 /// mapping reports raw indices, REQ-INP-021).
 #[must_use]
@@ -136,6 +206,18 @@ pub fn create_gamepad(standard: bool) -> BindingSet {
     let mut set = BindingSet::new(BindingDeviceKind::Gamepad);
     if standard {
         for (action, control) in standard_gamepad_set() {
+            set.set_action(action, control);
+        }
+    }
+    set
+}
+
+/// The gamepad set of a handheld console: the handheld defaults when `standard`.
+#[must_use]
+pub fn create_handheld_gamepad(standard: bool) -> BindingSet {
+    let mut set = BindingSet::new(BindingDeviceKind::Gamepad);
+    if standard {
+        for (action, control) in handheld_gamepad_set() {
             set.set_action(action, control);
         }
     }

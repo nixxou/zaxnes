@@ -154,6 +154,10 @@ impl SdlPlatform {
         let horizontal = match axis {
             Axis::LeftX => true,
             Axis::LeftY => false,
+            Axis::TriggerLeft => {
+                self.pad.set(PadButton::L2, value > i16::MAX / 2);
+                return;
+            }
             _ => return,
         };
         self.pad.set_axis(horizontal, value);
