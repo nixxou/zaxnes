@@ -1427,14 +1427,17 @@ fn update_cursor(
 const WIDESCREEN_EXTRA_PERCENT: [u16; 14] =
     [0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300];
 
-fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> i32 {
+///
+/// Returns the margins on each side and above and below: the picture keeps the chosen ratio,
+/// so `extra` makes it as much taller as wider (only a margin decoder fills the height).
+fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     #[allow(clippy::cast_precision_loss)] // Window sizes.
     let ratio = match choice {
         1 if size.1 > 0 => size.0 as f32 / size.1 as f32,
         2 => 3.0 / 2.0,
         3 => 16.0 / 10.0,
         4 => 16.0 / 9.0,
-        _ => return 0,
+        _ => return (0, 0),
     };
     let percent = usize::try_from(extra)
         .ok()
@@ -1442,18 +1445,26 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> i32 {
         .copied()
         .unwrap_or(0);
     let bonus = 1.0 + (f32::from(percent) / 100.0);
-    let each_side = (240.0 * ratio * bonus - 256.0) / 2.0;
-    if each_side <= 0.0 {
-        return 0;
-    }
-    #[allow(clippy::cast_possible_truncation)] // Clamped right after.
-    let tiles = (each_side / 8.0).ceil() as i32;
-    (tiles * 8).clamp(0, zax_nes::wide::MAX_MARGIN)
+    let whole_tiles = |pixels: f32, max: i32| {
+        #[allow(clippy::cast_possible_truncation)] // Clamped right after.
+        let tiles = (pixels.max(0.0) / 8.0).ceil() as i32;
+        (tiles * 8).clamp(0, max)
+    };
+    (
+        whole_tiles(
+            (240.0 * ratio * bonus - 256.0) / 2.0,
+            zax_nes::wide::MAX_MARGIN,
+        ),
+        whole_tiles(
+            240.0 * (bonus - 1.0) / 2.0,
+            zax_nes::wide::MAX_VERTICAL_MARGIN,
+        ),
+    )
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
-    let widescreen = widescreen_margin(
+    let (widescreen, widescreen_y) = widescreen_margin(
         host.settings().get(SettingId::VideoWidescreen).as_int(),
         host.settings()
             .get(SettingId::VideoWidescreenExtra)
@@ -1466,6 +1477,9 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .as_bool();
     if let Some(session) = host.session_mut() {
         session.core_mut().set_widescreen_margin(widescreen);
+        session
+            .core_mut()
+            .set_widescreen_vertical_margin(widescreen_y);
         session.set_strict_wide_edges(strict_edges);
     }
     let (session, scene) = host.session_and_scene_mut();
@@ -1483,6 +1497,12 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .published_frame()
         .map_or(0, ConversionFrame::margin) as f32;
     scene.margin = margin;
+    #[allow(clippy::cast_precision_loss)] // 0..=240.
+    let margin_y = session
+        .engine()
+        .published_frame()
+        .map_or(0, ConversionFrame::margin_y) as f32;
+    scene.margin_y = margin_y;
     // AMD-009 (Q-022): the 2D mode shows the core's pixel frame on the NES plane. AMD-017
     // (Q-037) adds the hot F11 toggle to the "2D Mode" profile of REQ-SCN-055: the host combines
     // the two, and nothing of the session is reloaded to switch.

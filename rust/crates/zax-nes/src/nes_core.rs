@@ -451,6 +451,7 @@ impl NesCore {
             mask_y: ppu.mask_y(),
             margin: ppu.frame_margin(),
             visible_rows: ppu.visible_rows(),
+            margin_y: ppu.frame_vertical_margin(),
         }
     }
 
@@ -459,6 +460,16 @@ impl NesCore {
     /// others. Rounded down to a multiple of 8 and capped at [`crate::wide::MAX_MARGIN`].
     pub fn set_widescreen_margin(&mut self, pixels: i32) {
         self.bus.ppu_mut().wide_mut().set_host_margin(pixels);
+    }
+
+    /// Sets the margin the host offers above and below, in pixels (0 = off). Only a game with
+    /// a margin decoder that reads rows past the screen fills it. Rounded down to a multiple of
+    /// 8 and capped at [`crate::wide::MAX_VERTICAL_MARGIN`].
+    pub fn set_widescreen_vertical_margin(&mut self, pixels: i32) {
+        self.bus
+            .ppu_mut()
+            .wide_mut()
+            .set_host_vertical_margin(pixels);
     }
 
     /// The widescreen margin the host offers on each side, in pixels.

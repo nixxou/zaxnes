@@ -234,6 +234,9 @@ pub struct SceneState {
     /// frame). The visible rectangle reaches this far past both sides of the 256-pixel picture,
     /// and the left and right clip margins count from those wider edges.
     pub margin: f32,
+    /// Vertical widescreen margin of the displayed frame, in NES pixels above and below: the
+    /// top and bottom clip margins count from those taller edges.
+    pub margin_y: f32,
     /// Whether a game is running. Outside that state the 3D scene is not displayed: only the
     /// background or the skybox stays visible behind the UI (REQ-SCN-047).
     pub game_running: bool,
@@ -267,6 +270,7 @@ impl Default for SceneState {
             camera: SceneCamera::new(),
             clipping: ConversionSettings::DEFAULT_CLIPPING,
             margin: 0.0,
+            margin_y: 0.0,
             game_running: false,
             use_nes_background_color: true,
             nes_background_color: Rgb24::default(),
@@ -305,9 +309,9 @@ impl SceneState {
     pub fn view_clipping(&self) -> Vec4F {
         Vec4F::new(
             self.clipping.x - self.margin,
-            self.clipping.y,
+            self.clipping.y - self.margin_y,
             self.clipping.z - self.margin,
-            self.clipping.w,
+            self.clipping.w - self.margin_y,
         )
     }
 }

@@ -51,6 +51,8 @@ pub struct RomRequest<'a> {
     pub dump_frame: Option<&'a Path>,
     /// Widescreen margin offered on each side, in pixels.
     pub widescreen: i32,
+    /// Widescreen margin offered above and below, in pixels.
+    pub widescreen_y: i32,
     /// Where to write the composed tile records of the last frame.
     pub png_nes: Option<&'a Path>,
     /// State block restored after the reset.
@@ -79,6 +81,8 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         force_three_dimensional: false,
     })?;
     host.core.set_widescreen_margin(request.widescreen);
+    host.core
+        .set_widescreen_vertical_margin(request.widescreen_y);
     if let Some(path) = request.load_state {
         host.core
             .try_load_state(&fs::read(path)?, 0)
@@ -117,6 +121,11 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         .published_frame()
         .map_or(0, zax_engine3d::frame::ConversionFrame::margin) as f32;
     scene.margin = margin;
+    #[allow(clippy::cast_precision_loss)] // 0..=240.
+    let margin_y = engine
+        .published_frame()
+        .map_or(0, zax_engine3d::frame::ConversionFrame::margin_y) as f32;
+    scene.margin_y = margin_y;
     scene.nes_background_color = engine.frame_color(0);
     scene.emulated_time = engine
         .published_frame()
@@ -397,6 +406,7 @@ impl Host {
             mask_y: batch.mask_y,
             margin: batch.margin,
             visible_rows: batch.visible_rows,
+            margin_y: batch.margin_y,
         };
         let counter = i32::try_from(counter)
             .map_err(|_| HarnessError::Usage("--run: too many frames".to_owned()))?;

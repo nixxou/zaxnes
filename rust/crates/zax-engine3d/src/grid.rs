@@ -12,6 +12,11 @@ pub const STANDARD_WIDTH: i32 = 35;
 /// tile simply has a negative cell x, or one past 34. Only the array index is offset.
 pub const WIDE_COLUMNS: i32 = zax_nes::wide::MAX_EXTRA_COLUMNS;
 
+/// Cells the grid array reserves above cell y = 0 (and as many below the last row), for the
+/// extra rows of a frame with a vertical widescreen margin: as for the columns, only the array
+/// index is offset.
+pub const WIDE_ROWS: i32 = zax_nes::wide::MAX_EXTRA_ROWS;
+
 /// Width of the grid array in cells, widescreen columns included.
 pub const WIDTH: i32 = STANDARD_WIDTH + (2 * WIDE_COLUMNS);
 
@@ -20,7 +25,7 @@ pub const HEIGHT: i32 = 33;
 
 /// Number of cells of either grid.
 #[allow(clippy::cast_sign_loss)] // A positive constant.
-pub const CELL_COUNT: usize = (WIDTH * HEIGHT) as usize;
+pub const CELL_COUNT: usize = (WIDTH * (HEIGHT + (2 * WIDE_ROWS))) as usize;
 
 /// Scene height `Hs = 248`: the constant that flips the y axis (REQ-E3D-205, REQ-E3D-410).
 pub const SCENE_HEIGHT: i32 = 248;
@@ -52,7 +57,7 @@ pub const fn sprite_cell(x: i32, y: i32) -> Cell {
 /// The index of a cell in a grid array; negative or past the end for a cell outside the grid.
 #[must_use]
 pub const fn index(x: i32, y: i32) -> i32 {
-    x + WIDE_COLUMNS + (y * WIDTH)
+    x + WIDE_COLUMNS + ((y + WIDE_ROWS) * WIDTH)
 }
 
 /// The index of a cell in a grid array.
@@ -74,12 +79,12 @@ pub fn slot(index: i32) -> Option<usize> {
 pub const fn contains(cell: Cell) -> bool {
     cell.x >= -WIDE_COLUMNS
         && cell.x < STANDARD_WIDTH + WIDE_COLUMNS
-        && cell.y >= 0
-        && cell.y < HEIGHT
+        && cell.y >= -WIDE_ROWS
+        && cell.y < HEIGHT + WIDE_ROWS
 }
 
 /// The cell at array index `index`.
 #[must_use]
 pub const fn cell_of(index: i32) -> Cell {
-    Cell::new((index % WIDTH) - WIDE_COLUMNS, index / WIDTH)
+    Cell::new((index % WIDTH) - WIDE_COLUMNS, (index / WIDTH) - WIDE_ROWS)
 }

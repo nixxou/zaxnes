@@ -231,7 +231,7 @@ pub struct SessionFrame {
 
 /// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palette,
 /// edge masks, widescreen margin and visible rows.
-type CapturedBatch = ([u8; 32], i32, i32, (i32, zax_nes::VisibleRows));
+type CapturedBatch = ([u8; 32], i32, i32, (i32, zax_nes::VisibleRows, i32));
 
 /// One game being played.
 pub struct GameSession {
@@ -1028,7 +1028,7 @@ impl GameSession {
             batch.palette,
             batch.mask_x,
             batch.mask_y,
-            (batch.margin, batch.visible_rows),
+            (batch.margin, batch.visible_rows, batch.margin_y),
         );
         clock.stop(Stage::Capture, started);
         captured
@@ -1041,7 +1041,7 @@ impl GameSession {
         clock: &mut StageClock,
         palette: [u8; 32],
         (mask_x, mask_y): (i32, i32),
-        (margin, visible_rows): (i32, zax_nes::VisibleRows),
+        (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
     ) {
         let visible_rows = if self.strict_wide_edges || margin == 0 {
             visible_rows
@@ -1061,6 +1061,7 @@ impl GameSession {
             mask_y,
             margin,
             visible_rows,
+            margin_y,
         };
         let started = clock.start();
         self.scripted(scene, |engine| {

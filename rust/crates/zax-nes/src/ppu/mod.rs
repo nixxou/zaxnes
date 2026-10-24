@@ -184,6 +184,8 @@ pub struct Ppu2C02 {
     frame_margin: i32,
     /// The visible range of each band of the frame being captured (`FrameBatch::visible_rows`).
     visible_rows: crate::VisibleRows,
+    /// The vertical widescreen margin of the frame being captured, latched with `frame_margin`.
+    frame_vertical_margin: i32,
     /// The background rows of the frame being captured, by row index, for a margin decoder.
     captured_rows: [Option<tiles::CapturedRow>; 31],
 }
@@ -260,6 +262,7 @@ impl Ppu2C02 {
             frame_margin: 0,
             visible_rows: crate::STANDARD_ROWS,
             captured_rows: [None; 31],
+            frame_vertical_margin: 0,
         }
     }
 
@@ -1138,6 +1141,13 @@ impl Ppu2C02 {
     #[must_use]
     pub const fn frame_margin(&self) -> i32 {
         self.frame_margin
+    }
+
+    /// The vertical widescreen margin, in pixels above and below, of the frame whose records
+    /// are held.
+    #[must_use]
+    pub const fn frame_vertical_margin(&self) -> i32 {
+        self.frame_vertical_margin
     }
 
     /// The visible range of each band of the frame whose records are held.

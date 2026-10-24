@@ -52,6 +52,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --sav <file>             battery-backed PRG-RAM to import before the run (REQ-CORE-095)
   --dump-frame <file.json> write the captured frame as a '--frames' JSON file
   --widescreen <pixels>    widescreen margin the host offers on each side (default 0)
+  --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            as the widescreen margin makes them
   --load-state <file>      restore a state block (written by --save-state) after the reset
@@ -118,6 +119,8 @@ pub struct Options {
     pub dump_frame: Option<PathBuf>,
     /// Widescreen margin offered on each side, in pixels.
     pub widescreen: i32,
+    /// Widescreen margin offered above and below, in pixels.
+    pub widescreen_y: i32,
     /// Where to write the composed tile records of the last frame.
     pub png_nes: Option<PathBuf>,
     /// State block restored after the reset.
@@ -186,6 +189,7 @@ impl Options {
             battery: None,
             dump_frame: None,
             widescreen: 0,
+            widescreen_y: 0,
             png_nes: None,
             load_state: None,
             save_state: None,
@@ -263,6 +267,7 @@ impl Options {
             "--sav" => self.battery = Some(PathBuf::from(value)),
             "--dump-frame" => self.dump_frame = Some(PathBuf::from(value)),
             "--widescreen" => self.widescreen = integer(value)?,
+            "--widescreen-y" => self.widescreen_y = integer(value)?,
             "--png-nes" => self.png_nes = Some(PathBuf::from(value)),
             "--load-state" => self.load_state = Some(PathBuf::from(value)),
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
@@ -528,6 +533,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             battery: options.battery.as_deref(),
             dump_frame: options.dump_frame.as_deref(),
             widescreen: options.widescreen,
+            widescreen_y: options.widescreen_y,
             png_nes: options.png_nes.as_deref(),
             load_state: options.load_state.as_deref(),
             save_state: options.save_state.as_deref(),
