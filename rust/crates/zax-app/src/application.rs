@@ -1460,8 +1460,13 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
             .as_int(),
         state.last_render_size,
     );
+    let strict_edges = host
+        .settings()
+        .get(SettingId::VideoWidescreenStrictEdges)
+        .as_bool();
     if let Some(session) = host.session_mut() {
         session.core_mut().set_widescreen_margin(widescreen);
+        session.set_strict_wide_edges(strict_edges);
     }
     let (session, scene) = host.session_and_scene_mut();
     let Some(session) = session else {

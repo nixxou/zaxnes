@@ -245,6 +245,9 @@ pub struct GameSession {
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
     pipeline: FramePipeline,
+    /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
+    /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
+    strict_wide_edges: bool,
 }
 
 /// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
@@ -366,6 +369,7 @@ impl GameSession {
             started: false,
             aimed: None,
             batch_records: Vec::new(),
+            strict_wide_edges: false,
             pipeline: FramePipeline::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
@@ -498,6 +502,11 @@ impl GameSession {
     #[must_use]
     pub fn core_mut(&mut self) -> &mut NesCore {
         &mut self.core
+    }
+
+    /// Sets `video.widescreen_strict_edges` (see the field `strict_wide_edges`).
+    pub fn set_strict_wide_edges(&mut self, strict: bool) {
+        self.strict_wide_edges = strict;
     }
 
     /// The conversion engine.
@@ -1010,10 +1019,7 @@ impl GameSession {
 
     /// Copies the tile records of the frame the core just ran into `batch_records`; returns its
     /// palette, edge masks and widescreen margin.
-    fn capture_batch(
-        &mut self,
-        clock: &mut StageClock,
-    ) -> CapturedBatch {
+    fn capture_batch(&mut self, clock: &mut StageClock) -> CapturedBatch {
         let started = clock.start();
         let batch = self.core.frame_batch();
         self.batch_records.clear();
@@ -1037,6 +1043,14 @@ impl GameSession {
         (mask_x, mask_y): (i32, i32),
         (margin, visible_rows): (i32, zax_nes::VisibleRows),
     ) {
+        let visible_rows = if self.strict_wide_edges || margin == 0 {
+            visible_rows
+        } else {
+            // Every band counts as drawn across the whole margin.
+            #[allow(clippy::cast_possible_truncation)] // At most 512.
+            let margin = margin as i16;
+            [(-margin, 256 + margin); 30]
+        };
         let counter = self.frame_counter;
         let records = std::mem::take(&mut self.batch_records);
         // The conversion is synchronous, right after the frame, as REQ-LOOP-060 (c) requires.

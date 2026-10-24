@@ -397,6 +397,10 @@ impl NesCore {
 
         let start_cycle = self.bus.cycle_count();
 
+        // A game with a margin decoder gets the host's margin whatever its ROM asks for.
+        let decoder = self.builtin_patch.and_then(crate::wide_decode::for_patch);
+        self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
+
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
         loop {
@@ -406,6 +410,9 @@ impl NesCore {
             }
         }
         self.bus.end_deferred_ppu();
+        if let Some(decoder) = decoder {
+            self.decode_margins(decoder);
+        }
 
         self.frame_count += 1;
 
@@ -414,6 +421,20 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    /// Has `decoder` fill the margins of the frame just run from the game's memory.
+    fn decode_margins(&mut self, decoder: &dyn crate::wide_decode::MarginDecoder) {
+        let (ram, ppu, cartridge) = self.bus.decoder_parts();
+        let Some(cartridge) = cartridge else {
+            return;
+        };
+        let memory = crate::wide_decode::DecoderMemory {
+            ram,
+            prg_ram: cartridge.memory().prg_ram(),
+            prg_rom: cartridge.rom().prg_rom(),
+        };
+        ppu.decode_margins(decoder, &memory, Some(cartridge));
     }
 
     /// The batch of the frame just run (REQ-CORE-030).

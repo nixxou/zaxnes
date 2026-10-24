@@ -212,6 +212,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.backend", "Graphics API (at the next start)"),
     ("setting.video.widescreen", "Widescreen (ROMs made for it)"),
     ("setting.video.widescreen_extra", "Widescreen extra width"),
+    (
+        "setting.video.widescreen_strict_edges",
+        "Widescreen: wait for whole objects at the drawn edges",
+    ),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),

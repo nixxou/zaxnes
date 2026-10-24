@@ -401,6 +401,11 @@ impl NesBus {
     }
 
     /// A read of the widescreen extension's PRG window: the byte of PRG-ROM it shows there.
+    /// CPU RAM, the PPU and the cartridge at once, for a margin decoder.
+    pub(crate) fn decoder_parts(&mut self) -> (&[u8], &mut Ppu2C02, Option<&Cartridge>) {
+        (&self.ram, &mut self.ppu, self.cartridge.as_ref())
+    }
+
     fn wide_window_read(&self, address: u16) -> Option<u8> {
         let offset = self.ppu.wide().prg_window(address)?;
         let prg = self.cartridge.as_ref()?.rom().prg_rom();

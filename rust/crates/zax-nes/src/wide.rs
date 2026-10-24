@@ -53,10 +53,13 @@ const CYCLES_PER_SCANLINE: u32 = 114;
 /// Version the ROM reads at `$5001`.
 const VERSION: u8 = 1;
 
-/// The widest margin, in pixels on each side, the core will ever capture: sixteen tile columns,
-/// a 512 x 240 picture (16:9 with a bonus of 20 %, so that the 3D objects at the edges of a wide
-/// window are already whole).
-pub const MAX_MARGIN: i32 = 128;
+/// The widest margin, in pixels on each side, the core will ever capture: 64 tile columns, a
+/// 1280 x 240 picture. Past 128 pixels only a margin decoder ([`crate::wide_decode`]) has
+/// anything to show: the nametables wrap there.
+pub const MAX_MARGIN: i32 = 512;
+
+/// The widest margin a ROM can ask for or be told of through its 8-bit registers.
+const MAX_ROM_MARGIN: i32 = 248;
 
 /// Extra background columns on each side at the widest margin.
 pub const MAX_EXTRA_COLUMNS: i32 = MAX_MARGIN / 8;
@@ -82,6 +85,9 @@ pub struct WideExtension {
     overclock: u8,
     /// Layout register: bit 0 asks for four separate nametables.
     layout: u8,
+    /// Whether a margin decoder fills the margins: the host's margin then applies whatever
+    /// the ROM asked. Set by the core, not saved.
+    decoded: bool,
     /// PRG window: bit 7 on, bits 0-6 the 16 KiB bank.
     window_bank: u8,
     /// PRG window: first page of the bank.
@@ -112,6 +118,7 @@ impl WideExtension {
             scratch: vec![0; RAM_SIZE],
             overclock: 0,
             layout: 0,
+            decoded: false,
             window_bank: 0,
             window_page: 0,
             stall: 0,
@@ -122,6 +129,11 @@ impl WideExtension {
     /// and capped at [`MAX_MARGIN`]. It survives resets and state loads: it is a host setting.
     pub fn set_host_margin(&mut self, pixels: i32) {
         self.host_margin = (pixels.clamp(0, MAX_MARGIN) / 8) * 8;
+    }
+
+    /// Tells the extension a margin decoder fills the margins of this game.
+    pub fn set_decoded(&mut self, decoded: bool) {
+        self.decoded = decoded;
     }
 
     /// The margin the host offers on each side, in pixels.
@@ -140,6 +152,9 @@ impl WideExtension {
     /// asked for one and the host offers one.
     #[must_use]
     pub fn margin(&self) -> i32 {
+        if self.decoded {
+            return self.host_margin;
+        }
         if !self.unlocked {
             return 0;
         }
@@ -174,6 +189,7 @@ impl WideExtension {
     pub fn reset(&mut self) {
         *self = Self {
             host_margin: self.host_margin,
+            decoded: self.decoded,
             ..Self::new()
         };
     }
@@ -196,7 +212,9 @@ impl WideExtension {
             0x5000 => Some(UNLOCK[0]),
             0x5001 => Some(VERSION),
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..=128.
-            0x5002 => Some(self.host_margin as u8),
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            // 0..=248.
+            0x5002 => Some(self.host_margin.min(MAX_ROM_MARGIN) as u8),
             0x5003 => Some(self.requested_margin),
             0x5004 => Some(self.left_extent),
             0x5005 => Some(self.right_extent),

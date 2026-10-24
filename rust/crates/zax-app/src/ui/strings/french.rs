@@ -209,6 +209,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.video.backend", "API graphique (au prochain démarrage)"),
     ("setting.video.widescreen", "Écran large (ROM prévues pour)"),
     ("setting.video.widescreen_extra", "Largeur supplémentaire de l'écran large"),
+    (
+        "setting.video.widescreen_strict_edges",
+        "Écran large : attendre les objets entiers aux bords dessinés",
+    ),
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),

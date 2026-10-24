@@ -47,8 +47,9 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
     // emu.builtin_patches, emu.catch_up, emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline,
-    // ui.profiler, video.backend, video.dynamic_resolution, video.widescreen and
-    // video.widescreen_extra: Rust-only settings (owner request).
+    // ui.profiler, video.backend, video.dynamic_resolution, video.widescreen,
+    // video.widescreen_extra and video.widescreen_strict_edges: Rust-only settings (owner
+    // request).
     assert_eq!(
         additions,
         [
@@ -64,7 +65,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.backend",
             "video.dynamic_resolution",
             "video.widescreen",
-            "video.widescreen_extra"
+            "video.widescreen_extra",
+            "video.widescreen_strict_edges"
         ]
     );
 }
