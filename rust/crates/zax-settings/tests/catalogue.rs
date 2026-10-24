@@ -46,13 +46,15 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     assert!(specified.is_subset(&model));
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
-    // emu.catch_up, emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler,
+    // emu.catch_up, emu.lua_experimental, emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline,
+    // ui.profiler,
     // video.backend and video.dynamic_resolution: Rust-only settings (owner request).
     assert_eq!(
         additions,
         [
             "audio.mute",
             "emu.catch_up",
+            "emu.lua_experimental",
             "emu.lua_optimized",
             "emu.lua_smooth_gc",
             "emu.pipeline",

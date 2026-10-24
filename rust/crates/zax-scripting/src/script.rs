@@ -69,6 +69,7 @@ impl ScriptHook {
 
 /// One script of the loaded profile as the runtime holds it: its name, its tags, its live
 /// `enable` and error flags, and a function per hook it defines.
+#[allow(clippy::struct_excessive_bools)] // Independent flags of the spec, not a state machine.
 pub struct LoadedScript {
     file_index: usize,
     name: String,
@@ -84,6 +85,9 @@ pub struct LoadedScript {
     hooks: [Option<Function>; ScriptHook::COUNT],
     /// The instances this script's `UpdateS` must visit this frame (step 3).
     pub(crate) pending: Vec<FrameInstanceId>,
+    /// Whether its `UpdateS` receives a light `shape` and no `shape2D`
+    /// (`runtime::light_shapes`), decided once from the source when the profile loads.
+    pub(crate) light_update_s: bool,
     /// The Lua value of this script (`self`), kept once made so that a hook call finds it
     /// without a lookup.
     pub(crate) handle: Option<mlua::Value>,
@@ -106,6 +110,7 @@ impl LoadedScript {
             handle: None,
             hooks: std::array::from_fn(|_| None),
             pending: Vec::new(),
+            light_update_s: false,
         }
     }
 

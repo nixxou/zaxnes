@@ -205,6 +205,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
     ("setting.emu.lua_smooth_gc", "Smooth Lua memory collection"),
     ("setting.emu.lua_optimized", "Optimized Lua (unsafe)"),
+    (
+        "setting.emu.lua_experimental",
+        "Experimental Lua optimization (needs Optimized Lua)",
+    ),
     ("setting.emu.pipeline", "Scripts in parallel with the drawing"),
     ("setting.video.dynamic_resolution", "Automatic resolution"),
     ("setting.video.backend", "Graphics API (at the next start)"),

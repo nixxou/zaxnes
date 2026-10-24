@@ -620,6 +620,10 @@ pub struct ScriptEnvironment {
     /// see `binding::raw`). Off by default; `ZAXNES_FAST_LUA=1` turns them on for a run of the
     /// tests.
     pub optimized: bool,
+    /// The experimental Lua paths (Rust-only setting `emu.lua_experimental`): the light `shape`
+    /// of `runtime::light_shapes`. They need [`Self::optimized`] too. Off by default;
+    /// `ZAXNES_EXPERIMENTAL_LUA=1` turns them on for a run of the tests.
+    pub experimental: bool,
 }
 
 impl ScriptEnvironment {
@@ -652,6 +656,8 @@ impl Default for ScriptEnvironment {
             log: Box::new(NullScriptLog),
             notify: None,
             optimized: std::env::var("ZAXNES_FAST_LUA").is_ok_and(|value| value.trim() == "1"),
+            experimental: std::env::var("ZAXNES_EXPERIMENTAL_LUA")
+                .is_ok_and(|value| value.trim() == "1"),
         }
     }
 }
