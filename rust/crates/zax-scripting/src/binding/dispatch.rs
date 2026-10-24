@@ -269,7 +269,7 @@ pub(crate) fn assign(
 }
 
 /// Rewrites the payload of the host value `this`.
-fn set_host_payload(this: &Value, payload: Payload) {
+pub(crate) fn set_host_payload(this: &Value, payload: Payload) {
     if let Value::UserData(data) = this {
         if let Ok(host) = data.borrow::<Host>() {
             host.set_payload(payload);
