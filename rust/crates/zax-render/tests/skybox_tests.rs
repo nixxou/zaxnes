@@ -244,6 +244,7 @@ fn render(
     let frame = SceneFrame {
         draw_list: list.as_ref(),
         nes_picture: &[],
+        nes_picture_height: 0,
     };
     gl.render(renderer, &scene, &frame)
 }

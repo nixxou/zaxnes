@@ -325,6 +325,8 @@ pub struct SceneFrame<'a> {
     /// The 256 × 240 pixel frame the core produced for the **displayed** frame, one NES colour
     /// index per pixel, row 0 first (SPEC-02 REQ-CORE-048). Only read in 2D mode.
     pub nes_picture: &'a [u8],
+    /// The rows of `nes_picture`: 240, more with a vertical widescreen margin (0 reads as 240).
+    pub nes_picture_height: usize,
 }
 
 impl<'a> SceneFrame<'a> {
@@ -334,6 +336,7 @@ impl<'a> SceneFrame<'a> {
         Self {
             draw_list: Some(draw_list),
             nes_picture: &[],
+            nes_picture_height: 0,
         }
     }
 }

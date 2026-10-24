@@ -691,26 +691,29 @@ impl Ppu2C02 {
     /// middle columns are the PPU's own picture; the sides are composed from the tile records
     /// in the NES order (a sprite in front, then the background, then a sprite behind, a lower
     /// sprite number winning) over the universal backdrop.
-    pub fn wide_picture_into(&self, out: &mut Vec<u8>) {
+    pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
         let margin = usize::try_from(self.frame_margin.max(0)).unwrap_or(0);
+        let margin_y = usize::try_from(self.frame_vertical_margin.max(0)).unwrap_or(0);
         let width = SCREEN_WIDTH + (2 * margin);
-        let height = super::SCREEN_HEIGHT;
+        let height = super::SCREEN_HEIGHT + (2 * margin_y);
         out.clear();
-        if margin == 0 {
+        if margin == 0 && margin_y == 0 {
             out.extend_from_slice(&self.pixels);
-            return;
+            return height;
         }
 
         // The PPU blanks its first 8 columns when the game asks for it, which in a wide picture
         // would be a black band in the middle: they are composed too.
         let composed_from = if self.left_column_masked() { 8 } else { 0 };
+        let screen_rows = margin_y..margin_y + super::SCREEN_HEIGHT;
         // Palette entries of the sides (0 = nothing), composed first, then turned into colours. A
         // sprite behind is painted first so that an opaque background pixel covers it.
         out.resize(width * height, 0);
         let paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
             for py in 0..8i32 {
-                let y = i32::from(record.y) + py;
-                let Ok(row) = usize::try_from(y) else {
+                let Ok(row) =
+                    usize::try_from(i32::from(record.y) + py + self.frame_vertical_margin)
+                else {
                     continue;
                 };
                 if row >= height {
@@ -718,7 +721,8 @@ impl Ppu2C02 {
                 }
                 for px in 0..8i32 {
                     let x = i32::from(record.x) + px;
-                    if (composed_from..SCREEN_WIDTH_I32).contains(&x) {
+                    if screen_rows.contains(&row) && (composed_from..SCREEN_WIDTH_I32).contains(&x)
+                    {
                         continue;
                     }
                     let Ok(column) = usize::try_from(x + self.frame_margin) else {
@@ -754,18 +758,19 @@ impl Ppu2C02 {
             paint(record, 0x10, out);
         }
 
+        #[allow(clippy::cast_sign_loss)] // 0 or 8.
+        let first = margin + composed_from as usize;
         for row in 0..height {
             let line = &mut out[row * width..(row + 1) * width];
             for (column, slot) in line.iter_mut().enumerate() {
-                #[allow(clippy::cast_sign_loss)] // 0 or 8.
-                let first = margin + composed_from as usize;
-                if (first..margin + SCREEN_WIDTH).contains(&column) {
-                    *slot = self.pixels[(row * SCREEN_WIDTH) + column - margin];
+                if screen_rows.contains(&row) && (first..margin + SCREEN_WIDTH).contains(&column) {
+                    *slot = self.pixels[((row - margin_y) * SCREEN_WIDTH) + column - margin];
                 } else {
                     *slot = self.palette[palette_index(0x3F00 | u16::from(*slot))];
                 }
             }
         }
+        height
     }
 }
 

@@ -749,6 +749,7 @@ impl Running {
                 let frame = SceneFrame {
                     draw_list: Some(displayed),
                     nes_picture: &[],
+                    nes_picture_height: 0,
                 };
                 draw_scene(graphics, view, &scene, &frame, shadow_reported, clock)
             };
@@ -1201,6 +1202,8 @@ struct RunState {
     shadow_map_reported: bool,
     drag_origin: Option<[f32; 2]>,
     picture: Vec<u8>,
+    /// Its rows.
+    picture_height: usize,
 }
 
 impl RunState {
@@ -1215,6 +1218,7 @@ impl RunState {
             shadow_map_reported: false,
             drag_origin: None,
             picture: Vec::new(),
+            picture_height: 0,
         }
     }
 }
@@ -1508,7 +1512,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     // the two, and nothing of the session is reloaded to switch.
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
-        session.copy_nes_picture(&mut state.picture);
+        state.picture_height = session.copy_nes_picture(&mut state.picture);
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
     scene.followed_shape = session.followed_shape();
@@ -1539,6 +1543,7 @@ fn render_scene(
     let frame = SceneFrame {
         draw_list: list,
         nes_picture: picture,
+        nes_picture_height: state.picture_height,
     };
     draw_scene(
         graphics,

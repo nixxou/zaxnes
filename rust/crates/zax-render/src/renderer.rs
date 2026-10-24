@@ -79,8 +79,8 @@ impl Residency for GlResidency<'_> {
         self.textures.get(texture)
     }
 
-    fn picture(&mut self, picture: &[u8]) -> Result<Option<Texture>, GlError> {
-        self.picture.upload(picture)
+    fn picture(&mut self, picture: &[u8], height: usize) -> Result<Option<Texture>, GlError> {
+        self.picture.upload(picture, height)
     }
 }
 
@@ -127,7 +127,7 @@ pub struct SceneRenderer {
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
     /// The quad of the last widescreen 2D-mode picture, by margin.
-    wide_picture_quad: Option<(u16, Arc<TileMesh>)>,
+    wide_picture_quad: Option<interop::WidePictureQuad>,
     plan: FramePlan<GpuMesh, Texture>,
     passes: Passes,
     last_view: CameraView,
@@ -288,8 +288,11 @@ impl SceneRenderer {
             textures: &mut self.textures,
             picture: &mut self.picture,
         };
-        self.wide_picture_quad =
-            interop::wide_quad_for(frame.nes_picture, self.wide_picture_quad.take())?;
+        self.wide_picture_quad = interop::wide_quad_for(
+            frame.nes_picture,
+            frame.nes_picture_height,
+            self.wide_picture_quad.take(),
+        )?;
         let fixed = FixedMeshes {
             unit_box: &self.unit_box,
             picture_quad: &self.picture_quad,

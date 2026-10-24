@@ -389,24 +389,24 @@ impl TextureStore {
         handle
     }
 
-    /// Uploads the NES picture of the 2D mode (colour indices, row 0 first, 240 rows of 256 or of
-    /// a widescreen width), or `None` when it has no such size.
+    /// Uploads the NES picture of the 2D mode (colour indices, row 0 first, `height` rows of 256
+    /// or of a widescreen width), or `None` when it has no such size.
     pub fn picture(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         indices: &[u8],
+        height: usize,
     ) -> Option<TextureHandle> {
-        const HEIGHT: usize = 240;
-        let width = crate::interop::picture_width(indices.len())?;
-        self.picture_pixels.resize(width * HEIGHT * 4, 0);
+        let (width, height) = crate::interop::picture_size(indices.len(), height)?;
+        self.picture_pixels.resize(width * height * 4, 0);
         for (pixel, &index) in self.picture_pixels.chunks_exact_mut(4).zip(indices) {
             let color = nes_color(usize::from(index));
             pixel.copy_from_slice(&[color.r, color.g, color.b, 255]);
         }
 
-        #[allow(clippy::cast_possible_truncation)] // At most 512 and 240.
-        let size = (width as u32, HEIGHT as u32);
+        #[allow(clippy::cast_possible_truncation)] // At most 1280 and 720.
+        let size = (width as u32, height as u32);
         if let Some(handle) = self.picture {
             let entry = self.slots[handle.0 as usize]
                 .as_ref()

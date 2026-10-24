@@ -261,7 +261,7 @@ pub struct WgpuSceneRenderer {
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
     /// The quad of the last widescreen 2D-mode picture, by margin.
-    wide_picture_quad: Option<(u16, Arc<TileMesh>)>,
+    wide_picture_quad: Option<interop::WidePictureQuad>,
     plan: FramePlan<MeshHandle, TextureHandle>,
     layouts: Layouts,
     scene_module: wgpu::ShaderModule,
@@ -329,8 +329,14 @@ impl Residency for WgpuResidency<'_> {
         Ok(self.textures.get(self.device, self.queue, texture))
     }
 
-    fn picture(&mut self, picture: &[u8]) -> Result<Option<TextureHandle>, Self::Error> {
-        Ok(self.textures.picture(self.device, self.queue, picture))
+    fn picture(
+        &mut self,
+        picture: &[u8],
+        height: usize,
+    ) -> Result<Option<TextureHandle>, Self::Error> {
+        Ok(self
+            .textures
+            .picture(self.device, self.queue, picture, height))
     }
 }
 
@@ -571,8 +577,11 @@ impl WgpuSceneRenderer {
             meshes: &mut self.meshes,
             textures: &mut self.textures,
         };
-        self.wide_picture_quad =
-            interop::wide_quad_for(frame.nes_picture, self.wide_picture_quad.take())?;
+        self.wide_picture_quad = interop::wide_quad_for(
+            frame.nes_picture,
+            frame.nes_picture_height,
+            self.wide_picture_quad.take(),
+        )?;
         let fixed = FixedMeshes {
             unit_box: &self.unit_box,
             picture_quad: &self.picture_quad,

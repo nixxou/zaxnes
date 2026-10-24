@@ -265,6 +265,8 @@ struct FramePipeline {
     in_flight: bool,
     /// The picture of the last finished frame, kept while the core is away.
     picture: Vec<u8>,
+    /// Its rows.
+    picture_height: usize,
     /// Whether the profile's scripts leave the core alone (no input hook, no memory or port
     /// access), so that the next frame may run while the scripts of the last one do
     /// ([`GameSession::launch_ahead`]).
@@ -613,7 +615,7 @@ impl GameSession {
             .memory
             .ram
             .copy_from_slice(self.core.bus().ram());
-        self.core.wide_picture_into(&mut self.pipeline.picture);
+        self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
     }
 
     /// Starts the next frame on the emulation thread at once ("emulation ahead"): its input word
@@ -644,7 +646,8 @@ impl GameSession {
                 clock.stop(Stage::Core, started);
                 let captured = self.capture_batch(clock);
                 self.pipeline.pending = Some(captured);
-                self.core.wide_picture_into(&mut self.pipeline.picture);
+                self.pipeline.picture_height =
+                    self.core.wide_picture_into(&mut self.pipeline.picture);
             }
         }
     }
@@ -911,7 +914,7 @@ impl GameSession {
         // The 2D mode shows the core's picture while the next frame runs (emulation ahead has
         // kept the picture of the frame it captured).
         if self.pipeline.pending.is_none() {
-            self.core.wide_picture_into(&mut self.pipeline.picture);
+            self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
         }
         let core = std::mem::replace(&mut self.core, spare);
         match worker.start(core, word) {
@@ -1120,13 +1123,15 @@ impl GameSession {
         self.engine.two_dimensional_mode
     }
 
-    /// Copies the core's 256 x 240 indexed picture into `destination`.
-    pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) {
+    /// Copies the core's indexed picture (256 x 240, larger with widescreen margins) into
+    /// `destination`; returns its rows.
+    pub fn copy_nes_picture(&self, destination: &mut Vec<u8>) -> usize {
         destination.clear();
         if self.pipeline.in_flight || self.pipeline.pending.is_some() {
             destination.extend_from_slice(&self.pipeline.picture);
+            self.pipeline.picture_height
         } else {
-            self.core.wide_picture_into(destination);
+            self.core.wide_picture_into(destination)
         }
     }
 
