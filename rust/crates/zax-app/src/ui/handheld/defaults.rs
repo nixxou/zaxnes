@@ -20,7 +20,7 @@ const TWO_THIRDS: i32 = 1;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 7] {
+fn defaults() -> [(SettingId, SettingValue); 8] {
     [
         (
             SettingId::VideoRenderMethod,
@@ -34,6 +34,8 @@ fn defaults() -> [(SettingId, SettingValue); 7] {
         // The optimised Lua, and the scripts of a late frame beside the drawing (owner request).
         (SettingId::EmuLuaOptimized, SettingValue::Bool(true)),
         (SettingId::EmuPipeline, SettingValue::Enum(PIPELINE_AUTO)),
+        // The render scale follows the GPU time (owner request).
+        (SettingId::VideoDynamicResolution, SettingValue::Bool(true)),
     ]
 }
 
@@ -61,6 +63,7 @@ mod tests {
         assert_eq!(1, model.vsync());
         assert!(model.get(SettingId::EmuLuaOptimized).as_bool());
         assert_eq!(PIPELINE_AUTO, model.get(SettingId::EmuPipeline).as_int());
+        assert!(model.get(SettingId::VideoDynamicResolution).as_bool());
     }
 
     #[test]

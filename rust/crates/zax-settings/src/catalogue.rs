@@ -119,6 +119,7 @@ setting_ids! {
     EmuLuaSmoothGc => "emu.lua_smooth_gc",
     EmuLuaOptimized => "emu.lua_optimized",
     EmuPipeline => "emu.pipeline",
+    VideoDynamicResolution => "video.dynamic_resolution",
     ConvSameBgPalette => "conv.same_bg_palette",
     ConvSameSpPalette => "conv.same_sp_palette",
     ConvSpriteTolerance => "conv.sprite_tolerance",

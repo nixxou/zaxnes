@@ -213,6 +213,18 @@ struct Running {
     clock: StageClock,
     /// The pipelined frames (`emu.pipeline`).
     pipeline: Pipelined,
+    /// The automatic resolution (`video.dynamic_resolution`).
+    resolution: AutomaticResolution,
+}
+
+/// The state of the automatic resolution between two displayed frames.
+#[derive(Default)]
+struct AutomaticResolution {
+    governor: render_scaling::DynamicResolution,
+    /// Whether the renderer times its passes: the setting is on and the context can.
+    timing: bool,
+    /// Whether the log said once that the context cannot time GPU work.
+    reported: bool,
 }
 
 /// The state of the pipelined frames between two displayed frames.
@@ -331,6 +343,7 @@ impl Running {
             profiler: profiling.then(|| FrameProfiler::new(Instant::now())),
             clock: StageClock::new(profiling),
             pipeline: Pipelined::default(),
+            resolution: AutomaticResolution::default(),
         })
     }
 
@@ -405,6 +418,7 @@ impl Running {
         self.pipeline
             .governor
             .record(pipelined, busy_begin.elapsed(), overlap, budget);
+        self.follow_the_gpu(budget);
         if self.host.quit_requested()
             || (self.options.smoke_test
                 && smoke_run_is_over(&self.options, &self.host, &self.state))
@@ -493,11 +507,16 @@ impl Running {
     /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
         let view_height = (height - to_i32_f(self.ui.chrome_height())).max(1);
+        let factor = if self.resolution.timing {
+            self.resolution.governor.factor()
+        } else {
+            self.host.settings().res_scale_factor()
+        };
         let (scene_width, scene_height) = render_scaling::scene_size(
             width,
             view_height,
             self.host.settings().render_method(),
-            self.host.settings().res_scale_factor(),
+            factor,
         );
         self.host
             .view_mut()
@@ -558,6 +577,34 @@ impl Running {
         self.pipeline
             .governor
             .next_frame(PipelineMode::of(self.host.settings()), allows)
+    }
+
+    /// The automatic resolution: switches the renderer's GPU timing with the setting, and gives
+    /// the governor the measure that arrived during this frame.
+    fn follow_the_gpu(&mut self, budget: Duration) {
+        let settings = self.host.settings();
+        let wanted = settings.get(SettingId::VideoDynamicResolution).as_bool()
+            && render_scaling::scale_applies(settings.render_method());
+        let resolution = &mut self.resolution;
+        if wanted != resolution.timing {
+            resolution.timing = self.renderer.set_gpu_timing(wanted);
+            if wanted && !resolution.timing && !std::mem::replace(&mut resolution.reported, true) {
+                log("the GPU cannot time its work: the automatic resolution keeps the set scale.");
+            }
+        }
+        if !resolution.timing {
+            return;
+        }
+        if let Some(gpu) = self.renderer.statistics().gpu_time {
+            if resolution.governor.record(gpu, budget) {
+                log(&format!(
+                    "automatic resolution: scale {:.2} (GPU {:.1} ms for a {:.1} ms frame)",
+                    resolution.governor.factor(),
+                    gpu.as_secs_f64() * 1000.0,
+                    budget.as_secs_f64() * 1000.0
+                ));
+            }
+        }
     }
 
     /// The time one displayed frame may take: the swap interval at the display's refresh rate.
