@@ -46,13 +46,14 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     assert!(specified.is_subset(&model));
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
-    // emu.catch_up, emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler,
-    // video.backend, video.dynamic_resolution and video.widescreen: Rust-only settings (owner
-    // request).
+    // emu.builtin_patches, emu.catch_up, emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline,
+    // ui.profiler, video.backend, video.dynamic_resolution, video.widescreen and
+    // video.widescreen_extra: Rust-only settings (owner request).
     assert_eq!(
         additions,
         [
             "audio.mute",
+            "emu.builtin_patches",
             "emu.catch_up",
             "emu.lua_optimized",
             "emu.lua_smooth_gc",
@@ -62,7 +63,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "ui.show_fps",
             "video.backend",
             "video.dynamic_resolution",
-            "video.widescreen"
+            "video.widescreen",
+            "video.widescreen_extra"
         ]
     );
 }

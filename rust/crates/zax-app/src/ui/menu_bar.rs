@@ -97,6 +97,9 @@ pub struct MenuItem {
     pub selection: Option<Selection>,
     /// For a submenu, what it lists.
     pub submenu: Option<Submenu>,
+    /// Shown in the warning colour: a save state made with the built-in ROM patches set the
+    /// other way.
+    pub warning: bool,
 }
 
 impl MenuItem {
@@ -109,6 +112,7 @@ impl MenuItem {
             shortcut: String::new(),
             selection: None,
             submenu: None,
+            warning: false,
         }
     }
 
@@ -395,11 +399,15 @@ fn recent_rom_items(roms: &[String]) -> Vec<MenuItem> {
 fn slot_items(numbered: Command, quick: Command, host: &AppHost) -> Vec<MenuItem> {
     let mut items = Vec::with_capacity(EXPOSED_SLOT_COUNT + 2);
     for slot in 1..=slot_count() {
-        items.push(MenuItem::of(
-            numbered,
-            Some(slot_label(slot, host.slots.find(&numbered_slot_id(slot)))),
-            CommandArgs::of_number(slot),
-        ));
+        let id = numbered_slot_id(slot);
+        let fits = host.slot_fits_builtin_patches(&id);
+        let mut label = slot_label(slot, host.slots.find(&id));
+        if !fits {
+            label = format!("{label} ({})", text::slot_other_patch());
+        }
+        let mut item = MenuItem::of(numbered, Some(label), CommandArgs::of_number(slot));
+        item.warning = !fits;
+        items.push(item);
     }
     items.push(MenuItem::rule());
     items.push(MenuItem::of(

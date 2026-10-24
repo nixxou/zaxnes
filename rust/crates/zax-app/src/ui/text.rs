@@ -153,6 +153,12 @@ pub fn empty_slot() -> String {
     strings::get(keys::SLOT_EMPTY)
 }
 
+/// Note added to a slot whose state was made with the built-in ROM patches set the other way.
+#[must_use]
+pub fn slot_other_patch() -> String {
+    strings::get(keys::SLOT_OTHER_PATCH)
+}
+
 /// Label of the quick slot in the state submenus (REQ-UI-208).
 #[must_use]
 pub fn quick_slot() -> String {

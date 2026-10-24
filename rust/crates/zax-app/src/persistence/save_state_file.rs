@@ -20,6 +20,10 @@ pub const LEGACY_SIGNATURE: &[u8; 8] = b"SEN3DSAV";
 pub const FORMAT_VERSION: i32 = 1;
 /// Notification text of an unreadable state (REQ-LOOP-046).
 pub const CORRUPTED_MESSAGE: &str = "Corrupted save state.";
+
+/// The message shown when a state was made with the built-in ROM patches set the other way.
+pub const OTHER_PATCH_MESSAGE: &str =
+    "This save state was made with the built-in ROM patches set the other way.";
 /// Notification text of a state whose game is gone (REQ-LOOP-044).
 pub const GAME_MISSING_MESSAGE: &str = "The game profile doesn't exist anymore.";
 /// Largest header the reader accepts.

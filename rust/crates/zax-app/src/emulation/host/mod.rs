@@ -204,6 +204,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub notifications: NotificationCenter,
     /// The save slots.
     pub slots: SaveSlotIndex,
+    /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
+    slot_patch_cache: std::cell::RefCell<std::collections::HashMap<(String, i64, bool), bool>>,
     /// The Zapper.
     pub zapper: ZapperState,
     /// How far the frame clock catches up when the command line or the environment says so;
@@ -292,6 +294,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
             slots,
+            slot_patch_cache: std::cell::RefCell::default(),
             zapper: ZapperState::new(),
             catch_up: None,
             defer_conversion: false,

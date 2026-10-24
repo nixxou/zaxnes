@@ -189,6 +189,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.fail_job(CORRUPTED_MESSAGE);
             return;
         };
+        // A state made with the built-in ROM patches set the other way would run the other code
+        // on its memory: it is refused before anything is touched.
+        if self.state_fits_builtin_patches(&state.core) == Some(false) {
+            self.notifications
+                .show_error(save_state_file::OTHER_PATCH_MESSAGE);
+            return;
+        }
         let mut job = LoadJob::new(LoadKind::LoadSlot);
         job.game = Some(game);
         slot_id.clone_into(&mut job.slot_id);
@@ -304,8 +311,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let Some(rom) = job.rom.as_ref() else {
                     return Step::Failed(INVALID_ROM_MESSAGE.to_owned());
                 };
+                let builtin_patches = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
                 let result = match self.session.as_mut() {
-                    Some(session) => session.load_rom(&rom.image, &rom.name),
+                    Some(session) => {
+                        session.core_mut().set_builtin_patches(builtin_patches);
+                        session.load_rom(&rom.image, &rom.name)
+                    }
                     None => return Step::Failed(INVALID_ROM_MESSAGE.to_owned()),
                 };
                 if !result.success {
@@ -539,6 +550,38 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         scene.light.reset();
         scene.backdrop.reset();
         crate::scene_script_bridge::push_settings(&self.settings, scene);
+    }
+
+    /// Whether the core block `core` can be restored with the built-in ROM patches as the
+    /// settings have them (see `NesCore::state_fits_builtin_patches`).
+    pub fn state_fits_builtin_patches(&self, core: &[u8]) -> Option<bool> {
+        let mut probe = NesCore::new();
+        probe.set_builtin_patches(self.settings.get(SettingId::EmuBuiltinPatches).as_bool());
+        probe.state_fits_builtin_patches(core, 0)
+    }
+
+    /// Whether the state of slot `slot_id` fits the built-in ROM patches as set; remembered per
+    /// slot and save time, so that a menu can ask every frame.
+    pub fn slot_fits_builtin_patches(&self, slot_id: &str) -> bool {
+        let Some(record) = self
+            .slots
+            .find(slot_id)
+            .filter(|record| record.is_occupied())
+        else {
+            return true;
+        };
+        let enabled = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
+        let key = (slot_id.to_owned(), record.saved_at, enabled);
+        if let Some(&fits) = self.slot_patch_cache.borrow().get(&key) {
+            return fits;
+        }
+        let fits = std::fs::read(self.paths.slot_state_file(slot_id))
+            .ok()
+            .and_then(|bytes| save_state_file::try_read(&bytes))
+            .and_then(|state| self.state_fits_builtin_patches(&state.core))
+            .unwrap_or(true);
+        self.slot_patch_cache.borrow_mut().insert(key, fits);
+        fits
     }
 
     pub(super) fn current_rom_fingerprint(&self) -> Option<String> {

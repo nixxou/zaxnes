@@ -55,6 +55,8 @@ pub struct NesCore {
     /// carry this one, so that restoring one applies the patch of the running build.
     original_image: Option<Vec<u8>>,
     builtin_patch: Option<&'static str>,
+    /// Whether the built-in patches apply at all (on by default).
+    builtin_patches_enabled: bool,
 }
 
 impl Default for NesCore {
@@ -77,6 +79,48 @@ impl NesCore {
             zapper_position_source: None,
             original_image: None,
             builtin_patch: None,
+            builtin_patches_enabled: true,
+        }
+    }
+
+    /// Turns the built-in patches on or off for the next [`NesCore::load_rom`] and state
+    /// restore; the ROM loaded keeps what it has.
+    pub fn set_builtin_patches(&mut self, enabled: bool) {
+        self.builtin_patches_enabled = enabled;
+    }
+
+    /// Whether the state block at `offset` in `data` can be restored with the built-in patches as
+    /// they are set: a block made by a ROM a built-in patch applies to must have been made with
+    /// the patch (widescreen extension running) when the patches are on, and without it when they
+    /// are off; any other block fits. `None` when `data` holds no readable block there.
+    #[must_use]
+    pub fn state_fits_builtin_patches(&self, data: &[u8], offset: usize) -> Option<bool> {
+        let wide = Self::state_uses_widescreen(data, offset)?;
+        let mut reader = StateReader::new(data, offset).ok()?;
+        reader.read_u32().ok()?;
+        reader.read_i32().ok()?;
+        reader.read_string().ok()?;
+        let has_rom_image = reader.read_bool().ok()?;
+        reader.read_string().ok()?;
+        let rom = reader.read_blob().ok()?;
+        let patchable = has_rom_image && crate::builtin_patches::matches(&rom);
+        Some(wide == (patchable && self.builtin_patches_enabled))
+    }
+
+    /// Whether the state block at `offset` in `data` was made by a ROM running the widescreen
+    /// extension (format 5 or 6: `Some(true)`) or by one without it (4: `Some(false)`); `None`
+    /// when `data` holds no block of this core there. A ROM patched by a built-in patch needs
+    /// states of the first kind, the unpatched ROM states of the second.
+    #[must_use]
+    pub fn state_uses_widescreen(data: &[u8], offset: usize) -> Option<bool> {
+        let header = data.get(offset..offset.checked_add(8)?)?;
+        if u32::from_le_bytes([header[0], header[1], header[2], header[3]]) != Self::STATE_MAGIC {
+            return None;
+        }
+        match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
+            Self::STATE_VERSION => Some(false),
+            Self::WIDE_STATE_VERSION | Self::WIDE_STATE_VERSION_5 => Some(true),
+            _ => None,
         }
     }
 
@@ -147,7 +191,11 @@ impl NesCore {
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
         // A ROM a built-in patch was made for is patched in memory (the host's copy is left
         // alone); the original is kept for the savestates.
-        let patched = crate::builtin_patches::apply(image);
+        let patched = if self.builtin_patches_enabled {
+            crate::builtin_patches::apply(image)
+        } else {
+            None
+        };
         let loaded = patched
             .as_ref()
             .map_or(image, |patched| patched.image.as_slice());
@@ -673,7 +721,11 @@ impl NesCore {
         let rom = if has_rom_image {
             // The block is self-contained: it restores even with no ROM loaded
             // (REQ-CORE-090). A ROM a built-in patch was made for gets the patch of this build.
-            let patched = crate::builtin_patches::apply(&rom_bytes);
+            let patched = if self.builtin_patches_enabled {
+                crate::builtin_patches::apply(&rom_bytes)
+            } else {
+                None
+            };
             let image = patched
                 .as_ref()
                 .map_or(rom_bytes.as_slice(), |p| p.image.as_slice());
