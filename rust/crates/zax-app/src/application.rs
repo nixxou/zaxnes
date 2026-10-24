@@ -212,28 +212,18 @@ struct Running {
 
 /// The state of the automatic resolution between two displayed frames.
 #[derive(Default)]
-#[allow(clippy::struct_excessive_bools)] // Independent facts of the run, not a state machine.
 struct AutomaticResolution {
-    governor: render_scaling::DynamicResolution,
-    /// Whether the renderer times its passes: the setting is on and the context can.
-    timing: bool,
-    /// Whether the log said once that the context cannot time GPU work.
-    reported: bool,
-    /// Whether the log said once that the timer returned a value that is no measure.
-    reported_implausible: bool,
-    /// Results the timer returned since timing started, and how many were no measure: when
-    /// none of the first ones is, the timer is given up.
-    results: u32,
-    rejected: u32,
-    /// Whether the timer was given up for this run.
-    given_up: bool,
-    /// The measures of the profiler's window: count, sum and maximum, and the results rejected.
-    window: (u32, Duration, Duration, u32),
+    governor: render_scaling::AutomaticScale,
+    /// Whether it is in force: the setting is on, the render method scales the view, the
+    /// renderer is the OpenGL one and the frames have a pace to keep.
+    active: bool,
+    /// When the frame before began and how long its work before the swap took: its outcome is
+    /// known once the next one begins.
+    previous: Option<(Instant, Duration)>,
+    /// The profiler's window: the lowest and highest scale, and the frames late because of the
+    /// drawing and because of the work.
+    window: Option<(f32, f32, u32, u32)>,
 }
-
-/// Results of the GPU timer without a single measure after which the automatic resolution gives
-/// the timer up for the run (about 5 s at 60 Hz).
-const GPU_RESULTS_BEFORE_GIVING_UP: u32 = 300;
 
 /// The state of the pipelined frames between two displayed frames.
 #[derive(Default)]
@@ -444,7 +434,7 @@ impl Running {
         if pipelined {
             self.clock.count_pipelined();
         }
-        self.follow_the_gpu(budget);
+        self.follow_the_frames(busy_begin, busy_begin.elapsed());
         if self.host.quit_requested()
             || (self.options.smoke_test
                 && smoke_run_is_over(&self.options, &self.host, &self.state))
@@ -483,7 +473,7 @@ impl Running {
                 &hooks,
                 profiler.reported_frames(),
             ));
-            if let Some(line) = self.gpu_report() {
+            if let Some(line) = self.resolution_report() {
                 log(&line);
             }
         }
@@ -551,7 +541,8 @@ impl Running {
     /// previous image.
     fn plan_view(&mut self, emulated: u32, width: i32, height: i32) -> Result<ViewPlan, String> {
         let view_height = (height - to_i32_f(self.ui.chrome_height())).max(1);
-        let factor = if self.resolution.timing {
+        let automatic = self.resolution.active;
+        let factor = if automatic {
             self.resolution.governor.factor()
         } else {
             self.host.settings().res_scale_factor()
@@ -562,10 +553,17 @@ impl Running {
             self.host.settings().render_method(),
             factor,
         );
-        self.host
+        let view = self
+            .host
             .view_mut()
-            .ok_or("the host has no view of the game")?
-            .resize(scene_width, scene_height)?;
+            .ok_or("the host has no view of the game")?;
+        if automatic {
+            // The scale changes every few frames: the buffers keep the room of the whole view,
+            // and the scene is drawn into part of them.
+            view.resize_within(scene_width, scene_height, (width.max(1), view_height))?;
+        } else {
+            view.resize(scene_width, scene_height)?;
+        }
         let skip = render_skip::should_skip(
             self.host.scene().settings.skip_render,
             self.host.state() == EmulationState::Running,
@@ -657,80 +655,79 @@ impl Running {
             .next_frame(PipelineMode::of(self.host.settings()), allows)
     }
 
-    /// The automatic resolution: switches the renderer's GPU timing with the setting, and gives
-    /// the governor the measure that arrived during this frame.
-    fn follow_the_gpu(&mut self, budget: Duration) {
+    /// The automatic resolution: the outcome of the frame before (on time, late because of the
+    /// drawing, late because of the work) goes to the governor, once this frame, which began at
+    /// `began` and worked `work` before its swap, tells how long it lasted.
+    fn follow_the_frames(&mut self, began: Instant, work: Duration) {
         let settings = self.host.settings();
-        let resolution = &mut self.resolution;
+        let budget = self.paced_budget();
         let wanted = settings.get(SettingId::VideoDynamicResolution).as_bool()
             && render_scaling::scale_applies(settings.render_method())
-            && !resolution.given_up;
-        if wanted != resolution.timing {
-            resolution.timing = self.graphics.set_gpu_timing(wanted);
-            if wanted && !resolution.timing && !std::mem::replace(&mut resolution.reported, true) {
-                log("the GPU cannot time its work: the automatic resolution keeps the set scale.");
-            }
-        }
-        if !resolution.timing {
-            return;
-        }
-        let Some(gpu) = self.graphics.statistics().gpu_time else {
-            return;
-        };
-        resolution.results += 1;
-        if !render_scaling::plausible_gpu_time(gpu) {
-            resolution.rejected += 1;
-            resolution.window.3 += 1;
-            if !std::mem::replace(&mut resolution.reported_implausible, true) {
+            && self.graphics.is_gl()
+            && budget.is_some();
+        let resolution = &mut self.resolution;
+        if wanted != resolution.active {
+            resolution.active = wanted;
+            resolution.previous = None;
+            if wanted {
                 log(&format!(
-                    "automatic resolution: the GPU timer returned {:.1} ms, which is no measure; \
-                     such results are left out.",
-                    gpu.as_secs_f64() * 1000.0
-                ));
-            }
-            if resolution.rejected == resolution.results
-                && resolution.results >= GPU_RESULTS_BEFORE_GIVING_UP
-            {
-                resolution.given_up = true;
-                resolution.timing = self.graphics.set_gpu_timing(false);
-                log(&format!(
-                    "automatic resolution: the GPU timer gave no measure in {} results; the \
-                     scale stays at {:.2}.",
-                    resolution.results,
+                    "automatic resolution: on, from scale {:.2}",
                     resolution.governor.factor()
                 ));
             }
-            return;
         }
-        let window = &mut resolution.window;
-        window.0 += 1;
-        window.1 += gpu;
-        window.2 = window.2.max(gpu);
-        if resolution.governor.record(gpu, budget) {
-            log(&format!(
-                "automatic resolution: scale {:.2} (GPU {:.1} ms for a {:.1} ms frame)",
-                resolution.governor.factor(),
-                gpu.as_secs_f64() * 1000.0,
-                budget.as_secs_f64() * 1000.0
-            ));
+        let Some(budget) = budget.filter(|_| resolution.active) else {
+            return;
+        };
+        let Some((start, previous_work)) = resolution.previous.replace((began, work)) else {
+            return;
+        };
+        let outcome =
+            render_scaling::frame_outcome(began.duration_since(start), previous_work, budget);
+        resolution.governor.record(outcome);
+        let scale = resolution.governor.factor();
+        let window = resolution.window.get_or_insert((scale, scale, 0, 0));
+        window.0 = window.0.min(scale);
+        window.1 = window.1.max(scale);
+        match outcome {
+            render_scaling::FrameOutcome::LateDrawing => window.2 += 1,
+            render_scaling::FrameOutcome::LateWork => window.3 += 1,
+            render_scaling::FrameOutcome::OnTime => {}
         }
     }
 
-    /// The GPU line of a profiler report while the automatic resolution times the GPU: the
-    /// measures of the window and the scale in force. Starts the next window.
-    fn gpu_report(&mut self) -> Option<String> {
+    /// The resolution line of a profiler report while the automatic resolution is in force:
+    /// the scales of the window and the late frames. Starts the next window.
+    fn resolution_report(&mut self) -> Option<String> {
         let resolution = &mut self.resolution;
-        let (count, sum, max, rejected) = std::mem::take(&mut resolution.window);
-        if !resolution.timing {
+        let window = resolution.window.take();
+        if !resolution.active {
             return None;
         }
-        let mean = sum.as_secs_f64() * 1000.0 / f64::from(count.max(1));
+        let (lowest, highest, drawing, work) = window.unwrap_or_default();
         Some(format!(
-            "profile gpu: scene passes {mean:.2}/{:.2} ms (mean/max) over {count} measures, \
-             {rejected} result(s) left out | automatic resolution scale {:.2}",
-            max.as_secs_f64() * 1000.0,
+            "profile resolution: scale {:.2} now, {lowest:.2} to {highest:.2} in the window | \
+             late frames: {drawing} because of the drawing, {work} because of the work",
             resolution.governor.factor()
         ))
+    }
+
+    /// The time a displayed frame has, as the pacing in force sets it: the swap interval at the
+    /// display's refresh rate, or the frame cap's period; none when nothing paces the frames.
+    fn paced_budget(&self) -> Option<Duration> {
+        let interval = self.window.vsync_interval();
+        if interval > 0 {
+            let refresh = self
+                .window
+                .window()
+                .display_mode()
+                .map_or(60, |mode| mode.refresh_rate)
+                .max(1);
+            return Some(Duration::from_secs_f64(
+                f64::from(interval) / f64::from(refresh),
+            ));
+        }
+        self.window.frame_cap()
     }
 
     /// The time one displayed frame may take: the swap interval at the display's refresh rate.

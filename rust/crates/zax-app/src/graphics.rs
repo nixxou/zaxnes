@@ -80,6 +80,30 @@ pub enum SceneView {
 }
 
 impl SceneView {
+    /// Gives the picture `width` x `height` pixels inside buffers of `capacity` (the OpenGL
+    /// picture; the wgpu one is sized exactly).
+    ///
+    /// # Errors
+    ///
+    /// The GL framebuffer could not be made again.
+    pub fn resize_within(
+        &mut self,
+        width: i32,
+        height: i32,
+        capacity: (i32, i32),
+    ) -> Result<(), String> {
+        match self {
+            Self::Gl(view) => view
+                .resize_within(width, height, capacity)
+                .map_err(|error| error.to_string()),
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(view) => {
+                view.resize(width, height);
+                Ok(())
+            }
+        }
+    }
+
     /// Gives the picture `width` x `height` pixels (at least 1 x 1).
     ///
     /// # Errors
@@ -226,6 +250,12 @@ pub enum Graphics {
 }
 
 impl Graphics {
+    /// Whether the scene is drawn by the OpenGL renderer.
+    #[must_use]
+    pub const fn is_gl(&self) -> bool {
+        matches!(self, Self::Gl { .. })
+    }
+
     /// What the last rendered frame cost.
     #[must_use]
     pub fn statistics(&self) -> &RenderStatistics {
@@ -264,6 +294,9 @@ impl Graphics {
                     width: view.width(),
                     height: view.height(),
                 };
+                // The renderer's own buffers keep the room the picture has.
+                let (room_width, room_height) = view.capacity();
+                renderer.reserve_target(room_width, room_height);
                 renderer
                     .render(&target, scene, frame)
                     .map_err(|error| error.to_string())

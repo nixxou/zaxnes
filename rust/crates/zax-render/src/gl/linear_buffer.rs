@@ -22,6 +22,7 @@ use super::api::{Gl, GlError};
 use super::program::ShaderProgram;
 use super::shaders;
 use crate::geometry;
+use crate::numerics::Vector2;
 use crate::target::RenderTarget;
 
 /// The single-sample attachments.
@@ -49,8 +50,14 @@ pub struct LinearColorBuffer {
     attachments: Option<Attachments>,
     samples_attachments: Option<SampleAttachments>,
     max_samples: i32,
+    /// The size drawn into, at the bottom left of the attachments.
     width: i32,
     height: i32,
+    /// The size of the attachments: the size drawn into, or more when the host reserved room
+    /// for a size that changes often ([`Self::reserve`]).
+    capacity: (i32, i32),
+    /// The room the host asks to keep.
+    reserve: (i32, i32),
     samples: i32,
 }
 
@@ -72,6 +79,8 @@ impl LinearColorBuffer {
             max_samples,
             width: 0,
             height: 0,
+            capacity: (0, 0),
+            reserve: (0, 0),
             samples: 1,
         })
     }
@@ -82,23 +91,29 @@ impl LinearColorBuffer {
         self.samples
     }
 
+    /// Keeps attachments of at least `width` × `height`, whatever size is drawn into: a host
+    /// whose size changes often (the automatic resolution) then draws into part of them instead
+    /// of reallocating them. `(0, 0)` gives the room back.
+    pub const fn reserve(&mut self, width: i32, height: i32) {
+        self.reserve = (width, height);
+    }
+
     /// Binds the buffer as the draw target at `width` × `height`, reallocating it when the size
-    /// or the sample count changed. `samples` is clamped to what `GL_MAX_SAMPLES` allows, then
-    /// lowered one step at a time until the multisampled framebuffer is complete (AMD-032 §2).
+    /// of the attachments or the sample count changes. `samples` is clamped to what
+    /// `GL_MAX_SAMPLES` allows, then lowered one step at a time until the multisampled
+    /// framebuffer is complete (AMD-032 §2).
     pub fn begin_pass(&mut self, width: i32, height: i32, samples: i32) -> Result<(), GlError> {
         let (w, h) = (width.max(1), height.max(1));
+        let capacity = (w.max(self.reserve.0), h.max(self.reserve.1));
         let wanted = geometry::clamp_anti_alias_samples(samples, self.max_samples);
-        if self.attachments.is_none()
-            || w != self.width
-            || h != self.height
-            || wanted != self.samples
-        {
+        if self.attachments.is_none() || capacity != self.capacity || wanted != self.samples {
             self.release();
-            self.attachments = Some(allocate(&self.gl, w, h)?);
-            self.width = w;
-            self.height = h;
+            self.attachments = Some(allocate(&self.gl, capacity.0, capacity.1)?);
+            self.capacity = capacity;
             self.allocate_samples(wanted)?;
         }
+        self.width = w;
+        self.height = h;
 
         let framebuffer = match (&self.samples_attachments, &self.attachments) {
             (Some(multisampled), _) => Some(multisampled.framebuffer),
@@ -140,6 +155,16 @@ impl LinearColorBuffer {
 
         self.resolve.use_program();
         self.resolve.set_i32("uLinear", 0);
+        // The part drawn into, in texture coordinates: the whole texture unless the host
+        // reserved room.
+        #[allow(clippy::cast_precision_loss)] // Sizes far below 2^24.
+        self.resolve.set_vec2(
+            "uUvScale",
+            Vector2::new(
+                self.width as f32 / self.capacity.0.max(1) as f32,
+                self.height as f32 / self.capacity.1.max(1) as f32,
+            ),
+        );
         gl.active_texture(0);
         gl.bind_texture(glow::TEXTURE_2D, Some(attachments.color));
         gl.bind_vertex_array(Some(self.vertex_array));
@@ -157,7 +182,7 @@ impl LinearColorBuffer {
         let mut count = samples;
         while count > 1 {
             let (attachments, status) =
-                try_allocate_samples(&self.gl, self.width, self.height, count)?;
+                try_allocate_samples(&self.gl, self.capacity.0, self.capacity.1, count)?;
             if status == glow::FRAMEBUFFER_COMPLETE {
                 self.samples_attachments = Some(attachments);
                 self.samples = count;
@@ -183,6 +208,7 @@ impl LinearColorBuffer {
         self.samples = 1;
         self.width = 0;
         self.height = 0;
+        self.capacity = (0, 0);
     }
 }
 

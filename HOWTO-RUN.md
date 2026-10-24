@@ -259,7 +259,12 @@ La version console reste en OpenGL ES.
   l'image est la même.
 - En Vulkan et DirectX 12, les ciels « Gradient » et « Fantasy » sont toujours les ciels calculés
   (`--assets` et ses cubemaps restent propres à OpenGL), et la résolution automatique garde
-  l'échelle choisie (elle n'est pas encore mesurée sur ces API).
+  l'échelle choisie (elle est propre au rendu OpenGL).
+- La résolution automatique (méthode de rendu « Render Tex ») fait varier la résolution de la
+  scène entre 50 et 100 %, sans à-coup : elle remonte d'un pour cent à la fois tant que les images
+  arrivent à l'heure, et redescend d'un dixième quand des images sont en retard **à cause du
+  rendu**. Les retards dus au processeur (scripts, conversion) n'y touchent pas : baisser la
+  résolution ne les corrigerait pas.
 
 **ReShade.** En **Vulkan**, ReShade trouve la profondeur de la scène 3D, ce qui ouvre les effets
 qui en dépendent (occlusion ambiante, profondeur de champ, brouillard…) :

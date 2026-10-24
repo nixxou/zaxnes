@@ -15,8 +15,11 @@ pub struct OffscreenFramebuffer {
     framebuffer: Option<glow::Framebuffer>,
     color_texture: Option<glow::Texture>,
     depth_buffer: Option<glow::Renderbuffer>,
+    /// The size of the picture, at the bottom left of the buffers.
     width: i32,
     height: i32,
+    /// The size of the buffers: the picture's, or more ([`Self::resize_within`]).
+    capacity: (i32, i32),
 }
 
 impl OffscreenFramebuffer {
@@ -32,9 +35,16 @@ impl OffscreenFramebuffer {
             depth_buffer: None,
             width: 0,
             height: 0,
+            capacity: (0, 0),
         };
         buffer.allocate(width.max(1), height.max(1))?;
         Ok(buffer)
+    }
+
+    /// The size of the buffers, at least the picture's.
+    #[must_use]
+    pub const fn capacity(&self) -> (i32, i32) {
+        self.capacity
     }
 
     /// Width in pixels.
@@ -60,12 +70,31 @@ impl OffscreenFramebuffer {
     /// # Errors
     /// The new framebuffer could not be created or is incomplete.
     pub fn resize(&mut self, width: i32, height: i32) -> Result<(), PlatformError> {
+        self.resize_within(width, height, (width, height))
+    }
+
+    /// Makes the picture `width` x `height` inside buffers of `capacity` (or of the picture's
+    /// size when it is larger): a picture whose size changes often within that room (the
+    /// automatic resolution) is drawn into part of the buffers, which are reallocated only when
+    /// the room changes.
+    ///
+    /// # Errors
+    /// The new framebuffer could not be created or is incomplete.
+    pub fn resize_within(
+        &mut self,
+        width: i32,
+        height: i32,
+        capacity: (i32, i32),
+    ) -> Result<(), PlatformError> {
         let (width, height) = (width.max(1), height.max(1));
-        if width == self.width && height == self.height {
-            return Ok(());
+        let capacity = (width.max(capacity.0), height.max(capacity.1));
+        if capacity != self.capacity {
+            self.release();
+            self.allocate(capacity.0, capacity.1)?;
         }
-        self.release();
-        self.allocate(width, height)
+        self.width = width;
+        self.height = height;
+        Ok(())
     }
 
     /// Copies the buffer onto the default framebuffer, stretched to the window and filtered
@@ -197,10 +226,13 @@ impl OffscreenFramebuffer {
                 "Offscreen framebuffer {width}x{height} is incomplete: {status:#x}."
             )));
         }
+        // Recorded once the buffers exist: after a failure, the next resize tries again.
+        self.capacity = (width, height);
         Ok(())
     }
 
     fn release(&mut self) {
+        self.capacity = (0, 0);
         // SAFETY: deletes the objects `allocate` created, on the same context.
         unsafe {
             if let Some(depth) = self.depth_buffer.take() {
