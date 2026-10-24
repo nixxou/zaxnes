@@ -79,6 +79,17 @@ impl TileBuffer {
     }
 
     /// Empties the buffer at the start of a rendered frame.
+    /// Keeps the background records `keep` accepts, and every sprite record.
+    pub fn retain_background(&mut self, mut keep: impl FnMut(&TileRecord) -> bool) {
+        self.records
+            .retain(|record| !record.background || keep(record));
+        self.background_count = self
+            .records
+            .iter()
+            .filter(|record| record.background)
+            .count();
+    }
+
     pub fn clear(&mut self) {
         self.records.clear();
         self.background_count = 0;

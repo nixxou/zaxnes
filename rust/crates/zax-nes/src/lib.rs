@@ -20,6 +20,7 @@ pub mod state;
 mod tile_record;
 mod video_info;
 pub mod wide;
+pub mod wide_decode;
 
 pub use frame_batch::{FrameBatch, VisibleRows, STANDARD_ROWS};
 pub use input::{ControllerPortType, ZapperPosition};

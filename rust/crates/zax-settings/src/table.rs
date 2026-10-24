@@ -1263,4 +1263,18 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("Widescreen extra width"),
     );
+    // Rust-only (owner request): a shape cut where the game stops drawing a band of the
+    // widescreen picture is left unfinished (temporary pattern) until it is whole. Off by
+    // default: a one-tile object standing there would stay temporary. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoWidescreenStrictEdges,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_label("Widescreen: wait for whole objects at the drawn edges"),
+    );
 }

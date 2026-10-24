@@ -20,9 +20,12 @@ pub struct BuiltinPatch {
     pub bps: &'static [u8],
 }
 
+/// Name of the Zelda II (USA) widescreen patch.
+pub const ZELDA2_USA: &str = "Zelda II (USA) widescreen";
+
 /// The built-in patches.
 pub const PATCHES: [BuiltinPatch; 1] = [BuiltinPatch {
-    name: "Zelda II (USA) widescreen",
+    name: ZELDA2_USA,
     source_crc: 0xBA32_2865,
     bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
 }];

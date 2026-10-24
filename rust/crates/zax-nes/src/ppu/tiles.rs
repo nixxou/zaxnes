@@ -16,7 +16,16 @@ use super::{
     palette_index, Cart, Ppu2C02, TileBuffer, SCREEN_WIDTH, SCREEN_WIDTH_I32, VISIBLE_SCANLINES,
 };
 use crate::cartridges::{Cartridge, ChrFetch};
+use crate::wide_decode::{BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 use crate::{nes_colors, NametableMirroring, TileRecord};
+
+/// Where a background row of the frame was read from, kept for a margin decoder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct CapturedRow {
+    row: BackgroundRow,
+    y: i16,
+    pattern_table: u16,
+}
 
 impl Ppu2C02 {
     /// Upper bound on the bytes the tile records of one frame occupy in a savestate, so that
@@ -55,6 +64,7 @@ impl Ppu2C02 {
         self.tiles.clear();
         self.frame_margin = 0;
         self.visible_rows = crate::STANDARD_ROWS;
+        self.captured_rows = [None; 31];
         self.tiles.set_extra_columns(0);
         self.mask_x = 0;
         self.mask_y = 0;
@@ -69,6 +79,7 @@ impl Ppu2C02 {
         #[allow(clippy::cast_possible_truncation)] // At most 128.
         let margin = self.frame_margin as i16;
         self.visible_rows = [(-margin, 256 + margin); 30];
+        self.captured_rows = [None; 31];
     }
 
     /// Runs the captures owed by visible line `line` at its first dot: the sprite band, and
@@ -155,6 +166,20 @@ impl Ppu2C02 {
         let row_index = line / 8;
         #[allow(clippy::cast_possible_truncation)] // line is 0..240.
         let y = (line - 1) as i16;
+        if let Some(slot) = usize::try_from(row_index)
+            .ok()
+            .and_then(|row| self.captured_rows.get_mut(row))
+        {
+            *slot = Some(CapturedRow {
+                row: BackgroundRow {
+                    line,
+                    v: self.v_row_start,
+                    fine_x: self.fine_x,
+                },
+                y,
+                pattern_table,
+            });
+        }
 
         // Widescreen extension: `extra` more columns on each side, read on through the
         // horizontally neighbouring nametables (a 512-pixel plane that wraps), and only those
@@ -216,7 +241,7 @@ impl Ppu2C02 {
                 cartridge.advance_chr_latch(i32::from(pattern_table), i32::from(tile));
             }
 
-            #[allow(clippy::cast_possible_truncation)] // x is -103..352.
+            #[allow(clippy::cast_possible_truncation)] // x is -519..768.
             let record = TileRecord::new(
                 plane0,
                 plane1,
@@ -229,6 +254,83 @@ impl Ppu2C02 {
                 palette,
                 true,
             );
+            self.tiles.add(record);
+        }
+    }
+
+    /// Replaces the margins of the frame just captured with the tiles `decoder` reads from the
+    /// game's memory, row by row; a row the decoder does not handle keeps its nametable
+    /// columns. The centre 256 pixels are left as captured.
+    pub(crate) fn decode_margins(
+        &mut self,
+        decoder: &dyn MarginDecoder,
+        memory: &DecoderMemory<'_>,
+        cart: Option<&Cartridge>,
+    ) {
+        let extra = self.frame_margin / 8;
+        if extra == 0 {
+            return;
+        }
+        let row_width = 33 + (2 * extra);
+        let mut decoded_rows = [false; 31];
+        let mut tiles = Vec::new();
+        let mut records = Vec::new();
+        for (row_index, captured) in self.captured_rows.iter().enumerate() {
+            let Some(captured) = captured else {
+                continue;
+            };
+            let fine_x = i32::from(captured.row.fine_x);
+            // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose
+            // pixels begin at 256 - fine X, and goes on while it starts left of the edge.
+            let last = 32 + extra - i32::from(fine_x == 0);
+            let mut columns = (-extra..0).chain(32..=last);
+            tiles.clear();
+            if !decoder.decode_row(memory, &captured.row, &mut columns, &mut tiles) {
+                continue;
+            }
+            decoded_rows[row_index] = true;
+            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
+            let row_number = row_index as i32;
+            for &DecodedTile {
+                column,
+                tile,
+                palette,
+            } in &tiles
+            {
+                let (plane0, plane1) = self.read_pattern_planes(
+                    captured.pattern_table + (u16::from(tile) * 16),
+                    ChrFetch::Background,
+                    cart,
+                );
+                #[allow(clippy::cast_possible_truncation)] // -519..768.
+                let x = ((8 * column) - fine_x) as i16;
+                records.push(TileRecord::new(
+                    plane0,
+                    plane1,
+                    x,
+                    captured.y,
+                    (row_number * row_width) + column + extra,
+                    false,
+                    false,
+                    false,
+                    palette & 3,
+                    true,
+                ));
+            }
+            if let Some(range) = self.visible_rows.get_mut(row_index) {
+                #[allow(clippy::cast_possible_truncation)] // At most 512.
+                let margin = self.frame_margin as i16;
+                *range = (-margin, 256 + margin);
+            }
+        }
+
+        // The decoded rows lose their nametable margins, then get the decoded ones.
+        self.tiles.retain_background(|record| {
+            let row = usize::try_from(record.index / row_width).unwrap_or(usize::MAX);
+            let column = (record.index % row_width) - extra;
+            !decoded_rows.get(row).copied().unwrap_or(false) || (0..32).contains(&column)
+        });
+        for record in records {
             self.tiles.add(record);
         }
     }

@@ -1,0 +1,153 @@
+//! Margin decoders: widescreen scenery read from a game's own level data instead of the PPU.
+//!
+//! The PPU holds two screens of background at most, and most games only keep a few columns
+//! past the screen drawn there. A game that keeps its whole area in RAM can do better: a decoder
+//! made for it turns that RAM into the tiles of the margins, as wide as the host asks.
+//!
+//! Decoders are optional and per game. For each background row of a widescreen frame the core
+//! asks the game's decoder, if it has one, for the tiles of the margins; a row the decoder does
+//! not handle (status bar, title screen, a mode it does not know) keeps the columns captured
+//! from the nametables, as for any game without a decoder. The centre 256 pixels always come
+//! from the PPU.
+//!
+//! A decoder applies to the ROMs a built-in patch is made for, while the built-in patches are
+//! on (see [`crate::builtin_patches`]).
+
+mod zelda2;
+
+/// What a decoder may read once the frame has run.
+#[derive(Debug, Clone, Copy)]
+pub struct DecoderMemory<'a> {
+    /// CPU RAM, `$0000-$07FF`.
+    pub ram: &'a [u8],
+    /// PRG-RAM, `$6000-$7FFF`.
+    pub prg_ram: &'a [u8],
+    /// The whole PRG-ROM image, as the cartridge runs it (built-in patch applied).
+    pub prg_rom: &'a [u8],
+}
+
+impl DecoderMemory<'_> {
+    /// CPU RAM byte at `address` (0 past the end).
+    #[must_use]
+    pub fn ram(&self, address: u16) -> u8 {
+        self.ram.get(usize::from(address)).copied().unwrap_or(0)
+    }
+}
+
+/// One captured background row: where the PPU was reading when it drew it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackgroundRow {
+    /// Line the row was captured on.
+    pub line: i32,
+    /// The PPU address register (`v`) at the start of that line.
+    pub v: u16,
+    /// Fine X scroll.
+    pub fine_x: u8,
+}
+
+impl BackgroundRow {
+    /// Tile column of the left edge, 0-31.
+    #[must_use]
+    pub const fn coarse_x(&self) -> u8 {
+        (self.v & 0x1F) as u8
+    }
+
+    /// Tile row, 0-29 (30-31 for rows past a nametable).
+    #[must_use]
+    pub const fn coarse_y(&self) -> u8 {
+        ((self.v >> 5) & 0x1F) as u8
+    }
+
+    /// Horizontal nametable bit.
+    #[must_use]
+    pub const fn nametable_x(&self) -> u8 {
+        ((self.v >> 10) & 1) as u8
+    }
+
+    /// Vertical nametable bit.
+    #[must_use]
+    pub const fn nametable_y(&self) -> u8 {
+        ((self.v >> 11) & 1) as u8
+    }
+
+    /// The pixel of the 512-pixel horizontal plane of two nametables at the left edge.
+    #[must_use]
+    pub fn ring_x(&self) -> i32 {
+        (i32::from(self.nametable_x()) << 8)
+            | (i32::from(self.coarse_x()) << 3)
+            | i32::from(self.fine_x)
+    }
+}
+
+/// One tile a decoder hands back: screen column `column` (x = 8 × column − fine X, 0 being the
+/// leftmost column of the 256-pixel picture), CHR tile `tile` of the row's background pattern
+/// table, in sub-palette `palette`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DecodedTile {
+    pub column: i32,
+    pub tile: u8,
+    pub palette: u8,
+}
+
+/// A margin decoder for one game.
+pub trait MarginDecoder: Sync {
+    /// Decodes the tiles of `row` at screen columns `columns` (the margins of the frame) into
+    /// `out`. Returns `false` when the decoder does not handle this row: the core then keeps
+    /// what it captured from the nametables. A column left out shows nothing (backdrop).
+    fn decode_row(
+        &self,
+        memory: &DecoderMemory<'_>,
+        row: &BackgroundRow,
+        columns: &mut dyn Iterator<Item = i32>,
+        out: &mut Vec<DecodedTile>,
+    ) -> bool;
+}
+
+/// The decoder made for the ROM a built-in patch named `patch` applies to, if any.
+#[must_use]
+pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
+    match patch {
+        crate::builtin_patches::ZELDA2_USA => Some(&zelda2::Zelda2),
+        _ => None,
+    }
+}
+
+/// The value congruent to `ring_position` modulo `ring` nearest to `estimate` (ties to the
+/// lower one): picks which instance of a wrapping coordinate an estimate stands for.
+#[must_use]
+pub fn resolve_ring(ring_position: i32, ring: i32, estimate: i32) -> i32 {
+    let base = estimate - (estimate - ring_position).rem_euclid(ring);
+    let up = base + ring;
+    if estimate - base <= up - estimate {
+        base
+    } else {
+        up
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rings_resolve_to_the_nearest_instance() {
+        assert_eq!(resolve_ring(10, 512, 0), 10);
+        assert_eq!(resolve_ring(500, 512, 0), -12);
+        assert_eq!(resolve_ring(10, 512, 600), 522);
+        assert_eq!(resolve_ring(0, 256, 128), 0);
+    }
+
+    #[test]
+    fn rows_read_the_ppu_address() {
+        let row = BackgroundRow {
+            line: 33,
+            v: 0x1000 | 0x0800 | 0x0400 | (5 << 5) | 3,
+            fine_x: 6,
+        };
+        assert_eq!(row.coarse_x(), 3);
+        assert_eq!(row.coarse_y(), 5);
+        assert_eq!(row.nametable_x(), 1);
+        assert_eq!(row.nametable_y(), 1);
+        assert_eq!(row.ring_x(), 256 + 24 + 6);
+    }
+}

@@ -21,9 +21,32 @@ ones.
 | 16:10 | 64 | 384 x 240 |
 | 16:9 | 88 | 432 x 240 |
 
-`video.widescreen_extra` (+0 % to +30 %, +10 % by default) widens the picture beyond the ratio,
+`video.widescreen_extra` (+0 % to +300 %, +10 % by default) widens the picture beyond the ratio,
 so that the 3D objects at the edges of the view are already whole when they come into sight. The
-margin is at most 128 pixels on each side (a 512 x 240 picture).
+host margin is at most 512 pixels on each side (a 1280 x 240 picture). Through the nametables a
+ROM can show 128 at most (they wrap past that), and it can ask for 248 at most (8-bit register).
+
+`video.widescreen_strict_edges` (off by default) tells the 3D engine where each band of 8 lines
+stops being drawn (`FrameBatch::visible_rows`): a shape cut there stays unfinished until it is
+whole. Off, every band counts as drawn across the whole margin.
+
+## Margin decoders
+
+The nametables only hold what a game keeps drawn, two screens at most. A game that keeps its
+whole area in RAM can do better: a margin decoder (`zax_nes::wide_decode::MarginDecoder`) turns
+that RAM into the tiles of the margins, as wide as the host asks. After each frame the core hands
+the decoder every captured background row (the PPU address and fine X it was drawn with) and the
+memory (CPU RAM, PRG-RAM, PRG-ROM); the decoder returns, per screen column of the margins, a CHR
+tile of the row's pattern table and a sub-palette. A row it does not handle (status bar, a mode
+it does not know) keeps the columns captured from the nametables. The centre 256 pixels always
+come from the PPU.
+
+A decoder belongs to a built-in patch (`wide_decode::for_patch`) and runs while the built-in
+patches are on. With a decoder the host margin applies whatever the ROM asked for. Decoders:
+
+| Game | Decodes |
+|---|---|
+| Zelda II (USA) | side view (level RAM at `$6000`), world map (run-length map in PRG-RAM); adapted from z2rs (MIT) |
 
 `NesCore::set_widescreen_margin(pixels)` is the same thing for other hosts.
 
