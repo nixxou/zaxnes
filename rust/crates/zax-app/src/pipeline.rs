@@ -2,6 +2,8 @@
 //! conversion of a frame, then its draw list, run on a thread of their own while the main thread
 //! draws the frame before it. The picture is one displayed frame late; what is drawn is the same.
 //!
+//! It needs the optimised Lua (`emu.lua_optimized`): with it off, nothing is pipelined.
+//!
 //! "Auto" pipelines only while the frames are late, and goes back to the direct path once the
 //! work fits again, with a margin between the two thresholds so that it does not flicker
 //! between them. Each change shows once: entering draws the last frame again, leaving skips one.
@@ -24,9 +26,13 @@ pub enum PipelineMode {
 
 impl PipelineMode {
     /// The choice in force: `ZAXNES_PIPELINE` (`0`, `1` or `2`) when set, else the one
-    /// `settings` holds.
+    /// `settings` holds; always off without the optimised Lua (`emu.lua_optimized`), since a
+    /// pipelined frame hands the Lua runtime to another thread.
     #[must_use]
     pub fn of(settings: &SettingsModel) -> Self {
+        if !settings.get(SettingId::EmuLuaOptimized).as_bool() {
+            return Self::Off;
+        }
         let forced = std::env::var(ENVIRONMENT_VARIABLE)
             .ok()
             .and_then(|value| value.trim().parse::<i32>().ok());

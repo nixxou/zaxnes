@@ -28,6 +28,7 @@
 
 use std::cell::RefCell;
 use std::ffi::{c_int, c_void};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mlua::{ffi, AnyUserData, FromLua, Function, IntoLua, Lua, Value};
 
@@ -57,13 +58,36 @@ fn metatable_key() -> *const c_void {
 /// Present in a state whose host values are raw.
 pub(crate) struct RawBinding;
 
+/// How many Lua states of the process have raw host values. While none has, nothing here reads
+/// a userdata block: with the optimised Lua off, no `unsafe` code of the binding runs.
+static RAW_STATES: AtomicUsize = AtomicUsize::new(0);
+
+impl RawBinding {
+    fn new() -> Self {
+        RAW_STATES.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for RawBinding {
+    fn drop(&mut self) {
+        RAW_STATES.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// The error a fast getter or setter returned, waiting for the raise function.
 #[derive(Default)]
 struct PendingError(RefCell<Option<mlua::Error>>);
 
+/// Whether some Lua state of the process has the optimised Lua: one atomic load, which keeps
+/// the safe paths as they were while none has.
+pub(crate) fn any_state() -> bool {
+    RAW_STATES.load(Ordering::Relaxed) != 0
+}
+
 /// Whether the host values of `lua` are raw.
 pub(crate) fn enabled(lua: &Lua) -> bool {
-    lua.app_data_ref::<RawBinding>().is_some()
+    RAW_STATES.load(Ordering::Relaxed) != 0 && lua.app_data_ref::<RawBinding>().is_some()
 }
 
 /// The `mlua` functions the raw metatable falls back on.
@@ -111,7 +135,7 @@ pub(crate) fn install(lua: &Lua, fallbacks: Fallbacks) -> mlua::Result<()> {
             ffi::lua_rawsetp(state, ffi::LUA_REGISTRYINDEX, metatable_key());
         })?;
     }
-    lua.set_app_data(RawBinding);
+    lua.set_app_data(RawBinding::new());
     Ok(())
 }
 
@@ -205,7 +229,7 @@ unsafe fn block_at(state: *mut ffi::lua_State, index: c_int) -> Option<*mut RawH
 /// and only a raw host value carries [`MAGIC`] there (a stream holds a `FILE *`, which no
 /// canonical address equals).
 fn block_of(value: &AnyUserData) -> Option<*mut RawHost> {
-    if value.type_id().is_some() {
+    if RAW_STATES.load(Ordering::Relaxed) == 0 || value.type_id().is_some() {
         return None;
     }
     let block = value.to_pointer().cast::<RawHost>().cast_mut();

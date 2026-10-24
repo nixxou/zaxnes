@@ -20,7 +20,7 @@ const TWO_THIRDS: i32 = 1;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 6] {
+fn defaults() -> [(SettingId, SettingValue); 7] {
     [
         (
             SettingId::VideoRenderMethod,
@@ -31,7 +31,8 @@ fn defaults() -> [(SettingId, SettingValue); 6] {
         (SettingId::VideoAntiAlias, SettingValue::Enum(0)),
         // Swap every refresh: 60 frames per second on the 60 Hz screens of the handhelds.
         (SettingId::VideoVSync, SettingValue::Enum(1)),
-        // The scripts of a late frame run beside the drawing (owner request): "Auto".
+        // The optimised Lua, and the scripts of a late frame beside the drawing (owner request).
+        (SettingId::EmuLuaOptimized, SettingValue::Bool(true)),
         (SettingId::EmuPipeline, SettingValue::Enum(PIPELINE_AUTO)),
     ]
 }
@@ -58,6 +59,7 @@ mod tests {
         assert!((model.res_scale_factor() - 2.0 / 3.0).abs() < 1.0e-6);
         assert_eq!(0, model.anti_alias());
         assert_eq!(1, model.vsync());
+        assert!(model.get(SettingId::EmuLuaOptimized).as_bool());
         assert_eq!(PIPELINE_AUTO, model.get(SettingId::EmuPipeline).as_int());
     }
 

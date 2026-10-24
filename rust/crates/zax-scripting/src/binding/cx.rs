@@ -4,16 +4,24 @@
 use std::any::Any;
 use std::cell::RefCell;
 
-use mlua::{Function, Lua, MultiValue, Table, Value};
+use mlua::{AnyUserData, Function, Lua, MultiValue, Table, Value};
 use zax_engine3d::engine::ConversionState;
 use zax_engine3d::instance::{InstanceRef, PatternInstance};
 use zax_engine3d::vectors::{Cell, Rect, Vec2, Vec3};
 
-use super::lend::{self, LendError};
+use super::lend::{self, LendError, LendSlot};
 use super::payload::{FrameKey, FrameSlot, Host, Payload, Vec3Ref};
 use crate::environment::ScriptContext;
 use crate::runtime::{Retired, RuntimeData};
 use crate::values::{number_format, LuaColor};
+
+/// What the host lends to the Lua state for the duration of one call into it: the runtime's
+/// data, the engine state when there is one, and the pattern instance being built.
+pub(crate) struct Lent {
+    pub data: AnyUserData,
+    pub state: Option<AnyUserData>,
+    pub build: Option<(InstanceRef, AnyUserData)>,
+}
 
 /// A request for the host context: run against the lent [`ScriptContext`], and answer with a
 /// boxed value.
@@ -224,21 +232,38 @@ impl<'a> Cx<'a> {
         mlua::Error::runtime(format!("{what} is not available here"))
     }
 
-    /// The error of a lent object that cannot be reached: `what` names the object when it is
-    /// not part of the lend.
+    /// The pointer lend of the optimised Lua, when one is in force for this call.
+    fn pointer_lend(&self) -> Option<&LendSlot> {
+        if !super::raw::any_state() {
+            return None;
+        }
+        lend::slot(self.lua).filter(|slot| slot.is_lent())
+    }
+
+    /// The error of a pointer-lent object that cannot be reached: `what` names it.
     fn lend_error(error: LendError, what: &str) -> mlua::Error {
         match error {
-            LendError::NotLent => Self::not_available("the script API"),
             LendError::Absent => Self::not_available(what),
             LendError::Busy => mlua::Error::UserDataBorrowMutError,
         }
     }
 
+    fn lent(&self) -> mlua::Result<mlua::AppDataRef<'_, Lent>> {
+        self.lua
+            .app_data_ref::<Lent>()
+            .ok_or_else(|| Self::not_available("the script API"))
+    }
+
     /// Runs `operation` on the runtime's data. The data is lent to the Lua state for the
     /// length of a call into it, so it can only be reached through a closure.
     pub fn data<R>(&self, operation: impl FnOnce(&mut RuntimeData) -> R) -> mlua::Result<R> {
-        lend::with_data(self.lua, operation)
-            .map_err(|error| Self::lend_error(error, "the runtime data"))
+        if let Some(slot) = self.pointer_lend() {
+            return lend::with_data(slot, operation)
+                .map_err(|error| Self::lend_error(error, "the runtime data"));
+        }
+        self.lent()?
+            .data
+            .borrow_mut_scoped::<RuntimeData, R>(operation)
     }
 
     /// Runs `operation` on the camera, backdrop, inputs and memory the host lent to this call.
@@ -269,8 +294,15 @@ impl<'a> Cx<'a> {
 
     /// Runs `operation` on the engine state, which only a hook with access to it has.
     pub fn state<R>(&self, operation: impl FnOnce(&mut ConversionState) -> R) -> mlua::Result<R> {
-        lend::with_state(self.lua, operation)
-            .map_err(|error| Self::lend_error(error, "the conversion state"))
+        if let Some(slot) = self.pointer_lend() {
+            return lend::with_state(slot, operation)
+                .map_err(|error| Self::lend_error(error, "the conversion state"));
+        }
+        let lent = self.lent()?;
+        lent.state
+            .as_ref()
+            .ok_or_else(|| Self::not_available("the conversion state"))?
+            .borrow_mut_scoped::<ConversionState, R>(operation)
     }
 
     /// Runs `operation`, which may fail with a Lua error of its own, on the engine state.
@@ -283,7 +315,10 @@ impl<'a> Cx<'a> {
 
     /// True when the call was made with the engine state at hand.
     pub fn has_state(&self) -> bool {
-        lend::has_state(self.lua)
+        if let Some(slot) = self.pointer_lend() {
+            return lend::has_state(slot);
+        }
+        self.lent().is_ok_and(|lent| lent.state.is_some())
     }
 
     /// Runs `operation` on the pattern instance being built, when `reference` is it.
@@ -292,8 +327,17 @@ impl<'a> Cx<'a> {
         reference: InstanceRef,
         operation: impl FnOnce(&mut PatternInstance) -> R,
     ) -> mlua::Result<Option<R>> {
-        lend::with_build(self.lua, reference, operation)
-            .map_err(|error| Self::lend_error(error, "the pattern instance"))
+        if let Some(slot) = self.pointer_lend() {
+            return lend::with_build(slot, reference, operation)
+                .map_err(|error| Self::lend_error(error, "the pattern instance"));
+        }
+        let lent = self.lent()?;
+        match &lent.build {
+            Some((building, target)) if *building == reference => Ok(Some(
+                target.borrow_mut_scoped::<PatternInstance, R>(operation)?,
+            )),
+            _ => Ok(None),
+        }
     }
 
     // errors
@@ -559,12 +603,9 @@ impl<'a> Cx<'a> {
 /// The payload of the host value `value`, or `None` for any other Lua value.
 pub(crate) fn host_payload(value: &Value) -> Option<Payload> {
     match value {
-        Value::UserData(data) => match data.type_id() {
-            Some(id) if id == std::any::TypeId::of::<Host>() => {
-                data.borrow::<Host>().ok().map(|host| host.payload())
-            }
-            Some(_) => None,
-            None => super::raw::payload_of(data),
+        Value::UserData(data) => match data.borrow::<Host>() {
+            Ok(host) => Some(host.payload()),
+            Err(_) => super::raw::payload_of(data),
         },
         _ => None,
     }

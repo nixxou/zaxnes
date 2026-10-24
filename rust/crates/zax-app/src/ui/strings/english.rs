@@ -204,7 +204,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.core", "Emulation core"),
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
     ("setting.emu.lua_smooth_gc", "Smooth Lua memory collection"),
-    ("setting.emu.lua_fast_binding", "Fast Lua binding"),
+    ("setting.emu.lua_optimized", "Optimized Lua (unsafe)"),
     ("setting.emu.pipeline", "Scripts in parallel with the drawing"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),

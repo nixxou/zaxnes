@@ -669,19 +669,21 @@ fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Smooth Lua collector"),
     );
-    // Rust-only (owner request): the scripts reach the host values through C metamethods instead
-    // of `mlua`'s userdata; same results, less time per access. Not exposed to Lua.
+    // Rust-only (owner request): the optimised Lua paths, which use `unsafe` code: the host values
+    // reached through C metamethods instead of `mlua`'s userdata (same results, less time per
+    // access), and the pipelined frames of `emu.pipeline`, which only run with it. Off: only the
+    // safe `mlua` paths run. Not exposed to Lua.
     out.push(
         SettingDescriptor::new(
-            SettingId::EmuLuaFastBinding,
+            SettingId::EmuLuaOptimized,
             SettingKind::Bool,
-            SettingValue::Bool(true),
+            SettingValue::Bool(false),
             SettingScope::User,
             SettingEffect::NextGameLoad,
             SettingTheme::Emulation,
         )
         .with_domain(Domain::switch())
-        .with_label("Fast Lua binding"),
+        .with_label("Optimized Lua (unsafe)"),
     );
     // Rust-only (owner request): the scripts and the conversion of a frame run on their own
     // thread while the frame before it is drawn, one displayed frame later; "Auto" does so only

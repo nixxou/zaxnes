@@ -1,21 +1,20 @@
-//! The lend of the runtime's data, the engine state and the pattern instance being built to
-//! the calls into Lua, as raw pointers (Rust-only performance work, owner decision).
+//! The lend of the runtime's data and of the engine state to the frame calls into Lua, as raw
+//! pointers: part of the optimised Lua (Rust-only setting `emu.lua_optimized`, owner decision).
+//! Without it, the same objects are lent through `mlua` scoped userdata (`cx::Lent`), whose
+//! per-access type check and borrow bookkeeping cost more than most getters.
 //!
 //! The host lends them for the length of one call into Lua; every access from the script API
 //! goes through [`with_data`], [`with_state`] or [`with_build`], which turn the pointer back into
-//! a `&mut` for the length of a closure. Before this module the lend went through `mlua` scoped
-//! userdata, whose per-access type check and borrow bookkeeping cost more than most getters.
-//!
-//! Soundness rests on three rules, each enforced here:
-//! - a pointer is only stored by [`lend`] (or [`lend_build`]), which takes the `&mut` it comes
-//!   from for the life of the returned guard, so the owner cannot touch the object while it is
-//!   lent, and the guard takes the pointer back when it drops (a panic included);
+//! a `&mut` for the length of a closure. Soundness rests on three rules, each enforced here:
+//! - a pointer is only stored by [`lend`], which takes the `&mut` it comes from for the life of
+//!   the returned guard, so the owner cannot touch the object while it is lent, and the guard
+//!   takes the pointer back when it drops (a panic included);
 //! - at most one `&mut` per lent object exists at a time: a busy flag per object makes a second,
 //!   nested access fail with the error `mlua` gave for the same conflict;
 //! - a lend nested in another one saves and restores the outer lend and its flags.
 //!
-//! The lend lives in the Lua state's application data ([`LendSlot`]), so two runtimes never see
-//! each other's objects.
+//! The lend lives in the Lua state's application data ([`LendSlot`]), installed only for a
+//! runtime with the optimised Lua, so two runtimes never see each other's objects.
 
 #![allow(unsafe_code)]
 
@@ -42,18 +41,23 @@ const DATA: u8 = 1;
 const STATE: u8 = 2;
 const BUILD: u8 = 4;
 
-/// The lend of one Lua state, installed once with the binding.
+/// The lend of one Lua state, installed once with the optimised binding.
 #[derive(Default)]
 pub(crate) struct LendSlot {
     current: Cell<Option<Lend>>,
     busy: Cell<u8>,
 }
 
+impl LendSlot {
+    /// Whether a call into Lua holds a lend now.
+    pub fn is_lent(&self) -> bool {
+        self.current.get().is_some()
+    }
+}
+
 /// Why a lent object could not be reached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LendError {
-    /// Nothing is lent: the call was not made under a lend.
-    NotLent,
     /// The object is not part of this lend (no engine state).
     Absent,
     /// The object is already borrowed by an access still running.
@@ -65,22 +69,21 @@ pub(crate) fn install(lua: &Lua) {
     lua.set_app_data(LendSlot::default());
 }
 
-/// The lend slot of `lua`, without keeping the application data borrowed: the closure an access
-/// runs may itself use the application data of the state.
-fn slot(lua: &Lua) -> Result<&LendSlot, LendError> {
+/// The lend slot of `lua`, when its runtime has the optimised Lua, without keeping the
+/// application data borrowed: the closure an access runs may itself use the application data.
+pub(crate) fn slot(lua: &Lua) -> Option<&LendSlot> {
     let pointer = lua
         .app_data_ref::<LendSlot>()
-        .map(|slot| NonNull::from(&*slot))
-        .ok_or(LendError::NotLent)?;
+        .map(|slot| NonNull::from(&*slot))?;
     // SAFETY: the slot is a boxed application datum that `install` puts in once and nothing
     // removes or replaces, so it lives, at the same address, as long as the Lua state, which
     // outlives the borrow of `lua`. It is only used through its `Cell`s, on this thread.
-    Ok(unsafe { pointer.as_ref() })
+    Some(unsafe { pointer.as_ref() })
 }
 
 /// Restores the lend that was in force before [`lend`] when it drops.
 pub(crate) struct LendGuard<'a> {
-    lua: &'a Lua,
+    slot: &'a LendSlot,
     previous: Option<Lend>,
     previous_busy: u8,
     _lent: PhantomData<&'a mut ()>,
@@ -88,17 +91,15 @@ pub(crate) struct LendGuard<'a> {
 
 impl Drop for LendGuard<'_> {
     fn drop(&mut self) {
-        if let Ok(slot) = slot(self.lua) {
-            slot.current.set(self.previous);
-            slot.busy.set(self.previous_busy);
-        }
+        self.slot.current.set(self.previous);
+        self.slot.busy.set(self.previous_busy);
     }
 }
 
-/// Lends `data`, `state` and the instance being built to the calls into `lua` until the guard
-/// drops.
+/// Lends `data`, `state` and the instance being built to the calls into Lua that reach `slot`
+/// until the guard drops.
 pub(crate) fn lend<'a>(
-    lua: &'a Lua,
+    slot: &'a LendSlot,
     data: &'a mut RuntimeData,
     state: Option<&'a mut ConversionState>,
     build: Option<(InstanceRef, &'a mut PatternInstance)>,
@@ -108,55 +109,12 @@ pub(crate) fn lend<'a>(
         state: state.map(NonNull::from),
         build: build.map(|(reference, instance)| (reference, NonNull::from(instance))),
     };
-    let (previous, previous_busy) = slot(lua).map_or((None, 0), |slot| {
-        (slot.current.replace(Some(lend)), slot.busy.replace(0))
-    });
     LendGuard {
-        lua,
-        previous,
-        previous_busy,
+        slot,
+        previous: slot.current.replace(Some(lend)),
+        previous_busy: slot.busy.replace(0),
         _lent: PhantomData,
     }
-}
-
-/// Restores the instance being built that was in force before [`lend_build`] when it drops.
-pub(crate) struct BuildGuard<'a> {
-    lua: &'a Lua,
-    previous: Option<(InstanceRef, NonNull<PatternInstance>)>,
-    _lent: PhantomData<&'a mut ()>,
-}
-
-impl Drop for BuildGuard<'_> {
-    fn drop(&mut self) {
-        if let Ok(slot) = slot(self.lua) {
-            if let Some(mut lend) = slot.current.get() {
-                lend.build = self.previous;
-                slot.current.set(Some(lend));
-            }
-        }
-    }
-}
-
-/// Lends `instance` as the instance being built under the current lend of `lua`, until the
-/// guard drops.
-///
-/// # Errors
-///
-/// [`LendError::NotLent`] when nothing is lent.
-pub(crate) fn lend_build<'a>(
-    lua: &'a Lua,
-    reference: InstanceRef,
-    instance: &'a mut PatternInstance,
-) -> Result<BuildGuard<'a>, LendError> {
-    let slot = slot(lua)?;
-    let mut lend = slot.current.get().ok_or(LendError::NotLent)?;
-    let previous = lend.build.replace((reference, NonNull::from(instance)));
-    slot.current.set(Some(lend));
-    Ok(BuildGuard {
-        lua,
-        previous,
-        _lent: PhantomData,
-    })
 }
 
 /// Holds a busy bit and clears it when it drops, so that a panicking access frees its object.
@@ -182,13 +140,17 @@ impl Drop for Busy<'_> {
     }
 }
 
-/// Runs `operation` on the runtime data lent to `lua`.
+/// The lend in force; callers check [`LendSlot::is_lent`] first.
+fn current(slot: &LendSlot) -> Result<Lend, LendError> {
+    slot.current.get().ok_or(LendError::Absent)
+}
+
+/// Runs `operation` on the runtime data lent through `slot`.
 pub(crate) fn with_data<R>(
-    lua: &Lua,
+    slot: &LendSlot,
     operation: impl FnOnce(&mut RuntimeData) -> R,
 ) -> Result<R, LendError> {
-    let slot = slot(lua)?;
-    let lend = slot.current.get().ok_or(LendError::NotLent)?;
+    let lend = current(slot)?;
     let _busy = Busy::take(slot, DATA)?;
     // SAFETY: the pointer comes from the `&mut RuntimeData` that `lend` holds for the life of
     // the guard whose lend is current; the DATA bit, held until this access ends, keeps any
@@ -196,39 +158,30 @@ pub(crate) fn with_data<R>(
     Ok(operation(unsafe { &mut *lend.data.as_ptr() }))
 }
 
-/// Runs `operation` on the engine state lent to `lua`.
+/// Runs `operation` on the engine state lent through `slot`.
 pub(crate) fn with_state<R>(
-    lua: &Lua,
+    slot: &LendSlot,
     operation: impl FnOnce(&mut ConversionState) -> R,
 ) -> Result<R, LendError> {
-    let slot = slot(lua)?;
-    let state = slot
-        .current
-        .get()
-        .ok_or(LendError::NotLent)?
-        .state
-        .ok_or(LendError::Absent)?;
+    let state = current(slot)?.state.ok_or(LendError::Absent)?;
     let _busy = Busy::take(slot, STATE)?;
     // SAFETY: as in `with_data`, for the `&mut ConversionState` of the lend and the STATE bit.
     Ok(operation(unsafe { &mut *state.as_ptr() }))
 }
 
-/// Whether the current lend of `lua` carries the engine state.
-pub(crate) fn has_state(lua: &Lua) -> bool {
-    slot(lua)
-        .ok()
-        .and_then(|slot| slot.current.get())
-        .is_some_and(|lend| lend.state.is_some())
+/// Whether the lend through `slot` carries the engine state.
+pub(crate) fn has_state(slot: &LendSlot) -> bool {
+    slot.current.get().is_some_and(|lend| lend.state.is_some())
 }
 
-/// Runs `operation` on the instance being built under the lend of `lua`, when `reference` is it.
+/// Runs `operation` on the instance being built under the lend through `slot`, when
+/// `reference` is it.
 pub(crate) fn with_build<R>(
-    lua: &Lua,
+    slot: &LendSlot,
     reference: InstanceRef,
     operation: impl FnOnce(&mut PatternInstance) -> R,
 ) -> Result<Option<R>, LendError> {
-    let slot = slot(lua)?;
-    match slot.current.get().ok_or(LendError::NotLent)?.build {
+    match current(slot)?.build {
         Some((building, instance)) if building == reference => {
             let _busy = Busy::take(slot, BUILD)?;
             // SAFETY: as in `with_data`, for the `&mut PatternInstance` of the lend and the
