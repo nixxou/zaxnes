@@ -3,6 +3,7 @@
 //! zax-nes: the NES core (port of `src/Zax.Nes`).
 
 pub mod apu;
+pub mod builtin_patches;
 pub mod cartridges;
 pub mod cpu;
 mod frame_batch;

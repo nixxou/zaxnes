@@ -553,8 +553,19 @@ impl GameSession {
         self.core.timing().nominal_frames_per_second
     }
 
-    /// Loads a ROM image into the core (REQ-LOOP-021 step 4).
+    /// Loads a ROM image into the core (REQ-LOOP-021 step 4). A ROM a built-in patch was made
+    /// for is patched in memory first (the file is left alone).
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
+        let patched = zax_nes::builtin_patches::apply(image);
+        if let Some(patched) = &patched {
+            crate::app_log::line(&format!(
+                "{name}: built-in patch applied ({}).",
+                patched.name
+            ));
+        }
+        let image = patched
+            .as_ref()
+            .map_or(image, |patched| patched.image.as_slice());
         let result = self.core.load_rom(image, name);
         if result.success {
             self.frame_counter = 0;
