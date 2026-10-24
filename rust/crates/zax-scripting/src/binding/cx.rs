@@ -152,6 +152,9 @@ pub(crate) struct HostCache {
 pub(crate) struct Epochs {
     pub frame: u32,
     pub pinned: u32,
+    /// The counter of the frame whose epoch ended last, which a handle of that epoch still
+    /// reads while it is the published frame (REQ-LUA-028).
+    pub previous_counter: Option<i32>,
 }
 
 impl Epochs {
@@ -411,6 +414,11 @@ impl<'a> Cx<'a> {
     /// The epoch the frame being converted, or the pinned frame, is in now.
     pub fn epoch_of(&self, pinned: bool) -> mlua::Result<u32> {
         Ok(self.cache()?.epochs.get().of(pinned))
+    }
+
+    /// The epochs in force now.
+    pub fn epochs(&self) -> mlua::Result<Epochs> {
+        Ok(self.cache()?.epochs.get())
     }
 
     fn cache(&self) -> mlua::Result<mlua::AppDataRef<'_, HostCache>> {

@@ -124,7 +124,7 @@ Notations : `L` = lecture seule, `LE` = lecture et écriture ; « 0-based » = p
 
 **REQ-LUA-028** (P1) — Une **référence d'instance ou de shape conservée** par un script au-delà de sa frame (dans une globale) NE DOIT PAS provoquer de plantage ni d'erreur Lua à la lecture : l'objet DEVRAIT rester lisible avec les valeurs de sa dernière frame, et le modifier n'a aucun effet visible.
 - Critère d'acceptation : script qui garde `old = shape` à la frame N et lit `old.Offset.x` et `old.Shape2D.tStart.x` à la frame N+10 → valeurs numériques, aucune erreur.
-- Notes : dans la référence, une lecture tardive de ces objets peut renvoyer les valeurs d'une autre shape (objets réutilisés d'une frame à l'autre). Le corpus remet ses listes à zéro à chaque `Update`, il ne dépend pas de ce comportement.
+- Notes : dans la référence, une lecture tardive de ces objets peut renvoyer les valeurs d'une autre shape (objets réutilisés d'une frame à l'autre). Le corpus en dépend au moins d'une frame à la suivante : « Zelda II - The Adventure of Link (U) » (scripts `pf` et `char`, AMD-038).
 
 ### 3.5 Hooks spéciaux
 

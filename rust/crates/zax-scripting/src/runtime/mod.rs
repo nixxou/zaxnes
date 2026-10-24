@@ -95,6 +95,8 @@ pub(crate) struct RuntimeData {
     pub input_process_script: Option<usize>,
     pub has_frame_hooks: bool,
     pub frame_counter: i32,
+    /// The counter of the frame whose epoch ended last (see `Epochs::previous_counter`).
+    previous_counter: Option<i32>,
     /// Changes whenever the frames the handles of the frame being converted point into change,
     /// so that a handle kept from an earlier frame reads as gone (REQ-LUA-028).
     pub epoch: u32,
@@ -168,6 +170,7 @@ impl RuntimeData {
     #[must_use = "the retired handles must be given to the object cache"]
     pub fn advance_epoch(&mut self) -> Retired {
         self.epoch = self.epoch.wrapping_add(1);
+        self.previous_counter = Some(self.frame_counter);
         let capacity = self.frame_handles.len();
         let handles = std::mem::replace(
             &mut self.frame_handles,
@@ -192,6 +195,7 @@ impl RuntimeData {
             epochs: Epochs {
                 frame: self.epoch,
                 pinned: self.pin_epoch,
+                previous_counter: self.previous_counter,
             },
         }
     }
@@ -254,6 +258,7 @@ impl ProfileScriptRuntime {
                 input_process_script: None,
                 has_frame_hooks: false,
                 frame_counter: 0,
+                previous_counter: None,
                 epoch: 0,
                 pin_epoch: 0,
                 frame_handles: FrameHandles::default(),
@@ -778,8 +783,9 @@ impl ProfileScriptRuntime {
     }
 
     fn publish_frame_globals(&mut self, frame_counter: i32, time: f32) -> mlua::Result<()> {
-        self.data.frame_counter = frame_counter;
+        // The epoch that ends is the one of the frame converted before, whose counter it keeps.
         let retired = self.data.advance_epoch();
+        self.data.frame_counter = frame_counter;
         Cx::new(&self.lua).retire(retired)?;
         let globals = self.lua.globals();
         globals.set("frame", f64::from(frame_counter))?;

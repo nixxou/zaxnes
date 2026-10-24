@@ -481,6 +481,28 @@ fn a_handle_kept_from_an_earlier_frame_reads_as_gone_req_lua_028() {
     assert_eq!(session.number("return kept.Offset.x"), 0.0);
 }
 
+/// A handle kept at one frame reads that frame's values in the hooks of the next one, while it
+/// is the published frame, and writing through it changes nothing: the "Zelda II" scripts list
+/// the platforms in `LateUpdate` and read them in the next `UpdateS`.
+#[test]
+fn a_handle_kept_from_the_last_frame_reads_its_values_in_the_next_hooks_req_lua_028() {
+    let mut session = session_with(
+        "function UpdateS() if shape.TagStr == 't' and kept == nil then kept = shape end end \
+         function Update() if kept ~= nil and seen == nil then \
+         seen = kept.sizeZ; kept.Alpha = 0.25; alpha = kept.Alpha end end",
+    );
+
+    session.frame(&Batch::new().bg_cell(img::c(), 1, 1), 2);
+
+    assert_eq!(session.number("return seen"), 3.0);
+    assert_eq!(session.number("return alpha"), 1.0);
+    assert!(
+        session.log.errors().is_empty(),
+        "{:?}",
+        session.log.errors()
+    );
+}
+
 #[test]
 fn the_same_object_is_the_same_value_req_lua_043() {
     let mut session = session_with("");
