@@ -24,3 +24,4 @@
 *.bytes      binary
 *.nes        binary
 *.3dn        binary
+*.bps        binary

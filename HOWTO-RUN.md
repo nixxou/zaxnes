@@ -284,6 +284,48 @@ programme s'arrête net. Avec ReShade, utilisez Vulkan.
 
 Les effets de ReShade s'appliquent à toute l'image de la fenêtre, barre de menus comprise.
 
+### Écran large : *Zelda II* en 16:9
+
+Zaxnes sait montrer un jeu **plus large** que les 256 pixels de la NES, quand le jeu est prévu
+pour. Aujourd'hui, un seul l'est : ***Zelda II - The Adventure of Link* (USA)**, grâce à un
+**hack écran large intégré** à l'émulateur.
+
+- **Le hack s'applique tout seul, en mémoire**, quand la ROM chargée est la version USA (reconnue
+  à son contenu) : le fichier de la ROM n'est jamais modifié, et Zaxnes ne livre aucune donnée du
+  jeu (le correctif ne contient que ce que le hack ajoute). Le journal l'indique :
+  `… : built-in patch applied (…)`. La version européenne n'est pas concernée.
+- Ce qu'il change : en vue de côté (villes, palais, grottes), le décor et les **ennemis** sont
+  dessinés au-delà des bords, et les nouveaux ennemis apparaissent dans les marges au lieu de
+  surgir au bord de l'écran ; sur la **carte du monde**, l'image est plus large (et plus haute
+  avec la largeur supplémentaire) et les rencontres vivent dans les marges. La logique du jeu
+  (contacts, IA) reste celle d'origine. Les projectiles ne sont pas montrés dans les marges.
+- Ça fonctionne en 3D comme en mode 2D.
+
+Les réglages, onglet **Vidéo** :
+
+| Ligne | Choix | Effet |
+|---|---|---|
+| **Écran large (ROM prévues pour)** | Désactivée, Window, 3:2, 16:10, 16:9 | la proportion de l'image ; « Window » suit celle de la vue. Désactivée par défaut |
+| **Largeur supplémentaire de l'écran large** | +0 % à +300 % (+10 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
+| **Écran large : attendre les objets entiers aux bords dessinés** | oui / non (non par défaut) | une forme coupée là où le jeu cesse de dessiner reste provisoire jusqu'à ce qu'elle soit entière |
+| **Patchs de ROM intégrés (au prochain chargement)** | oui / non (oui par défaut) | applique le hack au chargement de la ROM ; non = le *Zelda II* d'origine |
+
+**Sauvegardes d'état.** Une sauvegarde retient si elle a été faite avec le hack, et sa version.
+Dans les menus de chargement :
+
+- **en orange**, une sauvegarde faite avec le réglage « Patchs de ROM intégrés » dans l'autre
+  position : Zaxnes propose de basculer le réglage, recharge le jeu, puis charge la sauvegarde ;
+- **en rouge**, une sauvegarde faite avec une **autre version** du hack : elle ne peut pas être
+  chargée (la mémoire du jeu ne correspond plus).
+
+Les sauvegardes portent désormais une vignette de l'image et la version de Zaxnes qui les a
+faites. La sauvegarde de pile (les fichiers de partie de *Zelda II*) ne dépend pas du hack : elle
+suit la ROM d'origine.
+
+Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md)
+(côté émulateur) et [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md)
+(le hack lui-même et comment le reconstruire).
+
 ### Langue de l'interface
 
 L'onglet **Interface** porte le réglage **Langue** (`ui.language`), qui vaut `en` (« English »)

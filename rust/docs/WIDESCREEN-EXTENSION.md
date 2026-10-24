@@ -22,8 +22,8 @@ Nothing changes for any other ROM: the register window stays transparent until a
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
 ones.
 
-This document describes everything on the emulator side, layer by layer, as implemented on the
-`feat/widescreen` branch.
+This document describes everything on the emulator side, layer by layer, as implemented in
+Zaxnes.
 
 ---
 
@@ -38,15 +38,19 @@ All are Rust-only settings (not exposed to Lua), Video options.
 | `video.widescreen_strict_edges` | bool | false | see 5.3 |
 | `emu.builtin_patches` | bool | true | applies the built-in patches at the next ROM load (see 7) |
 
-The margins are computed by `widescreen_margin(choice, extra, window size)` in
+The margins are computed by `widescreen_margin(choice, extra, view size)` in
 `zax-app/src/application.rs`, every frame, and handed to the core:
 
 ```
-ratio  = window width / height (Window), 3/2, 16/10 or 16/9
+ratio  = view width / height (Window), 3/2, 16/10 or 16/9
 bonus  = 1 + percent / 100
 margin_x = ceil8(max(0, (240 * ratio * bonus - 256) / 2))   capped at 512   (each side)
 margin_y = ceil8(max(0, 240 * (bonus - 1) / 2))              capped at 240   (above and below)
 ```
+
+The view size is the scene's view before any resolution scale: its ratio is the picture's, while
+the scene's own size moves with the automatic resolution (and its rounding with it, which would
+make the margin jump a tile back and forth).
 
 `ceil8` rounds up to a whole tile. The picture keeps the chosen ratio: the bonus makes it as much
 taller as wider. With no bonus: 3:2 gives 56 px a side (368 x 240), 16:10 64 (384), 16:9 88
