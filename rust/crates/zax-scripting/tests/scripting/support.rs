@@ -133,6 +133,7 @@ impl Batch {
             mask_x: 0,
             mask_y: 0,
             margin: 0,
+            visible_rows: zax_nes::STANDARD_ROWS,
         };
         engine.convert(&batch, counter)
     }

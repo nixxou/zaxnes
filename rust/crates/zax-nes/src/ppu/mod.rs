@@ -182,6 +182,8 @@ pub struct Ppu2C02 {
     // being captured began, so that every band of one frame has the same columns.
     wide: WideExtension,
     frame_margin: i32,
+    /// The visible range of each band of the frame being captured (`FrameBatch::visible_rows`).
+    visible_rows: crate::VisibleRows,
 }
 
 impl Default for Ppu2C02 {
@@ -254,6 +256,7 @@ impl Ppu2C02 {
             mask_y: 0,
             wide: WideExtension::new(),
             frame_margin: 0,
+            visible_rows: crate::STANDARD_ROWS,
         }
     }
 
@@ -1132,6 +1135,12 @@ impl Ppu2C02 {
     #[must_use]
     pub const fn frame_margin(&self) -> i32 {
         self.frame_margin
+    }
+
+    /// The visible range of each band of the frame whose records are held.
+    #[must_use]
+    pub const fn visible_rows(&self) -> crate::VisibleRows {
+        self.visible_rows
     }
 }
 

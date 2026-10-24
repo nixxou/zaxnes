@@ -823,6 +823,8 @@ pub struct ConversionFrame {
     palette: FramePalette,
     mask: Cell,
     margin: i32,
+    /// The visible range of each band of the batch (`FrameBatch::visible_rows`).
+    visible_rows: zax_nes::VisibleRows,
     counter: i32,
     background_shape_count: usize,
     background_tile_count: usize,
@@ -863,6 +865,7 @@ impl ConversionFrame {
             palette: FramePalette::default(),
             mask: Cell::default(),
             margin: 0,
+            visible_rows: zax_nes::STANDARD_ROWS,
             counter: 0,
             background_shape_count: 0,
             background_tile_count: 0,
@@ -1011,6 +1014,38 @@ impl ConversionFrame {
     #[must_use]
     pub const fn margin(&self) -> i32 {
         self.margin
+    }
+
+    /// Sets the visible range of each band of the batch, after [`ConversionFrame::begin_batch`].
+    pub(crate) fn set_visible_rows(&mut self, rows: &zax_nes::VisibleRows) {
+        self.visible_rows = *rows;
+    }
+
+    /// [`FrameShape::is_finished`] on a widescreen frame, whose bands may show fewer columns
+    /// than its margin: a shape that reaches the edge of what one of its bands shows may be cut
+    /// there, so it is not finished either.
+    #[must_use]
+    pub fn is_shape_finished(&self, id: ShapeId) -> bool {
+        let shape = self.shape(id);
+        if shape.is_big() {
+            return true;
+        }
+        if !shape.inside() {
+            return false;
+        }
+        if self.margin == 0 {
+            return true;
+        }
+        let first = usize::try_from(shape.pixel_start.y.max(0) / 8).unwrap_or(0);
+        let last = usize::try_from(shape.pixel_end.y.clamp(0, 239) / 8).unwrap_or(0);
+        self.visible_rows
+            .get(first..=last)
+            .unwrap_or_default()
+            .iter()
+            .all(|&(low, high)| {
+                shape.pixel_start.x > i32::from(low) + shape.mask.x
+                    && shape.pixel_end.x + shape.mask.x < i32::from(high) - 1
+            })
     }
 
     /// Number of emulated frames since the game started (REQ-E3D-043).

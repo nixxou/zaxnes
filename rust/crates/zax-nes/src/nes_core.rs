@@ -429,6 +429,7 @@ impl NesCore {
             mask_x: ppu.mask_x(),
             mask_y: ppu.mask_y(),
             margin: ppu.frame_margin(),
+            visible_rows: ppu.visible_rows(),
         }
     }
 

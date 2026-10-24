@@ -545,9 +545,10 @@ impl Segmenter {
         context: &mut SegmentContext<'_>,
         shape: ShapeId,
     ) {
+        let finished = frame.is_shape_finished(shape);
         let data = frame.shape(shape);
         ImageSetKey::collect_ids(data.images(), &mut self.key);
-        let id = if data.is_finished() {
+        let id = if finished {
             match context.patterns.find_permanent(&self.key) {
                 Some(id) => id,
                 None => context.learn(frame, shape, true),

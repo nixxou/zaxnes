@@ -397,6 +397,7 @@ impl ConversionEngine {
         let frame = &mut state.frames[index];
         let margin = batch.margin.clamp(0, zax_nes::wide::MAX_MARGIN);
         frame.begin_batch(frame_counter, Cell::new(batch.mask_x, batch.mask_y), margin);
+        frame.set_visible_rows(&batch.visible_rows);
 
         // (a) frame palette.
         frame.palette_mut().load_from(&batch.palette);
