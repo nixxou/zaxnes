@@ -6,6 +6,10 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# The wgpu renderer (`render --backend vulkan|dx12`), desktop only.
+wgpu = ["zax-render/wgpu"]
+
 [dependencies]
 serde_json.workspace = true
 sha2 = "0.10"

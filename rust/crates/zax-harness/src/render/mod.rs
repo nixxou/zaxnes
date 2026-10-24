@@ -7,6 +7,7 @@
 //! `--bench <frames>` times the rendering of each one (REQ-SCN-064).
 
 pub mod draw_list_report;
+pub mod engine;
 pub mod frame_json;
 pub mod input_script;
 pub mod profile;
@@ -27,12 +28,11 @@ use zax_render::assets::{png_image, NeutralSceneAssets, SceneAssets};
 use zax_render::camera::CameraView;
 use zax_render::geometry;
 use zax_render::numerics::Vector3;
-use zax_render::offscreen::{ContextApi, OffscreenContext};
 use zax_render::scene::SkyboxKind;
 use zax_render::statistics::RenderStatistics;
-use zax_render::SceneRenderer;
 
 use crate::{json_text, HarnessError};
+use engine::{Backend, Engine};
 use input_script::InputScript;
 use rom::RomRequest;
 use scenes::SyntheticScene;
@@ -72,6 +72,8 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --bg-color <r,g,b>       the custom background colour, 0-255 (REQ-SCN-046)
   --real-time <seconds>    real time the star twinkle uses (REQ-SCN-050)
   --sky-bodies             light the procedural sun, moon and clouds (REQ-PUB-003, Q-064)
+  --backend <name>         gl (default), or vulkan or dx12 with a harness built with the
+                           wgpu feature (procedural skies only)
   --bench <frames>         also time that many frames per scene and report them
   --explain                print the draw list grouped by 3D object, with the NES
                            colours each group's texels resolve to (colour fidelity)
@@ -139,6 +141,8 @@ pub struct Options {
     pub real_time: f32,
     /// Whether the sun, the moon and the clouds are lit.
     pub sky_bodies: bool,
+    /// The renderer.
+    pub backend: Backend,
     /// Frames to time per scene; 0 times nothing.
     pub bench: i32,
     /// Print the camera and the draw-list report of each scene.
@@ -180,6 +184,7 @@ impl Options {
             background: Rgb24::default(),
             real_time: 0.0,
             sky_bodies: false,
+            backend: Backend::Gl,
             bench: 0,
             explain: false,
             list_scenes: false,
@@ -263,6 +268,7 @@ impl Options {
             "--bg-color" => self.background = parse_color(value)?,
             "--real-time" => self.real_time = number(value)?,
             "--bench" => self.bench = integer(value)?,
+            "--backend" => self.backend = Backend::parse(value)?,
             _ => return Err(format!("unknown argument '{key}'")),
         }
         Ok(())
@@ -389,20 +395,23 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         apply(options, scene);
     }
 
-    let context = OffscreenContext::new(options.width, options.height, ContextApi::DesktopCore)?;
-
     // AMD-024 REQ-PUB-001: the scene assets are only the folder --assets names, as in the
     // application. Without it the renderer produces the procedural skyboxes of REQ-PUB-003.
     let assets = NeutralSceneAssets::try_open(options.assets.as_deref())
         .map(|assets| Box::new(assets) as Box<dyn SceneAssets>);
-    let mut renderer = SceneRenderer::new(context.gl(), assets)?;
-    renderer.set_group_opaque_draws(options.group_draws);
+    let mut engine = Engine::open(
+        options.backend,
+        options.width,
+        options.height,
+        assets,
+        options.group_draws,
+    )?;
 
     let mut report = Vec::with_capacity(built.len());
     let mut text = String::new();
     for scene in &built {
-        renderer.render(&context.target(), &scene.scene, &scene.frame())?;
-        let pixels = context.read_pixels();
+        engine.render(&scene.scene, &scene.frame())?;
+        let pixels = engine.read_pixels();
         let file = options.output.join(format!("{}.png", scene.name));
         write_png(&file, options, &pixels)?;
         if scene.nes_picture.len() >= NES_PIXELS {
@@ -413,16 +422,16 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         }
 
         if options.explain {
-            text.push_str(&explain(scene, renderer.last_view()));
+            text.push_str(&explain(scene, engine.last_view()));
         }
 
         let statistics = CaptureStatistics::measure(&pixels);
         let measured = if options.bench > 0 {
-            Some(bench(&mut renderer, &context, scene, options.bench)?)
+            Some(bench(&mut engine, scene, options.bench)?)
         } else {
             None
         };
-        let counts = renderer.statistics();
+        let counts = engine.statistics();
         report.push(describe(scene, counts, &statistics, measured, options));
 
         let timing = measured.map_or_else(String::new, |time| {
@@ -623,22 +632,21 @@ const WARM_UP_FRAMES: usize = 8;
 /// Renders `count` frames and returns the median and the 99th percentile frame time, the
 /// measurement REQ-SCN-064 asks for.
 fn bench(
-    renderer: &mut SceneRenderer,
-    context: &OffscreenContext,
+    engine: &mut Engine,
     scene: &SyntheticScene,
     count: i32,
 ) -> Result<FrameTimes, HarnessError> {
     let count = usize::try_from(count).unwrap_or(0).max(1);
     for _ in 0..WARM_UP_FRAMES {
-        renderer.render(&context.target(), &scene.scene, &scene.frame())?;
+        engine.render(&scene.scene, &scene.frame())?;
     }
-    context.finish();
+    engine.finish();
 
     let mut samples = Vec::with_capacity(count);
     for _ in 0..count {
         let start = Instant::now();
-        renderer.render(&context.target(), &scene.scene, &scene.frame())?;
-        context.finish();
+        engine.render(&scene.scene, &scene.frame())?;
+        engine.finish();
         samples.push(start.elapsed().as_secs_f64() * 1000.0);
     }
 
