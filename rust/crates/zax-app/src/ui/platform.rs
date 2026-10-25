@@ -13,6 +13,7 @@ use super::handheld::pad::{PadButton, PadState};
 
 /// The state between events: how the window's coordinates scale to the drawable's.
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)] // independent switches of each kind of platform
 pub struct SdlPlatform {
     scale: [f32; 2],
     /// Whether the pointer events are dropped: `--ui-shots` photographs the interface as it is
@@ -23,6 +24,9 @@ pub struct SdlPlatform {
     gamepad: bool,
     /// The [`PadState`] alone: the desktop's console mode reads it, `ImGui` does not.
     feeds_pad: bool,
+    /// Whether the face buttons stand for the handheld's at the same places (the desktop: an
+    /// `XInput` pad labels A the bottom button, a handheld the right one) rather than by label.
+    positional: bool,
     pad: PadState,
 }
 
@@ -41,6 +45,7 @@ impl SdlPlatform {
             ignore_pointer: false,
             gamepad: false,
             feeds_pad: true,
+            positional: true,
             pad: PadState::new(),
         }
     }
@@ -54,6 +59,7 @@ impl SdlPlatform {
             ignore_pointer: true,
             gamepad: false,
             feeds_pad: false,
+            positional: false,
             pad: PadState::new(),
         }
     }
@@ -66,6 +72,7 @@ impl SdlPlatform {
             ignore_pointer: true,
             gamepad: true,
             feeds_pad: true,
+            positional: false,
             pad: PadState::new(),
         }
     }
@@ -149,6 +156,11 @@ impl SdlPlatform {
         let Some((pad_button, key)) = pad_mapping(button) else {
             return;
         };
+        let pad_button = if self.positional {
+            at_handheld_place(pad_button)
+        } else {
+            pad_button
+        };
         self.pad.set(pad_button, down);
         if let Some(key) = key.filter(|_| self.gamepad) {
             io.add_key_event(key, down);
@@ -217,6 +229,18 @@ const fn pad_mapping(button: Button) -> Option<(PadButton, Option<Key>)> {
         Button::Guide => (PadButton::Menu, None),
         _ => return None,
     })
+}
+
+/// The handheld button at the place of a face button named `labelled` on an `XInput` pad: a
+/// handheld has A on the right, B at the bottom, X on top and Y on the left.
+const fn at_handheld_place(labelled: PadButton) -> PadButton {
+    match labelled {
+        PadButton::A => PadButton::B,
+        PadButton::B => PadButton::A,
+        PadButton::X => PadButton::Y,
+        PadButton::Y => PadButton::X,
+        other => other,
+    }
 }
 
 fn button(io: &mut Io, button: SdlButton, down: bool) {
@@ -309,6 +333,19 @@ mod tests {
             x: 120,
             y: 80,
         }
+    }
+
+    /// The desktop's pad has the handheld's face buttons at their places (owner request): an
+    /// `XInput` pad labels A the bottom button, a handheld the right one.
+    #[test]
+    fn the_desktop_face_buttons_are_the_handhelds_at_the_same_places() {
+        assert_eq!(PadButton::A, at_handheld_place(PadButton::B));
+        assert_eq!(PadButton::B, at_handheld_place(PadButton::A));
+        assert_eq!(PadButton::X, at_handheld_place(PadButton::Y));
+        assert_eq!(PadButton::Y, at_handheld_place(PadButton::X));
+        assert_eq!(PadButton::Start, at_handheld_place(PadButton::Start));
+        assert!(SdlPlatform::new().positional);
+        assert!(!SdlPlatform::for_handheld().positional);
     }
 
     /// Dear `ImGui` allows one context per process, so the platforms are checked in turn.

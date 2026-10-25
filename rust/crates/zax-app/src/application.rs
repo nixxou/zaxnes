@@ -306,7 +306,7 @@ impl Running {
         )?;
         let input = SdlInput::new(window.sdl()).map_err(|error| error.to_string())?;
         let mut bindings_store = FileInputBindingStore::new(paths.clone(), OffsetDateTime::now_utc);
-        let bindings = load_bindings(&mut bindings_store);
+        let bindings = load_bindings(&mut bindings_store, options.handheld);
         let source = DesktopInputSource::new(bindings, Box::new(bindings_store));
 
         let (audio, sample_rate) = open_audio(options, window.sdl());
@@ -942,6 +942,15 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
         );
     }
     store.load(&mut model, OffsetDateTime::now_utc());
+    // Rust-only (owner request): the widescreen, its margin and the built-in patches are options
+    // of each game now, with no global choice left; a value an earlier version saved goes.
+    for id in [
+        SettingId::VideoWidescreen,
+        SettingId::VideoWidescreenExtra,
+        SettingId::EmuBuiltinPatches,
+    ] {
+        model.reset(id);
+    }
     // The command line wins over the file, but only for the options it really carries (Q-066);
     // then the scene gets the values that came out of the two.
     command_line_settings::apply(options, &mut model);
@@ -1184,11 +1193,15 @@ const GROUP_DRAWS_VARIABLE: &str = "ZAXNES_GROUP_DRAWS";
 
 /// The saved bindings, a gamepad left at its defaults taking those of the handheld: the desktop's
 /// pads play as in its console mode (owner request), the menu button, X, Y and L2 being the
-/// console interface's.
-fn load_bindings(store: &mut FileInputBindingStore) -> crate::input::InputBindings {
+/// console interface's, its face buttons where a handheld has them.
+fn load_bindings(store: &mut FileInputBindingStore, device: bool) -> crate::input::InputBindings {
     let mut bindings = crate::input::InputBindings::new();
     store.load(&mut bindings);
-    bindings.use_handheld_defaults();
+    if device {
+        bindings.use_handheld_defaults();
+    } else {
+        bindings.use_desktop_console_defaults();
+    }
     bindings
 }
 

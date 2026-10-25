@@ -14,6 +14,9 @@ pub struct InputBindings {
     structure_revision: u64,
     /// Whether the pads get the handheld defaults (`default_bindings::handheld_gamepad_set`).
     handheld: bool,
+    /// Whether those defaults go by the positions of a handheld's buttons rather than by their
+    /// labels (the desktop, `default_bindings::create_desktop_console_gamepad`).
+    positional: bool,
 }
 
 impl Default for InputBindings {
@@ -48,6 +51,7 @@ impl InputBindings {
             last_gamepads: [None, None],
             structure_revision: 0,
             handheld: false,
+            positional: false,
         }
     }
 
@@ -65,9 +69,30 @@ impl InputBindings {
         }
     }
 
+    /// Gives the pads the defaults of the desktop's console mode from now on: those of a
+    /// handheld, the face buttons where a handheld has them (owner request). A pad whose saved set
+    /// is still a default of an earlier version (the desktop's, or the handheld's by labels) gets
+    /// them at once; a set the player changed is kept.
+    pub fn use_desktop_console_defaults(&mut self) {
+        self.handheld = true;
+        self.positional = true;
+        let former = [
+            default_bindings::create_gamepad(true),
+            default_bindings::create_handheld_gamepad(true),
+        ];
+        let console = default_bindings::create_desktop_console_gamepad(true);
+        for (_, set) in &mut self.gamepads {
+            if former.iter().any(|default| same_bindings(set, default)) {
+                set.replace(console.bindings().iter().cloned());
+            }
+        }
+    }
+
     /// The default set of a `standard` pad (or an empty one) on this device.
     fn default_gamepad(&self, standard: bool) -> BindingSet {
-        if self.handheld {
+        if self.positional {
+            default_bindings::create_desktop_console_gamepad(standard)
+        } else if self.handheld {
             default_bindings::create_handheld_gamepad(standard)
         } else {
             default_bindings::create_gamepad(standard)
