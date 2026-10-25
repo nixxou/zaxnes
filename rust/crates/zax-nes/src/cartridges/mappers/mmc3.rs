@@ -127,6 +127,22 @@ impl Mapper for Mmc3 {
         None
     }
 
+    fn chr_peek_view<'m>(
+        &self,
+        memory: &'m crate::cartridges::CartridgeMemory,
+    ) -> Option<crate::cartridges::ChrView<'m>> {
+        // Its peek is the default one, through its bank windows: only the fetches clock the
+        // IRQ counter.
+        let chr_rom = memory.rom().chr_rom();
+        let chr = if chr_rom.is_empty() {
+            memory.chr_ram()
+        } else {
+            chr_rom
+        };
+        self.banks()
+            .map(|banks| crate::cartridges::ChrView::new(chr, banks))
+    }
+
     fn mapper_number(&self) -> i32 {
         4
     }

@@ -191,7 +191,12 @@ each band. Widescreen changes:
   `row * (33 + 2 extra) + k + extra`.
 * **Captured rows.** Each background band also records where it was read from
   (`CapturedRow`: PPU address `v` at the start of the line, fine X, y, pattern table), for a
-  margin decoder.
+  margin decoder, and the CHR banks it was drawn with (`chr`: the offsets of the eight 1 KiB
+  windows, `ChrView::offsets()` of `Cartridge::chr_peek_view()`). The decoded tiles of the row
+  are read through those banks (`read_row_planes`): the margins are decoded once the frame is
+  over, when a game that switches banks during the frame (Super Mario Bros. 3: its status bar
+  below line 192, its animated tiles) has other banks in place. A board with no side-effect-free
+  view keeps the reading through the banks of the end of the frame.
 * **Visible rows.** `FrameBatch::visible_rows` (30 bands of 8 lines) holds, per band, the range
   of x the band could show tiles in: `visible_range()` at its capture, or the full margin for a
   band a decoder filled.
@@ -265,6 +270,18 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    flipping every 30) and a line outside `0..240`. A decoder that cannot returns `false` (the
    default) and the vertical margin stays empty.
 
+4. A decoder whose `decodes_masked_column()` is true (default false) is also asked for screen
+   column 0 of each row while the game hides the leftmost 8 pixels of the background (PPUMASK
+   bit 1 clear), and that column's nametable record of a decoded row is replaced too: the wide
+   picture composes those 8 pixels from the records, and such a game keeps there the column it is
+   drawing next (Super Mario Bros. 3, horizontal mirroring: the column it draws past the right
+   edge is the same nametable column as the one at the left edge).
+
+The CHR banks of the decoded rows: `Mapper::chr_peek_view` (default: `chr_view`) is the view
+`ppu_peek` reads, side effects aside. MMC3 has one (its peek is the default one through its bank
+windows; only its fetches clock the IRQ counter) although its `chr_view`, the PPU's fast path,
+is `None`.
+
 Decoders run only while the built-in patches are on for the game in play (see 7). The decoders:
 
 | Game | Decodes | Source |
@@ -272,6 +289,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
+| Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), unpatched | a horizontal level, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -311,6 +329,22 @@ hold for that place (Mega Man 2's rule: the rows that differ from the parse writ
 row that matches) is taken from them, with the bricks broken and the coins taken; any other from
 the parse. Not handled yet: a fixed room sharing its area with others (bonus rooms) shows its
 neighbours in the margins; castle loops (the game sets the area back) show the straight area.
+
+Super Mario Bros. 3: the game lays the whole level out in PRG-RAM (`Tile_Mem`, `$6000-$794F`)
+before it starts and keeps it up to date (blocks hit, coins taken, bricks broken). A horizontal
+level is up to 15 screens of 16 x 27 tiles of 16 x 16 pixels, screen `s` at `$6000 + $1B0 s`, row
+first. Tile `t` is the CHR tiles `layout[256 q + t]` of quarter `q` (top left, bottom left, top
+right, bottom right), its sub-palette `t >> 6`; the layout of tileset `$070A` is the pointer at
+`$99F7 + 2 n` of PRG bank 30 (the game's bank before the last, fixed at `$8000`; the decoder finds
+it 16 KiB before the end of the PRG-ROM, where it is with or without the built-in patch), in bank
+`PAGE_A000_ByTileset[n]` (`$83E9`) or, for a pointer at `$C000`, `PAGE_C000_ByTileset[n]`
+(`$83D6`). The 27 rows are the 54 tile rows of the plane of two stacked nametables (horizontal
+mirroring), from its top; the camera's y in the level is `Vert_Scroll` (`$FC`) and picks the
+instance of a row, its x `$12:$FD`. Rows past the level (the status bar, below line 192) and a row
+whose centre differs from the tile map at more than one of four columns (the world map, the title,
+the bonus games, a transition) are left to the nametables; the world map (tileset 0) and the
+vertical levels (`$03EF` non-zero) are not decoded yet. The vertical margin is decoded once a row
+halfway down the playfield matches. Column 0 is decoded too while the game hides it (see 4).
 
 ---
 

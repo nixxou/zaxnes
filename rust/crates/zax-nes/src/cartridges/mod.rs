@@ -377,6 +377,13 @@ impl Cartridge {
         self.board.chr_view(&self.memory)
     }
 
+    /// The CHR [`Self::ppu_peek`] reads with the banks in place now, as a view (see
+    /// [`Mapper::chr_peek_view`]); `None` for the boards whose peek reads another source.
+    #[must_use]
+    pub fn chr_peek_view(&self) -> Option<ChrView<'_>> {
+        self.board.chr_peek_view(&self.memory)
+    }
+
     /// Reads CHR without any side effect. The tile emitter and the host accessors use this
     /// one (REQ-CORE-033).
     #[must_use]
