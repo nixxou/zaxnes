@@ -36,6 +36,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             && self.settings.get(SettingId::VideoWidescreen).as_int() != 0
     }
 
+    /// Whether the advanced mode of the game's widescreen is on (its patch, when the patch is an
+    /// advanced one, applies only then).
+    #[must_use]
+    pub fn advanced_patches_wanted(&self) -> bool {
+        self.settings
+            .get(SettingId::VideoWidescreenAdvanced)
+            .as_bool()
+    }
+
+    /// Whether `patch` applies to its ROM when it loads, as the game's hacks are set.
+    #[must_use]
+    pub fn patch_applies(&self, patch: &BuiltinPatch) -> bool {
+        self.builtin_patches_wanted() && (!patch.advanced || self.advanced_patches_wanted())
+    }
+
     /// The built-in patch forced on the game in play (another version of the game a patch is
     /// made for), when it is.
     #[must_use]
@@ -78,6 +93,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let wanted = SettingValue::Enum(i32::from(on));
         if global.get(SettingId::VideoWidescreen) != wanted {
             options.push((SettingId::VideoWidescreen, wanted));
+        }
+        self.set_game_options(&rom, options);
+    }
+
+    /// Turns the advanced mode of the widescreen of the game in play on or off.
+    pub(super) fn set_game_advanced(&mut self, on: bool) {
+        let Some(rom) = self.game_options_rom.clone() else {
+            return;
+        };
+        let mut options = self.game_options(&rom);
+        options.retain(|(id, _)| *id != SettingId::VideoWidescreenAdvanced);
+        if on {
+            options.push((SettingId::VideoWidescreenAdvanced, SettingValue::Bool(true)));
         }
         self.set_game_options(&rom, options);
     }

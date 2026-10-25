@@ -9,6 +9,7 @@
 //! |---|---|---|
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
+//! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +31,13 @@ pub struct BuiltinPatch {
     /// patch while it is off, or without it while it is on): the video memory of one is not laid
     /// out as the other expects, so the game is sent back to a step that redraws it.
     pub after_other_way_state: Option<fn(&mut [u8])>,
+    /// An advanced mode of the game's widescreen (Rust-only, owner request): applied only when
+    /// the player asks for it, the game widening without it through its margin decoder alone.
+    pub advanced: bool,
+    /// The widescreen extension unlocked at power-on and reset with its PRG window open on
+    /// (`$5008`, `$5009`): for a ROM with no room left for the code that would unlock it, whose
+    /// reset can then jump straight into the window.
+    pub boot_window: Option<(u8, u8)>,
 }
 
 /// Name of the Zelda II (USA) widescreen patch.
@@ -38,8 +46,11 @@ pub const ZELDA2_USA: &str = "Zelda II (USA) widescreen";
 /// Name of the Mega Man 2 (USA) widescreen patch.
 pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
 
+/// Name of the Super Mario Bros. (World) widescreen patch (advanced mode).
+pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
+
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 2] = [
+pub const PATCHES: [BuiltinPatch; 3] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -48,6 +59,8 @@ pub const PATCHES: [BuiltinPatch; 2] = [
         bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
         options: &[],
         after_other_way_state: Some(zelda2_after_other_way_state),
+        advanced: false,
+        boot_window: None,
     },
     BuiltinPatch {
         name: MEGAMAN2_USA,
@@ -81,6 +94,22 @@ pub const PATCHES: [BuiltinPatch; 2] = [
             },
         ],
         after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+    },
+    BuiltinPatch {
+        name: SMB1_WORLD,
+        game: "Super Mario Bros.",
+        rom_name: "Super Mario Bros. (World)",
+        source_crc: 0xD445_F698,
+        bps: include_bytes!("../patches/smb1-world-widescreen.bps"),
+        options: &[],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (2)
+        // is open in the window from power-on.
+        boot_window: Some((0x82, 0x00)),
     },
 ];
 
@@ -168,11 +197,35 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
     // gives do not.
     let mut patched_image = Vec::with_capacity(start + patched.len());
     patched_image.extend_from_slice(&image[..start]);
+    if patched.len() != data.len() {
+        resize_prg(&mut patched_image, data.len(), patched.len());
+    }
     patched_image.extend_from_slice(&patched);
     Some(PatchedRom {
         image: patched_image,
         name: patch.name,
     })
+}
+
+/// A patch that adds PRG-ROM (16 KiB banks after the game's, for the widescreen extension's PRG
+/// window; the CHR-ROM stays as it is, after them): the header in `header` (the bytes before the
+/// data) gets the new PRG size, data of `before` bytes becoming `after`.
+fn resize_prg(header: &mut [u8], before: usize, after: usize) {
+    const BANK: usize = 16 * 1024;
+    if header.len() < HEADER_SIZE || !header.starts_with(b"NES") {
+        return;
+    }
+    let Some(added) = after.checked_sub(before).filter(|added| added % BANK == 0) else {
+        return;
+    };
+    let nes2 = header[7] & 0x0C == 0x08;
+    let high = if nes2 { header[9] & 0x0F } else { 0 };
+    let banks = u16::from_le_bytes([header[4], high]) + u16::try_from(added / BANK).unwrap_or(0);
+    let [low, high] = banks.to_le_bytes();
+    header[4] = low;
+    if nes2 {
+        header[9] = (header[9] & 0xF0) | (high & 0x0F);
+    }
 }
 
 /// The built-in patch made for `image` (iNES header or not), if any.
@@ -526,6 +579,17 @@ mod tests {
         let patch = patch(source, target, &actions);
         assert_eq!(apply_bps(&patch, source), Ok(target.to_vec()));
         assert_eq!(apply_bps(&patch, b"ABCDEFGX"), Err(BpsError::WrongSource));
+    }
+
+    #[test]
+    fn a_patch_adding_prg_banks_grows_the_header() {
+        let mut header = b"NES".to_vec();
+        header.extend_from_slice(&[2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        resize_prg(&mut header, 40 * 1024, 72 * 1024);
+        assert_eq!(header[4], 4, "two banks added");
+        assert_eq!(header[5], 1, "the CHR-ROM stays");
+        resize_prg(&mut header, 40 * 1024, 41 * 1024);
+        assert_eq!(header[4], 4, "not whole banks: left alone");
     }
 
     #[test]

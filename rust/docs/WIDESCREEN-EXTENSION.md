@@ -386,6 +386,23 @@ pub struct BuiltinPatch {
   target and patch checksums, so a `Some` is exactly the build.
 * `BuiltinPatch::version()` is the target CRC-32 read from the BPS footer: any change to a hack
   changes it.
+* `BuiltinPatch::advanced`: an **advanced mode** of a game's widescreen (Super Mario Bros.: the
+  enemies in the margins). Such a patch applies only when the game's `video.widescreen_advanced`
+  is on too (`NesCore::set_advanced_patches`, set with `set_builtin_patches` at each load and
+  restore); off, the ROM loads as it is and its margin decoder alone widens it. The hacks screen
+  shows the row "Advanced mode" for such a game (`HackRow::Advanced`; on, it turns the widescreen
+  on too), and the options of an advanced patch only while it is on. A state is "the hack" or not
+  as for any patch; loading one made in the other mode switches the advanced mode (the widescreen
+  stays on).
+* `BuiltinPatch::boot_window`: `(bank, page)` of the extension's PRG window, opened at power-on
+  and reset with the extension unlocked (`WideExtension::boot`), and again after a restore that
+  left it locked: for a ROM with no room for the code that would unlock it, whose reset or NMI then
+  jumps straight into the window.
+* A patch may add PRG-ROM: data of the original size plus whole 16 KiB banks, the CHR-ROM after
+  them (`apply_with` then raises the PRG bank count of the player's header, `resize_prg`). An
+  NROM game maps its first 32 KiB as before; the added banks are seen through the window. The BPS
+  patch copies the moved CHR-ROM from the player's ROM (SourceCopy) and the bank's fill with
+  TargetCopy, so it still carries only the hack's bytes.
 * `BuiltinPatch::options`: the options the player can turn on or off (`HackOption`: key, English
   and French labels, bit, default). The core starts with the defaults at each ROM load
   (`default_options()`); the application keeps the player's choices in `emu.hack_options`

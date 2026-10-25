@@ -57,6 +57,8 @@ pub struct RomRequest<'a> {
     pub widescreen_y: i32,
     /// Whether the state of `load_state` is restored with the built-in ROM patches.
     pub builtin_patches: bool,
+    /// Whether the built-in patches of an advanced widescreen mode apply.
+    pub advanced: bool,
     /// Where to write the composed tile records of the last frame.
     pub png_nes: Option<&'a Path>,
     /// State block restored after the reset.
@@ -87,6 +89,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         profile,
         mesh: request.mesh,
         force_three_dimensional: false,
+        advanced: request.advanced,
     })?;
     host.core.set_builtin_patches(request.builtin_patches);
     host.core.set_widescreen_margin(request.widescreen);
@@ -324,6 +327,8 @@ pub(crate) struct Startup<'a> {
     pub mesh: RenderAlgorithm,
     /// Segments as a 3D profile does even when the profile has no pattern (benchmark only).
     pub force_three_dimensional: bool,
+    /// Whether the built-in patches of an advanced widescreen mode apply.
+    pub advanced: bool,
 }
 
 /// The machine and the engine; the scene and the machine are lent to the Lua
@@ -340,6 +345,7 @@ impl Host {
     pub(crate) fn start(startup: &Startup<'_>) -> Result<(Self, SceneState), HarnessError> {
         let profile = startup.profile;
         let mut core = NesCore::new();
+        core.set_advanced_patches(startup.advanced);
         let load = core.load_rom(&fs::read(startup.rom)?, &file_name(startup.rom));
         if !load.success {
             return Err(HarnessError::Rom(format!(

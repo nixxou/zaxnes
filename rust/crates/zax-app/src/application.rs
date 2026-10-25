@@ -947,6 +947,7 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
     for id in [
         SettingId::VideoWidescreen,
         SettingId::VideoWidescreenExtra,
+        SettingId::VideoWidescreenAdvanced,
         SettingId::EmuBuiltinPatches,
         SettingId::EmuForcedPatch,
     ] {

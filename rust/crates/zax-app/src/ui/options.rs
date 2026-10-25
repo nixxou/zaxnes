@@ -57,7 +57,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 8] = [
+pub const EXCLUDED: [SettingId; 9] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -67,6 +67,7 @@ pub const EXCLUDED: [SettingId; 8] = [
     SettingId::EmuForcedPatch,
     SettingId::VideoWidescreen,
     SettingId::VideoWidescreenExtra,
+    SettingId::VideoWidescreenAdvanced,
 ];
 
 /// The settings the window edits as a folder: a field and a button that picks it.

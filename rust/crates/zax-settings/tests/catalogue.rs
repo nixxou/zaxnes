@@ -48,8 +48,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     additions.sort();
     // emu.builtin_patches, emu.catch_up, emu.forced_patch, emu.hack_options, emu.lua_experimental,
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler, ui.roms_folder,
-    // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_extra and
-    // video.widescreen_strict_edges: Rust-only settings (owner request).
+    // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_advanced,
+    // video.widescreen_extra and video.widescreen_strict_edges: Rust-only settings (owner request).
     assert_eq!(
         additions,
         [
@@ -69,6 +69,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.backend",
             "video.dynamic_resolution",
             "video.widescreen",
+            "video.widescreen_advanced",
             "video.widescreen_extra",
             "video.widescreen_strict_edges"
         ]

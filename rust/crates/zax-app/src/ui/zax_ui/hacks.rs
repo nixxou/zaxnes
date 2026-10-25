@@ -53,7 +53,10 @@ impl ZaxUi {
                     ui.separator();
                 }
                 match row {
-                    HackRow::Force | HackRow::Widescreen | HackRow::PatchOption(_) => {
+                    HackRow::Force
+                    | HackRow::Widescreen
+                    | HackRow::Advanced
+                    | HackRow::PatchOption(_) => {
                         let mut on = hacks.is_on(row);
                         if ui.checkbox(&label, &mut on) {
                             hacks.step(row, 1);

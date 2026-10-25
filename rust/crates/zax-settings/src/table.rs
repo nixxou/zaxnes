@@ -1240,6 +1240,17 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
         )
         .with_label("Built-in ROM patches"),
     );
+    // Rust-only (owner request): the advanced mode of a game's widescreen (a built-in patch whose
+    // `advanced` is set: Super Mario Bros.' enemies in the margins); off, its margin decoder alone
+    // widens it. An option of each game only.
+    out.push(SettingDescriptor::new(
+        SettingId::VideoWidescreenAdvanced,
+        SettingKind::Bool,
+        SettingValue::Bool(false),
+        SettingScope::User,
+        SettingEffect::NextRomLoad,
+        SettingTheme::Video,
+    ));
     // Rust-only (owner request): the built-in patch applied to a ROM none is made for (another
     // version of its game, a ROM hack), by name; an option of each game only.
     out.push(SettingDescriptor::new(

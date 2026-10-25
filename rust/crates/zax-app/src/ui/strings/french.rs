@@ -300,6 +300,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HACK_WIDESCREEN, "Écran large"),
     (keys::HACK_RATIO, "Ratio"),
     (keys::HACK_MARGIN, "Marge supplémentaire"),
+    (keys::HACK_ADVANCED, "Mode avancé (ennemis dans les marges)"),
     (keys::HACK_ON, "activé"),
     (keys::HACK_FORCE, "Forcer l'activation"),
     (keys::HACKS_FORCED_NOTE, "Le hack écran large de {0}, fait pour la ROM « {1} » (CRC {2}), est forcé sur celle-ci : {3} (CRC {4}). Il prend effet au lancement du jeu ; si le jeu ne fonctionne pas avec, désactivez « Forcer l'activation »."),

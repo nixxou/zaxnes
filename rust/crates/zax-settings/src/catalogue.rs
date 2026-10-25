@@ -125,6 +125,7 @@ setting_ids! {
     VideoWidescreen => "video.widescreen",
     VideoWidescreenExtra => "video.widescreen_extra",
     VideoWidescreenStrictEdges => "video.widescreen_strict_edges",
+    VideoWidescreenAdvanced => "video.widescreen_advanced",
     EmuBuiltinPatches => "emu.builtin_patches",
     EmuForcedPatch => "emu.forced_patch",
     EmuHackOptions => "emu.hack_options",

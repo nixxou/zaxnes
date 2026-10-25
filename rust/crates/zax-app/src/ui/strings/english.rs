@@ -301,6 +301,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HACK_WIDESCREEN, "Widescreen"),
     (keys::HACK_RATIO, "Ratio"),
     (keys::HACK_MARGIN, "Extra margin"),
+    (keys::HACK_ADVANCED, "Advanced mode (enemies in the margins)"),
     (keys::HACK_ON, "on"),
     (keys::HACK_FORCE, "Force it"),
     (keys::HACKS_FORCED_NOTE, "The widescreen hack of {0}, made for the ROM \u{201c}{1}\u{201d} (CRC {2}), is forced on this one: {3} (CRC {4}). It takes effect when the game starts; if the game does not run with it, take the forcing back."),
