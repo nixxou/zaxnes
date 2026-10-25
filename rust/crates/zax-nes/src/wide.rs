@@ -16,7 +16,7 @@
 //! | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels |
 //! | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels |
 //! | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines, before the vblank |
-//! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring |
+//! | `$5007` | R/W | bit 0: four separate nametables (2 x 2), whatever the cartridge's mirroring; bit 4: the PRG window goes on over `$6000`-`$7FFF` (8 KiB more, for a game with nothing there) |
 //! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
 //! | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 //! | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
@@ -270,6 +270,8 @@ impl WideExtension {
         self.unlocked = true;
         self.window_bank = window_bank;
         self.window_page = window_page;
+        // The whole window, $6000-$7FFF included: such a ROM has no room for anything there.
+        self.layout |= 0x10;
     }
 
     /// Puts the registers back to their power-on values; the host margin is kept.
@@ -410,7 +412,13 @@ impl WideExtension {
     /// a small PRG-ROM: the caller wraps it.
     #[must_use]
     pub fn prg_window(&self, address: u16) -> Option<usize> {
-        if !self.unlocked || self.window_bank & 0x80 == 0 || !(0x5800..=0x5FFF).contains(&address) {
+        // Bit 4 of $5007: the window goes on over $6000-$7FFF (a game with nothing there).
+        let end = if self.layout & 0x10 == 0 {
+            0x5FFF
+        } else {
+            0x7FFF
+        };
+        if !self.unlocked || self.window_bank & 0x80 == 0 || !(0x5800..=end).contains(&address) {
             return None;
         }
 
@@ -591,6 +599,14 @@ mod tests {
         assert_eq!(wide.prg_window(0x5800), Some(0x2B00));
         assert_eq!(wide.prg_window(0x5FFF), Some(0x2B00 + 0x7FF));
         assert_eq!(wide.prg_window(0x57FF), None);
+        assert_eq!(
+            wide.prg_window(0x6000),
+            None,
+            "not past $5FFF without bit 4"
+        );
+        wide.write(0x5007, 0x10);
+        assert_eq!(wide.prg_window(0x6000), Some(0x2B00 + 0x800));
+        assert_eq!(wide.prg_window(0x7FFF), Some(0x2B00 + 0x27FF));
     }
 
     #[test]
