@@ -34,6 +34,12 @@ In the game list, X chooses the profile of the selected ROM: the three closest t
 then "2D Mode" and the 3D default, then every profile by title (left/right move by a page). The
 choice is kept for that ROM.
 
+Select opens the options of the selected game: the same options as the main menu (without the
+language, the camera and the controls), each set to "Use Global" until it is changed for this
+game. Only the options changed are kept, in `games.json` beside the chosen profile; "Game options"
+shows in cyan at the bottom of the list when the selected game has some, and X (or the first
+row) puts them all back to global.
+
 In the in-game menu, left/right on "Save state" or "Load state" picks the slot, and A opens the
 list of the slots, with the date and the picture of each: purple to save, blue to load, as the
 title says. A state made with the built-in patches set the other way shows in orange (Zaxnes

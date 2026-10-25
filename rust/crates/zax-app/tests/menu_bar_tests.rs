@@ -366,3 +366,36 @@ fn req_ui_205_a_shortcut_drives_the_command_model() {
 
     assert!(harness.ui.state.options);
 }
+
+/// The menu of the options of the game in play (Rust-only): greyed with no game; with one, it
+/// draws its rows and the options of that ROM are in force while it plays.
+#[test]
+fn the_game_options_menu_follows_the_game_in_play() {
+    use zax_app::persistence::app_settings::AppSettings as _;
+    use zax_app::ui::{keys, strings};
+    use zax_settings::catalogue::SettingId;
+    use zax_settings::values::SettingValue;
+
+    let mut harness = UiHarness::new(&["Castle Quest"]);
+    let title = strings::get(keys::HANDHELD_HINT_GAME_OPTIONS);
+    harness.ui.force_open_menu = Some(title.clone());
+    harness.draw_frames(2);
+    assert_eq!(None, harness.host.current_rom_path());
+
+    let shadows = harness.host.settings().shadow();
+    let rom = harness.write_rom("game.nes");
+    harness.host.set_game_options(
+        &rom,
+        vec![(SettingId::RenderShadow, SettingValue::Bool(!shadows))],
+    );
+    harness.launch("g0");
+    assert!(harness.host.current_rom_path().is_some());
+    assert_eq!(!shadows, harness.host.settings().shadow());
+    harness.ui.force_open_menu = Some(title);
+    harness.draw_frames(3);
+    assert_eq!(
+        1,
+        harness.host.game_options(&rom).len(),
+        "drawing changes nothing"
+    );
+}

@@ -6,6 +6,7 @@
 pub mod defaults;
 mod draw;
 pub mod exit_combo;
+pub mod game_options;
 pub mod keyboard;
 pub mod layout;
 pub mod options;
@@ -20,8 +21,11 @@ use std::path::{Path, PathBuf};
 use zax_platform::ui_image::{PictureUpdate, UiPicture, FIRST_PICTURE_ID};
 use zax_render::numerics::Vector3;
 use zax_settings::catalogue::SettingId;
+use zax_settings::model::SettingsModel;
+use zax_settings::values::SettingValue;
 
 use self::exit_combo::{ComboEvent, ExitCombo};
+use self::game_options::{GameOptionsCommand, GameOptionsModel};
 use self::layout::Metrics;
 use self::options::{HandheldOptionsModel, OptionsCommand};
 use self::overlay::{CameraPreset, OverlayCommand, OverlayModel};
@@ -55,6 +59,8 @@ pub enum Screen {
     Profiles,
     /// The reduced options.
     Options,
+    /// The options of one game, from the list of games.
+    GameOptions,
     /// The gamepad bindings of player one.
     Controls,
     /// The in-game menu.
@@ -84,6 +90,7 @@ pub struct HandheldUi {
     profiles: Option<ProfileListModel>,
     overlay: OverlayModel,
     options: HandheldOptionsModel,
+    game_options: Option<GameOptionsModel>,
     controls: ControlsState,
     keys: KeyConfigModel,
     combo: ExitCombo,
@@ -143,6 +150,7 @@ impl HandheldUi {
             profiles: None,
             overlay: OverlayModel::new(),
             options: HandheldOptionsModel::new(),
+            game_options: None,
             controls: ControlsState::default(),
             keys: KeyConfigModel::new(),
             combo: ExitCombo::new(),
@@ -372,7 +380,10 @@ impl HandheldUi {
     fn follow_the_game(&mut self, host: &AppHost) {
         let playing = host.current_game_id().is_some() || host.is_loading();
         match (playing, self.screen) {
-            (true, Screen::Home | Screen::Profiles) => self.screen = Screen::InGame,
+            (true, Screen::Home | Screen::Profiles | Screen::GameOptions) => {
+                self.game_options = None;
+                self.screen = Screen::InGame;
+            }
             (false, Screen::InGame | Screen::Overlay | Screen::States) => self.show_home(host),
             _ => {}
         }
@@ -468,6 +479,15 @@ impl HandheldUi {
                     self.carry_out_options(command, frame);
                 }
             }
+            Screen::GameOptions => {
+                let command = self
+                    .game_options
+                    .as_mut()
+                    .and_then(|options| options.handle(button));
+                if let Some(command) = command {
+                    self.carry_out_game_options(command, frame.host);
+                }
+            }
             Screen::Controls => self.press_controls(button, frame),
             Screen::Overlay => {
                 if let Some(command) = self.overlay.handle(button) {
@@ -521,8 +541,40 @@ impl HandheldUi {
                     self.open_profiles(&entry);
                 }
             }
+            RomListCommand::GameOptions(path) => self.open_game_options(&path, host),
             RomListCommand::Options => self.open_options(host),
         }
+    }
+
+    fn open_game_options(&mut self, path: &Path, host: &AppHost) {
+        let name = RomEntry::new(path.to_path_buf()).name;
+        let options = host.game_options(&path.to_string_lossy());
+        self.game_options = Some(GameOptionsModel::new(
+            path.to_path_buf(),
+            name,
+            host.settings(),
+            options,
+        ));
+        self.screen = Screen::GameOptions;
+    }
+
+    fn carry_out_game_options(&mut self, command: GameOptionsCommand, host: &mut AppHost) {
+        match command {
+            GameOptionsCommand::Save => {
+                if let Some(options) = &self.game_options {
+                    host.set_game_options(&options.rom().to_string_lossy(), options.options());
+                }
+            }
+            GameOptionsCommand::Close => {
+                self.game_options = None;
+                self.screen = Screen::Home;
+            }
+        }
+    }
+
+    /// Whether the game in `path` has options of its own, for the hint of the list.
+    fn has_game_options(host: &AppHost, path: &Path) -> bool {
+        !host.game_options(&path.to_string_lossy()).is_empty()
     }
 
     fn open_profiles(&mut self, entry: &RomEntry) {
@@ -671,6 +723,21 @@ impl HandheldUi {
                 }
             }
             Screen::Options => self.open_options_for_capture(),
+            Screen::GameOptions => {
+                if let Some(entry) = self.roms.selected_entry().cloned() {
+                    let options = vec![
+                        (SettingId::RenderShadow, SettingValue::Bool(false)),
+                        (SettingId::EmuCatchUp, SettingValue::Enum(3)),
+                    ];
+                    self.game_options = Some(GameOptionsModel::new(
+                        entry.path,
+                        entry.name,
+                        &SettingsModel::new(),
+                        options,
+                    ));
+                    self.screen = Screen::GameOptions;
+                }
+            }
             Screen::Controls => {
                 self.controls = ControlsState::default();
                 self.screen = Screen::Controls;

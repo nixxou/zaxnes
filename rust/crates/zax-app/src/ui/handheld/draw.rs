@@ -5,6 +5,7 @@
 use imgui::{Condition, DrawListMut, StyleColor, StyleVar, Ui, WindowFlags, WindowToken};
 use zax_platform::input::labels;
 
+use super::game_options::GAME_ROWS;
 use super::layout::{self, Hint, Metrics};
 use super::options::{self, ROWS};
 use super::overlay::{OverlayItem, ITEMS};
@@ -28,6 +29,9 @@ const PROFILE: [f32; 4] = [0.45, 0.92, 0.55, 1.0];
 const PROFILE_ON_FOCUS: [f32; 4] = [0.02, 0.32, 0.08, 1.0];
 const BAR: [f32; 4] = [0.1, 0.1, 0.16, 1.0];
 const WARNING: [f32; 4] = [1.0, 0.45, 0.35, 1.0];
+/// A value a game has of its own, and the hint of the list when the game has some.
+const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
+const GAME_OWN_ON_FOCUS: [f32; 4] = [0.0, 0.3, 0.4, 1.0];
 /// The save state screen when it saves, and when it loads: two colours apart from each other and
 /// from the orange and red of the states that do not load as they are.
 const SAVE_ACCENT: [f32; 4] = [0.84, 0.46, 1.0, 1.0];
@@ -161,6 +165,15 @@ impl Painter<'_> {
 
     /// The bar of hints at the bottom, each a button and what it does, already in words.
     fn hint_texts(&self, hints: &[(&str, String)]) {
+        let entries: Vec<(&str, String, [f32; 4])> = hints
+            .iter()
+            .map(|(button, meaning)| (*button, meaning.clone(), TEXT))
+            .collect();
+        self.hint_entries(&entries);
+    }
+
+    /// The same, each meaning in a colour of its own.
+    fn hint_entries(&self, hints: &[(&str, String, [f32; 4])]) {
         let metrics = &self.metrics;
         let top = self.size[1] - metrics.hint_band();
         self.list
@@ -169,10 +182,10 @@ impl Painter<'_> {
             .build();
         let y = top + metrics.padding;
         let mut x = metrics.padding;
-        for (button, meaning) in hints {
+        for (button, meaning, colour) in hints {
             self.text(x, y, FOCUS, button);
             x += self.width(button) + metrics.padding * 0.5;
-            self.text(x, y, TEXT, meaning);
+            self.text(x, y, *colour, meaning);
             x += self.width(meaning) + metrics.padding * 1.6;
         }
     }
@@ -217,7 +230,8 @@ impl HandheldUi {
         self.metrics = Metrics::for_height(size[1]);
         self.follow_the_state_picture(frame.host);
         match self.screen {
-            Screen::Home => self.draw_home(ui),
+            Screen::Home => self.draw_home(ui, frame),
+            Screen::GameOptions => self.draw_game_options(ui),
             Screen::Profiles => self.draw_profiles(ui),
             Screen::Options => self.draw_options(ui, frame),
             Screen::Controls => self.draw_controls(ui, frame),
@@ -243,7 +257,7 @@ impl HandheldUi {
         }
     }
 
-    fn draw_home(&self, ui: &Ui) {
+    fn draw_home(&self, ui: &Ui, frame: &UiFrame<'_>) {
         let Some(_window) = full_screen(ui, "##home", BACKGROUND) else {
             return;
         };
@@ -281,7 +295,69 @@ impl HandheldUi {
             };
             painter.row(slot, selected, &entry.name, (&tag.0, colour));
         }
-        painter.hints(layout::hints(Screen::Home));
+        // "Game options" in cyan when the selected game has some (owner request).
+        let own = self
+            .roms
+            .selected_entry()
+            .is_some_and(|entry| Self::has_game_options(frame.host, &entry.path));
+        let hints: Vec<(&str, String, [f32; 4])> = layout::hints(Screen::Home)
+            .iter()
+            .map(|hint| {
+                let colour = if own && hint.meaning == keys::HANDHELD_HINT_GAME_OPTIONS {
+                    GAME_OWN
+                } else {
+                    TEXT
+                };
+                (hint.button, strings::get(hint.meaning), colour)
+            })
+            .collect();
+        painter.hint_entries(&hints);
+    }
+
+    fn draw_game_options(&self, ui: &Ui) {
+        let (Some(_window), Some(options)) = (
+            full_screen(ui, "##game-options", BACKGROUND),
+            &self.game_options,
+        ) else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let title = strings::format(
+            &strings::get(keys::HANDHELD_GAME_OPTIONS_TITLE),
+            &[options.name()],
+        );
+        painter.title(&title, "");
+        let rows = self.metrics.visible_rows(painter.size[1]);
+        let selected = options.selected_index();
+        let total = GAME_ROWS.len() + 1;
+        let first = first_visible(selected, rows, total);
+        for (slot, index) in (0..total).skip(first).take(rows).enumerate() {
+            let focused = index == selected;
+            let Some(row) = index.checked_sub(1).map(|row| GAME_ROWS[row]) else {
+                let colour = if options.has_options() { GAME_OWN } else { DIM };
+                let colour = if focused && colour == GAME_OWN {
+                    GAME_OWN_ON_FOCUS
+                } else {
+                    colour
+                };
+                painter.row(
+                    slot,
+                    focused,
+                    &strings::get(keys::HANDHELD_GAME_OPTIONS_RESET),
+                    ("", colour),
+                );
+                continue;
+            };
+            let own = options.is_own(row);
+            let colour = match (own, focused) {
+                (true, true) => GAME_OWN_ON_FOCUS,
+                (true, false) => GAME_OWN,
+                (false, _) => DIM,
+            };
+            let shown = format!("< {} >", options.value_text(row));
+            painter.row(slot, focused, &options::label(row), (&shown, colour));
+        }
+        painter.hints(layout::hints(Screen::GameOptions));
     }
 
     fn draw_profiles(&self, ui: &Ui) {

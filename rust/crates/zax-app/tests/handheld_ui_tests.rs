@@ -16,6 +16,8 @@ use zax_app::ui::handheld::pad::{PadButton, PadState};
 use zax_app::ui::handheld::states::StatesMode;
 use zax_app::ui::handheld::{HandheldUi, Screen};
 use zax_app::ui::zax_ui::UiFrame;
+use zax_settings::catalogue::SettingId;
+use zax_settings::values::SettingValue;
 
 /// A harness whose ROM folder holds the given files.
 fn start(titles: &[&str], roms: &[&str]) -> (UiHarness, HandheldUi) {
@@ -299,6 +301,51 @@ fn the_options_change_the_settings_of_the_host() {
 }
 
 #[test]
+fn the_options_of_a_game_hold_only_what_changes_and_play_with_it() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes", "Other.nes"]);
+    let rom = harness.root.path().join("roms").join("Game.nes");
+    let rom = rom.to_string_lossy().into_owned();
+    let shadows = harness.host.settings().shadow();
+    tap(&mut harness, &mut handheld, PadButton::Select);
+    assert_eq!(Screen::GameOptions, handheld.screen());
+    // Reset row, volume, render scale, shadows.
+    for _ in 0..3 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(
+        harness.host.game_options(&rom),
+        [(SettingId::RenderShadow, SettingValue::Bool(!shadows))]
+    );
+    assert_eq!(
+        shadows,
+        harness.host.settings().shadow(),
+        "the global value stays"
+    );
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Home, handheld.screen());
+
+    // The game plays with it, and the end of the game gives the global value back.
+    tap(&mut harness, &mut handheld, PadButton::A);
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::InGame, handheld.screen());
+    assert_eq!(!shadows, harness.host.settings().shadow());
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    for _ in 0..6 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::Home, handheld.screen());
+    assert_eq!(shadows, harness.host.settings().shadow());
+
+    // X puts everything back.
+    tap(&mut harness, &mut handheld, PadButton::Select);
+    tap(&mut harness, &mut handheld, PadButton::X);
+    assert_eq!(0, harness.host.game_options(&rom).len());
+}
+
+#[test]
 fn the_options_of_the_menu_go_back_to_the_menu() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     play(&mut harness, &mut handheld);
@@ -347,6 +394,7 @@ fn every_screen_draws_at_the_three_sizes_of_the_devices() {
             Screen::Home,
             Screen::Profiles,
             Screen::Options,
+            Screen::GameOptions,
             Screen::Controls,
             Screen::Overlay,
             Screen::InGame,

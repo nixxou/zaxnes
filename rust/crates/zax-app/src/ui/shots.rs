@@ -37,7 +37,7 @@ const DESKTOP_PLAN: [(&str, Screen); 7] = [
 ];
 
 /// The handheld screens, photographed at the size of the window (640x480 for the devices).
-const HANDHELD_PLAN: [(&str, Screen); 7] = [
+const HANDHELD_PLAN: [(&str, Screen); 8] = [
     ("handheld-accueil", Screen::Handheld(HandheldScreen::Home)),
     (
         "handheld-profils",
@@ -46,6 +46,10 @@ const HANDHELD_PLAN: [(&str, Screen); 7] = [
     (
         "handheld-options",
         Screen::Handheld(HandheldScreen::Options),
+    ),
+    (
+        "handheld-options-jeu",
+        Screen::Handheld(HandheldScreen::GameOptions),
     ),
     (
         "handheld-commandes",

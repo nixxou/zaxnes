@@ -429,3 +429,58 @@ fn resetting_a_theme_takes_its_settings_back_to_their_defaults() {
     assert_exact(model.get(SettingId::CameraFov).as_float(), 70.0);
     assert_close(model.get(SettingId::AudioVolume).as_float(), 0.2, 4);
 }
+
+/// The options of a game (Rust-only) mask the preference and the profile while it plays, a
+/// script still masks them, the user's choice on such a setting changes the game's value and
+/// not the preference, and the end of the game drops them.
+#[test]
+fn the_options_of_a_game_sit_between_the_preferences_and_the_scripts() {
+    // Shadows are on by default: the preference is off, the game wants them.
+    let mut model = SettingsModel::new();
+    model.set(SettingId::RenderShadow, false);
+    model.set(SettingId::EmuCatchUp, SettingValue::Enum(1));
+    model.drain_changes().for_each(drop);
+
+    model.set_game_values([(SettingId::RenderShadow, SettingValue::Bool(true))]);
+    assert!(model.get(SettingId::RenderShadow).as_bool());
+    assert!(model.has_game_value(SettingId::RenderShadow));
+    let changed: Vec<SettingId> = model.drain_changes().map(|change| change.id).collect();
+    assert_eq!(changed, [SettingId::RenderShadow]);
+    assert_eq!(
+        preference(&model, SettingId::RenderShadow),
+        [SettingValue::Bool(false)]
+    );
+
+    model.set_layer(SettingId::RenderShadow, false, SettingLayer::Session);
+    assert!(
+        !model.get(SettingId::RenderShadow).as_bool(),
+        "a script wins"
+    );
+    model.clear_session_layer();
+    assert!(model.get(SettingId::RenderShadow).as_bool());
+
+    assert!(!model.take_game_edited());
+    model.set(SettingId::RenderShadow, false);
+    assert!(model.take_game_edited());
+    assert_eq!(
+        model.game_values().get(&SettingId::RenderShadow),
+        Some(&SettingValue::Bool(false))
+    );
+    model.set(SettingId::EmuCatchUp, SettingValue::Enum(2));
+    assert!(
+        !model.take_game_edited(),
+        "a setting the game has no value for"
+    );
+    assert_eq!(
+        preference(&model, SettingId::EmuCatchUp),
+        [SettingValue::Enum(2)]
+    );
+
+    model.set_game_values([(SettingId::RenderShadow, SettingValue::Bool(true))]);
+    model.end_of_game();
+    assert_eq!(0, model.game_values().len());
+    assert!(
+        !model.get(SettingId::RenderShadow).as_bool(),
+        "the preference again"
+    );
+}

@@ -3,10 +3,11 @@
 
 use time::macros::datetime;
 use time::OffsetDateTime;
-use zax_settings::catalogue::{self};
+use zax_settings::catalogue::{self, SettingId};
 use zax_settings::games::GameConfigFile;
 use zax_settings::persistence::SettingsLoadStatus;
 use zax_settings::store::MemoryStorage;
+use zax_settings::values::SettingValue;
 
 fn now() -> OffsetDateTime {
     datetime!(2026-10-21 09:00:00 UTC)
@@ -156,4 +157,29 @@ fn the_file_carries_no_settings() {
             descriptor.key()
         );
     }
+}
+
+/// The options of a game (Rust-only) are kept with the file, by setting key, and only for the
+/// ROM they were set for; forgetting the ROM drops them.
+#[test]
+fn the_options_of_a_game_are_remembered_per_rom() {
+    let rom = r"D:\roms\zelda2.nes";
+    let mut first = GameConfigFile::new(MemoryStorage::new());
+    assert_eq!(0, first.options_for(rom).len());
+    let options = vec![
+        (SettingId::RenderShadow, SettingValue::Bool(false)),
+        (SettingId::EmuCatchUp, SettingValue::Enum(3)),
+    ];
+    first.set_options_for(rom, options.clone());
+    assert!(first.is_dirty());
+    first.save().expect("the store accepts the write");
+    let mut second = GameConfigFile::new(first.storage().clone());
+    assert_eq!(second.load(now()).status, SettingsLoadStatus::Loaded);
+    assert_eq!(second.options_for(&rom.to_uppercase()), options.as_slice());
+    assert_eq!(0, second.options_for(r"D:\roms\other.nes").len());
+    second.set_options_for(rom, Vec::new());
+    assert_eq!(0, second.options_for(rom).len());
+    second.set_options_for(rom, options);
+    assert!(second.forget_rom(rom));
+    assert_eq!(0, second.options_for(rom).len());
 }

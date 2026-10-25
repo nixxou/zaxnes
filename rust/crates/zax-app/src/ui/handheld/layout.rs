@@ -92,6 +92,7 @@ const HOME_HINTS: &[Hint] = &[
     hint("X", keys::HANDHELD_HINT_PROFILE),
     hint("Y", keys::HANDHELD_HINT_OPTIONS),
     hint("L/R", keys::HANDHELD_HINT_JUMP),
+    hint("Select", keys::HANDHELD_HINT_GAME_OPTIONS),
 ];
 const PROFILES_HINTS: &[Hint] = &[
     hint("A", keys::HANDHELD_HINT_CHOOSE),
@@ -99,6 +100,11 @@ const PROFILES_HINTS: &[Hint] = &[
 ];
 const OPTIONS_HINTS: &[Hint] = &[
     hint("</>", keys::HANDHELD_HINT_CHANGE),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
+const GAME_OPTIONS_HINTS: &[Hint] = &[
+    hint("</>", keys::HANDHELD_HINT_CHANGE),
+    hint("X", keys::HANDHELD_HINT_RESET_ALL),
     hint("B", keys::HANDHELD_HINT_BACK),
 ];
 const CONTROLS_HINTS: &[Hint] = &[
@@ -128,6 +134,7 @@ pub const fn hints(screen: Screen) -> &'static [Hint] {
         Screen::Home => HOME_HINTS,
         Screen::Profiles => PROFILES_HINTS,
         Screen::Options => OPTIONS_HINTS,
+        Screen::GameOptions => GAME_OPTIONS_HINTS,
         Screen::Controls => CONTROLS_HINTS,
         Screen::Overlay => OVERLAY_HINTS,
         Screen::States => STATES_SAVE_HINTS,

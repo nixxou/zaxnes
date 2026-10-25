@@ -1,11 +1,19 @@
 //! The menu bar (REQ-UI-200).
 
+use std::path::PathBuf;
+
 use imgui::Ui;
 
 use super::ZaxUi;
 use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs};
+use crate::ui::handheld::game_options::{GameOptionsModel, GAME_ROWS};
+use crate::ui::handheld::options;
 use crate::ui::menu_bar::{Menu, MenuBarModel, MenuItem, MenuItemKind, MenuWarning};
+use crate::ui::{keys, strings};
+
+/// The title of the game options menu when the game has some (owner request).
+const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
 
 impl ZaxUi {
     /// Draws the bar and returns its height.
@@ -26,10 +34,81 @@ impl ZaxUi {
                 chosen = chosen.or(draw_items(ui, items, host));
             }
         }
+        draw_game_options(ui, host);
         if let Some((command, args)) = chosen {
             Self::activate(host, command, args);
         }
         height
+    }
+}
+
+/// The options of the game in play (Rust-only, owner request): a submenu per option with its
+/// values, "Use Global" first, and an entry that puts everything back. Greyed with no game.
+fn draw_game_options(ui: &Ui, host: &mut AppHost) {
+    let title = strings::get(keys::HANDHELD_HINT_GAME_OPTIONS);
+    let Some(rom) = host.current_rom_path().map(str::to_owned) else {
+        // Greyed: there is no game to set options for.
+        drop(ui.begin_menu_with_enabled(&title, false));
+        return;
+    };
+    let options = host.game_options(&rom);
+    let colour =
+        (!options.is_empty()).then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
+    let menu = ui.begin_menu(&title);
+    drop(colour);
+    let Some(_menu) = menu else {
+        return;
+    };
+    let name = host.current_game_title().unwrap_or_default().to_owned();
+    let mut model = GameOptionsModel::new(PathBuf::from(&rom), name, host.settings(), options);
+    let mut changed = false;
+    if ui
+        .menu_item_config(strings::get(keys::HANDHELD_GAME_OPTIONS_RESET))
+        .enabled(model.has_options())
+        .build()
+    {
+        model = GameOptionsModel::new(
+            PathBuf::from(&rom),
+            String::new(),
+            host.settings(),
+            Vec::new(),
+        );
+        changed = true;
+    }
+    ui.separator();
+    for (index, row) in GAME_ROWS.iter().enumerate() {
+        let _id = ui.push_id_usize(index);
+        let own = model.is_own(*row);
+        let label = format!("{}: {}", options::label(*row), model.value_text(*row));
+        let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
+        let submenu = ui.begin_menu(&label);
+        drop(colour);
+        let Some(_submenu) = submenu else {
+            continue;
+        };
+        let global =
+            GameOptionsModel::new(PathBuf::new(), String::new(), host.settings(), Vec::new());
+        let use_global = global.value_text(*row);
+        if ui.menu_item_config(&use_global).selected(!own).build() {
+            model.use_global(*row);
+            changed = true;
+        }
+        ui.separator();
+        let current = own.then(|| model.value_text(*row));
+        for (choice, text) in model.choices(*row).iter().enumerate() {
+            let _choice = ui.push_id_usize(choice);
+            if ui
+                .menu_item_config(text)
+                .selected(current.as_deref() == Some(text.as_str()))
+                .build()
+            {
+                model.choose(*row, choice);
+                changed = true;
+            }
+        }
+    }
+    if changed {
+        host.set_game_options(&rom, model.options());
     }
 }
 
