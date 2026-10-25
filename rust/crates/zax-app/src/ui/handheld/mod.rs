@@ -297,6 +297,11 @@ impl HandheldUi {
                 .then(|| hacks::other_rom_patch(entry.profile_title(), &entry.name))
                 .flatten()
                 .map(|patch| patch.name);
+            let own = host.game_options(&entry.path.to_string_lossy());
+            entry.widescreen_forced = entry.widescreen_other.is_some_and(|patch| {
+                own.iter()
+                    .any(|(id, value)| *id == SettingId::EmuForcedPatch && value.as_text() == patch)
+            });
             entry.widescreen_on = host
                 .game_options(&entry.path.to_string_lossy())
                 .iter()
@@ -557,6 +562,10 @@ impl HandheldUi {
             match button {
                 PadButton::A => {
                     frame.host.confirm_pending();
+                    // A patch forced from the list shows on it at once.
+                    if self.screen == Screen::Home {
+                        self.refresh_roms(frame.host);
+                    }
                 }
                 // A message with one button goes with B as well.
                 PadButton::B | PadButton::Menu => frame.host.cancel_pending(),
@@ -672,15 +681,37 @@ impl HandheldUi {
             RomListCommand::Options => self.open_options(host),
             RomListCommand::ToggleWidescreen(path) => {
                 let entry = self.roms.entries().iter().find(|entry| entry.path == path);
-                // A version of the game the hack is not made for: why, instead of nothing.
-                if let Some(entry) = entry.filter(|entry| !entry.widescreen) {
+                // A version of the game the hack is not made for: why, and whether to force it,
+                // instead of nothing; once forced, L2 turns its widescreen on and off.
+                if let Some(entry) =
+                    entry.filter(|entry| !entry.widescreen && !entry.widescreen_forced)
+                {
                     let hacks = HacksModel::for_rom(host, &path, entry.profile_title());
-                    if let Some(message) = hacks.other_rom_message() {
-                        host.inform(&strings::get(keys::HACK_WIDESCREEN), &message);
+                    let (Some(message), Some(other)) =
+                        (hacks.other_rom_message(), hacks.other_rom_patch())
+                    else {
+                        return;
+                    };
+                    let title = strings::get(keys::HACK_WIDESCREEN);
+                    if hacks.forceable() {
+                        let question =
+                            format!("{message}\n\n{}", strings::get(keys::HACKS_FORCE_QUESTION));
+                        host.ask_to_force_patch(
+                            (&title, &question),
+                            (
+                                &strings::get(keys::HACKS_FORCE_BUTTON),
+                                &strings::get(keys::BUTTON_CANCEL),
+                            ),
+                            &path.to_string_lossy(),
+                            other.name,
+                        );
+                    } else {
+                        host.inform(&title, &message);
                     }
                     return;
                 }
-                let mut hacks = HacksModel::for_rom(host, &path, None);
+                let title = self.profile_title_of(&path);
+                let mut hacks = HacksModel::for_rom(host, &path, title.as_deref());
                 hacks.toggle_widescreen();
                 hacks.apply(host);
                 self.note_widescreen(&path, hacks.widescreen_on());

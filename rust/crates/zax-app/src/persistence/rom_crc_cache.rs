@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 /// The file of the cache, in the user data folder.
 pub const FILE_NAME: &str = "rom_crc.json";
 
+/// The version of what the CRC is taken over: 2 is the data within the sizes the header gives
+/// (no trainer, no overdump). A cache of another version is read again from the files.
+const VERSION: u32 = 2;
+
 /// What tells a file changed: its size and its modification time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Stamp {
@@ -45,6 +49,8 @@ struct Record {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Body {
+    #[serde(default)]
+    version: u32,
     entries: Vec<Record>,
 }
 
@@ -68,7 +74,7 @@ impl RomCrcCache {
         }
     }
 
-    /// The CRC-32 of the data of the ROM in `path` (iNES header excluded): the one kept while
+    /// The CRC-32 of the data of the ROM in `path` (`builtin_patches::data_crc`): the one kept while
     /// the file has the same size and modification time, or read from the file. None when the
     /// file cannot be read.
     pub fn crc_of(&mut self, path: &Path) -> Option<u32> {
@@ -107,8 +113,11 @@ impl RomCrcCache {
             })
             .collect();
         entries.sort_by(|a, b| a.path.cmp(&b.path));
-        let text =
-            serde_json::to_string_pretty(&Body { entries }).map_err(std::io::Error::other)?;
+        let text = serde_json::to_string_pretty(&Body {
+            version: VERSION,
+            entries,
+        })
+        .map_err(std::io::Error::other)?;
         if let Some(parent) = file.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -126,6 +135,7 @@ impl RomCrcCache {
             .as_ref()
             .and_then(|file| std::fs::read_to_string(file).ok())
             .and_then(|text| serde_json::from_str::<Body>(&text).ok())
+            .filter(|body| body.version == VERSION)
         else {
             return;
         };

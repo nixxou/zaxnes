@@ -377,7 +377,10 @@ impl HandheldUi {
             if entry.widescreen || entry.widescreen_other.is_some() {
                 // Grey while off, coloured once on, red for a version of the game the hack is
                 // not made for (owner request).
-                let badge = if entry.widescreen_other.is_some() {
+                // Orange once forced and on.
+                let badge = if entry.widescreen_forced && entry.widescreen_on {
+                    OTHER_MODE
+                } else if entry.widescreen_other.is_some() {
                     WARNING
                 } else if entry.widescreen_on {
                     GAME_OWN
@@ -417,7 +420,9 @@ impl HandheldUi {
             .selected_entry()
             .filter(|entry| entry.widescreen || entry.widescreen_other.is_some())
         {
-            let colour = if entry.widescreen_other.is_some() {
+            let colour = if entry.widescreen_forced && entry.widescreen_on {
+                OTHER_MODE
+            } else if entry.widescreen_other.is_some() {
                 WARNING
             } else if entry.widescreen_on {
                 GAME_OWN
@@ -501,9 +506,13 @@ impl HandheldUi {
                 None => painter.message(&strings::get(keys::HACKS_NONE), DIM),
             }
         }
+        // Another version of the game: what it is, under the rows that force the patch.
+        let other = hacks.other_rom_message().filter(|_| !rows.is_empty());
         // The note on the patch takes the place of a row or two at the bottom.
         let visible = self.metrics.visible_rows(painter.size[1]);
-        let visible = if hacks.patch().is_some() {
+        let visible = if other.is_some() {
+            visible.saturating_sub(3).max(1)
+        } else if hacks.patch().is_some() {
             visible.saturating_sub(2).max(1)
         } else {
             visible
@@ -526,7 +535,9 @@ impl HandheldUi {
             let shown = format!("< {} >", hacks.value_text(*row));
             painter.row(slot, focused, &hacks.label(*row), (&shown, colour));
         }
-        if hacks.patch().is_some() {
+        if let Some(other) = other {
+            painter.note(visible, &other);
+        } else if hacks.patch().is_some() {
             painter.note(visible, &strings::get(keys::HACKS_PATCH_NOTE));
         }
         painter.hints(layout::hints(Screen::Hacks));

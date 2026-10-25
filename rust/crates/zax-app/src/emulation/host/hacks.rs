@@ -36,6 +36,30 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             && self.settings.get(SettingId::VideoWidescreen).as_int() != 0
     }
 
+    /// The built-in patch forced on the game in play (another version of the game a patch is
+    /// made for), when it is.
+    #[must_use]
+    pub fn forced_patch(&self) -> Option<&'static BuiltinPatch> {
+        zax_nes::builtin_patches::by_name(self.settings.get(SettingId::EmuForcedPatch).as_text())
+    }
+
+    /// Forces `patch` on the ROM in `rom` (an option of that game), its widescreen on (Auto)
+    /// unless it already is.
+    pub fn force_patch(&mut self, rom: &str, patch: &str) {
+        let mut options = self.game_options(rom);
+        options.retain(|(id, _)| *id != SettingId::EmuForcedPatch);
+        options.push((SettingId::EmuForcedPatch, SettingValue::from(patch)));
+        let on = options
+            .iter()
+            .any(|(id, value)| *id == SettingId::VideoWidescreen && value.as_int() != 0);
+        if !on {
+            options.retain(|(id, _)| *id != SettingId::VideoWidescreen);
+            options.push((SettingId::VideoWidescreen, SettingValue::Enum(1)));
+        }
+        self.log(&format!("{patch} forced on {rom}"));
+        self.set_game_options(rom, options);
+    }
+
     /// Turns the widescreen of the game in play on (the automatic ratio, unless it already has
     /// one) or off, as an option of that game.
     pub(super) fn set_game_widescreen(&mut self, on: bool) {

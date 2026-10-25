@@ -167,7 +167,18 @@ dernière ligne de ses options (Select) et dans le menu en jeu.
 Un **[W] rouge** marque une autre version d'un tel jeu (reconnue au titre de son profil ou au nom
 du fichier), pour laquelle le hack n'est pas fait — *Zelda II* européen, par exemple. L2, ou son
 écran Hacks, explique alors pourquoi l'écran large ne peut pas être activé : la ROM pour laquelle
-le hack est fait, avec son CRC, et le nom et le CRC de celle-ci, à titre indicatif.
+le hack est fait, avec son CRC, et le nom et le CRC de celle-ci, à titre indicatif. Si sa taille
+est la bonne, on peut **forcer l'activation** (bouton *Forcer* de la question, ou ligne *Forcer
+l'activation* de l'écran Hacks) : le patch est appliqué sans vérifier son CRC. Un hack de la ROM
+proche de l'original a de bonnes chances de fonctionner ; une autre version du jeu, beaucoup
+moins (*Zelda II* européen ne démarre pas avec le patch américain). Le [W] passe en **orange**
+tant que l'activation forcée est en place et l'écran large activé ; ce réglage est propre au jeu.
+Les sauvegardes d'état d'un jeu forcé ne sont pas contrôlées comme les autres (orange/rouge) : en
+charger une après avoir retiré le forçage peut donner n'importe quoi.
+
+Le CRC est celui des seules données de la ROM, à la taille que donne son en-tête : un en-tête
+différent, un *trainer* ou des octets en trop en fin de fichier ne changent rien (c'est le CRC
+que donne No-Intro).
 
 `Ctrl`+`S` et `Ctrl`+`L` (ou **Fichier ▸ Sauvegarder un état… / Charger un état…**) ouvrent
 directement l'écran de sauvegarde ou de chargement de ce mode par-dessus le jeu, qui se met en

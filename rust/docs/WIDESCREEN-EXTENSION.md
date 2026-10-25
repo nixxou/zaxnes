@@ -45,7 +45,18 @@ global options window no longer shows them, nor `emu.builtin_patches`.
 The ROM list knows the games a hack is made for from the CRC-32 of their data
 (`builtin_patches::widescreen_capable`: a built-in patch or a margin decoder), kept in
 `rom_crc.json` of the user data with each file's size and modification time
-(`persistence/rom_crc_cache.rs`).
+(`persistence/rom_crc_cache.rs`, version 2). The data is the PRG-ROM and CHR-ROM within the sizes
+the iNES (or NES 2.0) header gives, without the header, a trainer or an overdump
+(`builtin_patches::rom_data`, `data_crc`): the CRC No-Intro gives, and what the BPS patches are
+made against.
+
+A ROM whose 3D profile title or file name says a game a patch is made for, but whose data is
+another version of it (`builtin_patches::for_game_name`; each patch knows its `game` and the
+No-Intro name of its ROM), shows a red [W]. When its data has the size the patch was made for
+(`builtin_patches::source_size`), the patch can be **forced** on it: `emu.forced_patch` (an option
+of that game, the patch's name) makes `NesCore::set_forced_patch` apply it at load and restore
+through `builtin_patches::apply_with`, which then skips the BPS checksums of the source and the
+target (`apply_bps_checked`). The state checks of section 7 know nothing of a forced patch.
 
 The margins are computed by `widescreen_margin(choice, extra, view size)` in
 `zax-app/src/application.rs`, every frame, and handed to the core:
@@ -356,7 +367,8 @@ pub struct BuiltinPatch {
   every frame (`NesCore::set_hack_options`); the ROM reads them at `$500A`.
 * `NesCore::load_rom` applies the matching patch when `set_builtin_patches(true)`
   (`EmulationHost::builtin_patches_wanted`, at each ROM load: `emu.builtin_patches` and the
-  game's `video.widescreen` on, owner request) and keeps the **original** image
+  game's `video.widescreen` on, owner request), or the forced one (section 1), and keeps the
+  **original** image
   (`original_image()`); `builtin_patch()` names the patch.
 * The battery file and the savestate fingerprint use the original image: a new version of a hack
   is the same game, and its battery RAM carries over.
