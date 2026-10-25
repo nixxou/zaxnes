@@ -249,6 +249,15 @@ impl UiHarness {
             });
     }
 
+    /// Puts the pointer at `position`, in the coordinates of the window.
+    pub fn move_pointer(&mut self, position: [f32; 2]) {
+        self.imgui
+            .get_or_insert_with(ImGuiHarness::new)
+            .context_mut()
+            .io_mut()
+            .add_mouse_pos_event(position);
+    }
+
     pub fn draw_frames(&mut self, count: usize) {
         for _ in 0..count {
             self.draw();

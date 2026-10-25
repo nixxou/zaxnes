@@ -190,6 +190,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.ui.cancel_modal", "Fermer la fenêtre modale"),
     ("cmd.ui.toggle_debug_overlay", "Panneau de statistiques"),
     ("cmd.ui.close_windows", "Fermer les fenêtres"),
+    ("cmd.ui.toggle_console", "Mode console"),
+    ("cmd.ui.save_states", "Sauvegarder un état…"),
+    ("cmd.ui.load_states", "Charger un état…"),
     // ------------------------------------------- labels of SPEC-09 settings
     ("setting.video.frame_rate", "Fréquence de rendu"),
     ("setting.video.skip_frame", "Rendu accéléré (saut d'images)"),
@@ -279,6 +282,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_USE_GLOBAL, "Use Global : {0}"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Options du jeu"),
     (keys::HANDHELD_HINT_RESET_ALL, "Tout remettre"),
+    (keys::SHORTCUT_HOME, "Origine"),
     (keys::HANDHELD_MENU_SAVE_STATE, "Sauvegarder l'état"),
     (keys::HANDHELD_MENU_LOAD_STATE, "Charger l'état"),
     (keys::HANDHELD_MENU_FAST_FORWARD, "Avance rapide"),

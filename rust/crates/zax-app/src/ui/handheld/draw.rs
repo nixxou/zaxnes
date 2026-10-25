@@ -227,7 +227,8 @@ impl HandheldUi {
     /// Draws the screen in front, the hold of the exit combination and the notification.
     pub fn draw(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
         let size = ui.io().display_size;
-        self.metrics = Metrics::for_height(size[1]);
+        self.metrics = self.metrics_for(size[1]);
+        let _body = self.body_font().map(|font| ui.push_font(font));
         self.follow_the_state_picture(frame.host);
         match self.screen {
             Screen::Home => self.draw_home(ui, frame),

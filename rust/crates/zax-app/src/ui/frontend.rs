@@ -10,11 +10,13 @@ use zax_platform::imgui_renderer::ImguiRenderer;
 use zax_platform::input::{Key, KeyboardDevice};
 use zax_platform::ui_image::PictureUpdate;
 
+use super::commands::UiCommand;
 use super::debug_overlay::{self, DebugInfo};
 use super::fonts::{FontSizes, UiFonts};
 use super::handheld::keyboard::KeyboardPad;
 use super::handheld::layout::Metrics;
-use super::handheld::HandheldUi;
+use super::handheld::states::StatesMode;
+use super::handheld::{HandheldUi, Screen as HandheldScreen};
 use super::menu_shortcuts::ShortcutModifiers;
 use super::platform::SdlPlatform;
 use super::shots::{ShotStep, UiShots};
@@ -41,6 +43,20 @@ pub enum UiGraphics<'a> {
     Wgpu(&'a mut zax_platform::wgpu_display::WgpuDisplay),
 }
 
+/// The console mode of the desktop: on, and whether it came on by itself (the gamepad's menu
+/// button, a save state shortcut), in which case it goes when the game is back.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ConsoleMode {
+    active: bool,
+    automatic: bool,
+}
+
+/// The body height the console mode of the desktop is sized for, whatever the window: between
+/// the smallest handheld and a full HD screen.
+fn console_height(drawable_height: f32) -> f32 {
+    drawable_height.clamp(480.0, 1080.0)
+}
+
 /// What the screenshot plan asks after a frame is drawn.
 #[derive(Debug, Default)]
 pub struct ShotRequest {
@@ -58,8 +74,13 @@ pub struct ImguiFrontend {
     platform: SdlPlatform,
     ui: ZaxUi,
     /// The gamepad-only interface, which takes the place of `ui` in the handheld mode; `ui` stays
-    /// for the texts and the commands the two share.
+    /// for the texts and the commands the two share. On the desktop it is the console mode (F1),
+    /// and the gamepad's gestures in game (Rust-only, owner request).
     handheld: Option<HandheldUi>,
+    /// Whether this is a handheld, where the gamepad interface is the only one.
+    device: bool,
+    /// The console mode of the desktop.
+    console: ConsoleMode,
     shots: Option<UiShots>,
     /// The keyboard as a pad of the handheld interface.
     keyboard_pad: KeyboardPad,
@@ -99,6 +120,18 @@ impl ImguiFrontend {
                 FontSizes::DESKTOP
             },
         );
+        // The console mode of the desktop has faces of its own, baked for the window it opens in
+        // (a screenshot run photographs the desktop as it is, without it).
+        let console = (!options.handheld && options.ui_shot_directory.is_none()).then(|| {
+            let metrics = Metrics::for_height(console_height(height));
+            let faces = UiFonts::load_console(
+                context.fonts(),
+                options.font_file.as_deref(),
+                options.built_in_font,
+                metrics.font_sizes(),
+            );
+            (metrics, faces)
+        });
         let renderer = match graphics {
             UiGraphics::Gl(gl) => {
                 Some(ImguiRenderer::new(gl, context.fonts()).map_err(|error| error.to_string())?)
@@ -114,7 +147,7 @@ impl ImguiFrontend {
         fonts.remap_missing_glyphs(context.fonts());
         let mut ui = ZaxUi::new(host);
         ui.set_heading_font(fonts.heading);
-        let handheld = options.handheld.then(|| {
+        let handheld = if options.handheld {
             let directory = roms_directory(host, options);
             if let Err(error) = std::fs::create_dir_all(&directory) {
                 ui.log(format!(
@@ -124,8 +157,16 @@ impl ImguiFrontend {
             }
             let mut handheld = HandheldUi::new(host, directory, height);
             handheld.set_heading_font(fonts.heading);
-            handheld
-        });
+            Some(handheld)
+        } else {
+            console.map(|(metrics, (body, heading))| {
+                let directory = roms_directory(host, options);
+                let mut handheld = HandheldUi::new(host, directory, console_height(height));
+                handheld.set_heading_font(heading);
+                handheld.use_on_desktop(metrics, Some(body));
+                handheld
+            })
+        };
         #[cfg(feature = "native-dialog")]
         if options.ui_shot_directory.is_none() {
             ui.set_file_picker(Box::new(super::native_picker::NativePicker::detect()));
@@ -154,6 +195,11 @@ impl ImguiFrontend {
             platform,
             ui,
             handheld,
+            device: options.handheld,
+            console: ConsoleMode {
+                active: options.console,
+                automatic: false,
+            },
             shots,
             keyboard_pad: KeyboardPad::new(),
             pictures: Vec::new(),
@@ -177,21 +223,73 @@ impl ImguiFrontend {
         self.context.io().want_capture_mouse
     }
 
+    /// Whether the gamepad interface is the one shown: always on a handheld, in the console
+    /// mode on the desktop.
+    #[must_use]
+    pub const fn console_shown(&self) -> bool {
+        self.handheld.is_some() && (self.device || self.console.active)
+    }
+
     /// Whether the interface holds a modal window (REQ-UI-004).
     #[must_use]
     pub fn is_modal(&self) -> bool {
-        self.handheld
-            .as_ref()
-            .map_or_else(|| self.ui.state.is_modal(), HandheldUi::is_modal)
+        match &self.handheld {
+            Some(handheld) if self.console_shown() => handheld.is_modal(),
+            _ => self.ui.state.is_modal(),
+        }
     }
 
     /// Height of the menu bar, which the game view sits under (REQ-UI-200).
     #[must_use]
     pub const fn chrome_height(&self) -> f32 {
-        if self.handheld.is_some() {
+        if self.console_shown() {
             0.0
         } else {
             self.ui.chrome_height
+        }
+    }
+
+    /// Switches the desktop to its console mode, or back to the menu bar. On the way back, a
+    /// menu left open over the game is closed and the game resumes.
+    fn switch_console(&mut self, host: &mut AppHost, active: bool, automatic: bool) {
+        let Some(handheld) = &mut self.handheld else {
+            return;
+        };
+        if self.device {
+            return;
+        }
+        if !active && self.console.active {
+            handheld.leave_for_desktop(host);
+            self.keyboard_pad.release(self.platform.pad_mut());
+        }
+        self.console = ConsoleMode { active, automatic };
+    }
+
+    /// Carries out what a shortcut, a binding or a menu entry asked of the console mode.
+    fn follow_console_request(&mut self, host: &mut AppHost) {
+        let Some(request) = self.ui.take_console_request() else {
+            return;
+        };
+        match request {
+            UiCommand::ToggleConsole => {
+                let active = !self.console.active;
+                self.switch_console(host, active, false);
+            }
+            UiCommand::SaveStates | UiCommand::LoadStates => {
+                let mode = if request == UiCommand::SaveStates {
+                    StatesMode::Save
+                } else {
+                    StatesMode::Load
+                };
+                let opened = self
+                    .handheld
+                    .as_mut()
+                    .is_some_and(|handheld| handheld.open_states(mode, host));
+                if opened && !self.console.active {
+                    self.switch_console(host, true, true);
+                }
+            }
+            UiCommand::ToggleDebugOverlay | UiCommand::CloseWindows => {}
         }
     }
 
@@ -203,8 +301,27 @@ impl ImguiFrontend {
         binding_capture_active: bool,
         bindings: &InputBindings,
     ) {
+        // In the console mode of the desktop, F1 and Home still switch back; the other keys
+        // drive the pad, as on a handheld.
+        if self.console_shown() && !self.device {
+            let down = |key: Key| keyboard.is_down(key as i32);
+            let pressed = self.ui.rising_keys(down);
+            let plain = !(down(Key::ControlLeft)
+                || down(Key::ControlRight)
+                || down(Key::ShiftLeft)
+                || down(Key::ShiftRight)
+                || down(Key::AltLeft)
+                || down(Key::AltRight));
+            if !binding_capture_active
+                && plain
+                && pressed.iter().any(|key| matches!(key, Key::F1 | Key::Home))
+            {
+                self.switch_console(host, false, false);
+                return;
+            }
+        }
         // A handheld has no menu bar: the keys drive its pad instead of the shortcuts.
-        if self.handheld.is_some() {
+        if self.console_shown() {
             if binding_capture_active {
                 self.keyboard_pad.release(self.platform.pad_mut());
             } else {
@@ -229,12 +346,13 @@ impl ImguiFrontend {
             alt: down(Key::AltLeft) || down(Key::AltRight),
         };
         self.ui.handle_shortcuts(host, &pressed, modifiers);
+        self.follow_console_request(host);
     }
 
     /// The keys that go down this frame as an application shortcut, which the game must not see.
     #[must_use]
     pub fn consumed_keys(&self, keyboard: &dyn KeyboardDevice) -> Vec<i32> {
-        if self.handheld.is_some() || self.wants_keyboard() {
+        if self.console_shown() || self.wants_keyboard() {
             return Vec::new();
         }
         self.ui
@@ -282,21 +400,52 @@ impl ImguiFrontend {
             sizes.drawable,
             frame.real_seconds,
         );
+        // A menu entry clicked last frame.
+        self.follow_console_request(frame.host);
+        let shown = self.console_shown();
+        let device = self.device;
+        let desktop_modal = self.ui.state.is_modal();
         let ui = self.context.new_frame();
+        let mut open_console = false;
         if let Some(handheld) = &mut self.handheld {
             // A screenshot run has no gamepad, and its screens are staged by the plan.
             if self.shots.is_none() {
                 self.platform.pad_mut().advance(frame.real_seconds);
-                handheld.update(self.platform.pad(), frame.real_seconds, frame);
             }
-            handheld.draw(ui, frame);
-            self.pictures.extend(handheld.take_picture_updates());
-            self.ui.draw_fps_counter(ui, frame);
-        } else {
+            let playing = frame.host.current_game_id().is_some() || frame.host.is_loading();
+            if shown {
+                if self.shots.is_none() {
+                    handheld.update(self.platform.pad(), frame.real_seconds, frame);
+                }
+                handheld.draw(ui, frame);
+                self.pictures.extend(handheld.take_picture_updates());
+                self.ui.draw_fps_counter(ui, frame);
+            } else if !device && playing && !desktop_modal && self.shots.is_none() {
+                // The gamepad plays as in the console mode (owner request): the menu button
+                // opens its menu, X, Y and L2 act in game.
+                handheld.update(self.platform.pad(), frame.real_seconds, frame);
+                open_console = handheld.screen() != HandheldScreen::InGame;
+            }
+        }
+        if !shown {
             self.ui.draw(ui, frame);
             if self.ui.state.debug_overlay_visible() {
                 debug_overlay::draw(ui, frame.host, self.ui.chrome_height, debug);
             }
+        }
+        if open_console {
+            self.console = ConsoleMode {
+                active: true,
+                automatic: true,
+            };
+        }
+        // A console mode that came by itself goes when the game is back.
+        let back_in_game = self
+            .handheld
+            .as_ref()
+            .is_some_and(|handheld| handheld.screen() == HandheldScreen::InGame);
+        if shown && !device && self.console.automatic && back_in_game {
+            self.console = ConsoleMode::default();
         }
         self.platform.pad_mut().end_frame();
     }
@@ -323,10 +472,11 @@ impl ImguiFrontend {
 
     /// Takes one event of the host.
     pub fn handle_host_event(&mut self, host: &mut AppHost, event: HostEvent) {
+        let shown = self.console_shown();
         match (&mut self.handheld, event) {
-            (Some(_), HostEvent::LanguageChanged(code)) => self.ui.language_changed(&code),
-            (Some(handheld), event) => handheld.handle_host_event(host, event),
-            (None, event) => self.ui.handle_host_event(host, event),
+            (Some(_), HostEvent::LanguageChanged(code)) if shown => self.ui.language_changed(&code),
+            (Some(handheld), event) if shown => handheld.handle_host_event(host, event),
+            (_, event) => self.ui.handle_host_event(host, event),
         }
     }
 

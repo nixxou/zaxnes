@@ -10,6 +10,8 @@ use zax_nes::ControllerPortType;
 use zax_render::camera::CameraMode;
 use zax_settings::catalogue::{self, SettingId};
 
+use super::commands::UiCommand;
+use super::keys;
 use super::strings;
 use super::text;
 use crate::application::AppHost;
@@ -101,6 +103,8 @@ pub struct MenuItem {
     /// Shown in a warning colour: a save state made with the built-in hack set the other way
     /// (orange) or with another version of it (red).
     pub warning: MenuWarning,
+    /// The command of the interface it runs, for an entry that runs none of the host's.
+    pub ui_command: Option<UiCommand>,
 }
 
 /// The warning colour of a menu item.
@@ -126,6 +130,20 @@ impl MenuItem {
             selection: None,
             submenu: None,
             warning: MenuWarning::None,
+            ui_command: None,
+        }
+    }
+
+    /// An entry that runs `command` of the interface, its shortcut beside it.
+    #[must_use]
+    pub fn of_ui(command: UiCommand, shortcut: &str) -> Self {
+        Self {
+            ui_command: Some(command),
+            shortcut: shortcut.to_owned(),
+            ..Self::plain(
+                MenuItemKind::Command,
+                strings::get(&keys::command(command.name())),
+            )
         }
     }
 
@@ -238,8 +256,14 @@ impl MenuBarModel {
     /// Whether `item` can run now.
     #[must_use]
     pub fn is_enabled(item: &MenuItem, host: &AppHost) -> bool {
-        item.command
-            .is_some_and(|command| host.can_execute(command, &item.args))
+        match item.ui_command {
+            // The save state screens need a game.
+            Some(UiCommand::SaveStates | UiCommand::LoadStates) => host.current_game_id().is_some(),
+            Some(_) => true,
+            None => item
+                .command
+                .is_some_and(|command| host.can_execute(command, &item.args)),
+        }
     }
 
     /// Whether `item` shows a check mark: a toggle that is on, a choice that is selected.
@@ -328,6 +352,9 @@ fn build_menus() -> Vec<Menu> {
             MenuItem::rule(),
             MenuItem::sub(text::load_state(), Submenu::LoadState),
             MenuItem::sub(text::save_state(), Submenu::SaveState),
+            // The slots with their pictures, in the screens of the console mode.
+            MenuItem::of_ui(UiCommand::LoadStates, "Ctrl+L"),
+            MenuItem::of_ui(UiCommand::SaveStates, "Ctrl+S"),
             // REQ-UI-052: the slot deletion of SPEC-09 REQ-PERS-054 needs a route of its own,
             // since a classic menu has no selected tile to hang a small button on.
             MenuItem::sub(text::delete_state(), Submenu::DeleteState),
@@ -382,6 +409,7 @@ fn build_menus() -> Vec<Menu> {
         items: vec![
             item(Command::ShowOptions),
             item(Command::ShowKeyConfig),
+            MenuItem::of_ui(UiCommand::ToggleConsole, "F1"),
             MenuItem::rule(),
             item(Command::ShowDataFolder),
             item(Command::ShowAbout),

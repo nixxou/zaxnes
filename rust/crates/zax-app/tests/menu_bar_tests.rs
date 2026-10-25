@@ -399,3 +399,26 @@ fn the_game_options_menu_follows_the_game_in_play() {
         "drawing changes nothing"
     );
 }
+
+/// The console mode of the desktop (Rust-only): F1 and Home switch to it, Ctrl+S and Ctrl+L ask
+/// for its state screens; the front end takes the request.
+#[test]
+fn the_console_shortcuts_ask_the_front_end() {
+    let mut harness = UiHarness::new(&["Castle Quest"]);
+    for (key, modifiers, expected) in [
+        (Key::F1, ShortcutModifiers::NONE, UiCommand::ToggleConsole),
+        (Key::Home, ShortcutModifiers::NONE, UiCommand::ToggleConsole),
+        (Key::S, ShortcutModifiers::CONTROL, UiCommand::SaveStates),
+        (Key::L, ShortcutModifiers::CONTROL, UiCommand::LoadStates),
+    ] {
+        harness
+            .ui
+            .handle_shortcuts(&mut harness.host, &[key], modifiers);
+        assert_eq!(Some(expected), harness.ui.take_console_request());
+    }
+    // Shift+F1 still saves slot 1.
+    harness
+        .ui
+        .handle_shortcuts(&mut harness.host, &[Key::F1], ShortcutModifiers::SHIFT);
+    assert_eq!(None, harness.ui.take_console_request());
+}

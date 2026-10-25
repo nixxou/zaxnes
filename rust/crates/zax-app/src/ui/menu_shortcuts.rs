@@ -158,6 +158,32 @@ pub fn all() -> Vec<MenuShortcut> {
             ShortcutCommand::Ui(UiCommand::ToggleDebugOverlay),
             "F12",
         ),
+        // The console mode of the desktop (Rust-only, owner request), on keys no default game
+        // binding uses; the slots keep Ctrl+F1 and Shift+F1.
+        shortcut(
+            Key::F1,
+            ShortcutModifiers::NONE,
+            ShortcutCommand::Ui(UiCommand::ToggleConsole),
+            "F1",
+        ),
+        shortcut(
+            Key::Home,
+            ShortcutModifiers::NONE,
+            ShortcutCommand::Ui(UiCommand::ToggleConsole),
+            &strings::get(keys::SHORTCUT_HOME),
+        ),
+        shortcut(
+            Key::S,
+            ShortcutModifiers::CONTROL,
+            ShortcutCommand::Ui(UiCommand::SaveStates),
+            "Ctrl+S",
+        ),
+        shortcut(
+            Key::L,
+            ShortcutModifiers::CONTROL,
+            ShortcutCommand::Ui(UiCommand::LoadStates),
+            "Ctrl+L",
+        ),
     ];
     for (index, key) in SLOT_KEYS.into_iter().enumerate() {
         let slot = i32::try_from(index + 1).unwrap_or(i32::MAX);

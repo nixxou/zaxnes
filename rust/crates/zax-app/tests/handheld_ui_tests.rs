@@ -416,3 +416,35 @@ fn every_screen_draws_at_the_three_sizes_of_the_devices() {
         }
     }
 }
+
+/// The shortcuts of the desktop (Ctrl+S, Ctrl+L) open the state screens over the game, which
+/// pauses; going back resumes it. Leaving the console mode closes a menu left open and the game
+/// goes on.
+#[test]
+fn the_state_screens_open_over_the_game_and_the_desktop_takes_the_game_back() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    assert!(
+        !handheld.open_states(StatesMode::Load, &mut harness.host),
+        "no game"
+    );
+    tap(&mut harness, &mut handheld, PadButton::A);
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::InGame, handheld.screen());
+
+    assert!(handheld.open_states(StatesMode::Save, &mut harness.host));
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::States, handheld.screen());
+    assert_eq!(StatesMode::Save, handheld.states().mode());
+    assert_eq!(EmulationState::Paused, harness.host.state());
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::InGame, handheld.screen());
+    assert_eq!(EmulationState::Running, harness.host.state());
+
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    assert_eq!(Screen::Overlay, handheld.screen());
+    handheld.leave_for_desktop(&mut harness.host);
+    harness.pump();
+    harness.settle();
+    assert_eq!(Screen::InGame, handheld.screen());
+    assert_eq!(EmulationState::Running, harness.host.state());
+}

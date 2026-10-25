@@ -21,6 +21,8 @@ pub struct SdlPlatform {
     /// Whether the game-controller events drive the interface (the handheld mode): they feed
     /// `ImGui`'s gamepad keys and the [`PadState`] the handheld screens read.
     gamepad: bool,
+    /// The [`PadState`] alone: the desktop's console mode reads it, `ImGui` does not.
+    feeds_pad: bool,
     pad: PadState,
 }
 
@@ -38,6 +40,7 @@ impl SdlPlatform {
             scale: [1.0, 1.0],
             ignore_pointer: false,
             gamepad: false,
+            feeds_pad: true,
             pad: PadState::new(),
         }
     }
@@ -50,6 +53,7 @@ impl SdlPlatform {
             scale: [1.0, 1.0],
             ignore_pointer: true,
             gamepad: false,
+            feeds_pad: false,
             pad: PadState::new(),
         }
     }
@@ -61,6 +65,7 @@ impl SdlPlatform {
             scale: [1.0, 1.0],
             ignore_pointer: true,
             gamepad: true,
+            feeds_pad: true,
             pad: PadState::new(),
         }
     }
@@ -88,7 +93,7 @@ impl SdlPlatform {
     /// Passes one SDL event on.
     #[allow(clippy::cast_precision_loss)] // pixel coordinates are far below 2^24
     pub fn handle_event(&mut self, io: &mut Io, event: &Event) {
-        if self.gamepad {
+        if self.feeds_pad {
             self.handle_gamepad_event(io, event);
         }
         if self.ignore_pointer
@@ -145,7 +150,7 @@ impl SdlPlatform {
             return;
         };
         self.pad.set(pad_button, down);
-        if let Some(key) = key {
+        if let Some(key) = key.filter(|_| self.gamepad) {
             io.add_key_event(key, down);
         }
     }
@@ -161,6 +166,9 @@ impl SdlPlatform {
             _ => return,
         };
         self.pad.set_axis(horizontal, value);
+        if !self.gamepad {
+            return;
+        }
         let (negative, positive) = if horizontal {
             (Key::GamepadLStickLeft, Key::GamepadLStickRight)
         } else {
@@ -326,7 +334,7 @@ mod tests {
         let _ = context.render();
 
         // The handheld platform declares the gamepad to Dear ImGui and feeds the pad state; the
-        // desktop one ignores the controllers.
+        // desktop one feeds the pad of its console mode only, and the capture one neither.
         let start = Event::ControllerButtonDown {
             timestamp: 0,
             which: 0,
@@ -344,9 +352,18 @@ mod tests {
             .contains(BackendFlags::HAS_GAMEPAD));
         handheld.handle_event(context.io_mut(), &start);
         assert!(handheld.pad().is_held(PadButton::Start));
+        context.io_mut().config_flags = ConfigFlags::empty();
         let mut desktop = SdlPlatform::new();
+        desktop.configure(context.io_mut());
+        assert!(!context
+            .io()
+            .config_flags
+            .contains(ConfigFlags::NAV_ENABLE_GAMEPAD));
         desktop.handle_event(context.io_mut(), &start);
-        assert!(!desktop.pad().is_held(PadButton::Start));
+        assert!(desktop.pad().is_held(PadButton::Start));
+        let mut capture = SdlPlatform::for_capture();
+        capture.handle_event(context.io_mut(), &start);
+        assert!(!capture.pad().is_held(PadButton::Start));
     }
     #[test]
     fn the_standard_buttons_reach_the_handheld_buttons_and_the_imgui_keys() {

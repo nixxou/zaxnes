@@ -138,6 +138,24 @@ la demande du programme.
 La barre de menus est en haut de la fenêtre. Chaque entrée affiche son raccourci. Une entrée
 grisée n'est pas disponible dans l'état courant — « Reset » sans jeu chargé, par exemple.
 
+Pendant une partie, la barre **se cache** : elle réapparaît, par-dessus l'image, quand la souris
+touche le haut de la fenêtre, et reste tant qu'un de ses menus est ouvert. Sans jeu, elle reste
+affichée.
+
+### Mode console (F1)
+
+`F1` ou `Origine` (Home) passe au **mode console** : les écrans de la version portable, en plein
+écran dans la fenêtre — liste des jeux du dossier `roms` des données utilisateur (ou de
+`--roms`), profil, options du jeu, menu en jeu, écrans de sauvegarde avec leurs aperçus. Les
+mêmes touches reviennent à la barre de menus (un menu laissé ouvert sur le jeu se ferme et la
+partie reprend). `--console` ouvre directement Zaxnes dans ce mode. Au clavier, les touches du
+joueur 1 servent de manette (`X` = A, `Z` = B, `Échap` = menu…).
+
+`Ctrl`+`S` et `Ctrl`+`L` (ou **Fichier ▸ Sauvegarder un état… / Charger un état…**) ouvrent
+directement l'écran de sauvegarde ou de chargement de ce mode par-dessus le jeu, qui se met en
+pause ; `B` (ou `Échap`) y revient, et après le choix d'un emplacement la barre de menus
+revient d'elle-même.
+
 ### Fichier
 
 | Entrée | Raccourci | Effet |
@@ -431,19 +449,25 @@ maintenir `Select` et donner le coup de stick.
 Toute manette de type Xbox (XInput ou reconnue par la table standard) est prise en charge sans
 réglage. Les manettes de réalité virtuelle ne sont jamais proposées ni attribuées.
 
+Une manette joue **comme sur la version portable** (mode console), barre de menus ou pas :
+
 | Commande | Action |
 |---|---|
 | Croix | directions NES |
 | Bouton sud (A Xbox, Croix PS) | bouton A |
-| Bouton ouest (X Xbox, Carré) | bouton B |
-| Bouton nord (Y Xbox, Triangle) | rollback |
-| Bouton est (B Xbox, Rond) | avance rapide |
+| Bouton est (B Xbox, Rond) | bouton B |
 | Back / View / Share | Select |
 | Start / Menu / Options | Start |
+| Guide (ou Select + Start si le réglage le demande) | menu du mode console, partie en pause |
+| Bouton ouest (X Xbox, Carré) | vue par défaut |
+| Bouton nord (Y Xbox, Triangle) | 2D / 3D ; maintenu, la 2D vue de face, plein cadre |
+| LB / RB | éloigner / rapprocher la caméra |
+| Gâchette droite (RT) | avance rapide |
+| Gâchette gauche (LT) maintenue / appui bref | garder / remettre l'angle et le zoom |
 | Stick droit | tourner la caméra |
-| Gâchette gauche / droite | rapprocher / éloigner la caméra |
-| Clic du stick droit (R3) | pause / menu |
-| Stick gauche, clic du stick gauche, LB, RB, Guide | rien |
+
+Le rollback n'a plus de bouton par défaut sur la manette (la touche `,` du clavier reste). Une
+manette dont vous aviez changé les touches garde les vôtres.
 
 La **première manette utilisée** va au joueur 1, la suivante au joueur 2 ; l'attribution est
 mémorisée et retrouvée environ 0,5 s après le démarrage suivant. Les bindings d'une manette
