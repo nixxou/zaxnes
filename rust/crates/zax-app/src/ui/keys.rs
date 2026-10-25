@@ -194,6 +194,11 @@ pub const HANDHELD_STATES_NO_PICTURE: &str = "handheld.states.no_picture";
 pub const HANDHELD_HINT_SAVE_HERE: &str = "handheld.hint.save_here";
 pub const HANDHELD_HINT_LOAD: &str = "handheld.hint.load";
 pub const HANDHELD_HINT_PAGE: &str = "handheld.hint.page";
+pub const HANDHELD_GAME_OPTIONS_TITLE: &str = "handheld.game_options.title";
+pub const HANDHELD_GAME_OPTIONS_RESET: &str = "handheld.game_options.reset";
+pub const HANDHELD_USE_GLOBAL: &str = "handheld.game_options.use_global";
+pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
+pub const HANDHELD_HINT_RESET_ALL: &str = "handheld.hint.reset_all";
 
 // ------------------------------------------------- commands of REQ-UI-205
 pub const COMMAND_PREFIX: &str = "cmd.";
@@ -386,4 +391,9 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_HINT_SAVE_HERE,
     HANDHELD_HINT_LOAD,
     HANDHELD_HINT_PAGE,
+    HANDHELD_GAME_OPTIONS_TITLE,
+    HANDHELD_GAME_OPTIONS_RESET,
+    HANDHELD_USE_GLOBAL,
+    HANDHELD_HINT_GAME_OPTIONS,
+    HANDHELD_HINT_RESET_ALL,
 ];

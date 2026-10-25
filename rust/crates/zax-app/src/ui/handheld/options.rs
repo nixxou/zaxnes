@@ -181,55 +181,61 @@ impl HandheldOptionsModel {
     }
 
     fn step(self, settings: &mut SettingsModel, step: i32) -> Option<OptionsCommand> {
-        match self.selected() {
-            OptionRow::Language => {
-                let codes = language_codes();
-                let current = settings.language();
-                let next = *cycled(&codes, &current.as_str(), step);
-                settings.set_language(next);
-            }
-            OptionRow::Volume => settings.set_volume(stepped_volume(settings.volume(), step)),
-            OptionRow::RenderScale => set_render_scale(settings, step),
-            OptionRow::Shadows => {
-                let on = settings.shadow();
-                settings.set_shadow(!on);
-            }
-            OptionRow::FrameCap => {
-                let next = *cycled(&FRAME_CAPS, &frame_cap(settings), step);
-                settings.set_vsync(if next == 30 { 2 } else { 1 });
-            }
-            OptionRow::Profiler => {
-                let on = settings.get(SettingId::UiProfiler).as_bool();
-                settings.set(SettingId::UiProfiler, SettingValue::Bool(!on));
-            }
-            OptionRow::ShowFps => {
-                let on = settings.show_fps();
-                settings.set_show_fps(!on);
-            }
-            OptionRow::Camera => return Some(OptionsCommand::StepCamera(step)),
-            OptionRow::CatchUp => {
-                let next = *cycled(&CATCH_UPS, &catch_up(settings), step);
-                settings.set(SettingId::EmuCatchUp, SettingValue::Enum(next));
-            }
-            OptionRow::LuaOptimized => {
-                let on = settings.get(SettingId::EmuLuaOptimized).as_bool();
-                settings.set(SettingId::EmuLuaOptimized, SettingValue::Bool(!on));
-            }
-            OptionRow::LuaExperimental => {
-                let on = settings.get(SettingId::EmuLuaExperimental).as_bool();
-                settings.set(SettingId::EmuLuaExperimental, SettingValue::Bool(!on));
-            }
-            OptionRow::Pipeline => {
-                let next = *cycled(&PIPELINES, &pipeline(settings), step);
-                settings.set(SettingId::EmuPipeline, SettingValue::Enum(next));
-            }
-            OptionRow::Region => {
-                cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
-            }
-            OptionRow::Controls => {}
-        }
-        None
+        step_row(self.selected(), settings, step)
     }
+}
+
+/// Steps `row` by `step` in `settings`: the value rows change the settings themselves, the camera
+/// row asks the application.
+pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Option<OptionsCommand> {
+    match row {
+        OptionRow::Language => {
+            let codes = language_codes();
+            let current = settings.language();
+            let next = *cycled(&codes, &current.as_str(), step);
+            settings.set_language(next);
+        }
+        OptionRow::Volume => settings.set_volume(stepped_volume(settings.volume(), step)),
+        OptionRow::RenderScale => set_render_scale(settings, step),
+        OptionRow::Shadows => {
+            let on = settings.shadow();
+            settings.set_shadow(!on);
+        }
+        OptionRow::FrameCap => {
+            let next = *cycled(&FRAME_CAPS, &frame_cap(settings), step);
+            settings.set_vsync(if next == 30 { 2 } else { 1 });
+        }
+        OptionRow::Profiler => {
+            let on = settings.get(SettingId::UiProfiler).as_bool();
+            settings.set(SettingId::UiProfiler, SettingValue::Bool(!on));
+        }
+        OptionRow::ShowFps => {
+            let on = settings.show_fps();
+            settings.set_show_fps(!on);
+        }
+        OptionRow::Camera => return Some(OptionsCommand::StepCamera(step)),
+        OptionRow::CatchUp => {
+            let next = *cycled(&CATCH_UPS, &catch_up(settings), step);
+            settings.set(SettingId::EmuCatchUp, SettingValue::Enum(next));
+        }
+        OptionRow::LuaOptimized => {
+            let on = settings.get(SettingId::EmuLuaOptimized).as_bool();
+            settings.set(SettingId::EmuLuaOptimized, SettingValue::Bool(!on));
+        }
+        OptionRow::LuaExperimental => {
+            let on = settings.get(SettingId::EmuLuaExperimental).as_bool();
+            settings.set(SettingId::EmuLuaExperimental, SettingValue::Bool(!on));
+        }
+        OptionRow::Pipeline => {
+            let next = *cycled(&PIPELINES, &pipeline(settings), step);
+            settings.set(SettingId::EmuPipeline, SettingValue::Enum(next));
+        }
+        OptionRow::Region => {
+            cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
+        }
+        OptionRow::Controls => {}
+    }
+    None
 }
 
 /// The label of `row`, in the language in force.

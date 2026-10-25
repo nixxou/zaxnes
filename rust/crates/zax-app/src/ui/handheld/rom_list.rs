@@ -60,6 +60,8 @@ pub enum RomListCommand {
     Play(PathBuf),
     /// Choose the profile of the selected game.
     ChooseProfile(PathBuf),
+    /// Open the options of the selected game.
+    GameOptions(PathBuf),
     /// Open the options.
     Options,
 }
@@ -239,6 +241,11 @@ impl RomListModel {
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
             }
             PadButton::Y => return Some(RomListCommand::Options),
+            PadButton::Select => {
+                return self
+                    .selected_entry()
+                    .map(|entry| RomListCommand::GameOptions(entry.path.clone()));
+            }
             _ => {}
         }
         None
@@ -364,6 +371,10 @@ mod tests {
             model.handle(PadButton::X)
         );
         assert_eq!(Some(RomListCommand::Options), model.handle(PadButton::Y));
+        assert!(matches!(
+            model.handle(PadButton::Select),
+            Some(RomListCommand::GameOptions(_))
+        ));
         assert_eq!(None, model.handle(PadButton::B));
         assert_eq!(None, RomListModel::default().handle(PadButton::A));
     }

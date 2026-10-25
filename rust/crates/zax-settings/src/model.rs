@@ -1,6 +1,7 @@
 //! The settings of one emulator instance: a value for each setting of the catalogue, layered
-//! defaults → user preferences → profile values → session writes, validated on every write and
-//! reported when the effective value really changes (REQ-PERS-003, REQ-PERS-005, REQ-PERS-009).
+//! defaults → user preferences → profile values → the options of the game → session writes,
+//! validated on every write and reported when the effective value really changes (REQ-PERS-003,
+//! REQ-PERS-005, REQ-PERS-009).
 
 use std::collections::BTreeMap;
 use std::vec::Drain;
@@ -56,6 +57,11 @@ pub struct SettingsModel {
     profile: BTreeMap<SettingId, SettingValue>,
     session: BTreeMap<SettingId, SettingValue>,
     command: BTreeMap<SettingId, SettingValue>,
+    /// The options of the game in play (Rust-only, owner request): the few values the user chose
+    /// for this ROM, over the preferences and the profile, never persisted with them.
+    game: BTreeMap<SettingId, SettingValue>,
+    /// Whether the user changed one of those since the last [`SettingsModel::take_game_edited`].
+    game_edited: bool,
     environment_defaults: BTreeMap<SettingId, SettingValue>,
     core_count: i32,
     display_refresh_rate: f32,
@@ -71,6 +77,8 @@ impl Default for SettingsModel {
             profile: BTreeMap::new(),
             session: BTreeMap::new(),
             command: BTreeMap::new(),
+            game: BTreeMap::new(),
+            game_edited: false,
             environment_defaults: BTreeMap::new(),
             core_count: 1,
             display_refresh_rate: 60.0,
@@ -159,6 +167,66 @@ impl SettingsModel {
     #[must_use]
     pub fn has_session_value(&self, id: SettingId) -> bool {
         self.session.contains_key(&id)
+    }
+
+    /// The options of the game in play (Rust-only): its values over the preferences and the
+    /// profile.
+    #[must_use]
+    pub fn game_values(&self) -> &BTreeMap<SettingId, SettingValue> {
+        &self.game
+    }
+
+    /// Whether the game in play has a value of its own for `id`.
+    #[must_use]
+    pub fn has_game_value(&self, id: SettingId) -> bool {
+        self.game.contains_key(&id)
+    }
+
+    /// Puts the options of a game in force (Rust-only): `values` replace those of the previous
+    /// game, each validated as a write is; a derived or session setting has none.
+    pub fn set_game_values(&mut self, values: impl IntoIterator<Item = (SettingId, SettingValue)>) {
+        let mut next = BTreeMap::new();
+        for (id, value) in values {
+            let descriptor = catalogue::descriptor(id);
+            if matches!(
+                descriptor.scope(),
+                SettingScope::User | SettingScope::Profile
+            ) {
+                let clean = descriptor.domain().coerce(
+                    &value.coerce_to(descriptor.kind()),
+                    descriptor.default_value(),
+                    self.core_count,
+                );
+                next.insert(id, clean);
+            }
+        }
+        let touched: Vec<SettingId> = self.game.keys().chain(next.keys()).copied().collect();
+        let before: Vec<(&'static SettingDescriptor, SettingValue)> = touched
+            .iter()
+            .map(|id| {
+                let descriptor = catalogue::descriptor(*id);
+                (descriptor, self.read(descriptor))
+            })
+            .collect();
+        self.game = next;
+        self.game_edited = false;
+        for (descriptor, previous) in &before {
+            self.notify_if_changed(descriptor, previous);
+        }
+    }
+
+    /// Drops the options of the game, back to the preferences and the profile.
+    pub fn clear_game_values(&mut self) {
+        if !self.game.is_empty() {
+            self.set_game_values([]);
+        }
+    }
+
+    /// Whether the user changed an option of the game in play since the last call: a choice
+    /// made in the options on a setting the game has a value for goes to the game, not to the
+    /// preference, and its owner has to write it down.
+    pub fn take_game_edited(&mut self) -> bool {
+        std::mem::take(&mut self.game_edited)
     }
 
     /// Whether a command-line override is masking the stored value for `id` (Q-066).
@@ -274,6 +342,7 @@ impl SettingsModel {
     /// `emu.game_speed` goes back to 0.
     pub fn end_of_game(&mut self) {
         self.clear_session_layer();
+        self.clear_game_values();
         self.reset(SettingId::EmuGameSpeed);
     }
 
@@ -325,6 +394,9 @@ impl SettingsModel {
         if let Some(command) = self.command.get(&id) {
             return command.clone();
         }
+        if let Some(game) = self.game.get(&id) {
+            return game.clone();
+        }
         let stored = if descriptor.scope() == SettingScope::Profile {
             self.profile.get(&id)
         } else {
@@ -375,6 +447,13 @@ impl SettingsModel {
             },
         };
         let unchanged_stored = stored_before == clean;
+        // The user's choice on a setting the game has a value for changes that value: it is the
+        // one in force, and the preference stays what it was.
+        if layer == SettingLayer::User && tier != Tier::Command && self.game.contains_key(&id) {
+            self.game.insert(id, clean);
+            self.game_edited = true;
+            return self.notify_if_changed(descriptor, &before);
+        }
         self.tier_mut(tier).insert(id, clean);
         // The user's own choice ends the command-line override of that one setting: from now on the
         // value in force is a preference again, and it is persisted (Q-066).

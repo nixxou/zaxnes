@@ -342,6 +342,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 Step::Continue
             }
             1 => {
+                self.apply_game_options(&game.id);
                 if let Err(message) = self.ensure_session(&game, job.reload_profile) {
                     return Step::Failed(message);
                 }
@@ -415,6 +416,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             1 => {
                 // Step 4: a profile load creates a new Lua state (REQ-LUA-014).
+                self.apply_game_options(&game.id);
                 if let Err(message) = self.ensure_session(&game, job.reload_profile) {
                     return Step::Failed(message);
                 }

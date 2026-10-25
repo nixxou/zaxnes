@@ -204,6 +204,18 @@ Volume ▸ (par paliers de 10 %, plus « Volume + » et « Volume − »), Muet,
 | Dossier des données | | ouvre la racine utilisateur dans l'explorateur |
 | À propos | | nom, version, licence et crédits |
 
+### Options du jeu
+
+Le menu **Options du jeu** règle quelques options pour le seul jeu en cours (il est grisé sans
+jeu) : volume, échelle de rendu, ombres, limite d'images, compteur d'images, mesures de
+performance, rattrapage, chemins Lua, scripts en parallèle et région. Chaque option est sur
+« Use Global : <valeur> » tant qu'elle n'a pas été changée pour ce jeu ; son sous-menu propose
+les autres valeurs. Seules les options changées sont gardées, par fichier de ROM, et elles
+s'appliquent à chaque lancement de ce jeu, puis disparaissent à sa fin. Le titre du menu est en
+cyan quand le jeu en a ; « Tout remettre en global » les efface toutes. Changer, pendant la
+partie, dans la fenêtre d'options, une option que le jeu a en propre change la valeur du jeu,
+pas le réglage global.
+
 ### Notifications
 
 Les messages du programme — `Quick Save`, `Roll Back`, `Fast Forward`, les erreurs de chargement —
@@ -486,7 +498,7 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 | Chemin | Contenu |
 |---|---|
 | `settings.json` | réglages : les préférences utilisateur, par clé stable (`camera.fov`, `audio.volume`, `scene.skybox`…) |
-| `games.json` | profil 3D choisi pour chaque fichier de ROM, et les dix ROMs récentes |
+| `games.json` | profil 3D choisi pour chaque fichier de ROM, ses options du jeu, et les dix ROMs récentes |
 | `input.json` | bindings : clavier J1/J2, un jeu par modèle de manette, dernière manette de chaque joueur |
 | `library.json` | bibliothèque : chemin de ROM, titre et date de dernière partie par jeu |
 | `saves/index.json` | métadonnées des 36 emplacements numérotés et de l'emplacement rapide |

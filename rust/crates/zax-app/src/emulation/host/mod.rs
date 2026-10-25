@@ -6,6 +6,7 @@
 //! interface drives the host through [`Command`]s and reads it through [`HostEvent`]s.
 
 mod commands;
+mod game_options;
 mod games;
 mod jobs;
 mod save_states;
@@ -169,6 +170,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     battery: BatteryRamStore,
     session: Option<GameSession>,
     current_game: Option<ResolvedGame>,
+    /// The `games.json` key of the ROM whose options are in force, while a game plays.
+    game_options_rom: Option<String>,
     pause_thumbnail: Option<Vec<u8>>,
     job: Option<jobs::LoadJob>,
     loading: bool,
@@ -274,6 +277,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             battery: BatteryRamStore::new(),
             session: None,
             current_game: None,
+            game_options_rom: None,
             pause_thumbnail: None,
             job: None,
             loading: false,
@@ -963,6 +967,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// mirror into the engine and the scene, and the events for the interface. Effects can
     /// change settings in turn, so it runs until nothing is left.
     pub fn dispatch_setting_changes(&mut self) {
+        self.keep_game_options_edits();
         for _ in 0..8 {
             let ids = self.collect_setting_changes();
             if ids.is_empty() {
@@ -1195,6 +1200,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         if clear_current_game {
             self.current_game = None;
+            self.game_options_rom = None;
             self.pause_thumbnail = None;
             self.rollback.clear();
             self.fast_forward.clear();
