@@ -99,8 +99,16 @@ pub struct ZaxUi {
     pub browser: FileBrowserModel,
     /// Height of the menu bar, which the game view sits under (REQ-UI-200).
     pub chrome_height: f32,
+    /// Whether the menu bar was drawn this frame: during a game it shows only under the pointer.
+    pub menu_bar_drawn: bool,
+    /// Whether a menu of the bar was open, or the bar under the pointer, last frame.
+    menu_engaged: bool,
+    /// The height of the bar when it was last drawn, the band that reveals it.
+    menu_bar_height: f32,
     /// The capture aid of `--ui-shots`: the menu to open on the next frame.
     pub force_open_menu: Option<String>,
+    /// What a shortcut or a menu entry asked of the console mode, for the front end.
+    console_request: Option<UiCommand>,
     /// The capture aid of `--ui-shots`: the options tab to select on the next frame.
     pub force_options_tab: Option<OptionsTab>,
     heading_font: Option<imgui::FontId>,
@@ -111,6 +119,16 @@ pub struct ZaxUi {
     fps_countdown: f32,
     held_keys: Vec<Key>,
     effects: Vec<UiEffect>,
+}
+
+/// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
+const MENU_BAR_REVEAL: f32 = 24.0;
+
+/// Whether the pointer is in the window, within `band` pixels of its top.
+fn pointer_at_top(ui: &imgui::Ui, band: f32) -> bool {
+    let [x, y] = ui.io().mouse_pos;
+    let [width, _] = ui.io().display_size;
+    (0.0..=band.max(MENU_BAR_REVEAL)).contains(&y) && (0.0..=width).contains(&x)
 }
 
 impl ZaxUi {
@@ -125,8 +143,12 @@ impl ZaxUi {
             chooser: ProfileChooserModel::new(host.games().library()),
             browser: FileBrowserModel::new(),
             chrome_height: 0.0,
+            menu_bar_drawn: false,
+            menu_engaged: false,
+            menu_bar_height: MENU_BAR_REVEAL,
             force_open_menu: None,
             force_options_tab: None,
+            console_request: None,
             heading_font: None,
             purpose: BrowserPurpose::Rom,
             picker: None,
@@ -205,11 +227,26 @@ impl ZaxUi {
         self.state.has_current_game = frame.host.current_game_id().is_some();
         self.sync_confirmation(frame.host);
 
-        self.chrome_height = if self.state.menu_bar_visible() {
-            self.draw_menu_bar(ui, frame.host)
+        // During a game the bar hides until the pointer reaches the top of the window, or while
+        // one of its menus is open, and then lies over the view (owner request); with no game
+        // it stays, above the welcome screen.
+        let auto_hide = self.state.has_current_game;
+        let shown = self.state.menu_bar_visible()
+            && (!auto_hide
+                || self.menu_engaged
+                || self.force_open_menu.is_some()
+                || pointer_at_top(ui, self.menu_bar_height));
+        let bar = if shown {
+            let (height, engaged) = self.draw_menu_bar(ui, frame.host);
+            self.menu_bar_height = height;
+            self.menu_engaged = engaged;
+            height
         } else {
+            self.menu_engaged = false;
             0.0
         };
+        self.menu_bar_drawn = shown;
+        self.chrome_height = if auto_hide { 0.0 } else { bar };
         if self.state.welcome_visible() {
             self.draw_welcome(ui, frame.host);
         }
@@ -293,7 +330,17 @@ impl ZaxUi {
         match command {
             UiCommand::ToggleDebugOverlay => self.state.debug_overlay = !self.state.debug_overlay,
             UiCommand::CloseWindows => self.state.close_all(),
+            // The console mode belongs to the front end, which takes the request.
+            UiCommand::ToggleConsole | UiCommand::SaveStates | UiCommand::LoadStates => {
+                self.console_request = Some(command);
+            }
         }
+    }
+
+    /// What was asked of the console mode since the last call: switching to it or back, or one
+    /// of its save state screens.
+    pub fn take_console_request(&mut self) -> Option<UiCommand> {
+        self.console_request.take()
     }
 
     /// Runs the command a binding named, when it is one the interface owns. Returns whether it

@@ -258,17 +258,29 @@ fn req_ui_207_the_welcome_screen_shows_while_no_game_is_loaded() {
 fn req_ui_209_full_screen_hides_the_menu_bar_and_keeps_the_shortcuts() {
     let mut harness = UiHarness::new(&["Arkanoid"]);
 
-    harness.launch("g0");
+    // With no game the bar is there, above the welcome screen.
     harness.draw();
-
-    assert!(harness.ui.state.menu_bar_visible());
+    assert!(harness.ui.menu_bar_drawn);
     assert!(harness.ui.chrome_height > 0.0);
+
+    // During a game it hides until the pointer reaches the top of the window, and then lies
+    // over the view, which keeps its place (owner request).
+    harness.launch("g0");
+    harness.move_pointer([200.0, 300.0]);
+    harness.draw();
+    assert!(harness.ui.state.menu_bar_visible());
+    assert!(!harness.ui.menu_bar_drawn);
+    harness.move_pointer([200.0, 4.0]);
+    harness.draw_frames(2);
+    assert!(harness.ui.menu_bar_drawn);
+    assert!(harness.ui.chrome_height.abs() < f32::EPSILON);
 
     harness.run(Command::ToggleFullscreen);
     harness.draw();
 
     assert!(harness.host.settings().fullscreen());
     assert!(!harness.ui.state.menu_bar_visible());
+    assert!(!harness.ui.menu_bar_drawn);
     assert!(harness.ui.chrome_height.abs() < f32::EPSILON);
 
     // The shortcuts keep working: pause, then the options window over the view.
@@ -296,7 +308,7 @@ fn req_ui_209_full_screen_hides_the_menu_bar_and_keeps_the_shortcuts() {
 
     assert!(!harness.host.settings().fullscreen());
     assert!(harness.ui.state.menu_bar_visible());
-    assert!(harness.ui.chrome_height > 0.0);
+    assert!(harness.ui.menu_bar_drawn, "the pointer is still at the top");
 }
 
 #[test]

@@ -199,6 +199,7 @@ pub const HANDHELD_GAME_OPTIONS_RESET: &str = "handheld.game_options.reset";
 pub const HANDHELD_USE_GLOBAL: &str = "handheld.game_options.use_global";
 pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
 pub const HANDHELD_HINT_RESET_ALL: &str = "handheld.hint.reset_all";
+pub const SHORTCUT_HOME: &str = "shortcut.home";
 
 // ------------------------------------------------- commands of REQ-UI-205
 pub const COMMAND_PREFIX: &str = "cmd.";
@@ -396,4 +397,5 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_USE_GLOBAL,
     HANDHELD_HINT_GAME_OPTIONS,
     HANDHELD_HINT_RESET_ALL,
+    SHORTCUT_HOME,
 ];

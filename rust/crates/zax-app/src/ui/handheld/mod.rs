@@ -109,6 +109,15 @@ pub struct HandheldUi {
     pictures: Vec<PictureUpdate>,
     /// Whether the host waits for an answer to a question, which the interface then asks.
     confirming: bool,
+    /// Where the save state screen goes back to: the in-game menu, or the game when a shortcut
+    /// of the desktop opened it.
+    states_return: Screen,
+    /// Whether this is a handheld, rather than the console mode of the desktop (F1).
+    device: bool,
+    /// The sizes the desktop pins, its fonts being baked once whatever the window becomes.
+    fixed_metrics: Option<Metrics>,
+    /// The body face of the desktop's console mode; a handheld's is the atlas default.
+    body_font: Option<imgui::FontId>,
 }
 
 /// L2 in game (Rust-only, owner request): held, it keeps the camera's angles and distance; a
@@ -161,6 +170,10 @@ impl HandheldUi {
             flat_view: None,
             head_on: HeadOn::Off,
             states: StatesModel::new(StatesMode::Save, 1),
+            states_return: Screen::Overlay,
+            device: true,
+            fixed_metrics: None,
+            body_font: None,
             shown_picture: None,
             pictures: Vec::new(),
             confirming: false,
@@ -172,6 +185,62 @@ impl HandheldUi {
     /// The face of the titles.
     pub const fn set_heading_font(&mut self, font: Option<imgui::FontId>) {
         self.heading_font = font;
+    }
+
+    /// Makes this the console mode of the desktop (Rust-only, owner request): the sizes of its
+    /// fonts, baked for `metrics`, and the body face. Holding Select and Start does not quit
+    /// there.
+    pub const fn use_on_desktop(&mut self, metrics: Metrics, body_font: Option<imgui::FontId>) {
+        self.device = false;
+        self.fixed_metrics = Some(metrics);
+        self.metrics = metrics;
+        self.body_font = body_font;
+    }
+
+    /// The sizes of the screens for a display `height` pixels high.
+    fn metrics_for(&self, height: f32) -> Metrics {
+        self.fixed_metrics
+            .unwrap_or_else(|| Metrics::for_height(height))
+    }
+
+    /// The body face, for the drawing.
+    pub(super) const fn body_font(&self) -> Option<imgui::FontId> {
+        self.body_font
+    }
+
+    /// Leaves the console mode of the desktop: a menu open over the game closes and the game
+    /// goes on; with no game, the list is what comes back next time.
+    pub fn leave_for_desktop(&mut self, host: &mut AppHost) {
+        self.game_options = None;
+        self.flat_view = None;
+        if host.current_game_id().is_some() {
+            if self.screen != Screen::InGame {
+                host.enqueue(Command::Resume, CommandArgs::default());
+            }
+            self.screen = Screen::InGame;
+        } else {
+            self.screen = Screen::Home;
+            self.return_to = Screen::Home;
+        }
+    }
+
+    /// Opens the save state screen over the game in play, which pauses (a shortcut of the
+    /// desktop); going back resumes it. False with no game.
+    pub fn open_states(&mut self, mode: StatesMode, host: &mut AppHost) -> bool {
+        if host.current_game_id().is_none() || host.is_loading() {
+            return false;
+        }
+        match self.screen {
+            Screen::InGame => {
+                host.enqueue(Command::Pause, CommandArgs::default());
+                self.states_return = Screen::InGame;
+            }
+            Screen::States => {}
+            _ => self.states_return = Screen::Overlay,
+        }
+        self.states = StatesModel::new(mode, self.overlay.slot());
+        self.screen = Screen::States;
+        true
     }
 
     /// The screen in front.
@@ -398,9 +467,12 @@ impl HandheldUi {
     fn update_combo(&mut self, pad: &PadState, seconds: f32, host: &mut AppHost) {
         let both = pad.is_held(PadButton::Select) && pad.is_held(PadButton::Start);
         match self.combo.update(seconds, both) {
-            ComboEvent::Quit => host.enqueue(Command::Quit, CommandArgs::default()),
+            // The PortMaster convention; a desktop has its window to close.
+            ComboEvent::Quit if self.device => {
+                host.enqueue(Command::Quit, CommandArgs::default());
+            }
             ComboEvent::Tap if menu_is_select_start(host) => self.toggle_overlay(host),
-            ComboEvent::Tap | ComboEvent::Idle => {}
+            ComboEvent::Quit | ComboEvent::Tap | ComboEvent::Idle => {}
         }
     }
 
@@ -626,6 +698,7 @@ impl HandheldUi {
         match command {
             OverlayCommand::Resume => close(self, host),
             OverlayCommand::ChooseState(mode, slot) => {
+                self.states_return = Screen::Overlay;
                 self.states = StatesModel::new(mode, slot);
                 self.screen = Screen::States;
             }
@@ -646,7 +719,10 @@ impl HandheldUi {
     fn carry_out_states(&mut self, command: StatesCommand, host: &mut AppHost) {
         let (command, slot) = match command {
             StatesCommand::Back => {
-                self.screen = Screen::Overlay;
+                if self.states_return == Screen::InGame {
+                    host.enqueue(Command::Resume, CommandArgs::default());
+                }
+                self.screen = self.states_return;
                 return;
             }
             StatesCommand::Save(slot) => (Command::SaveSlot, slot),

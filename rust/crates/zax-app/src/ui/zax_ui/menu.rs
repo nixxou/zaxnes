@@ -7,6 +7,7 @@ use imgui::Ui;
 use super::ZaxUi;
 use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs};
+use crate::ui::commands::UiCommand;
 use crate::ui::handheld::game_options::{GameOptionsModel, GAME_ROWS};
 use crate::ui::handheld::options;
 use crate::ui::menu_bar::{Menu, MenuBarModel, MenuItem, MenuItemKind, MenuWarning};
@@ -16,11 +17,13 @@ use crate::ui::{keys, strings};
 const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
 
 impl ZaxUi {
-    /// Draws the bar and returns its height.
-    pub(super) fn draw_menu_bar(&mut self, ui: &Ui, host: &mut AppHost) -> f32 {
+    /// Draws the bar and returns its height, and whether one of its menus is open or the
+    /// pointer is over it.
+    pub(super) fn draw_menu_bar(&mut self, ui: &Ui, host: &mut AppHost) -> (f32, bool) {
         let Some(_bar) = ui.begin_main_menu_bar() else {
-            return 0.0;
+            return (0.0, false);
         };
+        let mut engaged = ui.is_window_hovered();
         let height = ui.window_size()[1];
         // The capture aid of --ui-shots: the popup identifier a menu-bar entry opens is the one
         // its label hashes to in this very window, so asking for it here is the same thing a
@@ -31,25 +34,29 @@ impl ZaxUi {
         let mut chosen = None;
         for Menu { title, items } in self.menu_bar.menus() {
             if let Some(_menu) = ui.begin_menu(title) {
+                engaged = true;
                 chosen = chosen.or(draw_items(ui, items, host));
             }
         }
-        draw_game_options(ui, host);
-        if let Some((command, args)) = chosen {
-            Self::activate(host, command, args);
+        engaged |= draw_game_options(ui, host);
+        match chosen {
+            Some(Chosen::Host(command, args)) => Self::activate(host, command, args),
+            Some(Chosen::Ui(command)) => self.run_ui_command(command),
+            None => {}
         }
-        height
+        (height, engaged)
     }
 }
 
 /// The options of the game in play (Rust-only, owner request): a submenu per option with its
 /// values, "Use Global" first, and an entry that puts everything back. Greyed with no game.
-fn draw_game_options(ui: &Ui, host: &mut AppHost) {
+/// Returns whether the menu is open.
+fn draw_game_options(ui: &Ui, host: &mut AppHost) -> bool {
     let title = strings::get(keys::HANDHELD_HINT_GAME_OPTIONS);
     let Some(rom) = host.current_rom_path().map(str::to_owned) else {
         // Greyed: there is no game to set options for.
         drop(ui.begin_menu_with_enabled(&title, false));
-        return;
+        return false;
     };
     let options = host.game_options(&rom);
     let colour =
@@ -57,7 +64,7 @@ fn draw_game_options(ui: &Ui, host: &mut AppHost) {
     let menu = ui.begin_menu(&title);
     drop(colour);
     let Some(_menu) = menu else {
-        return;
+        return false;
     };
     let name = host.current_game_title().unwrap_or_default().to_owned();
     let mut model = GameOptionsModel::new(PathBuf::from(&rom), name, host.settings(), options);
@@ -110,10 +117,17 @@ fn draw_game_options(ui: &Ui, host: &mut AppHost) {
     if changed {
         host.set_game_options(&rom, model.options());
     }
+    true
+}
+
+/// What the user chose in a menu: a command of the host, or one of the interface.
+enum Chosen {
+    Host(Command, CommandArgs),
+    Ui(UiCommand),
 }
 
 /// Draws the entries of a menu and returns the command the user chose, if any.
-fn draw_items(ui: &Ui, items: &[MenuItem], host: &AppHost) -> Option<(Command, CommandArgs)> {
+fn draw_items(ui: &Ui, items: &[MenuItem], host: &AppHost) -> Option<Chosen> {
     let mut chosen = None;
     for (index, item) in items.iter().enumerate() {
         if item.kind == MenuItemKind::Separator {
@@ -149,7 +163,9 @@ fn draw_items(ui: &Ui, items: &[MenuItem], host: &AppHost) -> Option<(Command, C
             .build();
         if activated {
             if let Some(command) = item.command {
-                chosen = chosen.or(Some((command, item.args.clone())));
+                chosen = chosen.or(Some(Chosen::Host(command, item.args.clone())));
+            } else if let Some(command) = item.ui_command {
+                chosen = chosen.or(Some(Chosen::Ui(command)));
             }
         }
     }

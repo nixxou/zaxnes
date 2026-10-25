@@ -31,6 +31,25 @@ impl FontSizes {
     };
 }
 
+/// The system face (the `hint` file, or the platform's) and the bold one of its family, read;
+/// none with `built_in_only`, or when the face is missing or unreadable.
+fn read_faces(
+    hint: Option<&str>,
+    built_in_only: bool,
+) -> Option<(PathBuf, Vec<u8>, Option<Vec<u8>>)> {
+    if built_in_only {
+        return None;
+    }
+    let files = system_fonts::locate(hint);
+    let regular = files.regular.as_ref()?;
+    let body = std::fs::read(regular).ok()?;
+    let bold = files
+        .bold
+        .as_ref()
+        .and_then(|bold| std::fs::read(bold).ok());
+    Some((regular.clone(), body, bold))
+}
+
 /// U+25B8, the small triangle of "Fichier ▸ Ouvrir une ROM" (REQ-UI-207).
 pub const SMALL_RIGHT_TRIANGLE: u32 = 0x25B8;
 /// U+25BA, the pointer Segoe UI and Arial carry instead.
@@ -94,21 +113,7 @@ impl UiFonts {
         built_in_only: bool,
         wanted: FontSizes,
     ) -> Self {
-        let files = if built_in_only {
-            system_fonts::FontFiles::default()
-        } else {
-            system_fonts::locate(hint)
-        };
-        // An unreadable file leaves the built-in font, as a missing one does.
-        let faces = files.regular.as_ref().and_then(|regular| {
-            let body = std::fs::read(regular).ok()?;
-            let bold = files
-                .bold
-                .as_ref()
-                .and_then(|bold| std::fs::read(bold).ok());
-            Some((regular.clone(), body, bold))
-        });
-        let Some((body_file, body, bold)) = faces else {
+        let Some((body_file, body, bold)) = read_faces(hint, built_in_only) else {
             let config = (wanted != FontSizes::DESKTOP).then(|| FontConfig {
                 size_pixels: wanted.body,
                 ..FontConfig::default()
@@ -124,6 +129,30 @@ impl UiFonts {
             heading: Some(heading),
             body_file: Some(body_file),
         }
+    }
+
+    /// Adds the faces of the console mode of the desktop (Rust-only, owner request) after the
+    /// desktop's: the body and the heading at `wanted`. Returns them, the heading none with the
+    /// built-in font only.
+    pub fn load_console(
+        atlas: &mut FontAtlas,
+        hint: Option<&str>,
+        built_in_only: bool,
+        wanted: FontSizes,
+    ) -> (FontId, Option<FontId>) {
+        let Some((_, body, bold)) = read_faces(hint, built_in_only) else {
+            let config = Some(FontConfig {
+                size_pixels: wanted.body,
+                ..FontConfig::default()
+            });
+            return (
+                atlas.add_font(&[FontSource::DefaultFontData { config }]),
+                None,
+            );
+        };
+        let body_font = atlas.add_font(&[face(&body, wanted.body)]);
+        let heading = atlas.add_font(&[face(bold.as_deref().unwrap_or(&body), wanted.heading)]);
+        (body_font, Some(heading))
     }
 
     /// Points the code points a face lacks at the nearest glyph the atlas carries (REQ-UI-207).

@@ -78,11 +78,16 @@ Rust-only options:
                           and automatic on aarch64 Linux without an X11 or Wayland display).
   --roms <dir>            Folder of .nes files the handheld ROM list shows
                           (default: the roms folder of the user data).
+  --console               Open the desktop in its console mode (the handheld screens);
+                          F1 or Home switches between it and the menu bar.
   --catch-up <n>          Most emulated frames per displayed frame when the game runs late,
                           1 to 5, or 0 for none (also ZAXNES_CATCH_UP; default 5, 0 on handhelds).
   --backend <api>         Graphics API for this run: gl, vulkan or dx12 (video.backend; Vulkan
                           and DirectX 12 in the desktop builds only).
   --load-state <n>        Load save state slot n of the game once it has started (with --rom).
+
+Desktop shortcuts (Rust-only):
+  F1 / Home   console mode / menu bar     Ctrl+S / Ctrl+L   save / load state screens
 ";
 
 /// A command line that cannot be read. The messages are those of the C# program.
@@ -207,6 +212,9 @@ pub struct AppOptions {
     /// The gamepad-only interface of handheld consoles (Rust-only). `--handheld` sets it; the
     /// environment and the platform can too, see [`crate::handheld_mode`].
     pub handheld: bool,
+    /// The desktop opens in its console mode (Rust-only, `--console`); F1 or Home goes to the
+    /// menu bar.
+    pub console: bool,
     /// The folder the handheld ROM list shows (Rust-only); `None` for the `roms` folder of the
     /// user data.
     pub roms_directory: Option<String>,
@@ -247,6 +255,7 @@ impl Default for AppOptions {
             smoke_shot_path: None,
             ui_shot_directory: None,
             handheld: false,
+            console: false,
             roms_directory: None,
             catch_up: None,
             backend: None,
@@ -368,6 +377,7 @@ impl AppOptions {
     ) -> Result<(), OptionsError> {
         match argument {
             "--handheld" => self.handheld = true,
+            "--console" => self.console = true,
             "--roms" => {
                 self.roms_directory = Some(next_value(arguments, index, "--roms")?.to_owned());
             }
