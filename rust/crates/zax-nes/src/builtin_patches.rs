@@ -120,6 +120,14 @@ pub const PATCHES: [BuiltinPatch; 3] = [
                 bit: 1,
                 default: false,
             },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
         ],
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
