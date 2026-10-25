@@ -948,6 +948,7 @@ fn load_settings(options: &AppOptions, paths: &UserDataPaths) -> (SettingsStore,
         SettingId::VideoWidescreen,
         SettingId::VideoWidescreenExtra,
         SettingId::EmuBuiltinPatches,
+        SettingId::EmuForcedPatch,
     ] {
         model.reset(id);
     }

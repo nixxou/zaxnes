@@ -351,9 +351,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     return Step::Failed(INVALID_ROM_MESSAGE.to_owned());
                 };
                 let builtin_patches = self.builtin_patches_wanted();
+                let forced = self.forced_patch();
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_builtin_patches(builtin_patches);
+                        session.core_mut().set_forced_patch(forced);
                         session.load_rom(&rom.image, &rom.name)
                     }
                     None => return Step::Failed(INVALID_ROM_MESSAGE.to_owned()),
@@ -448,11 +450,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         state: &SaveStateContent,
     ) -> Step {
         let builtin_patches = self.builtin_patches_wanted();
+        let forced = self.forced_patch();
         let Some(session) = self.session.as_mut() else {
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
         // The state carries the original ROM: the hack applies to it as the setting says now.
         session.core_mut().set_builtin_patches(builtin_patches);
+        session.core_mut().set_forced_patch(forced);
         if let Err(error) = session.restore_core(&state.core) {
             self.log(&format!("savestate refused: {error}"));
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());

@@ -57,6 +57,8 @@ pub struct NesCore {
     builtin_patch: Option<&'static str>,
     /// Whether the built-in patches apply at all (on by default).
     builtin_patches_enabled: bool,
+    /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
+    forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
     /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
     /// picks a margin decoder made for an unpatched ROM.
     rom_crc: Option<u32>,
@@ -83,6 +85,7 @@ impl NesCore {
             original_image: None,
             builtin_patch: None,
             builtin_patches_enabled: true,
+            forced_patch: None,
             rom_crc: None,
         }
     }
@@ -91,6 +94,16 @@ impl NesCore {
     /// restore; the ROM loaded keeps what it has.
     pub fn set_builtin_patches(&mut self, enabled: bool) {
         self.builtin_patches_enabled = enabled;
+    }
+
+    /// The built-in patch the next [`NesCore::load_rom`] and state restore apply to a ROM no
+    /// patch is made for, while the patches are on (Rust-only: a forced patch, whose checksums
+    /// are not asked for); none by default.
+    pub fn set_forced_patch(
+        &mut self,
+        patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
+    ) {
+        self.forced_patch = patch;
     }
 
     /// Whether the state block at `offset` in `data` can be restored with the built-in patches as
@@ -216,7 +229,7 @@ impl NesCore {
         // A ROM a built-in patch was made for is patched in memory (the host's copy is left
         // alone); the original is kept for the savestates.
         let patched = if self.builtin_patches_enabled {
-            crate::builtin_patches::apply(image)
+            crate::builtin_patches::apply_with(image, self.forced_patch)
         } else {
             None
         };
@@ -236,7 +249,10 @@ impl NesCore {
         self.builtin_patch = patched.as_ref().map(|patched| patched.name);
         self.rom_crc = Some(crate::builtin_patches::data_crc(image));
         // The patch's options start as they are by default; a host sets the player's choice.
-        let options = crate::builtin_patches::patch_for(image)
+        let options = self
+            .builtin_patch
+            .and_then(crate::builtin_patches::by_name)
+            .or_else(|| crate::builtin_patches::patch_for(image))
             .map_or(0, crate::builtin_patches::BuiltinPatch::default_options);
         self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
@@ -843,7 +859,7 @@ impl NesCore {
             // The block is self-contained: it restores even with no ROM loaded
             // (REQ-CORE-090). A ROM a built-in patch was made for gets the patch of this build.
             let patched = if self.builtin_patches_enabled {
-                crate::builtin_patches::apply(&rom_bytes)
+                crate::builtin_patches::apply_with(&rom_bytes, self.forced_patch)
             } else {
                 None
             };

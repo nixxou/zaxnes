@@ -1240,6 +1240,16 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
         )
         .with_label("Built-in ROM patches"),
     );
+    // Rust-only (owner request): the built-in patch applied to a ROM none is made for (another
+    // version of its game, a ROM hack), by name; an option of each game only.
+    out.push(SettingDescriptor::new(
+        SettingId::EmuForcedPatch,
+        SettingKind::Text,
+        SettingValue::from(""),
+        SettingScope::User,
+        SettingEffect::NextRomLoad,
+        SettingTheme::Emulation,
+    ));
     // Rust-only (owner request): the options of the built-in patches the player changed, as
     // "<patch>/<option>=0|1" entries separated by ";" (zax-nes::builtin_patches::HackOption).
     // Not exposed to Lua, not shown in the options window (a menu edits it).

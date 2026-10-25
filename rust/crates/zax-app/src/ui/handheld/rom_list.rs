@@ -35,6 +35,8 @@ pub struct RomEntry {
     /// The name of the built-in patch of the game, when it is made for another ROM of it (the
     /// profile or the name says the game, its data says another version): [W] in red.
     pub widescreen_other: Option<&'static str>,
+    /// Whether that patch is forced on the game all the same.
+    pub widescreen_forced: bool,
 }
 
 impl RomEntry {
@@ -52,6 +54,7 @@ impl RomEntry {
             widescreen: false,
             widescreen_on: false,
             widescreen_other: None,
+            widescreen_forced: false,
         }
     }
 

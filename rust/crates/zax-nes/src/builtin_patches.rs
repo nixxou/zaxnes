@@ -148,49 +148,92 @@ const HEADER_SIZE: usize = 16;
 /// that matches does not apply cleanly, which its checksums would tell).
 #[must_use]
 pub fn apply(image: &[u8]) -> Option<PatchedRom> {
-    let header_size = if image.starts_with(b"NES\x1A") && image.len() > HEADER_SIZE {
-        HEADER_SIZE
-    } else {
-        0
-    };
-    let (header, data) = image.split_at(header_size);
+    apply_with(image, None)
+}
+
+/// The same, and when no patch is made for `image`, `forced` applied all the same (Rust-only,
+/// owner request: a ROM hack of the game, or another version of it, may well run with it): its
+/// checksums are not asked for, only the size of the data it was made for.
+#[must_use]
+pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option<PatchedRom> {
+    let (start, end) = data_bounds(image);
+    let data = &image[start..end];
     let crc = crc32(data);
-    PATCHES
-        .iter()
-        .filter(|patch| patch.source_crc == crc)
-        .find_map(|patch| {
-            let patched = apply_bps(patch.bps, data).ok()?;
-            let mut image = Vec::with_capacity(header.len() + patched.len());
-            image.extend_from_slice(header);
-            image.extend_from_slice(&patched);
-            Some(PatchedRom {
-                image,
-                name: patch.name,
-            })
-        })
+    let (patch, checked) = match PATCHES.iter().find(|patch| patch.source_crc == crc) {
+        Some(patch) => (patch, true),
+        None => (forced?, false),
+    };
+    let patched = apply_bps_checked(patch.bps, data, checked).ok()?;
+    // What comes before the data (the header, a trainer) stays; bytes past the size the header
+    // gives do not.
+    let mut patched_image = Vec::with_capacity(start + patched.len());
+    patched_image.extend_from_slice(&image[..start]);
+    patched_image.extend_from_slice(&patched);
+    Some(PatchedRom {
+        image: patched_image,
+        name: patch.name,
+    })
 }
 
 /// The built-in patch made for `image` (iNES header or not), if any.
 #[must_use]
 pub fn patch_for(image: &[u8]) -> Option<&'static BuiltinPatch> {
-    let header_size = if image.starts_with(b"NES") && image.len() > HEADER_SIZE {
-        HEADER_SIZE
-    } else {
-        0
-    };
-    let crc = crc32(&image[header_size..]);
-    PATCHES.iter().find(|patch| patch.source_crc == crc)
+    for_data_crc(data_crc(image))
 }
 
-/// CRC-32 of the data of `image`, its iNES header (if any) excluded.
+/// The built-in patch called `name`, if any.
+#[must_use]
+pub fn by_name(name: &str) -> Option<&'static BuiltinPatch> {
+    PATCHES.iter().find(|patch| patch.name == name)
+}
+
+/// CRC-32 of the data of `image`: its PRG-ROM and CHR-ROM, without the iNES header, a trainer
+/// or bytes past the sizes the header gives (an overdump). It is the CRC the No-Intro set gives.
 #[must_use]
 pub fn data_crc(image: &[u8]) -> u32 {
-    let header_size = if image.starts_with(b"NES") && image.len() > HEADER_SIZE {
-        HEADER_SIZE
-    } else {
-        0
+    crc32(rom_data(image))
+}
+
+/// The data of `image`, as [`data_crc`] reads it.
+#[must_use]
+pub fn rom_data(image: &[u8]) -> &[u8] {
+    let (start, end) = data_bounds(image);
+    &image[start..end]
+}
+
+/// Where the data of `image` starts and ends: after the header and a trainer, up to the sizes
+/// the header gives (iNES, or NES 2.0 with its high bits); a whole headerless image.
+fn data_bounds(image: &[u8]) -> (usize, usize) {
+    if !image.starts_with(b"NES\x1A") || image.len() <= HEADER_SIZE {
+        return (0, image.len());
+    }
+    let trainer = if image[6] & 0x04 == 0 { 0 } else { 512 };
+    let start = (HEADER_SIZE + trainer).min(image.len());
+    let nes2 = image[7] & 0x0C == 0x08;
+    let units = |low: u8, high: u8| {
+        if nes2 && high == 0x0F {
+            // The exponent form, never used by a game a patch is made for: the whole rest.
+            None
+        } else {
+            Some(usize::from(low) | (usize::from(if nes2 { high } else { 0 }) << 8))
+        }
     };
-    crc32(&image[header_size..])
+    let size = units(image[4], image[9] & 0x0F)
+        .zip(units(image[5], image[9] >> 4))
+        .map(|(prg, chr)| prg * 16 * 1024 + chr * 8 * 1024)
+        .filter(|size| *size > 0);
+    let end = size.map_or(image.len(), |size| (start + size).min(image.len()));
+    (start, end)
+}
+
+/// The size of the data `patch` was made for, from its BPS header.
+#[must_use]
+pub fn source_size(patch: &BuiltinPatch) -> Option<usize> {
+    let mut reader = Reader {
+        bytes: patch.bps,
+        position: 4,
+    };
+    reader.number().ok()
 }
 
 /// The built-in patch made for ROM data (iNES header excluded) of CRC-32 `crc`, if any.
@@ -229,13 +272,7 @@ pub fn widescreen_capable(crc: u32) -> bool {
 /// Whether a built-in patch is made for `image` (iNES header or not).
 #[must_use]
 pub fn matches(image: &[u8]) -> bool {
-    let header_size = if image.starts_with(b"NES") && image.len() > HEADER_SIZE {
-        HEADER_SIZE
-    } else {
-        0
-    };
-    let crc = crc32(&image[header_size..]);
-    PATCHES.iter().any(|patch| patch.source_crc == crc)
+    patch_for(image).is_some()
 }
 
 /// Why a BPS patch did not apply.
@@ -255,6 +292,12 @@ pub enum BpsError {
 /// [`BpsError`] when the patch is malformed, made for another source, or produces a target
 /// whose checksum differs from the one it carries.
 pub fn apply_bps(patch: &[u8], source: &[u8]) -> Result<Vec<u8>, BpsError> {
+    apply_bps_checked(patch, source, true)
+}
+
+/// [`apply_bps`], the checksums of the source and of the target asked for only when `checked`
+/// (a forced patch: only the size of the source must be the one the patch was made for).
+fn apply_bps_checked(patch: &[u8], source: &[u8], checked: bool) -> Result<Vec<u8>, BpsError> {
     if patch.len() < 4 + 12 || !patch.starts_with(b"BPS1") {
         return Err(BpsError::Malformed);
     }
@@ -270,7 +313,7 @@ pub fn apply_bps(patch: &[u8], source: &[u8]) -> Result<Vec<u8>, BpsError> {
     if crc32(&patch[..footer_at + 8]) != footer(2)? {
         return Err(BpsError::Malformed);
     }
-    if crc32(source) != footer(0)? {
+    if checked && crc32(source) != footer(0)? {
         return Err(BpsError::WrongSource);
     }
 
@@ -327,7 +370,7 @@ pub fn apply_bps(patch: &[u8], source: &[u8]) -> Result<Vec<u8>, BpsError> {
         }
     }
 
-    if target.len() != target_size || crc32(&target) != footer(1)? {
+    if target.len() != target_size || (checked && crc32(&target) != footer(1)?) {
         return Err(BpsError::WrongTarget);
     }
     Ok(target)
@@ -507,6 +550,35 @@ mod tests {
         let patched = apply(&image).map(|rom| rom.image).unwrap_or_default();
         assert_eq!(patched.len(), image.len());
         assert_eq!(patched[..16], image[..16], "the player's header is kept");
+
+        // An overdump and a trainer leave the data, and so the patch, as they are.
+        let mut overdump = image.clone();
+        overdump.extend_from_slice(&[0xFF; 1024]);
+        assert_eq!(data_crc(&image), data_crc(&overdump));
+        assert_eq!(
+            Some(ZELDA2_USA),
+            patch_for(&overdump).map(|patch| patch.name)
+        );
+        let mut trainer = image[..16].to_vec();
+        trainer[6] |= 0x04;
+        trainer.extend_from_slice(&[0x55; 512]);
+        trainer.extend_from_slice(&image[16..]);
+        assert_eq!(data_crc(&image), data_crc(&trainer));
+        assert!(apply(&trainer).is_some());
+
+        // A hack of the ROM (one byte changed here) takes the patch only when it is forced.
+        let mut hack = image.clone();
+        let last = hack.len() - 1;
+        hack[last] ^= 0x01;
+        assert!(apply(&hack).is_none());
+        let zelda = by_name(ZELDA2_USA);
+        let forced = apply_with(&hack, zelda)
+            .map(|rom| rom.image)
+            .unwrap_or_default();
+        assert_eq!(forced.len(), hack.len());
+        // The patch applies to data of the size it was made for only.
+        assert_eq!(source_size(zelda.unwrap()), Some(image.len() - 16));
+        assert!(apply_with(&hack[..hack.len() - 8192], zelda).is_none());
     }
 
     #[test]

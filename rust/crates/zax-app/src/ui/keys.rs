@@ -221,6 +221,14 @@ pub const HACK_MARGIN: &str = "hacks.margin";
 pub const HACK_ON: &str = "hacks.on";
 /// What a game a widescreen hack is made for, but not for this ROM of it, is told.
 pub const HACKS_OTHER_ROM: &str = "hacks.other_rom";
+/// The forcing of the patch of another ROM of the game: the row, the question, its button, and
+/// what is said when the size does not allow it.
+pub const HACK_FORCE: &str = "hacks.force";
+pub const HACKS_FORCE_QUESTION: &str = "hacks.force_question";
+pub const HACKS_FORCE_BUTTON: &str = "hacks.force_button";
+pub const HACKS_FORCE_SIZE: &str = "hacks.force_size";
+/// What the hacks of a game say once the patch of another ROM of it is forced.
+pub const HACKS_FORCED_NOTE: &str = "hacks.forced_note";
 pub const HACK_OFF: &str = "hacks.off";
 pub const MENU_HACKS: &str = "menu.hacks";
 pub const HANDHELD_HINT_HACKS: &str = "handheld.hint.hacks";
@@ -437,6 +445,11 @@ pub const PUBLISHED: &[&str] = &[
     HACK_MARGIN,
     HACK_ON,
     HACKS_OTHER_ROM,
+    HACK_FORCE,
+    HACKS_FORCE_QUESTION,
+    HACKS_FORCE_BUTTON,
+    HACKS_FORCE_SIZE,
+    HACKS_FORCED_NOTE,
     HACK_OFF,
     MENU_HACKS,
     HANDHELD_HINT_HACKS,

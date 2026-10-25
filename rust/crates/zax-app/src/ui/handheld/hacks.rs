@@ -23,6 +23,8 @@ use crate::ui::{keys, strings, text};
 /// A row of the hacks of a game.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HackRow {
+    /// The patch of another ROM of the game applied all the same (forced), on or off.
+    Force,
     /// The widescreen, on or off.
     Widescreen,
     /// Its ratio: automatic (the view's) or a fixed one.
@@ -60,6 +62,9 @@ pub struct HacksModel {
     /// The built-in patch made for another ROM of the same game, when no hack is made for this
     /// one (its profile or its name says the game).
     other_rom: Option<&'static BuiltinPatch>,
+    /// Whether that patch can be forced on this ROM: its data has the size the patch was made
+    /// for.
+    forceable: bool,
     selected: usize,
     /// The global values: the preferences, without the scripts' or a game's.
     global: SettingsModel,
@@ -95,10 +100,11 @@ impl HacksModel {
             patch,
             crc,
             other_rom,
+            forceable: true,
             selected: 0,
             global,
             own,
-            patch_options: patch.map(patch_options).unwrap_or_default(),
+            patch_options: patch.or(other_rom).map(patch_options).unwrap_or_default(),
         }
     }
 
@@ -117,8 +123,52 @@ impl HacksModel {
         );
         if !hacks.capable {
             hacks.other_rom = other_rom_patch(title, &hacks.name);
+            if let Some(other) = hacks.other_rom {
+                // A forced patch applies to data of the size it was made for only.
+                let size = std::fs::read(rom)
+                    .ok()
+                    .map(|image| builtin_patches::rom_data(&image).len());
+                hacks.forceable = size.is_some() && size == builtin_patches::source_size(other);
+                hacks.patch_options = host.patch_options(other);
+            }
         }
         hacks
+    }
+
+    /// Whether the patch of another ROM of the game is forced on this one.
+    #[must_use]
+    pub fn forced(&self) -> bool {
+        self.other_rom
+            .is_some_and(|other| self.value(SettingId::EmuForcedPatch).as_text() == other.name)
+    }
+
+    /// The built-in patch made for another ROM of the game, when this one is such a version.
+    #[must_use]
+    pub const fn other_rom_patch(&self) -> Option<&'static BuiltinPatch> {
+        self.other_rom
+    }
+
+    /// Whether the patch of another ROM of the game can be forced on this one.
+    #[must_use]
+    pub const fn forceable(&self) -> bool {
+        self.other_rom.is_some() && self.forceable
+    }
+
+    /// Forces the patch of another ROM of the game on this one, the widescreen on (Auto), or
+    /// takes both back.
+    pub fn toggle_force(&mut self) {
+        let Some(other) = self.other_rom.filter(|_| self.forceable) else {
+            return;
+        };
+        if self.forced() {
+            self.set(SettingId::EmuForcedPatch, SettingValue::from(""));
+            self.set(SettingId::VideoWidescreen, SettingValue::Enum(0));
+        } else {
+            self.set(SettingId::EmuForcedPatch, SettingValue::from(other.name));
+            if !self.widescreen_on() {
+                self.set(SettingId::VideoWidescreen, SettingValue::Enum(RATIOS[0]));
+            }
+        }
     }
 
     /// Why the widescreen cannot be turned on, for a version of a game the hack is made for
@@ -133,16 +183,28 @@ impl HacksModel {
         let crc = self
             .crc
             .map_or_else(|| "?".to_owned(), |crc| format!("{crc:08X}"));
-        Some(strings::format(
-            &strings::get(keys::HACKS_OTHER_ROM),
-            &[
-                patch.game,
-                patch.rom_name,
-                &format!("{:08X}", patch.source_crc),
-                &file,
-                &crc,
-            ],
-        ))
+        // Once forced, what is forced rather than why it cannot be.
+        let template = if self.forced() {
+            keys::HACKS_FORCED_NOTE
+        } else {
+            keys::HACKS_OTHER_ROM
+        };
+        Some(
+            strings::format(
+                &strings::get(template),
+                &[
+                    patch.game,
+                    patch.rom_name,
+                    &format!("{:08X}", patch.source_crc),
+                    &file,
+                    &crc,
+                ],
+            ) + &if self.forceable {
+                String::new()
+            } else {
+                format!(" {}", strings::get(keys::HACKS_FORCE_SIZE))
+            },
+        )
     }
 
     /// The game's file.
@@ -163,19 +225,28 @@ impl HacksModel {
         self.capable
     }
 
-    /// The built-in patch made for the game, if any.
+    /// The built-in patch the game plays with: the one made for it, or the one forced on it.
     #[must_use]
-    pub const fn patch(&self) -> Option<&'static BuiltinPatch> {
+    pub fn patch(&self) -> Option<&'static BuiltinPatch> {
         self.patch
+            .or_else(|| self.other_rom.filter(|_| self.forced()))
     }
 
-    /// The rows: none when no hack is made for the game.
+    /// The rows: none when no hack is made for the game; for another version of a game one is
+    /// made for, the forcing first, then the rest once it is forced.
     #[must_use]
     pub fn rows(&self) -> Vec<HackRow> {
+        let mut rows = Vec::new();
         if !self.capable {
-            return Vec::new();
+            if !self.forceable() {
+                return rows;
+            }
+            rows.push(HackRow::Force);
+            if !self.forced() {
+                return rows;
+            }
         }
-        let mut rows = vec![HackRow::Widescreen, HackRow::Ratio, HackRow::Margin];
+        rows.extend([HackRow::Widescreen, HackRow::Ratio, HackRow::Margin]);
         rows.extend((0..self.patch_options.len()).map(HackRow::PatchOption));
         rows
     }
@@ -233,6 +304,7 @@ impl HacksModel {
     /// Steps `row` by `step`.
     pub fn step(&mut self, row: HackRow, step: i32) {
         match row {
+            HackRow::Force => self.toggle_force(),
             HackRow::Widescreen => self.toggle_widescreen(),
             HackRow::Ratio => {
                 // From off, the first step turns the widescreen on.
@@ -272,7 +344,7 @@ impl HacksModel {
                 .iter()
                 .map(|label| text::label_of_option(label))
                 .collect(),
-            HackRow::Widescreen | HackRow::PatchOption(_) => Vec::new(),
+            HackRow::Force | HackRow::Widescreen | HackRow::PatchOption(_) => Vec::new(),
         }
     }
 
@@ -290,7 +362,7 @@ impl HacksModel {
             HackRow::Margin => {
                 usize::try_from(self.value(SettingId::VideoWidescreenExtra).as_int()).unwrap_or(0)
             }
-            HackRow::Widescreen | HackRow::PatchOption(_) => 0,
+            HackRow::Force | HackRow::Widescreen | HackRow::PatchOption(_) => 0,
         }
     }
 
@@ -307,7 +379,7 @@ impl HacksModel {
                     self.set(SettingId::VideoWidescreenExtra, SettingValue::Enum(value));
                 }
             }
-            HackRow::Widescreen | HackRow::PatchOption(_) => {}
+            HackRow::Force | HackRow::Widescreen | HackRow::PatchOption(_) => {}
         }
     }
 
@@ -315,6 +387,7 @@ impl HacksModel {
     #[must_use]
     pub fn is_on(&self, row: HackRow) -> bool {
         match row {
+            HackRow::Force => self.forced(),
             HackRow::Widescreen => self.widescreen_on(),
             HackRow::PatchOption(index) => self.patch_options.get(index).is_some_and(|(_, on)| *on),
             HackRow::Ratio | HackRow::Margin => false,
@@ -343,7 +416,7 @@ impl HacksModel {
     /// options of its patch.
     pub fn apply(&self, host: &mut AppHost) {
         host.set_game_options(&self.rom.to_string_lossy(), self.own.clone());
-        let Some(patch) = self.patch else {
+        let Some(patch) = self.patch() else {
             return;
         };
         let stored = host.patch_options(patch);
@@ -358,6 +431,7 @@ impl HacksModel {
     #[must_use]
     pub fn label(&self, row: HackRow) -> String {
         match row {
+            HackRow::Force => strings::get(keys::HACK_FORCE),
             HackRow::Widescreen => strings::get(keys::HACK_WIDESCREEN),
             HackRow::Ratio => strings::get(keys::HACK_RATIO),
             HackRow::Margin => strings::get(keys::HACK_MARGIN),
@@ -381,6 +455,7 @@ impl HacksModel {
     pub fn value_text(&self, row: HackRow) -> String {
         let switch = |on: bool| strings::get(if on { keys::HACK_ON } else { keys::HACK_OFF });
         match row {
+            HackRow::Force => switch(self.forced()),
             HackRow::Widescreen => switch(self.widescreen_on()),
             HackRow::Ratio => {
                 let ratio = self
@@ -403,6 +478,7 @@ impl HacksModel {
     #[must_use]
     pub fn is_own(&self, row: HackRow) -> bool {
         let id = match row {
+            HackRow::Force => SettingId::EmuForcedPatch,
             HackRow::Widescreen | HackRow::Ratio => SettingId::VideoWidescreen,
             HackRow::Margin => SettingId::VideoWidescreenExtra,
             HackRow::PatchOption(_) => return false,
@@ -490,7 +566,8 @@ mod tests {
             Vec::new(),
             |_| Vec::new(),
         );
-        assert_eq!(0, hacks.rows().len());
+        // Only the forcing until the patch is forced.
+        assert_eq!([HackRow::Force].as_slice(), hacks.rows().as_slice());
         let message = hacks.other_rom_message().unwrap();
         for part in [
             "Zelda II - The Adventure of Link (USA)",
@@ -504,6 +581,39 @@ mod tests {
             None,
             model(Some(0x1234_5678), Vec::new()).other_rom_message()
         );
+    }
+
+    #[test]
+    fn the_patch_of_another_rom_can_be_forced_and_taken_back() {
+        let mut hacks = HacksModel::new(
+            PathBuf::from("/roms/Zelda II - The Adventure of Link (Europe).nes"),
+            Some(0x0123_ABCD),
+            &SettingsModel::new(),
+            Vec::new(),
+            |_| Vec::new(),
+        );
+        assert_eq!([HackRow::Force].as_slice(), hacks.rows().as_slice());
+        assert!(hacks.patch().is_none());
+        hacks.step(HackRow::Force, 1);
+        assert!(hacks.forced());
+        assert!(hacks.widescreen_on());
+        assert_eq!(
+            Some(builtin_patches::ZELDA2_USA),
+            hacks.patch().map(|patch| patch.name)
+        );
+        assert_eq!(
+            [
+                HackRow::Force,
+                HackRow::Widescreen,
+                HackRow::Ratio,
+                HackRow::Margin
+            ]
+            .as_slice(),
+            hacks.rows().as_slice()
+        );
+        hacks.step(HackRow::Force, 1);
+        assert!(!hacks.forced());
+        assert_eq!(0, hacks.own().len(), "nothing of its own is left");
     }
 
     #[test]

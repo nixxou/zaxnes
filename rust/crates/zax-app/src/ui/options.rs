@@ -57,13 +57,14 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 7] = [
+pub const EXCLUDED: [SettingId; 8] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
     // Rust-only (owner request): the hacks belong to each game, in its hacks screen.
     SettingId::EmuHackOptions,
     SettingId::EmuBuiltinPatches,
+    SettingId::EmuForcedPatch,
     SettingId::VideoWidescreen,
     SettingId::VideoWidescreenExtra,
 ];

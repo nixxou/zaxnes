@@ -46,7 +46,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     assert!(specified.is_subset(&model));
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
-    // emu.builtin_patches, emu.catch_up, emu.hack_options, emu.lua_experimental,
+    // emu.builtin_patches, emu.catch_up, emu.forced_patch, emu.hack_options, emu.lua_experimental,
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_extra and
     // video.widescreen_strict_edges: Rust-only settings (owner request).
@@ -56,6 +56,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "audio.mute",
             "emu.builtin_patches",
             "emu.catch_up",
+            "emu.forced_patch",
             "emu.hack_options",
             "emu.lua_experimental",
             "emu.lua_optimized",
