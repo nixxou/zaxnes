@@ -356,7 +356,10 @@ games, a transition) are left to the nametables; the vertical levels (`$03EF` no
 pipe mazes) are not decoded yet. A world map is in the same tile map (rows 16-26, at most four
 screens, the screens past it filled with tile `$02`) with the layout of tileset 0 in bank 12 (the
 page table's entry for it is not used): the next screen of the map shows past its frame. The
-vertical margin is decoded once a row halfway down the playfield matches. Column 0 is decoded too
+vertical margin above the screen is decoded once a row halfway down the playfield matches; the one
+below stays empty: it is under the status bar, and the level there stuck to the status bar made a
+3D profile that tells the status bar by its shape miss it every other frame (its clipping, and the
+2D view framed by it, jumped). Column 0 is decoded too
 while the game hides it (see 5), and the last 3 columns of the centre are redrawn (see 4).
 
 ---
