@@ -33,6 +33,12 @@ pub const MENU_MOVIES: &str = "menu.movies";
 pub const WINDOW_MOVIE_NOTE: &str = "window.movie_note";
 /// Its button that writes the note.
 pub const MOVIE_NOTE_WRITE: &str = "movie_note.write";
+/// Title of the dialog that picks the ROM folder of the console mode.
+pub const WINDOW_ROMS_FOLDER: &str = "window.roms_folder";
+/// The button that opens it, beside the folder in the options.
+pub const BUTTON_BROWSE: &str = "button.browse";
+/// What the ROM folder row says under the field: what the folder is for and the default.
+pub const ROMS_FOLDER_HINT: &str = "hint.roms_folder";
 pub const SLOT_QUICK: &str = "slot.quick";
 pub const SLOT_PREFIX: &str = "slot.prefix";
 
@@ -265,6 +271,9 @@ pub const PUBLISHED: &[&str] = &[
     MENU_MOVIES,
     WINDOW_MOVIE_NOTE,
     MOVIE_NOTE_WRITE,
+    WINDOW_ROMS_FOLDER,
+    BUTTON_BROWSE,
+    ROMS_FOLDER_HINT,
     SLOT_QUICK,
     SLOT_PREFIX,
     WINDOW_OPTIONS,

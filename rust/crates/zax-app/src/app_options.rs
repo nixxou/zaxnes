@@ -77,7 +77,8 @@ Rust-only options:
   --handheld              Gamepad-only interface for handheld consoles (also ZAXNES_HANDHELD=1,
                           and automatic on aarch64 Linux without an X11 or Wayland display).
   --roms <dir>            Folder of .nes files the handheld ROM list shows
-                          (default: the roms folder of the user data).
+                          (default: the ROM folder of the options, else the roms
+                          folder of the user data).
   --console               Open the desktop in its console mode (the handheld screens);
                           F1 or Home switches between it and the menu bar.
   --catch-up <n>          Most emulated frames per displayed frame when the game runs late,

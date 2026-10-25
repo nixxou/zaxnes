@@ -1210,6 +1210,19 @@ fn reimplementation_extras(out: &mut Vec<SettingDescriptor>) {
         .with_text_options(&[LANGUAGE_ENGLISH, LANGUAGE_FRENCH])
         .with_label("Language"),
     );
+    // Rust-only (owner request): the folder the ROM list of the console mode shows. Empty means
+    // the `roms` folder of the user data; `--roms` wins over it.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiRomsFolder,
+            SettingKind::Text,
+            SettingValue::from(""),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Interface,
+        )
+        .with_label("ROM folder"),
+    );
 }
 
 fn video_rust_only(out: &mut Vec<SettingDescriptor>) {

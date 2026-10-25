@@ -283,3 +283,13 @@ fn amd_021_r2_013_a_change_plays_the_validation_sound_exactly_once() {
     assert_eq!(0, play(SettingId::EmuGameSpeed));
     assert_eq!(0, play(SettingId::CameraFov));
 }
+
+/// The ROM folder of the console mode (Rust-only, owner request) is a folder row of the
+/// Interface tab: a field and a button that picks it.
+#[test]
+fn the_rom_folder_is_a_folder_row_of_the_interface_tab() {
+    let model = OptionsModel::new();
+    assert!(keys(&model, OptionsTab::Interface).contains(&SettingId::UiRomsFolder));
+    assert!(options::is_folder(&row(&model, SettingId::UiRomsFolder)));
+    assert!(!options::is_folder(&row(&model, SettingId::UiShowFps)));
+}

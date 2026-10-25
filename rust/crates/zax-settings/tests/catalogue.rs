@@ -47,8 +47,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
     // emu.builtin_patches, emu.catch_up, emu.hack_options, emu.lua_experimental,
-    // emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler, video.backend,
-    // video.dynamic_resolution, video.widescreen, video.widescreen_extra and
+    // emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler, ui.roms_folder,
+    // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_extra and
     // video.widescreen_strict_edges: Rust-only settings (owner request).
     assert_eq!(
         additions,
@@ -63,6 +63,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.pipeline",
             "ui.language",
             "ui.profiler",
+            "ui.roms_folder",
             "ui.show_fps",
             "video.backend",
             "video.dynamic_resolution",

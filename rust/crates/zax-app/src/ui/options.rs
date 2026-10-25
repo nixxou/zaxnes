@@ -65,6 +65,9 @@ pub const EXCLUDED: [SettingId; 4] = [
     SettingId::EmuHackOptions,
 ];
 
+/// The settings the window edits as a folder: a field and a button that picks it.
+pub const FOLDERS: [SettingId; 1] = [SettingId::UiRomsFolder];
+
 /// The profile settings the window shows all the same: the video region (REQ-UI-061).
 pub const INCLUDED_PROFILE: [SettingId; 1] = [SettingId::EmuTvMode];
 
@@ -193,7 +196,16 @@ pub fn plays_validation_sound(id: SettingId) -> bool {
     !SILENT.contains(&id)
 }
 
+/// Whether the window edits `row` as a folder.
+#[must_use]
+pub fn is_folder(row: &OptionsRow) -> bool {
+    FOLDERS.contains(&row.descriptor.id())
+}
+
 fn is_editable(descriptor: &SettingDescriptor) -> bool {
+    if FOLDERS.contains(&descriptor.id()) {
+        return true;
+    }
     match descriptor.kind() {
         SettingKind::Bool
         | SettingKind::Int

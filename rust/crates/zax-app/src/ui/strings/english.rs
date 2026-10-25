@@ -33,6 +33,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::MENU_MOVIES, "Play a movie"),
     (keys::WINDOW_MOVIE_NOTE, "Note on this frame"),
     (keys::MOVIE_NOTE_WRITE, "Write"),
+    (keys::WINDOW_ROMS_FOLDER, "ROM folder of the console mode"),
+    (keys::BUTTON_BROWSE, "Browse..."),
+    (keys::ROMS_FOLDER_HINT, "The games the console mode lists. Empty: {0}"),
     (keys::SLOT_QUICK, "Quick state"),
     (keys::SLOT_PREFIX, "Slot"),
     // ----------------------------------------------------- window titles
@@ -244,6 +247,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.ui.fullscreen", "Full screen"),
     ("setting.ui.show_fps", "Show the FPS"),
     ("setting.ui.profiler", "Performance measures (log)"),
+    ("setting.ui.roms_folder", "ROM folder"),
     ("setting.ui.sort_option", "Library sort order"),
     ("setting.ui.language", "Language"),
     // ----------------------------------- labels of the enumerated values

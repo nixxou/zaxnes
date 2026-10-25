@@ -63,9 +63,13 @@ zaxnes.exe          (Windows)
 ./zaxnes            (Linux)
 ```
 
-Sans argument, Zaxnes ouvre son **écran d'accueil** : il rappelle le chemin **Fichier ▸ Ouvrir une
-ROM** et liste les dix dernières ROMs ouvertes, qu'un clic relance. La musique de menu joue si
-elle est activée (menu **Audio ▸ Musique de menu**).
+Sans argument, Zaxnes s'ouvre sur la **liste des jeux du mode console** (§ Mode console) : les ROMs
+du dossier choisi dans **Options ▸ Interface ▸ Dossier des ROM** (par défaut le dossier `roms` des
+données utilisateur), avec leur profil et leur jaquette, au clavier ou à la manette. Une fois un
+jeu lancé, la barre de menus revient d'elle-même. `F1` ou `Origine` quitte la liste pour l'**écran
+d'accueil** de la barre de menus : il rappelle le chemin **Fichier ▸ Ouvrir une ROM** et liste les
+dix dernières ROMs ouvertes, qu'un clic relance. La musique de menu joue si elle est activée (menu
+**Audio ▸ Musique de menu**). Avec `--rom`, le jeu démarre directement.
 
 **Une seule instance à la fois** par dossier de données : un second lancement sur la même racine
 utilisateur écrit une ligne sur la sortie d'erreur et se ferme, pour que deux fenêtres n'écrivent
@@ -94,6 +98,8 @@ archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/
 | Option | Effet |
 |---|---|
 | `--rom <chemin>` | ouvre cette ROM au démarrage ; sans `--profile`, la résolution de profil ci-dessus s'applique |
+| `--roms <dossier>` | dossier dont le mode console liste les jeux, pour cette session (passe avant le réglage **Dossier des ROM**) |
+| `--console` | ouvre Zaxnes en mode console et y reste, même avec `--rom` |
 | `--profile <titre>` | entrée de la bibliothèque (titre exact, identifiant ou préfixe non ambigu), ou chemin d'un profil `.3dn` déjà importé. Sans l'option : « 2D Mode » |
 | `--list-profiles` | liste les entrées de la bibliothèque, puis quitte |
 | `--import-3dsen <dossier\|fichier>` | importe les profils de **votre** installation de 3dSen (§9.1), affiche le bilan, puis quitte avec `0` si tout s'est bien passé |
@@ -145,8 +151,9 @@ affichée.
 ### Mode console (F1)
 
 `F1` ou `Origine` (Home) passe au **mode console** : les écrans de la version portable, en plein
-écran dans la fenêtre — liste des jeux du dossier `roms` des données utilisateur (ou de
-`--roms`), profil, options du jeu, menu en jeu, écrans de sauvegarde avec leurs aperçus. Les
+écran dans la fenêtre — liste des jeux du dossier des ROM (réglage **Dossier des ROM**, onglet
+Interface ; `--roms` passe avant), profil, options du jeu, menu en jeu, écrans de sauvegarde avec
+leurs aperçus. Les
 mêmes touches reviennent à la barre de menus (un menu laissé ouvert sur le jeu se ferme et la
 partie reprend). `--console` ouvre directement Zaxnes dans ce mode. Au clavier, les touches du
 joueur 1 servent de manette (`X` = A, `Z` = B, `Échap` = menu…).
@@ -283,7 +290,11 @@ de réglages.
   d'un jeu différent. Une ligne marquée *(au prochain démarrage)* ou *(au prochain chargement)*
   ne prend effet qu'à ce moment-là ;
 - chaque changement de valeur joue **une fois** le son de validation, **sauf** les curseurs
-  **Vitesse** (onglet Émulation) et **FOV** (onglet Caméra), qui sont muets.
+  **Vitesse** (onglet Émulation) et **FOV** (onglet Caméra), qui sont muets ;
+- **Dossier des ROM** (onglet Interface) : le dossier dont le mode console liste les jeux. Le
+  chemin se tape (pris en compte à `Entrée` ou en quittant le champ) ou se choisit avec
+  **Parcourir…** ; vide, c'est le dossier `roms` des données utilisateur. La liste suit le
+  changement tout de suite ; `--roms` passe avant ce réglage.
 
 ### API graphique : OpenGL, Vulkan, DirectX 12
 
