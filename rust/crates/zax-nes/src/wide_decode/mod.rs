@@ -13,7 +13,9 @@
 //! A decoder applies to the ROMs a built-in patch is made for, while the built-in patches are
 //! on (see [`crate::builtin_patches`]).
 
+pub mod guest;
 mod megaman2;
+mod smb1;
 mod zelda2;
 
 /// What a decoder may read once the frame has run.
@@ -142,6 +144,7 @@ pub trait MarginDecoder: Sync {
 pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
     match crc {
         megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
+        smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
         _ => None,
     }
 }
