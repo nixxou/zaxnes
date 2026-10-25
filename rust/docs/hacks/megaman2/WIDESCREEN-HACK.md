@@ -16,7 +16,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 |---|---|
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
-| Target data | CRC-32 `BB71FB56` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `86750B14` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15 and one in bank 14 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
@@ -42,6 +42,7 @@ screens `$14` to `$15`.
 | hiding the sprites (`$CC6C`) | the 64 sprites | both pages |
 | energy bars (`$CFAD`, `$CFC9`, `$CFCE`, `$CFD3`) | write to `$0200` | write to the page in use |
 | enemy spawn (`$D763`) and enemy loop (bank 14 `$9283`) | | an enemy of the stage list that spawns in a margin is dormant: drawn, but its behaviour is skipped until it comes onto the original screen; it then wakes for good (margins included). A dormant enemy is still removed outside `[LO, HI)` |
+| cloud devil palette marker (bank 14 `$AF9D`, in place of `JSR $AF4C`) | an object of type `$42`/`$43` resets the palette of the heads of type `$40`/`$41` (2 or 3) to the first step of their fade-in (sky) when it reaches the screen | resets it only when no head of that type is alive (slots `$10`-`$1F`, `$0420` bit 7); otherwise the head before, still in the left margin, keeps its colours and the next one shows at once (the game skips the fade-in of a head whose palette is in colour, `$AE61`) |
 
 `LO = max(-M, section start - camera)`, `HI = min(256 + M, section end - camera)`; M is the margin,
 0 for slots below `$10` (Mega Man's shots keep the original limits). The game's collisions compare
@@ -64,7 +65,9 @@ untouched.
 Unlocked at reset (`$FFE4`, `JMP $F2D1` becomes `JMP wide_reset`, which unlocks then jumps on) and
 checked every NMI (`$CFFD`, `LDA $F7 / AND #$7C / STA $F7` becomes `JSR wide_nmi`, which unlocks
 again if needed, then writes `$5003 = M`, `$5004 = $5005 = 0` (the nametable columns are hidden:
-the decoder draws the background), `$5007 = 6` (sprites free of those extents, second sprite page), `$5006 = 64`, `MOBJ` from `$500A`,
+the decoder draws the background), `$5007 = $0E` (sprites free of those extents, second sprite page, high bytes kept from one page
+to the next: the hack writes one for every sprite it places, so a frame the game runs late keeps
+them with its half-built page), `$5006 = 64`, `MOBJ` from `$500A`,
 and does the replaced instructions).
 
 Variables (extension RAM): `WV_M $5200`, `WV_PAGE $5209` (bit 7: the second page is in use),
@@ -183,6 +186,9 @@ OBJ_X_LO        = $0460         ; object x, pixel
 ORIGINAL_RESET  = $F2D1
 KILL            = $EF8C         ; removes object X (and lets its enemy spawn again), SEC / RTS
 NEXT_ENEMY      = $9299         ; bank 14: the enemy loop's next slot
+TIKKI_PALETTE   = $AF4C         ; bank 14: writes step Y/4 of a cloud devil's fade-in to palette X
+LAST_SLOT       = $1F           ; the last enemy slot
+STAGE_ENEMY_TYPE = $B900        ; stage bank: the type of each entry of the enemy list
 FIRST_ENEMY     = $10
 
 .segment "CODE"
@@ -232,7 +238,8 @@ wide_nmi:
     LDA      #$00
     STA      WIDE_LEFT
     STA      WIDE_RIGHT
-    LDA      #$06                       ; sprites free of the extents, second sprite page
+    LDA      #$0E                       ; sprites free of the extents, second sprite page,
+                                        ; high bytes kept (every sprite placed gets one)
     STA      WIDE_LAYOUT
     LDA      #OVERCLOCK_LINES
     STA      WIDE_OVERCLOCK
@@ -524,11 +531,16 @@ wide_spawn_window:
 ; game's sprite loop moves on to when the first is full, instead of stopping (the objects left
 ; over then flickered, the game drawing them in the other order every other frame).
 
-; $CC6C (in place of the loop that hides the 64 sprites): both pages, back to the first.
+; $CC6C (in place of the loop that hides the 64 sprites): both pages, their high bytes back to
+; 0 (they are kept from one page to the next: the page and its high bytes are rebuilt together),
+; back to the first page.
 wide_clear_oam:
-    LDA      #$F8
     LDX      #$00
 @hide:
+    LDA      #$00
+    STA      WIDE_SPRHI,x
+    STA      EXTRA_SPRHI,x
+    LDA      #$F8
     STA      OAM,x
     STA      EXTRA_OAM,x
     INX
@@ -558,6 +570,16 @@ wide_put_attribute:
     RTS
 wide_put_x:
     PUT      3
+    PHA                                 ; the bars are on the original screen: high byte 0
+    LDA      #$00
+    BIT      WV_PAGE
+    BMI      @second
+    STA      WIDE_SPRHI,x
+    PLA
+    RTS
+@second:
+    STA      EXTRA_SPRHI,x
+    PLA
     RTS
 
 ; The sprite loop of one object ($CE9A-$CEF8, entered in place of LDX $06 / LDY $07): the
@@ -629,13 +651,31 @@ wide_draw_loop:
 ; until it comes onto the original screen; from then on it lives as the original does, margins
 ; included.
 
-; Spawn ($D763, in place of TYA / STA $0100,X; X the enemy slot - $10, Y its list entry).
+; Spawn ($D763, in place of TYA / STA $0100,X; X the enemy slot - $10, Y its list entry, the
+; stage bank mapped). Enemies that draw themselves into the background (Air Man's cloud devils)
+; are never dormant: they draw as soon as they spawn, as the original does at its screen edge.
 wide_spawned:
     TYA
     STA      $0100,x
+    LDA      STAGE_ENEMY_TYPE,y
+    LDY      #NEVER_DORMANT_COUNT - 1
+@exempt:
+    CMP      wide_never_dormant,y
+    BEQ      @awake
+    DEY
+    BPL      @exempt
     LDA      #$01
+    BNE      @set
+@awake:
+    LDA      #$00
+@set:
     STA      WV_DORMANT+FIRST_ENEMY,x
+    LDY      $0100,x                    ; Y back to the list entry
     RTS
+
+wide_never_dormant:
+.byt    $40, $41                        ; Air Tikki (cloud devil), both kinds
+NEVER_DORMANT_COUNT = * - wide_never_dormant
 
 ; The enemy loop (bank 14, $9283, in place of LDY $0400,X; $2E/$2F the enemy's screen x): a
 ; dormant enemy off the original screen skips its behaviour (it is still removed past the
@@ -658,6 +698,39 @@ wide_wake:
     PLA                                 ; not back to the loop's dispatch: its next slot
     PLA
     JMP      NEXT_ENEMY
+
+; ---------------------------------------------------------------------------- ;
+; Air Man's cloud devils share two background palettes: a head of type $40 is drawn in palette 2,
+; one of type $41 in palette 3. A marker of the stage list (type $42 or $43) sets its palette back
+; to the first step of the fade-in (sky) when it reaches the screen, so that the next head of
+; that type fades in; on the original screen the head before it is gone by then, in a wide view
+; it is still in the left margin and would vanish with it. So the palette is reset only when no
+; head of that type is alive; otherwise the next head finds it in colour and shows at once (the
+; game's own test, $AE61).
+
+; Bank 14, $AF9D, in place of JSR $AF4C (X the palette's offset in the buffer, $08 or $0C; Y 0).
+wide_tikki_reset:
+    TXA
+    LSR
+    LSR
+    CLC
+    ADC      #$3E                       ; $08 -> $40, $0C -> $41
+    STA      WV_T0
+    LDY      #LAST_SLOT
+@slot:
+    LDA      $0420,y
+    BPL      @next
+    LDA      $0400,y
+    CMP      WV_T0
+    BEQ      @kept
+@next:
+    DEY
+    CPY      #FIRST_ENEMY - 1
+    BNE      @slot
+    LDY      #$00
+    JMP      TIKKI_PALETTE
+@kept:
+    RTS
 
 wide_end:
 .assert wide_end <= $F900, error, "widescreen code past $F8FF"
@@ -749,6 +822,8 @@ def hooks(sym):
     # Dormant enemies: marked at spawn, woken in the enemy loop (bank 14).
     put(0xD763, '98 9d 00 01', jsr(sym['wide_spawned']))
     banked.append((14, 0x9283, bytes.fromhex('bc 00 04'), jsr(sym['wide_wake'])))
+    # Cloud devils: a marker resets its palette only once no head of its type is alive.
+    banked.append((14, 0xAF9D, bytes.fromhex('20 4c af'), jsr(sym['wide_tikki_reset'])))
     # Sprite pages: both hidden, the loop of one object, the energy bars' writes.
     put(0xCC6C, 'a9 f8 a2 00 9d 00 02 e8 d0 fa 60', jmp(sym['wide_clear_oam']))
     put(0xCE9A, 'a6 06 a4 07', jmp(sym['wide_draw_loop']))

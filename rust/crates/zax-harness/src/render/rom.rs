@@ -99,7 +99,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         .movie
         .map(|path| start_movie(&mut host, path))
         .transpose()?;
-    let frames = request.frames.max(1);
+    let frames = request.frames;
     let mut records = Vec::new();
     for counter in 0..frames {
         for &(_, address, value) in request.pokes.iter().filter(|poke| poke.0 == counter) {
@@ -177,9 +177,21 @@ fn start_movie(host: &mut Host, path: &Path) -> Result<zax_nes::movie::Movie, Ha
     host.core
         .try_load_state(&movie.start_state, 0)
         .map_err(|error| HarnessError::Rom(error.message))?;
-    let options = serde_json::from_str::<serde_json::Value>(&movie.header)
-        .ok()
-        .and_then(|header| header.get("hackOptions")?.as_u64());
+    let header = serde_json::from_str::<serde_json::Value>(&movie.header).ok();
+    let field = |name: &str| {
+        header
+            .as_ref()
+            .and_then(|header| header.get(name)?.as_u64())
+    };
+    // Without --widescreen, the margin the movie was recorded with (the hack reads it).
+    if host.core.widescreen_margin() == 0 {
+        if let Some(margin) =
+            field("widescreenMargin").and_then(|margin| i32::try_from(margin).ok())
+        {
+            host.core.set_widescreen_margin(margin);
+        }
+    }
+    let options = field("hackOptions");
     if let Some(options) = options.and_then(|options| u8::try_from(options).ok()) {
         host.core.set_hack_options(options);
     }

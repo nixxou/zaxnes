@@ -108,7 +108,10 @@ Details:
   written since the previous one and starts the next page from 0: a game writes the high byte of
   every sprite it places off the standard picture, every frame. x = -16 is `$FF:$F0`, x = 300 is
   `$01:$2C`. Sprites past the visible range are dropped. Without an unlocked ROM the high byte is
-  ignored.
+  ignored. A sprite whose x is outside 0..255 is left out of the PPU's own picture (its pattern
+  bytes read as 0 at the fetches of dots 257-320, which still take place; the evaluation keeps the
+  OAM index of each sprite it copies for that): a hardware PPU, which only knows the low byte,
+  would draw a sprite at x = 298 at x = 42.
 * **Overclock.** At the start of line 240 the PPU arms `$5006` x 114 CPU cycles
   (`arm_overclock()`). For each of them `NesBus::tick()` runs the CPU and the cartridge only
   (`take_stall_cycle()`): the PPU and the APU stay still, so the picture, the sound and their
@@ -178,7 +181,10 @@ each band. Widescreen changes:
   own pixels, the rest is drawn from the records (sprites behind, background, sprites in front,
   by OAM priority), unfilled pixels taking the backdrop colour. When the game blanks the left 8
   pixels (PPUMASK), those are composed from the records too, otherwise they would be a black band
-  in the middle of the wide picture. Without margins it is the plain 256 x 240 frame.
+  in the middle of the wide picture. The sprites the PPU did not draw are then drawn over the
+  centre from their records: the second page, and those across the left edge (x < 0), whose part
+  on the screen the PPU left out with the rest; one behind the background only over the backdrop
+  colour. Without margins it is the plain 256 x 240 frame.
 
 ---
 
