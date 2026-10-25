@@ -25,6 +25,8 @@ pub struct UiState {
     pub native_dialog: bool,
     /// The debug overlay (F3).
     pub debug_overlay: bool,
+    /// The window that asks for a note on the frame on screen of the movie (Rust-only).
+    pub movie_note: bool,
 }
 
 impl UiState {
@@ -50,7 +52,11 @@ impl UiState {
     /// dialogue (REQ-UI-004).
     #[must_use]
     pub const fn is_modal(&self) -> bool {
-        self.file_browser || self.profile_chooser || self.dialog || self.native_dialog
+        self.file_browser
+            || self.profile_chooser
+            || self.dialog
+            || self.native_dialog
+            || self.movie_note
     }
 
     /// Whether any window is open.
@@ -62,6 +68,7 @@ impl UiState {
             || self.profile_chooser
             || self.file_browser
             || self.dialog
+            || self.movie_note
     }
 
     /// Closes every window (Escape).
@@ -72,5 +79,6 @@ impl UiState {
         self.profile_chooser = false;
         self.file_browser = false;
         self.dialog = false;
+        self.movie_note = false;
     }
 }

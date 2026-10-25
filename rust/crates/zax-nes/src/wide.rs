@@ -61,6 +61,11 @@ pub const MAX_MARGIN: i32 = 512;
 /// The widest margin the nametables can show: past it they wrap.
 const NAMETABLE_MARGIN: i32 = 128;
 
+/// The second sprite page in the extension's RAM (`$5007` bit 2), and the high bytes of its
+/// sprites' x (sprite n at `EXTRA_HIGH + 4n`).
+const EXTRA_OAM: u16 = 0x5300;
+const EXTRA_HIGH: u16 = 0x5400;
+
 /// The widest margin a ROM can ask for or be told of through its 8-bit registers.
 const MAX_ROM_MARGIN: i32 = 248;
 
@@ -81,6 +86,8 @@ pub struct WideExtension {
     host_margin: i32,
     /// Margin the host offers above and below, in pixels, a multiple of 8 (0 = off).
     host_vertical_margin: i32,
+    /// The options of the ROM's built-in patch the player turned on (`$500A`).
+    host_options: u8,
     /// How many bytes of [`UNLOCK`] have been written in a row.
     unlock_progress: u8,
     unlocked: bool,
@@ -91,6 +98,10 @@ pub struct WideExtension {
     pending_high: [u8; 64],
     /// Sprite x high bytes of the sprites now in OAM.
     active_high: [u8; 64],
+    /// The second sprite page (`$5007` bit 2) latched at the last OAM DMA: 64 sprites in OAM
+    /// format, then the high bytes of their x. Not saved: the next DMA latches it again.
+    extra_oam: [u8; 256],
+    extra_high: [u8; 64],
     /// RAM at `$5200`-`$5FFF`.
     scratch: Vec<u8>,
     /// Overclock register: extra scanlines of CPU time per frame.
@@ -121,6 +132,7 @@ impl WideExtension {
         Self {
             host_margin: 0,
             host_vertical_margin: 0,
+            host_options: 0,
             unlock_progress: 0,
             unlocked: false,
             requested_margin: 0,
@@ -128,6 +140,8 @@ impl WideExtension {
             right_extent: 0xFF,
             pending_high: [0; 64],
             active_high: [0; 64],
+            extra_oam: [0xFF; 256],
+            extra_high: [0; 64],
             scratch: vec![0; RAM_SIZE],
             overclock: 0,
             layout: 0,
@@ -159,6 +173,12 @@ impl WideExtension {
         } else {
             0
         }
+    }
+
+    /// Sets the options of the ROM's built-in patch the player turned on, which the ROM reads at
+    /// `$500A` (one bit each, see `builtin_patches::HackOption`).
+    pub fn set_host_options(&mut self, options: u8) {
+        self.host_options = options;
     }
 
     /// Tells the extension a margin decoder fills the margins of this game.
@@ -216,6 +236,23 @@ impl WideExtension {
         )
     }
 
+    /// The range of screen x a sprite may start at and still show: [`WideExtension::visible_range`],
+    /// or, when the ROM asked for sprites free of the background extents (`$5007` bit 1: a margin
+    /// decoder draws the background), the margin the ROM asked for, up to 248.
+    #[must_use]
+    pub fn sprite_range(&self) -> (i32, i32) {
+        if self.unlocked && self.layout & 2 != 0 {
+            // Sprites are not read from the nametables: up to what the ROM can ask for.
+            let margin = (i32::from(self.requested_margin)
+                .min(self.host_margin)
+                .min(MAX_ROM_MARGIN)
+                / 8)
+                * 8;
+            return (-margin, 256 + margin);
+        }
+        self.visible_range()
+    }
+
     /// The screen x of OAM sprite `sprite` (0..64) whose OAM x byte is `low`.
     #[must_use]
     pub fn sprite_x(&self, sprite: usize, low: u8) -> i32 {
@@ -232,6 +269,7 @@ impl WideExtension {
         *self = Self {
             host_margin: self.host_margin,
             host_vertical_margin: self.host_vertical_margin,
+            host_options: self.host_options,
             decoded: self.decoded,
             ..Self::new()
         };
@@ -265,6 +303,7 @@ impl WideExtension {
             0x5007 => Some(self.layout),
             0x5008 => Some(self.window_bank),
             0x5009 => Some(self.window_page),
+            0x500A => Some(self.host_options),
             FIRST_RAM..=LAST_REGISTER => {
                 self.scratch.get(usize::from(address - FIRST_RAM)).copied()
             }
@@ -325,7 +364,37 @@ impl WideExtension {
         }
 
         self.active_high = self.pending_high;
-        self.pending_high = [0; 64];
+        // Bit 3: the ROM writes the high byte of every sprite it places, so they stay with the
+        // sprite page as it is, finished or not (a frame the game runs late); otherwise each page
+        // starts from 0.
+        if self.layout & 8 == 0 {
+            self.pending_high = [0; 64];
+        }
+        if self.layout & 4 != 0 {
+            let page = usize::from(EXTRA_OAM - FIRST_RAM);
+            let high = usize::from(EXTRA_HIGH - FIRST_RAM);
+            if let Some(sprites) = self.scratch.get(page..page + 256) {
+                self.extra_oam.copy_from_slice(sprites);
+            }
+            for (n, byte) in self.extra_high.iter_mut().enumerate() {
+                *byte = self.scratch.get(high + (4 * n)).copied().unwrap_or(0);
+            }
+        } else {
+            self.extra_oam = [0xFF; 256];
+        }
+    }
+
+    /// The second sprite page latched at the last OAM DMA (`$5007` bit 2), in OAM format.
+    #[must_use]
+    pub const fn extra_oam(&self) -> &[u8; 256] {
+        &self.extra_oam
+    }
+
+    /// The screen x of sprite `sprite` (0..64) of the second page, whose x byte is `low`.
+    #[must_use]
+    pub fn extra_sprite_x(&self, sprite: usize, low: u8) -> i32 {
+        let high = self.extra_high.get(sprite).copied().unwrap_or(0);
+        i32::from(i16::from_le_bytes([low, high]))
     }
 
     /// The offset in PRG-ROM a CPU read of `address` sees through the PRG window, or `None`

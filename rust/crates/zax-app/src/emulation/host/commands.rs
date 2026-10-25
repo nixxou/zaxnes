@@ -10,6 +10,7 @@ use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::notification_center::{NotificationSeverity, SHORT_SECONDS};
 use crate::emulation::speed_setting;
+use crate::game_session::GameSession;
 use crate::persistence::app_settings::{AppSettings, AppSettingsMut, TvRegionSetting};
 use crate::persistence::save_slots::{is_valid_slot_id, numbered_slot_id, QUICK_SLOT_ID};
 
@@ -61,7 +62,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::SpeedUp => self.settings.game_speed() < speed_setting::MAXIMUM,
             Command::SpeedDown => self.settings.game_speed() > speed_setting::MINIMUM,
             Command::SetPortType => self.session.is_some() && matches!(args.number, 0 | 1),
+            Command::ToggleHackOption => {
+                usize::try_from(args.number).is_ok_and(|index| index < self.hack_options().len())
+            }
             Command::CancelModal => self.modal_window_open(),
+            Command::ToggleMovieRecording => {
+                !loading && !stopped && self.session.as_ref().is_some_and(GameSession::has_rom)
+            }
+            Command::PlayMovie => {
+                !loading
+                    && self.session.as_ref().is_some_and(GameSession::has_rom)
+                    && args.text.as_deref().is_some_and(|text| !text.is_empty())
+            }
+            Command::StopMovie | Command::AnnotateMovie => !loading && self.movie_mode().is_some(),
             Command::OpenRecentRom
             | Command::Quit
             | Command::SetSpeed
@@ -98,6 +111,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::ToggleFullscreen => self.settings.fullscreen(),
             Command::ToggleFpsCounter => self.settings.show_fps(),
             Command::ToggleMute => self.settings.mute(),
+            Command::ToggleMovieRecording => {
+                self.movie_mode() == Some(zax_nes::movie::MovieMode::Recording)
+            }
             Command::ToggleMenuMusic => self.settings.menu_music(),
             _ => false,
         }
@@ -149,6 +165,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::SetCameraMode
             | Command::ToggleLocalCamera
             | Command::ToggleShadows
+            | Command::ToggleHackOption
             | Command::ToggleFullscreen
             | Command::ToggleFpsCounter => self.execute_video(command, args),
             Command::SetVolume
@@ -161,6 +178,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ShowDataFolder
             | Command::ShowAbout
             | Command::CancelModal => self.request_ui(command, args),
+            Command::ToggleMovieRecording => self.toggle_movie_recording(),
+            Command::PlayMovie => self.play_movie(args.text.as_deref().unwrap_or_default()),
+            Command::StopMovie => self.stop_movie(),
+            Command::AnnotateMovie => self.annotate_movie(args),
         }
     }
 
@@ -272,6 +293,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 model.set_local_camera(value);
             }),
             Command::SetSkybox => self.update_settings(|model| model.set_skybox(args.number)),
+            Command::ToggleHackOption => self.toggle_hack_option(args.number),
             Command::ToggleShadows => self.update_settings(|model| {
                 let value = !model.shadow();
                 model.set_shadow(value);

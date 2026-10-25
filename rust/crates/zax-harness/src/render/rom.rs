@@ -45,6 +45,8 @@ pub struct RomRequest<'a> {
     pub mesh: RenderAlgorithm,
     /// The port 1 buttons to hold.
     pub input: &'a InputScript,
+    /// CPU writes made before given frames: (frame, address, value).
+    pub pokes: &'a [(u32, u16, u8)],
     /// Battery-backed PRG-RAM imported before the reset (REQ-CORE-095).
     pub battery: Option<&'a Path>,
     /// Where to write the captured frame as a `--frames` JSON file.
@@ -59,6 +61,10 @@ pub struct RomRequest<'a> {
     pub png_nes: Option<&'a Path>,
     /// State block restored after the reset.
     pub load_state: Option<&'a Path>,
+    /// The movie played after the reset.
+    pub movie: Option<&'a Path>,
+    /// The built-in patch's option bits, when given (over the movie's).
+    pub hack_options: Option<u8>,
     /// Where to write the state block after the run.
     pub save_state: Option<&'a Path>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -91,10 +97,24 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
             .try_load_state(&fs::read(path)?, 0)
             .map_err(|error| HarnessError::Rom(error.message))?;
     }
-    let frames = request.frames.max(1);
+    let movie = request
+        .movie
+        .map(|path| start_movie(&mut host, path))
+        .transpose()?;
+    if let Some(options) = request.hack_options {
+        host.core.set_hack_options(options);
+    }
+    let frames = request.frames;
     let mut records = Vec::new();
     for counter in 0..frames {
-        host.run_frame(counter, request.input.at(counter), &mut records, &mut scene)?;
+        for &(_, address, value) in request.pokes.iter().filter(|poke| poke.0 == counter) {
+            host.core.write_memory(address, value);
+        }
+        let input = movie
+            .as_ref()
+            .and_then(|movie| movie.inputs.get(counter as usize).copied())
+            .unwrap_or_else(|| request.input.at(counter));
+        host.run_frame(counter, input, &mut records, &mut scene)?;
     }
 
     host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_end);
@@ -155,6 +175,46 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 }
 
 /// The outputs of `--save-state`, `--dump-mem` and `--png-nes`, written after the run.
+/// Reads the movie `path`, restores its start state and hack options, and prints its notes.
+fn start_movie(host: &mut Host, path: &Path) -> Result<zax_nes::movie::Movie, HarnessError> {
+    let movie = zax_nes::movie::Movie::read(&fs::read(path)?)
+        .ok_or_else(|| HarnessError::Rom(format!("{}: not a movie file", path.display())))?;
+    host.core
+        .try_load_state(&movie.start_state, 0)
+        .map_err(|error| HarnessError::Rom(error.message))?;
+    let header = serde_json::from_str::<serde_json::Value>(&movie.header).ok();
+    let field = |name: &str| {
+        header
+            .as_ref()
+            .and_then(|header| header.get(name)?.as_u64())
+    };
+    // Without --widescreen, the margin the movie was recorded with (the hack reads it).
+    if host.core.widescreen_margin() == 0 {
+        if let Some(margin) =
+            field("widescreenMargin").and_then(|margin| i32::try_from(margin).ok())
+        {
+            host.core.set_widescreen_margin(margin);
+        }
+    }
+    let options = field("hackOptions");
+    if let Some(options) = options.and_then(|options| u8::try_from(options).ok()) {
+        host.core.set_hack_options(options);
+    }
+    println!(
+        "render: movie of {} frames, {}",
+        movie.inputs.len(),
+        movie.header
+    );
+    for note in &movie.annotations {
+        let abandoned = if note.abandoned { " (abandoned)" } else { "" };
+        println!(
+            "render: note at frame {}{abandoned}: {}",
+            note.frame, note.text
+        );
+    }
+    Ok(movie)
+}
+
 fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), HarnessError> {
     if let Some(path) = request.save_state {
         let state = host
@@ -166,11 +226,13 @@ fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), Ha
     }
 
     if let Some(path) = request.dump_mem {
-        let memory: Vec<u8> = (0..0x0800u16)
+        let mut memory: Vec<u8> = (0..0x0800u16)
             .chain(0x6000..=0x7FFF)
             .chain(0x5000..=0x5FFF)
             .map(|address| host.core.read_memory(address))
             .collect();
+        // Then the PPU's 4 KiB of nametable RAM.
+        memory.extend_from_slice(host.core.ppu().vram());
         fs::write(path, memory)?;
         let pc = host.core.cpu_and_bus_mut().0.pc;
         let around: Vec<u8> = (0..6u16)

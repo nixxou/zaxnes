@@ -458,6 +458,10 @@ impl Ppu2C02 {
                     if self.eval_sprite == 0 {
                         self.sprite_zero_found = true;
                     }
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 0..64.
+                    if let Some(source) = self.secondary_source.get_mut(self.eval_found as usize) {
+                        *source = self.eval_sprite as u8;
+                    }
 
                     self.eval_byte = 1;
                 } else {
@@ -545,10 +549,20 @@ impl Ppu2C02 {
         );
 
         self.sprite_line_stale = true;
+        // The widescreen extension: a sprite whose high byte puts it in a margin is not on the
+        // screen; the fetch happens all the same (the bus activity of the hardware).
+        let x = self.secondary_oam[(slot * 4) + 3];
+        let in_margin = i32::try_from(slot).is_ok_and(|slot| slot < self.sprites_loaded)
+            && !(0..256).contains(
+                &self
+                    .wide
+                    .sprite_x(usize::from(self.secondary_source[slot]), x),
+            );
+        let data = if in_margin { 0 } else { data };
         if step == 4 {
             self.sprite_pattern_low[slot] = data;
             self.sprite_attribute[slot] = self.secondary_oam[(slot * 4) + 2];
-            self.sprite_x[slot] = self.secondary_oam[(slot * 4) + 3];
+            self.sprite_x[slot] = x;
         } else {
             self.sprite_pattern_high[slot] = data;
         }

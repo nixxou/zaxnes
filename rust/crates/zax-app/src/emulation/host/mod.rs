@@ -8,7 +8,9 @@
 mod commands;
 mod game_options;
 mod games;
+mod hack_options;
 mod jobs;
+mod movies;
 mod save_states;
 
 use std::collections::VecDeque;
@@ -173,6 +175,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The `games.json` key of the ROM whose options are in force, while a game plays.
     game_options_rom: Option<String>,
     pause_thumbnail: Option<Vec<u8>>,
+    /// The file of the movie being played, where the notes written on it go.
+    movie_file: Option<std::path::PathBuf>,
     job: Option<jobs::LoadJob>,
     loading: bool,
     confirmation: Option<ConfirmationRequest>,
@@ -279,6 +283,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             current_game: None,
             game_options_rom: None,
             pause_thumbnail: None,
+            movie_file: None,
             job: None,
             loading: false,
             confirmation: None,
@@ -607,6 +612,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return 0;
         }
         self.apply_commands();
+        self.check_movie_end();
         let ahead = self.runs_ahead();
         if ahead {
             // Emulation ahead: the core leaves during the frames, so what reads or changes it
@@ -1181,6 +1187,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// hooks run and the scene is emptied. With `clear_current_game` the game is forgotten and
     /// the state goes to Stopped; with `dispose_session` the session is dropped.
     fn stop_current_game(&mut self, clear_current_game: bool, dispose_session: bool) {
+        self.finish_movie();
         if let Some(mut session) = self.session.take() {
             {
                 let core = session.core();

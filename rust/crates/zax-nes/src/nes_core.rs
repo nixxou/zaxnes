@@ -57,6 +57,9 @@ pub struct NesCore {
     builtin_patch: Option<&'static str>,
     /// Whether the built-in patches apply at all (on by default).
     builtin_patches_enabled: bool,
+    /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
+    /// picks a margin decoder made for an unpatched ROM.
+    rom_crc: Option<u32>,
 }
 
 impl Default for NesCore {
@@ -80,6 +83,7 @@ impl NesCore {
             original_image: None,
             builtin_patch: None,
             builtin_patches_enabled: true,
+            rom_crc: None,
         }
     }
 
@@ -230,6 +234,11 @@ impl NesCore {
         let region = cartridge.rom().announced_region();
         self.battery_ram_imported = false;
         self.builtin_patch = patched.as_ref().map(|patched| patched.name);
+        self.rom_crc = Some(crate::builtin_patches::data_crc(image));
+        // The patch's options start as they are by default; a host sets the player's choice.
+        let options = crate::builtin_patches::patch_for(image)
+            .map_or(0, crate::builtin_patches::BuiltinPatch::default_options);
+        self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
         self.bus.attach(Some(cartridge));
         self.power_on();
@@ -241,6 +250,7 @@ impl NesCore {
         self.battery_ram_imported = false;
         self.original_image = None;
         self.builtin_patch = None;
+        self.rom_crc = None;
         self.bus.attach(None);
         self.bus.apu_mut().discard_samples();
     }
@@ -418,7 +428,7 @@ impl NesCore {
         let start_cycle = self.bus.cycle_count();
 
         // A game with a margin decoder gets the host's margin whatever its ROM asks for.
-        let decoder = self.builtin_patch.and_then(crate::wide_decode::for_patch);
+        let decoder = self.margin_decoder();
         self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
 
         self.bus.ppu_mut().clear_frame_boundary();
@@ -453,8 +463,33 @@ impl NesCore {
             ram,
             prg_ram: cartridge.memory().prg_ram(),
             prg_rom: cartridge.rom().prg_rom(),
+            // The PPU puts its own readers in.
+            nametable: &|_| 0,
+            nametable_written: &|_| 0,
         };
         ppu.decode_margins(decoder, &memory, Some(cartridge));
+    }
+
+    /// Runs the `after_other_way_state` of `patch` (the built-in patch made for the ROM of a
+    /// state restored the other way) on CPU RAM.
+    fn put_right_other_way_state(
+        &mut self,
+        patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
+    ) {
+        if let Some(fix) = patch.and_then(|known| known.after_other_way_state) {
+            fix(self.bus.ram_mut());
+        }
+    }
+
+    /// The margin decoder of the game loaded: its built-in patch's, or one made for the ROM
+    /// itself; none while the built-in patches are off.
+    fn margin_decoder(&self) -> Option<&'static dyn crate::wide_decode::MarginDecoder> {
+        if !self.builtin_patches_enabled {
+            return None;
+        }
+        self.builtin_patch
+            .and_then(crate::wide_decode::for_patch)
+            .or_else(|| self.rom_crc.and_then(crate::wide_decode::for_rom))
     }
 
     /// The batch of the frame just run (REQ-CORE-030).
@@ -480,6 +515,24 @@ impl NesCore {
     /// others. Rounded down to a multiple of 8 and capped at [`crate::wide::MAX_MARGIN`].
     pub fn set_widescreen_margin(&mut self, pixels: i32) {
         self.bus.ppu_mut().wide_mut().set_host_margin(pixels);
+    }
+
+    /// Sets the options of the built-in patch the player turned on, one bit each as the patch's
+    /// `options` say; the ROM reads them at `$500A`.
+    pub fn set_hack_options(&mut self, options: u8) {
+        self.bus.ppu_mut().wide_mut().set_host_options(options);
+    }
+
+    /// The options of the built-in patch applied to the ROM loaded (none without one).
+    #[must_use]
+    pub fn hack_options(&self) -> &'static [crate::builtin_patches::HackOption] {
+        self.builtin_patch
+            .and_then(|name| {
+                crate::builtin_patches::PATCHES
+                    .iter()
+                    .find(|patch| patch.name == name)
+            })
+            .map_or(&[], |patch| patch.options)
     }
 
     /// Sets the margin the host offers above and below, in pixels (0 = off). Only a game with
@@ -778,6 +831,7 @@ impl NesCore {
             None
         };
         let patchable = rom_patch.is_some();
+        let rom_crc = crate::builtin_patches::data_crc(&rom_bytes);
         let region_byte = reader.read_u8()?;
         let region = NesRegion::from_u8(region_byte).ok_or_else(|| {
             InvalidState::corrupt(format!("Corrupt savestate: unknown region {region_byte}."))
@@ -843,13 +897,12 @@ impl NesCore {
         // A state made the other way (the patch ran and does not now, or the reverse).
         let made_with_patch =
             version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5;
-        if patchable && made_with_patch != patch.1.is_some() {
-            if let Some(fix) = rom_patch.and_then(|known| known.after_other_way_state) {
-                fix(self.bus.ram_mut());
-            }
+        if made_with_patch != patch.1.is_some() {
+            self.put_right_other_way_state(rom_patch);
         }
 
         self.battery_ram_imported = false;
+        self.rom_crc = has_rom_image.then_some(rom_crc).or(self.rom_crc);
         (self.original_image, self.builtin_patch) = patch;
         self.bus.attach(Some(cartridge));
         self.region = region;

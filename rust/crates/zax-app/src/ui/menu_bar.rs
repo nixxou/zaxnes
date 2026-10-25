@@ -64,6 +64,10 @@ pub enum Submenu {
     Skybox,
     /// The volume steps.
     Volume,
+    /// The options of the built-in patch of the game being played.
+    HackOptions,
+    /// The movies of the movies folder.
+    Movies,
 }
 
 /// What makes a [`MenuItemKind::Choice`] the selected one.
@@ -81,6 +85,8 @@ pub enum Selection {
     Skybox(i32),
     /// The volume is this percentage.
     Volume(i32),
+    /// Option n of the game's built-in patch is on.
+    HackOption(i32),
 }
 
 /// One entry of a menu.
@@ -293,6 +299,8 @@ impl MenuBarModel {
             Submenu::CameraMode => camera_items(),
             Submenu::Skybox => skybox_items(),
             Submenu::Volume => volume_items(),
+            Submenu::HackOptions => hack_option_items(host),
+            Submenu::Movies => movie_items(host),
         }
     }
 }
@@ -314,6 +322,10 @@ fn recent_roms(host: &AppHost) -> Vec<String> {
 fn is_selected(selection: Selection, host: &AppHost) -> bool {
     let settings = host.settings();
     match selection {
+        Selection::HackOption(index) => usize::try_from(index)
+            .ok()
+            .and_then(|index| host.hack_options().get(index).map(|(_, on)| *on))
+            .unwrap_or(false),
         Selection::Speed(value) => settings.game_speed() == value,
         Selection::Region(region) => !settings.auto_tv_mode() && settings.tv_mode() == region,
         Selection::Port(port, device) => host.port_type(port) == device,
@@ -389,6 +401,7 @@ fn build_menus() -> Vec<Menu> {
                 Submenu::Skybox,
             ),
             item(Command::ToggleShadows),
+            MenuItem::sub(text::hack_options(), Submenu::HackOptions),
             MenuItem::rule(),
             item(Command::ToggleFullscreen),
             item(Command::ToggleFpsCounter),
@@ -413,6 +426,11 @@ fn build_menus() -> Vec<Menu> {
             MenuItem::rule(),
             item(Command::ShowDataFolder),
             item(Command::ShowAbout),
+            MenuItem::rule(),
+            item(Command::ToggleMovieRecording),
+            MenuItem::sub(text::movies(), Submenu::Movies),
+            item(Command::AnnotateMovie),
+            item(Command::StopMovie),
         ],
     };
     vec![file, emulation, video, audio, tools]
@@ -631,6 +649,50 @@ fn skybox_items() -> Vec<MenuItem> {
                 text::label_of_option(&option.label),
                 CommandArgs::of_number(value),
                 Selection::Skybox(value),
+            )
+        })
+        .collect()
+}
+
+fn hack_option_items(host: &AppHost) -> Vec<MenuItem> {
+    let french = strings::language() == strings::UiLanguage::French;
+    host.hack_options()
+        .iter()
+        .enumerate()
+        .map(|(index, (option, _))| {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // A few.
+            let index = index as i32;
+            MenuItem::choice(
+                Command::ToggleHackOption,
+                (if french {
+                    option.label_fr
+                } else {
+                    option.label
+                })
+                .to_owned(),
+                CommandArgs::of_number(index),
+                Selection::HackOption(index),
+            )
+        })
+        .collect()
+}
+
+fn movie_items(host: &AppHost) -> Vec<MenuItem> {
+    let files = host.movie_files();
+    if files.is_empty() {
+        return vec![MenuItem::note(text::nothing_here())];
+    }
+    files
+        .iter()
+        .map(|path| {
+            let label = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            MenuItem::of(
+                Command::PlayMovie,
+                Some(label),
+                CommandArgs::of_text(&path.to_string_lossy()),
             )
         })
         .collect()

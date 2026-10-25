@@ -134,6 +134,7 @@ commands! {
     SetCameraMode => "video.set_camera_mode", Shortcut::None, false;
     ToggleLocalCamera => "video.toggle_local_camera", Shortcut::None, true;
     ToggleShadows => "video.toggle_shadows", Shortcut::None, true;
+    ToggleHackOption => "video.toggle_hack_option", Shortcut::None, false;
     ToggleFullscreen => "video.toggle_fullscreen", Shortcut::Key("shortcut.alt_enter"), true;
     ToggleFpsCounter => "video.toggle_fps", Shortcut::None, true;
     SetVolume => "audio.set_volume", Shortcut::None, false;
@@ -145,6 +146,10 @@ commands! {
     ShowKeyConfig => "tools.key_config", Shortcut::None, false;
     ShowDataFolder => "tools.data_folder", Shortcut::None, false;
     ShowAbout => "tools.about", Shortcut::None, false;
+    ToggleMovieRecording => "tools.record_movie", Shortcut::None, true;
+    PlayMovie => "tools.play_movie", Shortcut::None, false;
+    StopMovie => "tools.stop_movie", Shortcut::None, false;
+    AnnotateMovie => "tools.annotate_movie", Shortcut::Fixed("Ctrl+M"), false;
     CancelModal => "ui.cancel_modal", Shortcut::None, false;
 }
 

@@ -75,6 +75,7 @@ impl Ppu2C02 {
     /// widescreen margin of the new one is latched.
     pub(super) fn begin_rendered_frame(&mut self) {
         self.tiles.clear();
+        self.vram_clock = self.vram_clock.wrapping_add(1);
         self.frame_margin = self.wide.margin();
         self.frame_vertical_margin = self.wide.vertical_margin();
         self.tiles
@@ -278,6 +279,14 @@ impl Ppu2C02 {
         let mut decoded_rows = [false; 31];
         let mut tiles = Vec::new();
         let mut records = Vec::new();
+        // The decoder may read the nametables, as the PPU sees them now.
+        let nametable = |address: u16| self.read_nametable_inner(address, cart);
+        let written = |address: u16| self.nametable_written(address, cart);
+        let memory = &DecoderMemory {
+            nametable: &nametable,
+            nametable_written: &written,
+            ..*memory
+        };
         for (row_index, captured) in self.captured_rows.iter().enumerate() {
             let Some(captured) = captured else {
                 continue;
@@ -320,14 +329,20 @@ impl Ppu2C02 {
                     true,
                 ));
             }
-            if let Some(range) = self.visible_rows.get_mut(row_index) {
-                #[allow(clippy::cast_possible_truncation)] // At most 512.
-                let margin = self.frame_margin as i16;
-                *range = (-margin, 256 + margin);
-            }
         }
 
         self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
+
+        #[allow(clippy::cast_possible_truncation)] // At most 512.
+        let margin = self.frame_margin as i16;
+        for (range, _) in self
+            .visible_rows
+            .iter_mut()
+            .zip(decoded_rows)
+            .filter(|(_, decoded)| *decoded)
+        {
+            *range = (-margin, 256 + margin);
+        }
 
         // The decoded rows lose their nametable margins, then get the decoded ones.
         self.tiles.retain_background(|record| {
@@ -459,7 +474,7 @@ impl Ppu2C02 {
             let oam_x = self.oam[(n * 4) + 3];
             let x = if self.frame_margin > 0 {
                 let x = self.wide.sprite_x(n, oam_x);
-                let (visible_low, visible_high) = self.wide.visible_range();
+                let (visible_low, visible_high) = self.wide.sprite_range();
                 if x + 8 <= visible_low || x >= visible_high {
                     continue;
                 }
@@ -508,6 +523,39 @@ impl Ppu2C02 {
                     cart,
                 );
             }
+        }
+        self.capture_extra_sprites(band, sprite_table, cart);
+    }
+
+    /// The sprites of the extension's second page whose band starts in `band` (8 x 8 only),
+    /// after the console's 64: indices 128 and up, so below them all.
+    fn capture_extra_sprites(&mut self, band: i32, sprite_table: u16, cart: Cart<'_, '_>) {
+        let (visible_low, visible_high) = self.wide.sprite_range();
+        let oam = *self.wide.extra_oam();
+        for n in 0..64 {
+            let top = i32::from(oam[n * 4]) + 1;
+            if top >= VISIBLE_SCANLINES || top / 8 != band {
+                continue;
+            }
+            let attribute = oam[(n * 4) + 2];
+            let x = self.wide.extra_sprite_x(n, oam[(n * 4) + 3]);
+            if x + 8 <= visible_low || x >= visible_high {
+                continue;
+            }
+            let sprite = SpriteAttributes {
+                #[allow(clippy::cast_possible_truncation)] // -32768..32767 by construction.
+                x: x as i16,
+                mirror_h: (attribute & 0x40) != 0,
+                mirror_v: (attribute & 0x80) != 0,
+                hidden: (attribute & 0x20) != 0,
+                palette: attribute & 0x03,
+            };
+            #[allow(clippy::cast_possible_truncation)] // 0..256.
+            let top = top as i16;
+            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // n < 64.
+            let index = 128 + n as i32;
+            let tile = u16::from(oam[(n * 4) + 1]);
+            self.emit_sprite(index, top, sprite_table + (tile * 16), &sprite, cart);
         }
     }
 
@@ -697,7 +745,12 @@ impl Ppu2C02 {
         let width = SCREEN_WIDTH + (2 * margin);
         let height = super::SCREEN_HEIGHT + (2 * margin_y);
         out.clear();
-        if margin == 0 && margin_y == 0 {
+        let extra_sprites = self
+            .tiles
+            .records()
+            .iter()
+            .any(|record| !record.background && record.index >= 128);
+        if margin == 0 && margin_y == 0 && !extra_sprites {
             out.extend_from_slice(&self.pixels);
             return height;
         }
@@ -753,7 +806,8 @@ impl Ppu2C02 {
             .iter()
             .filter(|r| !r.background && !r.hidden)
             .collect();
-        front.sort_by_key(|record| std::cmp::Reverse(record.index % 64));
+        // OAM order: the lower the number, the higher the priority; the second page is below.
+        front.sort_by_key(|record| std::cmp::Reverse(sprite_priority(record.index)));
         for record in front {
             paint(record, 0x10, out);
         }
@@ -770,7 +824,60 @@ impl Ppu2C02 {
                 }
             }
         }
+
+        self.paint_extra_sprites(out, width, &screen_rows);
         height
+    }
+
+    /// Draws over the centre of a wide picture the sprites the PPU did not draw there: those of
+    /// the extension's second page (records 128 and up), and those across the left edge of the
+    /// screen, whose high byte keeps them out of the PPU's picture (their x is negative). A
+    /// sprite behind the background shows only where the centre has the backdrop colour.
+    fn paint_extra_sprites(
+        &self,
+        out: &mut [u8],
+        width: usize,
+        screen_rows: &std::ops::Range<usize>,
+    ) {
+        let records = self.tiles.records();
+        let backdrop = self.palette[palette_index(0x3F00)];
+        for record in records
+            .iter()
+            .filter(|r| !r.background && (r.index >= 128 || r.x < 0))
+            .rev()
+        {
+            for py in 0..8i32 {
+                let Ok(row) =
+                    usize::try_from(i32::from(record.y) + py + self.frame_vertical_margin)
+                else {
+                    continue;
+                };
+                if !screen_rows.contains(&row) {
+                    continue;
+                }
+                for px in 0..8i32 {
+                    let x = i32::from(record.x) + px;
+                    if !(0..SCREEN_WIDTH_I32).contains(&x) {
+                        continue;
+                    }
+                    #[allow(clippy::cast_sign_loss)] // 0..8.
+                    let Some(pixel) = record
+                        .displayed_pixel(px as usize, py as usize)
+                        .filter(|&pixel| pixel != 0)
+                    else {
+                        continue;
+                    };
+                    let Ok(column) = usize::try_from(x + self.frame_margin) else {
+                        continue;
+                    };
+                    let entry = 0x3F10 | u16::from(record.palette * 4) | u16::from(pixel);
+                    let slot = &mut out[(row * width) + column];
+                    if !record.hidden || *slot == backdrop {
+                        *slot = self.palette[palette_index(entry)];
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -787,5 +894,15 @@ struct SpriteAttributes {
 fn restore_chr_latch(cart: Cart<'_, '_>, saved_latch: i32) {
     if let Some(cartridge) = cart.as_deref_mut() {
         cartridge.set_chr_latch_state(saved_latch);
+    }
+}
+
+/// Drawing priority of a sprite record of index `index` (lower first): its OAM number, the two
+/// halves of an 8 x 16 sprite sharing it, the second page's after all of them.
+const fn sprite_priority(index: i32) -> i32 {
+    if index >= 128 {
+        index
+    } else {
+        index % 64
     }
 }

@@ -88,6 +88,10 @@ const LAST_SPAN_DOT: i32 = 255;
 #[allow(clippy::struct_excessive_bools)] // The chip's flags, one field each like the C#.
 pub struct Ppu2C02 {
     vram: [u8; VRAM_SIZE],
+    /// For each byte of `vram`, the rendered frame (`vram_clock`) it was last written in, for a
+    /// margin decoder to tell what the game drew when (not saved: 0 after a state load).
+    vram_written: Vec<u32>,
+    vram_clock: u32,
     oam: [u8; OAM_SIZE],
     palette: [u8; PALETTE_SIZE],
     decay_stamp: [i64; 8],
@@ -145,6 +149,10 @@ pub struct Ppu2C02 {
     // Rendering state (render.rs).
     pixels: Vec<u8>,
     secondary_oam: [u8; 4 * SPRITES_PER_LINE],
+    /// The primary OAM index of each sprite the evaluation copied to `secondary_oam`, for the
+    /// widescreen extension: a sprite its high byte puts in a margin is left out of the picture
+    /// (not saved: a state is taken between frames).
+    secondary_source: [u8; SPRITES_PER_LINE],
     sprite_pattern_low: [u8; SPRITES_PER_LINE],
     sprite_pattern_high: [u8; SPRITES_PER_LINE],
     sprite_attribute: [u8; SPRITES_PER_LINE],
@@ -202,6 +210,8 @@ impl Ppu2C02 {
     pub fn new() -> Self {
         Self {
             vram: [0; VRAM_SIZE],
+            vram_written: vec![0; VRAM_SIZE],
+            vram_clock: 0,
             oam: [0; OAM_SIZE],
             palette: [0; PALETTE_SIZE],
             decay_stamp: [0; 8],
@@ -231,6 +241,7 @@ impl Ppu2C02 {
             nmi_line_sample: false,
             pixels: vec![0; SCREEN_WIDTH * SCREEN_HEIGHT],
             secondary_oam: [0; 4 * SPRITES_PER_LINE],
+            secondary_source: [0; SPRITES_PER_LINE],
             sprite_pattern_low: [0; SPRITES_PER_LINE],
             sprite_pattern_high: [0; SPRITES_PER_LINE],
             sprite_attribute: [0; SPRITES_PER_LINE],
@@ -1094,6 +1105,20 @@ impl Ppu2C02 {
         self.vram[map_nametable(address, self.layout_of(cartridge))]
     }
 
+    /// The rendered frame a nametable byte was last written in (0: not since power-on or the
+    /// last state load; always 0 for nametables the cartridge serves).
+    fn nametable_written(&self, address: u16, cartridge: Option<&Cartridge>) -> u32 {
+        let page = cartridge_nametable_page(address, cartridge);
+        if page == Cartridge::SERVED_BY_CARTRIDGE {
+            return 0;
+        }
+        let offset = usize::try_from(page).map_or_else(
+            |_| map_nametable(address, self.layout_of(cartridge)),
+            |page| (page << 10) | (usize::from(address) & 0x03FF),
+        );
+        self.vram_written.get(offset).copied().unwrap_or(0)
+    }
+
     fn write_nametable_byte(&mut self, address: u16, value: u8, cart: Cart<'_, '_>) {
         let page = cartridge_nametable_page(address, cart.as_deref());
         if page == Cartridge::SERVED_BY_CARTRIDGE {
@@ -1103,13 +1128,15 @@ impl Ppu2C02 {
             }
         }
 
-        if let Ok(page) = usize::try_from(page) {
-            self.vram[(page << 10) | (usize::from(address) & 0x03FF)] = value;
-            return;
+        let offset = if let Ok(page) = usize::try_from(page) {
+            (page << 10) | (usize::from(address) & 0x03FF)
+        } else {
+            map_nametable(address, self.layout_of(cart.as_deref()))
+        };
+        self.vram[offset] = value;
+        if let Some(written) = self.vram_written.get_mut(offset) {
+            *written = self.vram_clock;
         }
-
-        let layout = self.layout_of(cart.as_deref());
-        self.vram[map_nametable(address, layout)] = value;
     }
 
     /// Maps a nametable address to an offset in the 4 KiB VRAM, using the layout
