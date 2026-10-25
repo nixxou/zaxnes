@@ -61,6 +61,11 @@ pub const MAX_MARGIN: i32 = 512;
 /// The widest margin the nametables can show: past it they wrap.
 const NAMETABLE_MARGIN: i32 = 128;
 
+/// The second sprite page in the extension's RAM (`$5007` bit 2), and the high bytes of its
+/// sprites' x (sprite n at `EXTRA_HIGH + 4n`).
+const EXTRA_OAM: u16 = 0x5300;
+const EXTRA_HIGH: u16 = 0x5400;
+
 /// The widest margin a ROM can ask for or be told of through its 8-bit registers.
 const MAX_ROM_MARGIN: i32 = 248;
 
@@ -91,6 +96,10 @@ pub struct WideExtension {
     pending_high: [u8; 64],
     /// Sprite x high bytes of the sprites now in OAM.
     active_high: [u8; 64],
+    /// The second sprite page (`$5007` bit 2) latched at the last OAM DMA: 64 sprites in OAM
+    /// format, then the high bytes of their x. Not saved: the next DMA latches it again.
+    extra_oam: [u8; 256],
+    extra_high: [u8; 64],
     /// RAM at `$5200`-`$5FFF`.
     scratch: Vec<u8>,
     /// Overclock register: extra scanlines of CPU time per frame.
@@ -128,6 +137,8 @@ impl WideExtension {
             right_extent: 0xFF,
             pending_high: [0; 64],
             active_high: [0; 64],
+            extra_oam: [0xFF; 256],
+            extra_high: [0; 64],
             scratch: vec![0; RAM_SIZE],
             overclock: 0,
             layout: 0,
@@ -338,6 +349,31 @@ impl WideExtension {
 
         self.active_high = self.pending_high;
         self.pending_high = [0; 64];
+        if self.layout & 4 != 0 {
+            let page = usize::from(EXTRA_OAM - FIRST_RAM);
+            let high = usize::from(EXTRA_HIGH - FIRST_RAM);
+            if let Some(sprites) = self.scratch.get(page..page + 256) {
+                self.extra_oam.copy_from_slice(sprites);
+            }
+            for (n, byte) in self.extra_high.iter_mut().enumerate() {
+                *byte = self.scratch.get(high + (4 * n)).copied().unwrap_or(0);
+            }
+        } else {
+            self.extra_oam = [0xFF; 256];
+        }
+    }
+
+    /// The second sprite page latched at the last OAM DMA (`$5007` bit 2), in OAM format.
+    #[must_use]
+    pub const fn extra_oam(&self) -> &[u8; 256] {
+        &self.extra_oam
+    }
+
+    /// The screen x of sprite `sprite` (0..64) of the second page, whose x byte is `low`.
+    #[must_use]
+    pub fn extra_sprite_x(&self, sprite: usize, low: u8) -> i32 {
+        let high = self.extra_high.get(sprite).copied().unwrap_or(0);
+        i32::from(i16::from_le_bytes([low, high]))
     }
 
     /// The offset in PRG-ROM a CPU read of `address` sees through the PRG window, or `None`
