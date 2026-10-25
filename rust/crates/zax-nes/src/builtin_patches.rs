@@ -103,7 +103,24 @@ pub const PATCHES: [BuiltinPatch; 3] = [
         rom_name: "Super Mario Bros. (World)",
         source_crc: 0xD445_F698,
         bps: include_bytes!("../patches/smb1-world-widescreen.bps"),
-        options: &[],
+        options: &[
+            // Testing aids: B on the title screen goes through every level; Mario never hurt
+            // (falls and the timer still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (B on the title screen)",
+                label_fr: "Sélecteur de niveau (B sur l'écran titre)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+        ],
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
