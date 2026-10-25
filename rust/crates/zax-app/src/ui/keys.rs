@@ -218,6 +218,8 @@ pub const HACKS_PATCH_NOTE: &str = "hacks.patch_note";
 pub const HACK_WIDESCREEN: &str = "hacks.widescreen";
 pub const HACK_RATIO: &str = "hacks.ratio";
 pub const HACK_MARGIN: &str = "hacks.margin";
+/// The advanced mode of a game's widescreen.
+pub const HACK_ADVANCED: &str = "hacks.advanced";
 pub const HACK_ON: &str = "hacks.on";
 /// What a game a widescreen hack is made for, but not for this ROM of it, is told.
 pub const HACKS_OTHER_ROM: &str = "hacks.other_rom";
@@ -440,6 +442,7 @@ pub const PUBLISHED: &[&str] = &[
     HACKS_TITLE,
     HACKS_NONE,
     HACKS_PATCH_NOTE,
+    HACK_ADVANCED,
     HACK_WIDESCREEN,
     HACK_RATIO,
     HACK_MARGIN,

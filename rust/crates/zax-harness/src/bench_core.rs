@@ -196,6 +196,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         profile: &profile,
         mesh: RenderAlgorithm::Greedy,
         force_three_dimensional: options.three_dimensional,
+        advanced: false,
     })?;
     let mut records = Vec::new();
     let mut picture = Vec::with_capacity(256 * 240);

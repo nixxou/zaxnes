@@ -55,6 +55,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
   --poke <frame>:<addr>=<value>,...  CPU writes (hex) made before those frames
   --no-builtin-patches     restore --load-state without the built-in ROM patches
+  --advanced               apply the built-in patches of an advanced widescreen mode too
   --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            as the widescreen margin makes them
@@ -132,6 +133,8 @@ pub struct Options {
     pub widescreen_y: i32,
     /// Whether --load-state restores with the built-in ROM patches.
     pub builtin_patches: bool,
+    /// Whether the built-in patches of an advanced widescreen mode apply.
+    pub advanced: bool,
     /// Where to write the composed tile records of the last frame.
     pub png_nes: Option<PathBuf>,
     /// State block restored after the reset.
@@ -207,6 +210,7 @@ impl Options {
             widescreen: 0,
             widescreen_y: 0,
             builtin_patches: true,
+            advanced: false,
             png_nes: None,
             load_state: None,
             movie: None,
@@ -240,6 +244,7 @@ impl Options {
             match argument.as_str() {
                 "--no-shadows" => options.shadows = false,
                 "--no-builtin-patches" => options.builtin_patches = false,
+                "--advanced" => options.advanced = true,
                 "--group-draws" => options.group_draws = true,
                 "--sky-bodies" => options.sky_bodies = true,
                 "--explain" => options.explain = true,
@@ -579,6 +584,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             widescreen: options.widescreen,
             widescreen_y: options.widescreen_y,
             builtin_patches: options.builtin_patches,
+            advanced: options.advanced,
             png_nes: options.png_nes.as_deref(),
             load_state: options.load_state.as_deref(),
             movie: options.movie.as_deref(),

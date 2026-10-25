@@ -31,6 +31,8 @@ pub enum HackRow {
     Ratio,
     /// The margin it captures beyond the view.
     Margin,
+    /// The advanced mode, for a game whose patch is an advanced one: the patch applies.
+    Advanced,
     /// Option n of the game's built-in patch.
     PatchOption(usize),
 }
@@ -247,7 +249,14 @@ impl HacksModel {
             }
         }
         rows.extend([HackRow::Widescreen, HackRow::Ratio, HackRow::Margin]);
-        rows.extend((0..self.patch_options.len()).map(HackRow::PatchOption));
+        let advanced_patch = self.patch().is_some_and(|patch| patch.advanced);
+        if advanced_patch {
+            rows.push(HackRow::Advanced);
+        }
+        // The options of an advanced patch are those of its mode.
+        if !advanced_patch || self.advanced_on() {
+            rows.extend((0..self.patch_options.len()).map(HackRow::PatchOption));
+        }
         rows
     }
 
@@ -284,6 +293,12 @@ impl HacksModel {
         self.value(SettingId::VideoWidescreen).as_int() != 0
     }
 
+    /// Whether the advanced mode of the widescreen is on for the game.
+    #[must_use]
+    pub fn advanced_on(&self) -> bool {
+        self.value(SettingId::VideoWidescreenAdvanced).as_bool()
+    }
+
     /// Gives the game `value` for `id`; the global value is not kept as its own.
     fn set(&mut self, id: SettingId, value: SettingValue) {
         self.own.retain(|(own, _)| *own != id);
@@ -306,6 +321,14 @@ impl HacksModel {
         match row {
             HackRow::Force => self.toggle_force(),
             HackRow::Widescreen => self.toggle_widescreen(),
+            HackRow::Advanced => {
+                let on = !self.advanced_on();
+                self.set(SettingId::VideoWidescreenAdvanced, SettingValue::Bool(on));
+                // The advanced mode is a mode of the widescreen.
+                if on && !self.widescreen_on() {
+                    self.set(SettingId::VideoWidescreen, SettingValue::Enum(RATIOS[0]));
+                }
+            }
             HackRow::Ratio => {
                 // From off, the first step turns the widescreen on.
                 let current = self.value(SettingId::VideoWidescreen).as_int();
@@ -344,7 +367,9 @@ impl HacksModel {
                 .iter()
                 .map(|label| text::label_of_option(label))
                 .collect(),
-            HackRow::Force | HackRow::Widescreen | HackRow::PatchOption(_) => Vec::new(),
+            HackRow::Force | HackRow::Widescreen | HackRow::Advanced | HackRow::PatchOption(_) => {
+                Vec::new()
+            }
         }
     }
 
@@ -362,7 +387,7 @@ impl HacksModel {
             HackRow::Margin => {
                 usize::try_from(self.value(SettingId::VideoWidescreenExtra).as_int()).unwrap_or(0)
             }
-            HackRow::Force | HackRow::Widescreen | HackRow::PatchOption(_) => 0,
+            HackRow::Force | HackRow::Widescreen | HackRow::Advanced | HackRow::PatchOption(_) => 0,
         }
     }
 
@@ -379,7 +404,7 @@ impl HacksModel {
                     self.set(SettingId::VideoWidescreenExtra, SettingValue::Enum(value));
                 }
             }
-            HackRow::Force | HackRow::Widescreen | HackRow::PatchOption(_) => {}
+            HackRow::Force | HackRow::Widescreen | HackRow::Advanced | HackRow::PatchOption(_) => {}
         }
     }
 
@@ -389,6 +414,7 @@ impl HacksModel {
         match row {
             HackRow::Force => self.forced(),
             HackRow::Widescreen => self.widescreen_on(),
+            HackRow::Advanced => self.advanced_on(),
             HackRow::PatchOption(index) => self.patch_options.get(index).is_some_and(|(_, on)| *on),
             HackRow::Ratio | HackRow::Margin => false,
         }
@@ -435,6 +461,7 @@ impl HacksModel {
             HackRow::Widescreen => strings::get(keys::HACK_WIDESCREEN),
             HackRow::Ratio => strings::get(keys::HACK_RATIO),
             HackRow::Margin => strings::get(keys::HACK_MARGIN),
+            HackRow::Advanced => strings::get(keys::HACK_ADVANCED),
             HackRow::PatchOption(index) => self
                 .patch_options
                 .get(index)
@@ -457,6 +484,7 @@ impl HacksModel {
         match row {
             HackRow::Force => switch(self.forced()),
             HackRow::Widescreen => switch(self.widescreen_on()),
+            HackRow::Advanced => switch(self.advanced_on()),
             HackRow::Ratio => {
                 let ratio = self
                     .value(SettingId::VideoWidescreen)
@@ -481,6 +509,7 @@ impl HacksModel {
             HackRow::Force => SettingId::EmuForcedPatch,
             HackRow::Widescreen | HackRow::Ratio => SettingId::VideoWidescreen,
             HackRow::Margin => SettingId::VideoWidescreenExtra,
+            HackRow::Advanced => SettingId::VideoWidescreenAdvanced,
             HackRow::PatchOption(_) => return false,
         };
         self.own.iter().any(|(own, _)| *own == id)

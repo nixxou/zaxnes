@@ -264,6 +264,14 @@ impl WideExtension {
         i32::from(i16::from_le_bytes([low, high]))
     }
 
+    /// Unlocked with the PRG window open on `window_bank` (bit 7 set), `window_page`, as a
+    /// built-in patch with a boot window asks at power-on and reset.
+    pub fn boot(&mut self, window_bank: u8, window_page: u8) {
+        self.unlocked = true;
+        self.window_bank = window_bank;
+        self.window_page = window_page;
+    }
+
     /// Puts the registers back to their power-on values; the host margin is kept.
     pub fn reset(&mut self) {
         *self = Self {

@@ -57,6 +57,7 @@ pub struct NesCore {
     builtin_patch: Option<&'static str>,
     /// Whether the built-in patches apply at all (on by default).
     builtin_patches_enabled: bool,
+    advanced_patches_enabled: bool,
     /// The built-in patch applied to a ROM none is made for (Rust-only, owner request: forced).
     forced_patch: Option<&'static crate::builtin_patches::BuiltinPatch>,
     /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
@@ -85,6 +86,7 @@ impl NesCore {
             original_image: None,
             builtin_patch: None,
             builtin_patches_enabled: true,
+            advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
         }
@@ -94,6 +96,24 @@ impl NesCore {
     /// restore; the ROM loaded keeps what it has.
     pub fn set_builtin_patches(&mut self, enabled: bool) {
         self.builtin_patches_enabled = enabled;
+    }
+
+    /// Turns the advanced patches (`BuiltinPatch::advanced`) on or off for the next
+    /// [`NesCore::load_rom`] and state restore: off, a ROM whose patch is advanced loads as it
+    /// is, widened by its margin decoder alone.
+    pub fn set_advanced_patches(&mut self, enabled: bool) {
+        self.advanced_patches_enabled = enabled;
+    }
+
+    /// The built-in patch `image` gets as the patches are set.
+    fn patch_image(&self, image: &[u8]) -> Option<crate::builtin_patches::PatchedRom> {
+        if !self.builtin_patches_enabled {
+            return None;
+        }
+        crate::builtin_patches::apply_with(image, self.forced_patch).filter(|patched| {
+            self.advanced_patches_enabled
+                || crate::builtin_patches::by_name(patched.name).is_none_or(|patch| !patch.advanced)
+        })
     }
 
     /// The built-in patch the next [`NesCore::load_rom`] and state restore apply to a ROM no
@@ -120,7 +140,9 @@ impl NesCore {
         let has_rom_image = reader.read_bool().ok()?;
         reader.read_string().ok()?;
         let rom = reader.read_blob().ok()?;
-        let patchable = has_rom_image && crate::builtin_patches::matches(&rom);
+        let patchable = has_rom_image
+            && crate::builtin_patches::patch_for(&rom)
+                .is_some_and(|patch| !patch.advanced || self.advanced_patches_enabled);
         Some(wide == (patchable && self.builtin_patches_enabled))
     }
 
@@ -228,11 +250,7 @@ impl NesCore {
     pub fn load_rom(&mut self, image: &[u8], name: &str) -> RomLoadResult {
         // A ROM a built-in patch was made for is patched in memory (the host's copy is left
         // alone); the original is kept for the savestates.
-        let patched = if self.builtin_patches_enabled {
-            crate::builtin_patches::apply_with(image, self.forced_patch)
-        } else {
-            None
-        };
+        let patched = self.patch_image(image);
         let loaded = patched
             .as_ref()
             .map_or(image, |patched| patched.image.as_slice());
@@ -322,6 +340,7 @@ impl NesCore {
 
         self.bus.reset();
         self.bus.ppu_mut().reset();
+        self.boot_patch_window(self.builtin_patch);
         self.bus.apu_mut().reset();
         let clear_prg_ram = !self.battery_ram_imported;
         if let Some(cartridge) = self.bus.cartridge_mut() {
@@ -484,6 +503,17 @@ impl NesCore {
             nametable_written: &|_| 0,
         };
         ppu.decode_margins(decoder, &memory, Some(cartridge));
+    }
+
+    /// Unlocks the widescreen extension with its PRG window open when the built-in patch named
+    /// `patch` asks for it (`BuiltinPatch::boot_window`).
+    fn boot_patch_window(&mut self, patch: Option<&'static str>) {
+        if let Some((bank, page)) = patch
+            .and_then(crate::builtin_patches::by_name)
+            .and_then(|known| known.boot_window)
+        {
+            self.bus.ppu_mut().wide_mut().boot(bank, page);
+        }
     }
 
     /// Runs the `after_other_way_state` of `patch` (the built-in patch made for the ROM of a
@@ -858,11 +888,7 @@ impl NesCore {
         let rom = if has_rom_image {
             // The block is self-contained: it restores even with no ROM loaded
             // (REQ-CORE-090). A ROM a built-in patch was made for gets the patch of this build.
-            let patched = if self.builtin_patches_enabled {
-                crate::builtin_patches::apply_with(&rom_bytes, self.forced_patch)
-            } else {
-                None
-            };
+            let patched = self.patch_image(&rom_bytes);
             let image = patched
                 .as_ref()
                 .map_or(rom_bytes.as_slice(), |p| p.image.as_slice());
@@ -915,6 +941,10 @@ impl NesCore {
             version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5;
         if made_with_patch != patch.1.is_some() {
             self.put_right_other_way_state(rom_patch);
+        }
+        // A patch that boots the extension needs its window, whatever the state left it as.
+        if !self.bus.ppu().wide().unlocked() {
+            self.boot_patch_window(patch.1);
         }
 
         self.battery_ram_imported = false;

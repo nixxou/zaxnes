@@ -351,10 +351,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     return Step::Failed(INVALID_ROM_MESSAGE.to_owned());
                 };
                 let builtin_patches = self.builtin_patches_wanted();
+                let advanced = self.advanced_patches_wanted();
                 let forced = self.forced_patch();
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_builtin_patches(builtin_patches);
+                        session.core_mut().set_advanced_patches(advanced);
                         session.core_mut().set_forced_patch(forced);
                         session.load_rom(&rom.image, &rom.name)
                     }
@@ -450,12 +452,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         state: &SaveStateContent,
     ) -> Step {
         let builtin_patches = self.builtin_patches_wanted();
+        let advanced = self.advanced_patches_wanted();
         let forced = self.forced_patch();
         let Some(session) = self.session.as_mut() else {
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
         // The state carries the original ROM: the hack applies to it as the setting says now.
         session.core_mut().set_builtin_patches(builtin_patches);
+        session.core_mut().set_advanced_patches(advanced);
         session.core_mut().set_forced_patch(forced);
         if let Err(error) = session.restore_core(&state.core) {
             self.log(&format!("savestate refused: {error}"));
@@ -622,7 +626,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 return SlotPatchStatus::OtherVersion;
             }
         }
-        if hack == self.builtin_patches_wanted() {
+        if hack == self.patch_applies(patch) {
             SlotPatchStatus::Fits
         } else {
             SlotPatchStatus::OtherMode { hack }
@@ -663,7 +667,18 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.settings
                 .set(SettingId::EmuBuiltinPatches, SettingValue::Bool(true));
         }
-        self.set_game_widescreen(hack);
+        // An advanced patch is its own mode of the widescreen, which stays on either way.
+        let advanced = std::fs::read(self.paths.slot_state_file(slot_id))
+            .ok()
+            .and_then(|bytes| save_state_file::try_read(&bytes))
+            .and_then(|state| NesCore::state_builtin_patch(&state.core, 0))
+            .is_some_and(|patch| patch.advanced);
+        if advanced {
+            self.set_game_widescreen(true);
+            self.set_game_advanced(hack);
+        } else {
+            self.set_game_widescreen(hack);
+        }
         self.dispatch_setting_changes();
         self.load_slot(slot_id);
     }
