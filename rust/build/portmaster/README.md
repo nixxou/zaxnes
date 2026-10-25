@@ -21,7 +21,7 @@ No game, ROM or profile is included.
 | D-pad, A, B, Select, Start | the NES pad (A and B are the buttons labelled A and B) |
 | X | default camera view |
 | Y | 2D / 3D |
-| Y held | 2D seen from the front (default view) |
+| Y held | 2D seen head on, the picture filling the screen from top to bottom; back in 3D the camera has its angle and zoom again |
 | L1 / R1 | zoom out / zoom in |
 | Right stick | turn the camera |
 | R2 | fast forward |

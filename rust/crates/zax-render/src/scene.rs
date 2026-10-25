@@ -250,6 +250,10 @@ pub struct SceneState {
     /// all (REQ-SCN-055). The scene then shows the core's pixel frame on the NES plane instead
     /// of the recomposed tiles (AMD-009, Q-022).
     pub two_dimensional_mode: bool,
+    /// In the 2D mode, the picture is seen head on and fills the height of the view
+    /// ([`crate::camera::SceneCamera::picture_view`]) instead of through the camera (Rust-only,
+    /// owner request: the "2D from the front" of the handheld).
+    pub picture_head_on: bool,
     /// The shape the subjective camera follows, or `None` (REQ-SCN-021). In FPV it decides
     /// which tiles count as occluders and are drawn at half opacity (REQ-SCN-022).
     pub followed_shape: Option<ShapeId>,
@@ -275,6 +279,7 @@ impl Default for SceneState {
             use_nes_background_color: true,
             nes_background_color: Rgb24::default(),
             two_dimensional_mode: false,
+            picture_head_on: false,
             followed_shape: None,
             real_time: 0.0,
             emulated_time: 0.0,

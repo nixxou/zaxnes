@@ -106,6 +106,38 @@ fn a_plays_the_game_in_2d_and_the_screen_gives_way_to_it() {
 }
 
 #[test]
+fn y_held_shows_the_2d_picture_head_on_and_leaves_the_camera_alone() {
+    // The profiles of the harness hold no pattern: the game shows in 2D from the start.
+    let (mut harness, mut handheld) = start(&["Castle Quest"], &["Castle Quest.nes"]);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::InGame, handheld.screen());
+    assert!(!harness.host.scene().picture_head_on);
+    let camera = *harness.host.scene().camera.current();
+
+    // Held for most of a second: 2D, seen head on.
+    let mut held = PadState::new();
+    held.set(PadButton::Y, true);
+    for _ in 0..8 {
+        frame(&mut harness, &mut handheld, &held, 0.1);
+    }
+    press(&mut harness, &mut handheld, &[]);
+    assert!(harness.host.showing_two_dimensional());
+    assert!(harness.host.scene().picture_head_on);
+    assert_eq!(camera, *harness.host.scene().camera.current());
+
+    // Leaving the 2D mode (here, the game) puts the camera back in charge.
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    for _ in 0..6 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
+    press(&mut harness, &mut handheld, &[]);
+    assert!(!harness.host.showing_two_dimensional());
+    assert!(!harness.host.scene().picture_head_on);
+}
+
+#[test]
 fn x_chooses_the_profile_and_a_plays_with_it() {
     let (mut harness, mut handheld) = start(&["Castle Quest"], &["Castle Quest.nes"]);
     tap(&mut harness, &mut handheld, PadButton::X);
