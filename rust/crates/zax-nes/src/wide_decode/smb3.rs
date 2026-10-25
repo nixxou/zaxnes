@@ -18,6 +18,9 @@
 //! (`$FC`, 0 to 239) and its x `Horz_Scroll_Hi:Horz_Scroll` (`$12:$FD`). The status bar is drawn
 //! in the rows past the level (54-59).
 //!
+//! The vertical margin is the level above the screen; below it, under the status bar, it stays
+//! empty.
+//!
 //! A world map is in the same tile map (rows 16-26, up to four screens, those past it filled with
 //! tile `$02`), with the layout of tileset 0, in bank 12. A vertical level is not decoded.
 //!
@@ -63,6 +66,9 @@ const MAP_SCREENS: usize = 4;
 const MAP_FIRST_ROW: usize = 17 * 16;
 const MAP_FILL: u8 = 0x02;
 const MAP_LAYOUT_BANK: usize = 12;
+
+/// Lines of the screen.
+const SCREEN_LINES: i32 = 240;
 
 /// A line of the playfield (above the status bar) whatever the scroll.
 const MIDDLE_LINE: i32 = 96;
@@ -239,6 +245,11 @@ impl MarginDecoder for SuperMarioBros3 {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
+        // Below the screen is below the status bar, which the game always draws at the bottom:
+        // the level there would stick to it, and nothing of the level goes on under it.
+        if row.line >= SCREEN_LINES {
+            return true;
+        }
         let Some(level) = Level::of(memory) else {
             return false;
         };
