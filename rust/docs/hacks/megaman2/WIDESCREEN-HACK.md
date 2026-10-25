@@ -16,7 +16,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 |---|---|
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
-| Target data | CRC-32 `86750B14` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `3A41F62C` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15 and one in bank 14 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
@@ -43,6 +43,9 @@ screens `$14` to `$15`.
 | energy bars (`$CFAD`, `$CFC9`, `$CFCE`, `$CFD3`) | write to `$0200` | write to the page in use |
 | enemy spawn (`$D763`) and enemy loop (bank 14 `$9283`) | | an enemy of the stage list that spawns in a margin is dormant: drawn, but its behaviour is skipped until it comes onto the original screen; it then wakes for good (margins included). A dormant enemy is still removed outside `[LO, HI)` |
 | cloud devil palette marker (bank 14 `$AF9D`, in place of `JSR $AF4C`) | an object of type `$42`/`$43` resets the palette of the heads of type `$40`/`$41` (2 or 3) to the first step of their fade-in (sky) when it reaches the screen | resets it only when no head of that type is alive (slots `$10`-`$1F`, `$0420` bit 7); otherwise the head before, still in the left margin, keeps its colours and the next one shows at once (the game skips the fade-in of a head whose palette is in colour, `$AE61`) |
+| an enemy's touch (`$E596`: `LDA $4B` / `BNE` / `SEC` becomes `JSR wide_touch` / `BNE $E5CC`) | no damage while the hit timer `$4B` runs | nor when the option "Invincible" is on (`$500A` bit 1) |
+| Mega Man's damage (bank 11 `$A564`: `LDA $4B` / `BNE` / `LDY $B3` becomes `JSR wide_hurt` / `BNE $A59C` / `NOP`) | no damage while the hit timer `$4B` runs | nor when the option "Invincible" is on (`$500A` bit 1, off by default, a testing aid) |
+| spikes (bank 14 `$8A5E` and `$8CC2`: `LDA #0` / `STA $2C` / `JMP $C10B` becomes `JSR wide_spike` / `JMP $8A65` (or `$8CC9`) / `NOP`) | a spike tile kills Mega Man unless the hit timer runs | invincible, the game goes on to its next test, A kept; falling off the screen still kills |
 
 `LO = max(-M, section start - camera)`, `HI = min(256 + M, section end - camera)`; M is the margin,
 0 for slots below `$10` (Mega Man's shots keep the original limits). The game's collisions compare
@@ -149,7 +152,8 @@ WIDE_LEFT       = $5004         ; W: background extents (the decoder draws the m
 WIDE_RIGHT      = $5005
 WIDE_OVERCLOCK  = $5006         ; W: extra CPU time each frame, in scanlines
 WIDE_LAYOUT     = $5007         ; W: bit 1, sprites free of the background extents
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on (bit 0: enemies in the margins)
+WIDE_OPTIONS    = $500A         ; R: the options the player turned on (bit 0: enemies in the margins,
+                                ; bit 1: invincible)
 WIDE_SPRHI      = $5100         ; W: high byte of the x of sprite n at $5100 + 4n
 EXTRA_OAM       = $5300         ; the second sprite page ($5007 bit 2), OAM format
 EXTRA_SPRHI     = $5400         ; high byte of the x of its sprite n at $5400 + 4n
@@ -188,6 +192,7 @@ KILL            = $EF8C         ; removes object X (and lets its enemy spawn aga
 NEXT_ENEMY      = $9299         ; bank 14: the enemy loop's next slot
 TIKKI_PALETTE   = $AF4C         ; bank 14: writes step Y/4 of a cloud devil's fade-in to palette X
 LAST_SLOT       = $1F           ; the last enemy slot
+DEATH           = $C10B         ; Mega Man dies ($2C: how)
 STAGE_ENEMY_TYPE = $B900        ; stage bank: the type of each entry of the enemy list
 FIRST_ENEMY     = $10
 
@@ -732,6 +737,40 @@ wide_tikki_reset:
 @kept:
     RTS
 
+; ---------------------------------------------------------------------------- ;
+; Invincibility (option bit 1, a testing aid): Mega Man takes no damage and spikes do not kill him.
+; Falling off the bottom of the screen still does.
+
+; Bank 11, $A564, in place of LDA $4B / BNE no_damage / LDY $B3 (then BNE no_damage, $A567):
+; Z clear when the hit does nothing (the hit timer $4B running, or invincible), Y = $B3.
+wide_hurt:
+    LDY      $B3
+; An enemy's touch ($E596, in place of LDA $4B / BNE no_damage / SEC, then BNE no_damage): the
+; same test, C set.
+wide_touch:
+    LDA      WIDE_OPTIONS
+    AND      #$02
+    ORA      $4B
+    SEC
+    RTS
+
+; Bank 14, $8A5E and $8CC2, in place of LDA #$00 / STA $2C / JMP DEATH (then JMP past it): a spike
+; tile met with the hit timer off. Invincible, back to the caller's next test, A kept.
+wide_spike:
+    PHA
+    LDA      WIDE_OPTIONS
+    AND      #$02
+    BEQ      @die
+    PLA
+    RTS
+@die:
+    PLA
+    PLA                                 ; not back to the hook
+    PLA
+    LDA      #$00
+    STA      $2C
+    JMP      DEATH
+
 wide_end:
 .assert wide_end <= $F900, error, "widescreen code past $F8FF"
 ```
@@ -779,7 +818,7 @@ def branch(opcode, at, target):
     return bytes([opcode, offset & 0xFF])
 
 
-BCS, BCC, BEQ = 0xB0, 0x90, 0xF0
+BCS, BCC, BEQ, BNE = 0xB0, 0x90, 0xF0, 0xD0
 NOP = 0xEA
 
 
@@ -824,6 +863,13 @@ def hooks(sym):
     banked.append((14, 0x9283, bytes.fromhex('bc 00 04'), jsr(sym['wide_wake'])))
     # Cloud devils: a marker resets its palette only once no head of its type is alive.
     banked.append((14, 0xAF9D, bytes.fromhex('20 4c af'), jsr(sym['wide_tikki_reset'])))
+    # Invincibility: an enemy's touch, other damage (bank 11) and spikes (bank 14).
+    put(0xE596, 'a5 4b d0 32 38', jsr(sym['wide_touch']) + branch(BNE, 0xE599, 0xE5CC))
+    banked.append((11, 0xA564, bytes.fromhex('a5 4b d0 34 a4 b3'),
+                   jsr(sym['wide_hurt']) + branch(BNE, 0xA567, 0xA59C) + bytes([NOP])))
+    for spike, past in ((0x8A5E, 0x8A65), (0x8CC2, 0x8CC9)):
+        banked.append((14, spike, bytes.fromhex('a9 00 85 2c 4c 0b c1'),
+                       jsr(sym['wide_spike']) + jmp(past) + bytes([NOP])))
     # Sprite pages: both hidden, the loop of one object, the energy bars' writes.
     put(0xCC6C, 'a9 f8 a2 00 9d 00 02 e8 d0 fa 60', jmp(sym['wide_clear_oam']))
     put(0xCE9A, 'a6 06 a4 07', jmp(sym['wide_draw_loop']))
