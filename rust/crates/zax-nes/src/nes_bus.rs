@@ -334,6 +334,11 @@ impl NesBus {
                 return value;
             }
         }
+        if (0x6000..0x8000).contains(&address) {
+            if let Some(value) = self.wide_window_read(address) {
+                return value;
+            }
+        }
 
         self.cartridge
             .as_mut()
@@ -458,6 +463,11 @@ impl CpuBus for NesBus {
                 return value;
             }
             if let Some(value) = self.ppu.wide().read(address) {
+                return value;
+            }
+        }
+        if (0x6000..0x8000).contains(&address) {
+            if let Some(value) = self.wide_window_read(address) {
                 return value;
             }
         }

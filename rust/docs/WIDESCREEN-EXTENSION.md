@@ -394,6 +394,8 @@ pub struct BuiltinPatch {
   on too), and the options of an advanced patch only while it is on. A state is "the hack" or not
   as for any patch; loading one made in the other mode switches the advanced mode (the widescreen
   stays on).
+* `$5007` bit 4: the PRG window goes on over `$6000-$7FFF`, 10 KiB from `$5800`, for a game
+  with nothing there (no PRG-RAM; the cartridge never sees those reads). A boot window sets it.
 * `BuiltinPatch::boot_window`: `(bank, page)` of the extension's PRG window, opened at power-on
   and reset with the extension unlocked (`WideExtension::boot`), and again after a restore that
   left it locked: for a ROM with no room for the code that would unlock it, whose reset or NMI then
