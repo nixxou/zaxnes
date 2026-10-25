@@ -61,6 +61,8 @@ pub struct RomRequest<'a> {
     pub png_nes: Option<&'a Path>,
     /// State block restored after the reset.
     pub load_state: Option<&'a Path>,
+    /// The movie played after the reset.
+    pub movie: Option<&'a Path>,
     /// Where to write the state block after the run.
     pub save_state: Option<&'a Path>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -93,13 +95,21 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
             .try_load_state(&fs::read(path)?, 0)
             .map_err(|error| HarnessError::Rom(error.message))?;
     }
+    let movie = request
+        .movie
+        .map(|path| start_movie(&mut host, path))
+        .transpose()?;
     let frames = request.frames.max(1);
     let mut records = Vec::new();
     for counter in 0..frames {
         for &(_, address, value) in request.pokes.iter().filter(|poke| poke.0 == counter) {
             host.core.write_memory(address, value);
         }
-        host.run_frame(counter, request.input.at(counter), &mut records, &mut scene)?;
+        let input = movie
+            .as_ref()
+            .and_then(|movie| movie.inputs.get(counter as usize).copied())
+            .unwrap_or_else(|| request.input.at(counter));
+        host.run_frame(counter, input, &mut records, &mut scene)?;
     }
 
     host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_end);
@@ -160,6 +170,34 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
 }
 
 /// The outputs of `--save-state`, `--dump-mem` and `--png-nes`, written after the run.
+/// Reads the movie `path`, restores its start state and hack options, and prints its notes.
+fn start_movie(host: &mut Host, path: &Path) -> Result<zax_nes::movie::Movie, HarnessError> {
+    let movie = zax_nes::movie::Movie::read(&fs::read(path)?)
+        .ok_or_else(|| HarnessError::Rom(format!("{}: not a movie file", path.display())))?;
+    host.core
+        .try_load_state(&movie.start_state, 0)
+        .map_err(|error| HarnessError::Rom(error.message))?;
+    let options = serde_json::from_str::<serde_json::Value>(&movie.header)
+        .ok()
+        .and_then(|header| header.get("hackOptions")?.as_u64());
+    if let Some(options) = options.and_then(|options| u8::try_from(options).ok()) {
+        host.core.set_hack_options(options);
+    }
+    println!(
+        "render: movie of {} frames, {}",
+        movie.inputs.len(),
+        movie.header
+    );
+    for note in &movie.annotations {
+        let abandoned = if note.abandoned { " (abandoned)" } else { "" };
+        println!(
+            "render: note at frame {}{abandoned}: {}",
+            note.frame, note.text
+        );
+    }
+    Ok(movie)
+}
+
 fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), HarnessError> {
     if let Some(path) = request.save_state {
         let state = host

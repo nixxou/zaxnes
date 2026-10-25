@@ -159,6 +159,24 @@ pub fn slot_other_patch() -> String {
     strings::get(keys::SLOT_OTHER_PATCH)
 }
 
+/// The submenu of the movies to play.
+#[must_use]
+pub fn movies() -> String {
+    strings::get(keys::MENU_MOVIES)
+}
+
+/// The title of the window that asks for a note on the frame on screen.
+#[must_use]
+pub fn movie_note_title() -> String {
+    strings::get(keys::WINDOW_MOVIE_NOTE)
+}
+
+/// Its button that writes the note.
+#[must_use]
+pub fn movie_note_write() -> String {
+    strings::get(keys::MOVIE_NOTE_WRITE)
+}
+
 /// The submenu of the options of the game's built-in patch.
 #[must_use]
 pub fn hack_options() -> String {

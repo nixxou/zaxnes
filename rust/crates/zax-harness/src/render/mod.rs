@@ -58,6 +58,10 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            as the widescreen margin makes them
   --load-state <file>      restore a state block (written by --save-state) after the reset
+  --movie <file.zmv>       play a movie of the application: its start state is restored, its
+                           hack options set and its inputs replace --press for its frames
+                           (counted from its start, as --run, --poke and --press count them);
+                           its notes are printed
   --save-state <file>      write the state block of the machine after the run
   --dump-mem <file>        write CPU $0000-$07FF, $6000-$7FFF, then $5000-$5FFF (14 KiB)
                            after the run
@@ -131,6 +135,8 @@ pub struct Options {
     pub png_nes: Option<PathBuf>,
     /// State block restored after the reset.
     pub load_state: Option<PathBuf>,
+    /// The movie to play.
+    pub movie: Option<PathBuf>,
     /// Where to write the state block after the run.
     pub save_state: Option<PathBuf>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -200,6 +206,7 @@ impl Options {
             builtin_patches: true,
             png_nes: None,
             load_state: None,
+            movie: None,
             save_state: None,
             dump_mem: None,
             profile: None,
@@ -294,6 +301,7 @@ impl Options {
             "--widescreen-y" => self.widescreen_y = integer(value)?,
             "--png-nes" => self.png_nes = Some(PathBuf::from(value)),
             "--load-state" => self.load_state = Some(PathBuf::from(value)),
+            "--movie" => self.movie = Some(PathBuf::from(value)),
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
             "--profile" => self.profile = Some(value.to_owned()),
@@ -562,6 +570,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             builtin_patches: options.builtin_patches,
             png_nes: options.png_nes.as_deref(),
             load_state: options.load_state.as_deref(),
+            movie: options.movie.as_deref(),
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
         })?]);

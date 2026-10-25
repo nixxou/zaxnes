@@ -22,6 +22,7 @@ use zax_engine3d::error::EngineError;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
+use zax_nes::movie::{Movie, MovieRun};
 use zax_nes::rom::RomLoadResult;
 use zax_nes::{ControllerPortType, FrameBatch, NesBus, NesCore, TileRecord, ZapperPosition};
 use zax_profiles::profile::GameProfile;
@@ -248,6 +249,8 @@ pub struct GameSession {
     /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
     /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
     strict_wide_edges: bool,
+    /// The movie being recorded or played (see `zax_nes::movie`).
+    movie: Option<MovieRun>,
 }
 
 /// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
@@ -372,6 +375,7 @@ impl GameSession {
             aimed: None,
             batch_records: Vec::new(),
             strict_wide_edges: false,
+            movie: None,
             pipeline: FramePipeline::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
@@ -725,6 +729,46 @@ impl GameSession {
         restored
     }
 
+    /// Starts recording a movie from the current state (the core is home).
+    ///
+    /// # Errors
+    /// No ROM loaded.
+    pub fn start_movie_recording(&mut self) -> Result<(), String> {
+        let state = self
+            .core
+            .save_state(true)
+            .map_err(|error| error.to_string())?;
+        self.movie = Some(MovieRun::record(self.core.frame_count(), state));
+        Ok(())
+    }
+
+    /// Loads the start state of `movie` and plays it from there.
+    ///
+    /// # Errors
+    /// The start state does not load.
+    pub fn start_movie_playback(&mut self, movie: Movie) -> Result<(), String> {
+        self.restore_core(&movie.start_state)?;
+        self.movie = Some(MovieRun::play(self.core.frame_count(), movie));
+        Ok(())
+    }
+
+    /// Ends the movie being recorded or played, and gives it.
+    pub fn stop_movie(&mut self) -> Option<Movie> {
+        self.movie.take().map(MovieRun::into_movie)
+    }
+
+    /// The movie being recorded or played.
+    #[must_use]
+    pub const fn movie(&self) -> Option<&MovieRun> {
+        self.movie.as_ref()
+    }
+
+    /// Writes `text` on the frame on screen of the movie; returns that frame.
+    pub fn annotate_movie(&mut self, text: &str) -> Option<u32> {
+        let frame_count = self.core.frame_count();
+        self.movie.as_mut()?.annotate(frame_count, text)
+    }
+
     /// Runs the `Start` hooks, once.
     pub fn start(&mut self, model: &mut SettingsModel, scene: &mut SceneState) {
         if self.started {
@@ -1004,13 +1048,17 @@ impl GameSession {
                 .set_zapper_position_source(Some(Box::new(move |_| zapper_position)));
         }
         // REQ-INP-004: a Zapper port carries the Zapper byte and no controller button at all.
-        routing::core_word(
+        let word = routing::core_word(
             first,
             second,
             self.core.port_type(0).unwrap_or_default(),
             self.core.port_type(1).unwrap_or_default(),
             zapper_byte,
-        )
+        );
+        let frame_count = self.core.frame_count();
+        self.movie
+            .as_mut()
+            .map_or(word, |movie| movie.input(frame_count, word))
     }
 
     /// The tile capture, the conversion and the frame hooks of the frame the core just ran (the
