@@ -216,6 +216,18 @@ impl WideExtension {
         )
     }
 
+    /// The range of screen x a sprite may start at and still show: [`WideExtension::visible_range`],
+    /// or the whole ROM margin when the ROM asked for sprites free of the background extents
+    /// (`$5007` bit 1: a margin decoder draws the background).
+    #[must_use]
+    pub fn sprite_range(&self) -> (i32, i32) {
+        if self.layout & 2 != 0 {
+            let margin = self.rom_margin();
+            return (-margin, 256 + margin);
+        }
+        self.visible_range()
+    }
+
     /// The screen x of OAM sprite `sprite` (0..64) whose OAM x byte is `low`.
     #[must_use]
     pub fn sprite_x(&self, sprite: usize, low: u8) -> i32 {

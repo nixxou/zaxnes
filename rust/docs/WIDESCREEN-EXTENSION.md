@@ -15,8 +15,9 @@ A game takes part in one of two ways, which work together:
   the ROM.
 
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
-to the ROM it was made for. The only one today is the Zelda II (USA) widescreen hack, documented
-in [`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md).
+to the ROM it was made for: the Zelda II (USA) widescreen hack
+([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -78,7 +79,7 @@ until then.
 | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels (power-on `$FF`) |
 | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels (power-on `$FF`) |
 | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines (power-on 0) |
-| `$5007` | R/W | bit 0: four separate nametables (power-on 0) |
+| `$5007` | R/W | bit 0: four separate nametables; bit 1: sprites free of the extents (power-on 0) |
 | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
@@ -94,7 +95,10 @@ Details:
 * **Extents.** `$5004` and `$5005` are read each time a background band is captured: a game
   writes them during the frame to hide the sides behind a status bar or past the end of a level.
   A tile is kept when any of its pixels falls in
-  `[-min(rom_margin, $5004), 256 + min(rom_margin, $5005))` (`visible_range()`).
+  `[-min(rom_margin, $5004), 256 + min(rom_margin, $5005))` (`visible_range()`). With `$5007`
+  bit 1 the extents apply to the background only: sprites show across the whole ROM margin
+  (`sprite_range()`), for a game whose margins a decoder draws while the ROM hides the
+  nametable columns (extents 0).
 * **Sprites.** The x of sprite *n* is the signed 16-bit value `high:OAM x`, `high` being the byte
   last written to `$5100 + 4n` (any of its four addresses) **before the OAM DMA** that copied the
   page (`latch_sprites()`, called by the bus after each `$4014` write). Each DMA takes the bytes
@@ -228,7 +232,7 @@ Decoders run only while the built-in patches are on (`emu.builtin_patches`). The
 | Game | Decodes | Source |
 |---|---|---|
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
-| Mega Man 2 (USA), no patch (data CRC-32 `0FCFC04D`) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
+| Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns

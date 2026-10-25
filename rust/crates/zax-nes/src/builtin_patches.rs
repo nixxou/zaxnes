@@ -8,6 +8,7 @@
 //! | ROM | Patch | Source |
 //! |---|---|---|
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
+//! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -27,13 +28,24 @@ pub struct BuiltinPatch {
 /// Name of the Zelda II (USA) widescreen patch.
 pub const ZELDA2_USA: &str = "Zelda II (USA) widescreen";
 
+/// Name of the Mega Man 2 (USA) widescreen patch.
+pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
+
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 1] = [BuiltinPatch {
-    name: ZELDA2_USA,
-    source_crc: 0xBA32_2865,
-    bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
-    after_other_way_state: Some(zelda2_after_other_way_state),
-}];
+pub const PATCHES: [BuiltinPatch; 2] = [
+    BuiltinPatch {
+        name: ZELDA2_USA,
+        source_crc: 0xBA32_2865,
+        bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
+        after_other_way_state: Some(zelda2_after_other_way_state),
+    },
+    BuiltinPatch {
+        name: MEGAMAN2_USA,
+        source_crc: 0x0FCF_C04D,
+        bps: include_bytes!("../patches/megaman2-usa-widescreen.bps"),
+        after_other_way_state: None,
+    },
+];
 
 /// Zelda II: the world map is laid out in four nametables by the hack and in two by the game, and
 /// only redrawn when it is entered; a map state made the other way goes back through
