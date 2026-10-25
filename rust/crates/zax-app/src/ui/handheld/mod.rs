@@ -93,6 +93,8 @@ pub struct HandheldUi {
     camera_memory: CameraMemory,
     /// How long Y has been held in game, while it is, and whether the hold already acted.
     flat_view: Option<(f32, bool)>,
+    /// Where the head-on 2D picture of a held Y stands.
+    head_on: HeadOn,
     states: StatesModel,
     /// The slot and the save time of the thumbnail shown, and whether it has one.
     shown_picture: Option<(i32, i64, bool)>,
@@ -112,6 +114,17 @@ struct CameraMemory {
     kept: bool,
     /// The kept angles and distance.
     saved: Option<(Vector3, f32)>,
+}
+
+/// The head-on 2D picture a held Y asks for: it waits for the 2D mode to show, then stays until
+/// the game leaves the 2D mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeadOn {
+    Off,
+    /// Asked for, the switch to 2D not done yet.
+    Waiting,
+    /// Shown.
+    Shown,
 }
 
 /// How long L2 is held to keep the camera, and Y to see the game in 2D from the front.
@@ -138,6 +151,7 @@ impl HandheldUi {
             effects: Vec::new(),
             camera_memory: CameraMemory::default(),
             flat_view: None,
+            head_on: HeadOn::Off,
             states: StatesModel::new(StatesMode::Save, 1),
             shown_picture: None,
             pictures: Vec::new(),
@@ -246,8 +260,10 @@ impl HandheldUi {
     }
 
     /// Y in game (owner request): a short press switches between 2D and 3D; a hold shows the game
-    /// in 2D seen from the front, as on a television (default view).
+    /// in 2D seen head on, its picture filling the height of the view, as on a television. The
+    /// camera is left alone: back in 3D, it has the angle and the zoom it had.
     fn update_flat_view(&mut self, pad: &PadState, seconds: f32, host: &mut AppHost) {
+        self.follow_head_on(host);
         if self.screen != Screen::InGame {
             self.flat_view = None;
             return;
@@ -260,12 +276,27 @@ impl HandheldUi {
                 if !host.showing_two_dimensional() {
                     host.enqueue(Command::ToggleTwoDimensional, CommandArgs::default());
                 }
-                host.enqueue(Command::ResetView, CommandArgs::default());
+                self.head_on = HeadOn::Waiting;
+                self.follow_head_on(host);
             }
         } else if let Some((_, acted)) = self.flat_view.take() {
             if !acted {
                 host.enqueue(Command::ToggleTwoDimensional, CommandArgs::default());
             }
+        }
+    }
+
+    /// The head-on picture shows once the game is in 2D, and goes when it leaves it.
+    fn follow_head_on(&mut self, host: &mut AppHost) {
+        let two_dimensional = host.showing_two_dimensional();
+        self.head_on = match (self.head_on, two_dimensional) {
+            (HeadOn::Waiting | HeadOn::Shown, true) => HeadOn::Shown,
+            (HeadOn::Shown, false) | (HeadOn::Off, _) => HeadOn::Off,
+            (HeadOn::Waiting, false) => HeadOn::Waiting,
+        };
+        let shown = self.head_on == HeadOn::Shown;
+        if host.scene().picture_head_on != shown {
+            host.scene_mut().picture_head_on = shown;
         }
     }
 

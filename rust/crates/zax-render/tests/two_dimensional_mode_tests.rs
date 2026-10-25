@@ -160,6 +160,41 @@ fn amd_009_a_picture_of_the_wrong_size_falls_back_to_the_tile_list() {
     assert!(renderer.statistics().opaque_tiles > 1);
 }
 
+/// The head-on picture (Rust-only): the first row the game shows (row 8, under the default
+/// margins) meets the top of the view and row 239 its bottom, where the camera's own view
+/// shows neither.
+#[test]
+fn the_picture_seen_head_on_fills_the_height_of_the_view() {
+    let gl = GlFixture::create(320, 300);
+    let mut renderer = gl.renderer();
+    // White rows at the top, hidden ones included, red ones at the bottom, black between.
+    let mut picture = picture(0x0F);
+    picture[..12 * WIDTH].fill(0x30);
+    picture[(HEIGHT - 4) * WIDTH..].fill(0x16);
+    let white = |(r, g, b): (i32, i32, i32)| r > 150 && g > 150 && b > 150;
+    let red = |(r, g, b): (i32, i32, i32)| r > 100 && g < 80 && b < 80;
+
+    let mut head_on = scene();
+    head_on.picture_head_on = true;
+    let capture = gl.render(&mut renderer, &head_on, &frame(&picture));
+    let (middle, last) = (capture.width / 2, capture.height - 1);
+    assert!(white(capture.at(middle, 0)), "{:?}", capture.at(middle, 0));
+    assert!(
+        red(capture.at(middle, last)),
+        "{:?}",
+        capture.at(middle, last)
+    );
+
+    head_on.picture_head_on = false;
+    let capture = gl.render(&mut renderer, &head_on, &frame(&picture));
+    assert!(!white(capture.at(middle, 0)), "{:?}", capture.at(middle, 0));
+    assert!(
+        !red(capture.at(middle, last)),
+        "{:?}",
+        capture.at(middle, last)
+    );
+}
+
 fn scene() -> SceneState {
     let mut scene = SceneState {
         game_running: true,

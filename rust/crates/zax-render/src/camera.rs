@@ -283,6 +283,31 @@ impl SceneCamera {
         self.current_mut().set_distance(distance);
     }
 
+    /// The head-on view of the 2D picture (Rust-only, owner request: the "2D from the front" of
+    /// the handheld): straight ahead, the rows of the picture that `clipping` leaves visible
+    /// (REQ-SCN-036) filling the height of a view of `aspect`. `clipping` is the game's, without
+    /// the widescreen margins, which stay out of sight above and below. It ignores the setpoints,
+    /// which a script may move, and leaves them alone for the return to 3D.
+    #[must_use]
+    pub fn picture_view(&self, clipping: Vec4F, aspect: f32) -> CameraView {
+        let mut flat = self.clone();
+        // The subjective view looks exactly along its axis, with no aimed point (REQ-SCN-010).
+        flat.mode = CameraMode::Fpv;
+        flat.local_camera = false;
+        flat.angles = Vector3::ZERO;
+        // NES row 0 lies at y = 247..248 and row 239 at 8..9 (REQ-E3D-410); the visible
+        // rectangle cuts the picture in the same scene coordinates.
+        let rect = VisibleRect::from_clipping(clipping);
+        let top = rect.max_y.min(geometry::SCENE_HEIGHT);
+        let bottom = rect
+            .min_y
+            .max(geometry::SCENE_HEIGHT - geometry::FRAME_HEIGHT);
+        flat.target = Vector3::new(rect.center().x, f32::midpoint(top, bottom), 0.0);
+        let half_angle = self.fov * std::f32::consts::PI / 180.0 / 2.0;
+        flat.distance = (top - bottom).max(1.0) / 2.0 / half_angle.tan();
+        flat.build_view(Vec4F::new(0.0, 0.0, 0.0, 0.0), aspect)
+    }
+
     /// Ends a game (REQ-SCN-013): back to TPV, smoothing time back to 0.4 s, then a view reset.
     /// The speed setting is the host's business (SPEC-07).
     pub fn end_game(&mut self) {

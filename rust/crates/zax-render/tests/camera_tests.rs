@@ -29,6 +29,57 @@ fn steady(clipping: Vec4F) -> CameraView {
     camera.build_view(clipping, 16.0 / 9.0)
 }
 
+/// Where the scene point `(x, y, 0)` lands in normalized device coordinates.
+fn projected(view: &CameraView, x: f32, y: f32) -> (f32, f32) {
+    let m = view.view_projection();
+    let clip_x = (x * m.m11) + (y * m.m21) + m.m41;
+    let clip_y = (x * m.m12) + (y * m.m22) + m.m42;
+    let clip_w = (x * m.m14) + (y * m.m24) + m.m44;
+    (clip_x / clip_w, clip_y / clip_w)
+}
+
+#[test]
+fn the_picture_seen_head_on_fills_the_height_of_the_view() {
+    // Field of view, aspect, margins, then the visible rectangle: centre x, top y, bottom y.
+    let cases = [
+        (
+            70.0,
+            4.0 / 3.0,
+            Vec4F::new(0.0, 0.0, 0.0, 0.0),
+            128.0,
+            240.0,
+            8.0,
+        ),
+        (45.0, 16.0 / 9.0, DEFAULT_CLIPPING, 124.0, 239.9, 8.1),
+        (
+            95.0,
+            1.5,
+            Vec4F::new(8.0, 16.0, 8.0, 24.0),
+            128.0,
+            216.0,
+            16.0,
+        ),
+    ];
+    for (fov, aspect, clipping, centre, top_y, bottom_y) in cases {
+        let mut camera = SceneCamera::new();
+        camera.set_fov(fov);
+        // Whatever the camera does, and it keeps it.
+        camera.current_mut().angles = Vector3::new(20.0, -35.0, 5.0);
+        camera.snap_to_setpoints();
+        let before = camera.clone();
+        let view = camera.picture_view(clipping, aspect);
+        assert_eq!(before, camera);
+        // The first visible row at the top edge, the last at the bottom one, centred.
+        let (_, top) = projected(&view, centre, top_y);
+        let (_, bottom) = projected(&view, centre, bottom_y);
+        let (centre_x, centre_y) = projected(&view, centre, f32::midpoint(top_y, bottom_y));
+        close(1.0, top, 0.0001);
+        close(-1.0, bottom, 0.0001);
+        close(0.0, centre_x, 0.0001);
+        close(0.0, centre_y, 0.0001);
+    }
+}
+
 #[allow(clippy::cast_possible_truncation)] // The C# (int) conversion of a small count.
 fn advance(camera: &mut SceneCamera, seconds: f32) {
     let steps = (seconds * 600.0).round_ties_even() as i32;
