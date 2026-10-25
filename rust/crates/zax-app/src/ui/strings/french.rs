@@ -32,6 +32,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::MENU_MOVIES, "Lire un film"),
     (keys::WINDOW_MOVIE_NOTE, "Note sur cette frame"),
     (keys::MOVIE_NOTE_WRITE, "Écrire"),
+    (keys::WINDOW_ROMS_FOLDER, "Dossier des ROM du mode console"),
+    (keys::BUTTON_BROWSE, "Parcourir…"),
+    (keys::ROMS_FOLDER_HINT, "Les jeux que liste le mode console. Vide : {0}"),
     (keys::SLOT_QUICK, "État rapide"),
     (keys::SLOT_PREFIX, "Emplacement"),
     // ----------------------------------------------------- window titles
@@ -242,6 +245,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.input.emulated_menu_button", "Menu = Select + Start"),
     ("setting.ui.fullscreen", "Plein écran"),
     ("setting.ui.profiler", "Mesures de performance (journal)"),
+    ("setting.ui.roms_folder", "Dossier des ROM"),
     ("setting.ui.show_fps", "Afficher les FPS"),
     ("setting.ui.sort_option", "Tri de la bibliothèque"),
     ("setting.ui.language", "Langue"),

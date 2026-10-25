@@ -787,6 +787,14 @@ impl HandheldUi {
         &self.roms_directory
     }
 
+    /// Shows the ROMs of `directory` from now on (the ROM folder of the options changed).
+    pub fn set_roms_directory(&mut self, host: &AppHost, directory: PathBuf) {
+        if directory != self.roms_directory {
+            self.roms_directory = directory;
+            self.refresh_roms(host);
+        }
+    }
+
     /// Puts the interface on `screen` with what it needs to be photographed (`--ui-shots`).
     pub fn arrange_for_capture(&mut self, screen: Screen) {
         if self.roms.entries().is_empty() {

@@ -4,7 +4,7 @@ use imgui::{ColorEditFlags, Condition, TabItem, TabItemFlags, Ui, WindowFlags};
 use zax_settings::meta::{SettingEffect, SettingKind};
 use zax_settings::values::{Color, SettingValue};
 
-use super::{centre, play, ZaxUi};
+use super::{centre, play, BrowserPurpose, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
 use crate::persistence::app_settings::AppSettings as _;
@@ -47,13 +47,48 @@ impl ZaxUi {
                         play(host, UiSound::Confirm);
                     }
                     ui.separator();
-                    for row in self.options.rows(tab) {
-                        draw_row(ui, host, row);
+                    for row in self.options.rows(tab).to_vec() {
+                        if options::is_folder(&row) {
+                            self.draw_folder_row(ui, host, &row);
+                        } else {
+                            draw_row(ui, host, &row);
+                        }
                     }
                 }
             }
         }
         self.state.options = open;
+    }
+
+    /// A folder setting: a field written on Enter or when it loses the focus, and a button
+    /// that picks the folder (Rust-only, the ROM folder of the console mode).
+    fn draw_folder_row(&mut self, ui: &Ui, host: &mut AppHost, row: &OptionsRow) {
+        let id = row.descriptor.id();
+        let _id = ui.push_id(row.descriptor.key());
+        let stored = host.settings().get(id).as_text().to_owned();
+        if !self.folder_editing {
+            self.folder_text.clone_from(&stored);
+        }
+        let default = host.paths().root.join("roms").display().to_string();
+        let width = ui.push_item_width(-ui.calc_text_size(text::browse())[0] - 140.0);
+        let entered = ui
+            .input_text(row.label(), &mut self.folder_text)
+            .hint(&default)
+            .enter_returns_true(true)
+            .build();
+        drop(width);
+        self.folder_editing = ui.is_item_active();
+        let left = ui.is_item_deactivated_after_edit();
+        if (entered || left) && self.folder_text.trim() != stored {
+            let value = self.folder_text.trim().to_owned();
+            host.update_settings(|model| model.set(id, value.as_str()));
+            play(host, UiSound::Confirm);
+        }
+        ui.same_line();
+        if ui.button(text::browse()) {
+            self.open_browser(host, BrowserPurpose::RomsFolder);
+        }
+        ui.text_disabled(text::roms_folder_hint(&default));
     }
 }
 

@@ -171,6 +171,24 @@ pub fn movie_note_title() -> String {
     strings::get(keys::WINDOW_MOVIE_NOTE)
 }
 
+/// Title of the dialog that picks the ROM folder of the console mode.
+#[must_use]
+pub fn roms_folder_title() -> String {
+    strings::get(keys::WINDOW_ROMS_FOLDER)
+}
+
+/// The button that picks a folder.
+#[must_use]
+pub fn browse() -> String {
+    strings::get(keys::BUTTON_BROWSE)
+}
+
+/// What the ROM folder row says, with the folder used when it is empty.
+#[must_use]
+pub fn roms_folder_hint(default: &str) -> String {
+    strings::get(keys::ROMS_FOLDER_HINT).replace("{0}", default)
+}
+
 /// Its button that writes the note.
 #[must_use]
 pub fn movie_note_write() -> String {

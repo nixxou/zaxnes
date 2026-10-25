@@ -25,6 +25,7 @@ use crate::app_options::AppOptions;
 use crate::application::AppHost;
 use crate::emulation::host::HostEvent;
 use crate::input::{DesktopInputSource, InputBindings};
+use zax_settings::catalogue::SettingId;
 
 /// The window sizes of one frame: the window's own and the drawable's.
 #[derive(Debug, Clone, Copy)]
@@ -86,6 +87,10 @@ pub struct ImguiFrontend {
     keyboard_pad: KeyboardPad,
     /// The changes of the interface's pictures not handed to the renderer yet.
     pictures: Vec<PictureUpdate>,
+    /// The ROM folder of the command line (`--roms`), which wins over the options.
+    roms_option: Option<String>,
+    /// The ROM folder of the options the ROM list was last given.
+    roms_setting: String,
 }
 
 impl ImguiFrontend {
@@ -147,8 +152,9 @@ impl ImguiFrontend {
         fonts.remap_missing_glyphs(context.fonts());
         let mut ui = ZaxUi::new(host);
         ui.set_heading_font(fonts.heading);
+        let roms_option = options.roms_directory.clone();
         let handheld = if options.handheld {
-            let directory = roms_directory(host, options);
+            let directory = roms_directory(host, roms_option.as_deref());
             if let Err(error) = std::fs::create_dir_all(&directory) {
                 ui.log(format!(
                     "the ROM folder '{}' could not be created: {error}",
@@ -160,7 +166,7 @@ impl ImguiFrontend {
             Some(handheld)
         } else {
             console.map(|(metrics, (body, heading))| {
-                let directory = roms_directory(host, options);
+                let directory = roms_directory(host, roms_option.as_deref());
                 let mut handheld = HandheldUi::new(host, directory, console_height(height));
                 handheld.set_heading_font(heading);
                 handheld.use_on_desktop(metrics, Some(body));
@@ -193,16 +199,15 @@ impl ImguiFrontend {
             context,
             renderer,
             platform,
+            console: console_at_start(options, handheld.is_some()),
             ui,
             handheld,
             device: options.handheld,
-            console: ConsoleMode {
-                active: options.console,
-                automatic: false,
-            },
             shots,
             keyboard_pad: KeyboardPad::new(),
             pictures: Vec::new(),
+            roms_option,
+            roms_setting: roms_setting(host),
         })
     }
 
@@ -263,6 +268,19 @@ impl ImguiFrontend {
             self.keyboard_pad.release(self.platform.pad_mut());
         }
         self.console = ConsoleMode { active, automatic };
+    }
+
+    /// Gives the ROM list the ROM folder of the options when it changed.
+    fn follow_roms_folder(&mut self, host: &AppHost) {
+        let setting = roms_setting(host);
+        if setting == self.roms_setting {
+            return;
+        }
+        self.roms_setting = setting;
+        let directory = roms_directory(host, self.roms_option.as_deref());
+        if let Some(handheld) = &mut self.handheld {
+            handheld.set_roms_directory(host, directory);
+        }
     }
 
     /// Carries out what a shortcut, a binding or a menu entry asked of the console mode.
@@ -402,6 +420,7 @@ impl ImguiFrontend {
         );
         // A menu entry clicked last frame.
         self.follow_console_request(frame.host);
+        self.follow_roms_folder(frame.host);
         let shown = self.console_shown();
         let device = self.device;
         let desktop_modal = self.ui.state.is_modal();
@@ -495,11 +514,81 @@ impl ImguiFrontend {
     }
 }
 
-/// The folder the handheld ROM list reads: `--roms`, or the `roms` folder of the user data.
-fn roms_directory(host: &AppHost, options: &AppOptions) -> PathBuf {
-    let directory = options
-        .roms_directory
-        .as_deref()
+/// The console mode the desktop starts in: without a game to start, it opens on the ROM list of
+/// its console mode, which goes by itself once a game plays (owner request); F1 or Home leaves
+/// it. `--console` keeps it on.
+fn console_at_start(options: &AppOptions, has_console: bool) -> ConsoleMode {
+    let opens_on_list = !options.handheld
+        && !options.console
+        && !options.smoke_test
+        && options.rom_path.is_none()
+        && has_console;
+    ConsoleMode {
+        active: options.console || opens_on_list,
+        automatic: opens_on_list,
+    }
+}
+
+/// The ROM folder of the options, as stored.
+fn roms_setting(host: &AppHost) -> String {
+    host.settings()
+        .get(SettingId::UiRomsFolder)
+        .as_text()
+        .to_owned()
+}
+
+/// The folder the handheld ROM list reads: `--roms`, the ROM folder of the options, or the
+/// `roms` folder of the user data.
+fn roms_directory(host: &AppHost, option: Option<&str>) -> PathBuf {
+    let setting = host.settings().get(SettingId::UiRomsFolder);
+    let directory = option
+        .or_else(|| Some(setting.as_text().trim()).filter(|folder| !folder.is_empty()))
         .map_or_else(|| host.paths().root.join("roms"), PathBuf::from);
     std::path::absolute(&directory).unwrap_or(directory)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Without a game to start, the desktop opens on the ROM list of its console mode, which
+    /// goes once a game plays; a game on the command line, a smoke run or a handheld do not.
+    #[test]
+    fn the_desktop_opens_on_the_rom_list_without_a_game() {
+        let plain = AppOptions::default();
+        let on_list = ConsoleMode {
+            active: true,
+            automatic: true,
+        };
+        assert_eq!(on_list, console_at_start(&plain, true));
+        assert_eq!(ConsoleMode::default(), console_at_start(&plain, false));
+        let with_game = AppOptions {
+            rom_path: Some("game.nes".to_owned()),
+            ..AppOptions::default()
+        };
+        assert_eq!(ConsoleMode::default(), console_at_start(&with_game, true));
+        let smoke = AppOptions {
+            smoke_test: true,
+            ..AppOptions::default()
+        };
+        assert_eq!(ConsoleMode::default(), console_at_start(&smoke, true));
+        let device = AppOptions {
+            handheld: true,
+            ..AppOptions::default()
+        };
+        assert_eq!(ConsoleMode::default(), console_at_start(&device, true));
+        // --console keeps it on, game or not.
+        let console = AppOptions {
+            console: true,
+            rom_path: Some("game.nes".to_owned()),
+            ..AppOptions::default()
+        };
+        assert_eq!(
+            ConsoleMode {
+                active: true,
+                automatic: false
+            },
+            console_at_start(&console, true)
+        );
+    }
 }

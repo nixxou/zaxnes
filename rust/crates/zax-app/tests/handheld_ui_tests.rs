@@ -448,3 +448,21 @@ fn the_state_screens_open_over_the_game_and_the_desktop_takes_the_game_back() {
     assert_eq!(Screen::InGame, handheld.screen());
     assert_eq!(EmulationState::Running, harness.host.state());
 }
+
+/// A ROM folder chosen in the options: the list shows its games from then on.
+#[test]
+fn another_rom_folder_lists_its_games() {
+    let (harness, mut handheld) = start(&[], &["Old.nes"]);
+    let other = harness.root.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("New.nes"), SyntheticRom::counter()).unwrap();
+    handheld.set_roms_directory(&harness.host, other.clone());
+    assert_eq!(other.as_path(), handheld.roms_directory());
+    let names: Vec<&str> = handheld
+        .roms()
+        .entries()
+        .iter()
+        .map(|entry| entry.name.as_str())
+        .collect();
+    assert_eq!(["New"], names.as_slice());
+}

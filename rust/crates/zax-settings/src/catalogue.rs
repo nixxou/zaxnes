@@ -159,6 +159,7 @@ setting_ids! {
     UiShowFps => "ui.show_fps",
     UiProfiler => "ui.profiler",
     UiLanguage => "ui.language",
+    UiRomsFolder => "ui.roms_folder",
 }
 
 /// Whether `key` is a stable key of the grammar of REQ-PERS-080: dot-separated segments of `a-z`,

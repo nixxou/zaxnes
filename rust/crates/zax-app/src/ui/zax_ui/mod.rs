@@ -37,6 +37,7 @@ use crate::emulation::host::HostEvent;
 use crate::emulation::rom_file::INVALID_ROM_MESSAGE;
 use crate::input::DesktopInputSource;
 use crate::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
+use zax_settings::catalogue::SettingId;
 
 /// Space between the notification and the bottom of the window.
 const NOTIFICATION_MARGIN: f32 = 48.0;
@@ -79,8 +80,17 @@ pub enum BrowserPurpose {
     Profile,
     /// A cover picture to import.
     Cover,
+    /// The ROM folder of the console mode (Rust-only).
+    RomsFolder,
     /// A 3dSen installation or bundle to import.
     ThreeDSen,
+}
+
+impl BrowserPurpose {
+    /// Whether the answer is a folder rather than a file.
+    const fn wants_folder(self) -> bool {
+        matches!(self, Self::ThreeDSen | Self::RomsFolder)
+    }
 }
 
 /// The interface.
@@ -121,6 +131,10 @@ pub struct ZaxUi {
     effects: Vec<UiEffect>,
     /// The note being typed for the frame on screen of the movie (`state.movie_note`).
     movie_note: String,
+    /// The text of the folder field of the options while it is being typed.
+    folder_text: String,
+    /// Whether the folder field has the focus (its text is then the one being typed).
+    folder_editing: bool,
 }
 
 /// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
@@ -158,6 +172,8 @@ impl ZaxUi {
             fps_text: String::from("0.0 FPS"),
             fps_countdown: 0.0,
             movie_note: String::new(),
+            folder_text: String::new(),
+            folder_editing: false,
             held_keys: Vec::new(),
             effects: Vec::new(),
         }
@@ -456,6 +472,7 @@ impl ZaxUi {
             BrowserPurpose::Cover => text::import_cover_title(),
             BrowserPurpose::ThreeDSen => text::import_three_d_sen_title(),
             BrowserPurpose::Profile => text::import_profile_title(),
+            BrowserPurpose::RomsFolder => text::roms_folder_title(),
         }
     }
 
@@ -465,6 +482,7 @@ impl ZaxUi {
             BrowserPurpose::Cover => file_browser::cover_filters(),
             BrowserPurpose::ThreeDSen => file_browser::three_d_sen_filters(),
             BrowserPurpose::Profile => file_browser::profile_filters(),
+            BrowserPurpose::RomsFolder => Vec::new(),
         }
     }
 
@@ -477,9 +495,9 @@ impl ZaxUi {
         let request = PickRequest {
             title: Self::browser_title(purpose),
             filters: Self::browser_filters(purpose),
-            start_directory: Some(host.settings().last_browse_directory()),
-            // AMD-030 §2: the 3dSen import is the one dialog that answers with a folder.
-            folder: purpose == BrowserPurpose::ThreeDSen,
+            start_directory: Some(Self::browser_start(host, purpose)),
+            // AMD-030 §2: the 3dSen import answers with a folder, and so does the ROM folder.
+            folder: purpose.wants_folder(),
         };
         if !picker.start(request) {
             return false;
@@ -497,12 +515,22 @@ impl ZaxUi {
         self.browser.open(
             &Self::browser_title(purpose),
             Self::browser_filters(purpose),
-            Some(&host.settings().last_browse_directory()),
-            // AMD-030 §2: the 3dSen import is the one dialog that answers with a folder.
-            three_d_sen,
+            Some(&Self::browser_start(host, purpose)),
+            // AMD-030 §2: the 3dSen import answers with a folder, and so does the ROM folder.
+            purpose.wants_folder(),
             three_d_sen.then_some(hint.as_str()),
         );
         self.state.file_browser = true;
+    }
+
+    /// The folder a dialog opens on: the ROM folder in force for the ROM folder, else the last
+    /// one browsed (REQ-PERS-066).
+    fn browser_start(host: &AppHost, purpose: BrowserPurpose) -> String {
+        let folder = host.settings().get(SettingId::UiRomsFolder);
+        if purpose == BrowserPurpose::RomsFolder && !folder.as_text().is_empty() {
+            return folder.as_text().to_owned();
+        }
+        host.settings().last_browse_directory()
     }
 
     fn open_profile_chooser(&mut self, rom_path: Option<&str>) {
@@ -545,6 +573,9 @@ impl ZaxUi {
             BrowserPurpose::Cover => host.enqueue(Command::ImportCover, CommandArgs::of_text(path)),
             BrowserPurpose::ThreeDSen => self.import_three_d_sen(host, path),
             BrowserPurpose::Profile => self.import_profile(host, path),
+            BrowserPurpose::RomsFolder => {
+                host.update_settings(|model| model.set(SettingId::UiRomsFolder, path));
+            }
         }
     }
 
