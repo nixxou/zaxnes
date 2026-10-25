@@ -528,3 +528,33 @@ fn the_game_options_keep_the_hacks_of_the_game() {
     tap(&mut harness, &mut handheld, PadButton::X);
     assert_eq!(vec![widescreen], harness.host.game_options(&rom));
 }
+
+/// A version of a game a widescreen hack is made for another ROM of (here by its name): a red
+/// [W] on the list, and L2 explains why the widescreen cannot be turned on instead of doing it.
+#[test]
+fn another_version_of_a_widened_game_says_why_l2_does_nothing() {
+    let (mut harness, mut handheld) =
+        start(&[], &["Zelda II - The Adventure of Link (Europe).nes"]);
+    let entry = &handheld.roms().entries()[0];
+    assert!(!entry.widescreen);
+    assert_eq!(
+        Some(zax_nes::builtin_patches::ZELDA2_USA),
+        entry.widescreen_other
+    );
+    tap(&mut harness, &mut handheld, PadButton::L2);
+    let question = harness.host.pending_confirmation().unwrap();
+    assert!(
+        question.message.contains("BA322865"),
+        "{}",
+        question.message
+    );
+    assert_eq!("", question.cancel_label);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert!(harness.host.pending_confirmation().is_none());
+    let rom = harness
+        .root
+        .path()
+        .join("roms")
+        .join("Zelda II - The Adventure of Link (Europe).nes");
+    assert_eq!(0, harness.host.game_options(&rom.to_string_lossy()).len());
+}

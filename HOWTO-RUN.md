@@ -164,6 +164,11 @@ l'écran large est désactivé pour ce jeu, en couleur une fois activé. **L2** 
 bascule ; **Start** (`H`) ouvre l'écran **Hacks** du jeu (§ Écran large), qu'on trouve aussi en
 dernière ligne de ses options (Select) et dans le menu en jeu.
 
+Un **[W] rouge** marque une autre version d'un tel jeu (reconnue au titre de son profil ou au nom
+du fichier), pour laquelle le hack n'est pas fait — *Zelda II* européen, par exemple. L2, ou son
+écran Hacks, explique alors pourquoi l'écran large ne peut pas être activé : la ROM pour laquelle
+le hack est fait, avec son CRC, et le nom et le CRC de celle-ci, à titre indicatif.
+
 `Ctrl`+`S` et `Ctrl`+`L` (ou **Fichier ▸ Sauvegarder un état… / Charger un état…**) ouvrent
 directement l'écran de sauvegarde ou de chargement de ce mode par-dessus le jeu, qui se met en
 pause ; `B` (ou `Échap`) y revient, et après le choix d'un emplacement la barre de menus

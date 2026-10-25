@@ -302,6 +302,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HACK_RATIO, "Ratio"),
     (keys::HACK_MARGIN, "Extra margin"),
     (keys::HACK_ON, "on"),
+    (keys::HACKS_OTHER_ROM, "The widescreen hack of {0} is made for the ROM \u{201c}{1}\u{201d} (CRC {2}). This ROM does not match it: {3} (CRC {4}). The widescreen cannot be turned on for it."),
     (keys::HACK_OFF, "off"),
     (keys::MENU_HACKS, "Hacks..."),
     (keys::HANDHELD_HINT_HACKS, "Hacks"),

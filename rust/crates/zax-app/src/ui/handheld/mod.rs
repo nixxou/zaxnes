@@ -293,6 +293,10 @@ impl HandheldUi {
             entry.widescreen = entry
                 .crc
                 .is_some_and(zax_nes::builtin_patches::widescreen_capable);
+            entry.widescreen_other = (!entry.widescreen)
+                .then(|| hacks::other_rom_patch(entry.profile_title(), &entry.name))
+                .flatten()
+                .map(|patch| patch.name);
             entry.widescreen_on = host
                 .game_options(&entry.path.to_string_lossy())
                 .iter()
@@ -554,6 +558,7 @@ impl HandheldUi {
                 PadButton::A => {
                     frame.host.confirm_pending();
                 }
+                // A message with one button goes with B as well.
                 PadButton::B | PadButton::Menu => frame.host.cancel_pending(),
                 _ => {}
             }
@@ -666,18 +671,41 @@ impl HandheldUi {
             RomListCommand::GameOptions(path) => self.open_game_options(&path, host),
             RomListCommand::Options => self.open_options(host),
             RomListCommand::ToggleWidescreen(path) => {
-                let mut hacks = HacksModel::for_rom(host, &path);
+                let entry = self.roms.entries().iter().find(|entry| entry.path == path);
+                // A version of the game the hack is not made for: why, instead of nothing.
+                if let Some(entry) = entry.filter(|entry| !entry.widescreen) {
+                    let hacks = HacksModel::for_rom(host, &path, entry.profile_title());
+                    if let Some(message) = hacks.other_rom_message() {
+                        host.inform(&strings::get(keys::HACK_WIDESCREEN), &message);
+                    }
+                    return;
+                }
+                let mut hacks = HacksModel::for_rom(host, &path, None);
                 hacks.toggle_widescreen();
                 hacks.apply(host);
                 self.note_widescreen(&path, hacks.widescreen_on());
             }
-            RomListCommand::Hacks(path) => self.open_hacks(&path, Screen::Home, host),
+            RomListCommand::Hacks(path) => {
+                let title = self.profile_title_of(&path);
+                self.open_hacks(&path, title.as_deref(), Screen::Home, host);
+            }
         }
     }
 
-    /// Opens the hacks of the game in `path`; B goes back to `return_to`.
-    fn open_hacks(&mut self, path: &Path, return_to: Screen, host: &AppHost) {
-        self.hacks = Some(HacksModel::for_rom(host, path));
+    /// The title of the 3D profile the list found for the game in `path`, if any.
+    fn profile_title_of(&self, path: &Path) -> Option<String> {
+        self.roms
+            .entries()
+            .iter()
+            .find(|entry| entry.path == path)
+            .and_then(RomEntry::profile_title)
+            .map(str::to_owned)
+    }
+
+    /// Opens the hacks of the game in `path` (whose profile is called `title`, if it has one);
+    /// B goes back to `return_to`.
+    fn open_hacks(&mut self, path: &Path, title: Option<&str>, return_to: Screen, host: &AppHost) {
+        self.hacks = Some(HacksModel::for_rom(host, path, title));
         self.hacks_return = return_to;
         self.screen = Screen::Hacks;
     }
@@ -754,7 +782,8 @@ impl HandheldUi {
                     .as_ref()
                     .map(|options| options.rom().clone())
                 {
-                    self.open_hacks(&rom, Screen::GameOptions, host);
+                    let title = self.profile_title_of(&rom);
+                    self.open_hacks(&rom, title.as_deref(), Screen::GameOptions, host);
                 }
             }
         }
@@ -828,7 +857,8 @@ impl HandheldUi {
             OverlayCommand::Options => self.open_options(host),
             OverlayCommand::Hacks => {
                 if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
-                    self.open_hacks(&rom, Screen::Overlay, host);
+                    let title = host.current_game_title().map(str::to_owned);
+                    self.open_hacks(&rom, title.as_deref(), Screen::Overlay, host);
                 }
             }
             OverlayCommand::QuitToList => {

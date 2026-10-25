@@ -29,6 +29,7 @@ const PROFILE: [f32; 4] = [0.45, 0.92, 0.55, 1.0];
 const PROFILE_ON_FOCUS: [f32; 4] = [0.02, 0.32, 0.08, 1.0];
 const BAR: [f32; 4] = [0.1, 0.1, 0.16, 1.0];
 const WARNING: [f32; 4] = [1.0, 0.45, 0.35, 1.0];
+const WARNING_ON_FOCUS: [f32; 4] = [0.6, 0.06, 0.02, 1.0];
 /// A value a game has of its own, and the hint of the list when the game has some.
 const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
 const GAME_OWN_ON_FOCUS: [f32; 4] = [0.0, 0.3, 0.4, 1.0];
@@ -177,10 +178,14 @@ impl Painter<'_> {
         };
         if let Some((badge, colour)) = badge {
             let badge_x = clip_to - self.width(badge);
-            let colour = match (selected, colour == GAME_OWN) {
-                (true, true) => GAME_OWN_ON_FOCUS,
-                (true, false) => ON_FOCUS,
-                (false, _) => colour,
+            let colour = if !selected {
+                colour
+            } else if colour == GAME_OWN {
+                GAME_OWN_ON_FOCUS
+            } else if colour == WARNING {
+                WARNING_ON_FOCUS
+            } else {
+                ON_FOCUS
             };
             self.text(badge_x, y, colour, badge);
             clip_to = badge_x - metrics.padding;
@@ -256,6 +261,30 @@ impl Painter<'_> {
 
 /// A window over the whole display, with no frame, no scrolling and no focus of its own.
 fn full_screen<'ui>(ui: &'ui Ui, name: &str, background: [f32; 4]) -> Option<WindowToken<'ui>> {
+    full_screen_with(
+        ui,
+        name,
+        background,
+        WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS,
+    )
+}
+
+/// The same, over every other window: Dear `ImGui` files a window that is not brought to the
+/// front behind all the others when it first appears, which would hide a question.
+fn full_screen_over<'ui>(
+    ui: &'ui Ui,
+    name: &str,
+    background: [f32; 4],
+) -> Option<WindowToken<'ui>> {
+    full_screen_with(ui, name, background, WindowFlags::empty())
+}
+
+fn full_screen_with<'ui>(
+    ui: &'ui Ui,
+    name: &str,
+    background: [f32; 4],
+    extra: WindowFlags,
+) -> Option<WindowToken<'ui>> {
     let _padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
     let _border = ui.push_style_var(StyleVar::WindowBorderSize(0.0));
     let _rounding = ui.push_style_var(StyleVar::WindowRounding(0.0));
@@ -268,7 +297,7 @@ fn full_screen<'ui>(ui: &'ui Ui, name: &str, background: [f32; 4]) -> Option<Win
                 | WindowFlags::NO_MOVE
                 | WindowFlags::NO_SAVED_SETTINGS
                 | WindowFlags::NO_NAV
-                | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS,
+                | extra,
         )
         .begin()
 }
@@ -345,9 +374,16 @@ impl HandheldUi {
             } else {
                 tag.1
             };
-            if entry.widescreen {
-                // Grey while off, coloured once on (owner request).
-                let badge = if entry.widescreen_on { GAME_OWN } else { DIM };
+            if entry.widescreen || entry.widescreen_other.is_some() {
+                // Grey while off, coloured once on, red for a version of the game the hack is
+                // not made for (owner request).
+                let badge = if entry.widescreen_other.is_some() {
+                    WARNING
+                } else if entry.widescreen_on {
+                    GAME_OWN
+                } else {
+                    DIM
+                };
                 painter.row_badged(
                     slot,
                     selected,
@@ -376,8 +412,18 @@ impl HandheldUi {
             })
             .collect();
         // L2 turns the widescreen of the selected game on or off, Start opens its hacks.
-        if let Some(entry) = self.roms.selected_entry().filter(|entry| entry.widescreen) {
-            let colour = if entry.widescreen_on { GAME_OWN } else { TEXT };
+        if let Some(entry) = self
+            .roms
+            .selected_entry()
+            .filter(|entry| entry.widescreen || entry.widescreen_other.is_some())
+        {
+            let colour = if entry.widescreen_other.is_some() {
+                WARNING
+            } else if entry.widescreen_on {
+                GAME_OWN
+            } else {
+                TEXT
+            };
             hints.push(("L2", strings::get(keys::HANDHELD_HINT_WIDESCREEN), colour));
             hints.push(("Start", strings::get(keys::HANDHELD_HINT_HACKS), TEXT));
         }
@@ -450,7 +496,10 @@ impl HandheldUi {
         painter.title(&title, "");
         let rows = hacks.rows();
         if rows.is_empty() {
-            painter.message(&strings::get(keys::HACKS_NONE), DIM);
+            match hacks.other_rom_message() {
+                Some(message) => painter.message(&message, WARNING),
+                None => painter.message(&strings::get(keys::HACKS_NONE), DIM),
+            }
         }
         // The note on the patch takes the place of a row or two at the bottom.
         let visible = self.metrics.visible_rows(painter.size[1]);
@@ -835,7 +884,7 @@ impl HandheldUi {
     fn draw_confirmation(&self, ui: &Ui, question: ConfirmationView<'_>) {
         let size = ui.io().display_size;
         let metrics = &self.metrics;
-        let Some(_window) = full_screen(ui, "##question", [0.0, 0.0, 0.0, 0.75]) else {
+        let Some(_window) = full_screen_over(ui, "##question", [0.0, 0.0, 0.0, 0.75]) else {
             return;
         };
         let painter = self.painter(ui);
@@ -862,10 +911,13 @@ impl HandheldUi {
         let _wrap = ui.push_text_wrap_pos_with_pos(left + width - metrics.padding);
         let _colour = ui.push_style_color(StyleColor::Text, TEXT);
         ui.text_wrapped(question.message());
-        painter.hint_texts(&[
-            ("A", question.confirm_label()),
-            ("B", question.cancel_label()),
-        ]);
+        // A message to acknowledge has no cancelling button.
+        let cancel = question.cancel_label();
+        if cancel.is_empty() {
+            painter.hint_texts(&[("A", question.confirm_label())]);
+        } else {
+            painter.hint_texts(&[("A", question.confirm_label()), ("B", cancel)]);
+        }
     }
 
     /// While Select + Start is held: how long until the application quits.

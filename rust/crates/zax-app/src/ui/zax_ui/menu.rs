@@ -130,7 +130,11 @@ impl ZaxUi {
         let Some(rom) = host.current_rom_path() else {
             return;
         };
-        self.hacks = Some(HacksModel::for_rom(host, std::path::Path::new(rom)));
+        self.hacks = Some(HacksModel::for_rom(
+            host,
+            std::path::Path::new(rom),
+            host.current_game_title(),
+        ));
         self.state.hacks = true;
     }
 }

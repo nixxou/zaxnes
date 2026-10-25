@@ -34,6 +34,8 @@ pub enum ConfirmedAction {
         /// Whether the hack is turned on.
         hack: bool,
     },
+    /// Nothing: a message the user only acknowledges (no cancelling button).
+    Acknowledge,
 }
 
 /// A question the interface puts to the user before a deletion (REQ-UI-110).
@@ -102,7 +104,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             ConfirmedAction::LoadSlotSwitchingHack { slot_id, hack } => {
                 self.load_slot_switching_hack(&slot_id, hack);
             }
+            ConfirmedAction::Acknowledge => {}
         }
+    }
+
+    /// Shows `message` under `title` until the user acknowledges it (Rust-only): a question with
+    /// one button.
+    pub fn inform(&mut self, title: &str, message: &str) {
+        self.log(&format!("{title}: {message}"));
+        self.confirm(ConfirmationRequest {
+            title: title.to_owned(),
+            message: message.to_owned(),
+            confirm_label: "OK".to_owned(),
+            cancel_label: String::new(),
+            action: ConfirmedAction::Acknowledge,
+        });
     }
 
     /// Asks before deleting the game; returns false when it cannot be deleted now.

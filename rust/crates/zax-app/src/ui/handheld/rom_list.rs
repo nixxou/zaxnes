@@ -32,6 +32,9 @@ pub struct RomEntry {
     pub widescreen: bool,
     /// Whether the widescreen is on for the game.
     pub widescreen_on: bool,
+    /// The name of the built-in patch of the game, when it is made for another ROM of it (the
+    /// profile or the name says the game, its data says another version): [W] in red.
+    pub widescreen_other: Option<&'static str>,
 }
 
 impl RomEntry {
@@ -48,7 +51,17 @@ impl RomEntry {
             crc: None,
             widescreen: false,
             widescreen_on: false,
+            widescreen_other: None,
         }
+    }
+
+    /// The title of its 3D profile, when it has one (not the "2D Mode" entry).
+    #[must_use]
+    pub fn profile_title(&self) -> Option<&str> {
+        self.profile
+            .as_ref()
+            .filter(|profile| !profile.two_dimensional)
+            .map(|profile| profile.title.as_str())
     }
 
     /// The letter the A-Z jump files the game under; `#` for a name that starts otherwise.
@@ -257,7 +270,7 @@ impl RomListModel {
             PadButton::L2 => {
                 return self
                     .selected_entry()
-                    .filter(|entry| entry.widescreen)
+                    .filter(|entry| entry.widescreen || entry.widescreen_other.is_some())
                     .map(|entry| RomListCommand::ToggleWidescreen(entry.path.clone()));
             }
             PadButton::Start => {

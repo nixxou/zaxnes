@@ -219,6 +219,8 @@ pub const HACK_WIDESCREEN: &str = "hacks.widescreen";
 pub const HACK_RATIO: &str = "hacks.ratio";
 pub const HACK_MARGIN: &str = "hacks.margin";
 pub const HACK_ON: &str = "hacks.on";
+/// What a game a widescreen hack is made for, but not for this ROM of it, is told.
+pub const HACKS_OTHER_ROM: &str = "hacks.other_rom";
 pub const HACK_OFF: &str = "hacks.off";
 pub const MENU_HACKS: &str = "menu.hacks";
 pub const HANDHELD_HINT_HACKS: &str = "handheld.hint.hacks";
@@ -434,6 +436,7 @@ pub const PUBLISHED: &[&str] = &[
     HACK_RATIO,
     HACK_MARGIN,
     HACK_ON,
+    HACKS_OTHER_ROM,
     HACK_OFF,
     MENU_HACKS,
     HANDHELD_HINT_HACKS,

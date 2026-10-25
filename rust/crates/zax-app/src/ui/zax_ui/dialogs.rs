@@ -259,9 +259,12 @@ impl ZaxUi {
             play(host, UiSound::Confirm);
             host.confirm_pending();
         }
-        ui.same_line();
-        if ui.button_with_size(&cancel, [110.0, 0.0]) {
-            host.cancel_pending();
+        // A message to acknowledge has no cancelling button.
+        if !cancel.is_empty() {
+            ui.same_line();
+            if ui.button_with_size(&cancel, [110.0, 0.0]) {
+                host.cancel_pending();
+            }
         }
         self.sync_confirmation(host);
     }
