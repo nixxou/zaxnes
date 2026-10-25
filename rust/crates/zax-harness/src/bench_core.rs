@@ -24,7 +24,12 @@ pub const USAGE: &str = "zax-harness bench-core <rom.nes> [options]
   --profile <title|file>   profile to play (default: none, the \"2D Mode\" path)
   --assets <dir>           folder holding profiles.json (profile lookup)
   --press <script>         port 1 buttons, as render --press (e.g. 60-70:start,200-900:right)
-  --3d                     segment as a 3D profile does even without patterns";
+  --3d                     segment as a 3D profile does even without patterns
+  --widescreen <pixels>    widescreen margin the host offers on each side (default 0)
+  --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
+  --load-state <file>      restore a state block (with its ROM image) before the run
+  --advanced               apply the built-in patches of an advanced widescreen mode too
+  --hack-options <bits>    the built-in patch's option bits ($500A)";
 
 /// What `bench-core` runs.
 #[derive(Debug, Clone)]
@@ -36,6 +41,11 @@ pub struct Options {
     assets: Option<PathBuf>,
     press: InputScript,
     three_dimensional: bool,
+    widescreen: i32,
+    widescreen_y: i32,
+    load_state: Option<PathBuf>,
+    advanced: bool,
+    hack_options: Option<u8>,
 }
 
 impl Options {
@@ -56,10 +66,16 @@ impl Options {
             assets: None,
             press: InputScript::default(),
             three_dimensional: false,
+            widescreen: 0,
+            widescreen_y: 0,
+            load_state: None,
+            advanced: false,
+            hack_options: None,
         };
         while let Some((name, tail)) = rest.split_first() {
-            if name == "--3d" {
-                options.three_dimensional = true;
+            if name == "--3d" || name == "--advanced" {
+                options.three_dimensional |= name == "--3d";
+                options.advanced |= name == "--advanced";
                 rest = tail;
                 continue;
             }
@@ -75,6 +91,10 @@ impl Options {
                 "--profile" => options.profile = Some(value.clone()),
                 "--assets" => options.assets = Some(PathBuf::from(value)),
                 "--press" => options.press = InputScript::parse(value)?,
+                "--widescreen" => options.widescreen = i32::try_from(count()?).unwrap_or(0),
+                "--widescreen-y" => options.widescreen_y = i32::try_from(count()?).unwrap_or(0),
+                "--load-state" => options.load_state = Some(PathBuf::from(value)),
+                "--hack-options" => options.hack_options = u8::try_from(count()?).ok(),
                 _ => return Err(usage()),
             }
             rest = tail;
@@ -196,8 +216,19 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         profile: &profile,
         mesh: RenderAlgorithm::Greedy,
         force_three_dimensional: options.three_dimensional,
-        advanced: false,
+        advanced: options.advanced,
     })?;
+    host.core.set_widescreen_margin(options.widescreen);
+    host.core
+        .set_widescreen_vertical_margin(options.widescreen_y);
+    if let Some(bits) = options.hack_options {
+        host.core.set_hack_options(bits);
+    }
+    if let Some(path) = &options.load_state {
+        host.core
+            .try_load_state(&std::fs::read(path)?, 0)
+            .map_err(|error| HarnessError::Rom(error.message))?;
+    }
     let mut records = Vec::new();
     let mut picture = Vec::with_capacity(256 * 240);
     let mut tallies = [Tally::default(); Stage::ALL.len()];
@@ -230,6 +261,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         records.clear();
         records.extend_from_slice(batch.records);
         let (palette, mask_x, mask_y) = (batch.palette, batch.mask_x, batch.mask_y);
+        let (margin, visible_rows, margin_y) = (batch.margin, batch.visible_rows, batch.margin_y);
         lap(Stage::Capture, 0.0);
 
         let batch = FrameBatch {
@@ -237,9 +269,9 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             palette,
             mask_x,
             mask_y,
-            margin: 0,
-            visible_rows: zax_nes::STANDARD_ROWS,
-            margin_y: 0,
+            margin,
+            visible_rows,
+            margin_y,
         };
         let frame_counter = i32::try_from(counter)
             .map_err(|_| HarnessError::Usage("--frames: too many frames".to_owned()))?;
@@ -259,8 +291,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         host.engine.build_draw_list();
         lap(Stage::DrawList, 0.0);
 
-        picture.clear();
-        picture.extend_from_slice(host.core.pixel_frame());
+        host.core.wide_picture_into(&mut picture);
         lap(Stage::Picture, 0.0);
 
         if timed {
