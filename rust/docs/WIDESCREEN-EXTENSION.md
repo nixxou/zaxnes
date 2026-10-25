@@ -134,7 +134,7 @@ Details:
   ignored. A sprite whose x is outside 0..255 is left out of the PPU's own picture (its pattern
   bytes read as 0 at the fetches of dots 257-320, which still take place; the evaluation keeps the
   OAM index of each sprite it copies for that): a hardware PPU, which only knows the low byte,
-  would draw a sprite at x = 298 at x = 42.
+  would draw a sprite at x = 298 at x = 42. Nor does such a sprite take one of the eight places of a line in the evaluation, or raise the overflow: the sprites on the screen all show.
 * **Overclock.** At the start of line 240 the PPU arms `$5006` x 114 CPU cycles
   (`arm_overclock()`). For each of them `NesBus::tick()` runs the CPU and the cartridge only
   (`take_stall_cycle()`): the PPU and the APU stay still, so the picture, the sound and their
