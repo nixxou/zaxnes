@@ -99,8 +99,8 @@ Details:
   writes them during the frame to hide the sides behind a status bar or past the end of a level.
   A tile is kept when any of its pixels falls in
   `[-min(rom_margin, $5004), 256 + min(rom_margin, $5005))` (`visible_range()`). With `$5007`
-  bit 1 the extents apply to the background only: sprites show across the whole ROM margin
-  (`sprite_range()`), for a game whose margins a decoder draws while the ROM hides the
+  bit 1 the extents apply to the background only: sprites show across the margin the ROM asked
+  for, up to 248 (`sprite_range()`; the nametables' 128 does not apply to them), for a game whose margins a decoder draws while the ROM hides the
   nametable columns (extents 0).
 * **Sprites.** The x of sprite *n* is the signed 16-bit value `high:OAM x`, `high` being the byte
   last written to `$5100 + 4n` (any of its four addresses) **before the OAM DMA** that copied the

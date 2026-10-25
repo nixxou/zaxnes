@@ -237,12 +237,17 @@ impl WideExtension {
     }
 
     /// The range of screen x a sprite may start at and still show: [`WideExtension::visible_range`],
-    /// or the whole ROM margin when the ROM asked for sprites free of the background extents
-    /// (`$5007` bit 1: a margin decoder draws the background).
+    /// or, when the ROM asked for sprites free of the background extents (`$5007` bit 1: a margin
+    /// decoder draws the background), the margin the ROM asked for, up to 248.
     #[must_use]
     pub fn sprite_range(&self) -> (i32, i32) {
-        if self.layout & 2 != 0 {
-            let margin = self.rom_margin();
+        if self.unlocked && self.layout & 2 != 0 {
+            // Sprites are not read from the nametables: up to what the ROM can ask for.
+            let margin = (i32::from(self.requested_margin)
+                .min(self.host_margin)
+                .min(MAX_ROM_MARGIN)
+                / 8)
+                * 8;
             return (-margin, 256 + margin);
         }
         self.visible_range()
