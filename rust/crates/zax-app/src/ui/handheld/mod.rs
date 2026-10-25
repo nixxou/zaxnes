@@ -7,6 +7,7 @@ pub mod defaults;
 mod draw;
 pub mod exit_combo;
 pub mod game_options;
+pub mod hacks;
 pub mod keyboard;
 pub mod layout;
 pub mod options;
@@ -26,6 +27,7 @@ use zax_settings::values::SettingValue;
 
 use self::exit_combo::{ComboEvent, ExitCombo};
 use self::game_options::{GameOptionsCommand, GameOptionsModel};
+use self::hacks::{HacksCommand, HacksModel};
 use self::layout::Metrics;
 use self::options::{HandheldOptionsModel, OptionsCommand};
 use self::overlay::{CameraPreset, OverlayCommand, OverlayModel};
@@ -61,6 +63,8 @@ pub enum Screen {
     Options,
     /// The options of one game, from the list of games.
     GameOptions,
+    /// The hacks of one game (Rust-only): from the list, its options or the in-game menu.
+    Hacks,
     /// The gamepad bindings of player one.
     Controls,
     /// The in-game menu.
@@ -91,6 +95,10 @@ pub struct HandheldUi {
     overlay: OverlayModel,
     options: HandheldOptionsModel,
     game_options: Option<GameOptionsModel>,
+    /// The hacks of one game, while their screen is open.
+    hacks: Option<HacksModel>,
+    /// Where the hacks go back to: the list, the game's options or the in-game menu.
+    hacks_return: Screen,
     controls: ControlsState,
     keys: KeyConfigModel,
     combo: ExitCombo,
@@ -160,6 +168,8 @@ impl HandheldUi {
             overlay: OverlayModel::new(),
             options: HandheldOptionsModel::new(),
             game_options: None,
+            hacks: None,
+            hacks_return: Screen::Home,
             controls: ControlsState::default(),
             keys: KeyConfigModel::new(),
             combo: ExitCombo::new(),
@@ -212,6 +222,7 @@ impl HandheldUi {
     /// goes on; with no game, the list is what comes back next time.
     pub fn leave_for_desktop(&mut self, host: &mut AppHost) {
         self.game_options = None;
+        self.hacks = None;
         self.flat_view = None;
         if host.current_game_id().is_some() {
             if self.screen != Screen::InGame {
@@ -271,9 +282,24 @@ impl HandheldUi {
             .all()
             .to_vec();
         let mut entries = rom_list::scan(&self.roms_directory);
+        // The widescreen of the games without one of their own: the global value.
+        let mut global = host.settings().clone();
+        global.clear_session_layer();
+        global.clear_game_values();
+        let global_on = global.get(SettingId::VideoWidescreen).as_int() != 0;
         for entry in &mut entries {
             entry.profile = self.profile_of(host, entry);
+            entry.crc = host.rom_data_crc(&entry.path);
+            entry.widescreen = entry
+                .crc
+                .is_some_and(zax_nes::builtin_patches::widescreen_capable);
+            entry.widescreen_on = host
+                .game_options(&entry.path.to_string_lossy())
+                .iter()
+                .find(|(id, _)| *id == SettingId::VideoWidescreen)
+                .map_or(global_on, |(_, value)| value.as_int() != 0);
         }
+        host.save_rom_crcs();
         self.roms.replace(entries);
     }
 
@@ -331,7 +357,15 @@ impl HandheldUi {
         self.update_capture(seconds, frame);
         self.update_camera_memory(pad, seconds, frame.host);
         self.update_flat_view(pad, seconds, frame.host);
-        for button in pad.presses() {
+        let presses: Vec<PadButton> = pad.presses().collect();
+        for button in presses.iter().copied() {
+            // A key that is A and Start at once (Enter) plays the game rather than open its
+            // hacks as well, and Start with Select held is the exit combination.
+            let both = button == PadButton::Start
+                && (presses.contains(&PadButton::A) || pad.is_held(PadButton::Select));
+            if both && self.screen == Screen::Home {
+                continue;
+            }
             self.press(button, frame);
         }
     }
@@ -448,10 +482,20 @@ impl HandheldUi {
     /// The screen follows the game: it hides when one runs and comes back when it stops.
     fn follow_the_game(&mut self, host: &AppHost) {
         let playing = host.current_game_id().is_some() || host.is_loading();
+        let hacks_of_the_list = self.hacks_return != Screen::Overlay;
         match (playing, self.screen) {
             (true, Screen::Home | Screen::Profiles | Screen::GameOptions) => {
                 self.game_options = None;
                 self.screen = Screen::InGame;
+            }
+            (true, Screen::Hacks) if hacks_of_the_list => {
+                self.game_options = None;
+                self.hacks = None;
+                self.screen = Screen::InGame;
+            }
+            (false, Screen::Hacks) if !hacks_of_the_list => {
+                self.hacks = None;
+                self.show_home(host);
             }
             (false, Screen::InGame | Screen::Overlay | Screen::States) => self.show_home(host),
             _ => {}
@@ -560,6 +604,12 @@ impl HandheldUi {
                     self.carry_out_game_options(command, frame.host);
                 }
             }
+            Screen::Hacks => {
+                let command = self.hacks.as_mut().and_then(|hacks| hacks.handle(button));
+                if let Some(command) = command {
+                    self.carry_out_hacks(command, frame.host);
+                }
+            }
             Screen::Controls => self.press_controls(button, frame),
             Screen::Overlay => {
                 if let Some(command) = self.overlay.handle(button) {
@@ -615,7 +665,64 @@ impl HandheldUi {
             }
             RomListCommand::GameOptions(path) => self.open_game_options(&path, host),
             RomListCommand::Options => self.open_options(host),
+            RomListCommand::ToggleWidescreen(path) => {
+                let mut hacks = HacksModel::for_rom(host, &path);
+                hacks.toggle_widescreen();
+                hacks.apply(host);
+                self.note_widescreen(&path, hacks.widescreen_on());
+            }
+            RomListCommand::Hacks(path) => self.open_hacks(&path, Screen::Home, host),
         }
+    }
+
+    /// Opens the hacks of the game in `path`; B goes back to `return_to`.
+    fn open_hacks(&mut self, path: &Path, return_to: Screen, host: &AppHost) {
+        self.hacks = Some(HacksModel::for_rom(host, path));
+        self.hacks_return = return_to;
+        self.screen = Screen::Hacks;
+    }
+
+    fn carry_out_hacks(&mut self, command: HacksCommand, host: &mut AppHost) {
+        let Some(hacks) = self.hacks.as_ref() else {
+            return;
+        };
+        let rom = hacks.rom().to_path_buf();
+        match command {
+            HacksCommand::Save => {
+                hacks.apply(host);
+                let on = hacks.widescreen_on();
+                self.note_widescreen(&rom, on);
+            }
+            HacksCommand::Close => {
+                self.hacks = None;
+                self.screen = self.hacks_return;
+                // The options of the game are read again, with the hacks as they are now.
+                if self.screen == Screen::GameOptions {
+                    self.open_game_options(&rom, host);
+                    if let Some(options) = &mut self.game_options {
+                        options.select(GameOptionsModel::HACKS_ROW);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The list shows the widescreen of the game in `path` as `on`.
+    fn note_widescreen(&mut self, path: &Path, on: bool) {
+        if let Some(entry) = self
+            .roms
+            .entries_mut()
+            .iter_mut()
+            .find(|entry| entry.path == path)
+        {
+            entry.widescreen_on = on;
+        }
+    }
+
+    /// The hacks screen, while it is open.
+    #[must_use]
+    pub const fn hacks(&self) -> Option<&HacksModel> {
+        self.hacks.as_ref()
     }
 
     fn open_game_options(&mut self, path: &Path, host: &AppHost) {
@@ -641,12 +748,23 @@ impl HandheldUi {
                 self.game_options = None;
                 self.screen = Screen::Home;
             }
+            GameOptionsCommand::OpenHacks => {
+                if let Some(rom) = self
+                    .game_options
+                    .as_ref()
+                    .map(|options| options.rom().clone())
+                {
+                    self.open_hacks(&rom, Screen::GameOptions, host);
+                }
+            }
         }
     }
 
     /// Whether the game in `path` has options of its own, for the hint of the list.
     fn has_game_options(host: &AppHost, path: &Path) -> bool {
-        !host.game_options(&path.to_string_lossy()).is_empty()
+        host.game_options(&path.to_string_lossy())
+            .iter()
+            .any(|(id, _)| game_options::is_game_row_setting(*id))
     }
 
     fn open_profiles(&mut self, entry: &RomEntry) {
@@ -708,6 +826,11 @@ impl HandheldUi {
             }
             OverlayCommand::SetCamera(preset) => apply_camera(preset, host),
             OverlayCommand::Options => self.open_options(host),
+            OverlayCommand::Hacks => {
+                if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
+                    self.open_hacks(&rom, Screen::Overlay, host);
+                }
+            }
             OverlayCommand::QuitToList => {
                 host.enqueue(Command::Stop, CommandArgs::default());
                 self.show_home(host);
@@ -825,6 +948,28 @@ impl HandheldUi {
             Screen::Controls => {
                 self.controls = ControlsState::default();
                 self.screen = Screen::Controls;
+            }
+            // The hacks of Mega Man 2 (USA), told by the CRC of its data, the widescreen on.
+            Screen::Hacks => {
+                if let Some(entry) = self.roms.selected_entry().cloned() {
+                    let mut hacks = HacksModel::new(
+                        entry.path,
+                        Some(0x0FCF_C04D),
+                        &SettingsModel::new(),
+                        Vec::new(),
+                        |patch| {
+                            patch
+                                .options
+                                .iter()
+                                .map(|option| (*option, option.default))
+                                .collect()
+                        },
+                    );
+                    hacks.toggle_widescreen();
+                    self.hacks = Some(hacks);
+                    self.hacks_return = Screen::Home;
+                    self.screen = Screen::Hacks;
+                }
             }
             Screen::Overlay => {
                 self.overlay.reopen();

@@ -5,7 +5,7 @@
 use imgui::{Condition, DrawListMut, StyleColor, StyleVar, Ui, WindowFlags, WindowToken};
 use zax_platform::input::labels;
 
-use super::game_options::GAME_ROWS;
+use super::game_options::{GameOptionsModel, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
 use super::options::{self, ROWS};
 use super::overlay::{OverlayItem, ITEMS};
@@ -121,6 +121,33 @@ impl Painter<'_> {
         right: (&str, [f32; 4]),
         x1: f32,
     ) {
+        self.row_parts(slot, (selected, focus), left, None, right, x1);
+    }
+
+    /// One row of a list with `badge` before `right` (the [W] of a game a widescreen hack is
+    /// made for).
+    fn row_badged(
+        &self,
+        slot: usize,
+        selected: bool,
+        left: &str,
+        badge: (&str, [f32; 4]),
+        right: (&str, [f32; 4]),
+    ) {
+        let x1 = self.size[0] - self.metrics.padding * 0.5;
+        self.row_parts(slot, (selected, FOCUS), left, Some(badge), right, x1);
+    }
+
+    /// One row of a list that ends at `x1`: `left`, then `badge` if any, then `right`.
+    fn row_parts(
+        &self,
+        slot: usize,
+        (selected, focus): (bool, [f32; 4]),
+        left: &str,
+        badge: Option<(&str, [f32; 4])>,
+        right: (&str, [f32; 4]),
+        x1: f32,
+    ) {
         let metrics = &self.metrics;
         let top = self.row_top(slot);
         let x0 = metrics.padding * 0.5;
@@ -143,11 +170,21 @@ impl Painter<'_> {
         if !right.0.is_empty() {
             self.text(right_x, y, side, right.0);
         }
-        let clip_to = if right.0.is_empty() {
+        let mut clip_to = if right.0.is_empty() {
             x1
         } else {
             right_x - metrics.padding
         };
+        if let Some((badge, colour)) = badge {
+            let badge_x = clip_to - self.width(badge);
+            let colour = match (selected, colour == GAME_OWN) {
+                (true, true) => GAME_OWN_ON_FOCUS,
+                (true, false) => ON_FOCUS,
+                (false, _) => colour,
+            };
+            self.text(badge_x, y, colour, badge);
+            clip_to = badge_x - metrics.padding;
+        }
         self.list
             .with_clip_rect_intersect([x0, top], [clip_to, top + metrics.row], || {
                 self.text(x0 + metrics.padding, y, main, left);
@@ -188,6 +225,19 @@ impl Painter<'_> {
             self.text(x, y, *colour, meaning);
             x += self.width(meaning) + metrics.padding * 1.6;
         }
+    }
+
+    /// A paragraph in small print under the row `slot` of the list area.
+    fn note(&self, slot: usize, text: &str) {
+        let metrics = &self.metrics;
+        let width = self.size[0] - 4.0 * metrics.padding;
+        self.ui
+            .set_cursor_pos([2.0 * metrics.padding, self.row_top(slot) + metrics.padding]);
+        let _wrap = self
+            .ui
+            .push_text_wrap_pos_with_pos(2.0 * metrics.padding + width);
+        let _colour = self.ui.push_style_color(StyleColor::Text, DIM);
+        self.ui.text_wrapped(text);
     }
 
     /// A paragraph in the middle of the list area.
@@ -233,6 +283,7 @@ impl HandheldUi {
         match self.screen {
             Screen::Home => self.draw_home(ui, frame),
             Screen::GameOptions => self.draw_game_options(ui),
+            Screen::Hacks => self.draw_hacks(ui),
             Screen::Profiles => self.draw_profiles(ui),
             Screen::Options => self.draw_options(ui, frame),
             Screen::Controls => self.draw_controls(ui, frame),
@@ -294,14 +345,26 @@ impl HandheldUi {
             } else {
                 tag.1
             };
-            painter.row(slot, selected, &entry.name, (&tag.0, colour));
+            if entry.widescreen {
+                // Grey while off, coloured once on (owner request).
+                let badge = if entry.widescreen_on { GAME_OWN } else { DIM };
+                painter.row_badged(
+                    slot,
+                    selected,
+                    &entry.name,
+                    ("[W]", badge),
+                    (&tag.0, colour),
+                );
+            } else {
+                painter.row(slot, selected, &entry.name, (&tag.0, colour));
+            }
         }
         // "Game options" in cyan when the selected game has some (owner request).
         let own = self
             .roms
             .selected_entry()
             .is_some_and(|entry| Self::has_game_options(frame.host, &entry.path));
-        let hints: Vec<(&str, String, [f32; 4])> = layout::hints(Screen::Home)
+        let mut hints: Vec<(&str, String, [f32; 4])> = layout::hints(Screen::Home)
             .iter()
             .map(|hint| {
                 let colour = if own && hint.meaning == keys::HANDHELD_HINT_GAME_OPTIONS {
@@ -312,6 +375,12 @@ impl HandheldUi {
                 (hint.button, strings::get(hint.meaning), colour)
             })
             .collect();
+        // L2 turns the widescreen of the selected game on or off, Start opens its hacks.
+        if let Some(entry) = self.roms.selected_entry().filter(|entry| entry.widescreen) {
+            let colour = if entry.widescreen_on { GAME_OWN } else { TEXT };
+            hints.push(("L2", strings::get(keys::HANDHELD_HINT_WIDESCREEN), colour));
+            hints.push(("Start", strings::get(keys::HANDHELD_HINT_HACKS), TEXT));
+        }
         painter.hint_entries(&hints);
     }
 
@@ -330,10 +399,19 @@ impl HandheldUi {
         painter.title(&title, "");
         let rows = self.metrics.visible_rows(painter.size[1]);
         let selected = options.selected_index();
-        let total = GAME_ROWS.len() + 1;
+        let total = GameOptionsModel::ROW_COUNT;
         let first = first_visible(selected, rows, total);
         for (slot, index) in (0..total).skip(first).take(rows).enumerate() {
             let focused = index == selected;
+            if index == GameOptionsModel::HACKS_ROW {
+                painter.row(
+                    slot,
+                    focused,
+                    &strings::get(keys::HANDHELD_HINT_HACKS),
+                    (">", DIM),
+                );
+                continue;
+            }
             let Some(row) = index.checked_sub(1).map(|row| GAME_ROWS[row]) else {
                 let colour = if options.has_options() { GAME_OWN } else { DIM };
                 let colour = if focused && colour == GAME_OWN {
@@ -359,6 +437,50 @@ impl HandheldUi {
             painter.row(slot, focused, &options::label(row), (&shown, colour));
         }
         painter.hints(layout::hints(Screen::GameOptions));
+    }
+
+    /// The hacks of one game: the widescreen, its ratio and margin, the options of its patch.
+    fn draw_hacks(&self, ui: &Ui) {
+        let (Some(_window), Some(hacks)) = (full_screen(ui, "##hacks", BACKGROUND), &self.hacks)
+        else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let title = strings::format(&strings::get(keys::HACKS_TITLE), &[hacks.name()]);
+        painter.title(&title, "");
+        let rows = hacks.rows();
+        if rows.is_empty() {
+            painter.message(&strings::get(keys::HACKS_NONE), DIM);
+        }
+        // The note on the patch takes the place of a row or two at the bottom.
+        let visible = self.metrics.visible_rows(painter.size[1]);
+        let visible = if hacks.patch().is_some() {
+            visible.saturating_sub(2).max(1)
+        } else {
+            visible
+        };
+        let selected = hacks.selected_index();
+        let first = first_visible(selected, visible, rows.len());
+        for (slot, (index, row)) in rows
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take(visible)
+            .enumerate()
+        {
+            let focused = index == selected;
+            let colour = match (hacks.is_own(*row), focused) {
+                (true, true) => GAME_OWN_ON_FOCUS,
+                (true, false) => GAME_OWN,
+                (false, _) => DIM,
+            };
+            let shown = format!("< {} >", hacks.value_text(*row));
+            painter.row(slot, focused, &hacks.label(*row), (&shown, colour));
+        }
+        if hacks.patch().is_some() {
+            painter.note(visible, &strings::get(keys::HACKS_PATCH_NOTE));
+        }
+        painter.hints(layout::hints(Screen::Hacks));
     }
 
     fn draw_profiles(&self, ui: &Ui) {
@@ -557,6 +679,7 @@ impl HandheldUi {
             OverlayItem::FastForward => keys::HANDHELD_MENU_FAST_FORWARD,
             OverlayItem::Camera => keys::HANDHELD_OPTION_CAMERA,
             OverlayItem::Options => keys::WINDOW_OPTIONS,
+            OverlayItem::Hacks => keys::HANDHELD_HINT_HACKS,
             OverlayItem::QuitToList => keys::HANDHELD_MENU_QUIT_TO_LIST,
             OverlayItem::ExitToLauncher => keys::HANDHELD_MENU_EXIT,
         })

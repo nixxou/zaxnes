@@ -185,6 +185,19 @@ pub fn data_crc(image: &[u8]) -> u32 {
     crc32(&image[header_size..])
 }
 
+/// The built-in patch made for ROM data (iNES header excluded) of CRC-32 `crc`, if any.
+#[must_use]
+pub fn for_data_crc(crc: u32) -> Option<&'static BuiltinPatch> {
+    PATCHES.iter().find(|patch| patch.source_crc == crc)
+}
+
+/// Whether the game whose data (iNES header excluded) has CRC-32 `crc` can be widened: a
+/// built-in patch is made for it, or a margin decoder reads it as it is.
+#[must_use]
+pub fn widescreen_capable(crc: u32) -> bool {
+    for_data_crc(crc).is_some() || crate::wide_decode::for_rom(crc).is_some()
+}
+
 /// Whether a built-in patch is made for `image` (iNES header or not).
 #[must_use]
 pub fn matches(image: &[u8]) -> bool {

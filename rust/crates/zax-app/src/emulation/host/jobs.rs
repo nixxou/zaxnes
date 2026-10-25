@@ -350,7 +350,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 let Some(rom) = job.rom.as_ref() else {
                     return Step::Failed(INVALID_ROM_MESSAGE.to_owned());
                 };
-                let builtin_patches = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
+                let builtin_patches = self.builtin_patches_wanted();
                 let result = match self.session.as_mut() {
                     Some(session) => {
                         session.core_mut().set_builtin_patches(builtin_patches);
@@ -447,7 +447,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         game: &ResolvedGame,
         state: &SaveStateContent,
     ) -> Step {
-        let builtin_patches = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
+        let builtin_patches = self.builtin_patches_wanted();
         let Some(session) = self.session.as_mut() else {
             return Step::Failed(CORRUPTED_MESSAGE.to_owned());
         };
@@ -618,7 +618,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 return SlotPatchStatus::OtherVersion;
             }
         }
-        if hack == self.settings.get(SettingId::EmuBuiltinPatches).as_bool() {
+        if hack == self.builtin_patches_wanted() {
             SlotPatchStatus::Fits
         } else {
             SlotPatchStatus::OtherMode { hack }
@@ -635,7 +635,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         else {
             return SlotPatchStatus::Fits;
         };
-        let enabled = self.settings.get(SettingId::EmuBuiltinPatches).as_bool();
+        let enabled = self.builtin_patches_wanted();
         let key = (slot_id.to_owned(), record.saved_at, enabled);
         if let Some(&status) = self.slot_patch_cache.borrow().get(&key) {
             return status;
@@ -653,8 +653,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Turns the built-in hack on or off as `hack` says, then loads `slot_id`: the answer to the
     /// question [`EmulationHost::load_slot`] asks for a state made the other way.
     pub(super) fn load_slot_switching_hack(&mut self, slot_id: &str, hack: bool) {
-        self.settings
-            .set(SettingId::EmuBuiltinPatches, SettingValue::Bool(hack));
+        // The patch follows the widescreen of the game (owner request): it is turned on (Auto)
+        // or off for this game, and the patches allowed for a state made with them.
+        if hack {
+            self.settings
+                .set(SettingId::EmuBuiltinPatches, SettingValue::Bool(true));
+        }
+        self.set_game_widescreen(hack);
         self.dispatch_setting_changes();
         self.load_slot(slot_id);
     }

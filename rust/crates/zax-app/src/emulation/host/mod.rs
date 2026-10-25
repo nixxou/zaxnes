@@ -9,6 +9,7 @@ mod commands;
 mod game_options;
 mod games;
 mod hack_options;
+mod hacks;
 mod jobs;
 mod movies;
 mod save_states;
@@ -214,6 +215,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
     slot_patch_cache:
         std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
+    /// The CRC of the data of the ROM files, which tells the games a hack is made for.
+    rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
     /// The Zapper.
     pub zapper: ZapperState,
     /// How far the frame clock catches up when the command line or the environment says so;
@@ -256,6 +259,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             confirm_with_interface,
         } = options;
         let now: Now = now.unwrap_or_else(|| Box::new(OffsetDateTime::now_utc));
+        // The cache is kept with the other files of the user data, when they are persisted.
+        let rom_crcs = crate::persistence::rom_crc_cache::RomCrcCache::new(
+            settings_store.is_some().then(|| {
+                paths
+                    .root
+                    .join(crate::persistence::rom_crc_cache::FILE_NAME)
+            }),
+        );
         let mut slots = SaveSlotIndex::load(&paths, now());
         slots.reconcile(&paths, |game_id| games.exists(game_id));
         let mut host = Self {
@@ -305,6 +316,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             notifications: NotificationCenter::new(),
             slots,
             slot_patch_cache: std::cell::RefCell::default(),
+            rom_crcs: std::cell::RefCell::new(rom_crcs),
             zapper: ZapperState::new(),
             catch_up: None,
             defer_conversion: false,

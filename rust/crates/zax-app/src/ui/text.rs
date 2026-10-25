@@ -195,12 +195,6 @@ pub fn movie_note_write() -> String {
     strings::get(keys::MOVIE_NOTE_WRITE)
 }
 
-/// The submenu of the options of the game's built-in patch.
-#[must_use]
-pub fn hack_options() -> String {
-    strings::get(keys::MENU_HACK_OPTIONS)
-}
-
 /// Note after a slot made with another version of the built-in hack.
 #[must_use]
 pub fn slot_other_hack_version() -> String {

@@ -26,6 +26,12 @@ pub struct RomEntry {
     pub name: String,
     /// The profile remembered or found for the game, if any.
     pub profile: Option<ProfileMatch>,
+    /// The CRC-32 of its data (iNES header excluded), when the file could be read.
+    pub crc: Option<u32>,
+    /// Whether a widescreen hack is made for the game (Rust-only, owner request).
+    pub widescreen: bool,
+    /// Whether the widescreen is on for the game.
+    pub widescreen_on: bool,
 }
 
 impl RomEntry {
@@ -39,6 +45,9 @@ impl RomEntry {
             path,
             name,
             profile: None,
+            crc: None,
+            widescreen: false,
+            widescreen_on: false,
         }
     }
 
@@ -64,6 +73,10 @@ pub enum RomListCommand {
     GameOptions(PathBuf),
     /// Open the options.
     Options,
+    /// Turn the widescreen of the selected game on or off (Rust-only, owner request).
+    ToggleWidescreen(PathBuf),
+    /// Open the hacks of the selected game.
+    Hacks(PathBuf),
 }
 
 /// The ROM files of `directory`, sorted by name without regard to case. A folder that cannot be
@@ -241,6 +254,17 @@ impl RomListModel {
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
             }
             PadButton::Y => return Some(RomListCommand::Options),
+            PadButton::L2 => {
+                return self
+                    .selected_entry()
+                    .filter(|entry| entry.widescreen)
+                    .map(|entry| RomListCommand::ToggleWidescreen(entry.path.clone()));
+            }
+            PadButton::Start => {
+                return self
+                    .selected_entry()
+                    .map(|entry| RomListCommand::Hacks(entry.path.clone()));
+            }
             PadButton::Select => {
                 return self
                     .selected_entry()

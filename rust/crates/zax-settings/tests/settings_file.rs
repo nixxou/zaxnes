@@ -343,3 +343,19 @@ fn a_preference_back_at_its_default_leaves_the_file() {
         .text(NAME)
         .is_some_and(|text| text.contains("camera.fov")));
 }
+
+/// Rust-only: the widescreen choice once called "Window" is "Auto" now; a file written before
+/// still reads.
+#[test]
+fn the_former_window_widescreen_reads_as_auto() {
+    let storage = storage_with(
+        r#"{
+  "schemaVersion": 1,
+  "values": { "video.widescreen": "Window" }
+}"#,
+    );
+    let mut model = SettingsModel::new();
+    let mut file = SettingsFile::new(storage);
+    file.load(&mut model, now());
+    assert_eq!(1, model.get(SettingId::VideoWidescreen).as_int());
+}

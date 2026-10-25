@@ -130,7 +130,7 @@ fn y_held_shows_the_2d_picture_head_on_and_leaves_the_camera_alone() {
 
     // Leaving the 2D mode (here, the game) puts the camera back in charge.
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..6 {
+    for _ in 0..7 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
@@ -222,8 +222,8 @@ fn the_load_screen_loads_a_state_and_leaves_an_empty_slot_alone() {
 fn quit_to_the_rom_list_stops_the_game() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     play(&mut harness, &mut handheld);
-    // Quit to ROM list is the seventh row (no Rewind row on the handheld).
-    for _ in 0..6 {
+    // Quit to ROM list is the eighth row (no Rewind row on the handheld; Hacks before it).
+    for _ in 0..7 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);
@@ -331,7 +331,7 @@ fn the_options_of_a_game_hold_only_what_changes_and_play_with_it() {
     assert_eq!(Screen::InGame, handheld.screen());
     assert_eq!(!shadows, harness.host.settings().shadow());
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..6 {
+    for _ in 0..7 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
@@ -465,4 +465,66 @@ fn another_rom_folder_lists_its_games() {
         .map(|entry| entry.name.as_str())
         .collect();
     assert_eq!(["New"], names.as_slice());
+}
+
+/// The hacks of a game (Rust-only, owner request) open from the list (Start), from the game's
+/// options (their last row) and from the in-game menu; B goes back where they came from. A game
+/// no hack is made for has none to show, and its list entry no [W].
+#[test]
+fn the_hacks_open_from_the_list_the_game_options_and_the_menu() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    assert!(!handheld.roms().entries()[0].widescreen);
+    assert!(handheld.roms().entries()[0].crc.is_some());
+
+    tap(&mut harness, &mut handheld, PadButton::Start);
+    assert_eq!(Screen::Hacks, handheld.screen());
+    assert_eq!(0, handheld.hacks().unwrap().rows().len());
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Home, handheld.screen());
+
+    // L2 does nothing for a game no widescreen hack is made for.
+    tap(&mut harness, &mut handheld, PadButton::L2);
+    assert_eq!(Screen::Home, handheld.screen());
+
+    tap(&mut harness, &mut handheld, PadButton::Select);
+    tap(&mut harness, &mut handheld, PadButton::Up);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(Screen::Hacks, handheld.screen());
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::GameOptions, handheld.screen());
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Home, handheld.screen());
+
+    play(&mut harness, &mut handheld);
+    for _ in 0..6 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(Screen::Hacks, handheld.screen());
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Overlay, handheld.screen());
+}
+
+/// The options of a game saved from their screen keep its hacks, which are not theirs: the
+/// widescreen of the game stays.
+#[test]
+fn the_game_options_keep_the_hacks_of_the_game() {
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let rom = harness.root.path().join("roms").join("Game.nes");
+    let rom = rom.to_string_lossy().into_owned();
+    let widescreen = (SettingId::VideoWidescreen, SettingValue::Enum(4));
+    harness
+        .host
+        .set_game_options(&rom, vec![widescreen.clone()]);
+    tap(&mut harness, &mut handheld, PadButton::Select);
+    for _ in 0..3 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    tap(&mut harness, &mut handheld, PadButton::A); // the shadows
+    let options = harness.host.game_options(&rom);
+    assert!(options.contains(&widescreen));
+    assert_eq!(2, options.len());
+    // Putting every option back leaves the hacks.
+    tap(&mut harness, &mut handheld, PadButton::X);
+    assert_eq!(vec![widescreen], harness.host.game_options(&rom));
 }

@@ -1268,7 +1268,8 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
         )
         .with_domain(Domain::choice(vec![
             opt(0, "Off"),
-            opt(1, "Window"),
+            // The ratio of the view: the window, the screen in full screen or on a handheld.
+            opt(1, "Auto"),
             opt(2, "3:2"),
             opt(3, "16:10"),
             opt(4, "16:9"),
@@ -1282,7 +1283,8 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
         SettingDescriptor::new(
             SettingId::VideoWidescreenExtra,
             SettingKind::Enum,
-            SettingValue::Enum(2),
+            // +20 % (owner request).
+            SettingValue::Enum(4),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Video,

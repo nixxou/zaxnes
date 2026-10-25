@@ -20,6 +20,8 @@ pub enum OverlayItem {
     Camera,
     /// The options.
     Options,
+    /// The hacks of the game (Rust-only, owner request).
+    Hacks,
     /// Stop the game and show the ROM list.
     QuitToList,
     /// Leave the application.
@@ -27,13 +29,14 @@ pub enum OverlayItem {
 }
 
 /// The rows, in order.
-pub const ITEMS: [OverlayItem; 8] = [
+pub const ITEMS: [OverlayItem; 9] = [
     OverlayItem::Resume,
     OverlayItem::SaveState,
     OverlayItem::LoadState,
     OverlayItem::FastForward,
     OverlayItem::Camera,
     OverlayItem::Options,
+    OverlayItem::Hacks,
     OverlayItem::QuitToList,
     OverlayItem::ExitToLauncher,
 ];
@@ -80,6 +83,8 @@ pub enum OverlayCommand {
     SetCamera(CameraPreset),
     /// Show the options.
     Options,
+    /// Show the hacks of the game.
+    Hacks,
     /// Stop the game, back to the ROM list.
     QuitToList,
     /// Leave the application.
@@ -187,6 +192,7 @@ impl OverlayModel {
             OverlayItem::FastForward => OverlayCommand::ToggleFastForward,
             OverlayItem::Camera => OverlayCommand::SetCamera(self.camera),
             OverlayItem::Options => OverlayCommand::Options,
+            OverlayItem::Hacks => OverlayCommand::Hacks,
             OverlayItem::QuitToList => OverlayCommand::QuitToList,
             OverlayItem::ExitToLauncher => OverlayCommand::ExitToLauncher,
         }
