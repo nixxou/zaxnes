@@ -18,8 +18,13 @@
 //! (`$FC`, 0 to 239) and its x `Horz_Scroll_Hi:Horz_Scroll` (`$12:$FD`). The status bar is drawn
 //! in the rows past the level (54-59).
 //!
+//! A world map is in the same tile map (rows 16-26, up to four screens, those past it filled with
+//! tile `$02`), with the layout of tileset 0, in bank 12. A vertical level is not decoded.
+//!
 //! The decoder checks itself against the PPU: a row whose centre does not show what the tile map
-//! gives (the world map, the title, a vertical level, a transition) is left to the nametables.
+//! gives (the title, a transition) is left to the nametables. Column 0, which the game hides
+//! because it holds the column drawn next, and the last 3 columns of the centre, whose colours
+//! the attributes written for that column change, are redrawn from the tile map too.
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -52,8 +57,18 @@ const LEVEL_ROWS: i32 = 54;
 /// Tile rows of the plane of two stacked nametables.
 const PLANE_ROWS: i32 = 60;
 
+/// A world map: at most 4 screens; its first row under the top border, and the tile of the
+/// screens past it.
+const MAP_SCREENS: usize = 4;
+const MAP_FIRST_ROW: usize = 17 * 16;
+const MAP_FILL: u8 = 0x02;
+const MAP_LAYOUT_BANK: usize = 12;
+
 /// A line of the playfield (above the status bar) whatever the scroll.
 const MIDDLE_LINE: i32 = 96;
+
+/// The centre's rightmost columns redrawn from the tile map.
+const RIGHT_COLUMNS: i32 = 3;
 
 /// Screen columns whose tiles are checked against the nametables.
 const CHECKED: [i32; 4] = [3, 11, 19, 27];
@@ -71,9 +86,8 @@ impl Level<'_> {
         if memory.ram(LEVEL_VERTICAL) != 0 {
             return None;
         }
-        // Tileset 0 is the world map, laid out otherwise.
         let tileset = memory.ram(LEVEL_TILESET);
-        if tileset == 0 || tileset >= TILESETS {
+        if tileset >= TILESETS {
             return None;
         }
         let rom = memory.prg_rom;
@@ -86,11 +100,20 @@ impl Level<'_> {
             } else {
                 PAGE_A000_BY_TILESET
             };
-        let bank = usize::from(*rom.get(pages + usize::from(tileset))?);
+        // The world map's entry of the page table is not used: its layout is in bank 12.
+        let bank = if tileset == 0 {
+            MAP_LAYOUT_BANK
+        } else {
+            usize::from(*rom.get(pages + usize::from(tileset))?)
+        };
         let start = (bank * BANK_SIZE) + (usize::from(pointer) & (BANK_SIZE - 1));
         let layout = rom.get(start..start + 0x400)?;
         let tiles = memory.prg_ram.get(..SCREENS as usize * SCREEN_BYTES)?;
-        let last_screen = i32::from(memory.ram(LEVEL_WIDTH)).min(SCREENS - 1);
+        let last_screen = if tileset == 0 {
+            map_last_screen(tiles)
+        } else {
+            i32::from(memory.ram(LEVEL_WIDTH)).min(SCREENS - 1)
+        };
         Some(Level {
             tiles,
             layout,
@@ -116,6 +139,16 @@ impl Level<'_> {
         let pattern = *self.layout.get((quarter * 256) + usize::from(tile))?;
         Some((pattern, tile >> 6))
     }
+}
+
+/// The last screen of a world map: the game fills the screens past it with tile `$02`, the first
+/// row under the map's top border (row 17) included.
+fn map_last_screen(tiles: &[u8]) -> i32 {
+    (0..MAP_SCREENS)
+        .take_while(|&screen| tiles.get((screen * SCREEN_BYTES) + MAP_FIRST_ROW) != Some(&MAP_FILL))
+        .count()
+        .try_into()
+        .map_or(0, |screens: i32| (screens - 1).max(0))
 }
 
 impl Level<'_> {
@@ -191,6 +224,12 @@ impl MarginDecoder for SuperMarioBros3 {
         // The game hides its left 8 pixels: with horizontal mirroring, the column it draws
         // ahead of the right edge is the same nametable column as the one at the left edge.
         true
+    }
+
+    fn redrawn_right_columns(&self) -> i32 {
+        // The attribute bytes the game writes for the column it draws past the right edge
+        // cover the last visible columns too (up to 24 pixels with the fine scroll).
+        RIGHT_COLUMNS
     }
 
     fn decode_extra_row(

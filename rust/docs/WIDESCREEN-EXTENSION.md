@@ -17,7 +17,8 @@ A game takes part in one of two ways, which work together:
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
 to the ROM it was made for: the Zelda II (USA) widescreen hack
 ([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
-one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)).
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super
+Mario Bros. 3 (USA) (Rev 1) one ([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -52,7 +53,9 @@ made against.
 
 A ROM whose 3D profile title or file name says a game a patch is made for, but whose data is
 another version of it (`builtin_patches::for_game_name`; each patch knows its `game` and the
-No-Intro name of its ROM), shows a red [W]. When its data has the size the patch was made for
+No-Intro name of its ROM; the longest game the name starts with, and not one whose number goes
+on: "Super Mario Bros. 3 (Europe)" is Super Mario Bros. 3's, "Super Mario Bros. 2 (USA)" no
+one's), shows a red [W]. When its data has the size the patch was made for
 (`builtin_patches::source_size`), the patch can be **forced** on it: `emu.forced_patch` (an option
 of that game, the patch's name) makes `NesCore::set_forced_patch` apply it at load and restore
 through `builtin_patches::apply_with`, which then skips the BPS checksums of the source and the
@@ -270,7 +273,14 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    flipping every 30) and a line outside `0..240`. A decoder that cannot returns `false` (the
    default) and the vertical margin stays empty.
 
-4. A decoder whose `decodes_masked_column()` is true (default false) is also asked for screen
+4. A decoder whose `redrawn_right_columns()` is `n` (default 0) is also asked for the screen
+   columns `32 - n` to 31 of each row, and those columns' nametable records of a decoded row are
+   replaced. The wide picture composes the centre of that band from the records from
+   `x = 8 (32 - n) - fine X` on instead of taking the PPU's pixels (`Ppu2C02::redrawn_from`, per
+   band of 8 lines, 256 for none; sprites from their records too): a game whose last visible
+   columns show colours of the column it is drawing past the edge (Super Mario Bros. 3, 3
+   columns: the attribute bytes it writes ahead also cover them).
+5. A decoder whose `decodes_masked_column()` is true (default false) is also asked for screen
    column 0 of each row while the game hides the leftmost 8 pixels of the background (PPUMASK
    bit 1 clear), and that column's nametable record of a decoded row is replaced too: the wide
    picture composes those 8 pixels from the records, and such a game keeps there the column it is
@@ -289,7 +299,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
-| Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), unpatched | a horizontal level, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
+| Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -341,10 +351,13 @@ it 16 KiB before the end of the PRG-ROM, where it is with or without the built-i
 (`$83D6`). The 27 rows are the 54 tile rows of the plane of two stacked nametables (horizontal
 mirroring), from its top; the camera's y in the level is `Vert_Scroll` (`$FC`) and picks the
 instance of a row, its x `$12:$FD`. Rows past the level (the status bar, below line 192) and a row
-whose centre differs from the tile map at more than one of four columns (the world map, the title,
-the bonus games, a transition) are left to the nametables; the world map (tileset 0) and the
-vertical levels (`$03EF` non-zero) are not decoded yet. The vertical margin is decoded once a row
-halfway down the playfield matches. Column 0 is decoded too while the game hides it (see 4).
+whose centre differs from the tile map at more than one of four columns (the title, the bonus
+games, a transition) are left to the nametables; the vertical levels (`$03EF` non-zero, four
+pipe mazes) are not decoded yet. A world map is in the same tile map (rows 16-26, at most four
+screens, the screens past it filled with tile `$02`) with the layout of tileset 0 in bank 12 (the
+page table's entry for it is not used): the next screen of the map shows past its frame. The
+vertical margin is decoded once a row halfway down the playfield matches. Column 0 is decoded too
+while the game hides it (see 5), and the last 3 columns of the centre are redrawn (see 4).
 
 ---
 
@@ -441,7 +454,11 @@ pub struct BuiltinPatch {
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
   per frame of core time with the fixed overclock, 1.11 ms with the yield, as without overclock;
-  Mega Man 2's Air Man run keeps no lag frame (232 at 64 lines).
+  Mega Man 2's Air Man run keeps no lag frame (232 at 64 lines). Super Mario Bros. 3:
+  `GraphicsBuf_Prep_And_WaitVSync`'s `LDA VBlank_Tick / BPL` at `$96FB`, where every loop of the
+  game waits; 1500 frames of 1-1 with the enemies in a 112-pixel margin lag 30 times (3 in the
+  original game), none with 255 lines; 1.50 ms per frame of core time without the overclock, 1.53
+  with it and the yield.
 * A patch may add PRG-ROM: data of the original size plus whole 16 KiB banks, the CHR-ROM after
   them (`apply_with` then raises the PRG bank count of the player's header, `resize_prg`). An
   NROM game maps its first 32 KiB as before; the added banks are seen through the window. The BPS

@@ -132,6 +132,15 @@ pub trait MarginDecoder: Sync {
         false
     }
 
+    /// How many of the centre's rightmost columns the decoder redraws on the rows it decodes
+    /// (0 by default): a game that shows there colours of the column it is drawing next (Super
+    /// Mario Bros. 3: the attributes it writes ahead of the right edge also cover the visible
+    /// columns next to it). Their nametable records are replaced, and the wide picture composes
+    /// those columns of the decoded rows from the records instead of the PPU's pixels.
+    fn redrawn_right_columns(&self) -> i32 {
+        0
+    }
+
     /// Decodes the whole of `row`, a row the PPU did not draw: above or below the screen, in
     /// the vertical margin (its `line` is then negative or past 239, and its PPU address is the
     /// one it would have on the plane of two stacked nametables). Returns `false`, as by
@@ -166,6 +175,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::ZELDA2_USA => Some(&zelda2::Zelda2),
         crate::builtin_patches::MEGAMAN2_USA => Some(&megaman2::MegaMan2),
         crate::builtin_patches::SMB1_WORLD => Some(&smb1::SuperMarioBros),
+        crate::builtin_patches::SMB3_USA => Some(&smb3::SuperMarioBros3),
         _ => None,
     }
 }

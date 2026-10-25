@@ -196,6 +196,10 @@ pub struct Ppu2C02 {
     frame_vertical_margin: i32,
     /// The background rows of the frame being captured, by row index, for a margin decoder.
     captured_rows: [Option<tiles::CapturedRow>; 31],
+    /// Per band of 8 lines, the x from which the centre of the wide picture is composed from the
+    /// records rather than taken from the PPU (256: nowhere): the columns a margin decoder
+    /// redraws at the right edge ([`crate::wide_decode::MarginDecoder::redrawn_right_columns`]).
+    redrawn_from: [i16; 30],
 }
 
 impl Default for Ppu2C02 {
@@ -273,6 +277,7 @@ impl Ppu2C02 {
             frame_margin: 0,
             visible_rows: crate::STANDARD_ROWS,
             captured_rows: [None; 31],
+            redrawn_from: [256; 30],
             frame_vertical_margin: 0,
         }
     }
