@@ -23,7 +23,7 @@ variables below are only its labels, to find them.
 |---|---|
 | Source ROM | *Super Mario Bros. 3 (USA) (Rev 1)*, MMC3, 256 KiB PRG (32 banks of 8 KiB; in the game's PRG mode bank 30 is fixed at `$8000` and bank 31 at `$E000`, `$A000` and `$C000` switch), 128 KiB CHR-ROM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `2E6301ED` |
-| Target data | CRC-32 `973B6A3B` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `CA41ABAB` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 128 bytes at `$E240` of bank 31 (the `$FF` padding before a DMC sample), 2 KiB at `$1600`-`$1DFF` of bank 25 (its empty end), hooks in banks 0, 3, 4, 5, 24, 30 and 31; size and layout unchanged |
 | Patch | `rust/crates/zax-nes/patches/smb3-usa-rev1-widescreen.bps`, made against the data without header |
 
@@ -52,7 +52,8 @@ Variables (extension RAM): `WV_M $5200`, scratch `WV_T0 $5201` / `WV_T1 $5202`, 
 screen x + 8 `WV_EST $5203`/`$5204`, `WV_COUNT $5205`, `WV_M16 $5206`/`$5207`, `WV_DEL_HI $5208`,
 the sprite block the game gave each object this frame `WV_SPR_BASE $5210 + slot`, X saved
 `WV_SAVE_X $5209`, the object that drew each sprite this frame `WV_OWNER $5240 + sprite` (slot + 1,
-0 for none);
+0 for none), the creation pass ahead `WV_AHEAD $520A` and the game's column meanwhile
+`WV_ORIG $520B`/`$520C`;
 the trace build adds the lag counters at `$57F0`.
 
 ---
@@ -72,7 +73,7 @@ out the 8-pixel columns marked off the screen in `Objects_SprHVis` (`$0651 + slo
 | sprite block of an object (`Objects_HandleScrollAndUpdate`, `$C9BC`, bank 0) | `Object_SprRAM = SprRamOffsets[slot + Counter_7to0]`; a troopa then adds 8 to it and draws its head tip and wing in the two sprites below | the same, also kept in `WV_SPR_BASE` (`wide_spr_base`) |
 | end of the frame's work (`GraphicsBuf_Prep_And_WaitVSync`, `$96E5`, bank 30; the next NMI's OAM DMA follows) | | the high byte of the x of each of the six sprites of every object in a normal state: the instance of its 8-bit x nearest the object's screen x + 8, to `$5100 + OAM offset` (`wide_frame_end`; not on the world map). The six from `WV_SPR_BASE` when `Object_SprRAM` is it or 8 more, else from `Object_SprRAM`; then every sprite `WV_OWNER` names, from its object (the end-of-level card draws in a block of its own), the table cleared as it is read |
 | sprite writers (`Object_Draw16x16Sprite`, `$D680`, two 8 x 16 sprites from `Sprite_RAM + Y`; `Object_Draw24x16Sprite`, `$D6C7`, three) | | the object being drawn (`SlotIndexBackup`) noted in `WV_OWNER` for those sprites (`wide_own2`, `wide_own3`) |
-| creation as the screen scrolls (`Level_ObjectsSpawnByScroll`, `$B838`, bank 5) | the level's objects are created at the column 16 pixels past the right edge (scrolling right) or 32 past the left one | `M16` further (`wide_spawn_ahead`) |
+| creation as the screen scrolls (`Level_ObjectsSpawnByScroll`, called at `$B82E`, bank 5) | the level's objects are created when the column 16 pixels past the right edge (scrolling right) or 32 past the left one is exactly on them | run twice (`wide_spawn_twice`): first a pass ahead, `M16` further (`wide_spawn_ahead`, `$B838`), which creates any object not created yet between the game's column and that one (`wide_spawn_test`, `$B884`): what an area starts with in between (an end-of-level card after a pipe) would otherwise never meet a column that starts past it; then the game's own pass, as the game. An object already created is not created again |
 | deletion off the screen (`Object_DeleteOffScreen`, `$D40F` and `$D41E`, bank 0) | an object off the screen goes past `+$120`/`-$30` (`+$180`/`-$80`, `+$140`/`-$50` for some) of the camera | `M16` further (`wide_delete_low`, `wide_delete_high`): one created there would otherwise go at once. An object within the wide view has no column off the screen, so the game's test does not even start |
 | creation of a special object by an object (`SpecialObj_FindEmptyAbort`, `$C454`; the Lava Lotus, `$B0C1`; the Hammer Bro, `$A5E6`) | none while the object is off the screen | the same with the original screen (`wide_original_offscreen`, `wide_original_hoffscreen`): special objects (hammers, fireballs, boomerangs) have an 8-bit x relative to the screen, one thrown from a margin would show and hit 256 pixels away |
 
@@ -100,6 +101,8 @@ Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original 
 | 30 | `$96E5` | `LDA $5E / ASL A / TAY` | `JSR wide_frame_end` |
 | 0 | `$D680` | `LDA $04 / LSR A` | `JSR wide_own2` |
 | 0 | `$D6C7` | `LDA $04 / LSR A` | `JSR wide_own3` |
+| 5 | `$B82E` | `JMP $B836` (Level_ObjectsSpawnByScroll) | `JMP wide_spawn_twice` |
+| 5 | `$B884` | `ASL A x 4 / CMP $05` | `JSR wide_spawn_test` |
 | 5 | `$B838` | `LDA $FD / CLC / ADC $B832,Y / AND #$F0 / STA $05 / LDA $12 / ADC $B834,Y` | `JSR wide_spawn_ahead / JMP $B847` |
 | 0 | `$D40F` | `LDA $FD / CLC / ADC $D3CC,Y` | `JSR wide_delete_low` |
 | 0 | `$D41E` | `ADC $D3D2,Y` | `JSR wide_delete_high` |
@@ -144,7 +147,8 @@ lag counters (`$57F0` lag frames, `$57F2` NMIs, 16-bit), for measuring only.
 * Special objects (hammers, fireballs...) still vanish at the original edges, and the objects of
   the margins throw none.
 * Objects are created as far ahead as the margin: they start moving that much earlier than in the
-  original game. The game has 5 slots for the level's enemies; one that finds none free when its
+  original game; the level events the list holds (Cheep Cheep waves and the like) start that much
+  earlier too. The game has 5 slots for the level's enemies; one that finds none free when its
   column comes is not created, as in the original game, which happens a little more often with
   more enemies alive.
 * Sprites an object writes itself outside its block and outside the game's two sprite writers get
@@ -205,6 +209,9 @@ WV_M16_HI       = $5207
 WV_DEL_HI       = $5208         ; the high byte of the deletion limit at hand
 WV_SPR_BASE     = $5210         ; + slot: the six sprites the game gave the object this frame
 WV_SAVE_X       = $5209
+WV_AHEAD        = $520A         ; non-zero during the creation pass as far ahead as the margin
+WV_ORIG_LO      = $520B         ; the game's own creation column during that pass (16-bit)
+WV_ORIG_HI      = $520C
 WV_OWNER        = $5240         ; + sprite (66 bytes): 1 + the slot of the object that drew it
 .ifdef LAG_TRACE
 WV_LAG          = $57F0         ; 2 bytes: NMIs that found the game still busy (a trace build)
@@ -244,11 +251,14 @@ OBJECT_SPRITES  = 6
 OBJECT_WIDTHS   = $D792         ; bank 0 (at $C000 while objects run): column x offsets
 OBJECT_WIDTH_FLAGS = $D798      ; and their bits in Objects_SprHVis
 TEMP_VAR6       = $05
+TEMP_VAR7       = $06
+SCROLL_LAST_DIR = $5B           ; 0 the screen last moved right, 1 left
 PAD_INPUT       = $18           ; the buttons pressed this frame
 PAD_B           = $40
 TITLE_STATE     = $DE
 TITLE_DEBUG_MENU = $07          ; its state with no way in left in the game
 PLAYER_DEBUG_NO_HIT = $7CFF     ; the game's unused debug invincibility, cleared at each level
+LEVEL_OBJECTS_SPAWN_BY_SCROLL = $B836 ; bank 5
 LOSBS_LOOK_AHEAD = $B832        ; bank 5 (at $A000 while objects spawn): 16 and -32, low
 LOSBS_LOOK_AHEAD_HI = $B834     ; and high
 DELETE_RANGE_LO = $D3CC         ; bank 0: the deletion limits, right (even) and left (odd)
@@ -545,6 +555,24 @@ wide_own_two:
     RTS
 
 ; ---------------------------------------------------------------------------- ;
+; The creation of the level's objects as the screen scrolls (PRG005_B82E, in place of JMP
+; Level_ObjectsSpawnByScroll): run twice, first at the column as far ahead as the margin, then at
+; the game's own. The game creates an object only when that column is exactly on it: the column
+; ahead alone, which starts that much further where an area starts, would never meet the objects
+; in between (an end-of-level card right after a pipe). One already created is not created again.
+wide_spawn_twice:
+    LDA     WV_M16_LO                   ; no margin: the game's pass alone
+    ORA     WV_M16_HI
+    BEQ     @own
+    LDA     #$01
+    STA     WV_AHEAD
+    JSR     LEVEL_OBJECTS_SPAWN_BY_SCROLL
+@own:
+    LDA     #$00
+    STA     WV_AHEAD
+    JMP     LEVEL_OBJECTS_SPAWN_BY_SCROLL
+
+; ---------------------------------------------------------------------------- ;
 ; The column where objects of the level are created as the screen scrolls
 ; (Level_ObjectsSpawnByScroll, $B838, in place of its computation of Temp_Var6/7; Y is
 ; Scroll_LastDir, 0 right, 1 left). The game creates them 16 pixels past the right edge or 32 past
@@ -558,6 +586,13 @@ wide_spawn_ahead:
     LDA     HORZ_SCROLL_HI
     ADC     LOSBS_LOOK_AHEAD_HI,y
     STA     WV_T1
+    LDA     WV_AHEAD                    ; the game's own pass: its column
+    BEQ     @column_low
+    LDA     WV_T0                       ; the game's column, for wide_spawn_test
+    AND     #$F0
+    STA     WV_ORIG_LO
+    LDA     WV_T1
+    STA     WV_ORIG_HI
     CPY     #$00
     BNE     @left
     LDA     WV_T0
@@ -576,6 +611,7 @@ wide_spawn_ahead:
     SBC     WV_M16_HI
 @column:
     STA     WV_T1
+@column_low:
     LDA     WV_T0
     AND     #$F0
     STA     TEMP_VAR6
@@ -699,6 +735,52 @@ wide_spr_base:
     STA     OBJECT_SPR_RAM,x
     STA     WV_SPR_BASE,x
     RTS
+
+; ---------------------------------------------------------------------------- ;
+; Whether an object of the list is at the creation column (Level_ObjectsSpawnByScroll, $B884, in
+; place of ASL A x 4 / CMP Temp_Var6; A is the object's column byte, the BNE after skips it; on
+; the screen Temp_Var7). The game's pass: exactly the game's column, as the game. The pass ahead:
+; anywhere past the game's column up to the column ahead (in the direction the screen moves),
+; so that what an area starts with between the two is created too. A gets the object's x within
+; its screen, Z set when it is to be created.
+wide_spawn_test:
+    ASL     A
+    ASL     A
+    ASL     A
+    ASL     A
+    STA     WV_T0
+    LDA     WV_AHEAD
+    BNE     @range
+    LDA     WV_T0
+    CMP     TEMP_VAR6
+    RTS
+@range:
+    LDA     SCROLL_LAST_DIR
+    BNE     @left
+    LDA     TEMP_VAR6                   ; right: x <= the column ahead (same screen)
+    CMP     WV_T0
+    BCC     @no
+    LDA     WV_ORIG_LO                  ; and past the game's column
+    CMP     WV_T0
+    LDA     WV_ORIG_HI
+    SBC     TEMP_VAR7
+    BCS     @no
+@yes:
+    LDA     WV_T0
+    CMP     WV_T0
+    RTS
+@left:
+    LDA     WV_T0                       ; left: x >= the column ahead
+    CMP     TEMP_VAR6
+    BCC     @no
+    LDA     WV_T0                       ; and short of the game's column
+    CMP     WV_ORIG_LO
+    LDA     TEMP_VAR7
+    SBC     WV_ORIG_HI
+    BCC     @yes
+@no:
+    LDA     #$01
+    RTS
 ```
 
 ### B. `tools/build.py`
@@ -778,6 +860,10 @@ def hooks(sym):
     # Objects created as far ahead as the margin (Level_ObjectsSpawnByScroll)...
     put(5, 0xB838, 'a5 fd 18 79 32 b8 29 f0 85 05 a5 12 79 34 b8',
         jsr(sym['wide_spawn_ahead']) + jmp(0xB847))
+    # ... an object between the game's column and the column ahead too ...
+    put(5, 0xB884, '0a 0a 0a 0a c5 05', jsr(sym['wide_spawn_test']))
+    # ... the game's own column too, after (PRG005_B82E, JMP Level_ObjectsSpawnByScroll) ...
+    put(5, 0xB82E, '4c 36 b8', jmp(sym['wide_spawn_twice']))
     # ... and deleted that much further (Object_DeleteOffScreen).
     put(0, 0xD40F, 'a5 fd 18 79 cc d3', jsr(sym['wide_delete_low']))
     put(0, 0xD41E, '79 d2 d3', jsr(sym['wide_delete_high']))
