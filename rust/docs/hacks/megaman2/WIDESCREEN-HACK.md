@@ -16,7 +16,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 |---|---|
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
-| Target data | CRC-32 `16798BC9` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `BB71FB56` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15 and one in bank 14 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
@@ -49,7 +49,7 @@ screens `$14` to `$15`.
 collides, which keeps the game's logic exactly the original's on the screen. With M = 0 every
 routine does exactly what the code it replaces does.
 
-Margin: `M = min($5002, 128)` (128: what sprites can show through the extension). Enemies use
+Margin: `M = min($5002, 248)` (248: the widest the extension's 8-bit registers carry; sprites show that far with `$5007` bit 1). Enemies use
 `MOBJ`: `M`, or 0 when the player turns the option "Enemies in the margins" off (`$500A` bit 0,
 on by default): they then spawn and go at the original edges, the second sprite page and the 16-bit
 sprite x staying.
@@ -152,7 +152,7 @@ EXTRA_OAM       = $5300         ; the second sprite page ($5007 bit 2), OAM form
 EXTRA_SPRHI     = $5400         ; high byte of the x of its sprite n at $5400 + 4n
 OAM             = $0200
 
-MAX_MARGIN      = 128           ; what sprites can show (the extension's own limit)
+MAX_MARGIN      = 248           ; the widest margin the extension's 8-bit registers carry
 .ifndef OVERCLOCK_LINES
 OVERCLOCK_LINES = 64            ; pays for the hack's work and the enemies of the margins
 .endif
