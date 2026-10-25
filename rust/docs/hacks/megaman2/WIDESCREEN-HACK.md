@@ -17,7 +17,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
 | Target data | CRC-32 `AA52E0AD` (the hack's version in savestate headers; `tools/build.py` prints it) |
-| Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15 and one in bank 14 |
+| Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15, bank 14 and bank 11 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
 ---
@@ -101,11 +101,30 @@ Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original 
 | `$CFAD`, `$CFC9`, `$CFCE`, `$CFD3` | `STA $0200,X`, `$0201,X`, `$0202,X`, `$0203,X` | `JSR wide_put_y` / `_tile` / `_attribute` / `_x` |
 | `$D763` | `TYA / STA $0100,X` | `JSR wide_spawned` |
 | bank 14 `$9283` | `LDY $0400,X` | `JSR wide_wake` |
+| bank 14 `$AF9D` | `JSR $AF4C` (a cloud devil marker resets its palette) | `JSR wide_tikki_reset` |
+| bank 14 `$95AB` | `LDY #$17 / JSR $998D` (the shrimp spawner sets palette 2 to the water's) | `JSR wide_water_palette / NOP / NOP` |
+| `$E596` | `LDA $4B / BNE $E5CC / SEC` (an enemy's touch) | `JSR wide_touch / BNE $E5CC` |
+| bank 11 `$A564` | `LDA $4B / BNE $A59C / LDY $B3` (other damage) | `JSR wide_hurt / BNE $A59C / NOP` |
+| bank 14 `$8A5E`, `$8CC2` | `LDA #0 / STA $2C / JMP $C10B` (a spike kills) | `JSR wide_spike / JMP $8A65` (or `$8CC9`) `/ NOP` |
 
 `$EF8C` is the game's own removal (it also lets an enemy of the list spawn again); `$CEDB` hides a
 sprite (OAM y `$F8`).
 
-## 5. Building
+## 5. Options
+
+The options the player can turn on or off (Video menu, "Hack options"); Zaxnes writes their bits at
+`$500A` every frame, the hack reads them there (`WIDE_OPTIONS`).
+
+| Bit | Key | Label | Default | Effect |
+|---|---|---|---|---|
+| 0 | `enemies_in_margins` | Enemies in the margins / Ennemis dans les marges | on | off, `MOBJ = 0`: enemies spawn, live and are removed at the original edges (the background of the margins stays) |
+| 1 | `invincible` | Invincible | off | a testing aid: no damage, spikes harmless (`wide_touch`, `wide_hurt`, `wide_spike`); falling off the screen still kills |
+| 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock instead of 64: the game never runs late (no lag frame) |
+
+The options live in Zaxnes (`rust/crates/zax-nes/src/builtin_patches.rs`, `PATCHES`); the ROM does
+not depend on them being set (all 0 is the hack without enemies in the margins, 64 lines).
+
+## 6. Building
 
 Requirements: cc65 (ca65, ld65; run through WSL when not on the PATH), Python 3, the source ROM.
 
@@ -117,15 +136,17 @@ assembles `src/wide.s` for `$F300`-`$F8FF` (`-g`, labels from `ld65 -Ln`), check
 still `$FF`, writes the code and the hooks, `build/mm2wide.nes` and the BPS patch (`tools/make_bps.py`,
 SourceRead / TargetRead only). `WIDE_SKIP=<hex addresses>` leaves hooks out, for testing.
 
-## 6. Limits
+## 7. Limits
 
 * Enemies a stage's own code removes when off the screen, other than through the routines above,
   still go at the original edge.
-* More enemies alive means more CPU time: the game's slowdowns can come more often.
+* More enemies alive means more CPU time: at 64 lines of overclock the game's slowdowns come more
+  often (a 2216-frame Air Man run: 230 lag frames with the enemies in the margins); "No slowdown"
+  (255 lines) leaves none, the game's own included.
 * No vertical margin yet (the decoder draws the sides only).
-* The 64 lines of overclock also shorten the game's own slowdowns; with "No slowdown" (255 lines)
-  there are none left (a 2216-frame Air Man run: 230 lag frames at 64 lines with the enemies in the
-  margins, 0 at 255).
+* Objects that share a resource with another one (a background palette, as the cloud devils and the
+  lantern fish do) can meet in a wide view where the original screen never shows them together;
+  the two cases met so far are handled (section 2), others may remain.
 
 ---
 
