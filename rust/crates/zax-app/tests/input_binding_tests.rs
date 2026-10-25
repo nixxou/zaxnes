@@ -1068,3 +1068,49 @@ fn a_saved_desktop_default_pad_moves_to_the_handheld_defaults() {
         PhysicalControl::button(pad_map::WEST)
     );
 }
+
+/// The desktop plays as its console mode with the face buttons where a handheld has them (owner
+/// request): NES A on the right button (Xbox B), NES B on the bottom one (Xbox A). A pad saved
+/// with an earlier default (the desktop's, or the handheld's by labels) moves to it; one the
+/// player changed is kept.
+#[test]
+fn a_desktop_pad_gets_the_handheld_buttons_at_their_places() {
+    let mut bindings = InputBindings::new();
+    bindings.gamepad_mut("desktop default", true);
+    let mut labelled = InputBindings::new();
+    labelled.use_handheld_defaults();
+    let by_labels = labelled.gamepad_mut("any", true).clone();
+    bindings
+        .gamepad_mut("handheld default", true)
+        .replace(by_labels.bindings().iter().cloned());
+    bindings
+        .gamepad_mut("changed", true)
+        .set_action(InputAction::A, PhysicalControl::button(pad_map::NORTH));
+
+    bindings.use_desktop_console_defaults();
+
+    for name in ["desktop default", "handheld default", "new pad"] {
+        let set = bindings.gamepad_mut(name, true);
+        assert_eq!(
+            set.get_action(InputAction::A),
+            PhysicalControl::button(pad_map::EAST),
+            "{name}"
+        );
+        assert_eq!(
+            set.get_action(InputAction::B),
+            PhysicalControl::button(pad_map::SOUTH),
+            "{name}"
+        );
+        assert_eq!(
+            set.get_action(InputAction::FAST_FORWARD),
+            PhysicalControl::trigger(pad_map::RIGHT_TRIGGER),
+            "{name}"
+        );
+    }
+    assert_eq!(
+        bindings
+            .gamepad_mut("changed", true)
+            .get_action(InputAction::A),
+        PhysicalControl::button(pad_map::NORTH)
+    );
+}

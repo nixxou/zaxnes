@@ -354,7 +354,8 @@ pour. Aujourd'hui, deux le sont, grâce à un **hack écran large intégré** à
 L'écran large se règle **par jeu**, dans l'écran **Hacks** du jeu : en mode console, depuis la
 liste (Start, ou L2 pour seulement l'activer ou le désactiver), depuis les options du jeu ou depuis
 le menu en jeu ; sur PC, par **Options du jeu ▸ Hacks…**. Il est **désactivé par défaut** ; ses
-réglages ne sont plus dans les options globales.
+réglages ne sont plus dans les options globales (une valeur globale enregistrée par une version
+précédente est oubliée au démarrage).
 
 | Ligne | Choix | Effet |
 |---|---|---|
@@ -501,24 +502,27 @@ maintenir `Select` et donner le coup de stick.
 Toute manette de type Xbox (XInput ou reconnue par la table standard) est prise en charge sans
 réglage. Les manettes de réalité virtuelle ne sont jamais proposées ni attribuées.
 
-Une manette joue **comme sur la version portable** (mode console), barre de menus ou pas :
+Une manette joue **comme sur la version portable** (mode console), barre de menus ou pas, avec
+ses boutons **aux mêmes places** que ceux de la portable (A à droite, B en bas, X en haut, Y à
+gauche) — et non selon les lettres d'une manette Xbox :
 
 | Commande | Action |
 |---|---|
 | Croix | directions NES |
-| Bouton sud (A Xbox, Croix PS) | bouton A |
-| Bouton est (B Xbox, Rond) | bouton B |
+| Bouton est (B Xbox, Rond) | bouton A ; dans les menus, choisir |
+| Bouton sud (A Xbox, Croix PS) | bouton B ; dans les menus, retour |
 | Back / View / Share | Select |
 | Start / Menu / Options | Start |
 | Guide (ou Select + Start si le réglage le demande) | menu du mode console, partie en pause |
-| Bouton ouest (X Xbox, Carré) | vue par défaut |
-| Bouton nord (Y Xbox, Triangle) | 2D / 3D ; maintenu, la 2D vue de face, plein cadre |
+| Bouton nord (Y Xbox, Triangle) | vue par défaut (le X de la portable) |
+| Bouton ouest (X Xbox, Carré) | 2D / 3D ; maintenu, la 2D vue de face, plein cadre (le Y de la portable) |
 | LB / RB | éloigner / rapprocher la caméra |
 | Gâchette droite (RT) | avance rapide |
 | Gâchette gauche (LT) maintenue / appui bref | garder / remettre l'angle et le zoom |
 | Stick droit | tourner la caméra |
 
 Le rollback n'a plus de bouton par défaut sur la manette (la touche `,` du clavier reste). Une
+manette restée sur les touches par défaut d'une version précédente passe à celles-ci ; une
 manette dont vous aviez changé les touches garde les vôtres.
 
 La **première manette utilisée** va au joueur 1, la suivante au joueur 2 ; l'attribution est

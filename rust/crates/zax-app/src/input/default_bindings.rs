@@ -212,6 +212,26 @@ pub fn create_gamepad(standard: bool) -> BindingSet {
     set
 }
 
+/// The gamepad set of the desktop, which plays as its console mode (Rust-only, owner request):
+/// the handheld defaults with the face buttons where a handheld has them, not by their labels.
+/// A handheld labels A the right button and B the bottom one; an `XInput` pad labels A the bottom
+/// one: NES A goes on the right button (Xbox B), NES B on the bottom one (Xbox A).
+#[must_use]
+pub fn create_desktop_console_gamepad(standard: bool) -> BindingSet {
+    let mut set = create_handheld_gamepad(standard);
+    if standard {
+        set.set_action(
+            InputAction::A,
+            PhysicalControl::button(standard_gamepad::EAST),
+        );
+        set.set_action(
+            InputAction::B,
+            PhysicalControl::button(standard_gamepad::SOUTH),
+        );
+    }
+    set
+}
+
 /// The gamepad set of a handheld console: the handheld defaults when `standard`.
 #[must_use]
 pub fn create_handheld_gamepad(standard: bool) -> BindingSet {
