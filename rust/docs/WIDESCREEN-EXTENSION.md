@@ -79,10 +79,13 @@ until then.
 | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels (power-on `$FF`) |
 | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels (power-on `$FF`) |
 | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines (power-on 0) |
-| `$5007` | R/W | bit 0: four separate nametables; bit 1: sprites free of the extents (power-on 0) |
+| `$5007` | R/W | bit 0: four separate nametables; bit 1: sprites free of the extents; bit 2: second sprite page (power-on 0) |
 | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
+| `$500A` | R | the options of the ROM's built-in patch the player turned on, one bit each (see 7) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
+| `$5300`-`$53FF` | RAM | with `$5007` bit 2: a second page of 64 sprites, OAM format |
+| `$5400`-`$54FF` | RAM | with `$5007` bit 2: high byte of the x of its sprite *n* at `$5400 + 4n` |
 | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM (power-on 0); `$5800`-`$5FFF` reads the PRG window instead while it is on |
 
 Details:
@@ -122,8 +125,12 @@ Details:
   cartridge's PRG-ROM): code the fixed bank calls can live in any bank. Being ROM, it is always
   the code of the ROM loaded; a copy in RAM would travel in savestates and outlive a new version
   of a hack.
-* The 64-sprite OAM and the 8-sprites-per-line limit are unchanged (the core already captures
-  every sprite).
+* **Second sprite page** (`$5007` bit 2): at each OAM DMA the extension latches its RAM at
+  `$5300` (64 sprites, OAM format) and `$5400 + 4n` (the high bytes of their x). The core captures
+  them after the console's 64, as records 128 and up (below them all in priority), 8 x 8 only; the
+  2D picture draws them over the PPU's centre too. A game whose sprites no longer fit in 64 (more
+  enemies in the margins) moves on to it instead of flickering. The 8-sprites-per-line limit does
+  not apply to captures anyway.
 
 Typical use:
 
@@ -317,6 +324,12 @@ pub struct BuiltinPatch {
   target and patch checksums, so a `Some` is exactly the build.
 * `BuiltinPatch::version()` is the target CRC-32 read from the BPS footer: any change to a hack
   changes it.
+* `BuiltinPatch::options`: the options the player can turn on or off (`HackOption`: key, English
+  and French labels, bit, default). The core starts with the defaults at each ROM load
+  (`default_options()`); the application keeps the player's choices in `emu.hack_options`
+  (`<patch>/<key>=0|1` entries separated by `;`), shows them in the Video menu's "Hack options"
+  submenu (command `video.toggle_hack_option`) and sets them every frame
+  (`NesCore::set_hack_options`); the ROM reads them at `$500A`.
 * `NesCore::load_rom` applies the matching patch when `set_builtin_patches(true)` (the setting
   `emu.builtin_patches`, read at each ROM load) and keeps the **original** image
   (`original_image()`); `builtin_patch()` names the patch.

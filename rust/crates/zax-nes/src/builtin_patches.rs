@@ -19,6 +19,9 @@ pub struct BuiltinPatch {
     pub source_crc: u32,
     /// The BPS patch.
     pub bps: &'static [u8],
+    /// The options the player can turn on or off (a menu of the host), told to the ROM through
+    /// the widescreen extension's `$500A`.
+    pub options: &'static [HackOption],
     /// Puts right, in CPU RAM, a machine restored from a state made the other way (with the
     /// patch while it is off, or without it while it is on): the video memory of one is not laid
     /// out as the other expects, so the game is sent back to a step that redraws it.
@@ -37,12 +40,20 @@ pub const PATCHES: [BuiltinPatch; 2] = [
         name: ZELDA2_USA,
         source_crc: 0xBA32_2865,
         bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
+        options: &[],
         after_other_way_state: Some(zelda2_after_other_way_state),
     },
     BuiltinPatch {
         name: MEGAMAN2_USA,
         source_crc: 0x0FCF_C04D,
         bps: include_bytes!("../patches/megaman2-usa-widescreen.bps"),
+        options: &[HackOption {
+            key: "enemies_in_margins",
+            label: "Enemies in the margins",
+            label_fr: "Ennemis dans les marges",
+            bit: 0,
+            default: true,
+        }],
         after_other_way_state: None,
     },
 ];
@@ -59,6 +70,15 @@ fn zelda2_after_other_way_state(ram: &mut [u8]) {
 }
 
 impl BuiltinPatch {
+    /// The bits of `$500A` with every option as it is by default.
+    #[must_use]
+    pub fn default_options(&self) -> u8 {
+        self.options
+            .iter()
+            .filter(|option| option.default)
+            .fold(0, |bits, option| bits | (1 << (option.bit & 7)))
+    }
+
     /// The patch's version: the CRC-32 of the ROM data it produces, which any change to the
     /// hack changes (read from the BPS footer).
     #[must_use]
@@ -70,6 +90,20 @@ impl BuiltinPatch {
             .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
             .map_or(0, u32::from_le_bytes)
     }
+}
+
+/// An option of a built-in patch: bit `bit` of the extension's `$500A`, which the ROM reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HackOption {
+    /// Stable key, kept in the host's settings.
+    pub key: &'static str,
+    /// Its label in English and in French.
+    pub label: &'static str,
+    pub label_fr: &'static str,
+    /// Its bit of `$500A`.
+    pub bit: u8,
+    /// Whether it is on until the player says otherwise.
+    pub default: bool,
 }
 
 /// A ROM image with the built-in patch it matched applied.

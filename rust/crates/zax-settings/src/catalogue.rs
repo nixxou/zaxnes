@@ -125,6 +125,7 @@ setting_ids! {
     VideoWidescreenExtra => "video.widescreen_extra",
     VideoWidescreenStrictEdges => "video.widescreen_strict_edges",
     EmuBuiltinPatches => "emu.builtin_patches",
+    EmuHackOptions => "emu.hack_options",
     ConvSameBgPalette => "conv.same_bg_palette",
     ConvSameSpPalette => "conv.same_sp_palette",
     ConvSpriteTolerance => "conv.sprite_tolerance",

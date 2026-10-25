@@ -61,6 +61,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::SpeedUp => self.settings.game_speed() < speed_setting::MAXIMUM,
             Command::SpeedDown => self.settings.game_speed() > speed_setting::MINIMUM,
             Command::SetPortType => self.session.is_some() && matches!(args.number, 0 | 1),
+            Command::ToggleHackOption => {
+                usize::try_from(args.number).is_ok_and(|index| index < self.hack_options().len())
+            }
             Command::CancelModal => self.modal_window_open(),
             Command::OpenRecentRom
             | Command::Quit
@@ -149,6 +152,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::SetCameraMode
             | Command::ToggleLocalCamera
             | Command::ToggleShadows
+            | Command::ToggleHackOption
             | Command::ToggleFullscreen
             | Command::ToggleFpsCounter => self.execute_video(command, args),
             Command::SetVolume
@@ -272,6 +276,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 model.set_local_camera(value);
             }),
             Command::SetSkybox => self.update_settings(|model| model.set_skybox(args.number)),
+            Command::ToggleHackOption => self.toggle_hack_option(args.number),
             Command::ToggleShadows => self.update_settings(|model| {
                 let value = !model.shadow();
                 model.set_shadow(value);

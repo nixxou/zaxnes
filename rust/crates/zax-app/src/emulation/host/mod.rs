@@ -7,6 +7,7 @@
 
 mod commands;
 mod games;
+mod hack_options;
 mod jobs;
 mod save_states;
 

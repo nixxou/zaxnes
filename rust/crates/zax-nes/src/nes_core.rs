@@ -235,6 +235,10 @@ impl NesCore {
         self.battery_ram_imported = false;
         self.builtin_patch = patched.as_ref().map(|patched| patched.name);
         self.rom_crc = Some(crate::builtin_patches::data_crc(image));
+        // The patch's options start as they are by default; a host sets the player's choice.
+        let options = crate::builtin_patches::patch_for(image)
+            .map_or(0, crate::builtin_patches::BuiltinPatch::default_options);
+        self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
         self.bus.attach(Some(cartridge));
         self.power_on();
@@ -510,6 +514,24 @@ impl NesCore {
     /// others. Rounded down to a multiple of 8 and capped at [`crate::wide::MAX_MARGIN`].
     pub fn set_widescreen_margin(&mut self, pixels: i32) {
         self.bus.ppu_mut().wide_mut().set_host_margin(pixels);
+    }
+
+    /// Sets the options of the built-in patch the player turned on, one bit each as the patch's
+    /// `options` say; the ROM reads them at `$500A`.
+    pub fn set_hack_options(&mut self, options: u8) {
+        self.bus.ppu_mut().wide_mut().set_host_options(options);
+    }
+
+    /// The options of the built-in patch applied to the ROM loaded (none without one).
+    #[must_use]
+    pub fn hack_options(&self) -> &'static [crate::builtin_patches::HackOption] {
+        self.builtin_patch
+            .and_then(|name| {
+                crate::builtin_patches::PATCHES
+                    .iter()
+                    .find(|patch| patch.name == name)
+            })
+            .map_or(&[], |patch| patch.options)
     }
 
     /// Sets the margin the host offers above and below, in pixels (0 = off). Only a game with
