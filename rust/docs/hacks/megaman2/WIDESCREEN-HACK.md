@@ -112,7 +112,7 @@ sprite (OAM y `$F8`).
 
 ## 5. Options
 
-The options the player can turn on or off (Video menu, "Hack options"); Zaxnes writes their bits at
+The options the player can turn on or off (the game's hacks screen: console mode, or Game options > Hacks... on the desktop); Zaxnes writes their bits at
 `$500A` every frame, the hack reads them there (`WIDE_OPTIONS`).
 
 | Bit | Key | Label | Default | Effect |

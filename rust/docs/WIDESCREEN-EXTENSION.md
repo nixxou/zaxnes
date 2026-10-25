@@ -30,20 +30,28 @@ Zaxnes.
 
 ## 1. Host settings (application)
 
-All are Rust-only settings (not exposed to Lua), Video options.
+All are Rust-only settings (not exposed to Lua). The first two are options of each game, set in
+its hacks screen (console mode: the ROM list, the game's options, the in-game menu; desktop: Game
+options > Hacks..., `ui/handheld/hacks.rs`) and kept in `games.json` with its other options; the
+global options window no longer shows them, nor `emu.builtin_patches`.
 
 | Key | Values | Default | Effect |
 |---|---|---|---|
-| `video.widescreen` | Off, Window, 3:2, 16:10, 16:9 | Off | the picture ratio the margins are worked out for |
-| `video.widescreen_extra` | +0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300 % (indices 0-13) | +10 % (index 2) | makes the picture that much larger, in both directions |
-| `video.widescreen_strict_edges` | bool | false | see 5.3 |
-| `emu.builtin_patches` | bool | true | applies the built-in patches at the next ROM load (see 7) |
+| `video.widescreen` | Off, Auto, 3:2, 16:10, 16:9 | Off | the picture ratio the margins are worked out for; Auto is the view's |
+| `video.widescreen_extra` | +0, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 300 % (indices 0-13) | +20 % (index 4) | makes the picture that much larger, in both directions |
+| `video.widescreen_strict_edges` | bool | false | see 5.3 (global, Video options) |
+| `emu.builtin_patches` | bool | true | allows the built-in patches; a ROM is patched at load only when its `video.widescreen` is on too (see 7) |
+
+The ROM list knows the games a hack is made for from the CRC-32 of their data
+(`builtin_patches::widescreen_capable`: a built-in patch or a margin decoder), kept in
+`rom_crc.json` of the user data with each file's size and modification time
+(`persistence/rom_crc_cache.rs`).
 
 The margins are computed by `widescreen_margin(choice, extra, view size)` in
 `zax-app/src/application.rs`, every frame, and handed to the core:
 
 ```
-ratio  = view width / height (Window), 3/2, 16/10 or 16/9
+ratio  = view width / height (Auto), 3/2, 16/10 or 16/9
 bonus  = 1 + percent / 100
 margin_x = ceil8(max(0, (240 * ratio * bonus - 256) / 2))   capped at 512   (each side)
 margin_y = ceil8(max(0, 240 * (bonus - 1) / 2))              capped at 240   (above and below)
@@ -246,7 +254,7 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    flipping every 30) and a line outside `0..240`. A decoder that cannot returns `false` (the
    default) and the vertical margin stays empty.
 
-Decoders run only while the built-in patches are on (`emu.builtin_patches`). The decoders:
+Decoders run only while the built-in patches are on for the game in play (see 7). The decoders:
 
 | Game | Decodes | Source |
 |---|---|---|
@@ -343,11 +351,12 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::options`: the options the player can turn on or off (`HackOption`: key, English
   and French labels, bit, default). The core starts with the defaults at each ROM load
   (`default_options()`); the application keeps the player's choices in `emu.hack_options`
-  (`<patch>/<key>=0|1` entries separated by `;`), shows them in the Video menu's "Hack options"
-  submenu (command `video.toggle_hack_option`) and sets them every frame
-  (`NesCore::set_hack_options`); the ROM reads them at `$500A`.
-* `NesCore::load_rom` applies the matching patch when `set_builtin_patches(true)` (the setting
-  `emu.builtin_patches`, read at each ROM load) and keeps the **original** image
+  (`<patch>/<key>=0|1` entries separated by `;`), shows them in the game's hacks screen
+  (`HacksModel`; the command `video.toggle_hack_option` stays for bindings) and sets them
+  every frame (`NesCore::set_hack_options`); the ROM reads them at `$500A`.
+* `NesCore::load_rom` applies the matching patch when `set_builtin_patches(true)`
+  (`EmulationHost::builtin_patches_wanted`, at each ROM load: `emu.builtin_patches` and the
+  game's `video.widescreen` on, owner request) and keeps the **original** image
   (`original_image()`); `builtin_patch()` names the patch.
 * The battery file and the savestate fingerprint use the original image: a new version of a hack
   is the same game, and its battery RAM carries over.
@@ -392,10 +401,10 @@ The new fields are optional when read.
 
 * `Fits`: loads as it is (also any state of a ROM no built-in patch is made for).
 * `OtherMode { hack }`: made with the hack (`isHack`, or for older files a core block of version
-  5/6) while `emu.builtin_patches` is off, or the reverse. Shown in **orange** in the load menus.
-  Choosing it asks (`TURN_HACK_ON_QUESTION` / `TURN_HACK_OFF_QUESTION`, translated); agreeing
-  sets `emu.builtin_patches`, then loads the slot, whose restore reloads the ROM from the state
-  with the patch as now set.
+  5/6) while the patches are not wanted for the game, or the reverse. Shown in **orange** in the
+  load menus. Choosing it asks (`TURN_HACK_ON_QUESTION` / `TURN_HACK_OFF_QUESTION`, translated);
+  agreeing turns the game's widescreen on (Auto, and `emu.builtin_patches` on) or off, then
+  loads the slot, whose restore reloads the ROM from the state with the patch as now set.
 * `OtherVersion`: made with the hack and a `hackVersion` other than the running patch's. Shown in
   **red**; refused (`OTHER_HACK_VERSION_MESSAGE`). Older files without `hackVersion` count as the
   current version.

@@ -53,6 +53,13 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
     }
 }
 
+/// Whether `id` is a setting of a row of [`GAME_ROWS`]; the game's other options (its hacks)
+/// belong to other screens.
+#[must_use]
+pub fn is_game_row_setting(id: SettingId) -> bool {
+    GAME_ROWS.iter().any(|row| row_settings(*row).contains(&id))
+}
+
 /// What the screen asks of the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GameOptionsCommand {
@@ -60,6 +67,8 @@ pub enum GameOptionsCommand {
     Save,
     /// Leave the screen.
     Close,
+    /// Open the hacks of the game (its last row, Rust-only).
+    OpenHacks,
 }
 
 /// The options of one game and the selection; row 0 is "reset everything".
@@ -72,6 +81,8 @@ pub struct GameOptionsModel {
     global: SettingsModel,
     /// The global values with the game's own over them.
     edited: SettingsModel,
+    /// The game's options of other screens (its hacks), kept as they are.
+    kept: GameOptions,
 }
 
 impl GameOptionsModel {
@@ -82,12 +93,16 @@ impl GameOptionsModel {
         global.clear_session_layer();
         global.clear_game_values();
         global.drain_changes().for_each(drop);
+        let (options, kept): (GameOptions, GameOptions) = options
+            .into_iter()
+            .partition(|(id, _)| is_game_row_setting(*id));
         let mut model = Self {
             rom,
             name,
             selected: 0,
             edited: global.clone(),
             global,
+            kept,
         };
         model.edited.set_game_values(options);
         model.normalise();
@@ -106,19 +121,34 @@ impl GameOptionsModel {
         &self.name
     }
 
+    /// The rows of the screen: "reset everything", the rows of [`GAME_ROWS`], then "Hacks".
+    pub const ROW_COUNT: usize = GAME_ROWS.len() + 2;
+
+    /// The row that opens the hacks of the game, the last one.
+    pub const HACKS_ROW: usize = GAME_ROWS.len() + 1;
+
     /// The index of the selected row, 0 being "reset everything".
     #[must_use]
     pub const fn selected_index(&self) -> usize {
         self.selected
     }
 
-    /// The options to keep: only the settings that differ from the global values.
+    /// Selects the row `index` (back from the hacks, on their row).
+    pub const fn select(&mut self, index: usize) {
+        if index < Self::ROW_COUNT {
+            self.selected = index;
+        }
+    }
+
+    /// The options to keep: only the settings that differ from the global values, and the
+    /// game's options of other screens as they were.
     #[must_use]
     pub fn options(&self) -> GameOptions {
         self.edited
             .game_values()
             .iter()
             .map(|(id, value)| (*id, value.clone()))
+            .chain(self.kept.iter().cloned())
             .collect()
     }
 
@@ -167,6 +197,7 @@ impl GameOptionsModel {
         let own: GameOptions = self
             .options()
             .into_iter()
+            .filter(|(id, _)| is_game_row_setting(*id))
             .filter(|(id, _)| !row_settings(row).contains(id))
             .collect();
         self.edited = self.global.clone();
@@ -209,10 +240,13 @@ impl GameOptionsModel {
 
     /// One press of a button.
     pub fn handle(&mut self, button: PadButton) -> Option<GameOptionsCommand> {
-        let count = GAME_ROWS.len() + 1;
+        let count = Self::ROW_COUNT;
         match button {
             PadButton::Up => self.selected = (self.selected + count - 1) % count,
             PadButton::Down => self.selected = (self.selected + 1) % count,
+            PadButton::A | PadButton::Right if self.selected == Self::HACKS_ROW => {
+                return Some(GameOptionsCommand::OpenHacks);
+            }
             PadButton::Left => return self.step(-1),
             PadButton::A if self.selected == 0 => return self.reset(),
             PadButton::Right | PadButton::A => return self.step(1),
@@ -221,6 +255,11 @@ impl GameOptionsModel {
             _ => {}
         }
         None
+    }
+
+    /// Every row back to the global value; the game's options of other screens stay.
+    pub fn reset_all(&mut self) {
+        self.edited.clear_game_values();
     }
 
     /// Every row back to the global value.

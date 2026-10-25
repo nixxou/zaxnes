@@ -27,6 +27,8 @@ pub struct UiState {
     pub debug_overlay: bool,
     /// The window that asks for a note on the frame on screen of the movie (Rust-only).
     pub movie_note: bool,
+    /// The hacks of the game in play (Rust-only).
+    pub hacks: bool,
 }
 
 impl UiState {
@@ -69,6 +71,7 @@ impl UiState {
             || self.file_browser
             || self.dialog
             || self.movie_note
+            || self.hacks
     }
 
     /// Closes every window (Escape).
@@ -80,5 +83,6 @@ impl UiState {
         self.file_browser = false;
         self.dialog = false;
         self.movie_note = false;
+        self.hacks = false;
     }
 }

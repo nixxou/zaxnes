@@ -156,7 +156,13 @@ Interface ; `--roms` passe avant), profil, options du jeu, menu en jeu, écrans 
 leurs aperçus. Les
 mêmes touches reviennent à la barre de menus (un menu laissé ouvert sur le jeu se ferme et la
 partie reprend). `--console` ouvre directement Zaxnes dans ce mode. Au clavier, les touches du
-joueur 1 servent de manette (`X` = A, `Z` = B, `Échap` = menu…).
+joueur 1 servent de manette (`X` = A, `Z` = B, `Échap` = menu…), plus `W` (= L2) et `H` (= Start)
+sur la liste des jeux.
+
+Sur la liste, un jeu pour lequel un hack écran large existe porte un **[W]** : gris tant que
+l'écran large est désactivé pour ce jeu, en couleur une fois activé. **L2** (`W` au clavier) le
+bascule ; **Start** (`H`) ouvre l'écran **Hacks** du jeu (§ Écran large), qu'on trouve aussi en
+dernière ligne de ses options (Select) et dans le menu en jeu.
 
 `Ctrl`+`S` et `Ctrl`+`L` (ou **Fichier ▸ Sauvegarder un état… / Charger un état…**) ouvrent
 directement l'écran de sauvegarde ou de chargement de ce mode par-dessus le jeu, qui se met en
@@ -213,7 +219,6 @@ embarqué et l'entrée « 2D Mode » ne sont jamais supprimables : l'entrée res
 | Réinitialiser la vue | `Échap` maintenu ≥ 0,3 s | revient à la vue par défaut |
 | Skybox ▸ | | Par défaut, Couleur, Dégradé, Fantaisie |
 | Ombres | | active ou désactive les ombres |
-| Options du hack ▸ | | les options du hack écran large du jeu en cours (§ Écran large), cochées si actives |
 | Plein écran | `Alt`+`Entrée` | masque la barre de menus ; les raccourcis restent actifs |
 | Afficher les FPS | | petit compteur en haut à droite, **désactivé par défaut** |
 
@@ -246,8 +251,8 @@ ramène le film à cette image, et l'enregistrement continue. Les fichiers vont 
 
 ### Options du jeu
 
-Le menu **Options du jeu** règle quelques options pour le seul jeu en cours (il est grisé sans
-jeu) : volume, échelle de rendu, ombres, limite d'images, compteur d'images, mesures de
+Le menu **Options du jeu** ouvre d'abord la fenêtre **Hacks…** du jeu en cours (§ Écran large),
+puis règle quelques options pour ce seul jeu (il est grisé sans jeu) : volume, échelle de rendu, ombres, limite d'images, compteur d'images, mesures de
 performance, rattrapage, chemins Lua, scripts en parallèle et région. Chaque option est sur
 « Use Global : <valeur> » tant qu'elle n'a pas été changée pour ce jeu ; son sous-menu propose
 les autres valeurs. Seules les options changées sont gardées, par fichier de ROM, et elles
@@ -346,36 +351,51 @@ Zaxnes sait montrer un jeu **plus large** que les 256 pixels de la NES, quand le
 pour. Aujourd'hui, deux le sont, grâce à un **hack écran large intégré** à l'émulateur :
 ***Zelda II - The Adventure of Link* (USA)** et ***Mega Man 2* (USA)**.
 
-- **Le hack s'applique tout seul, en mémoire**, quand la ROM chargée est la version USA (reconnue
-  à son contenu) : le fichier de la ROM n'est jamais modifié, et Zaxnes ne livre aucune donnée du
-  jeu (le correctif ne contient que ce que le hack ajoute). Le journal l'indique :
-  `… : built-in patch applied (…)`. Les versions européennes ne sont pas concernées.
+L'écran large se règle **par jeu**, dans l'écran **Hacks** du jeu : en mode console, depuis la
+liste (Start, ou L2 pour seulement l'activer ou le désactiver), depuis les options du jeu ou depuis
+le menu en jeu ; sur PC, par **Options du jeu ▸ Hacks…**. Il est **désactivé par défaut** ; ses
+réglages ne sont plus dans les options globales.
+
+| Ligne | Choix | Effet |
+|---|---|---|
+| **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
+| **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
+| **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
+| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements |
+
+Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
+
+- **Le hack s'applique tout seul, en mémoire**, au lancement d'une ROM USA reconnue à son
+  contenu, **si l'écran large est activé pour ce jeu** ; désactivé, le jeu démarre tel qu'il a été
+  fait. Désactivé en cours de partie, l'écran large retire seulement les marges : la ROM d'origine
+  revient au prochain lancement (et activé en cours de partie, le patch attend lui aussi le
+  prochain lancement). Le fichier de la ROM n'est jamais modifié, et Zaxnes ne livre aucune donnée
+  du jeu (le correctif ne contient que ce que le hack ajoute). Le journal l'indique :
+  `… : built-in patch applied (…)`. Les versions européennes ne sont pas concernées. Les CRC des
+  ROMs, qui disent pour quel jeu un hack existe, sont gardés dans `rom_crc.json` des données
+  utilisateur (avec la taille et la date de chaque fichier, qui n'est relu que s'il change).
 - *Zelda II* : en vue de côté (villes, palais, grottes), le décor et les **ennemis** sont
   dessinés au-delà des bords, et les nouveaux ennemis apparaissent dans les marges au lieu de
   surgir au bord de l'écran ; sur la **carte du monde**, l'image est plus large (et plus haute
   avec la largeur supplémentaire) et les rencontres vivent dans les marges. La logique du jeu
   (contacts, IA) reste celle d'origine. Les projectiles ne sont pas montrés dans les marges.
 - *Mega Man 2* : le décor des marges est lu dans le niveau, et les ennemis apparaissent, vivent
-  et s'affichent dans les marges. Pas de marge verticale. **Vidéo ▸ Options du hack** :
-  « Ennemis dans les marges » (actif par défaut), « Invincible » (une aide pour tester,
-  désactivé par défaut), « Sans ralentissements » (actif par défaut : plus de lignes
-  d'overclock, le jeu ne ralentit plus).
+  et s'affichent dans les marges. Pas de marge verticale. Options du patch : « Ennemis dans les
+  marges » (actif par défaut), « Invincible » (une aide pour tester, désactivé par défaut),
+  « Sans ralentissements » (actif par défaut : plus de lignes d'overclock, le jeu ne ralentit
+  plus).
 - Ça fonctionne en 3D comme en mode 2D.
 
-Les réglages, onglet **Vidéo** :
-
-| Ligne | Choix | Effet |
-|---|---|---|
-| **Écran large (ROM prévues pour)** | Désactivée, Window, 3:2, 16:10, 16:9 | la proportion de l'image ; « Window » suit celle de la vue. Désactivée par défaut |
-| **Largeur supplémentaire de l'écran large** | +0 % à +300 % (+10 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
-| **Écran large : attendre les objets entiers aux bords dessinés** | oui / non (non par défaut) | une forme coupée là où le jeu cesse de dessiner reste provisoire jusqu'à ce qu'elle soit entière |
-| **Patchs de ROM intégrés (au prochain chargement)** | oui / non (oui par défaut) | applique le hack au chargement de la ROM ; non = le *Zelda II* d'origine |
+Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers
+aux bords dessinés** (non par défaut) — une forme coupée là où le jeu cesse de dessiner reste
+provisoire jusqu'à ce qu'elle soit entière.
 
 **Sauvegardes d'état.** Une sauvegarde retient si elle a été faite avec le hack, et sa version.
 Dans les menus de chargement :
 
-- **en orange**, une sauvegarde faite avec le réglage « Patchs de ROM intégrés » dans l'autre
-  position : Zaxnes propose de basculer le réglage, recharge le jeu, puis charge la sauvegarde ;
+- **en orange**, une sauvegarde faite avec l'écran large dans l'autre position (avec ou sans le
+  patch) : Zaxnes propose d'activer ou de désactiver l'écran large de ce jeu, recharge le jeu,
+  puis charge la sauvegarde ;
 - **en rouge**, une sauvegarde faite avec une **autre version** du hack : elle ne peut pas être
   chargée (la mémoire du jeu ne correspond plus).
 

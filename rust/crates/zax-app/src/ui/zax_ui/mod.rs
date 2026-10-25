@@ -7,6 +7,7 @@
 //! the file manager) is returned as [`UiEffect`]s for the loop to carry out.
 
 mod dialogs;
+mod hacks;
 mod key_config;
 mod menu;
 mod options;
@@ -38,6 +39,8 @@ use crate::emulation::rom_file::INVALID_ROM_MESSAGE;
 use crate::input::DesktopInputSource;
 use crate::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
 use zax_settings::catalogue::SettingId;
+
+use super::handheld::hacks::HacksModel;
 
 /// Space between the notification and the bottom of the window.
 const NOTIFICATION_MARGIN: f32 = 48.0;
@@ -131,6 +134,8 @@ pub struct ZaxUi {
     effects: Vec<UiEffect>,
     /// The note being typed for the frame on screen of the movie (`state.movie_note`).
     movie_note: String,
+    /// The hacks of the game in play, while their window is open (`state.hacks`).
+    hacks: Option<HacksModel>,
     /// The text of the folder field of the options while it is being typed.
     folder_text: String,
     /// Whether the folder field has the focus (its text is then the one being typed).
@@ -172,6 +177,7 @@ impl ZaxUi {
             fps_text: String::from("0.0 FPS"),
             fps_countdown: 0.0,
             movie_note: String::new(),
+            hacks: None,
             folder_text: String::new(),
             folder_editing: false,
             held_keys: Vec::new(),
@@ -286,6 +292,9 @@ impl ZaxUi {
         }
         if self.state.movie_note {
             self.draw_movie_note(ui, frame.host);
+        }
+        if self.state.hacks {
+            self.draw_hacks(ui, frame.host);
         }
         // REQ-UI-110: the confirmation box is drawn last, so it sits over everything else.
         if self.state.dialog {

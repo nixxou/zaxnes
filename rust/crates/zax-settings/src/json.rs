@@ -80,8 +80,17 @@ fn enum_from_json(descriptor: &SettingDescriptor, node: &Value) -> Option<Settin
         return Some(SettingValue::Enum(num::truncate_to_i32(number)));
     }
     let label = node.as_str()?;
-    let number = descriptor.domain().value_of(label)?;
+    let number = descriptor
+        .domain()
+        .value_of(label)
+        .or_else(|| former_label(descriptor, label))?;
     Some(SettingValue::Enum(num::truncate_to_i32(number)))
+}
+
+/// The value of a label a choice had before it was renamed, so that the files written then still
+/// read: `video.widescreen`'s "Window" is "Auto" now (Rust-only, owner request).
+fn former_label(descriptor: &SettingDescriptor, label: &str) -> Option<f64> {
+    (descriptor.key() == "video.widescreen" && label == "Window").then_some(1.0)
 }
 
 /// The shortest text that reads back as the same float, as System.Text.Json writes it: `90` for

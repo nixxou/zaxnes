@@ -69,7 +69,7 @@ fn entry_key(patch: &str, key: &str) -> String {
 }
 
 /// Whether `option` of `patch` is on in the stored text (its default when not stored).
-fn is_on(stored: &str, patch: &str, option: &HackOption) -> bool {
+pub(super) fn is_on(stored: &str, patch: &str, option: &HackOption) -> bool {
     let wanted = entry_key(patch, option.key);
     stored
         .split(';')
@@ -79,7 +79,7 @@ fn is_on(stored: &str, patch: &str, option: &HackOption) -> bool {
 }
 
 /// The stored text with `key` of `patch` set to `on`.
-fn with_option(stored: &str, patch: &str, key: &str, on: bool) -> String {
+pub(super) fn with_option(stored: &str, patch: &str, key: &str, on: bool) -> String {
     let wanted = entry_key(patch, key);
     let mut entries: Vec<String> = stored
         .split(';')

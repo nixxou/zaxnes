@@ -25,7 +25,6 @@ pub const MENU_CAMERA_ORBITAL: &str = "menu.camera.orbital";
 pub const MENU_CAMERA_FIRST_PERSON: &str = "menu.camera.first_person";
 pub const SLOT_EMPTY: &str = "slot.empty";
 pub const SLOT_OTHER_PATCH: &str = "slot.other_patch";
-pub const MENU_HACK_OPTIONS: &str = "menu.hack_options";
 pub const SLOT_OTHER_HACK_VERSION: &str = "slot.other_hack_version";
 /// Submenu of the movies to play.
 pub const MENU_MOVIES: &str = "menu.movies";
@@ -213,6 +212,17 @@ pub const HANDHELD_USE_GLOBAL: &str = "handheld.game_options.use_global";
 pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
 pub const HANDHELD_HINT_RESET_ALL: &str = "handheld.hint.reset_all";
 pub const SHORTCUT_HOME: &str = "shortcut.home";
+pub const HACKS_TITLE: &str = "hacks.title";
+pub const HACKS_NONE: &str = "hacks.none";
+pub const HACKS_PATCH_NOTE: &str = "hacks.patch_note";
+pub const HACK_WIDESCREEN: &str = "hacks.widescreen";
+pub const HACK_RATIO: &str = "hacks.ratio";
+pub const HACK_MARGIN: &str = "hacks.margin";
+pub const HACK_ON: &str = "hacks.on";
+pub const HACK_OFF: &str = "hacks.off";
+pub const MENU_HACKS: &str = "menu.hacks";
+pub const HANDHELD_HINT_HACKS: &str = "handheld.hint.hacks";
+pub const HANDHELD_HINT_WIDESCREEN: &str = "handheld.hint.widescreen";
 
 // ------------------------------------------------- commands of REQ-UI-205
 pub const COMMAND_PREFIX: &str = "cmd.";
@@ -266,7 +276,6 @@ pub const PUBLISHED: &[&str] = &[
     MENU_CAMERA_FIRST_PERSON,
     SLOT_EMPTY,
     SLOT_OTHER_PATCH,
-    MENU_HACK_OPTIONS,
     SLOT_OTHER_HACK_VERSION,
     MENU_MOVIES,
     WINDOW_MOVIE_NOTE,
@@ -418,4 +427,15 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_HINT_GAME_OPTIONS,
     HANDHELD_HINT_RESET_ALL,
     SHORTCUT_HOME,
+    HACKS_TITLE,
+    HACKS_NONE,
+    HACKS_PATCH_NOTE,
+    HACK_WIDESCREEN,
+    HACK_RATIO,
+    HACK_MARGIN,
+    HACK_ON,
+    HACK_OFF,
+    MENU_HACKS,
+    HANDHELD_HINT_HACKS,
+    HANDHELD_HINT_WIDESCREEN,
 ];

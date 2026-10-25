@@ -9,7 +9,7 @@ use super::pad::{PadButton, PadState};
 use crate::input::{InputAction, InputBindings};
 
 /// The fixed keys of each button.
-const FIXED: [(PadButton, &[Key]); 9] = [
+const FIXED: [(PadButton, &[Key]); 11] = [
     (PadButton::Up, &[Key::Up]),
     (PadButton::Down, &[Key::Down]),
     (PadButton::Left, &[Key::Left]),
@@ -19,6 +19,9 @@ const FIXED: [(PadButton, &[Key]); 9] = [
     (PadButton::X, &[Key::X]),
     (PadButton::Y, &[Key::Y]),
     (PadButton::Menu, &[Key::Tab, Key::F1]),
+    // The widescreen of a game and its hacks, on the list (Rust-only, owner request).
+    (PadButton::L2, &[Key::W]),
+    (PadButton::Start, &[Key::H]),
 ];
 
 /// The buttons that also follow a configured keyboard binding.
