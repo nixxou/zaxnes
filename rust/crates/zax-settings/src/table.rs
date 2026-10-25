@@ -1212,6 +1212,20 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
         )
         .with_label("Built-in ROM patches"),
     );
+    // Rust-only (owner request): the options of the built-in patches the player changed, as
+    // "<patch>/<option>=0|1" entries separated by ";" (zax-nes::builtin_patches::HackOption).
+    // Not exposed to Lua, not shown in the options window (a menu edits it).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuHackOptions,
+            SettingKind::Text,
+            SettingValue::from(""),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_label("Hack options"),
+    );
     // Rust-only (owner request): how much wider than 256 pixels the picture of a ROM made for
     // the widescreen extension may be (zax-nes::wide). The other ROMs never see it. Not exposed
     // to Lua.

@@ -86,6 +86,8 @@ pub struct WideExtension {
     host_margin: i32,
     /// Margin the host offers above and below, in pixels, a multiple of 8 (0 = off).
     host_vertical_margin: i32,
+    /// The options of the ROM's built-in patch the player turned on (`$500A`).
+    host_options: u8,
     /// How many bytes of [`UNLOCK`] have been written in a row.
     unlock_progress: u8,
     unlocked: bool,
@@ -130,6 +132,7 @@ impl WideExtension {
         Self {
             host_margin: 0,
             host_vertical_margin: 0,
+            host_options: 0,
             unlock_progress: 0,
             unlocked: false,
             requested_margin: 0,
@@ -170,6 +173,12 @@ impl WideExtension {
         } else {
             0
         }
+    }
+
+    /// Sets the options of the ROM's built-in patch the player turned on, which the ROM reads at
+    /// `$500A` (one bit each, see `builtin_patches::HackOption`).
+    pub fn set_host_options(&mut self, options: u8) {
+        self.host_options = options;
     }
 
     /// Tells the extension a margin decoder fills the margins of this game.
@@ -255,6 +264,7 @@ impl WideExtension {
         *self = Self {
             host_margin: self.host_margin,
             host_vertical_margin: self.host_vertical_margin,
+            host_options: self.host_options,
             decoded: self.decoded,
             ..Self::new()
         };
@@ -288,6 +298,7 @@ impl WideExtension {
             0x5007 => Some(self.layout),
             0x5008 => Some(self.window_bank),
             0x5009 => Some(self.window_page),
+            0x500A => Some(self.host_options),
             FIRST_RAM..=LAST_REGISTER => {
                 self.scratch.get(usize::from(address - FIRST_RAM)).copied()
             }

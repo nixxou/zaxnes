@@ -1479,7 +1479,9 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .settings()
         .get(SettingId::VideoWidescreenStrictEdges)
         .as_bool();
+    let hack_options = host.hack_option_bits();
     if let Some(session) = host.session_mut() {
+        session.core_mut().set_hack_options(hack_options);
         session.core_mut().set_widescreen_margin(widescreen);
         session
             .core_mut()

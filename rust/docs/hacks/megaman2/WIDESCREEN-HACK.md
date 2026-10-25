@@ -16,8 +16,8 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 |---|---|
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
-| Target data | CRC-32 `3EE5A6CA` (the hack's version in savestate headers; `tools/build.py` prints it) |
-| Changes | bank 15 only: new code at `$F300` (in the `$FF` fill `$F2E3`-`$F8FF`) and eleven hooks |
+| Target data | CRC-32 `16798BC9` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15 and one in bank 14 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
 ---
@@ -38,23 +38,37 @@ screens `$14` to `$15`.
 | collisions (`$EEBE`, `$EFB7`: `LDA $0420,X / AND #$03`) | on 8-bit screen x | none for an object outside the original screen |
 | sprites (`$CE7D`, `$CECE`) | x = 8-bit screen x + signed offset, hidden when it carries | 16-bit x, shown within `[-M, 256 + M)`, high byte to `$5100 + OAM offset` |
 
+| sprite loop of an object (`$CE9A`-`$CEF8`) | stops when the 64 sprites are used (the objects left over flicker, drawn first every other frame) | the same loop, moving on to the extension's second page (`$5300`) when the first is full |
+| hiding the sprites (`$CC6C`) | the 64 sprites | both pages |
+| energy bars (`$CFAD`, `$CFC9`, `$CFCE`, `$CFD3`) | write to `$0200` | write to the page in use |
+| enemy spawn (`$D763`) and enemy loop (bank 14 `$9283`) | | an enemy of the stage list that spawns in a margin is dormant: drawn, but its behaviour is skipped until it comes onto the original screen; it then wakes for good (margins included). A dormant enemy is still removed outside `[LO, HI)` |
+
 `LO = max(-M, section start - camera)`, `HI = min(256 + M, section end - camera)`; M is the margin,
 0 for slots below `$10` (Mega Man's shots keep the original limits). The game's collisions compare
 8-bit screen x, so an object 256 pixels away would collide; outside the original screen nothing
 collides, which keeps the game's logic exactly the original's on the screen. With M = 0 every
 routine does exactly what the code it replaces does.
 
-Margin: `M = min($5002, 128)` (128: what sprites can show through the extension).
+Margin: `M = min($5002, 128)` (128: what sprites can show through the extension). Enemies use
+`MOBJ`: `M`, or 0 when the player turns the option "Enemies in the margins" off (`$500A` bit 0,
+on by default): they then spawn and go at the original edges, the second sprite page and the 16-bit
+sprite x staying.
+
+CPU time: the hack's work and the enemies of the margins cost time the console does not have; the
+game, which builds its sprites during the frame, would run out of it and show half-built sprite
+pages. The hack asks for 64 lines of overclock (`$5006`), which leaves the picture and the sound
+untouched.
 
 ## 3. The extension
 
 Unlocked at reset (`$FFE4`, `JMP $F2D1` becomes `JMP wide_reset`, which unlocks then jumps on) and
 checked every NMI (`$CFFD`, `LDA $F7 / AND #$7C / STA $F7` becomes `JSR wide_nmi`, which unlocks
 again if needed, then writes `$5003 = M`, `$5004 = $5005 = 0` (the nametable columns are hidden:
-the decoder draws the background), `$5007 = 2` (sprites free of those extents), and does the
-replaced instructions).
+the decoder draws the background), `$5007 = 6` (sprites free of those extents, second sprite page), `$5006 = 64`, `MOBJ` from `$500A`,
+and does the replaced instructions).
 
-Variables (extension RAM): `WV_M $5200`, the live range `WV_LO $5201`/`$5202` and `WV_HI
+Variables (extension RAM): `WV_M $5200`, `WV_PAGE $5209` (bit 7: the second page is in use),
+`WV_MOBJ $520A`, `WV_DORMANT $5220 + slot`, the live range `WV_LO $5201`/`$5202` and `WV_HI
 $5203`/`$5204` (signed 16-bit), the object's screen x `WV_S $5205`/`$5206`, scratch `$5207`,
 `$5208`.
 
@@ -73,7 +87,12 @@ Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original 
 | `$EFE8` | `LDA $2F / BNE $EF8C / CLC / RTS` | `JMP wide_cull_still` |
 | `$EEBE`, `$EFB7` | `LDA $0420,X / AND #$03 / BEQ` | `JSR wide_hit_flags / BEQ` (same target) |
 | `$CE7D` | `SEC / LDA $0460,X / SBC $1F / STA $00 / LDA $0440,X / SBC $20` | `JSR wide_draw_origin` |
-| `$CECE` | the 13-byte add and carry tests of a sprite's x | `JSR wide_sprite_x / BCS $CEDB / JMP $CEE2` |
+| `$CECE` | the 13-byte add and carry tests of a sprite's x | `JSR wide_sprite_x / BCS $CEDB / JMP $CEE2` (the loop around it is replaced, see `$CE9A`) |
+| `$CC6C` | the loop hiding the 64 sprites | `JMP wide_clear_oam` |
+| `$CE9A` | `LDX $06 / LDY $07` (head of an object's sprite loop) | `JMP wide_draw_loop` |
+| `$CFAD`, `$CFC9`, `$CFCE`, `$CFD3` | `STA $0200,X`, `$0201,X`, `$0202,X`, `$0203,X` | `JSR wide_put_y` / `_tile` / `_attribute` / `_x` |
+| `$D763` | `TYA / STA $0100,X` | `JSR wide_spawned` |
+| bank 14 `$9283` | `LDY $0400,X` | `JSR wide_wake` |
 
 `$EF8C` is the game's own removal (it also lets an enemy of the list spawn again); `$CEDB` hides a
 sprite (OAM y `$F8`).
@@ -96,6 +115,7 @@ SourceRead / TargetRead only). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
   still go at the original edge.
 * More enemies alive means more CPU time: the game's slowdowns can come more often.
 * No vertical margin yet (the decoder draws the sides only).
+* The 64 lines of overclock also shorten the game's own slowdowns.
 
 ---
 
@@ -124,10 +144,18 @@ WIDE_HOST       = $5002         ; R: margin the host offers on each side
 WIDE_REQ        = $5003         ; W: margin asked for
 WIDE_LEFT       = $5004         ; W: background extents (the decoder draws the margins)
 WIDE_RIGHT      = $5005
+WIDE_OVERCLOCK  = $5006         ; W: extra CPU time each frame, in scanlines
 WIDE_LAYOUT     = $5007         ; W: bit 1, sprites free of the background extents
+WIDE_OPTIONS    = $500A         ; R: the options the player turned on (bit 0: enemies in the margins)
 WIDE_SPRHI      = $5100         ; W: high byte of the x of sprite n at $5100 + 4n
+EXTRA_OAM       = $5300         ; the second sprite page ($5007 bit 2), OAM format
+EXTRA_SPRHI     = $5400         ; high byte of the x of its sprite n at $5400 + 4n
+OAM             = $0200
 
 MAX_MARGIN      = 128           ; what sprites can show (the extension's own limit)
+.ifndef OVERCLOCK_LINES
+OVERCLOCK_LINES = 64            ; pays for the hack's work and the enemies of the margins
+.endif
 
 ; Variables in the extension's RAM.
 WV_M            = $5200         ; margin of this frame
@@ -139,6 +167,10 @@ WV_SL           = $5205         ; screen x of the object at hand, signed 16-bit
 WV_SH           = $5206
 WV_T0           = $5207
 WV_T1           = $5208
+WV_PAGE         = $5209         ; bit 7: the sprites being placed go to the second page
+WV_MOBJ         = $520A         ; margin enemies spawn and live in: WV_M, or 0 with the option off
+WV_DORMANT      = $5220         ; + slot ($10-$1F): non-zero while an enemy that spawned out of
+                                ; sight has not come onto the original screen yet
 
 ; Game RAM (original meanings).
 CAM_LO          = $1F           ; camera x, pixel
@@ -150,6 +182,7 @@ OBJ_X_LO        = $0460         ; object x, pixel
 
 ORIGINAL_RESET  = $F2D1
 KILL            = $EF8C         ; removes object X (and lets its enemy spawn again), SEC / RTS
+NEXT_ENEMY      = $9299         ; bank 14: the enemy loop's next slot
 FIRST_ENEMY     = $10
 
 .segment "CODE"
@@ -190,11 +223,19 @@ wide_nmi:
 @margin:
     STA      WV_M
     STA      WIDE_REQ
+    LDA      WIDE_OPTIONS               ; enemies in the margins (option bit 0)
+    AND      #$01
+    BEQ      @objects
+    LDA      WV_M
+@objects:
+    STA      WV_MOBJ
     LDA      #$00
     STA      WIDE_LEFT
     STA      WIDE_RIGHT
-    LDA      #$02
+    LDA      #$06                       ; sprites free of the extents, second sprite page
     STA      WIDE_LAYOUT
+    LDA      #OVERCLOCK_LINES
+    STA      WIDE_OVERCLOCK
     LDA      $F7
     AND      #$7C
     STA      $F7
@@ -205,7 +246,7 @@ wide_nmi:
 ;   LO = max(-M, section start - camera), HI = min(256 + M, section end - camera),
 ; M being 0 for Mega Man's own slots. The original's range is [0, 256).
 wide_bounds:
-    LDA      WV_M
+    LDA      WV_MOBJ
     CPX      #FIRST_ENEMY
     BCS      @margin
     LDA      #$00
@@ -420,7 +461,13 @@ wide_sprite_x:
     BCC      @hide
 @show:
     LDA      WV_T0
+    BIT      WV_PAGE
+    BMI      @second
     STA      WIDE_SPRHI,x
+    BPL      @low
+@second:
+    STA      EXTRA_SPRHI,x
+@low:
     LDA      WV_T1
     CLC
     RTS
@@ -434,7 +481,7 @@ wide_sprite_x:
 wide_spawn_window:
     SEC                                 ; left = camera - M
     LDA      CAM_LO
-    SBC      WV_M
+    SBC      WV_MOBJ
     STA      $0A
     LDA      CAM_HI
     SBC      #$00
@@ -457,7 +504,7 @@ wide_spawn_window:
     STA      $09
     CLC
     LDA      $08
-    ADC      WV_M
+    ADC      WV_MOBJ
     STA      $08
     LDA      $09
     ADC      #$00
@@ -471,6 +518,146 @@ wide_spawn_window:
     STA      $09
 @rts:
     RTS
+
+; ---------------------------------------------------------------------------- ;
+; Sprite pages. The console has 64 sprites; the extension a second page of 64 at $5300, which the
+; game's sprite loop moves on to when the first is full, instead of stopping (the objects left
+; over then flickered, the game drawing them in the other order every other frame).
+
+; $CC6C (in place of the loop that hides the 64 sprites): both pages, back to the first.
+wide_clear_oam:
+    LDA      #$F8
+    LDX      #$00
+@hide:
+    STA      OAM,x
+    STA      EXTRA_OAM,x
+    INX
+    BNE      @hide
+    STX      WV_PAGE
+    RTS
+
+; Stores A at byte k of the sprite at offset X of the page in use (flags N and V change).
+.macro PUT k
+    BIT      WV_PAGE
+    BMI      :+
+    STA      OAM+k,x
+    JMP      :++
+:   STA      EXTRA_OAM+k,x
+:
+.endmacro
+
+; The writes of the energy bars' sprites ($CFAD, $CFC9, $CFCE, $CFD3, in place of STA $020k,X).
+wide_put_y:
+    PUT      0
+    RTS
+wide_put_tile:
+    PUT      1
+    RTS
+wide_put_attribute:
+    PUT      2
+    RTS
+wide_put_x:
+    PUT      3
+    RTS
+
+; The sprite loop of one object ($CE9A-$CEF8, entered in place of LDX $06 / LDY $07): the
+; original's, the sprites written to the page in use; carry set on return when both are full.
+; $04 sprites, $07 index in the tile/attribute list ($08) and the position list ($0A), $00/$01
+; screen x/y, $02 horizontal flip, $03 palette override, $06 OAM offset.
+wide_draw_loop:
+@sprite:
+    LDX      $06
+    LDY      $07
+    LDA      ($08),y                    ; tile
+    PUT      1
+    CLC
+    LDA      ($0A),y                    ; y
+    ADC      $01
+    PUT      0
+    INY
+    LDA      $03
+    BEQ      @own_palette
+    LDA      ($08),y
+    AND      #$F0
+    ORA      $03
+    BNE      @attribute
+@own_palette:
+    LDA      ($08),y
+@attribute:
+    EOR      $02
+    PUT      2
+    LDA      $02
+    BEQ      @offset
+    LDA      ($0A),y                    ; flipped: the mirrored offset
+    TAY
+    LDA      $8600,y
+    JMP      @x
+@offset:
+    LDA      ($0A),y
+@x:
+    JSR      wide_sprite_x
+    BCS      @hidden
+    PUT      3
+    CLC
+    TXA
+    ADC      #$04
+    STA      $06
+    BEQ      @full
+@next:
+    INC      $07
+    INC      $07
+    DEC      $04
+    BNE      @sprite
+    CLC
+    RTS
+@hidden:
+    LDA      #$F8
+    PUT      0
+    JMP      @next
+@full:
+    BIT      WV_PAGE                    ; the first page: on to the second
+    BMI      @both
+    LDA      #$80
+    STA      WV_PAGE
+    JMP      @next
+@both:
+    SEC
+    RTS
+
+; ---------------------------------------------------------------------------- ;
+; Dormant enemies. An enemy of the stage list that spawns in a margin shows but does not move
+; until it comes onto the original screen; from then on it lives as the original does, margins
+; included.
+
+; Spawn ($D763, in place of TYA / STA $0100,X; X the enemy slot - $10, Y its list entry).
+wide_spawned:
+    TYA
+    STA      $0100,x
+    LDA      #$01
+    STA      WV_DORMANT+FIRST_ENEMY,x
+    RTS
+
+; The enemy loop (bank 14, $9283, in place of LDY $0400,X; $2E/$2F the enemy's screen x): a
+; dormant enemy off the original screen skips its behaviour (it is still removed past the
+; margins); one on it wakes up.
+wide_wake:
+    LDA      WV_DORMANT,x
+    BEQ      @behave
+    LDA      $2F
+    BNE      @asleep
+    LDA      #$00
+    STA      WV_DORMANT,x
+@behave:
+    LDY      $0400,x
+    RTS
+@asleep:
+    JSR      wide_cull_screen
+    BCC      @skip
+    JSR      KILL
+@skip:
+    PLA                                 ; not back to the loop's dispatch: its next slot
+    PLA
+    JMP      NEXT_ENEMY
 
 wide_end:
 .assert wide_end <= $F900, error, "widescreen code past $F8FF"
@@ -524,8 +711,10 @@ NOP = 0xEA
 
 
 def hooks(sym):
-    """(address, original bytes, new bytes): every patch of the fixed bank."""
+    """The patches: (address, original bytes, new bytes) of the fixed bank, and
+    (bank, address, original bytes, new bytes) of a switchable bank ($8000-$BFFF)."""
     out = []
+    banked = []
 
     def put(address, original, new):
         original = bytes.fromhex(original)
@@ -557,7 +746,17 @@ def hooks(sym):
     put(0xCE7D, '38 bd 60 04 e5 1f 85 00 bd 40 04 e5 20', jsr(sym['wide_draw_origin']))
     put(0xCECE, '18 30 06 65 00 90 0d b0 04 65 00 b0 07',
         jsr(sym['wide_sprite_x']) + branch(BCS, 0xCED1, 0xCEDB) + jmp(0xCEE2))
-    return out
+    # Dormant enemies: marked at spawn, woken in the enemy loop (bank 14).
+    put(0xD763, '98 9d 00 01', jsr(sym['wide_spawned']))
+    banked.append((14, 0x9283, bytes.fromhex('bc 00 04'), jsr(sym['wide_wake'])))
+    # Sprite pages: both hidden, the loop of one object, the energy bars' writes.
+    put(0xCC6C, 'a9 f8 a2 00 9d 00 02 e8 d0 fa 60', jmp(sym['wide_clear_oam']))
+    put(0xCE9A, 'a6 06 a4 07', jmp(sym['wide_draw_loop']))
+    put(0xCFAD, '9d 00 02', jsr(sym['wide_put_y']))
+    put(0xCFC9, '9d 01 02', jsr(sym['wide_put_tile']))
+    put(0xCFCE, '9d 02 02', jsr(sym['wide_put_attribute']))
+    put(0xCFD3, '9d 03 02', jsr(sym['wide_put_x']))
+    return out, banked
 
 
 def tool(name):
@@ -608,7 +807,14 @@ def main():
     data[start:start + len(code)] = code
 
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
-    for address, original, new in hooks(sym):
+    fixed, banked = hooks(sym)
+    for number, address, original, new in banked:
+        if address in skip:
+            continue
+        at = number * BANK_SIZE + address - 0x8000
+        assert data[at:at + len(original)] == original, f'bank {number} ${address:04X}: not the expected bytes'
+        data[at:at + len(new)] = new
+    for address, original, new in fixed:
         if address in skip:
             continue
         at = bank + address - FIXED

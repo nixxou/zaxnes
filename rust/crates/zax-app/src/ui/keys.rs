@@ -25,6 +25,7 @@ pub const MENU_CAMERA_ORBITAL: &str = "menu.camera.orbital";
 pub const MENU_CAMERA_FIRST_PERSON: &str = "menu.camera.first_person";
 pub const SLOT_EMPTY: &str = "slot.empty";
 pub const SLOT_OTHER_PATCH: &str = "slot.other_patch";
+pub const MENU_HACK_OPTIONS: &str = "menu.hack_options";
 pub const SLOT_OTHER_HACK_VERSION: &str = "slot.other_hack_version";
 pub const SLOT_QUICK: &str = "slot.quick";
 pub const SLOT_PREFIX: &str = "slot.prefix";
@@ -241,6 +242,7 @@ pub const PUBLISHED: &[&str] = &[
     MENU_CAMERA_FIRST_PERSON,
     SLOT_EMPTY,
     SLOT_OTHER_PATCH,
+    MENU_HACK_OPTIONS,
     SLOT_OTHER_HACK_VERSION,
     SLOT_QUICK,
     SLOT_PREFIX,
