@@ -55,6 +55,11 @@ pub struct HacksModel {
     capable: bool,
     /// The built-in patch made for it, if any.
     patch: Option<&'static BuiltinPatch>,
+    /// The CRC-32 of its data, when the file could be read.
+    crc: Option<u32>,
+    /// The built-in patch made for another ROM of the same game, when no hack is made for this
+    /// one (its profile or its name says the game).
+    other_rom: Option<&'static BuiltinPatch>,
     selected: usize,
     /// The global values: the preferences, without the scripts' or a game's.
     global: SettingsModel,
@@ -81,11 +86,15 @@ impl HacksModel {
         global.clear_session_layer();
         global.clear_game_values();
         global.drain_changes().for_each(drop);
+        let capable = crc.is_some_and(builtin_patches::widescreen_capable);
+        let other_rom = (!capable).then(|| other_rom_patch(None, &name)).flatten();
         Self {
             rom,
             name,
-            capable: crc.is_some_and(builtin_patches::widescreen_capable),
+            capable,
             patch,
+            crc,
+            other_rom,
             selected: 0,
             global,
             own,
@@ -93,18 +102,47 @@ impl HacksModel {
         }
     }
 
-    /// The hacks of the game in `rom`, as the host knows them.
+    /// The hacks of the game in `rom`, whose 3D profile is called `title` if it has one, as the
+    /// host knows them.
     #[must_use]
-    pub fn for_rom(host: &AppHost, rom: &Path) -> Self {
+    pub fn for_rom(host: &AppHost, rom: &Path, title: Option<&str>) -> Self {
         let crc = host.rom_data_crc(rom);
         host.save_rom_crcs();
-        Self::new(
+        let mut hacks = Self::new(
             rom.to_path_buf(),
             crc,
             host.settings(),
             host.game_options(&rom.to_string_lossy()),
             |patch| host.patch_options(patch),
-        )
+        );
+        if !hacks.capable {
+            hacks.other_rom = other_rom_patch(title, &hacks.name);
+        }
+        hacks
+    }
+
+    /// Why the widescreen cannot be turned on, for a version of a game the hack is made for
+    /// another ROM of: the ROM it is made for and its CRC, this one's name and CRC.
+    #[must_use]
+    pub fn other_rom_message(&self) -> Option<String> {
+        let patch = self.other_rom?;
+        let file = self.rom.file_name().map_or_else(
+            || self.name.clone(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let crc = self
+            .crc
+            .map_or_else(|| "?".to_owned(), |crc| format!("{crc:08X}"));
+        Some(strings::format(
+            &strings::get(keys::HACKS_OTHER_ROM),
+            &[
+                patch.game,
+                patch.rom_name,
+                &format!("{:08X}", patch.source_crc),
+                &file,
+                &crc,
+            ],
+        ))
     }
 
     /// The game's file.
@@ -373,6 +411,15 @@ impl HacksModel {
     }
 }
 
+/// The built-in patch of the game a ROM is a version of, by the title of its 3D profile or else by
+/// its name: what tells a ROM the hack is not made for from a game that has none.
+#[must_use]
+pub fn other_rom_patch(title: Option<&str>, name: &str) -> Option<&'static BuiltinPatch> {
+    title
+        .and_then(builtin_patches::for_game_name)
+        .or_else(|| builtin_patches::for_game_name(name))
+}
+
 /// The labels of the choices of `id`.
 fn choices(id: SettingId) -> Vec<String> {
     catalogue::descriptor(id)
@@ -432,6 +479,31 @@ mod tests {
                     .collect()
             },
         )
+    }
+
+    #[test]
+    fn another_rom_of_a_game_a_hack_is_made_for_says_which_one_it_needs() {
+        let hacks = HacksModel::new(
+            PathBuf::from("/roms/Zelda II - The Adventure of Link (Europe).nes"),
+            Some(0x0123_ABCD),
+            &SettingsModel::new(),
+            Vec::new(),
+            |_| Vec::new(),
+        );
+        assert_eq!(0, hacks.rows().len());
+        let message = hacks.other_rom_message().unwrap();
+        for part in [
+            "Zelda II - The Adventure of Link (USA)",
+            "BA322865",
+            "Zelda II - The Adventure of Link (Europe).nes",
+            "0123ABCD",
+        ] {
+            assert!(message.contains(part), "{part} in {message}");
+        }
+        assert_eq!(
+            None,
+            model(Some(0x1234_5678), Vec::new()).other_rom_message()
+        );
     }
 
     #[test]

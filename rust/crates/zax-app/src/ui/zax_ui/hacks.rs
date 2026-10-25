@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use imgui::{Condition, Ui, WindowFlags};
+use imgui::{Condition, StyleColor, Ui, WindowFlags};
 
 use super::{centre, ZaxUi};
 use crate::application::AppHost;
@@ -37,7 +37,13 @@ impl ZaxUi {
         let mut changed = false;
         if window.is_some() {
             if !hacks.is_capable() {
-                ui.text_wrapped(strings::get(keys::HACKS_NONE));
+                match hacks.other_rom_message() {
+                    Some(message) => {
+                        let _red = ui.push_style_color(StyleColor::Text, [1.0, 0.45, 0.35, 1.0]);
+                        ui.text_wrapped(message);
+                    }
+                    None => ui.text_wrapped(strings::get(keys::HACKS_NONE)),
+                }
             }
             for (index, row) in hacks.rows().into_iter().enumerate() {
                 let _id = ui.push_id_usize(index);

@@ -15,6 +15,10 @@
 pub struct BuiltinPatch {
     /// What the patch does, for the log.
     pub name: &'static str,
+    /// The game, as the names of its ROMs and profiles start ("Zelda II").
+    pub game: &'static str,
+    /// The name of the ROM it is made for, as the No-Intro set has it.
+    pub rom_name: &'static str,
     /// CRC-32 of the ROM data the patch applies to, iNES header excluded.
     pub source_crc: u32,
     /// The BPS patch.
@@ -38,6 +42,8 @@ pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
 pub const PATCHES: [BuiltinPatch; 2] = [
     BuiltinPatch {
         name: ZELDA2_USA,
+        game: "Zelda II",
+        rom_name: "Zelda II - The Adventure of Link (USA)",
         source_crc: 0xBA32_2865,
         bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
         options: &[],
@@ -45,6 +51,8 @@ pub const PATCHES: [BuiltinPatch; 2] = [
     },
     BuiltinPatch {
         name: MEGAMAN2_USA,
+        game: "Mega Man 2",
+        rom_name: "Mega Man 2 (USA)",
         source_crc: 0x0FCF_C04D,
         bps: include_bytes!("../patches/megaman2-usa-widescreen.bps"),
         options: &[
@@ -189,6 +197,26 @@ pub fn data_crc(image: &[u8]) -> u32 {
 #[must_use]
 pub fn for_data_crc(crc: u32) -> Option<&'static BuiltinPatch> {
     PATCHES.iter().find(|patch| patch.source_crc == crc)
+}
+
+/// The built-in patch made for the game named `name` (a ROM file or a profile title), whichever
+/// version of it the ROM is: the patch whose game the name starts with, letters and digits only
+/// ("Zelda II - The Adventure of Link (Europe)" is Zelda II's, "Mega Man 3" is no one's).
+#[must_use]
+pub fn for_game_name(name: &str) -> Option<&'static BuiltinPatch> {
+    let wanted = letters_and_digits(name);
+    PATCHES.iter().find(|patch| {
+        let game = letters_and_digits(patch.game);
+        !game.is_empty() && wanted.starts_with(&game)
+    })
+}
+
+/// `text` reduced to its letters and digits, lower case.
+fn letters_and_digits(text: &str) -> String {
+    text.chars()
+        .filter(|character| character.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 /// Whether the game whose data (iNES header excluded) has CRC-32 `crc` can be widened: a
@@ -408,6 +436,19 @@ mod tests {
         let crc = crc32(&patch);
         patch.extend(crc.to_le_bytes());
         patch
+    }
+
+    #[test]
+    fn a_game_is_found_by_the_start_of_its_name() {
+        let zelda = for_game_name("Zelda II - The Adventure of Link (Europe)").unwrap();
+        assert_eq!(ZELDA2_USA, zelda.name);
+        assert_eq!(
+            Some(MEGAMAN2_USA),
+            for_game_name("Mega Man 2 (U)").map(|patch| patch.name)
+        );
+        assert!(for_game_name("Mega Man 3 (USA)").is_none());
+        assert!(for_game_name("Legend of Zelda, The (USA)").is_none());
+        assert!(for_game_name("").is_none());
     }
 
     #[test]

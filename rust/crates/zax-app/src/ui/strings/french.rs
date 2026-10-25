@@ -301,6 +301,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HACK_RATIO, "Ratio"),
     (keys::HACK_MARGIN, "Marge supplémentaire"),
     (keys::HACK_ON, "activé"),
+    (keys::HACKS_OTHER_ROM, "Le hack écran large de {0} est fait pour la ROM « {1} » (CRC {2}). Cette ROM-ci ne correspond pas : {3} (CRC {4}). L'écran large ne peut pas être activé pour elle."),
     (keys::HACK_OFF, "désactivé"),
     (keys::MENU_HACKS, "Hacks…"),
     (keys::HANDHELD_HINT_HACKS, "Hacks"),

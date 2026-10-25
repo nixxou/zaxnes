@@ -1427,7 +1427,7 @@ fn start_game_from_command_line(
     startup_game: Option<&str>,
 ) {
     let Some(rom) = options.rom_path.as_deref() else {
-        log("no --rom given; the window opens on the welcome screen (AMD-010 REQ-UI-207).");
+        log("no --rom given; the window opens on the ROM list of the console mode (F1: the welcome screen).");
         return;
     };
     let full: PathBuf = std::path::absolute(rom).unwrap_or_else(|_| PathBuf::from(rom));
