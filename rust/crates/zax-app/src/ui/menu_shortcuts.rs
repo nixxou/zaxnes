@@ -150,6 +150,12 @@ pub fn all() -> Vec<MenuShortcut> {
             host(Command::Quit),
             "Ctrl+Q",
         ),
+        shortcut(
+            Key::M,
+            ShortcutModifiers::CONTROL,
+            host(Command::AnnotateMovie),
+            "Ctrl+M",
+        ),
         // The debug overlay of DEC-10-Q7's neighbourhood: an addition, off by default, on a key
         // no default game binding uses.
         shortcut(

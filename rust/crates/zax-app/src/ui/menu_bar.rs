@@ -64,6 +64,8 @@ pub enum Submenu {
     Volume,
     /// The options of the built-in patch of the game being played.
     HackOptions,
+    /// The movies of the movies folder.
+    Movies,
 }
 
 /// What makes a [`MenuItemKind::Choice`] the selected one.
@@ -274,6 +276,7 @@ impl MenuBarModel {
             Submenu::Skybox => skybox_items(),
             Submenu::Volume => volume_items(),
             Submenu::HackOptions => hack_option_items(host),
+            Submenu::Movies => movie_items(host),
         }
     }
 }
@@ -395,6 +398,11 @@ fn build_menus() -> Vec<Menu> {
             MenuItem::rule(),
             item(Command::ShowDataFolder),
             item(Command::ShowAbout),
+            MenuItem::rule(),
+            item(Command::ToggleMovieRecording),
+            MenuItem::sub(text::movies(), Submenu::Movies),
+            item(Command::AnnotateMovie),
+            item(Command::StopMovie),
         ],
     };
     vec![file, emulation, video, audio, tools]
@@ -636,6 +644,27 @@ fn hack_option_items(host: &AppHost) -> Vec<MenuItem> {
                 .to_owned(),
                 CommandArgs::of_number(index),
                 Selection::HackOption(index),
+            )
+        })
+        .collect()
+}
+
+fn movie_items(host: &AppHost) -> Vec<MenuItem> {
+    let files = host.movie_files();
+    if files.is_empty() {
+        return vec![MenuItem::note(text::nothing_here())];
+    }
+    files
+        .iter()
+        .map(|path| {
+            let label = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            MenuItem::of(
+                Command::PlayMovie,
+                Some(label),
+                CommandArgs::of_text(&path.to_string_lossy()),
             )
         })
         .collect()

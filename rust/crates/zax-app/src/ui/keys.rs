@@ -27,6 +27,12 @@ pub const SLOT_EMPTY: &str = "slot.empty";
 pub const SLOT_OTHER_PATCH: &str = "slot.other_patch";
 pub const MENU_HACK_OPTIONS: &str = "menu.hack_options";
 pub const SLOT_OTHER_HACK_VERSION: &str = "slot.other_hack_version";
+/// Submenu of the movies to play.
+pub const MENU_MOVIES: &str = "menu.movies";
+/// Title of the window that asks for a note on the frame on screen.
+pub const WINDOW_MOVIE_NOTE: &str = "window.movie_note";
+/// Its button that writes the note.
+pub const MOVIE_NOTE_WRITE: &str = "movie_note.write";
 pub const SLOT_QUICK: &str = "slot.quick";
 pub const SLOT_PREFIX: &str = "slot.prefix";
 
@@ -244,6 +250,9 @@ pub const PUBLISHED: &[&str] = &[
     SLOT_OTHER_PATCH,
     MENU_HACK_OPTIONS,
     SLOT_OTHER_HACK_VERSION,
+    MENU_MOVIES,
+    WINDOW_MOVIE_NOTE,
+    MOVIE_NOTE_WRITE,
     SLOT_QUICK,
     SLOT_PREFIX,
     WINDOW_OPTIONS,

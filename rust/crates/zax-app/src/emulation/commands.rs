@@ -146,6 +146,10 @@ commands! {
     ShowKeyConfig => "tools.key_config", Shortcut::None, false;
     ShowDataFolder => "tools.data_folder", Shortcut::None, false;
     ShowAbout => "tools.about", Shortcut::None, false;
+    ToggleMovieRecording => "tools.record_movie", Shortcut::None, true;
+    PlayMovie => "tools.play_movie", Shortcut::None, false;
+    StopMovie => "tools.stop_movie", Shortcut::None, false;
+    AnnotateMovie => "tools.annotate_movie", Shortcut::Fixed("Ctrl+M"), false;
     CancelModal => "ui.cancel_modal", Shortcut::None, false;
 }
 

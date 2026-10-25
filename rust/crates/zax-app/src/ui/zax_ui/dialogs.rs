@@ -266,6 +266,40 @@ impl ZaxUi {
         self.sync_confirmation(host);
     }
 
+    /// The note for the frame on screen of the movie: written with the button or Ctrl+Enter.
+    pub(super) fn draw_movie_note(&mut self, ui: &Ui, host: &mut AppHost) {
+        let mut open = self.state.movie_note;
+        let window = ui
+            .window(format!("{}##movie_note", text::movie_note_title()))
+            .size([460.0, 0.0], Condition::Always)
+            .position(centre(ui, 460.0, 160.0), Condition::Appearing)
+            .flags(WindowFlags::NO_COLLAPSE | WindowFlags::NO_SAVED_SETTINGS)
+            .opened(&mut open)
+            .begin();
+        let mut write = false;
+        if window.is_some() {
+            if ui.is_window_appearing() {
+                ui.set_keyboard_focus_here();
+            }
+            ui.input_text_multiline("##note", &mut self.movie_note, [440.0, 90.0])
+                .build();
+            write |= ui.io().key_ctrl && ui.is_key_pressed(imgui::Key::Enter);
+            write |= ui.button_with_size(text::movie_note_write(), [110.0, 0.0]);
+            ui.same_line();
+            if ui.button_with_size(text::cancel(), [110.0, 0.0]) {
+                open = false;
+            }
+        }
+        if write {
+            open = false;
+            host.enqueue(
+                Command::AnnotateMovie,
+                CommandArgs::of_text(&std::mem::take(&mut self.movie_note)),
+            );
+        }
+        self.state.movie_note = open;
+    }
+
     pub(super) fn draw_about(&mut self, ui: &Ui) {
         let mut open = self.state.about;
         let window = ui

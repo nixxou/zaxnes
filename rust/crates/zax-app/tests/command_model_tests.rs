@@ -73,6 +73,11 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         ShowKeyConfig,
         ShowDataFolder,
         ShowAbout,
+        // Rust-only (owner request): the movies.
+        ToggleMovieRecording,
+        PlayMovie,
+        StopMovie,
+        AnnotateMovie,
     ];
     for command in expected {
         assert!(
