@@ -309,8 +309,7 @@ get empty margins. A row whose centre differs from the parse at more than one of
 (an intermediate screen, a transition) is left to the nametables. A margin column the nametables
 hold for that place (Mega Man 2's rule: the rows that differ from the parse written after every
 row that matches) is taken from them, with the bricks broken and the coins taken; any other from
-the parse. Not handled yet: a fixed room sharing its area with others (bonus rooms) shows its
-neighbours in the margins; castle loops (the game sets the area back) show the straight area.
+the parse. The parse also records, per column, whether the area's own data locked the scrolling there (a scroll lock object): while the game's lock is on in such a room (an underground bonus room, whose area holds other rooms beside it), the margins stay empty; a lock that is not the area's (the flagpole, a fall) keeps them. The decoder works only while the title screen or the game runs an area (`OperMode` 0 or 1, task 3): the black WORLD screen shares its blank tile with the sky. Castle loops send Mario and the screen 4 pages back, coherent with the straight area the parse lays out.
 
 ---
 

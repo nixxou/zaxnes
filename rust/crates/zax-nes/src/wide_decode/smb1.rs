@@ -20,7 +20,9 @@
 //!
 //! What the game changed since (a brick broken, a coin taken, a block used) is in the nametables:
 //! a column the nametables hold for that very place is shown as they hold it. Rows 0-3 are the
-//! status bar, its margins left empty. A row whose centre does not show what the parser gives
+//! status bar, its margins left empty. In a room the area's data locks the screen on (a scroll
+//! lock object, as the parse records it per column: an underground bonus room, whose area holds
+//! other rooms beside it) the margins stay empty. A row whose centre does not show what the parser gives
 //! (a transition) is left to the nametables, as is any row while the game is not running an area
 //! (`OperMode` 0 or 1 with `OperMode_Task` 3: the black "WORLD 1-1" screen shares its blank tile
 //! with the sky, which the check would not tell).
@@ -54,6 +56,7 @@ const CURRENT_COLUMN: u16 = 0x0726;
 const METATILE_BUFFER: u16 = 0x06A1;
 const SCREEN_LEFT_PAGE: u16 = 0x071A;
 const SCREEN_LEFT_X: u16 = 0x071C;
+const SCROLL_LOCK: u16 = 0x0723;
 const OPER_MODE: u16 = 0x0770;
 const OPER_MODE_TASK: u16 = 0x0772;
 /// The task of the title screen and of the game that runs the area (`GameMenuRoutine`,
@@ -76,6 +79,9 @@ struct Area {
     key: [u8; 3],
     /// Each metatile column's 13 metatiles, from page 0; empty when the area could not be parsed.
     columns: Vec<[u8; ROWS]>,
+    /// For each column, whether the area's own data had locked the scrolling there (a scroll lock
+    /// object: the underground bonus rooms, a warp zone, rooms one screen wide that share an area).
+    locked: Vec<bool>,
 }
 
 static AREA: Mutex<Option<Area>> = Mutex::new(None);
@@ -113,6 +119,16 @@ impl MarginDecoder for SuperMarioBros {
         let camera =
             (i32::from(memory.ram(SCREEN_LEFT_PAGE)) << 8) | i32::from(memory.ram(SCREEN_LEFT_X));
         let first_column = resolve_ring(row.ring_x(), 512, camera) >> 3;
+        // A room the area's data locks the screen on (a bonus room) shows nothing past the screen:
+        // the next room of the area is its neighbour there. A lock that is not the area's (the
+        // flagpole, a fall) keeps the margins.
+        let room = (memory.ram(SCROLL_LOCK) != 0
+            && usize::try_from((camera + 128) >> 4)
+                .ok()
+                .and_then(|column| area.locked.get(column))
+                .copied()
+                .unwrap_or(false))
+        .then_some((camera >> 3)..((camera >> 3) + 32));
         let tiles = Tiles {
             area,
             prg_rom: memory.prg_rom,
@@ -136,6 +152,9 @@ impl MarginDecoder for SuperMarioBros {
 
         for column in columns {
             let world = first_column + column;
+            if room.as_ref().is_some_and(|room| !room.contains(&world)) {
+                continue;
+            }
             let Some((tile, palette)) = tiles.at(world, coarse_y) else {
                 continue;
             };
@@ -159,6 +178,7 @@ fn parse(memory: &DecoderMemory<'_>, key: [u8; 3]) -> Area {
     let mut area = Area {
         key,
         columns: Vec::new(),
+        locked: Vec::new(),
     };
     let mut guest = Guest::new(memory.ram, memory.prg_rom);
     guest.poke_ram(HALFWAY_PAGE, 0);
@@ -188,6 +208,7 @@ fn parse(memory: &DecoderMemory<'_>, key: [u8; 3]) -> Area {
             *metatile = guest.peek_ram(METATILE_BUFFER + offset);
         }
         columns.push(column);
+        area.locked.push(guest.peek_ram(SCROLL_LOCK) != 0);
         if !guest.call(INCREMENT_COLUMN_POS, 1_000) {
             break;
         }
