@@ -23,7 +23,7 @@ variables below are only its labels, to find them.
 |---|---|
 | Source ROM | *Super Mario Bros. 3 (USA) (Rev 1)*, MMC3, 256 KiB PRG (32 banks of 8 KiB; in the game's PRG mode bank 30 is fixed at `$8000` and bank 31 at `$E000`, `$A000` and `$C000` switch), 128 KiB CHR-ROM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `2E6301ED` |
-| Target data | CRC-32 `174D5C62` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `82752551` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 128 bytes at `$E240` of bank 31 (the `$FF` padding before a DMC sample), 2 KiB at `$1600`-`$1DFF` of bank 25 (its empty end), hooks in banks 0, 3, 4, 5, 24, 30 and 31; size and layout unchanged |
 | Patch | `rust/crates/zax-nes/patches/smb3-usa-rev1-widescreen.bps`, made against the data without header |
 
@@ -49,7 +49,8 @@ nametable columns: the decoder draws the background), `$5007 = $02` (sprites fre
 (`$500A` bit 2), else 0.
 
 Variables (extension RAM): `WV_M $5200`, scratch `WV_T0 $5201` / `WV_T1 $5202`, an object's
-screen x + 8 `WV_EST $5203`/`$5204`, `WV_COUNT $5205`, `WV_M16 $5206`/`$5207`, `WV_DEL_HI $5208`;
+screen x + 8 `WV_EST $5203`/`$5204`, `WV_COUNT $5205`, `WV_M16 $5206`/`$5207`, `WV_DEL_HI $5208`,
+the sprite block the game gave each object this frame `WV_SPR_BASE $5210 + slot`;
 the trace build adds the lag counters at `$57F0`.
 
 ---
@@ -66,7 +67,8 @@ out the 8-pixel columns marked off the screen in `Objects_SprHVis` (`$0651 + slo
 | Game routine | Original | Hack |
 |---|---|---|
 | horizontal visibility (`Object_DetermineHorzVisY`, `$D7B8`, bank 0) | a column is off the screen unless its x starts within `[0, 256)` | within `[-M, 256 + M)` (`wide_horz_vis`; as the game, Temp_Var15/16 keep the first column's x) |
-| end of the frame's work (`GraphicsBuf_Prep_And_WaitVSync`, `$96E5`, bank 30; the next NMI's OAM DMA follows) | | the high byte of the x of each of the six sprites of every object in a normal state: the instance of its 8-bit x nearest the object's screen x + 8, to `$5100 + OAM offset` (`wide_frame_end`; not on the world map) |
+| sprite block of an object (`Objects_HandleScrollAndUpdate`, `$C9BC`, bank 0) | `Object_SprRAM = SprRamOffsets[slot + Counter_7to0]`; a troopa then adds 8 to it and draws its head tip and wing in the two sprites below | the same, also kept in `WV_SPR_BASE` (`wide_spr_base`) |
+| end of the frame's work (`GraphicsBuf_Prep_And_WaitVSync`, `$96E5`, bank 30; the next NMI's OAM DMA follows) | | the high byte of the x of each of the six sprites of every object in a normal state: the instance of its 8-bit x nearest the object's screen x + 8, to `$5100 + OAM offset` (`wide_frame_end`; not on the world map). The six from `WV_SPR_BASE` when `Object_SprRAM` is it or 8 more, else from `Object_SprRAM` |
 | creation as the screen scrolls (`Level_ObjectsSpawnByScroll`, `$B838`, bank 5) | the level's objects are created at the column 16 pixels past the right edge (scrolling right) or 32 past the left one | `M16` further (`wide_spawn_ahead`) |
 | deletion off the screen (`Object_DeleteOffScreen`, `$D40F` and `$D41E`, bank 0) | an object off the screen goes past `+$120`/`-$30` (`+$180`/`-$80`, `+$140`/`-$50` for some) of the camera | `M16` further (`wide_delete_low`, `wide_delete_high`): one created there would otherwise go at once. An object within the wide view has no column off the screen, so the game's test does not even start |
 | creation of a special object by an object (`SpecialObj_FindEmptyAbort`, `$C454`; the Lava Lotus, `$B0C1`; the Hammer Bro, `$A5E6`) | none while the object is off the screen | the same with the original screen (`wide_original_offscreen`, `wide_original_hoffscreen`): special objects (hammers, fireballs, boomerangs) have an 8-bit x relative to the screen, one thrown from a margin would show and hit 256 pixels away |
@@ -91,6 +93,7 @@ Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original 
 |---|---|---|---|
 | 31 | `$F496` | `JMP $9F40` | `JMP fixed_nmi` |
 | 0 | `$D7B8` | `LDA #0 / STA $0651,X` | `JMP wide_horz_vis` |
+| 0 | `$C9BC` | `LDA $C401,Y / STA $058F,X` | `JSR wide_spr_base` |
 | 30 | `$96E5` | `LDA $5E / ASL A / TAY` | `JSR wide_frame_end` |
 | 5 | `$B838` | `LDA $FD / CLC / ADC $B832,Y / AND #$F0 / STA $05 / LDA $12 / ADC $B834,Y` | `JSR wide_spawn_ahead / JMP $B847` |
 | 0 | `$D40F` | `LDA $FD / CLC / ADC $D3CC,Y` | `JSR wide_delete_low` |
@@ -194,6 +197,7 @@ WV_COUNT        = $5205
 WV_M16_LO       = $5206         ; the margin rounded up to 16 pixels, 16-bit
 WV_M16_HI       = $5207
 WV_DEL_HI       = $5208         ; the high byte of the deletion limit at hand
+WV_SPR_BASE     = $5210         ; + slot: the six sprites the game gave the object this frame
 .ifdef LAG_TRACE
 WV_LAG          = $57F0         ; 2 bytes: NMIs that found the game still busy (a trace build)
 WV_NMI          = $57F2         ; 2 bytes: NMIs
@@ -223,6 +227,7 @@ OBJECTS_SPR_VVIS = $0681        ; + slot: a bit per 16-pixel row off the screen
 OBJ_GROUP_REL_IDX = $03E2       ; the object's index in its group's tables
 OBJECT_GROUP_ATTRIBUTES = $A0D8 ; the group's bank (at $A000 while it runs): bits 4-6 the width
 LEVEL_TILESET   = $070A         ; 0: the world map
+SPR_RAM_OFFSETS = $C401         ; bank 0: the sprite blocks the objects take in turn
 OBJECT_SLOTS    = 8
 OBJECT_SPRITES  = 6
 OBJECT_WIDTHS   = $D792         ; bank 0 (at $C000 while objects run): column x offsets
@@ -369,9 +374,12 @@ wide_frame_end:
 @hurt:
     STA     PLAYER_DEBUG_NO_HIT
     LDA     WV_M
-    BEQ     @done
+    BEQ     @none
     LDA     LEVEL_TILESET
-    BEQ     @done
+    BNE     @level
+@none:
+    JMP     @done
+@level:
     TXA
     PHA
     LDX     #OBJECT_SLOTS - 1
@@ -393,7 +401,17 @@ wide_frame_end:
     BCC     @estimated
     INC     WV_EST_HI
 @estimated:
+    LDA     OBJECT_SPR_RAM,x            ; its sprites: from the block the game gave it, which the
+    SEC                                 ; troopas move up 8 bytes to draw their head and wing
+    SBC     WV_SPR_BASE,x               ; below it; from where the object put them otherwise
+    BEQ     @given
+    CMP     #$08
+    BEQ     @given
     LDA     OBJECT_SPR_RAM,x
+    JMP     @block
+@given:
+    LDA     WV_SPR_BASE,x
+@block:
     TAY
     LDA     #OBJECT_SPRITES
     STA     WV_COUNT
@@ -581,6 +599,16 @@ wide_original_hoffscreen:
     LDA     #$01
 wide_original_done:
     RTS
+
+; ---------------------------------------------------------------------------- ;
+; The sprite block an object gets this frame (Objects_HandleScrollAndUpdate, $C9BC, in place of
+; LDA SprRamOffsets,Y / STA Object_SprRAM,X): the same, kept for wide_frame_end, since an object
+; may move its Object_SprRAM afterwards (a troopa adds 8 and draws two sprites below it).
+wide_spr_base:
+    LDA     SPR_RAM_OFFSETS,y
+    STA     OBJECT_SPR_RAM,x
+    STA     WV_SPR_BASE,x
+    RTS
 ```
 
 ### B. `tools/build.py`
@@ -651,6 +679,8 @@ def hooks(sym):
     # The end of the frame's work: the high bytes of the objects' sprites
     # (GraphicsBuf_Prep_And_WaitVSync).
     put(30, 0x96E5, 'a5 5e 0a a8', jsr(sym['wide_frame_end']))
+    # The sprite block an object gets, kept (Objects_HandleScrollAndUpdate).
+    put(0, 0xC9BC, 'b9 01 c4 9d 8f 05', jsr(sym['wide_spr_base']))
     # Objects created as far ahead as the margin (Level_ObjectsSpawnByScroll)...
     put(5, 0xB838, 'a5 fd 18 79 32 b8 29 f0 85 05 a5 12 79 34 b8',
         jsr(sym['wide_spawn_ahead']) + jmp(0xB847))
