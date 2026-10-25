@@ -346,6 +346,7 @@ mod tests {
             ram: &ram,
             prg_ram: &prg_ram,
             prg_rom: &prg,
+            nametable: &|_| 0,
         };
         // The row of level row 2's top, the left edge at pixel 256 of the plane.
         let row = BackgroundRow {
@@ -368,6 +369,7 @@ mod tests {
             ram: &ram,
             prg_ram: &[0; 0x2000],
             prg_rom: &vec![0; 8 * BANK_SIZE],
+            nametable: &|_| 0,
         };
         let status = BackgroundRow {
             line: 0,
@@ -405,6 +407,7 @@ mod tests {
             ram: &ram,
             prg_ram: &prg_ram,
             prg_rom: &[],
+            nametable: &|_| 0,
         };
         let map = WorldMap::new(&memory).unwrap_or_else(|| unreachable!());
         assert_eq!(map.terrain(0, 0), 6);

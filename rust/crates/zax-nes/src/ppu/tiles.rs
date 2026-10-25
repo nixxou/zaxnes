@@ -278,6 +278,12 @@ impl Ppu2C02 {
         let mut decoded_rows = [false; 31];
         let mut tiles = Vec::new();
         let mut records = Vec::new();
+        // The decoder may read the nametables, as the PPU sees them now.
+        let nametable = |address: u16| self.read_nametable_inner(address, cart);
+        let memory = &DecoderMemory {
+            nametable: &nametable,
+            ..*memory
+        };
         for (row_index, captured) in self.captured_rows.iter().enumerate() {
             let Some(captured) = captured else {
                 continue;
@@ -320,14 +326,20 @@ impl Ppu2C02 {
                     true,
                 ));
             }
-            if let Some(range) = self.visible_rows.get_mut(row_index) {
-                #[allow(clippy::cast_possible_truncation)] // At most 512.
-                let margin = self.frame_margin as i16;
-                *range = (-margin, 256 + margin);
-            }
         }
 
         self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
+
+        #[allow(clippy::cast_possible_truncation)] // At most 512.
+        let margin = self.frame_margin as i16;
+        for (range, _) in self
+            .visible_rows
+            .iter_mut()
+            .zip(decoded_rows)
+            .filter(|(_, decoded)| *decoded)
+        {
+            *range = (-margin, 256 + margin);
+        }
 
         // The decoded rows lose their nametable margins, then get the decoded ones.
         self.tiles.retain_background(|record| {

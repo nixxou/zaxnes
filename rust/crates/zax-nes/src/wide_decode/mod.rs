@@ -13,10 +13,11 @@
 //! A decoder applies to the ROMs a built-in patch is made for, while the built-in patches are
 //! on (see [`crate::builtin_patches`]).
 
+mod megaman2;
 mod zelda2;
 
 /// What a decoder may read once the frame has run.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct DecoderMemory<'a> {
     /// CPU RAM, `$0000-$07FF`.
     pub ram: &'a [u8],
@@ -24,6 +25,20 @@ pub struct DecoderMemory<'a> {
     pub prg_ram: &'a [u8],
     /// The whole PRG-ROM image, as the cartridge runs it (built-in patch applied).
     pub prg_rom: &'a [u8],
+    /// A nametable byte (`$2000-$2FFF`) as the PPU reads it now, mirroring and layout applied:
+    /// a decoder can check what it decodes against what the PPU shows.
+    pub nametable: &'a dyn Fn(u16) -> u8,
+}
+
+impl std::fmt::Debug for DecoderMemory<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DecoderMemory")
+            .field("ram", &self.ram.len())
+            .field("prg_ram", &self.prg_ram.len())
+            .field("prg_rom", &self.prg_rom.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl DecoderMemory<'_> {
@@ -114,6 +129,16 @@ pub trait MarginDecoder: Sync {
         _out: &mut Vec<DecodedTile>,
     ) -> bool {
         false
+    }
+}
+
+/// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if
+/// any: a game a decoder alone widens.
+#[must_use]
+pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
+    match crc {
+        megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
+        _ => None,
     }
 }
 
