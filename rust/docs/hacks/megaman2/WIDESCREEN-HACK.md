@@ -16,7 +16,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 |---|---|
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
-| Target data | CRC-32 `56AFB664` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `AA52E0AD` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15 and one in bank 14 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
@@ -43,6 +43,7 @@ screens `$14` to `$15`.
 | energy bars (`$CFAD`, `$CFC9`, `$CFCE`, `$CFD3`) | write to `$0200` | write to the page in use |
 | enemy spawn (`$D763`) and enemy loop (bank 14 `$9283`) | | an enemy of the stage list that spawns in a margin is dormant: drawn, but its behaviour is skipped until it comes onto the original screen; it then wakes for good (margins included). A dormant enemy is still removed outside `[LO, HI)` |
 | cloud devil palette marker (bank 14 `$AF9D`, in place of `JSR $AF4C`) | an object of type `$42`/`$43` resets the palette of the heads of type `$40`/`$41` (2 or 3) to the first step of their fade-in (sky) when it reaches the screen | resets it only when no head of that type is alive (slots `$10`-`$1F`, `$0420` bit 7); otherwise the head before, still in the left margin, keeps its colours and the next one shows at once (the game skips the fade-in of a head whose palette is in colour, `$AE61`) |
+| shrimp spawner's palette (bank 14 `$95AB`: `LDY #$17` / `JSR $998D` becomes `JSR wide_water_palette` / `NOP` / `NOP`) | the spawner (type `$03`) sets background palette 2 to the water's colours every frame; the lantern fish (type `$0F`) sets its own colours there every frame, and the one the enemy loop runs last wins | the spawner leaves the palette alone while a lantern fish is alive (slots `$10`-`$1F`), so the fish shows whatever slot it spawned into |
 | an enemy's touch (`$E596`: `LDA $4B` / `BNE` / `SEC` becomes `JSR wide_touch` / `BNE $E5CC`) | no damage while the hit timer `$4B` runs | nor when the option "Invincible" is on (`$500A` bit 1) |
 | Mega Man's damage (bank 11 `$A564`: `LDA $4B` / `BNE` / `LDY $B3` becomes `JSR wide_hurt` / `BNE $A59C` / `NOP`) | no damage while the hit timer `$4B` runs | nor when the option "Invincible" is on (`$500A` bit 1, off by default, a testing aid) |
 | spikes (bank 14 `$8A5E` and `$8CC2`: `LDA #0` / `STA $2C` / `JMP $C10B` becomes `JSR wide_spike` / `JMP $8A65` (or `$8CC9`) / `NOP`) | a spike tile kills Mega Man unless the hit timer runs | invincible, the game goes on to its next test, A kept; falling off the screen still kills |
@@ -197,6 +198,8 @@ NEXT_ENEMY      = $9299         ; bank 14: the enemy loop's next slot
 TIKKI_PALETTE   = $AF4C         ; bank 14: writes step Y/4 of a cloud devil's fade-in to palette X
 LAST_SLOT       = $1F           ; the last enemy slot
 DEATH           = $C10B         ; Mega Man dies ($2C: how)
+PALETTE_2       = $998D         ; bank 14: background palette 2, colours 1-3 = $99F9 + Y - 2 .. Y
+LANTERN_FISH    = $0F           ; Bubble Man's lantern fish
 STAGE_ENEMY_TYPE = $B900        ; stage bank: the type of each entry of the enemy list
 FIRST_ENEMY     = $10
 
@@ -748,6 +751,31 @@ wide_tikki_reset:
     RTS
 
 ; ---------------------------------------------------------------------------- ;
+; Bubble Man's lantern fish is drawn in background palette 2 and sets its colours every frame;
+; the shrimp spawner (type $03) sets that palette to the water's every frame. Whichever of the two
+; the enemy loop runs last wins: with the enemies of the margins the fish can spawn into a slot
+; before the spawner's and stay invisible. So the spawner leaves the palette alone while a lantern
+; fish is alive.
+
+; Bank 14, $95AB, in place of LDY #$17 / JSR PALETTE_2.
+wide_water_palette:
+    LDY      #LAST_SLOT
+@slot:
+    LDA      $0420,y
+    BPL      @next
+    LDA      $0400,y
+    CMP      #LANTERN_FISH
+    BEQ      @fish
+@next:
+    DEY
+    CPY      #FIRST_ENEMY - 1
+    BNE      @slot
+    LDY      #$17
+    JMP      PALETTE_2
+@fish:
+    RTS
+
+; ---------------------------------------------------------------------------- ;
 ; Invincibility (option bit 1, a testing aid): Mega Man takes no damage and spikes do not kill him.
 ; Falling off the bottom of the screen still does.
 
@@ -873,6 +901,9 @@ def hooks(sym):
     banked.append((14, 0x9283, bytes.fromhex('bc 00 04'), jsr(sym['wide_wake'])))
     # Cloud devils: a marker resets its palette only once no head of its type is alive.
     banked.append((14, 0xAF9D, bytes.fromhex('20 4c af'), jsr(sym['wide_tikki_reset'])))
+    # Lantern fish: the shrimp spawner leaves its palette alone while one is alive.
+    banked.append((14, 0x95AB, bytes.fromhex('a0 17 20 8d 99'),
+                   jsr(sym['wide_water_palette']) + bytes([NOP, NOP])))
     # Invincibility: an enemy's touch, other damage (bank 11) and spikes (bank 14).
     put(0xE596, 'a5 4b d0 32 38', jsr(sym['wide_touch']) + branch(BNE, 0xE599, 0xE5CC))
     banked.append((11, 0xA564, bytes.fromhex('a5 4b d0 34 a4 b3'),
