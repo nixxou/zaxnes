@@ -171,11 +171,13 @@ fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), Ha
     }
 
     if let Some(path) = request.dump_mem {
-        let memory: Vec<u8> = (0..0x0800u16)
+        let mut memory: Vec<u8> = (0..0x0800u16)
             .chain(0x6000..=0x7FFF)
             .chain(0x5000..=0x5FFF)
             .map(|address| host.core.read_memory(address))
             .collect();
+        // Then the PPU's 4 KiB of nametable RAM.
+        memory.extend_from_slice(host.core.ppu().vram());
         fs::write(path, memory)?;
         let pc = host.core.cpu_and_bus_mut().0.pc;
         let around: Vec<u8> = (0..6u16)
