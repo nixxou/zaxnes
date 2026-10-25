@@ -25,6 +25,10 @@ pub(super) struct CapturedRow {
     row: BackgroundRow,
     y: i16,
     pattern_table: u16,
+    /// The CHR banks the row was drawn with ([`crate::cartridges::ChrView::offsets`]), for a
+    /// board that has a side-effect-free view: a game that switches banks during the frame (a
+    /// status bar, animated tiles) has others in place once the frame is over.
+    chr: Option<[usize; crate::cartridges::BankWindows::CHR_WINDOWS]>,
 }
 
 impl Ppu2C02 {
@@ -182,6 +186,10 @@ impl Ppu2C02 {
                 },
                 y,
                 pattern_table,
+                chr: cart
+                    .as_deref()
+                    .and_then(Cartridge::chr_peek_view)
+                    .map(|view| view.offsets()),
             });
         }
 
@@ -276,6 +284,9 @@ impl Ppu2C02 {
             return;
         }
         let row_width = 33 + (2 * extra);
+        // Column 0 too, for a decoder that draws it while the game hides it.
+        let masked_column = decoder.decodes_masked_column() && (self.mask & 0x02) == 0;
+        let first_centre = i32::from(masked_column);
         let mut decoded_rows = [false; 31];
         let mut tiles = Vec::new();
         let mut records = Vec::new();
@@ -295,7 +306,7 @@ impl Ppu2C02 {
             // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose
             // pixels begin at 256 - fine X, and goes on while it starts left of the edge.
             let last = 32 + extra - i32::from(fine_x == 0);
-            let mut columns = (-extra..0).chain(32..=last);
+            let mut columns = (-extra..first_centre).chain(32..=last);
             tiles.clear();
             if !decoder.decode_row(memory, &captured.row, &mut columns, &mut tiles) {
                 continue;
@@ -309,11 +320,7 @@ impl Ppu2C02 {
                 palette,
             } in &tiles
             {
-                let (plane0, plane1) = self.read_pattern_planes(
-                    captured.pattern_table + (u16::from(tile) * 16),
-                    ChrFetch::Background,
-                    cart,
-                );
+                let (plane0, plane1) = self.read_row_planes(captured, tile, cart);
                 #[allow(clippy::cast_possible_truncation)] // -519..768.
                 let x = ((8 * column) - fine_x) as i16;
                 records.push(TileRecord::new(
@@ -348,7 +355,7 @@ impl Ppu2C02 {
         self.tiles.retain_background(|record| {
             let row = usize::try_from(record.index / row_width).unwrap_or(usize::MAX);
             let column = (record.index % row_width) - extra;
-            !decoded_rows.get(row).copied().unwrap_or(false) || (0..32).contains(&column)
+            !decoded_rows.get(row).copied().unwrap_or(false) || (first_centre..32).contains(&column)
         });
         for record in records {
             self.tiles.add(record);
@@ -402,11 +409,7 @@ impl Ppu2C02 {
                     palette,
                 } in tiles.iter()
                 {
-                    let (plane0, plane1) = self.read_pattern_planes(
-                        from.pattern_table + (u16::from(tile) * 16),
-                        ChrFetch::Background,
-                        cart,
-                    );
+                    let (plane0, plane1) = self.read_row_planes(from, tile, cart);
                     #[allow(clippy::cast_possible_truncation)] // -519..768.
                     let x = ((8 * column) - fine_x) as i16;
                     // Rows past the frame: the record index is not a row of the frame.
@@ -608,6 +611,29 @@ impl Ppu2C02 {
 
     /// Reads the 16 CHR bytes of the pattern at `address` through the side-effect-free path
     /// and packs them as REQ-CORE-034 requires.
+    /// The planes of background tile `tile` as row `captured` showed it: through the CHR
+    /// banks in place when it was drawn, when the board has a side-effect-free view.
+    fn read_row_planes(
+        &self,
+        captured: &CapturedRow,
+        tile: u8,
+        cartridge: Option<&Cartridge>,
+    ) -> (u64, u64) {
+        let address = captured.pattern_table + (u16::from(tile) * 16);
+        let view = cartridge.and_then(Cartridge::chr_peek_view);
+        let (Some(view), Some(offsets)) = (view, captured.chr) else {
+            return self.read_pattern_planes(address, ChrFetch::Background, cartridge);
+        };
+        let view = view.with_offsets(offsets);
+        let mut plane0 = 0u64;
+        let mut plane1 = 0u64;
+        for row in 0..8u16 {
+            plane0 |= u64::from(view.read(address + row)) << (8 * row);
+            plane1 |= u64::from(view.read(address + 8 + row)) << (8 * row);
+        }
+        (plane0, plane1)
+    }
+
     fn read_pattern_planes(
         &self,
         address: u16,

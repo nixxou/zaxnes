@@ -16,6 +16,7 @@
 pub mod guest;
 mod megaman2;
 mod smb1;
+mod smb3;
 mod zelda2;
 
 /// What a decoder may read once the frame has run.
@@ -123,6 +124,14 @@ pub trait MarginDecoder: Sync {
         out: &mut Vec<DecodedTile>,
     ) -> bool;
 
+    /// Whether the decoder also draws screen column 0 of the rows it decodes while the game
+    /// hides the leftmost 8 pixels of the background (PPUMASK bit 1 clear): such a game keeps
+    /// there the column it is drawing next (Super Mario Bros. 3), and the wide picture, which
+    /// shows those pixels, would show it. `false` by default: column 0 stays the nametables'.
+    fn decodes_masked_column(&self) -> bool {
+        false
+    }
+
     /// Decodes the whole of `row`, a row the PPU did not draw: above or below the screen, in
     /// the vertical margin (its `line` is then negative or past 239, and its PPU address is the
     /// one it would have on the plane of two stacked nametables). Returns `false`, as by
@@ -145,6 +154,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
     match crc {
         megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
         smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
+        smb3::SOURCE_CRC => Some(&smb3::SuperMarioBros3),
         _ => None,
     }
 }
