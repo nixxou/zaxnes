@@ -149,6 +149,10 @@ pub struct Ppu2C02 {
     // Rendering state (render.rs).
     pixels: Vec<u8>,
     secondary_oam: [u8; 4 * SPRITES_PER_LINE],
+    /// The primary OAM index of each sprite the evaluation copied to `secondary_oam`, for the
+    /// widescreen extension: a sprite its high byte puts in a margin is left out of the picture
+    /// (not saved: a state is taken between frames).
+    secondary_source: [u8; SPRITES_PER_LINE],
     sprite_pattern_low: [u8; SPRITES_PER_LINE],
     sprite_pattern_high: [u8; SPRITES_PER_LINE],
     sprite_attribute: [u8; SPRITES_PER_LINE],
@@ -237,6 +241,7 @@ impl Ppu2C02 {
             nmi_line_sample: false,
             pixels: vec![0; SCREEN_WIDTH * SCREEN_HEIGHT],
             secondary_oam: [0; 4 * SPRITES_PER_LINE],
+            secondary_source: [0; SPRITES_PER_LINE],
             sprite_pattern_low: [0; SPRITES_PER_LINE],
             sprite_pattern_high: [0; SPRITES_PER_LINE],
             sprite_attribute: [0; SPRITES_PER_LINE],

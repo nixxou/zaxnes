@@ -829,9 +829,10 @@ impl Ppu2C02 {
         height
     }
 
-    /// Draws the sprites of the extension's second page (records 128 and up) over the centre of
-    /// a wide picture: they never went through the PPU, whose pixels the centre is. In front,
-    /// the sprites behind the background left out.
+    /// Draws over the centre of a wide picture the sprites the PPU did not draw there: those of
+    /// the extension's second page (records 128 and up), and those across the left edge of the
+    /// screen, whose high byte keeps them out of the PPU's picture (their x is negative). A
+    /// sprite behind the background shows only where the centre has the backdrop colour.
     fn paint_extra_sprites(
         &self,
         out: &mut [u8],
@@ -839,9 +840,10 @@ impl Ppu2C02 {
         screen_rows: &std::ops::Range<usize>,
     ) {
         let records = self.tiles.records();
+        let backdrop = self.palette[palette_index(0x3F00)];
         for record in records
             .iter()
-            .filter(|r| !r.background && !r.hidden && r.index >= 128)
+            .filter(|r| !r.background && (r.index >= 128 || r.x < 0))
             .rev()
         {
             for py in 0..8i32 {
@@ -869,7 +871,10 @@ impl Ppu2C02 {
                         continue;
                     };
                     let entry = 0x3F10 | u16::from(record.palette * 4) | u16::from(pixel);
-                    out[(row * width) + column] = self.palette[palette_index(entry)];
+                    let slot = &mut out[(row * width) + column];
+                    if !record.hidden || *slot == backdrop {
+                        *slot = self.palette[palette_index(entry)];
+                    }
                 }
             }
         }

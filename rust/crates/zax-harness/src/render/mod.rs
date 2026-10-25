@@ -482,6 +482,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             write_nes_picture(
                 &options.output.join(format!("{}-2d.png", scene.name)),
                 &scene.nes_picture,
+                scene.nes_picture_height,
             )?;
         }
 
@@ -555,7 +556,7 @@ const NES_PIXELS: usize = 256 * 240;
 fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> {
     let profile = || profile::load(options.profile.as_deref(), options.assets.as_deref());
     if let Some(rom) = &options.rom {
-        let frames = u32::try_from(options.run_frames.max(1)).unwrap_or(1);
+        let frames = u32::try_from(options.run_frames.max(0)).unwrap_or(1);
         return Ok(vec![rom::capture(&RomRequest {
             rom,
             frames,
@@ -637,16 +638,23 @@ fn write_png(file: &Path, options: &Options, pixels: &[u8]) -> Result<(), Harnes
 }
 
 /// Writes the flat NES picture, one colour index per pixel (REQ-CORE-048).
-fn write_nes_picture(file: &Path, indices: &[u8]) -> Result<(), HarnessError> {
+/// The 2D view: the picture as wide and tall as its widescreen margins make it, `rows` rows.
+fn write_nes_picture(file: &Path, indices: &[u8], rows: usize) -> Result<(), HarnessError> {
+    // A JSON frame carries no picture height: the NES picture.
+    let rows = if rows == 0 { 240 } else { rows };
+    let width = indices.len() / rows;
     let pixels: Vec<u8> = indices
         .iter()
-        .take(NES_PIXELS)
+        .take(width * rows)
         .flat_map(|&index| {
             let color = nes_color(usize::from(index));
             [color.r, color.g, color.b, 255]
         })
         .collect();
-    fs::write(file, png_image::encode_rgba(256, 240, &pixels)?)?;
+    let (Ok(width), Ok(rows)) = (u32::try_from(width), u32::try_from(rows)) else {
+        return Ok(());
+    };
+    fs::write(file, png_image::encode_rgba(width, rows, &pixels)?)?;
     Ok(())
 }
 

@@ -224,6 +224,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             "hackName": patch.map(|patch| patch.name),
             "hackVersion": patch.map(|patch| format!("{:08X}", patch.version())),
             "hackOptions": self.hack_option_bits(),
+            // The hack reads the margin ($5002): where enemies spawn depends on it.
+            "widescreenMargin": self.session.as_ref().map(|session| session.core().widescreen_margin()),
             "appVersion": env!("CARGO_PKG_VERSION"),
             "savedAtLocal": save_state_file::local_date_time(saved_at),
         })
