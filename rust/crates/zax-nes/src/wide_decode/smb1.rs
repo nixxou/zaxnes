@@ -21,7 +21,9 @@
 //! What the game changed since (a brick broken, a coin taken, a block used) is in the nametables:
 //! a column the nametables hold for that very place is shown as they hold it. Rows 0-3 are the
 //! status bar, its margins left empty. A row whose centre does not show what the parser gives
-//! (an intermediate screen, a transition) is left to the nametables.
+//! (a transition) is left to the nametables, as is any row while the game is not running an area
+//! (`OperMode` 0 or 1 with `OperMode_Task` 3: the black "WORLD 1-1" screen shares its blank tile
+//! with the sky, which the check would not tell).
 
 use std::sync::Mutex;
 
@@ -52,6 +54,12 @@ const CURRENT_COLUMN: u16 = 0x0726;
 const METATILE_BUFFER: u16 = 0x06A1;
 const SCREEN_LEFT_PAGE: u16 = 0x071A;
 const SCREEN_LEFT_X: u16 = 0x071C;
+const OPER_MODE: u16 = 0x0770;
+const OPER_MODE_TASK: u16 = 0x0772;
+/// The task of the title screen and of the game that runs the area (`GameMenuRoutine`,
+/// `GameCoreRoutine`); the others draw other screens (the black "WORLD 1-1" one shares its blank
+/// tile with the sky).
+const PLAYING: u8 = 3;
 
 /// Metatile columns parsed: 32 pages.
 const COLUMNS: usize = 512;
@@ -81,7 +89,7 @@ impl MarginDecoder for SuperMarioBros {
         out: &mut Vec<DecodedTile>,
     ) -> bool {
         let coarse_y = i32::from(row.coarse_y());
-        if coarse_y >= 30 {
+        if coarse_y >= 30 || memory.ram(OPER_MODE) > 1 || memory.ram(OPER_MODE_TASK) != PLAYING {
             return false;
         }
         if coarse_y < FIRST_ROW {
