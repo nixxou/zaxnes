@@ -28,6 +28,10 @@ pub struct DecoderMemory<'a> {
     /// A nametable byte (`$2000-$2FFF`) as the PPU reads it now, mirroring and layout applied:
     /// a decoder can check what it decodes against what the PPU shows.
     pub nametable: &'a dyn Fn(u16) -> u8,
+    /// When a nametable byte was last written, in rendered frames (0: not since power-on or a
+    /// state load): what the game drew together shares a frame, what an object drew over it later
+    /// is newer.
+    pub nametable_written: &'a dyn Fn(u16) -> u32,
 }
 
 impl std::fmt::Debug for DecoderMemory<'_> {

@@ -202,9 +202,11 @@ pub trait MarginDecoder: Sync {
 
 * `DecoderMemory`: CPU RAM (`$0000-$07FF`), PRG-RAM (`$6000-$7FFF`), the whole PRG-ROM image as
   the cartridge runs it (patch applied), and `nametable(address)`, a nametable byte as the PPU
-  reads it now (mirroring and layout applied). A decoder can check what it decodes for the centre
-  against what the PPU shows, and leave a row that does not match (a menu, a transition) to the
-  nametables.
+  reads it now (mirroring and layout applied), and `nametable_written(address)`, the rendered
+  frame that byte was last written in (0 since power-on or a state load). A decoder can check what
+  it decodes for the centre against what the PPU shows, and leave a row that does not match (a
+  menu, a transition) to the nametables; and it can tell a nametable column the game drew for a
+  place (written in one go) from an older one of the ring, and what objects drew over it later.
 * `BackgroundRow`: the line, the PPU address `v` at its start, fine X; helpers `coarse_x`,
   `coarse_y`, `nametable_x`, `nametable_y`, `ring_x` (pixel of the 512-pixel plane of two
   nametables at the left edge).
@@ -248,7 +250,11 @@ of 8 structures of 32 x 32 pixels, column first; structure `n` is 4 bytes at `$8
 block byte, the high 2 being its collision) is CHR tiles `4 b` to `4 b + 3`, column first. The
 level is a straight list of screens (world x / 256); the camera `$20:$1F` is kept between screens
 `$14` and `$15` of the current section, and nothing is drawn past them (the next screens belong
-to another section). Each row's centre is checked against the nametables at four columns.
+to another section). Each row's centre is checked against the nametables at four columns. A
+margin column the nametables still hold for that place (the rows written in the column's most
+common frame all show the layout's tiles) is taken from the nametables, with what objects drew
+into the background since (Air Man's cloud devils, Bubble Man's lantern fish, ...); any other
+column comes from the layout.
 
 ---
 
