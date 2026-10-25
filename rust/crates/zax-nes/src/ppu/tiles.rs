@@ -471,7 +471,7 @@ impl Ppu2C02 {
             let oam_x = self.oam[(n * 4) + 3];
             let x = if self.frame_margin > 0 {
                 let x = self.wide.sprite_x(n, oam_x);
-                let (visible_low, visible_high) = self.wide.visible_range();
+                let (visible_low, visible_high) = self.wide.sprite_range();
                 if x + 8 <= visible_low || x >= visible_high {
                     continue;
                 }
