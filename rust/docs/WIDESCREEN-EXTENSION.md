@@ -398,6 +398,14 @@ pub struct BuiltinPatch {
   and reset with the extension unlocked (`WideExtension::boot`), and again after a restore that
   left it locked: for a ROM with no room for the code that would unlock it, whose reset or NMI then
   jumps straight into the window.
+* `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
+  Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
+  main loop `$C010`-`$C01A`, everything else running in the NMI). `NesCore::run_frame` ends the
+  overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
+  run the wait loop, so the game is the same, and a frame that does not need the overclock costs
+  nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
+  per frame of core time with the fixed overclock, 1.11 ms with the yield, as without overclock;
+  Mega Man 2's Air Man run keeps no lag frame (232 at 64 lines).
 * A patch may add PRG-ROM: data of the original size plus whole 16 KiB banks, the CHR-ROM after
   them (`apply_with` then raises the PRG bank count of the player's header, `resize_prg`). An
   NROM game maps its first 32 KiB as before; the added banks are seen through the window. The BPS
