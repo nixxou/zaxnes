@@ -10,6 +10,7 @@
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
+//! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM, code in its free space and a 16 KiB PRG bank added for the extension's window (`smb3wide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -53,8 +54,11 @@ pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
 /// Name of the Super Mario Bros. (World) widescreen patch (advanced mode).
 pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
 
+/// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
+pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
+
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 3] = [
+pub const PATCHES: [BuiltinPatch; 4] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -145,6 +149,47 @@ pub const PATCHES: [BuiltinPatch; 3] = [
         boot_window: Some((0x82, 0x00)),
         // Everything runs in the NMI; the main loop is a JMP to itself.
         idle_loop: Some((0x8057, 0x8059)),
+    },
+    BuiltinPatch {
+        name: SMB3_USA,
+        game: "Super Mario Bros. 3",
+        rom_name: "Super Mario Bros. 3 (USA) (Rev 1)",
+        source_crc: 0x2E63_01ED,
+        bps: include_bytes!("../patches/smb3-usa-rev1-widescreen.bps"),
+        options: &[
+            // Testing aids: B on the 1P/2P menu opens the game's own debug menu (Up/Down: the
+            // world); Mario never hurt (pits still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (B on the 1P/2P menu)",
+                label_fr: "Sélecteur de niveau (B sur le menu 1P/2P)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // The NMI unlocks the extension and opens its window itself (code in bank 31's free
+        // space).
+        boot_window: None,
+        // GraphicsBuf_Prep_And_WaitVSync: LDA VBlank_Tick / BPL, until the NMI counts it down.
+        idle_loop: Some((0x96FB, 0x96FE)),
     },
 ];
 
@@ -336,10 +381,20 @@ pub fn for_data_crc(crc: u32) -> Option<&'static BuiltinPatch> {
 #[must_use]
 pub fn for_game_name(name: &str) -> Option<&'static BuiltinPatch> {
     let wanted = letters_and_digits(name);
-    PATCHES.iter().find(|patch| {
-        let game = letters_and_digits(patch.game);
-        !game.is_empty() && wanted.starts_with(&game)
-    })
+    // The longest game that names it, and not one whose number goes on ("Super Mario Bros. 3"
+    // is not "Super Mario Bros.").
+    PATCHES
+        .iter()
+        .filter(|patch| {
+            let game = letters_and_digits(patch.game);
+            !game.is_empty()
+                && wanted.starts_with(&game)
+                && !wanted[game.len()..]
+                    .chars()
+                    .next()
+                    .is_some_and(|next| next.is_ascii_digit())
+        })
+        .max_by_key(|patch| patch.game.len())
 }
 
 /// `text` reduced to its letters and digits, lower case.
@@ -578,6 +633,15 @@ mod tests {
             for_game_name("Mega Man 2 (U)").map(|patch| patch.name)
         );
         assert!(for_game_name("Mega Man 3 (USA)").is_none());
+        assert_eq!(
+            for_game_name("Super Mario Bros. 3 (Europe)").map(|patch| patch.name),
+            Some(SMB3_USA)
+        );
+        assert_eq!(
+            for_game_name("Super Mario Bros. (Europe)").map(|patch| patch.name),
+            Some(SMB1_WORLD)
+        );
+        assert!(for_game_name("Super Mario Bros. 2 (USA)").is_none());
         assert!(for_game_name("Legend of Zelda, The (USA)").is_none());
         assert!(for_game_name("").is_none());
     }
