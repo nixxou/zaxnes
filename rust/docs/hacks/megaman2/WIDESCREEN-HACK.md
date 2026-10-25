@@ -16,7 +16,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 |---|---|
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
-| Target data | CRC-32 `3A41F62C` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `56AFB664` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15 and one in bank 14 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
@@ -61,7 +61,8 @@ sprite x staying.
 CPU time: the hack's work and the enemies of the margins cost time the console does not have; the
 game, which builds its sprites during the frame, would run out of it and show half-built sprite
 pages. The hack asks for 64 lines of overclock (`$5006`), which leaves the picture and the sound
-untouched.
+untouched; 255 with the option "No slowdown" (`$500A` bit 2, on by default), which removes the
+game's lag frames, its own and those of the enemies in the margins.
 
 ## 3. The extension
 
@@ -70,7 +71,7 @@ checked every NMI (`$CFFD`, `LDA $F7 / AND #$7C / STA $F7` becomes `JSR wide_nmi
 again if needed, then writes `$5003 = M`, `$5004 = $5005 = 0` (the nametable columns are hidden:
 the decoder draws the background), `$5007 = $0E` (sprites free of those extents, second sprite page, high bytes kept from one page
 to the next: the hack writes one for every sprite it places, so a frame the game runs late keeps
-them with its half-built page), `$5006 = 64`, `MOBJ` from `$500A`,
+them with its half-built page), `$5006 = 64` (255 with `$500A` bit 2), `MOBJ` from `$500A`,
 and does the replaced instructions).
 
 Variables (extension RAM): `WV_M $5200`, `WV_PAGE $5209` (bit 7: the second page is in use),
@@ -121,7 +122,9 @@ SourceRead / TargetRead only). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
   still go at the original edge.
 * More enemies alive means more CPU time: the game's slowdowns can come more often.
 * No vertical margin yet (the decoder draws the sides only).
-* The 64 lines of overclock also shorten the game's own slowdowns.
+* The 64 lines of overclock also shorten the game's own slowdowns; with "No slowdown" (255 lines)
+  there are none left (a 2216-frame Air Man run: 230 lag frames at 64 lines with the enemies in the
+  margins, 0 at 255).
 
 ---
 
@@ -153,7 +156,7 @@ WIDE_RIGHT      = $5005
 WIDE_OVERCLOCK  = $5006         ; W: extra CPU time each frame, in scanlines
 WIDE_LAYOUT     = $5007         ; W: bit 1, sprites free of the background extents
 WIDE_OPTIONS    = $500A         ; R: the options the player turned on (bit 0: enemies in the margins,
-                                ; bit 1: invincible)
+                                ; bit 1: invincible, bit 2: no slowdown)
 WIDE_SPRHI      = $5100         ; W: high byte of the x of sprite n at $5100 + 4n
 EXTRA_OAM       = $5300         ; the second sprite page ($5007 bit 2), OAM format
 EXTRA_SPRHI     = $5400         ; high byte of the x of its sprite n at $5400 + 4n
@@ -162,6 +165,7 @@ OAM             = $0200
 MAX_MARGIN      = 248           ; the widest margin the extension's 8-bit registers carry
 .ifndef OVERCLOCK_LINES
 OVERCLOCK_LINES = 64            ; pays for the hack's work and the enemies of the margins
+NO_SLOWDOWN_LINES = 255         ; with the option "No slowdown": the game never runs late
 .endif
 
 ; Variables in the extension's RAM.
@@ -246,7 +250,13 @@ wide_nmi:
     LDA      #$0E                       ; sprites free of the extents, second sprite page,
                                         ; high bytes kept (every sprite placed gets one)
     STA      WIDE_LAYOUT
-    LDA      #OVERCLOCK_LINES
+    LDA      WIDE_OPTIONS               ; no slowdown (option bit 2): nearly a frame more
+    AND      #$04
+    BEQ      @overclock
+    LDA      #NO_SLOWDOWN_LINES - OVERCLOCK_LINES
+@overclock:
+    CLC
+    ADC      #OVERCLOCK_LINES
     STA      WIDE_OVERCLOCK
     LDA      $F7
     AND      #$7C
