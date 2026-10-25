@@ -53,6 +53,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --dump-frame <file.json> write the captured frame as a '--frames' JSON file
   --widescreen <pixels>    widescreen margin the host offers on each side (default 0)
   --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
+  --poke <frame>:<addr>=<value>,...  CPU writes (hex) made before those frames
   --no-builtin-patches     restore --load-state without the built-in ROM patches
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            as the widescreen margin makes them
@@ -114,6 +115,8 @@ pub struct Options {
     pub run_frames: i32,
     /// The port 1 buttons to hold.
     pub press: InputScript,
+    /// CPU writes made before given frames: (frame, address, value).
+    pub pokes: Vec<(u32, u16, u8)>,
     /// Battery-backed PRG-RAM to import.
     pub battery: Option<PathBuf>,
     /// Where to write the captured frame as JSON.
@@ -189,6 +192,7 @@ impl Options {
             rom: None,
             run_frames: 120,
             press: InputScript::default(),
+            pokes: Vec::new(),
             battery: None,
             dump_frame: None,
             widescreen: 0,
@@ -268,6 +272,21 @@ impl Options {
             "--run" => self.run_frames = integer(value)?,
             "--press" => {
                 self.press = InputScript::parse(value).map_err(|error| error.to_string())?;
+            }
+            "--poke" => {
+                for item in value.split(',').filter(|item| !item.is_empty()) {
+                    let parse = || -> Option<(u32, u16, u8)> {
+                        let (frame, rest) = item.split_once(':')?;
+                        let (address, byte) = rest.split_once('=')?;
+                        Some((
+                            frame.parse().ok()?,
+                            u16::from_str_radix(address.trim_start_matches('$'), 16).ok()?,
+                            u8::from_str_radix(byte.trim_start_matches('$'), 16).ok()?,
+                        ))
+                    };
+                    self.pokes
+                        .push(parse().ok_or_else(|| format!("--poke: bad entry '{item}'"))?);
+                }
             }
             "--sav" => self.battery = Some(PathBuf::from(value)),
             "--dump-frame" => self.dump_frame = Some(PathBuf::from(value)),
@@ -535,6 +554,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             profile: &profile()?,
             mesh: options.mesh,
             input: &options.press,
+            pokes: &options.pokes,
             battery: options.battery.as_deref(),
             dump_frame: options.dump_frame.as_deref(),
             widescreen: options.widescreen,

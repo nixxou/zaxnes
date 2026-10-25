@@ -98,10 +98,11 @@ impl MarginDecoder for MegaMan2 {
 }
 
 /// Whether screen column `column` of the nametables (on the plane of two) holds world tile column
-/// `world`, not an older column of the ring. The game writes a column of the level in one go: the
-/// rows written in the column's most common frame must all show the layout's tiles there; rows
-/// written later are what objects drew over it (Air Man's cloud devils, Bubble Man's lantern fish),
-/// which a current column keeps.
+/// `world`, not an older column of the ring. The game draws the level a 32-pixel block at a time;
+/// what an object draws over it (Air Man's cloud devils, Bubble Man's lantern fish) comes later. So
+/// the column is current when its rows that differ from the layout were all written after every
+/// row that matches it (and enough rows match); an older column of the ring was drawn in one go,
+/// its differences among the rows that happen to match.
 fn column_is_current(
     memory: &DecoderMemory<'_>,
     stage: &[u8],
@@ -109,42 +110,24 @@ fn column_is_current(
     column: i32,
     world: i32,
 ) -> bool {
-    let at = |tile_row: i32| {
+    let mut newest_match = 0u32;
+    let mut oldest_difference = u32::MAX;
+    let mut matching = 0;
+    for tile_row in 0i32..30 {
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 0..30.
         let v = (row.v & !0x03E0) | ((tile_row as u16) << 5);
-        nametable_address(BackgroundRow { v, ..row }, column)
-    };
-    let mut written = [0u32; 30];
-    for (tile_row, frame) in (0i32..).zip(written.iter_mut()) {
-        *frame = (memory.nametable_written)(at(tile_row));
-    }
-    // The column's frame: the most common one.
-    let column_frame = most_common(written);
-    if column_frame == 0 {
-        return false;
-    }
-    (0i32..).zip(written).all(|(tile_row, frame)| {
-        frame != column_frame
-            || tile_at(stage, world, tile_row)
-                .is_some_and(|(tile, _)| (memory.nametable)(at(tile_row)) == tile)
-    })
-}
-
-/// The most common value of `values` (the highest of equally common ones).
-fn most_common(mut values: [u32; 30]) -> u32 {
-    values.sort_unstable();
-    let (mut best, mut best_count, mut count) = (0, 0, 0);
-    for (index, &value) in values.iter().enumerate() {
-        count = if index > 0 && values[index - 1] == value {
-            count + 1
+        let address = nametable_address(BackgroundRow { v, ..row }, column);
+        let written = (memory.nametable_written)(address);
+        let same = tile_at(stage, world, tile_row)
+            .is_some_and(|(tile, _)| (memory.nametable)(address) == tile);
+        if same {
+            matching += 1;
+            newest_match = newest_match.max(written);
         } else {
-            1
-        };
-        if count >= best_count {
-            (best, best_count) = (value, count);
+            oldest_difference = oldest_difference.min(written);
         }
     }
-    best
+    newest_match > 0 && matching >= 4 && oldest_difference > newest_match
 }
 
 /// The tile and sub-palette the nametables hold at screen column `column` of `row`.
