@@ -45,6 +45,8 @@ pub struct RomRequest<'a> {
     pub mesh: RenderAlgorithm,
     /// The port 1 buttons to hold.
     pub input: &'a InputScript,
+    /// CPU writes made before given frames: (frame, address, value).
+    pub pokes: &'a [(u32, u16, u8)],
     /// Battery-backed PRG-RAM imported before the reset (REQ-CORE-095).
     pub battery: Option<&'a Path>,
     /// Where to write the captured frame as a `--frames` JSON file.
@@ -94,6 +96,9 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     let frames = request.frames.max(1);
     let mut records = Vec::new();
     for counter in 0..frames {
+        for &(_, address, value) in request.pokes.iter().filter(|poke| poke.0 == counter) {
+            host.core.write_memory(address, value);
+        }
         host.run_frame(counter, request.input.at(counter), &mut records, &mut scene)?;
     }
 

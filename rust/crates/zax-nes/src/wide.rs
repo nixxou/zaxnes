@@ -364,7 +364,12 @@ impl WideExtension {
         }
 
         self.active_high = self.pending_high;
-        self.pending_high = [0; 64];
+        // Bit 3: the ROM writes the high byte of every sprite it places, so they stay with the
+        // sprite page as it is, finished or not (a frame the game runs late); otherwise each page
+        // starts from 0.
+        if self.layout & 8 == 0 {
+            self.pending_high = [0; 64];
+        }
         if self.layout & 4 != 0 {
             let page = usize::from(EXTRA_OAM - FIRST_RAM);
             let high = usize::from(EXTRA_HIGH - FIRST_RAM);

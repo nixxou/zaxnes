@@ -79,7 +79,7 @@ until then.
 | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels (power-on `$FF`) |
 | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels (power-on `$FF`) |
 | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines (power-on 0) |
-| `$5007` | R/W | bit 0: four separate nametables; bit 1: sprites free of the extents; bit 2: second sprite page (power-on 0) |
+| `$5007` | R/W | bit 0: four separate nametables; bit 1: sprites free of the extents; bit 2: second sprite page; bit 3: sprite high bytes kept from one page to the next (power-on 0) |
 | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
 | `$500A` | R | the options of the ROM's built-in patch the player turned on, one bit each (see 7) |
