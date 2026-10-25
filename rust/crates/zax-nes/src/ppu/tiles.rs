@@ -75,6 +75,7 @@ impl Ppu2C02 {
     /// widescreen margin of the new one is latched.
     pub(super) fn begin_rendered_frame(&mut self) {
         self.tiles.clear();
+        self.vram_clock = self.vram_clock.wrapping_add(1);
         self.frame_margin = self.wide.margin();
         self.frame_vertical_margin = self.wide.vertical_margin();
         self.tiles
@@ -280,8 +281,10 @@ impl Ppu2C02 {
         let mut records = Vec::new();
         // The decoder may read the nametables, as the PPU sees them now.
         let nametable = |address: u16| self.read_nametable_inner(address, cart);
+        let written = |address: u16| self.nametable_written(address, cart);
         let memory = &DecoderMemory {
             nametable: &nametable,
+            nametable_written: &written,
             ..*memory
         };
         for (row_index, captured) in self.captured_rows.iter().enumerate() {

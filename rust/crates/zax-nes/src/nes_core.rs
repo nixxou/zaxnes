@@ -463,8 +463,9 @@ impl NesCore {
             ram,
             prg_ram: cartridge.memory().prg_ram(),
             prg_rom: cartridge.rom().prg_rom(),
-            // The PPU puts its own reader in.
+            // The PPU puts its own readers in.
             nametable: &|_| 0,
+            nametable_written: &|_| 0,
         };
         ppu.decode_margins(decoder, &memory, Some(cartridge));
     }
