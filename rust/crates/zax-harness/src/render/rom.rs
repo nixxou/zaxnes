@@ -63,6 +63,8 @@ pub struct RomRequest<'a> {
     pub load_state: Option<&'a Path>,
     /// The movie played after the reset.
     pub movie: Option<&'a Path>,
+    /// The built-in patch's option bits, when given (over the movie's).
+    pub hack_options: Option<u8>,
     /// Where to write the state block after the run.
     pub save_state: Option<&'a Path>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -99,6 +101,9 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         .movie
         .map(|path| start_movie(&mut host, path))
         .transpose()?;
+    if let Some(options) = request.hack_options {
+        host.core.set_hack_options(options);
+    }
     let frames = request.frames;
     let mut records = Vec::new();
     for counter in 0..frames {

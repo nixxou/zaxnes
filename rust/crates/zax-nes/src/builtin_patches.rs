@@ -47,13 +47,23 @@ pub const PATCHES: [BuiltinPatch; 2] = [
         name: MEGAMAN2_USA,
         source_crc: 0x0FCF_C04D,
         bps: include_bytes!("../patches/megaman2-usa-widescreen.bps"),
-        options: &[HackOption {
-            key: "enemies_in_margins",
-            label: "Enemies in the margins",
-            label_fr: "Ennemis dans les marges",
-            bit: 0,
-            default: true,
-        }],
+        options: &[
+            HackOption {
+                key: "enemies_in_margins",
+                label: "Enemies in the margins",
+                label_fr: "Ennemis dans les marges",
+                bit: 0,
+                default: true,
+            },
+            // A testing aid: no damage, spikes harmless (pits still kill).
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+        ],
         after_other_way_state: None,
     },
 ];
