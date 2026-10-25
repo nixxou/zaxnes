@@ -45,7 +45,7 @@ pub struct Options {
     widescreen_y: i32,
     load_state: Option<PathBuf>,
     advanced: bool,
-    hack_options: Option<u8>,
+    patch_bits: Option<u8>,
 }
 
 impl Options {
@@ -70,7 +70,7 @@ impl Options {
             widescreen_y: 0,
             load_state: None,
             advanced: false,
-            hack_options: None,
+            patch_bits: None,
         };
         while let Some((name, tail)) = rest.split_first() {
             if name == "--3d" || name == "--advanced" {
@@ -94,7 +94,7 @@ impl Options {
                 "--widescreen" => options.widescreen = i32::try_from(count()?).unwrap_or(0),
                 "--widescreen-y" => options.widescreen_y = i32::try_from(count()?).unwrap_or(0),
                 "--load-state" => options.load_state = Some(PathBuf::from(value)),
-                "--hack-options" => options.hack_options = u8::try_from(count()?).ok(),
+                "--hack-options" => options.patch_bits = u8::try_from(count()?).ok(),
                 _ => return Err(usage()),
             }
             rest = tail;
@@ -218,17 +218,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         force_three_dimensional: options.three_dimensional,
         advanced: options.advanced,
     })?;
-    host.core.set_widescreen_margin(options.widescreen);
-    host.core
-        .set_widescreen_vertical_margin(options.widescreen_y);
-    if let Some(bits) = options.hack_options {
-        host.core.set_hack_options(bits);
-    }
-    if let Some(path) = &options.load_state {
-        host.core
-            .try_load_state(&std::fs::read(path)?, 0)
-            .map_err(|error| HarnessError::Rom(error.message))?;
-    }
+    widen(&mut host, options)?;
     let mut records = Vec::new();
     let mut picture = Vec::with_capacity(256 * 240);
     let mut tallies = [Tally::default(); Stage::ALL.len()];
@@ -320,6 +310,22 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         );
     }
     Ok(text)
+}
+
+/// The widescreen margins, the patch's options and the state the options ask for.
+fn widen(host: &mut Host, options: &Options) -> Result<(), HarnessError> {
+    host.core.set_widescreen_margin(options.widescreen);
+    host.core
+        .set_widescreen_vertical_margin(options.widescreen_y);
+    if let Some(bits) = options.patch_bits {
+        host.core.set_hack_options(bits);
+    }
+    if let Some(path) = &options.load_state {
+        host.core
+            .try_load_state(&std::fs::read(path)?, 0)
+            .map_err(|error| HarnessError::Rom(error.message))?;
+    }
+    Ok(())
 }
 
 fn report(options: &Options, tallies: &[Tally], whole: Tally, record_count: f64) -> String {
