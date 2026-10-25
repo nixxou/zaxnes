@@ -189,8 +189,11 @@ pub trait MarginDecoder: Sync {
 }
 ```
 
-* `DecoderMemory`: CPU RAM (`$0000-$07FF`), PRG-RAM (`$6000-$7FFF`) and the whole PRG-ROM image as
-  the cartridge runs it (patch applied).
+* `DecoderMemory`: CPU RAM (`$0000-$07FF`), PRG-RAM (`$6000-$7FFF`), the whole PRG-ROM image as
+  the cartridge runs it (patch applied), and `nametable(address)`, a nametable byte as the PPU
+  reads it now (mirroring and layout applied). A decoder can check what it decodes for the centre
+  against what the PPU shows, and leave a row that does not match (a menu, a transition) to the
+  nametables.
 * `BackgroundRow`: the line, the PPU address `v` at its start, fine X; helpers `coarse_x`,
   `coarse_y`, `nametable_x`, `nametable_y`, `ring_x` (pixel of the 512-pixel plane of two
   nametables at the left edge).
@@ -203,8 +206,11 @@ pub trait MarginDecoder: Sync {
 
 How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
 
-1. Before the frame, `wide.set_decoded(true)` when the ROM's built-in patch has a decoder
-   (`wide_decode::for_patch(name)`): the host margin then applies.
+1. Before the frame, `wide.set_decoded(true)` when the game has a decoder: the one of its
+   built-in patch (`wide_decode::for_patch(name)`), or else one made for the unpatched ROM
+   (`wide_decode::for_rom(crc)`, the CRC-32 of the ROM's data as the host gave it). The host
+   margin then applies; a ROM that never unlocks the extension gets margins from its decoder
+   alone (its sprites keep 8-bit x and its own culling).
 2. After the frame, for each captured background row, the decoder is asked for screen columns
    `-extra..0` and `32..=32 + extra`. A row it returns `false` for (status bar, title, a mode it
    does not know) keeps the columns captured from the nametables, within the ROM's margin. For a
@@ -217,11 +223,21 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    flipping every 30) and a line outside `0..240`. A decoder that cannot returns `false` (the
    default) and the vertical margin stays empty.
 
-Decoders run only while the built-in patches are on. The decoders:
+Decoders run only while the built-in patches are on (`emu.builtin_patches`). The decoders:
 
 | Game | Decodes | Source |
 |---|---|---|
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
+| Mega Man 2 (USA), no patch (data CRC-32 `0FCFC04D`) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
+
+Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
+(`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
+of 8 structures of 32 x 32 pixels, column first; structure `n` is 4 bytes at `$8000 + 4 n`, its
+16 x 16 blocks column first, its attribute byte at `$8400 + n`; block `b` (the low 6 bits of the
+block byte, the high 2 being its collision) is CHR tiles `4 b` to `4 b + 3`, column first. The
+level is a straight list of screens (world x / 256); the camera `$20:$1F` is kept between screens
+`$14` and `$15` of the current section, and nothing is drawn past them (the next screens belong
+to another section). Each row's centre is checked against the nametables at four columns.
 
 ---
 

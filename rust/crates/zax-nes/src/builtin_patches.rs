@@ -110,6 +110,17 @@ pub fn patch_for(image: &[u8]) -> Option<&'static BuiltinPatch> {
     PATCHES.iter().find(|patch| patch.source_crc == crc)
 }
 
+/// CRC-32 of the data of `image`, its iNES header (if any) excluded.
+#[must_use]
+pub fn data_crc(image: &[u8]) -> u32 {
+    let header_size = if image.starts_with(b"NES") && image.len() > HEADER_SIZE {
+        HEADER_SIZE
+    } else {
+        0
+    };
+    crc32(&image[header_size..])
+}
+
 /// Whether a built-in patch is made for `image` (iNES header or not).
 #[must_use]
 pub fn matches(image: &[u8]) -> bool {
