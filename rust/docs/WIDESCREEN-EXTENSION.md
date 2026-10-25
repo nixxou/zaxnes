@@ -271,6 +271,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 |---|---|---|
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
+| Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -284,6 +285,32 @@ margin column the nametables still hold for that place (the rows written in the 
 common frame all show the layout's tiles) is taken from the nametables, with what objects drew
 into the background since (Air Man's cloud devils, Bubble Man's lantern fish, ...); any other
 column comes from the layout.
+
+**The sandbox** (`wide_decode/guest.rs`): a decoder can run a game's own routines on a `Cpu6502`
+over a copy of the console RAM and the PRG-ROM (`$8000-$FFFF`, a fixed 32 KiB image, NROM). Writes
+to anything but the RAM go nowhere, reads of it return 0, interrupts never come; `Guest::call`
+runs a routine from an empty stack until it returns (to `$0000`) or a cycle cap. The console is not
+touched. For a game whose level format is easier to run than to rewrite.
+
+Super Mario Bros.: the game keeps no level map; its area parser (`AreaParserCore`, `$93FC`) reads
+the area's objects as the screen scrolls and writes one column of 13 metatiles (`MetatileBuffer`,
+`$06A1`, 16 x 16 pixels each, from tile row 4 down) a little past the right edge. The decoder runs
+it in the sandbox from the start of the area: `InitializeArea` (`$8FE4`, halfway page and
+entrance control set to 0, so from page 0); then the game's area data pointer (`$E7/$E8`, minus
+the 2 header bytes) and type (`$074E`) are put back and the header read again (`$9C58`, within
+`GetAreaDataAddrs`), since `AreaPointer` may name another area (the next one while Mario goes
+down a pipe, anything on the title screen); then `AreaParserCore` and `IncrementColumnPos`
+(`$92DB`) for each of 512 columns (32 pages). About 2 ms, once per area: the result is kept
+(one area, process-wide) until the area's data pointer or type changes. A metatile is
+`%ppnnnnnn`: sub-palette `p`, 4 tiles at `MetatileGraphics_Low/High[p]` (`$8B08`/`$8B0C`) +
+4 `n` (top left, bottom left, top right, bottom right); the palette comes from the metatile, not
+from the attribute table, which the game writes later than the tiles. Rows 0-3 (the status bar)
+get empty margins. A row whose centre differs from the parse at more than one of four columns
+(an intermediate screen, a transition) is left to the nametables. A margin column the nametables
+hold for that place (Mega Man 2's rule: the rows that differ from the parse written after every
+row that matches) is taken from them, with the bricks broken and the coins taken; any other from
+the parse. Not handled yet: a fixed room sharing its area with others (bonus rooms) shows its
+neighbours in the margins; castle loops (the game sets the area back) show the straight area.
 
 ---
 
