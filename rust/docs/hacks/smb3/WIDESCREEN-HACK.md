@@ -23,7 +23,7 @@ variables below are only its labels, to find them.
 |---|---|
 | Source ROM | *Super Mario Bros. 3 (USA) (Rev 1)*, MMC3, 256 KiB PRG (32 banks of 8 KiB; in the game's PRG mode bank 30 is fixed at `$8000` and bank 31 at `$E000`, `$A000` and `$C000` switch), 128 KiB CHR-ROM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `2E6301ED` |
-| Target data | CRC-32 `82752551` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `973B6A3B` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 128 bytes at `$E240` of bank 31 (the `$FF` padding before a DMC sample), 2 KiB at `$1600`-`$1DFF` of bank 25 (its empty end), hooks in banks 0, 3, 4, 5, 24, 30 and 31; size and layout unchanged |
 | Patch | `rust/crates/zax-nes/patches/smb3-usa-rev1-widescreen.bps`, made against the data without header |
 
@@ -50,7 +50,9 @@ nametable columns: the decoder draws the background), `$5007 = $02` (sprites fre
 
 Variables (extension RAM): `WV_M $5200`, scratch `WV_T0 $5201` / `WV_T1 $5202`, an object's
 screen x + 8 `WV_EST $5203`/`$5204`, `WV_COUNT $5205`, `WV_M16 $5206`/`$5207`, `WV_DEL_HI $5208`,
-the sprite block the game gave each object this frame `WV_SPR_BASE $5210 + slot`;
+the sprite block the game gave each object this frame `WV_SPR_BASE $5210 + slot`, X saved
+`WV_SAVE_X $5209`, the object that drew each sprite this frame `WV_OWNER $5240 + sprite` (slot + 1,
+0 for none);
 the trace build adds the lag counters at `$57F0`.
 
 ---
@@ -68,7 +70,8 @@ out the 8-pixel columns marked off the screen in `Objects_SprHVis` (`$0651 + slo
 |---|---|---|
 | horizontal visibility (`Object_DetermineHorzVisY`, `$D7B8`, bank 0) | a column is off the screen unless its x starts within `[0, 256)` | within `[-M, 256 + M)` (`wide_horz_vis`; as the game, Temp_Var15/16 keep the first column's x) |
 | sprite block of an object (`Objects_HandleScrollAndUpdate`, `$C9BC`, bank 0) | `Object_SprRAM = SprRamOffsets[slot + Counter_7to0]`; a troopa then adds 8 to it and draws its head tip and wing in the two sprites below | the same, also kept in `WV_SPR_BASE` (`wide_spr_base`) |
-| end of the frame's work (`GraphicsBuf_Prep_And_WaitVSync`, `$96E5`, bank 30; the next NMI's OAM DMA follows) | | the high byte of the x of each of the six sprites of every object in a normal state: the instance of its 8-bit x nearest the object's screen x + 8, to `$5100 + OAM offset` (`wide_frame_end`; not on the world map). The six from `WV_SPR_BASE` when `Object_SprRAM` is it or 8 more, else from `Object_SprRAM` |
+| end of the frame's work (`GraphicsBuf_Prep_And_WaitVSync`, `$96E5`, bank 30; the next NMI's OAM DMA follows) | | the high byte of the x of each of the six sprites of every object in a normal state: the instance of its 8-bit x nearest the object's screen x + 8, to `$5100 + OAM offset` (`wide_frame_end`; not on the world map). The six from `WV_SPR_BASE` when `Object_SprRAM` is it or 8 more, else from `Object_SprRAM`; then every sprite `WV_OWNER` names, from its object (the end-of-level card draws in a block of its own), the table cleared as it is read |
+| sprite writers (`Object_Draw16x16Sprite`, `$D680`, two 8 x 16 sprites from `Sprite_RAM + Y`; `Object_Draw24x16Sprite`, `$D6C7`, three) | | the object being drawn (`SlotIndexBackup`) noted in `WV_OWNER` for those sprites (`wide_own2`, `wide_own3`) |
 | creation as the screen scrolls (`Level_ObjectsSpawnByScroll`, `$B838`, bank 5) | the level's objects are created at the column 16 pixels past the right edge (scrolling right) or 32 past the left one | `M16` further (`wide_spawn_ahead`) |
 | deletion off the screen (`Object_DeleteOffScreen`, `$D40F` and `$D41E`, bank 0) | an object off the screen goes past `+$120`/`-$30` (`+$180`/`-$80`, `+$140`/`-$50` for some) of the camera | `M16` further (`wide_delete_low`, `wide_delete_high`): one created there would otherwise go at once. An object within the wide view has no column off the screen, so the game's test does not even start |
 | creation of a special object by an object (`SpecialObj_FindEmptyAbort`, `$C454`; the Lava Lotus, `$B0C1`; the Hammer Bro, `$A5E6`) | none while the object is off the screen | the same with the original screen (`wide_original_offscreen`, `wide_original_hoffscreen`): special objects (hammers, fireballs, boomerangs) have an 8-bit x relative to the screen, one thrown from a margin would show and hit 256 pixels away |
@@ -95,6 +98,8 @@ Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original 
 | 0 | `$D7B8` | `LDA #0 / STA $0651,X` | `JMP wide_horz_vis` |
 | 0 | `$C9BC` | `LDA $C401,Y / STA $058F,X` | `JSR wide_spr_base` |
 | 30 | `$96E5` | `LDA $5E / ASL A / TAY` | `JSR wide_frame_end` |
+| 0 | `$D680` | `LDA $04 / LSR A` | `JSR wide_own2` |
+| 0 | `$D6C7` | `LDA $04 / LSR A` | `JSR wide_own3` |
 | 5 | `$B838` | `LDA $FD / CLC / ADC $B832,Y / AND #$F0 / STA $05 / LDA $12 / ADC $B834,Y` | `JSR wide_spawn_ahead / JMP $B847` |
 | 0 | `$D40F` | `LDA $FD / CLC / ADC $D3CC,Y` | `JSR wide_delete_low` |
 | 0 | `$D41E` | `ADC $D3D2,Y` | `JSR wide_delete_high` |
@@ -142,8 +147,9 @@ lag counters (`$57F0` lag frames, `$57F2` NMIs, 16-bit), for measuring only.
   original game. The game has 5 slots for the level's enemies; one that finds none free when its
   column comes is not created, as in the original game, which happens a little more often with
   more enemies alive.
-* Objects drawn with more than the six sprites of their slot (a few large ones) can get a wrong
-  high byte for the sprites outside it when they stand across an edge.
+* Sprites an object writes itself outside its block and outside the game's two sprite writers get
+  no high byte from it: they show 256 pixels away while it is in a margin (none met besides the
+  troopas' head and wing, which are handled).
 * The vertical levels (four pipe mazes) get no margins from the decoder.
 
 ---
@@ -198,6 +204,8 @@ WV_M16_LO       = $5206         ; the margin rounded up to 16 pixels, 16-bit
 WV_M16_HI       = $5207
 WV_DEL_HI       = $5208         ; the high byte of the deletion limit at hand
 WV_SPR_BASE     = $5210         ; + slot: the six sprites the game gave the object this frame
+WV_SAVE_X       = $5209
+WV_OWNER        = $5240         ; + sprite (66 bytes): 1 + the slot of the object that drew it
 .ifdef LAG_TRACE
 WV_LAG          = $57F0         ; 2 bytes: NMIs that found the game still busy (a trace build)
 WV_NMI          = $57F2         ; 2 bytes: NMIs
@@ -229,6 +237,9 @@ OBJECT_GROUP_ATTRIBUTES = $A0D8 ; the group's bank (at $A000 while it runs): bit
 LEVEL_TILESET   = $070A         ; 0: the world map
 SPR_RAM_OFFSETS = $C401         ; bank 0: the sprite blocks the objects take in turn
 OBJECT_SLOTS    = 8
+SPRITE_COUNT    = 64
+SLOT_INDEX_BACKUP = $CD         ; the object being run
+TEMP_VAR5       = $04
 OBJECT_SPRITES  = 6
 OBJECT_WIDTHS   = $D792         ; bank 0 (at $C000 while objects run): column x offsets
 OBJECT_WIDTH_FLAGS = $D798      ; and their bits in Objects_SprHVis
@@ -364,8 +375,10 @@ wide_horz_vis:
 ; ---------------------------------------------------------------------------- ;
 ; The end of a frame's work (GraphicsBuf_Prep_And_WaitVSync, $96E5, in place of LDA
 ; Graphics_Queue / ASL A / TAY; the OAM DMA of the next NMI follows). The objects' sprites have
-; their x on 8 bits: each of the six of an object in a normal state gets the high byte that puts it
-; nearest the object, for the extension. Not on the world map.
+; their x on 8 bits: each gets the high byte that puts it nearest the object that drew it, for the
+; extension. First the six sprites of each object's block, then every sprite the game's draw
+; routines wrote this frame (WV_OWNER, see wide_own), which covers the objects that draw
+; elsewhere (the end-of-level card). Not on the world map.
 wide_frame_end:
     LDA     WIDE_OPTIONS                ; invincibility (option bit 1)
     AND     #OPT_INVINCIBLE
@@ -373,37 +386,28 @@ wide_frame_end:
     LDA     #$01
 @hurt:
     STA     PLAYER_DEBUG_NO_HIT
-    LDA     WV_M
-    BEQ     @none
-    LDA     LEVEL_TILESET
-    BNE     @level
-@none:
-    JMP     @done
-@level:
     TXA
     PHA
+    LDA     WV_M
+    BEQ     @clear
+    LDA     LEVEL_TILESET
+    BNE     @level
+@clear:
+    LDX     #SPRITE_COUNT - 1           ; no high bytes: only forget who drew what
+    LDA     #$00
+@forget:
+    STA     WV_OWNER,x
+    DEX
+    BPL     @forget
+    JMP     @done
+@level:
     LDX     #OBJECT_SLOTS - 1
 @object:
-    LDA     OBJECTS_STATE,x
-    CMP     #$02
+    JSR     wide_estimate
     BCC     @next
-    LDA     OBJECTS_X,x                 ; its x on the screen + 8
-    SEC
-    SBC     HORZ_SCROLL
-    STA     WV_EST_LO
-    LDA     OBJECTS_XHI,x
-    SBC     HORZ_SCROLL_HI
-    STA     WV_EST_HI
-    LDA     WV_EST_LO
-    CLC
-    ADC     #$08
-    STA     WV_EST_LO
-    BCC     @estimated
-    INC     WV_EST_HI
-@estimated:
-    LDA     OBJECT_SPR_RAM,x            ; its sprites: from the block the game gave it, which the
-    SEC                                 ; troopas move up 8 bytes to draw their head and wing
-    SBC     WV_SPR_BASE,x               ; below it; from where the object put them otherwise
+    LDA     OBJECT_SPR_RAM,x            ; its block: the one the game gave it, which the troopas
+    SEC                                 ; move up 8 bytes to draw their head and wing below it;
+    SBC     WV_SPR_BASE,x               ; where the object put it otherwise
     BEQ     @given
     CMP     #$08
     BEQ     @given
@@ -416,10 +420,79 @@ wide_frame_end:
     LDA     #OBJECT_SPRITES
     STA     WV_COUNT
 @sprite:
-    LDA     SPRITE_RAM,y                ; a hidden sprite
+    JSR     wide_sprite_high
+    INY
+    INY
+    INY
+    INY
+    DEC     WV_COUNT
+    BNE     @sprite
+@next:
+    DEX
+    BPL     @object
+
+    LDY     #(SPRITE_COUNT - 1) * 4     ; the sprites the draw routines wrote
+@owned:
+    TYA
+    LSR     A
+    LSR     A
+    TAX
+    LDA     WV_OWNER,x
+    BEQ     @owned_next
+    PHA
+    LDA     #$00
+    STA     WV_OWNER,x
+    PLA
+    TAX
+    DEX
+    JSR     wide_estimate
+    BCC     @owned_next
+    JSR     wide_sprite_high
+@owned_next:
+    DEY
+    DEY
+    DEY
+    DEY
+    CPY     #$FC
+    BNE     @owned
+@done:
+    PLA
+    TAX
+    LDA     GRAPHICS_QUEUE
+    ASL     A
+    TAY
+    RTS
+
+; Object X's x on the screen + 8, 16-bit, into WV_EST; C clear when it is not in a normal state.
+wide_estimate:
+    LDA     OBJECTS_STATE,x
+    CMP     #$02
+    BCC     @none
+    LDA     OBJECTS_X,x
+    SEC
+    SBC     HORZ_SCROLL
+    STA     WV_EST_LO
+    LDA     OBJECTS_XHI,x
+    SBC     HORZ_SCROLL_HI
+    STA     WV_EST_HI
+    LDA     WV_EST_LO
+    CLC
+    ADC     #$08
+    STA     WV_EST_LO
+    BCC     @done
+    INC     WV_EST_HI
+@done:
+    SEC
+@none:
+    RTS
+
+; The high byte of the sprite at Sprite_RAM + Y, the instance of its 8-bit x nearest WV_EST, to
+; the extension (none for a hidden sprite).
+wide_sprite_high:
+    LDA     SPRITE_RAM,y
     CMP     #$F0
-    BCS     @sprite_next
-    LDA     SPRITE_RAM + 3,y            ; x - estimate, 8-bit signed: the instance nearest it
+    BCS     @hidden
+    LDA     SPRITE_RAM + 3,y            ; x - estimate, 8-bit signed
     SEC
     SBC     WV_EST_LO
     STA     WV_T0
@@ -434,24 +507,41 @@ wide_frame_end:
     ADC     WV_T0
     LDA     WV_EST_HI
     ADC     WV_T1
-@high:
     STA     WIDE_SPRHI,y
-@sprite_next:
-    INY
-    INY
-    INY
-    INY
-    DEC     WV_COUNT
-    BNE     @sprite
-@next:
-    DEX
-    BPL     @object
-    PLA
+@hidden:
+    RTS
+
+; ---------------------------------------------------------------------------- ;
+; The game's sprite writers of objects (Object_Draw16x16Sprite, $D680: two 8 x 16 sprites from
+; Sprite_RAM + Y; Object_Draw24x16Sprite, $D6C7: three; in place of LDA Temp_Var5 / LSR A, done
+; here): the object being drawn (SlotIndexBackup) is noted as the one that drew them (WV_OWNER,
+; per sprite, slot + 1).
+wide_own3:
+    STX     WV_SAVE_X
+    TYA
+    LSR     A
+    LSR     A
     TAX
-@done:
-    LDA     GRAPHICS_QUEUE
-    ASL     A
-    TAY
+    LDA     SLOT_INDEX_BACKUP
+    CLC
+    ADC     #$01
+    STA     WV_OWNER + 2,x
+    JMP     wide_own_two
+wide_own2:
+    STX     WV_SAVE_X
+    TYA
+    LSR     A
+    LSR     A
+    TAX
+    LDA     SLOT_INDEX_BACKUP
+    CLC
+    ADC     #$01
+wide_own_two:
+    STA     WV_OWNER,x
+    STA     WV_OWNER + 1,x
+    LDX     WV_SAVE_X
+    LDA     TEMP_VAR5
+    LSR     A
     RTS
 
 ; ---------------------------------------------------------------------------- ;
@@ -681,6 +771,10 @@ def hooks(sym):
     put(30, 0x96E5, 'a5 5e 0a a8', jsr(sym['wide_frame_end']))
     # The sprite block an object gets, kept (Objects_HandleScrollAndUpdate).
     put(0, 0xC9BC, 'b9 01 c4 9d 8f 05', jsr(sym['wide_spr_base']))
+    # The sprites an object's draw routines write: who drew them (Object_Draw16x16Sprite,
+    # Object_Draw24x16Sprite).
+    put(0, 0xD680, 'a5 04 4a', jsr(sym['wide_own2']))
+    put(0, 0xD6C7, 'a5 04 4a', jsr(sym['wide_own3']))
     # Objects created as far ahead as the margin (Level_ObjectsSpawnByScroll)...
     put(5, 0xB838, 'a5 fd 18 79 32 b8 29 f0 85 05 a5 12 79 34 b8',
         jsr(sym['wide_spawn_ahead']) + jmp(0xB847))
