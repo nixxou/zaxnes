@@ -119,6 +119,8 @@ pub struct ZaxUi {
     fps_countdown: f32,
     held_keys: Vec<Key>,
     effects: Vec<UiEffect>,
+    /// The note being typed for the frame on screen of the movie (`state.movie_note`).
+    movie_note: String,
 }
 
 /// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
@@ -155,6 +157,7 @@ impl ZaxUi {
             fps_shown: 0.0,
             fps_text: String::from("0.0 FPS"),
             fps_countdown: 0.0,
+            movie_note: String::new(),
             held_keys: Vec::new(),
             effects: Vec::new(),
         }
@@ -265,6 +268,9 @@ impl ZaxUi {
         if self.state.profile_chooser {
             self.draw_profile_chooser(ui, frame.host);
         }
+        if self.state.movie_note {
+            self.draw_movie_note(ui, frame.host);
+        }
         // REQ-UI-110: the confirmation box is drawn last, so it sits over everything else.
         if self.state.dialog {
             self.draw_confirm_dialog(ui, frame.host);
@@ -318,6 +324,10 @@ impl ZaxUi {
             Command::ShowDataFolder => self.show_data_folder(host),
             // The host already flipped the setting; the window itself is the caller's job.
             Command::ToggleFullscreen => self.state.fullscreen = host.settings().fullscreen(),
+            Command::AnnotateMovie => {
+                self.movie_note.clear();
+                self.state.movie_note = true;
+            }
             other => self.log(format!(
                 "the interface has nothing to do for '{}'.",
                 other.name()
@@ -592,7 +602,9 @@ impl ZaxUi {
             // Case 2: "rien". One leaves the box by its buttons only.
             return;
         }
-        if self.state.profile_chooser {
+        if self.state.movie_note {
+            self.state.movie_note = false;
+        } else if self.state.profile_chooser {
             self.state.profile_chooser = false;
         } else if self.state.file_browser {
             self.state.file_browser = false;

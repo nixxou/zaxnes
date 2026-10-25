@@ -30,7 +30,7 @@ impl TileBuffer {
     pub const MAX_BACKGROUND: usize = 1023;
 
     /// Maximum number of sprite records in one frame (REQ-CORE-032).
-    pub const MAX_SPRITES: usize = 128;
+    pub const MAX_SPRITES: usize = 256;
 
     /// Maximum number of background records in one widescreen frame: 31 rows of the 33
     /// columns plus the extra columns of the widest margin on both sides.

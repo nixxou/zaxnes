@@ -63,6 +63,8 @@ pub struct UserDataPaths {
     pub covers_directory: PathBuf,
     /// Folder of the logs.
     pub logs_directory: PathBuf,
+    /// Folder of the movies (`.zmv`).
+    pub movies_directory: PathBuf,
     /// Whether the root accepts writes (REQ-PERS-073).
     pub is_writable: bool,
     /// The legacy root this root was copied from, when it was.
@@ -85,6 +87,7 @@ impl UserDataPaths {
             program_profiles_directory: executable_directory.join(PROFILES_FOLDER_NAME),
             covers_directory: root.join("covers"),
             logs_directory: root.join("logs"),
+            movies_directory: root.join("movies"),
             root,
             kind,
             executable_directory,

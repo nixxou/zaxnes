@@ -53,10 +53,16 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --dump-frame <file.json> write the captured frame as a '--frames' JSON file
   --widescreen <pixels>    widescreen margin the host offers on each side (default 0)
   --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
+  --poke <frame>:<addr>=<value>,...  CPU writes (hex) made before those frames
   --no-builtin-patches     restore --load-state without the built-in ROM patches
+  --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            as the widescreen margin makes them
   --load-state <file>      restore a state block (written by --save-state) after the reset
+  --movie <file.zmv>       play a movie of the application: its start state is restored, its
+                           hack options set and its inputs replace --press for its frames
+                           (counted from its start, as --run, --poke and --press count them);
+                           its notes are printed
   --save-state <file>      write the state block of the machine after the run
   --dump-mem <file>        write CPU $0000-$07FF, $6000-$7FFF, then $5000-$5FFF (14 KiB)
                            after the run
@@ -114,6 +120,8 @@ pub struct Options {
     pub run_frames: i32,
     /// The port 1 buttons to hold.
     pub press: InputScript,
+    /// CPU writes made before given frames: (frame, address, value).
+    pub pokes: Vec<(u32, u16, u8)>,
     /// Battery-backed PRG-RAM to import.
     pub battery: Option<PathBuf>,
     /// Where to write the captured frame as JSON.
@@ -128,6 +136,10 @@ pub struct Options {
     pub png_nes: Option<PathBuf>,
     /// State block restored after the reset.
     pub load_state: Option<PathBuf>,
+    /// The movie to play.
+    pub movie: Option<PathBuf>,
+    /// The built-in patch's option bits, when given.
+    pub hack_options: Option<u8>,
     /// Where to write the state block after the run.
     pub save_state: Option<PathBuf>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -189,6 +201,7 @@ impl Options {
             rom: None,
             run_frames: 120,
             press: InputScript::default(),
+            pokes: Vec::new(),
             battery: None,
             dump_frame: None,
             widescreen: 0,
@@ -196,6 +209,8 @@ impl Options {
             builtin_patches: true,
             png_nes: None,
             load_state: None,
+            movie: None,
+            hack_options: None,
             save_state: None,
             dump_mem: None,
             profile: None,
@@ -269,12 +284,34 @@ impl Options {
             "--press" => {
                 self.press = InputScript::parse(value).map_err(|error| error.to_string())?;
             }
+            "--poke" => {
+                for item in value.split(',').filter(|item| !item.is_empty()) {
+                    let parse = || -> Option<(u32, u16, u8)> {
+                        let (frame, rest) = item.split_once(':')?;
+                        let (address, byte) = rest.split_once('=')?;
+                        Some((
+                            frame.parse().ok()?,
+                            u16::from_str_radix(address.trim_start_matches('$'), 16).ok()?,
+                            u8::from_str_radix(byte.trim_start_matches('$'), 16).ok()?,
+                        ))
+                    };
+                    self.pokes
+                        .push(parse().ok_or_else(|| format!("--poke: bad entry '{item}'"))?);
+                }
+            }
             "--sav" => self.battery = Some(PathBuf::from(value)),
             "--dump-frame" => self.dump_frame = Some(PathBuf::from(value)),
             "--widescreen" => self.widescreen = integer(value)?,
             "--widescreen-y" => self.widescreen_y = integer(value)?,
             "--png-nes" => self.png_nes = Some(PathBuf::from(value)),
             "--load-state" => self.load_state = Some(PathBuf::from(value)),
+            "--movie" => self.movie = Some(PathBuf::from(value)),
+            "--hack-options" => {
+                self.hack_options = Some(
+                    u8::try_from(integer(value)?)
+                        .map_err(|_| "--hack-options: 0 to 255".to_owned())?,
+                );
+            }
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
             "--profile" => self.profile = Some(value.to_owned()),
@@ -455,6 +492,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             write_nes_picture(
                 &options.output.join(format!("{}-2d.png", scene.name)),
                 &scene.nes_picture,
+                scene.nes_picture_height,
             )?;
         }
 
@@ -528,13 +566,14 @@ const NES_PIXELS: usize = 256 * 240;
 fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> {
     let profile = || profile::load(options.profile.as_deref(), options.assets.as_deref());
     if let Some(rom) = &options.rom {
-        let frames = u32::try_from(options.run_frames.max(1)).unwrap_or(1);
+        let frames = u32::try_from(options.run_frames.max(0)).unwrap_or(1);
         return Ok(vec![rom::capture(&RomRequest {
             rom,
             frames,
             profile: &profile()?,
             mesh: options.mesh,
             input: &options.press,
+            pokes: &options.pokes,
             battery: options.battery.as_deref(),
             dump_frame: options.dump_frame.as_deref(),
             widescreen: options.widescreen,
@@ -542,6 +581,8 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             builtin_patches: options.builtin_patches,
             png_nes: options.png_nes.as_deref(),
             load_state: options.load_state.as_deref(),
+            movie: options.movie.as_deref(),
+            hack_options: options.hack_options,
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
         })?]);
@@ -608,16 +649,23 @@ fn write_png(file: &Path, options: &Options, pixels: &[u8]) -> Result<(), Harnes
 }
 
 /// Writes the flat NES picture, one colour index per pixel (REQ-CORE-048).
-fn write_nes_picture(file: &Path, indices: &[u8]) -> Result<(), HarnessError> {
+/// The 2D view: the picture as wide and tall as its widescreen margins make it, `rows` rows.
+fn write_nes_picture(file: &Path, indices: &[u8], rows: usize) -> Result<(), HarnessError> {
+    // A JSON frame carries no picture height: the NES picture.
+    let rows = if rows == 0 { 240 } else { rows };
+    let width = indices.len() / rows;
     let pixels: Vec<u8> = indices
         .iter()
-        .take(NES_PIXELS)
+        .take(width * rows)
         .flat_map(|&index| {
             let color = nes_color(usize::from(index));
             [color.r, color.g, color.b, 255]
         })
         .collect();
-    fs::write(file, png_image::encode_rgba(256, 240, &pixels)?)?;
+    let (Ok(width), Ok(rows)) = (u32::try_from(width), u32::try_from(rows)) else {
+        return Ok(());
+    };
+    fs::write(file, png_image::encode_rgba(width, rows, &pixels)?)?;
     Ok(())
 }
 

@@ -156,6 +156,11 @@ directement l'écran de sauvegarde ou de chargement de ce mode par-dessus le jeu
 pause ; `B` (ou `Échap`) y revient, et après le choix d'un emplacement la barre de menus
 revient d'elle-même.
 
+Les films (menu **Outils**, `Ctrl`+`M`) et les options du hack (menu **Vidéo**) ne sont que dans
+la barre de menus : en mode console, `F1` ou `Origine` y ramène d'abord. Un film en cours
+d'enregistrement continue pendant le mode console, et une sauvegarde chargée depuis ses écrans
+le ramène en arrière comme depuis le menu.
+
 ### Fichier
 
 | Entrée | Raccourci | Effet |
@@ -201,6 +206,7 @@ embarqué et l'entrée « 2D Mode » ne sont jamais supprimables : l'entrée res
 | Réinitialiser la vue | `Échap` maintenu ≥ 0,3 s | revient à la vue par défaut |
 | Skybox ▸ | | Par défaut, Couleur, Dégradé, Fantaisie |
 | Ombres | | active ou désactive les ombres |
+| Options du hack ▸ | | les options du hack écran large du jeu en cours (§ Écran large), cochées si actives |
 | Plein écran | `Alt`+`Entrée` | masque la barre de menus ; les raccourcis restent actifs |
 | Afficher les FPS | | petit compteur en haut à droite, **désactivé par défaut** |
 
@@ -221,6 +227,15 @@ Volume ▸ (par paliers de 10 %, plus « Volume + » et « Volume − »), Muet,
 | Configuration des touches… | | la fenêtre de remappage (§5) |
 | Dossier des données | | ouvre la racine utilisateur dans l'explorateur |
 | À propos | | nom, version, licence et crédits |
+| Enregistrer un film | | commence un film à l'image affichée ; un second clic l'arrête et l'écrit |
+| Lire un film ▸ | | les 15 films les plus récents du dossier `movies` ; rend la main au joueur à la fin |
+| Note sur cette frame… | `Ctrl`+`M` | met en pause et demande une note sur l'image affichée (`Ctrl`+`Entrée` écrit, `Échap` annule) |
+| Arrêter le film | | arrête l'enregistrement (et l'écrit) ou la lecture |
+
+Un **film** (`.zmv`) garde un état de départ et les touches de chaque image : la partie se
+rejoue à l'identique. Pendant l'enregistrement, charger une sauvegarde ou faire un rollback
+ramène le film à cette image, et l'enregistrement continue. Les fichiers vont dans le dossier
+`movies` des données utilisateur ; le détail est dans [`rust/docs/MOVIES.md`](rust/docs/MOVIES.md).
 
 ### Options du jeu
 
@@ -314,21 +329,26 @@ programme s'arrête net. Avec ReShade, utilisez Vulkan.
 
 Les effets de ReShade s'appliquent à toute l'image de la fenêtre, barre de menus comprise.
 
-### Écran large : *Zelda II* en 16:9
+### Écran large : *Zelda II* et *Mega Man 2* en 16:9
 
 Zaxnes sait montrer un jeu **plus large** que les 256 pixels de la NES, quand le jeu est prévu
-pour. Aujourd'hui, un seul l'est : ***Zelda II - The Adventure of Link* (USA)**, grâce à un
-**hack écran large intégré** à l'émulateur.
+pour. Aujourd'hui, deux le sont, grâce à un **hack écran large intégré** à l'émulateur :
+***Zelda II - The Adventure of Link* (USA)** et ***Mega Man 2* (USA)**.
 
 - **Le hack s'applique tout seul, en mémoire**, quand la ROM chargée est la version USA (reconnue
   à son contenu) : le fichier de la ROM n'est jamais modifié, et Zaxnes ne livre aucune donnée du
   jeu (le correctif ne contient que ce que le hack ajoute). Le journal l'indique :
-  `… : built-in patch applied (…)`. La version européenne n'est pas concernée.
-- Ce qu'il change : en vue de côté (villes, palais, grottes), le décor et les **ennemis** sont
+  `… : built-in patch applied (…)`. Les versions européennes ne sont pas concernées.
+- *Zelda II* : en vue de côté (villes, palais, grottes), le décor et les **ennemis** sont
   dessinés au-delà des bords, et les nouveaux ennemis apparaissent dans les marges au lieu de
   surgir au bord de l'écran ; sur la **carte du monde**, l'image est plus large (et plus haute
   avec la largeur supplémentaire) et les rencontres vivent dans les marges. La logique du jeu
   (contacts, IA) reste celle d'origine. Les projectiles ne sont pas montrés dans les marges.
+- *Mega Man 2* : le décor des marges est lu dans le niveau, et les ennemis apparaissent, vivent
+  et s'affichent dans les marges. Pas de marge verticale. **Vidéo ▸ Options du hack** :
+  « Ennemis dans les marges » (actif par défaut), « Invincible » (une aide pour tester,
+  désactivé par défaut), « Sans ralentissements » (actif par défaut : plus de lignes
+  d'overclock, le jeu ne ralentit plus).
 - Ça fonctionne en 3D comme en mode 2D.
 
 Les réglages, onglet **Vidéo** :
@@ -353,8 +373,9 @@ faites. La sauvegarde de pile (les fichiers de partie de *Zelda II*) ne dépend 
 suit la ROM d'origine.
 
 Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md)
-(côté émulateur) et [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md)
-(le hack lui-même et comment le reconstruire).
+(côté émulateur), [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md)
+et [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md)
+(les hacks eux-mêmes et comment les reconstruire).
 
 ### Langue de l'interface
 

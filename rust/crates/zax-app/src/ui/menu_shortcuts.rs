@@ -150,6 +150,12 @@ pub fn all() -> Vec<MenuShortcut> {
             host(Command::Quit),
             "Ctrl+Q",
         ),
+        shortcut(
+            Key::M,
+            ShortcutModifiers::CONTROL,
+            host(Command::AnnotateMovie),
+            "Ctrl+M",
+        ),
         // The debug overlay of DEC-10-Q7's neighbourhood: an addition, off by default, on a key
         // no default game binding uses.
         shortcut(
@@ -158,33 +164,8 @@ pub fn all() -> Vec<MenuShortcut> {
             ShortcutCommand::Ui(UiCommand::ToggleDebugOverlay),
             "F12",
         ),
-        // The console mode of the desktop (Rust-only, owner request), on keys no default game
-        // binding uses; the slots keep Ctrl+F1 and Shift+F1.
-        shortcut(
-            Key::F1,
-            ShortcutModifiers::NONE,
-            ShortcutCommand::Ui(UiCommand::ToggleConsole),
-            "F1",
-        ),
-        shortcut(
-            Key::Home,
-            ShortcutModifiers::NONE,
-            ShortcutCommand::Ui(UiCommand::ToggleConsole),
-            &strings::get(keys::SHORTCUT_HOME),
-        ),
-        shortcut(
-            Key::S,
-            ShortcutModifiers::CONTROL,
-            ShortcutCommand::Ui(UiCommand::SaveStates),
-            "Ctrl+S",
-        ),
-        shortcut(
-            Key::L,
-            ShortcutModifiers::CONTROL,
-            ShortcutCommand::Ui(UiCommand::LoadStates),
-            "Ctrl+L",
-        ),
     ];
+    list.extend(console_shortcuts());
     for (index, key) in SLOT_KEYS.into_iter().enumerate() {
         let slot = i32::try_from(index + 1).unwrap_or(i32::MAX);
         // AMD-013 (Q-030): Ctrl+Fn loads, Shift ("Maj") + Fn saves.
@@ -204,6 +185,44 @@ pub fn all() -> Vec<MenuShortcut> {
         });
     }
     list
+}
+
+/// The shortcuts of the console mode of the desktop (Rust-only, owner request), on keys no
+/// default game binding uses; the slots keep Ctrl+F1 and Shift+F1.
+fn console_shortcuts() -> [MenuShortcut; 4] {
+    let shortcut = |key, modifiers, command, text: String| MenuShortcut {
+        key,
+        modifiers,
+        command: ShortcutCommand::Ui(command),
+        args: CommandArgs::default(),
+        text,
+    };
+    [
+        shortcut(
+            Key::F1,
+            ShortcutModifiers::NONE,
+            UiCommand::ToggleConsole,
+            "F1".to_owned(),
+        ),
+        shortcut(
+            Key::Home,
+            ShortcutModifiers::NONE,
+            UiCommand::ToggleConsole,
+            strings::get(keys::SHORTCUT_HOME),
+        ),
+        shortcut(
+            Key::S,
+            ShortcutModifiers::CONTROL,
+            UiCommand::SaveStates,
+            "Ctrl+S".to_owned(),
+        ),
+        shortcut(
+            Key::L,
+            ShortcutModifiers::CONTROL,
+            UiCommand::LoadStates,
+            "Ctrl+L".to_owned(),
+        ),
+    ]
 }
 
 /// The keys that act without a modifier. REQ-INP-106 lets an implementation add fixed shortcuts

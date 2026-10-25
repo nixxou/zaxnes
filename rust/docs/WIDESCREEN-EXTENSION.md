@@ -15,8 +15,9 @@ A game takes part in one of two ways, which work together:
   the ROM.
 
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
-to the ROM it was made for. The only one today is the Zelda II (USA) widescreen hack, documented
-in [`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md).
+to the ROM it was made for: the Zelda II (USA) widescreen hack
+([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -82,10 +83,13 @@ until then.
 | `$5004` | R/W | how far left of x = 0 the picture may show, in pixels (power-on `$FF`) |
 | `$5005` | R/W | how far right of x = 255 the picture may show, in pixels (power-on `$FF`) |
 | `$5006` | R/W | overclock: extra CPU time each frame, in scanlines (power-on 0) |
-| `$5007` | R/W | bit 0: four separate nametables (power-on 0) |
+| `$5007` | R/W | bit 0: four separate nametables; bit 1: sprites free of the extents; bit 2: second sprite page; bit 3: sprite high bytes kept from one page to the next (power-on 0) |
 | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
+| `$500A` | R | the options of the ROM's built-in patch the player turned on, one bit each (see 7) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
+| `$5300`-`$53FF` | RAM | with `$5007` bit 2: a second page of 64 sprites, OAM format |
+| `$5400`-`$54FF` | RAM | with `$5007` bit 2: high byte of the x of its sprite *n* at `$5400 + 4n` |
 | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM (power-on 0); `$5800`-`$5FFF` reads the PRG window instead while it is on |
 
 Details:
@@ -98,14 +102,20 @@ Details:
 * **Extents.** `$5004` and `$5005` are read each time a background band is captured: a game
   writes them during the frame to hide the sides behind a status bar or past the end of a level.
   A tile is kept when any of its pixels falls in
-  `[-min(rom_margin, $5004), 256 + min(rom_margin, $5005))` (`visible_range()`).
+  `[-min(rom_margin, $5004), 256 + min(rom_margin, $5005))` (`visible_range()`). With `$5007`
+  bit 1 the extents apply to the background only: sprites show across the margin the ROM asked
+  for, up to 248 (`sprite_range()`; the nametables' 128 does not apply to them), for a game whose margins a decoder draws while the ROM hides the
+  nametable columns (extents 0).
 * **Sprites.** The x of sprite *n* is the signed 16-bit value `high:OAM x`, `high` being the byte
   last written to `$5100 + 4n` (any of its four addresses) **before the OAM DMA** that copied the
   page (`latch_sprites()`, called by the bus after each `$4014` write). Each DMA takes the bytes
   written since the previous one and starts the next page from 0: a game writes the high byte of
   every sprite it places off the standard picture, every frame. x = -16 is `$FF:$F0`, x = 300 is
   `$01:$2C`. Sprites past the visible range are dropped. Without an unlocked ROM the high byte is
-  ignored.
+  ignored. A sprite whose x is outside 0..255 is left out of the PPU's own picture (its pattern
+  bytes read as 0 at the fetches of dots 257-320, which still take place; the evaluation keeps the
+  OAM index of each sprite it copies for that): a hardware PPU, which only knows the low byte,
+  would draw a sprite at x = 298 at x = 42.
 * **Overclock.** At the start of line 240 the PPU arms `$5006` x 114 CPU cycles
   (`arm_overclock()`). For each of them `NesBus::tick()` runs the CPU and the cartridge only
   (`take_stall_cycle()`): the PPU and the APU stay still, so the picture, the sound and their
@@ -122,8 +132,12 @@ Details:
   cartridge's PRG-ROM): code the fixed bank calls can live in any bank. Being ROM, it is always
   the code of the ROM loaded; a copy in RAM would travel in savestates and outlive a new version
   of a hack.
-* The 64-sprite OAM and the 8-sprites-per-line limit are unchanged (the core already captures
-  every sprite).
+* **Second sprite page** (`$5007` bit 2): at each OAM DMA the extension latches its RAM at
+  `$5300` (64 sprites, OAM format) and `$5400 + 4n` (the high bytes of their x). The core captures
+  them after the console's 64, as records 128 and up (below them all in priority), 8 x 8 only; the
+  2D picture draws them over the PPU's centre too. A game whose sprites no longer fit in 64 (more
+  enemies in the margins) moves on to it instead of flickering. The 8-sprites-per-line limit does
+  not apply to captures anyway.
 
 Typical use:
 
@@ -171,7 +185,10 @@ each band. Widescreen changes:
   own pixels, the rest is drawn from the records (sprites behind, background, sprites in front,
   by OAM priority), unfilled pixels taking the backdrop colour. When the game blanks the left 8
   pixels (PPUMASK), those are composed from the records too, otherwise they would be a black band
-  in the middle of the wide picture. Without margins it is the plain 256 x 240 frame.
+  in the middle of the wide picture. The sprites the PPU did not draw are then drawn over the
+  centre from their records: the second page, and those across the left edge (x < 0), whose part
+  on the screen the PPU left out with the rest; one behind the background only over the backdrop
+  colour. Without margins it is the plain 256 x 240 frame.
 
 ---
 
@@ -193,8 +210,13 @@ pub trait MarginDecoder: Sync {
 }
 ```
 
-* `DecoderMemory`: CPU RAM (`$0000-$07FF`), PRG-RAM (`$6000-$7FFF`) and the whole PRG-ROM image as
-  the cartridge runs it (patch applied).
+* `DecoderMemory`: CPU RAM (`$0000-$07FF`), PRG-RAM (`$6000-$7FFF`), the whole PRG-ROM image as
+  the cartridge runs it (patch applied), and `nametable(address)`, a nametable byte as the PPU
+  reads it now (mirroring and layout applied), and `nametable_written(address)`, the rendered
+  frame that byte was last written in (0 since power-on or a state load). A decoder can check what
+  it decodes for the centre against what the PPU shows, and leave a row that does not match (a
+  menu, a transition) to the nametables; and it can tell a nametable column the game drew for a
+  place (written in one go) from an older one of the ring, and what objects drew over it later.
 * `BackgroundRow`: the line, the PPU address `v` at its start, fine X; helpers `coarse_x`,
   `coarse_y`, `nametable_x`, `nametable_y`, `ring_x` (pixel of the 512-pixel plane of two
   nametables at the left edge).
@@ -207,8 +229,11 @@ pub trait MarginDecoder: Sync {
 
 How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
 
-1. Before the frame, `wide.set_decoded(true)` when the ROM's built-in patch has a decoder
-   (`wide_decode::for_patch(name)`): the host margin then applies.
+1. Before the frame, `wide.set_decoded(true)` when the game has a decoder: the one of its
+   built-in patch (`wide_decode::for_patch(name)`), or else one made for the unpatched ROM
+   (`wide_decode::for_rom(crc)`, the CRC-32 of the ROM's data as the host gave it). The host
+   margin then applies; a ROM that never unlocks the extension gets margins from its decoder
+   alone (its sprites keep 8-bit x and its own culling).
 2. After the frame, for each captured background row, the decoder is asked for screen columns
    `-extra..0` and `32..=32 + extra`. A row it returns `false` for (status bar, title, a mode it
    does not know) keeps the columns captured from the nametables, within the ROM's margin. For a
@@ -221,11 +246,25 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    flipping every 30) and a line outside `0..240`. A decoder that cannot returns `false` (the
    default) and the vertical margin stays empty.
 
-Decoders run only while the built-in patches are on. The decoders:
+Decoders run only while the built-in patches are on (`emu.builtin_patches`). The decoders:
 
 | Game | Decodes | Source |
 |---|---|---|
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
+| Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
+
+Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
+(`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
+of 8 structures of 32 x 32 pixels, column first; structure `n` is 4 bytes at `$8000 + 4 n`, its
+16 x 16 blocks column first, its attribute byte at `$8400 + n`; block `b` (the low 6 bits of the
+block byte, the high 2 being its collision) is CHR tiles `4 b` to `4 b + 3`, column first. The
+level is a straight list of screens (world x / 256); the camera `$20:$1F` is kept between screens
+`$14` and `$15` of the current section, and nothing is drawn past them (the next screens belong
+to another section). Each row's centre is checked against the nametables at four columns. A
+margin column the nametables still hold for that place (the rows written in the column's most
+common frame all show the layout's tiles) is taken from the nametables, with what objects drew
+into the background since (Air Man's cloud devils, Bubble Man's lantern fish, ...); any other
+column comes from the layout.
 
 ---
 
@@ -301,6 +340,12 @@ pub struct BuiltinPatch {
   target and patch checksums, so a `Some` is exactly the build.
 * `BuiltinPatch::version()` is the target CRC-32 read from the BPS footer: any change to a hack
   changes it.
+* `BuiltinPatch::options`: the options the player can turn on or off (`HackOption`: key, English
+  and French labels, bit, default). The core starts with the defaults at each ROM load
+  (`default_options()`); the application keeps the player's choices in `emu.hack_options`
+  (`<patch>/<key>=0|1` entries separated by `;`), shows them in the Video menu's "Hack options"
+  submenu (command `video.toggle_hack_option`) and sets them every frame
+  (`NesCore::set_hack_options`); the ROM reads them at `$500A`.
 * `NesCore::load_rom` applies the matching patch when `set_builtin_patches(true)` (the setting
   `emu.builtin_patches`, read at each ROM load) and keeps the **original** image
   (`original_image()`); `builtin_patch()` names the patch.

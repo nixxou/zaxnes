@@ -57,10 +57,12 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 3] = [
+pub const EXCLUDED: [SettingId; 4] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
+    // Rust-only: edited by the Video menu's "Hack options", per game.
+    SettingId::EmuHackOptions,
 ];
 
 /// The profile settings the window shows all the same: the video region (REQ-UI-061).

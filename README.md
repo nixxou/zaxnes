@@ -72,12 +72,17 @@ run the import on a PC and copy the resulting `profiles/` folder to the card (se
 **[HOWTO-RUN.md](HOWTO-RUN.md)** (in French) is the user guide: menus, shortcuts, options, where
 files are written, and the full command line.
 
-**Widescreen.** *Zelda II - The Adventure of Link* (USA) can be played in 16:9 (or 3:2, 16:10):
-a widescreen hack built into the emulator is applied in memory to the player's own ROM (the
-patch ships no game data), and the scene shows the level and the enemies past the original
-edges. The emulator side is described in
-[`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md), the hack in
-[`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md).
+**Widescreen.** *Zelda II - The Adventure of Link* (USA) and *Mega Man 2* (USA) can be played
+in 16:9 (or 3:2, 16:10): a widescreen hack built into the emulator is applied in memory to the
+player's own ROM (the patch ships no game data), and the scene shows the level and the enemies
+past the original edges. The emulator side is described in
+[`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md), the hacks in
+[`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md) and
+[`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md).
+
+**Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
+replays exactly, with notes written on given frames (Ctrl+M); see
+[`rust/docs/MOVIES.md`](rust/docs/MOVIES.md).
 
 On a handheld, the NES pad is the D-pad, A, B, Select and Start; the other buttons drive the
 camera (X default view, Y 2D/3D, L1/R1 zoom, right stick to turn, L2 to keep or restore an
