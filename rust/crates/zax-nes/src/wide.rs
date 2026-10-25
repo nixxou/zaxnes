@@ -435,6 +435,18 @@ impl WideExtension {
         }
     }
 
+    /// Whether the overclock is running (the PPU and the APU still).
+    #[must_use]
+    pub const fn stalling(&self) -> bool {
+        self.stall > 0
+    }
+
+    /// Ends the overclock now: the game is waiting for the next frame (see
+    /// `BuiltinPatch::idle_loop`), the cycles left would only run its wait loop.
+    pub fn end_stall(&mut self) {
+        self.stall = 0;
+    }
+
     /// Takes one CPU cycle of the overclock: true when the machine must stay still for it (the
     /// CPU alone runs it).
     #[inline]

@@ -38,6 +38,10 @@ pub struct BuiltinPatch {
     /// (`$5008`, `$5009`): for a ROM with no room left for the code that would unlock it, whose
     /// reset can then jump straight into the window.
     pub boot_window: Option<(u8, u8)>,
+    /// The game's wait for the next frame, first to last address of its loop: the overclock
+    /// (`$5006`) ends as soon as the CPU is there, the cycles left being of no use to the game
+    /// (Rust-only, owner request: "yield"; the same game, the CPU time only when a frame needs it).
+    pub idle_loop: Option<(u16, u16)>,
 }
 
 /// Name of the Zelda II (USA) widescreen patch.
@@ -61,6 +65,8 @@ pub const PATCHES: [BuiltinPatch; 3] = [
         after_other_way_state: Some(zelda2_after_other_way_state),
         advanced: false,
         boot_window: None,
+        // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
+        idle_loop: Some((0xC010, 0xC01A)),
     },
     BuiltinPatch {
         name: MEGAMAN2_USA,
@@ -96,6 +102,8 @@ pub const PATCHES: [BuiltinPatch; 3] = [
         after_other_way_state: None,
         advanced: false,
         boot_window: None,
+        // The frame's wait: LDA $1D / BEQ (the NMI sets $1D).
+        idle_loop: Some((0xC08E, 0xC091)),
     },
     BuiltinPatch {
         name: SMB1_WORLD,
@@ -135,6 +143,8 @@ pub const PATCHES: [BuiltinPatch; 3] = [
         // No room in the game for code that would unlock the extension: its added PRG bank (2)
         // is open in the window from power-on.
         boot_window: Some((0x82, 0x00)),
+        // Everything runs in the NMI; the main loop is a JMP to itself.
+        idle_loop: Some((0x8057, 0x8059)),
     },
 ];
 

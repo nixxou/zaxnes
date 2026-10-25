@@ -466,10 +466,21 @@ impl NesCore {
         let decoder = self.margin_decoder();
         self.bus.ppu_mut().wide_mut().set_decoded(decoder.is_some());
 
+        // The overclock ends once the game waits for the next frame, when its patch says where.
+        let idle_loop = self
+            .builtin_patch
+            .and_then(crate::builtin_patches::by_name)
+            .and_then(|patch| patch.idle_loop);
+
         self.bus.ppu_mut().clear_frame_boundary();
         self.bus.defer_ppu();
         loop {
             self.cpu.step(&mut self.bus);
+            if let Some((first, last)) = idle_loop {
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
             if self.bus.ppu().vblank_just_started() {
                 break;
             }
