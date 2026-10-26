@@ -72,14 +72,15 @@ run the import on a PC and copy the resulting `profiles/` folder to the card (se
 **[HOWTO-RUN.md](HOWTO-RUN.md)** (in French) is the user guide: menus, shortcuts, options, where
 files are written, and the full command line.
 
-**Widescreen.** *Zelda II - The Adventure of Link* (USA) and *Mega Man 2* (USA) can be played
-in 16:9 (or 3:2, 16:10, or the ratio of the view): a widescreen hack built into the emulator is
+**Widescreen.** *Zelda II - The Adventure of Link* (USA), *Mega Man 2* (USA) and *Super Mario
+Bros. 3* (USA) (Rev 1) can be played in 16:9 (or 3:2, 16:10, or the ratio of the view): a widescreen hack built into the emulator is
 applied in memory to the player's own ROM (the patch ships no game data), and the scene shows the
 level and the enemies past the original edges. It is turned on per game, in the game's hacks
 screen (the [W] of the ROM list). The emulator side is described in
 [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md), the hacks in
-[`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md) and
-[`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md).
+[`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md),
+[`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md) and
+[`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see

@@ -365,7 +365,9 @@ Les effets de ReShade s'appliquent à toute l'image de la fenêtre, barre de men
 
 Zaxnes sait montrer un jeu **plus large** que les 256 pixels de la NES, quand le jeu est prévu
 pour. Aujourd'hui, deux le sont, grâce à un **hack écran large intégré** à l'émulateur :
-***Zelda II - The Adventure of Link* (USA)** et ***Mega Man 2* (USA)**.
+***Zelda II - The Adventure of Link* (USA)** et ***Mega Man 2* (USA)**. ***Super Mario Bros. 3*
+(USA) (Rev 1)** l'est aussi : son décor est lu dans le niveau sans patch, et un patch intégré y
+ajoute les ennemis (le mode avancé).
 
 L'écran large se règle **par jeu**, dans l'écran **Hacks** du jeu : en mode console, depuis la
 liste (Start, ou L2 pour seulement l'activer ou le désactiver), depuis les options du jeu ou depuis
@@ -378,7 +380,7 @@ précédente est oubliée au démarrage).
 | **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
-| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements |
+| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
 
@@ -401,6 +403,16 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   marges » (actif par défaut), « Invincible » (une aide pour tester, désactivé par défaut),
   « Sans ralentissements » (actif par défaut : plus de lignes d'overclock, le jeu ne ralentit
   plus).
+- *Super Mario Bros. 3* (USA) (Rev 1, la version « PRG1 ») : l'écran large seul lit le décor des
+  marges dans le niveau, et aussi la carte du monde (l'écran voisin de la carte apparaît au-delà
+  de son cadre), avec une marge au-dessus de l'écran ; la ROM n'est pas modifiée. La ligne **Mode
+  avancé** ajoute le patch : les ennemis sont créés, vivent et s'affichent dans les marges (ils ne
+  lancent ni marteau ni boule de feu tant qu'ils n'y sont pas sur l'écran d'origine), et Mario
+  peut aller dans la marge de droite, où l'écran défile tout seul aussi. Options du patch :
+  « Sélecteur de niveau » (B sur le menu 1P/2P ouvre le menu de débogage du jeu : Haut/Bas le
+  monde, Start sa carte ; désactivé par défaut), « Invincible » (désactivé par défaut),
+  « Sans ralentissements » (actif par défaut). Les labyrinthes de tuyaux verticaux n'ont pas de
+  marges.
 - Ça fonctionne en 3D comme en mode 2D.
 
 Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers
@@ -422,8 +434,9 @@ suit la ROM d'origine.
 
 Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md)
 (côté émulateur), [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md)
-et [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md)
-(les hacks eux-mêmes et comment les reconstruire).
+, [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md)
+et [`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md) (les hacks
+eux-mêmes et comment les reconstruire).
 
 ### Langue de l'interface
 
