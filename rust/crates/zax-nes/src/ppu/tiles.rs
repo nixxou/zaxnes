@@ -448,7 +448,14 @@ impl Ppu2C02 {
             count += 1;
         }
 
+        let sprite_table: u16 = if (self.control & 0x08) != 0 {
+            0x1000
+        } else {
+            0x0000
+        };
         if count == 0 {
+            // The extension's second page may have sprites in a band the console's have none in.
+            self.capture_extra_sprites(band, sprite_table, cart);
             return;
         }
 
@@ -460,12 +467,6 @@ impl Ppu2C02 {
         }
 
         let tall = (self.control & 0x20) != 0;
-        let sprite_table: u16 = if (self.control & 0x08) != 0 {
-            0x1000
-        } else {
-            0x0000
-        };
-
         for i in 0..count {
             let n = self.sprite_order[i];
             let oam_y = self.oam[n * 4];
