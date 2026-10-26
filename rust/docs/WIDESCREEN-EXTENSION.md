@@ -423,7 +423,16 @@ the edges of the screen (most of them: 8-bit x, moved by their own routines) are
 bits and live on up to the objects' margin (`min(M + 16, 120)`); one made at an edge by a spawner
 comes in from it; past an edge an object looks for its ground at the edge (the game's terrain is a
 ring that follows the nametables, drawn only where the game has drawn). The game's collisions with
-Simon only take objects on the screen (`$0300` 0), so nothing in a margin touches him. Options:
+Simon only take objects on the screen (`$0300` 0), so nothing in a margin touches him; Simon's
+weapons (slots `$14`-`$16`, which the game checks against the objects in 8 bits, `$E5C7`) touch
+nothing either while past an edge, so a dagger flying on into a margin cannot hit an object at the
+other edge. Weapons and the enemies' shots go on through the margins (the cross keeps the game's
+bounds: it reaches an edge only at the end of a room, and turns back there); an enemy only shoots
+while on the screen (the game's own check before `$ED38`). An object made at another's place
+(`$ED5E` and three more copies: shots, pieces, points) takes its x's bit 8 too, so one made by an
+object past an edge is made there. The objects the game keeps in 9 bits (`$EAB9`) are no longer
+hidden within 8 pixels of the edges, and go as far as the objects' margin when that is past the
+game's 64 pixels. Options:
 testing aids, off by default (Select in a stage goes on to the next stage through the state that
 begins one, with its block's graphics; Simon never hurt), and "No slowdown" (255 lines of
 overclock, on by default; the yield ends it in the main loop, `idle_loop` `$C030`-`$C03E`). The
