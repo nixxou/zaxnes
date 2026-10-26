@@ -15,6 +15,7 @@
 
 pub mod guest;
 mod megaman2;
+mod ng3;
 mod smb1;
 mod zelda2;
 
@@ -145,6 +146,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
     match crc {
         megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
         smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
+        ng3::SOURCE_CRC => Some(&ng3::NinjaGaiden3),
         _ => None,
     }
 }
