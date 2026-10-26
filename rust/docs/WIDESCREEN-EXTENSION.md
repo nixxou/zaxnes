@@ -17,7 +17,7 @@ A game takes part in one of two ways, which work together:
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
 to the ROM it was made for: the Zelda II (USA) widescreen hack
 ([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
-one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super Mario Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)).
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super Mario Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)), and the Ninja Gaiden III (USA) one, its advanced mode too ([`hacks/ng3/WIDESCREEN-HACK.md`](hacks/ng3/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -272,7 +272,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
-| Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
+| Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -420,7 +420,7 @@ pub struct BuiltinPatch {
   jumps straight into the window.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
-  main loop `$C010`-`$C01A`, everything else running in the NMI). `NesCore::run_frame` ends the
+  main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
