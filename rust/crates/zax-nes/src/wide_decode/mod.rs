@@ -13,6 +13,7 @@
 //! A decoder applies to the ROMs a built-in patch is made for, while the built-in patches are
 //! on (see [`crate::builtin_patches`]).
 
+mod adventure_island;
 mod castlevania;
 pub mod guest;
 mod megaman2;
@@ -156,6 +157,17 @@ pub trait MarginDecoder: Sync {
     ) -> bool {
         false
     }
+
+    /// Whether `decode_extra_row` also covers the screen's overscan: the rows asked for then
+    /// fill the vertical margin whole whatever the fine Y scroll, the screen's first and last
+    /// rows (across its top or bottom edge, or ending on it) are decoded whole width (their
+    /// centre too), and the 2D picture composes the screen's lines such rows cover from the
+    /// records rather than the PPU's pixels. For a game that shows another row of its nametable
+    /// ring there (Adventure Island scrolling vertically). Off by default: `margin_y / 8` rows
+    /// each side, the screen the PPU's.
+    fn covers_overscan(&self) -> bool {
+        false
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if
@@ -165,6 +177,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
     match crc {
         megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
         smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
+        adventure_island::SOURCE_CRC => Some(&adventure_island::AdventureIsland),
         ng3::SOURCE_CRC => Some(&ng3::NinjaGaiden3),
         smb3::SOURCE_CRC => Some(&smb3::SuperMarioBros3),
         castlevania::SOURCE_CRC => Some(&castlevania::USA),
@@ -180,6 +193,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::ZELDA2_USA => Some(&zelda2::Zelda2),
         crate::builtin_patches::MEGAMAN2_USA => Some(&megaman2::MegaMan2),
         crate::builtin_patches::SMB1_WORLD => Some(&smb1::SuperMarioBros),
+        crate::builtin_patches::ADVENTURE_ISLAND_USA => Some(&adventure_island::AdventureIsland),
         crate::builtin_patches::NG3_USA => Some(&ng3::NinjaGaiden3),
         crate::builtin_patches::SMB3_USA => Some(&smb3::SuperMarioBros3),
         crate::builtin_patches::CASTLEVANIA_USA => Some(&castlevania::USA),

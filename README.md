@@ -80,7 +80,10 @@ screen (the [W] of the ROM list). The emulator side is described in
 [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md), the hacks in
 [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md),
 [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md) and
-[`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md).
+[`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md);
+[`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md)
+(*Adventure Island* (USA): the margins from its own round data, and in the advanced mode the
+sprites and objects in them).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see
