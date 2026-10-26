@@ -15,6 +15,7 @@ use super::debug_overlay::{self, DebugInfo};
 use super::fonts::{FontSizes, UiFonts};
 use super::handheld::keyboard::KeyboardPad;
 use super::handheld::layout::Metrics;
+use super::handheld::pointer::PointerInput;
 use super::handheld::states::StatesMode;
 use super::handheld::{HandheldUi, Screen as HandheldScreen};
 use super::menu_shortcuts::ShortcutModifiers;
@@ -426,6 +427,7 @@ impl ImguiFrontend {
         let desktop_modal = self.ui.state.is_modal();
         let ui = self.context.new_frame();
         let mut open_console = false;
+        let mut leave_console = false;
         if let Some(handheld) = &mut self.handheld {
             // A screenshot run has no gamepad, and its screens are staged by the plan.
             if self.shots.is_none() {
@@ -435,9 +437,19 @@ impl ImguiFrontend {
             if shown {
                 if self.shots.is_none() {
                     handheld.update(self.platform.pad(), frame.real_seconds, frame);
+                    // The mouse of the desktop (owner request), but not through a menu of the
+                    // bar over it.
+                    if !device && !self.ui.menu_engaged() {
+                        handheld.update_pointer(&pointer_input(ui), frame);
+                    }
                 }
                 handheld.draw(ui, frame);
                 self.pictures.extend(handheld.take_picture_updates());
+                // The menu bar of the desktop stays at hand over its console mode (owner
+                // request); an entry the desktop carries out brings the desktop back.
+                if !device && self.shots.is_none() {
+                    leave_console = self.ui.draw_menu_bar_over_console(ui, frame.host);
+                }
                 self.ui.draw_fps_counter(ui, frame);
             } else if !device && playing && !desktop_modal && self.shots.is_none() {
                 // The gamepad plays as in the console mode (owner request): the menu button
@@ -451,6 +463,9 @@ impl ImguiFrontend {
             if self.ui.state.debug_overlay_visible() {
                 debug_overlay::draw(ui, frame.host, self.ui.chrome_height, debug);
             }
+        }
+        if leave_console {
+            self.switch_console(frame.host, false, false);
         }
         if open_console {
             self.console = ConsoleMode {
@@ -511,6 +526,16 @@ impl ImguiFrontend {
             effects.extend(handheld.take_effects());
         }
         effects
+    }
+}
+
+/// What the mouse did this frame, for the console mode of the desktop.
+fn pointer_input(ui: &imgui::Ui) -> PointerInput {
+    PointerInput {
+        position: ui.io().mouse_pos,
+        clicked: ui.is_mouse_clicked(imgui::MouseButton::Left),
+        right_clicked: ui.is_mouse_clicked(imgui::MouseButton::Right),
+        wheel: ui.io().mouse_wheel,
     }
 }
 

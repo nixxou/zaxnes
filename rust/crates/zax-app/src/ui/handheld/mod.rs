@@ -2,6 +2,8 @@
 //! keyboard, for 640x480, 720x480 and 720x720 screens. The screens are models
 //! ([`rom_list`], [`profile_list`], [`overlay`], [`options`]) that answer a press of a button with
 //! a command; [`HandheldUi`] owns them, carries the commands out on the host and draws them.
+//! In the console mode of the desktop the mouse acts too, through the same presses
+//! ([`pointer`]).
 
 pub mod defaults;
 mod draw;
@@ -13,10 +15,12 @@ pub mod layout;
 pub mod options;
 pub mod overlay;
 pub mod pad;
+pub mod pointer;
 pub mod profile_list;
 pub mod rom_list;
 pub mod states;
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use zax_platform::ui_image::{PictureUpdate, UiPicture, FIRST_PICTURE_ID};
@@ -32,6 +36,7 @@ use self::layout::Metrics;
 use self::options::{HandheldOptionsModel, OptionsCommand};
 use self::overlay::{CameraPreset, OverlayCommand, OverlayModel};
 use self::pad::{PadButton, PadState};
+use self::pointer::{PointerInput, Zone};
 use self::profile_list::{ProfileListCommand, ProfileListModel};
 use self::rom_list::{ProfileMatch, RomEntry, RomListCommand, RomListModel};
 use self::states::{SlotState, StatesCommand, StatesMode, StatesModel};
@@ -126,6 +131,8 @@ pub struct HandheldUi {
     fixed_metrics: Option<Metrics>,
     /// The body face of the desktop's console mode; a handheld's is the atlas default.
     body_font: Option<imgui::FontId>,
+    /// Where the rows and the hints of the last drawn screen lie, for the mouse.
+    zones: RefCell<Vec<Zone>>,
 }
 
 /// L2 in game (Rust-only, owner request): held, it keeps the camera's angles and distance; a
@@ -187,6 +194,7 @@ impl HandheldUi {
             shown_picture: None,
             pictures: Vec::new(),
             confirming: false,
+            zones: RefCell::new(Vec::new()),
         };
         ui.refresh_roms(host);
         ui
@@ -375,6 +383,18 @@ impl HandheldUi {
             if both && self.screen == Screen::Home {
                 continue;
             }
+            self.press(button, frame);
+        }
+    }
+
+    /// The mouse of the desktop's console mode (owner request): what it did over the screen
+    /// drawn last frame, as presses of the pad. Nothing in game.
+    pub fn update_pointer(&mut self, input: &PointerInput, frame: &mut UiFrame<'_>) {
+        if self.screen == Screen::InGame && frame.host.pending_confirmation().is_none() {
+            return;
+        }
+        let presses = pointer::presses(&self.zones.borrow(), input);
+        for button in presses {
             self.press(button, frame);
         }
     }
