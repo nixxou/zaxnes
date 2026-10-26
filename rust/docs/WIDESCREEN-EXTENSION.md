@@ -401,9 +401,10 @@ first. The map's first block row is nametable row 4; the status bar keeps rows 0
 decoded are 6-27. A room ends a screen past the last screen of its camera, the nibble of the
 lengths table (`$FB8C`, Rev 1 `$FBB0`) for the stage (the high one for room `$46` 0, the low one
 for room 1, as `$CFF0` reads it); past both ends the margins stay empty. The camera is `$2F:$2E`;
-some stages draw room x 0 in the right nametable (`$FBB2`), so the camera is tried both ways on
-the ring of two nametables, and a row is decoded only when four of its centre columns show what
-the map gives there (the title, the intermissions and the transitions are left to the
+some stages draw room x 0 in the right nametable (the table `$FBB2`, Rev 1 `$FBD6`: the camera is
+then 256 pixels away on the ring of two nametables; read there, not guessed, since the rows of
+those stages repeat and both ways can match), and a row is decoded only when four of its centre
+columns show what the map gives there (the title, the intermissions and the transitions are left to the
 nametables).
 The built-in patches of both builds (`CASTLEVANIA_USA`, `CASTLEVANIA_USA_REV1`, an advanced
 mode) are one hack built for each (`cvwide`): its code is the free end of PRG bank 5, the same in
