@@ -260,11 +260,20 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    decoded row, the nametable margin records are removed and the decoded tiles added, their CHR
    planes read through the PPU as for any background tile; its visible row becomes the full
    margin. The centre 256 pixels always come from the PPU.
-3. With a vertical margin, `decode_extra_row` is asked for `margin_y / 8` rows above the first
-   captured row and as many below the last, whole width. Each virtual row carries the PPU address
-   it would have on the plane of two stacked nametables (60 rows, the vertical nametable bit
-   flipping every 30) and a line outside `0..240`. A decoder that cannot returns `false` (the
-   default) and the vertical margin stays empty.
+3. With a vertical margin, `decode_extra_row` is asked for as many rows above the first
+   captured row and below the last as cover `margin_y` lines past the screen
+   (`decode_extra_rows`: `ceil((first row's y + margin_y) / 8)` above,
+   `ceil((240 + margin_y - last row's bottom) / 8)` below; with fine Y scrolling the first
+   captured row may start a few lines down, and `margin_y / 8` rows left those lines at the top
+   of the margin empty), whole width. Each virtual row carries the PPU address it would have on
+   the plane of two stacked nametables (60 rows, the vertical nametable bit flipping every 30)
+   and a line outside `0..240`. A decoder that cannot returns `false` (the default) and the
+   vertical margin stays empty on that side. A first or last captured row reaching past the
+   screen (a line below 0, or past 240) is also asked for its centre (columns `0..32`) through
+   `decode_extra_row`: past the screen the game shows there a nametable row it keeps for the
+   overscan, often another row of its ring (Adventure Island scrolling vertically). When the
+   decoder gives it, the row's centre records are replaced by the decoded ones (same record
+   indices); the PPU's own pixels still make the lines `0..240`.
 
 Decoders run only while the built-in patches are on for the game in play (see 7). The decoders:
 
@@ -328,13 +337,30 @@ row of the plane congruent to its nametable row nearest `$32` (the top of the ro
 drawn) plus its line / 8. The game also puts things over the tables when it draws a column (the
 cloud platforms of the sea rounds, `$A629`): a margin column it drew already (left of the column
 being drawn) shows the nametables', each tile that differs from the tables kept only when written
-in or after the frame of the column's rows that match them (older ones are another column's);
-a column not drawn yet shows the tables (such a platform appears in the right margin when the game
-draws it, 8 pixels past the screen). A row whose centre does not show what the tables give, or
+in or after the frame of the column's rows that match them (older ones are another column's), and
+not when it is what the tables give 30 rows up or down (the game draws the rows the screen scrolls
+to vertically over the screen's columns only: a margin column keeps there the ring's other row);
+a column not written since a state was loaded counts as drawn (write frame 0, the state's own);
+the column being drawn shows the game's column buffer (`$0460`) once it is complete (from its
+third step, `$06 & 7 = 3`); a column not drawn yet shows the tables, with the platforms the game
+will draw over them. Those are objects of kind `$3B` whose extra byte's low 3 bits are 0: created,
+such an object asks for its drawing (`$052E` = 4, its extra byte in `$052F`), counted down at the
+third step of each column; from the column where it reaches 0 the game writes two tiles over each
+of 8 columns (`tbl_A80F[$8E]`, the second row 8 bytes on) at the plane's row `$32 + $8D`, `$8D`
+from the ground's y under the first column (`$A607`: `sub_C1AD` at x 265, minus 16 plus
+`tbl_A604[$2B]`, rounded, minus twice the extra byte's high nibble, in tiles, plus 1 for style 0),
+and the sub-palette `tbl_A81F[$8E]` over attribute row `$34 + $0530`. The decoder shows the
+platform being drawn (`$88` columns left, its tiles at `$89`), the one asked for, and those of the
+round's three object lists read ahead as `$8C5A` reads them (`$7C` + list, `$0546`/`$0547`,
+`$0540`; created when the screen's left edge comes 64 pixels near their position, so drawn from
+world tile column position / 8 - 4), with the ground of the game's 5 parts of 128 pixels
+(`$0506`, `$050B`, `sub_C1EA`) and past them of the round's sections (as `$BEDE` makes the next
+part). The screen's vertical position is taken as it is now. A row whose centre does not show what the tables give, or
 what the game drew over them, at four columns is left to the nametables (the title, the screens
 between rounds). The vertical margin comes from the tables (past a column's top and bottom its
 first and last metatiles go on, as the game repeats them within the column), while the screen's
-nearest row shows the round.
+nearest row wholly on it shows the round; so does the centre of a row across the screen's top or
+bottom edge (the game keeps there, for the overscan, a row of its ring that is not the plane's).
 
 ---
 

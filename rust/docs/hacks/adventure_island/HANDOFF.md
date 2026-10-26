@@ -52,8 +52,9 @@ use `--png-nes`, `--dump-mem` (RAM; extension RAM at file offset 0x2800).
 - Done: objects past a 64 px margin show as still previews from the edge of the view (lists read
   ahead, creation in a borrowed slot, sprites captured; see the hack doc, section 2). Parity checked
   with `test-tools/survey.py` against the previous patch on the 32 rounds.
-- Overlays (clouds) appear in the right margin only when the game draws the column (could read the
-  object stream ahead, `$8C5A`/`sub_8D74`).
+- Done: the platforms drawn over the tables (clouds) show ahead in the right margin (decoder:
+  `Platforms`, `ListReader`, `ground_y`; the drawing column from the game's buffer `$0460`).
+  Checked with `test-tools/platcheck.py` (a platform's window in the round frame by frame).
 - Margins past the round's end are empty (boss room).
 - Not tested: bonus stages (cloud/pot rooms), the ending, save states made the other way, the app UI
   (hacks screen should show "Advanced mode" generically).
