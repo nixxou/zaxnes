@@ -391,6 +391,7 @@ précédente est oubliée au démarrage).
 | **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
+| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
 | options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
@@ -417,7 +418,7 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
 - *Super Mario Bros. 3* (USA) (Rev 1, la version « PRG1 ») : l'écran large seul lit le décor des
   marges dans le niveau, et aussi la carte du monde (l'écran voisin de la carte apparaît au-delà
   de son cadre), avec une marge au-dessus de l'écran ; la ROM n'est pas modifiée. La ligne **Mode
-  avancé** ajoute le patch : les ennemis sont créés, vivent et s'affichent dans les marges (ils ne
+  avancé** (activée par défaut) ajoute le patch : les ennemis sont créés, vivent et s'affichent dans les marges (ils ne
   lancent ni marteau ni boule de feu tant qu'ils n'y sont pas sur l'écran d'origine), et Mario
   peut aller dans la marge de droite, où l'écran défile tout seul aussi. Options du patch :
   « Sélecteur de niveau » (B sur le menu 1P/2P ouvre le menu de débogage du jeu : Haut/Bas le
