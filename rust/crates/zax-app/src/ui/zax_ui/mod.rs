@@ -97,6 +97,7 @@ impl BrowserPurpose {
 }
 
 /// The interface.
+#[allow(clippy::struct_excessive_bools)] // independent flags of the menu bar and the windows
 pub struct ZaxUi {
     /// Which windows are open.
     pub state: UiState,
@@ -118,6 +119,9 @@ pub struct ZaxUi {
     menu_engaged: bool,
     /// The height of the bar when it was last drawn, the band that reveals it.
     menu_bar_height: f32,
+    /// Whether an entry of the bar the desktop carries out (a command of the host, the hacks)
+    /// was chosen since the front end last asked.
+    menu_chosen: bool,
     /// The capture aid of `--ui-shots`: the menu to open on the next frame.
     pub force_open_menu: Option<String>,
     /// What a shortcut or a menu entry asked of the console mode, for the front end.
@@ -167,6 +171,7 @@ impl ZaxUi {
             menu_bar_drawn: false,
             menu_engaged: false,
             menu_bar_height: MENU_BAR_REVEAL,
+            menu_chosen: false,
             force_open_menu: None,
             force_options_tab: None,
             console_request: None,
@@ -303,6 +308,33 @@ impl ZaxUi {
         // REQ-UI-206: the OSD is the one layer full screen keeps.
         Self::draw_notification(ui, frame.host, NOTIFICATION_MARGIN);
         self.draw_fps_counter(ui, frame);
+    }
+
+    /// The menu bar over the console mode of the desktop (owner request): as during a game, it
+    /// shows while the pointer is at the top of the window or one of its menus is open, and
+    /// lies over the screen. Returns whether an entry the desktop carries out was chosen, for
+    /// which the front end leaves the console mode.
+    pub fn draw_menu_bar_over_console(&mut self, ui: &imgui::Ui, host: &mut AppHost) -> bool {
+        self.state.fullscreen = host.settings().fullscreen();
+        self.state.has_current_game = host.current_game_id().is_some();
+        let shown = self.state.menu_bar_visible()
+            && (self.menu_engaged || pointer_at_top(ui, self.menu_bar_height));
+        if shown {
+            let (height, engaged) = self.draw_menu_bar(ui, host);
+            self.menu_bar_height = height;
+            self.menu_engaged = engaged;
+        } else {
+            self.menu_engaged = false;
+        }
+        self.menu_bar_drawn = shown;
+        std::mem::take(&mut self.menu_chosen)
+    }
+
+    /// Whether a menu of the bar was open, or the bar under the pointer, last frame: the screen
+    /// under it then leaves the pointer alone.
+    #[must_use]
+    pub const fn menu_engaged(&self) -> bool {
+        self.menu_engaged
     }
 
     /// Takes one event of the host: a window or a dialogue asked for by a command, or the new
