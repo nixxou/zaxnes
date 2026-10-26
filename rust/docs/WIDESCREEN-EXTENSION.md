@@ -272,6 +272,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
+| Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched | the round, from its tables in PRG-ROM, slopes and vertical scrolling included | `adventure_island.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -310,6 +311,27 @@ get empty margins. A row whose centre differs from the parse at more than one of
 hold for that place (Mega Man 2's rule: the rows that differ from the parse written after every
 row that matches) is taken from them, with the bricks broken and the coins taken; any other from
 the parse. The parse also records, per column, whether the area's own data locked the scrolling there (a scroll lock object): while the game's lock is on in such a room (an underground bonus room, whose area holds other rooms beside it), the margins stay empty; a lock that is not the area's (the flagpole, a fall) keeps them. The decoder works only while the title screen or the game runs an area (`OperMode` 0 or 1, task 3): the black WORLD screen shares its blank tile with the sky. Castle loops (4-4, 7-4, 8-4) send Mario and the screen 4 pages back, coherent with the straight area the parse lays out afterwards; for about a second around each loopback (before it, the game reading the repeated part ahead; after it, the screen's page below 0) the centre does not match the parse and the margins are left to the nametables, mostly empty. Not handled: the path is decided only when the parser reaches the loop point.
+
+Adventure Island: the game draws a round one tile column at a time, 8 pixels past the right edge
+(the column of world tile `16 $30 + ($35 & 15)`, the screen's left edge 264 pixels behind), from
+tables its RAM points to for the round (`$1A`-`$27`). A round is a list of sections of 16
+columns, 3 bytes each: a screen (the first byte's high six bits), the camera's vertical move (its
+low two) and a slope (the second byte's high three); a screen is four structures of 32 pixels, six
+bits each; a structure a top part (6 metatiles) and a bottom part (5); a metatile 4 x 4 tiles and
+an attribute byte. A column is 56 tiles high (the top part's first metatile three times, its
+other five, the bottom part's five and its last again). It is put on a plane of rows the camera
+moves over, at the row `$31` holds when the game draws it, the nametables holding that plane
+modulo 30 rows; a slope moves `$31` by a step every 8 or 16 columns (`$BE0D`, masks `$BE5D`,
+steps `$BE63`), so the row of every column follows from the column being drawn. A line shows the
+row of the plane congruent to its nametable row nearest `$32` (the top of the rows the game keeps
+drawn) plus its line / 8. The game also puts things over the tables when it draws a column (the
+cloud platforms of the sea rounds, `$A629`): a margin column it drew already (left of the column
+being drawn) shows the nametables', each tile that differs from the tables kept only when written
+in or after the frame of the column's rows that match them (older ones are another column's);
+a column not drawn yet shows the tables (such a platform appears in the right margin when the game
+draws it, 8 pixels past the screen). A row whose centre does not show what the tables give, or
+what the game drew over them, at four columns is left to the nametables (the title, the screens
+between rounds).
 
 ---
 
