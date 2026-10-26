@@ -462,7 +462,9 @@ pub struct BuiltinPatch {
   changes it.
 * `BuiltinPatch::advanced`: an **advanced mode** of a game's widescreen (Super Mario Bros.: the
   enemies in the margins). Such a patch applies only when the game's `video.widescreen_advanced`
-  is on too (`NesCore::set_advanced_patches`, set with `set_builtin_patches` at each load and
+  is on too, which it is by default (owner request: the widescreen is the whole hack, its
+  testing aids aside; a game keeps a value of its own only when it is turned off)
+  (`NesCore::set_advanced_patches`, set with `set_builtin_patches` at each load and
   restore); off, the ROM loads as it is and its margin decoder alone widens it. The hacks screen
   shows the row "Advanced mode" for such a game (`HackRow::Advanced`; on, it turns the widescreen
   on too), and the options of an advanced patch only while it is on. A state is "the hack" or not
