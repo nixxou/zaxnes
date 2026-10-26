@@ -434,7 +434,11 @@ while on the screen (the game's own check before `$ED38`). An object made at ano
 (`$ED5E` and three more copies: shots, pieces, points) takes its x's bit 8 too, so one made by an
 object past an edge is made there. The objects the game keeps in 9 bits (`$EAB9`) are no longer
 hidden within 8 pixels of the edges, and go as far as the objects' margin when that is past the
-game's 64 pixels. Options:
+game's 64 pixels. The moving platforms (stages 4, 5 and 10, slots `$17`-`$1A`, bank 6 `$AB1F`)
+have their place on the screen in 16 bits, from which the game puts an 8-bit x and, near an edge,
+only the piece of them on the screen (its x wrapped: a platform past the left edge showed at the
+right one too): the hack keeps the 16-bit x for the sprite builder and, within the view, draws them
+whole. Options:
 testing aids, off by default (Select in a stage goes on to the next stage through the state that
 begins one, with its block's graphics; Simon never hurt), and "No slowdown" (255 lines of
 overclock, on by default; the yield ends it in the main loop, `idle_loop` `$C030`-`$C03E`). The
