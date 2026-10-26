@@ -10,6 +10,7 @@
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
+//! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`aiwide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -53,8 +54,11 @@ pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
 /// Name of the Super Mario Bros. (World) widescreen patch (advanced mode).
 pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
 
+/// Name of the Adventure Island (USA) widescreen patch (advanced mode).
+pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
+
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 3] = [
+pub const PATCHES: [BuiltinPatch; 4] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -145,6 +149,47 @@ pub const PATCHES: [BuiltinPatch; 3] = [
         boot_window: Some((0x82, 0x00)),
         // Everything runs in the NMI; the main loop is a JMP to itself.
         idle_loop: Some((0x8057, 0x8059)),
+    },
+    BuiltinPatch {
+        name: ADVENTURE_ISLAND_USA,
+        game: "Adventure Island",
+        rom_name: "Adventure Island (USA)",
+        source_crc: 0xF8A7_13BE,
+        bps: include_bytes!("../patches/adventure-island-usa-widescreen.bps"),
+        options: &[
+            // Testing aids: Select on the title screen goes through every round; no injury from
+            // the enemies (falls, the water and hunger still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (Select on the title screen)",
+                label_fr: "Sélecteur de niveau (Select sur l'écran titre)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the sprites and objects.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (2)
+        // is open in the window from power-on.
+        boot_window: Some((0x82, 0x00)),
+        // The main loop's wait for the NMI: LDA $0B / BNE.
+        idle_loop: Some((0xB759, 0xB75C)),
     },
 ];
 
@@ -331,15 +376,50 @@ pub fn for_data_crc(crc: u32) -> Option<&'static BuiltinPatch> {
 }
 
 /// The built-in patch made for the game named `name` (a ROM file or a profile title), whichever
-/// version of it the ROM is: the patch whose game the name starts with, letters and digits only
-/// ("Zelda II - The Adventure of Link (Europe)" is Zelda II's, "Mega Man 3" is no one's).
+/// version of it the ROM is: the patch whose game the name starts with, letters and digits only,
+/// unless a sequel's number follows ("Zelda II - The Adventure of Link (Europe)" is Zelda II's,
+/// "Mega Man 3" and "Adventure Island II" are no one's).
 #[must_use]
 pub fn for_game_name(name: &str) -> Option<&'static BuiltinPatch> {
-    let wanted = letters_and_digits(name);
     PATCHES.iter().find(|patch| {
-        let game = letters_and_digits(patch.game);
-        !game.is_empty() && wanted.starts_with(&game)
+        game_rest(name, patch.game).is_some_and(|rest| !starts_with_sequel_number(rest))
     })
+}
+
+/// What follows the game `game` in `name`, comparing their letters and digits only; `None` when
+/// `name` does not start with it, or goes on with more letters or digits of the same word.
+fn game_rest<'a>(name: &'a str, game: &str) -> Option<&'a str> {
+    let wanted = letters_and_digits(game);
+    if wanted.is_empty() {
+        return None;
+    }
+    let mut matched = String::new();
+    for (at, character) in name.char_indices() {
+        if matched.len() >= wanted.len() {
+            let rest = &name[at..];
+            return (!character.is_alphanumeric()).then_some(rest);
+        }
+        if character.is_alphanumeric() {
+            matched.extend(character.to_lowercase());
+            if !wanted.starts_with(&matched) {
+                return None;
+            }
+        }
+    }
+    (matched == wanted).then_some("")
+}
+
+/// Whether `text` starts, past spaces and punctuation, with a word that numbers a sequel: digits,
+/// or a roman numeral ("II", "III", "IV").
+fn starts_with_sequel_number(text: &str) -> bool {
+    let word: String = text
+        .trim_start_matches(|character: char| !character.is_alphanumeric())
+        .chars()
+        .take_while(|character| character.is_alphanumeric())
+        .collect();
+    !word.is_empty()
+        && (word.chars().all(|character| character.is_ascii_digit())
+            || word.chars().all(|character| "IVX".contains(character)))
 }
 
 /// `text` reduced to its letters and digits, lower case.
@@ -578,6 +658,22 @@ mod tests {
             for_game_name("Mega Man 2 (U)").map(|patch| patch.name)
         );
         assert!(for_game_name("Mega Man 3 (USA)").is_none());
+        assert_eq!(
+            Some(ADVENTURE_ISLAND_USA),
+            for_game_name("Adventure Island (Europe)").map(|patch| patch.name)
+        );
+        assert!(for_game_name("Adventure Island II (USA)").is_none());
+        assert!(for_game_name("Adventure Island 3 (USA)").is_none());
+        assert!(for_game_name("Adventure Islands").is_none());
+        assert!(for_game_name("Super Mario Bros. 3 (USA)").is_none());
+        assert_eq!(
+            Some(SMB1_WORLD),
+            for_game_name("Super Mario Bros (E)").map(|patch| patch.name)
+        );
+        assert_eq!(
+            Some(ZELDA2_USA),
+            for_game_name("Zelda II").map(|patch| patch.name)
+        );
         assert!(for_game_name("Legend of Zelda, The (USA)").is_none());
         assert!(for_game_name("").is_none());
     }
