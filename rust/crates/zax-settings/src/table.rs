@@ -1242,11 +1242,12 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
     );
     // Rust-only (owner request): the advanced mode of a game's widescreen (a built-in patch whose
     // `advanced` is set: Super Mario Bros.' enemies in the margins); off, its margin decoder alone
-    // widens it. An option of each game only.
+    // widens it. An option of each game only, on by default (owner request: the widescreen is the
+    // whole hack, its testing aids aside).
     out.push(SettingDescriptor::new(
         SettingId::VideoWidescreenAdvanced,
         SettingKind::Bool,
-        SettingValue::Bool(false),
+        SettingValue::Bool(true),
         SettingScope::User,
         SettingEffect::NextRomLoad,
         SettingTheme::Video,

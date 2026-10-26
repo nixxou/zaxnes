@@ -181,6 +181,10 @@ impl Mapper for Board {
         dispatch!(self, b => b.chr_view(memory))
     }
 
+    fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        dispatch!(self, b => b.chr_peek_view(memory))
+    }
+
     fn ppu_write(&mut self, memory: &mut CartridgeMemory, address: u16, value: u8) {
         dispatch!(self, b => b.ppu_write(memory, address, value));
     }
