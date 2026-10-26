@@ -331,7 +331,7 @@ impl Ppu2C02 {
             }
         }
 
-        self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
+        let edge_rows = self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
 
         #[allow(clippy::cast_possible_truncation)] // At most 512.
         let margin = self.frame_margin as i16;
@@ -344,10 +344,15 @@ impl Ppu2C02 {
             *range = (-margin, 256 + margin);
         }
 
-        // The decoded rows lose their nametable margins, then get the decoded ones.
+        // The decoded rows lose their nametable margins, then get the decoded ones; a row across
+        // the screen's top or bottom edge whose centre was decoded (`edge_rows`) loses its centre
+        // too.
         self.tiles.retain_background(|record| {
             let row = usize::try_from(record.index / row_width).unwrap_or(usize::MAX);
             let column = (record.index % row_width) - extra;
+            if edge_rows.contains(&row) {
+                return false;
+            }
             !decoded_rows.get(row).copied().unwrap_or(false) || (0..32).contains(&column)
         });
         for record in records {
@@ -355,9 +360,12 @@ impl Ppu2C02 {
         }
     }
 
-    /// The rows of the vertical margin: `frame_vertical_margin / 8` rows above the first
-    /// background row of the frame and as many below the last, whole width, for a decoder that
-    /// can read rows the PPU did not draw ([`MarginDecoder::decode_extra_row`]).
+    /// The rows of the vertical margin, for a decoder that can read rows the PPU did not draw
+    /// ([`MarginDecoder::decode_extra_row`]): as many rows above the first background row of the
+    /// frame and below the last as cover `frame_vertical_margin` lines past the screen, whole
+    /// width. A first or last row reaching past the screen (fine Y scrolling) is decoded too,
+    /// whole width: past the screen its centre is a row the game does not show (the overscan),
+    /// often another one of its nametables'. Returns the frame rows whose centre was decoded so.
     fn decode_extra_rows(
         &self,
         decoder: &dyn MarginDecoder,
@@ -365,16 +373,37 @@ impl Ppu2C02 {
         cart: Option<&Cartridge>,
         tiles: &mut Vec<DecodedTile>,
         records: &mut Vec<TileRecord>,
-    ) {
-        let rows = self.frame_vertical_margin / 8;
-        let first = self.captured_rows.iter().flatten().next();
-        let last = self.captured_rows.iter().flatten().last();
+    ) -> Vec<usize> {
+        let mut edge_rows = Vec::new();
+        let margin_y = i32::from(u16::try_from(self.frame_vertical_margin).unwrap_or(0));
+        let first = self
+            .captured_rows
+            .iter()
+            .enumerate()
+            .find_map(|(index, row)| Some((index, row.as_ref()?)));
+        let last = self
+            .captured_rows
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, row)| Some((index, row.as_ref()?)));
         let (Some(first), Some(last)) = (first, last) else {
-            return;
+            return edge_rows;
         };
+        if margin_y == 0 {
+            return edge_rows;
+        }
         let extra = self.frame_margin / 8;
-        for (from, step) in [(first, -1), (last, 1)] {
-            for distance in 1..=rows {
+        let row_width = 33 + (2 * extra);
+        // Lines from the screen's edge to the margin's: down to -margin_y above, up to
+        // 240 + margin_y below.
+        let above = (i32::from(first.1.y) + margin_y + 7).max(0) / 8;
+        let below = (240 + margin_y - (i32::from(last.1.y) + 8) + 7).max(0) / 8;
+        let crosses = [first.1.y < 0, i32::from(last.1.y) + 8 > 240];
+        for ((index, from), step, rows, crosses) in
+            [(first, -1, above, crosses[0]), (last, 1, below, crosses[1])]
+        {
+            for distance in i32::from(!crosses)..=rows {
                 let offset = step * distance;
                 // The row `offset` rows away on the plane of two stacked nametables of 30 rows.
                 let stacked = (i32::from(from.row.nametable_y()) * 30)
@@ -391,11 +420,25 @@ impl Ppu2C02 {
                 let fine_x = i32::from(row.fine_x);
                 let last_column = 32 + extra - i32::from(fine_x == 0);
                 tiles.clear();
-                if !decoder.decode_extra_row(memory, &row, &mut (-extra..=last_column), tiles) {
-                    return;
+                if distance == 0 {
+                    // The edge row itself: its centre (the margins are decode_row's).
+                    if decoder.decode_extra_row(memory, &row, &mut (0..32), tiles) {
+                        edge_rows.push(index);
+                    } else {
+                        continue;
+                    }
+                } else if !decoder.decode_extra_row(
+                    memory,
+                    &row,
+                    &mut (-extra..=last_column),
+                    tiles,
+                ) {
+                    break;
                 }
                 #[allow(clippy::cast_possible_truncation)] // Within 240 pixels of the screen.
                 let y = from.y + (8 * offset) as i16;
+                #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
+                let row_number = index as i32;
                 for &DecodedTile {
                     column,
                     tile,
@@ -409,13 +452,19 @@ impl Ppu2C02 {
                     );
                     #[allow(clippy::cast_possible_truncation)] // -519..768.
                     let x = ((8 * column) - fine_x) as i16;
-                    // Rows past the frame: the record index is not a row of the frame.
+                    // Rows past the frame: the record index is not a row of the frame; the edge
+                    // row's centre keeps its own.
+                    let record_index = if distance == 0 {
+                        (row_number * row_width) + column + extra
+                    } else {
+                        -1
+                    };
                     records.push(TileRecord::new(
                         plane0,
                         plane1,
                         x,
                         y,
-                        -1,
+                        record_index,
                         false,
                         false,
                         false,
@@ -425,6 +474,7 @@ impl Ppu2C02 {
                 }
             }
         }
+        edge_rows
     }
 
     // ---------------------------------------------------------------- sprites
