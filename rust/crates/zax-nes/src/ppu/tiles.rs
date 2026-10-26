@@ -416,9 +416,10 @@ impl Ppu2C02 {
         } else {
             (margin_y / 8, margin_y / 8)
         };
+        // The rows at the screen's edges (across them, or ending on them).
         let crosses = [
-            overscan && first.1.y < 0,
-            overscan && i32::from(last.1.y) + 8 > 240,
+            overscan && first.1.y <= 0,
+            overscan && i32::from(last.1.y) + 8 >= 240,
         ];
         for ((index, from), step, rows, crosses) in
             [(first, -1, above, crosses[0]), (last, 1, below, crosses[1])]

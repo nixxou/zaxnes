@@ -271,10 +271,11 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    `margin_y` lines past the screen whatever the fine Y scroll (`ceil((first row's y +
    margin_y) / 8)` above, `ceil((240 + margin_y - last row's bottom) / 8)` below: the first
    captured row may start a few lines down, and `margin_y / 8` rows leave those lines empty), and
-   a first or last captured row reaching past the screen (a line below 0, or past 240) is asked
-   for its centre (columns `0..32`) too: past the screen the game shows there a nametable row it
-   keeps for the overscan, often another row of its ring (Adventure Island scrolling
-   vertically). When the decoder gives it, the row's centre records are replaced by the decoded
+   the first and last captured rows (across the screen's edge, or ending on it) are asked for
+   their centre (columns `0..32`) too: the game shows there a nametable row it keeps for the
+   overscan, often another row of its ring (Adventure Island scrolling vertically: past the
+   screen, or the whole bottom row when the vertical scroll is a multiple of 8 and the ring's 30
+   rows all show). When the decoder gives it, the row's centre records are replaced by the decoded
    ones (same record indices). The lines of the screen a decoded row covers (that edge row's, or the row just
    above the first captured one, or just below the last, when the decoder gives it) are composed
    from the records in the 2D picture too, not from the PPU's pixels (`Ppu2C02::centre_lines`,
@@ -368,8 +369,10 @@ part). The screen's vertical position is taken as it is now. A row whose centre 
 what the game drew over them, at four columns is left to the nametables (the title, the screens
 between rounds). The vertical margin comes from the tables (past a column's top and bottom its
 first and last metatiles go on, as the game repeats them within the column), while the screen's
-nearest row wholly on it shows the round; so does the centre of a row across the screen's top or
-bottom edge (the game keeps there, for the overscan, a row of its ring that is not the plane's).
+nearest row wholly on it shows the round; the screen's first and last rows (across its top or
+bottom edge, or ending on it: the game keeps there, for the overscan, a row of its ring that may
+not be the plane's) are decoded whole width as the margins are, the nametables kept where they
+show the round, while the next row towards the centre does.
 
 ---
 

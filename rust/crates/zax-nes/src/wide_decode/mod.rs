@@ -139,11 +139,12 @@ pub trait MarginDecoder: Sync {
     }
 
     /// Whether `decode_extra_row` also covers the screen's overscan: the rows asked for then
-    /// fill the vertical margin whole whatever the fine Y scroll, a row across the screen's top
-    /// or bottom edge is decoded whole width (its centre too), and the 2D picture composes the
-    /// screen's lines such rows cover from the records rather than the PPU's pixels. For a game
-    /// that shows another row of its nametable ring there (Adventure Island scrolling
-    /// vertically). Off by default: `margin_y / 8` rows each side, the screen the PPU's.
+    /// fill the vertical margin whole whatever the fine Y scroll, the screen's first and last
+    /// rows (across its top or bottom edge, or ending on it) are decoded whole width (their
+    /// centre too), and the 2D picture composes the screen's lines such rows cover from the
+    /// records rather than the PPU's pixels. For a game that shows another row of its nametable
+    /// ring there (Adventure Island scrolling vertically). Off by default: `margin_y / 8` rows
+    /// each side, the screen the PPU's.
     fn covers_overscan(&self) -> bool {
         false
     }
