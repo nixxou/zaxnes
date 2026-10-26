@@ -400,7 +400,12 @@ the stage (`$28`) is 17 bytes at the pointer of entry `$28` of the blocks table 
 first. The map's first block row is nametable row 4; the status bar keeps rows 0-5, so the rows
 decoded are 6-27. A room ends a screen past the last screen of its camera, the nibble of the
 lengths table (`$FB8C`, Rev 1 `$FBB0`) for the stage (the high one for room `$46` 0, the low one
-for room 1, as `$CFF0` reads it); past both ends the margins stay empty. The camera is `$2F:$2E`;
+for room 1, as `$CFF0` reads it); past both ends the margins stay empty. A room may open on a
+screen of filler behind a wall, which the camera never shows (stage 4): its map holds block
+numbers past the stage's blocks there (a set ends where the next set of the table starts), and
+such leading screens are not the room either. A margin column the nametables still hold for its
+place (16 of its 22 playfield rows show the map) is taken from them, so what the game draws into
+the background shows there too (the crushers of stage 6 going down, a wall broken). The camera is `$2F:$2E`;
 some stages draw room x 0 in the right nametable (the table `$FBB2`, Rev 1 `$FBD6`: the camera is
 then 256 pixels away on the ring of two nametables; read there, not guessed, since the rows of
 those stages repeat and both ways can match), and a row is decoded only when four of its centre

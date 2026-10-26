@@ -23,6 +23,10 @@
 //! * the map's first block row is nametable row 4; its top two tile rows are under the status
 //!   bar, which the game keeps in nametable rows 0-5 (the playfield shows from row 6).
 //!
+//! A margin column the nametables still hold for its place is taken from them (the game redraws
+//! some blocks there: crushers, broken walls); leading screens of filler (block numbers past the
+//! stage's blocks, behind a wall the camera never passes) are not the room.
+//!
 //! The decoder checks itself against the PPU: a row whose centre does not show what the map
 //! gives (the title, a transition, the status bar) is left to the nametables.
 
@@ -75,6 +79,8 @@ const MAP_TOP: i32 = 4;
 const PLAYFIELD_TOP: i32 = 6;
 const BLOCK_ROWS: i32 = 6;
 const BLOCK_BYTES: usize = 17;
+/// The stages, 0-18.
+const STAGES: usize = 19;
 /// The map column of room x 0.
 const FIRST_MAP_COLUMN: usize = 4;
 /// The end of a map.
@@ -112,7 +118,18 @@ impl MarginDecoder for Castlevania {
             }
         }
         for column in columns {
-            if let Some((tile, palette)) = level.tile_at(first_column + column, coarse_y) {
+            let world = first_column + column;
+            if level.tile_at(world, coarse_y).is_none() {
+                continue;
+            }
+            // A column the nametables still hold for this very place shows what the game drew
+            // there: its crushers going down, a wall broken.
+            let decoded = if column_is_current(memory, &level, *row, column, world) {
+                Some(nametable_tile(memory, *row, column))
+            } else {
+                level.tile_at(world, coarse_y)
+            };
+            if let Some((tile, palette)) = decoded {
                 out.push(DecodedTile {
                     column,
                     tile,
@@ -124,13 +141,55 @@ impl MarginDecoder for Castlevania {
     }
 }
 
+/// How many of a column's playfield rows must show the map for the nametables to hold it.
+const CURRENT_ROWS: i32 = 16;
+
+/// Whether screen column `column` of the nametables (on the plane of two) holds room tile column
+/// `world` rather than another place of the ring: most of its playfield rows show what the map
+/// gives there (the game redraws a few itself: crushers, broken walls).
+fn column_is_current(
+    memory: &DecoderMemory<'_>,
+    level: &Level<'_>,
+    row: BackgroundRow,
+    column: i32,
+    world: i32,
+) -> bool {
+    let mut matching = 0;
+    for tile_row in PLAYFIELD_TOP..MAP_TOP + 4 * BLOCK_ROWS {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 6..28.
+        let v = (row.v & !0x03E0) | ((tile_row as u16) << 5);
+        let address = nametable_address(BackgroundRow { v, ..row }, column);
+        if level
+            .tile_at(world, tile_row)
+            .is_some_and(|(tile, _)| (memory.nametable)(address) == tile)
+        {
+            matching += 1;
+        }
+    }
+    matching >= CURRENT_ROWS
+}
+
+/// The tile and sub-palette the nametables hold at screen column `column` of `row`.
+fn nametable_tile(memory: &DecoderMemory<'_>, row: BackgroundRow, column: i32) -> (u8, u8) {
+    let address = nametable_address(row, column);
+    let tile = (memory.nametable)(address);
+    let table = address & 0x2C00;
+    let tile_column = address & 0x1F;
+    let tile_row = (address >> 5) & 0x1F;
+    let attribute =
+        (memory.nametable)(table | 0x03C0 | ((tile_row >> 2) << 3) | (tile_column >> 2));
+    let shift = ((tile_row & 2) << 1) | (tile_column & 2);
+    (tile, (attribute >> shift) & 3)
+}
+
 /// The room in play: its map and its stage's blocks, in PRG bank 4.
 struct Level<'a> {
     bank: &'a [u8],
     map: usize,
     blocks: usize,
     camera: i32,
-    /// Where the room ends, in tile columns.
+    /// Where the room starts and ends, in tile columns.
+    start: i32,
     end: i32,
     /// 1 when the stage draws room x 0 in the right nametable.
     swap: i32,
@@ -166,20 +225,55 @@ impl<'a> Level<'a> {
         let room = maps.checked_sub(0x8000)? + 2 * usize::from(memory.ram(ROOM));
         let map = usize::from(*bank.get(room)?) | (usize::from(*bank.get(room + 1)?) << 8);
         let camera = (i32::from(memory.ram(CAMERA_HIGH)) << 8) | i32::from(memory.ram(CAMERA_LOW));
-        Some(Self {
+        // The stage's blocks end where the next block set of the table starts (the last set, at
+        // the end of the bank).
+        let next_set = (0..STAGES)
+            .filter_map(|other| {
+                let low = fixed_byte(build.blocks, 2 * other)?;
+                let high = fixed_byte(build.blocks, 2 * other + 1)?;
+                Some(usize::from(low) | (usize::from(high) << 8))
+            })
+            .filter(|&set| set > blocks)
+            .min()
+            .unwrap_or(0x8000 + BANK_SIZE);
+        let mut level = Self {
             bank,
             map,
             blocks: blocks.checked_sub(0x8000)?,
             camera,
+            start: 0,
             end: (i32::from(last_screen) + 1) * 32,
             swap: i32::from(fixed_byte(build.swaps, stage)? & 1),
+        };
+        // A room may open on a screen of filler behind a wall that the camera never shows (stage
+        // 4): its map holds block numbers past the stage's blocks there. Such leading screens are
+        // not the room.
+        let count = (next_set - blocks) / BLOCK_BYTES;
+        while level.start < level.end && level.screen_has_filler(level.start, count) {
+            level.start += 32;
+        }
+        Some(level)
+    }
+
+    /// Whether the screen at tile column `first` holds a block number past the stage's `count`.
+    fn screen_has_filler(&self, first: i32, count: usize) -> bool {
+        let Ok(first) = usize::try_from(first) else {
+            return false;
+        };
+        (first >> 2..(first >> 2) + 8).any(|column| {
+            (0..6).any(|row: usize| {
+                let cell = (self.map + (column + FIRST_MAP_COLUMN) * 6 + row)
+                    .checked_sub(0x8000)
+                    .and_then(|cell| self.bank.get(cell));
+                cell.is_some_and(|&block| block != END && usize::from(block) >= count)
+            })
         })
     }
 
     /// CHR tile and sub-palette of room tile column `world`, nametable row `tile_row`; `None`
     /// outside the room or under the playfield.
     fn tile_at(&self, world: i32, tile_row: i32) -> Option<(u8, u8)> {
-        if world >= self.end {
+        if world < self.start || world >= self.end {
             return None;
         }
         let world = usize::try_from(world).ok()?;
@@ -240,6 +334,7 @@ mod tests {
             map,
             blocks,
             camera: 0,
+            start: 0,
             end: 32,
             swap: 0,
         };
