@@ -49,8 +49,9 @@ walkthrough movie desyncs in Zaxnes (enemy timing), not usable. 3D render needs 
 use `--png-nes`, `--dump-mem` (RAM; extension RAM at file offset 0x2800).
 
 ## Remaining ideas / limits (also in the hack doc section 7)
-- Objects are created at x=320; past a 64 px margin they pop in there (would need early dormant
-  spawning; risky for slot order).
+- Done: objects past a 64 px margin show as still previews from the edge of the view (lists read
+  ahead, creation in a borrowed slot, sprites captured; see the hack doc, section 2). Parity checked
+  with `test-tools/survey.py` against the previous patch on the 32 rounds.
 - Overlays (clouds) appear in the right margin only when the game draws the column (could read the
   object stream ahead, `$8C5A`/`sub_8D74`).
 - Margins past the round's end are empty (boss room).
