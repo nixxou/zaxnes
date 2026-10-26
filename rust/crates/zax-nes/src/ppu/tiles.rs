@@ -404,9 +404,22 @@ impl Ppu2C02 {
         let row_width = 33 + (2 * extra);
         // Lines from the screen's edge to the margin's: down to -margin_y above, up to
         // 240 + margin_y below.
-        let above = (i32::from(first.1.y) + margin_y + 7).max(0) / 8;
-        let below = (240 + margin_y - (i32::from(last.1.y) + 8) + 7).max(0) / 8;
-        let crosses = [first.1.y < 0, i32::from(last.1.y) + 8 > 240];
+        // A decoder that covers the overscan (`MarginDecoder::covers_overscan`) gets the rows
+        // that fill the margin whole and the rows across the screen's edges; any other gets
+        // margin_y / 8 rows on each side, and the screen stays the PPU's.
+        let overscan = decoder.covers_overscan();
+        let (above, below) = if overscan {
+            (
+                (i32::from(first.1.y) + margin_y + 7).max(0) / 8,
+                (240 + margin_y - (i32::from(last.1.y) + 8) + 7).max(0) / 8,
+            )
+        } else {
+            (margin_y / 8, margin_y / 8)
+        };
+        let crosses = [
+            overscan && first.1.y < 0,
+            overscan && i32::from(last.1.y) + 8 > 240,
+        ];
         for ((index, from), step, rows, crosses) in
             [(first, -1, above, crosses[0]), (last, 1, below, crosses[1])]
         {
@@ -443,9 +456,9 @@ impl Ppu2C02 {
                 }
                 // The screen's lines this decoded row covers are composed from its records.
                 let top = i32::from(from.y) + (8 * offset);
-                if step < 0 {
+                if overscan && step < 0 {
                     lines.0 = lines.0.max(top + 8);
-                } else {
+                } else if overscan {
                     lines.1 = lines.1.min(top);
                 }
                 #[allow(clippy::cast_possible_truncation)] // Within 240 pixels of the screen.
