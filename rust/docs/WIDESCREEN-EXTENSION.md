@@ -273,7 +273,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
-| Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched | the round, from its tables in PRG-ROM, slopes and vertical scrolling included | `adventure_island.rs`, see below |
+| Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -332,7 +332,9 @@ in or after the frame of the column's rows that match them (older ones are anoth
 a column not drawn yet shows the tables (such a platform appears in the right margin when the game
 draws it, 8 pixels past the screen). A row whose centre does not show what the tables give, or
 what the game drew over them, at four columns is left to the nametables (the title, the screens
-between rounds).
+between rounds). The vertical margin comes from the tables (past a column's top and bottom its
+first and last metatiles go on, as the game repeats them within the column), while the screen's
+nearest row shows the round.
 
 ---
 
@@ -521,7 +523,7 @@ way also needs the machine put right, which the core does in `restore_state`:
 | `--widescreen-y <px>` | host margin above and below |
 | `--no-builtin-patches` | restore `--load-state` without the built-in patches |
 | `--load-state <file>` / `--save-state <file>` | core state block (saved with its ROM image) |
-| `--png-nes <file>` | the frame's records composed flat, as wide as the margin |
+| `--png-nes <file>` | the frame's records composed flat, as wide and as tall as the margins |
 | `--dump-mem <file>` | `$0000-$07FF`, `$6000-$7FFF`, `$5000-$5FFF`; prints PC, registers, JAMMED |
 | `--press <frames>:<buttons>` | input script |
 

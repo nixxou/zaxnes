@@ -34,6 +34,10 @@
 //! The decoder checks the centre of each row: a row whose centre does not show what the tables
 //! give, or what the game drew over them, is left to the nametables (the title, the screens between
 //! rounds).
+//!
+//! The rows of the vertical margin come from the tables: the column's rows past the screen (and
+//! past its top and bottom, its first and last metatiles going on), while the screen's nearest
+//! row shows the round.
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -74,48 +78,26 @@ impl MarginDecoder for AdventureIsland {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        let coarse_y = i32::from(row.coarse_y());
-        if coarse_y >= RING_ROWS {
+        if i32::from(row.coarse_y()) >= RING_ROWS {
             return false;
         }
-        let round = Round::new(memory);
-        let drawing = (i32::from(memory.ram(SECTION)) * 16) + i32::from(memory.ram(COLUMN) & 15);
-        let first_column = resolve_ring(row.ring_x(), 512, (drawing * 8) - DRAW_LEAD) >> 3;
-        // The row of the plane this line shows.
-        let plane_row = resolve_ring(
-            coarse_y,
-            RING_ROWS,
-            i32::from(memory.ram(WINDOW_ROW)) + (row.line >> 3),
-        );
-        let rows = ColumnRows::new(&round, drawing, i32::from(memory.ram(COLUMN_ROW)));
-        let layout = Layout {
-            round: &round,
-            rows: &rows,
-        };
-
-        // What the PPU shows in the centre must be what the tables give, or what the game drew over
-        // them when it drew the column (the cloud platforms of the sea rounds).
-        for column in CHECKED {
-            let world = first_column + column;
-            let shown = layout
-                .drawn(memory, *row, column, world, plane_row)
-                .and_then(|drawn| drawn.cell(memory, *row, column));
-            if shown.is_none() {
-                return false;
-            }
+        let view = View::new(memory);
+        let first_column = view.first_column(*row);
+        let plane_row = View::plane_row(memory, *row);
+        if !view.centre_matches(memory, *row, first_column, plane_row) {
+            return false;
         }
-
         for column in columns {
             let world = first_column + column;
             // A column the game drew already shows what it drew, what it puts over the tables
             // included; one it has not drawn yet, the tables.
-            let drawn = (world < drawing)
-                .then(|| layout.drawn(memory, *row, column, world, plane_row))
+            let drawn = (world < view.drawing)
+                .then(|| view.drawn(memory, *row, column, world, plane_row))
                 .flatten();
             let decoded = drawn
                 .as_ref()
                 .and_then(|drawn| drawn.cell(memory, *row, column))
-                .or_else(|| layout.tile(world, plane_row));
+                .or_else(|| view.tile(world, plane_row));
             if let Some((tile, palette)) = decoded {
                 out.push(DecodedTile {
                     column,
@@ -125,6 +107,111 @@ impl MarginDecoder for AdventureIsland {
             }
         }
         true
+    }
+
+    /// The rows above and below the screen: the plane's, from the tables (the nametables hold the
+    /// screen's rows only), while the screen's nearest row shows the round.
+    fn decode_extra_row(
+        &self,
+        memory: &DecoderMemory<'_>,
+        row: &BackgroundRow,
+        columns: &mut dyn Iterator<Item = i32>,
+        out: &mut Vec<DecodedTile>,
+    ) -> bool {
+        let view = View::new(memory);
+        // The screen's row nearest this one.
+        let rows_away = if row.line < 0 {
+            -((-row.line + 7) / 8)
+        } else {
+            (row.line - (VISIBLE_LINES - 8)).max(0) / 8
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..30.
+        let screen_y = (i32::from(row.coarse_y()) - rows_away).rem_euclid(RING_ROWS) as u16;
+        let screen_row = BackgroundRow {
+            line: row.line - (8 * rows_away),
+            v: (row.v & !0x03E0) | (screen_y << 5),
+            fine_x: row.fine_x,
+        };
+        let first_column = view.first_column(*row);
+        if !view.centre_matches(
+            memory,
+            screen_row,
+            first_column,
+            View::plane_row(memory, screen_row),
+        ) {
+            return false;
+        }
+        let plane_row = View::plane_row(memory, *row);
+        for column in columns {
+            if let Some((tile, palette)) = view.tile(first_column + column, plane_row) {
+                out.push(DecodedTile {
+                    column,
+                    tile,
+                    palette,
+                });
+            }
+        }
+        true
+    }
+}
+
+/// The lines of the screen.
+const VISIBLE_LINES: i32 = 240;
+
+/// The round as the screen shows it this frame.
+struct View<'a> {
+    round: Round<'a>,
+    rows: ColumnRows,
+    /// The world tile column the game is drawing.
+    drawing: i32,
+}
+
+impl<'a> View<'a> {
+    fn new(memory: &DecoderMemory<'a>) -> Self {
+        let round = Round::new(memory);
+        let drawing = (i32::from(memory.ram(SECTION)) * 16) + i32::from(memory.ram(COLUMN) & 15);
+        let rows = ColumnRows::new(&round, drawing, i32::from(memory.ram(COLUMN_ROW)));
+        Self {
+            round,
+            rows,
+            drawing,
+        }
+    }
+
+    /// The world tile column at the left edge of `row`.
+    fn first_column(&self, row: BackgroundRow) -> i32 {
+        resolve_ring(row.ring_x(), 512, (self.drawing * 8) - DRAW_LEAD) >> 3
+    }
+
+    /// The row of the plane `row` shows: the one congruent to its nametable row nearest the rows
+    /// the game keeps drawn.
+    fn plane_row(memory: &DecoderMemory<'_>, row: BackgroundRow) -> i32 {
+        resolve_ring(
+            i32::from(row.coarse_y()),
+            RING_ROWS,
+            i32::from(memory.ram(WINDOW_ROW)) + (row.line >> 3),
+        )
+    }
+
+    /// CHR tile and sub-palette of world tile column `world` at row `plane_row` of the plane.
+    fn tile(&self, world: i32, plane_row: i32) -> Option<(u8, u8)> {
+        self.round.tile(world, plane_row - self.rows.at(world))
+    }
+
+    /// Whether the centre of `row` shows what the tables give, or what the game drew over them
+    /// when it drew the column (the cloud platforms of the sea rounds).
+    fn centre_matches(
+        &self,
+        memory: &DecoderMemory<'_>,
+        row: BackgroundRow,
+        first_column: i32,
+        plane_row: i32,
+    ) -> bool {
+        CHECKED.iter().all(|&column| {
+            self.drawn(memory, row, column, first_column + column, plane_row)
+                .and_then(|drawn| drawn.cell(memory, row, column))
+                .is_some()
+        })
     }
 }
 
@@ -171,12 +258,20 @@ impl<'a> Round<'a> {
         self.table(0, (3 * section) + index)
     }
 
-    /// CHR tile and sub-palette of tile row `tile_row` (0-55) of world tile column `world`;
-    /// `None` off the round or the column.
+    /// CHR tile and sub-palette of tile row `tile_row` of world tile column `world` (0-55: the
+    /// column; past its top and bottom its first and last metatiles go on, as the game repeats
+    /// them within the column); `None` off the round.
     fn tile(&self, world: i32, tile_row: i32) -> Option<(u8, u8)> {
-        if !(0..self.columns).contains(&world) || !(0..COLUMN_TILES).contains(&tile_row) {
+        if !(0..self.columns).contains(&world) {
             return None;
         }
+        let tile_row = if tile_row < 0 {
+            tile_row.rem_euclid(4)
+        } else if tile_row >= COLUMN_TILES {
+            COLUMN_TILES - 4 + (tile_row - COLUMN_TILES).rem_euclid(4)
+        } else {
+            tile_row
+        };
         let screen = u32::from(self.section(world >> 4, 0)? >> 2);
         let structures = (0..3).try_fold(0u32, |bits, index| {
             Some((bits << 8) | u32::from(self.table(1, (3 * screen) + index)?))
@@ -260,18 +355,7 @@ impl ColumnRows {
     }
 }
 
-/// A round's tiles on the plane of rows.
-struct Layout<'a> {
-    round: &'a Round<'a>,
-    rows: &'a ColumnRows,
-}
-
-impl Layout<'_> {
-    /// CHR tile and sub-palette of world tile column `world` at row `plane_row` of the plane.
-    fn tile(&self, world: i32, plane_row: i32) -> Option<(u8, u8)> {
-        self.round.tile(world, plane_row - self.rows.at(world))
-    }
-
+impl View<'_> {
     /// What the nametables hold of world tile column `world` at screen column `column`: the frame
     /// the game drew it in, the newest of its rows that show what the tables give, when enough of
     /// them do. What the game drew over the tables then (or later) is newer than that; the rows
@@ -439,7 +523,12 @@ mod tests {
         assert_eq!(round.tile(1, 32), Some((0x71, 0)), "the bottom part");
         assert_eq!(round.tile(1, 52), Some((0x81, 0)), "its last metatile");
         assert_eq!(round.tile(1, 55), Some((0x8D, 2)), "repeated to the bottom");
-        assert_eq!(round.tile(1, 56), None);
+        assert_eq!(
+            round.tile(1, 56),
+            Some((0x81, 0)),
+            "the last metatile goes on below"
+        );
+        assert_eq!(round.tile(1, -3), Some((0x45, 0)), "the first one above");
         assert_eq!(round.tile(32, 0), None, "past the round");
         // Columns 4-15 are structure 0, all metatile 0.
         assert_eq!(round.tile(6, 2), Some((0x0A, 3)), "lower right quarter");
