@@ -1,6 +1,9 @@
 //! The drawing of the handheld screens: thin, since the models decide what is shown. Rows are
 //! painted on the window's draw list rather than as widgets, because the selection belongs to the
-//! models and the gamepad moves it; the focus is a bright bar with dark text.
+//! models and the gamepad moves it; the focus is a bright bar with dark text. Each row and each
+//! hint records where it lies, for the mouse of the desktop's console mode ([`super::pointer`]).
+
+use std::cell::RefCell;
 
 use imgui::{Condition, DrawListMut, StyleColor, StyleVar, Ui, WindowFlags, WindowToken};
 use zax_platform::input::labels;
@@ -9,6 +12,7 @@ use super::game_options::{GameOptionsModel, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
 use super::options::{self, ROWS};
 use super::overlay::{OverlayItem, ITEMS};
+use super::pointer::{self, Zone, ZoneAction};
 use super::rom_list::{first_visible, ProfileMatch, RomEntry, RomListModel};
 use super::states::{SlotState, StatesMode};
 use super::{slot_state, HandheldUi, Screen, STATE_PICTURE_ID};
@@ -72,9 +76,15 @@ struct Painter<'ui> {
     metrics: Metrics,
     size: [f32; 2],
     heading: Option<imgui::FontId>,
+    /// Where the rows and the hints drawn lie.
+    zones: &'ui RefCell<Vec<Zone>>,
 }
 
 impl Painter<'_> {
+    fn zone(&self, min: [f32; 2], max: [f32; 2], action: ZoneAction) {
+        self.zones.borrow_mut().push(Zone { min, max, action });
+    }
+
     fn text(&self, x: f32, y: f32, colour: [f32; 4], text: &str) {
         self.list.add_text([x, y], colour, text);
     }
@@ -171,6 +181,16 @@ impl Painter<'_> {
         if !right.0.is_empty() {
             self.text(right_x, y, side, right.0);
         }
+        let value = right.0.starts_with('<').then_some((right_x, x1));
+        self.zone(
+            [x0, top],
+            [x1, top + metrics.row],
+            ZoneAction::Row {
+                slot,
+                selected,
+                value,
+            },
+        );
         let mut clip_to = if right.0.is_empty() {
             x1
         } else {
@@ -225,10 +245,19 @@ impl Painter<'_> {
         let y = top + metrics.padding;
         let mut x = metrics.padding;
         for (button, meaning, colour) in hints {
+            let start = x;
             self.text(x, y, FOCUS, button);
             x += self.width(button) + metrics.padding * 0.5;
             self.text(x, y, *colour, meaning);
             x += self.width(meaning) + metrics.padding * 1.6;
+            if let Some(action) = pointer::hint_action(button) {
+                let half_gap = metrics.padding * 0.8;
+                self.zone(
+                    [start - half_gap, top],
+                    [x - half_gap, self.size[1]],
+                    action,
+                );
+            }
         }
     }
 
@@ -305,6 +334,7 @@ fn full_screen_with<'ui>(
 impl HandheldUi {
     /// Draws the screen in front, the hold of the exit combination and the notification.
     pub fn draw(&mut self, ui: &Ui, frame: &UiFrame<'_>) {
+        self.zones.get_mut().clear();
         let size = ui.io().display_size;
         self.metrics = self.metrics_for(size[1]);
         let _body = self.body_font().map(|font| ui.push_font(font));
@@ -328,13 +358,14 @@ impl HandheldUi {
         ZaxUi::draw_notification(ui, frame.host, margin);
     }
 
-    fn painter<'ui>(&self, ui: &'ui Ui) -> Painter<'ui> {
+    fn painter<'ui>(&'ui self, ui: &'ui Ui) -> Painter<'ui> {
         Painter {
             ui,
             list: ui.get_window_draw_list(),
             metrics: self.metrics,
             size: ui.io().display_size,
             heading: self.heading_font,
+            zones: &self.zones,
         }
     }
 
@@ -715,6 +746,17 @@ impl HandheldUi {
                     .rounding(metrics.padding * 0.4)
                     .build();
             }
+            let value = self.overlay_value(*item, frame);
+            let value_x = left + width - metrics.padding * 1.5 - painter.width(&value);
+            painter.zone(
+                [left + metrics.padding * 0.5, row_top],
+                [left + width - metrics.padding * 0.5, row_top + metrics.row],
+                ZoneAction::Row {
+                    slot: index,
+                    selected,
+                    value: (!value.is_empty()).then_some((value_x, left + width)),
+                },
+            );
             let colour = if selected { ON_FOCUS } else { TEXT };
             let y = row_top + (metrics.row - metrics.font) * 0.5;
             painter.text(
@@ -723,10 +765,8 @@ impl HandheldUi {
                 colour,
                 &Self::overlay_label(*item),
             );
-            let value = self.overlay_value(*item, frame);
             if !value.is_empty() {
-                let x = left + width - metrics.padding * 1.5 - painter.width(&value);
-                painter.text(x, y, if selected { ON_FOCUS } else { DIM }, &value);
+                painter.text(value_x, y, if selected { ON_FOCUS } else { DIM }, &value);
             }
         }
     }
@@ -898,6 +938,8 @@ impl HandheldUi {
         let Some(_window) = full_screen_over(ui, "##question", [0.0, 0.0, 0.0, 0.75]) else {
             return;
         };
+        // Only its buttons answer the pointer, not the screen under it.
+        self.zones.borrow_mut().clear();
         let painter = self.painter(ui);
         let width = (size[0] - 4.0 * metrics.padding).min(metrics.font * 26.0);
         let left = (size[0] - width) * 0.5;

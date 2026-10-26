@@ -17,7 +17,15 @@ A game takes part in one of two ways, which work together:
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
 to the ROM it was made for: the Zelda II (USA) widescreen hack
 ([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
-one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super Mario Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)), and the Adventure Island (USA) one, its advanced mode too ([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)).
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), the Super Mario
+Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)),
+the Ninja Gaiden III (USA) one, its advanced mode too
+([`hacks/ng3/WIDESCREEN-HACK.md`](hacks/ng3/WIDESCREEN-HACK.md)), the Super Mario Bros. 3
+(USA) (Rev 1) one, its advanced mode too ([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)),
+and the Castlevania (USA) one, built for its Rev 1 too, an advanced mode as well
+([`hacks/castlevania/WIDESCREEN-HACK.md`](hacks/castlevania/WIDESCREEN-HACK.md)), and the
+Adventure Island (USA) one, its advanced mode too
+([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -52,8 +60,9 @@ made against.
 
 A ROM whose 3D profile title or file name says a game a patch is made for, but whose data is
 another version of it (`builtin_patches::for_game_name`; each patch knows its `game` and the
-No-Intro name of its ROM; a sequel's number after the game, "Adventure Island II", "Super Mario
-Bros. 3", makes it another game), shows a red [W]. When its data has the size the patch was made for
+No-Intro name of its ROM; the longest game whose words the name starts with, and not one whose
+number goes on, in figures or in Roman numerals: "Super Mario Bros. 3 (Europe)" is Super Mario
+Bros. 3's, "Super Mario Bros. 2 (USA)", "Castlevania II" and "Adventure Island II" no one's), shows a red [W]. When its data has the size the patch was made for
 (`builtin_patches::source_size`), the patch can be **forced** on it: `emu.forced_patch` (an option
 of that game, the patch's name) makes `NesCore::set_forced_patch` apply it at load and restore
 through `builtin_patches::apply_with`, which then skips the BPS checksums of the source and the
@@ -192,7 +201,12 @@ each band. Widescreen changes:
   `row * (33 + 2 extra) + k + extra`.
 * **Captured rows.** Each background band also records where it was read from
   (`CapturedRow`: PPU address `v` at the start of the line, fine X, y, pattern table), for a
-  margin decoder.
+  margin decoder, and the CHR banks it was drawn with (`chr`: the offsets of the eight 1 KiB
+  windows, `ChrView::offsets()` of `Cartridge::chr_peek_view()`). The decoded tiles of the row
+  are read through those banks (`read_row_planes`): the margins are decoded once the frame is
+  over, when a game that switches banks during the frame (Super Mario Bros. 3: its status bar
+  below line 192, its animated tiles) has other banks in place. A board with no side-effect-free
+  view keeps the reading through the banks of the end of the frame.
 * **Visible rows.** `FrameBatch::visible_rows` (30 bands of 8 lines) holds, per band, the range
   of x the band could show tiles in: `visible_range()` at its capture, or the full margin for a
   band a decoder filled.
@@ -283,6 +297,25 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    overscan hides, where the game may show another row of its ring (a band across the picture
    between the screen and the vertical margin).
 
+4. A decoder whose `redrawn_right_columns()` is `n` (default 0) is also asked for the screen
+   columns `32 - n` to 31 of each row, and those columns' nametable records of a decoded row are
+   replaced. The wide picture composes the centre of that band from the records from
+   `x = 8 (32 - n) - fine X` on instead of taking the PPU's pixels (`Ppu2C02::redrawn_from`, per
+   band of 8 lines, 256 for none; sprites from their records too): a game whose last visible
+   columns show colours of the column it is drawing past the edge (Super Mario Bros. 3, 3
+   columns: the attribute bytes it writes ahead also cover them).
+5. A decoder whose `decodes_masked_column()` is true (default false) is also asked for screen
+   column 0 of each row while the game hides the leftmost 8 pixels of the background (PPUMASK
+   bit 1 clear), and that column's nametable record of a decoded row is replaced too: the wide
+   picture composes those 8 pixels from the records, and such a game keeps there the column it is
+   drawing next (Super Mario Bros. 3, horizontal mirroring: the column it draws past the right
+   edge is the same nametable column as the one at the left edge).
+
+The CHR banks of the decoded rows: `Mapper::chr_peek_view` (default: `chr_view`) is the view
+`ppu_peek` reads, side effects aside. MMC3 has one (its peek is the default one through its bank
+windows; only its fetches clock the IRQ counter) although its `chr_view`, the PPU's fast path,
+is `None`.
+
 Decoders run only while the built-in patches are on for the game in play (see 7). The decoders:
 
 | Game | Decodes | Source |
@@ -290,6 +323,9 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
+| Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
+| Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
+| Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched and with their built-in patches | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
@@ -374,6 +410,111 @@ bottom edge, or ending on it: the game keeps there, for the overscan, a row of i
 not be the plane's) are decoded whole width as the margins are, the nametables kept where they
 show the round, while the next row towards the centre does.
 
+Ninja Gaiden III: the game draws an area from PRG banks 0-3 (`$C01E`, fixed bank). Area `$5F`
+(48 of them) starts at the address `$B960 + a` / `$B990 + a` of bank 1 gives (banks 0 and 1 seen
+at `$8000-$BFFF`); bit 7 of `$A0F0 + a` (bank 6) makes it a vertical area (rows of 8 blocks, as
+wide as the screen: nothing to show beside it, the decoder leaves it alone); the low nibble of
+`$A1B0 + a` is its last camera screen, so it is `8 (n + 1)` columns of 32 pixels. A column is 6
+blocks of 32 x 32 pixels from the top of the playfield (nametable rows 0-23; the status bar, rows
+24-29, shows above it through the IRQ, and is left to the nametables). Block `b` is 4 sub-blocks
+at `($51) + 4 b` (top left, top right, bottom left, bottom right), its attribute byte at
+`($53) + b`; sub-block `s` is 4 tiles at `($55) + 4 s`, in the same order; those pointers point
+into banks 2 and 3, seen at `$8000-$BFFF`. The camera is `$DC:$DB`. The IRQ scrolls bands of the
+playfield on their own (skies, mountains, foregrounds): such a band shows the ring of 64 tile
+columns as the game drew it around the camera, so a row whose centre is not the area at the camera
+is tried as that ring, each column the layout's column of its ring position nearest to the camera
+(within the area). A row is decoded when 20 of its 32 centre columns show the layout's tile (the
+game animates some tiles, and a band may show a seam where the ring was drawn at two moments); a
+margin column the nametables hold for that place is taken from them (Mega Man 2's rule). A row of
+the area the layout does not explain (the desert's dunes, which the game shifts in the nametables
+to animate them; the upper layer of 3-1A) takes its margins, 16 columns a side, from the ring of
+nametables beside the screen. Past the ends of the area the margins repeat its first or last 32
+pixels (owner request: no black hole beside a band that goes on).
+
+Super Mario Bros. 3: the game lays the whole level out in PRG-RAM (`Tile_Mem`, `$6000-$794F`)
+before it starts and keeps it up to date (blocks hit, coins taken, bricks broken). A horizontal
+level is up to 15 screens of 16 x 27 tiles of 16 x 16 pixels, screen `s` at `$6000 + $1B0 s`, row
+first. Tile `t` is the CHR tiles `layout[256 q + t]` of quarter `q` (top left, bottom left, top
+right, bottom right), its sub-palette `t >> 6`; the layout of tileset `$070A` is the pointer at
+`$99F7 + 2 n` of PRG bank 30 (the game's bank before the last, fixed at `$8000`; the decoder finds
+it 16 KiB before the end of the PRG-ROM, where it is with or without the built-in patch), in bank
+`PAGE_A000_ByTileset[n]` (`$83E9`) or, for a pointer at `$C000`, `PAGE_C000_ByTileset[n]`
+(`$83D6`). The 27 rows are the 54 tile rows of the plane of two stacked nametables (horizontal
+mirroring), from its top; the camera's y in the level is `Vert_Scroll` (`$FC`) and picks the
+instance of a row, its x `$12:$FD`. Rows past the level (the status bar, below line 192) and a row
+whose centre differs from the tile map at more than one of four columns (the title, the bonus
+games, a transition) are left to the nametables; the vertical levels (`$03EF` non-zero, four
+pipe mazes) are not decoded yet. A world map is in the same tile map (rows 16-26, at most four
+screens, the screens past it filled with tile `$02`) with the layout of tileset 0 in bank 12 (the
+page table's entry for it is not used): the next screen of the map shows past its frame. The
+vertical margin above the screen is decoded once a row halfway down the playfield matches; the one
+below stays empty: it is under the status bar, and the level there stuck to the status bar made a
+3D profile that tells the status bar by its shape miss it every other frame (its clipping, and the
+2D view framed by it, jumped). Column 0 is decoded too
+while the game hides it (see 5), and the last 3 columns of the centre are redrawn (see 4).
+
+Castlevania: the two USA builds share their data banks 0-4 byte for byte (only the code, banks
+5-7, was rebuilt), so one decoder serves both, given where its build keeps two tables of the fixed
+bank (`castlevania::USA` and `USA_REV1`: Rev 1's are `$24` bytes further). The game draws the room
+in play from PRG bank 4 a 32 x 32-pixel block at a time (`$F67A`, base build). Room `$46` of stage
+`$28` has its map at entry `$46` of the list the maps table (`$FAFF`, Rev 1 `$FB23`) points at for
+the stage; the decoder reads it there as `$CFD4` does, the game keeping it in `$33` only once the
+camera moves (a stage starts with the right margin empty otherwise). A map is 6 block numbers a
+column, top first, room x `32 c` at `map + 6 (c + 4)`; block `n` of
+the stage (`$28`) is 17 bytes at the pointer of entry `$28` of the blocks table (`$F9D6`, Rev 1
+`$F9FA`) `+ 17 n`, its attribute byte (the block is one attribute cell), then its 16 tiles row
+first. The map's first block row is nametable row 4; the status bar keeps rows 0-5, so the rows
+decoded are 6-27. A room ends a screen past the last screen of its camera, the nibble of the
+lengths table (`$FB8C`, Rev 1 `$FBB0`) for the stage (the high one for room `$46` 0, the low one
+for room 1, as `$CFF0` reads it); past both ends the margins stay empty. A room may open on a
+screen of filler behind a wall, which the camera never shows (stage 4): its map holds block
+numbers past the stage's blocks there (a set ends where the next set of the table starts), and
+such leading screens are not the room either. A margin column within 64 pixels of the screen is
+taken from the nametables when 8 of its 22 playfield rows show the map (the game draws a column 96
+pixels ahead of the right edge a block at a time and keeps those behind the left one, so there
+every column is one it finished drawing for its place): what the game redraws into the background
+shows there too (the crushers of stage 6 going down, a wall broken); further out the margins come
+from the map. The camera is `$2F:$2E`;
+some stages draw room x 0 in the right nametable (the table `$FBB2`, Rev 1 `$FBD6`: the camera is
+then 256 pixels away on the ring of two nametables; read there, not guessed, since the rows of
+those stages repeat and both ways can match), and a row is decoded only when 24 of its 32 centre
+columns show what the map gives there or are such a column of the nametables (crushers or a wall
+broken in the centre leave the row decoded; the title, the intermissions and the transitions are
+left to the nametables).
+The built-in patches of both builds (`CASTLEVANIA_USA`, `CASTLEVANIA_USA_REV1`, an advanced
+mode) are one hack built for each (`cvwide`): its code is the free end of PRG bank 5, the same in
+both, which the fixed bank has no room to unlock, so the window is open from power-on
+(`boot_window`). It draws the objects in the margins: an object's x is 9-bit there (bit 0 of
+`$0300` its bit 8, 256-383 right of the screen and 384-511 left of it, as the game's own `$EF45`
+reads it), the game keeps its candles and spawners' objects alive from 64 pixels left of the
+screen to 64 right of it, and the hack draws them past the edges (the sprite builder of bank 0,
+16-bit sprite x and the high bytes at `$5100`), within the room. The enemies the game removes at
+the edges of the screen (most of them: 8-bit x, moved by their own routines) are followed in 16
+bits and live on up to the objects' margin (`min(M + 16, 120)`); one made at an edge by a spawner
+comes in from it; past an edge an object looks for its ground at the edge (the game's terrain is a
+ring that follows the nametables, drawn only where the game has drawn). The game's collisions with
+Simon only take objects on the screen (`$0300` 0), so nothing in a margin touches him; Simon's
+weapons (slots `$14`-`$16`, which the game checks against the objects in 8 bits, `$E5C7`) touch
+nothing either while past an edge, so a dagger flying on into a margin cannot hit an object at the
+other edge. Weapons and the enemies' shots go on through the margins (the cross keeps the game's
+bounds: it reaches an edge only at the end of a room, and turns back there); an enemy only shoots
+while on the screen (the game's own check before `$ED38`). An object made at another's place
+(`$ED5E` and three more copies: shots, pieces, points) takes its x's bit 8 too, so one made by an
+object past an edge is made there. The objects the game keeps in 9 bits (`$EAB9`) are no longer
+hidden within 8 pixels of the edges, and go as far as the objects' margin when that is past the
+game's 64 pixels. The moving platforms (stages 4, 5 and 10, slots `$17`-`$1A`, bank 6 `$AB1F`)
+have their place on the screen in 16 bits, from which the game puts an 8-bit x and, near an edge,
+only the piece of them on the screen (its x wrapped: a platform past the left edge showed at the
+right one too): the hack keeps the 16-bit x for the sprite builder and, within the view, draws them
+whole. Options:
+testing aids, off by default (Select in a stage goes on to the next stage through the state that
+begins one, with its block's graphics; Simon never hurt), and "No slowdown" (255 lines of
+overclock, on by default; the yield ends it in the main loop, `idle_loop` `$C030`-`$C03E`). The
+game's split under its status bar is a sprite 0 wait early in the NMI, far from the overclock (at
+line 240) and before the hack's code. Measured on a movie of stage 1 and its hall, 5,400 frames
+at a 112-pixel margin: the original game lags only in a room change (the same with the hack), the
+hack without the overclock some 110 frames more, none with it.
+
 ---
 
 ## 5. The 3D engine
@@ -450,7 +591,9 @@ pub struct BuiltinPatch {
   changes it.
 * `BuiltinPatch::advanced`: an **advanced mode** of a game's widescreen (Super Mario Bros.: the
   enemies in the margins; Adventure Island: the sprites and objects in the margins). Such a patch applies only when the game's `video.widescreen_advanced`
-  is on too (`NesCore::set_advanced_patches`, set with `set_builtin_patches` at each load and
+  is on too, which it is by default (owner request: the widescreen is the whole hack, its
+  testing aids aside; a game keeps a value of its own only when it is turned off)
+  (`NesCore::set_advanced_patches`, set with `set_builtin_patches` at each load and
   restore); off, the ROM loads as it is and its margin decoder alone widens it. The hacks screen
   shows the row "Advanced mode" for such a game (`HackRow::Advanced`; on, it turns the widescreen
   on too), and the options of an advanced patch only while it is on. A state is "the hack" or not
@@ -464,13 +607,17 @@ pub struct BuiltinPatch {
   jumps straight into the window.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
-  main loop `$C010`-`$C01A`, everything else running in the NMI; Adventure Island: `LDA $0B / BNE`
+  main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
   at `$B759`). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
   per frame of core time with the fixed overclock, 1.11 ms with the yield, as without overclock;
-  Mega Man 2's Air Man run keeps no lag frame (232 at 64 lines).
+  Mega Man 2's Air Man run keeps no lag frame (232 at 64 lines). Super Mario Bros. 3:
+  `GraphicsBuf_Prep_And_WaitVSync`'s `LDA VBlank_Tick / BPL` at `$96FB`, where every loop of the
+  game waits; 1500 frames of 1-1 with the enemies in a 112-pixel margin lag 30 times (3 in the
+  original game), none with 255 lines; 1.50 ms per frame of core time without the overclock, 1.53
+  with it and the yield.
 * A patch may add PRG-ROM: data of the original size plus whole 16 KiB banks, the CHR-ROM after
   them (`apply_with` then raises the PRG bank count of the player's header, `resize_prg`). An
   NROM game maps its first 32 KiB as before; the added banks are seen through the window. The BPS

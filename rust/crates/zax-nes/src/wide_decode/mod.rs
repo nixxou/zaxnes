@@ -14,9 +14,12 @@
 //! on (see [`crate::builtin_patches`]).
 
 mod adventure_island;
+mod castlevania;
 pub mod guest;
 mod megaman2;
+mod ng3;
 mod smb1;
+mod smb3;
 mod zelda2;
 
 /// What a decoder may read once the frame has run.
@@ -124,6 +127,23 @@ pub trait MarginDecoder: Sync {
         out: &mut Vec<DecodedTile>,
     ) -> bool;
 
+    /// Whether the decoder also draws screen column 0 of the rows it decodes while the game
+    /// hides the leftmost 8 pixels of the background (PPUMASK bit 1 clear): such a game keeps
+    /// there the column it is drawing next (Super Mario Bros. 3), and the wide picture, which
+    /// shows those pixels, would show it. `false` by default: column 0 stays the nametables'.
+    fn decodes_masked_column(&self) -> bool {
+        false
+    }
+
+    /// How many of the centre's rightmost columns the decoder redraws on the rows it decodes
+    /// (0 by default): a game that shows there colours of the column it is drawing next (Super
+    /// Mario Bros. 3: the attributes it writes ahead of the right edge also cover the visible
+    /// columns next to it). Their nametable records are replaced, and the wide picture composes
+    /// those columns of the decoded rows from the records instead of the PPU's pixels.
+    fn redrawn_right_columns(&self) -> i32 {
+        0
+    }
+
     /// Decodes the whole of `row`, a row the PPU did not draw: above or below the screen, in
     /// the vertical margin (its `line` is then negative or past 239, and its PPU address is the
     /// one it would have on the plane of two stacked nametables). Returns `false`, as by
@@ -158,6 +178,10 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
         smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
         adventure_island::SOURCE_CRC => Some(&adventure_island::AdventureIsland),
+        ng3::SOURCE_CRC => Some(&ng3::NinjaGaiden3),
+        smb3::SOURCE_CRC => Some(&smb3::SuperMarioBros3),
+        castlevania::SOURCE_CRC => Some(&castlevania::USA),
+        castlevania::SOURCE_CRC_REV1 => Some(&castlevania::USA_REV1),
         _ => None,
     }
 }
@@ -170,6 +194,10 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::MEGAMAN2_USA => Some(&megaman2::MegaMan2),
         crate::builtin_patches::SMB1_WORLD => Some(&smb1::SuperMarioBros),
         crate::builtin_patches::ADVENTURE_ISLAND_USA => Some(&adventure_island::AdventureIsland),
+        crate::builtin_patches::NG3_USA => Some(&ng3::NinjaGaiden3),
+        crate::builtin_patches::SMB3_USA => Some(&smb3::SuperMarioBros3),
+        crate::builtin_patches::CASTLEVANIA_USA => Some(&castlevania::USA),
+        crate::builtin_patches::CASTLEVANIA_USA_REV1 => Some(&castlevania::USA_REV1),
         _ => None,
     }
 }

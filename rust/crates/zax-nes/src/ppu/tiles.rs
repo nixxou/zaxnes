@@ -25,6 +25,10 @@ pub(super) struct CapturedRow {
     row: BackgroundRow,
     y: i16,
     pattern_table: u16,
+    /// The CHR banks the row was drawn with ([`crate::cartridges::ChrView::offsets`]), for a
+    /// board that has a side-effect-free view: a game that switches banks during the frame (a
+    /// status bar, animated tiles) has others in place once the frame is over.
+    chr: Option<[usize; crate::cartridges::BankWindows::CHR_WINDOWS]>,
 }
 
 impl Ppu2C02 {
@@ -67,6 +71,7 @@ impl Ppu2C02 {
         self.visible_rows = crate::STANDARD_ROWS;
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
+        self.redrawn_from = [256; 30];
         self.tiles.set_extra_columns(0);
         self.mask_x = 0;
         self.mask_y = 0;
@@ -86,6 +91,7 @@ impl Ppu2C02 {
         self.visible_rows = [(-margin, 256 + margin); 30];
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
+        self.redrawn_from = [256; 30];
     }
 
     /// Runs the captures owed by visible line `line` at its first dot: the sprite band, and
@@ -184,6 +190,10 @@ impl Ppu2C02 {
                 },
                 y,
                 pattern_table,
+                chr: cart
+                    .as_deref()
+                    .and_then(Cartridge::chr_peek_view)
+                    .map(|view| view.offsets()),
             });
         }
 
@@ -278,7 +288,13 @@ impl Ppu2C02 {
             return;
         }
         let row_width = 33 + (2 * extra);
+        // Column 0 too, for a decoder that draws it while the game hides it.
+        let masked_column = decoder.decodes_masked_column() && (self.mask & 0x02) == 0;
+        let first_centre = i32::from(masked_column);
+        // And the centre's last columns, for a decoder that redraws them.
+        let first_right = 32 - decoder.redrawn_right_columns().clamp(0, 31);
         let mut decoded_rows = [false; 31];
+        let mut redrawn_from = [256i16; 30];
         let mut tiles = Vec::new();
         let mut records = Vec::new();
         // The decoder may read the nametables, as the PPU sees them now.
@@ -297,12 +313,19 @@ impl Ppu2C02 {
             // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose
             // pixels begin at 256 - fine X, and goes on while it starts left of the edge.
             let last = 32 + extra - i32::from(fine_x == 0);
-            let mut columns = (-extra..0).chain(32..=last);
+            let mut columns = (-extra..first_centre).chain(first_right..=last);
             tiles.clear();
             if !decoder.decode_row(memory, &captured.row, &mut columns, &mut tiles) {
                 continue;
             }
             decoded_rows[row_index] = true;
+            if first_right < 32 {
+                if let Some(from) = redrawn_from.get_mut(row_index) {
+                    #[allow(clippy::cast_possible_truncation)] // 0..256.
+                    let x = ((8 * first_right) - fine_x).max(0) as i16;
+                    *from = x;
+                }
+            }
             #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
             let row_number = row_index as i32;
             for &DecodedTile {
@@ -311,11 +334,7 @@ impl Ppu2C02 {
                 palette,
             } in &tiles
             {
-                let (plane0, plane1) = self.read_pattern_planes(
-                    captured.pattern_table + (u16::from(tile) * 16),
-                    ChrFetch::Background,
-                    cart,
-                );
+                let (plane0, plane1) = self.read_row_planes(captured, tile, cart);
                 #[allow(clippy::cast_possible_truncation)] // -519..768.
                 let x = ((8 * column) - fine_x) as i16;
                 records.push(TileRecord::new(
@@ -336,6 +355,7 @@ impl Ppu2C02 {
         let (edge_rows, centre_lines) =
             self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
         self.centre_lines = centre_lines;
+        self.redrawn_from = redrawn_from;
 
         #[allow(clippy::cast_possible_truncation)] // At most 512.
         let margin = self.frame_margin as i16;
@@ -357,7 +377,8 @@ impl Ppu2C02 {
             if edge_rows.contains(&row) {
                 return false;
             }
-            !decoded_rows.get(row).copied().unwrap_or(false) || (0..32).contains(&column)
+            !decoded_rows.get(row).copied().unwrap_or(false)
+                || (first_centre..first_right).contains(&column)
         });
         for record in records {
             self.tiles.add(record);
@@ -492,11 +513,7 @@ impl Ppu2C02 {
             palette,
         } in tiles
         {
-            let (plane0, plane1) = self.read_pattern_planes(
-                from.pattern_table + (u16::from(tile) * 16),
-                ChrFetch::Background,
-                cart,
-            );
+            let (plane0, plane1) = self.read_row_planes(from, tile, cart);
             #[allow(clippy::cast_possible_truncation)] // -519..768.
             let x = ((8 * column) - fine_x) as i16;
             records.push(TileRecord::new(
@@ -696,6 +713,29 @@ impl Ppu2C02 {
 
     /// Reads the 16 CHR bytes of the pattern at `address` through the side-effect-free path
     /// and packs them as REQ-CORE-034 requires.
+    /// The planes of background tile `tile` as row `captured` showed it: through the CHR
+    /// banks in place when it was drawn, when the board has a side-effect-free view.
+    fn read_row_planes(
+        &self,
+        captured: &CapturedRow,
+        tile: u8,
+        cartridge: Option<&Cartridge>,
+    ) -> (u64, u64) {
+        let address = captured.pattern_table + (u16::from(tile) * 16);
+        let view = cartridge.and_then(Cartridge::chr_peek_view);
+        let (Some(view), Some(offsets)) = (view, captured.chr) else {
+            return self.read_pattern_planes(address, ChrFetch::Background, cartridge);
+        };
+        let view = view.with_offsets(offsets);
+        let mut plane0 = 0u64;
+        let mut plane1 = 0u64;
+        for row in 0..8u16 {
+            plane0 |= u64::from(view.read(address + row)) << (8 * row);
+            plane1 |= u64::from(view.read(address + 8 + row)) << (8 * row);
+        }
+        (plane0, plane1)
+    }
+
     fn read_pattern_planes(
         &self,
         address: u16,
@@ -852,6 +892,12 @@ impl Ppu2C02 {
         let top = usize::try_from(top.clamp(0, 240)).unwrap_or(0);
         let bottom = usize::try_from(bottom.clamp(0, 240)).unwrap_or(240);
         let screen_rows = margin_y + top..margin_y + bottom;
+        // And from the right columns a decoder redraws, band by band.
+        let centre_end = |row: usize| -> i32 {
+            row.checked_sub(margin_y)
+                .and_then(|line| self.redrawn_from.get(line / 8))
+                .map_or(SCREEN_WIDTH_I32, |&from| i32::from(from))
+        };
         // Palette entries of the sides (0 = nothing), composed first, then turned into colours. A
         // sprite behind is painted first so that an opaque background pixel covers it.
         out.resize(width * height, 0);
@@ -867,8 +913,7 @@ impl Ppu2C02 {
                 }
                 for px in 0..8i32 {
                     let x = i32::from(record.x) + px;
-                    if screen_rows.contains(&row) && (composed_from..SCREEN_WIDTH_I32).contains(&x)
-                    {
+                    if screen_rows.contains(&row) && (composed_from..centre_end(row)).contains(&x) {
                         continue;
                     }
                     let Ok(column) = usize::try_from(x + self.frame_margin) else {
@@ -909,8 +954,9 @@ impl Ppu2C02 {
         let first = margin + composed_from as usize;
         for row in 0..height {
             let line = &mut out[row * width..(row + 1) * width];
+            let end = margin + usize::try_from(centre_end(row)).unwrap_or(SCREEN_WIDTH);
             for (column, slot) in line.iter_mut().enumerate() {
-                if screen_rows.contains(&row) && (first..margin + SCREEN_WIDTH).contains(&column) {
+                if screen_rows.contains(&row) && (first..end).contains(&column) {
                     *slot = self.pixels[((row - margin_y) * SCREEN_WIDTH) + column - margin];
                 } else {
                     *slot = self.palette[palette_index(0x3F00 | u16::from(*slot))];
