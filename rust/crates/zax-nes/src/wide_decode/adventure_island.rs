@@ -92,20 +92,7 @@ impl MarginDecoder for AdventureIsland {
         }
         let platforms = Platforms::new(memory, &view);
         for column in columns {
-            let world = first_column + column;
-            // A column the game drew already shows what it drew, what it puts over the tables
-            // included; one it has not drawn yet, the tables.
-            let drawn = (world < view.drawing)
-                .then(|| view.drawn(memory, *row, column, world, plane_row))
-                .flatten();
-            let decoded = match drawn.as_ref() {
-                Some(drawn) => drawn.cell(memory, *row, column),
-                None => view
-                    .buffered(memory, world, plane_row)
-                    .or_else(|| platforms.tile(&view, world, plane_row))
-                    .or_else(|| view.tile(world, plane_row)),
-            }
-            .or_else(|| view.tile(world, plane_row));
+            let decoded = view.decoded(memory, &platforms, *row, column, first_column, plane_row);
             if let Some((tile, palette)) = decoded {
                 out.push(DecodedTile {
                     column,
@@ -117,14 +104,17 @@ impl MarginDecoder for AdventureIsland {
         true
     }
 
-    /// The rows across the screen's top and bottom edges show, past it, a row of the game's
-    /// ring that is not the plane's: the decoder gives them.
+    /// The rows at the screen's top and bottom edges may show a row of the game's ring that is
+    /// not the plane's (past the screen, or a whole row when the vertical scroll is a multiple
+    /// of 8 and the 30 rows of the ring all show): the decoder gives them.
     fn covers_overscan(&self) -> bool {
         true
     }
 
     /// The rows above and below the screen: the plane's, from the tables (the nametables hold the
-    /// screen's rows only), while the screen's nearest row shows the round.
+    /// screen's rows only), while the screen's nearest row shows the round. A row at the screen's
+    /// edge (its first or last) is decoded as the margins of `decode_row` are, the nametables
+    /// kept where they show the round, while the next row towards the centre does.
     fn decode_extra_row(
         &self,
         memory: &DecoderMemory<'_>,
@@ -134,8 +124,15 @@ impl MarginDecoder for AdventureIsland {
     ) -> bool {
         let view = View::new(memory);
         // The screen's row nearest this one, whole on the screen (a row across its edge shows,
-        // past it, a row the game does not show).
-        let rows_away = if row.line < 0 {
+        // past it, a row the game does not show); for a row at the edge, the next one in.
+        let edge = row.line > -8 && row.line < VISIBLE_LINES;
+        let rows_away = if edge {
+            if row.line < VISIBLE_LINES / 2 {
+                -1
+            } else {
+                1
+            }
+        } else if row.line < 0 {
             -((-row.line + 7) / 8)
         } else {
             (row.line - (VISIBLE_LINES - 8) + 7).max(0) / 8
@@ -157,8 +154,14 @@ impl MarginDecoder for AdventureIsland {
             return false;
         }
         let plane_row = View::plane_row(memory, *row);
+        let platforms = Platforms::new(memory, &view);
         for column in columns {
-            if let Some((tile, palette)) = view.tile(first_column + column, plane_row) {
+            let decoded = if edge {
+                view.decoded(memory, &platforms, *row, column, first_column, plane_row)
+            } else {
+                view.tile(first_column + column, plane_row)
+            };
+            if let Some((tile, palette)) = decoded {
                 out.push(DecodedTile {
                     column,
                     tile,
@@ -196,6 +199,32 @@ impl<'a> View<'a> {
     /// The world tile column at the left edge of `row`.
     fn first_column(&self, row: BackgroundRow) -> i32 {
         resolve_ring(row.ring_x(), 512, (self.drawing * 8) - DRAW_LEAD) >> 3
+    }
+
+    /// The tile and sub-palette of screen column `column` of `row` (world tile column
+    /// `first_column + column`): a column the game drew already shows what it drew, what it puts
+    /// over the tables included; one it has not drawn yet, the tables and the platforms to come.
+    fn decoded(
+        &self,
+        memory: &DecoderMemory<'_>,
+        platforms: &Platforms,
+        row: BackgroundRow,
+        column: i32,
+        first_column: i32,
+        plane_row: i32,
+    ) -> Option<(u8, u8)> {
+        let world = first_column + column;
+        let drawn = (world < self.drawing)
+            .then(|| self.drawn(memory, row, column, world, plane_row))
+            .flatten();
+        match drawn.as_ref() {
+            Some(drawn) => drawn.cell(memory, row, column),
+            None => self
+                .buffered(memory, world, plane_row)
+                .or_else(|| platforms.tile(self, world, plane_row))
+                .or_else(|| self.tile(world, plane_row)),
+        }
+        .or_else(|| self.tile(world, plane_row))
     }
 
     /// The row of the plane `row` shows: the one congruent to its nametable row nearest the rows
