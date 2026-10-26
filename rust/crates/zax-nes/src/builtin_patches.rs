@@ -13,6 +13,7 @@
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM's free space (`ng3wide`, `tools/build.py`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, part of it seen through the extension's window; the ROM keeps its size (`smb3wide`, `tools/build.py`) |
 //! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size; one source for both builds (`cvwide`, `tools/build.py`) |
+//! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`aiwide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -64,9 +65,11 @@ pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
 pub const CASTLEVANIA_USA: &str = "Castlevania (USA) widescreen";
 /// Name of the Castlevania (USA) (Rev 1) widescreen patch (advanced mode).
 pub const CASTLEVANIA_USA_REV1: &str = "Castlevania (USA) (Rev 1) widescreen";
+/// Name of the Adventure Island (USA) widescreen patch (advanced mode).
+pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 7] = [
+pub const PATCHES: [BuiltinPatch; 8] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -260,6 +263,47 @@ pub const PATCHES: [BuiltinPatch; 7] = [
         boot_window: Some((0x85, 0x1F)),
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
+    },
+    BuiltinPatch {
+        name: ADVENTURE_ISLAND_USA,
+        game: "Adventure Island",
+        rom_name: "Adventure Island (USA)",
+        source_crc: 0xF8A7_13BE,
+        bps: include_bytes!("../patches/adventure-island-usa-widescreen.bps"),
+        options: &[
+            // Testing aids: Select on the title screen goes through every round; no injury from
+            // the enemies (falls, the water and hunger still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (Select on the title screen)",
+                label_fr: "Sélecteur de niveau (Select sur l'écran titre)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the sprites and objects.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (2)
+        // is open in the window from power-on.
+        boot_window: Some((0x82, 0x00)),
+        // The main loop's wait for the NMI: LDA $0B / BNE.
+        idle_loop: Some((0xB759, 0xB75C)),
     },
 ];
 
@@ -753,6 +797,13 @@ mod tests {
         );
         assert!(for_game_name("Castlevania II - Simon's Quest (USA)").is_none());
         assert!(for_game_name("Castlevania III - Dracula's Curse (USA)").is_none());
+        assert_eq!(
+            Some(ADVENTURE_ISLAND_USA),
+            for_game_name("Adventure Island (Europe)").map(|patch| patch.name)
+        );
+        assert!(for_game_name("Adventure Island II (USA)").is_none());
+        assert!(for_game_name("Adventure Island 3 (USA)").is_none());
+        assert!(for_game_name("Adventure Islands").is_none());
         assert!(for_game_name("Legend of Zelda, The (USA)").is_none());
         assert!(for_game_name("").is_none());
     }

@@ -58,7 +58,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --advanced               apply the built-in patches of an advanced widescreen mode too
   --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
-                           as the widescreen margin makes them
+                           (and as tall) as the widescreen margins make them
   --load-state <file>      restore a state block (written by --save-state) after the reset
   --movie <file.zmv>       play a movie of the application: its start state is restored, its
                            hack options set and its inputs replace --press for its frames

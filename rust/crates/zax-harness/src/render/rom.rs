@@ -257,13 +257,15 @@ fn write_run_outputs(host: &mut Host, request: &RomRequest<'_>) -> Result<(), Ha
 
     if let Some(path) = request.png_nes {
         let batch = host.core.frame_batch();
-        let (width, pixels) = compose_records(&batch);
+        let (width, height, pixels) = compose_records(&batch);
         let width = u32::try_from(width).unwrap_or(256);
-        fs::write(path, png_image::encode_rgba(width, 240, &pixels)?)?;
+        let height = u32::try_from(height).unwrap_or(240);
+        fs::write(path, png_image::encode_rgba(width, height, &pixels)?)?;
         println!(
-            "render: records composed to {} ({width} x 240, margin {})",
+            "render: records composed to {} ({width} x {height}, margin {}, vertical margin {})",
             path.display(),
-            batch.margin
+            batch.margin,
+            batch.margin_y
         );
     }
     Ok(())
@@ -769,10 +771,12 @@ fn push_scripted_light(model: &SettingsModel, scene: &mut SceneState) {
 /// The tile records of `batch` composed flat as the NES would show them, `margin` pixels wider
 /// on each side: the backdrop, the sprites behind the background, the background, then the
 /// sprites in front, a lower sprite index winning. Returns the width and the RGBA pixels.
-fn compose_records(batch: &FrameBatch<'_>) -> (usize, Vec<u8>) {
+fn compose_records(batch: &FrameBatch<'_>) -> (usize, usize, Vec<u8>) {
     let margin = usize::try_from(batch.margin.max(0)).unwrap_or(0);
+    let margin_y = usize::try_from(batch.margin_y.max(0)).unwrap_or(0);
     let width = 256 + (2 * margin);
-    let mut entries = vec![0u8; width * 240];
+    let height = 240 + (2 * margin_y);
+    let mut entries = vec![0u8; width * height];
     let mut paint = |record: &TileRecord, base: u8| {
         for py in 0..8 {
             for px in 0..8 {
@@ -785,12 +789,12 @@ fn compose_records(batch: &FrameBatch<'_>) -> (usize, Vec<u8>) {
                 #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..8.
                 let (x, y) = (
                     i32::from(record.x) + px as i32 + batch.margin,
-                    i32::from(record.y) + py as i32,
+                    i32::from(record.y) + py as i32 + batch.margin_y,
                 );
                 let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
                     continue;
                 };
-                if x < width && y < 240 {
+                if x < width && y < height {
                     entries[(y * width) + x] = base + (record.palette * 4) + pixel;
                 }
             }
@@ -823,5 +827,5 @@ fn compose_records(batch: &FrameBatch<'_>) -> (usize, Vec<u8>) {
             [color.r, color.g, color.b, 255]
         })
         .collect();
-    (width, pixels)
+    (width, height, pixels)
 }
