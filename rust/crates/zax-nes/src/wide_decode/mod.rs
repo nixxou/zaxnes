@@ -13,6 +13,7 @@
 //! A decoder applies to the ROMs a built-in patch is made for, while the built-in patches are
 //! on (see [`crate::builtin_patches`]).
 
+mod adventure_island;
 pub mod guest;
 mod megaman2;
 mod smb1;
@@ -145,6 +146,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
     match crc {
         megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
         smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
+        adventure_island::SOURCE_CRC => Some(&adventure_island::AdventureIsland),
         _ => None,
     }
 }
