@@ -182,6 +182,8 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::SMB1_WORLD => Some(&smb1::SuperMarioBros),
         crate::builtin_patches::NG3_USA => Some(&ng3::NinjaGaiden3),
         crate::builtin_patches::SMB3_USA => Some(&smb3::SuperMarioBros3),
+        crate::builtin_patches::CASTLEVANIA_USA => Some(&castlevania::USA),
+        crate::builtin_patches::CASTLEVANIA_USA_REV1 => Some(&castlevania::USA_REV1),
         _ => None,
     }
 }

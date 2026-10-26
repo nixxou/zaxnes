@@ -7,9 +7,10 @@
 //! The level is drawn from PRG bank 4, as the game's own block drawer (`$F67A`, base build)
 //! reads it:
 //!
-//! * the room in play has a map at `($33)`: a column of 32 pixels is 6 block numbers, top
-//!   first, the column at room x `32 c` at `($33) + 6 (c + 4)`; the camera's x in the room is
-//!   `$2F:$2E`;
+//! * room `$46` of stage `$28` has a map, pointed at by entry `$46` of the list the fixed
+//!   bank's maps table gives for the stage (`$CFD4`, which keeps it in `$33`, but only once the
+//!   camera moves): a column of 32 pixels is 6 block numbers, top first, the column at room x
+//!   `32 c` at `map + 6 (c + 4)`; the camera's x in the room is `$2F:$2E`;
 //! * the stage's blocks (`$28` the stage) are pointed at by the fixed bank's table, entry
 //!   `$28`: block `n` is 17 bytes at that pointer `+ 17 n`, its attribute byte, then its 16
 //!   tiles row first (32 x 32 pixels, one attribute cell);
@@ -26,23 +27,29 @@
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
-/// The decoder for one build: where its fixed bank keeps the tables of the stages' blocks and
-/// of their rooms' lengths.
+/// The decoder for one build: where its fixed bank keeps the tables of the stages' maps, of
+/// their blocks and of their rooms' lengths.
 pub struct Castlevania {
-    blocks_table: u16,
-    lengths_table: u16,
+    /// The table of the stages' maps.
+    maps: u16,
+    /// The table of the stages' blocks.
+    blocks: u16,
+    /// The table of the stages' rooms' lengths.
+    lengths: u16,
 }
 
 /// The base build.
 pub static USA: Castlevania = Castlevania {
-    blocks_table: 0xF9D6,
-    lengths_table: 0xFB8C,
+    maps: 0xFAFF,
+    blocks: 0xF9D6,
+    lengths: 0xFB8C,
 };
 
 /// Rev 1.
 pub static USA_REV1: Castlevania = Castlevania {
-    blocks_table: 0xF9FA,
-    lengths_table: 0xFBB0,
+    maps: 0xFB23,
+    blocks: 0xF9FA,
+    lengths: 0xFBB0,
 };
 
 /// CRC-32 of the base build's data (no CHR-ROM, iNES header excluded).
@@ -52,8 +59,6 @@ pub const SOURCE_CRC_REV1: u32 = 0xB668_C7FC;
 
 const STAGE: u16 = 0x0028;
 const ROOM: u16 = 0x0046;
-const MAP_LOW: u16 = 0x0033;
-const MAP_HIGH: u16 = 0x0034;
 const CAMERA_LOW: u16 = 0x002E;
 const CAMERA_HIGH: u16 = 0x002F;
 
@@ -142,17 +147,21 @@ impl<'a> Level<'a> {
                 .copied()
         };
         let stage = usize::from(memory.ram(STAGE));
-        let blocks = usize::from(fixed_byte(build.blocks_table, 2 * stage)?)
-            | (usize::from(fixed_byte(build.blocks_table, 2 * stage + 1)?) << 8);
+        let blocks = usize::from(fixed_byte(build.blocks, 2 * stage)?)
+            | (usize::from(fixed_byte(build.blocks, 2 * stage + 1)?) << 8);
         // The camera's last screen: the high nibble for the stage's first room, the low one
         // for its second.
-        let lengths = fixed_byte(build.lengths_table, stage)?;
+        let lengths = fixed_byte(build.lengths, stage)?;
         let last_screen = if memory.ram(ROOM) == 0 {
             lengths >> 4
         } else {
             lengths & 0x0F
         };
-        let map = usize::from(memory.ram(MAP_LOW)) | (usize::from(memory.ram(MAP_HIGH)) << 8);
+        // The room's map, as `$CFD4` finds it: `$33` is only set once the camera moves.
+        let maps = usize::from(fixed_byte(build.maps, 2 * stage)?)
+            | (usize::from(fixed_byte(build.maps, 2 * stage + 1)?) << 8);
+        let room = maps.checked_sub(0x8000)? + 2 * usize::from(memory.ram(ROOM));
+        let map = usize::from(*bank.get(room)?) | (usize::from(*bank.get(room + 1)?) << 8);
         let camera = (i32::from(memory.ram(CAMERA_HIGH)) << 8) | i32::from(memory.ram(CAMERA_LOW));
         Some(Self {
             bank,
