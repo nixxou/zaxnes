@@ -304,6 +304,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
 | Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
 | Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
+| Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -385,6 +386,22 @@ below stays empty: it is under the status bar, and the level there stuck to the 
 3D profile that tells the status bar by its shape miss it every other frame (its clipping, and the
 2D view framed by it, jumped). Column 0 is decoded too
 while the game hides it (see 5), and the last 3 columns of the centre are redrawn (see 4).
+
+Castlevania: the two USA builds share their data banks 0-4 byte for byte (only the code, banks
+5-7, was rebuilt), so one decoder serves both, given where its build keeps two tables of the fixed
+bank (`castlevania::USA` and `USA_REV1`: Rev 1's are `$24` bytes further). The game draws the room
+in play from PRG bank 4 a 32 x 32-pixel block at a time (`$F67A`, base build): its map is at
+`($33)`, 6 block numbers a column, top first, room x `32 c` at `($33) + 6 (c + 4)`; block `n` of
+the stage (`$28`) is 17 bytes at the pointer of entry `$28` of the blocks table (`$F9D6`, Rev 1
+`$F9FA`) `+ 17 n`, its attribute byte (the block is one attribute cell), then its 16 tiles row
+first. The map's first block row is nametable row 4; the status bar keeps rows 0-5, so the rows
+decoded are 6-27. A room ends a screen past the last screen of its camera, the nibble of the
+lengths table (`$FB8C`, Rev 1 `$FBB0`) for the stage (the high one for room `$46` 0, the low one
+for room 1, as `$CFF0` reads it); past both ends the margins stay empty. The camera is `$2F:$2E`;
+some stages draw room x 0 in the right nametable (`$FBB2`), so the camera is tried both ways on
+the ring of two nametables, and a row is decoded only when four of its centre columns show what
+the map gives there (the title, the intermissions and the transitions are left to the
+nametables).
 
 ---
 

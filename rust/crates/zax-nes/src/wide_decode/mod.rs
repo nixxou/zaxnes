@@ -13,6 +13,7 @@
 //! A decoder applies to the ROMs a built-in patch is made for, while the built-in patches are
 //! on (see [`crate::builtin_patches`]).
 
+mod castlevania;
 pub mod guest;
 mod megaman2;
 mod ng3;
@@ -166,6 +167,8 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
         ng3::SOURCE_CRC => Some(&ng3::NinjaGaiden3),
         smb3::SOURCE_CRC => Some(&smb3::SuperMarioBros3),
+        castlevania::SOURCE_CRC => Some(&castlevania::USA),
+        castlevania::SOURCE_CRC_REV1 => Some(&castlevania::USA_REV1),
         _ => None,
     }
 }
