@@ -109,14 +109,14 @@ impl MarginDecoder for Castlevania {
         let swap = level.swap * 256;
         let first_column = (resolve_ring(row.ring_x(), 512, level.camera + swap) - swap) >> 3;
         // What the PPU shows in the centre must be what the map gives, give or take the blocks the
-        // game redraws itself (a wall broken, a crusher).
+        // game redraws itself (crushers, a wall broken: a column it holds for its place).
         let matching = (0..32)
             .filter(|&column| {
-                level
-                    .tile_at(first_column + column, coarse_y)
-                    .is_some_and(|(tile, _)| {
-                        (memory.nametable)(nametable_address(*row, column)) == tile
-                    })
+                let world = first_column + column;
+                level.tile_at(world, coarse_y).is_some_and(|(tile, _)| {
+                    (memory.nametable)(nametable_address(*row, column)) == tile
+                        || column_is_current(memory, &level, *row, column, world)
+                })
             })
             .count();
         if matching < CENTRE_MATCHES {
@@ -146,14 +146,19 @@ impl MarginDecoder for Castlevania {
     }
 }
 
-/// How many of a column's playfield rows must show the map for the nametables to hold it.
-const CURRENT_ROWS: i32 = 16;
+/// How many of a column's playfield rows must show the map for the nametables to hold it (a
+/// crusher down redraws 9 of the 22).
+const CURRENT_ROWS: i32 = 8;
+
+/// The screen columns the nametables hold whole: the game draws a column 96 pixels ahead of the
+/// right edge a block at a time and keeps those behind the left one, so within 64 pixels of both
+/// edges every column is one it finished drawing for its place.
+const HELD_COLUMNS: std::ops::Range<i32> = -8..40;
 
 /// Whether screen column `column` of the nametables (on the plane of two) holds room tile column
-/// `world` as the game drew it, rather than another place of the ring or rows of it left from
-/// before: most of its playfield rows show what the map gives there, and every row that does not
-/// was written after all of those (the game redraws a few blocks itself, crushers, broken walls,
-/// after it drew the column; a row it has not drawn yet is older).
+/// `world` as the game drew it: a column within 64 pixels of the screen enough of whose playfield
+/// rows show what the map gives there (the game redraws some blocks itself, crushers, broken
+/// walls, after it drew the column).
 fn column_is_current(
     memory: &DecoderMemory<'_>,
     level: &Level<'_>,
@@ -161,25 +166,20 @@ fn column_is_current(
     column: i32,
     world: i32,
 ) -> bool {
-    let mut matching = 0;
-    let mut newest_match = 0u32;
-    let mut oldest_difference = u32::MAX;
-    for tile_row in PLAYFIELD_TOP..MAP_TOP + 4 * BLOCK_ROWS {
-        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 6..28.
-        let v = (row.v & !0x03E0) | ((tile_row as u16) << 5);
-        let address = nametable_address(BackgroundRow { v, ..row }, column);
-        let written = (memory.nametable_written)(address);
-        if level
-            .tile_at(world, tile_row)
-            .is_some_and(|(tile, _)| (memory.nametable)(address) == tile)
-        {
-            matching += 1;
-            newest_match = newest_match.max(written);
-        } else {
-            oldest_difference = oldest_difference.min(written);
-        }
+    if !HELD_COLUMNS.contains(&column) {
+        return false;
     }
-    matching >= CURRENT_ROWS && newest_match > 0 && oldest_difference > newest_match
+    let matching = (PLAYFIELD_TOP..MAP_TOP + 4 * BLOCK_ROWS)
+        .filter(|&tile_row| {
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 6..28.
+            let v = (row.v & !0x03E0) | ((tile_row as u16) << 5);
+            let address = nametable_address(BackgroundRow { v, ..row }, column);
+            level
+                .tile_at(world, tile_row)
+                .is_some_and(|(tile, _)| (memory.nametable)(address) == tile)
+        })
+        .count();
+    i32::try_from(matching).unwrap_or(0) >= CURRENT_ROWS
 }
 
 /// The tile and sub-palette the nametables hold at screen column `column` of `row`.
