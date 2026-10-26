@@ -8,9 +8,9 @@ then `rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md` (this hack, complete)
 ## ROM
 *Adventure Island (USA)*, CNROM (mapper 3), 32 KiB PRG + 32 KiB CHR, data CRC-32 `F8A713BE`.
 The owner's dump (NES 2.0 header) and the disassembly's rebuild have the same data. Disassembly:
-https://github.com/cyneprepou4uk/NES-Games-Disassembly/tree/main/Adventure%20Island (rebuild:
-`handoff/tools` has no prep script; strip the listing prefix with the regex of `preparations.lua`,
-then `ca65 copy_bank_FF.asm` / `ld65 -C ld65.cfg`; header.bin + prg + CHR_ROM.chr = SHA-1 22EE75B8...).
+https://github.com/cyneprepou4uk/NES-Games-Disassembly/tree/main/Adventure%20Island (rebuild: strip
+the listing prefix with the regex of `preparations.lua`, then `ca65 copy_bank_FF.asm` /
+`ld65 -C ld65.cfg`; header.bin + prg + CHR_ROM.chr = SHA-1 22EE75B8...).
 No ROM is committed: get it from the owner.
 
 ## Done (committed)
@@ -28,19 +28,18 @@ No ROM is committed: get it from the owner.
    sequels (Adventure Island II, SMB 3). Docs: README, HOWTO-RUN, WIDESCREEN-EXTENSION, hack doc.
 4. Last commit (this one): decoder vertical margin (`decode_extra_row`; columns' first/last metatile
    repeated past top/bottom), harness `--png-nes` as tall as the margins, this handoff.
-   NOT yet run after the last edit: `cargo clippy -p zax-nes -p zax-harness --all-targets -- -D
-   warnings` and `cargo test -p zax-nes` (fmt done; the two clippy errors were fixed just before).
-   Run `rust/check.sh`. Known pre-existing failure unrelated: `zax-harness` `bench_core_tests`
-   (`rust/test-roms/nestest.nes` absent). Tests need `libsdl2-dev`.
+   fmt, clippy (`-D warnings`) and the tests pass; the only failures are `zax-harness`
+   `bench_core_tests` (`rust/test-roms/nestest.nes` absent, unrelated).
 
-## Hack sources (not elsewhere in the repo)
-`handoff/src/wide.s`, `handoff/tools/build.py`, `make_bps.py`, `make_doc.py` (also reproduced in the
-hack doc's appendices). Rebuild: `python -I tools/build.py "Adventure Island (USA).nes"
-build/aiwide.bps` (needs cc65) → copy to `rust/crates/zax-nes/patches/`; target CRC must be
-`4CDF2FE8` for the committed patch (update the hack doc if it changes; `make_doc.py` regenerates
+## Hack sources (kept out of this repository)
+The hack lives in its own repository, held by the owner: `src/wide.s`, `tools/build.py`,
+`make_bps.py`, `make_doc.py` (also reproduced in the hack doc's appendices, enough to rebuild it).
+Rebuild: `python -I tools/build.py "Adventure Island (USA).nes" build/aiwide.bps` (needs cc65) →
+copy to `rust/crates/zax-nes/patches/`; the target CRC of the committed patch is printed by the
+build and given in the hack doc (update the doc if it changes; `make_doc.py` regenerates the
 appendices).
 
-## Test scripts (scratch, in `handoff/tools`, paths are absolute to /tmp/claude-0, adapt)
+## Test scripts (in the hack's repository, `test-tools/`)
 `tour.py area round frames name [margin] [speed] [harness args]`: starts a round by pokes ($37/$38),
 forces scrolling by poking player x ($0584) and death ($72): fast decoder survey.
 `play.py level frames name [options] [margin]`: patched ROM, level select + right+B + jumps.
