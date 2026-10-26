@@ -208,7 +208,9 @@ each band. Widescreen changes:
   in the middle of the wide picture. The sprites the PPU did not draw are then drawn over the
   centre from their records: the second page, and those across the left edge (x < 0), whose part
   on the screen the PPU left out with the rest; one behind the background only over the backdrop
-  colour. Without margins it is the plain 256 x 240 frame.
+  colour. The lines of the screen a decoder covered (see section 4, step 3: the overscan rows
+  of a game scrolling vertically) are composed from the records like the margins. Without margins
+  it is the plain 256 x 240 frame.
 
 ---
 
@@ -273,7 +275,12 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    `decode_extra_row`: past the screen the game shows there a nametable row it keeps for the
    overscan, often another row of its ring (Adventure Island scrolling vertically). When the
    decoder gives it, the row's centre records are replaced by the decoded ones (same record
-   indices); the PPU's own pixels still make the lines `0..240`.
+   indices). The lines of the screen a decoded row covers (that edge row's, or the row just
+   above the first captured one, or just below the last, when the decoder gives it) are composed
+   from the records in the 2D picture too, not from the PPU's pixels (`Ppu2C02::centre_lines`,
+   latched by `decode_margins`, `(0, 240)` otherwise): those are the lines a television's
+   overscan hides, where the game may show another row of its ring (a band across the picture
+   between the screen and the vertical margin).
 
 Decoders run only while the built-in patches are on for the game in play (see 7). The decoders:
 

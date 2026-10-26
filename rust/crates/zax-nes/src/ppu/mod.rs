@@ -196,6 +196,10 @@ pub struct Ppu2C02 {
     frame_vertical_margin: i32,
     /// The background rows of the frame being captured, by row index, for a margin decoder.
     captured_rows: [Option<tiles::CapturedRow>; 31],
+    /// The lines of the screen whose centre the wide picture takes from the PPU's own pixels:
+    /// all of them, but those of a row across the top or bottom edge whose centre a decoder gave
+    /// (`decode_margins`), past which the game shows a row kept for the overscan.
+    centre_lines: (i32, i32),
 }
 
 impl Default for Ppu2C02 {
@@ -274,6 +278,7 @@ impl Ppu2C02 {
             visible_rows: crate::STANDARD_ROWS,
             captured_rows: [None; 31],
             frame_vertical_margin: 0,
+            centre_lines: (0, 240),
         }
     }
 
