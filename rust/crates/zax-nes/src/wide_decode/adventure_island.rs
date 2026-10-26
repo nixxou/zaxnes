@@ -117,6 +117,12 @@ impl MarginDecoder for AdventureIsland {
         true
     }
 
+    /// The rows across the screen's top and bottom edges show, past it, a row of the game's
+    /// ring that is not the plane's: the decoder gives them.
+    fn covers_overscan(&self) -> bool {
+        true
+    }
+
     /// The rows above and below the screen: the plane's, from the tables (the nametables hold the
     /// screen's rows only), while the screen's nearest row shows the round.
     fn decode_extra_row(
@@ -391,10 +397,13 @@ impl View<'_> {
     }
 
     /// What the nametables hold of world tile column `world` at screen column `column`: the frame
-    /// the game drew it in, the newest of its rows that show what the tables give, when enough of
-    /// them do (0 for a column not written since a state was loaded: the state holds it as drawn). What the game drew over the tables then (or later) is newer than that; the rows
-    /// the column was not drawn on (the plane's rows past the screen when the game drew it) are
-    /// older.
+    /// each of its rows that show what the tables give was written in, when enough of them do (0
+    /// for a row not written since a state was loaded: the state holds it as drawn). What the
+    /// game drew over the tables with the column (or later) is as new as the rows around it; a
+    /// row the column was not drawn on (the plane's rows past the screen when the game drew it)
+    /// is older. The game also draws whole rows as it scrolls vertically: those are newer than
+    /// the rest of the column, so a tile is compared with its nearest matching rows, not with the
+    /// newest.
     fn drawn(
         &self,
         memory: &DecoderMemory<'_>,
@@ -404,9 +413,9 @@ impl View<'_> {
         plane_row: i32,
     ) -> Option<DrawnColumn> {
         let coarse_y = i32::from(row.coarse_y());
-        let mut frame = 0u32;
+        let mut frames = [None; 30];
         let mut matching = 0;
-        for tile_row in 0..RING_ROWS {
+        for (tile_row, frame) in (0..RING_ROWS).zip(frames.iter_mut()) {
             let address = nametable_address(row_at(row, tile_row), column);
             // The rows of the screen are those of the plane around this one.
             let offset =
@@ -414,13 +423,13 @@ impl View<'_> {
             if let Some((tile, _)) = self.tile(world, plane_row + offset) {
                 if (memory.nametable)(address) == tile {
                     matching += 1;
-                    frame = frame.max((memory.nametable_written)(address));
+                    *frame = Some((memory.nametable_written)(address));
                 }
             }
         }
         // Frame 0: not written since the state was loaded (or power-on), the state's own.
         (matching >= 4).then(|| DrawnColumn {
-            frame,
+            frames,
             tables: self.tile(world, plane_row),
             ring: [
                 self.tile(world, plane_row - RING_ROWS),
@@ -432,8 +441,8 @@ impl View<'_> {
 
 /// A column the nametables hold as the game drew it.
 struct DrawnColumn {
-    /// The frame the game drew it in.
-    frame: u32,
+    /// The frame each nametable row (0-29) that shows the tables was written in.
+    frames: [Option<u32>; 30],
     /// What the tables give at the row asked for.
     tables: Option<(u8, u8)>,
     /// And at the rows of the plane the nametables hold at the same place (30 rows up and down).
@@ -445,7 +454,8 @@ impl DrawnColumn {
     /// show the tables or something the game drew over them since the column; the tables', when
     /// they show the plane's row 30 rows up or down (the game draws the rows the screen scrolls
     /// to over the screen's columns only: past them a row stays as the column left it); `None`
-    /// for a tile older than the column (another column's, before the ring came round).
+    /// for a tile older than the rows around it that show the tables (the older of the nearest
+    /// above and below: another column's, before the ring came round).
     fn cell(
         &self,
         memory: &DecoderMemory<'_>,
@@ -460,7 +470,23 @@ impl DrawnColumn {
             Some(tables) if self.ring.iter().flatten().any(|&(tile, _)| tile == shown.0) => {
                 Some(tables)
             }
-            _ => ((memory.nametable_written)(address) >= self.frame).then_some(shown),
+            _ => ((memory.nametable_written)(address) >= self.around(row)).then_some(shown),
+        }
+    }
+
+    /// The older of the frames of the nearest rows above and below `row` that show the tables.
+    fn around(&self, row: BackgroundRow) -> u32 {
+        let coarse_y = i32::from(row.coarse_y());
+        let nearest = |step: i32| {
+            (1..RING_ROWS).find_map(|distance| {
+                let index = usize::try_from((coarse_y + (step * distance)).rem_euclid(RING_ROWS));
+                index.ok().and_then(|index| self.frames[index])
+            })
+        };
+        match (nearest(-1), nearest(1)) {
+            (Some(above), Some(below)) => above.min(below),
+            (Some(frame), None) | (None, Some(frame)) => frame,
+            (None, None) => 0,
         }
     }
 }
