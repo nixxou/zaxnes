@@ -18,7 +18,8 @@
 //!   fixed bank's length table gives for the stage (`$CFF0`: the high nibble for room `$46`
 //!   0, the low one for room 1);
 //! * some stages draw room x 0 in the right nametable (`$FBB2`, which `$F5EB` turns into the
-//!   PPUCTRL nametable bit);
+//!   PPUCTRL nametable bit), read there too: their rows repeat, so trying both ways would at
+//!   times take the wrong one;
 //! * the map's first block row is nametable row 4; its top two tile rows are under the status
 //!   bar, which the game keeps in nametable rows 0-5 (the playfield shows from row 6).
 //!
@@ -36,6 +37,8 @@ pub struct Castlevania {
     blocks: u16,
     /// The table of the stages' rooms' lengths.
     lengths: u16,
+    /// The table of the stages that swap the nametables.
+    swaps: u16,
 }
 
 /// The base build.
@@ -43,6 +46,7 @@ pub static USA: Castlevania = Castlevania {
     maps: 0xFAFF,
     blocks: 0xF9D6,
     lengths: 0xFB8C,
+    swaps: 0xFBB2,
 };
 
 /// Rev 1.
@@ -50,6 +54,7 @@ pub static USA_REV1: Castlevania = Castlevania {
     maps: 0xFB23,
     blocks: 0xF9FA,
     lengths: 0xFBB0,
+    swaps: 0xFBD6,
 };
 
 /// CRC-32 of the base build's data (no CHR-ROM, iNES header excluded).
@@ -94,22 +99,18 @@ impl MarginDecoder for Castlevania {
             return false;
         };
         // Some stages draw room x 0 in the right nametable: the camera is then 256 pixels away
-        // on the ring of two nametables. The one the centre shows is the one.
-        let Some(first_column) = [0, 256].into_iter().find_map(|swap| {
-            let first = (resolve_ring(row.ring_x(), 512, level.camera + swap) - swap) >> 3;
-            CHECKED
-                .iter()
-                .all(|&column| {
-                    level
-                        .tile_at(first + column, coarse_y)
-                        .is_some_and(|(tile, _)| {
-                            (memory.nametable)(nametable_address(*row, column)) == tile
-                        })
-                })
-                .then_some(first)
-        }) else {
-            return false;
-        };
+        // on the ring of two nametables.
+        let swap = level.swap * 256;
+        let first_column = (resolve_ring(row.ring_x(), 512, level.camera + swap) - swap) >> 3;
+        // What the PPU shows in the centre must be what the map gives.
+        for column in CHECKED {
+            let Some((tile, _)) = level.tile_at(first_column + column, coarse_y) else {
+                return false;
+            };
+            if (memory.nametable)(nametable_address(*row, column)) != tile {
+                return false;
+            }
+        }
         for column in columns {
             if let Some((tile, palette)) = level.tile_at(first_column + column, coarse_y) {
                 out.push(DecodedTile {
@@ -131,6 +132,8 @@ struct Level<'a> {
     camera: i32,
     /// Where the room ends, in tile columns.
     end: i32,
+    /// 1 when the stage draws room x 0 in the right nametable.
+    swap: i32,
 }
 
 impl<'a> Level<'a> {
@@ -169,6 +172,7 @@ impl<'a> Level<'a> {
             blocks: blocks.checked_sub(0x8000)?,
             camera,
             end: (i32::from(last_screen) + 1) * 32,
+            swap: i32::from(fixed_byte(build.swaps, stage)? & 1),
         })
     }
 
@@ -237,6 +241,7 @@ mod tests {
             blocks,
             camera: 0,
             end: 32,
+            swap: 0,
         };
         // Block row 2 is nametable rows 12-15.
         assert_eq!(level.tile_at(4, 12), Some((0x40, 0)), "top left");
