@@ -17,8 +17,10 @@ A game takes part in one of two ways, which work together:
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
 to the ROM it was made for: the Zelda II (USA) widescreen hack
 ([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
-one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super
-Mario Bros. 3 (USA) (Rev 1) one ([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)).
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), the Super Mario
+Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)),
+and the Super Mario Bros. 3 (USA) (Rev 1) one, its advanced mode too
+([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -137,7 +139,7 @@ Details:
   ignored. A sprite whose x is outside 0..255 is left out of the PPU's own picture (its pattern
   bytes read as 0 at the fetches of dots 257-320, which still take place; the evaluation keeps the
   OAM index of each sprite it copies for that): a hardware PPU, which only knows the low byte,
-  would draw a sprite at x = 298 at x = 42.
+  would draw a sprite at x = 298 at x = 42. Nor does such a sprite take one of the eight places of a line in the evaluation, or raise the overflow: the sprites on the screen all show.
 * **Overclock.** At the start of line 240 the PPU arms `$5006` x 114 CPU cycles
   (`arm_overclock()`). For each of them `NesBus::tick()` runs the CPU and the cartridge only
   (`take_stall_cycle()`): the PPU and the APU stay still, so the picture, the sound and their
@@ -337,8 +339,7 @@ get empty margins. A row whose centre differs from the parse at more than one of
 (an intermediate screen, a transition) is left to the nametables. A margin column the nametables
 hold for that place (Mega Man 2's rule: the rows that differ from the parse written after every
 row that matches) is taken from them, with the bricks broken and the coins taken; any other from
-the parse. Not handled yet: a fixed room sharing its area with others (bonus rooms) shows its
-neighbours in the margins; castle loops (the game sets the area back) show the straight area.
+the parse. The parse also records, per column, whether the area's own data locked the scrolling there (a scroll lock object): while the game's lock is on in such a room (an underground bonus room, whose area holds other rooms beside it), the margins stay empty; a lock that is not the area's (the flagpole, a fall) keeps them. The decoder works only while the title screen or the game runs an area (`OperMode` 0 or 1, task 3): the black WORLD screen shares its blank tile with the sky. Castle loops (4-4, 7-4, 8-4) send Mario and the screen 4 pages back, coherent with the straight area the parse lays out afterwards; for about a second around each loopback (before it, the game reading the repeated part ahead; after it, the screen's page below 0) the centre does not match the parse and the margins are left to the nametables, mostly empty. Not handled: the path is decided only when the parser reaches the loop point.
 
 Super Mario Bros. 3: the game lays the whole level out in PRG-RAM (`Tile_Mem`, `$6000-$794F`)
 before it starts and keeps it up to date (blocks hit, coins taken, bricks broken). A horizontal
