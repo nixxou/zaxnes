@@ -20,8 +20,10 @@ to the ROM it was made for: the Zelda II (USA) widescreen hack
 one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), the Super Mario
 Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)),
 the Ninja Gaiden III (USA) one, its advanced mode too
-([`hacks/ng3/WIDESCREEN-HACK.md`](hacks/ng3/WIDESCREEN-HACK.md)), and the Super Mario Bros. 3
-(USA) (Rev 1) one, its advanced mode too ([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)).
+([`hacks/ng3/WIDESCREEN-HACK.md`](hacks/ng3/WIDESCREEN-HACK.md)), the Super Mario Bros. 3
+(USA) (Rev 1) one, its advanced mode too ([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)),
+and the Castlevania (USA) one, built for its Rev 1 too, an advanced mode as well
+([`hacks/castlevania/WIDESCREEN-HACK.md`](hacks/castlevania/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
