@@ -17,7 +17,7 @@ A game takes part in one of two ways, which work together:
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
 to the ROM it was made for: the Zelda II (USA) widescreen hack
 ([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
-one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super Mario Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)).
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super Mario Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)), and the Adventure Island (USA) one, its advanced mode too ([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -52,7 +52,8 @@ made against.
 
 A ROM whose 3D profile title or file name says a game a patch is made for, but whose data is
 another version of it (`builtin_patches::for_game_name`; each patch knows its `game` and the
-No-Intro name of its ROM), shows a red [W]. When its data has the size the patch was made for
+No-Intro name of its ROM; a sequel's number after the game, "Adventure Island II", "Super Mario
+Bros. 3", makes it another game), shows a red [W]. When its data has the size the patch was made for
 (`builtin_patches::source_size`), the patch can be **forced** on it: `emu.forced_patch` (an option
 of that game, the patch's name) makes `NesCore::set_forced_patch` apply it at load and restore
 through `builtin_patches::apply_with`, which then skips the BPS checksums of the source and the
@@ -408,7 +409,7 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::version()` is the target CRC-32 read from the BPS footer: any change to a hack
   changes it.
 * `BuiltinPatch::advanced`: an **advanced mode** of a game's widescreen (Super Mario Bros.: the
-  enemies in the margins). Such a patch applies only when the game's `video.widescreen_advanced`
+  enemies in the margins; Adventure Island: the sprites and objects in the margins). Such a patch applies only when the game's `video.widescreen_advanced`
   is on too (`NesCore::set_advanced_patches`, set with `set_builtin_patches` at each load and
   restore); off, the ROM loads as it is and its margin decoder alone widens it. The hacks screen
   shows the row "Advanced mode" for such a game (`HackRow::Advanced`; on, it turns the widescreen
@@ -423,7 +424,8 @@ pub struct BuiltinPatch {
   jumps straight into the window.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
-  main loop `$C010`-`$C01A`, everything else running in the NMI). `NesCore::run_frame` ends the
+  main loop `$C010`-`$C01A`, everything else running in the NMI; Adventure Island: `LDA $0B / BNE`
+  at `$B759`). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
