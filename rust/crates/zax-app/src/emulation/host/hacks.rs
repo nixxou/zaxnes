@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use zax_nes::builtin_patches::{BuiltinPatch, HackOption};
-use zax_settings::catalogue::SettingId;
+use zax_settings::catalogue::{self, SettingId};
 use zax_settings::values::SettingValue;
 
 use super::hack_options::{is_on, with_option};
@@ -104,8 +104,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         };
         let mut options = self.game_options(&rom);
         options.retain(|(id, _)| *id != SettingId::VideoWidescreenAdvanced);
-        if on {
-            options.push((SettingId::VideoWidescreenAdvanced, SettingValue::Bool(true)));
+        // The game keeps a value of its own only where it is not the default.
+        let value = SettingValue::Bool(on);
+        if &value != catalogue::descriptor(SettingId::VideoWidescreenAdvanced).default_value() {
+            options.push((SettingId::VideoWidescreenAdvanced, value));
         }
         self.set_game_options(&rom, options);
     }
