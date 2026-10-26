@@ -10,6 +10,7 @@
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
+//! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM's free space (`ng3wide`, `tools/build.py`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, part of it seen through the extension's window; the ROM keeps its size (`smb3wide`, `tools/build.py`) |
 
 /// One built-in patch.
@@ -54,11 +55,13 @@ pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
 /// Name of the Super Mario Bros. (World) widescreen patch (advanced mode).
 pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
 
+/// Name of the Ninja Gaiden III (USA) widescreen patch (advanced mode).
+pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
 pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 4] = [
+pub const PATCHES: [BuiltinPatch; 5] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -149,6 +152,36 @@ pub const PATCHES: [BuiltinPatch; 4] = [
         boot_window: Some((0x82, 0x00)),
         // Everything runs in the NMI; the main loop is a JMP to itself.
         idle_loop: Some((0x8057, 0x8059)),
+    },
+    BuiltinPatch {
+        name: NG3_USA,
+        game: "Ninja Gaiden III",
+        rom_name: "Ninja Gaiden III - The Ancient Ship of Doom (USA)",
+        source_crc: 0x902E_3168,
+        bps: include_bytes!("../patches/ng3-usa-widescreen.bps"),
+        options: &[
+            HackOption {
+                key: "enemies_in_margins",
+                label: "Enemies in the margins",
+                label_fr: "Ennemis dans les marges",
+                bit: 0,
+                default: true,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the objects.
+        advanced: true,
+        boot_window: None,
+        // The frame's wait in bank 4: BIT $15 / BPL (the NMI sets $15).
+        idle_loop: Some((0x9A87, 0x9A8A)),
     },
     BuiltinPatch {
         name: SMB3_USA,

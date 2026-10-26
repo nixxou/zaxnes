@@ -19,8 +19,9 @@ to the ROM it was made for: the Zelda II (USA) widescreen hack
 ([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
 one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), the Super Mario
 Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)),
-and the Super Mario Bros. 3 (USA) (Rev 1) one, its advanced mode too
-([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)).
+the Ninja Gaiden III (USA) one, its advanced mode too
+([`hacks/ng3/WIDESCREEN-HACK.md`](hacks/ng3/WIDESCREEN-HACK.md)), and the Super Mario Bros. 3
+(USA) (Rev 1) one, its advanced mode too ([`hacks/smb3/WIDESCREEN-HACK.md`](hacks/smb3/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -301,6 +302,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
+| Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
 | Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
@@ -340,6 +342,27 @@ get empty margins. A row whose centre differs from the parse at more than one of
 hold for that place (Mega Man 2's rule: the rows that differ from the parse written after every
 row that matches) is taken from them, with the bricks broken and the coins taken; any other from
 the parse. The parse also records, per column, whether the area's own data locked the scrolling there (a scroll lock object): while the game's lock is on in such a room (an underground bonus room, whose area holds other rooms beside it), the margins stay empty; a lock that is not the area's (the flagpole, a fall) keeps them. The decoder works only while the title screen or the game runs an area (`OperMode` 0 or 1, task 3): the black WORLD screen shares its blank tile with the sky. Castle loops (4-4, 7-4, 8-4) send Mario and the screen 4 pages back, coherent with the straight area the parse lays out afterwards; for about a second around each loopback (before it, the game reading the repeated part ahead; after it, the screen's page below 0) the centre does not match the parse and the margins are left to the nametables, mostly empty. Not handled: the path is decided only when the parser reaches the loop point.
+
+Ninja Gaiden III: the game draws an area from PRG banks 0-3 (`$C01E`, fixed bank). Area `$5F`
+(48 of them) starts at the address `$B960 + a` / `$B990 + a` of bank 1 gives (banks 0 and 1 seen
+at `$8000-$BFFF`); bit 7 of `$A0F0 + a` (bank 6) makes it a vertical area (rows of 8 blocks, as
+wide as the screen: nothing to show beside it, the decoder leaves it alone); the low nibble of
+`$A1B0 + a` is its last camera screen, so it is `8 (n + 1)` columns of 32 pixels. A column is 6
+blocks of 32 x 32 pixels from the top of the playfield (nametable rows 0-23; the status bar, rows
+24-29, shows above it through the IRQ, and is left to the nametables). Block `b` is 4 sub-blocks
+at `($51) + 4 b` (top left, top right, bottom left, bottom right), its attribute byte at
+`($53) + b`; sub-block `s` is 4 tiles at `($55) + 4 s`, in the same order; those pointers point
+into banks 2 and 3, seen at `$8000-$BFFF`. The camera is `$DC:$DB`. The IRQ scrolls bands of the
+playfield on their own (skies, mountains, foregrounds): such a band shows the ring of 64 tile
+columns as the game drew it around the camera, so a row whose centre is not the area at the camera
+is tried as that ring, each column the layout's column of its ring position nearest to the camera
+(within the area). A row is decoded when 20 of its 32 centre columns show the layout's tile (the
+game animates some tiles, and a band may show a seam where the ring was drawn at two moments); a
+margin column the nametables hold for that place is taken from them (Mega Man 2's rule). A row of
+the area the layout does not explain (the desert's dunes, which the game shifts in the nametables
+to animate them; the upper layer of 3-1A) takes its margins, 16 columns a side, from the ring of
+nametables beside the screen. Past the ends of the area the margins repeat its first or last 32
+pixels (owner request: no black hole beside a band that goes on).
 
 Super Mario Bros. 3: the game lays the whole level out in PRG-RAM (`Tile_Mem`, `$6000-$794F`)
 before it starts and keeps it up to date (blocks hit, coins taken, bricks broken). A horizontal
@@ -453,7 +476,7 @@ pub struct BuiltinPatch {
   jumps straight into the window.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
-  main loop `$C010`-`$C01A`, everything else running in the NMI). `NesCore::run_frame` ends the
+  main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
