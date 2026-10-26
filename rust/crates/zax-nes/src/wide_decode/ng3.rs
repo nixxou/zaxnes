@@ -13,10 +13,12 @@
 //!   `($55) + 4 s`, in the same order. Those three pointers (`$51`-`$56`) are set from the area's
 //!   flags and point into banks 2 and 3, seen at `$8000-$BFFF`.
 //!
-//! The camera is `$DC:$DB`. Each row's centre is checked against the nametables
-//! (a cut scene, a transition, a vertical area are left to the nametables); a margin column the
-//! nametables still hold for that place is taken from them, with what the game drew over the
-//! layout since. Rows 24 and past (the status bar) are left to the nametables.
+//! The camera is `$DC:$DB`. A row whose centre shows the layout (20 columns of 32, see
+//! [`MATCHING`]) is decoded; a margin column the nametables still hold for that place is taken
+//! from them, with what the game drew over the layout since. A row of the area the layout does not
+//! explain (the desert's animated dunes, the upper layer of 3-1A) takes its margins from the ring
+//! of nametables beside the screen. Past the ends of the area the margins repeat its first or last
+//! 32 pixels. Vertical areas and rows 24 and past (the status bar) are left to the nametables.
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -48,7 +50,10 @@ const BANK_PAIR: usize = 0x4000;
 
 /// Tile rows of the playfield: 6 blocks of 4.
 const ROWS: i32 = 24;
-/// Columns of the centre (of 32) that must show the layout's tile.
+/// Columns of the centre (of 32) that must show the layout's tile for a row to be decoded: 20 (the
+/// game animates some tiles, the sand of the desert, draws into the background, and a band it
+/// scrolls on its own may show a seam where the ring was drawn at two moments; another stretch of
+/// the area, a cut scene or a transition differ nearly everywhere).
 const MATCHING: usize = 20;
 
 /// The horizontal area being played, as read from PRG-ROM and RAM.
@@ -92,6 +97,18 @@ impl<'a> Area<'a> {
             attributes: pointer(ATTRIBUTES)?,
             sub_blocks: pointer(SUB_BLOCKS)?,
         })
+    }
+
+    /// `world`, or past the ends of the area the same column of its first or last 32 pixels: the
+    /// game shows nothing there, the margins its edge again rather than a hole.
+    fn within(&self, world: i32) -> i32 {
+        if world < 0 {
+            world.rem_euclid(4)
+        } else if world >= self.columns {
+            self.columns - 4 + world.rem_euclid(4)
+        } else {
+            world
+        }
     }
 
     /// CHR tile and sub-palette of world tile column `world`, tile row `tile_row` (0-23); `None`
@@ -151,15 +168,28 @@ impl MarginDecoder for NinjaGaiden3 {
                 ring_near: Some(((camera >> 3) + 16).clamp(32, (area.columns - 32).max(32))),
             },
         ];
+        let matching = placements.map(|placement| centre_matches(memory, &area, *row, &placement));
         let Some(placement) = placements
             .into_iter()
-            .find(|placement| centre_matches(memory, &area, *row, placement))
+            .zip(matching)
+            .find_map(|(placement, matching)| (matching >= MATCHING).then_some(placement))
         else {
-            return false;
+            // A row of the area the game drew otherwise than from the layout (the desert's dunes,
+            // which it shifts to animate them; the upper layer of 3-1A): its margins are what the
+            // ring of nametables holds beside the screen.
+            for column in columns.filter(|column| (-16..=48).contains(column)) {
+                let (tile, palette) = nametable_tile(memory, *row, column);
+                out.push(DecodedTile {
+                    column,
+                    tile,
+                    palette,
+                });
+            }
+            return true;
         };
 
         for column in columns {
-            let world = placement.world(column);
+            let world = area.within(placement.world(column));
             // A column the nametables hold for this very place shows what the game drew there.
             let decoded = if column_is_current(memory, &area, *row, column, world) {
                 Some(nametable_tile(memory, *row, column))
@@ -195,24 +225,21 @@ impl Placement {
     }
 }
 
-/// Whether the centre of `row` shows what the layout gives there, placed as `placement` says: at
-/// 20 columns of 32 at least (the game animates some tiles, the sand of the desert, draws into the
-/// background, and a band it scrolls on its own may show a seam where the ring was drawn at two
-/// moments; another stretch of the area, a cut scene or a transition differ nearly everywhere).
+/// How many of the 32 columns of the centre of `row` show what the layout gives there, placed as
+/// `placement` says.
 fn centre_matches(
     memory: &DecoderMemory<'_>,
     area: &Area<'_>,
     row: BackgroundRow,
     placement: &Placement,
-) -> bool {
+) -> usize {
     let tile_row = i32::from(row.coarse_y());
-    let matching = (0..32)
+    (0..32)
         .filter(|&column| {
             area.tile_at(placement.world(column), tile_row)
                 .is_some_and(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == tile)
         })
-        .count();
-    matching >= MATCHING
+        .count()
 }
 
 /// Whether screen column `column` of the nametables (on the plane of two) holds world tile column
@@ -313,6 +340,9 @@ mod tests {
         );
         assert_eq!(area.tile_at(10, 12), Some((0x20, 1)), "top right sub-block");
         assert_eq!(area.tile_at(32, 12), None, "past the area");
+        assert_eq!(area.within(-3), 1, "before it: its first 32 pixels again");
+        assert_eq!(area.within(33), 29, "past it: its last 32 pixels again");
+        assert_eq!(area.within(17), 17);
         assert_eq!(area.tile_at(8, 24), None, "past the playfield");
     }
 

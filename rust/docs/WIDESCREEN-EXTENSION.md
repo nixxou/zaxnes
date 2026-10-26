@@ -326,9 +326,12 @@ playfield on their own (skies, mountains, foregrounds): such a band shows the ri
 columns as the game drew it around the camera, so a row whose centre is not the area at the camera
 is tried as that ring, each column the layout's column of its ring position nearest to the camera
 (within the area). A row is decoded when 20 of its 32 centre columns show the layout's tile (the
-game animates some tiles, the desert's sand, and a band may show a seam where the ring was drawn
-at two moments); a margin column the nametables hold for that place is taken from them (Mega Man
-2's rule). Nothing is drawn past the ends of the area.
+game animates some tiles, and a band may show a seam where the ring was drawn at two moments); a
+margin column the nametables hold for that place is taken from them (Mega Man 2's rule). A row of
+the area the layout does not explain (the desert's dunes, which the game shifts in the nametables
+to animate them; the upper layer of 3-1A) takes its margins, 16 columns a side, from the ring of
+nametables beside the screen. Past the ends of the area the margins repeat its first or last 32
+pixels (owner request: no black hole beside a band that goes on).
 
 ---
 
