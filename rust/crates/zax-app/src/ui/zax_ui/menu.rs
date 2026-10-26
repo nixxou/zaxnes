@@ -43,9 +43,13 @@ impl ZaxUi {
         engaged |= open;
         if hacks {
             self.open_hacks(host);
+            self.menu_chosen = true;
         }
         match chosen {
-            Some(Chosen::Host(command, args)) => Self::activate(host, command, args),
+            Some(Chosen::Host(command, args)) => {
+                Self::activate(host, command, args);
+                self.menu_chosen = true;
+            }
             Some(Chosen::Ui(command)) => self.run_ui_command(command),
             None => {}
         }

@@ -159,6 +159,16 @@ partie reprend). `--console` ouvre directement Zaxnes dans ce mode. Au clavier, 
 joueur 1 servent de manette (`X` = A, `Z` = B, `Échap` = menu…), plus `W` (= L2) et `H` (= Start)
 sur la liste des jeux.
 
+La **souris** marche aussi sur PC : un clic sur une ligne la sélectionne, un clic sur la ligne
+sélectionnée la valide (A ; un double clic lance donc un jeu), un clic sur le « < valeur > » d'une
+option la change (moitié gauche : la valeur d'avant, moitié droite : la suivante) ; un clic sur une
+aide de la barre du bas fait ce qu'elle dit (« L/R » et « </> » : moitié gauche, moitié droite) ;
+la molette monte et descend dans la liste, le clic droit revient (B). La **barre de menus** reste
+à portée : elle apparaît quand la souris touche le haut de la fenêtre, comme pendant une partie,
+et un menu ouvert retient les clics de l'écran dessous. Une entrée qui ouvre une fenêtre du bureau
+ou agit sur le jeu (Options, Ouvrir une ROM, Hacks…) ramène à la barre de menus ;
+**Outils ▸ Mode console** bascule comme `F1`.
+
 Sur la liste, un jeu pour lequel un hack écran large existe porte un **[W]** : gris tant que
 l'écran large est désactivé pour ce jeu, en couleur une fois activé. **L2** (`W` au clavier) le
 bascule ; **Start** (`H`) ouvre l'écran **Hacks** du jeu (§ Écran large), qu'on trouve aussi en
@@ -186,7 +196,8 @@ pause ; `B` (ou `Échap`) y revient, et après le choix d'un emplacement la barr
 revient d'elle-même.
 
 Les films (menu **Outils**, `Ctrl`+`M`) et les options du hack (menu **Vidéo**) ne sont que dans
-la barre de menus : en mode console, `F1` ou `Origine` y ramène d'abord. Un film en cours
+la barre de menus : en mode console, on l'atteint par le haut de la fenêtre, ou `F1` / `Origine`
+y ramène. Un film en cours
 d'enregistrement continue pendant le mode console, et une sauvegarde chargée depuis ses écrans
 le ramène en arrière comme depuis le menu.
 
