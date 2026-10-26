@@ -404,13 +404,15 @@ for room 1, as `$CFF0` reads it); past both ends the margins stay empty. A room 
 screen of filler behind a wall, which the camera never shows (stage 4): its map holds block
 numbers past the stage's blocks there (a set ends where the next set of the table starts), and
 such leading screens are not the room either. A margin column the nametables still hold for its
-place (16 of its 22 playfield rows show the map) is taken from them, so what the game draws into
-the background shows there too (the crushers of stage 6 going down, a wall broken). The camera is `$2F:$2E`;
+place as the game drew it is taken from them, so what the game draws into the background shows
+there too (the crushers of stage 6 going down, a wall broken): 16 of its 22 playfield rows show
+the map, and every row that does not was written after all of those (Mega Man 2's rule: a row
+the game has not drawn yet is older, and the column then comes from the map). The camera is `$2F:$2E`;
 some stages draw room x 0 in the right nametable (the table `$FBB2`, Rev 1 `$FBD6`: the camera is
 then 256 pixels away on the ring of two nametables; read there, not guessed, since the rows of
-those stages repeat and both ways can match), and a row is decoded only when four of its centre
-columns show what the map gives there (the title, the intermissions and the transitions are left to the
-nametables).
+those stages repeat and both ways can match), and a row is decoded only when 24 of its 32 centre
+columns show what the map gives there (a block the game redrew in the centre, a wall broken, leaves
+the row decoded; the title, the intermissions and the transitions are left to the nametables).
 The built-in patches of both builds (`CASTLEVANIA_USA`, `CASTLEVANIA_USA_REV1`, an advanced
 mode) are one hack built for each (`cvwide`): its code is the free end of PRG bank 5, the same in
 both, which the fixed bank has no room to unlock, so the window is open from power-on
