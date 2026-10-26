@@ -208,8 +208,8 @@ each band. Widescreen changes:
   in the middle of the wide picture. The sprites the PPU did not draw are then drawn over the
   centre from their records: the second page, and those across the left edge (x < 0), whose part
   on the screen the PPU left out with the rest; one behind the background only over the backdrop
-  colour. The lines of the screen a decoder covered (see section 4, step 3: the overscan rows
-  of a game scrolling vertically) are composed from the records like the margins. Without margins
+  colour. For a decoder that covers the overscan, the lines of the screen it covered (see section
+  4, step 3) are composed from the records like the margins. Without margins
   it is the plain 256 x 240 frame.
 
 ---
@@ -262,20 +262,20 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    decoded row, the nametable margin records are removed and the decoded tiles added, their CHR
    planes read through the PPU as for any background tile; its visible row becomes the full
    margin. The centre 256 pixels always come from the PPU.
-3. With a vertical margin, `decode_extra_row` is asked for as many rows above the first
-   captured row and below the last as cover `margin_y` lines past the screen
-   (`decode_extra_rows`: `ceil((first row's y + margin_y) / 8)` above,
-   `ceil((240 + margin_y - last row's bottom) / 8)` below; with fine Y scrolling the first
-   captured row may start a few lines down, and `margin_y / 8` rows left those lines at the top
-   of the margin empty), whole width. Each virtual row carries the PPU address it would have on
+3. With a vertical margin, `decode_extra_row` is asked for `margin_y / 8` rows above the first
+   captured row and as many below the last, whole width. Each virtual row carries the PPU address it would have on
    the plane of two stacked nametables (60 rows, the vertical nametable bit flipping every 30)
    and a line outside `0..240`. A decoder that cannot returns `false` (the default) and the
-   vertical margin stays empty on that side. A first or last captured row reaching past the
-   screen (a line below 0, or past 240) is also asked for its centre (columns `0..32`) through
-   `decode_extra_row`: past the screen the game shows there a nametable row it keeps for the
-   overscan, often another row of its ring (Adventure Island scrolling vertically). When the
-   decoder gives it, the row's centre records are replaced by the decoded ones (same record
-   indices). The lines of the screen a decoded row covers (that edge row's, or the row just
+   vertical margin stays empty on that side. A decoder whose `covers_overscan()` is true (off by
+   default; Adventure Island only) also gets the screen's overscan: the rows asked for cover
+   `margin_y` lines past the screen whatever the fine Y scroll (`ceil((first row's y +
+   margin_y) / 8)` above, `ceil((240 + margin_y - last row's bottom) / 8)` below: the first
+   captured row may start a few lines down, and `margin_y / 8` rows leave those lines empty), and
+   a first or last captured row reaching past the screen (a line below 0, or past 240) is asked
+   for its centre (columns `0..32`) too: past the screen the game shows there a nametable row it
+   keeps for the overscan, often another row of its ring (Adventure Island scrolling
+   vertically). When the decoder gives it, the row's centre records are replaced by the decoded
+   ones (same record indices). The lines of the screen a decoded row covers (that edge row's, or the row just
    above the first captured one, or just below the last, when the decoder gives it) are composed
    from the records in the 2D picture too, not from the PPU's pixels (`Ppu2C02::centre_lines`,
    latched by `decode_margins`, `(0, 240)` otherwise): those are the lines a television's
@@ -344,7 +344,9 @@ row of the plane congruent to its nametable row nearest `$32` (the top of the ro
 drawn) plus its line / 8. The game also puts things over the tables when it draws a column (the
 cloud platforms of the sea rounds, `$A629`): a margin column it drew already (left of the column
 being drawn) shows the nametables', each tile that differs from the tables kept only when written
-in or after the frame of the column's rows that match them (older ones are another column's), and
+in or after the older of the frames of its nearest rows above and below that match them (older
+ones are another column's; the game also redraws whole rows as it scrolls vertically, newer than
+the rest of the column), and
 not when it is what the tables give 30 rows up or down (the game draws the rows the screen scrolls
 to vertically over the screen's columns only: a margin column keeps there the ring's other row);
 a column not written since a state was loaded counts as drawn (write frame 0, the state's own);
