@@ -23,8 +23,8 @@
 //! * the map's first block row is nametable row 4; its top two tile rows are under the status
 //!   bar, which the game keeps in nametable rows 0-5 (the playfield shows from row 6).
 //!
-//! A margin column the nametables still hold for its place is taken from them (the game redraws
-//! some blocks there: crushers, broken walls); leading screens of filler (block numbers past the
+//! A margin column the nametables still hold for its place, as the game drew it, is taken from
+//! them (the game redraws some blocks there: crushers, broken walls); leading screens of filler (block numbers past the
 //! stage's blocks, behind a wall the camera never passes) are not the room.
 //!
 //! The decoder checks itself against the PPU: a row whose centre does not show what the map
@@ -86,8 +86,8 @@ const FIRST_MAP_COLUMN: usize = 4;
 /// The end of a map.
 const END: u8 = 0xFF;
 
-/// Screen columns whose tiles are checked against the nametables.
-const CHECKED: [i32; 4] = [3, 11, 19, 27];
+/// How many of the centre's 32 columns must show the map for a row to be decoded.
+const CENTRE_MATCHES: usize = 24;
 
 impl MarginDecoder for Castlevania {
     fn decode_row(
@@ -108,14 +108,19 @@ impl MarginDecoder for Castlevania {
         // on the ring of two nametables.
         let swap = level.swap * 256;
         let first_column = (resolve_ring(row.ring_x(), 512, level.camera + swap) - swap) >> 3;
-        // What the PPU shows in the centre must be what the map gives.
-        for column in CHECKED {
-            let Some((tile, _)) = level.tile_at(first_column + column, coarse_y) else {
-                return false;
-            };
-            if (memory.nametable)(nametable_address(*row, column)) != tile {
-                return false;
-            }
+        // What the PPU shows in the centre must be what the map gives, give or take the blocks the
+        // game redraws itself (a wall broken, a crusher).
+        let matching = (0..32)
+            .filter(|&column| {
+                level
+                    .tile_at(first_column + column, coarse_y)
+                    .is_some_and(|(tile, _)| {
+                        (memory.nametable)(nametable_address(*row, column)) == tile
+                    })
+            })
+            .count();
+        if matching < CENTRE_MATCHES {
+            return false;
         }
         for column in columns {
             let world = first_column + column;
@@ -145,8 +150,10 @@ impl MarginDecoder for Castlevania {
 const CURRENT_ROWS: i32 = 16;
 
 /// Whether screen column `column` of the nametables (on the plane of two) holds room tile column
-/// `world` rather than another place of the ring: most of its playfield rows show what the map
-/// gives there (the game redraws a few itself: crushers, broken walls).
+/// `world` as the game drew it, rather than another place of the ring or rows of it left from
+/// before: most of its playfield rows show what the map gives there, and every row that does not
+/// was written after all of those (the game redraws a few blocks itself, crushers, broken walls,
+/// after it drew the column; a row it has not drawn yet is older).
 fn column_is_current(
     memory: &DecoderMemory<'_>,
     level: &Level<'_>,
@@ -155,18 +162,24 @@ fn column_is_current(
     world: i32,
 ) -> bool {
     let mut matching = 0;
+    let mut newest_match = 0u32;
+    let mut oldest_difference = u32::MAX;
     for tile_row in PLAYFIELD_TOP..MAP_TOP + 4 * BLOCK_ROWS {
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // 6..28.
         let v = (row.v & !0x03E0) | ((tile_row as u16) << 5);
         let address = nametable_address(BackgroundRow { v, ..row }, column);
+        let written = (memory.nametable_written)(address);
         if level
             .tile_at(world, tile_row)
             .is_some_and(|(tile, _)| (memory.nametable)(address) == tile)
         {
             matching += 1;
+            newest_match = newest_match.max(written);
+        } else {
+            oldest_difference = oldest_difference.min(written);
         }
     }
-    matching >= CURRENT_ROWS
+    matching >= CURRENT_ROWS && newest_match > 0 && oldest_difference > newest_match
 }
 
 /// The tile and sub-palette the nametables hold at screen column `column` of `row`.
