@@ -454,7 +454,7 @@ impl Ppu2C02 {
             let slot = ((self.eval_found * 4) + self.eval_byte) as usize;
             self.secondary_oam[slot] = self.oam_eval_latch;
             if self.eval_byte == 0 {
-                if self.in_sprite_range(self.oam_eval_latch) {
+                if self.in_sprite_range(self.oam_eval_latch) && !self.sprite_in_margin() {
                     if self.eval_sprite == 0 {
                         self.sprite_zero_found = true;
                     }
@@ -489,7 +489,7 @@ impl Ppu2C02 {
                 self.eval_byte = 0;
                 self.next_sprite();
             }
-        } else if self.in_sprite_range(self.oam_eval_latch) {
+        } else if self.in_sprite_range(self.oam_eval_latch) && !self.sprite_in_margin() {
             self.sprite_overflow = true;
             self.overflow_copy = 3;
             self.eval_byte = 1;
@@ -505,6 +505,16 @@ impl Ppu2C02 {
             self.eval_sprite = 0;
             self.eval_finished = true;
         }
+    }
+
+    /// Whether the sprite being evaluated is one the widescreen extension's high byte puts in a
+    /// margin: not on the screen, it takes no place among the line's eight (nor raises the
+    /// overflow), so that the sprites on the screen all show.
+    fn sprite_in_margin(&self) -> bool {
+        #[allow(clippy::cast_sign_loss)] // Masked to 0..64.
+        let sprite = (self.eval_sprite & 63) as usize;
+        let x = self.oam[(sprite * 4) + 3];
+        !(0..256).contains(&self.wide.sprite_x(sprite, x))
     }
 
     fn in_sprite_range(&self, sprite_y: u8) -> bool {
