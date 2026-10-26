@@ -23,7 +23,7 @@ variables below are only its labels, to find them.
 |---|---|
 | Source ROM | *Super Mario Bros. 3 (USA) (Rev 1)*, MMC3, 256 KiB PRG (32 banks of 8 KiB; in the game's PRG mode bank 30 is fixed at `$8000` and bank 31 at `$E000`, `$A000` and `$C000` switch), 128 KiB CHR-ROM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `2E6301ED` |
-| Target data | CRC-32 `CA41ABAB` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `9B0D1A59` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 128 bytes at `$E240` of bank 31 (the `$FF` padding before a DMC sample), 2 KiB at `$1600`-`$1DFF` of bank 25 (its empty end), hooks in banks 0, 3, 4, 5, 24, 30 and 31; size and layout unchanged |
 | Patch | `rust/crates/zax-nes/patches/smb3-usa-rev1-widescreen.bps`, made against the data without header |
 
@@ -53,7 +53,8 @@ screen x + 8 `WV_EST $5203`/`$5204`, `WV_COUNT $5205`, `WV_M16 $5206`/`$5207`, `
 the sprite block the game gave each object this frame `WV_SPR_BASE $5210 + slot`, X saved
 `WV_SAVE_X $5209`, the object that drew each sprite this frame `WV_OWNER $5240 + sprite` (slot + 1,
 0 for none), the creation pass ahead `WV_AHEAD $520A` and the game's column meanwhile
-`WV_ORIG $520B`/`$520C`;
+`WV_ORIG $520B`/`$520C`, Mario's right limit on the screen `WV_RIGHT $520D`/`$520E` and the
+level end's `WV_END $5218`/`$5219`;
 the trace build adds the lag counters at `$57F0`.
 
 ---
@@ -76,6 +77,17 @@ out the 8-pixel columns marked off the screen in `Objects_SprHVis` (`$0651 + slo
 | creation as the screen scrolls (`Level_ObjectsSpawnByScroll`, called at `$B82E`, bank 5) | the level's objects are created when the column 16 pixels past the right edge (scrolling right) or 32 past the left one is exactly on them | run twice (`wide_spawn_twice`): first a pass ahead, `M16` further (`wide_spawn_ahead`, `$B838`), which creates any object not created yet between the game's column and that one (`wide_spawn_test`, `$B884`): what an area starts with in between (an end-of-level card after a pipe) would otherwise never meet a column that starts past it; then the game's own pass, as the game. An object already created is not created again |
 | deletion off the screen (`Object_DeleteOffScreen`, `$D40F` and `$D41E`, bank 0) | an object off the screen goes past `+$120`/`-$30` (`+$180`/`-$80`, `+$140`/`-$50` for some) of the camera | `M16` further (`wide_delete_low`, `wide_delete_high`): one created there would otherwise go at once. An object within the wide view has no column off the screen, so the game's test does not even start |
 | creation of a special object by an object (`SpecialObj_FindEmptyAbort`, `$C454`; the Lava Lotus, `$B0C1`; the Hammer Bro, `$A5E6`) | none while the object is off the screen | the same with the original screen (`wide_original_offscreen`, `wide_original_hoffscreen`): special objects (hammers, fireballs, boomerangs) have an 8-bit x relative to the screen, one thrown from a margin would show and hit 256 pixels away |
+
+Mario:
+
+| Game routine | Original | Hack |
+|---|---|---|
+| Mario's limits on the screen (`PRG008_B1CE`, bank 8) | his sprite x held within 16-232 (the camera following him, this matters at the level's ends) | moving right, within 232 + M of the screen's left edge (16-bit), never past the level's last screen's 232 (`wide_player_limit`); the left limit as the game |
+| Mario and a screen that scrolls by itself (`AScroll_MovePlayer`, `PRG009_BCC0`, bank 9) | under 16 or from 224 on, moving into that edge, he gets the screen's speed: a wall at the original right edge in the middle of the wide view (1-4, the airships) | the right edge at 224 + M, never past the level's last screen's 224 (`wide_ascroll_edge`); the left one as the game |
+| crushed by the scrolling (`PRG008_A45A`, bank 8) | a sprite x of `$F8`-`$FF`: pushed 1-8 pixels off the left edge | a 16-bit x of -8 to -1 (`wide_crushed`): Mario past 247 is not crushed |
+| Mario's sprites (`wide_frame_end`) | | his six sprites (`Player_SprOff`, `$058E`) get the high byte from his screen x + 8 |
+
+Without margin and in a vertical level, these routines run the game's code as it is.
 
 The game's collisions (Mario and an object, two objects) compare 8-bit screen boxes first and then
 the full 16-bit positions: an object of the margins does not touch Mario. An object in the wide view
@@ -106,6 +118,9 @@ Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original 
 | 5 | `$B838` | `LDA $FD / CLC / ADC $B832,Y / AND #$F0 / STA $05 / LDA $12 / ADC $B834,Y` | `JSR wide_spawn_ahead / JMP $B847` |
 | 0 | `$D40F` | `LDA $FD / CLC / ADC $D3CC,Y` | `JSR wide_delete_low` |
 | 0 | `$D41E` | `ADC $D3D2,Y` | `JSR wide_delete_high` |
+| 8 | `$B1CE` | `LDA $AB / LDY $BD` | `JMP wide_player_limit` |
+| 9 | `$BCC0` | `LDA $AB / CMP #16 / BCC / CMP #224 / BCC` | `JMP wide_ascroll_edge` |
+| 8 | `$A45A` | `LDA $AB / CMP #$F8` | `JSR wide_crushed` |
 | 0 | `$C454` | `JSR $DD54` (Object_AnySprOffscreen) | `JSR wide_original_offscreen` |
 | 3 | `$B0C1` | `JSR $DD54` | `JSR wide_original_offscreen` |
 | 4 | `$A5E6` | `LDA $0651,X` | `JSR wide_original_hoffscreen` |
@@ -155,6 +170,9 @@ lag counters (`$57F0` lag frames, `$57F2` NMIs, 16-bit), for measuring only.
   no high byte from it: they show 256 pixels away while it is in a margin (none met besides the
   troopas' head and wing, which are handled).
 * The vertical levels (four pipe mazes) get no margins from the decoder.
+* Mario goes into the right margin only; the left edge still pushes him where the screen scrolls by
+  itself (the game's crush test needs it). Objects that look at Mario's 8-bit sprite x (a few turn
+  to face him) see him on the wrong side while he is past 255.
 
 ---
 
@@ -212,6 +230,10 @@ WV_SAVE_X       = $5209
 WV_AHEAD        = $520A         ; non-zero during the creation pass as far ahead as the margin
 WV_ORIG_LO      = $520B         ; the game's own creation column during that pass (16-bit)
 WV_ORIG_HI      = $520C
+WV_RIGHT_LO     = $520D         ; how far right of the screen's left edge Mario may go (16-bit)
+WV_RIGHT_HI     = $520E
+WV_END_LO       = $5218         ; the same, as the game allows it at the end of the level
+WV_END_HI       = $5219
 WV_OWNER        = $5240         ; + sprite (66 bytes): 1 + the slot of the object that drew it
 .ifdef LAG_TRACE
 WV_LAG          = $57F0         ; 2 bytes: NMIs that found the game still busy (a trace build)
@@ -253,6 +275,21 @@ OBJECT_WIDTH_FLAGS = $D798      ; and their bits in Objects_SprHVis
 TEMP_VAR6       = $05
 TEMP_VAR7       = $06
 SCROLL_LAST_DIR = $5B           ; 0 the screen last moved right, 1 left
+LEVEL_WIDTH     = $22           ; the level's last screen
+PLAYER_XHI      = $75
+PLAYER_X        = $90
+PLAYER_SPRITE_X = $AB
+PLAYER_XVEL     = $BD
+PLAYER_SPR_OFF  = $058E         ; the Sprite_RAM offset of Mario's six sprites
+LEVEL_VERTICAL  = $03EF
+PLAYER_LIMIT_TEST = $B1D2       ; bank 8: the game's screen limit for Mario, from its BMI
+PLAYER_LIMIT_SLOW = $B1FC       ; its velocity cut once Mario is held at a limit
+PLAYER_LIMIT_DONE = $B208       ; and what follows it
+LEVEL_ASCRL_HVEL = $7A0E        ; the screen's own horizontal speed while it scrolls by itself
+PLAYER_XVEL_FRAC = $074D
+ASCROLL_PRESSED = $BCCA         ; bank 9 (AScroll_MovePlayer): Mario against an edge
+ASCROLL_FREE    = $BCE0         ; not against one
+ASCROLL_ON      = $BCF1         ; after the edges
 PAD_INPUT       = $18           ; the buttons pressed this frame
 PAD_B           = $40
 TITLE_STATE     = $DE
@@ -440,6 +477,32 @@ wide_frame_end:
 @next:
     DEX
     BPL     @object
+
+    LDA     PLAYER_X                    ; Mario's six sprites, from his x on the screen + 8
+    SEC
+    SBC     HORZ_SCROLL
+    STA     WV_EST_LO
+    LDA     PLAYER_XHI
+    SBC     HORZ_SCROLL_HI
+    STA     WV_EST_HI
+    LDA     WV_EST_LO
+    CLC
+    ADC     #$08
+    STA     WV_EST_LO
+    BCC     @player
+    INC     WV_EST_HI
+@player:
+    LDY     PLAYER_SPR_OFF
+    LDA     #OBJECT_SPRITES
+    STA     WV_COUNT
+@player_sprite:
+    JSR     wide_sprite_high
+    INY
+    INY
+    INY
+    INY
+    DEC     WV_COUNT
+    BNE     @player_sprite
 
     LDY     #(SPRITE_COUNT - 1) * 4     ; the sprites the draw routines wrote
 @owned:
@@ -781,6 +844,192 @@ wide_spawn_test:
 @no:
     LDA     #$01
     RTS
+
+; ---------------------------------------------------------------------------- ;
+; Mario's limits on the screen (PRG008_B1CE, bank 8, in place of LDA Player_SpriteX / LDY
+; Player_XVel). The game holds his sprite x within 16-232 of the screen; the camera following him
+; makes it matter only at the level's ends, and where the screen scrolls by itself, where it is a
+; wall at the original right edge in the middle of the wide view. Moving right, the limit is
+; 232 + M instead (16-bit), never past where the game holds him at the level's end (its last
+; screen's 232). The left limit stays: the game takes Mario 1 to 8 pixels left of the screen for
+; crushed by the scrolling. Without margin, and in a vertical level, the game's code as it is.
+wide_player_limit:
+    LDA     LEVEL_VERTICAL
+    BNE     @game
+    LDA     WV_M16_LO
+    ORA     WV_M16_HI
+    BNE     @wide
+@game:
+    LDA     PLAYER_SPRITE_X
+    LDY     PLAYER_XVEL
+    JMP     PLAYER_LIMIT_TEST
+@wide:
+    LDY     PLAYER_XVEL
+    BPL     @rightward
+    LDA     PLAYER_SPRITE_X             ; moving left: the game's limit
+    JMP     PLAYER_LIMIT_TEST
+@rightward:
+    LDA     PLAYER_X                    ; Mario's x on the screen, 16-bit
+    SEC
+    SBC     HORZ_SCROLL
+    STA     WV_T0
+    LDA     PLAYER_XHI
+    SBC     HORZ_SCROLL_HI
+    STA     WV_T1
+    LDA     #232                        ; 232 + M
+    CLC
+    ADC     WV_M
+    STA     WV_RIGHT_LO
+    LDA     #$00
+    ADC     #$00
+    STA     WV_RIGHT_HI
+    LDA     #232                        ; the level's last screen's 232, on this screen
+    SEC
+    SBC     HORZ_SCROLL
+    STA     WV_END_LO
+    LDA     LEVEL_WIDTH
+    SBC     HORZ_SCROLL_HI
+    STA     WV_END_HI
+    LDA     WV_END_LO                   ; the nearer of the two
+    CMP     WV_RIGHT_LO
+    LDA     WV_END_HI
+    SBC     WV_RIGHT_HI
+    BPL     @limit
+    LDA     WV_END_LO
+    STA     WV_RIGHT_LO
+    LDA     WV_END_HI
+    STA     WV_RIGHT_HI
+@limit:
+    LDA     WV_T0                       ; short of it: free
+    CMP     WV_RIGHT_LO
+    LDA     WV_T1
+    SBC     WV_RIGHT_HI
+    BMI     @free
+    LDA     HORZ_SCROLL                 ; held there, as the game holds him at 232
+    CLC
+    ADC     WV_RIGHT_LO
+    STA     PLAYER_X
+    LDA     HORZ_SCROLL_HI
+    ADC     WV_RIGHT_HI
+    STA     PLAYER_XHI
+    LDA     WV_RIGHT_LO
+    STA     PLAYER_SPRITE_X
+    JMP     PLAYER_LIMIT_SLOW
+@free:
+    JMP     PLAYER_LIMIT_DONE
+
+; ---------------------------------------------------------------------------- ;
+; Mario against the edges of a screen that scrolls by itself (AScroll_MovePlayer, PRG009_BCC0,
+; bank 9, in place of LDA Player_SpriteX / CMP #16 / BLT / CMP #224 / BLT): the game gives him the
+; screen's speed when his sprite x is under 16 or from 224 on and he moves into that edge. The
+; right edge is 224 + M (16-bit), never past the level's last screen's 224; the left one stays.
+; Without margin, and in a vertical level, the game's tests.
+wide_ascroll_edge:
+    LDA     LEVEL_VERTICAL
+    BNE     @game
+    LDA     WV_M16_LO
+    ORA     WV_M16_HI
+    BNE     @wide
+@game:
+    LDA     PLAYER_SPRITE_X
+    CMP     #16
+    BCC     @game_pressed
+    CMP     #224
+    BCC     @game_free
+@game_pressed:
+    JMP     ASCROLL_PRESSED
+@game_free:
+    JMP     ASCROLL_FREE
+@wide:
+    LDA     PLAYER_X                    ; Mario's x on the screen, 16-bit
+    SEC
+    SBC     HORZ_SCROLL
+    STA     WV_T0
+    LDA     PLAYER_XHI
+    SBC     HORZ_SCROLL_HI
+    STA     WV_T1
+    BMI     @left                       ; left of the screen
+    BNE     @right_test                 ; past 255
+    LDA     WV_T0
+    CMP     #16
+    BCC     @left
+@right_test:
+    LDA     #224                        ; 224 + M
+    CLC
+    ADC     WV_M
+    STA     WV_RIGHT_LO
+    LDA     #$00
+    ADC     #$00
+    STA     WV_RIGHT_HI
+    LDA     #224                        ; the level's last screen's 224, on this screen
+    SEC
+    SBC     HORZ_SCROLL
+    STA     WV_END_LO
+    LDA     LEVEL_WIDTH
+    SBC     HORZ_SCROLL_HI
+    STA     WV_END_HI
+    LDA     WV_END_LO                   ; the nearer of the two
+    CMP     WV_RIGHT_LO
+    LDA     WV_END_HI
+    SBC     WV_RIGHT_HI
+    BPL     @edge
+    LDA     WV_END_LO
+    STA     WV_RIGHT_LO
+    LDA     WV_END_HI
+    STA     WV_RIGHT_HI
+@edge:
+    LDA     WV_T0
+    CMP     WV_RIGHT_LO
+    LDA     WV_T1
+    SBC     WV_RIGHT_HI
+    BMI     @free
+    LDA     PLAYER_XVEL                 ; right edge: held when he moves right at least as fast
+    SEC                                 ; as the screen
+    SBC     LEVEL_ASCRL_HVEL
+    BMI     @on
+    BPL     @push
+@left:
+    LDA     PLAYER_XVEL                 ; left edge: pushed when slower than the screen
+    SEC
+    SBC     LEVEL_ASCRL_HVEL
+    BPL     @on
+@push:
+    LDA     LEVEL_ASCRL_HVEL
+    STA     PLAYER_XVEL
+    LDA     #$00
+    STA     PLAYER_XVEL_FRAC
+@on:
+    JMP     ASCROLL_ON
+@free:
+    JMP     ASCROLL_FREE
+
+; ---------------------------------------------------------------------------- ;
+; Crushed by the scrolling (PRG008_A45A, bank 8, in place of LDA Player_SpriteX / CMP #$F8; the
+; BLT after skips the death): the game takes a sprite x of $F8-$FF for Mario pushed 1 to 8 pixels
+; off the left edge. With the right limit past 255, that is a 16-bit x of -8 to -1 only. C clear:
+; not crushed.
+wide_crushed:
+    LDA     WV_M16_LO
+    ORA     WV_M16_HI
+    BNE     @wide
+    LDA     PLAYER_SPRITE_X
+    CMP     #$F8
+    RTS
+@wide:
+    LDA     PLAYER_X
+    SEC
+    SBC     HORZ_SCROLL
+    STA     WV_T0
+    LDA     PLAYER_XHI
+    SBC     HORZ_SCROLL_HI
+    CMP     #$FF
+    BNE     @no
+    LDA     WV_T0
+    CMP     #$F8
+    RTS
+@no:
+    CLC
+    RTS
 ```
 
 ### B. `tools/build.py`
@@ -871,6 +1120,11 @@ def hooks(sym):
     put(0, 0xC454, '20 54 dd', jsr(sym['wide_original_offscreen']))
     put(3, 0xB0C1, '20 54 dd', jsr(sym['wide_original_offscreen']))
     put(4, 0xA5E6, 'bd 51 06', jsr(sym['wide_original_hoffscreen']))
+    # Mario's right limit on the screen: the wide view's (PRG008_B1CE).
+    put(8, 0xB1CE, 'a5 ab a4 bd', jmp(sym['wide_player_limit']))
+    # ... and where the screen scrolls by itself (AScroll_MovePlayer); crushed only off the left.
+    put(9, 0xBCC0, 'a5 ab c9 10 90 04 c9 e0 90 16', jmp(sym['wide_ascroll_edge']))
+    put(8, 0xA45A, 'a5 ab c9 f8', jsr(sym['wide_crushed']))
     # Options: the level select on the title screen (Title_Do1P2PMenu).
     put(24, 0xAC35, 'a5 f8 29 c0 c9 c0 d0 05 ea ea ea ea ea', jsr(sym['wide_title']) + jmp(0xAC42))
     return out
