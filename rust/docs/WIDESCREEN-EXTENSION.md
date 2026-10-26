@@ -408,8 +408,23 @@ nametables).
 The built-in patches of both builds (`CASTLEVANIA_USA`, `CASTLEVANIA_USA_REV1`, an advanced
 mode) are one hack built for each (`cvwide`): its code is the free end of PRG bank 5, the same in
 both, which the fixed bank has no room to unlock, so the window is open from power-on
-(`boot_window`); for now it carries testing aids only, off by default (Select in a stage goes on to
-the next stage through the state that begins one, with its block's graphics; Simon never hurt).
+(`boot_window`). It draws the objects in the margins: an object's x is 9-bit there (bit 0 of
+`$0300` its bit 8, 256-383 right of the screen and 384-511 left of it, as the game's own `$EF45`
+reads it), the game keeps its candles and spawners' objects alive from 64 pixels left of the
+screen to 64 right of it, and the hack draws them past the edges (the sprite builder of bank 0,
+16-bit sprite x and the high bytes at `$5100`), within the room. The enemies the game removes at
+the edges of the screen (most of them: 8-bit x, moved by their own routines) are followed in 16
+bits and live on up to the objects' margin (`min(M + 16, 120)`); one made at an edge by a spawner
+comes in from it; past an edge an object looks for its ground at the edge (the game's terrain is a
+ring that follows the nametables, drawn only where the game has drawn). The game's collisions with
+Simon only take objects on the screen (`$0300` 0), so nothing in a margin touches him. Options:
+testing aids, off by default (Select in a stage goes on to the next stage through the state that
+begins one, with its block's graphics; Simon never hurt), and "No slowdown" (255 lines of
+overclock, on by default; the yield ends it in the main loop, `idle_loop` `$C030`-`$C03E`). The
+game's split under its status bar is a sprite 0 wait early in the NMI, far from the overclock (at
+line 240) and before the hack's code. Measured on a movie of stage 1 and its hall, 5,400 frames
+at a 112-pixel margin: the original game lags only in a room change (the same with the hack), the
+hack without the overclock some 110 frames more, none with it.
 
 ---
 

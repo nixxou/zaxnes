@@ -427,10 +427,12 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   marges.
 - *Castlevania* (USA), la version d'origine comme la Rev 1 (« PRG1 ») : l'écran large seul lit
   le décor de la salle dans ses données, jusqu'à ses deux bords ; la ROM n'est pas modifiée. La
-  ligne **Mode avancé** ajoute le patch, qui ne porte pour l'instant que des aides pour tester :
-  « Sélecteur de niveau » (Select pendant un stage passe au stage suivant, avec ses graphismes,
-  sans coûter de vie ; après le dernier, le premier) et « Invincible » (Simon n'est jamais
-  touché ; les chutes tuent toujours), désactivées par défaut.
+  ligne **Mode avancé** (activée par défaut) ajoute le patch : les bougies, les objets et les
+  ennemis s'affichent et vivent dans les marges (les zombies arrivent du bord de la marge ; rien
+  ne touche Simon tant qu'il n'est pas sur l'écran d'origine). Options du patch : « Sélecteur de
+  niveau » (Select pendant un stage passe au stage suivant, avec ses graphismes, sans coûter de
+  vie ; après le dernier, le premier) et « Invincible » (Simon n'est jamais touché ; les chutes
+  tuent toujours), désactivées par défaut ; « Sans ralentissements » (actif par défaut).
 - Ça fonctionne en 3D comme en mode 2D.
 
 Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers

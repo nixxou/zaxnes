@@ -12,7 +12,7 @@
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM's free space (`ng3wide`, `tools/build.py`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, part of it seen through the extension's window; the ROM keeps its size (`smb3wide`, `tools/build.py`) |
-//! | Castlevania (USA), and its Rev 1 | testing aids, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size; one source for both builds (`cvwide`, `tools/build.py`) |
+//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size; one source for both builds (`cvwide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -237,7 +237,7 @@ pub const PATCHES: [BuiltinPatch; 7] = [
         bps: include_bytes!("../patches/castlevania-usa-widescreen.bps"),
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
-        // The margin decoder alone widens the game; the patch adds the testing aids.
+        // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
         // No room in the fixed bank for code that would unlock the extension: the free end of
         // PRG bank 5 (from its page $1F) is open in the window from power-on.
@@ -253,7 +253,7 @@ pub const PATCHES: [BuiltinPatch; 7] = [
         bps: include_bytes!("../patches/castlevania-usa-rev1-widescreen.bps"),
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
-        // The margin decoder alone widens the game; the patch adds the testing aids.
+        // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
         // No room in the fixed bank for code that would unlock the extension: the free end of
         // PRG bank 5 (from its page $1F) is open in the window from power-on.
@@ -264,7 +264,7 @@ pub const PATCHES: [BuiltinPatch; 7] = [
 ];
 
 /// The options of both Castlevania patches, the same hack built for each: testing aids, off by
-/// default.
+/// default, and the overclock.
 const CASTLEVANIA_OPTIONS: &[HackOption] = &[
     // Select in a stage: the next stage (after the last, the first).
     HackOption {
@@ -281,6 +281,14 @@ const CASTLEVANIA_OPTIONS: &[HackOption] = &[
         label_fr: "Invincible",
         bit: 1,
         default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
     },
 ];
 
