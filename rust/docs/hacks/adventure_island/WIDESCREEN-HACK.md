@@ -191,9 +191,9 @@ TargetCopy for runs of one value). `WIDE_SKIP=<hex addresses>` leaves hooks out,
   margin goes back onto the screen and is removed there, as the game had removed it at the edge.
 * More sprites show: the game still places 63 at most (`$C464`) and turns which ones are left out
   each frame, so a crowded screen flickers more than on the console.
-* The cloud platforms and the other things the game draws over the tables as it draws a column
-  appear in the right margin when the game draws them, 8 pixels past the screen (the decoder's
-  limit, see the decoder's description).
+* The platforms the game draws over the tables (the cloud platforms of the sea rounds) are the
+  decoder's: it shows them ahead in the right margin from the object lists, at the row the ground
+  gives them with the screen's vertical position of the moment (see the decoder's description).
 
 ## Appendices
 

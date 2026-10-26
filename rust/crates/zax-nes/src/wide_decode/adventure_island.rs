@@ -29,7 +29,10 @@
 //! rounds, `$A629`, from the round's object list). A margin column the game drew already (left of
 //! the one being drawn) is shown as the nametables hold it: a tile that differs from the tables is
 //! kept when it was written in or after the frame of the column's rows that match them, an older
-//! one belonging to another column of the ring. A column not drawn yet comes from the tables.
+//! one belonging to another column of the ring. The column the game is putting together comes
+//! from its buffer once complete (`$0460`); a column not drawn yet from the tables, with the
+//! platforms the game will draw over it (`Platforms`): the one being drawn, the one asked for,
+//! and those still in the round's object lists, read ahead.
 //!
 //! The decoder checks the centre of each row: a row whose centre does not show what the tables
 //! give, or what the game drew over them, is left to the nametables (the title, the screens between
@@ -87,6 +90,7 @@ impl MarginDecoder for AdventureIsland {
         if !view.centre_matches(memory, *row, first_column, plane_row) {
             return false;
         }
+        let platforms = Platforms::new(memory, &view);
         for column in columns {
             let world = first_column + column;
             // A column the game drew already shows what it drew, what it puts over the tables
@@ -94,10 +98,14 @@ impl MarginDecoder for AdventureIsland {
             let drawn = (world < view.drawing)
                 .then(|| view.drawn(memory, *row, column, world, plane_row))
                 .flatten();
-            let decoded = drawn
-                .as_ref()
-                .and_then(|drawn| drawn.cell(memory, *row, column))
-                .or_else(|| view.tile(world, plane_row));
+            let decoded = match drawn.as_ref() {
+                Some(drawn) => drawn.cell(memory, *row, column),
+                None => view
+                    .buffered(memory, world, plane_row)
+                    .or_else(|| platforms.tile(&view, world, plane_row))
+                    .or_else(|| view.tile(world, plane_row)),
+            }
+            .or_else(|| view.tile(world, plane_row));
             if let Some((tile, palette)) = decoded {
                 out.push(DecodedTile {
                     column,
@@ -119,11 +127,12 @@ impl MarginDecoder for AdventureIsland {
         out: &mut Vec<DecodedTile>,
     ) -> bool {
         let view = View::new(memory);
-        // The screen's row nearest this one.
+        // The screen's row nearest this one, whole on the screen (a row across its edge shows,
+        // past it, a row the game does not show).
         let rows_away = if row.line < 0 {
             -((-row.line + 7) / 8)
         } else {
-            (row.line - (VISIBLE_LINES - 8)).max(0) / 8
+            (row.line - (VISIBLE_LINES - 8) + 7).max(0) / 8
         };
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..30.
         let screen_y = (i32::from(row.coarse_y()) - rows_away).rem_euclid(RING_ROWS) as u16;
@@ -355,10 +364,35 @@ impl ColumnRows {
     }
 }
 
+/// The column the game is drawing, as it puts it together (`$0460`, from the column's first tile
+/// on): complete, platforms included, from its third step (`$06 & 7 = 3`, `$B397`) to the next
+/// column, while the nametables may not have it yet.
+const COLUMN_BUFFER: u16 = 0x0460;
+
 impl View<'_> {
+    /// The tile and sub-palette of world tile column `world` at row `plane_row` from the game's
+    /// column buffer, when `world` is the column it has put together; a tile the game put over
+    /// the tables takes the platforms' sub-palette.
+    fn buffered(&self, memory: &DecoderMemory<'_>, world: i32, plane_row: i32) -> Option<(u8, u8)> {
+        if world != self.drawing || memory.ram(0x0006) & 7 < 3 {
+            return None;
+        }
+        let index = u16::try_from(plane_row - self.rows.at(world))
+            .ok()
+            .filter(|&index| i32::from(index) < COLUMN_TILES)?;
+        let tile = memory.ram(COLUMN_BUFFER + index);
+        let tables = self.tile(world, plane_row)?;
+        if tables.0 == tile {
+            return Some(tables);
+        }
+        let style = u32::from(memory.ram(0x008E));
+        let palette = self.round.byte(PLATFORM_PALETTES + style)? & 3;
+        Some((tile, palette))
+    }
+
     /// What the nametables hold of world tile column `world` at screen column `column`: the frame
     /// the game drew it in, the newest of its rows that show what the tables give, when enough of
-    /// them do. What the game drew over the tables then (or later) is newer than that; the rows
+    /// them do (0 for a column not written since a state was loaded: the state holds it as drawn). What the game drew over the tables then (or later) is newer than that; the rows
     /// the column was not drawn on (the plane's rows past the screen when the game drew it) are
     /// older.
     fn drawn(
@@ -384,9 +418,14 @@ impl View<'_> {
                 }
             }
         }
-        (frame > 0 && matching >= 4).then(|| DrawnColumn {
+        // Frame 0: not written since the state was loaded (or power-on), the state's own.
+        (matching >= 4).then(|| DrawnColumn {
             frame,
             tables: self.tile(world, plane_row),
+            ring: [
+                self.tile(world, plane_row - RING_ROWS),
+                self.tile(world, plane_row + RING_ROWS),
+            ],
         })
     }
 }
@@ -397,12 +436,16 @@ struct DrawnColumn {
     frame: u32,
     /// What the tables give at the row asked for.
     tables: Option<(u8, u8)>,
+    /// And at the rows of the plane the nametables hold at the same place (30 rows up and down).
+    ring: [Option<(u8, u8)>; 2],
 }
 
 impl DrawnColumn {
     /// The tile and sub-palette at screen column `column` of `row`: the nametables', when they
-    /// show the tables or something the game drew over them since the column; `None` for a
-    /// tile older than the column (another column's, before the ring came round).
+    /// show the tables or something the game drew over them since the column; the tables', when
+    /// they show the plane's row 30 rows up or down (the game draws the rows the screen scrolls
+    /// to over the screen's columns only: past them a row stays as the column left it); `None`
+    /// for a tile older than the column (another column's, before the ring came round).
     fn cell(
         &self,
         memory: &DecoderMemory<'_>,
@@ -414,8 +457,304 @@ impl DrawnColumn {
         match self.tables {
             // The tables' sub-palette: the attribute bytes of the margins may be another column's.
             Some(tables) if tables.0 == shown.0 => Some(tables),
+            Some(tables) if self.ring.iter().flatten().any(|&(tile, _)| tile == shown.0) => {
+                Some(tables)
+            }
             _ => ((memory.nametable_written)(address) >= self.frame).then_some(shown),
         }
+    }
+}
+
+/// The platforms the game draws over the tables (`$A629`): kind `$3B` with its extra byte's low
+/// three bits 0 (the cloud platforms of the sea rounds, rock ledges elsewhere). Created as an
+/// object (`$A8CF`), such a platform asks for its drawing (`$052E` = 4, `$052F` its extra byte);
+/// at the third step of each tile column the game draws (`$06 & 7 = 3`, `$BD3C`) the request
+/// counts down, and from the column where it reaches 0 the game writes two tiles over each of 8
+/// columns: `tbl_A80F[$8E]` + the column (top) and + 8 more (below), at the row of the plane
+/// `$32 + $8D` (`$8D` from the ground's y under its first column, `$A607`), the sub-palette
+/// `tbl_A81F[$8E]` over the 16 lines of attribute row `$34 + $0530`. The decoder shows in the margin
+/// columns the game has not drawn yet the platform being drawn (`$88` columns left, its data at
+/// `$89`), the one asked for, and those still in the round's object lists (read ahead as `$8C5A`
+/// reads them), each at the column and row the game will give it.
+struct Platforms {
+    list: Vec<Platform>,
+}
+
+/// One platform: its first world tile column and the data index (0-7) of it, the columns left,
+/// its tiles (CPU address of the top row's first), its row of the plane and its sub-palette's.
+struct Platform {
+    first: i32,
+    index: i32,
+    columns: i32,
+    tiles: u16,
+    row: i32,
+    palette_row: i32,
+    palette: u8,
+}
+
+/// The platforms' kind, the tiles and sub-palettes of each style (`$8E`), the third of the
+/// ground's y they take (by `$2B`).
+const PLATFORM_KIND: u8 = 0x3B;
+const PLATFORM_TILES: u32 = 0xA80F;
+const PLATFORM_PALETTES: u32 = 0xA81F;
+const PLATFORM_LIFT: u32 = 0xA604;
+/// Their columns.
+const PLATFORM_COLUMNS: i32 = 8;
+/// The object lists: read pointers (`$7C` + list), bits left in the byte read (`$FF`: over) and
+/// that byte (`$0546`, `$0547`), the next entry's position (`$0540`); lists 0, 2 and 4.
+const LIST_POINTER: u16 = 0x007C;
+const LIST_BITS_LEFT: u16 = 0x0546;
+const LIST_BITS: u16 = 0x0547;
+const LIST_NEXT: u16 = 0x0540;
+/// Entries read ahead per list at most.
+const LIST_AHEAD: usize = 8;
+/// How far past the column being drawn platforms are looked for.
+const PLATFORM_REACH: i32 = 48;
+/// The ground: the y, shape and part-3 section of the game's 5 parts of 128 pixels, the change of
+/// y per section (`$BF43`).
+const GROUND_Y: u16 = 0x0506;
+const GROUND_SHAPE: u16 = 0x050B;
+const GROUND_SECTION: u16 = 0x003B;
+const GROUND_RISE: u32 = 0xBF43;
+
+impl Platforms {
+    fn new(memory: &DecoderMemory<'_>, view: &View<'_>) -> Self {
+        let mut list = Vec::new();
+        let ram = |address: u16| memory.ram(address);
+        let style = ram(0x008E);
+        let byte = |address: u32| view.round.byte(address);
+        let (Some(tiles_low), Some(tiles_high), Some(palette)) = (
+            byte(PLATFORM_TILES + (2 * u32::from(style))),
+            byte(PLATFORM_TILES + (2 * u32::from(style)) + 1),
+            byte(PLATFORM_PALETTES + u32::from(style)),
+        ) else {
+            return Self { list };
+        };
+        let scroll = (i32::from(ram(0x003A)) << 8) | i32::from(ram(0x0006));
+        // The next column whose third step is to come.
+        let next = view.drawing + i32::from(scroll & 7 >= 3);
+        // The platform being drawn.
+        let left = i32::from(ram(0x0088));
+        if left > 0 {
+            let row = i32::from(ram(WINDOW_ROW)) + i32::from(ram(0x008D));
+            list.push(Platform {
+                first: next,
+                index: PLATFORM_COLUMNS - left,
+                columns: left,
+                tiles: u16::from_le_bytes([ram(0x0089), ram(0x008A)]),
+                row,
+                palette_row: 2 * (i32::from(ram(0x0034)) + i32::from(ram(0x0530))),
+                palette: palette & 3,
+            });
+        }
+        let tiles = u16::from_le_bytes([tiles_low, tiles_high]);
+        let mut add = |first: i32, extra: u8| {
+            if let Some((row, palette_row)) = Self::row(memory, view, scroll, first, extra) {
+                list.push(Platform {
+                    first,
+                    index: 0,
+                    columns: PLATFORM_COLUMNS,
+                    tiles,
+                    row,
+                    palette_row,
+                    palette: palette & 3,
+                });
+            }
+        };
+        // The one asked for: drawn from the column where the count reaches 0.
+        let asked = i32::from(ram(0x052E));
+        if asked > 0 {
+            add(next + asked - 1, ram(0x052F));
+        }
+        // Those of the lists: created when the screen's left edge comes 64 pixels near their
+        // position (its 16-pixel part), their request counted down from the column then drawn.
+        for list_index in [0u16, 2, 4] {
+            let mut reader = ListReader::new(memory, list_index);
+            for _ in 0..LIST_AHEAD {
+                let Some((position, kind, extra)) = reader.entry() else {
+                    break;
+                };
+                let first = ((position & 0xFFF0) >> 3) - 4;
+                if first > view.drawing + PLATFORM_REACH {
+                    break;
+                }
+                if kind == PLATFORM_KIND && extra.trailing_zeros() >= 3 {
+                    add(first, extra);
+                }
+                if !reader.next() {
+                    break;
+                }
+            }
+        }
+        Self { list }
+    }
+
+    /// The row of the plane a platform starting at world tile column `first` gets (`$A654`), and
+    /// the first of the two rows its sub-palette goes over, as if drawn with the screen's vertical
+    /// position of now.
+    fn row(
+        memory: &DecoderMemory<'_>,
+        view: &View<'_>,
+        scroll: i32,
+        first: i32,
+        extra: u8,
+    ) -> Option<(i32, i32)> {
+        let ram = |address: u16| memory.ram(address);
+        // `$A607`: the ground at screen x 265 when the column is drawn (the screen's left edge then
+        // at 8 first - 5), the screen being where it is now.
+        let x = (8 * first) + 260 - scroll;
+        let ground = ground_y(memory, &view.round, x)?;
+        let third = ram(0x002B);
+        let lift = view.round.byte(PLATFORM_LIFT + u32::from(third))?;
+        let mut y = ground.wrapping_sub(0x10).wrapping_add(lift);
+        if y & 7 >= 4 {
+            y = y.wrapping_add(3);
+        }
+        let mut rows = (y & 0xF8).wrapping_sub((extra << 1) & 0xF0) >> 3;
+        if ram(0x008E) == 0 {
+            rows = rows.wrapping_add(1);
+        }
+        let palette_rows = (rows.wrapping_add(u8::from(third == 2))) >> 1;
+        Some((
+            i32::from(ram(WINDOW_ROW)) + i32::from(rows),
+            2 * (i32::from(ram(0x0034)) + i32::from(palette_rows)),
+        ))
+    }
+
+    /// The tile and sub-palette a platform puts at world tile column `world`, row `plane_row`.
+    fn tile(&self, view: &View<'_>, world: i32, plane_row: i32) -> Option<(u8, u8)> {
+        self.list.iter().find_map(|platform| {
+            let column = world - platform.first;
+            let below = plane_row - platform.row;
+            if !(0..platform.columns).contains(&column) || !(0..2).contains(&below) {
+                return None;
+            }
+            let index = u32::try_from(platform.index + column + (8 * below)).ok()?;
+            let tile = view.round.byte(u32::from(platform.tiles) + index)?;
+            let palette = if (0..2).contains(&(plane_row - platform.palette_row)) {
+                platform.palette
+            } else {
+                view.tile(world, plane_row)
+                    .map_or(0, |(_, palette)| palette)
+            };
+            Some((tile, palette))
+        })
+    }
+}
+
+/// The ground's y at screen x `x` as `sub_C1EA` gives it: from the game's 5 parts of 128 pixels
+/// (`((left edge | 128) + x) / 128`), and past them from the round's sections as `$BEDE` makes the
+/// next part (the last one's y plus `$BF43` of the section's second byte, the shape from its
+/// third); `None` past the round or 3 parts on.
+fn ground_y(memory: &DecoderMemory<'_>, round: &Round<'_>, x: i32) -> Option<u8> {
+    let ram = |address: u16| memory.ram(address);
+    let sum = i32::from(ram(0x0006) | 0x80) + x;
+    let part = sum >> 7;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..128.
+    let position = (sum & 0x7F) as u8;
+    let (y, shape) = match part {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..5.
+        0..=4 => (ram(GROUND_Y + part as u16), ram(GROUND_SHAPE + part as u16)),
+        5..=7 => {
+            let mut y = ram(GROUND_Y + 4);
+            let mut shape = 0;
+            for part in 5..=part {
+                let section = i32::from(ram(GROUND_SECTION)) - 3 + part;
+                if section >= i32::from(ram(SECTIONS)) {
+                    return None;
+                }
+                let rise = (round.section(section, 1)? >> 2) & 7;
+                y = y.wrapping_add(round.byte(GROUND_RISE + u32::from(rise))?);
+                shape = round.section(section, 2)? & 0x0F;
+            }
+            (y, shape)
+        }
+        _ => return None,
+    };
+    Some(match shape {
+        2 => y.wrapping_sub(position >> 2),
+        3 => y.wrapping_add(position >> 2),
+        4..=6 if position >= 0x40 => y.wrapping_add(if shape == 4 { 0xE0 } else { 0x20 }),
+        _ => y,
+    })
+}
+
+/// One of the round's object lists read ahead from its state in RAM, as `sub_8D74` reads it.
+struct ListReader<'a> {
+    prg_rom: &'a [u8],
+    pointer: u16,
+    bits_left: u8,
+    bits: u8,
+    position: i32,
+    over: bool,
+}
+
+impl<'a> ListReader<'a> {
+    fn new(memory: &DecoderMemory<'a>, list: u16) -> Self {
+        let ram = |address: u16| memory.ram(address);
+        Self {
+            prg_rom: memory.prg_rom,
+            pointer: u16::from_le_bytes([ram(LIST_POINTER + list), ram(LIST_POINTER + list + 1)]),
+            bits_left: ram(LIST_BITS_LEFT + list),
+            bits: ram(LIST_BITS + list),
+            position: i32::from(u16::from_le_bytes([
+                ram(LIST_NEXT + list),
+                ram(LIST_NEXT + list + 1),
+            ])),
+            over: ram(LIST_BITS_LEFT + list) & 0x80 != 0,
+        }
+    }
+
+    /// `count` bits, the first the highest; `None` past the PRG-ROM.
+    fn read(&mut self, count: u32) -> Option<i32> {
+        let mut value = 0;
+        for _ in 0..count {
+            if self.bits_left == 0 {
+                let offset = usize::from(self.pointer.checked_sub(0x8000)?);
+                self.bits = *self.prg_rom.get(offset)?;
+                self.pointer = self.pointer.wrapping_add(1);
+                self.bits_left = 8;
+            }
+            value = (value << 1) | i32::from(self.bits >> 7);
+            self.bits <<= 1;
+            self.bits_left -= 1;
+        }
+        Some(value)
+    }
+
+    /// The next entry: its position, kind and first extra byte (kinds `$38` and up; a second for
+    /// `$3E` and up).
+    fn entry(&mut self) -> Option<(i32, u8, u8)> {
+        if self.over {
+            return None;
+        }
+        let kind = u8::try_from(self.read(6)?).ok()?;
+        let mut extra = 0;
+        if kind >= 0x38 {
+            extra = u8::try_from(self.read(8)?).ok()?;
+            if kind >= 0x3E {
+                self.read(8)?;
+            }
+        }
+        Some((self.position, kind, extra))
+    }
+
+    /// On to the position of the entry after (1 bit, then 10 bits, 0 ending the list, or 6 bits
+    /// added; x 8); false when the list is over.
+    fn next(&mut self) -> bool {
+        let step = match self.read(1) {
+            Some(1) => match self.read(10) {
+                Some(0) | None => None,
+                Some(at) => {
+                    self.position = at * 8;
+                    Some(())
+                }
+            },
+            Some(_) => self.read(6).map(|add| self.position += add * 8),
+            None => None,
+        };
+        self.over = step.is_none();
+        !self.over
     }
 }
 
@@ -532,6 +871,38 @@ mod tests {
         assert_eq!(round.tile(32, 0), None, "past the round");
         // Columns 4-15 are structure 0, all metatile 0.
         assert_eq!(round.tile(6, 2), Some((0x0A, 3)), "lower right quarter");
+    }
+
+    #[test]
+    fn an_object_list_is_read_ahead_as_the_game_reads_it() {
+        let (mut prg, mut ram) = round_image();
+        // List 2 at $9800, its next entry at position $0120: kind $3B with extra byte $08, then 6
+        // bits added (2: 16 pixels on), kind $01, then 10 bits of 0: the list is over.
+        let bits = "111011 00001000 0 000010 000001 1 0000000000";
+        let bits: Vec<u8> = bits
+            .bytes()
+            .filter(|&b| b != b' ')
+            .map(|b| b - b'0')
+            .collect();
+        for (index, chunk) in bits.chunks(8).enumerate() {
+            let byte = chunk
+                .iter()
+                .enumerate()
+                .fold(0u8, |byte, (bit, &value)| byte | (value << (7 - bit)));
+            prg[0x1800 + index] = byte;
+        }
+        ram[usize::from(LIST_POINTER) + 2..usize::from(LIST_POINTER) + 4]
+            .copy_from_slice(&0x9800u16.to_le_bytes());
+        ram[usize::from(LIST_BITS_LEFT) + 2] = 0;
+        ram[usize::from(LIST_NEXT) + 2..usize::from(LIST_NEXT) + 4]
+            .copy_from_slice(&0x0120u16.to_le_bytes());
+        let memory = memory(&prg, &ram);
+        let mut reader = ListReader::new(&memory, 2);
+        assert_eq!(reader.entry(), Some((0x120, 0x3B, 0x08)));
+        assert!(reader.next());
+        assert_eq!(reader.entry(), Some((0x130, 0x01, 0)));
+        assert!(!reader.next(), "a 10-bit position of 0 ends the list");
+        assert_eq!(reader.entry(), None);
     }
 
     #[test]
