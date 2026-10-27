@@ -19,6 +19,7 @@ mod excitebike;
 mod ff1;
 pub mod guest;
 mod megaman2;
+mod metalforce;
 mod ng3;
 mod smb1;
 mod smb3;
@@ -186,6 +187,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         castlevania::SOURCE_CRC_REV1 => Some(&castlevania::USA_REV1),
         excitebike::SOURCE_CRC => Some(&excitebike::Excitebike),
         ff1::SOURCE_CRC => Some(&ff1::FinalFantasy),
+        metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
         _ => None,
     }
 }
@@ -204,6 +206,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::CASTLEVANIA_USA => Some(&castlevania::USA),
         crate::builtin_patches::CASTLEVANIA_USA_REV1 => Some(&castlevania::USA_REV1),
         crate::builtin_patches::FINAL_FANTASY_USA => Some(&ff1::FinalFantasy),
+        crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
         _ => None,
     }
 }

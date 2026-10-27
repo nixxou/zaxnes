@@ -16,6 +16,7 @@
 //! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`aiwide`, `tools/build.py`) |
 //! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | hooks into both copies of the original 16 KiB (the PRG laid out as the game, its copy for the $C000 mirror, then a 16 KiB bank for the extension's window) (`excitebikewide`, `tools/build.py`) |
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size (`ff1wide`, `tools/build.py`) |
+//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -73,9 +74,11 @@ pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
 pub const EXCITEBIKE: &str = "Excitebike (Japan, USA) widescreen";
 /// Name of the Final Fantasy (USA) widescreen patch (advanced mode).
 pub const FINAL_FANTASY_USA: &str = "Final Fantasy (USA) widescreen";
+/// Name of the Metal Force (Korea) widescreen patch (advanced mode).
+pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 10] = [
+pub const PATCHES: [BuiltinPatch; 11] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -361,6 +364,45 @@ pub const PATCHES: [BuiltinPatch; 10] = [
         boot_window: Some((0x86, 0x30)),
         // The wait for the NMI: JMP to itself, the NMI returning to the wait's caller.
         idle_loop: Some((0xFEBB, 0xFEBD)),
+    },
+    BuiltinPatch {
+        name: METALFORCE_KOREA,
+        game: "Metal Force",
+        rom_name: "Metal Force (Korea) (Unl)",
+        source_crc: 0xEC6D_910E,
+        bps: include_bytes!("../patches/metalforce-korea-widescreen.bps"),
+        options: &[
+            // Testing aids: left / right on the mission screen pick the mission; no damage (pits
+            // still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (left / right on the mission screen)",
+                label_fr: "Sélecteur de niveau (gauche / droite sur l'écran de mission)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        boot_window: None,
+        // Everything runs in the NMI; the reset ends in a JMP to itself.
+        idle_loop: Some((0xFFC3, 0xFFC5)),
     },
 ];
 

@@ -89,7 +89,10 @@ sprites and objects in them);
 the riders in the margins);
 [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
 (*Final Fantasy* (USA): the world map and the towns, castles and dungeons from the game's own
-maps, and in the advanced mode the people and vehicles in the margins).
+maps, and in the advanced mode the people and vehicles in the margins);
+[`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md)
+(*Metal Force* (Korea), mapper 156: the room from the level map the game keeps in its RAM, and in
+the advanced mode the enemies in the margins).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see
