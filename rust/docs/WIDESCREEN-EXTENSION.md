@@ -25,7 +25,9 @@ the Ninja Gaiden III (USA) one, its advanced mode too
 and the Castlevania (USA) one, built for its Rev 1 too, an advanced mode as well
 ([`hacks/castlevania/WIDESCREEN-HACK.md`](hacks/castlevania/WIDESCREEN-HACK.md)), and the
 Adventure Island (USA) one, its advanced mode too
-([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)).
+([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)), and the
+Final Fantasy (USA) one, an advanced mode as well
+([`hacks/ff1/WIDESCREEN-HACK.md`](hacks/ff1/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -327,7 +329,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 | Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched and with their built-in patches | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
-| Final Fantasy (USA) (data CRC-32 `CEBD2A31`), unpatched | the world map (unpacked from PRG-ROM) and the standard maps (PRG-RAM); vertical margin, overscan | `ff1.rs`, see below |
+| Final Fantasy (USA) (data CRC-32 `CEBD2A31`), unpatched and with its built-in patch | the world map (unpacked from PRG-ROM) and the standard maps (PRG-RAM); vertical margin, overscan | `ff1.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -537,8 +539,18 @@ a row whose PPU address does not place the map is placed as the camera in RAM sa
 map in its margins. All 15 rows of the nametable ring show: scrolling vertically the game draws the
 row coming in over the leaving one, at the screen's top or bottom edge, so the decoder covers the
 overscan (`covers_overscan`). A room (`$0D`) only changes the palette (`$03E0`) and which people
-show: its tiles are the map's. The people, the vehicles, the bridge and the canal are sprites, left
-out past the edges as the game culls them.
+show: its tiles are the map's. The people, the vehicles, the bridge and the canal are sprites,
+which the game leaves out past the edges: the built-in patch (`FINAL_FANTASY_USA`, an advanced
+mode, `ff1wide`) draws them in the margins. Its code is the free end of PRG bank 6 (from its page
+`$30`, zeros in the game), open in the window from power-on (`boot_window`); the window is not laid
+over `$6000-$7FFF`, where the game keeps its save and maps. Where the game puts a person
+(`$E70D`) or a vehicle (`$E3F4`) on the screen, the hack works out a 16-bit x (the distance in
+tiles signed) and keeps it within the host's margin; the sprite builder (`$E301`) writes the high
+bytes. Once a frame, at the game's wait for the NMI (`$FEA8`), it sets `$5003` to the host margin,
+the extents to 0 and `$5007` to 2. A sprite's y stays 8-bit: the people above and below the screen
+stay hidden. Option: "No slowdown" (bit 0, on by default; `idle_loop` `$FEBB`-`$FEBD`, the game's
+`JMP` to itself). Measured with a trace of the waits: 600 frames each of a town, the world map
+and a battle, at 0 and 128 pixels of margin, lag no frame, with or without the hack.
 
 ---
 
@@ -615,7 +627,7 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::version()` is the target CRC-32 read from the BPS footer: any change to a hack
   changes it.
 * `BuiltinPatch::advanced`: an **advanced mode** of a game's widescreen (Super Mario Bros.: the
-  enemies in the margins; Adventure Island: the sprites and objects in the margins). Such a patch applies only when the game's `video.widescreen_advanced`
+  enemies in the margins; Adventure Island: the sprites and objects in the margins; Final Fantasy: the people and vehicles in the margins). Such a patch applies only when the game's `video.widescreen_advanced`
   is on too, which it is by default (owner request: the widescreen is the whole hack, its
   testing aids aside; a game keeps a value of its own only when it is turned off)
   (`NesCore::set_advanced_patches`, set with `set_builtin_patches` at each load and
@@ -633,7 +645,7 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
-  at `$B759`). `NesCore::run_frame` ends the
+  at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms

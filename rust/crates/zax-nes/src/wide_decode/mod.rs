@@ -200,6 +200,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::SMB3_USA => Some(&smb3::SuperMarioBros3),
         crate::builtin_patches::CASTLEVANIA_USA => Some(&castlevania::USA),
         crate::builtin_patches::CASTLEVANIA_USA_REV1 => Some(&castlevania::USA_REV1),
+        crate::builtin_patches::FINAL_FANTASY_USA => Some(&ff1::FinalFantasy),
         _ => None,
     }
 }
