@@ -20,7 +20,7 @@ on the original screen).
 |---|---|
 | Source ROM | *Metal Force (Korea) (Unl)*, mapper 156 (Daou Infosys DIS23C01), 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), 256 KiB CHR-ROM, 8 KiB PRG-RAM (the level map) |
 | Source data (iNES header excluded) | CRC-32 `EC6D910E` |
-| Target data | CRC-32 `E0FA0F0A` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `9132B62B` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F940` of bank 15 (in the `$FF` fill `$F936`-`$FF7F`), hooks in bank 15 and bank 13 |
 | Patch | `rust/crates/zax-nes/patches/metalforce-korea-widescreen.bps`, made against the data without header |
 
@@ -47,6 +47,7 @@ edge. Shots: the player's at `$0373 + Y`, the enemies' at `$056B + Y`.
 | spawn from the list (`$C0B8`) | | the enemy sleeps (`WV_DORMANT`, `WV_DORMID` = its list entry) |
 | enemy loop (bank 13 `$820A`, its call of the collisions `$A0EA` at `$822A`) | collisions, then behaviour (`$8245`) | a sleeping enemy outside `[-48, 304)` of the screen (the original spawn window, whatever the camera's fine x) skips both, as an enemy that is gone does; inside, it wakes for good, margins included |
 | enemy off the screen? (bank 13 `$A3BC`) | removed 80 pixels past either edge | awake: `max(80, M + 16)` past either edge (the game has six slots; the enemies to come need them); asleep: `16 K + 64` (it spawned past the margin) |
+| flyer (type `$17`, bank 13 `$875A`; set off at `$8775`) | waits unseen at its place in the level (state 1) until the player is within 96 pixels (x only, `$AC15`), then appears there (states 2, 3) and dives at him (state 4, 5 pixels a frame, the way its flags `$03AA` bit 4 say); that place is always near the edge of the screen it comes from | when it is set off, moved the margin further out on its side, no further than 24 pixels inside the edge of the wide view and never towards the player: it appears at the edge of the view and dives the same way, `M / 5` frames longer (owner request, as the Castlevania hack does with the enemies its spawners put at the screen's edges) |
 | sprites of a metasprite (`$CA3D`, `$CACA`, `$CB57`, `$CBFA`, the four flips) | a sprite whose screen x high byte `$22` is not 0 is skipped | shown within `[-M, 256 + M)` |
 | OAM write (`$CC3C`) | | the sprite's high byte `$22` to `$5100 + OAM offset` |
 | damage (`$E76A`, `$E79E`, `$E7D5`, `$E80F`, `$E849`: 2, 3, 4, 4 and 8 points from the health `$031C`) | nothing while the blinking `$032B` runs | nor when the option "Invincible" is on |
@@ -78,7 +79,8 @@ the level select, and jumps to the sound).
 
 Variables (extension RAM): `WV_M $5200`, `WV_K $5201`, `WV_THR $5202` / `WV_THRL $5203` (asleep:
 `16 K + 64` and `256 -` that), `WV_AWAKE $5204` / `WV_AWAKEL $5205` (awake: `max(80, M + 16)` and
-`256 -` that), `WV_DORMANT $5240 + Y`, `WV_DORMID $52A0 + Y`. A slot reused by anything but the
+`256 -` that), `WV_LIML`/`WV_LIMH $5206`/`$5207` and `WV_NEWL`/`WV_NEWH $5208`/`$5209` (a
+flyer's limit and new x), `WV_DORMANT $5240 + Y`, `WV_DORMID $52A0 + Y`. A slot reused by anything but the
 list entry it slept for (`$03A8` differs) is awake.
 
 ## 4. Hooks
@@ -93,6 +95,7 @@ Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original 
 | `$C0B8` | `LDA #$01 / STA $0469,X` | `JSR wide_spawned / NOP / NOP` |
 | bank 13 `$822A` | `JSR $A0EA` | `JSR wide_wake` |
 | bank 13 `$A3BC` | `LDA $20 / BEQ $A3D4` | `JMP wide_despawn / NOP` |
+| bank 13 `$8775` | `LDX $03A7,Y` (a flyer is set off) | `JSR wide_flyer_appears` |
 | `$CA3D`, `$CACA`, `$CB57`, `$CBFA` | `LDA $22 / BNE +12 / LDA ($1D),Y` | `JSR wide_sprite_visible / BEQ` (the same target) `/ NOP` |
 | `$CC3C` | `LDA $0300` | `JSR wide_sprite_high` |
 | `$E76F`, `$E7A3`, `$E7DA`, `$E814`, `$E84E` | `LDA $032B` | `JSR wide_hurt` |
@@ -134,6 +137,12 @@ for testing.
   original (until `M + 16` past the edge), which can delay an enemy of the list behind them.
 * The sprites of the margins share the console's 64 sprites with the screen's: more flicker when
   many enemies show.
+* Only the flyers (type `$17`) are moved to the edge of the wide view; other enemies that appear
+  near the player (if any) appear where the game puts them.
+* The overclock makes the level unpacking shorter (the NMIs it would miss come on time), so a
+  replay of the original's inputs frame for frame drifts from the original after a level start;
+  without overclock the patched game at margin 0 matches the original (the stack and the frame
+  counters `$0348`/`$034D` aside).
 
 ---
 
@@ -188,7 +197,11 @@ WV_THR          = $5202         ; sleeping enemies are removed this far past the
 WV_THRL         = $5203         ; edge, and at 256 - this past its left edge (x high byte $FF)
 WV_AWAKE        = $5204         ; the same for the enemies awake: max(80, M + 16)...
 WV_AWAKEL       = $5205         ; ... and 256 - that
-WV_DORMANT      = $5240         ; + enemy slot offset ($00-$50): non-zero while asleep
+WV_LIML         = $5206         ; scratch: a limit and a candidate world x, 16-bit
+WV_LIMH         = $5207
+WV_NEWL         = $5208
+WV_NEWH         = $5209
+WV_DORMANT      = $5240        ; + enemy slot offset ($00-$50): non-zero while asleep
 WV_DORMID       = $52A0         ; + slot: the list entry ($03A8) it slept for
 
 ; Game RAM (original meanings).
@@ -200,6 +213,13 @@ SPRITE_XL       = $21           ; sprite at hand: screen x, signed 16-bit
 SPRITE_XH       = $22
 SPRITE_DATA     = $1D           ; the metasprite being drawn
 OBJ_LIST        = $03A8         ; + slot: the level list entry it spawned from (or its type)
+OBJ_FLAGS       = $03AA         ; + slot: bit 4, it faces (and moves) left
+OBJ_XL          = $03AB         ; + slot: world x
+OBJ_XH          = $03AC
+OBJ_STATE       = $03A7
+CAM_XL          = $34           ; camera: world x of the screen's left edge
+CAM_XH          = $35
+FLYER_INSET     = 24            ; a flyer appears this far inside the edge of the wide view
 LIST_SPAWNED    = $0469         ; + list entry: spawned
 HIT_TIMER       = $032B         ; the player's blinking after a hit
 GAME_STATE      = $034E
@@ -455,6 +475,112 @@ wide_asleep:
     RTS
 
 ; ---------------------------------------------------------------------------- ;
+; Flyers (type $17, bank 13 $875A): one waits unseen at its place in the level until the player
+; comes within 96 pixels, then appears there and dives at him. In the original that place is
+; always near the edge of the screen it comes from; in a wide view it would appear well inside.
+; So when it is set off (bank 13 $8775, in place of LDX $03A7,Y; Y its slot), it is moved the
+; margin further out on its side, no further than FLYER_INSET inside the edge of the wide view and
+; never towards the player: it appears at the edge of the view, as in the original, and dives the
+; same way, a little longer. Nothing moves with a margin of 0.
+wide_flyer_appears:
+    LDA      WV_M
+    BNE      @margin
+    JMP      @done
+@margin:
+    LDA      OBJ_FLAGS,y
+    AND      #$10
+    BEQ      @rightward
+    CLC                                 ; it flies left: x + M, at most camera + 256 + M - inset
+    LDA      CAM_XL
+    ADC      WV_M
+    STA      WV_LIML
+    LDA      CAM_XH
+    ADC      #$01
+    STA      WV_LIMH
+    SEC
+    LDA      WV_LIML
+    SBC      #FLYER_INSET
+    STA      WV_LIML
+    LDA      WV_LIMH
+    SBC      #$00
+    STA      WV_LIMH
+    CLC
+    LDA      OBJ_XL,y
+    ADC      WV_M
+    STA      WV_NEWL
+    LDA      OBJ_XH,y
+    ADC      #$00
+    STA      WV_NEWH
+    LDA      WV_NEWL                    ; past the limit: the limit
+    CMP      WV_LIML
+    LDA      WV_NEWH
+    SBC      WV_LIMH
+    BCC      @further
+    LDA      WV_LIML
+    STA      WV_NEWL
+    LDA      WV_LIMH
+    STA      WV_NEWH
+@further:
+    LDA      OBJ_XL,y                   ; only further out: x < new
+    CMP      WV_NEWL
+    LDA      OBJ_XH,y
+    SBC      WV_NEWH
+    BCC      @move
+    JMP      @done
+@rightward:
+    SEC                                 ; it flies right: x - M, at least camera - M + inset
+    LDA      CAM_XL
+    SBC      WV_M
+    STA      WV_LIML
+    LDA      CAM_XH
+    SBC      #$00
+    STA      WV_LIMH
+    BCS      @limit_in
+    LDA      #$00                       ; before the level: its start
+    STA      WV_LIML
+    STA      WV_LIMH
+@limit_in:
+    CLC
+    LDA      WV_LIML
+    ADC      #FLYER_INSET
+    STA      WV_LIML
+    LDA      WV_LIMH
+    ADC      #$00
+    STA      WV_LIMH
+    SEC
+    LDA      OBJ_XL,y
+    SBC      WV_M
+    STA      WV_NEWL
+    LDA      OBJ_XH,y
+    SBC      #$00
+    STA      WV_NEWH
+    BCC      @at_limit                  ; before the level
+    LDA      WV_NEWL                    ; before the limit: the limit
+    CMP      WV_LIML
+    LDA      WV_NEWH
+    SBC      WV_LIMH
+    BCS      @nearer
+@at_limit:
+    LDA      WV_LIML
+    STA      WV_NEWL
+    LDA      WV_LIMH
+    STA      WV_NEWH
+@nearer:
+    LDA      WV_NEWL                    ; only further out: new < x
+    CMP      OBJ_XL,y
+    LDA      WV_NEWH
+    SBC      OBJ_XH,y
+    BCS      @done
+@move:
+    LDA      WV_NEWL
+    STA      OBJ_XL,y
+    LDA      WV_NEWH
+    STA      OBJ_XH,y
+@done:
+    LDX      OBJ_STATE,y
+    RTS
+
+; ---------------------------------------------------------------------------- ;
 ; Sprites.
 
 ; One sprite of a metasprite ($CA3D, $CACA, $CB57, $CBFA, in place of LDA $22 / BNE skip /
@@ -616,6 +742,8 @@ def hooks(sym):
     # The enemy loop: a sleeping enemy does nothing; the off-screen test (bank 13).
     put_banked(13, 0x822A, '20 ea a0', jsr(sym['wide_wake']))
     put_banked(13, 0xA3BC, 'a5 20 f0 14', jmp(sym['wide_despawn']))
+    # Flyers (type $17): set off, moved the margin further out on their side.
+    put_banked(13, 0x8775, 'be a7 03', jsr(sym['wide_flyer_appears']))
     # Metasprites, four flips: each sprite's x test, then the OAM write's high byte.
     for at in (0xCA3D, 0xCACA, 0xCB57, 0xCBFA):
         put(at, 'a5 22 d0 0c b1 1d', jsr(sym['wide_sprite_visible']) + branch(BEQ, at + 3, at + 0x10))
