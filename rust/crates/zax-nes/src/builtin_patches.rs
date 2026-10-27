@@ -10,6 +10,7 @@
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
+//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -53,8 +54,11 @@ pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
 /// Name of the Super Mario Bros. (World) widescreen patch (advanced mode).
 pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
 
+/// Name of the Metal Force (Korea) widescreen patch (advanced mode).
+pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
+
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 3] = [
+pub const PATCHES: [BuiltinPatch; 4] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -145,6 +149,45 @@ pub const PATCHES: [BuiltinPatch; 3] = [
         boot_window: Some((0x82, 0x00)),
         // Everything runs in the NMI; the main loop is a JMP to itself.
         idle_loop: Some((0x8057, 0x8059)),
+    },
+    BuiltinPatch {
+        name: METALFORCE_KOREA,
+        game: "Metal Force",
+        rom_name: "Metal Force (Korea) (Unl)",
+        source_crc: 0xEC6D_910E,
+        bps: include_bytes!("../patches/metalforce-korea-widescreen.bps"),
+        options: &[
+            // Testing aids: left / right on the mission screen pick the mission; no damage (pits
+            // still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (left / right on the mission screen)",
+                label_fr: "Sélecteur de niveau (gauche / droite sur l'écran de mission)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        boot_window: None,
+        // Everything runs in the NMI; the reset ends in a JMP to itself.
+        idle_loop: Some((0xFFC3, 0xFFC5)),
     },
 ];
 

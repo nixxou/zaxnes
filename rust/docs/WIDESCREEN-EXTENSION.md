@@ -17,7 +17,7 @@ A game takes part in one of two ways, which work together:
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
 to the ROM it was made for: the Zelda II (USA) widescreen hack
 ([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
-one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super Mario Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)).
+one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), and the Super Mario Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)), and the Metal Force (Korea) one, its advanced mode ([`hacks/metalforce/WIDESCREEN-HACK.md`](hacks/metalforce/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -272,6 +272,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
+| Metal Force (Korea) (data CRC-32 `EC6D910E`, mapper 156), unpatched and with its built-in patch | the level map in PRG-RAM, sides and vertical margin | `metalforce.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -310,6 +311,23 @@ get empty margins. A row whose centre differs from the parse at more than one of
 hold for that place (Mega Man 2's rule: the rows that differ from the parse written after every
 row that matches) is taken from them, with the bricks broken and the coins taken; any other from
 the parse. The parse also records, per column, whether the area's own data locked the scrolling there (a scroll lock object): while the game's lock is on in such a room (an underground bonus room, whose area holds other rooms beside it), the margins stay empty; a lock that is not the area's (the flagpole, a fall) keeps them. The decoder works only while the title screen or the game runs an area (`OperMode` 0 or 1, task 3): the black WORLD screen shares its blank tile with the sky. Castle loops (4-4, 7-4, 8-4) send Mario and the screen 4 pages back, coherent with the straight area the parse lays out afterwards; for about a second around each loopback (before it, the game reading the repeated part ahead; after it, the screen's page below 0) the centre does not match the parse and the margins are left to the nametables, mostly empty. Not handled: the path is decided only when the parser reaches the loop point.
+
+Metal Force: the game unpacks the whole level into its 8 KiB of PRG-RAM and draws the screen's
+columns from it (`$E3DB`, pointer `$E529`). The map is at `$6000`, `$1800` bytes of 16 x 16
+metatiles, column after column; a column is `H` metatiles high, `H` = 16, 24, 32, 48, 64, 80, 96,
+112, 128, 144, 160 for the level shape `$0352` = 0 to 10, 40 past it, and its rows count upwards
+(row `m` is above row `m - 1`). Metatile `n` is 5 bytes at `$7800 + 5 n`: CHR tiles top left, top
+right, bottom left, bottom right, then its sub-palette (low two bits). The camera is `$35:$34`
+(world x of the screen's left edge) and `$3D` (the map row at the screen's bottom). The game shows
+one nametable (one-screen mirroring), a ring of 32 x 15 metatiles where map row `m` is metatile row
+`(14 - m) mod 15`: a row's column comes from the PPU's coarse x (modulo 256 pixels, the instance
+from `$35:$34`), its map row from its coarse y (modulo 15, the instance from `$3D` and the line).
+Each row's centre is checked against the nametable at four columns; a mission screen or a
+transition is left to the nametables. Rows above and below the screen (`decode_extra_row`) are
+decoded the same way, once the nametable row they would read matches the map one ring away (the
+screen shows the whole ring). The game writes the blocks the player breaks back into the map, so
+the margins show them broken. The game needs mapper 156 (Daou Infosys DIS23C01,
+`cartridges/mappers/daou306.rs`, as Mesen's `DaouInfosys`).
 
 ---
 
