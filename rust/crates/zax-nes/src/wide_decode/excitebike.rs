@@ -85,8 +85,9 @@ struct Lap {
     /// Each column's 14 tiles, and the stream's state before it was drawn.
     columns: Vec<[u8; TRACK_ROWS]>,
     states: Vec<[u8; 4]>,
-    /// The lap's length in columns (the state the first column was drawn from comes back), or
-    /// the columns laid out.
+    /// The lap's length in columns: from the second column on, the stream's states come back
+    /// every `length` columns (the first lap alone starts by reading the lap count); 0 when they
+    /// did not within the columns laid out.
     length: usize,
 }
 
@@ -195,15 +196,15 @@ impl<'a> Place<'a> {
         self.at(distance, coarse_y)
     }
 
-    /// The lap's tile `distance` columns from the next one to draw.
+    /// The lap's tile `distance` columns from the next one to draw: past the columns laid out,
+    /// or before them, the same place of the next or previous lap (from the second column on).
     fn at(&self, distance: i32, coarse_y: i32) -> Option<u8> {
+        let laid_out = i32::try_from(self.lap.columns.len()).ok()?;
         let length = i32::try_from(self.lap.length).ok()?;
-        let index = i32::try_from(self.next).ok()? + distance;
-        let index = if index < 0 || index >= length {
-            index.rem_euclid(length)
-        } else {
-            index
-        };
+        let mut index = i32::try_from(self.next).ok()? + distance;
+        if (index < 1 || index >= laid_out) && length > 0 {
+            index = 1 + (index - 1).rem_euclid(length);
+        }
         let row = usize::try_from(coarse_y - FIRST_TRACK_ROW).ok()?;
         self.lap
             .columns
@@ -268,7 +269,7 @@ fn track_stream(memory: &DecoderMemory<'_>) -> Vec<u8> {
     stream
 }
 
-/// One lap of the track, as `$F4FF` draws it from the start of a race.
+/// The track as `$F4FF` draws it from the start of a race: its first column, then one lap.
 fn lay_out(memory: &DecoderMemory<'_>, stream: Vec<u8>) -> Lap {
     let mut lap = Lap {
         stream,
@@ -299,13 +300,13 @@ fn lay_out(memory: &DecoderMemory<'_>, stream: Vec<u8>) -> Lap {
         for (offset, tile) in (0u16..).zip(column.iter_mut()) {
             *tile = guest.peek_ram(COLUMN_TILES + offset);
         }
-        if lap.states.len() > 1 && lap.states.first() == Some(&state) {
+        if lap.states.len() > 1 && lap.states.get(1) == Some(&state) {
+            lap.length = lap.states.len() - 1;
             break;
         }
         lap.states.push(state);
         lap.columns.push(column);
     }
-    lap.length = lap.columns.len();
     lap
 }
 
@@ -331,10 +332,11 @@ mod tests {
     /// A lap of 100 columns whose tile on every row is its index.
     fn lap() -> Lap {
         let columns: Vec<[u8; TRACK_ROWS]> = (0..100u8).map(|index| [index; TRACK_ROWS]).collect();
+        // Column 0 the race's start, columns 1-99 a lap of 99.
         Lap {
             stream: Vec::new(),
             states: vec![[0; 4]; columns.len()],
-            length: columns.len(),
+            length: columns.len() - 1,
             columns,
         }
     }
@@ -360,7 +362,7 @@ mod tests {
         );
         assert_eq!(
             place.tile(-4, 12),
-            Some(85),
+            Some(84),
             "past the ring, the lap's earlier ones"
         );
         assert_eq!(place.tile(61, 7), None, "not a row of the track");
@@ -375,6 +377,10 @@ mod tests {
             next_ring: 61,
             left: 10,
         };
-        assert_eq!(place.tile(64, 12), Some(1), "past the lap's end: its start");
+        assert_eq!(
+            place.tile(64, 12),
+            Some(2),
+            "past the lap's end: its start (column 1)"
+        );
     }
 }
