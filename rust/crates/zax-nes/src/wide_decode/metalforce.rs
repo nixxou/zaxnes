@@ -81,6 +81,11 @@ impl MarginDecoder for MetalForce {
         level.decode(first_column, level.map_row(*row, row.line), columns, out);
         true
     }
+
+    /// The one nametable: the screen's edges show the column the game draws for the other side.
+    fn decodes_screen_edges(&self) -> bool {
+        true
+    }
 }
 
 /// The level in play.

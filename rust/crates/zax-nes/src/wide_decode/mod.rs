@@ -137,6 +137,15 @@ pub trait MarginDecoder: Sync {
     ) -> bool {
         false
     }
+
+    /// Whether the decoder also draws the screen's edge tiles: screen column 0 of every row it
+    /// handles, and the wide picture then takes the visible parts of columns 0 and 32 from the
+    /// decoded tiles instead of the PPU. For a game with one nametable, whose screen edges show
+    /// the nametable column it is drawing for the other side (a tile or a palette of the level
+    /// 256 pixels away, which the TV's overscan hid). `false` by default.
+    fn decodes_screen_edges(&self) -> bool {
+        false
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if
