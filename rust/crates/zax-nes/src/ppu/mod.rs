@@ -83,6 +83,22 @@ const DOTS_PER_SCANLINE: i32 = RegionTiming::DOTS_PER_SCANLINE;
 /// vertical increment, no reload) that [`Ppu2C02::run_visible_span`] runs.
 const LAST_SPAN_DOT: i32 = 255;
 
+/// The hardware's limit of eight sprites per line, in the picture. The evaluation, the overflow
+/// flag and the pattern fetches the cartridge sees stay the hardware's whatever the choice: the
+/// sprites past the eighth are only added to the picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpriteLimit {
+    /// Eight sprites per line, as on the console.
+    #[default]
+    Kept,
+    /// Every sprite of a line shows: no flicker.
+    Removed,
+    /// Removed, but kept on a line where eight sprites or more at the same position follow
+    /// each other in OAM: a game hiding the sprites after them there (The Legend of Zelda at
+    /// its doors). Mesen's "automatically re-enable sprite limit as needed".
+    Smart,
+}
+
 /// The picture processing unit.
 #[derive(Debug, Clone)]
 #[allow(clippy::struct_excessive_bools)] // The chip's flags, one field each like the C#.
@@ -179,6 +195,16 @@ pub struct Ppu2C02 {
     sprite_line: [u8; SCREEN_WIDTH],
     /// True when the slots changed since `sprite_line` was built.
     sprite_line_stale: bool,
+    /// Whether the picture shows more than eight sprites on a line (see [`SpriteLimit`]).
+    sprite_limit: SpriteLimit,
+    /// The sprites of the next line past the eight the hardware loads, when the limit is
+    /// removed: their patterns, attributes and x, in OAM order after the eighth (not saved: a
+    /// state is taken between frames).
+    extra_pattern_low: [u8; 64],
+    extra_pattern_high: [u8; 64],
+    extra_attribute: [u8; 64],
+    extra_x: [u8; 64],
+    extra_loaded: usize,
 
     // Tile capture state (tiles.rs).
     tiles: TileBuffer,
@@ -273,6 +299,12 @@ impl Ppu2C02 {
             sprite_zero_loaded: false,
             sprite_line: [0; SCREEN_WIDTH],
             sprite_line_stale: true,
+            sprite_limit: SpriteLimit::Kept,
+            extra_pattern_low: [0; 64],
+            extra_pattern_high: [0; 64],
+            extra_attribute: [0; 64],
+            extra_x: [0; 64],
+            extra_loaded: 0,
             tiles: TileBuffer::new(),
             sprite_order: [0; 64],
             mask_x: 0,
@@ -296,6 +328,11 @@ impl Ppu2C02 {
     /// Changes the timings; takes effect on the next frame (REQ-CORE-016).
     pub fn set_timing(&mut self, timing: RegionTiming) {
         self.timing = timing;
+    }
+
+    /// Whether the picture shows more than eight sprites on a line; from the next line.
+    pub fn set_sprite_limit(&mut self, limit: SpriteLimit) {
+        self.sprite_limit = limit;
     }
 
     /// Current dot inside the scanline, 0 to 340.

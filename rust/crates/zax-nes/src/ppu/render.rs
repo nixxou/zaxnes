@@ -9,8 +9,8 @@
 //! fetches at dots 257 to 320 and two more tiles prefetched at dots 321 to 336.
 
 use super::{
-    map_nametable, Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE_I32,
-    VISIBLE_SCANLINES,
+    map_nametable, Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE,
+    SPRITES_PER_LINE_I32, VISIBLE_SCANLINES,
 };
 use crate::cartridges::{Cartridge, ChrFetch};
 
@@ -52,6 +52,7 @@ impl Ppu2C02 {
         self.sprites_loaded = 0;
         self.sprite_zero_loaded = false;
         self.sprite_line_stale = true;
+        self.extra_loaded = 0;
     }
 
     /// Runs everything the current dot owes: the fetch pipeline, sprite evaluation and the
@@ -264,6 +265,9 @@ impl Ppu2C02 {
                 }
 
                 self.run_sprite_fetches(dot, cart);
+                if dot == 320 {
+                    self.load_extra_sprites(cart.as_deref());
+                }
 
                 if !VISIBLE && (280..=304).contains(&dot) {
                     self.transfer_address_y();
@@ -578,12 +582,71 @@ impl Ppu2C02 {
         }
     }
 
+    /// The sprites of the next line past the eight the hardware loaded, when the picture has
+    /// no limit (see [`super::SpriteLimit`]): those in range after the eighth, up to the end of
+    /// the OAM where the evaluation stops. Their patterns are read without touching the
+    /// cartridge, which saw the hardware's fetches only.
+    fn load_extra_sprites(&mut self, cartridge: Option<&Cartridge>) {
+        self.extra_loaded = 0;
+        if self.sprites_loaded < SPRITES_PER_LINE_I32
+            || self.sprite_limit == super::SpriteLimit::Kept
+            || (self.sprite_limit == super::SpriteLimit::Smart && self.line_masks_sprites())
+        {
+            return;
+        }
+
+        let first = usize::from(self.secondary_source[SPRITES_PER_LINE - 1]) + 1;
+        for n in first..64 {
+            let y = self.oam[n * 4];
+            let x = self.oam[(n * 4) + 3];
+            if !self.in_sprite_range(y) || !(0..256).contains(&self.wide.sprite_x(n, x)) {
+                continue;
+            }
+
+            let tile = u16::from(self.oam[(n * 4) + 1]);
+            let attribute = self.oam[(n * 4) + 2];
+            let address = self.sprite_row_address(tile, attribute, self.scanline - i32::from(y));
+            let slot = self.extra_loaded;
+            self.extra_pattern_low[slot] = self.peek_vram(address, ChrFetch::Sprite, cartridge);
+            self.extra_pattern_high[slot] =
+                self.peek_vram(address + 8, ChrFetch::Sprite, cartridge);
+            self.extra_attribute[slot] = attribute;
+            self.extra_x[slot] = x;
+            self.extra_loaded += 1;
+        }
+        self.sprite_line_stale = true;
+    }
+
+    /// Whether a game hides sprites on the next line with the limit: eight sprites or more in
+    /// range at the same position one after the other in OAM (other sprites out of range may
+    /// lie between them). Mesen's test: eight sprites stacked on one spot have no other use.
+    fn line_masks_sprites(&self) -> bool {
+        let mut last = None;
+        let mut run = 0;
+        for n in 0..64 {
+            let y = self.oam[n * 4];
+            if !self.in_sprite_range(y) {
+                continue;
+            }
+
+            let position = (y, self.oam[(n * 4) + 3]);
+            if last == Some(position) {
+                run += 1;
+                if run >= SPRITES_PER_LINE {
+                    return true;
+                }
+            } else {
+                last = Some(position);
+                run = 1;
+            }
+        }
+        false
+    }
+
     fn sprite_pattern_address(&self, slot: usize) -> u16 {
         let sprite_y = self.secondary_oam[slot * 4];
         let tile = u16::from(self.secondary_oam[(slot * 4) + 1]);
         let attribute = self.secondary_oam[(slot * 4) + 2];
-        let tall = (self.control & 0x20) != 0;
-        let flip_v = (attribute & 0x80) != 0;
 
         let mut row = self.scanline - i32::from(sprite_y);
         if i32::try_from(slot).unwrap_or(i32::MAX) >= self.sprites_loaded {
@@ -591,6 +654,13 @@ impl Ppu2C02 {
             // activity as on hardware.
             row = 0;
         }
+        self.sprite_row_address(tile, attribute, row)
+    }
+
+    /// The address of the low plane of row `row` of a sprite of tile `tile`.
+    fn sprite_row_address(&self, tile: u16, attribute: u8, row: i32) -> u16 {
+        let tall = (self.control & 0x20) != 0;
+        let flip_v = (attribute & 0x80) != 0;
 
         // `row & 7` and `row & 15` are in range even for a negative row, as in the C#.
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
@@ -622,7 +692,8 @@ impl Ppu2C02 {
     /// Rebuilds [`Ppu2C02::sprite_line`] from the eight loaded sprite slots: per column, the
     /// first slot (in OAM order) whose pixel is opaque, as the hardware's priority
     /// multiplexer picks it. The slots only change during dots 257 to 320, so the line is
-    /// the same whichever pixel of 1 to 256 asks for it.
+    /// the same whichever pixel of 1 to 256 asks for it. The sprites past the eighth, when the
+    /// limit is removed, come after them.
     fn rebuild_sprite_line(&mut self) {
         self.sprite_line_stale = false;
         self.sprite_line.fill(0);
@@ -630,34 +701,26 @@ impl Ppu2C02 {
         #[allow(clippy::cast_sign_loss)] // 0..=8.
         let loaded = (self.sprites_loaded.clamp(0, SPRITES_PER_LINE_I32)) as usize;
         for slot in 0..loaded {
-            let attribute = self.sprite_attribute[slot];
-            let low = self.sprite_pattern_low[slot];
-            let high = self.sprite_pattern_high[slot];
             let zero = slot == 0 && self.sprite_zero_loaded;
-            let flags = SPRITE_OPAQUE
-                | ((attribute & 0x03) << 2)
-                | if (attribute & 0x20) != 0 {
-                    SPRITE_BEHIND
-                } else {
-                    0
-                }
-                | if zero { SPRITE_ZERO } else { 0 };
-            let start = usize::from(self.sprite_x[slot]);
-            for (column, cell) in self.sprite_line.iter_mut().skip(start).take(8).enumerate() {
-                if *cell != 0 {
-                    continue;
-                }
-
-                let bit = if (attribute & 0x40) != 0 {
-                    column
-                } else {
-                    7 - column
-                };
-                let pixel = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
-                if pixel != 0 {
-                    *cell = flags | pixel;
-                }
-            }
+            paint_sprite(
+                &mut self.sprite_line,
+                self.sprite_x[slot],
+                self.sprite_attribute[slot],
+                (
+                    self.sprite_pattern_low[slot],
+                    self.sprite_pattern_high[slot],
+                ),
+                zero,
+            );
+        }
+        for slot in 0..self.extra_loaded {
+            paint_sprite(
+                &mut self.sprite_line,
+                self.extra_x[slot],
+                self.extra_attribute[slot],
+                (self.extra_pattern_low[slot], self.extra_pattern_high[slot]),
+                false,
+            );
         }
     }
 
@@ -768,3 +831,37 @@ impl SpanPixels {
 const SPRITE_OPAQUE: u8 = 0x40;
 const SPRITE_BEHIND: u8 = 0x20;
 const SPRITE_ZERO: u8 = 0x10;
+
+/// Paints a sprite's row into `line`, at `x`, under the sprites painted before it (the first
+/// opaque pixel of a column wins, as the hardware's priority multiplexer picks it).
+fn paint_sprite(
+    line: &mut [u8; SCREEN_WIDTH],
+    x: u8,
+    attribute: u8,
+    (low, high): (u8, u8),
+    zero: bool,
+) {
+    let flags = SPRITE_OPAQUE
+        | ((attribute & 0x03) << 2)
+        | if (attribute & 0x20) != 0 {
+            SPRITE_BEHIND
+        } else {
+            0
+        }
+        | if zero { SPRITE_ZERO } else { 0 };
+    for (column, cell) in line.iter_mut().skip(usize::from(x)).take(8).enumerate() {
+        if *cell != 0 {
+            continue;
+        }
+
+        let bit = if (attribute & 0x40) != 0 {
+            column
+        } else {
+            7 - column
+        };
+        let pixel = ((low >> bit) & 1) | (((high >> bit) & 1) << 1);
+        if pixel != 0 {
+            *cell = flags | pixel;
+        }
+    }
+}
