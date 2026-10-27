@@ -482,6 +482,24 @@ Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WI
 et [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md) (les hacks
 eux-mêmes et comment les reconstruire).
 
+### Limite de 8 sprites par ligne
+
+La NES n'affiche que 8 sprites par ligne. Pour qu'aucun ne disparaisse pour de bon, beaucoup de jeux
+changent l'ordre de leurs sprites à chaque image : ceux en trop clignotent. Le réglage **« Supprimer
+la limite de 8 sprites par ligne »** (`video.remove_sprite_limit`, onglet **Vidéo**) fait comme
+Mesen :
+
+- **Désactivé** : 8 sprites par ligne, comme sur la console ;
+- **Toujours** : tous les sprites de chaque ligne sont affichés, plus de clignotement ;
+- **Intelligent** (par défaut) : comme **Toujours**, sauf sur les lignes où le jeu empile au moins
+  8 sprites au même endroit, à la suite dans l'OAM. C'est le procédé qu'utilisent certains jeux
+  pour cacher les sprites suivants : *The Legend of Zelda* cache ainsi Link quand il passe une
+  porte de donjon. Là, la limite est rétablie pour ces lignes seulement.
+
+Le réglage ne change que l'image 2D (la vue 3D a toujours tous les sprites) ; le drapeau
+d'overflow (bit 5 de `$2002`) et les accès à la cartouche restent ceux de la console, quel que
+soit le choix.
+
 ### Langue de l'interface
 
 L'onglet **Interface** porte le réglage **Langue** (`ui.language`), qui vaut `en` (« English »)
@@ -827,7 +845,8 @@ cargo run --release -p zax-harness -- render --out captures
 
 Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
 `--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
-`--distance`, `--mesh`, `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
+`--distance`, `--mesh`, `--sprite-limit kept|removed|smart` (la limite de 8 sprites par
+ligne de l'image 2D ; `kept` par défaut), `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
 4096 par défaut depuis `AMD-034`), `--skybox`, `--sky-bodies` (allume le soleil, la lune
 et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).

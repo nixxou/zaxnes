@@ -616,6 +616,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     );
     emulation_rust_only(out);
     video_rust_only(out);
+    video_sprite_limit(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1342,5 +1343,30 @@ fn video_rust_only(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Video,
         )
         .with_label("Widescreen: wait for whole objects at the drawn edges"),
+    );
+}
+
+/// `video.remove_sprite_limit` (Rust-only).
+fn video_sprite_limit(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): the 2D picture shows more than eight sprites on a line, which
+    // ends the flicker of the games that cycle their sprites. "Smart" keeps the limit on a line
+    // where a game stacks eight sprites to hide the ones after them, as Mesen does (the 3D view
+    // has every sprite whatever the choice). Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoRemoveSpriteLimit,
+            SettingKind::Enum,
+            // Smart (owner request).
+            SettingValue::Enum(2),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Disabled"),
+            opt(1, "Always"),
+            opt(2, "Smart"),
+        ]))
+        .with_label("Remove sprite limit"),
     );
 }

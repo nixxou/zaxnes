@@ -5,7 +5,7 @@
 mod common;
 
 use common::TileFixture;
-use zax_nes::ppu::SCREEN_WIDTH;
+use zax_nes::ppu::{SpriteLimit, SCREEN_WIDTH};
 use zax_nes::NesCore;
 
 /// Pattern $FF: plane 0 all ones, plane 1 all zeros, so every pixel is colour 1.
@@ -285,4 +285,90 @@ fn req_core_112_reading_2002_clears_the_vblank_flag_and_the_write_toggle() {
     fixture.core.write_memory(0x2006, 0x2C);
     fixture.core.write_memory(0x2006, 0x15);
     assert_eq!((0x2C15 >> 10) & 0x03, fixture.core.ppu().nametable_select());
+}
+
+/// A frame with the sprites `place` sets (sprite palette colour 1 = $02 over a $0F backdrop, no
+/// background), drawn with `limit`.
+fn sprite_frame(limit: SpriteLimit, place: impl Fn(&mut TileFixture)) -> TileFixture {
+    let mut fixture = TileFixture::new();
+    fixture.write_vram(0x3F00, &[0x0F]);
+    fixture.write_vram(0x3F11, &[0x02]);
+    for n in 0..64 {
+        fixture.set_sprite(n, 0xF0, 0, 0, 0);
+    }
+    place(&mut fixture);
+    fixture.set_scroll(0, 0);
+    fixture.set_control(0x00);
+    fixture.set_mask(0x14);
+    fixture.core.set_sprite_limit(limit);
+    fixture.core.run_frame(0);
+    fixture.core.run_frame(0);
+    fixture
+}
+
+#[test]
+fn the_sprites_past_the_eighth_of_a_line_show_once_the_limit_is_removed() {
+    let ten_in_a_row = |fixture: &mut TileFixture| {
+        for n in 0..10 {
+            fixture.set_sprite(n, 99, SOLID_TILE, 0x00, 16 * n);
+        }
+    };
+    for (limit, ninth_shows) in [
+        (SpriteLimit::Kept, false),
+        (SpriteLimit::Removed, true),
+        (SpriteLimit::Smart, true),
+    ] {
+        let fixture = sprite_frame(limit, ten_in_a_row);
+        assert_eq!(
+            0x02,
+            pixel_at(&fixture.core, (16 * 7) + 3, 103),
+            "{limit:?}"
+        );
+        let ninth = if ninth_shows { 0x02 } else { 0x0F };
+        assert_eq!(
+            ninth,
+            pixel_at(&fixture.core, (16 * 8) + 3, 103),
+            "{limit:?}"
+        );
+        assert_eq!(
+            ninth,
+            pixel_at(&fixture.core, (16 * 9) + 3, 103),
+            "{limit:?}"
+        );
+        // The flag is the hardware's whatever the picture shows.
+        assert!(fixture.core.ppu().sprite_overflow(), "{limit:?}");
+    }
+}
+
+#[test]
+fn smart_keeps_the_limit_on_the_lines_a_game_masks_with_eight_stacked_sprites() {
+    // The Legend of Zelda at a door: eight blank sprites at one spot, in front of the OAM, hide
+    // the sprites after them on their lines (here the lines 100 to 107); others of the same
+    // y, but not on one spot, mask nothing.
+    let mask = |fixture: &mut TileFixture| {
+        for n in 0..8 {
+            fixture.set_sprite(n, 99, 0x00, 0x20, 0);
+        }
+        fixture.set_sprite(8, 103, SOLID_TILE, 0x00, 100);
+    };
+    for (limit, masked) in [
+        (SpriteLimit::Kept, true),
+        (SpriteLimit::Removed, false),
+        (SpriteLimit::Smart, true),
+    ] {
+        let fixture = sprite_frame(limit, mask);
+        let hidden = if masked { 0x0F } else { 0x02 };
+        assert_eq!(hidden, pixel_at(&fixture.core, 103, 106), "{limit:?}");
+        // Below the mask the sprite shows in every mode.
+        assert_eq!(0x02, pixel_at(&fixture.core, 103, 109), "{limit:?}");
+    }
+
+    let spread = |fixture: &mut TileFixture| {
+        for n in 0..8 {
+            fixture.set_sprite(n, 99, 0x00, 0x20, 8 * n);
+        }
+        fixture.set_sprite(8, 103, SOLID_TILE, 0x00, 100);
+    };
+    let fixture = sprite_frame(SpriteLimit::Smart, spread);
+    assert_eq!(0x02, pixel_at(&fixture.core, 103, 106));
 }
