@@ -528,7 +528,9 @@ left), `$EF` (the piece's column) and `$EE` (the piece), and starts the stream a
 finish line. The decoder runs it in the sandbox from the state a race starts with (`$C869`
 clears `$4C-$EF`; `$E8-$EB` as `$C859` sets them; the lap counters 0), calling it with `$E0` set
 to `$EB` and reading the column from the VRAM buffer (`$0304`-`$0311`), until the stream's state
-comes back to the first column's: one lap, kept until the stream changes. The next column the game
+comes back to the second column's (the first lap alone starts by reading the lap count): the
+race's first column and one lap, kept until the stream changes; before or past them, a column is
+the same place of the previous or next lap. The next column the game
 draws is the lap's column whose state is the game's now; a track column within the 64 behind it
 is the nametables', one past it the lap's (going round). The other rows show the ring of
 nametables around them, the status bar's background goes on beside it, and only in a mode that
