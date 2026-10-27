@@ -15,6 +15,7 @@
 
 mod adventure_island;
 mod castlevania;
+mod ff1;
 pub mod guest;
 mod megaman2;
 mod ng3;
@@ -182,6 +183,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         smb3::SOURCE_CRC => Some(&smb3::SuperMarioBros3),
         castlevania::SOURCE_CRC => Some(&castlevania::USA),
         castlevania::SOURCE_CRC_REV1 => Some(&castlevania::USA_REV1),
+        ff1::SOURCE_CRC => Some(&ff1::FinalFantasy),
         _ => None,
     }
 }

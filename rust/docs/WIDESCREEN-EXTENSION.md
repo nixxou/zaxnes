@@ -327,6 +327,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 | Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched and with their built-in patches | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
+| Final Fantasy (USA) (data CRC-32 `CEBD2A31`), unpatched | the world map (unpacked from PRG-ROM) and the standard maps (PRG-RAM); vertical margin, overscan | `ff1.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -514,6 +515,30 @@ game's split under its status bar is a sprite 0 wait early in the NMI, far from 
 line 240) and before the hack's code. Measured on a movie of stage 1 and its hall, 5,400 frames
 at a 112-pixel margin: the original game lags only in a room change (the same with the hack), the
 hack without the overclock some 110 frames more, none with it.
+
+Final Fantasy: both kinds of map are grids of 16 x 16 tiles drawn through the tileset the game
+keeps in RAM (`$D1E4`): tile `t` is the CHR tiles `$0500 + t` (top left), `$0580 + t` (top right),
+`$0600 + t` (bottom left), `$0680 + t` (bottom right), its attribute byte (the same sub-palette in
+its four quarters) `$0700 + t`. The world map (`$2D` bit 0 clear) is 256 x 256 tiles, a torus,
+run-length encoded by rows in PRG bank 1 (`$D157`): row `y` at the pointer `$8000 + 2 y`, going on
+into bank 2 past `$BFFF`; a byte below `$80` is one tile, `$80 + t` and a count `t` that many times
+(0: 256), `$FF` ends the row. The game unpacks only the 16 rows around the screen
+(`$7000 + 256 (y & 15)`); the decoder unpacks any row from the ROM, so the vertical margin goes on.
+A standard map (`$2D` bit 0 set: towns, castles, dungeons) is 64 x 64 tiles at `$7000 + 64 y + x`,
+the game's copy (chests opened), wrapping as the game reads it. The game writes its scroll as
+`16 $27 + $35` across (`$29` in a standard map) and `16 $2F + $36` down (`$C346`, `$CCA6`), `$2F`
+being the nametable row (0-14) of the camera's top tile, `$28` (`$2A`) its map row: the screen is
+the plane of two nametables side by side, the map's x modulo 512 pixels, and the map's rows are the
+nametable's from row `$2F`, modulo 15. A row is placed by its PPU address, the camera picking the
+instance; a frame whose centre shows the map at four columns of one of three rows across the screen
+(lines 25, 121, 217) is decoded, any other (a battle, a menu, the title, a transition) is left to the
+nametables. The game shows a dialog box over the map with a scroll of its own for the box's lines:
+a row whose PPU address does not place the map is placed as the camera in RAM says, and gets the
+map in its margins. All 15 rows of the nametable ring show: scrolling vertically the game draws the
+row coming in over the leaving one, at the screen's top or bottom edge, so the decoder covers the
+overscan (`covers_overscan`). A room (`$0D`) only changes the palette (`$03E0`) and which people
+show: its tiles are the map's. The people, the vehicles, the bridge and the canal are sprites, left
+out past the edges as the game culls them.
 
 ---
 
