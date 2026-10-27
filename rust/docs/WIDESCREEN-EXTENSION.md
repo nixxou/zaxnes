@@ -207,7 +207,10 @@ each band. Widescreen changes:
   in the middle of the wide picture. The sprites the PPU did not draw are then drawn over the
   centre from their records: the second page, and those across the left edge (x < 0), whose part
   on the screen the PPU left out with the rest; one behind the background only over the backdrop
-  colour. Without margins it is the plain 256 x 240 frame.
+  colour. Without margins it is the plain 256 x 240 frame. For a row whose margin decoder draws
+  the screen's edge tiles (`MarginDecoder::decodes_screen_edges`, see 4), the visible parts of
+  screen columns 0 and 32 (x `0..8 - fine X` and `256 - fine X..256`) are composed from the
+  records too (`Ppu2C02::edge_lines`, per line, set by `decode_margins`, reset each frame).
 
 ---
 
@@ -259,6 +262,11 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    decoded row, the nametable margin records are removed and the decoded tiles added, their CHR
    planes read through the PPU as for any background tile; its visible row becomes the full
    margin. The centre 256 pixels always come from the PPU.
+   A decoder whose `decodes_screen_edges()` is true (default false; Metal Force) is asked for
+   screen column 0 as well, which replaces the nametable's record, and the 2D picture takes the
+   visible parts of columns 0 and 32 of its rows from the records (section 3): a game with one
+   nametable keeps at those columns the nametable column it is drawing for the other side of
+   the screen (a tile or a palette of the level 256 pixels away), which the TV's overscan hid.
 3. With a vertical margin, `decode_extra_row` is asked for `margin_y / 8` rows above the first
    captured row and as many below the last, whole width. Each virtual row carries the PPU address
    it would have on the plane of two stacked nametables (60 rows, the vertical nametable bit
@@ -326,7 +334,10 @@ Each row's centre is checked against the nametable at four columns; a mission sc
 transition is left to the nametables. Rows above and below the screen (`decode_extra_row`) are
 decoded the same way, once the nametable row they would read matches the map one ring away (the
 screen shows the whole ring). The game writes the blocks the player breaks back into the map, so
-the margins show them broken. The game needs mapper 156 (Daou Infosys DIS23C01,
+the margins show them broken. The one nametable makes the screen's edges show the column the game
+is drawing for the other side (the left one hidden by PPUMASK, the right one partly visible,
+both at the middle of a wide view), so the decoder draws them (`decodes_screen_edges`). The game
+needs mapper 156 (Daou Infosys DIS23C01,
 `cartridges/mappers/daou306.rs`, as Mesen's `DaouInfosys`).
 
 ---

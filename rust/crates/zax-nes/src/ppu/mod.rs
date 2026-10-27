@@ -196,6 +196,11 @@ pub struct Ppu2C02 {
     frame_vertical_margin: i32,
     /// The background rows of the frame being captured, by row index, for a margin decoder.
     captured_rows: [Option<tiles::CapturedRow>; 31],
+    /// For each line of the frame being captured, the pixels the wide picture composes from the
+    /// records instead of the PPU's at the screen's edges: those before the first value and
+    /// from the second ((0, 256): none). Set by the margin decoder of a game that draws the
+    /// screen's edge tiles itself ([`crate::wide_decode::MarginDecoder::decodes_screen_edges`]).
+    edge_lines: [(u16, u16); SCREEN_HEIGHT],
 }
 
 impl Default for Ppu2C02 {
@@ -274,6 +279,7 @@ impl Ppu2C02 {
             visible_rows: crate::STANDARD_ROWS,
             captured_rows: [None; 31],
             frame_vertical_margin: 0,
+            edge_lines: [(0, 256); SCREEN_HEIGHT],
         }
     }
 
