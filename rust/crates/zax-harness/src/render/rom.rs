@@ -13,6 +13,7 @@ use zax_engine3d::engine::ConversionEngine;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
+use zax_nes::ppu::SpriteLimit;
 use zax_nes::{ControllerPortType, FrameBatch, NesCore, TileRecord};
 use zax_profiles::profile::GameProfile;
 use zax_render::assets::png_image;
@@ -67,6 +68,8 @@ pub struct RomRequest<'a> {
     pub movie: Option<&'a Path>,
     /// The built-in patch's option bits, when given (over the movie's).
     pub hack_options: Option<u8>,
+    /// The limit of eight sprites per line of the picture.
+    pub sprite_limit: SpriteLimit,
     /// Where to write the state block after the run.
     pub save_state: Option<&'a Path>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -107,6 +110,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     if let Some(options) = request.hack_options {
         host.core.set_hack_options(options);
     }
+    host.core.set_sprite_limit(request.sprite_limit);
     let frames = request.frames;
     let mut records = Vec::new();
     for counter in 0..frames {
