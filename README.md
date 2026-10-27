@@ -83,7 +83,13 @@ screen (the [W] of the ROM list). The emulator side is described in
 [`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md);
 [`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md)
 (*Adventure Island* (USA): the margins from its own round data, and in the advanced mode the
-sprites and objects in them).
+sprites and objects in them);
+[`rust/docs/hacks/excitebike/WIDESCREEN-HACK.md`](rust/docs/hacks/excitebike/WIDESCREEN-HACK.md)
+(*Excitebike* (Japan, USA): the track laid out by the game's own routine, and in the advanced mode
+the riders in the margins);
+[`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
+(*Final Fantasy* (USA): the world map and the towns, castles and dungeons from the game's own
+maps, and in the advanced mode the people and vehicles in the margins).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see

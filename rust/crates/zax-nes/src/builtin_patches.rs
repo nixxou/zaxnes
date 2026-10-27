@@ -14,6 +14,7 @@
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, part of it seen through the extension's window; the ROM keeps its size (`smb3wide`, `tools/build.py`) |
 //! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size; one source for both builds (`cvwide`, `tools/build.py`) |
 //! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`aiwide`, `tools/build.py`) |
+//! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | hooks into both copies of the original 16 KiB (the PRG laid out as the game, its copy for the $C000 mirror, then a 16 KiB bank for the extension's window) (`excitebikewide`, `tools/build.py`) |
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size (`ff1wide`, `tools/build.py`) |
 
 /// One built-in patch.
@@ -68,11 +69,13 @@ pub const CASTLEVANIA_USA: &str = "Castlevania (USA) widescreen";
 pub const CASTLEVANIA_USA_REV1: &str = "Castlevania (USA) (Rev 1) widescreen";
 /// Name of the Adventure Island (USA) widescreen patch (advanced mode).
 pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
+/// Name of the Excitebike (Japan, USA) widescreen patch (advanced mode).
+pub const EXCITEBIKE: &str = "Excitebike (Japan, USA) widescreen";
 /// Name of the Final Fantasy (USA) widescreen patch (advanced mode).
 pub const FINAL_FANTASY_USA: &str = "Final Fantasy (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 9] = [
+pub const PATCHES: [BuiltinPatch; 10] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -307,6 +310,32 @@ pub const PATCHES: [BuiltinPatch; 9] = [
         boot_window: Some((0x82, 0x00)),
         // The main loop's wait for the NMI: LDA $0B / BNE.
         idle_loop: Some((0xB759, 0xB75C)),
+    },
+    BuiltinPatch {
+        name: EXCITEBIKE,
+        game: "Excitebike",
+        rom_name: "Excitebike (Japan, USA) (En)",
+        source_crc: 0x49AE_B3A6,
+        bps: include_bytes!("../patches/excitebike-widescreen.bps"),
+        options: &[
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the riders.
+        advanced: true,
+        // No free byte in the game for code that would unlock the extension: its added PRG bank
+        // (2, after the game and its copy) is open in the window from power-on.
+        boot_window: Some((0x82, 0x00)),
+        // Everything runs in the NMI; the main loop draws random numbers while it waits:
+        // JSR $D326 / LDA $48 / BMI / BEQ.
+        idle_loop: Some((0xC1D8, 0xC1E0)),
     },
     BuiltinPatch {
         name: FINAL_FANTASY_USA,
