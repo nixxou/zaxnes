@@ -191,6 +191,15 @@ pub trait Mapper {
         )
     }
 
+    /// The CHR [`Mapper::ppu_peek`] reads, as a view: what the patterns look like with the
+    /// banks in place now, whether or not the rendering fetches have side effects (a board
+    /// whose fetches only clock an IRQ counter, MMC3, has one even though [`Mapper::chr_view`]
+    /// gives none). `None` when the peek reads another source. Defaults to
+    /// [`Mapper::chr_view`].
+    fn chr_peek_view<'m>(&self, memory: &'m CartridgeMemory) -> Option<ChrView<'m>> {
+        self.chr_view(memory)
+    }
+
     /// Reads CHR without any side effect.
     fn ppu_peek(&self, memory: &CartridgeMemory, address: u16, _fetch: ChrFetch) -> u8 {
         self.banks().map_or(0, |banks| {

@@ -646,6 +646,32 @@ mod tests {
     }
 
     #[test]
+    fn the_advanced_mode_is_on_by_default_and_only_off_is_kept() {
+        const SMB3: u32 = 0x2E63_01ED;
+        let mut hacks = model(Some(SMB3), Vec::new());
+        assert!(hacks.advanced_on());
+        assert!(hacks.rows().contains(&HackRow::Advanced));
+        assert_eq!(0, hacks.own().len());
+        hacks.step(HackRow::Advanced, 1);
+        assert!(!hacks.advanced_on());
+        assert_eq!(
+            [(
+                SettingId::VideoWidescreenAdvanced,
+                SettingValue::Bool(false)
+            )]
+            .as_slice(),
+            hacks.own().as_slice()
+        );
+        // On again is the default; the widescreen comes on with it.
+        hacks.step(HackRow::Advanced, 1);
+        assert!(hacks.advanced_on());
+        assert_eq!(
+            [(SettingId::VideoWidescreen, SettingValue::Enum(1))].as_slice(),
+            hacks.own().as_slice()
+        );
+    }
+
+    #[test]
     fn a_game_no_hack_is_made_for_has_no_rows() {
         assert_eq!(0, model(Some(0x1234_5678), Vec::new()).rows().len());
         assert_eq!(0, model(None, Vec::new()).rows().len());

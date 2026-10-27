@@ -10,6 +10,12 @@
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
+//! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM's free space (`ng3wide`, `tools/build.py`) |
+//! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, part of it seen through the extension's window; the ROM keeps its size (`smb3wide`, `tools/build.py`) |
+//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size; one source for both builds (`cvwide`, `tools/build.py`) |
+//! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`aiwide`, `tools/build.py`) |
+//! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | hooks into both copies of the original 16 KiB (the PRG laid out as the game, its copy for the $C000 mirror, then a 16 KiB bank for the extension's window) (`excitebikewide`, `tools/build.py`) |
+//! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size (`ff1wide`, `tools/build.py`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
 
 /// One built-in patch.
@@ -54,11 +60,25 @@ pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
 /// Name of the Super Mario Bros. (World) widescreen patch (advanced mode).
 pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
 
+/// Name of the Ninja Gaiden III (USA) widescreen patch (advanced mode).
+pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
+/// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
+pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
+/// Name of the Castlevania (USA) widescreen patch (advanced mode).
+pub const CASTLEVANIA_USA: &str = "Castlevania (USA) widescreen";
+/// Name of the Castlevania (USA) (Rev 1) widescreen patch (advanced mode).
+pub const CASTLEVANIA_USA_REV1: &str = "Castlevania (USA) (Rev 1) widescreen";
+/// Name of the Adventure Island (USA) widescreen patch (advanced mode).
+pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
+/// Name of the Excitebike (Japan, USA) widescreen patch (advanced mode).
+pub const EXCITEBIKE: &str = "Excitebike (Japan, USA) widescreen";
+/// Name of the Final Fantasy (USA) widescreen patch (advanced mode).
+pub const FINAL_FANTASY_USA: &str = "Final Fantasy (USA) widescreen";
 /// Name of the Metal Force (Korea) widescreen patch (advanced mode).
 pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 4] = [
+pub const PATCHES: [BuiltinPatch; 11] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -151,6 +171,201 @@ pub const PATCHES: [BuiltinPatch; 4] = [
         idle_loop: Some((0x8057, 0x8059)),
     },
     BuiltinPatch {
+        name: NG3_USA,
+        game: "Ninja Gaiden III",
+        rom_name: "Ninja Gaiden III - The Ancient Ship of Doom (USA)",
+        source_crc: 0x902E_3168,
+        bps: include_bytes!("../patches/ng3-usa-widescreen.bps"),
+        options: &[
+            HackOption {
+                key: "enemies_in_margins",
+                label: "Enemies in the margins",
+                label_fr: "Ennemis dans les marges",
+                bit: 0,
+                default: true,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the objects.
+        advanced: true,
+        boot_window: None,
+        // The frame's wait in bank 4: BIT $15 / BPL (the NMI sets $15).
+        idle_loop: Some((0x9A87, 0x9A8A)),
+    },
+    BuiltinPatch {
+        name: SMB3_USA,
+        game: "Super Mario Bros. 3",
+        rom_name: "Super Mario Bros. 3 (USA) (Rev 1)",
+        source_crc: 0x2E63_01ED,
+        bps: include_bytes!("../patches/smb3-usa-rev1-widescreen.bps"),
+        options: &[
+            // Testing aids: B on the 1P/2P menu opens the game's own debug menu (Up/Down: the
+            // world); Mario never hurt (pits still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (B on the 1P/2P menu)",
+                label_fr: "Sélecteur de niveau (B sur le menu 1P/2P)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // The NMI unlocks the extension and opens its window itself (code in bank 31's free
+        // space).
+        boot_window: None,
+        // GraphicsBuf_Prep_And_WaitVSync: LDA VBlank_Tick / BPL, until the NMI counts it down.
+        idle_loop: Some((0x96FB, 0x96FE)),
+    },
+    BuiltinPatch {
+        name: CASTLEVANIA_USA,
+        game: "Castlevania",
+        rom_name: "Castlevania (USA)",
+        source_crc: 0x0AC1_AA8F,
+        bps: include_bytes!("../patches/castlevania-usa-widescreen.bps"),
+        options: CASTLEVANIA_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the objects.
+        advanced: true,
+        // No room in the fixed bank for code that would unlock the extension: the free end of
+        // PRG bank 5 (from its page $1F) is open in the window from power-on.
+        boot_window: Some((0x85, 0x1F)),
+        // Everything runs in the NMI; the main loop stirs the random number.
+        idle_loop: Some((0xC030, 0xC03E)),
+    },
+    BuiltinPatch {
+        name: CASTLEVANIA_USA_REV1,
+        game: "Castlevania",
+        rom_name: "Castlevania (USA) (Rev 1)",
+        source_crc: 0xB668_C7FC,
+        bps: include_bytes!("../patches/castlevania-usa-rev1-widescreen.bps"),
+        options: CASTLEVANIA_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the objects.
+        advanced: true,
+        // No room in the fixed bank for code that would unlock the extension: the free end of
+        // PRG bank 5 (from its page $1F) is open in the window from power-on.
+        boot_window: Some((0x85, 0x1F)),
+        // Everything runs in the NMI; the main loop stirs the random number.
+        idle_loop: Some((0xC030, 0xC03E)),
+    },
+    BuiltinPatch {
+        name: ADVENTURE_ISLAND_USA,
+        game: "Adventure Island",
+        rom_name: "Adventure Island (USA)",
+        source_crc: 0xF8A7_13BE,
+        bps: include_bytes!("../patches/adventure-island-usa-widescreen.bps"),
+        options: &[
+            // Testing aids: Select on the title screen goes through every round; no injury from
+            // the enemies (falls, the water and hunger still kill).
+            HackOption {
+                key: "level_select",
+                label: "Level select (Select on the title screen)",
+                label_fr: "Sélecteur de niveau (Select sur l'écran titre)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the sprites and objects.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (2)
+        // is open in the window from power-on.
+        boot_window: Some((0x82, 0x00)),
+        // The main loop's wait for the NMI: LDA $0B / BNE.
+        idle_loop: Some((0xB759, 0xB75C)),
+    },
+    BuiltinPatch {
+        name: EXCITEBIKE,
+        game: "Excitebike",
+        rom_name: "Excitebike (Japan, USA) (En)",
+        source_crc: 0x49AE_B3A6,
+        bps: include_bytes!("../patches/excitebike-widescreen.bps"),
+        options: &[
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the riders.
+        advanced: true,
+        // No free byte in the game for code that would unlock the extension: its added PRG bank
+        // (2, after the game and its copy) is open in the window from power-on.
+        boot_window: Some((0x82, 0x00)),
+        // Everything runs in the NMI; the main loop draws random numbers while it waits:
+        // JSR $D326 / LDA $48 / BMI / BEQ.
+        idle_loop: Some((0xC1D8, 0xC1E0)),
+    },
+    BuiltinPatch {
+        name: FINAL_FANTASY_USA,
+        game: "Final Fantasy",
+        rom_name: "Final Fantasy (USA)",
+        source_crc: 0xCEBD_2A31,
+        bps: include_bytes!("../patches/final-fantasy-usa-widescreen.bps"),
+        options: &[
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 0,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the people and vehicles.
+        advanced: true,
+        // No room in the fixed bank for code that would unlock the extension: the free end of
+        // PRG bank 6 (from its page $30) is open in the window from power-on.
+        boot_window: Some((0x86, 0x30)),
+        // The wait for the NMI: JMP to itself, the NMI returning to the wait's caller.
+        idle_loop: Some((0xFEBB, 0xFEBD)),
+    },
+    BuiltinPatch {
         name: METALFORCE_KOREA,
         game: "Metal Force",
         rom_name: "Metal Force (Korea) (Unl)",
@@ -188,6 +403,35 @@ pub const PATCHES: [BuiltinPatch; 4] = [
         boot_window: None,
         // Everything runs in the NMI; the reset ends in a JMP to itself.
         idle_loop: Some((0xFFC3, 0xFFC5)),
+    },
+];
+
+/// The options of both Castlevania patches, the same hack built for each: testing aids, off by
+/// default, and the overclock.
+const CASTLEVANIA_OPTIONS: &[HackOption] = &[
+    // Select in a stage: the next stage (after the last, the first).
+    HackOption {
+        key: "level_select",
+        label: "Level select (Select: next stage)",
+        label_fr: "Sélecteur de niveau (Select : stage suivant)",
+        bit: 0,
+        default: false,
+    },
+    // Simon never hurt (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
     },
 ];
 
@@ -374,23 +618,39 @@ pub fn for_data_crc(crc: u32) -> Option<&'static BuiltinPatch> {
 }
 
 /// The built-in patch made for the game named `name` (a ROM file or a profile title), whichever
-/// version of it the ROM is: the patch whose game the name starts with, letters and digits only
-/// ("Zelda II - The Adventure of Link (Europe)" is Zelda II's, "Mega Man 3" is no one's).
+/// version of it the ROM is: the patch whose game's words the name starts with ("Zelda II - The
+/// Adventure of Link (Europe)" is Zelda II's, "Mega Man 3" is no one's).
 #[must_use]
 pub fn for_game_name(name: &str) -> Option<&'static BuiltinPatch> {
-    let wanted = letters_and_digits(name);
-    PATCHES.iter().find(|patch| {
-        let game = letters_and_digits(patch.game);
-        !game.is_empty() && wanted.starts_with(&game)
-    })
+    let wanted = words(name);
+    // The longest game that names it, and not one whose number goes on ("Super Mario Bros. 3"
+    // is not "Super Mario Bros.", "Castlevania II" not "Castlevania").
+    PATCHES
+        .iter()
+        .filter(|patch| {
+            let game = words(patch.game);
+            !game.is_empty()
+                && wanted.starts_with(&game)
+                && !wanted.get(game.len()).is_some_and(|next| is_number(next))
+        })
+        .max_by_key(|patch| patch.game.len())
 }
 
-/// `text` reduced to its letters and digits, lower case.
-fn letters_and_digits(text: &str) -> String {
-    text.chars()
-        .filter(|character| character.is_alphanumeric())
-        .flat_map(char::to_lowercase)
+/// The words of `text`: its runs of letters and digits, lower case.
+fn words(text: &str) -> Vec<String> {
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
         .collect()
+}
+
+/// Whether `word` is a number, in figures or in Roman numerals (the sequel of a game).
+fn is_number(word: &str) -> bool {
+    word.chars().all(|character| character.is_ascii_digit())
+        || (word.len() <= 4
+            && word
+                .chars()
+                .all(|character| matches!(character, 'i' | 'v' | 'x')))
 }
 
 /// Whether the game whose data (iNES header excluded) has CRC-32 `crc` can be widened: a
@@ -621,6 +881,34 @@ mod tests {
             for_game_name("Mega Man 2 (U)").map(|patch| patch.name)
         );
         assert!(for_game_name("Mega Man 3 (USA)").is_none());
+        assert_eq!(
+            for_game_name("Super Mario Bros. 3 (Europe)").map(|patch| patch.name),
+            Some(SMB3_USA)
+        );
+        assert_eq!(
+            for_game_name("Super Mario Bros. (Europe)").map(|patch| patch.name),
+            Some(SMB1_WORLD)
+        );
+        assert!(for_game_name("Super Mario Bros. 2 (USA)").is_none());
+        assert_eq!(
+            for_game_name("Castlevania (Europe)").map(|patch| patch.game),
+            Some("Castlevania")
+        );
+        assert!(for_game_name("Castlevania II - Simon's Quest (USA)").is_none());
+        assert!(for_game_name("Castlevania III - Dracula's Curse (USA)").is_none());
+        assert_eq!(
+            Some(ADVENTURE_ISLAND_USA),
+            for_game_name("Adventure Island (Europe)").map(|patch| patch.name)
+        );
+        assert!(for_game_name("Adventure Island II (USA)").is_none());
+        assert!(for_game_name("Adventure Island 3 (USA)").is_none());
+        assert!(for_game_name("Adventure Islands").is_none());
+        assert_eq!(
+            Some(FINAL_FANTASY_USA),
+            for_game_name("Final Fantasy (Japan)").map(|patch| patch.name)
+        );
+        assert!(for_game_name("Final Fantasy II (Japan)").is_none());
+        assert!(for_game_name("Final Fantasy III (Japan)").is_none());
         assert!(for_game_name("Legend of Zelda, The (USA)").is_none());
         assert!(for_game_name("").is_none());
     }

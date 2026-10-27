@@ -72,14 +72,27 @@ run the import on a PC and copy the resulting `profiles/` folder to the card (se
 **[HOWTO-RUN.md](HOWTO-RUN.md)** (in French) is the user guide: menus, shortcuts, options, where
 files are written, and the full command line.
 
-**Widescreen.** *Zelda II - The Adventure of Link* (USA) and *Mega Man 2* (USA) can be played
-in 16:9 (or 3:2, 16:10, or the ratio of the view): a widescreen hack built into the emulator is
+**Widescreen.** *Zelda II - The Adventure of Link* (USA), *Mega Man 2* (USA) and *Super Mario
+Bros. 3* (USA) (Rev 1) can be played in 16:9 (or 3:2, 16:10, or the ratio of the view): a widescreen hack built into the emulator is
 applied in memory to the player's own ROM (the patch ships no game data), and the scene shows the
 level and the enemies past the original edges. It is turned on per game, in the game's hacks
 screen (the [W] of the ROM list). The emulator side is described in
 [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md), the hacks in
-[`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md) and
-[`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md).
+[`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md),
+[`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md) and
+[`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md);
+[`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md)
+(*Adventure Island* (USA): the margins from its own round data, and in the advanced mode the
+sprites and objects in them);
+[`rust/docs/hacks/excitebike/WIDESCREEN-HACK.md`](rust/docs/hacks/excitebike/WIDESCREEN-HACK.md)
+(*Excitebike* (Japan, USA): the track laid out by the game's own routine, and in the advanced mode
+the riders in the margins);
+[`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
+(*Final Fantasy* (USA): the world map and the towns, castles and dungeons from the game's own
+maps, and in the advanced mode the people and vehicles in the margins);
+[`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md)
+(*Metal Force* (Korea), mapper 156: the room from the level map the game keeps in its RAM, and in
+the advanced mode the enemies in the margins).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see

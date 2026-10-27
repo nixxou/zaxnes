@@ -254,6 +254,22 @@ impl<'m> ChrView<'m> {
         Self { data: chr, offsets }
     }
 
+    /// The offset of each 1 KiB window: the banks the view shows, to be shown again later.
+    #[must_use]
+    pub const fn offsets(&self) -> [usize; BankWindows::CHR_WINDOWS] {
+        self.offsets
+    }
+
+    /// The same CHR memory through the windows `offsets` (from [`Self::offsets`]): what an
+    /// earlier bank selection showed.
+    #[must_use]
+    pub const fn with_offsets(self, offsets: [usize; BankWindows::CHR_WINDOWS]) -> Self {
+        Self {
+            data: self.data,
+            offsets,
+        }
+    }
+
     /// The byte at `address` ($0000-$1FFF), 0 when there is no CHR at all.
     #[must_use]
     pub fn read(&self, address: u16) -> u8 {
