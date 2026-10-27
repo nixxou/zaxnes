@@ -25,7 +25,9 @@ the Ninja Gaiden III (USA) one, its advanced mode too
 and the Castlevania (USA) one, built for its Rev 1 too, an advanced mode as well
 ([`hacks/castlevania/WIDESCREEN-HACK.md`](hacks/castlevania/WIDESCREEN-HACK.md)), and the
 Adventure Island (USA) one, its advanced mode too
-([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)).
+([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)), and
+the Excitebike (Japan, USA) one, an advanced mode as well
+([`hacks/excitebike/WIDESCREEN-HACK.md`](hacks/excitebike/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -326,6 +328,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
 | Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 | Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched and with their built-in patches | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
+| Excitebike (Japan, USA) (data CRC-32 `49AEB3A6`), unpatched and with its built-in patch | a race's track, laid out by the game's own routine in the sandbox, one lap | `excitebike.rs`, see below |
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
@@ -515,6 +518,28 @@ line 240) and before the hack's code. Measured on a movie of stage 1 and its hal
 at a 112-pixel margin: the original game lags only in a room change (the same with the hack), the
 hack without the overclock some 110 frames more, none with it.
 
+
+Excitebike: only the track (tile rows 8-21) changes as a race scrolls; the stands, the sky with
+its signs, the grass and the status bar are drawn once. The game draws the track one tile column
+at a time (`$F4FF`, once a frame from the race's loop, when `$EB` reaches the player's column
+`$E0`), 14 tiles from row 8 at the column `$EA:$E9` of the ring of two nametables side by side
+(64 columns), some 19 columns past the screen's right edge. The track is a stream of bytes (at
+`$ED3A/$ED40` + the track `$43`; the design mode's own in RAM) of pieces and repetitions, each
+piece a list of columns; the routine keeps its place in `$ED` (the byte), `$EC` (repetitions
+left), `$EF` (the piece's column) and `$EE` (the piece), and starts the stream again past the
+finish line. The decoder runs it in the sandbox from the state a race starts with (`$C869`
+clears `$4C-$EF`; `$E8-$EB` as `$C859` sets them; the lap counters 0), calling it with `$E0` set
+to `$EB` and reading the column from the VRAM buffer (`$0304`-`$0311`), until the stream's state
+comes back to the second column's (the first lap alone starts by reading the lap count): the
+race's first column and one lap, kept until the stream changes; before or past them, a column is
+the same place of the previous or next lap, but in the first lap (`$03A4`, the finish lines
+passed, 1) the columns before the race's first are the start's screen, drawn before the race:
+the nametables', and left out of the check below. The next column the game
+draws is the lap's column whose state is the game's now; a track column within the 64 behind it
+is the nametables', one past it the lap's (going round). The other rows show the ring of
+nametables around them, the status bar's background goes on beside it, and only in a mode that
+runs a race (`$41` 2, 5, 9 or 10: `$C99A`, `$C97C`) whose track centre shows the lap's columns
+(three of four checked on row 15).
 ---
 
 ## 5. The 3D engine
