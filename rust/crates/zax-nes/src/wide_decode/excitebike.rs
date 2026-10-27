@@ -60,6 +60,8 @@ const NEXT_COLUMN: u16 = 0x00E9;
 const NEXT_TABLE: u16 = 0x00EA;
 const DRAW_AT: u16 = 0x00EB;
 const PLAYER_COLUMN: u16 = 0x00E0;
+/// Finish lines passed (`$03A4`: 1 from the race's first column, once the lap count is read).
+const FINISH_LINES: u16 = 0x03A4;
 /// The game's main mode (`$41`, the routines of the table at `$C000`): those that run a race
 /// (`$C99A`; `$C97C` for a track tried in the design mode) draw the track; the title, the menus
 /// and the editor do not.
@@ -167,6 +169,9 @@ struct Place<'a> {
     next_ring: i32,
     /// The ring's column at the track's left edge, as the race scrolls.
     left: i32,
+    /// Whether the race is in its first lap: the columns before the lap's first are the start's
+    /// screen, drawn before the race, not the end of a lap.
+    first_lap: bool,
 }
 
 impl<'a> Place<'a> {
@@ -180,6 +185,7 @@ impl<'a> Place<'a> {
             next,
             next_ring,
             left,
+            first_lap: memory.ram(FINISH_LINES) <= 1,
         }
     }
 
@@ -202,6 +208,9 @@ impl<'a> Place<'a> {
         let laid_out = i32::try_from(self.lap.columns.len()).ok()?;
         let length = i32::try_from(self.lap.length).ok()?;
         let mut index = i32::try_from(self.next).ok()? + distance;
+        if index < 0 && self.first_lap {
+            return None;
+        }
         if (index < 1 || index >= laid_out) && length > 0 {
             index = 1 + (index - 1).rem_euclid(length);
         }
@@ -214,23 +223,24 @@ impl<'a> Place<'a> {
     }
 
     /// Whether the track's centre shows the lap: a race in play (one column may differ, the
-    /// finish line's lettering).
+    /// finish line's lettering; the start's screen, before the lap's first column, is not
+    /// checked).
     fn racing(&self, memory: &DecoderMemory<'_>) -> bool {
         let next = resolve_ring(self.next_ring, RING, self.left + 32 + DRAW_LEAD);
-        let matching = CHECKED
-            .iter()
-            .filter(|&&column| {
-                let screen = self.left + column;
-                let ring = screen.rem_euclid(RING);
-                let address = 0x2000
-                    | (u16::try_from(ring >> 5).unwrap_or(0) << 10)
-                    | (u16::try_from(CHECKED_ROW).unwrap_or(0) << 5)
-                    | u16::try_from(ring & 31).unwrap_or(0);
-                self.at(screen - next, CHECKED_ROW)
-                    .is_some_and(|tile| (memory.nametable)(address) == tile)
-            })
-            .count();
-        matching + 1 >= CHECKED.len()
+        let (mut checked, mut matching) = (0, 0);
+        for column in CHECKED {
+            let screen = self.left + column;
+            let ring = screen.rem_euclid(RING);
+            let address = 0x2000
+                | (u16::try_from(ring >> 5).unwrap_or(0) << 10)
+                | (u16::try_from(CHECKED_ROW).unwrap_or(0) << 5)
+                | u16::try_from(ring & 31).unwrap_or(0);
+            if let Some(tile) = self.at(screen - next, CHECKED_ROW) {
+                checked += 1;
+                matching += usize::from((memory.nametable)(address) == tile);
+            }
+        }
+        matching + 1 >= checked
     }
 }
 
@@ -351,6 +361,7 @@ mod tests {
             next: 50,
             next_ring: 61,
             left: 10,
+            first_lap: false,
         };
         assert_eq!(place.tile(61, 12), Some(50), "the next column to draw");
         assert_eq!(place.tile(63, 12), Some(52), "past it");
@@ -376,6 +387,7 @@ mod tests {
             next: 98,
             next_ring: 61,
             left: 10,
+            first_lap: false,
         };
         assert_eq!(
             place.tile(64, 12),

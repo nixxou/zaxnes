@@ -532,7 +532,9 @@ clears `$4C-$EF`; `$E8-$EB` as `$C859` sets them; the lap counters 0), calling i
 to `$EB` and reading the column from the VRAM buffer (`$0304`-`$0311`), until the stream's state
 comes back to the second column's (the first lap alone starts by reading the lap count): the
 race's first column and one lap, kept until the stream changes; before or past them, a column is
-the same place of the previous or next lap. The next column the game
+the same place of the previous or next lap, but in the first lap (`$03A4`, the finish lines
+passed, 1) the columns before the race's first are the start's screen, drawn before the race:
+the nametables', and left out of the check below. The next column the game
 draws is the lap's column whose state is the game's now; a track column within the 64 behind it
 is the nametables', one past it the lap's (going round). The other rows show the ring of
 nametables around them, the status bar's background goes on beside it, and only in a mode that
