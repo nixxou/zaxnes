@@ -15,6 +15,7 @@
 
 pub mod guest;
 mod megaman2;
+mod metalforce;
 mod smb1;
 mod zelda2;
 
@@ -145,6 +146,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
     match crc {
         megaman2::SOURCE_CRC => Some(&megaman2::MegaMan2),
         smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
+        metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
         _ => None,
     }
 }
@@ -156,6 +158,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::ZELDA2_USA => Some(&zelda2::Zelda2),
         crate::builtin_patches::MEGAMAN2_USA => Some(&megaman2::MegaMan2),
         crate::builtin_patches::SMB1_WORLD => Some(&smb1::SuperMarioBros),
+        crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
         _ => None,
     }
 }
