@@ -14,6 +14,7 @@
 //! on (see [`crate::builtin_patches`]).
 
 mod adventure_island;
+mod blastermaster;
 mod castlevania;
 mod excitebike;
 mod ff1;
@@ -188,6 +189,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         excitebike::SOURCE_CRC => Some(&excitebike::Excitebike),
         ff1::SOURCE_CRC => Some(&ff1::FinalFantasy),
         metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
+        blastermaster::SOURCE_CRC => Some(&blastermaster::BlasterMaster),
         _ => None,
     }
 }

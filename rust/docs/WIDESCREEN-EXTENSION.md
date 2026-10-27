@@ -336,6 +336,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Final Fantasy (USA) (data CRC-32 `CEBD2A31`), unpatched and with its built-in patch | the world map (unpacked from PRG-ROM) and the standard maps (PRG-RAM); vertical margin, overscan | `ff1.rs`, see below |
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 | Metal Force (Korea) (data CRC-32 `EC6D910E`, mapper 156), unpatched and with its built-in patch | the level map in PRG-RAM, sides and vertical margin | `metalforce.rs`, see below |
+| Blaster Master (USA) (data CRC-32 `3F0FD764`), unpatched | the area's map in PRG-ROM, four levels of blocks, within the room the camera is in; vertical margin, overscan | `blastermaster.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -605,6 +606,27 @@ decoded while the game hides it (`decodes_masked_column`) and the last column of
 redrawn (`redrawn_right_columns` 1). The game
 needs mapper 156 (Daou Infosys DIS23C01,
 `cartridges/mappers/daou306.rs`, as Mesen's `DaouInfosys`).
+
+Blaster Master: an area is 2048 x 2048 pixels (8 x 8 screens of 256), drawn by the game's column
+and row drawers (`$DA15`, `$DAC4`) from four levels of tables in PRG-ROM, whose pointers `$D975`
+copies from the area's header into `$27-$30` (the header is entry `$C9F4[$14] & 15` of the
+pointers at `$8000` of bank `$C9F4[$14] >> 4`, `$EA3C`; the tables are in that bank). The map
+(`$2F/$30`) is 32 x 32 blocks of 64 pixels, row first; a block is 4 blocks of 32 at `($2D) + 4 b`
+(top left, top right, bottom left, bottom right), each of them 4 metatiles of 16 at `($2B) + 4 n`,
+each of them 4 CHR tiles at `($29) + 4 m`, in the same order; metatile `m`'s sub-palette is the
+low two bits of `($27) + m` (the game packs them into the attribute bytes, `$DC47`). The camera is
+`$1D:$1C` and `$1F:$1E` in sixteenths of a pixel (the screen's top left corner); the game shows two
+nametables side by side, a ring of 512 x 240 pixels at a fixed offset from the world (the scroll
+`$FD`, `$F1` bit 0 and `$FC` follow the camera's moves, `$D1AD`), so a row's place comes from its
+PPU address, the offset `scroll - camera` and the camera picking the instance. A row is decoded when
+its centre shows the map at four columns (the title, the area's name, the pause screen and the
+transitions are left to the nametables). The camera stays within a room: the 16 bytes entry
+`$CA04[$14]` points to (`$CC6D`) close the boundary left of screen `(x, y)` (byte `8 + y`) or above
+it (byte `y`), bit `7 - x`, and the camera stops in the middle of a screen whose boundary ahead is
+closed; the margins show the screens the view touches that the camera's own screens reach through
+open boundaries (the same room), the rest stays empty. The ring is 30 rows, all on the screen:
+scrolling vertically the game draws the row coming in at the other edge, in the overscan, so the
+decoder covers it (`covers_overscan`).
 
 ---
 
