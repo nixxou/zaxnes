@@ -25,7 +25,9 @@ the Ninja Gaiden III (USA) one, its advanced mode too
 and the Castlevania (USA) one, built for its Rev 1 too, an advanced mode as well
 ([`hacks/castlevania/WIDESCREEN-HACK.md`](hacks/castlevania/WIDESCREEN-HACK.md)), and the
 Adventure Island (USA) one, its advanced mode too
-([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)).
+([`hacks/adventure_island/WIDESCREEN-HACK.md`](hacks/adventure_island/WIDESCREEN-HACK.md)), and
+the Excitebike (Japan, USA) one, an advanced mode as well
+([`hacks/excitebike/WIDESCREEN-HACK.md`](hacks/excitebike/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -326,7 +328,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
 | Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 | Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched and with their built-in patches | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
-| Excitebike (Japan, USA) (data CRC-32 `49AEB3A6`), unpatched | a race's track, laid out by the game's own routine in the sandbox, one lap | `excitebike.rs`, see below |
+| Excitebike (Japan, USA) (data CRC-32 `49AEB3A6`), unpatched and with its built-in patch | a race's track, laid out by the game's own routine in the sandbox, one lap | `excitebike.rs`, see below |
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
