@@ -55,6 +55,8 @@ const PLANE_WIDTH: i32 = 512;
 const PLANE_HEIGHT: i32 = 240;
 const SCREEN: i32 = 256;
 const SCREENS: i32 = 8;
+/// The last capture line of a row whose 8 lines end before the screen's last.
+const LAST_INNER_LINE: i32 = 232;
 
 /// Screen columns whose tiles are checked against the nametables.
 const CHECKED: [i32; 4] = [3, 11, 19, 27];
@@ -283,18 +285,36 @@ impl BlasterMaster {
         };
         let first_column = area.first_column(row);
         let tile_row = area.tile_row(row, row.line);
-        // A row past the screen: the nametable row it would read is on the screen too, one ring
-        // (240 lines) away, and must show the map there.
-        let shown_row = if extra {
-            area.tile_row(row, row.line.rem_euclid(PLANE_HEIGHT))
-        } else {
-            tile_row
-        };
-        if !area.centre_matches(memory, row, first_column, shown_row) {
+        // A row at or past the screen's edge may be the row the game keeps for the overscan (the
+        // one it draws coming in, or a stale one: a band across the picture), so the check is
+        // made on the screen's nearest row wholly inside it, the same distance away on the ring.
+        let checked = if extra { Self::inner(row) } else { row };
+        let checked_row = area.tile_row(checked, checked.line);
+        if !area.centre_matches(memory, checked, first_column, checked_row) {
             return false;
         }
         area.decode(first_column, tile_row, columns, out);
         true
+    }
+
+    /// The screen's row nearest `row` that reaches neither its top edge nor its bottom one (its
+    /// top, the line before the capture line, within 1-231), on the same ring of 30 rows.
+    fn inner(row: BackgroundRow) -> BackgroundRow {
+        let rows = if row.line < 2 {
+            (2 - row.line + 7) / 8
+        } else if row.line > LAST_INNER_LINE {
+            -((row.line - LAST_INNER_LINE + 7) / 8)
+        } else {
+            0
+        };
+        let coarse_y = (i32::from(row.coarse_y()) + rows).rem_euclid(30);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..30.
+        let coarse_y = coarse_y as u16;
+        BackgroundRow {
+            line: row.line + 8 * rows,
+            v: (row.v & !0x03E0) | (coarse_y << 5),
+            fine_x: row.fine_x,
+        }
     }
 }
 
@@ -378,5 +398,28 @@ mod tests {
         assert!(at(2, 1), "reached around");
         assert!(!at(3, 1), "another room");
         assert!(at(2, 3), "open below");
+    }
+
+    #[test]
+    fn edge_rows_are_checked_one_row_in() {
+        let row = |line: i32, coarse_y: u16| BackgroundRow {
+            line,
+            v: 0x0405 | (coarse_y << 5),
+            fine_x: 3,
+        };
+        // The last row, ending on the screen's edge: the row above, on the ring.
+        let inner = BlasterMaster::inner(row(233, 0));
+        assert_eq!(
+            (inner.line, inner.coarse_y(), inner.v & 0x041F),
+            (225, 29, 0x0405)
+        );
+        // A row across the top edge: the next one down.
+        let inner = BlasterMaster::inner(row(-3, 29));
+        assert_eq!((inner.line, inner.coarse_y()), (5, 0));
+        // Two rows below the screen: three rows up.
+        let inner = BlasterMaster::inner(row(249, 4));
+        assert_eq!((inner.line, inner.coarse_y()), (225, 1));
+        // A row inside the screen stays.
+        assert_eq!(BlasterMaster::inner(row(120, 15)).line, 120);
     }
 }
