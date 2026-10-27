@@ -24,9 +24,9 @@ fn peek(core: &zax_nes::NesCore, address: u16) -> u8 {
 
 #[test]
 fn req_core_100_every_required_mapper_is_registered() {
-    let required: [i32; 31] = [
+    let required: [i32; 32] = [
         0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 21, 22, 23, 25, 27, 28, 30, 32, 34, 41, 64,
-        66, 71, 87, 101, 225, 228,
+        66, 71, 87, 101, 156, 225, 228,
     ];
     assert_eq!(&required[..], Cartridge::SUPPORTED_MAPPERS);
 }

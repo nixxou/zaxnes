@@ -4,13 +4,13 @@
 //! The registry only advertises the boards that are implemented, so that a ROM is never
 //! accepted and then found unplayable. The table is the one of REQ-CORE-100; several numbers
 //! share a board when they are the same silicon differently wired (9 and 10, 21/22/23/25/27,
-//! 87 and 101).
+//! 87 and 101). 156 is outside that table: it runs Metal Force (Korea), a widescreen target.
 
 use super::mappers::Nrom;
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
-    GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper015, Mapper034, Mmc1, Mmc2, Mmc3, Mmc5,
-    Multicart225, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
+    Daou306, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper015, Mapper034, Mmc1, Mmc2, Mmc3,
+    Mmc5, Multicart225, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
 use super::{Board, CartridgeMemory};
 
@@ -18,7 +18,7 @@ use super::{Board, CartridgeMemory};
 /// REQ-CORE-101 and not implemented.
 pub const SUPPORTED_MAPPERS: &[i32] = &[
     0, 1, 2, 3, 4, 5, 7, 9, 10, 11, 13, 15, 16, 18, 21, 22, 23, 25, 27, 28, 30, 32, 34, 41, 64, 66,
-    71, 87, 101, 225, 228,
+    71, 87, 101, 156, 225, 228,
 ];
 
 /// Whether `mapper` is implemented.
@@ -64,6 +64,7 @@ pub(crate) fn create_board(mapper: i32, memory: &CartridgeMemory) -> Option<Boar
         66 => Board::GxRom(GxRom::new(memory)),
         71 => Board::Codemasters(Codemasters::new(memory)),
         87 | 101 => Board::JalecoJ87(JalecoJ87::new(memory, mapper)),
+        156 => Board::Daou306(Daou306::new(memory)),
         225 => Board::Multicart225(Multicart225::new(memory)),
         228 => Board::Action52(Action52::new(memory)),
         _ => return None,

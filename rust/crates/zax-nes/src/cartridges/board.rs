@@ -3,8 +3,8 @@
 
 use super::mappers::{
     Action52, Action53, AxRom, BandaiFcg, Caltron6In1, CnRom, Codemasters, ColorDreams, CpRom,
-    GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034, Mmc1, Mmc2, Mmc3,
-    Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
+    Daou306, GxRom, IremG101, JalecoJ87, JalecoSs88006, Mapper, Mapper015, Mapper034, Mmc1, Mmc2,
+    Mmc3, Mmc5, Multicart225, Nrom, Rambo1, UnRom512, UxRom, Vrc2Vrc4,
 };
 use super::{BankWindows, CartridgeMemory, ChrFetch, ChrView};
 use crate::state::{InvalidState, StateReader, StateWriter};
@@ -60,6 +60,8 @@ pub enum Board {
     Codemasters(Codemasters),
     /// Mappers 87 and 101.
     JalecoJ87(JalecoJ87),
+    /// Mapper 156.
+    Daou306(Daou306),
     /// Mapper 225.
     Multicart225(Multicart225),
     /// Mapper 228.
@@ -93,6 +95,7 @@ macro_rules! dispatch {
             Board::GxRom($b) => $body,
             Board::Codemasters($b) => $body,
             Board::JalecoJ87($b) => $body,
+            Board::Daou306($b) => $body,
             Board::Multicart225($b) => $body,
             Board::Action52($b) => $body,
         }
