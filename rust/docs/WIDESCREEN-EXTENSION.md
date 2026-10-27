@@ -334,7 +334,11 @@ Each row's centre is checked against the nametable at four columns; a mission sc
 transition is left to the nametables. Rows above and below the screen (`decode_extra_row`) are
 decoded the same way, once the nametable row they would read matches the map one ring away (the
 screen shows the whole ring). The game writes the blocks the player breaks back into the map, so
-the margins show them broken. The one nametable makes the screen's edges show the column the game
+the margins show them broken. A level is made of rooms: the game keeps the camera within
+`$0356:$0355`-`$035A:$0359` (x) and `$0358:$0357`-`$035C:$035B` (y of the screen's bottom,
+upwards), and the map past them holds the other rooms; the decoder draws the room only (x up to
+the last camera x + 256, y up to the last camera y + 240), the rest of the margins stays empty.
+The one nametable makes the screen's edges show the column the game
 is drawing for the other side (the left one hidden by PPUMASK, the right one partly visible,
 both at the middle of a wide view), so the decoder draws them (`decodes_screen_edges`). The game
 needs mapper 156 (Daou Infosys DIS23C01,

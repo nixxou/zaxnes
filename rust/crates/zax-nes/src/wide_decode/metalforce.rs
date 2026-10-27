@@ -14,6 +14,11 @@
 //! at the bottom of the screen. The PPU shows one nametable (one-screen mirroring): a ring of
 //! 32 x 15 metatiles where map row `m` is nametable metatile row `(14 - m) mod 15`.
 //!
+//! A level is made of rooms: the game keeps the camera within `$0356:$0355`-`$035A:$0359` (x)
+//! and `$0358:$0357`-`$035C:$035B` (y of the screen's bottom edge, upwards), the map past them
+//! holding the other rooms. The margins show the room only: x up to the last camera x + 256, y
+//! up to the last camera y + 240.
+//!
 //! The decoder checks itself against the PPU: a row whose centre does not show what the map
 //! gives (the mission title, a transition) is left to the nametables.
 
@@ -29,6 +34,10 @@ const CAMERA_LOW: u16 = 0x0034;
 const CAMERA_HIGH: u16 = 0x0035;
 const BOTTOM_ROW: u16 = 0x003D;
 const SHAPE: u16 = 0x0352;
+const ROOM_X_MIN: u16 = 0x0355;
+const ROOM_Y_MIN: u16 = 0x0357;
+const ROOM_X_MAX: u16 = 0x0359;
+const ROOM_Y_MAX: u16 = 0x035B;
 
 /// Offsets in PRG-RAM.
 const MAP: usize = 0x0000;
@@ -95,6 +104,9 @@ struct Level<'a> {
     height: i32,
     camera: i32,
     bottom_row: i32,
+    /// The room, in world pixels: x from the first to past the last, y (upwards) the same.
+    room_x: (i32, i32),
+    room_y: (i32, i32),
 }
 
 impl<'a> Level<'a> {
@@ -107,6 +119,8 @@ impl<'a> Level<'a> {
             height: column_height(memory.ram(SHAPE)),
             camera: (i32::from(memory.ram(CAMERA_HIGH)) << 8) | i32::from(memory.ram(CAMERA_LOW)),
             bottom_row: i32::from(memory.ram(BOTTOM_ROW)),
+            room_x: (word(memory, ROOM_X_MIN), word(memory, ROOM_X_MAX) + 256),
+            room_y: (word(memory, ROOM_Y_MIN), word(memory, ROOM_Y_MAX) + 240),
         })
     }
 
@@ -145,6 +159,9 @@ impl<'a> Level<'a> {
         out: &mut Vec<DecodedTile>,
     ) {
         for column in columns {
+            if !self.in_room(first_column + column, tile_row) {
+                continue;
+            }
             if let Some((tile, palette)) = self.tile_at(first_column + column, tile_row) {
                 out.push(DecodedTile {
                     column,
@@ -153,6 +170,13 @@ impl<'a> Level<'a> {
                 });
             }
         }
+    }
+
+    /// Whether the tile at world tile column `column`, world tile row `tile_row` (upwards) shows
+    /// any of the room.
+    fn in_room(&self, column: i32, tile_row: i32) -> bool {
+        let (x, y) = (column * 8, tile_row * 8);
+        x + 8 > self.room_x.0 && x < self.room_x.1 && y + 8 > self.room_y.0 && y < self.room_y.1
     }
 
     /// CHR tile and sub-palette at world tile column `column`, world tile row `tile_row`
@@ -169,6 +193,11 @@ impl<'a> Level<'a> {
         let palette = self.metatiles.get(metatile + 4)? & 3;
         Some((tile, palette))
     }
+}
+
+/// The 16-bit value at `address` (low byte first).
+fn word(memory: &DecoderMemory<'_>, address: u16) -> i32 {
+    i32::from(memory.ram(address)) | (i32::from(memory.ram(address + 1)) << 8)
 }
 
 /// Metatiles in a map column for level shape `shape` (`$E529`).
@@ -208,6 +237,8 @@ mod tests {
             height: 16,
             camera: 0,
             bottom_row: 0,
+            room_x: (0, i32::MAX),
+            room_y: (0, i32::MAX),
         }
     }
 
@@ -229,6 +260,22 @@ mod tests {
         assert_eq!(level.tile_at(-1, 4), None);
         assert_eq!(level.tile_at(6, 32), None, "above the map");
         assert_eq!(level.tile_at(2 * MAP_COLUMNS_16, 4), None, "past it");
+    }
+
+    #[test]
+    fn the_margins_show_the_room_only() {
+        let map = vec![0u8; MAP_SIZE];
+        let metatiles = vec![0u8; 256 * 5];
+        let mut level = level(&map, &metatiles);
+        // A room of one screen: camera x 512 only, y 0 to 16.
+        level.room_x = (512, 512 + 256);
+        level.room_y = (0, 16 + 240);
+        assert!(!level.in_room(63, 0), "left of the room");
+        assert!(level.in_room(64, 0));
+        assert!(level.in_room(95, 0));
+        assert!(!level.in_room(96, 0), "right of it");
+        assert!(level.in_room(64, 31));
+        assert!(!level.in_room(64, 32), "above it");
     }
 
     #[test]
