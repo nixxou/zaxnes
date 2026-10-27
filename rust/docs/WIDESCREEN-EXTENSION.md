@@ -628,7 +628,11 @@ it (byte `y`), bit `7 - x`, and the camera stops in the middle of a screen whose
 closed; the margins show the screens the view touches that the camera's own screens reach through
 open boundaries (the same room), the rest stays empty. The ring is 30 rows, all on the screen:
 scrolling vertically the game draws the row coming in at the other edge, in the overscan, so the
-decoder covers it (`covers_overscan`).
+decoder covers it (`covers_overscan`). A row at or past the screen's top or bottom edge is checked
+on the screen's nearest row that reaches neither edge (its top within lines 1-231), the same
+distance away on the ring: the edge row itself may be the game's overscan row, a stale one or one
+whose attribute bytes are another row's (the bottom row then shows the rocks in the sky's colours,
+a band of "water" a television hid).
 
 ---
 
