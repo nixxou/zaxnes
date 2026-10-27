@@ -391,7 +391,7 @@ précédente est oubliée au démarrage).
 | **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
-| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
+| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
 | options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3* et *Adventure Island* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
@@ -440,6 +440,20 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   « Sélecteur de niveau » (Select sur l'écran titre fait défiler les 32 rounds, Start lance celui
   affiché), « Invincible » (les ennemis ne blessent plus ; chutes, eau et faim tuent toujours),
   deux aides pour tester, désactivées par défaut, et « Sans ralentissements » (actif par défaut).
+- *Excitebike* (Japan, USA) : le décor des marges est la piste de la course, que le jeu trace
+  lui-même (sa propre routine, rejouée en avance), les tribunes et l'herbe se répétant ; sans
+  patch. Le **mode avancé** ajoute le patch : les autres pilotes s'affichent dans les marges (le
+  jeu les garde jusqu'à une centaine de pixels au-delà des bords ; ils y apparaissent et y
+  disparaissent là où le jeu les crée et les retire). Option du patch : « Sans ralentissements »
+  (actif par défaut). Le hasard du jeu dépend du temps de calcul : avec le patch, les adversaires
+  ne refont pas exactement les mêmes choix que sur la ROM d'origine aux mêmes touches.
+- *Final Fantasy* (USA) : le décor des marges est lu dans les cartes du jeu, la carte du monde
+  comme les villes, châteaux et donjons, au-dessus et en dessous de l'écran aussi ; les boîtes de
+  dialogue gardent le décor autour d'elles ; sans patch. Le **mode avancé** ajoute le patch : les
+  habitants, les véhicules, le pont et le canal s'affichent dans les marges de gauche et de droite
+  (pas au-dessus ni en dessous de l'écran). Les combats et les menus n'ont pas de marges. Option
+  du patch : « Sans ralentissements » (actif par défaut). Le balayage noir d'un changement d'écran
+  ne couvre que l'écran d'origine.
 - Ça fonctionne en 3D comme en mode 2D.
 
 Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers
@@ -463,7 +477,9 @@ Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WI
 (côté émulateur), [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md)
-et [`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md) (les hacks
+, [`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md)
+, [`rust/docs/hacks/excitebike/WIDESCREEN-HACK.md`](rust/docs/hacks/excitebike/WIDESCREEN-HACK.md)
+et [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md) (les hacks
 eux-mêmes et comment les reconstruire).
 
 ### Langue de l'interface

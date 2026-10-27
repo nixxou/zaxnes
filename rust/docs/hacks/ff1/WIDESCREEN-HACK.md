@@ -144,6 +144,9 @@ the game travels in it. `make_doc.py` writes this document's appendices from the
 * The people above and below the screen stay hidden (8-bit sprite y).
 * The game decides who is drawn as it does on the screen: a person in a room (`$6F01` bit 7)
   shows only from inside it, the others only from outside.
+* The black sweep of a change of screen (the game blanks one line after the other, moving down
+  2 lines a frame) covers the original screen only: the margins keep the map until the new
+  screen is drawn.
 
 ---
 
