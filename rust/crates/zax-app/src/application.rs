@@ -10,6 +10,7 @@ use sdl2::event::{Event, WindowEvent};
 use time::OffsetDateTime;
 use zax_engine3d::draw_list::FrameDrawList;
 use zax_engine3d::frame::ConversionFrame;
+use zax_nes::ppu::SpriteLimit;
 use zax_platform::audio::PREFERRED_SAMPLE_RATE;
 use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::icon;
@@ -1563,8 +1564,18 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .get(SettingId::VideoWidescreenStrictEdges)
         .as_bool();
     let hack_options = host.hack_option_bits();
+    let sprite_limit = match host
+        .settings()
+        .get(SettingId::VideoRemoveSpriteLimit)
+        .as_int()
+    {
+        0 => SpriteLimit::Kept,
+        1 => SpriteLimit::Removed,
+        _ => SpriteLimit::Smart,
+    };
     if let Some(session) = host.session_mut() {
         session.core_mut().set_hack_options(hack_options);
+        session.core_mut().set_sprite_limit(sprite_limit);
         session.core_mut().set_widescreen_margin(widescreen);
         session
             .core_mut()

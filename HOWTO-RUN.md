@@ -159,6 +159,16 @@ partie reprend). `--console` ouvre directement Zaxnes dans ce mode. Au clavier, 
 joueur 1 servent de manette (`X` = A, `Z` = B, `Échap` = menu…), plus `W` (= L2) et `H` (= Start)
 sur la liste des jeux.
 
+La **souris** marche aussi sur PC : un clic sur une ligne la sélectionne, un clic sur la ligne
+sélectionnée la valide (A ; un double clic lance donc un jeu), un clic sur le « < valeur > » d'une
+option la change (moitié gauche : la valeur d'avant, moitié droite : la suivante) ; un clic sur une
+aide de la barre du bas fait ce qu'elle dit (« L/R » et « </> » : moitié gauche, moitié droite) ;
+la molette monte et descend dans la liste, le clic droit revient (B). La **barre de menus** reste
+à portée : elle apparaît quand la souris touche le haut de la fenêtre, comme pendant une partie,
+et un menu ouvert retient les clics de l'écran dessous. Une entrée qui ouvre une fenêtre du bureau
+ou agit sur le jeu (Options, Ouvrir une ROM, Hacks…) ramène à la barre de menus ;
+**Outils ▸ Mode console** bascule comme `F1`.
+
 Sur la liste, un jeu pour lequel un hack écran large existe porte un **[W]** : gris tant que
 l'écran large est désactivé pour ce jeu, en couleur une fois activé. **L2** (`W` au clavier) le
 bascule ; **Start** (`H`) ouvre l'écran **Hacks** du jeu (§ Écran large), qu'on trouve aussi en
@@ -186,7 +196,8 @@ pause ; `B` (ou `Échap`) y revient, et après le choix d'un emplacement la barr
 revient d'elle-même.
 
 Les films (menu **Outils**, `Ctrl`+`M`) et les options du hack (menu **Vidéo**) ne sont que dans
-la barre de menus : en mode console, `F1` ou `Origine` y ramène d'abord. Un film en cours
+la barre de menus : en mode console, on l'atteint par le haut de la fenêtre, ou `F1` / `Origine`
+y ramène. Un film en cours
 d'enregistrement continue pendant le mode console, et une sauvegarde chargée depuis ses écrans
 le ramène en arrière comme depuis le menu.
 
@@ -365,7 +376,9 @@ Les effets de ReShade s'appliquent à toute l'image de la fenêtre, barre de men
 
 Zaxnes sait montrer un jeu **plus large** que les 256 pixels de la NES, quand le jeu est prévu
 pour. Aujourd'hui, deux le sont, grâce à un **hack écran large intégré** à l'émulateur :
-***Zelda II - The Adventure of Link* (USA)** et ***Mega Man 2* (USA)**.
+***Zelda II - The Adventure of Link* (USA)** et ***Mega Man 2* (USA)**. ***Super Mario Bros. 3*
+(USA) (Rev 1)** l'est aussi : son décor est lu dans le niveau sans patch, et un patch intégré y
+ajoute les ennemis (le mode avancé).
 
 L'écran large se règle **par jeu**, dans l'écran **Hacks** du jeu : en mode console, depuis la
 liste (Start, ou L2 pour seulement l'activer ou le désactiver), depuis les options du jeu ou depuis
@@ -378,7 +391,8 @@ précédente est oubliée au démarrage).
 | **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
-| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements |
+| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
+| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island* et *Metal Force* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
 
@@ -401,6 +415,54 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   marges » (actif par défaut), « Invincible » (une aide pour tester, désactivé par défaut),
   « Sans ralentissements » (actif par défaut : plus de lignes d'overclock, le jeu ne ralentit
   plus).
+- *Super Mario Bros. 3* (USA) (Rev 1, la version « PRG1 ») : l'écran large seul lit le décor des
+  marges dans le niveau, et aussi la carte du monde (l'écran voisin de la carte apparaît au-delà
+  de son cadre), avec une marge au-dessus de l'écran ; la ROM n'est pas modifiée. La ligne **Mode
+  avancé** (activée par défaut) ajoute le patch : les ennemis sont créés, vivent et s'affichent dans les marges (ils ne
+  lancent ni marteau ni boule de feu tant qu'ils n'y sont pas sur l'écran d'origine), et Mario
+  peut aller dans la marge de droite, où l'écran défile tout seul aussi. Options du patch :
+  « Sélecteur de niveau » (B sur le menu 1P/2P ouvre le menu de débogage du jeu : Haut/Bas le
+  monde, Start sa carte ; désactivé par défaut), « Invincible » (désactivé par défaut),
+  « Sans ralentissements » (actif par défaut). Les labyrinthes de tuyaux verticaux n'ont pas de
+  marges.
+- *Castlevania* (USA), la version d'origine comme la Rev 1 (« PRG1 ») : l'écran large seul lit
+  le décor de la salle dans ses données, jusqu'à ses deux bords ; la ROM n'est pas modifiée. La
+  ligne **Mode avancé** (activée par défaut) ajoute le patch : les bougies, les objets et les
+  ennemis s'affichent et vivent dans les marges (les zombies arrivent du bord de la marge ; rien
+  ne touche Simon tant qu'il n'est pas sur l'écran d'origine). Options du patch : « Sélecteur de
+  niveau » (Select pendant un stage passe au stage suivant, avec ses graphismes, sans coûter de
+  vie ; après le dernier, le premier) et « Invincible » (Simon n'est jamais touché ; les chutes
+  tuent toujours), désactivées par défaut ; « Sans ralentissements » (actif par défaut).
+- *Adventure Island* (USA) : le décor des marges est lu dans les tables du round (pentes et
+  défilement vertical compris), sans patch. Le **mode avancé** ajoute le patch : les sprites et les
+  objets s'affichent dans les marges ; un objet que le jeu retire au bord gauche continue sa route
+  dans la marge sans plus rien toucher (le jeu reste celui d'origine). Options du patch :
+  « Sélecteur de niveau » (Select sur l'écran titre fait défiler les 32 rounds, Start lance celui
+  affiché), « Invincible » (les ennemis ne blessent plus ; chutes, eau et faim tuent toujours),
+  deux aides pour tester, désactivées par défaut, et « Sans ralentissements » (actif par défaut).
+- *Excitebike* (Japan, USA) : le décor des marges est la piste de la course, que le jeu trace
+  lui-même (sa propre routine, rejouée en avance), les tribunes et l'herbe se répétant ; sans
+  patch. Le **mode avancé** ajoute le patch : les autres pilotes s'affichent dans les marges (le
+  jeu les garde jusqu'à une centaine de pixels au-delà des bords ; ils y apparaissent et y
+  disparaissent là où le jeu les crée et les retire). Option du patch : « Sans ralentissements »
+  (actif par défaut). Le hasard du jeu dépend du temps de calcul : avec le patch, les adversaires
+  ne refont pas exactement les mêmes choix que sur la ROM d'origine aux mêmes touches.
+- *Final Fantasy* (USA) : le décor des marges est lu dans les cartes du jeu, la carte du monde
+  comme les villes, châteaux et donjons, au-dessus et en dessous de l'écran aussi ; les boîtes de
+  dialogue gardent le décor autour d'elles ; sans patch. Le **mode avancé** ajoute le patch : les
+  habitants, les véhicules, le pont et le canal s'affichent dans les marges de gauche et de droite
+  (pas au-dessus ni en dessous de l'écran). Les combats et les menus n'ont pas de marges. Option
+  du patch : « Sans ralentissements » (actif par défaut). Le balayage noir d'un changement d'écran
+  ne couvre que l'écran d'origine.
+- *Metal Force* (Korea), jeu coréen non licencié (mapper 156, géré par Zaxnes) : le décor des
+  marges est lu dans la carte du niveau que le jeu garde en mémoire, au-dessus et en dessous de
+  l'écran aussi, et seulement dans la salle en cours (au-delà, les marges restent vides) ; sans
+  patch. Le **mode avancé** ajoute le patch : les ennemis apparaissent dans les marges, endormis
+  jusqu'à ce qu'ils atteignent la zone d'apparition d'origine, puis vivent et s'affichent dans les
+  marges ; les avions du ciel apparaissent au bord de la vue ; les tirs restent bornés à l'écran
+  d'origine. Options du patch : « Sélecteur de niveau » (gauche / droite sur l'écran « MISSION »
+  choisit la mission, 1 à 7) et « Invincible » (les trous tuent toujours), désactivés par défaut ;
+  « Sans ralentissements » (actif par défaut).
 - Ça fonctionne en 3D comme en mode 2D.
 
 Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers
@@ -422,8 +484,31 @@ suit la ROM d'origine.
 
 Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WIDESCREEN-EXTENSION.md)
 (côté émulateur), [`rust/docs/hacks/zelda2/WIDESCREEN-HACK.md`](rust/docs/hacks/zelda2/WIDESCREEN-HACK.md)
-et [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md)
-(les hacks eux-mêmes et comment les reconstruire).
+, [`rust/docs/hacks/megaman2/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman2/WIDESCREEN-HACK.md)
+, [`rust/docs/hacks/smb3/WIDESCREEN-HACK.md`](rust/docs/hacks/smb3/WIDESCREEN-HACK.md)
+, [`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md)
+, [`rust/docs/hacks/excitebike/WIDESCREEN-HACK.md`](rust/docs/hacks/excitebike/WIDESCREEN-HACK.md)
+, [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
+et [`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md) (les hacks
+eux-mêmes et comment les reconstruire).
+
+### Limite de 8 sprites par ligne
+
+La NES n'affiche que 8 sprites par ligne. Pour qu'aucun ne disparaisse pour de bon, beaucoup de jeux
+changent l'ordre de leurs sprites à chaque image : ceux en trop clignotent. Le réglage **« Supprimer
+la limite de 8 sprites par ligne »** (`video.remove_sprite_limit`, onglet **Vidéo**) fait comme
+Mesen :
+
+- **Désactivé** : 8 sprites par ligne, comme sur la console ;
+- **Toujours** : tous les sprites de chaque ligne sont affichés, plus de clignotement ;
+- **Intelligent** (par défaut) : comme **Toujours**, sauf sur les lignes où le jeu empile au moins
+  8 sprites au même endroit, à la suite dans l'OAM. C'est le procédé qu'utilisent certains jeux
+  pour cacher les sprites suivants : *The Legend of Zelda* cache ainsi Link quand il passe une
+  porte de donjon. Là, la limite est rétablie pour ces lignes seulement.
+
+Le réglage ne change que l'image 2D (la vue 3D a toujours tous les sprites) ; le drapeau
+d'overflow (bit 5 de `$2002`) et les accès à la cartouche restent ceux de la console, quel que
+soit le choix.
 
 ### Langue de l'interface
 
@@ -770,7 +855,8 @@ cargo run --release -p zax-harness -- render --out captures
 
 Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-scenes`),
 `--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
-`--distance`, `--mesh`, `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
+`--distance`, `--mesh`, `--sprite-limit kept|removed|smart` (la limite de 8 sprites par
+ligne de l'image 2D ; `kept` par défaut), `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
 4096 par défaut depuis `AMD-034`), `--skybox`, `--sky-bodies` (allume le soleil, la lune
 et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).

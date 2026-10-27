@@ -24,6 +24,7 @@ use std::time::Instant;
 
 use zax_engine3d::palette::{nes_color, Rgb24};
 use zax_engine3d::settings::RenderAlgorithm;
+use zax_nes::ppu::SpriteLimit;
 use zax_render::assets::{png_image, NeutralSceneAssets, SceneAssets};
 use zax_render::camera::CameraView;
 use zax_render::geometry;
@@ -57,8 +58,9 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --no-builtin-patches     restore --load-state without the built-in ROM patches
   --advanced               apply the built-in patches of an advanced widescreen mode too
   --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
+  --sprite-limit <mode>    kept (default), removed or smart: the 8 sprites per line of the picture
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
-                           as the widescreen margin makes them
+                           (and as tall) as the widescreen margins make them
   --load-state <file>      restore a state block (written by --save-state) after the reset
   --movie <file.zmv>       play a movie of the application: its start state is restored, its
                            hack options set and its inputs replace --press for its frames
@@ -143,6 +145,8 @@ pub struct Options {
     pub movie: Option<PathBuf>,
     /// The built-in patch's option bits, when given.
     pub hack_options: Option<u8>,
+    /// The limit of eight sprites per line of the picture.
+    pub sprite_limit: SpriteLimit,
     /// Where to write the state block after the run.
     pub save_state: Option<PathBuf>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -215,6 +219,7 @@ impl Options {
             load_state: None,
             movie: None,
             hack_options: None,
+            sprite_limit: SpriteLimit::Kept,
             save_state: None,
             dump_mem: None,
             profile: None,
@@ -316,6 +321,18 @@ impl Options {
                     u8::try_from(integer(value)?)
                         .map_err(|_| "--hack-options: 0 to 255".to_owned())?,
                 );
+            }
+            "--sprite-limit" => {
+                self.sprite_limit = match value {
+                    "kept" => SpriteLimit::Kept,
+                    "removed" => SpriteLimit::Removed,
+                    "smart" => SpriteLimit::Smart,
+                    _ => {
+                        return Err(format!(
+                            "--sprite-limit: kept, removed or smart, got '{value}'"
+                        ))
+                    }
+                };
             }
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
@@ -589,6 +606,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             load_state: options.load_state.as_deref(),
             movie: options.movie.as_deref(),
             hack_options: options.hack_options,
+            sprite_limit: options.sprite_limit,
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
         })?]);

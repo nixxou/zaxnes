@@ -574,6 +574,12 @@ impl NesCore {
         self.bus.ppu_mut().wide_mut().set_host_margin(pixels);
     }
 
+    /// Sets whether the picture shows more than eight sprites on a line (the 2D picture; the
+    /// tile records of the 3D view have every sprite whatever the choice).
+    pub fn set_sprite_limit(&mut self, limit: crate::ppu::SpriteLimit) {
+        self.bus.ppu_mut().set_sprite_limit(limit);
+    }
+
     /// Sets the options of the built-in patch the player turned on, one bit each as the patch's
     /// `options` say; the ROM reads them at `$500A`.
     pub fn set_hack_options(&mut self, options: u8) {

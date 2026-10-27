@@ -91,9 +91,16 @@ impl MarginDecoder for MetalForce {
         true
     }
 
-    /// The one nametable: the screen's edges show the column the game draws for the other side.
-    fn decodes_screen_edges(&self) -> bool {
+    /// The one nametable: the screen's edge tiles show the column the game is drawing for the
+    /// other side. Column 0, hidden by PPUMASK, is decoded...
+    fn decodes_masked_column(&self) -> bool {
         true
+    }
+
+    /// ...and the last one, whose right part comes from the 33rd tile of a line, the same
+    /// nametable column as the first.
+    fn redrawn_right_columns(&self) -> i32 {
+        1
     }
 }
 
