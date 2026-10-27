@@ -29,7 +29,9 @@ Adventure Island (USA) one, its advanced mode too
 the Excitebike (Japan, USA) one, an advanced mode as well
 ([`hacks/excitebike/WIDESCREEN-HACK.md`](hacks/excitebike/WIDESCREEN-HACK.md)), and the Final
 Fantasy (USA) one, an advanced mode as well
-([`hacks/ff1/WIDESCREEN-HACK.md`](hacks/ff1/WIDESCREEN-HACK.md)).
+([`hacks/ff1/WIDESCREEN-HACK.md`](hacks/ff1/WIDESCREEN-HACK.md)), and the Metal
+Force (Korea) one, an advanced mode as well
+([`hacks/metalforce/WIDESCREEN-HACK.md`](hacks/metalforce/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -333,6 +335,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Excitebike (Japan, USA) (data CRC-32 `49AEB3A6`), unpatched and with its built-in patch | a race's track, laid out by the game's own routine in the sandbox, one lap | `excitebike.rs`, see below |
 | Final Fantasy (USA) (data CRC-32 `CEBD2A31`), unpatched and with its built-in patch | the world map (unpacked from PRG-ROM) and the standard maps (PRG-RAM); vertical margin, overscan | `ff1.rs`, see below |
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
+| Metal Force (Korea) (data CRC-32 `EC6D910E`, mapper 156), unpatched and with its built-in patch | the level map in PRG-RAM, sides and vertical margin | `metalforce.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -576,6 +579,32 @@ the extents to 0 and `$5007` to 2. A sprite's y stays 8-bit: the people above an
 stay hidden. Option: "No slowdown" (bit 0, on by default; `idle_loop` `$FEBB`-`$FEBD`, the game's
 `JMP` to itself). Measured with a trace of the waits: 600 frames each of a town, the world map
 and a battle, at 0 and 128 pixels of margin, lag no frame, with or without the hack.
+
+Metal Force: the game unpacks the whole level into its 8 KiB of PRG-RAM and draws the screen's
+columns from it (`$E3DB`, pointer `$E529`). The map is at `$6000`, `$1800` bytes of 16 x 16
+metatiles, column after column; a column is `H` metatiles high, `H` = 16, 24, 32, 48, 64, 80, 96,
+112, 128, 144, 160 for the level shape `$0352` = 0 to 10, 40 past it, and its rows count upwards
+(row `m` is above row `m - 1`). Metatile `n` is 5 bytes at `$7800 + 5 n`: CHR tiles top left, top
+right, bottom left, bottom right, then its sub-palette (low two bits). The camera is `$35:$34`
+(world x of the screen's left edge) and `$3D` (the map row at the screen's bottom). The game shows
+one nametable (one-screen mirroring), a ring of 32 x 15 metatiles where map row `m` is metatile row
+`(14 - m) mod 15`: a row's column comes from the PPU's coarse x (modulo 256 pixels, the instance
+from `$35:$34`), its map row from its coarse y (modulo 15, the instance from `$3D` and the line).
+Each row's centre is checked against the nametable at four columns; a mission screen or a
+transition is left to the nametables. Rows above and below the screen (`decode_extra_row`) are
+decoded the same way, once the nametable row they would read matches the map one ring away (the
+screen shows the whole ring). The game writes the blocks the player breaks back into the map, so
+the margins show them broken. A level is made of rooms: the game keeps the camera within
+`$0356:$0355`-`$035A:$0359` (x) and `$0358:$0357`-`$035C:$035B` (y of the screen's bottom,
+upwards), and the map past them holds the other rooms; the decoder draws the room only (x up to
+the last camera x + 256, y up to the last camera y + 240), the rest of the margins stays empty.
+The one nametable makes the screen's edge tiles show the column the game
+is drawing for the other side (the left one hidden by PPUMASK, the right one partly visible: the
+33rd tile of a line; both at the middle of a wide view, which the TV's overscan hid): column 0 is
+decoded while the game hides it (`decodes_masked_column`) and the last column of the centre is
+redrawn (`redrawn_right_columns` 1). The game
+needs mapper 156 (Daou Infosys DIS23C01,
+`cartridges/mappers/daou306.rs`, as Mesen's `DaouInfosys`).
 
 ---
 
