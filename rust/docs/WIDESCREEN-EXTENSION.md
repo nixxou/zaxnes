@@ -344,6 +344,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 | Metal Force (Korea) (data CRC-32 `EC6D910E`, mapper 156), unpatched and with its built-in patch | the level map in PRG-RAM, sides and vertical margin | `metalforce.rs`, see below |
 | Blaster Master (USA) (data CRC-32 `3F0FD764`), unpatched and with its built-in patch | the area's map in PRG-ROM, four levels of blocks, within the room the camera is in; vertical margin, overscan | `blastermaster.rs`, see below |
+| Metroid (USA) (data CRC-32 `70080810`), unpatched | the world map's rooms around the screen: the two the game keeps in PRG-RAM, the others built from the area's data as the game does; vertical margin, overscan | `metroid.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -645,6 +646,31 @@ whose attribute bytes are another row's (the bottom row then shows the rocks in 
 a band of "water" a television hid). Those attribute bytes also colour the row next to the edge row,
 on the screen: the rows starting or ending within 8 lines of the edges are decoded whole width too
 (`overscan_lines` 8).
+
+Metroid: the world is a map of 32 x 32 rooms of one screen (256 x 240), room numbers at `$7000`
+in PRG-RAM (`$FF`: none), each an entry of the area's room table; the area's tables are in its PRG
+bank (`InArea` `$74` low nibble through `$CA30`: Brinstar 1, Norfair 2, Kraid 4, Tourian 3, Ridley
+5), their addresses copied to `$3B` (rooms), `$3D` (structures) and `$3F` (metatiles). The game
+builds a room into PRG-RAM (`SetupRoom`, `$EA2B`: `$6000` for nametable 0, `$6400` for the other,
+tiles then attribute bytes as in a nametable) and copies it to the PPU a column or a row at a time.
+A room's data is its default sub-palette (the attribute bytes' fill), then objects until `$FD` or
+`$FF`: a position `%yyyyxxxx` in metatiles, a structure (read with an 8-bit index) and its
+sub-palette (set in the attribute bits when it is not the default, `$EF9E`); a structure is rows of
+metatiles, a byte `%xxxxnnnn` (offset in metatiles, count, 0 for 16) then the metatiles, until
+`$FF`, a row cut where it would wrap and a structure stopped past room offset `$3A0` (`$EF13`); a
+metatile is 4 CHR tiles at `($3F) + (4 n & $FF)`, upper left, upper right, lower left, lower right.
+The game scrolls one way at a time (`$49`: 0 up, 1 down, 2 left, 3 right): across, two rooms side
+by side (a ring of 512 x 240), or up and down, two stacked (256 x 480). `MapPosX`/`MapPosY`
+(`$50`/`$4F`) is the room scrolled into: the second of the two on the screen scrolling right or
+down, the first scrolling left or up; `$FF` (both nametable bits toggled together) gives the
+nametable of the screen's left or top edge, `$FD`/`$FC` the scroll; so a row's place comes from its
+PPU address, the ring's offset from the world and the camera picking the instance. The margins show
+the map's rooms around the screen, those behind a door too; the room on the screen's left (top)
+edge, and the other one while both show, are read from PRG-RAM (blasted blocks included), the
+others built from the area's data as `SetupRoom` does (kept, by bank and data address). A row is
+decoded when 28 of its 32 columns show the room's tile (the title, the password screen and the
+transitions are left to the nametables), checked on the screen's nearest row that reaches neither
+edge; scrolling up and down the game draws the row coming in at the edge (`covers_overscan`).
 
 ---
 
