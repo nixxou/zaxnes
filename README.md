@@ -104,7 +104,9 @@ mode the enemies in the margins);
 [`rust/docs/hacks/megaman4/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman4/WIDESCREEN-HACK.md)
 (*Mega Man 4* (USA), both builds: the same);
 [`rust/docs/hacks/megaman5/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman5/WIDESCREEN-HACK.md)
-(*Mega Man 5* (USA): the same).
+(*Mega Man 5* (USA): the same);
+[`rust/docs/hacks/megaman6/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman6/WIDESCREEN-HACK.md)
+(*Mega Man 6* (USA): the part of the stage the camera may show, from the map the game points to).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see
