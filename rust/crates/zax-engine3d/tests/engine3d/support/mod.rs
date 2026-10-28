@@ -189,6 +189,7 @@ impl Batch {
         let batch = FrameBatch {
             records: &self.records,
             palette: self.palette,
+            margin_palette: None,
             mask_x: self.mask_x,
             mask_y: self.mask_y,
             margin: 0,
