@@ -197,9 +197,9 @@ testing.
 ;
 ; This code is a 16 KiB PRG bank added to the game (PRG bank 32 of 34 in 16 KiB units: the game's
 ; 8 KiB banks 0-63 stay where they were and its two fixed banks are copied to banks 66 and 67, the
-; ones MMC3 fixes at $C000 and $E000); the widescreen extension's PRG window shows its first 2 KiB
-; at $5800-$5FFF, Zaxnes opening it at power-on (the patch's boot window: bank 32, page 0). The
-; window goes on over $6000-$7FFF ($5007 bit 4): the game reads and writes nothing there. The game
+; ones MMC3 fixes at $C000 and $E000); the widescreen extension's PRG window shows its first 10 KiB
+; at $5800-$7FFF, Zaxnes opening it at power-on (the patch's boot window: bank 32, page 0), the
+; hack keeping it over $6000-$7FFF ($5007 bit 4): the game reads and writes nothing there. The game
 ; reaches the code through hooks in its own (tools/build.py). The background of the margins is
 ; Zaxnes' margin decoder's work; the hack does the objects, the way the Mega Man 3 to 5 hacks do
 ; them, in Mega Man 6's own engine (objects run as scripts, each removing itself through the test
@@ -1574,8 +1574,8 @@ wide_end:
 Usage: python -I tools/build.py <Mega Man 6 (USA).nes> [out.bps]
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
-   PRG bank whose first 2 KiB the widescreen extension's PRG window shows at $5800-$5FFF (Zaxnes
-   opens it at power-on for this patch: bank 32, page 0).
+   PRG bank whose first 10 KiB the widescreen extension's PRG window shows at $5800-$7FFF (Zaxnes
+   opens it at power-on for this patch: bank 32, page 0; the hack keeps it over $6000-$7FFF).
 2. Lays the PRG-ROM out as 68 banks of 8 KiB: the game's 64 where they were, the hack's 16 KiB as
    banks 64-65, and the game's fixed banks 62 and 63 again as banks 66 and 67, the ones MMC3
    fixes at $C000 and $E000 (Zaxnes' MMC3 takes the last two banks, whatever their count).

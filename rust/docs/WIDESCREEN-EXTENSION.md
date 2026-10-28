@@ -811,8 +811,8 @@ whose tiles the game loaded (`$0680`) not before, and an object the game flags n
 0) is not drawn in a margin either; its
 sprite loops are the game's four (none, horizontal, vertical, both flips) for each page. Its code
 is a 16 KiB PRG bank added to the game (8 KiB banks 64-65 of 68, the fixed banks copied to banks 66
-and 67), of which the window shows the first 2 KiB from power-on (`boot_window`). `idle_loop`
-`$C581`-`$C584`. Measured on Plant Man's stage, 500 frames: the game with the hack's sprite
+and 67), of which the window shows the first 10 KiB from power-on (`boot_window`, `$5800`-`$7FFF`:
+the hack keeps `$5007` bit 4; the game has no PRG-RAM). `idle_loop` `$C581`-`$C584`. Measured on Plant Man's stage, 500 frames: the game with the hack's sprite
 routines left out lags 19 frames; the hack at a margin of 0 without overclock 75, at a 128-pixel
 margin with 64 lines 62, with 255 none.
 
