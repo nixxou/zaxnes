@@ -19,6 +19,12 @@ use crate::cartridges::{Cartridge, ChrFetch};
 use crate::wide_decode::{BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 use crate::{nes_colors, NametableMirroring, TileRecord};
 
+/// The screen x where screen column `column` of a row with fine X `fine_x` starts (0 at least).
+#[allow(clippy::cast_possible_truncation)] // 0..256.
+fn column_x(column: i32, fine_x: i32) -> i16 {
+    ((8 * column) - fine_x).max(0) as i16
+}
+
 /// In the wide picture's palette entries, the first of the margin palette's (after the 32 of the
 /// PPU's).
 const MARGIN_ENTRIES: u8 = 0x20;
@@ -76,6 +82,7 @@ impl Ppu2C02 {
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
         self.redrawn_from = [256; 30];
+        self.redrawn_to = [0; 30];
         self.margin_palette = None;
         self.tiles.set_extra_columns(0);
         self.mask_x = 0;
@@ -97,6 +104,7 @@ impl Ppu2C02 {
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
         self.redrawn_from = [256; 30];
+        self.redrawn_to = [0; 30];
         self.margin_palette = None;
     }
 
@@ -296,11 +304,14 @@ impl Ppu2C02 {
         let row_width = 33 + (2 * extra);
         // Column 0 too, for a decoder that draws it while the game hides it.
         let masked_column = decoder.decodes_masked_column() && (self.mask & 0x02) == 0;
-        let first_centre = i32::from(masked_column);
+        // And the centre's first columns, for a decoder that redraws them.
+        let left_columns = decoder.redrawn_left_columns().clamp(0, 31);
+        let first_centre = i32::from(masked_column).max(left_columns);
         // And the centre's last columns, for a decoder that redraws them.
         let first_right = 32 - decoder.redrawn_right_columns().clamp(0, 31);
         let mut decoded_rows = [false; 31];
         let mut redrawn_from = [256i16; 30];
+        let mut redrawn_to = [0i16; 30];
         let mut tiles = Vec::new();
         let mut records = Vec::new();
         self.margin_palette = decoder.margin_palette(memory);
@@ -328,12 +339,11 @@ impl Ppu2C02 {
                 continue;
             }
             decoded_rows[row_index] = true;
-            if first_right < 32 {
-                if let Some(from) = redrawn_from.get_mut(row_index) {
-                    #[allow(clippy::cast_possible_truncation)] // 0..256.
-                    let x = ((8 * first_right) - fine_x).max(0) as i16;
-                    *from = x;
-                }
+            if let Some(to) = redrawn_to.get_mut(row_index).filter(|_| left_columns > 0) {
+                *to = column_x(left_columns, fine_x);
+            }
+            if let Some(from) = redrawn_from.get_mut(row_index).filter(|_| first_right < 32) {
+                *from = column_x(first_right, fine_x);
             }
             #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
             let row_number = row_index as i32;
@@ -365,6 +375,7 @@ impl Ppu2C02 {
             self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
         self.centre_lines = centre_lines;
         self.redrawn_from = redrawn_from;
+        self.redrawn_to = redrawn_to;
 
         #[allow(clippy::cast_possible_truncation)] // At most 512.
         let margin = self.frame_margin as i16;
@@ -968,10 +979,15 @@ impl Ppu2C02 {
         let bottom = usize::try_from(bottom.clamp(0, 240)).unwrap_or(240);
         let screen_rows = margin_y + top..margin_y + bottom;
         // And from the right columns a decoder redraws, band by band.
-        let centre_end = |row: usize| -> i32 {
-            row.checked_sub(margin_y)
-                .and_then(|line| self.redrawn_from.get(line / 8))
-                .map_or(SCREEN_WIDTH_I32, |&from| i32::from(from))
+        // And up to the left columns a decoder redraws: the centre's x range, by picture row.
+        let centre = |row: usize| -> (i32, i32) {
+            let band = row.checked_sub(margin_y).map(|line| line / 8);
+            let to = band.and_then(|band| self.redrawn_to.get(band));
+            let from = band.and_then(|band| self.redrawn_from.get(band));
+            (
+                to.map_or(composed_from, |&to| i32::from(to).max(composed_from)),
+                from.map_or(SCREEN_WIDTH_I32, |&from| i32::from(from)),
+            )
         };
         // Palette entries of the sides (0 = nothing), composed first, then turned into colours. A
         // sprite behind is painted first so that an opaque background pixel covers it.
@@ -988,7 +1004,7 @@ impl Ppu2C02 {
                 }
                 for px in 0..8i32 {
                     let x = i32::from(record.x) + px;
-                    if screen_rows.contains(&row) && (composed_from..centre_end(row)).contains(&x) {
+                    if screen_rows.contains(&row) && (centre(row).0..centre(row).1).contains(&x) {
                         continue;
                     }
                     let Ok(column) = usize::try_from(x + self.frame_margin) else {
@@ -1031,11 +1047,11 @@ impl Ppu2C02 {
             paint(record, 0x10, out);
         }
 
-        #[allow(clippy::cast_sign_loss)] // 0 or 8.
-        let first = margin + composed_from as usize;
         for row in 0..height {
             let line = &mut out[row * width..(row + 1) * width];
-            let end = margin + usize::try_from(centre_end(row)).unwrap_or(SCREEN_WIDTH);
+            let (start, stop) = centre(row);
+            let first = margin + usize::try_from(start).unwrap_or(0);
+            let end = margin + usize::try_from(stop).unwrap_or(SCREEN_WIDTH);
             for (column, slot) in line.iter_mut().enumerate() {
                 if screen_rows.contains(&row) && (first..end).contains(&column) {
                     *slot = self.pixels[((row - margin_y) * SCREEN_WIDTH) + column - margin];

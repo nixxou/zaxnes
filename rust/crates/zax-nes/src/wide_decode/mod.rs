@@ -150,6 +150,16 @@ pub trait MarginDecoder: Sync {
         0
     }
 
+    /// How many of the centre's leftmost columns the decoder redraws on the rows it decodes (0
+    /// by default), as [`MarginDecoder::redrawn_right_columns`] does on the right: a game that
+    /// draws the column coming in at the left edge with attribute bytes that also colour the
+    /// visible column next to it (Metroid scrolling left, 2). Their nametable records are
+    /// replaced, and the wide picture composes those columns of the decoded rows from the
+    /// records instead of the PPU's pixels.
+    fn redrawn_left_columns(&self) -> i32 {
+        0
+    }
+
     /// Decodes the whole of `row`, a row the PPU did not draw: above or below the screen, in
     /// the vertical margin (its `line` is then negative or past 239, and its PPU address is the
     /// one it would have on the plane of two stacked nametables). Returns `false`, as by
