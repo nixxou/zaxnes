@@ -18,7 +18,7 @@ spawn, sleep, live and show in the margins, the way the Mega Man 2 hack does the
 |---|---|
 | Source ROM | *Mega Man (USA)*, UxROM (mapper 2), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `6EE4BB0A` |
-| Target data | CRC-32 `CE195C1D` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `DA3EE79E` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (the one UxROM fixes at `$C000`); hooks in bank 5 and bank 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/megaman1-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -72,7 +72,7 @@ hack asks for 64 lines of overclock (`$5006`), which leaves the picture and the 
 with the option "No slowdown" (on by default). Measured on Ice Man's stage (200 frames from its
 start, holding right, 128-pixel margin, counted with the frame counter `$23`): the original runs late
 no frame; the hack without overclock 100 (18 at a margin of 0: its sprite loop is slower), with 64
-lines 1, with 255 none. Cut Man's first section (1300 frames): none with 255 lines.
+lines or 255 none. Cut Man's first section (1300 frames): none with 255 lines.
 
 ## 3. The extension
 
@@ -517,6 +517,9 @@ wide_clear_oam:
     STA     EXTRA_SPRHI,x
     LDA     #$F8
     STA     EXTRA_OAM,x
+    INX
+    INX
+    INX
     INX
     BNE     @both
     STX     WV_PAGE

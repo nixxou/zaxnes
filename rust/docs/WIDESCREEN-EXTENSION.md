@@ -665,7 +665,7 @@ Its code is a 16 KiB PRG bank added to the game (bank 8 of 16, the fixed bank co
 the one UxROM fixes), open in the window from power-on (`boot_window`). Options: "Invincible" (a
 testing aid, off by default) and "No slowdown" (on by default; `idle_loop` `$C02B`-`$C02E`, the
 main loop's `LDA $1F / BEQ`). Measured on Ice Man's stage at a 128-pixel margin, 200 frames: the
-original lags no frame, the hack without overclock 100, with 64 lines 1, with 255 none.
+original lags no frame, the hack without overclock 100, with 64 or 255 lines none.
 
 Mega Man 3: the stage lives in the 8 KiB PRG bank the fixed bank's table at `$C8B9` gives for the
 stage `$22` (the decoder reads that table 16 KiB before the end of the PRG-ROM, where it is with or
