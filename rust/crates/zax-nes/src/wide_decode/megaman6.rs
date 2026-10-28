@@ -259,7 +259,7 @@ impl<'a> List<'a> {
     /// The actions of settings `setting` without a screen of their own (kinds 1-6), and whether
     /// one scrolls to the next screen; `None` for settings not of a scroll controller (`$71`
     /// past 3, or a kind past 6: a boss's).
-    fn actions(&self, setting: u8) -> Option<(Vec<u8>, bool)> {
+    fn actions(&self, setting: u8) -> Option<(Vec<(u8, bool)>, bool)> {
         let low = self.rom(CONTROLLER_BANK, 0x82EB + u16::from(setting))?;
         let high = self.rom(CONTROLLER_BANK, 0x836B + u16::from(setting))?;
         let start = u16::from(low) | (u16::from(high) << 8);
@@ -282,19 +282,24 @@ impl<'a> List<'a> {
             if kind > 6 {
                 return None;
             }
+            let tiles = byte(at + 1)? & 0x80 != 0;
             at += 3;
             if byte(at)? & 0x80 != 0 {
                 at += 1;
                 continue;
             }
             forward |= matches!(kind, 1 | 2);
-            kinds.push(kind);
+            kinds.push((kind, tiles));
         }
         Some((kinds, forward))
     }
 
     /// Whether screens `screen` and `screen + 1` are not side by side: a controller scrolls
-    /// between them up or down, or leaves one by a door to another screen.
+    /// between them up or down, or leaves one by a door to another screen; or they do not show
+    /// together: an action across their join loads the stage's other tiles (its `$73` with bit 7,
+    /// a set of background tiles the game stores in `$064F`: Mega Man 6's machine rooms, whose
+    /// door out swaps their tiles for the stage's, and the room drawn past the door showed as a
+    /// jumble, a ghost of the machine).
     fn apart(&self, screen: i32) -> bool {
         for index in 0..=u8::MAX {
             let Some((x, y, kind)) = self.entry(index) else {
@@ -308,12 +313,14 @@ impl<'a> List<'a> {
             };
             let own = x >> 8;
             let join = |kind: u8| match kind {
-                1 | 2 => Some(own),
-                3 | 4 if forward => Some(own),
-                3 | 4 => Some(own - 1),
-                _ => None,
+                1 | 2 | 5 => own,
+                3 | 4 if forward => own,
+                _ => own - 1,
             };
-            if kinds.iter().any(|&kind| join(kind) == Some(screen)) {
+            if kinds
+                .iter()
+                .any(|&(kind, tiles)| (kind <= 4 || tiles) && join(kind) == screen)
+            {
                 return true;
             }
             if self.door(y, own, screen) {
@@ -410,13 +417,15 @@ mod tests {
         let list = |address: usize| LIST_BANK * BANK_SIZE + (address & 0x1FFF);
         // Controllers on screen 2 (setting 1: falls to the next screen, and back up its ladder),
         // 5 (setting 2: falls to the previous), 7 (setting 3: a door right to screen $20) and 9
-        // (setting 4: $71 of 24, a boss's: left out), an enemy on screen 3, then the end.
-        let entries: [(u8, u8, u8, u8); 5] = [
+        // (setting 4: $71 of 24, a boss's: left out) and 10 (setting 5: a door right loading
+        // other tiles, a door left that does not), an enemy on screen 3, then the end.
+        let entries: [(u8, u8, u8, u8); 6] = [
             (2, 0x80, 1, 0x80),
             (3, 0x10, 0, 0x14),
             (5, 0x40, 2, 0x80),
             (7, 0xC0, 3, 0x80),
             (9, 0x40, 4, 0x80),
+            (10, 0x80, 5, 0x80),
         ];
         for (index, &(screen, x, setting, kind)) in entries.iter().enumerate() {
             prg[list(0x8100 + index)] = screen;
@@ -424,14 +433,15 @@ mod tests {
             prg[list(0x8300 + index)] = setting;
             prg[list(0x8400 + index)] = kind;
         }
-        prg[list(0x8105)] = 0xFF;
+        prg[list(0x8106)] = 0xFF;
         // The settings in bank $39: $71, two bytes, then the actions.
         let settings = |address: usize| CONTROLLER_BANK * BANK_SIZE + (address & 0x1FFF);
-        let all: [(usize, u16, &[u8]); 4] = [
+        let all: [(usize, u16, &[u8]); 5] = [
             (1, 0x9000, &[0x00, 0, 0, 1, 0, 0, 4, 0, 0, 0]),
             (2, 0x9010, &[0x01, 0, 0, 3, 0, 0, 0]),
             (3, 0x9020, &[0x90, 0x00, 0x02, 0, 0, 5, 0, 0, 0xA0, 0]),
             (4, 0x9040, &[0x18, 0, 0, 1, 0, 0, 0]),
+            (5, 0x9050, &[0x01, 0, 0, 5, 0x95, 0, 6, 0x00, 0, 0]),
         ];
         for (setting, at, bytes) in all {
             prg[settings(0x82EB + setting)] = (at & 0xFF) as u8;
@@ -461,7 +471,8 @@ mod tests {
         let list = List::new(&memory);
         let apart: Vec<i32> = (0..12).filter(|&screen| list.apart(screen)).collect();
         // 2|3 (down and back up, both the controller of 2's), 4|5 (down to the previous from 5),
-        // 7|8 (the door to $20); 9|10 not (a boss's settings).
-        assert_eq!(apart, [2, 4, 7]);
+        // 7|8 (the door to $20), 10|11 (a door loading other tiles); 9|10 not (a boss's settings,
+        // and a door left without tiles of its own).
+        assert_eq!(apart, [2, 4, 7, 10]);
     }
 }

@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `FCA24A45` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `9E1E3AAA` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -67,7 +67,7 @@ and `$064A` the next entries right and left of the spawn window.
 |---|---|---|
 | the list's spawns (bank `$3A` `$8120`, the window, then the walk from `$813A`) | entries between camera + 8 and camera + 254 spawn, the walk keeping its place in `$0649` / `$064A` | two walks: the original's, its window and its pointers, for the controllers alone (type `$80`, all in slot 22: the stage counts on one at a time in the window; with a wider one a controller took the slot of the next, which stayed marked spawned, and the camera never went on); then one between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`), for the enemies alone, with pointers of its own (taken from the game's whenever the game sets them); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
 | an entry's spawn (bank `$3A` `$81A7`) | | only the kind of the walk under way |
-| the part of the stage enemies live in (`wide_part`) | | the screens beside the camera's, as far as a join of two screens that are not side by side, whatever `$71` (`wide_reach`, worked out each frame before the walks, as Zaxnes' decoder does for the margins: the stage list's controllers, their actions without a screen of their own scrolling up or down from their screen, or doors to a screen of their own; bank `$39` at `$8000` and the list's bank `$3A` at `$A000` through the game's `$CBC0`, its banks put back as its NMI does) |
+| the part of the stage enemies live in (`wide_part`) | | the screens beside the camera's, as far as a join of two screens that are not side by side, whatever `$71` (`wide_reach`, worked out each frame before the walks, as Zaxnes' decoder does for the margins: the stage list's controllers, their actions without a screen of their own scrolling up or down from their screen, doors to a screen of their own, or doors that load the stage's other tiles (`$73` with bit 7); bank `$39` at `$8000` and the list's bank `$3A` at `$A000` through the game's `$CBC0`, its banks put back as its NMI does) |
 | a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
 | object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | a free slot: no sleep left in it (an object made there later is awake); an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks, then goes to the **reserve**; on the original screen it wakes for good |
 | the reserve (after the list's spawns, before the objects run; drawn before the rest of OAM is hidden) | | enemies asleep in the margins, out of the game's 14 enemy slots: 8 entries of the 29 object tables (`$03A0`-`$0624`, 23 bytes apart); an entry reaching the original screen takes a free slot again and wakes (it waits at the edge while none is), one past the margins is dropped; each is drawn as the drawer draws an object, in a free slot or in slot 21 borrowed (its object set aside meanwhile), its animation stepping on |
@@ -117,7 +117,7 @@ full), the part of the stage `WV_FIRST $520B` and `WV_END $520C` (screens), the 
 `$FF` awake: a slot another object took since is awake), `WV_STARTED $5240 + slot`, `WV_HIDDEN
 $5260 + slot`, the camera of the last spawns `WV_CAM $5210`/`$5211`, `WV_MOVED $5212`, the walk
 under way `WV_PASS $5213`, the game's list pointers as its walk left them `WV_O $5214`/`$5215`, the
-enemies' walk's own `WV_E $5216`/`$5217`, `WV_RES $5218`, `WV_BORROW $5219`, where the camera stops past `$71` the first and last screens of that part `WV_LSTOP $521A` and `WV_RSTOP $521B`, the two joins `wide_reach` tests and whether they are apart `WV_JL $5238`, `WV_JR $5239`, `WV_AL $523A`, `WV_AR $523B`, the controller at hand `WV_OWN $523C`, `WV_FWD $523D`, `WV_AT $523E`, `WV_ENTRY $523F`, the game's banks while they are worked out `WV_BANKS $521C`/`$521D`; the reserve:
+enemies' walk's own `WV_E $5216`/`$5217`, `WV_RES $5218`, `WV_BORROW $5219`, where the camera stops past `$71` the first and last screens of that part `WV_LSTOP $521A` and `WV_RSTOP $521B`, the two joins `wide_reach` tests and whether they are apart `WV_JL $5238`, `WV_JR $5239`, `WV_AL $523A`, `WV_AR $523B`, the controller at hand `WV_OWN $523C`, `WV_FWD $523D`, `WV_AT $523E`, `WV_ENTRY $523F`, `WV_TILES $5257`, the game's banks while they are worked out `WV_BANKS $521C`/`$521D`; the reserve:
 `RES_USED $5280 + e`, `RES_ENTRY $5288 + e`, `RES_HIDDEN $5290 + e`, its object tables at `$5500 +
 8 f + e`, the borrowed slot's at `$5600 + f`.
 
@@ -290,6 +290,7 @@ WV_OWN          = $523C         ; the controller at hand: its screen, whether it
 WV_FWD          = $523D         ; next one, where its settings are read, its entry in the list
 WV_AT           = $523E
 WV_ENTRY        = $523F
+WV_TILES        = $5257         ; non-zero when the action at hand loads the stage's other tiles
 WV_BANKS        = $521C         ; the game's banks at $8000 and $A000 ($4A, $4B) while wide_reach reads
 RES_COUNT       = 8             ; the reserve: enemies asleep in the margins, out of the game's slots
 RES_USED        = $5280         ; + entry: non-zero when in use
@@ -1072,7 +1073,9 @@ wide_hurt:
 ; scroll down to the next or previous screen, 2 and 4 up, 5 and 6 a door right or left to a
 ; screen. Without a screen of their own they act from the controller's screen (x's), a controller
 ; that scrolls to the next one (1, 2) taking its scroll back (3, 4) from that next one; with one,
-; a door leaves the join after (5) or before (6) its screen apart. Settings with $71 past 3 or a
+; a door leaves the join after (5) or before (6) its screen apart; without, a door does too when
+; it loads the stage's other tiles ($73 with bit 7, which the game stores in $064F: the two sides
+; do not show together, a machine room's tiles swapped for the stage's at its door out). Settings with $71 past 3 or a
 ; kind past 6 (a boss's) say nothing. The list (bank $3A) is read at $A000, bank $39 at $8000
 ; ($CBC0 maps both), the game's banks put back after.
 
@@ -1225,6 +1228,9 @@ wide_controller:
     BMI     @rts
     TAX
     INY
+    LDA     ($00),y                     ; its $73: bit 7, the stage's other tiles loaded
+    AND     #$80
+    STA     WV_TILES
     INY
     INY
     LDA     ($00),y
@@ -1243,9 +1249,17 @@ wide_controller:
     CPX     #$03                        ; too when it scrolls to the next, else the one before
     BCC     @mark
     CPX     #$05
-    BCS     @action
+    BCS     @door
     LDX     WV_FWD
     BNE     @mark
+    SEC
+    SBC     #$01
+@door:
+    LDA     WV_TILES                    ; 5, 6: a door across the join after or before its
+    BEQ     @action                     ; screen, apart only when it loads the stage's other
+    LDA     WV_OWN                      ; tiles (the screens do not show together)
+    CPX     #$05
+    BEQ     @mark
     SEC
     SBC     #$01
 @mark:

@@ -781,7 +781,10 @@ y) are `$71`, two bytes, then actions (kind, `$73`, `$72`, a screen of their own
 and 3 scroll down to the next or previous screen, 2 and 4 up (ladders), 5 and 6 through a door
 to a screen. Without a screen of their own they act from the controller's screen, a controller
 that scrolls to the next screen taking its scroll back from that next one; with one, a door
-leaves its join apart; settings with `$71` past 3 or a kind past 6 (a boss's) say nothing.
+leaves its join apart; without, a door does too when it loads the stage's other tiles (its `$73`
+with bit 7, a set of background tiles the game keeps in `$064F`: a machine room's tiles swapped
+for the stage's at its door out, the room past the door showed as a jumble, a ghost of the
+machine); settings with `$71` past 3 or a kind past 6 (a boss's) say nothing.
 Checked on movies of a stage against every change of screen they show (23 joins, 15 beside, 8
 not). `$71` (bit 0 right, bit 1 left: where the camera may go now) no longer bounds the margins:
 a screen beside past a lock shows. Two raster effects show rows that are not the stage at the
