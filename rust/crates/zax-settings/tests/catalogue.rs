@@ -49,8 +49,8 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.builtin_patches, emu.catch_up, emu.forced_patch, emu.hack_options, emu.lua_experimental,
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_advanced,
-    // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges and
-    // video.hide_overscan:
+    // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
+    // video.hide_overscan and video.nes_palette:
     // Rust-only settings (owner request).
     assert_eq!(
         additions,
@@ -71,6 +71,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "video.backend",
             "video.dynamic_resolution",
             "video.hide_overscan",
+            "video.nes_palette",
             "video.remove_sprite_limit",
             "video.widescreen",
             "video.widescreen_advanced",

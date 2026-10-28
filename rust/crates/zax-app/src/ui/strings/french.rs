@@ -243,6 +243,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "setting.video.hide_overscan",
         "Masquer les 8 lignes du haut et du bas (Auto : jeux NTSC)",
     ),
+    ("setting.video.nes_palette", "Palette de couleurs NES"),
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),

@@ -16,10 +16,11 @@ use crate::ui::{keys, strings};
 
 /// The rows a game can have a value of its own for: the options, without the language, the
 /// camera and the bindings, which belong to the player rather than to the game.
-pub const GAME_ROWS: [OptionRow; 11] = [
+pub const GAME_ROWS: [OptionRow; 12] = [
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
+    OptionRow::Palette,
     OptionRow::FrameCap,
     OptionRow::ShowFps,
     OptionRow::Profiler,
@@ -41,6 +42,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
             SettingId::VideoRenderMethod,
         ],
         OptionRow::Shadows => &[SettingId::RenderShadow],
+        OptionRow::Palette => &[SettingId::VideoNesPalette],
         OptionRow::FrameCap => &[SettingId::VideoVSync],
         OptionRow::ShowFps => &[SettingId::UiShowFps],
         OptionRow::Profiler => &[SettingId::UiProfiler],
@@ -353,6 +355,27 @@ mod tests {
         assert!(model.is_own(OptionRow::Region));
         model.handle(PadButton::Right);
         assert!(!model.is_own(OptionRow::Region), "{:?}", model.options());
+    }
+
+    #[test]
+    fn a_game_keeps_a_palette_of_its_own() {
+        let mut model = model(GameOptions::new());
+        go_to(&mut model, OptionRow::Palette);
+        // Every palette, the global one (Zaxnes) first.
+        let choices = model.choices(OptionRow::Palette);
+        assert_eq!(
+            choices.len(),
+            zax_engine3d::palette::NesPalette::LABELS.len()
+        );
+        assert_eq!(choices[2], "FCEUX");
+        model.choose(OptionRow::Palette, 1);
+        assert_eq!(
+            model.options(),
+            [(SettingId::VideoNesPalette, SettingValue::Enum(1))]
+        );
+        assert_eq!(model.value_text(OptionRow::Palette), "Mesen");
+        model.use_global(OptionRow::Palette);
+        assert!(!model.is_own(OptionRow::Palette));
     }
 
     #[test]

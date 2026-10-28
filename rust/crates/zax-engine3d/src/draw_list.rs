@@ -448,13 +448,19 @@ impl InstanceLook {
         // palette of **each tile of the frame** (plus 4 for a sprite shape) — not the shape's
         // own palette, which REQ-E3D-047 derives from the germ alone. A background shape that
         // spans several attribute quads therefore keeps the colours of each quad, as
-        // REQ-SCN-034 restates.
+        // REQ-SCN-034 restates. A background tile in sub-palette 4-7 (a margin decoder's own
+        // palette) uses tables 8-11, where the frame keeps that palette.
         let palette_table = if self.format == TextureFormat::Direct {
             -1
         } else if instance.custom_palette >= 0 {
             instance.custom_palette
         } else {
-            tile.palette() + if shape.background() { 0 } else { 4 }
+            tile.palette()
+                + if shape.background() && tile.palette() < 4 {
+                    0
+                } else {
+                    4
+                }
         };
 
         let deform = instance.deform_enabled().then(|| DeformParameters {

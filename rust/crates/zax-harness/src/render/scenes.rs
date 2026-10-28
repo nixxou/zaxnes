@@ -459,6 +459,7 @@ impl Builder {
         let batch = FrameBatch {
             records: &self.records,
             palette: self.palette,
+            margin_palette: None,
             mask_x: 0,
             mask_y: 0,
             margin: 0,
