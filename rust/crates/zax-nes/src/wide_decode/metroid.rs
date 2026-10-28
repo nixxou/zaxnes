@@ -83,8 +83,36 @@ const MAX_ROOMS: usize = 256;
 
 /// The rooms of the area in play (bit `x` of word `y`), by area bank and the room they were
 /// reached from.
-static AREA: Mutex<Option<(AreaKey, [u32; 32])>> = Mutex::new(None);
-type AreaKey = (usize, i32, i32);
+static AREA: Mutex<Option<(AreaKey, AreaRooms)>> = Mutex::new(None);
+/// Area bank, the screen's room, and the side it was entered from when it is a palette change
+/// room.
+type AreaKey = (usize, i32, i32, i32);
+
+/// The rooms of the area in play, and those of them in its other palette: bit `x` of word `y`.
+#[derive(Clone, Copy)]
+struct AreaRooms {
+    area: [u32; 32],
+    other_palette: [u32; 32],
+}
+
+const PALETTE_TOGGLE: u16 = 0x0076;
+/// The side of the room Samus entered a palette change room from: its `ScrollDir` then (`$EEFA`;
+/// 0 once she has left it).
+const PALETTE_CHANGE_DIR: u16 = 0x0091;
+/// In an area bank: the pointers to the area's palettes (PPU strings, `$C1E0`); the room
+/// palettes are 0 and 5 (`PaletteToggle`, `$76`, holds one plus one of them).
+const PALETTE_POINTERS: usize = 0x9560;
+const ROOM_PALETTES: [u8; 2] = [0, 5];
+/// In an area bank: the pointer to its special items (`$ED98`): rows of the map, each `y`, the
+/// next row's address (`$FFFF`: none), then rooms, each `x`, the offset of the next (`$FF`:
+/// none), then items until 0, item type in the low nibble.
+const SPECIAL_ITEMS: usize = 0x9598;
+/// The special item that toggles the room palette when Samus goes through its room (`$EEFA`,
+/// `$8C84`).
+const PALETTE_CHANGE: u8 = 0x0A;
+/// The bytes of the special items before the palette changes can be told apart: squeept (3),
+/// power-up (3), mellows (1), elevator (2), door (2).
+const SPECIAL_ITEM_SIZES: [(u8, usize); 5] = [(1, 3), (2, 3), (3, 1), (4, 2), (9, 2)];
 /// In an area bank: the map position of the area's starting room.
 const AREA_START: usize = 0x95D7;
 /// A tile Samus goes through: at or past this one (`$E7FD`).
@@ -121,8 +149,8 @@ struct View<'a> {
     camera_y: i32,
     /// The rooms in PRG-RAM the screen shows: map x, map y, nametable (0: `$6000`).
     loaded: [Option<(i32, i32, usize)>; 2],
-    /// The rooms of the area in play: bit `x` of word `y`.
-    area: [u32; 32],
+    /// The rooms of the area in play, and those in its other palette.
+    rooms: AreaRooms,
 }
 
 impl<'a> View<'a> {
@@ -168,7 +196,10 @@ impl<'a> View<'a> {
                     Some((first, map_y, nametable)),
                     (scroll_x != 0).then_some((first + 1, map_y, nametable ^ 1)),
                 ],
-                area: [0; 32],
+                rooms: AreaRooms {
+                    area: [0; 32],
+                    other_palette: [0; 32],
+                },
             }
         } else {
             let first = map_y - i32::from(direction == 1 && scroll_y != 0);
@@ -188,12 +219,15 @@ impl<'a> View<'a> {
                     Some((map_x, first, nametable)),
                     (scroll_y != 0).then_some((map_x, first + 1, nametable ^ 1)),
                 ],
-                area: [0; 32],
+                rooms: AreaRooms {
+                    area: [0; 32],
+                    other_palette: [0; 32],
+                },
             }
         };
         let (x, y, _) = view.loaded[0]?;
-        let area = view.area_rooms(x, y)?;
-        Some(Self { area, ..view })
+        let rooms = view.area_rooms(x, y)?;
+        Some(Self { rooms, ..view })
     }
 
     /// The row's place on the ring: its left edge across, its top down (a whole tile).
@@ -235,7 +269,9 @@ impl<'a> View<'a> {
         let tile = *room.get(row * 32 + column)?;
         let attribute = *room.get(ATTRIBUTES + (row / 4) * 8 + column / 4)?;
         let shift = ((row & 2) << 1) | (column & 2);
-        Some((tile, (attribute >> shift) & 3))
+        // A room in the area's other palette: sub-palettes 4-7, the decoder's margin palette.
+        let other = bit(&self.rooms.other_palette, room_x, room_y);
+        Some((tile, ((attribute >> shift) & 3) + if other { 4 } else { 0 }))
     }
 
     /// The room at map `(x, y)`: from PRG-RAM when the screen shows it, else built.
@@ -249,8 +285,7 @@ impl<'a> View<'a> {
         if number == 0xFF {
             return None;
         }
-        #[allow(clippy::cast_sign_loss)] // 0..32.
-        let in_area = self.area[y as usize] & (1 << x) != 0;
+        let in_area = bit(&self.rooms.area, x, y);
         if let Some((_, _, nametable)) = self
             .loaded
             .iter()
@@ -288,9 +323,16 @@ impl<'a> View<'a> {
     }
 
     /// The rooms of the area in play, reached from its starting room and from the screen's room
-    /// at map `(x, y)` (kept while the screen stays there).
-    fn area_rooms(&self, x: i32, y: i32) -> Option<[u32; 32]> {
-        let key = (self.bank_index, x, y);
+    /// at map `(x, y)`, and those of them in the area's other palette (kept while the screen
+    /// stays there).
+    fn area_rooms(&self, x: i32, y: i32) -> Option<AreaRooms> {
+        // A palette change room's other side is the one Samus did not come from.
+        let entered_from = match self.memory.ram(PALETTE_CHANGE_DIR) {
+            3 => -1,
+            2 => 1,
+            _ => 0,
+        };
+        let key = (self.bank_index, x, y, entered_from);
         let mut cached = AREA.lock().ok()?;
         if let Some((at, rooms)) = cached.as_ref() {
             if *at == key {
@@ -308,7 +350,12 @@ impl<'a> View<'a> {
             3 => WALKABLE,
             _ => 0x70,
         };
-        let rooms = reach(bank, self.tables, map, first_blast, &[start, (x, y)]);
+        let area = reach(bank, self.tables, map, first_blast, &[start, (x, y)]);
+        let changes = palette_changes(bank).unwrap_or_default();
+        let rooms = AreaRooms {
+            area,
+            other_palette: palette_sides(&area, &changes, (x, y), entered_from),
+        };
         *cached = Some((key, rooms));
         Some(rooms)
     }
@@ -392,6 +439,124 @@ impl<'a> RoomCache<'a> {
         };
         self.rooms[index].1.as_ref()
     }
+}
+
+/// Bit `(x, y)` of a set of map rooms (bit `x` of word `y`); false off the map.
+fn bit(set: &[u32; 32], x: i32, y: i32) -> bool {
+    usize::try_from(y)
+        .ok()
+        .and_then(|row| set.get(row))
+        .is_some_and(|word| (0..MAP_SIZE).contains(&x) && word & (1 << x) != 0)
+}
+
+/// The map positions of the area's palette change rooms (its special items, `$ED98`).
+fn palette_changes(bank: &[u8]) -> Option<Vec<(i32, i32)>> {
+    let mut found = Vec::new();
+    let mut row = read_word(bank, SPECIAL_ITEMS)?;
+    for _ in 0..32 {
+        let y = read(bank, row)?;
+        let mut room = row + 3;
+        for _ in 0..32 {
+            let x = read(bank, room)?;
+            let mut item = room + 2;
+            for _ in 0..8 {
+                let kind = read(bank, item)? & 0x0F;
+                if kind == 0 {
+                    break;
+                }
+                if kind == PALETTE_CHANGE {
+                    found.push((i32::from(x), i32::from(y)));
+                }
+                let Some(&(_, size)) = SPECIAL_ITEM_SIZES.iter().find(|(k, _)| *k == kind) else {
+                    break;
+                };
+                item += size;
+            }
+            match read(bank, room + 1)? {
+                0xFF => break,
+                next => room += usize::from(next),
+            }
+        }
+        match read_word(bank, row + 1)? {
+            0xFFFF => break,
+            next => row = next,
+        }
+    }
+    Some(found)
+}
+
+/// The rooms of `area` in the other palette than the screen's room `from`: those past a palette
+/// change room, on its side across from the one Samus enters it from (`$8C84`: going through it,
+/// she leaves by the other door and the game toggles the palette). `entered_from` is that side
+/// for `from` itself (-1 left, 1 right, 0: not one).
+fn palette_sides(
+    area: &[u32; 32],
+    changes: &[(i32, i32)],
+    from: (i32, i32),
+    entered_from: i32,
+) -> [u32; 32] {
+    let mut other = [0u32; 32];
+    if changes.is_empty() || !bit(area, from.0, from.1) {
+        return other;
+    }
+    // Each room once: its palette (true: the other) and, for a palette change room, the side
+    // it was entered from.
+    let mut seen = [0u32; 32];
+    let set = |set: &mut [u32; 32], x: i32, y: i32| {
+        #[allow(clippy::cast_sign_loss)] // 0..32.
+        {
+            set[y as usize] |= 1 << x;
+        }
+    };
+    set(&mut seen, from.0, from.1);
+    let mut queue = vec![(from, false, entered_from)];
+    while let Some(((x, y), toggled, side)) = queue.pop() {
+        let change = changes.contains(&(x, y));
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (x + dx, y + dy);
+            if !bit(area, nx, ny) || bit(&seen, nx, ny) {
+                continue;
+            }
+            set(&mut seen, nx, ny);
+            let crossed = change && side != 0 && dx == -side;
+            let toggled = toggled ^ crossed;
+            if toggled {
+                set(&mut other, nx, ny);
+            }
+            queue.push(((nx, ny), toggled, -dx));
+        }
+    }
+    other
+}
+
+/// The background colours (`$3F00-$3F0F`) of the area's room palette `palette` (0 or 5): its
+/// palette 0, then palette 5's PPU strings over it for 5 (`$C1FF`).
+fn room_palette(bank: &[u8], palette: u8) -> Option<[u8; 16]> {
+    let mut colours = [0x0F; 16];
+    let strings = |id: u8, colours: &mut [u8; 16]| -> Option<()> {
+        let mut at = read_word(bank, PALETTE_POINTERS + 2 * usize::from(id))?;
+        for _ in 0..16 {
+            let high = read(bank, at)?;
+            if high == 0 {
+                break;
+            }
+            let address = (usize::from(high) << 8) | usize::from(read(bank, at + 1)?);
+            let length = usize::from(read(bank, at + 2)?);
+            for index in 0..length {
+                let target = address + index;
+                if (0x3F00..0x3F10).contains(&target) {
+                    colours[target - 0x3F00] = read(bank, at + 3 + index)?;
+                }
+            }
+            at += 3 + length;
+        }
+        Some(())
+    };
+    strings(ROOM_PALETTES[0], &mut colours)?;
+    if palette != ROOM_PALETTES[0] {
+        strings(palette, &mut colours)?;
+    }
+    Some(colours)
 }
 
 /// A room built for the reach of an area: its tiles, and whether it has an elevator.
@@ -708,11 +873,50 @@ impl MarginDecoder for Metroid {
         // lines a television hides.
         true
     }
+
+    fn margin_palette(&self, memory: &DecoderMemory<'_>) -> Option<[u8; 16]> {
+        // The area's other room palette, for the rooms past a palette change room.
+        if memory.ram(GAME_MODE) != 0 {
+            return None;
+        }
+        let bank_index = *AREA_BANKS.get(usize::from(memory.ram(IN_AREA) & 0x0F))?;
+        let bank = memory
+            .prg_rom
+            .get(bank_index * BANK_SIZE..(bank_index + 1) * BANK_SIZE)?;
+        if palette_changes(bank)?.is_empty() {
+            return None;
+        }
+        let current = memory.ram(PALETTE_TOGGLE).wrapping_sub(1);
+        let other = if current == ROOM_PALETTES[1] {
+            ROOM_PALETTES[0]
+        } else {
+            ROOM_PALETTES[1]
+        };
+        room_palette(bank, other)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rooms_past_a_palette_change_are_in_the_other_palette() {
+        // A corridor of five rooms on map row 0, the middle one a palette change room.
+        let area = {
+            let mut area = [0u32; 32];
+            area[0] = 0b1_1111;
+            area
+        };
+        let changes = [(2, 0)];
+        let other = palette_sides(&area, &changes, (0, 0), 0);
+        assert_eq!(other[0], 0b1_1000);
+        // In the change room itself, entered from the right: the left side is the other.
+        let other = palette_sides(&area, &changes, (2, 0), 1);
+        assert_eq!(other[0], 0b0_0011);
+        // An area without one: none.
+        assert_eq!(palette_sides(&area, &[], (0, 0), 0), [0; 32]);
+    }
 
     #[test]
     fn rooms_are_built_from_structures_of_metatiles() {
