@@ -20,7 +20,7 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `112AF288` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `FCE641DC` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in banks 0-5 and 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -58,7 +58,7 @@ the other objects are drawn by `ObjDrawFrame` (`$DE4A`), which keeps the test's 
 | a sprite's x (`$DF0E`) | 8-bit | the same, and its high byte: the 16-bit x nearest the object's whose low byte is the sprite's; 0 for sprites no position test placed (the energy display). Kept in a buffer (`$5400 + OAM offset`, cleared at the world's update) and copied to `$5100` at its end: a frame the game runs late copies the sprite page as it is, with the last finished frame's high bytes |
 | end of the world's update (`$CB66`) | clears the unused sprites | first the previews: the enemies of the rooms the margins show that no nametable holds (across: the rooms left of the screen's and right of it; in a shaft, the corridors on either side), read from the rooms' data as `$EB4D` places them (none whose slot holds an enemy that shows: the game skips it then, `IsSlotTaken`, `$EB7A`), drawn still in their resting pose by the game's own drawing in enemy slot `$50` (set aside meanwhile), within the margins, while sprites are left (OAM offset below `$C0`); a room a nametable holds is previewed until the game has placed its enemies (`$5A` below `$F0`) and the frame it does; Kraid and Ridley are not; then the frame's high bytes to the extension |
 | `ObjDrawFrame` (`$DED2`) | draws the object when it shows; its `onScreen` byte = it shows | `onScreen` the same; the doors (objects `$80-$B0`) and the item (`$40`) are drawn when they show within the margins |
-| `DrawDoor` (each area bank, `$8BCC`) | draws the door (`AnimDrawObject`) | the same, then its twin, the facing door of the room across (in a shaft, the corridors on either side, which the game does not build): mirrored, 32 pixels further out (x `$10` <-> `$F0` of the room across), in the door's animation frame, within the margins; not when the other nametable holds the room across and the game keeps its facing door |
+| `DrawDoor` (each area bank, `$8BCC`) | draws the door (`AnimDrawObject`) | the same, then its twin, the facing door of the room across (in a shaft, the corridors on either side, which the game does not build): mirrored, 32 pixels further out (x `$10` <-> `$F0` of the room across), in the door's animation frame, within the margins (scrolling up and down, only while its door shows on the screen: the same lines); not when the other nametable holds the room across and the game keeps its facing door |
 | end of an object's drawing (`$DF2D`) | clears `$6B` | the same, and the object's 16-bit x is no longer valid |
 | world's update (`$CB29`), main loop's wait (`$C0C7`) | | the high bytes cleared (every frame out of play), the extension's settings |
 | `SubtractHealth` (`$CE92`) | | no damage when the option "Invincible" is on (the damage is dropped) |
@@ -552,6 +552,15 @@ wide_visible:
 ; door at x $10, its twin at $F0 of the room on the left, and the other way round). Never on the
 ; original screen for the game; shown within the margins.
 twin_place:
+    ; Up and down, the twin shows where its door does (the game's test): the same lines.
+    LDA     SCROLL_DIR
+    AND     #$02
+    BNE     @across
+    LDA     WV_ORIG
+    BNE     @across
+    STA     WV_WIDE
+    RTS
+@across:
     LDA     #$00
     STA     WV_ORIG
     LDA     WV_TWIN_SIDE
