@@ -127,6 +127,7 @@ setting_ids! {
     VideoWidescreenStrictEdges => "video.widescreen_strict_edges",
     VideoWidescreenAdvanced => "video.widescreen_advanced",
     VideoRemoveSpriteLimit => "video.remove_sprite_limit",
+    VideoHideOverscan => "video.hide_overscan",
     EmuBuiltinPatches => "emu.builtin_patches",
     EmuForcedPatch => "emu.forced_patch",
     EmuHackOptions => "emu.hack_options",
