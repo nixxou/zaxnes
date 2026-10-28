@@ -4,8 +4,9 @@
 //!
 //! Each game gives the layout (`tile_at`: the CHR tile and sub-palette of a world tile column and
 //! a tile row), the camera and the section; the rest is the Mega Man 2 decoder's method (see
-//! `megaman2.rs`): a row whose centre does not show the layout at four columns is left to the
-//! nametables (stage select, boss intro, a vertical transition, the pause menu).
+//! `megaman2.rs`): a row whose centre does not show the layout at three of four columns is left
+//! to the nametables (stage select, boss intro, a vertical transition, the pause menu); one
+//! column may hold a boss's shutter the game draws over the layout.
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory};
 
@@ -31,13 +32,18 @@ pub(super) fn decode_row(
     // pixels (the camera in RAM is a few pixels from the scroll the frame used at most; and a
     // game may show the same nametable on both sides, Mega Man 3 at the end of a section, where
     // the plane's two instances lie as far from the camera). The centre must show what the layout
-    // gives there.
+    // gives there, at all the checked columns but one: a boss's shutter, which the game draws into
+    // the background over the layout, may stand on one (its rows' margins went black while the
+    // camera scrolled through it); a screen not of the stage matches none.
     let first_column = resolve_ring(row.ring_x() & 255, 256, camera) >> 3;
-    let centre_matches = CHECKED.iter().all(|&column| {
-        tile_at(first_column + column, coarse_y)
-            .is_some_and(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == tile)
-    });
-    if !centre_matches {
+    let matching = CHECKED
+        .iter()
+        .filter(|&&column| {
+            tile_at(first_column + column, coarse_y)
+                .is_some_and(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == tile)
+        })
+        .count();
+    if matching + 1 < CHECKED.len() {
         return false;
     }
 

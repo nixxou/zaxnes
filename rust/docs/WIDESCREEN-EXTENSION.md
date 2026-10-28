@@ -726,7 +726,9 @@ centre happened to match the wrong one had its margins 256 pixels off). While bo
 (a row's 32 bytes equal on both sides), no margin column is taken from them: the margin's nametable
 column is a copy of one on the screen, which a repeating wall makes look like the layout's. A margin column the
 nametables hold for its place takes the layout's colours (the game writes a column's attribute bytes
-after its tiles), and the Mega Man 3 to 5 decoders redraw the screen's last column
+after its tiles), and the Mega Man 1, 3 to 6 decoders accept a row whose centre shows the layout at three of the four
+checked columns (a boss's shutter, which the game draws into the background, may stand on one: its
+rows' margins went black while the camera scrolled through it). The Mega Man 3 to 5 decoders redraw the screen's last column
 (`redrawn_right_columns` 1): it showed the colours of the column being drawn past the edge.
 The built-in patch (`MEGAMAN3_USA`, an advanced mode, `mm3wide`) draws the enemies in the margins.
 Its code is a 16 KiB PRG bank added to the game (8 KiB banks 32-33 of 64, the fixed banks copied to
