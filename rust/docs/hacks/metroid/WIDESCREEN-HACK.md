@@ -142,8 +142,9 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
   and down, the enemies keep the original screen.
 * Only the two rooms the game keeps in PRG-RAM have enemies; the other rooms of the margins are
   empty. The elevators, the statues and the other objects keep the original screen.
-* A room of the margins shows in the colours of the room in play: a neighbour whose palette
-  differs (the game changes the palette in a few rooms) shows in the wrong colours.
+* A room of the margins past a palette change room shows in the area's other palette (the
+  decoder's own margin palette); the game's other palette changes (the item rooms' music, the
+  elevators) do not apply to the margins.
 * The sprites of the margins share the console's 64 sprites with the screen's: more flicker when
   many enemies show.
 * The overclock removes lag frames, so a replay of the original's inputs frame for frame drifts

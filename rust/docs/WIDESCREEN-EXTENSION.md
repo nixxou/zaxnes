@@ -694,6 +694,13 @@ others built from the area's data as `SetupRoom` does (kept, by bank and data ad
 decoded when 28 of its 32 columns show the room's tile (the title, the password screen and the
 transitions are left to the nametables), checked on the screen's nearest row that reaches neither
 edge; scrolling up and down the game draws the row coming in at the edge (`covers_overscan`).
+An area has two room palettes, 0 and 5 of its palette pointers (`$9560`; `$76` holds one plus the
+one in use); the game toggles them when Samus goes through a palette change room (special item
+`$0A` of the area's table at `$9598`, `$EEFA`), leaving it by the other door than the one she came
+in by (`$8C84`; `$91` keeps the side she entered from). The rooms past such a room, on its other
+side from the screen's room (Brinstar's `(12, 7)`, Norfair's `(22, 17)`), are handed back in
+sub-palettes 4-7, and the decoder's margin palette (`margin_palette`) is the area's other room
+palette: its palette 0, with palette 5's PPU strings over it for 5.
 
 ---
 
