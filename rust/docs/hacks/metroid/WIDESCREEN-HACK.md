@@ -20,7 +20,7 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `467F9D17` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `A23663EB` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in bank 0 and bank 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -49,7 +49,8 @@ the other objects are drawn by `ObjDrawFrame` (`$DE4A`), which keeps the test's 
 
 | Game routine | Original | Hack |
 |---|---|---|
-| `IsObjectVisible` (`$DFDF`) | X = 1 when the object shows | the same test, to the letter; also whether it shows within the margins (scrolling across: its x within `[r - M, 256 + M - r)`, `r` its x radius, of the 16-bit screen x below; up and down: the screen's answer) and its 16-bit screen x: on the screen's own 256 pixels when the object is on the nametable of the screen's left edge (`$FF` bit 0) at or right of the scroll `$FD`, or on the other one left of it, else in the nearer margin |
+| `IsObjectVisible` (`$DFDF`) | X = 1 when the object shows | the same test, to the letter; also whether it shows within the margins (scrolling across: its x within `[r - M, 256 + M - r)`, `r` its x radius, of the 16-bit screen x below; up and down: the screen's answer) and its 16-bit screen x: on the nametable of the screen's left edge (`$FF` bit 0), on the screen at or right of the scroll `$FD`, in the left margin left of it; on the other one, by the room it holds (below): the room right of the screen's left one, on the screen left of the scroll and in the right margin right of it, the room left of it (the one Samus came from, the scroll at 0) in the left margin right of the scroll, any other room nowhere (but where the game's test shows it) |
+| `SelectRoomRAM` (`$EA05`) | the nametable a room is built on | the same, and the room's map position (`$50`, `$4F`) kept for that nametable |
 | `DrawEnemy` (`$DE1B`) | draws the enemy when it shows; `$0405` bit 1 = it shows | draws it when it shows within the margins; bit 1 = it updates (below) |
 | `UpdateEnemy_CheckIfVisible` (`$F39F`) | skips the enemy's routine when it does not show | skips it when it does not update; asleep in a margin, it is drawn in its resting pose (`$F682`, then `$F438`: animation and drawing, no movement) |
 | an enemy placed by its room (`$EB5E`) | status 1 (resting) | the same, and asleep (`$5300 + slot`, with its type at `$5301 + slot`: a slot holding another type since is awake) |
@@ -88,7 +89,7 @@ hidden: the decoder draws the background), `$5007 = 2` (sprites free of the exte
 Variables (extension RAM): `WV_M $5200`, `WV_ORIG $5201` and `WV_WIDE $5202` (the last position
 test: on the original screen, within the margins), `WV_VALID $5203` / `WV_BASEL`, `WV_BASEH
 $5204/$5205` (the 16-bit screen x of the object being drawn), `WV_ASLEEP $5206` (the last enemy
-test), `WV_SLEEP $5300 + slot offset`, `WV_STYPE $5301 + slot offset`.
+test), `WV_NT_X $5210-$5211` and `WV_NT_Y $5212-$5213` (by nametable: the map position of the room the game built there last), `WV_T0 $5214`, `WV_SLEEP $5300 + slot offset`, `WV_STYPE $5301 + slot offset`.
 
 ## 4. Hooks
 
@@ -100,6 +101,7 @@ the fixed bank (`$C000-$FFFF`) are written into both its copies (7 and 15).
 | `$C0C7` | `LDA #$00 / STA $1A` | `JSR wide_frame / NOP` |
 | `$CB29` | `LDX #$00 / STX $5B` | `JSR wide_world / NOP` |
 | `$DFDF` | `LDX #$01 / LDA` (IsObjectVisible) | `JMP wide_visible` |
+| `$EA05` | `JSR $EB85` (SelectRoomRAM) | `JSR wide_select_room` |
 | `$DE1B` | `JSR $DFDF` (DrawEnemy) | `JMP wide_enemy_draw` |
 | `$DED2` | `JSR $DFDF` (ObjDrawFrame) | `JMP wide_object_draw` |
 | `$F39F` | `JSR $DFDF` (UpdateEnemy_CheckIfVisible) | `JSR wide_enemy_check` |
@@ -174,7 +176,8 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 ;    lives within the margins; what enemies fire lives there too;
 ;  * the doors and the items show within the margins too (the game keeps them to its tests of
 ;    the original screen);
-;  * every sprite of an object gets the high byte of its 16-bit x;
+;  * every sprite of an object gets the high byte of its 16-bit x, the room each nametable holds
+;    telling which margin an object of the other nametable shows in;
 ;  * Samus, her shots and the other objects keep the original screen;
 ;  * the option "Level select" starts a new game in the area a direction held picks.
 ;
@@ -212,6 +215,9 @@ WV_VALID        = $5203         ; non-zero while WV_BASE is the object being dra
 WV_BASEL        = $5204         ; the 16-bit screen x of that object ($0E and its high byte)
 WV_BASEH        = $5205
 WV_ASLEEP       = $5206         ; the last enemy test: 1 when it sleeps in a margin
+WV_NT_X         = $5210         ; + nametable (0, 1): the map x and y of the room the game built
+WV_NT_Y         = $5212         ; there last
+WV_T0           = $5214         ; scratch
 WV_SLEEP        = $5300         ; + enemy slot offset: 1 asleep (placed by its room, not yet on
                                 ; the original screen)
 WV_STYPE        = $5301         ; + enemy slot offset: the type it was placed as
@@ -228,6 +234,9 @@ SCREEN_Y        = $10
 TEMP_08         = $08
 PAGE_INDEX      = $4B           ; also the object at hand (16 per object, $0300)           ; the enemy slot offset at hand (16 per slot)
 SCROLL_DIR      = $49           ; bit 1: scrolling across
+SCROLLING_RIGHT = 3
+MAP_Y           = $4F           ; the room the screen scrolls into: the second of the two on the
+MAP_X           = $50           ; screen scrolling right or down, the first scrolling left or up
 SPRITE_PAGE_POS = $5B
 HEALTH_CHANGE   = $6E           ; 2 bytes: the damage to take
 OBJECT_CNTRL    = $6B
@@ -246,6 +255,7 @@ EN_TYPE         = $6B02         ; + slot offset
 OAM_X           = $0203
 
 ; The game's routines.
+NAMETABLE_AT_SCROLL = $EB85     ; GetNameTableAtScrollDir: the nametable a room is built on
 EN_RESTING_ANIM = $F682         ; InitEnRestingAnimIndex
 EN_DRAW_NO_MOVE = $F438         ; UpdateEnemyCommon@noMove: animation and drawing only
 EN_DRAW_GO      = $DEDE         ; DrawEnemy_NotBlank, drawing the enemy
@@ -382,22 +392,40 @@ wide_visible:
     DEX
 @h_shown:
     STX     WV_ORIG
-    ; The 16-bit screen x: on the screen's own 256 pixels when on the screen's left nametable at
-    ; or right of the scroll, or on the other one left of it; else in a margin, the nearer one.
+    ; The 16-bit screen x. On the screen's left nametable: on the screen at or right of the
+    ; scroll, in the left margin left of it. On the other one, by the room it holds (the hack
+    ; keeps where each nametable's room is on the map, wide_select_room): the room right of the
+    ; screen's left one, on the screen left of the scroll and in the right margin right of it;
+    ; the room left of it (the one Samus came from, the scroll at 0), in the left margin right of
+    ; the scroll; any other room, nowhere (but where the game's test shows it).
     LDA     TEMP_X
     CMP     SCROLL_X                    ; carry: x >= scroll
     LDA     TEMP_HI
     EOR     PPUCTRL_ZP
     AND     #$01
     BEQ     @same
+    PHP
+    JSR     other_side
+    BEQ     @neither
+    BMI     @other_left
+    PLP
     BCC     @inside
-    BCS     @outside
+    BCS     @right
+@other_left:
+    PLP
+    BCS     @left
+    BCC     @far_left
+@neither:
+    PLP
+    LDA     WV_ORIG
+    BNE     @inside
+    BEQ     @far
 @same:
     BCS     @inside
-@outside:
-    LDA     SCREEN_X
-    BMI     @left
+    BCC     @left
+@right:
     ; Right: 256 + x, shown when x + radius < M.
+    LDA     SCREEN_X
     CLC
     ADC     TEMP_RADIUS_X
     BCS     @far
@@ -408,6 +436,7 @@ wide_visible:
     BNE     @base                       ; high byte 1
 @left:
     ; Left: x - 256, shown when x - radius >= 256 - M.
+    LDA     SCREEN_X
     SEC
     SBC     TEMP_RADIUS_X
     BCC     @far_left
@@ -444,6 +473,55 @@ wide_visible:
     STA     WV_BASEL
     LDA     #$01
     STA     WV_VALID
+    LDX     WV_ORIG
+    RTS
+
+; Which neighbour of the screen's left room the other nametable's (the object at hand's, $06)
+; holds: A = 1 the right one, $FF the left one, 0 neither (Z and N set accordingly).
+other_side:
+    LDA     TEMP_HI
+    AND     #$01
+    TAY
+    LDA     WV_NT_Y,Y
+    CMP     MAP_Y
+    BNE     @neither
+    LDA     MAP_X                       ; the screen's left room: MapPosX, but the second of
+    STA     WV_T0                       ; the two scrolling right
+    LDA     SCROLL_DIR
+    CMP     #SCROLLING_RIGHT
+    BNE     @left_room
+    LDA     SCROLL_X
+    BEQ     @left_room
+    DEC     WV_T0
+@left_room:
+    LDA     WV_NT_X,Y
+    SEC
+    SBC     WV_T0
+    CMP     #$01
+    BEQ     @right
+    CMP     #$FF
+    BEQ     @left
+@neither:
+    LDA     #$00
+    RTS
+@right:
+    LDA     #$01
+    RTS
+@left:
+    LDA     #$FF
+    RTS
+
+; A room being built (SelectRoomRAM, $EA05, in place of JSR GetNameTableAtScrollDir: A = the
+; nametable it goes on): the hack keeps the room's map position for that nametable.
+wide_select_room:
+    JSR     NAMETABLE_AT_SCROLL
+    PHA
+    TAY
+    LDA     MAP_X
+    STA     WV_NT_X,Y
+    LDA     MAP_Y
+    STA     WV_NT_Y,Y
+    PLA
     RTS
 
 ; Whether the enemy at hand ($4B) updates: A = 1 when it shows on the original screen, or within
@@ -701,6 +779,8 @@ def hooks(sym):
     put(7, 0xF39F, '20 df df', jsr(sym['wide_enemy_check']))
     # An object's drawing: the doors and the item in the margins too.
     put(7, 0xDED2, '20 df df', jmp(sym['wide_object_draw']))
+    # A room built: where each nametable's room is on the map.
+    put(7, 0xEA05, '20 85 eb', jsr(sym['wide_select_room']))
     # A room's enemy placed: it sleeps until it reaches the original screen.
     put(7, 0xEB5E, 'a9 01 9d f4 6a', jsr(sym['wide_spawn']))
     # A sprite's x and the end of an object's drawing: the sprites' high bytes.
