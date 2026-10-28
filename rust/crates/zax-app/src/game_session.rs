@@ -273,6 +273,9 @@ struct FramePipeline {
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
+    /// Whether its decoder asks the screen's top and bottom lines hidden with a vertical margin
+    /// too ([`NesCore::hides_overscan`]).
+    picture_hides_overscan: bool,
     /// Whether the profile's scripts leave the core alone (no input hook, no memory or port
     /// access), so that the next frame may run while the scripts of the last one do
     /// ([`GameSession::launch_ahead`]).
@@ -638,6 +641,7 @@ impl GameSession {
             .ram
             .copy_from_slice(self.core.bus().ram());
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+        self.pipeline.picture_hides_overscan = self.core.hides_overscan();
     }
 
     /// Starts the next frame on the emulation thread at once ("emulation ahead"): its input word
@@ -670,6 +674,7 @@ impl GameSession {
                 self.pipeline.pending = Some(captured);
                 self.pipeline.picture_height =
                     self.core.wide_picture_into(&mut self.pipeline.picture);
+                self.pipeline.picture_hides_overscan = self.core.hides_overscan();
             }
         }
     }
@@ -977,6 +982,7 @@ impl GameSession {
         // kept the picture of the frame it captured).
         if self.pipeline.pending.is_none() {
             self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+            self.pipeline.picture_hides_overscan = self.core.hides_overscan();
         }
         let core = std::mem::replace(&mut self.core, spare);
         match worker.start(core, word) {
@@ -1122,7 +1128,7 @@ impl GameSession {
         };
         let counter = self.frame_counter;
         let mut records = std::mem::take(&mut self.batch_records);
-        if self.hide_overscan && margin_y == 0 {
+        if self.hide_overscan && (margin_y == 0 || self.core.hides_overscan()) {
             // A tile half or more in the top or bottom 8 lines is not shown.
             records.retain(|record| record.y > 4 && record.y < 228);
         }
@@ -1202,6 +1208,17 @@ impl GameSession {
             self.pipeline.picture_height
         } else {
             self.core.wide_picture_into(destination)
+        }
+    }
+
+    /// Whether the decoder of the picture [`GameSession::copy_nes_picture`] copies asks the
+    /// screen's top and bottom lines hidden with a vertical margin too.
+    #[must_use]
+    pub fn nes_picture_hides_overscan(&self) -> bool {
+        if self.pipeline.in_flight || self.pipeline.pending.is_some() {
+            self.pipeline.picture_hides_overscan
+        } else {
+            self.core.hides_overscan()
         }
     }
 

@@ -1553,16 +1553,23 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
 /// The lines at the top and at the bottom of the NES picture an NTSC TV did not show.
 const OVERSCAN_LINES: usize = 8;
 
-/// Blacks out the [`OVERSCAN_LINES`] at the top and bottom of a 240-line `picture` (colour
-/// indices, as wide as its widescreen margins make it); a taller one, with a vertical margin,
-/// goes on past those lines and is not given to it.
-fn hide_overscan_lines(picture: &mut [u8]) {
-    const HEIGHT: usize = 240;
+/// Blacks out the [`OVERSCAN_LINES`] at the top and bottom of the screen in `picture` (colour
+/// indices, `height` rows, as wide and as tall as its widescreen margins make it, the screen's
+/// 240 lines in the middle). A taller one, with a vertical margin, goes on past those lines and is
+/// given to it only when its decoder asks (`GameSession::nes_picture_hides_overscan`).
+fn hide_overscan_lines(picture: &mut [u8], height: usize) {
+    const SCREEN: usize = 240;
     const BLACK: u8 = 0x0F;
-    let band = OVERSCAN_LINES * (picture.len() / HEIGHT);
-    let end = picture.len();
-    picture[..band].fill(BLACK);
-    picture[end - band..].fill(BLACK);
+    if height < SCREEN || picture.is_empty() {
+        return;
+    }
+    let width = picture.len() / height;
+    let top = (height - SCREEN) / 2;
+    let band = OVERSCAN_LINES * width;
+    let start = top * width;
+    let end = (top + SCREEN) * width;
+    picture[start..start + band].fill(BLACK);
+    picture[end - band..end].fill(BLACK);
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
@@ -1629,8 +1636,9 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
         state.picture_height = session.copy_nes_picture(&mut state.picture);
-        if hidden_overscan && state.picture_height == 240 {
-            hide_overscan_lines(&mut state.picture);
+        if hidden_overscan && (state.picture_height == 240 || session.nes_picture_hides_overscan())
+        {
+            hide_overscan_lines(&mut state.picture, state.picture_height);
         }
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
@@ -1774,5 +1782,41 @@ fn reveal_folder(folder: &Path) {
     });
     if let Err(error) = result {
         log(&format!("the data folder could not be opened: {error}"));
+    }
+}
+
+#[cfg(test)]
+mod overscan_tests {
+    use super::hide_overscan_lines;
+
+    #[test]
+    fn the_screens_edge_lines_are_hidden_within_a_vertical_margin() {
+        // 2 columns, a vertical margin of 4 lines above and below the 240 of the screen.
+        let height = 248;
+        let mut picture = vec![1u8; 2 * height];
+        hide_overscan_lines(&mut picture, height);
+        let line = |y: usize| &picture[y * 2..y * 2 + 2];
+        assert_eq!(line(3), [1, 1], "the margin above stays");
+        assert_eq!(line(4), [0x0F, 0x0F], "the screen's first line");
+        assert_eq!(line(11), [0x0F, 0x0F], "its eighth");
+        assert_eq!(line(12), [1, 1]);
+        assert_eq!(line(235), [1, 1]);
+        assert_eq!(
+            line(236),
+            [0x0F, 0x0F],
+            "the screen's eighth line from the bottom"
+        );
+        assert_eq!(line(243), [0x0F, 0x0F], "its last");
+        assert_eq!(line(244), [1, 1], "the margin below stays");
+    }
+
+    #[test]
+    fn a_plain_picture_loses_its_top_and_bottom_8_lines() {
+        let mut picture = vec![1u8; 240];
+        hide_overscan_lines(&mut picture, 240);
+        assert!(picture[..8].iter().all(|&colour| colour == 0x0F));
+        assert_eq!(picture[8], 1);
+        assert_eq!(picture[231], 1);
+        assert!(picture[232..].iter().all(|&colour| colour == 0x0F));
     }
 }

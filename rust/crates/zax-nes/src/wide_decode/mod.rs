@@ -179,6 +179,15 @@ pub trait MarginDecoder: Sync {
         false
     }
 
+    /// Whether the screen's top and bottom 8 lines stay hidden with a vertical margin when the
+    /// host hides them without one (`video.hide_overscan`): for a game whose vertical margin the
+    /// decoder leaves empty, and which draws rows there a piece at a time (Mega Man, scrolling
+    /// to another section). Off by default: a vertical margin shows those lines, going on past
+    /// them.
+    fn hides_overscan(&self) -> bool {
+        false
+    }
+
     /// With `covers_overscan`, the lines from the screen's top and bottom edges within which a
     /// captured row (starting within them at the top, ending within them at the bottom) is
     /// decoded whole width too, and composed from its records in the 2D picture: for a game whose
