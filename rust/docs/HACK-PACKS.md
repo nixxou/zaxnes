@@ -77,9 +77,18 @@ which already holds every field but the context (Mega Man 6's damage hook, `$8F7
   The ROM then runs as the plain widescreen (margin decoder only), and the log names the hook.
 * **Identification.** A pack is offered for a ROM when its hooks all match, not by the ROM's CRC:
   the CRC stays the fast path for the ROM the hack was made for.
-* **Savestates, movies.** The hack version is the pack's; a state saved with a pack restores into
-  the same ROM with the same pack. The ROM's size no longer changes, so a state of the plain game
-  restores into the hacked one as with the Super Mario Bros. 3 hack today.
+* **Savestates, with or without the pack.** The ROM keeps its size and layout (only the hooks'
+  bytes differ, in memory, and a state carries the image as the host gave it): the mapper's
+  state, the RAM and the PPU mean the same with or without the pack, and the hack's variables
+  live in the extension's memory, not the game's. A state is therefore taken where none of the
+  hack's code runs: the core waits for the game's wait for the next frame (`idle_loop`, known for
+  every hack: Mega Man 6's `$C581`), at most a frame, so that no return address into the hack's
+  code is on the stack. Such a state restores with the pack or without it: without, the
+  extension's state is left out and the game drops what only the hack kept (enemies in the
+  margins, off its screen); with, the hack starts from its empty state (its reserve empty, its
+  pointers taken from the game's), as after a load today. The core's check that a state was made
+  with or without the extension (`state_fits_builtin_patches`) gives way to this one. Movies stay
+  bound to their pack's version: any difference of behaviour makes them drift.
 
 ## 4. Moved code (later step)
 
@@ -118,3 +127,5 @@ rewritten disassembly, not hooks.
    file next to the ROM (a "widescreen pack" for a ROM Zaxnes does not know)?
 4. Keep the BPS of each converted hack for a while, to compare, or drop it at once?
 5. The aids without any widescreen: shown in the same options menu (proposed), or apart?
+6. States taken at the game's wait for the next frame only (proposed, at most a frame late), or
+   at once as today, compatible only with the same pack setting?
