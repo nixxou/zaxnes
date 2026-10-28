@@ -621,16 +621,19 @@ low two bits of `($27) + m` (the game packs them into the attribute bytes, `$DC4
 nametables side by side, a ring of 512 x 240 pixels at a fixed offset from the world (the scroll
 `$FD`, `$F1` bit 0 and `$FC` follow the camera's moves, `$D1AD`), so a row's place comes from its
 PPU address, the offset `scroll - camera` and the camera picking the instance. A row is decoded when
-its centre shows the map at four columns (the title, the area's name, the pause screen and the
-transitions are left to the nametables). The camera stays within a room: the 16 bytes entry
+its centre shows the map at four columns, or else its first four and last four columns do, in more
+than one tile (the game draws some rooms of the overhead view over the map); the title, the area's
+name, the pause screen and the transitions are left to the nametables. The camera stays within a room: the 16 bytes entry
 `$CA04[$14]` points to (`$CC6D`) close the boundary left of screen `(x, y)` (byte `8 + y`) or above
 it (byte `y`), bit `7 - x`, and the camera stops in the middle of a screen whose boundary ahead is
 closed; the margins show the screens the view touches that the camera's own screens reach through
-open boundaries (the same room), the rest stays empty. The ring is 30 rows, all on the screen:
+open boundaries (the same room), the rest stays empty; in the overhead view (areas `$14` 0-7) the
+camera goes across closed boundaries, so the margins show every screen. The ring is 30 rows, all on the screen:
 scrolling vertically the game draws the row coming in at the other edge, in the overscan, so the
 decoder covers it (`covers_overscan`). A row at or past the screen's top or bottom edge is checked
 on the screen's nearest row that reaches neither edge (its top within lines 1-231), the same
-distance away on the ring: the edge row itself may be the game's overscan row, a stale one or one
+distance away on the ring (its margins, decoded with the other rows, as well as its centre): the
+edge row itself may be the game's overscan row, a stale one or one
 whose attribute bytes are another row's (the bottom row then shows the rocks in the sky's colours,
 a band of "water" a television hid).
 
