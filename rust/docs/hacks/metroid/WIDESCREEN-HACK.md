@@ -20,8 +20,8 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `708310CA` (the hack's version in savestate headers; `tools/build.py` prints it) |
-| Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in bank 0 and bank 7 (both copies of the fixed bank) |
+| Target data | CRC-32 `1A91D7B6` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in banks 0-5 and 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
 The code runs from the widescreen extension's PRG window at `$5800-$5FFF`, which Zaxnes opens on
@@ -57,6 +57,7 @@ the other objects are drawn by `ObjDrawFrame` (`$DE4A`), which keeps the test's 
 | an enemy placed by its room (`$EB5E`) | status 1 (resting) | the same, and asleep (`$5300 + slot`, with its type at `$5301 + slot`: a slot holding another type since is awake) |
 | a sprite's x (`$DF0E`) | 8-bit | the same, and its high byte to `$5100 + OAM offset`: the 16-bit x nearest the object's whose low byte is the sprite's; 0 for sprites no position test placed (the energy display) |
 | `ObjDrawFrame` (`$DED2`) | draws the object when it shows; its `onScreen` byte = it shows | `onScreen` the same; the doors (objects `$80-$B0`) and the item (`$40`) are drawn when they show within the margins |
+| `DrawDoor` (each area bank, `$8BCC`) | draws the door (`AnimDrawObject`) | the same, then its twin, the facing door of the room across (in a shaft, the corridors on either side, which the game does not build): mirrored, 32 pixels further out (x `$10` <-> `$F0` of the room across), in the door's animation frame, within the margins; not when the other nametable holds the room across and the game keeps its facing door |
 | end of an object's drawing (`$DF2D`) | clears `$6B` | the same, and the object's 16-bit x is no longer valid |
 | world's update (`$CB29`), main loop's wait (`$C0C7`) | | the high bytes cleared (every frame out of play), the extension's settings |
 | `SubtractHealth` (`$CE92`) | | no damage when the option "Invincible" is on (the damage is dropped) |
@@ -90,7 +91,7 @@ hidden: the decoder draws the background), `$5007 = $0A` (sprites free of the ex
 Variables (extension RAM): `WV_M $5200`, `WV_ORIG $5201` and `WV_WIDE $5202` (the last position
 test: on the original screen, within the margins), `WV_VALID $5203` / `WV_BASEL`, `WV_BASEH
 $5204/$5205` (the 16-bit screen x of the object being drawn), `WV_ASLEEP $5206` (the last enemy
-test), `WV_NT_X $5210-$5211` and `WV_NT_Y $5212-$5213` (by nametable: the map position of the room the game built there last), `WV_T0 $5214`, `WV_SLEEP $5300 + slot offset`, `WV_SEEN $5302 + slot offset` (on the original screen at its last drawing), `WV_STYPE $5301 + slot offset`.
+test), `WV_NT_X $5210-$5211` and `WV_NT_Y $5212-$5213` (by nametable: the map position of the room the game built there last), `WV_T0`, `WV_T1 $5214/$5215`, `WV_TWIN $5216` (a door's twin being drawn), `WV_TWIN_SIDE $5217`, `WV_CNTRL $5218` (the door's `$6B`), `WV_SLEEP $5300 + slot offset`, `WV_SEEN $5302 + slot offset` (on the original screen at its last drawing), `WV_STYPE $5301 + slot offset`.
 
 ## 4. Hooks
 
@@ -111,6 +112,7 @@ the fixed bank (`$C000-$FFFF`) are written into both its copies (7 and 15).
 | `$DF0E` | `ADC $0E / STA $0203,X` | `JSR wide_sprite_x / NOP / NOP` |
 | `$DF2D` | `LDA #$00 / STA $6B` | `JSR wide_drawn / NOP` |
 | `$CE92` | `LDA $6E / ORA $6F` | `JSR wide_hurt / NOP` |
+| banks 1-5 `$8BCC` | `LDA #$06 / JMP $DE47` (DrawDoor) | `JMP wide_draw_door / NOP / NOP` |
 | bank 0 `$9354` | `LDA #$02 / STA $24` | `JSR wide_new_game / NOP` |
 
 ## 5. Options
@@ -145,7 +147,8 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 * No sprite in the vertical margins: the extension carries a high byte for x only. Scrolling up
   and down, the enemies keep the original screen.
 * Only the two rooms the game keeps in PRG-RAM have enemies; the other rooms of the margins are
-  empty. The elevators, the statues and the other objects keep the original screen.
+  empty. The room the screen scrolls into gets its enemies when the game builds it, its edge at
+  the screen's: an enemy near that edge shows in the margin only shortly before the screen. The elevators, the statues and the other objects keep the original screen.
 * A room of the margins past a palette change room shows in the area's other palette (the
   decoder's own margin palette); the game's other palette changes (the item rooms' music, the
   elevators) do not apply to the margins.
@@ -177,7 +180,7 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 ;    resting pose, but its routine does not run until it reaches the original screen; awake, it
 ;    lives within the margins; what enemies fire lives there too;
 ;  * the doors and the items show within the margins too (the game keeps them to its tests of
-;    the original screen);
+;    the original screen), and each door's twin, the facing door of the room across;
 ;  * every sprite of an object gets the high byte of its 16-bit x, the room each nametable holds
 ;    telling which margin an object of the other nametable shows in;
 ;  * Samus, her shots and the other objects keep the original screen;
@@ -220,6 +223,10 @@ WV_ASLEEP       = $5206         ; the last enemy test: 1 when it sleeps in a mar
 WV_NT_X         = $5210         ; + nametable (0, 1): the map x and y of the room the game built
 WV_NT_Y         = $5212         ; there last
 WV_T0           = $5214         ; scratch
+WV_T1           = $5215
+WV_TWIN         = $5216         ; non-zero while a door's twin is drawn
+WV_TWIN_SIDE    = $5217         ; its side: 1 right, $FF left
+WV_CNTRL        = $5218         ; the door's $6B
 WV_SLEEP        = $5300         ; + enemy slot offset: 1 asleep (placed by its room, not yet on
                                 ; the original screen)
 WV_STYPE        = $5301         ; + enemy slot offset: the type it was placed as
@@ -247,6 +254,10 @@ OBJECT_CNTRL    = $6B
 SCROLL_Y        = $FC
 SCROLL_X        = $FD
 PPUCTRL_ZP      = $FF           ; bit 0: the nametable of the screen's left (top) edge
+OBJ_STATUS      = $0300         ; + object offset: 0 none
+OBJ_HI          = $030C         ; + object offset: its nametable, y and x
+OBJ_X           = $030E
+TWIN_DISTANCE   = 32            ; a door's twin: from x $10 to $F0 of the room across
 OBJ_ON_SCREEN   = $030B         ; + object offset: it shows (the game's test)
 POWER_UP_DRAW   = $40           ; object offsets: the item being drawn, the doors
 FIRST_DOOR      = $80
@@ -264,6 +275,8 @@ EN_RESTING_ANIM = $F682         ; InitEnRestingAnimIndex
 EN_DRAW_NO_MOVE = $F438         ; UpdateEnemyCommon@noMove: animation and drawing only
 EN_DRAW_GO      = $DEDE         ; DrawEnemy_NotBlank, drawing the enemy
 EN_DRAW_SKIP    = $DE53         ; DrawEnemy_NotBlank, not drawing it
+ANIM_DRAW_OBJECT = $DE47        ; AnimDrawObject: animation, then ObjDrawFrame
+OBJ_DRAW_FRAME  = $DE4A
 OBJ_DRAW_GO     = $DEDE         ; ObjDrawFrame, drawing the object
 OBJ_DRAW_SKIP   = $DEE3         ; ObjDrawFrame, not drawing it
 AREA_START      = $930D         ; bank 0 (the title's): a game started in the area $74, as a
@@ -480,7 +493,64 @@ wide_visible:
     STA     WV_BASEL
     LDA     #$01
     STA     WV_VALID
+    LDA     WV_TWIN
+    BEQ     @done
+    JSR     twin_place
+@done:
     LDX     WV_ORIG
+    RTS
+
+; A door's twin (WV_TWIN): the facing door of the room across, 32 pixels further out (the left
+; door at x $10, its twin at $F0 of the room on the left, and the other way round). Never on the
+; original screen for the game; shown within the margins.
+twin_place:
+    LDA     #$00
+    STA     WV_ORIG
+    LDA     WV_TWIN_SIDE
+    BMI     @left
+    LDA     WV_BASEL
+    CLC
+    ADC     #TWIN_DISTANCE
+    STA     WV_BASEL
+    LDA     WV_BASEH
+    ADC     #$00
+    JMP     @placed
+@left:
+    LDA     WV_BASEL
+    SEC
+    SBC     #TWIN_DISTANCE
+    STA     WV_BASEL
+    LDA     WV_BASEH
+    SBC     #$00
+@placed:
+    STA     WV_BASEH
+    LDY     WV_BASEL                    ; the sprites' x from there
+    STY     SCREEN_X
+    ; Shown when its x is within the margins: high byte 0, 1 below M, or $FF from 256 - M.
+    LDY     #$00
+    CMP     #$00
+    BEQ     @shown
+    CMP     #$01
+    BEQ     @right
+    CMP     #$FF
+    BNE     @hidden
+    LDA     WV_M
+    BEQ     @hidden
+    EOR     #$FF
+    CLC
+    ADC     #$01
+    CMP     WV_BASEL
+    BEQ     @shown
+    BCC     @shown
+    BCS     @hidden
+@right:
+    LDA     WV_BASEL
+    CMP     WV_M
+    BCS     @hidden
+@shown:
+    INY
+@hidden:
+    STY     WV_WIDE
     RTS
 
 ; Which neighbour of the screen's left room the other nametable's (the object at hand's, $06)
@@ -615,9 +685,12 @@ wide_object_draw:
     JSR     wide_visible
     TXA
     LDX     PAGE_INDEX
+    LDY     WV_TWIN                     ; a door's twin is not the game's: its door's onScreen
+    BNE     @twin                       ; stays
     STA     OBJ_ON_SCREEN,X
     TAY                                 ; Z: the game's test
     BNE     @draw
+@twin:
     LDA     WV_WIDE
     BEQ     @skip
     CPX     #POWER_UP_DRAW
@@ -630,6 +703,75 @@ wide_object_draw:
     JMP     OBJ_DRAW_GO
 @skip:
     JMP     OBJ_DRAW_SKIP
+
+; A door's drawing (DrawDoor, in each area bank at $8BCC, in place of LDA #$06 / JMP
+; AnimDrawObject): the door, then its twin, the facing door of the room across (that room is not
+; built: in a shaft, the corridors on either side), mirrored, in the door's animation frame;
+; unless the room across is the one the other nametable holds, whose own door the game draws.
+wide_draw_door:
+    LDA     OBJECT_CNTRL
+    STA     WV_CNTRL
+    LDA     #$06                        ; the door's animation, every 6 frames
+    JSR     ANIM_DRAW_OBJECT
+    LDX     PAGE_INDEX
+    LDY     #$FF                        ; the side: left for the door at x $10
+    LDA     OBJ_X,X
+    BPL     @side
+    LDY     #$01
+@side:
+    STY     WV_TWIN_SIDE
+    LDA     OBJ_HI,X
+    AND     #$01
+    TAY
+    LDA     WV_NT_X,Y                   ; the room across
+    CLC
+    ADC     WV_TWIN_SIDE
+    STA     WV_T0
+    LDA     WV_NT_Y,Y
+    STA     WV_T1
+    TYA
+    EOR     #$01
+    TAY
+    LDA     WV_NT_X,Y
+    CMP     WV_T0
+    BNE     @twin
+    LDA     WV_NT_Y,Y
+    CMP     WV_T1
+    BNE     @twin
+    ; The other nametable holds the room across: its facing door, if the game keeps it.
+    STY     WV_T1                       ; the other nametable
+    LDA     OBJ_X,X
+    EOR     #$E0                        ; $10 <-> $F0
+    STA     WV_T0
+    LDY     #FIRST_DOOR
+@door:
+    LDA     OBJ_STATUS,Y
+    BEQ     @next
+    LDA     OBJ_HI,Y
+    AND     #$01
+    CMP     WV_T1
+    BNE     @next
+    LDA     OBJ_X,Y
+    CMP     WV_T0
+    BEQ     @done
+@next:
+    TYA
+    CLC
+    ADC     #$10
+    TAY
+    CPY     #LAST_DOOR+$10
+    BNE     @door
+@twin:
+    LDA     WV_CNTRL
+    EOR     #$10                        ; mirrored
+    STA     OBJECT_CNTRL
+    LDA     #$01
+    STA     WV_TWIN
+    JSR     OBJ_DRAW_FRAME
+    LDA     #$00
+    STA     WV_TWIN
+@done:
+    RTS
 
 ; A room built on a nametable (DeleteOffscreenRoomSprites, $ECB4, in place of LDA $0405,X /
 ; AND #$02: the enemies of that nametable the game keeps, those that showed): only those on the
@@ -804,6 +946,9 @@ def hooks(sym):
     put(7, 0xEA05, '20 85 eb', jsr(sym['wide_select_room']))
     # A room built on a nametable: its enemies in the margins go with the room it held.
     put(7, 0xECB4, 'bd 05 04 29 02', jsr(sym['wide_room_retire']))
+    # A door drawn (each area bank): its twin, the facing door of the room across.
+    for bank in range(1, 6):
+        put(bank, 0x8BCC, 'a9 06 4c 47 de', jmp(sym['wide_draw_door']))
     # A room's enemy placed: it sleeps until it reaches the original screen.
     put(7, 0xEB5E, 'a9 01 9d f4 6a', jsr(sym['wide_spawn']))
     # A sprite's x and the end of an object's drawing: the sprites' high bytes.
