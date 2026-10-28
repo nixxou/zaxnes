@@ -24,6 +24,7 @@ pub const MEGAMAN5: Layout = Layout {
     stage: 0x0027,
     camera_low: 0x00FC,
     camera_high: 0x00F9,
+    scroll_y: 0x00FA,
     section_length: 0x002A,
     section_screen: 0x002B,
     rooms: 0x0900,

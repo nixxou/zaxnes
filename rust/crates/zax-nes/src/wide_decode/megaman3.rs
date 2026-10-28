@@ -16,7 +16,8 @@
 //! The level is a straight list of screens: world x / 256 is the screen. The camera is
 //! `$F9:$FC`; the section being played is `$2C + 1` screens, the camera on its screen `$2D`, so
 //! from screen `$F9 - $2D` on; nothing is drawn past it (the next screens belong to another
-//! section, above or below).
+//! section, above or below). While the game scrolls to such a section (`$FA` non-zero) the
+//! margins stay empty.
 
 use super::{megaman, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -33,6 +34,9 @@ pub struct Layout {
     /// The camera's x: pixel and screen.
     pub camera_low: u16,
     pub camera_high: u16,
+    /// The vertical scroll: non-zero only while the game scrolls to another section, above or
+    /// below (the camera and the section are the new one's, the rows on the screen both's).
+    pub scroll_y: u16,
     /// The section being played: its last screen, counted from its first, and the camera's.
     pub section_length: u16,
     pub section_screen: u16,
@@ -73,6 +77,7 @@ pub const MEGAMAN3: Layout = Layout {
     stage: 0x0022,
     camera_low: 0x00FC,
     camera_high: 0x00F9,
+    scroll_y: 0x00FA,
     section_length: 0x002C,
     section_screen: 0x002D,
     rooms: 0x0A00,
@@ -92,7 +97,7 @@ impl MarginDecoder for Layout {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        if self.stage_bank(memory, 0).is_none() {
+        if memory.ram(self.scroll_y) != 0 || self.stage_bank(memory, 0).is_none() {
             return false;
         }
         let screen = i32::from(memory.ram(self.camera_high));
