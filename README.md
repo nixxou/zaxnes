@@ -106,7 +106,10 @@ mode the enemies in the margins);
 [`rust/docs/hacks/megaman5/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman5/WIDESCREEN-HACK.md)
 (*Mega Man 5* (USA): the same);
 [`rust/docs/hacks/megaman6/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman6/WIDESCREEN-HACK.md)
-(*Mega Man 6* (USA): the part of the stage the camera may show, from the map the game points to).
+(*Mega Man 6* (USA): the part of the stage the camera may show, from the map the game points to);
+[`rust/docs/hacks/metroid/WIDESCREEN-HACK.md`](rust/docs/hacks/metroid/WIDESCREEN-HACK.md)
+(*Metroid* (USA): the world map's rooms around the screen, and in the advanced mode the enemies
+in the margins).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see

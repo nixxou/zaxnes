@@ -29,6 +29,8 @@ pub enum OptionRow {
     RenderScale,
     /// The shadows.
     Shadows,
+    /// The table the NES colours are shown in (`video.nes_palette`).
+    Palette,
     /// The frame cap: 60 every refresh, 30 every other refresh of a 60 Hz screen.
     FrameCap,
     /// The frame counter.
@@ -52,11 +54,12 @@ pub enum OptionRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 14] = [
+pub const ROWS: [OptionRow; 15] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
+    OptionRow::Palette,
     OptionRow::FrameCap,
     OptionRow::ShowFps,
     OptionRow::Profiler,
@@ -68,6 +71,25 @@ pub const ROWS: [OptionRow; 14] = [
     OptionRow::Region,
     OptionRow::Controls,
 ];
+
+/// The values of the palette row (`video.nes_palette`): the setting's choices.
+fn palettes() -> Vec<i32> {
+    catalogue::descriptor(SettingId::VideoNesPalette)
+        .domain()
+        .options()
+        .unwrap_or_default()
+        .iter()
+        .map(|option| {
+            #[allow(clippy::cast_possible_truncation)] // A choice's index.
+            let value = option.value as i32;
+            value
+        })
+        .collect()
+}
+
+fn palette(settings: &SettingsModel) -> i32 {
+    settings.get(SettingId::VideoNesPalette).as_int()
+}
 
 /// The values of the catch-up row (`emu.catch_up`): none, then a limit of 1 to 5 frames.
 const CATCH_UPS: [i32; 6] = [0, 1, 2, 3, 4, 5];
@@ -201,6 +223,10 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let on = settings.shadow();
             settings.set_shadow(!on);
         }
+        OptionRow::Palette => {
+            let next = *cycled(&palettes(), &palette(settings), step);
+            settings.set(SettingId::VideoNesPalette, SettingValue::Enum(next));
+        }
         OptionRow::FrameCap => {
             let next = *cycled(&FRAME_CAPS, &frame_cap(settings), step);
             settings.set_vsync(if next == 30 { 2 } else { 1 });
@@ -246,6 +272,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Volume => text::label_of(catalogue::descriptor(SettingId::AudioVolume)),
         OptionRow::RenderScale => strings::get(keys::HANDHELD_OPTION_RENDER_SCALE),
         OptionRow::Shadows => text::label_of(catalogue::descriptor(SettingId::RenderShadow)),
+        OptionRow::Palette => text::label_of(catalogue::descriptor(SettingId::VideoNesPalette)),
         OptionRow::FrameCap => strings::get(keys::HANDHELD_OPTION_FRAME_CAP),
         OptionRow::ShowFps => text::label_of(catalogue::descriptor(SettingId::UiShowFps)),
         OptionRow::Profiler => text::label_of(catalogue::descriptor(SettingId::UiProfiler)),
@@ -277,6 +304,12 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
                 |label| text::label_of_option(label),
             ),
         OptionRow::Shadows => switch(settings.shadow()),
+        OptionRow::Palette => catalogue::descriptor(SettingId::VideoNesPalette)
+            .domain()
+            .options()
+            .unwrap_or_default()
+            .get(usize::try_from(palette(settings)).unwrap_or(0))
+            .map_or_else(String::new, |option| text::label_of_option(&option.label)),
         OptionRow::FrameCap => format!("{} fps", frame_cap(settings)),
         OptionRow::ShowFps => switch(settings.show_fps()),
         OptionRow::Profiler => switch(settings.get(SettingId::UiProfiler).as_bool()),

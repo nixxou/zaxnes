@@ -230,9 +230,12 @@ pub struct SessionFrame {
     pub zapper_position: ZapperPosition,
 }
 
-/// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palette,
-/// edge masks, widescreen margin and visible rows.
-type CapturedBatch = ([u8; 32], i32, i32, (i32, zax_nes::VisibleRows, i32));
+/// What [`GameSession::capture_batch`] keeps of a frame's batch besides its records: palettes
+/// (the PPU's and a margin decoder's own), edge masks, widescreen margin and visible rows.
+type CapturedBatch = (Palettes, i32, i32, (i32, zax_nes::VisibleRows, i32));
+
+/// A frame's PPU palette and the margin decoder's own background palette, if any.
+type Palettes = ([u8; 32], Option<[u8; 16]>);
 
 /// One game being played.
 pub struct GameSession {
@@ -1100,7 +1103,7 @@ impl GameSession {
         self.batch_records.clear();
         self.batch_records.extend_from_slice(batch.records);
         let captured = (
-            batch.palette,
+            (batch.palette, batch.margin_palette),
             batch.mask_x,
             batch.mask_y,
             (batch.margin, batch.visible_rows, batch.margin_y),
@@ -1114,7 +1117,7 @@ impl GameSession {
         &mut self,
         scene: &mut SceneState,
         clock: &mut StageClock,
-        palette: [u8; 32],
+        (palette, margin_palette): Palettes,
         (mask_x, mask_y): (i32, i32),
         (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
     ) {
@@ -1136,6 +1139,7 @@ impl GameSession {
         let batch = FrameBatch {
             records: &records,
             palette,
+            margin_palette,
             mask_x,
             mask_y,
             margin,

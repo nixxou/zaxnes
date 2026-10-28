@@ -27,6 +27,7 @@ mod megaman4;
 mod megaman5;
 mod megaman6;
 mod metalforce;
+mod metroid;
 mod ng3;
 mod smb1;
 mod smb3;
@@ -116,7 +117,8 @@ impl BackgroundRow {
 
 /// One tile a decoder hands back: screen column `column` (x = 8 × column − fine X, 0 being the
 /// leftmost column of the 256-pixel picture), CHR tile `tile` of the row's background pattern
-/// table, in sub-palette `palette`.
+/// table, in sub-palette `palette`: 0-3 the frame's background sub-palettes, 4-7 those of the
+/// decoder's margin palette ([`MarginDecoder::margin_palette`]; without one, 4-7 read as 0-3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodedTile {
     pub column: i32,
@@ -151,6 +153,16 @@ pub trait MarginDecoder: Sync {
     /// columns next to it). Their nametable records are replaced, and the wide picture composes
     /// those columns of the decoded rows from the records instead of the PPU's pixels.
     fn redrawn_right_columns(&self) -> i32 {
+        0
+    }
+
+    /// How many of the centre's leftmost columns the decoder redraws on the rows it decodes (0
+    /// by default), as [`MarginDecoder::redrawn_right_columns`] does on the right: a game that
+    /// draws the column coming in at the left edge with attribute bytes that also colour the
+    /// visible column next to it (Metroid scrolling left, 2). Their nametable records are
+    /// replaced, and the wide picture composes those columns of the decoded rows from the
+    /// records instead of the PPU's pixels.
+    fn redrawn_left_columns(&self) -> i32 {
         0
     }
 
@@ -196,6 +208,14 @@ pub trait MarginDecoder: Sync {
     fn overscan_lines(&self) -> i32 {
         0
     }
+
+    /// A background palette of the decoder's own for this frame (16 NES colour indices, laid out
+    /// as `$3F00-$3F0F`), for the margin tiles it hands back with sub-palettes 4-7: a game that
+    /// shows a neighbour of the screen in other colours than the screen's (Metroid, a room past
+    /// one where the game changes the palette). `None`, as by default, when it has none.
+    fn margin_palette(&self, _memory: &DecoderMemory<'_>) -> Option<[u8; 16]> {
+        None
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if
@@ -219,6 +239,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman4::SOURCE_CRC | megaman4::SOURCE_CRC_REV1 => Some(&megaman4::MEGAMAN4),
         megaman5::SOURCE_CRC => Some(&megaman5::MEGAMAN5),
         megaman6::SOURCE_CRC => Some(&megaman6::MegaMan6),
+        metroid::SOURCE_CRC => Some(&metroid::Metroid),
         _ => None,
     }
 }
@@ -246,6 +267,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         }
         crate::builtin_patches::MEGAMAN5_USA => Some(&megaman5::MEGAMAN5),
         crate::builtin_patches::MEGAMAN6_USA => Some(&megaman6::MegaMan6),
+        crate::builtin_patches::METROID_USA => Some(&metroid::Metroid),
         _ => None,
     }
 }
