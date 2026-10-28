@@ -19,6 +19,10 @@ use crate::cartridges::{Cartridge, ChrFetch};
 use crate::wide_decode::{BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 use crate::{nes_colors, NametableMirroring, TileRecord};
 
+/// In the wide picture's palette entries, the first of the margin palette's (after the 32 of the
+/// PPU's).
+const MARGIN_ENTRIES: u8 = 0x20;
+
 /// Where a background row of the frame was read from, kept for a margin decoder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct CapturedRow {
@@ -72,6 +76,7 @@ impl Ppu2C02 {
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
         self.redrawn_from = [256; 30];
+        self.margin_palette = None;
         self.tiles.set_extra_columns(0);
         self.mask_x = 0;
         self.mask_y = 0;
@@ -92,6 +97,7 @@ impl Ppu2C02 {
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
         self.redrawn_from = [256; 30];
+        self.margin_palette = None;
     }
 
     /// Runs the captures owed by visible line `line` at its first dot: the sprite band, and
@@ -297,6 +303,9 @@ impl Ppu2C02 {
         let mut redrawn_from = [256i16; 30];
         let mut tiles = Vec::new();
         let mut records = Vec::new();
+        self.margin_palette = decoder.margin_palette(memory);
+        // Sub-palettes 4-7 are the decoder's margin palette's, when it has one.
+        let palette_mask = if self.margin_palette.is_some() { 7 } else { 3 };
         // The decoder may read the nametables, as the PPU sees them now.
         let nametable = |address: u16| self.read_nametable_inner(address, cart);
         let written = |address: u16| self.nametable_written(address, cart);
@@ -346,7 +355,7 @@ impl Ppu2C02 {
                     false,
                     false,
                     false,
-                    palette & 3,
+                    palette & palette_mask,
                     true,
                 ));
             }
@@ -591,7 +600,7 @@ impl Ppu2C02 {
                 false,
                 false,
                 false,
-                palette & 3,
+                palette & if self.margin_palette.is_some() { 7 } else { 3 },
                 true,
             ));
         }
@@ -994,7 +1003,13 @@ impl Ppu2C02 {
                     };
                     let slot = &mut out[(row * width) + column];
                     if pixel != 0 {
-                        *slot = base + (record.palette * 4) + pixel;
+                        // A background tile in sub-palette 4-7 is the margin palette's: entries
+                        // MARGIN_ENTRIES up.
+                        *slot = if record.background && record.palette >= 4 {
+                            MARGIN_ENTRIES + ((record.palette - 4) * 4) + pixel
+                        } else {
+                            base + (record.palette * 4) + pixel
+                        };
                     }
                 }
             }
@@ -1024,6 +1039,10 @@ impl Ppu2C02 {
             for (column, slot) in line.iter_mut().enumerate() {
                 if screen_rows.contains(&row) && (first..end).contains(&column) {
                     *slot = self.pixels[((row - margin_y) * SCREEN_WIDTH) + column - margin];
+                } else if let (Some(margin_palette), Some(entry)) =
+                    (self.margin_palette, slot.checked_sub(MARGIN_ENTRIES))
+                {
+                    *slot = margin_palette[usize::from(entry & 15)];
                 } else {
                     *slot = self.palette[palette_index(0x3F00 | u16::from(*slot))];
                 }

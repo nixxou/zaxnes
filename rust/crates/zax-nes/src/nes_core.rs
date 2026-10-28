@@ -562,6 +562,7 @@ impl NesCore {
         FrameBatch {
             records: ppu.tile_records(),
             palette: ppu.snapshot_palette(),
+            margin_palette: ppu.margin_palette(),
             mask_x: ppu.mask_x(),
             mask_y: ppu.mask_y(),
             margin: ppu.frame_margin(),

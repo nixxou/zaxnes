@@ -325,6 +325,21 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    picture composes those 8 pixels from the records, and such a game keeps there the column it is
    drawing next (Super Mario Bros. 3, horizontal mirroring: the column it draws past the right
    edge is the same nametable column as the one at the left edge).
+6. A decoder's `margin_palette(memory)` (default `None`) is a background palette of its own for
+   the frame, 16 NES colour indices laid out as `$3F00-$3F0F`: with one, the decoded tiles it
+   hands back in sub-palettes 4-7 (`DecodedTile::palette`) are in its sub-palettes 0-3 (without
+   one, 4-7 read as 0-3). For a game that shows a neighbour of the screen in other colours than
+   the screen's (Metroid: a room past one where the game toggles the room palette). Extension
+   change: `Ppu2C02::margin_palette` (latched by `decode_margins`, cleared with the frame) keeps
+   it; the records keep sub-palettes 4-7 (`TileRecord::palette`, background records only); the
+   wide picture composes those pixels from it (palette entries `$20-$2F` of the composition,
+   `MARGIN_ENTRIES`); `FrameBatch::margin_palette` carries it to the 3D engine (`None` for every
+   other frame), which loads it into tables 8-11 of the frame palette
+   (`FramePalette::load_margin`, entry 0 of each table the universal colour; those tables
+   repeat the background ones otherwise) and colours a background tile in sub-palette 4-7 with
+   table `palette + 4` (`draw_list.rs`, REQ-E3D-560). A script that writes those tables as a
+   custom palette sees them overwritten in such a frame. Nothing changes for a decoder without
+   one.
 
 The CHR banks of the decoded rows: `Mapper::chr_peek_view` (default: `chr_view`) is the view
 `ppu_peek` reads, side effects aside. MMC3 has one (its peek is the default one through its bank

@@ -403,6 +403,9 @@ impl ConversionEngine {
 
         // (a) frame palette.
         frame.palette_mut().load_from(&batch.palette);
+        if let Some(margin) = &batch.margin_palette {
+            frame.palette_mut().load_margin(margin);
+        }
 
         // (b) filtering and placement of the tiles.
         intake(
