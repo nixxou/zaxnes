@@ -780,7 +780,9 @@ first columns, and with a fine X the hidden 8 pixels take part of column 1 as we
 that column's colours (a stripe at the left edge of the original picture). The built-in patch (`MEGAMAN6_USA`, an advanced mode,
 `mm6wide`) draws the enemies in the margins: Mega Man 6's objects run as scripts that remove
 themselves through the test "on the screen" (`$E485`), which the hack widens for the enemies (not
-for the stage's controllers, type `$80` in slot 22); an enemy asleep in a margin runs its script's
+for the stage's controllers, type `$80` in slot 22, which keep the original spawn window: the stage
+list is walked twice, the original's walk for them, a wider one with its own pointers for the
+enemies); an enemy asleep in a margin runs its script's
 first frame, which sets up how it looks, and one spawned while the camera stands (the stage's start,
 its tiles not yet in CHR-RAM) shows once the camera moves, one asleep past the next screen of the one
 whose tiles the game loaded (`$0680`) not before, and an object the game flags not drawn (`$03B7` bit

@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `5132C4DB` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `31C6F856` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -64,7 +64,8 @@ and `$064A` the next entries right and left of the spawn window.
 
 | Game routine | Original | Hack |
 |---|---|---|
-| spawn window (bank `$3A` `$8120`) | entries between camera + 8 and camera + 254 spawn | between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
+| the list's spawns (bank `$3A` `$8120`, the window, then the walk from `$813A`) | entries between camera + 8 and camera + 254 spawn, the walk keeping its place in `$0649` / `$064A` | two walks: the original's, its window and its pointers, for the controllers alone (type `$80`, all in slot 22: the stage counts on one at a time in the window; with a wider one a controller took the slot of the next, which stayed marked spawned, and the camera never went on); then one between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`), for the enemies alone, with pointers of its own (taken from the game's whenever the game sets them); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
+| an entry's spawn (bank `$3A` `$81A7`) | | only the kind of the walk under way |
 | a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
 | object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks; on the original screen it wakes for good |
 | "on the screen" (`$E485`) | y on the screen, x - camera within `[4, 256)` | the same for slots 0-7 and the controller (22); an enemy also within `[LO, HI)` |
@@ -256,10 +257,19 @@ WV_HIDDEN       = $5260         ; + slot: non-zero while an enemy asleep is not 
 WV_CAML         = $5210         ; the camera of the last spawn window, to tell whether it moved
 WV_CAMH         = $5211
 WV_MOVED        = $5212         ; non-zero when the camera moved since the last spawn window
+WV_PASS         = $5213         ; the walk of the stage list under way: $80 controllers, 0 enemies
+WV_O49          = $5214         ; the game's list pointers as its walk left them
+WV_O4A          = $5215
+WV_E49          = $5216         ; the enemies' walk's list pointers
+WV_E4A          = $5217
 
 ; The game.
 OAM             = $0200
 CAM_LO          = $56           ; the camera's x: pixel and screen
+LIST_RIGHT      = $0649         ; the stage list's next entries right and left of the spawn window
+LIST_LEFT       = $064A
+LIST_TYPE       = $7E           ; pointer to the stage list's entry types
+LIST_WALK       = $813A         ; bank $3A: the walk of the list, through the window $00-$03, to an RTS
 CHR_SCREEN      = $0680         ; the screen whose enemies' tiles the game loaded to CHR-RAM ($FF: loading)
 CAM_HI          = $57
 SCROLL          = $71           ; bit 0: the camera may go on right of its screen, bit 1 left
@@ -568,11 +578,19 @@ wide_think:
     RTS
 
 ; ---------------------------------------------------------------------------- ;
-; The spawn window (bank $3A $8120, in place of $03:$02 = camera + 254, $01:$00 = camera + 8):
-; the stage list (entries sorted by place, one list for each way) spawns the enemies between
-; camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show. Whether
-; the camera moved since the last call is kept first: if it did, the enemies hidden show.
-wide_spawn_window:
+; The stage list's spawns (bank $3A $8120, the routine's start, jumped to: it sets $03:$02 =
+; camera + 254, $01:$00 = camera + 8, then walks the list from $813A to an RTS). The list (entries
+; sorted by place, one list for each way, $0649 / $064A the next entries right and left of the
+; window) is walked twice, each walk with its own pointers:
+;  * the original's, with its window, for the controllers (type $80) alone: they all share slot 22
+;    and the stage counts on one at a time in the window (a wider one let one take the slot of the
+;    next, which stayed marked spawned: the camera never went on, $71);
+;  * the hack's, between camera + 8 - M and camera + 254 + M within the part of the stage the
+;    camera may show, for the enemies alone, its pointers kept in WV_E49 / WV_E4A (taken from the
+;    game's whenever the game set its own: a new stage, a restart, a scroll to another screen).
+; wide_spawn_filter, at the spawn of each entry, keeps the walk's own kind. Whether the camera
+; moved since the last call is kept first: if it did, the enemies hidden show.
+wide_spawns:
     LDA     #$00                        ; whether the camera moved: the hidden enemies show
     STA     WV_MOVED
     LDA     CAM_LO
@@ -599,6 +617,59 @@ wide_spawn_window:
     PLA
     TAX
 @window:
+    LDA     LIST_RIGHT                  ; the game set its pointers: the enemies' walk starts there
+    CMP     WV_O49
+    BNE     @reset
+    LDA     LIST_LEFT
+    CMP     WV_O4A
+    BEQ     @controllers
+@reset:
+    LDA     LIST_RIGHT
+    STA     WV_E49
+    LDA     LIST_LEFT
+    STA     WV_E4A
+@controllers:
+    CLC                                 ; the original window: camera + 8, camera + 254
+    LDA     CAM_LO
+    ADC     #$FE
+    STA     $02
+    LDA     CAM_HI
+    ADC     #$00
+    STA     $03
+    CLC
+    LDA     CAM_LO
+    ADC     #$08
+    STA     $00
+    LDA     CAM_HI
+    ADC     #$00
+    STA     $01
+    LDA     #$80
+    STA     WV_PASS
+    JSR     LIST_WALK
+    LDA     LIST_RIGHT
+    STA     WV_O49
+    LDA     LIST_LEFT
+    STA     WV_O4A
+    LDA     WV_E49                      ; the enemies' walk, with its own pointers
+    STA     LIST_RIGHT
+    LDA     WV_E4A
+    STA     LIST_LEFT
+    JSR     wide_enemy_window
+    LDA     #$00
+    STA     WV_PASS
+    JSR     LIST_WALK
+    LDA     LIST_RIGHT
+    STA     WV_E49
+    LDA     LIST_LEFT
+    STA     WV_E4A
+    LDA     WV_O49                      ; the game's pointers back
+    STA     LIST_RIGHT
+    LDA     WV_O4A
+    STA     LIST_LEFT
+    RTS
+
+; The enemies' window: $01:$00 = camera + 8 - M, $03:$02 = camera + 254 + M, within the part.
+wide_enemy_window:
     JSR     wide_part
     CLC                                 ; left = camera + 8 - M
     LDA     CAM_LO
@@ -646,6 +717,22 @@ wide_spawn_window:
     SBC     #$01
     STA     $03
 @rts:
+    RTS
+
+; An entry's spawn (bank $3A $81A7, in place of TYA / AND #$07 / TAX; Y the entry): only the walk's
+; own kind, controllers (type $80) or enemies; another returns from $81A7 at once, unspawned.
+wide_spawn_filter:
+    LDA     (LIST_TYPE),y
+    AND     #$80
+    CMP     WV_PASS
+    BNE     @other
+    TYA                                 ; the code replaced
+    AND     #$07
+    TAX
+    RTS
+@other:
+    PLA                                 ; out of $81A7 too
+    PLA
     RTS
 
 ; ---------------------------------------------------------------------------- ;
@@ -995,9 +1082,11 @@ def hooks(sym):
     # enemies).
     put(63, 0xE485, 'bd cb 04', jmp(sym['wide_on_screen']))
     put(63, 0xE43A, 'bd a0 03', jsr(sym['wide_think']))
-    # The spawn window, a list enemy's spawn.
+    # The stage list's spawns (two walks), an entry's spawn (each walk its kind), a list enemy's
+    # spawn.
     put(0x3A, 0x8120, 'a5 56 18 69 fe 85 02 a5 57 69 00 85 03 a5 56 18 69 08 85 00 a5 57 69 00 85 01',
-        jsr(sym['wide_spawn_window']))
+        jmp(sym['wide_spawns']))
+    put(0x3A, 0x81A7, '98 29 07 aa', jsr(sym['wide_spawn_filter']))
     put(0x3A, 0x81EA, 'a9 00 9d b4 04', jsr(sym['wide_spawned']))
     # Invincibility: Mega Man's damage.
     put(0x38, 0x8F72, 'a5 a2 d0 1f a5 96 d0 1b', jsr(sym['wide_hurt']) + bytes([0xD0, 0x1E]))  # BNE $8F95
