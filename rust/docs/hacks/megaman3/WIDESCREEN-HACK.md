@@ -10,6 +10,15 @@ reads the stage layout in PRG-ROM (see [`../../WIDESCREEN-EXTENSION.md`](../../W
 section 4); it widens the game on its own, the simple mode. The hack does the objects: enemies that
 spawn, sleep, live and show in the margins, the way the Mega Man and Mega Man 2 hacks do them.
 
+At the screen's edges the decoder draws column 0 while the game hides it (the game keeps there the
+column it is drawing) and redraws the screen's last column, which showed the colours of the column
+being drawn past the right edge; its margins stay empty while the vertical scroll `$FA` is not 0,
+and take no column from the nametables while both show the same 256 pixels. With the video setting
+that hides the overscan, the decoder asks for the screen's top and bottom 8 lines to stay hidden
+with a vertical margin too, and the vertical margin is drawn black: the game draws the rows coming
+in at those edges a piece at a time while it scrolls to another section, which a television hid. The
+picture then ends where it does without a vertical margin.
+
 ---
 
 ## 1. Identity
