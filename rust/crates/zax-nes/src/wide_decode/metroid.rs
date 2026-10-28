@@ -54,6 +54,9 @@ const IN_AREA: u16 = 0x0074;
 const SCROLL_Y: u16 = 0x00FC;
 const SCROLL_X: u16 = 0x00FD;
 const PPUCTRL: u16 = 0x00FF;
+/// The room the game is building; `$F0` up: its objects done (`$EAF4`), `$FF` all done.
+const ROOM_NUMBER: u16 = 0x005A;
+const ROOM_DONE: u8 = 0xF0;
 
 /// `$7000`, in PRG-RAM.
 const WORLD_MAP: usize = 0x1000;
@@ -227,7 +230,19 @@ impl<'a> View<'a> {
         };
         let (x, y, _) = view.loaded[0]?;
         let rooms = view.area_rooms(x, y)?;
-        Some(Self { rooms, ..view })
+        let mut view = Self { rooms, ..view };
+        // A room the game is building (`$5A` below `$F0`: its objects not all drawn yet) is built
+        // here from its data rather than read half done; it goes on the nametable at the scroll
+        // direction (`$EB85`).
+        if memory.ram(ROOM_NUMBER) < ROOM_DONE {
+            let building = usize::from((memory.ram(PPUCTRL) ^ direction) & 1);
+            for slot in &mut view.loaded {
+                if slot.is_some_and(|(_, _, nametable)| nametable == building) {
+                    *slot = None;
+                }
+            }
+        }
+        Some(view)
     }
 
     /// The row's place on the ring: its left edge across, its top down (a whole tile).

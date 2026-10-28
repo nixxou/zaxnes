@@ -689,7 +689,8 @@ way through (a tile at or past `$A0`, or a block the area's bombs blast, `$D651`
 up and down only between two rooms walled on the left and the right (shafts: a corridor's ceiling
 may happen to meet a room of another area built with this one's tables), never across an elevator
 room's top or bottom. The margins show the map's rooms around the screen, those behind a door too; the room on the screen's left (top)
-edge, and the other one while both show, are read from PRG-RAM (blasted blocks included), the
+edge, and the other one while both show, are read from PRG-RAM (blasted blocks included; not a
+room the game is still building, `$5A` below `$F0`, on the nametable at the scroll direction), the
 others built from the area's data as `SetupRoom` does (kept, by bank and data address). A row is
 decoded when 28 of its 32 columns show the room's tile (the title, the password screen and the
 transitions are left to the nametables), checked on the screen's nearest row that reaches neither
