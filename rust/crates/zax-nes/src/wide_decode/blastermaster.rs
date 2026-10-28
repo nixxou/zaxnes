@@ -369,6 +369,12 @@ impl MarginDecoder for BlasterMaster {
         // coming in over the one at the other edge, in the lines a television hides.
         true
     }
+
+    fn overscan_lines(&self) -> i32 {
+        // The attribute bytes the game writes for that row also colour the next one, on the
+        // screen within 8 lines of the edge.
+        8
+    }
 }
 
 #[cfg(test)]

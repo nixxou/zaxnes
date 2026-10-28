@@ -172,6 +172,15 @@ pub trait MarginDecoder: Sync {
     fn covers_overscan(&self) -> bool {
         false
     }
+
+    /// With `covers_overscan`, the lines from the screen's top and bottom edges within which a
+    /// captured row (starting within them at the top, ending within them at the bottom) is
+    /// decoded whole width too, and composed from its records in the 2D picture: for a game whose
+    /// attribute bytes for the row coming in at one edge also colour the next row, on the screen
+    /// (Blaster Master, 8: a television's overscan hid it). 0 by default: the edge rows only.
+    fn overscan_lines(&self) -> i32 {
+        0
+    }
 }
 
 /// The decoder made for an unpatched ROM whose data (iNES header excluded) has CRC-32 `crc`, if

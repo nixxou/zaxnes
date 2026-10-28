@@ -492,7 +492,73 @@ impl Ppu2C02 {
                 self.push_decoded(tiles, from, y, first_index, cart, records);
             }
         }
-        (edge_rows, lines)
+        let mut found = (edge_rows, lines);
+        if overscan {
+            self.decode_overscan_band(
+                decoder,
+                memory,
+                cart,
+                tiles,
+                records,
+                &mut found,
+                (row_width, extra),
+            );
+        }
+        found
+    }
+
+    /// The captured rows next to the edge rows, starting or ending within `overscan_lines` of
+    /// the screen's edge (`MarginDecoder::overscan_lines`): their centre too, added to `found`
+    /// (the edge rows, the lines of the screen that stay the PPU's). `layout` is the record
+    /// row's width and its first centre column.
+    #[allow(clippy::too_many_arguments)]
+    fn decode_overscan_band(
+        &self,
+        decoder: &dyn MarginDecoder,
+        memory: &DecoderMemory<'_>,
+        cart: Option<&Cartridge>,
+        tiles: &mut Vec<DecodedTile>,
+        records: &mut Vec<TileRecord>,
+        found: &mut (Vec<usize>, (i32, i32)),
+        (row_width, extra): (i32, i32),
+    ) {
+        let (edge_rows, lines) = found;
+        let band = decoder.overscan_lines();
+        if band <= 0 {
+            return;
+        }
+        for (index, captured) in self
+            .captured_rows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| Some((index, row.as_ref()?)))
+        {
+            let top = i32::from(captured.y);
+            let (at_top, at_bottom) = (top <= band, top + 8 >= 240 - band);
+            if edge_rows.contains(&index) || !(at_top || at_bottom) {
+                continue;
+            }
+            tiles.clear();
+            if !decoder.decode_extra_row(memory, &captured.row, &mut (0..32), tiles) {
+                continue;
+            }
+            edge_rows.push(index);
+            if at_top {
+                lines.0 = lines.0.max(top + 8);
+            } else {
+                lines.1 = lines.1.min(top);
+            }
+            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)] // 0..31.
+            let first_index = (index as i32 * row_width) + extra;
+            self.push_decoded(
+                tiles,
+                captured,
+                captured.y,
+                Some(first_index),
+                cart,
+                records,
+            );
+        }
     }
 
     /// The records of the decoded `tiles` of a row at `y`, read as `from`'s background (its
