@@ -774,7 +774,10 @@ rows of a camera on a screen's top are decoded (a vertical scroll leaves the mar
 nametables). The camera stops at its screen's edges unless `$71` lets it on (bit 0 right, bit 1
 left, set by objects of the stage as Mega Man goes): past such an edge nothing is drawn. Column 0
 is decoded while the game hides it, and the screen's last column redrawn (`redrawn_right_columns`
-1), as in Mega Man 3 to 5. The built-in patch (`MEGAMAN6_USA`, an advanced mode,
+1), as in Mega Man 3 to 5. Its first two columns are redrawn too (`redrawn_left_columns` 2): the
+column the game draws past the right edge wraps on a single nametable's width over the screen's
+first columns, and with a fine X the hidden 8 pixels take part of column 1 as well, which showed
+that column's colours (a stripe at the left edge of the original picture). The built-in patch (`MEGAMAN6_USA`, an advanced mode,
 `mm6wide`) draws the enemies in the margins: Mega Man 6's objects run as scripts that remove
 themselves through the test "on the screen" (`$E485`), which the hack widens for the enemies; its
 sprite loops are the game's four (none, horizontal, vertical, both flips) for each page. Its code

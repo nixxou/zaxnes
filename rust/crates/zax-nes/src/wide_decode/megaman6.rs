@@ -86,6 +86,13 @@ impl MarginDecoder for MegaMan6 {
         1
     }
 
+    /// The game draws the column coming past the right edge into a single nametable's width
+    /// (its 32 columns wrap), over the screen's first columns: the hidden 8 pixels cover column 0
+    /// and, with a fine X, part of column 1, which showed that column's colours.
+    fn redrawn_left_columns(&self) -> i32 {
+        2
+    }
+
     /// The game draws the rows coming in at the screen's top or bottom edge a piece at a time
     /// while it scrolls to another section (which a television hid): those 8 lines stay hidden
     /// with a vertical margin as without one, when the host hides them.
