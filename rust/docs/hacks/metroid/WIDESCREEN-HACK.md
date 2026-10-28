@@ -20,7 +20,7 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `A23663EB` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `4C7C7085` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in bank 0 and bank 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -50,6 +50,7 @@ the other objects are drawn by `ObjDrawFrame` (`$DE4A`), which keeps the test's 
 | Game routine | Original | Hack |
 |---|---|---|
 | `IsObjectVisible` (`$DFDF`) | X = 1 when the object shows | the same test, to the letter; also whether it shows within the margins (scrolling across: its x within `[r - M, 256 + M - r)`, `r` its x radius, of the 16-bit screen x below; up and down: the screen's answer) and its 16-bit screen x: on the nametable of the screen's left edge (`$FF` bit 0), on the screen at or right of the scroll `$FD`, in the left margin left of it; on the other one, by the room it holds (below): the room right of the screen's left one, on the screen left of the scroll and in the right margin right of it, the room left of it (the one Samus came from, the scroll at 0) in the left margin right of the scroll, any other room nowhere (but where the game's test shows it) |
+| `DeleteOffscreenRoomSprites` (`$ECB4`), a room built on a nametable | removes that nametable's enemies but those that showed (`$0405` bit 1) | removes them but those on the original screen at their last drawing (`$5302 + slot`): awake in a margin, an enemy updates and its bit 1 is set, but its room is going; kept, it would live on in the new room's place, with that room's walls |
 | `SelectRoomRAM` (`$EA05`) | the nametable a room is built on | the same, and the room's map position (`$50`, `$4F`) kept for that nametable |
 | `DrawEnemy` (`$DE1B`) | draws the enemy when it shows; `$0405` bit 1 = it shows | draws it when it shows within the margins; bit 1 = it updates (below) |
 | `UpdateEnemy_CheckIfVisible` (`$F39F`) | skips the enemy's routine when it does not show | skips it when it does not update; asleep in a margin, it is drawn in its resting pose (`$F682`, then `$F438`: animation and drawing, no movement) |
@@ -89,7 +90,7 @@ hidden: the decoder draws the background), `$5007 = 2` (sprites free of the exte
 Variables (extension RAM): `WV_M $5200`, `WV_ORIG $5201` and `WV_WIDE $5202` (the last position
 test: on the original screen, within the margins), `WV_VALID $5203` / `WV_BASEL`, `WV_BASEH
 $5204/$5205` (the 16-bit screen x of the object being drawn), `WV_ASLEEP $5206` (the last enemy
-test), `WV_NT_X $5210-$5211` and `WV_NT_Y $5212-$5213` (by nametable: the map position of the room the game built there last), `WV_T0 $5214`, `WV_SLEEP $5300 + slot offset`, `WV_STYPE $5301 + slot offset`.
+test), `WV_NT_X $5210-$5211` and `WV_NT_Y $5212-$5213` (by nametable: the map position of the room the game built there last), `WV_T0 $5214`, `WV_SLEEP $5300 + slot offset`, `WV_SEEN $5302 + slot offset` (on the original screen at its last drawing), `WV_STYPE $5301 + slot offset`.
 
 ## 4. Hooks
 
@@ -102,6 +103,7 @@ the fixed bank (`$C000-$FFFF`) are written into both its copies (7 and 15).
 | `$CB29` | `LDX #$00 / STX $5B` | `JSR wide_world / NOP` |
 | `$DFDF` | `LDX #$01 / LDA` (IsObjectVisible) | `JMP wide_visible` |
 | `$EA05` | `JSR $EB85` (SelectRoomRAM) | `JSR wide_select_room` |
+| `$ECB4` | `LDA $0405,X / AND #$02` (DeleteOffscreenRoomSprites) | `JSR wide_room_retire / NOP / NOP` |
 | `$DE1B` | `JSR $DFDF` (DrawEnemy) | `JMP wide_enemy_draw` |
 | `$DED2` | `JSR $DFDF` (ObjDrawFrame) | `JMP wide_object_draw` |
 | `$F39F` | `JSR $DFDF` (UpdateEnemy_CheckIfVisible) | `JSR wide_enemy_check` |
@@ -221,6 +223,8 @@ WV_T0           = $5214         ; scratch
 WV_SLEEP        = $5300         ; + enemy slot offset: 1 asleep (placed by its room, not yet on
                                 ; the original screen)
 WV_STYPE        = $5301         ; + enemy slot offset: the type it was placed as
+WV_SEEN         = $5302         ; + enemy slot offset: 1 when it showed on the original screen at
+                                ; its last drawing
 
 ; The game.
 NMI_STATUS      = $1A           ; 0 while the main loop waits for the NMI
@@ -566,6 +570,8 @@ wide_enemy_draw:
     ASL
     STA     TEMP_08
     LDX     PAGE_INDEX
+    LDA     WV_ORIG
+    STA     WV_SEEN,X
     LDA     EN_DATA05,X
     AND     #$FD
     ORA     TEMP_08
@@ -590,6 +596,9 @@ wide_enemy_check:
     LDX     PAGE_INDEX
     JSR     EN_DRAW_NO_MOVE
 @hidden:
+    LDX     PAGE_INDEX
+    LDA     #$00
+    STA     WV_SEEN,X
     LDX     #$00
     RTS
 @updates:
@@ -618,6 +627,15 @@ wide_object_draw:
     JMP     OBJ_DRAW_GO
 @skip:
     JMP     OBJ_DRAW_SKIP
+
+; A room built on a nametable (DeleteOffscreenRoomSprites, $ECB4, in place of LDA $0405,X /
+; AND #$02: the enemies of that nametable the game keeps, those that showed): only those on the
+; original screen are kept. Awake in a margin, an enemy shows and updates too, but its room is
+; going: kept, it would live on in the new room's place, with its walls.
+wide_room_retire:
+    LDA     WV_SEEN,X
+    ASL
+    RTS
 
 ; A room's enemy placed ($EB5E, in place of LDA #$01 / STA $6AF4,X: its status, resting): it
 ; sleeps until it reaches the original screen.
@@ -781,6 +799,8 @@ def hooks(sym):
     put(7, 0xDED2, '20 df df', jmp(sym['wide_object_draw']))
     # A room built: where each nametable's room is on the map.
     put(7, 0xEA05, '20 85 eb', jsr(sym['wide_select_room']))
+    # A room built on a nametable: its enemies in the margins go with the room it held.
+    put(7, 0xECB4, 'bd 05 04 29 02', jsr(sym['wide_room_retire']))
     # A room's enemy placed: it sleeps until it reaches the original screen.
     put(7, 0xEB5E, 'a9 01 9d f4 6a', jsr(sym['wide_spawn']))
     # A sprite's x and the end of an object's drawing: the sprites' high bytes.
