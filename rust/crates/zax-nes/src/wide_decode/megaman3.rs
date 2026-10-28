@@ -1,4 +1,5 @@
-//! Mega Man 3 (USA): the margins of a stage, decoded from its layout in PRG-ROM.
+//! Mega Man 3 (USA): the margins of a stage, decoded from its layout in PRG-ROM; and the layout
+//! the later games keep (Mega Man 4 to 6: [`Layout`], their addresses in their own modules).
 //!
 //! A stage lives in the 8 KiB PRG bank the fixed bank's table at `$C8B9` gives for the stage
 //! (`$22`), which the game's column drawer (`$E882`) maps at `$A000`:
@@ -19,30 +20,63 @@
 
 use super::{megaman, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
-/// The decoder.
-pub struct MegaMan3;
-
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x603A_AA57;
 
-const STAGE: u16 = 0x0022;
-const CAMERA_LOW: u16 = 0x00FC;
-const CAMERA_HIGH: u16 = 0x00F9;
-const SECTION_LENGTH: u16 = 0x002C;
-const SECTION_SCREEN: u16 = 0x002D;
+/// Where a game of the series keeps a stage, as offsets in the stage's 8 KiB bank (seen at
+/// `$A000`), and its camera and section in RAM.
+pub struct Layout {
+    /// Which 8 KiB bank holds the stage.
+    pub stage_bank: StageBank,
+    /// The stage number.
+    pub stage: u16,
+    /// The camera's x: pixel and screen.
+    pub camera_low: u16,
+    pub camera_high: u16,
+    /// The section being played: its last screen, counted from its first, and the camera's.
+    pub section_length: u16,
+    pub section_screen: u16,
+    /// Screen to room, one byte a screen.
+    pub rooms: usize,
+    /// The rooms' layouts, 64 bytes each.
+    pub layouts: usize,
+    /// The structures, 4 bytes each.
+    pub structures: usize,
+    /// The blocks' corners, four tables of 256 (top left, top right, bottom left, bottom right).
+    pub tiles: usize,
+    /// The blocks' sub-palettes (low two bits).
+    pub palettes: usize,
+}
 
-/// The fixed bank's table of each stage's layout bank, from the end of the PRG-ROM.
-const STAGE_BANKS: usize = 0x4000 - 0x08B9;
-const STAGE_BANK_COUNT: usize = 20;
+/// How a game finds a stage's bank.
+pub enum StageBank {
+    /// From a table of `count` banks, by stage, `offset` bytes before the end of the PRG-ROM.
+    Table { offset: usize, count: usize },
+    /// The stage number with these bits set.
+    Or(u8),
+}
+
+/// Mega Man 3 (USA).
+pub const MEGAMAN3: Layout = Layout {
+    stage_bank: StageBank::Table {
+        offset: 0x4000 - 0x08B9,
+        count: 20,
+    },
+    stage: 0x0022,
+    camera_low: 0x00FC,
+    camera_high: 0x00F9,
+    section_length: 0x002C,
+    section_screen: 0x002D,
+    rooms: 0x0A00,
+    layouts: 0x0F00,
+    structures: 0x1700,
+    tiles: 0x1B00,
+    palettes: 0x1F00,
+};
+
 const BANK_SIZE: usize = 0x2000;
 
-const ROOMS: usize = 0x0A00;
-const LAYOUTS: usize = 0x0F00;
-const STRUCTURES: usize = 0x1700;
-const TILES: usize = 0x1B00;
-const PALETTES: usize = 0x1F00;
-
-impl MarginDecoder for MegaMan3 {
+impl MarginDecoder for Layout {
     fn decode_row(
         &self,
         memory: &DecoderMemory<'_>,
@@ -50,13 +84,13 @@ impl MarginDecoder for MegaMan3 {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        let Some(stage) = stage_bank(memory.prg_rom, memory.ram(STAGE)) else {
+        let Some(stage) = self.stage_bank(memory.prg_rom, memory.ram(self.stage)) else {
             return false;
         };
-        let screen = i32::from(memory.ram(CAMERA_HIGH));
-        let camera = (screen << 8) | i32::from(memory.ram(CAMERA_LOW));
-        let first = screen - i32::from(memory.ram(SECTION_SCREEN));
-        let last = first + i32::from(memory.ram(SECTION_LENGTH));
+        let screen = i32::from(memory.ram(self.camera_high));
+        let camera = (screen << 8) | i32::from(memory.ram(self.camera_low));
+        let first = screen - i32::from(memory.ram(self.section_screen));
+        let last = first + i32::from(memory.ram(self.section_length));
         megaman::decode_row(
             memory,
             *row,
@@ -64,37 +98,43 @@ impl MarginDecoder for MegaMan3 {
             out,
             camera,
             first * 32..(last + 1) * 32,
-            &|world, tile_row| tile_at(stage, world, tile_row),
+            &|world, tile_row| self.tile_at(stage, world, tile_row),
         )
     }
 }
 
-/// The 8 KiB bank stage `stage` is laid out in, as the game's column drawer maps it.
-fn stage_bank(prg_rom: &[u8], stage: u8) -> Option<&[u8]> {
-    let stage = usize::from(stage);
-    if stage >= STAGE_BANK_COUNT {
-        return None;
+impl Layout {
+    /// The 8 KiB bank stage `stage` is laid out in, as the game's column drawer maps it.
+    fn stage_bank<'a>(&self, prg_rom: &'a [u8], stage: u8) -> Option<&'a [u8]> {
+        let bank = match self.stage_bank {
+            StageBank::Table { offset, count } => {
+                if usize::from(stage) >= count {
+                    return None;
+                }
+                let table = prg_rom.len().checked_sub(offset)?;
+                usize::from(*prg_rom.get(table + usize::from(stage))?)
+            }
+            StageBank::Or(bits) => usize::from(stage | bits),
+        };
+        prg_rom.get(bank * BANK_SIZE..(bank + 1) * BANK_SIZE)
     }
-    let table = prg_rom.len().checked_sub(STAGE_BANKS)?;
-    let bank = usize::from(*prg_rom.get(table + stage)?);
-    prg_rom.get(bank * BANK_SIZE..(bank + 1) * BANK_SIZE)
-}
 
-/// CHR tile and sub-palette of world tile column `world`, tile row `tile_row` (0-29), from the
-/// stage bank `stage`; `None` before the level or past the bank.
-fn tile_at(stage: &[u8], world: i32, tile_row: i32) -> Option<(u8, u8)> {
-    let screen = usize::try_from(world >> 5).ok()?;
-    let row = usize::try_from(tile_row).ok()?;
-    let column = usize::try_from(world & 31).ok()?;
-    let room = usize::from(*stage.get(ROOMS + screen)?);
-    let structure =
-        usize::from(*stage.get(LAYOUTS + (room * 64) + ((row >> 2) * 8) + (column >> 2))?);
-    let quarter = (((row >> 1) & 1) * 2) + ((column >> 1) & 1);
-    let block = usize::from(*stage.get(STRUCTURES + (structure * 4) + quarter)?);
-    let corner = ((row & 1) * 2) + (column & 1);
-    let tile = *stage.get(TILES + (corner * 0x100) + block)?;
-    let palette = *stage.get(PALETTES + block)? & 3;
-    Some((tile, palette))
+    /// CHR tile and sub-palette of world tile column `world`, tile row `tile_row` (0-29), from
+    /// the stage bank `stage`; `None` before the level or past the bank.
+    fn tile_at(&self, stage: &[u8], world: i32, tile_row: i32) -> Option<(u8, u8)> {
+        let screen = usize::try_from(world >> 5).ok()?;
+        let row = usize::try_from(tile_row).ok()?;
+        let column = usize::try_from(world & 31).ok()?;
+        let room = usize::from(*stage.get(self.rooms + screen)?);
+        let structure =
+            usize::from(*stage.get(self.layouts + (room * 64) + ((row >> 2) * 8) + (column >> 2))?);
+        let quarter = (((row >> 1) & 1) * 2) + ((column >> 1) & 1);
+        let block = usize::from(*stage.get(self.structures + (structure * 4) + quarter)?);
+        let corner = ((row & 1) * 2) + (column & 1);
+        let tile = *stage.get(self.tiles + (corner * 0x100) + block)?;
+        let palette = *stage.get(self.palettes + block)? & 3;
+        Some((tile, palette))
+    }
 }
 
 #[cfg(test)]
@@ -103,27 +143,58 @@ mod tests {
 
     #[test]
     fn screens_rooms_structures_and_blocks() {
+        let layout = &MEGAMAN3;
         let mut stage = vec![0u8; BANK_SIZE];
         // Screen 1 is room 2; its structure row 3, column 2 is structure 5.
-        stage[ROOMS + 1] = 2;
-        stage[LAYOUTS + 128 + 24 + 2] = 5;
+        stage[layout.rooms + 1] = 2;
+        stage[layout.layouts + 128 + 24 + 2] = 5;
         // Structure 5: blocks TL 1, TR 2, BL 3, BR 4.
-        stage[STRUCTURES + 20..STRUCTURES + 24].copy_from_slice(&[1, 2, 3, 4]);
+        stage[layout.structures + 20..layout.structures + 24].copy_from_slice(&[1, 2, 3, 4]);
         // Block 3: tiles $30-$33, sub-palette 2 (collision bits above).
         for corner in 0..4 {
-            stage[TILES + corner * 0x100 + 3] = 0x30 + u8::try_from(corner).unwrap();
+            stage[layout.tiles + corner * 0x100 + 3] = 0x30 + u8::try_from(corner).unwrap();
         }
-        stage[PALETTES + 3] = 0x42;
+        stage[layout.palettes + 3] = 0x42;
         // World tile column 32 + 8 is structure column 2 of screen 1; tile row 14 is structure
         // row 3, its lower half.
         assert_eq!(
-            tile_at(&stage, 40, 14),
+            layout.tile_at(&stage, 40, 14),
             Some((0x30, 2)),
             "block 3, top left"
         );
-        assert_eq!(tile_at(&stage, 41, 14), Some((0x31, 2)), "top right");
-        assert_eq!(tile_at(&stage, 40, 15), Some((0x32, 2)), "bottom left");
-        assert_eq!(tile_at(&stage, 41, 15), Some((0x33, 2)), "bottom right");
-        assert_eq!(tile_at(&stage, -1, 0), None);
+        assert_eq!(layout.tile_at(&stage, 41, 14), Some((0x31, 2)), "top right");
+        assert_eq!(
+            layout.tile_at(&stage, 40, 15),
+            Some((0x32, 2)),
+            "bottom left"
+        );
+        assert_eq!(
+            layout.tile_at(&stage, 41, 15),
+            Some((0x33, 2)),
+            "bottom right"
+        );
+        assert_eq!(layout.tile_at(&stage, -1, 0), None);
+    }
+
+    #[test]
+    fn stage_banks_from_a_table_or_bits() {
+        let mut prg = vec![0u8; 8 * BANK_SIZE];
+        let end = prg.len();
+        prg[end - 0x100 + 2] = 5;
+        let table = Layout {
+            stage_bank: StageBank::Table {
+                offset: 0x100,
+                count: 4,
+            },
+            ..MEGAMAN3
+        };
+        prg[5 * BANK_SIZE] = 0xAB;
+        assert_eq!(table.stage_bank(&prg, 2).map(|bank| bank[0]), Some(0xAB));
+        assert!(table.stage_bank(&prg, 4).is_none());
+        let bits = Layout {
+            stage_bank: StageBank::Or(0x04),
+            ..MEGAMAN3
+        };
+        assert_eq!(bits.stage_bank(&prg, 1).map(|bank| bank[0]), Some(0xAB));
     }
 }

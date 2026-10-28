@@ -18,6 +18,7 @@
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size (`ff1wide`, `tools/build.py`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`blastermasterwide`, `tools/build.py`) |
+//! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end; one source for both builds (`mm4wide`, `tools/build.py`) |
 //! | Mega Man 3 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm3wide`, `tools/build.py`) |
 //! | Mega Man (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`mm1wide`, `tools/build.py`) |
 
@@ -85,9 +86,13 @@ pub const BLASTERMASTER_USA: &str = "Blaster Master (USA) widescreen";
 pub const MEGAMAN1_USA: &str = "Mega Man (USA) widescreen";
 /// Name of the Mega Man 3 (USA) widescreen patch (advanced mode).
 pub const MEGAMAN3_USA: &str = "Mega Man 3 (USA) widescreen";
+/// Name of the Mega Man 4 (USA) widescreen patch (advanced mode).
+pub const MEGAMAN4_USA: &str = "Mega Man 4 (USA) widescreen";
+/// Name of the Mega Man 4 (USA) (Rev 1) widescreen patch (advanced mode).
+pub const MEGAMAN4_USA_REV1: &str = "Mega Man 4 (USA) (Rev 1) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 14] = [
+pub const PATCHES: [BuiltinPatch; 16] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -519,6 +524,59 @@ pub const PATCHES: [BuiltinPatch; 14] = [
         boot_window: Some((0x90, 0x00)),
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEAD, 0xFEC2)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN4_USA,
+        game: "Mega Man 4",
+        rom_name: "Mega Man 4 (USA)",
+        source_crc: 0x2BC6_7AA8,
+        bps: include_bytes!("../patches/megaman4-usa-widescreen.bps"),
+        options: MEGAMAN4_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (32
+        // in 16 KiB units) is open in the window from power-on.
+        boot_window: Some((0xA0, 0x00)),
+        // The task scheduler's wait for a task to wake (the NMI wakes them).
+        idle_loop: Some((0xFEA8, 0xFEBC)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN4_USA_REV1,
+        game: "Mega Man 4",
+        rom_name: "Mega Man 4 (USA) (Rev 1)",
+        source_crc: 0x18A2_E74F,
+        bps: include_bytes!("../patches/megaman4-usa-rev1-widescreen.bps"),
+        options: MEGAMAN4_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (32
+        // in 16 KiB units) is open in the window from power-on.
+        boot_window: Some((0xA0, 0x00)),
+        // The task scheduler's wait for a task to wake (the NMI wakes them).
+        idle_loop: Some((0xFEA8, 0xFEBC)),
+    },
+];
+
+/// The options of both Mega Man 4 patches, the same hack built for each: a testing aid, off by
+/// default, and the overclock.
+const MEGAMAN4_OPTIONS: &[HackOption] = &[
+    // No damage from an enemy's touch (pits and spikes still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
     },
 ];
 
@@ -1003,6 +1061,10 @@ mod tests {
         assert_eq!(
             Some(MEGAMAN1_USA),
             for_game_name("Mega Man (Europe)").map(|patch| patch.name)
+        );
+        assert_eq!(
+            for_game_name("Mega Man 4 (Europe)").map(|patch| patch.game),
+            Some("Mega Man 4")
         );
         assert!(for_game_name("Mega Man X (USA)").is_none());
         assert_eq!(
