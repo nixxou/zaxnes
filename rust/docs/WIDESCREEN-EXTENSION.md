@@ -33,7 +33,9 @@ Fantasy (USA) one, an advanced mode as well
 Force (Korea) one, an advanced mode as well
 ([`hacks/metalforce/WIDESCREEN-HACK.md`](hacks/metalforce/WIDESCREEN-HACK.md)), and the Blaster
 Master (USA) one, an advanced mode as well
-([`hacks/blastermaster/WIDESCREEN-HACK.md`](hacks/blastermaster/WIDESCREEN-HACK.md)).
+([`hacks/blastermaster/WIDESCREEN-HACK.md`](hacks/blastermaster/WIDESCREEN-HACK.md)), and the
+Metroid (USA) one, an advanced mode as well
+([`hacks/metroid/WIDESCREEN-HACK.md`](hacks/metroid/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -317,12 +319,36 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    band of 8 lines, 256 for none; sprites from their records too): a game whose last visible
    columns show colours of the column it is drawing past the edge (Super Mario Bros. 3, 3
    columns: the attribute bytes it writes ahead also cover them).
+   The same on the left: a decoder whose `redrawn_left_columns()` is `n` (default 0) is also
+   asked for screen columns 0 to `n - 1`, their nametable records are replaced, and the wide
+   picture composes the centre of that band from the records up to `x = 8 n - fine X`
+   (`Ppu2C02::redrawn_to`, per band of 8 lines, 0 for none): a game that draws the column
+   coming in at the left edge with attribute bytes that also colour the visible column next to
+   it (Metroid, 2 each side). Extension change: `MarginDecoder::redrawn_left_columns`, the field
+   `redrawn_to` (reset with the frame), the first centre column of `decode_margins` the larger of
+   the masked column's and `n`, and `wide_picture_into` taking the PPU's pixels from
+   `max(redrawn_to, the masked column)` of each band.
 5. A decoder whose `decodes_masked_column()` is true (default false) is also asked for screen
    column 0 of each row while the game hides the leftmost 8 pixels of the background (PPUMASK
    bit 1 clear), and that column's nametable record of a decoded row is replaced too: the wide
    picture composes those 8 pixels from the records, and such a game keeps there the column it is
    drawing next (Super Mario Bros. 3, horizontal mirroring: the column it draws past the right
    edge is the same nametable column as the one at the left edge).
+6. A decoder's `margin_palette(memory)` (default `None`) is a background palette of its own for
+   the frame, 16 NES colour indices laid out as `$3F00-$3F0F`: with one, the decoded tiles it
+   hands back in sub-palettes 4-7 (`DecodedTile::palette`) are in its sub-palettes 0-3 (without
+   one, 4-7 read as 0-3). For a game that shows a neighbour of the screen in other colours than
+   the screen's (Metroid: a room past one where the game toggles the room palette). Extension
+   change: `Ppu2C02::margin_palette` (latched by `decode_margins`, cleared with the frame) keeps
+   it; the records keep sub-palettes 4-7 (`TileRecord::palette`, background records only); the
+   wide picture composes those pixels from it (palette entries `$20-$2F` of the composition,
+   `MARGIN_ENTRIES`); `FrameBatch::margin_palette` carries it to the 3D engine (`None` for every
+   other frame), which loads it into tables 8-11 of the frame palette
+   (`FramePalette::load_margin`, entry 0 of each table the universal colour; those tables
+   repeat the background ones otherwise) and colours a background tile in sub-palette 4-7 with
+   table `palette + 4` (`draw_list.rs`, REQ-E3D-560). A script that writes those tables as a
+   custom palette sees them overwritten in such a frame. Nothing changes for a decoder without
+   one.
 
 The CHR banks of the decoded rows: `Mapper::chr_peek_view` (default: `chr_view`) is the view
 `ppu_peek` reads, side effects aside. MMC3 has one (its peek is the default one through its bank
@@ -344,6 +370,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 | Metal Force (Korea) (data CRC-32 `EC6D910E`, mapper 156), unpatched and with its built-in patch | the level map in PRG-RAM, sides and vertical margin | `metalforce.rs`, see below |
 | Blaster Master (USA) (data CRC-32 `3F0FD764`), unpatched and with its built-in patch | the area's map in PRG-ROM, four levels of blocks, within the room the camera is in; vertical margin, overscan | `blastermaster.rs`, see below |
+| Metroid (USA) (data CRC-32 `70080810`), unpatched and with its built-in patch | the world map's rooms around the screen: the two the game keeps in PRG-RAM, the others built from the area's data as the game does; vertical margin, overscan | `metroid.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -646,6 +673,49 @@ a band of "water" a television hid). Those attribute bytes also colour the row n
 on the screen: the rows starting or ending within 8 lines of the edges are decoded whole width too
 (`overscan_lines` 8).
 
+Metroid: the world is a map of 32 x 32 rooms of one screen (256 x 240), room numbers at `$7000`
+in PRG-RAM (`$FF`: none), each an entry of the area's room table; the area's tables are in its PRG
+bank (`InArea` `$74` low nibble through `$CA30`: Brinstar 1, Norfair 2, Kraid 4, Tourian 3, Ridley
+5), their addresses copied to `$3B` (rooms), `$3D` (structures) and `$3F` (metatiles). The game
+builds a room into PRG-RAM (`SetupRoom`, `$EA2B`: `$6000` for nametable 0, `$6400` for the other,
+tiles then attribute bytes as in a nametable) and copies it to the PPU a column or a row at a time.
+A room's data is its default sub-palette (the attribute bytes' fill), then objects until `$FD` or
+`$FF`: a position `%yyyyxxxx` in metatiles, a structure (read with an 8-bit index) and its
+sub-palette (set in the attribute bits when it is not the default, `$EF9E`); a structure is rows of
+metatiles, a byte `%xxxxnnnn` (offset in metatiles, count, 0 for 16) then the metatiles, until
+`$FF`, a row cut where it would wrap and a structure stopped past room offset `$3A0` (`$EF13`); a
+metatile is 4 CHR tiles at `($3F) + (4 n & $FF)`, upper left, upper right, lower left, lower right.
+The game scrolls one way at a time (`$49`: 0 up, 1 down, 2 left, 3 right): across, two rooms side
+by side (a ring of 512 x 240), or up and down, two stacked (256 x 480). `MapPosX`/`MapPosY`
+(`$50`/`$4F`) is the room scrolled into: the second of the two on the screen scrolling right or
+down, the first scrolling left or up; `$FF` (both nametable bits toggled together) gives the
+nametable of the screen's left or top edge, `$FD`/`$FC` the scroll; so a row's place comes from its
+PPU address, the ring's offset from the world and the camera picking the instance. The map's rooms
+belong to five areas with their own tables, and the map does not say which: the margins show the
+rooms of the area in play only, those its starting room (`$95D7`/`$95D8` of its bank) or the
+screen's room reach (worked out once per screen's room) through the edges two neighbours share a
+way through (a tile at or past `$A0`, or a block the area's bombs blast, `$D651`, on both sides),
+up and down only between two rooms walled on the left and the right (shafts: a corridor's ceiling
+may happen to meet a room of another area built with this one's tables), never across an elevator
+room's top or bottom. The margins show the map's rooms around the screen, those behind a door too; the room on the screen's left (top)
+edge, and the other one while both show, are read from PRG-RAM (blasted blocks included; not a
+room the game is still building, `$5A` below `$F0`, on the nametable at the scroll direction), the
+others built from the area's data as `SetupRoom` does (kept, by bank and data address). A row is
+decoded when 28 of its 32 columns show the room's tile (the title, the password screen and the
+transitions are left to the nametables), checked on the screen's nearest row that reaches neither
+edge; scrolling up and down the game draws the row coming in at the edge (`covers_overscan`).
+Scrolling across, the game draws the column coming in at the screen's edge (`$E70C`) with
+attribute bytes that cover two columns, so the visible column next to it shows the incoming one's
+colours for a moment: the decoder redraws the two columns at each edge (`redrawn_left_columns`,
+`redrawn_right_columns` 2), from the room in PRG-RAM.
+An area has two room palettes, 0 and 5 of its palette pointers (`$9560`; `$76` holds one plus the
+one in use); the game toggles them when Samus goes through a palette change room (special item
+`$0A` of the area's table at `$9598`, `$EEFA`), leaving it by the other door than the one she came
+in by (`$8C84`; `$91` keeps the side she entered from). The rooms past such a room, on its other
+side from the screen's room (Brinstar's `(12, 7)`, Norfair's `(22, 17)`), are handed back in
+sub-palettes 4-7, and the decoder's margin palette (`margin_palette`) is the area's other room
+palette: its palette 0, with palette 5's PPU strings over it for 5.
+
 ---
 
 ## 5. The 3D engine
@@ -731,7 +801,10 @@ pub struct BuiltinPatch {
   as for any patch; loading one made in the other mode switches the advanced mode (the widescreen
   stays on).
 * `$5007` bit 4: the PRG window goes on over `$6000-$7FFF`, 10 KiB from `$5800`, for a game
-  with nothing there (no PRG-RAM; the cartridge never sees those reads). A boot window sets it.
+  with nothing there (no PRG-RAM; the cartridge never sees those reads). A boot window sets it,
+  unless its patch keeps the game's PRG-RAM (`BuiltinPatch::boot_window_keeps_prg_ram`, Metroid:
+  the game reads its PRG-RAM before the hack's code has run, and the title screen took a byte of
+  the window for Samus' suit, `$69B3`, loading her suitless graphics).
 * `BuiltinPatch::boot_window`: `(bank, page)` of the extension's PRG window, opened at power-on
   and reset with the extension unlocked (`WideExtension::boot`), and again after a restore that
   left it locked: for a ROM with no room for the code that would unlock it, whose reset or NMI then
@@ -739,7 +812,8 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
-  at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller). `NesCore::run_frame` ends the
+  at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller; Metroid: its main loop's wait
+  `TAY / LDA $1A / BNE / JMP` at `$C0CB`-`$C0D2`). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms

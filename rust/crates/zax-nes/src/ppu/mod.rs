@@ -230,6 +230,14 @@ pub struct Ppu2C02 {
     /// records rather than taken from the PPU (256: nowhere): the columns a margin decoder
     /// redraws at the right edge ([`crate::wide_decode::MarginDecoder::redrawn_right_columns`]).
     redrawn_from: [i16; 30],
+    /// Per band of 8 lines, the x up to which the centre of the wide picture is composed from
+    /// the records rather than taken from the PPU (0: nowhere): the columns a margin decoder
+    /// redraws at the left edge
+    /// ([`crate::wide_decode::MarginDecoder::redrawn_left_columns`]).
+    redrawn_to: [i16; 30],
+    /// The margin decoder's own background palette for the frame, for the decoded tiles in
+    /// sub-palettes 4-7 ([`crate::wide_decode::MarginDecoder::margin_palette`]).
+    margin_palette: Option<[u8; 16]>,
 }
 
 impl Default for Ppu2C02 {
@@ -314,8 +322,10 @@ impl Ppu2C02 {
             visible_rows: crate::STANDARD_ROWS,
             captured_rows: [None; 31],
             redrawn_from: [256; 30],
+            redrawn_to: [0; 30],
             frame_vertical_margin: 0,
             centre_lines: (0, 240),
+            margin_palette: None,
         }
     }
 
@@ -501,6 +511,13 @@ impl Ppu2C02 {
     #[must_use]
     pub const fn fine_x(&self) -> i32 {
         self.fine_x as i32
+    }
+
+    /// The margin decoder's own background palette for the frame just run, if any (the decoded
+    /// tiles in sub-palettes 4-7).
+    #[must_use]
+    pub const fn margin_palette(&self) -> Option<[u8; 16]> {
+        self.margin_palette
     }
 
     /// Returns the 32 palette bytes of the batch, mirrors filled in (REQ-CORE-045).
