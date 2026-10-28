@@ -628,6 +628,14 @@ impl NesCore {
         self.bus.ppu().wide_picture_into(out)
     }
 
+    /// Whether the margin decoder of the frame just run asks the screen's top and bottom 8 lines
+    /// hidden with a vertical margin as without one, when the host hides them
+    /// ([`crate::wide_decode::MarginDecoder::hides_overscan`]; false for a game without one).
+    #[must_use]
+    pub fn hides_overscan(&self) -> bool {
+        self.bus.ppu().hides_overscan()
+    }
+
     /// The tile records of the frame just run.
     #[must_use]
     pub fn tile_records(&self) -> &[TileRecord] {

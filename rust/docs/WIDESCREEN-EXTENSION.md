@@ -674,11 +674,9 @@ section's screen while `$27`/`$28` still give the old one: the margins stay empt
 change the camera and the section together, but the rows on the screen while they scroll belong to
 both sections: their decoders draw nothing while the vertical scroll `$FA` is not 0, and Mega Man 6
 decodes nothing off a screen's top). During such a scroll the game draws the rows coming in at the screen's
-top or bottom edge a piece at a time, which a television hid (and `video.hide_overscan` hides
-without a vertical margin): the Mega Man decoders cover the overscan (`covers_overscan`) and give
-those edge rows empty while the scroll runs (`$26` for Mega Man, `$FA` for 3 to 5, `$58` for 6),
-so that the wide picture composes them from the backdrop like the vertical margin; at any other
-time they decline them and the screen stays the PPU's.
+top or bottom edge a piece at a time, which a television hid: the Mega Man decoders ask the
+screen's top and bottom 8 lines hidden with a vertical margin as without one
+(`MarginDecoder::hides_overscan`, see section 6).
 The built-in patch (`MEGAMAN1_USA`, an advanced mode, `mm1wide`) draws the enemies in the margins.
 Its code is a 16 KiB PRG bank added to the game (bank 8 of 16, the fixed bank copied to bank 15,
 the one UxROM fixes), open in the window from power-on (`boot_window`). Options: "Invincible" (a
@@ -809,7 +807,14 @@ temporary.
   carries the wide picture and its rows. `interop::picture_size(len, height)` validates it,
   `interop::wide_quad_for(picture, height, cached)` builds the textured quad (x from -margin to
   256 + margin, y up to `margin_y` past the top and bottom of the NES plane), cached per
-  `(margin, margin_y)`. Both backends (GL `gl/picture.rs`, wgpu `wgpu_backend/resources.rs`)
+  `(margin, margin_y)`. `video.hide_overscan` (the screen's top and bottom 8 lines drawn black,
+  and their tiles left out of the 3D conversion) applies to a picture with a vertical margin only
+  when the frame's margin decoder asks for it (`MarginDecoder::hides_overscan`, false by default:
+  a vertical margin goes on past those lines; true for the Mega Man decoders, whose vertical margin
+  stays empty while the game draws rows there a piece at a time). The core latches it per frame
+  (`Ppu2C02::hides_overscan`, `NesCore::hides_overscan`), the session carries it with the
+  picture it keeps while the core is away (`GameSession::nes_picture_hides_overscan`), and
+  `hide_overscan_lines` blacks the screen's lines in the middle of the taller picture. Both backends (GL `gl/picture.rs`, wgpu `wgpu_backend/resources.rs`)
   reallocate the picture texture when its size changes.
 
 ---

@@ -226,6 +226,9 @@ pub struct Ppu2C02 {
     /// all of them, but those of a row across the top or bottom edge whose centre a decoder gave
     /// (`decode_margins`), past which the game shows a row kept for the overscan.
     centre_lines: (i32, i32),
+    /// The decoder of the frame just run asks its screen's top and bottom lines hidden with a
+    /// vertical margin too ([`crate::wide_decode::MarginDecoder::hides_overscan`]).
+    hides_overscan: bool,
     /// Per band of 8 lines, the x from which the centre of the wide picture is composed from the
     /// records rather than taken from the PPU (256: nowhere): the columns a margin decoder
     /// redraws at the right edge ([`crate::wide_decode::MarginDecoder::redrawn_right_columns`]).
@@ -316,6 +319,7 @@ impl Ppu2C02 {
             redrawn_from: [256; 30],
             frame_vertical_margin: 0,
             centre_lines: (0, 240),
+            hides_overscan: false,
         }
     }
 

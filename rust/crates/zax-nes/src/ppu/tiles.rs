@@ -71,6 +71,7 @@ impl Ppu2C02 {
         self.visible_rows = crate::STANDARD_ROWS;
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
+        self.hides_overscan = false;
         self.redrawn_from = [256; 30];
         self.tiles.set_extra_columns(0);
         self.mask_x = 0;
@@ -91,6 +92,7 @@ impl Ppu2C02 {
         self.visible_rows = [(-margin, 256 + margin); 30];
         self.captured_rows = [None; 31];
         self.centre_lines = (0, 240);
+        self.hides_overscan = false;
         self.redrawn_from = [256; 30];
     }
 
@@ -355,6 +357,7 @@ impl Ppu2C02 {
         let (edge_rows, centre_lines) =
             self.decode_extra_rows(decoder, memory, cart, &mut tiles, &mut records);
         self.centre_lines = centre_lines;
+        self.hides_overscan = decoder.hides_overscan();
         self.redrawn_from = redrawn_from;
 
         #[allow(clippy::cast_possible_truncation)] // At most 512.
@@ -933,6 +936,13 @@ impl Ppu2C02 {
     /// middle columns are the PPU's own picture; the sides are composed from the tile records
     /// in the NES order (a sprite in front, then the background, then a sprite behind, a lower
     /// sprite number winning) over the universal backdrop.
+    /// Whether the decoder of the frame just run asks the screen's top and bottom lines hidden
+    /// with a vertical margin too ([`crate::wide_decode::MarginDecoder::hides_overscan`]).
+    #[must_use]
+    pub const fn hides_overscan(&self) -> bool {
+        self.hides_overscan
+    }
+
     pub fn wide_picture_into(&self, out: &mut Vec<u8>) -> usize {
         let margin = usize::try_from(self.frame_margin.max(0)).unwrap_or(0);
         let margin_y = usize::try_from(self.frame_vertical_margin.max(0)).unwrap_or(0);
