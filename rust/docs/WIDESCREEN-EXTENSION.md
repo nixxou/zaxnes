@@ -671,7 +671,9 @@ attribute byte at `$8300 + n`; block `b` (the low six bits) is CHR tiles `4 b` t
 camera is `$1B:$1A`, the section being played screens `$27` to `$28`; nothing is drawn past it.
 While the game scrolls to another section (`$26` non-zero) the camera is already on the new
 section's screen while `$27`/`$28` still give the old one: the margins stay empty (Mega Man 3 to 5
-change the camera and the section together; Mega Man 6 decodes nothing off a screen's top).
+change the camera and the section together, but the rows on the screen while they scroll belong to
+both sections: their decoders draw nothing while the vertical scroll `$FA` is not 0, and Mega Man 6
+decodes nothing off a screen's top).
 The built-in patch (`MEGAMAN1_USA`, an advanced mode, `mm1wide`) draws the enemies in the margins.
 Its code is a 16 KiB PRG bank added to the game (bank 8 of 16, the fixed bank copied to bank 15,
 the one UxROM fixes), open in the window from power-on (`boot_window`). Options: "Invincible" (a
