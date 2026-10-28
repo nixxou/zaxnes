@@ -779,7 +779,10 @@ column the game draws past the right edge wraps on a single nametable's width ov
 first columns, and with a fine X the hidden 8 pixels take part of column 1 as well, which showed
 that column's colours (a stripe at the left edge of the original picture). The built-in patch (`MEGAMAN6_USA`, an advanced mode,
 `mm6wide`) draws the enemies in the margins: Mega Man 6's objects run as scripts that remove
-themselves through the test "on the screen" (`$E485`), which the hack widens for the enemies; its
+themselves through the test "on the screen" (`$E485`), which the hack widens for the enemies (not
+for the stage's controllers, type `$80` in slot 22); an enemy asleep in a margin runs its script's
+first frame, which sets up how it looks, and one spawned while the camera stands (the stage's start,
+its tiles not yet in CHR-RAM) shows once the camera moves; its
 sprite loops are the game's four (none, horizontal, vertical, both flips) for each page. Its code
 is a 16 KiB PRG bank added to the game (8 KiB banks 64-65 of 68, the fixed banks copied to banks 66
 and 67), of which the window shows the first 2 KiB from power-on (`boot_window`). `idle_loop`
