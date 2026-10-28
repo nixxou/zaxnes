@@ -889,6 +889,17 @@ impl MarginDecoder for Metroid {
         true
     }
 
+    fn redrawn_left_columns(&self) -> i32 {
+        // Scrolling across, the game draws the column coming in at the edge of the screen
+        // (`$E70C`); its attribute bytes cover two columns, so the one next to it, on the
+        // screen, shows the incoming one's colours meanwhile (a blue line at the left edge).
+        2
+    }
+
+    fn redrawn_right_columns(&self) -> i32 {
+        2
+    }
+
     fn margin_palette(&self, memory: &DecoderMemory<'_>) -> Option<[u8; 16]> {
         // The area's other room palette, for the rooms past a palette change room.
         if memory.ram(GAME_MODE) != 0 {
