@@ -249,6 +249,9 @@ pub struct GameSession {
     /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
     /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
     strict_wide_edges: bool,
+    /// `video.hide_overscan`, for this game: whether the tiles of the picture's top and bottom
+    /// 8 lines are left out of the 3D scene (without a vertical widescreen margin).
+    hide_overscan: bool,
     /// The movie being recorded or played (see `zax_nes::movie`).
     movie: Option<MovieRun>,
 }
@@ -384,6 +387,7 @@ impl GameSession {
             aimed: None,
             batch_records: Vec::new(),
             strict_wide_edges: false,
+            hide_overscan: false,
             movie: None,
             pipeline: FramePipeline::default(),
         };
@@ -522,6 +526,11 @@ impl GameSession {
     /// Sets `video.widescreen_strict_edges` (see the field `strict_wide_edges`).
     pub fn set_strict_wide_edges(&mut self, strict: bool) {
         self.strict_wide_edges = strict;
+    }
+
+    /// Sets `video.hide_overscan` for this game (see the field `hide_overscan`).
+    pub fn set_hide_overscan(&mut self, hide: bool) {
+        self.hide_overscan = hide;
     }
 
     /// The conversion engine.
@@ -1112,7 +1121,11 @@ impl GameSession {
             [(-margin, 256 + margin); 30]
         };
         let counter = self.frame_counter;
-        let records = std::mem::take(&mut self.batch_records);
+        let mut records = std::mem::take(&mut self.batch_records);
+        if self.hide_overscan && margin_y == 0 {
+            // A tile half or more in the top or bottom 8 lines is not shown.
+            records.retain(|record| record.y > 4 && record.y < 228);
+        }
         // The conversion is synchronous, right after the frame, as REQ-LOOP-060 (c) requires.
         let batch = FrameBatch {
             records: &records,

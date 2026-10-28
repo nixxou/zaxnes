@@ -1374,10 +1374,11 @@ fn video_sprite_limit(out: &mut Vec<SettingDescriptor>) {
 
 /// `video.hide_overscan` (Rust-only).
 fn video_overscan(out: &mut Vec<SettingDescriptor>) {
-    // Rust-only (owner request): the 2D picture's top and bottom 8 lines, which an NTSC TV did
-    // not show (games leave scrolling garbage there), are blacked out. "Auto" does it for the
-    // NTSC games only: a PAL TV showed the 240 lines. Never with a widescreen margin, which goes
-    // on past those lines. Not exposed to Lua.
+    // Rust-only (owner request): the picture's top and bottom 8 lines, which an NTSC TV did not
+    // show (games leave scrolling garbage there), are blacked out in 2D and their tiles left out
+    // of the 3D scene. "Auto" does it for the NTSC games only: a PAL TV showed the 240 lines.
+    // Never with a vertical widescreen margin, which goes on past those lines. Not exposed to
+    // Lua.
     out.push(
         SettingDescriptor::new(
             SettingId::VideoHideOverscan,

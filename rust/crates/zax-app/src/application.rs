@@ -1553,19 +1553,16 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
 /// The lines at the top and at the bottom of the NES picture an NTSC TV did not show.
 const OVERSCAN_LINES: usize = 8;
 
-/// Blacks out the [`OVERSCAN_LINES`] at the top and bottom of a 256 x 240 `picture` (colour
-/// indices); a wider or taller one, with widescreen margins, is left whole: its margins go on
-/// past those lines.
+/// Blacks out the [`OVERSCAN_LINES`] at the top and bottom of a 240-line `picture` (colour
+/// indices, as wide as its widescreen margins make it); a taller one, with a vertical margin,
+/// goes on past those lines and is not given to it.
 fn hide_overscan_lines(picture: &mut [u8]) {
-    const WIDTH: usize = 256;
     const HEIGHT: usize = 240;
     const BLACK: u8 = 0x0F;
-    if picture.len() != WIDTH * HEIGHT {
-        return;
-    }
-    let band = OVERSCAN_LINES * WIDTH;
+    let band = OVERSCAN_LINES * (picture.len() / HEIGHT);
+    let end = picture.len();
     picture[..band].fill(BLACK);
-    picture[(HEIGHT * WIDTH) - band..].fill(BLACK);
+    picture[end - band..].fill(BLACK);
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
@@ -1592,7 +1589,11 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         1 => SpriteLimit::Removed,
         _ => SpriteLimit::Smart,
     };
+    let mut hidden_overscan = false;
     if let Some(session) = host.session_mut() {
+        let ntsc = session.nominal_frame_rate() > 55;
+        hidden_overscan = hide_overscan == 2 || (hide_overscan == 1 && ntsc);
+        session.set_hide_overscan(hidden_overscan);
         session.core_mut().set_hack_options(hack_options);
         session.core_mut().set_sprite_limit(sprite_limit);
         session.core_mut().set_widescreen_margin(widescreen);
@@ -1628,8 +1629,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
         state.picture_height = session.copy_nes_picture(&mut state.picture);
-        let ntsc = session.nominal_frame_rate() > 55;
-        if hide_overscan == 2 || (hide_overscan == 1 && ntsc) {
+        if hidden_overscan && state.picture_height == 240 {
             hide_overscan_lines(&mut state.picture);
         }
     }
