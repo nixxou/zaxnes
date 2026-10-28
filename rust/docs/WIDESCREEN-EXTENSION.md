@@ -765,7 +765,10 @@ pub struct BuiltinPatch {
   as for any patch; loading one made in the other mode switches the advanced mode (the widescreen
   stays on).
 * `$5007` bit 4: the PRG window goes on over `$6000-$7FFF`, 10 KiB from `$5800`, for a game
-  with nothing there (no PRG-RAM; the cartridge never sees those reads). A boot window sets it.
+  with nothing there (no PRG-RAM; the cartridge never sees those reads). A boot window sets it,
+  unless its patch keeps the game's PRG-RAM (`BuiltinPatch::boot_window_keeps_prg_ram`, Metroid:
+  the game reads its PRG-RAM before the hack's code has run, and the title screen took a byte of
+  the window for Samus' suit, `$69B3`, loading her suitless graphics).
 * `BuiltinPatch::boot_window`: `(bank, page)` of the extension's PRG window, opened at power-on
   and reset with the extension unlocked (`WideExtension::boot`), and again after a restore that
   left it locked: for a ROM with no room for the code that would unlock it, whose reset or NMI then
