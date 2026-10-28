@@ -60,8 +60,9 @@ const SCREENS: i32 = 8;
 /// The last capture line of a row whose 8 lines end before the screen's last.
 const LAST_INNER_LINE: i32 = 232;
 
-/// Screen columns whose tiles are checked against the nametables.
-const CHECKED: [i32; 4] = [3, 11, 19, 27];
+/// Of the screen's 32 columns, how many must show the map's tile for a row to be the map's (a few
+/// may show something the game changed: a door, a block).
+const MATCHING_COLUMNS: usize = 28;
 /// The screen's first and last four columns, checked when the others are not the map's.
 const EDGES: [i32; 8] = [0, 1, 2, 3, 28, 29, 30, 31];
 /// The first area of the side view (`$14`): below are the overhead view's.
@@ -148,7 +149,9 @@ impl<'a> Area<'a> {
                 .filter(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == *tile)
                 .map(|(tile, _)| tile)
         };
-        if CHECKED.iter().all(|&column| matches(column).is_some()) {
+        // A few columns would not do: the game blanks the nametables around a boss, where the
+        // map has tiles every few columns.
+        if (0..32).filter(|&column| matches(column).is_some()).count() >= MATCHING_COLUMNS {
             return true;
         }
         // The game may draw something of its own over the map in the middle of the screen (a
