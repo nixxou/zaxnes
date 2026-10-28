@@ -1579,6 +1579,10 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .get(SettingId::VideoWidescreenStrictEdges)
         .as_bool();
     let hide_overscan = host.settings().get(SettingId::VideoHideOverscan).as_int();
+    // The colours the NES ones are shown in: the whole process's.
+    zax_engine3d::palette::select_nes_palette(
+        u8::try_from(host.settings().get(SettingId::VideoNesPalette).as_int()).unwrap_or(0),
+    );
     let hack_options = host.hack_option_bits();
     let sprite_limit = match host
         .settings()
@@ -1774,5 +1778,22 @@ fn reveal_folder(folder: &Path) {
     });
     if let Err(error) = result {
         log(&format!("the data folder could not be opened: {error}"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_nes_palette_choices_are_the_engines_palettes() {
+        let labels: Vec<&str> = zax_settings::catalogue::descriptor(SettingId::VideoNesPalette)
+            .domain()
+            .options()
+            .unwrap_or_default()
+            .iter()
+            .map(|option| option.label.as_str())
+            .collect();
+        assert_eq!(labels, zax_engine3d::palette::NesPalette::LABELS);
     }
 }
