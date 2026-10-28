@@ -20,7 +20,7 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `1A91D7B6` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `734183C0` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in banks 0-5 and 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -55,7 +55,8 @@ the other objects are drawn by `ObjDrawFrame` (`$DE4A`), which keeps the test's 
 | `DrawEnemy` (`$DE1B`) | draws the enemy when it shows; `$0405` bit 1 = it shows | draws it when it shows within the margins; bit 1 = it updates (below) |
 | `UpdateEnemy_CheckIfVisible` (`$F39F`) | skips the enemy's routine when it does not show | skips it when it does not update; asleep in a margin, it is drawn in its resting pose (`$F682`, then `$F438`: animation and drawing, no movement) |
 | an enemy placed by its room (`$EB5E`) | status 1 (resting) | the same, and asleep (`$5300 + slot`, with its type at `$5301 + slot`: a slot holding another type since is awake) |
-| a sprite's x (`$DF0E`) | 8-bit | the same, and its high byte to `$5100 + OAM offset`: the 16-bit x nearest the object's whose low byte is the sprite's; 0 for sprites no position test placed (the energy display) |
+| a sprite's x (`$DF0E`) | 8-bit | the same, and its high byte: the 16-bit x nearest the object's whose low byte is the sprite's; 0 for sprites no position test placed (the energy display). Kept in a buffer (`$5400 + OAM offset`, cleared at the world's update) and copied to `$5100` at its end: a frame the game runs late copies the sprite page as it is, with the last finished frame's high bytes |
+| end of the world's update (`$CB66`) | clears the unused sprites | first the previews: the enemies of the rooms the margins show that no nametable holds (across: the rooms left of the screen's and right of it; in a shaft, the corridors on either side), read from the rooms' data as `$EB4D` places them, drawn still in their resting pose by the game's own drawing in enemy slot `$50` (set aside meanwhile), within the margins, while sprites are left (OAM offset below `$C0`); a room a nametable holds is previewed until the game has placed its enemies (`$5A` below `$F0`) and the frame it does; Kraid and Ridley are not; then the frame's high bytes to the extension |
 | `ObjDrawFrame` (`$DED2`) | draws the object when it shows; its `onScreen` byte = it shows | `onScreen` the same; the doors (objects `$80-$B0`) and the item (`$40`) are drawn when they show within the margins |
 | `DrawDoor` (each area bank, `$8BCC`) | draws the door (`AnimDrawObject`) | the same, then its twin, the facing door of the room across (in a shaft, the corridors on either side, which the game does not build): mirrored, 32 pixels further out (x `$10` <-> `$F0` of the room across), in the door's animation frame, within the margins; not when the other nametable holds the room across and the game keeps its facing door |
 | end of an object's drawing (`$DF2D`) | clears `$6B` | the same, and the object's 16-bit x is no longer valid |
@@ -91,7 +92,7 @@ hidden: the decoder draws the background), `$5007 = $0A` (sprites free of the ex
 Variables (extension RAM): `WV_M $5200`, `WV_ORIG $5201` and `WV_WIDE $5202` (the last position
 test: on the original screen, within the margins), `WV_VALID $5203` / `WV_BASEL`, `WV_BASEH
 $5204/$5205` (the 16-bit screen x of the object being drawn), `WV_ASLEEP $5206` (the last enemy
-test), `WV_NT_X $5210-$5211` and `WV_NT_Y $5212-$5213` (by nametable: the map position of the room the game built there last), `WV_T0`, `WV_T1 $5214/$5215`, `WV_TWIN $5216` (a door's twin being drawn), `WV_TWIN_SIDE $5217`, `WV_CNTRL $5218` (the door's `$6B`), `WV_SLEEP $5300 + slot offset`, `WV_SEEN $5302 + slot offset` (on the original screen at its last drawing), `WV_STYPE $5301 + slot offset`.
+test), `WV_NT_X $5210-$5211` and `WV_NT_Y $5212-$5213` (by nametable: the map position of the room the game built there last), `WV_T0`, `WV_T1 $5214/$5215`, `WV_TWIN $5216` (a door's twin being drawn), `WV_TWIN_SIDE $5217`, `WV_CNTRL $5218` (the door's `$6B`), `WV_PREVIEW $5219` (a preview being drawn), `WV_PREV_XL/XH/Y $521A-$521C` (its place), `WV_CX/CY $521D/$521E` (the room previewed), `WV_OXL/OXH/OYL/OYH $5220-$5223` (its corner on the screen), `WV_PTRL/H $5224/$5225`, `WV_PTYPE/PPOS $5226/$5227` (the entry read), `WV_FRESH $5228` (1 + the nametable built last), `WV_SPAWNED $5229`, `WV_PSAVE $5230-$524F` (slot `$50` set aside), `WV_HI_BUF $5400 + OAM offset`, `WV_SLEEP $5300 + slot offset`, `WV_SEEN $5302 + slot offset` (on the original screen at its last drawing), `WV_STYPE $5301 + slot offset`.
 
 ## 4. Hooks
 
@@ -112,6 +113,7 @@ the fixed bank (`$C000-$FFFF`) are written into both its copies (7 and 15).
 | `$DF0E` | `ADC $0E / STA $0203,X` | `JSR wide_sprite_x / NOP / NOP` |
 | `$DF2D` | `LDA #$00 / STA $6B` | `JSR wide_drawn / NOP` |
 | `$CE92` | `LDA $6E / ORA $6F` | `JSR wide_hurt / NOP` |
+| `$CB66` | `LDX $5B / LDA #$F4` (UpdateWorld, the unused sprites) | `JSR wide_previews / NOP` |
 | banks 1-5 `$8BCC` | `LDA #$06 / JMP $DE47` (DrawDoor) | `JMP wide_draw_door / NOP / NOP` |
 | bank 0 `$9354` | `LDA #$02 / STA $24` | `JSR wide_new_game / NOP` |
 
@@ -146,9 +148,10 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 
 * No sprite in the vertical margins: the extension carries a high byte for x only. Scrolling up
   and down, the enemies keep the original screen.
-* Only the two rooms the game keeps in PRG-RAM have enemies; the other rooms of the margins are
-  empty. The room the screen scrolls into gets its enemies when the game builds it, its edge at
-  the screen's: an enemy near that edge shows in the margin only shortly before the screen. The elevators, the statues and the other objects keep the original screen.
+* Only the two rooms the game keeps in PRG-RAM have living enemies; those of the other rooms of
+  the margins are previews, still, from their rooms' data (what spawns otherwise, the pipes' bugs,
+  has none). Rooms of another area the margins could touch would preview garbage (the decoder
+  hides them; the hack does not tell the areas apart). The elevators, the statues and the other objects keep the original screen.
 * A room of the margins past a palette change room shows in the area's other palette (the
   decoder's own margin palette); the game's other palette changes (the item rooms' music, the
   elevators) do not apply to the margins.
@@ -181,6 +184,8 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 ;    lives within the margins; what enemies fire lives there too;
 ;  * the doors and the items show within the margins too (the game keeps them to its tests of
 ;    the original screen), and each door's twin, the facing door of the room across;
+;  * the enemies of the rooms the margins show that the game has not built are drawn still as
+;    previews, from the rooms' data, until the game builds the room;
 ;  * every sprite of an object gets the high byte of its 16-bit x, the room each nametable holds
 ;    telling which margin an object of the other nametable shows in;
 ;  * Samus, her shots and the other objects keep the original screen;
@@ -227,6 +232,24 @@ WV_T1           = $5215
 WV_TWIN         = $5216         ; non-zero while a door's twin is drawn
 WV_TWIN_SIDE    = $5217         ; its side: 1 right, $FF left
 WV_CNTRL        = $5218         ; the door's $6B
+WV_PREVIEW      = $5219         ; non-zero while a preview is drawn
+WV_PREV_XL      = $521A         ; its 16-bit screen x and its screen y
+WV_PREV_XH      = $521B
+WV_PREV_Y       = $521C
+WV_CX           = $521D         ; the map room previewed
+WV_CY           = $521E
+WV_OXL          = $5220         ; its top left corner on the screen, 16-bit
+WV_OXH          = $5221
+WV_OYL          = $5222
+WV_OYH          = $5223
+WV_PTRL         = $5224         ; where its data is read
+WV_PTRH         = $5225
+WV_PTYPE        = $5226         ; the enemy entry read: type, position
+WV_PPOS         = $5227
+WV_FRESH        = $5228         ; 1 + the nametable the game built a room on last
+WV_SPAWNED      = $5229         ; non-zero when the game placed a room's enemy this frame
+WV_HI_BUF       = $5400         ; + 4 n: the high byte of sprite n, as the frame writes them
+WV_PSAVE        = $5230         ; slot $50 set aside (32 bytes, to $524F)
 WV_SLEEP        = $5300         ; + enemy slot offset: 1 asleep (placed by its room, not yet on
                                 ; the original screen)
 WV_STYPE        = $5301         ; + enemy slot offset: the type it was placed as
@@ -265,6 +288,21 @@ LAST_DOOR       = $B0
 JOY1_STATUS     = $14           ; the buttons held
 BANK_SWITCH     = $24           ; the PRG bank to switch to, plus one
 IN_AREA         = $74
+EN_Y            = $0400         ; + slot offset: the enemy's 16 bytes from its y
+EN_IS_HIT       = $0404
+EN_SPECIAL      = $040F         ; bit 7: the tough version
+EN_STATUS       = $6AF4         ; + slot offset: its other 16 bytes from its status
+EN_RESET_ANIM   = $6AF9
+PREVIEW_SLOT    = $50           ; the enemy slot a preview borrows
+LAST_PREVIEW_SPRITE = $C0       ; previews stop when the sprites reach this OAM offset
+ROOM_PTR_TABLE  = $3B           ; the area's room pointers
+WORLD_MAP       = $7000
+MAP_SIZE        = 32
+ROOM_HEIGHT     = 240
+SCROLLING_DOWN  = 1
+ROOM_NUMBER     = $5A           ; the room the game builds; $F0 up: its objects done
+ROOM_DONE       = $F0
+TEMP_00         = $00
 EN_DATA05       = $0405         ; + slot offset: bit 1 the enemy updates (it showed)
 EN_TYPE         = $6B02         ; + slot offset
 OAM_X           = $0203
@@ -328,7 +366,13 @@ wide_frame:
 ; The start of the world's update ($CB29, in place of LDX #$00 / STX $5B): the sprites are built
 ; again, from no high bytes.
 wide_world:
-    JSR     clear_high_bytes
+    LDA     #$00                        ; no enemy placed yet this frame
+    STA     WV_SPAWNED
+    TAX                                 ; the frame's high bytes from 0 (the sprites written
+@clear:                                 ; otherwise, the energy display, have none)
+    STA     WV_HI_BUF,X
+    INX
+    BNE     @clear
     LDX     #$00
     STX     SPRITE_PAGE_POS
     RTS
@@ -348,6 +392,10 @@ clear_high_bytes:
 ; screen x and y). Also works out whether it shows within the margins (WV_WIDE) and its 16-bit
 ; screen x for its sprites (WV_BASE).
 wide_visible:
+    LDA     WV_PREVIEW
+    BEQ     @game
+    JMP     preview_place
+@game:
     LDX     #$01
     LDA     TEMP_Y
     TAY
@@ -594,6 +642,9 @@ wide_select_room:
     JSR     NAMETABLE_AT_SCROLL
     PHA
     TAY
+    INY                                 ; the room built last: its enemies come at the end
+    STY     WV_FRESH                    ; of its objects
+    DEY
     LDA     MAP_X
     STA     WV_NT_X,Y
     LDA     MAP_Y
@@ -639,6 +690,8 @@ wide_awake:
 ; margins; its update bit (EN_DATA05 bit 1) set when it updates.
 wide_enemy_draw:
     JSR     wide_visible
+    LDA     WV_PREVIEW                  ; a preview: drawn, nothing of the game's touched
+    BNE     @go
     JSR     wide_awake
     ASL
     STA     TEMP_08
@@ -651,6 +704,7 @@ wide_enemy_draw:
     STA     EN_DATA05,X
     LDA     WV_WIDE
     BEQ     @skip
+@go:
     JMP     EN_DRAW_GO
 @skip:
     JMP     EN_DRAW_SKIP
@@ -773,6 +827,388 @@ wide_draw_door:
 @done:
     RTS
 
+; ---------------------------------------------------------------------------- ;
+; Previews (the end of the world's update, $CB66, in place of LDX $5B / LDA #$F4: the unused
+; sprites cleared next): the enemies of the rooms the margins show that the game has not built
+; (the room the screen scrolls into, before the game builds it; in a shaft, the corridors on
+; either side), read from the rooms' data as the game places them ($EB4D) and drawn still in
+; their resting pose by the game's own drawing, in enemy slot $50 borrowed meanwhile. When the
+; game builds the room, its enemies take over where the previews were (the room previewed until
+; the game has placed its enemies, at the end of its objects, and the frame it does: after the
+; enemies were drawn).
+wide_previews:
+    LDA     WV_M
+    BEQ     @done
+    LDA     SCROLL_DIR
+    AND     #$02
+    BEQ     @shaft
+    ; Across: the rooms left of the screen's left one, and right of the screen.
+    LDA     MAP_X                       ; the screen's left room
+    STA     WV_CX
+    LDA     SCROLL_DIR
+    CMP     #SCROLLING_RIGHT
+    BNE     @left_room
+    LDA     SCROLL_X
+    BEQ     @left_room
+    DEC     WV_CX
+@left_room:
+    LDA     MAP_Y
+    STA     WV_CY
+    LDA     #$00
+    STA     WV_OYL
+    STA     WV_OYH
+    LDA     #$FF                        ; the room on the left
+    JSR     preview_across
+    LDA     #$01                        ; the next ones
+    JSR     preview_across
+    LDA     #$02
+    JSR     preview_across
+    JMP     @done
+@shaft:
+    ; Up and down: the corridors on either side of the screen's rooms.
+    LDA     MAP_Y                       ; the screen's top room
+    STA     WV_CY
+    LDA     SCROLL_DIR
+    CMP     #SCROLLING_DOWN
+    BNE     @top_room
+    LDA     SCROLL_Y
+    BEQ     @top_room
+    DEC     WV_CY
+@top_room:
+    LDA     #$00
+    SEC
+    SBC     SCROLL_Y
+    STA     WV_OYL
+    LDA     #$00
+    SBC     #$00
+    STA     WV_OYH
+    JSR     preview_sides
+    INC     WV_CY                       ; the room below, 240 lines down
+    LDA     WV_OYL
+    CLC
+    ADC     #ROOM_HEIGHT
+    STA     WV_OYL
+    LDA     WV_OYH
+    ADC     #$00
+    STA     WV_OYH
+    JSR     preview_sides
+@done:
+    ; The frame's sprites are written: their high bytes to the extension, at once (a frame the
+    ; game runs late copies the sprite page as it is then: the high bytes stay those of the last
+    ; finished frame meanwhile).
+    LDX     #$00
+@copy:
+    LDA     WV_HI_BUF,X
+    STA     WIDE_SPRHI,X
+    INX
+    INX
+    INX
+    INX
+    BNE     @copy
+    LDX     SPRITE_PAGE_POS
+    LDA     #$F4
+    RTS
+
+; The rooms left and right of the shaft's room WV_CY.
+preview_sides:
+    LDA     MAP_X
+    STA     WV_CX
+    DEC     WV_CX
+    LDA     #$FF
+    STA     WV_OXH
+    LDA     #$00
+    STA     WV_OXL
+    JSR     preview_room
+    INC     WV_CX
+    INC     WV_CX
+    LDA     #$01
+    STA     WV_OXH
+    LDA     #$00
+    STA     WV_OXL
+    JSR     preview_room
+    DEC     WV_CX
+    RTS
+
+; The room A rooms right of the screen's left one (WV_CX): its x on the screen, A * 256 less the
+; scroll.
+preview_across:
+    PHA
+    CLC
+    ADC     WV_CX
+    STA     WV_CX
+    PLA
+    PHA
+    STA     WV_OXH
+    LDA     #$00
+    SEC
+    SBC     SCROLL_X
+    STA     WV_OXL
+    LDA     WV_OXH
+    SBC     #$00
+    STA     WV_OXH
+    JSR     preview_room
+    PLA                                 ; back to the screen's left room
+    EOR     #$FF
+    SEC
+    ADC     WV_CX
+    STA     WV_CX
+    RTS
+
+; The previews of map room (WV_CX, WV_CY), its top left corner at (WV_OX, WV_OY) on the screen:
+; none when a nametable holds it (the game's own enemies), off the map or no room there.
+preview_room:
+    LDA     WV_CX
+    CMP     #MAP_SIZE
+    BCS     @out
+    LDA     WV_CY
+    CMP     #MAP_SIZE
+    BCS     @out
+    LDY     #$01
+@nametable:
+    LDA     WV_NT_X,Y
+    CMP     WV_CX
+    BNE     @other
+    LDA     WV_NT_Y,Y
+    CMP     WV_CY
+    BNE     @other
+    ; Held, but the room the game builds last: previewed until its enemies show, while the
+    ; game is still on its objects ($5A below $F0) and the frame it places them (after the
+    ; enemies were drawn).
+    INY
+    CPY     WV_FRESH
+    BNE     @out
+    DEY
+    LDA     ROOM_NUMBER
+    CMP     #ROOM_DONE
+    BCC     @other
+    LDA     WV_SPAWNED
+    BEQ     @out
+@other:
+    DEY
+    BPL     @nametable
+    BMI     @on_map
+@out:
+    RTS
+@on_map:
+    ; The room's number: the map at $7000 + 32 y + x.
+    LDA     WV_CY
+    STA     TEMP_00+1
+    LDA     #$00
+    LSR     TEMP_00+1
+    ROR
+    LSR     TEMP_00+1
+    ROR
+    LSR     TEMP_00+1
+    ROR
+    ORA     WV_CX
+    STA     TEMP_00
+    LDA     TEMP_00+1
+    ORA     #>WORLD_MAP
+    STA     TEMP_00+1
+    LDY     #$00
+    LDA     (TEMP_00),Y
+    CMP     #$FF
+    BEQ     @none
+    ASL                                 ; its data (an 8-bit index, as $EA42)
+    TAY
+    LDA     (ROOM_PTR_TABLE),Y
+    STA     WV_PTRL
+    INY
+    LDA     (ROOM_PTR_TABLE),Y
+    STA     WV_PTRH
+    LDA     #$01                        ; past the default palette
+    JSR     preview_step
+@objects:
+    LDY     #$00
+    LDA     (TEMP_00),Y
+    CMP     #$FF
+    BEQ     @none
+    CMP     #$FD
+    BEQ     @list
+    CMP     #$FE
+    BNE     @object
+    LDA     #$01
+    BNE     @next_object
+@object:
+    LDA     #$03
+@next_object:
+    JSR     preview_step
+    JMP     @objects
+@list:
+    LDA     #$01
+    JSR     preview_step
+@entry:
+    LDY     #$00
+    LDA     (TEMP_00),Y
+    CMP     #$FF
+    BEQ     @none
+    AND     #$0F
+    CMP     #$01
+    BNE     @size
+    INY
+    LDA     (TEMP_00),Y
+    STA     WV_PTYPE
+    INY
+    LDA     (TEMP_00),Y
+    STA     WV_PPOS
+    JSR     preview_enemy
+    BCS     @none                       ; no sprites left
+    LDA     #$01
+@size:
+    TAY
+    LDA     ENTRY_SIZES,Y
+    JSR     preview_step
+    JMP     @entry
+@none:
+    RTS
+
+; The sizes of a room's entries after $FD, by type ($EAD4): enemy 3, door 2, elevator 2,
+; statues 1, pipe of bugs 3.
+ENTRY_SIZES:
+    .byte   1, 3, 2, 1, 2, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1
+
+; Moves the room data pointer A bytes on and loads it into $00/$01.
+preview_step:
+    CLC
+    ADC     WV_PTRL
+    STA     WV_PTRL
+    STA     TEMP_00
+    LDA     WV_PTRH
+    ADC     #$00
+    STA     WV_PTRH
+    STA     TEMP_00+1
+    RTS
+
+; Draws the enemy WV_PTYPE at WV_PPOS (%yyyyxxxx, as $EB4D: y + 8, x + 12) of the room, when it
+; shows within the margins; carry set when the sprites run out.
+preview_enemy:
+    LDA     WV_PTYPE
+    AND     #$40                        ; Kraid and Ridley: not previewed
+    BNE     @hidden
+    LDA     SPRITE_PAGE_POS
+    CMP     #LAST_PREVIEW_SPRITE
+    BCS     @full
+    ; y: the room's top on the screen + (pos & $F0) + 8, on the screen's 240 lines.
+    LDA     WV_PPOS
+    AND     #$F0
+    ORA     #$08
+    CLC
+    ADC     WV_OYL
+    STA     WV_PREV_Y
+    LDA     WV_OYH
+    ADC     #$00
+    BNE     @hidden
+    LDA     WV_PREV_Y
+    CMP     #$F0
+    BCS     @hidden
+    ; x: the room's left on the screen + (pos << 4) + 12, within the margins.
+    LDA     WV_PPOS
+    ASL
+    ASL
+    ASL
+    ASL
+    ORA     #$0C
+    CLC
+    ADC     WV_OXL
+    STA     WV_PREV_XL
+    LDA     WV_OXH
+    ADC     #$00
+    STA     WV_PREV_XH
+    CMP     #$01
+    BEQ     @right
+    CMP     #$FF
+    BNE     @hidden
+    LDA     WV_M                        ; left: x >= 256 - M
+    EOR     #$FF
+    CLC
+    ADC     #$01
+    CMP     WV_PREV_XL
+    BEQ     @shown
+    BCC     @shown
+    BCS     @hidden
+@right:
+    LDA     WV_PREV_XL                  ; right: x < M
+    CMP     WV_M
+    BCS     @hidden
+@shown:
+    JSR     preview_draw
+@hidden:
+    CLC
+    RTS
+@full:
+    SEC
+    RTS
+
+; Draws the preview: slot $50 set aside, the enemy set up there resting (its type, toughness,
+; facing right), its resting animation's frame drawn ($F682, then $F438: animation and
+; drawing), the slot put back.
+preview_draw:
+    LDX     #$0F
+@save:
+    LDA     EN_Y+PREVIEW_SLOT,X
+    STA     WV_PSAVE,X
+    LDA     EN_STATUS+PREVIEW_SLOT,X
+    STA     WV_PSAVE+$10,X
+    DEX
+    BPL     @save
+    LDA     PAGE_INDEX
+    PHA
+    LDX     #PREVIEW_SLOT
+    STX     PAGE_INDEX
+    LDA     WV_PTYPE
+    AND     #$3F
+    STA     EN_TYPE,X
+    LDA     WV_PTYPE
+    AND     #$80                        ; the tough version: its own palette
+    STA     EN_SPECIAL,X
+    LDA     #$01                        ; resting
+    STA     EN_STATUS,X
+    LDA     #$00
+    STA     EN_DATA05,X
+    STA     EN_IS_HIT,X
+    LDA     #$FF                        ; no animation yet: the resting one is set
+    STA     EN_RESET_ANIM,X
+    LDA     #$01
+    STA     WV_PREVIEW
+    JSR     EN_RESTING_ANIM
+    LDX     #PREVIEW_SLOT
+    JSR     EN_DRAW_NO_MOVE
+    LDA     #$00
+    STA     WV_PREVIEW
+    PLA
+    STA     PAGE_INDEX
+    LDX     #$0F
+@restore:
+    LDA     WV_PSAVE,X
+    STA     EN_Y+PREVIEW_SLOT,X
+    LDA     WV_PSAVE+$10,X
+    STA     EN_STATUS+PREVIEW_SLOT,X
+    DEX
+    BPL     @restore
+    ; The room data pointer, which the drawing used ($00/$01).
+    LDA     WV_PTRL
+    STA     TEMP_00
+    LDA     WV_PTRH
+    STA     TEMP_00+1
+    RTS
+
+; The position test for a preview (WV_PREVIEW): its place, worked out by preview_enemy; never on
+; the original screen for the game.
+preview_place:
+    LDA     WV_PREV_XL
+    STA     SCREEN_X
+    STA     WV_BASEL
+    LDA     WV_PREV_XH
+    STA     WV_BASEH
+    LDA     WV_PREV_Y
+    STA     SCREEN_Y
+    LDA     #$01
+    STA     WV_VALID
+    STA     WV_WIDE
+    LDX     #$00
+    STX     WV_ORIG
+    RTS
+
 ; A room built on a nametable (DeleteOffscreenRoomSprites, $ECB4, in place of LDA $0405,X /
 ; AND #$02: the enemies of that nametable the game keeps, those that showed): only those on the
 ; original screen are kept. Awake in a margin, an enemy shows and updates too, but its room is
@@ -786,6 +1222,7 @@ wide_room_retire:
 ; sleeps until it reaches the original screen.
 wide_spawn:
     LDA     #$01
+    STA     WV_SPAWNED
     STA     $6AF4,X
     STA     WV_SLEEP,X
     LDA     EN_TYPE,X
@@ -816,7 +1253,7 @@ wide_sprite_x:
 @zero:
     TYA
 @store:
-    STA     WIDE_SPRHI,X
+    STA     WV_HI_BUF,X
     RTS
 
 ; The end of an object's drawing (ClearObjectCntrl, $DF2D, in place of LDA #$00 / STA $6B).
@@ -949,6 +1386,8 @@ def hooks(sym):
     # A door drawn (each area bank): its twin, the facing door of the room across.
     for bank in range(1, 6):
         put(bank, 0x8BCC, 'a9 06 4c 47 de', jmp(sym['wide_draw_door']))
+    # The end of the world's update: the previews of the rooms the game has not built.
+    put(7, 0xCB66, 'a6 5b a9 f4', jsr(sym['wide_previews']))
     # A room's enemy placed: it sleeps until it reaches the original screen.
     put(7, 0xEB5E, 'a9 01 9d f4 6a', jsr(sym['wide_spawn']))
     # A sprite's x and the end of an object's drawing: the sprites' high bytes.

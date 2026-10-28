@@ -478,7 +478,8 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   de repos jusqu'à ce qu'ils atteignent l'écran d'origine, puis vivent et s'affichent dans les
   marges ; les portes et les objets s'affichent aussi dans les marges ; Samus et ses tirs
   restent bornés à l'écran d'origine. Seules les deux salles que le jeu garde en mémoire ont
-  leurs ennemis, et les marges ne montrent que les salles de la zone en cours ; une salle
+  des ennemis vivants ; ceux des autres salles des marges y sont dessinés immobiles, en aperçu,
+  jusqu'à ce que le jeu construise la salle, et les marges ne montrent que les salles de la zone en cours ; une salle
   au-delà d'un changement de palette (Brinstar) y prend ses propres couleurs. Options du patch : « Sélecteur de niveau » (maintenir une direction en
   appuyant sur START pour une nouvelle partie : haut Norfair, droite Kraid, gauche Tourian, bas
   Ridley) et « Invincible », désactivés par défaut ; « Sans ralentissements » (actif par défaut).
