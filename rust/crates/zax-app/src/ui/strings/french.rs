@@ -239,6 +239,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "setting.video.remove_sprite_limit",
         "Supprimer la limite de 8 sprites par ligne",
     ),
+    (
+        "setting.video.hide_overscan",
+        "Masquer les 8 lignes du haut et du bas (Auto : jeux NTSC)",
+    ),
     ("setting.emu.builtin_patches", "Patchs de ROM intégrés (au prochain chargement)"),
     ("setting.emu.tv_mode", "Région vidéo"),
     ("setting.emu.core", "Cœur d'émulation"),

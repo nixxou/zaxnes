@@ -1550,6 +1550,24 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
+/// The lines at the top and at the bottom of the NES picture an NTSC TV did not show.
+const OVERSCAN_LINES: usize = 8;
+
+/// Blacks out the [`OVERSCAN_LINES`] at the top and bottom of a 256 x 240 `picture` (colour
+/// indices); a wider or taller one, with widescreen margins, is left whole: its margins go on
+/// past those lines.
+fn hide_overscan_lines(picture: &mut [u8]) {
+    const WIDTH: usize = 256;
+    const HEIGHT: usize = 240;
+    const BLACK: u8 = 0x0F;
+    if picture.len() != WIDTH * HEIGHT {
+        return;
+    }
+    let band = OVERSCAN_LINES * WIDTH;
+    picture[..band].fill(BLACK);
+    picture[(HEIGHT * WIDTH) - band..].fill(BLACK);
+}
+
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
     let (widescreen, widescreen_y) = widescreen_margin(
@@ -1563,6 +1581,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .settings()
         .get(SettingId::VideoWidescreenStrictEdges)
         .as_bool();
+    let hide_overscan = host.settings().get(SettingId::VideoHideOverscan).as_int();
     let hack_options = host.hack_option_bits();
     let sprite_limit = match host
         .settings()
@@ -1609,6 +1628,10 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
         state.picture_height = session.copy_nes_picture(&mut state.picture);
+        let ntsc = session.nominal_frame_rate() > 55;
+        if hide_overscan == 2 || (hide_overscan == 1 && ntsc) {
+            hide_overscan_lines(&mut state.picture);
+        }
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
     scene.followed_shape = session.followed_shape();

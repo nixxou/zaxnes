@@ -519,6 +519,21 @@ Le réglage ne change que l'image 2D (la vue 3D a toujours tous les sprites) ; l
 d'overflow (bit 5 de `$2002`) et les accès à la cartouche restent ceux de la console, quel que
 soit le choix.
 
+### Overscan (8 lignes du haut et du bas)
+
+La NES produit 240 lignes, mais un téléviseur NTSC n'en montrait qu'environ 224 : les 8 premières
+et les 8 dernières tombaient hors de l'écran. Beaucoup de jeux y préparent le décor qui défile, et
+on y voit des tuiles ou des couleurs parasites. Un téléviseur PAL, lui, montrait les 240 lignes. Le
+réglage **« Masquer les 8 lignes du haut et du bas »** (`video.hide_overscan`, onglet **Vidéo**) :
+
+- **Désactivé** : les 240 lignes sont affichées ;
+- **Auto** (par défaut) : ces lignes sont noires pour les jeux NTSC (60 Hz), affichées pour les
+  jeux PAL (50 Hz), comme FCEUX ;
+- **Toujours** : ces lignes sont noires quelle que soit la région.
+
+Le réglage ne change que l'image 2D, et seulement sans marge d'écran large : avec une marge
+verticale, l'image continue au-delà de ces lignes, que le décodeur de marge redessine.
+
 ### Langue de l'interface
 
 L'onglet **Interface** porte le réglage **Langue** (`ui.language`), qui vaut `en` (« English »)
