@@ -11,6 +11,16 @@ reads the stage map in PRG-ROM through the pointers the game keeps in RAM (see
 its own, the simple mode. The hack does the objects: enemies that spawn, sleep, live and show in the
 margins, the way the Mega Man 3 to 5 hacks do them, in Mega Man 6's own engine.
 
+At the screen's edges the decoder redraws the screen's first two columns and its last one: the game
+draws the column coming past the right edge on a single nametable's width, over the screen's first
+columns, which it hides 8 pixels of (with a fine X, part of column 1 too: a stripe of that column's
+colours showed there), and the last column showed the colours of the column being drawn past the
+edge. Only rows of a camera on a screen's top are decoded. With the video setting that hides the
+overscan, the decoder asks for the screen's top and bottom 8 lines to stay hidden with a vertical
+margin too, and the vertical margin is drawn black: the game draws the rows coming in at those edges
+a piece at a time while it scrolls to another section, which a television hid. The picture then ends
+where it does without a vertical margin.
+
 ---
 
 ## 1. Identity
