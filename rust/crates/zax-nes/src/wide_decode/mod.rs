@@ -23,6 +23,7 @@ mod megaman;
 mod megaman1;
 mod megaman2;
 mod megaman3;
+mod megaman4;
 mod metalforce;
 mod ng3;
 mod smb1;
@@ -203,7 +204,8 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
         blastermaster::SOURCE_CRC => Some(&blastermaster::BlasterMaster),
         megaman1::SOURCE_CRC => Some(&megaman1::MegaMan1),
-        megaman3::SOURCE_CRC => Some(&megaman3::MegaMan3),
+        megaman3::SOURCE_CRC => Some(&megaman3::MEGAMAN3),
+        megaman4::SOURCE_CRC | megaman4::SOURCE_CRC_REV1 => Some(&megaman4::MEGAMAN4),
         _ => None,
     }
 }
@@ -225,7 +227,10 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
         crate::builtin_patches::BLASTERMASTER_USA => Some(&blastermaster::BlasterMaster),
         crate::builtin_patches::MEGAMAN1_USA => Some(&megaman1::MegaMan1),
-        crate::builtin_patches::MEGAMAN3_USA => Some(&megaman3::MegaMan3),
+        crate::builtin_patches::MEGAMAN3_USA => Some(&megaman3::MEGAMAN3),
+        crate::builtin_patches::MEGAMAN4_USA | crate::builtin_patches::MEGAMAN4_USA_REV1 => {
+            Some(&megaman4::MEGAMAN4)
+        }
         _ => None,
     }
 }
