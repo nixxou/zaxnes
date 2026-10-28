@@ -520,6 +520,18 @@ Le réglage ne change que l'image 2D (la vue 3D a toujours tous les sprites) ; l
 d'overflow (bit 5 de `$2002`) et les accès à la cartouche restent ceux de la console, quel que
 soit le choix.
 
+### Palette de couleurs NES
+
+La NES ne produit pas de couleurs RVB mais un signal vidéo composite, que le téléviseur décode :
+chaque émulateur traduit ses 64 couleurs avec une table à lui, d'où des teintes différentes d'un
+émulateur à l'autre pour le même jeu. Le réglage **« Palette de couleurs NES »**
+(`video.nes_palette`, onglet **Vidéo**) choisit cette table, pour l'image 2D comme pour la vue
+3D : **Zaxnes** (celle de 3DSen, par défaut), **Mesen** (sa palette par défaut), **FCEUX**,
+**Nestopia (YUV)** (le défaut de Nestopia), **Nestopia (RGB)**, les palettes de FirebrandX
+(**Smooth**, **NES Classic** — celle de la mini console —, **Composite Direct**, **PVM Style**),
+**Sony CXA2025AS** (le décodeur des téléviseurs Sony) et **Wavebeam**. Le changement est
+immédiat ; le jeu n'en sait rien (les numéros de couleur restent les siens).
+
 ### Overscan (8 lignes du haut et du bas)
 
 La NES produit 240 lignes, mais un téléviseur NTSC n'en montrait qu'environ 224 : les 8 premières

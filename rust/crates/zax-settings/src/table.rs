@@ -618,6 +618,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     video_rust_only(out);
     video_sprite_limit(out);
     video_overscan(out);
+    video_nes_palette(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1395,5 +1396,37 @@ fn video_overscan(out: &mut Vec<SettingDescriptor>) {
             opt(2, "Always"),
         ]))
         .with_label("Hide the overscan"),
+    );
+}
+
+/// `video.nes_palette` (Rust-only).
+fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): the RGB table the 64 NES colours are shown in, the 2D picture
+    // and the 3D view alike. The console outputs a composite signal, which each emulator decodes
+    // into a table of its own: Zaxnes' (3DSen's, the default) or one of the main emulators'
+    // (`zax_engine3d::palette::NesPalette`, in this order). Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoNesPalette,
+            SettingKind::Enum,
+            SettingValue::Enum(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Zaxnes"),
+            opt(1, "Mesen"),
+            opt(2, "FCEUX"),
+            opt(3, "Nestopia (YUV)"),
+            opt(4, "Nestopia (RGB)"),
+            opt(5, "Smooth (FirebrandX)"),
+            opt(6, "NES Classic (FirebrandX)"),
+            opt(7, "Composite Direct (FirebrandX)"),
+            opt(8, "PVM Style (FirebrandX)"),
+            opt(9, "Sony CXA2025AS"),
+            opt(10, "Wavebeam"),
+        ]))
+        .with_label("NES colour palette"),
     );
 }
