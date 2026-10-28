@@ -94,6 +94,10 @@ margins make it), `--dump-mem`, `--dump-frame`, `--png-nes`, `--save-state`.
 To analyse a note: replay to its frame and to the frames around it (a few before, a few after),
 and look at the view the player used (the 2D view for a player in 2D).
 
+`--trace-ram <file>` writes the CPU's 2 KiB of work RAM after every frame run, one block after
+the other (2 KiB a frame): what a game did over a whole movie, at once (each change of screen, a
+variable's course), instead of one replay per frame looked at.
+
 ## 5. Determinism and its limits
 
 * A replay is exact when the game sees what it saw while recording: the same ROM and built-in

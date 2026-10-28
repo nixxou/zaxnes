@@ -74,6 +74,8 @@ pub struct RomRequest<'a> {
     pub save_state: Option<&'a Path>,
     /// Where to write the work RAM and the cartridge RAM after the run.
     pub dump_mem: Option<&'a Path>,
+    /// Where to write the CPU's 2 KiB of work RAM after every frame, one after the other.
+    pub trace_ram: Option<&'a Path>,
 }
 
 /// Runs the ROM and builds the scene of its last frame.
@@ -113,6 +115,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
     host.core.set_sprite_limit(request.sprite_limit);
     let frames = request.frames;
     let mut records = Vec::new();
+    let mut trace = Vec::new();
     for counter in 0..frames {
         for &(_, address, value) in request.pokes.iter().filter(|poke| poke.0 == counter) {
             host.core.write_memory(address, value);
@@ -122,6 +125,16 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
             .and_then(|movie| movie.inputs.get(counter as usize).copied())
             .unwrap_or_else(|| request.input.at(counter));
         host.run_frame(counter, input, &mut records, &mut scene)?;
+        if request.trace_ram.is_some() {
+            trace.extend((0..0x0800u16).map(|address| host.core.read_memory(address)));
+        }
+    }
+    if let Some(path) = request.trace_ram {
+        fs::write(path, &trace)?;
+        println!(
+            "render: work RAM of {frames} frames written to {}",
+            path.display()
+        );
     }
 
     host.with_runtime(&mut scene, ProfileScriptRuntime::invoke_end);
