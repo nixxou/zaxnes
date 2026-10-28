@@ -669,6 +669,9 @@ lives in PRG bank `$31` (Wily's stages, 6 and up, in bank `$31 - 6`), as the gam
 first) the pointer at `$8C30 + 2 room` gives; structure `n` is 4 block bytes at `$8000 + 4 n`, its
 attribute byte at `$8300 + n`; block `b` (the low six bits) is CHR tiles `4 b` to `4 b + 3`. The
 camera is `$1B:$1A`, the section being played screens `$27` to `$28`; nothing is drawn past it.
+While the game scrolls to another section (`$26` non-zero) the camera is already on the new
+section's screen while `$27`/`$28` still give the old one: the margins stay empty (Mega Man 3 to 5
+change the camera and the section together; Mega Man 6 decodes nothing off a screen's top).
 The built-in patch (`MEGAMAN1_USA`, an advanced mode, `mm1wide`) draws the enemies in the margins.
 Its code is a 16 KiB PRG bank added to the game (bank 8 of 16, the fixed bank copied to bank 15,
 the one UxROM fixes), open in the window from power-on (`boot_window`). Options: "Invincible" (a

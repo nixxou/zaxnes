@@ -13,7 +13,9 @@
 //!
 //! The level is a straight list of screens: world x / 256 is the screen. The camera (`$1B:$1A`)
 //! is kept between screens `$27` and `$28` of the section being played; the screens past them
-//! belong to the next section (above, below, past a door), so nothing is drawn there.
+//! belong to the next section (above, below, past a door), so nothing is drawn there. While the
+//! game scrolls from one section to the next (`$26` non-zero) the camera is already on the new
+//! section's screen and `$27`/`$28` still give the old one: the margins stay empty.
 
 use super::{megaman, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -28,6 +30,7 @@ const CAMERA_LOW: u16 = 0x001A;
 const CAMERA_HIGH: u16 = 0x001B;
 const SECTION_FIRST: u16 = 0x0027;
 const SECTION_LAST: u16 = 0x0028;
+const SECTION_CHANGE: u16 = 0x0026;
 
 const STRUCTURES: usize = 0x0000;
 const ATTRIBUTES: usize = 0x0300;
@@ -45,6 +48,9 @@ impl MarginDecoder for MegaMan1 {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
+        if memory.ram(SECTION_CHANGE) != 0 {
+            return false;
+        }
         let bank = usize::from(memory.ram(STAGE) % STAGE_BANKS);
         let Some(stage) = memory.prg_rom.get(bank * BANK_SIZE..(bank + 1) * BANK_SIZE) else {
             return false;
