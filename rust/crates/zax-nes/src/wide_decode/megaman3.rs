@@ -54,6 +54,14 @@ pub enum StageBank {
     Table { offset: usize, count: usize },
     /// The stage number with these bits set.
     Or(u8),
+    /// The bank RAM byte `bank` holds; while RAM byte `switch` is `value`, each screen's own,
+    /// from the table `per_screen` bytes before the end of the PRG-ROM (Mega Man 5).
+    Ram {
+        bank: u16,
+        switch: u16,
+        value: u8,
+        per_screen: usize,
+    },
 }
 
 /// Mega Man 3 (USA).
@@ -84,9 +92,9 @@ impl MarginDecoder for Layout {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        let Some(stage) = self.stage_bank(memory.prg_rom, memory.ram(self.stage)) else {
+        if self.stage_bank(memory, 0).is_none() {
             return false;
-        };
+        }
         let screen = i32::from(memory.ram(self.camera_high));
         let camera = (screen << 8) | i32::from(memory.ram(self.camera_low));
         let first = screen - i32::from(memory.ram(self.section_screen));
@@ -98,14 +106,26 @@ impl MarginDecoder for Layout {
             out,
             camera,
             first * 32..(last + 1) * 32,
-            &|world, tile_row| self.tile_at(stage, world, tile_row),
+            &|world, tile_row| {
+                let stage = self.stage_bank(memory, world >> 5)?;
+                self.tile_at(stage, world, tile_row)
+            },
         )
+    }
+
+    /// The games hide the screen's leftmost 8 pixels while they scroll, and keep there a column
+    /// they are drawing (Mega Man 5 shows it in the middle of a wide view otherwise).
+    fn decodes_masked_column(&self) -> bool {
+        true
     }
 }
 
 impl Layout {
-    /// The 8 KiB bank stage `stage` is laid out in, as the game's column drawer maps it.
-    fn stage_bank<'a>(&self, prg_rom: &'a [u8], stage: u8) -> Option<&'a [u8]> {
+    /// The 8 KiB bank screen `screen` of the stage is laid out in, as the game's column drawer
+    /// maps it.
+    fn stage_bank<'a>(&self, memory: &DecoderMemory<'a>, screen: i32) -> Option<&'a [u8]> {
+        let prg_rom = memory.prg_rom;
+        let stage = memory.ram(self.stage);
         let bank = match self.stage_bank {
             StageBank::Table { offset, count } => {
                 if usize::from(stage) >= count {
@@ -115,6 +135,19 @@ impl Layout {
                 usize::from(*prg_rom.get(table + usize::from(stage))?)
             }
             StageBank::Or(bits) => usize::from(stage | bits),
+            StageBank::Ram {
+                bank,
+                switch,
+                value,
+                per_screen,
+            } => {
+                if memory.ram(switch) == value {
+                    let table = prg_rom.len().checked_sub(per_screen)?;
+                    usize::from(*prg_rom.get(table + usize::try_from(screen).ok()?)?)
+                } else {
+                    usize::from(memory.ram(bank))
+                }
+            }
         };
         prg_rom.get(bank * BANK_SIZE..(bank + 1) * BANK_SIZE)
     }
@@ -177,10 +210,27 @@ mod tests {
     }
 
     #[test]
-    fn stage_banks_from_a_table_or_bits() {
+    fn stage_banks_from_a_table_bits_or_ram() {
         let mut prg = vec![0u8; 8 * BANK_SIZE];
         let end = prg.len();
         prg[end - 0x100 + 2] = 5;
+        prg[end - 0x80 + 3] = 6;
+        prg[5 * BANK_SIZE] = 0xAB;
+        prg[6 * BANK_SIZE] = 0xCD;
+        let mut ram = vec![0u8; 0x800];
+        ram[0x22] = 2;
+        ram[0x27] = 5;
+        let nametable = |_| 0;
+        let written = |_| 0;
+        let memory = |ram: &[u8]| -> Vec<u8> { ram.to_vec() };
+        let ram_copy = memory(&ram);
+        let decoder_memory = DecoderMemory {
+            ram: &ram_copy,
+            prg_ram: &[],
+            prg_rom: &prg,
+            nametable: &nametable,
+            nametable_written: &written,
+        };
         let table = Layout {
             stage_bank: StageBank::Table {
                 offset: 0x100,
@@ -188,13 +238,41 @@ mod tests {
             },
             ..MEGAMAN3
         };
-        prg[5 * BANK_SIZE] = 0xAB;
-        assert_eq!(table.stage_bank(&prg, 2).map(|bank| bank[0]), Some(0xAB));
-        assert!(table.stage_bank(&prg, 4).is_none());
+        assert_eq!(
+            table.stage_bank(&decoder_memory, 0).map(|bank| bank[0]),
+            Some(0xAB)
+        );
+        // Stage 2 with bit 2: bank 6.
         let bits = Layout {
             stage_bank: StageBank::Or(0x04),
             ..MEGAMAN3
         };
-        assert_eq!(bits.stage_bank(&prg, 1).map(|bank| bank[0]), Some(0xAB));
+        assert_eq!(
+            bits.stage_bank(&decoder_memory, 0).map(|bank| bank[0]),
+            Some(0xCD)
+        );
+        let in_ram = Layout {
+            stage_bank: StageBank::Ram {
+                bank: 0x0027,
+                switch: 0x0026,
+                value: 0x0E,
+                per_screen: 0x80,
+            },
+            ..MEGAMAN3
+        };
+        assert_eq!(
+            in_ram.stage_bank(&decoder_memory, 3).map(|bank| bank[0]),
+            Some(0xAB)
+        );
+        ram[0x26] = 0x0E;
+        let ram_copy = memory(&ram);
+        let decoder_memory = DecoderMemory {
+            ram: &ram_copy,
+            ..decoder_memory
+        };
+        assert_eq!(
+            in_ram.stage_bank(&decoder_memory, 3).map(|bank| bank[0]),
+            Some(0xCD)
+        );
     }
 }
