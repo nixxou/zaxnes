@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `9E1E3AAA` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `06C20CA3` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -67,7 +67,7 @@ and `$064A` the next entries right and left of the spawn window.
 |---|---|---|
 | the list's spawns (bank `$3A` `$8120`, the window, then the walk from `$813A`) | entries between camera + 8 and camera + 254 spawn, the walk keeping its place in `$0649` / `$064A` | two walks: the original's, its window and its pointers, for the controllers alone (type `$80`, all in slot 22: the stage counts on one at a time in the window; with a wider one a controller took the slot of the next, which stayed marked spawned, and the camera never went on); then one between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`), for the enemies alone, with pointers of its own (taken from the game's whenever the game sets them); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
 | an entry's spawn (bank `$3A` `$81A7`) | | only the kind of the walk under way |
-| the part of the stage enemies live in (`wide_part`) | | the screens beside the camera's, as far as a join of two screens that are not side by side, whatever `$71` (`wide_reach`, worked out each frame before the walks, as Zaxnes' decoder does for the margins: the stage list's controllers, their actions without a screen of their own scrolling up or down from their screen, doors to a screen of their own, or doors that load the stage's other tiles (`$73` with bit 7); bank `$39` at `$8000` and the list's bank `$3A` at `$A000` through the game's `$CBC0`, its banks put back as its NMI does) |
+| the part of the stage enemies live in (`wide_part`) | | the screens beside the camera's, as far as a join of two screens that are not side by side, whatever `$71` (`wide_reach`, worked out before the walks when the camera's screen, whether it straddles the next, or the stage's list changes (`WV_RKEY $5258`-`$525A`: worked out every frame, its walk of the list cost a frame late in two), as Zaxnes' decoder does for the margins: the stage list's controllers, their actions without a screen of their own scrolling up or down from their screen, doors to a screen of their own, or doors that load the stage's other tiles (`$73` with bit 7); bank `$39` at `$8000` and the list's bank `$3A` at `$A000` through the game's `$CBC0`, its banks put back as its NMI does) |
 | a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
 | object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | a free slot: no sleep left in it (an object made there later is awake); an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks, then goes to the **reserve**; on the original screen it wakes for good |
 | the reserve (after the list's spawns, before the objects run; drawn before the rest of OAM is hidden) | | enemies asleep in the margins, out of the game's 14 enemy slots: 8 entries of the 29 object tables (`$03A0`-`$0624`, 23 bytes apart); an entry reaching the original screen takes a free slot again and wakes (it waits at the edge while none is), one past the margins is dropped; each is drawn as the drawer draws an object, in a free slot or in slot 21 borrowed (its object set aside meanwhile), its animation stepping on |
@@ -291,6 +291,8 @@ WV_FWD          = $523D         ; next one, where its settings are read, its ent
 WV_AT           = $523E
 WV_ENTRY        = $523F
 WV_TILES        = $5257         ; non-zero when the action at hand loads the stage's other tiles
+WV_RKEY         = $5258         ; what wide_reach last worked out for: camera screen * 2 + whether
+                                ; it straddles the next, the stage list's pointer (3 bytes)
 WV_BANKS        = $521C         ; the game's banks at $8000 and $A000 ($4A, $4B) while wide_reach reads
 RES_COUNT       = 8             ; the reserve: enemies asleep in the margins, out of the game's slots
 RES_USED        = $5280         ; + entry: non-zero when in use
@@ -1091,6 +1093,30 @@ wide_list_byte:
     RTS
 
 wide_reach:
+    LDA     CAM_LO                      ; worked out again only when the camera's screen, whether
+    CMP     #$01                        ; it straddles the next, or the stage's list changes
+    LDA     CAM_HI
+    ROL
+    CMP     WV_RKEY
+    BNE     @work
+    LDA     LIST_SCREENS
+    CMP     WV_RKEY + 1
+    BNE     @work
+    LDA     LIST_SCREENS + 1
+    CMP     WV_RKEY + 2
+    BNE     @work
+    RTS
+@work:
+    STA     WV_RKEY + 2                 ; (A: the list's high byte when it differs there; the key
+    LDA     CAM_LO                      ; is stored whole below)
+    CMP     #$01
+    LDA     CAM_HI
+    ROL
+    STA     WV_RKEY
+    LDA     LIST_SCREENS
+    STA     WV_RKEY + 1
+    LDA     LIST_SCREENS + 1
+    STA     WV_RKEY + 2
     TXA                                 ; X kept, and the game's scratch $00 / $01
     PHA
     LDA     $00
