@@ -391,8 +391,8 @@ précédente est oubliée au démarrage).
 | **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
-| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*, *Blaster Master*, *Mega Man*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
-| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island*, *Metal Force* et *Blaster Master* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements ; *Mega Man* (mode avancé) : invincible, sans ralentissements |
+| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*, *Blaster Master*, *Mega Man*, *Mega Man 3*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
+| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island*, *Metal Force* et *Blaster Master* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements ; *Mega Man* et *Mega Man 3* (mode avancé) : invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
 
@@ -480,6 +480,11 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   sur la seconde page de l'extension au lieu de clignoter ; Mega Man et ses tirs restent bornés à
   l'écran d'origine. Options du patch : « Invincible » (ni dégâts ni recul ; les trous et les pics
   tuent toujours), désactivé par défaut ; « Sans ralentissements » (actif par défaut).
+- *Mega Man 3* (USA) : de même (décor lu dans le plan du niveau, section en cours ; le mode avancé
+  ajoute les ennemis dans les marges, endormis jusqu'à l'écran d'origine, et la seconde page de
+  sprites). Options du patch : « Invincible » (aucun contact ennemi ne blesse ni ne repousse ; les
+  trous et les pics tuent toujours), désactivé par défaut ; « Sans ralentissements » (actif par
+  défaut).
 - Ça fonctionne en 3D comme en mode 2D.
 
 Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers
@@ -508,7 +513,8 @@ Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WI
 , [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md`](rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md)
-et [`rust/docs/hacks/megaman1/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman1/WIDESCREEN-HACK.md) (les hacks
+, [`rust/docs/hacks/megaman1/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman1/WIDESCREEN-HACK.md)
+et [`rust/docs/hacks/megaman3/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman3/WIDESCREEN-HACK.md) (les hacks
 eux-mêmes et comment les reconstruire).
 
 ### Limite de 8 sprites par ligne

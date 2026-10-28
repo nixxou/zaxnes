@@ -27,17 +27,23 @@ pub(super) fn decode_row(
     if coarse_y >= 30 {
         return false;
     }
-    let first_column = resolve_ring(row.ring_x(), 512, camera) >> 3;
-
-    // What the PPU shows in the centre must be what the layout gives.
-    for column in CHECKED {
-        let Some((tile, _)) = tile_at(first_column + column, coarse_y) else {
-            return false;
-        };
-        if (memory.nametable)(nametable_address(row, column)) != tile {
-            return false;
-        }
-    }
+    // The plane of two nametables side by side; or one, mirrored (Mega Man 3 at the end of a
+    // section, before scrolling vertically): the centre must show what the layout gives.
+    let centre_matches = |first_column: i32| {
+        CHECKED.iter().all(|&column| {
+            tile_at(first_column + column, coarse_y)
+                .is_some_and(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == tile)
+        })
+    };
+    let wide = resolve_ring(row.ring_x(), 512, camera) >> 3;
+    let narrow = resolve_ring(row.ring_x() & 255, 256, camera) >> 3;
+    let first_column = if centre_matches(wide) {
+        wide
+    } else if centre_matches(narrow) {
+        narrow
+    } else {
+        return false;
+    };
 
     for column in columns {
         let world = first_column + column;
