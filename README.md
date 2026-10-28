@@ -98,7 +98,9 @@ the advanced mode the enemies in the margins);
 enemies in the margins);
 [`rust/docs/hacks/megaman1/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman1/WIDESCREEN-HACK.md)
 (*Mega Man* (USA): the section being played from the stage layout in its ROM, and in the advanced
-mode the enemies in the margins).
+mode the enemies in the margins);
+[`rust/docs/hacks/megaman3/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman3/WIDESCREEN-HACK.md)
+(*Mega Man 3* (USA): the same, its own stage layout).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see
