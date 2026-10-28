@@ -391,8 +391,8 @@ précédente est oubliée au démarrage).
 | **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
-| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*, *Blaster Master*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
-| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island*, *Metal Force* et *Blaster Master* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
+| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*, *Blaster Master*, *Metroid*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
+| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island*, *Metal Force* et *Blaster Master* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements ; *Metroid* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
 
@@ -472,6 +472,19 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   sur le choix de zone du jeu : haut / bas, Start ; 01-08 les zones, 09-16 leurs sections vues
   de dessus) et « Invincible », désactivés par défaut ; « Sans ralentissements » (actif par
   défaut).
+- *Metroid* (USA) : les marges montrent les salles de la carte autour de l'écran, celles
+  derrière une porte aussi, au-dessus et en dessous de l'écran aussi, mais seulement celles de la
+  zone en cours ; une salle au-delà d'un changement de palette (Brinstar) y prend ses propres
+  couleurs ; sans patch. Le **mode avancé** ajoute le patch : les ennemis apparaissent dans les
+  marges, endormis dans leur pose de repos jusqu'à ce qu'ils atteignent l'écran d'origine, puis
+  vivent et s'affichent dans les marges ; les portes et les objets s'affichent aussi dans les
+  marges, et chaque porte a sa jumelle, la porte d'en face de la salle voisine ; Samus et ses tirs
+  restent bornés à l'écran d'origine. Seules les deux salles que le jeu garde en mémoire ont des
+  ennemis vivants ; ceux des autres salles des marges y sont dessinés immobiles, en aperçu,
+  jusqu'à ce que le jeu construise la salle. Options du patch : « Sélecteur de niveau »
+  (maintenir une direction en appuyant sur START pour une nouvelle partie : haut Norfair, droite
+  Kraid, gauche Tourian, bas Ridley) et « Invincible », désactivés par défaut ; « Sans
+  ralentissements » (actif par défaut).
 - Ça fonctionne en 3D comme en mode 2D.
 
 Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers
@@ -499,7 +512,8 @@ Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WI
 , [`rust/docs/hacks/excitebike/WIDESCREEN-HACK.md`](rust/docs/hacks/excitebike/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md)
-et [`rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md`](rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md) (les hacks
+, [`rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md`](rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md)
+et [`rust/docs/hacks/metroid/WIDESCREEN-HACK.md`](rust/docs/hacks/metroid/WIDESCREEN-HACK.md) (les hacks
 eux-mêmes et comment les reconstruire).
 
 ### Limite de 8 sprites par ligne

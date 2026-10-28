@@ -20,6 +20,10 @@ pub struct FrameBatch<'a> {
     /// The 32 bytes of PPU palette RAM ($3F00-$3F1F) at the end of the frame
     /// (REQ-CORE-045). Each value is a NES colour index, 0 to 63.
     pub palette: [u8; 32],
+    /// The margin decoder's own background palette for the frame (16 NES colour indices, as
+    /// `$3F00-$3F0F`): background records in sub-palettes 4-7 are in its sub-palettes 0-3.
+    /// `None` for a frame without (its records stay in sub-palettes 0-3).
+    pub margin_palette: Option<[u8; 16]>,
     /// Width in NES pixels of the unreliable bands on the left *and* right edges
     /// (REQ-CORE-046).
     pub mask_x: i32,

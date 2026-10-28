@@ -349,6 +349,21 @@ impl FramePalette {
         }
     }
 
+    /// Sets tables 8 to 11 (the copies of the background sub-palettes) to `margin`, a margin
+    /// decoder's own background palette (16 NES colour indices, as `$3F00-$3F0F`): the
+    /// background tiles in sub-palettes 4 to 7 use them. Entries 0 of the tables keep the
+    /// universal background colour.
+    pub fn load_margin(&mut self, margin: &[u8; 16]) {
+        let universal = self.entries[0];
+        for (e, entry) in self.entries[32..48].iter_mut().enumerate() {
+            *entry = if e % 4 == 0 {
+                universal
+            } else {
+                margin[e] & 0x3F
+            };
+        }
+    }
+
     /// Copies the entries of `source` into this palette.
     pub fn copy_from(&mut self, source: &Self) {
         self.entries = source.entries;
@@ -364,6 +379,32 @@ impl FramePalette {
     /// Sets every entry to zero.
     pub fn clear(&mut self) {
         self.entries = [0; Self::ENTRY_COUNT];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_margin_palette_fills_tables_8_to_11() {
+        let mut ppu = [0u8; 32];
+        for (index, byte) in ppu.iter_mut().enumerate() {
+            *byte = u8::try_from(index).unwrap();
+        }
+        let mut palette = FramePalette::default();
+        palette.load_from(&ppu);
+        // Tables 8-11 repeat the background sub-palettes...
+        assert_eq!(palette.get(32 + 5), Some(5));
+        let margin: [u8; 16] = std::array::from_fn(|index| 0x30 + u8::try_from(index).unwrap());
+        palette.load_margin(&margin);
+        // ...until a margin palette replaces them, entry 0 of each staying the universal colour.
+        assert_eq!(palette.get(32 + 5), Some(0x35));
+        assert_eq!(palette.get(32 + 4), Some(0));
+        assert_eq!(palette.get(47), Some(0x3F));
+        // The background and sprite tables are left alone.
+        assert_eq!(palette.get(5), Some(5));
+        assert_eq!(palette.get(16 + 5), Some(21));
     }
 }
 
