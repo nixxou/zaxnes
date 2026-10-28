@@ -18,6 +18,7 @@
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size (`ff1wide`, `tools/build.py`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`blastermasterwide`, `tools/build.py`) |
+//! | Mega Man (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`mm1wide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -79,9 +80,11 @@ pub const FINAL_FANTASY_USA: &str = "Final Fantasy (USA) widescreen";
 pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
 /// Name of the Blaster Master (USA) widescreen patch (advanced mode).
 pub const BLASTERMASTER_USA: &str = "Blaster Master (USA) widescreen";
+/// Name of the Mega Man (USA) widescreen patch (advanced mode).
+pub const MEGAMAN1_USA: &str = "Mega Man (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 12] = [
+pub const PATCHES: [BuiltinPatch; 13] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -447,6 +450,39 @@ pub const PATCHES: [BuiltinPatch; 12] = [
         boot_window: Some((0x88, 0x00)),
         // The frame's wait: BIT $12 / BMI, until the NMI clears it.
         idle_loop: Some((0xE93A, 0xE93D)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN1_USA,
+        game: "Mega Man",
+        rom_name: "Mega Man (USA)",
+        source_crc: 0x6EE4_BB0A,
+        bps: include_bytes!("../patches/megaman1-usa-widescreen.bps"),
+        options: &[
+            // A testing aid: no damage (pits and spikes still kill).
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (8)
+        // is open in the window from power-on.
+        boot_window: Some((0x88, 0x00)),
+        // The frame's wait: LDA $1F / BEQ, until the NMI sets it.
+        idle_loop: Some((0xC02B, 0xC02E)),
     },
 ];
 

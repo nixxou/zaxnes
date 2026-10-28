@@ -19,6 +19,8 @@ mod castlevania;
 mod excitebike;
 mod ff1;
 pub mod guest;
+mod megaman;
+mod megaman1;
 mod megaman2;
 mod metalforce;
 mod ng3;
@@ -199,6 +201,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         ff1::SOURCE_CRC => Some(&ff1::FinalFantasy),
         metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
         blastermaster::SOURCE_CRC => Some(&blastermaster::BlasterMaster),
+        megaman1::SOURCE_CRC => Some(&megaman1::MegaMan1),
         _ => None,
     }
 }
@@ -219,6 +222,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::FINAL_FANTASY_USA => Some(&ff1::FinalFantasy),
         crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
         crate::builtin_patches::BLASTERMASTER_USA => Some(&blastermaster::BlasterMaster),
+        crate::builtin_patches::MEGAMAN1_USA => Some(&megaman1::MegaMan1),
         _ => None,
     }
 }

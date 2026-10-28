@@ -95,7 +95,10 @@ maps, and in the advanced mode the people and vehicles in the margins);
 the advanced mode the enemies in the margins);
 [`rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md`](rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md)
 (*Blaster Master* (USA): the room from the area's map in its ROM, and in the advanced mode the
-enemies in the margins).
+enemies in the margins);
+[`rust/docs/hacks/megaman1/WIDESCREEN-HACK.md`](rust/docs/hacks/megaman1/WIDESCREEN-HACK.md)
+(*Mega Man* (USA): the section being played from the stage layout in its ROM, and in the advanced
+mode the enemies in the margins).
 
 **Movies.** Tools menu: a game played once (`.zmv`: a start state and the input of every frame)
 replays exactly, with notes written on given frames (Ctrl+M); see

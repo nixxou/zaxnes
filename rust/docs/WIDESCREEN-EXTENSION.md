@@ -33,7 +33,9 @@ Fantasy (USA) one, an advanced mode as well
 Force (Korea) one, an advanced mode as well
 ([`hacks/metalforce/WIDESCREEN-HACK.md`](hacks/metalforce/WIDESCREEN-HACK.md)), and the Blaster
 Master (USA) one, an advanced mode as well
-([`hacks/blastermaster/WIDESCREEN-HACK.md`](hacks/blastermaster/WIDESCREEN-HACK.md)).
+([`hacks/blastermaster/WIDESCREEN-HACK.md`](hacks/blastermaster/WIDESCREEN-HACK.md)), and the Mega
+Man (USA) one, an advanced mode as well
+([`hacks/megaman1/WIDESCREEN-HACK.md`](hacks/megaman1/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -344,6 +346,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 | Metal Force (Korea) (data CRC-32 `EC6D910E`, mapper 156), unpatched and with its built-in patch | the level map in PRG-RAM, sides and vertical margin | `metalforce.rs`, see below |
 | Blaster Master (USA) (data CRC-32 `3F0FD764`), unpatched and with its built-in patch | the area's map in PRG-ROM, four levels of blocks, within the room the camera is in; vertical margin, overscan | `blastermaster.rs`, see below |
+| Mega Man (USA) (data CRC-32 `6EE4BB0A`), unpatched and with its built-in patch | the stage layout in PRG-ROM, within the section being played | `megaman1.rs` (with `megaman.rs`), see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -646,6 +649,21 @@ a band of "water" a television hid). Those attribute bytes also colour the row n
 on the screen: the rows starting or ending within 8 lines of the edges are decoded whole width too
 (`overscan_lines` 8).
 
+Mega Man: the first game's stages are laid out as Mega Man 2's (`megaman.rs` holds what the Mega
+Man decoders share: the check of the centre, the section, the nametable columns the game still
+holds for their place, and the 32 x 32 structures of four 16 x 16 blocks, column first). A stage
+lives in PRG bank `$31` (Wily's stages, 6 and up, in bank `$31 - 6`), as the game's column drawer
+(`$CE5A`) reads it: screen `s` is room `$8C00[s]`, whose 64 structure bytes (8 columns of 8, column
+first) the pointer at `$8C30 + 2 room` gives; structure `n` is 4 block bytes at `$8000 + 4 n`, its
+attribute byte at `$8300 + n`; block `b` (the low six bits) is CHR tiles `4 b` to `4 b + 3`. The
+camera is `$1B:$1A`, the section being played screens `$27` to `$28`; nothing is drawn past it.
+The built-in patch (`MEGAMAN1_USA`, an advanced mode, `mm1wide`) draws the enemies in the margins.
+Its code is a 16 KiB PRG bank added to the game (bank 8 of 16, the fixed bank copied to bank 15,
+the one UxROM fixes), open in the window from power-on (`boot_window`). Options: "Invincible" (a
+testing aid, off by default) and "No slowdown" (on by default; `idle_loop` `$C02B`-`$C02E`, the
+main loop's `LDA $1F / BEQ`). Measured on Ice Man's stage at a 128-pixel margin, 200 frames: the
+original lags no frame, the hack without overclock 100, with 64 lines 1, with 255 none.
+
 ---
 
 ## 5. The 3D engine
@@ -739,7 +757,8 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
-  at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller). `NesCore::run_frame` ends the
+  at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller; Mega
+  Man: `LDA $1F / BEQ` at `$C02B`). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
