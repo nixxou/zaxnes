@@ -291,8 +291,9 @@ fn the_options_change_the_settings_of_the_host() {
     tap(&mut harness, &mut handheld, PadButton::Down); // volume
     tap(&mut harness, &mut handheld, PadButton::Left);
     assert!((harness.host.settings().volume() - 0.9).abs() < 1.0e-6);
-    for _ in 0..3 {
-        tap(&mut harness, &mut handheld, PadButton::Down); // render scale, shadows, frame cap
+    for _ in 0..4 {
+        // render scale, shadows, palette, frame cap
+        tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);
     assert_eq!(2, harness.host.settings().vsync());

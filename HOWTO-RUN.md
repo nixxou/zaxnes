@@ -544,7 +544,10 @@ chaque émulateur traduit ses 64 couleurs avec une table à lui, d'où des teint
 **Nestopia (YUV)** (le défaut de Nestopia), **Nestopia (RGB)**, les palettes de FirebrandX
 (**Smooth**, **NES Classic** — celle de la mini console —, **Composite Direct**, **PVM Style**),
 **Sony CXA2025AS** (le décodeur des téléviseurs Sony) et **Wavebeam**. Le changement est
-immédiat ; le jeu n'en sait rien (les numéros de couleur restent les siens).
+immédiat ; le jeu n'en sait rien (les numéros de couleur restent les siens). Chaque jeu peut avoir
+la sienne : ligne **« Palette de couleurs NES »** des options du jeu (écran des options d'un jeu
+en mode console, menu déroulant **« Options du jeu »** sur PC), « Utiliser le global » reprenant
+celle des réglages.
 
 ### Overscan (8 lignes du haut et du bas)
 
