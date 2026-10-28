@@ -115,6 +115,9 @@ pub struct WideExtension {
     window_bank: u8,
     /// PRG window: first page of the bank.
     window_page: u8,
+    /// The code of the hack pack that runs, which the PRG window shows instead of PRG-ROM
+    /// (empty: PRG-ROM). Not part of a state: the pack gives it again on a load or a restore.
+    code: Vec<u8>,
     /// CPU cycles of the current overclock still to run with the machine held.
     stall: u32,
 }
@@ -148,6 +151,7 @@ impl WideExtension {
             decoded: false,
             window_bank: 0,
             window_page: 0,
+            code: Vec::new(),
             stall: 0,
         }
     }
@@ -284,6 +288,7 @@ impl WideExtension {
             host_vertical_margin: self.host_vertical_margin,
             host_options: self.host_options,
             decoded: self.decoded,
+            code: std::mem::take(&mut self.code),
             ..Self::new()
         };
     }
@@ -408,6 +413,18 @@ impl WideExtension {
     pub fn extra_sprite_x(&self, sprite: usize, low: u8) -> i32 {
         let high = self.extra_high.get(sprite).copied().unwrap_or(0);
         i32::from(i16::from_le_bytes([low, high]))
+    }
+
+    /// The code of the hack pack that runs (see [`crate::hack_pack`]), shown by the PRG window
+    /// instead of PRG-ROM; empty for none. A reset keeps it.
+    pub fn set_code(&mut self, code: &[u8]) {
+        code.clone_into(&mut self.code);
+    }
+
+    /// The code [`WideExtension::set_code`] gave, empty for none.
+    #[must_use]
+    pub fn code(&self) -> &[u8] {
+        &self.code
     }
 
     /// The offset in PRG-ROM a CPU read of `address` sees through the PRG window, or `None`

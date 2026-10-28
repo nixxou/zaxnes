@@ -17,7 +17,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return Vec::new();
         };
         let core = session.core();
-        let Some(patch) = core.builtin_patch() else {
+        let Some(patch) = core.options_patch() else {
             return Vec::new();
         };
         let stored = self.settings.get(SettingId::EmuHackOptions);
@@ -41,7 +41,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(patch) = self
             .session
             .as_ref()
-            .and_then(|session| session.core().builtin_patch())
+            .and_then(|session| session.core().options_patch())
         else {
             return;
         };

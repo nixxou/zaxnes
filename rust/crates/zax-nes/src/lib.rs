@@ -7,6 +7,7 @@ pub mod builtin_patches;
 pub mod cartridges;
 pub mod cpu;
 mod frame_batch;
+pub mod hack_pack;
 pub mod input;
 pub mod movie;
 mod nametable_mirroring;

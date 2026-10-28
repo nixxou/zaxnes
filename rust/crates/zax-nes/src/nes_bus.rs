@@ -418,6 +418,11 @@ impl NesBus {
 
     fn wide_window_read(&self, address: u16) -> Option<u8> {
         let offset = self.ppu.wide().prg_window(address)?;
+        // A hack pack's code, when one runs; PRG-ROM otherwise.
+        let code = self.ppu.wide().code();
+        if !code.is_empty() {
+            return Some(code.get(offset).copied().unwrap_or(0xFF));
+        }
         let prg = self.cartridge.as_ref()?.rom().prg_rom();
         prg.get(offset % prg.len().max(1)).copied()
     }

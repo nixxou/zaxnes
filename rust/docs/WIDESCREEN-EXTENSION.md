@@ -180,7 +180,11 @@ Details:
   mapper has at `$8000` (`prg_window(address)`, read by `NesBus::wide_window_read` from the
   cartridge's PRG-ROM): code the fixed bank calls can live in any bank. Being ROM, it is always
   the code of the ROM loaded; a copy in RAM would travel in savestates and outlive a new version
-  of a hack.
+  of a hack. When the game's built-in patch is a hack pack (7.1) whose widescreen runs, the
+  window shows the pack's code instead (`WideExtension::set_code`, `code()`): the bank in
+  `$5008` bits 0-6 is then a 16 KiB part of that code, `$FF` past its end. The code is the
+  build's, set by the core at each load and restore; it is not part of a state, and `reset()`
+  keeps it.
 * **Second sprite page** (`$5007` bit 2): at each OAM DMA the extension latches its RAM at
   `$5300` (64 sprites, OAM format) and `$5400 + 4n` (the high bytes of their x). The core captures
   them after the console's 64, as records 128 and up (below them all in priority), 8 x 8 only; the
@@ -997,6 +1001,40 @@ pub struct BuiltinPatch {
 * The patch only holds the bytes the hack writes (TargetRead); everything else is copied from the
   player's ROM (SourceRead): no game data ships with the emulator.
 
+### 7.1 Hack packs
+
+`zax-nes/src/hack_pack.rs`, packs in `zax-nes/patches/*.zxpk`; the proposal and its decisions
+are in `docs/HACK-PACKS.md`. A `BuiltinPatch` whose `bps` starts with `ZXPK` is a pack
+(`hack_pack::is_pack`); Mega Man 6 is the first.
+
+Format 1, little-endian: `ZXPK`, `u8` format, name (`u8` length + UTF-8), `u32` code length and
+the code (assembled for the window at `$5800`), `u8` component count, then each component: its
+name, `u16` hook count and each hook (`u32` offset in the ROM data without iNES header, `u8`
+length, the original bytes, the new ones).
+
+* **Code.** It never goes in the ROM: the extension's PRG window shows it (section 2), the boot
+  window (`boot_window`, `$80`/0 for Mega Man 6) opening it at power-on. The ROM keeps its size.
+* **Hooks.** The pack fits a ROM when every hook of every component finds its original bytes
+  (`HackPack::matches`); a pack is applied whole or not at all. It is found by the ROM's CRC-32,
+  and failing that by its hooks (`builtin_patches::pack_for`, `patch_for`): another build of the
+  game whose hooked code is the same takes it too.
+* **Components.** `"widescreen"` follows the advanced mode: `apply_with` writes its hooks into
+  the patched image, like a BPS patch, and `PatchedRom::code` carries the code. Every other
+  component is a **testing aid** named after its option's key (Mega Man 6: `"invincible"`). The
+  core applies it to the cartridge's PRG-ROM, or puts the game's bytes back, whenever its option
+  changes (`NesCore::set_hack_options` -> `sync_aids`), **with or without** the advanced mode
+  (owner request: the aids are independent of the widescreen). `NesCore::options_patch()` names
+  the patch whose options apply then, and `hack_options()` lists only the aids' options while the
+  patch does not run; the hacks screen shows those rows without the advanced mode
+  (`BuiltinPatch::is_aid`).
+* **Version.** `BuiltinPatch::version()` of a pack is the CRC-32 of the pack.
+* **Install.** `NesCore::install_pack` runs after the cartridge is attached, at each load and at
+  each restore of a state that carries its ROM: the pack made for the host's image, the code in
+  the window while its widescreen runs, the window opened on it again (a state may hold another
+  window), the aids as their options say.
+* `RomImage::prg_rom_mut` and `Cartridge::rom_mut` give the core the PRG-ROM to write the aids'
+  hooks to (crate-private).
+
 ---
 
 ## 8. Savestates
@@ -1009,6 +1047,11 @@ sprite high bytes, RAM, overclock, layout, PRG window and stall counter follow t
 block. Version 5 (before the PRG window) is still read. The block carries the **original** ROM
 image; `restore_state` applies the built-in patch of the running build to it (when the patches
 are on), so a state survives a new version of the hack's code.
+
+MMC3 (`Mmc3::load_registers`) computes its bank windows again from its registers after a
+restore (`update_banks`): the block stores them as offsets in the PRG-ROM it was saved with,
+which are wrong for a PRG-ROM of another size (Mega Man 6 saved with its 68-bank BPS patch and
+restored with its 64-bank pack: the fixed last bank pointed into bank 66).
 
 ### 8.2 State file (application)
 

@@ -115,6 +115,12 @@ impl RomImage {
         &self.prg_rom
     }
 
+    /// PRG-ROM bytes to write: a hack pack's hooks, turned on and off as its options go (see
+    /// [`crate::hack_pack`]).
+    pub(crate) fn prg_rom_mut(&mut self) -> &mut [u8] {
+        &mut self.prg_rom
+    }
+
     /// CHR-ROM bytes. Empty when the cartridge uses CHR-RAM.
     #[must_use]
     pub fn chr_rom(&self) -> &[u8] {

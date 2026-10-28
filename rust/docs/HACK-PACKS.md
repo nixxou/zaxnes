@@ -1,6 +1,6 @@
-# Hack packs (proposal)
+# Hack packs
 
-Status: proposal for review, nothing implemented. Branch `hack-rewrite`.
+Status: Mega Man 6 converted, see section 7. Branch `hack-rewrite`.
 
 ## 1. Why
 
@@ -129,3 +129,28 @@ rewritten disassembly, not hooks.
 5. The aids without any widescreen: shown in the same options menu (proposed), or apart?
 6. States taken at the game's wait for the next frame only (proposed, at most a frame late), or
    at once as today, compatible only with the same pack setting?
+
+## 7. Status
+
+Decided (owner): every proposed answer above. The aids are components of their own, independent
+of the advanced mode; a state is meant to restore with or without the pack.
+
+Done, branch `hack-rewrite`:
+
+* the format and its reader (`zax-nes/src/hack_pack.rs`), the core applying it
+  (`WIDESCREEN-EXTENSION.md` 7.1);
+* Mega Man 6 as a pack (`megaman6-usa-widescreen.zxpk`, 4199 bytes, 3840 of code;
+  `mm6wide/tools/build.py --pack`). Checked: 7 movies (about 60,000 frames, stages 0, 1, 5 and 6)
+  give the same work RAM every frame with the BPS and with the pack, the stack page aside (the
+  damage hook is a `JMP` in the pack's "invincible" component, a `JSR` in the BPS). The
+  "Invincible" option works without the advanced mode (3000 frames of stage 5: 15 hits taken
+  without it, none with it);
+* MMC3 recomputes its bank windows after a restore: a state of the BPS build (68 banks) restores
+  on the pack (64).
+
+Still to do:
+
+* states taken at the game's wait for the next frame (`idle_loop`) and restored with or without
+  the pack (question 6): the application still classes a state by its patch mode (section 8.3 of
+  `WIDESCREEN-EXTENSION.md`);
+* the other hacks, one at a time, each checked the same way.
