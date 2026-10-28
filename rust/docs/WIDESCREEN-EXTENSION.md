@@ -782,7 +782,9 @@ that column's colours (a stripe at the left edge of the original picture). The b
 themselves through the test "on the screen" (`$E485`), which the hack widens for the enemies (not
 for the stage's controllers, type `$80` in slot 22); an enemy asleep in a margin runs its script's
 first frame, which sets up how it looks, and one spawned while the camera stands (the stage's start,
-its tiles not yet in CHR-RAM) shows once the camera moves; its
+its tiles not yet in CHR-RAM) shows once the camera moves, one asleep past the next screen of the one
+whose tiles the game loaded (`$0680`) not before, and an object the game flags not drawn (`$03B7` bit
+0) is not drawn in a margin either; its
 sprite loops are the game's four (none, horizontal, vertical, both flips) for each page. Its code
 is a 16 KiB PRG bank added to the game (8 KiB banks 64-65 of 68, the fixed banks copied to banks 66
 and 67), of which the window shows the first 2 KiB from power-on (`boot_window`). `idle_loop`
