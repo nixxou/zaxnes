@@ -673,7 +673,12 @@ While the game scrolls to another section (`$26` non-zero) the camera is already
 section's screen while `$27`/`$28` still give the old one: the margins stay empty (Mega Man 3 to 5
 change the camera and the section together, but the rows on the screen while they scroll belong to
 both sections: their decoders draw nothing while the vertical scroll `$FA` is not 0, and Mega Man 6
-decodes nothing off a screen's top).
+decodes nothing off a screen's top). During such a scroll the game draws the rows coming in at the screen's
+top or bottom edge a piece at a time, which a television hid (and `video.hide_overscan` hides
+without a vertical margin): the Mega Man decoders cover the overscan (`covers_overscan`) and give
+those edge rows empty while the scroll runs (`$26` for Mega Man, `$FA` for 3 to 5, `$58` for 6),
+so that the wide picture composes them from the backdrop like the vertical margin; at any other
+time they decline them and the screen stays the PPU's.
 The built-in patch (`MEGAMAN1_USA`, an advanced mode, `mm1wide`) draws the enemies in the margins.
 Its code is a 16 KiB PRG bank added to the game (bank 8 of 16, the fixed bank copied to bank 15,
 the one UxROM fixes), open in the window from power-on (`boot_window`). Options: "Invincible" (a

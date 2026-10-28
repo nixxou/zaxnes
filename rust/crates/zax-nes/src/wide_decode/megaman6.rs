@@ -78,6 +78,24 @@ impl MarginDecoder for MegaMan6 {
     fn decodes_masked_column(&self) -> bool {
         true
     }
+
+    /// The screen's top and bottom rows while the game scrolls to another section: the rows
+    /// coming in are drawn there a piece at a time, which a television hid (and the overscan
+    /// setting hides without a vertical margin). Given empty, the wide picture composes them from
+    /// the backdrop, as it does the vertical margin; otherwise they stay the PPU's.
+    fn covers_overscan(&self) -> bool {
+        true
+    }
+
+    fn decode_extra_row(
+        &self,
+        memory: &DecoderMemory<'_>,
+        _row: &BackgroundRow,
+        _columns: &mut dyn Iterator<Item = i32>,
+        _out: &mut Vec<DecodedTile>,
+    ) -> bool {
+        memory.ram(CAMERA_Y_LOW) != 0
+    }
 }
 
 /// Where the stage's data is, as the game keeps it in RAM.
