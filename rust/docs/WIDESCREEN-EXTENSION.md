@@ -690,7 +690,9 @@ being played is `$2C + 1` screens, the camera on its screen `$2D`. At the end of
 vertical transition, the game switches the mirroring and both nametables show the same 256 pixels:
 the shared decoder places a row at the instance of its pixel nearest the camera modulo 256 pixels
 (on the plane of two nametables both instances can lie 256 pixels from the camera, and a row whose
-centre happened to match the wrong one had its margins 256 pixels off). A margin column the
+centre happened to match the wrong one had its margins 256 pixels off). While both nametables are the same
+(a row's 32 bytes equal on both sides), no margin column is taken from them: the margin's nametable
+column is a copy of one on the screen, which a repeating wall makes look like the layout's. A margin column the
 nametables hold for its place takes the layout's colours (the game writes a column's attribute bytes
 after its tiles), and the Mega Man 3 to 5 decoders redraw the screen's last column
 (`redrawn_right_columns` 1): it showed the colours of the column being drawn past the edge.
