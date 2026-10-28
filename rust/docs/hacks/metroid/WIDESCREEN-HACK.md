@@ -20,7 +20,7 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `4C7C7085` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `708310CA` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in bank 0 and bank 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -84,7 +84,7 @@ CPU time: 64 lines of overclock (`$5006`) pay for the hack's work and the enemie
 
 Set every frame at the main loop's wait (`$C0C7`, `LDA #$00 / STA $1A` becomes `JSR wide_frame /
 NOP`, which writes `$5003 = min($5002, 248)`, `$5004 = $5005 = 0` (the nametable columns are
-hidden: the decoder draws the background), `$5007 = 2` (sprites free of the extents), `$5006 = 64`
+hidden: the decoder draws the background), `$5007 = $0A` (sprites free of the extents, their high bytes kept from one OAM DMA to the next: the NMI copies the sprite page every frame, also one the game has not built again, whose high bytes must stay), `$5006 = 64`
 (255 with "No slowdown"), clears the sprite high bytes out of play, then `$1A`).
 
 Variables (extension RAM): `WV_M $5200`, `WV_ORIG $5201` and `WV_WIDE $5202` (the last position
@@ -193,7 +193,7 @@ WIDE_REQ        = $5003         ; W: the margin asked for
 WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
 WIDE_RIGHT      = $5005         ; and right of it
 WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents
+WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, bit 3 high bytes kept
 WIDE_OPTIONS    = $500A         ; R: the options the player turned on
 WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
@@ -290,7 +290,10 @@ wide_frame:
     LDA     #$00
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$02                        ; sprites free of the extents
+    ; Sprites free of the extents, their high bytes kept from one OAM DMA to the next: the NMI
+    ; copies the sprite page every frame, also one the game has not built again (its work for
+    ; the frame not done), whose high bytes must stay.
+    LDA     #$0A
     STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS
     AND     #OPT_NO_SLOWDOWN
