@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `1F247C95` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `5132C4DB` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -68,7 +68,7 @@ and `$064A` the next entries right and left of the spawn window.
 | a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
 | object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks; on the original screen it wakes for good |
 | "on the screen" (`$E485`) | y on the screen, x - camera within `[4, 256)` | the same for slots 0-7 and the controller (22); an enemy also within `[LO, HI)` |
-| an object's place (`$E24B`, in the drawer) | not drawn when flagged off the screen (`$03B7` bit 0), its y off the screen or its x - camera (low byte) below 4 | the same on the original screen; an enemy off it is drawn within `[LO, HI)`, the flag aside, unless it is hidden |
+| an object's place (`$E24B`, in the drawer) | not drawn when flagged off the screen (`$03B7` bit 0), its y off the screen or its x - camera (low byte) below 4 | the same on the original screen; an enemy off it is drawn within `[LO, HI)`, the flag aside (the game sets it only for objects it never draws: those off the screen it removes), unless it is hidden or, asleep, on a screen other than the one whose enemies' tiles the game loaded to CHR-RAM (`$0680`, `$FF` while loading) and the next one: the original spawns no enemy elsewhere, and those of a further screen showed as a jumble |
 | an object's sprites (`$E315`, the jump to one of the four loops: none, horizontal, vertical, both flips) | x = 8-bit screen x + or - the offset, the sprite hidden when it overflows; the loop stops when OAM is full | the same four loops for each page (eight), 16-bit x, shown within `[-M, 256 + M)`, its high byte to `$5100 + 4 n` (or `$5400 + 4 n`); the loops go on to the extension's second page (`$5300`) when the first is full, and stop when both are |
 | the frame's sprites (`$D1D4`, `$E1DD`: `$8C = 0`) | | also the first page in use and its high bytes back to 0 (the energy bars' writer writes none); X kept, as by the code replaced (the vertical scroll's loop, `$D7CA`, counts with it through `$D701`: changed, it ran 256 frames instead of 120 and the scroll down went on and on) |
 | bars and objects in turns (`$D1D8`) | the energy bars before the objects one frame, after them the next | the bars always first (nothing is left over to flicker) |
@@ -161,6 +161,11 @@ testing.
 * An enemy asleep in a margin hangs where its entry puts it, in the pose of its first frame, until
   the original screen reaches it.
 * An enemy spawned in a margin at the stage's start shows only once the camera moves.
+* An enemy asleep two screens or more ahead of the screen whose enemies' tiles are loaded (`$0680`)
+  is not drawn until the camera reaches the screen before it.
+* Where `$71` stops the camera going back left (a point of no return), the left margin stops at
+  the camera's screen: the screen before it in the stage's list may be to its left or above it,
+  which only the stage's controllers know.
 * The part of the stage the margins and the enemies keep to follows `$71`, which the game's own
   objects set as Mega Man goes: where it lets the camera on, the margins reach as far as the map.
 * The hack's sprite loops cost time: without overclock the game runs late more often than the
@@ -194,7 +199,8 @@ testing.
 ;  * one that spawns in a margin sleeps there: its script runs its first frame (which sets up how
 ;    it looks), then not again until it comes onto the original screen; awake, it stays awake; one
 ;    that spawns while the camera stands (the stage's start: its tiles are still on their way to
-;    CHR-RAM) is not drawn until the camera moves;
+;    CHR-RAM) is not drawn until the camera moves, nor one on a screen whose enemies' tiles the
+;    game has not loaded yet (it loads those of the camera's screen and the next one);
 ;  * every object's sprites get the high byte of their 16-bit x, and the sprites that no longer
 ;    fit in the console's 64 go on to the extension's second page instead of being dropped;
 ;  * the game's collisions measure 16-bit distances: an enemy in a margin only touches what is
@@ -254,6 +260,7 @@ WV_MOVED        = $5212         ; non-zero when the camera moved since the last 
 ; The game.
 OAM             = $0200
 CAM_LO          = $56           ; the camera's x: pixel and screen
+CHR_SCREEN      = $0680         ; the screen whose enemies' tiles the game loaded to CHR-RAM ($FF: loading)
 CAM_HI          = $57
 SCROLL          = $71           ; bit 0: the camera may go on right of its screen, bit 1 left
 OBJ_TYPE        = $03A0         ; + slot: 0 free
@@ -445,7 +452,8 @@ wide_on_screen:
 ; An object's place on the screen ($E24B, in place of the tests of the drawer and $00 = x -
 ; camera; then BCS: not drawn): carry clear when it is drawn, $00 the low byte of its screen x.
 ; The original: not flagged off the screen ($03B7 bit 0), y on the screen, x - camera (low byte)
-; at least 4. An enemy whose x is off the original screen: within the margins, the flag aside.
+; at least 4. An enemy whose x is off the original screen: within the margins, unless flagged
+; (an object the game never draws) or, asleep, hidden or on a screen whose tiles are not loaded.
 wide_place:
     JSR     wide_screen_x
     LDA     WV_SL
@@ -458,10 +466,22 @@ wide_place:
     BCS     @original
     LDA     OBJ_YH,x
     BNE     @hidden
-    LDA     WV_DORMANT,x                ; asleep, spawned while the camera stood: not yet
+    LDA     OBJ_FLAGS,x                 ; an object the game does not draw (the game never sets
+    AND     #$01                        ; it for one off the screen: those it removes)
+    BNE     @hidden
+    LDA     WV_DORMANT,x
     CMP     #$FF
     BEQ     @inside
-    LDA     WV_HIDDEN,x
+    LDA     WV_HIDDEN,x                 ; asleep, spawned while the camera stood: not yet
+    BNE     @hidden
+    LDA     CHR_SCREEN                  ; asleep: its tiles are in CHR-RAM only on the screen
+    CMP     #$FF                        ; whose graphics the game loaded or the next one (the
+    BEQ     @hidden                     ; original spawns no enemy elsewhere); $FF: loading
+    CMP     OBJ_XH,x
+    BEQ     @inside
+    CLC
+    ADC     #$01
+    CMP     OBJ_XH,x
     BNE     @hidden
 @inside:
     JMP     wide_inside
