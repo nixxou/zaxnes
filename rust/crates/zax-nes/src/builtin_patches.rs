@@ -458,7 +458,15 @@ pub const PATCHES: [BuiltinPatch; 13] = [
         source_crc: 0x7008_0810,
         bps: include_bytes!("../patches/metroid-usa-widescreen.bps"),
         options: &[
-            // A testing aid: Samus takes no damage.
+            // Testing aids: a new game starts in the area a direction held at START picks, as a
+            // password starts one; no damage.
+            HackOption {
+                key: "level_select",
+                label: "Level select (hold a direction at START: up Norfair, right Kraid, left Tourian, down Ridley)",
+                label_fr: "Sélecteur de niveau (maintenir une direction sur START : haut Norfair, droite Kraid, gauche Tourian, bas Ridley)",
+                bit: 0,
+                default: false,
+            },
             HackOption {
                 key: "invincible",
                 label: "Invincible",

@@ -666,8 +666,14 @@ by side (a ring of 512 x 240), or up and down, two stacked (256 x 480). `MapPosX
 (`$50`/`$4F`) is the room scrolled into: the second of the two on the screen scrolling right or
 down, the first scrolling left or up; `$FF` (both nametable bits toggled together) gives the
 nametable of the screen's left or top edge, `$FD`/`$FC` the scroll; so a row's place comes from its
-PPU address, the ring's offset from the world and the camera picking the instance. The margins show
-the map's rooms around the screen, those behind a door too; the room on the screen's left (top)
+PPU address, the ring's offset from the world and the camera picking the instance. The map's rooms
+belong to five areas with their own tables, and the map does not say which: the margins show the
+rooms of the area in play only, those its starting room (`$95D7`/`$95D8` of its bank) or the
+screen's room reach (worked out once per screen's room) through the edges two neighbours share a
+way through (a tile at or past `$A0`, or a block the area's bombs blast, `$D651`, on both sides),
+up and down only between two rooms walled on the left and the right (shafts: a corridor's ceiling
+may happen to meet a room of another area built with this one's tables), never across an elevator
+room's top or bottom. The margins show the map's rooms around the screen, those behind a door too; the room on the screen's left (top)
 edge, and the other one while both show, are read from PRG-RAM (blasted blocks included), the
 others built from the area's data as `SetupRoom` does (kept, by bank and data address). A row is
 decoded when 28 of its 32 columns show the room's tile (the title, the password screen and the

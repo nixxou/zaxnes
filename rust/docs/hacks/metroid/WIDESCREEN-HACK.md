@@ -20,8 +20,8 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `DD237F7D` (the hack's version in savestate headers; `tools/build.py` prints it) |
-| Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in bank 7 (both copies of the fixed bank) |
+| Target data | CRC-32 `467F9D17` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in bank 0 and bank 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
 The code runs from the widescreen extension's PRG window at `$5800-$5FFF`, which Zaxnes opens on
@@ -54,15 +54,19 @@ the other objects are drawn by `ObjDrawFrame` (`$DE4A`), which keeps the test's 
 | `UpdateEnemy_CheckIfVisible` (`$F39F`) | skips the enemy's routine when it does not show | skips it when it does not update; asleep in a margin, it is drawn in its resting pose (`$F682`, then `$F438`: animation and drawing, no movement) |
 | an enemy placed by its room (`$EB5E`) | status 1 (resting) | the same, and asleep (`$5300 + slot`, with its type at `$5301 + slot`: a slot holding another type since is awake) |
 | a sprite's x (`$DF0E`) | 8-bit | the same, and its high byte to `$5100 + OAM offset`: the 16-bit x nearest the object's whose low byte is the sprite's; 0 for sprites no position test placed (the energy display) |
+| `ObjDrawFrame` (`$DED2`) | draws the object when it shows; its `onScreen` byte = it shows | `onScreen` the same; the doors (objects `$80-$B0`) and the item (`$40`) are drawn when they show within the margins |
 | end of an object's drawing (`$DF2D`) | clears `$6B` | the same, and the object's 16-bit x is no longer valid |
 | world's update (`$CB29`), main loop's wait (`$C0C7`) | | the high bytes cleared (every frame out of play), the extension's settings |
 | `SubtractHealth` (`$CE92`) | | no damage when the option "Invincible" is on (the damage is dropped) |
+| a new game (bank 0 `$9354`, the end of `InitializeStats`) | Brinstar's bank | with the option "Level select", a direction held at START picks the area (up Norfair, right Kraid, left Tourian, down Ridley): `$74` set, then the game starts there as a password starts one (`$930D`) |
 
 An enemy updates when it shows on the original screen (it then wakes), or within the margins
 awake: what enemies fire (offsets `$60` up) is always awake. Asleep in a margin, a room's enemy
 shows but its routine does not run: it neither moves nor attacks until it reaches the original
-screen; awake, it stays awake. Samus, her shots and the other objects keep the original test:
-a shot leaving the original screen is removed as in the original.
+screen; awake, it stays awake. The doors and the item are drawn within the margins too; the game
+keeps them to its own test (it removes a door its test does not show when it builds a room on
+that door's nametable). Samus, her shots and the other objects keep the original test: a shot
+leaving the original screen is removed as in the original.
 
 Only the two rooms the game keeps in PRG-RAM have enemies: the margins may show other rooms (a
 neighbour the screen does not reach yet, a room behind a door), drawn by the decoder, empty.
@@ -88,8 +92,8 @@ test), `WV_SLEEP $5300 + slot offset`, `WV_STYPE $5301 + slot offset`.
 
 ## 4. Hooks
 
-Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original length. All are
-in the fixed bank (`$C000-$FFFF`), written into both its copies (7 and 15).
+Each is checked against the bytes it replaces; NOP (`$EA`) fill to the original length. Those of
+the fixed bank (`$C000-$FFFF`) are written into both its copies (7 and 15).
 
 | Address | Replaces | With |
 |---|---|---|
@@ -97,11 +101,13 @@ in the fixed bank (`$C000-$FFFF`), written into both its copies (7 and 15).
 | `$CB29` | `LDX #$00 / STX $5B` | `JSR wide_world / NOP` |
 | `$DFDF` | `LDX #$01 / LDA` (IsObjectVisible) | `JMP wide_visible` |
 | `$DE1B` | `JSR $DFDF` (DrawEnemy) | `JMP wide_enemy_draw` |
+| `$DED2` | `JSR $DFDF` (ObjDrawFrame) | `JMP wide_object_draw` |
 | `$F39F` | `JSR $DFDF` (UpdateEnemy_CheckIfVisible) | `JSR wide_enemy_check` |
 | `$EB5E` | `LDA #$01 / STA $6AF4,X` | `JSR wide_spawn / NOP / NOP` |
 | `$DF0E` | `ADC $0E / STA $0203,X` | `JSR wide_sprite_x / NOP / NOP` |
 | `$DF2D` | `LDA #$00 / STA $6B` | `JSR wide_drawn / NOP` |
 | `$CE92` | `LDA $6E / ORA $6F` | `JSR wide_hurt / NOP` |
+| bank 0 `$9354` | `LDA #$02 / STA $24` | `JSR wide_new_game / NOP` |
 
 ## 5. Options
 
@@ -110,6 +116,7 @@ Zaxnes writes their bits at `$500A` every frame, the hack reads them there (`WID
 
 | Bit | Key | Label | Default | Effect |
 |---|---|---|---|---|
+| 0 | `level_select` | Level select (hold a direction at START: ...) / Sélecteur de niveau (...) | off | a testing aid: a new game starts in the area a direction held at START picks: up Norfair, right Kraid, left Tourian, down Ridley (none: Brinstar) |
 | 1 | `invincible` | Invincible | off | a testing aid: Samus takes no damage (her knockback stays) |
 | 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock instead of 64 |
 
@@ -134,7 +141,9 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 * No sprite in the vertical margins: the extension carries a high byte for x only. Scrolling up
   and down, the enemies keep the original screen.
 * Only the two rooms the game keeps in PRG-RAM have enemies; the other rooms of the margins are
-  empty. The doors, the items and the other objects keep the original screen.
+  empty. The elevators, the statues and the other objects keep the original screen.
+* A room of the margins shows in the colours of the room in play: a neighbour whose palette
+  differs (the game changes the palette in a few rooms) shows in the wrong colours.
 * The sprites of the margins share the console's 64 sprites with the screen's: more flicker when
   many enemies show.
 * The overclock removes lag frames, so a replay of the original's inputs frame for frame drifts
@@ -162,8 +171,11 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 ;  * one a room placed (slots 0-5, $EB4D) sleeps in a margin: it shows, drawn and animated in its
 ;    resting pose, but its routine does not run until it reaches the original screen; awake, it
 ;    lives within the margins; what enemies fire lives there too;
+;  * the doors and the items show within the margins too (the game keeps them to its tests of
+;    the original screen);
 ;  * every sprite of an object gets the high byte of its 16-bit x;
-;  * Samus, her shots and the other objects keep the original screen.
+;  * Samus, her shots and the other objects keep the original screen;
+;  * the option "Level select" starts a new game in the area a direction held picks.
 ;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
 
@@ -179,6 +191,7 @@ WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents
 WIDE_OPTIONS    = $500A         ; R: the options the player turned on
 WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
+OPT_LEVEL_SELECT = $01         ; a testing aid: a new game in the area a direction held picks
 OPT_INVINCIBLE  = $02           ; a testing aid: Samus takes no damage
 OPT_NO_SLOWDOWN = $04           ; nearly a frame more of CPU time: the game never runs late
 
@@ -212,7 +225,7 @@ TEMP_X          = $0B
 SCREEN_X        = $0E           ; its screen x and y, 8-bit
 SCREEN_Y        = $10
 TEMP_08         = $08
-PAGE_INDEX      = $4B           ; the enemy slot offset at hand (16 per slot)
+PAGE_INDEX      = $4B           ; also the object at hand (16 per object, $0300)           ; the enemy slot offset at hand (16 per slot)
 SCROLL_DIR      = $49           ; bit 1: scrolling across
 SPRITE_PAGE_POS = $5B
 HEALTH_CHANGE   = $6E           ; 2 bytes: the damage to take
@@ -220,6 +233,13 @@ OBJECT_CNTRL    = $6B
 SCROLL_Y        = $FC
 SCROLL_X        = $FD
 PPUCTRL_ZP      = $FF           ; bit 0: the nametable of the screen's left (top) edge
+OBJ_ON_SCREEN   = $030B         ; + object offset: it shows (the game's test)
+POWER_UP_DRAW   = $40           ; object offsets: the item being drawn, the doors
+FIRST_DOOR      = $80
+LAST_DOOR       = $B0
+JOY1_STATUS     = $14           ; the buttons held
+BANK_SWITCH     = $24           ; the PRG bank to switch to, plus one
+IN_AREA         = $74
 EN_DATA05       = $0405         ; + slot offset: bit 1 the enemy updates (it showed)
 EN_TYPE         = $6B02         ; + slot offset
 OAM_X           = $0203
@@ -229,6 +249,10 @@ EN_RESTING_ANIM = $F682         ; InitEnRestingAnimIndex
 EN_DRAW_NO_MOVE = $F438         ; UpdateEnemyCommon@noMove: animation and drawing only
 EN_DRAW_GO      = $DEDE         ; DrawEnemy_NotBlank, drawing the enemy
 EN_DRAW_SKIP    = $DE53         ; DrawEnemy_NotBlank, not drawing it
+OBJ_DRAW_GO     = $DEDE         ; ObjDrawFrame, drawing the object
+OBJ_DRAW_SKIP   = $DEE3         ; ObjDrawFrame, not drawing it
+AREA_START      = $930D         ; bank 0 (the title's): a game started in the area $74, as a
+                                ; password starts one
 
 .segment "CODE"
 .org $5800
@@ -493,6 +517,29 @@ wide_enemy_check:
     LDX     #$01
     RTS
 
+; An object's drawing (ObjDrawFrame, $DED2, in place of JSR IsObjectVisible, then the game's own
+; setting of the object's onScreen byte and its choice to draw): onScreen keeps the game's test;
+; the doors and the item are drawn within the margins too.
+wide_object_draw:
+    JSR     wide_visible
+    TXA
+    LDX     PAGE_INDEX
+    STA     OBJ_ON_SCREEN,X
+    TAY                                 ; Z: the game's test
+    BNE     @draw
+    LDA     WV_WIDE
+    BEQ     @skip
+    CPX     #POWER_UP_DRAW
+    BEQ     @draw
+    CPX     #FIRST_DOOR
+    BCC     @skip
+    CPX     #LAST_DOOR+1
+    BCS     @skip
+@draw:
+    JMP     OBJ_DRAW_GO
+@skip:
+    JMP     OBJ_DRAW_SKIP
+
 ; A room's enemy placed ($EB5E, in place of LDA #$01 / STA $6AF4,X: its status, resting): it
 ; sleeps until it reaches the original screen.
 wide_spawn:
@@ -552,6 +599,36 @@ wide_hurt:
     LDA     HEALTH_CHANGE
     ORA     HEALTH_CHANGE+1
     RTS
+
+; ---------------------------------------------------------------------------- ;
+; A new game (bank 0 $9354, the end of InitializeStats, in place of LDA #$02 / STA $24: Brinstar's
+; bank): with the option "Level select", a direction held at START picks the area (up Norfair,
+; right Kraid, left Tourian, down Ridley), the game then starting there as a password does.
+wide_new_game:
+    LDA     WIDE_OPTIONS
+    AND     #OPT_LEVEL_SELECT
+    BEQ     @brinstar
+    LDA     JOY1_STATUS
+    LDY     #$11                        ; Norfair
+    AND     #$0F
+    CMP     #$08
+    BEQ     @area
+    INY                                 ; Kraid
+    CMP     #$01
+    BEQ     @area
+    INY                                 ; Tourian
+    CMP     #$02
+    BEQ     @area
+    INY                                 ; Ridley
+    CMP     #$04
+    BEQ     @area
+@brinstar:
+    LDA     #$02
+    STA     BANK_SWITCH
+    RTS
+@area:
+    STY     IN_AREA
+    JMP     AREA_START
 ```
 
 ### B. `tools/build.py`
@@ -567,8 +644,8 @@ Usage: python -I tools/build.py <Metroid (USA).nes> [out.bps]
 2. Lays the PRG-ROM out as 16 banks: the game's 8 where they were, the hack's bank 8, banks
    9-14 of $FF, and the game's fixed bank again as bank 15, the one MMC1 fixes at $C000 (Zaxnes'
    MMC1 fixes bank 15 modulo the bank count).
-3. Writes the hooks into the fixed bank (both its copies), each checked against the bytes it
-   replaces.
+3. Writes the hooks into the game's banks (those of the fixed bank into both its copies), each
+   checked against the bytes it replaces.
 4. Writes build/metroidwide.nes (header: 16 PRG banks) and, if asked, the BPS patch (data
    without iNES header; the game's banks moved or copied come from the player's ROM).
 """
@@ -621,6 +698,8 @@ def hooks(sym):
     put(7, 0xDFDF, 'a2 01 a5', jmp(sym['wide_visible']))
     put(7, 0xDE1B, '20 df df', jmp(sym['wide_enemy_draw']))
     put(7, 0xF39F, '20 df df', jsr(sym['wide_enemy_check']))
+    # An object's drawing: the doors and the item in the margins too.
+    put(7, 0xDED2, '20 df df', jmp(sym['wide_object_draw']))
     # A room's enemy placed: it sleeps until it reaches the original screen.
     put(7, 0xEB5E, 'a9 01 9d f4 6a', jsr(sym['wide_spawn']))
     # A sprite's x and the end of an object's drawing: the sprites' high bytes.
@@ -628,6 +707,8 @@ def hooks(sym):
     put(7, 0xDF2D, 'a9 00 85 6b', jsr(sym['wide_drawn']))
     # Invincibility: Samus' damage.
     put(7, 0xCE92, 'a5 6e 05 6f', jsr(sym['wide_hurt']))
+    # Level select: a new game (the title's bank).
+    put(0, 0x9354, 'a9 02 85 24', jsr(sym['wide_new_game']))
     return out
 
 
