@@ -303,7 +303,12 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    from the records in the 2D picture too, not from the PPU's pixels (`Ppu2C02::centre_lines`,
    latched by `decode_margins`, `(0, 240)` otherwise): those are the lines a television's
    overscan hides, where the game may show another row of its ring (a band across the picture
-   between the screen and the vertical margin).
+   between the screen and the vertical margin). A decoder whose `overscan_lines()` is `n` (default
+   0; Blaster Master 8) also gets the centre of the other captured rows starting within `n` lines
+   of the screen's top or ending within `n` lines of its bottom (`decode_extra_rows`, after the
+   edge rows; a row the decoder declines keeps the PPU's), composed from its records likewise: a
+   game whose attribute bytes for the row coming in at one edge also colour the next row, still
+   on the screen.
 
 4. A decoder whose `redrawn_right_columns()` is `n` (default 0) is also asked for the screen
    columns `32 - n` to 31 of each row, and those columns' nametable records of a decoded row are
@@ -637,7 +642,9 @@ on the screen's nearest row that reaches neither edge (its top within lines 1-23
 distance away on the ring (its margins, decoded with the other rows, as well as its centre): the
 edge row itself may be the game's overscan row, a stale one or one
 whose attribute bytes are another row's (the bottom row then shows the rocks in the sky's colours,
-a band of "water" a television hid).
+a band of "water" a television hid). Those attribute bytes also colour the row next to the edge row,
+on the screen: the rows starting or ending within 8 lines of the edges are decoded whole width too
+(`overscan_lines` 8).
 
 ---
 
