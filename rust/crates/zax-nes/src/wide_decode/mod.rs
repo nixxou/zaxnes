@@ -21,6 +21,7 @@ mod ff1;
 pub mod guest;
 mod megaman2;
 mod metalforce;
+mod metroid;
 mod ng3;
 mod smb1;
 mod smb3;
@@ -199,6 +200,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         ff1::SOURCE_CRC => Some(&ff1::FinalFantasy),
         metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
         blastermaster::SOURCE_CRC => Some(&blastermaster::BlasterMaster),
+        metroid::SOURCE_CRC => Some(&metroid::Metroid),
         _ => None,
     }
 }
