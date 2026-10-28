@@ -18,7 +18,7 @@ spawn, sleep, live and show in the margins, the way the Mega Man 3 hack does the
 |---|---|
 | Source ROMs | *Mega Man 4 (USA)* and *Mega Man 4 (USA) (Rev 1)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM; the builds differ in three bytes (one in bank `$2C`, two at `$FFF0`), none of them hooked |
 | Source data (iNES header excluded) | CRC-32 `2BC67AA8`; Rev 1 `18A2E74F` |
-| Target data | CRC-32 `22DA725A`; Rev 1 `57F81EC7` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `E8D3BE30`; Rev 1 `9DF1D2AD` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patches | `rust/crates/zax-nes/patches/megaman4-usa-widescreen.bps` and `megaman4-usa-rev1-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patches |
 
@@ -61,7 +61,9 @@ the next entries right and left of the spawn window.
 | an enemy's touch (bank `$3A` `$81C1`, `JSR $F95D`) | | none with the option "Invincible" |
 
 `LO = max(-M, section start - camera)`, `HI = min(256 + M, section end - camera)`; M is the margin.
-Mega Man's weapons (slots 0-7) keep the original limits. With M = 0 every routine does exactly what
+Mega Man's weapons (slots 0-7) keep the original limits. An object the game keeps off
+the screen is drawn with the low byte of its screen x alone, as the original (Mega Man while the
+game scrolls to another section). With M = 0 every routine does exactly what
 the code it replaces does.
 
 Margin: `M = min($5002, 248)` (248: the widest the extension's 8-bit registers carry; sprites show
@@ -375,10 +377,12 @@ wide_place:
 @rts:
     RTS
 @off:
-    LDA     WV_SH                       ; off: C set when right of the camera, Z clear
-    EOR     #$80
-    CMP     #$80
-    ORA     #$01
+    LDA     WV_SH                       ; off: C set when right of the camera, Z clear; drawn
+    EOR     #$80                        ; (an object the game keeps) with the low byte of its
+    CMP     #$80                        ; screen x alone, as the original
+    LDA     #$00
+    STA     WV_SH
+    LDA     #$01
     RTS
 
 ; Whether object X can touch or be touched ($F968 and $FA50, in place of LDA $0528,X; then BPL:

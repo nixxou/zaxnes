@@ -18,7 +18,7 @@ spawn, sleep, live and show in the margins, the way the Mega Man 2 hack does the
 |---|---|
 | Source ROM | *Mega Man (USA)*, UxROM (mapper 2), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `6EE4BB0A` |
-| Target data | CRC-32 `DA3EE79E` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `164D836E` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (the one UxROM fixes at `$C000`); hooks in bank 5 and bank 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/megaman1-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -58,7 +58,10 @@ spawn window, `$8B` the last left of it.
 | damage (bank 5 `$A23F`) | Mega Man's health less the damage, then the knockback | with the option "Invincible", nothing: back to the main loop |
 
 `LO = max(-M, section start - camera)`, `HI = min(256 + M, section end - camera)`; M is the margin
-for the enemies, 0 for slots below `$10` (Mega Man's shots keep the original limits). The game's
+for the enemies, 0 for slots below `$10` (Mega Man's shots keep the original limits). Mega Man and his
+shots are drawn with the low byte of their screen x alone, as the original: a scroll to another
+section puts Mega Man on the new screen before the camera, and the original draws him on the screen
+still. The game's
 collisions (`$C9BE` for Mega Man's touch, `$C9C2` for his weapons, against an object) take an
 object only when its x - camera is on the screen (high byte 0, `$CA0F`): nothing in a margin touches or is touched, which
 keeps the game's logic exactly the original's on the screen. With M = 0 every routine does exactly
@@ -527,11 +530,18 @@ wide_clear_oam:
     RTS
 
 ; An object's screen x ($D21F, in place of LDY #2 / SEC / LDA $0480,X / SBC $1A / STA $0F): kept
-; in 16 bits for its sprites.
+; in 16 bits for an enemy's sprites. Mega Man and his shots keep the original's low byte alone (a
+; scroll to another section puts Mega Man on the new screen before the camera, and the original
+; draws him on the screen still).
 wide_draw_origin:
     JSR     wide_screen_x
     LDA     WV_SL
     STA     $0F
+    CPX     #FIRST_ENEMY
+    BCS     @enemy
+    LDA     #$00
+    STA     WV_SH
+@enemy:
     LDY     #$02
     RTS
 
