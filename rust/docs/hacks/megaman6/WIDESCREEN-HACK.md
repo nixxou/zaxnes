@@ -29,14 +29,15 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `31C6F856` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `003E85D9` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
-The code runs from the widescreen extension's PRG window at `$5800-$5FFF`, which Zaxnes opens on
-bank 32, page 0 at power-on for this patch (`boot_window`): the game has no free room for code that
-would unlock the extension. The window is not laid over `$6000-$7FFF` (`$5007` bit 4 off once the
-hack has set it): the game's board may have PRG-RAM there. The game only ever selects banks below
+The code runs from the widescreen extension's PRG window at `$5800-$7FFF` (10 KiB), which Zaxnes
+opens on bank 32, page 0 at power-on for this patch (`boot_window`): the game has no free room for
+code that would unlock the extension. The window covers `$6000-$7FFF` (`$5007` bit 4, set by the
+hack every frame): the game reads and writes nothing there (no PRG-RAM; checked over its code and
+in play). The game only ever selects banks below
 64, so the added banks never show at `$8000` or `$A000`.
 
 ---
@@ -67,7 +68,10 @@ and `$064A` the next entries right and left of the spawn window.
 | the list's spawns (bank `$3A` `$8120`, the window, then the walk from `$813A`) | entries between camera + 8 and camera + 254 spawn, the walk keeping its place in `$0649` / `$064A` | two walks: the original's, its window and its pointers, for the controllers alone (type `$80`, all in slot 22: the stage counts on one at a time in the window; with a wider one a controller took the slot of the next, which stayed marked spawned, and the camera never went on); then one between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`), for the enemies alone, with pointers of its own (taken from the game's whenever the game sets them); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
 | an entry's spawn (bank `$3A` `$81A7`) | | only the kind of the walk under way |
 | a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
-| object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks; on the original screen it wakes for good |
+| object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | a free slot: no sleep left in it (an object made there later is awake); an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks, then goes to the **reserve**; on the original screen it wakes for good |
+| the reserve (after the list's spawns, before the objects run; drawn before the rest of OAM is hidden) | | enemies asleep in the margins, out of the game's 14 enemy slots: 8 entries of the 29 object tables (`$03A0`-`$0624`, 23 bytes apart); an entry reaching the original screen takes a free slot again and wakes (it waits at the edge while none is), one past the margins is dropped; each is drawn as the drawer draws an object, in a free slot or in slot 21 borrowed (its object set aside meanwhile), its animation stepping on |
+| an entry's free slot (bank `$3A` `$81C4`, `JSR $E590`) | none while a slot holds the entry | none while the reserve holds it either |
+| the game empties its slots (`$D6F1`, a scroll to another screen) | | the reserve emptied too (also whenever the game sets its list pointers) |
 | "on the screen" (`$E485`) | y on the screen, x - camera within `[4, 256)` | the same for slots 0-7 and the controller (22); an enemy also within `[LO, HI)` |
 | an object's place (`$E24B`, in the drawer) | not drawn when flagged off the screen (`$03B7` bit 0), its y off the screen or its x - camera (low byte) below 4 | the same on the original screen; an enemy off it is drawn within `[LO, HI)`, the flag aside (the game sets it only for objects it never draws: those off the screen it removes), unless it is hidden or, asleep, on a screen other than the one whose enemies' tiles the game loaded to CHR-RAM (`$0680`, `$FF` while loading) and the next one: the original spawns no enemy elsewhere, and those of a further screen showed as a jumble |
 | an object's sprites (`$E315`, the jump to one of the four loops: none, horizontal, vertical, both flips) | x = 8-bit screen x + or - the offset, the sprite hidden when it overflows; the loop stops when OAM is full | the same four loops for each page (eight), 16-bit x, shown within `[-M, 256 + M)`, its high byte to `$5100 + 4 n` (or `$5400 + 4 n`); the loops go on to the extension's second page (`$5300`) when the first is full, and stop when both are |
@@ -90,15 +94,18 @@ CPU time: 64 lines of overclock (`$5006`) pay for the hack's work and the enemie
 255 with the option "No slowdown" (on by default). Measured on Plant Man's stage (500 frames,
 holding right and jumping, counted with a temporary trace of the NMI's updates): the game with the
 hooks' sprite routines left out runs late 19 frames; the hack at a margin of 0 without overclock
-75; at a 128-pixel margin without overclock 148, with 64 lines 62, with 255 none.
+75; at a 128-pixel margin without overclock 148, with 64 lines 62, with 255 none. The reserve,
+measured on the first stage of a movie from its start (600 frames at a 128-pixel
+margin, the game's own count of the frames it finished, `$F3`): with 64 lines 64 frames late
+against 54 without it, with 255 none.
 
 ## 3. The extension
 
 Set every frame the NMI updates the screen (`$C01F`, `LDA $FB / STA $A000` becomes `JSR wide_nmi /
 NOP` x 2, which writes `$5003 = M`, `$5004 = $5005 = 0` (the nametable columns are hidden: the
-decoder draws the background), `$5007 = $0E` (sprites free of those extents, second sprite page,
+decoder draws the background), `$5007 = $1E` (sprites free of those extents, second sprite page,
 high bytes kept from one page to the next: every sprite the hack places gets one, those of the
-energy bars keep the 0 of the frame's start), `$5006 = 64` (255 with "No slowdown"), then does the
+energy bars keep the 0 of the frame's start; the window on to `$7FFF`), `$5006 = 64` (255 with "No slowdown"), then does the
 replaced instructions).
 
 Variables (extension RAM): `WV_M $5200`, the live range `WV_LO $5201`/`$5202` and `WV_HI
@@ -106,7 +113,12 @@ $5203`/`$5204` (signed 16-bit), the object's screen x `WV_S $5205`/`$5206`, scra
 `WV_T1 $5208`, `WV_PAGE $5209` (bit 7: the second page is in use), `WV_FULL $520A` (both pages
 full), the part of the stage `WV_FIRST $520B` and `WV_END $520C` (screens), the sprites' x base
 `WV_X $520D`/`$520E`, `WV_YH $520F`, `WV_DORMANT $5220 + slot` (the list entry of an enemy asleep,
-`$FF` awake: a slot another object took since is awake).
+`$FF` awake: a slot another object took since is awake), `WV_STARTED $5240 + slot`, `WV_HIDDEN
+$5260 + slot`, the camera of the last spawns `WV_CAM $5210`/`$5211`, `WV_MOVED $5212`, the walk
+under way `WV_PASS $5213`, the game's list pointers as its walk left them `WV_O $5214`/`$5215`, the
+enemies' walk's own `WV_E $5216`/`$5217`, `WV_RES $5218`, `WV_BORROW $5219`; the reserve:
+`RES_USED $5280 + e`, `RES_ENTRY $5288 + e`, `RES_HIDDEN $5290 + e`, its object tables at `$5500 +
+8 f + e`, the borrowed slot's at `$5600 + f`.
 
 ## 4. Hooks
 
@@ -124,7 +136,10 @@ banks `$38` and `$3A` run at `$8000`.
 | `$E26D` | `LDX $8C / LDA #$F0` (head of the loop hiding the rest of OAM) | `JMP wide_hide_rest` |
 | `$E485` | `LDA $04CB,X` (head of the test "on the screen") | `JMP wide_on_screen` |
 | `$E43A` | `LDA $03A0,X` | `JSR wide_think` |
-| bank `$3A` `$8120` | `$03:$02 = camera + 254`, `$01:$00 = camera + 8` (26 bytes) | `JSR wide_spawn_window` |
+| bank `$3A` `$8120` | `$03:$02 = camera + 254`, `$01:$00 = camera + 8` (26 bytes) | `JMP wide_spawns` |
+| bank `$3A` `$81A7` | `TYA / AND #$07 / TAX` | `JSR wide_spawn_filter` |
+| bank `$3A` `$81C4` | `JSR $E590` | `JSR wide_free_slot` |
+| `$D6F1` | `LDX #$15 / LDA #$00` | `JSR wide_slots_cleared` |
 | bank `$3A` `$81EA` | `LDA #$00 / STA $04B4,X` | `JSR wide_spawned` |
 | bank `$38` `$8F72` | `LDA $A2 / BNE $8F95 / LDA $96 / BNE $8F95` | `JSR wide_hurt / BNE $8F95` |
 
@@ -149,7 +164,7 @@ Requirements: cc65 (ca65, ld65; run through WSL when not on the PATH), Python 3,
 python -I tools/build.py "Mega Man 6 (USA).nes" build/mm6wide.bps
 ```
 
-assembles `src/wide.s` for `$5800` (one 16 KiB bank, the code within its first 2 KiB, `-g`, labels
+assembles `src/wide.s` for `$5800` (one 16 KiB bank, the code within its first 10 KiB, `-g`, labels
 from `ld65 -Ln`), lays the PRG out in 68 banks of 8 KiB, writes the hooks, `build/mm6wide.nes` and
 the BPS patch (`tools/make_bps.py`: the fixed banks' copies are SourceCopy from the player's ROM,
 the added banks and the hooks TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
@@ -161,6 +176,7 @@ testing.
 * Only the enemies (slots 8 up) live in the margins; Mega Man's weapons keep the original screen.
 * An enemy asleep in a margin hangs where its entry puts it, in the pose of its first frame, until
   the original screen reaches it.
+* The reserve holds 8 enemies; past that, an enemy asleep stays in a game slot, as before it.
 * An enemy spawned in a margin at the stage's start shows only once the camera moves.
 * An enemy asleep two screens or more ahead of the screen whose enemies' tiles are loaded (`$0680`)
   is not drawn until the camera reaches the screen before it.
@@ -185,7 +201,7 @@ testing.
 ; 8 KiB banks 0-63 stay where they were and its two fixed banks are copied to banks 66 and 67, the
 ; ones MMC3 fixes at $C000 and $E000); the widescreen extension's PRG window shows its first 2 KiB
 ; at $5800-$5FFF, Zaxnes opening it at power-on (the patch's boot window: bank 32, page 0). The
-; window is not laid over $6000-$7FFF ($5007 bit 4 off): the game may have PRG-RAM there. The game
+; window goes on over $6000-$7FFF ($5007 bit 4): the game reads and writes nothing there. The game
 ; reaches the code through hooks in its own (tools/build.py). The background of the margins is
 ; Zaxnes' margin decoder's work; the hack does the objects, the way the Mega Man 3 to 5 hacks do
 ; them, in Mega Man 6's own engine (objects run as scripts, each removing itself through the test
@@ -202,6 +218,8 @@ testing.
 ;    that spawns while the camera stands (the stage's start: its tiles are still on their way to
 ;    CHR-RAM) is not drawn until the camera moves, nor one on a screen whose enemies' tiles the
 ;    game has not loaded yet (it loads those of the camera's screen and the next one);
+;  * an enemy asleep in a margin, once set up, waits in the reserve, out of the game's slots (the
+;    hack draws it), and takes a free slot again when it reaches the original screen;
 ;  * every object's sprites get the high byte of their 16-bit x, and the sprites that no longer
 ;    fit in the console's 64 go on to the extension's second page instead of being dropped;
 ;  * the game's collisions measure 16-bit distances: an enemy in a margin only touches what is
@@ -262,6 +280,16 @@ WV_O49          = $5214         ; the game's list pointers as its walk left them
 WV_O4A          = $5215
 WV_E49          = $5216         ; the enemies' walk's list pointers
 WV_E4A          = $5217
+WV_RES          = $5218         ; the reserve entry at hand
+WV_BORROW       = $5219         ; non-zero while slot BORROWED holds a reserve entry being drawn
+RES_COUNT       = 8             ; the reserve: enemies asleep in the margins, out of the game's slots
+RES_USED        = $5280         ; + entry: non-zero when in use
+RES_ENTRY       = $5288         ; + entry: its stage list entry
+RES_HIDDEN      = $5290         ; + entry: its WV_HIDDEN
+RES_DATA        = $5500         ; object table f of entry e at RES_DATA + RES_COUNT f + e
+SAVE_DATA       = $5600         ; + f: the borrowed slot's object tables while it draws an entry
+OBJ_TABLES      = 29            ; the object tables, 23 bytes apart from $03A0 (slots 0-22)
+BORROWED        = $15           ; the slot borrowed to draw the reserve when none is free
 
 ; The game.
 OAM             = $0200
@@ -270,6 +298,15 @@ LIST_RIGHT      = $0649         ; the stage list's next entries right and left o
 LIST_LEFT       = $064A
 LIST_TYPE       = $7E           ; pointer to the stage list's entry types
 LIST_WALK       = $813A         ; bank $3A: the walk of the list, through the window $00-$03, to an RTS
+FREE_SLOT       = $E590         ; a free enemy slot for list entry Y in X, carry clear; set: none
+SET_BANK        = $CBC0         ; the 8 KiB bank Y at $A000
+DRAW_SPRITES    = $E2A9         ; an object's sprites, X the slot, $00 its screen x
+OBJ_ANIM_BANK   = $0458         ; + slot: its animation's bank
+OBJ_ANIM_END    = $04F9         ; + slot: its animation's length (steps of 2)
+OBJ_ANIM_STEP   = $0510         ; + slot: its animation's step
+OBJ_ANIM_LO     = $053E         ; + slot: its animation's data, low and high
+OBJ_ANIM_HI     = $0527
+OBJ_ANIM_TIME   = $0555         ; + slot: frames left of its animation's step
 CHR_SCREEN      = $0680         ; the screen whose enemies' tiles the game loaded to CHR-RAM ($FF: loading)
 CAM_HI          = $57
 SCROLL          = $71           ; bit 0: the camera may go on right of its screen, bit 1 left
@@ -305,8 +342,9 @@ wide_nmi:
     LDA     #$00
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$0E                        ; sprites free of the extents, second sprite page, high
-                                        ; bytes kept (every sprite placed gets one)
+    LDA     #$1E                        ; sprites free of the extents, second sprite page, high
+                                        ; bytes kept (every sprite placed gets one), the window
+                                        ; on to $7FFF (the hack's code; the game has no PRG-RAM)
     STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS
     AND     #OPT_NO_SLOWDOWN
@@ -545,6 +583,13 @@ wide_spawned:
 wide_think:
     CPX     #FIRST_ENEMY
     BCC     @run
+    LDA     OBJ_TYPE,x                  ; a free slot: no sleep of an object gone left in it (an
+    BNE     @object                     ; object made there later is not asleep)
+    LDA     #$FF
+    STA     WV_DORMANT,x
+    LDA     #$00
+    RTS
+@object:
     LDA     WV_DORMANT,x
     CMP     #$FF
     BEQ     @run
@@ -558,6 +603,7 @@ wide_think:
     LDA     #$00                        ; past the margins: removed ($E456)
     STA     OBJ_TYPE,x
     LDA     #$FF
+    STA     WV_DORMANT,x
     STA     OBJ_ENTRY,x
     STA     OBJ_HEALTH,x
 @asleep:
@@ -567,9 +613,13 @@ wide_think:
     CPX     #CONTROLLER                 ; a controller does nothing before its time
     BCS     @asleep
     LDA     WV_STARTED,x
-    BNE     @asleep
+    BNE     @park
     INC     WV_STARTED,x                ; its first frame: the script runs, the enemy still asleep
     BNE     @run
+@park:
+    JSR     wide_park                   ; then into the reserve, its slot freed, if there is room
+    LDA     #$00
+    RTS
 @wake:
     LDA     #$FF
     STA     WV_DORMANT,x
@@ -624,6 +674,7 @@ wide_spawns:
     CMP     WV_O4A
     BEQ     @controllers
 @reset:
+    JSR     wide_reserve_clear          ; a new start: the reserve's enemies are gone
     LDA     LIST_RIGHT
     STA     WV_E49
     LDA     LIST_LEFT
@@ -666,7 +717,7 @@ wide_spawns:
     STA     LIST_RIGHT
     LDA     WV_O4A
     STA     LIST_LEFT
-    RTS
+    JMP     wide_reserve_frame
 
 ; The enemies' window: $01:$00 = camera + 8 - M, $03:$02 = camera + 254 + M, within the part.
 wide_enemy_window:
@@ -765,6 +816,7 @@ wide_frame_start:
 ; The rest of OAM hidden ($E26D, in place of LDX $8C / LDA #$F0 and the loop): on the page in
 ; use, and the second page whole while the first is.
 wide_hide_rest:
+    JSR     wide_reserve_draw
     LDX     OAM_NEXT
     LDA     #$F0
     BIT     WV_PAGE
@@ -1002,8 +1054,262 @@ wide_hurt:
     ORA     $96
     RTS
 
+; ---------------------------------------------------------------------------- ;
+; The reserve. An enemy asleep in a margin, once its script's first frame has set it up, leaves
+; the game's slots: its object tables wait in the reserve, which the hack draws, until it reaches
+; the original screen and takes a free slot again (or leaves the margins and is dropped, as the
+; game removes an enemy off the screen). The game's 14 enemy slots are for the enemies awake.
+
+.macro SLOT_TO_RES                      ; slot X to reserve entry Y
+.repeat OBJ_TABLES, f
+    LDA     OBJ_TYPE + 23 * f,x
+    STA     RES_DATA + RES_COUNT * f,y
+.endrep
+.endmacro
+
+.macro RES_TO_SLOT                      ; reserve entry Y to slot X
+.repeat OBJ_TABLES, f
+    LDA     RES_DATA + RES_COUNT * f,y
+    STA     OBJ_TYPE + 23 * f,x
+.endrep
+.endmacro
+
+; Entry Y's screen x, from its tables, in WV_SL / WV_SH.
+.macro RES_SCREEN_X
+    SEC
+    LDA     RES_DATA + RES_COUNT * ((OBJ_X - OBJ_TYPE) / 23),y
+    SBC     CAM_LO
+    STA     WV_SL
+    LDA     RES_DATA + RES_COUNT * ((OBJ_XH - OBJ_TYPE) / 23),y
+    SBC     CAM_HI
+    STA     WV_SH
+.endmacro
+
+; Enemy X (asleep, set up) into the reserve, its slot freed; it stays when the reserve is full.
+wide_park:
+    LDY     #RES_COUNT - 1
+@find:
+    LDA     RES_USED,y
+    BEQ     @free
+    DEY
+    BPL     @find
+    RTS
+@free:
+    SLOT_TO_RES
+    LDA     #$01
+    STA     RES_USED,y
+    LDA     OBJ_ENTRY,x
+    STA     RES_ENTRY,y
+    LDA     WV_HIDDEN,x
+    STA     RES_HIDDEN,y
+    LDA     #$00
+    STA     OBJ_TYPE,x
+    LDA     #$FF
+    STA     OBJ_ENTRY,x
+    STA     WV_DORMANT,x
+    RTS
+
+; The reserve emptied (a new start, or the game emptying its slots).
+wide_reserve_clear:
+    LDA     #$00
+    LDY     #RES_COUNT - 1
+@clear:
+    STA     RES_USED,y
+    DEY
+    BPL     @clear
+    RTS
+
+; The game empties its object slots ($D6F1, a scroll to another screen; in place of LDX #$15 /
+; LDA #$00): the reserve too.
+wide_slots_cleared:
+    JSR     wide_reserve_clear
+    LDX     #$15
+    LDA     #$00
+    RTS
+
+; A list entry's free slot ($81C4, in place of JSR $E590; Y the entry): none while the entry waits
+; in the reserve (the game's own test: none while a slot holds it).
+wide_free_slot:
+    LDX     #RES_COUNT - 1
+@entry:
+    LDA     RES_USED,x
+    BEQ     @next
+    TYA
+    CMP     RES_ENTRY,x
+    BNE     @next
+    SEC
+    RTS
+@next:
+    DEX
+    BPL     @entry
+    JMP     FREE_SLOT
+
+; The reserve's frame (after the list's spawns, before the objects run): an entry on the original
+; screen wakes in a free slot (it waits at the edge while none is), one past the margins is
+; dropped; the camera moving shows those hidden.
+wide_reserve_frame:
+    LDY     #RES_COUNT - 1
+@entry:
+    STY     WV_RES
+    LDA     RES_USED,y
+    BNE     @used
+    JMP     @next
+@used:
+    LDA     WV_MOVED
+    BEQ     @where
+    LDA     #$00
+    STA     RES_HIDDEN,y
+@where:
+    RES_SCREEN_X
+    LDA     WV_SH
+    BEQ     @screen
+    JMP     @margin
+@screen:
+    LDX     #CONTROLLER - 1             ; on the original screen: a free slot
+@slot:
+    LDA     OBJ_TYPE,x
+    BEQ     @wake
+    DEX
+    CPX     #FIRST_ENEMY
+    BCS     @slot
+    JMP     @next
+@wake:
+    RES_TO_SLOT
+    LDA     #$FF
+    STA     WV_DORMANT,x
+    LDA     #$01
+    STA     WV_STARTED,x
+    LDA     #$00
+    STA     WV_HIDDEN,x
+    STA     RES_USED,y
+    JMP     @next
+@margin:
+    JSR     wide_inside
+    BCC     @next
+    LDY     WV_RES                      ; past the margins: dropped
+    LDA     #$00
+    STA     RES_USED,y
+@next:
+    LDY     WV_RES
+    DEY
+    BMI     @rts
+    JMP     @entry
+@rts:
+    RTS
+
+; The reserve drawn (before the rest of OAM is hidden, $E26D): each entry in a free slot, or in
+; slot BORROWED, whose own object waits in SAVE_DATA meanwhile, drawn as the drawer draws an
+; object; its animation's progress goes back to the reserve.
+wide_reserve_draw:
+    LDY     #RES_COUNT - 1
+@entry:
+    STY     WV_RES
+    LDA     RES_USED,y
+    BNE     @used
+    JMP     @next
+@used:
+    LDA     #$00
+    STA     WV_BORROW
+    LDX     #CONTROLLER - 1
+@slot:
+    LDA     OBJ_TYPE,x
+    BNE     @taken
+    JMP     @load
+@taken:
+    DEX
+    CPX     #FIRST_ENEMY
+    BCS     @slot
+    LDX     #BORROWED                   ; none free: borrowed
+    INC     WV_BORROW
+.repeat OBJ_TABLES, f
+    LDA     OBJ_TYPE + 23 * f,x
+    STA     SAVE_DATA + f
+.endrep
+    LDA     WV_DORMANT,x
+    STA     SAVE_DATA + OBJ_TABLES
+    LDA     WV_HIDDEN,x
+    STA     SAVE_DATA + OBJ_TABLES + 1
+@load:
+    RES_TO_SLOT
+    LDA     RES_ENTRY,y
+    STA     WV_DORMANT,x
+    LDA     RES_HIDDEN,y
+    STA     WV_HIDDEN,x
+    JSR     wide_draw_one
+    LDY     WV_RES
+    SLOT_TO_RES
+    LDA     WV_BORROW
+    BNE     @restore
+    JMP     @free
+@restore:
+.repeat OBJ_TABLES, f
+    LDA     SAVE_DATA + f
+    STA     OBJ_TYPE + 23 * f,x
+.endrep
+    LDA     SAVE_DATA + OBJ_TABLES
+    STA     WV_DORMANT,x
+    LDA     SAVE_DATA + OBJ_TABLES + 1
+    STA     WV_HIDDEN,x
+    JMP     @next
+@free:
+    LDA     #$00                        ; the free slot free again
+    STA     OBJ_TYPE,x
+    LDA     #$FF
+    STA     OBJ_ENTRY,x
+    STA     WV_DORMANT,x
+@next:
+    LDY     WV_RES
+    DEY
+    BMI     @rts
+    JMP     @entry
+@rts:
+    RTS
+
+; One object drawn, X its slot (kept: $E2A9 leaves in X whether OAM is full), as the drawer's
+; loop does it ($E213-$E266): its animation's step counted down and stepped, its place
+; (wide_place), its sprites ($E2A9).
+wide_draw_one:
+    TXA
+    PHA
+    JSR     @draw
+    PLA
+    TAX
+    RTS
+@draw:
+    LDA     OBJ_FLAGS,x
+    AND     #$02
+    BNE     @rts
+    LDA     OBJ_ANIM_BANK,x
+    TAY
+    JSR     SET_BANK
+    DEC     OBJ_ANIM_TIME,x
+    BNE     @place
+    INC     OBJ_ANIM_STEP,x
+    INC     OBJ_ANIM_STEP,x
+    LDA     OBJ_ANIM_STEP,x
+    CMP     OBJ_ANIM_END,x
+    BCC     @step
+    LDA     #$00
+    STA     OBJ_ANIM_STEP,x
+@step:
+    TAY
+    INY
+    INY
+    LDA     OBJ_ANIM_LO,x
+    STA     $08
+    LDA     OBJ_ANIM_HI,x
+    STA     $09
+    LDA     ($08),y
+    STA     OBJ_ANIM_TIME,x
+@place:
+    JSR     wide_place
+    BCS     @rts
+    JSR     DRAW_SPRITES
+@rts:
+    RTS
+
 wide_end:
-.assert wide_end <= $6000, error, "widescreen code past the 2 KiB window"
+.assert wide_end <= $8000, error, "widescreen code past the 10 KiB window"
 ```
 
 ### B. `tools/build.py`
@@ -1088,6 +1394,9 @@ def hooks(sym):
         jmp(sym['wide_spawns']))
     put(0x3A, 0x81A7, '98 29 07 aa', jsr(sym['wide_spawn_filter']))
     put(0x3A, 0x81EA, 'a9 00 9d b4 04', jsr(sym['wide_spawned']))
+    # The reserve: a list entry waiting there gets no slot; the game emptying its slots empties it.
+    put(0x3A, 0x81C4, '20 90 e5', jsr(sym['wide_free_slot']))
+    put(62, 0xD6F1, 'a2 15 a9 00', jsr(sym['wide_slots_cleared']))
     # Invincibility: Mega Man's damage.
     put(0x38, 0x8F72, 'a5 a2 d0 1f a5 96 d0 1b', jsr(sym['wide_hurt']) + bytes([0xD0, 0x1E]))  # BNE $8F95
     return out
