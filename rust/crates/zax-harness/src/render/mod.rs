@@ -69,6 +69,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --save-state <file>      write the state block of the machine after the run
   --dump-mem <file>        write CPU $0000-$07FF, $6000-$7FFF, then $5000-$5FFF (14 KiB)
                            after the run
+  --trace-ram <file>       write CPU $0000-$07FF after every frame run, one block of 2 KiB each
   --press <spec>           port 1 buttons to hold, a comma separated list of
                            <first>[-<last>]:<buttons>, the frames counting from the reset and
                            the buttons being a|b|select|start|up|down|left|right joined by '+'
@@ -151,6 +152,8 @@ pub struct Options {
     pub save_state: Option<PathBuf>,
     /// Where to write the work RAM and the cartridge RAM after the run.
     pub dump_mem: Option<PathBuf>,
+    /// `--trace-ram`: the work RAM after every frame.
+    pub trace_ram: Option<PathBuf>,
     /// The profile file or title.
     pub profile: Option<String>,
     /// Asset folder for the skybox cubemaps.
@@ -222,6 +225,7 @@ impl Options {
             sprite_limit: SpriteLimit::Kept,
             save_state: None,
             dump_mem: None,
+            trace_ram: None,
             profile: None,
             assets: None,
             width: 640,
@@ -336,6 +340,7 @@ impl Options {
             }
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
+            "--trace-ram" => self.trace_ram = Some(PathBuf::from(value)),
             "--profile" => self.profile = Some(value.to_owned()),
             "--assets" => self.assets = Some(PathBuf::from(value)),
             "--size" => (self.width, self.height) = parse_size(value)?,
@@ -609,6 +614,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             sprite_limit: options.sprite_limit,
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
+            trace_ram: options.trace_ram.as_deref(),
         })?]);
     }
 
