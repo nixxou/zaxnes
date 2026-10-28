@@ -17,6 +17,7 @@
 //! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | hooks into both copies of the original 16 KiB (the PRG laid out as the game, its copy for the $C000 mirror, then a 16 KiB bank for the extension's window) (`excitebikewide`, `tools/build.py`) |
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size (`ff1wide`, `tools/build.py`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
+//! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`blastermasterwide`, `tools/build.py`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -76,9 +77,11 @@ pub const EXCITEBIKE: &str = "Excitebike (Japan, USA) widescreen";
 pub const FINAL_FANTASY_USA: &str = "Final Fantasy (USA) widescreen";
 /// Name of the Metal Force (Korea) widescreen patch (advanced mode).
 pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
+/// Name of the Blaster Master (USA) widescreen patch (advanced mode).
+pub const BLASTERMASTER_USA: &str = "Blaster Master (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 11] = [
+pub const PATCHES: [BuiltinPatch; 12] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -403,6 +406,47 @@ pub const PATCHES: [BuiltinPatch; 11] = [
         boot_window: None,
         // Everything runs in the NMI; the reset ends in a JMP to itself.
         idle_loop: Some((0xFFC3, 0xFFC5)),
+    },
+    BuiltinPatch {
+        name: BLASTERMASTER_USA,
+        game: "Blaster Master",
+        rom_name: "Blaster Master (USA)",
+        source_crc: 0x3F0F_D764,
+        bps: include_bytes!("../patches/blastermaster-usa-widescreen.bps"),
+        options: &[
+            // Testing aids: a new game starts with the game's own area select (up / down,
+            // Start); no damage (the player only).
+            HackOption {
+                key: "level_select",
+                label: "Level select (at a new game)",
+                label_fr: "Sélecteur de niveau (en début de partie)",
+                bit: 0,
+                default: false,
+            },
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
+            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (8)
+        // is open in the window from power-on.
+        boot_window: Some((0x88, 0x00)),
+        // The frame's wait: BIT $12 / BMI, until the NMI clears it.
+        idle_loop: Some((0xE93A, 0xE93D)),
     },
 ];
 
