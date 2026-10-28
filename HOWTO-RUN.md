@@ -498,7 +498,8 @@ Le détail technique est dans [`rust/docs/WIDESCREEN-EXTENSION.md`](rust/docs/WI
 , [`rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md`](rust/docs/hacks/adventure_island/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/excitebike/WIDESCREEN-HACK.md`](rust/docs/hacks/excitebike/WIDESCREEN-HACK.md)
 , [`rust/docs/hacks/ff1/WIDESCREEN-HACK.md`](rust/docs/hacks/ff1/WIDESCREEN-HACK.md)
-et [`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md) (les hacks
+, [`rust/docs/hacks/metalforce/WIDESCREEN-HACK.md`](rust/docs/hacks/metalforce/WIDESCREEN-HACK.md)
+et [`rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md`](rust/docs/hacks/blastermaster/WIDESCREEN-HACK.md) (les hacks
 eux-mêmes et comment les reconstruire).
 
 ### Limite de 8 sprites par ligne
