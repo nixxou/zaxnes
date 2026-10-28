@@ -118,6 +118,13 @@ impl MarginDecoder for Layout {
     fn decodes_masked_column(&self) -> bool {
         true
     }
+
+    /// The column the game draws past the screen's right edge takes its colours from attribute
+    /// bytes it writes later: the screen's last column shows them first (a stripe of the next
+    /// structure's colours at the edge of the original picture).
+    fn redrawn_right_columns(&self) -> i32 {
+        1
+    }
 }
 
 impl Layout {
