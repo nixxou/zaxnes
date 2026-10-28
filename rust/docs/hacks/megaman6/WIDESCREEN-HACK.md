@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `851CA121` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `FCA24A45` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -67,7 +67,7 @@ and `$064A` the next entries right and left of the spawn window.
 |---|---|---|
 | the list's spawns (bank `$3A` `$8120`, the window, then the walk from `$813A`) | entries between camera + 8 and camera + 254 spawn, the walk keeping its place in `$0649` / `$064A` | two walks: the original's, its window and its pointers, for the controllers alone (type `$80`, all in slot 22: the stage counts on one at a time in the window; with a wider one a controller took the slot of the next, which stayed marked spawned, and the camera never went on); then one between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`), for the enemies alone, with pointers of its own (taken from the game's whenever the game sets them); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
 | an entry's spawn (bank `$3A` `$81A7`) | | only the kind of the walk under way |
-| the part of the stage enemies live in (`wide_part`) | | the camera's screen, extended where `$71` lets the camera on, as far as the next controller of the list on that side whose settings will not (`wide_reach`, worked out each frame before the walks, as Zaxnes' decoder does for the margins: bank `$39` at `$8000` and the list's bank `$3A` at `$A000` through the game's `$CBC0`, its banks put back as its NMI does) |
+| the part of the stage enemies live in (`wide_part`) | | the screens beside the camera's, as far as a join of two screens that are not side by side, whatever `$71` (`wide_reach`, worked out each frame before the walks, as Zaxnes' decoder does for the margins: the stage list's controllers, their actions without a screen of their own scrolling up or down from their screen, or doors to a screen of their own; bank `$39` at `$8000` and the list's bank `$3A` at `$A000` through the game's `$CBC0`, its banks put back as its NMI does) |
 | a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
 | object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | a free slot: no sleep left in it (an object made there later is awake); an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks, then goes to the **reserve**; on the original screen it wakes for good |
 | the reserve (after the list's spawns, before the objects run; drawn before the rest of OAM is hidden) | | enemies asleep in the margins, out of the game's 14 enemy slots: 8 entries of the 29 object tables (`$03A0`-`$0624`, 23 bytes apart); an entry reaching the original screen takes a free slot again and wakes (it waits at the edge while none is), one past the margins is dropped; each is drawn as the drawer draws an object, in a free slot or in slot 21 borrowed (its object set aside meanwhile), its animation stepping on |
@@ -117,8 +117,7 @@ full), the part of the stage `WV_FIRST $520B` and `WV_END $520C` (screens), the 
 `$FF` awake: a slot another object took since is awake), `WV_STARTED $5240 + slot`, `WV_HIDDEN
 $5260 + slot`, the camera of the last spawns `WV_CAM $5210`/`$5211`, `WV_MOVED $5212`, the walk
 under way `WV_PASS $5213`, the game's list pointers as its walk left them `WV_O $5214`/`$5215`, the
-enemies' walk's own `WV_E $5216`/`$5217`, `WV_RES $5218`, `WV_BORROW $5219`, where the camera stops past `$71` `WV_LSTOP $521A` and `WV_RSTOP
-$521B` (`$FF`: none), the game's banks while they are worked out `WV_BANKS $521C`/`$521D`; the reserve:
+enemies' walk's own `WV_E $5216`/`$5217`, `WV_RES $5218`, `WV_BORROW $5219`, where the camera stops past `$71` the first and last screens of that part `WV_LSTOP $521A` and `WV_RSTOP $521B`, the two joins `wide_reach` tests and whether they are apart `WV_JL $5238`, `WV_JR $5239`, `WV_AL $523A`, `WV_AR $523B`, the controller at hand `WV_OWN $523C`, `WV_FWD $523D`, `WV_AT $523E`, `WV_ENTRY $523F`, the game's banks while they are worked out `WV_BANKS $521C`/`$521D`; the reserve:
 `RES_USED $5280 + e`, `RES_ENTRY $5288 + e`, `RES_HIDDEN $5290 + e`, its object tables at `$5500 +
 8 f + e`, the borrowed slot's at `$5600 + f`.
 
@@ -182,11 +181,8 @@ testing.
 * An enemy spawned in a margin at the stage's start shows only once the camera moves.
 * An enemy asleep two screens or more ahead of the screen whose enemies' tiles are loaded (`$0680`)
   is not drawn until the camera reaches the screen before it.
-* Where `$71` stops the camera going back left (a point of no return), the left margin stops at
-  the camera's screen: the screen before it in the stage's list may be to its left or above it,
-  which only the stage's controllers know.
-* The part of the stage the margins and the enemies keep to follows `$71`, which the game's own
-  objects set as Mega Man goes: where it lets the camera on, the margins reach as far as the map.
+* The part of the stage enemies live in follows the joins the stage's controllers give (as
+  Zaxnes' decoder's margins): a controller of another kind of settings (a boss's) says nothing.
 * The hack's sprite loops cost time: without overclock the game runs late more often than the
   original; "No slowdown" (on by default) leaves no lag frame.
 
@@ -284,8 +280,16 @@ WV_E49          = $5216         ; the enemies' walk's list pointers
 WV_E4A          = $5217
 WV_RES          = $5218         ; the reserve entry at hand
 WV_BORROW       = $5219         ; non-zero while slot BORROWED holds a reserve entry being drawn
-WV_LSTOP        = $521A         ; the screen the camera stops on going left, past where $71 lets it
-WV_RSTOP        = $521B         ; the screen it last stops in going right ($FF both: the stage's end)
+WV_LSTOP        = $521A         ; the first screen beside the camera's that enemies live in
+WV_RSTOP        = $521B         ; and the last (see wide_reach)
+WV_JL           = $5238         ; the joins wide_reach tests: before the camera's screen ($FF: none)
+WV_JR           = $5239         ; and after the last it shows
+WV_AL           = $523A         ; non-zero when that join's screens are not side by side
+WV_AR           = $523B
+WV_OWN          = $523C         ; the controller at hand: its screen, whether it scrolls to the
+WV_FWD          = $523D         ; next one, where its settings are read, its entry in the list
+WV_AT           = $523E
+WV_ENTRY        = $523F
 WV_BANKS        = $521C         ; the game's banks at $8000 and $A000 ($4A, $4B) while wide_reach reads
 RES_COUNT       = 8             ; the reserve: enemies asleep in the margins, out of the game's slots
 RES_USED        = $5280         ; + entry: non-zero when in use
@@ -388,39 +392,14 @@ wide_screen_x:
     STA     WV_SH
     RTS
 
-; The part of the stage the camera may show, in screens: [WV_FIRST, WV_END). The camera stops at
-; its screen's edges unless $71 lets it on.
+; The part of the stage enemies live in, in screens: [WV_FIRST, WV_END), the screens side by side
+; with the camera's that wide_reach found (whatever $71, which says where the camera may go now).
 wide_part:
-    LDA     SCROLL
-    AND     #$02
-    BEQ     @own
-    LDA     WV_LSTOP                    ; on to where a controller will stop it, or the start
-    CMP     #$FF
-    BNE     @first
-    LDA     #$00
-    BEQ     @first
-@own:
-    LDA     CAM_HI
-@first:
+    LDA     WV_LSTOP
     STA     WV_FIRST
-    LDA     SCROLL
-    AND     #$01
-    BEQ     @stop
-    LDA     WV_RSTOP                    ; on to where a controller will stop it, or the map's end
-    CMP     #$FF
-    BEQ     @map
+    LDA     WV_RSTOP
     CLC
-    ADC     #$02
-    BNE     @end
-@map:
-    LDA     #$40
-    BNE     @end
-@stop:
-    LDA     CAM_LO                      ; the screen the camera reaches, and the one after it
-    CMP     #$01
-    LDA     CAM_HI
     ADC     #$01
-@end:
     STA     WV_END
     RTS
 
@@ -1083,12 +1062,18 @@ wide_hurt:
     RTS
 
 ; ---------------------------------------------------------------------------- ;
-; How far the camera goes past its screen's edges where $71 lets it on (as Zaxnes' decoder works
-; it out): to the first controller of the stage list on that side that will not let it on (a
-; controller sets $71 when it spawns, from its settings: entry y of $82EB / $836B in bank $39, the
-; first byte, or the third when the first has bit 7). Going left, the screen it stops on is that of
-; the controller's x - 8 (the window's left edge, camera + 8, spawns it); going right, the last it
-; stops in is that of its x - 254. The list (bank $3A) is read at $A000, bank $39 at $8000
+; The part of the stage the enemies live in: the screens beside the camera's, as far as a join of
+; two screens that are not side by side, as Zaxnes' decoder draws the margins (the margins show at
+; most one screen past the two the camera may straddle: the join before its screen, and the one
+; after the last it shows). A stage is a straight list of screens; its controllers (type $80)
+; say which joins are not side by side: their settings (entry y of $82EB / $836B in bank $39) are
+; $71 (or, after bit 7, a routine's address then $71), two bytes, then actions of three bytes
+; (kind, $73, $72) and a screen of their own with bit 7, up to a 0 or a byte with bit 7: 1 and 3 a
+; scroll down to the next or previous screen, 2 and 4 up, 5 and 6 a door right or left to a
+; screen. Without a screen of their own they act from the controller's screen (x's), a controller
+; that scrolls to the next one (1, 2) taking its scroll back (3, 4) from that next one; with one,
+; a door leaves the join after (5) or before (6) its screen apart. Settings with $71 past 3 or a
+; kind past 6 (a boss's) say nothing. The list (bank $3A) is read at $A000, bank $39 at $8000
 ; ($CBC0 maps both), the game's banks put back after.
 
 ; A byte of the list whose pointer is at X (zero page), entry Y: $A000 + its offset in bank $3A.
@@ -1100,25 +1085,6 @@ wide_list_byte:
     ADC     #$20
     STA     $01
     LDA     ($00),y
-    RTS
-
-; The $71 the controller of entry Y sets (Y kept).
-wide_settings:
-    STY     WV_T0
-    LDX     #LIST_YS
-    JSR     wide_list_byte
-    TAY
-    LDA     SETTINGS_LO,y
-    STA     $00
-    LDA     SETTINGS_HI,y
-    STA     $01
-    LDY     #$00
-    LDA     ($00),y
-    BPL     @done
-    LDY     #$02
-    LDA     ($00),y
-@done:
-    LDY     WV_T0
     RTS
 
 wide_reach:
@@ -1134,62 +1100,59 @@ wide_reach:
     STA     WV_BANKS + 1
     LDY     #CONTROLLER_BANK
     JSR     SET_BANK
-    LDA     #$FF
-    STA     WV_LSTOP
-    STA     WV_RSTOP
-    LDY     LIST_LEFT                   ; going left: the entries before $064A
-@left:
-    CPY     #$00
-    BEQ     @right
-    DEY
-    LDX     #LIST_SCREENS
-    JSR     wide_list_byte
-    CMP     #$FF
-    BEQ     @right
-    STA     WV_T1
-    LDX     #LIST_TYPE
-    JSR     wide_list_byte
-    CMP     #$80
-    BNE     @left
-    JSR     wide_settings
-    AND     #$02
-    BNE     @left
-    LDX     #LIST_XS                    ; it stops the camera: the screen of its x - 8
-    JSR     wide_list_byte
-    CMP     #$08
-    LDA     WV_T1
-    SBC     #$00
-    BCS     :+
+    LDA     CAM_HI                      ; the joins: before the camera's screen, after the last
+    SEC                                 ; it shows (its screen, or the next it straddles)
+    SBC     #$01
+    STA     WV_JL
+    LDA     CAM_LO
+    CMP     #$01
+    LDA     CAM_HI
+    ADC     #$00
+    STA     WV_JR
     LDA     #$00
-:   STA     WV_LSTOP
-@right:
-    LDY     LIST_RIGHT                  ; going right: from $0649 on
-@next:
+    STA     WV_AL
+    STA     WV_AR
+    TAY
+@entry:
+    STY     WV_ENTRY
     LDX     #LIST_SCREENS
     JSR     wide_list_byte
     CMP     #$FF
     BEQ     @done
-    STA     WV_T1
+    STA     WV_OWN
     LDX     #LIST_TYPE
     JSR     wide_list_byte
     CMP     #$80
-    BNE     @on
-    JSR     wide_settings
-    AND     #$01
-    BNE     @on
-    LDX     #LIST_XS                    ; it stops the camera: the screen of its x - 254
-    JSR     wide_list_byte
-    CMP     #$FE
-    LDA     WV_T1
-    SBC     #$00
-    BCS     :+
-    LDA     #$00
-:   STA     WV_RSTOP
-    JMP     @done
-@on:
-    INY
     BNE     @next
+    LDX     #LIST_XS                    ; on its screen: its x's low byte within [4, $FE]
+    JSR     wide_list_byte
+    CMP     #$04
+    BCC     @next
+    CMP     #$FF
+    BEQ     @next
+    LDX     #LIST_YS
+    JSR     wide_list_byte
+    JSR     wide_controller
+@next:
+    LDY     WV_ENTRY
+    INY
+    BNE     @entry
 @done:
+    LDA     CAM_HI                      ; the first screen: the one before the camera's, beside it
+    BEQ     @first
+    LDY     WV_AL
+    BNE     @first
+    SEC
+    SBC     #$01
+@first:
+    STA     WV_LSTOP
+    LDA     WV_JR                       ; the last: the one after, beside it
+    LDY     WV_AR
+    BNE     @last
+    CLC
+    ADC     #$01
+@last:
+    STA     WV_RSTOP
     LDA     #$06                        ; the game's banks back, as its NMI puts them back
     STA     BANK_SELECT
     STA     MMC3_SELECT
@@ -1208,6 +1171,92 @@ wide_reach:
     STA     $00
     PLA
     TAX
+    RTS
+
+; The joins the controller of settings A on screen WV_OWN leaves apart: WV_AL / WV_AR set for
+; WV_JL / WV_JR. Two walks of its actions: whether it is a scroll controller's and scrolls to the
+; next screen, then the joins.
+wide_controller:
+    TAY
+    LDA     SETTINGS_LO,y
+    STA     $00
+    LDA     SETTINGS_HI,y
+    STA     $01
+    LDY     #$00
+    LDA     ($00),y
+    BPL     @plain
+    LDY     #$02                        ; a routine's address first
+    LDA     ($00),y
+    LDY     #$05
+    BNE     @scroll
+@plain:
+    LDY     #$03
+@scroll:
+    CMP     #$04                        ; $71 past 3: not a scroll controller's
+    BCC     :+
+    RTS
+:   STY     WV_AT
+    LDA     #$00
+    STA     WV_FWD
+@check:
+    LDA     ($00),y
+    BEQ     @apply
+    BMI     @apply
+    CMP     #$07                        ; a kind past 6: not a scroll controller's
+    BCC     :+
+    RTS
+:   TAX
+    INY
+    INY
+    INY
+    LDA     ($00),y
+    BPL     :+
+    INY                                 ; a screen of its own
+    BNE     @check
+:   CPX     #$03                        ; 1, 2: it scrolls to the next screen
+    BCS     @check
+    INC     WV_FWD
+    BNE     @check
+@apply:
+    LDY     WV_AT
+@action:
+    LDA     ($00),y
+    BEQ     @rts
+    BMI     @rts
+    TAX
+    INY
+    INY
+    INY
+    LDA     ($00),y
+    BPL     @own
+    INY                                 ; with a screen of its own: a door leaves a join apart
+    LDA     WV_OWN
+    CPX     #$05
+    BEQ     @mark
+    CPX     #$06
+    BNE     @action
+    SEC
+    SBC     #$01
+    JMP     @mark
+@own:
+    LDA     WV_OWN                      ; without: 1, 2 the join after its screen; 3, 4 that one
+    CPX     #$03                        ; too when it scrolls to the next, else the one before
+    BCC     @mark
+    CPX     #$05
+    BCS     @action
+    LDX     WV_FWD
+    BNE     @mark
+    SEC
+    SBC     #$01
+@mark:
+    CMP     WV_JL
+    BNE     :+
+    INC     WV_AL
+:   CMP     WV_JR
+    BNE     @action
+    INC     WV_AR
+    JMP     @action
+@rts:
     RTS
 
 ; ---------------------------------------------------------------------------- ;

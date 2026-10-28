@@ -13,11 +13,11 @@
 //!
 //! The camera is `$57:$56` across, `$59:$58` down. Only rows the camera shows whole screens of
 //! (its y on a screen's top) are decoded; while it scrolls down a shaft the margins stay the
-//! nametables'. The camera stops at a screen's edge unless `$71` lets it on (bit 0 right, bit 1
-//! left; objects of the stage set it as Mega Man goes): past such an edge the map holds another
-//! part of the stage, and nothing is drawn. Where `$71` lets it on, it goes as far as the next
-//! controller of the stage's list (see [`List`]) that will stop it when it spawns: the screen
-//! before or after in the list may be above or below, not beside.
+//! nametables'. The margins show the screens beside the camera's, as far as a join of two
+//! screens that are not side by side (see [`List`]: the screen before or after in the list may be
+//! above or below, or behind a door to another screen); past it nothing is drawn. `$71`, which
+//! lets the camera on past its screen's edges (bit 0 right, bit 1 left), only says where it may
+//! go now: a screen beside, past a lock, shows.
 
 use super::{megaman, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -31,18 +31,25 @@ const CAMERA_X_LOW: u16 = 0x0056;
 const CAMERA_X_HIGH: u16 = 0x0057;
 const CAMERA_Y_LOW: u16 = 0x0058;
 const CAMERA_Y_HIGH: u16 = 0x0059;
+/// The vertical scroll's nametable (bit 0), as the NMI sets $2000 from it.
+const CAMERA_Y_SCROLL: u16 = 0x00FA;
 const MAP: u16 = 0x0052;
 const TILES: u16 = 0x0062;
 const STRUCTURES: u16 = 0x0066;
 const BANK_8000: u16 = 0x006E;
 const BANK_A000: u16 = 0x006F;
-const SCROLL: u16 = 0x0071;
 const LIST_SCREENS: u16 = 0x0074;
 const LIST_XS: u16 = 0x0078;
 const LIST_YS: u16 = 0x007C;
 const LIST_TYPES: u16 = 0x007E;
-const LIST_RIGHT: u16 = 0x0649;
-const LIST_LEFT: u16 = 0x064A;
+
+/// The game's raster effect: on, its first interrupt handler, the line of the first interrupt.
+const RASTER: u16 = 0x00F4;
+const RASTER_HANDLERS: u16 = 0x0677;
+const RASTER_LINE: u16 = 0x0672;
+/// The sunset's handlers, and the lines its band of sky takes (2, then 20 times 3).
+const SUNSET_HANDLERS: u8 = 0x0E;
+const SUNSET_LINES: i32 = 62;
 
 const BANK_SIZE: usize = 0x2000;
 /// The bank of the stage lists, at `$8000` while the game walks them.
@@ -66,21 +73,31 @@ impl MarginDecoder for MegaMan6 {
         let camera =
             (i32::from(memory.ram(CAMERA_X_HIGH)) << 8) | i32::from(memory.ram(CAMERA_X_LOW));
         let screen_y = i32::from(memory.ram(CAMERA_Y_HIGH));
-        // The camera goes on past its screen's edges only where $71 lets it, and as far as the
-        // next controller of the stage's list that will stop it.
-        let scroll = memory.ram(SCROLL);
+        // The screens side by side with the camera's: as far as the next join of the stage's
+        // list that is not (see `List::apart`), the margins showing at most one screen past the
+        // two the camera may straddle.
         let screen = camera >> 8;
         let list = List::new(memory);
-        let first = if scroll & 2 != 0 {
-            list.left_stop().map_or(0, |stop| stop * 32)
-        } else {
-            screen * 32
-        };
-        let end = if scroll & 1 != 0 {
-            list.right_stop().map_or(32 * 64, |stop| (stop + 2) * 32)
-        } else {
-            (screen + i32::from(camera & 0xFF != 0) + 1) * 32
-        };
+        let mut first = screen;
+        if first > 0 && !list.apart(first - 1) {
+            first -= 1;
+        }
+        let mut end_screen = screen + i32::from(camera & 0xFF != 0);
+        if !list.apart(end_screen) {
+            end_screen += 1;
+        }
+        let (first, end) = (first * 32, (end_screen + 1) * 32);
+        // The sunset's band of sky, which the game scrolls apart (its raster effect), is a layer:
+        // it goes on as the nametables do; so is a row the game shows from the other nametable
+        // than the stage's (`$FA` bit 0, as its NMI sets $2000): the empty band its raster effect
+        // opens above the submarine, pushing the stage's lower rows down as it rises and sinks
+        // (the stage's layout there showed blocks of ice afloat beside it).
+        if sky_band(memory).contains(&i32::from(row.coarse_y()))
+            || row.nametable_y() != memory.ram(CAMERA_Y_SCROLL) & 1
+        {
+            megaman::decode_layer(memory, *row, columns, out);
+            return true;
+        }
         let stage = Stage::new(memory);
         megaman::decode_row(
             memory,
@@ -119,6 +136,18 @@ impl MarginDecoder for MegaMan6 {
     fn hides_overscan(&self) -> bool {
         true
     }
+}
+
+/// The tile rows of the sunset's band of sky, when the game shows it: its raster effect on
+/// (`$F4`), its interrupt handlers from 14 on (`$0677`, the table at `$C116`): from the line after
+/// `$0672` the band's scroll is 0, then 0 or 1 every 3 lines 20 times (`$C2FF`, `$C31B`, the
+/// shimmer), then the camera's again (`$C2F0`, `$06A7`). Empty otherwise.
+fn sky_band(memory: &DecoderMemory<'_>) -> std::ops::Range<i32> {
+    if memory.ram(RASTER) == 0 || memory.ram(RASTER_HANDLERS) != SUNSET_HANDLERS {
+        return 0..0;
+    }
+    let line = i32::from(memory.ram(RASTER_LINE)) + 1;
+    line / 8..(line + SUNSET_LINES + 7) / 8
 }
 
 /// Where the stage's data is, as the game keeps it in RAM.
@@ -173,12 +202,22 @@ impl<'a> Stage<'a> {
     }
 }
 
-/// The stage's list of objects as the game walks it (bank `$3A` at `$8000`): entry `i` is screen
-/// `($74)[i]`, x `($78)[i]`, y `($7C)[i]`, type `($7E)[i]`, sorted by place, `$FF` past both
-/// ends; `$0649` is the next entry right of the spawn window, `$064A` the one past its left edge.
-/// A controller (type `$80`, script `$824D` of bank `$39`) sets `$71` when it spawns, from its
-/// settings: entry `y` of the tables `$82EB` (low) and `$836B` (high) of bank `$39`, whose first
-/// byte is `$71`, or, with bit 7 set (a routine's address first), its third.
+/// The stage's list of objects (bank `$3A` at `$8000` while the game walks it): entry `i` is
+/// screen `($74)[i]`, x `($78)[i]`, y `($7C)[i]`, type `($7E)[i]`, sorted by place, `$FF` past
+/// its end.
+///
+/// A stage is a straight list of screens: whether screen `s + 1` is beside `s` or above or below
+/// it, the map does not say. The stage's controllers (type `$80`, script `$824D` of bank `$39`)
+/// do: each one's settings, entry `y` of the tables `$82EB` (low) and `$836B` (high) of bank `$39`,
+/// are `$71` (or, after bit 7, a routine's address then `$71`), two bytes, then its actions, three
+/// bytes each (kind, `$73`, `$72`) and a screen of their own with bit 7, up to a 0 or a byte with
+/// bit 7: 1 and 3 Mega Man at the screen's bottom scroll down to the screen after or before it
+/// (`$D583`, `$D53C`), 2 and 4 at a ladder's top scroll up to the next or previous (`$D60E`,
+/// `$D5CD`), 5 and 6 at its right or left edge scroll across to a screen (`$D64F`, `$D6AF`). An
+/// action without a screen of its own starts from the camera's, which rests on the controller's
+/// screen while it acts; one that scrolls to the next screen (1, 2) makes the controller the
+/// join's, and its scroll back (3, 4) acts from that next screen (the game takes the controller
+/// along). Checked on movies of a stage against every change of screen they show.
 struct List<'a> {
     memory: &'a DecoderMemory<'a>,
     screens: u16,
@@ -204,59 +243,117 @@ impl<'a> List<'a> {
         self.memory.prg_rom.get(offset).copied()
     }
 
-    /// Entry `index`'s x and type; `None` past an end of the list.
-    fn entry(&self, index: u8) -> Option<(i32, u8)> {
+    /// Entry `index`'s x, y and type; `None` past the list's end.
+    fn entry(&self, index: u8) -> Option<(i32, u8, u8)> {
         let at = |list: u16| list.wrapping_add(u16::from(index));
         let screen = self.rom(LIST_BANK, at(self.screens))?;
         if screen == 0xFF {
             return None;
         }
         let x = self.rom(LIST_BANK, at(self.xs))?;
+        let y = self.rom(LIST_BANK, at(self.ys))?;
         let kind = self.rom(LIST_BANK, at(self.types))?;
-        Some(((i32::from(screen) << 8) | i32::from(x), kind))
+        Some(((i32::from(screen) << 8) | i32::from(x), y, kind))
     }
 
-    /// The `$71` controller `index` sets.
-    fn scroll(&self, index: u8) -> Option<u8> {
-        let setting = usize::from(self.rom(LIST_BANK, self.ys.wrapping_add(u16::from(index)))?);
-        let low = self.rom(CONTROLLER_BANK, 0x82EB + u16::try_from(setting).ok()?)?;
-        let high = self.rom(CONTROLLER_BANK, 0x836B + u16::try_from(setting).ok()?)?;
-        let at = u16::from(low) | (u16::from(high) << 8);
-        let first = self.rom(CONTROLLER_BANK, at)?;
-        if first & 0x80 == 0 {
-            Some(first)
+    /// The actions of settings `setting` without a screen of their own (kinds 1-6), and whether
+    /// one scrolls to the next screen; `None` for settings not of a scroll controller (`$71`
+    /// past 3, or a kind past 6: a boss's).
+    fn actions(&self, setting: u8) -> Option<(Vec<u8>, bool)> {
+        let low = self.rom(CONTROLLER_BANK, 0x82EB + u16::from(setting))?;
+        let high = self.rom(CONTROLLER_BANK, 0x836B + u16::from(setting))?;
+        let start = u16::from(low) | (u16::from(high) << 8);
+        let byte = |offset: u16| self.rom(CONTROLLER_BANK, start.wrapping_add(offset));
+        let (scroll, mut at) = if byte(0)? & 0x80 == 0 {
+            (byte(0)?, 3)
         } else {
-            self.rom(CONTROLLER_BANK, at.wrapping_add(2))
+            (byte(2)?, 5)
+        };
+        if scroll > 3 {
+            return None;
         }
+        let mut kinds = Vec::new();
+        let mut forward = false;
+        for _ in 0..16 {
+            let kind = byte(at)?;
+            if kind == 0 || kind & 0x80 != 0 {
+                break;
+            }
+            if kind > 6 {
+                return None;
+            }
+            at += 3;
+            if byte(at)? & 0x80 != 0 {
+                at += 1;
+                continue;
+            }
+            forward |= matches!(kind, 1 | 2);
+            kinds.push(kind);
+        }
+        Some((kinds, forward))
     }
 
-    /// Going left, the screen the camera stops on: that of the first controller left of the
-    /// spawn window that does not let it on left (it spawns as the window's left edge, the
-    /// camera + 8, reaches it). `None`: the stage's start.
-    fn left_stop(&self) -> Option<i32> {
-        let mut index = self.memory.ram(LIST_LEFT);
-        while index > 0 {
-            index -= 1;
-            let (x, kind) = self.entry(index)?;
-            if kind == CONTROLLER && self.scroll(index)? & 2 == 0 {
-                return Some((x - 8).max(0) >> 8);
+    /// Whether screens `screen` and `screen + 1` are not side by side: a controller scrolls
+    /// between them up or down, or leaves one by a door to another screen.
+    fn apart(&self, screen: i32) -> bool {
+        for index in 0..=u8::MAX {
+            let Some((x, y, kind)) = self.entry(index) else {
+                return false;
+            };
+            if kind != CONTROLLER || !(4..=0xFE).contains(&(x & 0xFF)) {
+                continue;
+            }
+            let Some((kinds, forward)) = self.actions(y) else {
+                continue;
+            };
+            let own = x >> 8;
+            let join = |kind: u8| match kind {
+                1 | 2 => Some(own),
+                3 | 4 if forward => Some(own),
+                3 | 4 => Some(own - 1),
+                _ => None,
+            };
+            if kinds.iter().any(|&kind| join(kind) == Some(screen)) {
+                return true;
+            }
+            if self.door(y, own, screen) {
+                return true;
             }
         }
-        None
+        false
     }
 
-    /// Going right, the screen the camera last stops in: that of the first controller right of
-    /// the spawn window that does not let it on right (it spawns as the window's right edge, the
-    /// camera + 254, reaches it; the camera then goes on to its screen's end). `None`: the map's.
-    fn right_stop(&self) -> Option<i32> {
-        let mut index = self.memory.ram(LIST_RIGHT);
-        loop {
-            let (x, kind) = self.entry(index)?;
-            if kind == CONTROLLER && self.scroll(index)? & 1 == 0 {
-                return Some((x - 254).max(0) >> 8);
+    /// Whether settings `setting` of a controller on screen `own` hold a door to another screen
+    /// (5 or 6 with a screen of its own) across the join after `screen`.
+    fn door(&self, setting: u8, own: i32, screen: i32) -> bool {
+        let Some(low) = self.rom(CONTROLLER_BANK, 0x82EB + u16::from(setting)) else {
+            return false;
+        };
+        let Some(high) = self.rom(CONTROLLER_BANK, 0x836B + u16::from(setting)) else {
+            return false;
+        };
+        let start = u16::from(low) | (u16::from(high) << 8);
+        let byte = |offset: u16| self.rom(CONTROLLER_BANK, start.wrapping_add(offset));
+        let Some(first) = byte(0) else {
+            return false;
+        };
+        let mut at = if first & 0x80 == 0 { 3 } else { 5 };
+        for _ in 0..16 {
+            let Some(kind) = byte(at) else {
+                return false;
+            };
+            if kind == 0 || kind & 0x80 != 0 || kind > 6 {
+                return false;
             }
-            index = index.checked_add(1)?;
+            at += 3;
+            if byte(at).is_some_and(|target| target & 0x80 != 0) {
+                at += 1;
+                if (kind == 5 && own == screen) || (kind == 6 && own - 1 == screen) {
+                    return true;
+                }
+            }
         }
+        false
     }
 }
 
@@ -307,34 +404,36 @@ mod tests {
     }
 
     #[test]
-    fn the_camera_stops_at_the_next_controller_that_does_not_let_it_on() {
+    fn screens_apart_where_a_controller_scrolls_up_or_down_or_through_a_door() {
         // The list in bank $3A: screens at $8100, x at $8200, y at $8300, types at $8400.
         let mut prg = vec![0u8; 0x3B * BANK_SIZE];
         let list = |address: usize| LIST_BANK * BANK_SIZE + (address & 0x1FFF);
-        // Entries: an enemy on screen 2, a controller on screen 3 at x $40 (setting 1: $71 = 1,
-        // right only), the camera, a controller on screen 6 at x $80 (setting 2: through a
-        // routine's address, $71 = 2), one on screen 8 (setting 3: $71 = 3), then the end.
-        let entries: [(u8, u8, u8, u8); 4] = [
-            (2, 0x10, 0, 0x14),
-            (3, 0x40, 1, 0x80),
-            (6, 0x80, 2, 0x80),
-            (8, 0x00, 3, 0x80),
+        // Controllers on screen 2 (setting 1: falls to the next screen, and back up its ladder),
+        // 5 (setting 2: falls to the previous), 7 (setting 3: a door right to screen $20) and 9
+        // (setting 4: $71 of 24, a boss's: left out), an enemy on screen 3, then the end.
+        let entries: [(u8, u8, u8, u8); 5] = [
+            (2, 0x80, 1, 0x80),
+            (3, 0x10, 0, 0x14),
+            (5, 0x40, 2, 0x80),
+            (7, 0xC0, 3, 0x80),
+            (9, 0x40, 4, 0x80),
         ];
-        prg[list(0x8100)] = 0xFF;
         for (index, &(screen, x, setting, kind)) in entries.iter().enumerate() {
-            prg[list(0x8101 + index)] = screen;
-            prg[list(0x8201 + index)] = x;
-            prg[list(0x8301 + index)] = setting;
-            prg[list(0x8401 + index)] = kind;
+            prg[list(0x8100 + index)] = screen;
+            prg[list(0x8200 + index)] = x;
+            prg[list(0x8300 + index)] = setting;
+            prg[list(0x8400 + index)] = kind;
         }
         prg[list(0x8105)] = 0xFF;
-        // The settings in bank $39.
+        // The settings in bank $39: $71, two bytes, then the actions.
         let settings = |address: usize| CONTROLLER_BANK * BANK_SIZE + (address & 0x1FFF);
-        for (setting, at, bytes) in [
-            (1usize, 0x9000u16, &[0x01u8][..]),
-            (2, 0x9010, &[0x90, 0x00, 0x02]),
-            (3, 0x9020, &[0x03]),
-        ] {
+        let all: [(usize, u16, &[u8]); 4] = [
+            (1, 0x9000, &[0x00, 0, 0, 1, 0, 0, 4, 0, 0, 0]),
+            (2, 0x9010, &[0x01, 0, 0, 3, 0, 0, 0]),
+            (3, 0x9020, &[0x90, 0x00, 0x02, 0, 0, 5, 0, 0, 0xA0, 0]),
+            (4, 0x9040, &[0x18, 0, 0, 1, 0, 0, 0]),
+        ];
+        for (setting, at, bytes) in all {
             prg[settings(0x82EB + setting)] = (at & 0xFF) as u8;
             prg[settings(0x836B + setting)] = (at >> 8) as u8;
             let start = settings(usize::from(at));
@@ -342,17 +441,14 @@ mod tests {
         }
         let mut ram = vec![0u8; 0x800];
         for (zero_page, address) in [
-            (0x74, 0x8101u16),
-            (0x78, 0x8201),
-            (0x7C, 0x8301),
-            (0x7E, 0x8401),
+            (0x74, 0x8100u16),
+            (0x78, 0x8200),
+            (0x7C, 0x8300),
+            (0x7E, 0x8400),
         ] {
             ram[zero_page] = (address & 0xFF) as u8;
             ram[zero_page + 1] = (address >> 8) as u8;
         }
-        // The window between entries 1 and 2: $064A = 2 (entries 0-1 left), $0649 = 2.
-        ram[0x64A] = 2;
-        ram[0x649] = 2;
         let nametable = |_| 0;
         let written = |_| 0;
         let memory = DecoderMemory {
@@ -363,22 +459,9 @@ mod tests {
             nametable_written: &written,
         };
         let list = List::new(&memory);
-        // Left: the controller of screen 3 lets the camera on right only: it stops on the screen
-        // of $340 - 8.
-        assert_eq!(list.left_stop(), Some(3));
-        // Right: that of screen 6 does not let it on right: the camera last stops in the screen
-        // of $680 - 254 (screen 5).
-        assert_eq!(list.right_stop(), Some(5));
-        // Past the controllers that let it on, the list's ends.
-        let mut past = ram.clone();
-        past[0x64A] = 1;
-        past[0x649] = 4;
-        let memory = DecoderMemory {
-            ram: &past,
-            ..memory
-        };
-        let list = List::new(&memory);
-        assert_eq!(list.left_stop(), None);
-        assert_eq!(list.right_stop(), None);
+        let apart: Vec<i32> = (0..12).filter(|&screen| list.apart(screen)).collect();
+        // 2|3 (down and back up, both the controller of 2's), 4|5 (down to the previous from 5),
+        // 7|8 (the door to $20); 9|10 not (a boss's settings).
+        assert_eq!(apart, [2, 4, 7]);
     }
 }
