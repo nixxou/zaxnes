@@ -39,7 +39,9 @@ Man (USA) one, an advanced mode as well
 Man 3 (USA) one, an advanced mode as well
 ([`hacks/megaman3/WIDESCREEN-HACK.md`](hacks/megaman3/WIDESCREEN-HACK.md)), and the Mega
 Man 4 (USA) one, built for its Rev 1 too, an advanced mode as well
-([`hacks/megaman4/WIDESCREEN-HACK.md`](hacks/megaman4/WIDESCREEN-HACK.md)).
+([`hacks/megaman4/WIDESCREEN-HACK.md`](hacks/megaman4/WIDESCREEN-HACK.md)), and the Mega
+Man 5 (USA) one, an advanced mode as well
+([`hacks/megaman5/WIDESCREEN-HACK.md`](hacks/megaman5/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -353,6 +355,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Mega Man (USA) (data CRC-32 `6EE4BB0A`), unpatched and with its built-in patch | the stage layout in PRG-ROM, within the section being played | `megaman1.rs` (with `megaman.rs`), see below |
 | Mega Man 3 (USA) (data CRC-32 `603AAA57`), unpatched and with its built-in patch | the stage layout in PRG-ROM, within the section being played | `megaman3.rs` (with `megaman.rs`), see below |
 | Mega Man 4 (USA), both builds (data CRC-32 `2BC67AA8`, Rev 1 `18A2E74F`), unpatched and with their built-in patches | the stage layout in PRG-ROM, within the section being played | `megaman4.rs` (Mega Man 3's `Layout`), see below |
+| Mega Man 5 (USA) (data CRC-32 `3EDCF7E8`), unpatched and with its built-in patch | the stage layout in PRG-ROM, within the section being played | `megaman5.rs` (Mega Man 3's `Layout`), see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -701,6 +704,19 @@ list's palette changes (types `$C0` and up) kept waiting for the original window
 at a 128-pixel margin, 200 frames: the original lags 0 to 2 frames, the hack with 64 lines 1 to
 29, with 255 none.
 
+Mega Man 5 keeps that layout too: the stage is the 8 KiB bank `$27` at `$A000` (`$D758`; while
+`$26` is `$0E`, each screen's own bank from the fixed bank's table at `$D793`: `StageBank::Ram`,
+the bank looked up per screen), rooms `$A900`, layouts `$B600`, structures `$B200`, blocks'
+corners `$AD00`-`$B000`, sub-palettes `$B100`; the section is `$2A + 1` screens, the camera on its
+screen `$2B`. The Mega Man 3 to 5 decoders draw column 0 while the game hides it
+(`decodes_masked_column`): Mega Man 5 keeps there the column it is drawing. The built-in patch
+(`MEGAMAN5_USA`, an advanced mode, `mm5wide`) is Mega Man 4's hack at Mega Man 5's addresses (its
+sprite loop mirrors the offsets of flipped sprites); its code is a 16 KiB PRG bank added to the
+game (8 KiB banks 32-33 of 36, the fixed banks copied to banks 34 and 35), of which the window
+shows the first 2 KiB from power-on (`boot_window`). `idle_loop` `$FEAE`-`$FEC3`. Measured on
+Charge Man's stage, 500 frames: the hack at a margin of 0 without overclock lags 50 frames, at a
+128-pixel margin with 64 lines 23, with 255 none.
+
 ---
 
 ## 5. The 3D engine
@@ -795,7 +811,7 @@ pub struct BuiltinPatch {
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
   at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller; Mega
-  Man: `LDA $1F / BEQ` at `$C02B`; Mega Man 3: its task scheduler's wait at `$FEAD`-`$FEC2`; Mega Man 4: at `$FEA8`-`$FEBC`). `NesCore::run_frame` ends the
+  Man: `LDA $1F / BEQ` at `$C02B`; Mega Man 3: its task scheduler's wait at `$FEAD`-`$FEC2`; Mega Man 4: at `$FEA8`-`$FEBC`; Mega Man 5: at `$FEAE`-`$FEC3`). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
