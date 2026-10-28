@@ -27,23 +27,19 @@ pub(super) fn decode_row(
     if coarse_y >= 30 {
         return false;
     }
-    // The plane of two nametables side by side; or one, mirrored (Mega Man 3 at the end of a
-    // section, before scrolling vertically): the centre must show what the layout gives.
-    let centre_matches = |first_column: i32| {
-        CHECKED.iter().all(|&column| {
-            tile_at(first_column + column, coarse_y)
-                .is_some_and(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == tile)
-        })
-    };
-    let wide = resolve_ring(row.ring_x(), 512, camera) >> 3;
-    let narrow = resolve_ring(row.ring_x() & 255, 256, camera) >> 3;
-    let first_column = if centre_matches(wide) {
-        wide
-    } else if centre_matches(narrow) {
-        narrow
-    } else {
+    // The row's place: the instance of its pixel on the plane nearest the camera, modulo 256
+    // pixels (the camera in RAM is a few pixels from the scroll the frame used at most; and a
+    // game may show the same nametable on both sides, Mega Man 3 at the end of a section, where
+    // the plane's two instances lie as far from the camera). The centre must show what the layout
+    // gives there.
+    let first_column = resolve_ring(row.ring_x() & 255, 256, camera) >> 3;
+    let centre_matches = CHECKED.iter().all(|&column| {
+        tile_at(first_column + column, coarse_y)
+            .is_some_and(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == tile)
+    });
+    if !centre_matches {
         return false;
-    };
+    }
 
     for column in columns {
         let world = first_column + column;
@@ -51,11 +47,15 @@ pub(super) fn decode_row(
             continue;
         }
         // A column the nametables hold for this very place shows what the game drew there,
-        // things objects draw into the background included.
+        // things objects draw into the background included; its colours are the layout's, the
+        // game writing a column's attribute bytes after its tiles (the column it is drawing past
+        // the screen's edge showed in another column's colours).
+        let layout = tile_at(world, coarse_y);
         let decoded = if column_is_current(memory, row, column, world, tile_at) {
-            Some(nametable_tile(memory, row, column))
+            let (tile, palette) = nametable_tile(memory, row, column);
+            Some((tile, layout.map_or(palette, |(_, palette)| palette)))
         } else {
-            tile_at(world, coarse_y)
+            layout
         };
         if let Some((tile, palette)) = decoded {
             out.push(DecodedTile {

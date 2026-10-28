@@ -688,7 +688,12 @@ right, bottom left, bottom right); block `b` is CHR tiles `$BB00[b]`, `$BC00[b]`
 `$BE00[b]` (the same corners), in sub-palette `$BF00[b] & 3`. The camera is `$F9:$FC`; the section
 being played is `$2C + 1` screens, the camera on its screen `$2D`. At the end of a section, before a
 vertical transition, the game switches the mirroring and both nametables show the same 256 pixels:
-the shared decoder takes the plane of one nametable when the plane of two does not place the centre.
+the shared decoder places a row at the instance of its pixel nearest the camera modulo 256 pixels
+(on the plane of two nametables both instances can lie 256 pixels from the camera, and a row whose
+centre happened to match the wrong one had its margins 256 pixels off). A margin column the
+nametables hold for its place takes the layout's colours (the game writes a column's attribute bytes
+after its tiles), and the Mega Man 3 to 5 decoders redraw the screen's last column
+(`redrawn_right_columns` 1): it showed the colours of the column being drawn past the edge.
 The built-in patch (`MEGAMAN3_USA`, an advanced mode, `mm3wide`) draws the enemies in the margins.
 Its code is a 16 KiB PRG bank added to the game (8 KiB banks 32-33 of 64, the fixed banks copied to
 banks 62 and 63, the ones MMC3 fixes), of which the window shows the first 2 KiB from power-on
