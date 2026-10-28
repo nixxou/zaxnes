@@ -617,6 +617,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
     emulation_rust_only(out);
     video_rust_only(out);
     video_sprite_limit(out);
+    video_overscan(out);
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCore,
@@ -1368,5 +1369,31 @@ fn video_sprite_limit(out: &mut Vec<SettingDescriptor>) {
             opt(2, "Smart"),
         ]))
         .with_label("Remove sprite limit"),
+    );
+}
+
+/// `video.hide_overscan` (Rust-only).
+fn video_overscan(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): the picture's top and bottom 8 lines, which an NTSC TV did not
+    // show (games leave scrolling garbage there), are blacked out in 2D and their tiles left out
+    // of the 3D scene. "Auto" does it for the NTSC games only: a PAL TV showed the 240 lines.
+    // Never with a vertical widescreen margin, which goes on past those lines. Not exposed to
+    // Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoHideOverscan,
+            SettingKind::Enum,
+            // Auto (owner request).
+            SettingValue::Enum(1),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Disabled"),
+            opt(1, "Auto"),
+            opt(2, "Always"),
+        ]))
+        .with_label("Hide the overscan"),
     );
 }

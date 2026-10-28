@@ -391,8 +391,8 @@ précédente est oubliée au démarrage).
 | **Écran large** | activé / désactivé | l'activer prend le ratio Auto |
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
-| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
-| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island* et *Metal Force* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
+| **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*, *Blaster Master*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
+| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island*, *Metal Force* et *Blaster Master* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
 
@@ -463,6 +463,15 @@ Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
   d'origine. Options du patch : « Sélecteur de niveau » (gauche / droite sur l'écran « MISSION »
   choisit la mission, 1 à 7) et « Invincible » (les trous tuent toujours), désactivés par défaut ;
   « Sans ralentissements » (actif par défaut).
+- *Blaster Master* (USA) : le décor des marges est lu dans la carte de la zone, dans la ROM du
+  jeu, au-dessus et en dessous de l'écran aussi, et seulement dans la salle en cours (au-delà,
+  les marges restent vides) ; sans patch. Le **mode avancé** ajoute le patch : les ennemis
+  apparaissent dans les marges, endormis sur place jusqu'à ce qu'ils atteignent l'écran
+  d'origine, puis vivent et s'affichent dans les marges ; le joueur et les tirs restent bornés
+  à l'écran d'origine. Options du patch : « Sélecteur de niveau » (une nouvelle partie commence
+  sur le choix de zone du jeu : haut / bas, Start ; 01-08 les zones, 09-16 leurs sections vues
+  de dessus) et « Invincible », désactivés par défaut ; « Sans ralentissements » (actif par
+  défaut).
 - Ça fonctionne en 3D comme en mode 2D.
 
 Reste dans l'onglet **Vidéo** des options globales : **Écran large : attendre les objets entiers
@@ -509,6 +518,22 @@ Mesen :
 Le réglage ne change que l'image 2D (la vue 3D a toujours tous les sprites) ; le drapeau
 d'overflow (bit 5 de `$2002`) et les accès à la cartouche restent ceux de la console, quel que
 soit le choix.
+
+### Overscan (8 lignes du haut et du bas)
+
+La NES produit 240 lignes, mais un téléviseur NTSC n'en montrait qu'environ 224 : les 8 premières
+et les 8 dernières tombaient hors de l'écran. Beaucoup de jeux y préparent le décor qui défile, et
+on y voit des tuiles ou des couleurs parasites. Un téléviseur PAL, lui, montrait les 240 lignes. Le
+réglage **« Masquer les 8 lignes du haut et du bas »** (`video.hide_overscan`, onglet **Vidéo**) :
+
+- **Désactivé** : les 240 lignes sont affichées ;
+- **Auto** (par défaut) : ces lignes sont noires pour les jeux NTSC (60 Hz), affichées pour les
+  jeux PAL (50 Hz), comme FCEUX ;
+- **Toujours** : ces lignes sont noires quelle que soit la région.
+
+En 2D, ces lignes sont noires ; en 3D, les tuiles qui sont au moins à moitié dans ces lignes ne
+sont pas montrées. Le réglage ne s'applique pas avec une marge verticale d'écran large : l'image
+continue alors au-delà de ces lignes, que le décodeur de marge redessine.
 
 ### Langue de l'interface
 

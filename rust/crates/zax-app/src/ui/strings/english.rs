@@ -239,6 +239,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "Widescreen: wait for whole objects at the drawn edges",
     ),
     ("setting.video.remove_sprite_limit", "Remove the limit of 8 sprites per line"),
+    (
+        "setting.video.hide_overscan",
+        "Hide the 8 lines at the top and bottom (Auto: NTSC games)",
+    ),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
