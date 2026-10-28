@@ -229,6 +229,8 @@ pub const HACK_FORCE: &str = "hacks.force";
 pub const HACKS_FORCE_QUESTION: &str = "hacks.force_question";
 pub const HACKS_FORCE_BUTTON: &str = "hacks.force_button";
 pub const HACKS_FORCE_SIZE: &str = "hacks.force_size";
+/// What is said when the hack is a hack pack, which is never forced: its signatures decide.
+pub const HACKS_PACK_SIGNATURES: &str = "hacks.pack_signatures";
 /// What the hacks of a game say once the patch of another ROM of it is forced.
 pub const HACKS_FORCED_NOTE: &str = "hacks.forced_note";
 pub const HACK_OFF: &str = "hacks.off";
@@ -452,6 +454,7 @@ pub const PUBLISHED: &[&str] = &[
     HACKS_FORCE_QUESTION,
     HACKS_FORCE_BUTTON,
     HACKS_FORCE_SIZE,
+    HACKS_PACK_SIGNATURES,
     HACKS_FORCED_NOTE,
     HACK_OFF,
     MENU_HACKS,

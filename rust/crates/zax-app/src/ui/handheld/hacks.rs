@@ -10,6 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use zax_nes::builtin_patches::{self, BuiltinPatch, HackOption};
+use zax_nes::hack_pack;
 use zax_settings::catalogue::{self, SettingId};
 use zax_settings::games::GameOptions;
 use zax_settings::model::SettingsModel;
@@ -124,13 +125,23 @@ impl HacksModel {
             |patch| host.patch_options(patch),
         );
         if !hacks.capable {
+            // Not by its CRC: by the signatures of a hack pack (another version of the game, a ROM
+            // hack), the hooks finding the bytes they replace.
+            let image = std::fs::read(rom).ok();
+            if let Some((patch, _)) = image.as_deref().and_then(builtin_patches::pack_for) {
+                hacks.capable = true;
+                hacks.patch = Some(patch);
+                hacks.patch_options = host.patch_options(patch);
+                return hacks;
+            }
             hacks.other_rom = other_rom_patch(title, &hacks.name);
             if let Some(other) = hacks.other_rom {
-                // A forced patch applies to data of the size it was made for only.
-                let size = std::fs::read(rom)
-                    .ok()
-                    .map(|image| builtin_patches::rom_data(&image).len());
-                hacks.forceable = size.is_some() && size == builtin_patches::source_size(other);
+                // A forced patch applies to data of the size it was made for only; a hack pack is
+                // never forced (its signatures decide, above).
+                let size = image.map(|image| builtin_patches::rom_data(&image).len());
+                hacks.forceable = !hack_pack::is_pack(other.bps)
+                    && size.is_some()
+                    && size == builtin_patches::source_size(other);
                 hacks.patch_options = host.patch_options(other);
             }
         }
@@ -203,6 +214,8 @@ impl HacksModel {
                 ],
             ) + &if self.forceable {
                 String::new()
+            } else if hack_pack::is_pack(patch.bps) {
+                format!(" {}", strings::get(keys::HACKS_PACK_SIGNATURES))
             } else {
                 format!(" {}", strings::get(keys::HACKS_FORCE_SIZE))
             },

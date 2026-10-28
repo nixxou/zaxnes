@@ -703,10 +703,12 @@ impl HandheldUi {
                 let entry = self.roms.entries().iter().find(|entry| entry.path == path);
                 // A version of the game the hack is not made for: why, and whether to force it,
                 // instead of nothing; once forced, L2 turns its widescreen on and off.
-                if let Some(entry) =
-                    entry.filter(|entry| !entry.widescreen && !entry.widescreen_forced)
-                {
-                    let hacks = HacksModel::for_rom(host, &path, entry.profile_title());
+                // A hack pack whose signatures the ROM has is made for it all the same.
+                let other = entry
+                    .filter(|entry| !entry.widescreen && !entry.widescreen_forced)
+                    .map(|entry| HacksModel::for_rom(host, &path, entry.profile_title()))
+                    .filter(|hacks| !hacks.is_capable());
+                if let Some(hacks) = other {
                     let (Some(message), Some(other)) =
                         (hacks.other_rom_message(), hacks.other_rom_patch())
                     else {

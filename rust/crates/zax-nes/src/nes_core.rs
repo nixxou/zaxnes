@@ -557,7 +557,8 @@ impl NesCore {
     }
 
     /// The margin decoder of the game loaded: its built-in patch's, or one made for the ROM
-    /// itself; none while the built-in patches are off.
+    /// itself, or that of the patch whose hack pack the ROM has the signatures of (another
+    /// version of the game, a ROM hack); none while the built-in patches are off.
     fn margin_decoder(&self) -> Option<&'static dyn crate::wide_decode::MarginDecoder> {
         if !self.builtin_patches_enabled {
             return None;
@@ -565,6 +566,11 @@ impl NesCore {
         self.builtin_patch
             .and_then(crate::wide_decode::for_patch)
             .or_else(|| self.rom_crc.and_then(crate::wide_decode::for_rom))
+            .or_else(|| {
+                self.pack
+                    .as_ref()
+                    .and_then(|(patch, _)| crate::wide_decode::for_patch(patch.name))
+            })
     }
 
     /// The batch of the frame just run (REQ-CORE-030).
