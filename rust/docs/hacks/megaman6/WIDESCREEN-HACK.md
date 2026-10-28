@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `9740462D` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `1F247C95` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -70,7 +70,7 @@ and `$064A` the next entries right and left of the spawn window.
 | "on the screen" (`$E485`) | y on the screen, x - camera within `[4, 256)` | the same for slots 0-7 and the controller (22); an enemy also within `[LO, HI)` |
 | an object's place (`$E24B`, in the drawer) | not drawn when flagged off the screen (`$03B7` bit 0), its y off the screen or its x - camera (low byte) below 4 | the same on the original screen; an enemy off it is drawn within `[LO, HI)`, the flag aside, unless it is hidden |
 | an object's sprites (`$E315`, the jump to one of the four loops: none, horizontal, vertical, both flips) | x = 8-bit screen x + or - the offset, the sprite hidden when it overflows; the loop stops when OAM is full | the same four loops for each page (eight), 16-bit x, shown within `[-M, 256 + M)`, its high byte to `$5100 + 4 n` (or `$5400 + 4 n`); the loops go on to the extension's second page (`$5300`) when the first is full, and stop when both are |
-| the frame's sprites (`$D1D4`, `$E1DD`: `$8C = 0`) | | also the first page in use and its high bytes back to 0 (the energy bars' writer writes none) |
+| the frame's sprites (`$D1D4`, `$E1DD`: `$8C = 0`) | | also the first page in use and its high bytes back to 0 (the energy bars' writer writes none); X kept, as by the code replaced (the vertical scroll's loop, `$D7CA`, counts with it through `$D701`: changed, it ran 256 frames instead of 120 and the scroll down went on and on) |
 | bars and objects in turns (`$D1D8`) | the energy bars before the objects one frame, after them the next | the bars always first (nothing is left over to flicker) |
 | the rest of OAM hidden (`$E26D`) | from `$8C` to the end | on the page in use, and the second page whole while the first is |
 | Mega Man's damage (bank `$38` `$8F72`) | none while `$A2` or `$96` is set | nor with the option "Invincible" |
@@ -567,6 +567,8 @@ wide_spawn_window:
     STA     WV_CAML
     LDA     CAM_HI
     STA     WV_CAMH
+    TXA                                 ; X kept, as by the code replaced
+    PHA
     LDX     #CONTROLLER - 1
     LDA     #$00
 @show:
@@ -574,6 +576,8 @@ wide_spawn_window:
     DEX
     CPX     #FIRST_ENEMY
     BCS     @show
+    PLA
+    TAX
 @window:
     JSR     wide_part
     CLC                                 ; left = camera + 8 - M
@@ -629,8 +633,11 @@ wide_spawn_window:
 ; sprite loop moves on to when the first is full, instead of stopping.
 
 ; The frame's sprites begin ($D1D4 and $E1DD, in place of LDA #0 / STA $8C): on the first page,
-; its high bytes back to 0 (the energy bars' writer, $CF4A, writes none).
+; its high bytes back to 0 (the energy bars' writer, $CF4A, writes none). X is kept, as by the
+; code replaced.
 wide_frame_start:
+    TXA                                 ; X kept: $E1DD's callers count with it (the
+    PHA                                 ; vertical scroll's loop, $D7CA, through $D701)
     LDA     #$00
     STA     OAM_NEXT
     STA     WV_PAGE
@@ -643,6 +650,9 @@ wide_frame_start:
     INX
     INX
     BNE     @clear
+    PLA
+    TAX
+    LDA     #$00                        ; A = 0, as the code replaced leaves it
     RTS
 
 ; The rest of OAM hidden ($E26D, in place of LDX $8C / LDA #$F0 and the loop): on the page in
