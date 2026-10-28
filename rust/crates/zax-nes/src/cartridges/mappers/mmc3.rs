@@ -116,6 +116,10 @@ impl Mapper for Mmc3 {
         self.irq_enabled = reader.read_bool()?;
         self.irq_pending = reader.read_bool()?;
         self.a12.load_state(reader)?;
+        // The windows again from the registers, over the PRG-ROM loaded: a state of the same
+        // game made with a PRG-ROM of another size (a widescreen hack that added banks, its
+        // fixed ones moved to the end) maps the fixed banks of this one.
+        self.update_banks();
         Ok(())
     }
 

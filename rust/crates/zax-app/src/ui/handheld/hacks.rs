@@ -253,10 +253,19 @@ impl HacksModel {
         if advanced_patch {
             rows.push(HackRow::Advanced);
         }
-        // The options of an advanced patch are those of its mode.
-        if !advanced_patch || self.advanced_on() {
-            rows.extend((0..self.patch_options.len()).map(HackRow::PatchOption));
-        }
+        // The options of an advanced patch are those of its mode, but for the aids of its hack
+        // pack, which apply without it.
+        let all = !advanced_patch || self.advanced_on();
+        let patch = self.patch();
+        rows.extend(
+            self.patch_options
+                .iter()
+                .enumerate()
+                .filter(|(_, (option, _))| {
+                    all || patch.is_some_and(|patch| patch.is_aid(option.key))
+                })
+                .map(|(index, _)| HackRow::PatchOption(index)),
+        );
         rows
     }
 
@@ -669,6 +678,32 @@ mod tests {
             [(SettingId::VideoWidescreen, SettingValue::Enum(1))].as_slice(),
             hacks.own().as_slice()
         );
+    }
+
+    #[test]
+    fn the_aids_of_a_hack_pack_stay_without_the_advanced_mode() {
+        const MEGA_MAN_6: u32 = 0x9887_98A8;
+        let mut hacks = model(Some(MEGA_MAN_6), Vec::new());
+        assert_eq!(
+            hacks.patch_options().len(),
+            hacks
+                .rows()
+                .iter()
+                .filter(|row| matches!(row, HackRow::PatchOption(_)))
+                .count()
+        );
+        hacks.step(HackRow::Advanced, 1);
+        assert!(!hacks.advanced_on());
+        // "Invincible" is a component of the pack of its own; the others are of the mode.
+        let options: Vec<_> = hacks
+            .rows()
+            .into_iter()
+            .filter_map(|row| match row {
+                HackRow::PatchOption(index) => Some(hacks.patch_options()[index].0.key),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(["invincible"].as_slice(), options.as_slice());
     }
 
     #[test]

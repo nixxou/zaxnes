@@ -63,6 +63,17 @@ pub struct NesCore {
     /// CRC-32 of the data (iNES header excluded) of the ROM loaded as the host gave it, which
     /// picks a margin decoder made for an unpatched ROM.
     rom_crc: Option<u32>,
+    /// The hack pack made for the ROM loaded, with the patch it is, whether its widescreen runs
+    /// (advanced mode) or not: its aids (an "Invincible" component) are turned on and off by
+    /// their options either way.
+    pack: Option<(
+        &'static crate::builtin_patches::BuiltinPatch,
+        crate::hack_pack::HackPack,
+    )>,
+    /// The options whose aid components are applied to the cartridge's PRG-ROM now.
+    aids_on: u8,
+    /// The options the host set last.
+    host_options: u8,
 }
 
 impl Default for NesCore {
@@ -89,6 +100,9 @@ impl NesCore {
             advanced_patches_enabled: false,
             forced_patch: None,
             rom_crc: None,
+            pack: None,
+            aids_on: 0,
+            host_options: 0,
         }
     }
 
@@ -275,6 +289,7 @@ impl NesCore {
         self.set_hack_options(options);
         self.original_image = patched.map(|_| image.to_vec());
         self.bus.attach(Some(cartridge));
+        self.install_pack(Some(image));
         self.power_on();
         RomLoadResult::ok(region)
     }
@@ -588,18 +603,80 @@ impl NesCore {
     /// `options` say; the ROM reads them at `$500A`.
     pub fn set_hack_options(&mut self, options: u8) {
         self.bus.ppu_mut().wide_mut().set_host_options(options);
+        self.host_options = options;
+        self.sync_aids();
+    }
+
+    /// Applies to the cartridge's PRG-ROM the hooks of the pack's aids whose option is on, and
+    /// puts the game's bytes back where it is off (see [`crate::hack_pack`]).
+    fn sync_aids(&mut self) {
+        let Some((patch, pack)) = &self.pack else {
+            return;
+        };
+        let Some(cartridge) = self.bus.cartridge_mut() else {
+            return;
+        };
+        for option in patch.options {
+            let Some(component) = pack.component(option.key) else {
+                continue;
+            };
+            let mask = 1 << (option.bit & 7);
+            let on = self.host_options & mask != 0;
+            if on != (self.aids_on & mask != 0) {
+                component.apply(cartridge.rom_mut().prg_rom_mut(), on);
+                self.aids_on ^= mask;
+            }
+        }
+    }
+
+    /// After a cartridge is attached for `image` (the host's, before any patch): the hack pack
+    /// made for it, its code in the extension's window while its widescreen runs, its aids as
+    /// their options say. Without an image (a state that has none), the pack stays as it was.
+    fn install_pack(&mut self, image: Option<&[u8]>) {
+        let Some(image) = image else {
+            return;
+        };
+        self.pack = crate::builtin_patches::pack_for(image);
+        self.aids_on = 0;
+        let running = match (&self.pack, self.builtin_patch) {
+            (Some((patch, pack)), Some(name)) if patch.name == name => Some((*patch, pack.code)),
+            _ => None,
+        };
+        let wide = self.bus.ppu_mut().wide_mut();
+        wide.set_code(running.map_or(&[], |(_, code)| code));
+        // The window on the pack's code, whatever a state left it as (a state of the hack built
+        // as a BPS patch had it on the bank that patch added).
+        if let Some(((bank, page), keeps_prg_ram)) = running
+            .and_then(|(patch, _)| Some((patch.boot_window?, patch.boot_window_keeps_prg_ram)))
+        {
+            wide.boot(bank, page, !keeps_prg_ram);
+        }
+        self.sync_aids();
+    }
+
+    /// The built-in patch whose options apply to the ROM loaded: the one applied, or, without it,
+    /// the one whose hack pack gives the ROM its aids (see [`Self::hack_options`]).
+    #[must_use]
+    pub fn options_patch(&self) -> Option<&'static str> {
+        self.builtin_patch
+            .or_else(|| self.pack.as_ref().map(|(patch, _)| patch.name))
     }
 
     /// The options of the built-in patch applied to the ROM loaded (none without one).
     #[must_use]
-    pub fn hack_options(&self) -> &'static [crate::builtin_patches::HackOption] {
-        self.builtin_patch
-            .and_then(|name| {
-                crate::builtin_patches::PATCHES
-                    .iter()
-                    .find(|patch| patch.name == name)
-            })
-            .map_or(&[], |patch| patch.options)
+    pub fn hack_options(&self) -> Vec<crate::builtin_patches::HackOption> {
+        if let Some(patch) = self.builtin_patch.and_then(crate::builtin_patches::by_name) {
+            return patch.options.to_vec();
+        }
+        // Without the patch running, the options of a hack pack's aids (each turned on apart).
+        self.pack.as_ref().map_or_else(Vec::new, |(patch, pack)| {
+            patch
+                .options
+                .iter()
+                .filter(|option| pack.component(option.key).is_some())
+                .copied()
+                .collect()
+        })
     }
 
     /// Sets the margin the host offers above and below, in pixels (0 = off). Only a game with
@@ -907,6 +984,9 @@ impl NesCore {
         };
         let patchable = rom_patch.is_some();
         let rom_crc = crate::builtin_patches::data_crc(&rom_bytes);
+        // The image as the state gave it, for the hack pack made for it (installed once the
+        // cartridge is attached).
+        let pack_image = has_rom_image.then(|| rom_bytes.clone());
         let region_byte = reader.read_u8()?;
         let region = NesRegion::from_u8(region_byte).ok_or_else(|| {
             InvalidState::corrupt(format!("Corrupt savestate: unknown region {region_byte}."))
@@ -980,6 +1060,7 @@ impl NesCore {
         self.rom_crc = has_rom_image.then_some(rom_crc).or(self.rom_crc);
         (self.original_image, self.builtin_patch) = patch;
         self.bus.attach(Some(cartridge));
+        self.install_pack(pack_image.as_deref());
         self.region = region;
         self.apply_region();
         self.frame_count = frame_count;

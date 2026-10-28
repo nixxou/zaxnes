@@ -21,7 +21,7 @@
 //! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the fixed bank and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`metroidwide`, `tools/build.py`) |
 //! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end; one source for both builds (`mm4wide`, `tools/build.py`) |
 //! | Mega Man 5 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm5wide`, `tools/build.py`) |
-//! | Mega Man 6 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm6wide`, `tools/build.py`) |
+//! | Mega Man 6 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
 //! | Mega Man 3 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm3wide`, `tools/build.py`) |
 //! | Mega Man (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`mm1wide`, `tools/build.py`) |
 
@@ -651,14 +651,16 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man 6",
         rom_name: "Mega Man 6 (USA)",
         source_crc: 0x9887_98A8,
-        bps: include_bytes!("../patches/megaman6-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; "Invincible" a component of its own.
+        bps: include_bytes!("../patches/megaman6-usa-widescreen.zxpk"),
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (32
-        // in 16 KiB units) is open in the window from power-on.
-        boot_window: Some((0xA0, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The task scheduler's wait for the NMI (no task ready).
         idle_loop: Some((0xC581, 0xC584)),
@@ -736,10 +738,20 @@ impl BuiltinPatch {
             .fold(0, |bits, option| bits | (1 << (option.bit & 7)))
     }
 
+    /// Whether option `key` is an aid of the patch's hack pack: a component of its own, applied
+    /// with or without the advanced mode.
+    #[must_use]
+    pub fn is_aid(&self, key: &str) -> bool {
+        crate::hack_pack::HackPack::read(self.bps).is_some_and(|pack| pack.component(key).is_some())
+    }
+
     /// The patch's version: the CRC-32 of the ROM data it produces, which any change to the
-    /// hack changes (read from the BPS footer).
+    /// hack changes (read from the BPS footer); for a hack pack, the pack's CRC-32.
     #[must_use]
     pub fn version(&self) -> u32 {
+        if crate::hack_pack::is_pack(self.bps) {
+            return crc32(self.bps);
+        }
         self.bps
             .len()
             .checked_sub(8)
@@ -770,6 +782,8 @@ pub struct PatchedRom {
     pub image: Vec<u8>,
     /// The patch's name.
     pub name: &'static str,
+    /// The code of a hack pack, which the extension's PRG window shows; empty for a BPS patch.
+    pub code: &'static [u8],
 }
 
 /// Size of an iNES header.
@@ -792,8 +806,25 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
     let crc = crc32(data);
     let (patch, checked) = match PATCHES.iter().find(|patch| patch.source_crc == crc) {
         Some(patch) => (patch, true),
-        None => (forced?, false),
+        None => match pack_matching(data) {
+            Some((patch, _)) => (patch, true),
+            None => (forced?, false),
+        },
     };
+    if crate::hack_pack::is_pack(patch.bps) {
+        // A hack pack: its hooks all checked, the widescreen's applied; the ROM keeps its size,
+        // the code goes to the extension's memory.
+        let pack = crate::hack_pack::HackPack::read(patch.bps).filter(|pack| pack.matches(data))?;
+        let mut patched_image = image[..end].to_vec();
+        if let Some(widescreen) = pack.component(crate::hack_pack::WIDESCREEN) {
+            widescreen.apply(&mut patched_image[start..], true);
+        }
+        return Some(PatchedRom {
+            image: patched_image,
+            name: patch.name,
+            code: pack.code,
+        });
+    }
     let patched = apply_bps_checked(patch.bps, data, checked).ok()?;
     // What comes before the data (the header, a trainer) stays; bytes past the size the header
     // gives do not.
@@ -806,7 +837,32 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
     Some(PatchedRom {
         image: patched_image,
         name: patch.name,
+        code: &[],
     })
+}
+
+/// The built-in hack pack whose hooks all find their bytes in `data` (a ROM's PRG-ROM and
+/// CHR-ROM), whatever its CRC: another build of the game whose hooked code is the same.
+fn pack_matching(data: &[u8]) -> Option<(&'static BuiltinPatch, crate::hack_pack::HackPack)> {
+    PATCHES.iter().find_map(|patch| {
+        let pack = crate::hack_pack::HackPack::read(patch.bps)?;
+        pack.matches(data).then_some((patch, pack))
+    })
+}
+
+/// The hack pack of the built-in patch made for `image`, when that patch is one and its hooks
+/// all find their bytes: what the core takes the pack's aids from (their options), with or
+/// without the advanced mode.
+#[must_use]
+pub fn pack_for(image: &[u8]) -> Option<(&'static BuiltinPatch, crate::hack_pack::HackPack)> {
+    let data = rom_data(image);
+    match for_data_crc(crc32(data)) {
+        Some(patch) => {
+            let pack = crate::hack_pack::HackPack::read(patch.bps)?;
+            pack.matches(data).then_some((patch, pack))
+        }
+        None => pack_matching(data),
+    }
 }
 
 /// A patch that adds PRG-ROM (16 KiB banks after the game's, for the widescreen extension's PRG
@@ -833,7 +889,7 @@ fn resize_prg(header: &mut [u8], before: usize, after: usize) {
 /// The built-in patch made for `image` (iNES header or not), if any.
 #[must_use]
 pub fn patch_for(image: &[u8]) -> Option<&'static BuiltinPatch> {
-    for_data_crc(data_crc(image))
+    for_data_crc(data_crc(image)).or_else(|| pack_matching(rom_data(image)).map(|(patch, _)| patch))
 }
 
 /// The built-in patch called `name`, if any.
@@ -1306,6 +1362,16 @@ mod tests {
     #[test]
     fn the_built_in_patches_are_well_formed() {
         for patch in PATCHES {
+            // A hack pack: it reads, and its widescreen is one of its components.
+            if crate::hack_pack::is_pack(patch.bps) {
+                let pack = crate::hack_pack::HackPack::read(patch.bps);
+                assert!(
+                    pack.is_some_and(|pack| pack.component(crate::hack_pack::WIDESCREEN).is_some()),
+                    "{}",
+                    patch.name
+                );
+                continue;
+            }
             assert!(patch.bps.starts_with(b"BPS1"), "{}", patch.name);
             let footer = patch.bps.len() - 12;
             let source_crc = u32::from_le_bytes([

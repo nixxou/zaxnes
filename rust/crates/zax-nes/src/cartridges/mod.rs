@@ -240,6 +240,11 @@ impl Cartridge {
         &self.memory.rom
     }
 
+    /// The ROM image, to write a hack pack's hooks into (see [`crate::hack_pack`]).
+    pub(crate) fn rom_mut(&mut self) -> &mut RomImage {
+        &mut self.memory.rom
+    }
+
     /// iNES mapper number of this cartridge.
     #[must_use]
     pub fn mapper_number(&self) -> i32 {
