@@ -21,10 +21,12 @@
 //! (`$CC6D`: the bits of the 16 bytes `$CA04[$14]` points to, `8 + y` for the boundary left of
 //! screen `(x, y)`, `y` for the one above it, bit `7 - x`), and the camera stops in the middle of
 //! a screen with a closed boundary ahead. The margins show the screens the camera's screens reach
-//! through open boundaries only.
+//! through open boundaries only. In the overhead view (areas `$14` 0-7) the camera goes across
+//! closed boundaries: the margins show every screen.
 //!
-//! The decoder checks itself against the PPU: a row whose centre does not show what the map gives
-//! (the title, the area's name, a transition, the pause screen) is left to the nametables.
+//! The decoder checks itself against the PPU: a row whose centre does not show what the map gives,
+//! nor its two ends (the game draws some rooms of the overhead view over the map), is left to the
+//! nametables (the title, the area's name, a transition, the pause screen).
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -60,6 +62,10 @@ const LAST_INNER_LINE: i32 = 232;
 
 /// Screen columns whose tiles are checked against the nametables.
 const CHECKED: [i32; 4] = [3, 11, 19, 27];
+/// The screen's first and last four columns, checked when the others are not the map's.
+const EDGES: [i32; 8] = [0, 1, 2, 3, 28, 29, 30, 31];
+/// The first area of the side view (`$14`): below are the overhead view's.
+const FIRST_SIDE_AREA: u8 = 8;
 
 /// The area in play.
 struct Area<'a> {
@@ -104,7 +110,13 @@ impl<'a> Area<'a> {
             metatiles: pointer(METATILES)?,
             blocks: pointer(BLOCKS)?,
             map: pointer(MAP)?,
-            shown: shown_screens(&boundaries, camera_x, camera_y, margin_x, margin_y),
+            // The overhead view's camera goes across closed boundaries: there they are not a
+            // room's.
+            shown: if memory.ram(AREA) < FIRST_SIDE_AREA {
+                u64::MAX
+            } else {
+                shown_screens(&boundaries, camera_x, camera_y, margin_x, margin_y)
+            },
             camera_x,
             camera_y,
             offset_x: (scroll_x - camera_x).rem_euclid(PLANE_WIDTH),
@@ -131,10 +143,19 @@ impl<'a> Area<'a> {
         first_column: i32,
         tile_row: i32,
     ) -> bool {
-        CHECKED.iter().all(|&column| {
+        let matches = |column: i32| {
             self.tile_at(first_column + column, tile_row)
-                .is_some_and(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == tile)
-        })
+                .filter(|(tile, _)| (memory.nametable)(nametable_address(row, column)) == *tile)
+                .map(|(tile, _)| tile)
+        };
+        if CHECKED.iter().all(|&column| matches(column).is_some()) {
+            return true;
+        }
+        // The game may draw something of its own over the map in the middle of the screen (a
+        // room of the overhead view): the row is the map's still when both of its ends are, in
+        // more than one tile.
+        let ends: Option<Vec<u8>> = EDGES.iter().map(|&column| matches(column)).collect();
+        ends.is_some_and(|tiles| tiles.iter().any(|tile| *tile != tiles[0]))
     }
 
     fn decode(
@@ -273,7 +294,6 @@ impl BlasterMaster {
         row: BackgroundRow,
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
-        extra: bool,
     ) -> bool {
         if row.coarse_y() >= 30 {
             return false;
@@ -287,8 +307,10 @@ impl BlasterMaster {
         let tile_row = area.tile_row(row, row.line);
         // A row at or past the screen's edge may be the row the game keeps for the overscan (the
         // one it draws coming in, or a stale one: a band across the picture), so the check is
-        // made on the screen's nearest row wholly inside it, the same distance away on the ring.
-        let checked = if extra { Self::inner(row) } else { row };
+        // made on the screen's nearest row wholly inside it, the same distance away on the ring;
+        // the margins of a row across the edge (decode_row) as well as its centre and the rows
+        // past it (decode_extra_row).
+        let checked = Self::inner(row);
         let checked_row = area.tile_row(checked, checked.line);
         if !area.centre_matches(memory, checked, first_column, checked_row) {
             return false;
@@ -326,7 +348,7 @@ impl MarginDecoder for BlasterMaster {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        Self::decode_any(memory, *row, columns, out, false)
+        Self::decode_any(memory, *row, columns, out)
     }
 
     fn decode_extra_row(
@@ -336,7 +358,7 @@ impl MarginDecoder for BlasterMaster {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        Self::decode_any(memory, *row, columns, out, true)
+        Self::decode_any(memory, *row, columns, out)
     }
 
     fn covers_overscan(&self) -> bool {
