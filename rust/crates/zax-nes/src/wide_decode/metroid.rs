@@ -18,6 +18,15 @@
 //! (top) one scrolling left (up). `PPUCTRL` (`$FF`, both nametable bits toggled together) gives the
 //! nametable of the screen's left (top) edge, `$FD`/`$FC` the scroll.
 //!
+//! The map's rooms belong to five areas, each with its own tables, and the map does not say which
+//! a room is in: the margins show the rooms of the area in play only, those its starting room
+//! (`$95D7`/`$95D8` of its bank) or the screen's room reach through the edges two neighbours
+//! share a way through (a tile at or past `$A0`, or a block the area's bombs blast, `$D651`, on
+//! both sides), up and down only between two rooms walled on the left and the right (the vertical
+//! shafts: a corridor's ceiling may happen to meet a room of another area built with this one's
+//! tables), never across an elevator room's top or bottom (the elevators lead to the other
+//! areas).
+//!
 //! The margins show the map's rooms around the screen, those behind a door too. The room on
 //! the screen's left (top) edge, and the other one while both show, come from PRG-RAM (what the
 //! game changed in them included); the others are built from the area's data as the game would.
@@ -72,6 +81,20 @@ type BuiltRooms = HashMap<(usize, usize), Box<[u8; ROOM_SIZE]>>;
 /// Rooms kept at most: a few areas' worth.
 const MAX_ROOMS: usize = 256;
 
+/// The rooms of the area in play (bit `x` of word `y`), by area bank and the room they were
+/// reached from.
+static AREA: Mutex<Option<(AreaKey, [u32; 32])>> = Mutex::new(None);
+type AreaKey = (usize, i32, i32);
+/// In an area bank: the map position of the area's starting room.
+const AREA_START: usize = 0x95D7;
+/// A tile Samus goes through: at or past this one (`$E7FD`).
+const WALKABLE: u8 = 0xA0;
+/// The blocks the bombs blast, from the area's first (`CheckBlastTile`, `$D651`) to `$97`.
+const LAST_BLAST: u8 = 0x97;
+/// Of a room's 30 rows, how many may go through its left or right edge for it to be a shaft (a
+/// door's opening).
+const SHAFT_OPENING: usize = 6;
+
 /// The area's tables (CPU addresses in its bank).
 #[derive(Clone, Copy)]
 struct Tables {
@@ -98,6 +121,8 @@ struct View<'a> {
     camera_y: i32,
     /// The rooms in PRG-RAM the screen shows: map x, map y, nametable (0: `$6000`).
     loaded: [Option<(i32, i32, usize)>; 2],
+    /// The rooms of the area in play: bit `x` of word `y`.
+    area: [u32; 32],
 }
 
 impl<'a> View<'a> {
@@ -143,6 +168,7 @@ impl<'a> View<'a> {
                     Some((first, map_y, nametable)),
                     (scroll_x != 0).then_some((first + 1, map_y, nametable ^ 1)),
                 ],
+                area: [0; 32],
             }
         } else {
             let first = map_y - i32::from(direction == 1 && scroll_y != 0);
@@ -162,9 +188,12 @@ impl<'a> View<'a> {
                     Some((map_x, first, nametable)),
                     (scroll_y != 0).then_some((map_x, first + 1, nametable ^ 1)),
                 ],
+                area: [0; 32],
             }
         };
-        Some(view)
+        let (x, y, _) = view.loaded[0]?;
+        let area = view.area_rooms(x, y)?;
+        Some(Self { area, ..view })
     }
 
     /// The row's place on the ring: its left edge across, its top down (a whole tile).
@@ -220,6 +249,8 @@ impl<'a> View<'a> {
         if number == 0xFF {
             return None;
         }
+        #[allow(clippy::cast_sign_loss)] // 0..32.
+        let in_area = self.area[y as usize] & (1 << x) != 0;
         if let Some((_, _, nametable)) = self
             .loaded
             .iter()
@@ -233,10 +264,10 @@ impl<'a> View<'a> {
                 .get(start..start + ROOM_SIZE)
                 .map(Room::Ram);
         }
-        let bank = self
-            .memory
-            .prg_rom
-            .get(self.bank_index * BANK_SIZE..(self.bank_index + 1) * BANK_SIZE)?;
+        if !in_area {
+            return None;
+        }
+        let bank = self.bank()?;
         let data = room_data(bank, self.tables, number)?;
         let mut rooms = ROOMS.lock().ok()?;
         let rooms = rooms.get_or_insert_with(HashMap::new);
@@ -248,6 +279,38 @@ impl<'a> View<'a> {
             rooms.insert(key, build_room(bank, self.tables, data)?);
         }
         rooms.get(&key).map(|room| Room::Built(room.clone()))
+    }
+
+    fn bank(&self) -> Option<&'a [u8]> {
+        self.memory
+            .prg_rom
+            .get(self.bank_index * BANK_SIZE..(self.bank_index + 1) * BANK_SIZE)
+    }
+
+    /// The rooms of the area in play, reached from its starting room and from the screen's room
+    /// at map `(x, y)` (kept while the screen stays there).
+    fn area_rooms(&self, x: i32, y: i32) -> Option<[u32; 32]> {
+        let key = (self.bank_index, x, y);
+        let mut cached = AREA.lock().ok()?;
+        if let Some((at, rooms)) = cached.as_ref() {
+            if *at == key {
+                return Some(*rooms);
+            }
+        }
+        let bank = self.bank()?;
+        let map = self.memory.prg_ram.get(WORLD_MAP..WORLD_MAP + 1024)?;
+        let start = (
+            i32::from(read(bank, AREA_START)?),
+            i32::from(read(bank, AREA_START + 1)?),
+        );
+        let first_blast = match self.bank_index {
+            1 => 0x80,
+            3 => WALKABLE,
+            _ => 0x70,
+        };
+        let rooms = reach(bank, self.tables, map, first_blast, &[start, (x, y)]);
+        *cached = Some((key, rooms));
+        Some(rooms)
     }
 
     fn centre_matches(
@@ -329,6 +392,128 @@ impl<'a> RoomCache<'a> {
         };
         self.rooms[index].1.as_ref()
     }
+}
+
+/// A room built for the reach of an area: its tiles, and whether it has an elevator.
+type ReachRoom = Option<(Box<[u8; ROOM_SIZE]>, bool)>;
+
+/// The rooms of `map` reached from `from` through the edges two neighbours share a way through:
+/// bit `x` of word `y`.
+fn reach(
+    bank: &[u8],
+    tables: Tables,
+    map: &[u8],
+    first_blast: u8,
+    from: &[(i32, i32)],
+) -> [u32; 32] {
+    let goes_through = |tile: u8| tile >= WALKABLE || (first_blast..=LAST_BLAST).contains(&tile);
+    let number = |x: i32, y: i32| {
+        if !(0..MAP_SIZE).contains(&x) || !(0..MAP_SIZE).contains(&y) {
+            return None;
+        }
+        usize::try_from(y * MAP_SIZE + x)
+            .ok()
+            .and_then(|cell| map.get(cell).copied())
+            .filter(|number| *number != 0xFF)
+    };
+    let mut built: HashMap<u8, ReachRoom> = HashMap::new();
+    let mut room = |number: u8| -> ReachRoom {
+        built
+            .entry(number)
+            .or_insert_with(|| {
+                let data = room_data(bank, tables, number)?;
+                Some((build_room(bank, tables, data)?, has_elevator(bank, data)?))
+            })
+            .clone()
+    };
+    let shaft = |tiles: &[u8; ROOM_SIZE]| {
+        [0, 31].iter().all(|&column| {
+            (0..30)
+                .filter(|row| goes_through(tiles[row * 32 + column]))
+                .count()
+                <= SHAFT_OPENING
+        })
+    };
+    let mut reached = [0u32; 32];
+    let mut queue: Vec<(i32, i32)> = Vec::new();
+    for &(x, y) in from {
+        if number(x, y).is_some() {
+            #[allow(clippy::cast_sign_loss)] // 0..32.
+            let (column, row) = (x as u32, y as usize);
+            reached[row] |= 1 << column;
+            queue.push((x, y));
+        }
+    }
+    while let Some((x, y)) = queue.pop() {
+        let Some((tiles, elevator)) = number(x, y).and_then(&mut room) else {
+            continue;
+        };
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (x + dx, y + dy);
+            let Some(other) = number(nx, ny) else {
+                continue;
+            };
+            #[allow(clippy::cast_sign_loss)] // 0..32.
+            let (column, row) = (nx as u32, ny as usize);
+            if reached[row] & (1 << column) != 0 {
+                continue;
+            }
+            let Some((other_tiles, other_elevator)) = room(other) else {
+                continue;
+            };
+            let open = if dx == 0 {
+                let (here, there) = if dy > 0 { (29, 0) } else { (0, 29) };
+                !elevator
+                    && !other_elevator
+                    && shaft(&tiles)
+                    && shaft(&other_tiles)
+                    && (0..32).any(|column| {
+                        goes_through(tiles[here * 32 + column])
+                            && goes_through(other_tiles[there * 32 + column])
+                    })
+            } else {
+                let (here, there) = if dx > 0 { (31, 0) } else { (0, 31) };
+                (0..30).any(|row| {
+                    goes_through(tiles[row * 32 + here])
+                        && goes_through(other_tiles[row * 32 + there])
+                })
+            };
+            if open {
+                reached[row] |= 1 << column;
+                queue.push((nx, ny));
+            }
+        }
+    }
+    reached
+}
+
+/// Whether the room whose data is at `data` has an elevator among its objects (`$EAD4`: after
+/// `$FD`, entries of 3 bytes for an enemy or a pipe of bugs, 2 for a door or an elevator, 1 for
+/// the statues).
+fn has_elevator(bank: &[u8], data: usize) -> Option<bool> {
+    let mut at = data + 1;
+    for _ in 0..256 {
+        match read(bank, at)? {
+            0xFF => return Some(false),
+            0xFD => break,
+            0xFE => at += 1,
+            _ => at += 3,
+        }
+    }
+    at += 1;
+    for _ in 0..64 {
+        let entry = read(bank, at)?;
+        if entry == 0xFF {
+            return Some(false);
+        }
+        match entry & 0x0F {
+            4 => return Some(true),
+            1 | 7 => at += 3,
+            2 => at += 2,
+            _ => at += 1,
+        }
+    }
+    Some(false)
 }
 
 /// Reads the byte at CPU address `address` of an area bank (`$8000-$BFFF`).
