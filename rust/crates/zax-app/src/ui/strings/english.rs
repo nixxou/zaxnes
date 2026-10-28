@@ -243,6 +243,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         "setting.video.hide_overscan",
         "Hide the 8 lines at the top and bottom (Auto: NTSC games)",
     ),
+    ("setting.video.nes_palette", "NES colour palette"),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
     ("setting.audio.bg_music", "Menu music"),
