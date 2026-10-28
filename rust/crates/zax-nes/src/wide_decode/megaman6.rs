@@ -79,6 +79,13 @@ impl MarginDecoder for MegaMan6 {
         true
     }
 
+    /// The column the game draws past the screen's right edge takes its colours from attribute
+    /// bytes it writes later: the screen's last column shows them first (a stripe of the next
+    /// structure's colours at the edge of the original picture).
+    fn redrawn_right_columns(&self) -> i32 {
+        1
+    }
+
     /// The game draws the rows coming in at the screen's top or bottom edge a piece at a time
     /// while it scrolls to another section (which a television hid): those 8 lines stay hidden
     /// with a vertical margin as without one, when the host hides them.

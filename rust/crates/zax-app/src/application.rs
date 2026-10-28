@@ -1555,8 +1555,10 @@ const OVERSCAN_LINES: usize = 8;
 
 /// Blacks out the [`OVERSCAN_LINES`] at the top and bottom of the screen in `picture` (colour
 /// indices, `height` rows, as wide and as tall as its widescreen margins make it, the screen's
-/// 240 lines in the middle). A taller one, with a vertical margin, goes on past those lines and is
-/// given to it only when its decoder asks (`GameSession::nes_picture_hides_overscan`).
+/// 240 lines in the middle), and the vertical margin past them: the picture ends where it does
+/// without a vertical margin. A taller picture is given to it only when its decoder asks
+/// (`GameSession::nes_picture_hides_overscan`): its vertical margin holds nothing of the decoder's,
+/// only the rows across the screen's edges the PPU drew, reaching into it.
 fn hide_overscan_lines(picture: &mut [u8], height: usize) {
     const SCREEN: usize = 240;
     const BLACK: u8 = 0x0F;
@@ -1565,11 +1567,10 @@ fn hide_overscan_lines(picture: &mut [u8], height: usize) {
     }
     let width = picture.len() / height;
     let top = (height - SCREEN) / 2;
-    let band = OVERSCAN_LINES * width;
-    let start = top * width;
-    let end = (top + SCREEN) * width;
-    picture[start..start + band].fill(BLACK);
-    picture[end - band..end].fill(BLACK);
+    let start = (top + OVERSCAN_LINES) * width;
+    let end = (top + SCREEN - OVERSCAN_LINES) * width;
+    picture[..start].fill(BLACK);
+    picture[end..].fill(BLACK);
 }
 
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
@@ -1790,24 +1791,18 @@ mod overscan_tests {
     use super::hide_overscan_lines;
 
     #[test]
-    fn the_screens_edge_lines_are_hidden_within_a_vertical_margin() {
+    fn a_taller_picture_ends_where_the_screen_does_without_a_margin() {
         // 2 columns, a vertical margin of 4 lines above and below the 240 of the screen.
         let height = 248;
         let mut picture = vec![1u8; 2 * height];
         hide_overscan_lines(&mut picture, height);
         let line = |y: usize| &picture[y * 2..y * 2 + 2];
-        assert_eq!(line(3), [1, 1], "the margin above stays");
-        assert_eq!(line(4), [0x0F, 0x0F], "the screen's first line");
-        assert_eq!(line(11), [0x0F, 0x0F], "its eighth");
-        assert_eq!(line(12), [1, 1]);
-        assert_eq!(line(235), [1, 1]);
-        assert_eq!(
-            line(236),
-            [0x0F, 0x0F],
-            "the screen's eighth line from the bottom"
-        );
-        assert_eq!(line(243), [0x0F, 0x0F], "its last");
-        assert_eq!(line(244), [1, 1], "the margin below stays");
+        assert_eq!(line(0), [0x0F, 0x0F], "the margin above");
+        assert_eq!(line(11), [0x0F, 0x0F], "the screen's eighth line");
+        assert_eq!(line(12), [1, 1], "its ninth");
+        assert_eq!(line(235), [1, 1], "its ninth from the bottom");
+        assert_eq!(line(236), [0x0F, 0x0F], "its eighth from the bottom");
+        assert_eq!(line(247), [0x0F, 0x0F], "the margin below");
     }
 
     #[test]

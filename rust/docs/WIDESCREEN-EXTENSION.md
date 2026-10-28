@@ -746,7 +746,8 @@ left, bottom right), in sub-palette `($62)[1024 + b] & 3`. The camera is `$57:$5
 rows of a camera on a screen's top are decoded (a vertical scroll leaves the margins to the
 nametables). The camera stops at its screen's edges unless `$71` lets it on (bit 0 right, bit 1
 left, set by objects of the stage as Mega Man goes): past such an edge nothing is drawn. Column 0
-is decoded while the game hides it. The built-in patch (`MEGAMAN6_USA`, an advanced mode,
+is decoded while the game hides it, and the screen's last column redrawn (`redrawn_right_columns`
+1), as in Mega Man 3 to 5. The built-in patch (`MEGAMAN6_USA`, an advanced mode,
 `mm6wide`) draws the enemies in the margins: Mega Man 6's objects run as scripts that remove
 themselves through the test "on the screen" (`$E485`), which the hack widens for the enemies; its
 sprite loops are the game's four (none, horizontal, vertical, both flips) for each page. Its code
@@ -814,7 +815,9 @@ temporary.
   stays empty while the game draws rows there a piece at a time). The core latches it per frame
   (`Ppu2C02::hides_overscan`, `NesCore::hides_overscan`), the session carries it with the
   picture it keeps while the core is away (`GameSession::nes_picture_hides_overscan`), and
-  `hide_overscan_lines` blacks the screen's lines in the middle of the taller picture. Both backends (GL `gl/picture.rs`, wgpu `wgpu_backend/resources.rs`)
+  `hide_overscan_lines` blacks those lines and the vertical margin past them (the picture ends
+  where it does without a vertical margin: only the rows across the screen's edges the PPU drew
+  reached into it). Both backends (GL `gl/picture.rs`, wgpu `wgpu_backend/resources.rs`)
   reallocate the picture texture when its size changes.
 
 ---
