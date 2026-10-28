@@ -531,8 +531,9 @@ réglage **« Masquer les 8 lignes du haut et du bas »** (`video.hide_overscan`
   jeux PAL (50 Hz), comme FCEUX ;
 - **Toujours** : ces lignes sont noires quelle que soit la région.
 
-Le réglage ne change que l'image 2D, et seulement sans marge d'écran large : avec une marge
-verticale, l'image continue au-delà de ces lignes, que le décodeur de marge redessine.
+En 2D, ces lignes sont noires ; en 3D, les tuiles qui sont au moins à moitié dans ces lignes ne
+sont pas montrées. Le réglage ne s'applique pas avec une marge verticale d'écran large : l'image
+continue alors au-delà de ces lignes, que le décodeur de marge redessine.
 
 ### Langue de l'interface
 
