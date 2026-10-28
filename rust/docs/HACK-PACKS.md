@@ -148,6 +148,11 @@ Done, branch `hack-rewrite`:
 * MMC3 recomputes its bank windows after a restore: a state of the BPS build (68 banks) restores
   on the pack (64).
 
+* the hacks screen: by the ROM's CRC first, then by the packs' signatures; a ROM that has them
+  (another revision, a ROM hack leaving the hooked code alone) gets the hack, its options and
+  the margin decoder without forcing. Checked on a Mega Man 6 ROM with one byte changed outside
+  the hooks (CRC `D9F52C71`): the pack applies.
+
 Still to do:
 
 * states taken at the game's wait for the next frame (`idle_loop`) and restored with or without

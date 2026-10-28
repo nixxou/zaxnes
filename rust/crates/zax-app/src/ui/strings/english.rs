@@ -315,6 +315,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HACKS_FORCED_NOTE, "The widescreen hack of {0}, made for the ROM \u{201c}{1}\u{201d} (CRC {2}), is forced on this one: {3} (CRC {4}). It takes effect when the game starts; if the game does not run with it, take the forcing back."),
     (keys::HACKS_FORCE_QUESTION, "Force it all the same? A ROM hack close to the original stands a good chance of running with it; otherwise the game may crash."),
     (keys::HACKS_FORCE_BUTTON, "Force"),
+    (keys::HACKS_PACK_SIGNATURES, "Nor does it have the code the hack changes where it changes it: the hack cannot apply to it."),
     (keys::HACKS_FORCE_SIZE, "Its size is not the one the hack is made for: it cannot be forced either."),
     (keys::HACKS_OTHER_ROM, "The widescreen hack of {0} is made for the ROM \u{201c}{1}\u{201d} (CRC {2}). This ROM does not match it: {3} (CRC {4}). The widescreen cannot be turned on for it."),
     (keys::HACK_OFF, "off"),

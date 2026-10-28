@@ -1027,6 +1027,14 @@ length, the original bytes, the new ones).
   the patch whose options apply then, and `hack_options()` lists only the aids' options while the
   patch does not run; the hacks screen shows those rows without the advanced mode
   (`BuiltinPatch::is_aid`).
+* **Another ROM of the game** (a revision, a ROM hack). The hacks screen opens for a game whose
+  name or profile says a hack is made for it, as before. Inside, `HacksModel::for_rom` looks for
+  the patch by the ROM's CRC-32 first, then by the signatures of the hack packs
+  (`builtin_patches::pack_for` on the file): a ROM that has them is treated as one the hack is
+  made for (its rows, its options, no forcing), and the list's widescreen command turns it on
+  directly. A pack is never forced: a ROM without its signatures is told so
+  (`hacks.pack_signatures`). The margin decoder of such a ROM is that of the pack's patch
+  (`NesCore::margin_decoder`, after the CRC's).
 * **Version.** `BuiltinPatch::version()` of a pack is the CRC-32 of the pack.
 * **Install.** `NesCore::install_pack` runs after the cartridge is attached, at each load and at
   each restore of a state that carries its ROM: the pack made for the host's image, the code in
