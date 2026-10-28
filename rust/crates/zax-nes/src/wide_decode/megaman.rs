@@ -41,6 +41,13 @@ pub(super) fn decode_row(
         return false;
     }
 
+    // With the same nametable on both sides (mirrored), a margin's nametable column is a copy of
+    // one on the screen: never the margin's own, though a repeating wall may match the layout.
+    let mirrored = (0..32).all(|column| {
+        (memory.nametable)(nametable_address(row, column))
+            == (memory.nametable)(nametable_address(row, column + 32))
+    });
+
     for column in columns {
         let world = first_column + column;
         if !section.contains(&world) {
@@ -51,7 +58,8 @@ pub(super) fn decode_row(
         // game writing a column's attribute bytes after its tiles (the column it is drawing past
         // the screen's edge showed in another column's colours).
         let layout = tile_at(world, coarse_y);
-        let decoded = if column_is_current(memory, row, column, world, tile_at) {
+        let own_column = !mirrored || (0..32).contains(&column);
+        let decoded = if own_column && column_is_current(memory, row, column, world, tile_at) {
             let (tile, palette) = nametable_tile(memory, row, column);
             Some((tile, layout.map_or(palette, |(_, palette)| palette)))
         } else {
