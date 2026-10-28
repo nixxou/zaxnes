@@ -257,6 +257,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         let batch = FrameBatch {
             records: &records,
             palette,
+            margin_palette: None,
             mask_x,
             mask_y,
             margin,

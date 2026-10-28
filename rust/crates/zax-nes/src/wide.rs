@@ -266,12 +266,15 @@ impl WideExtension {
 
     /// Unlocked with the PRG window open on `window_bank` (bit 7 set), `window_page`, as a
     /// built-in patch with a boot window asks at power-on and reset.
-    pub fn boot(&mut self, window_bank: u8, window_page: u8) {
+    pub fn boot(&mut self, window_bank: u8, window_page: u8, over_prg_ram: bool) {
         self.unlocked = true;
         self.window_bank = window_bank;
         self.window_page = window_page;
-        // The whole window, $6000-$7FFF included: such a ROM has no room for anything there.
-        self.layout |= 0x10;
+        // The whole window, $6000-$7FFF included, for a ROM with no room for anything there;
+        // up to $5FFF only for one with PRG-RAM there.
+        if over_prg_ram {
+            self.layout |= 0x10;
+        }
     }
 
     /// Puts the registers back to their power-on values; the host margin is kept.

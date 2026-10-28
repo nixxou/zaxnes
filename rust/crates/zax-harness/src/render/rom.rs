@@ -480,6 +480,7 @@ impl Host {
         let batch = FrameBatch {
             records,
             palette: batch.palette,
+            margin_palette: batch.margin_palette,
             mask_x: batch.mask_x,
             mask_y: batch.mask_y,
             margin: batch.margin,
