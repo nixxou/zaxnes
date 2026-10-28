@@ -31,8 +31,24 @@ size and its free room; a ROM whose hooked code is unchanged takes the pack what
 | Hooks | the list below |
 | Boot | the boot window (first page shown at power-on, whether it covers `$6000-$7FFF`), the idle loop (`BuiltinPatch::boot_window`, `boot_window_keeps_prg_ram`, `idle_loop` as today) |
 
-The options (`HackOption`), the game's name, the advanced flag stay in `BuiltinPatch`, which
-points at a pack instead of a BPS.
+The game's name stays in `BuiltinPatch`, which points at a pack instead of a BPS.
+
+### Components
+
+A pack is one or more **components**, each with its own hooks (and code pages), each turned on
+apart from the others:
+
+| Component | Today | In a pack |
+|---|---|---|
+| Widescreen (advanced mode) | the patch, applied with the advanced mode | its hooks and code, on with the advanced mode |
+| Testing aids: "Invincible", "Level select" | options of the patch (`$500A` bits the hack's code reads): only with the advanced mode | components of their own, on or off alone: with the plain widescreen, without widescreen at all, or with the advanced mode |
+| "No slowdown" | an option of the patch (the overclock it sets) | stays the widescreen's: it pays for its work |
+
+An aid is a few hooks of its own (the damage test, the stage start) and, when it needs code, a
+few bytes of the code memory: it does not use the widescreen's code, nor its variables. Two
+components never hook the same bytes (checked when the pack is built); where an aid and the
+widescreen would both need the same place, the aid takes a hook of its own just before or after
+it. The options menu shows each component as a switch, on or off whatever the others are.
 
 Each hook:
 
@@ -44,8 +60,9 @@ Each hook:
 | new | bytes, as many | what the CPU reads there instead (`JSR wide_place / BCS $E269`, NOPs) |
 | context | u8 count + bytes, optional | bytes around the hook that identify the place (section 4) |
 
-Built by the hack's `tools/build.py` from its `put()` list, which already holds every field but
-the context; `make_bps.py` gives way to `make_pack.py`.
+Each hook belongs to one component. Built by the hack's `tools/build.py` from its `put()` list,
+which already holds every field but the context (Mega Man 6's damage hook, `$8F72` in bank
+`$38`, moves to the "Invincible" component); `make_bps.py` gives way to `make_pack.py`.
 
 ## 3. How the emulator applies it
 
@@ -100,3 +117,4 @@ rewritten disassembly, not hooks.
 3. Packs shipped inside the emulator as the BPS are today (proposed), or also loadable from a
    file next to the ROM (a "widescreen pack" for a ROM Zaxnes does not know)?
 4. Keep the BPS of each converted hack for a while, to compare, or drop it at once?
+5. The aids without any widescreen: shown in the same options menu (proposed), or apart?
