@@ -221,6 +221,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::FINAL_FANTASY_USA => Some(&ff1::FinalFantasy),
         crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
         crate::builtin_patches::BLASTERMASTER_USA => Some(&blastermaster::BlasterMaster),
+        crate::builtin_patches::METROID_USA => Some(&metroid::Metroid),
         _ => None,
     }
 }

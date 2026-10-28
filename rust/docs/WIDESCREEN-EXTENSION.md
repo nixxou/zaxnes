@@ -33,7 +33,9 @@ Fantasy (USA) one, an advanced mode as well
 Force (Korea) one, an advanced mode as well
 ([`hacks/metalforce/WIDESCREEN-HACK.md`](hacks/metalforce/WIDESCREEN-HACK.md)), and the Blaster
 Master (USA) one, an advanced mode as well
-([`hacks/blastermaster/WIDESCREEN-HACK.md`](hacks/blastermaster/WIDESCREEN-HACK.md)).
+([`hacks/blastermaster/WIDESCREEN-HACK.md`](hacks/blastermaster/WIDESCREEN-HACK.md)), and the
+Metroid (USA) one, an advanced mode as well
+([`hacks/metroid/WIDESCREEN-HACK.md`](hacks/metroid/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -344,7 +346,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Adventure Island (USA) (data CRC-32 `F8A713BE`), unpatched (and with its built-in patch) | the round, from its tables in PRG-ROM, slopes and vertical scrolling included; vertical margin | `adventure_island.rs`, see below |
 | Metal Force (Korea) (data CRC-32 `EC6D910E`, mapper 156), unpatched and with its built-in patch | the level map in PRG-RAM, sides and vertical margin | `metalforce.rs`, see below |
 | Blaster Master (USA) (data CRC-32 `3F0FD764`), unpatched and with its built-in patch | the area's map in PRG-ROM, four levels of blocks, within the room the camera is in; vertical margin, overscan | `blastermaster.rs`, see below |
-| Metroid (USA) (data CRC-32 `70080810`), unpatched | the world map's rooms around the screen: the two the game keeps in PRG-RAM, the others built from the area's data as the game does; vertical margin, overscan | `metroid.rs`, see below |
+| Metroid (USA) (data CRC-32 `70080810`), unpatched and with its built-in patch | the world map's rooms around the screen: the two the game keeps in PRG-RAM, the others built from the area's data as the game does; vertical margin, overscan | `metroid.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
