@@ -1,0 +1,102 @@
+# Hack packs (proposal)
+
+Status: proposal for review, nothing implemented. Branch `hack-rewrite`.
+
+## 1. Why
+
+Every advanced-mode hack is shipped today as a BPS patch applied to the player's ROM in memory
+(`builtin_patches.rs`). The patch carries two things:
+
+1. **The hack's code**, assembled into room it takes from the ROM: free space in a bank (the
+   Super Mario Bros. 3 hack in the padding before a DMC sample), or a PRG bank added to the game
+   (Mega Man 1, 3 to 6, Metroid: the PRG-ROM grows by 16 KiB and the fixed banks are copied to the
+   new end, as MMC3 fixes the last two).
+2. **The hooks**: a few bytes of the game's code replaced by a `JSR`/`JMP` into that code
+   (17 for Mega Man 6), each checked against the bytes it replaces when the hack is built.
+
+A ROM that differs from the one the patch was made for (a translation, a bug-fix patch, another
+revision) is refused: the patch is matched by the CRC-32 of the ROM's data, and its free room or
+its hooks may be taken by the other patch.
+
+A hack pack keeps the same two things apart from the ROM: the code lives in memory of the
+extension's own, the hooks are a table the emulator applies and checks itself. The ROM keeps its
+size and its free room; a ROM whose hooked code is unchanged takes the pack whatever else differs.
+
+## 2. What a pack holds
+
+| Part | Contents |
+|---|---|
+| Header | `ZXPK`, format version, the pack's name (as `BuiltinPatch::name` today), its version (a hash of the rest: the "hack version" of savestates and movies) |
+| Code | the hack's code image, up to 32 KiB, in 256-byte pages; assembled for `$5800` as today |
+| Hooks | the list below |
+| Boot | the boot window (first page shown at power-on, whether it covers `$6000-$7FFF`), the idle loop (`BuiltinPatch::boot_window`, `boot_window_keeps_prg_ram`, `idle_loop` as today) |
+
+The options (`HackOption`), the game's name, the advanced flag stay in `BuiltinPatch`, which
+points at a pack instead of a BPS.
+
+Each hook:
+
+| Field | Size | Meaning |
+|---|---|---|
+| bank | u8 | the game's 8 KiB PRG bank the hooked code is in (the fixed ones too) |
+| offset | u16 | its offset in that bank |
+| original | u8 count + bytes | the bytes the game has there: checked before anything is applied |
+| new | bytes, as many | what the CPU reads there instead (`JSR wide_place / BCS $E269`, NOPs) |
+| context | u8 count + bytes, optional | bytes around the hook that identify the place (section 4) |
+
+Built by the hack's `tools/build.py` from its `put()` list, which already holds every field but
+the context; `make_bps.py` gives way to `make_pack.py`.
+
+## 3. How the emulator applies it
+
+* **Code.** The pack's code is a memory of the extension, not of the cartridge. The PRG window
+  (`$5008` bit 7 on, `$5009` the first page) shows it at `$5800-$5FFF` (and on to `$7FFF` with
+  `$5007` bit 4) instead of a bank of PRG-ROM; bits 0-6 of `$5008` pick a 16 KiB part of it. With
+  no pack the window shows PRG-ROM as today: the hacks not yet converted are not touched.
+* **Hooks.** At load the emulator checks every hook's original bytes in the player's PRG-ROM and
+  writes the new ones into its in-memory copy, as the BPS does today; nothing is written to the
+  ROM file. If one hook does not match, no hook is applied and the pack is refused: the hooks of
+  a hack depend on each other (half a hack can leave the game in a state it was never made for).
+  The ROM then runs as the plain widescreen (margin decoder only), and the log names the hook.
+* **Identification.** A pack is offered for a ROM when its hooks all match, not by the ROM's CRC:
+  the CRC stays the fast path for the ROM the hack was made for.
+* **Savestates, movies.** The hack version is the pack's; a state saved with a pack restores into
+  the same ROM with the same pack. The ROM's size no longer changes, so a state of the plain game
+  restores into the hacked one as with the Super Mario Bros. 3 hack today.
+
+## 4. Moved code (later step)
+
+A translation may move code: the same instructions at another offset. With a context (the bytes
+around the hook), the emulator may look for the unique place in the bank where they are and
+apply the hook there. Two limits:
+
+* the hack's code jumps back into the game at fixed addresses (`JMP $E27A` at the end of
+  `wide_hide_rest`, `LIST_WALK = $813A`): those would need the same search and a relocation of the
+  hack's code, which a first version does not do;
+* the margin decoders read the game's RAM and its data in PRG-ROM at fixed places (Mega Man 6's
+  stage lists in bank `$3A`, the controllers' settings in bank `$39`): a translation seldom moves
+  them, nothing guarantees it.
+
+First version: hooks at their exact place only (the ROM's code unchanged where the hack hooks,
+whatever else differs). The search comes after, if a real translated ROM needs it.
+
+## 5. First game: Mega Man 6
+
+* Its code (now 10 KiB of a 16 KiB bank added to the game) becomes the pack's code; the window
+  registers it already uses do not change.
+* Its 17 hooks are `build.py`'s `put()` list as it is.
+* The PRG-ROM stays 512 KiB: no bank added, no fixed bank copied to the end.
+* Check: the same movies (`G:\3DSen\wide-test-megaman\movies-mm6`) replay the same with the
+  pack as with the BPS, frame for frame (RAM traces compared with `--trace-ram`).
+
+Then the other hacks one at a time, each checked the same way. Zelda II stays a BPS: its hack is a
+rewritten disassembly, not hooks.
+
+## 6. To decide
+
+1. Refuse the whole pack when one hook does not match (proposed), or apply the others?
+2. The code memory's size: 32 KiB (two 16 KiB parts for `$5008`) is enough for every hack today
+   (the largest, Mega Man 6, uses 10 KiB).
+3. Packs shipped inside the emulator as the BPS are today (proposed), or also loadable from a
+   file next to the ROM (a "widescreen pack" for a ROM Zaxnes does not know)?
+4. Keep the BPS of each converted hack for a while, to compare, or drop it at once?
