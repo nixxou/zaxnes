@@ -519,11 +519,14 @@ impl NesCore {
     /// Unlocks the widescreen extension with its PRG window open when the built-in patch named
     /// `patch` asks for it (`BuiltinPatch::boot_window`).
     fn boot_patch_window(&mut self, patch: Option<&'static str>) {
-        if let Some((bank, page)) = patch
+        if let Some(((bank, page), keeps_prg_ram)) = patch
             .and_then(crate::builtin_patches::by_name)
-            .and_then(|known| known.boot_window)
+            .and_then(|known| Some((known.boot_window?, known.boot_window_keeps_prg_ram)))
         {
-            self.bus.ppu_mut().wide_mut().boot(bank, page);
+            self.bus
+                .ppu_mut()
+                .wide_mut()
+                .boot(bank, page, !keeps_prg_ram);
         }
     }
 
