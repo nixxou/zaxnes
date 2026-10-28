@@ -319,6 +319,15 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    band of 8 lines, 256 for none; sprites from their records too): a game whose last visible
    columns show colours of the column it is drawing past the edge (Super Mario Bros. 3, 3
    columns: the attribute bytes it writes ahead also cover them).
+   The same on the left: a decoder whose `redrawn_left_columns()` is `n` (default 0) is also
+   asked for screen columns 0 to `n - 1`, their nametable records are replaced, and the wide
+   picture composes the centre of that band from the records up to `x = 8 n - fine X`
+   (`Ppu2C02::redrawn_to`, per band of 8 lines, 0 for none): a game that draws the column
+   coming in at the left edge with attribute bytes that also colour the visible column next to
+   it (Metroid, 2 each side). Extension change: `MarginDecoder::redrawn_left_columns`, the field
+   `redrawn_to` (reset with the frame), the first centre column of `decode_margins` the larger of
+   the masked column's and `n`, and `wide_picture_into` taking the PPU's pixels from
+   `max(redrawn_to, the masked column)` of each band.
 5. A decoder whose `decodes_masked_column()` is true (default false) is also asked for screen
    column 0 of each row while the game hides the leftmost 8 pixels of the background (PPUMASK
    bit 1 clear), and that column's nametable record of a decoded row is replaced too: the wide
