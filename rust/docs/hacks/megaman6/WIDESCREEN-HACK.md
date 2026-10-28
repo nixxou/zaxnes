@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `B3FD4BFA` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `9740462D` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -53,7 +53,8 @@ the end (`$E26D`).
 Objects: 23 slots, 23 bytes apart: `$03A0` type (0 free), `$03B7` flags (bit 0 off the screen: not
 drawn; bits 6-7 the flips), `$03FC` the stage list's entry an enemy came from (`$FF` none),
 `$046F`/`$0486` x screen / pixel, `$04B4`/`$04CB` y. Slot 0 is Mega Man, 1-7 his weapons and the
-like, 8-21 the enemies the list spawns (`$E59B`). Each object runs as a script (`$E434` resumes
+like, 8-21 the enemies the list spawns (`$E59B`), 22 the list's controllers (type `$80`, put
+straight in that slot: what lets the camera on, and the like). Each object runs as a script (`$E434` resumes
 them, slot 22 down to 0); a script removes its object when the test `$E485` finds it off the
 screen. The game's collisions measure 16-bit distances between objects. The camera is `$57:$56`;
 it stops at its screen's edge unless `$71` lets it on (bit 0 right, bit 1 left), which objects of
@@ -63,11 +64,11 @@ and `$064A` the next entries right and left of the spawn window.
 
 | Game routine | Original | Hack |
 |---|---|---|
-| spawn window (bank `$3A` `$8120`) | entries between camera + 8 and camera + 254 spawn | between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`) |
-| a list enemy's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen |
-| object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | an enemy asleep is skipped while off the original screen (past the margins it is removed); on it, it wakes for good |
-| "on the screen" (`$E485`) | y on the screen, x - camera within `[4, 256)` | the same for slots 0-7; an enemy also within `[LO, HI)` |
-| an object's place (`$E24B`, in the drawer) | not drawn when flagged off the screen (`$03B7` bit 0), its y off the screen or its x - camera (low byte) below 4 | the same on the original screen; an enemy off it is drawn within `[LO, HI)`, the flag aside |
+| spawn window (bank `$3A` `$8120`) | entries between camera + 8 and camera + 254 spawn | between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
+| a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
+| object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks; on the original screen it wakes for good |
+| "on the screen" (`$E485`) | y on the screen, x - camera within `[4, 256)` | the same for slots 0-7 and the controller (22); an enemy also within `[LO, HI)` |
+| an object's place (`$E24B`, in the drawer) | not drawn when flagged off the screen (`$03B7` bit 0), its y off the screen or its x - camera (low byte) below 4 | the same on the original screen; an enemy off it is drawn within `[LO, HI)`, the flag aside, unless it is hidden |
 | an object's sprites (`$E315`, the jump to one of the four loops: none, horizontal, vertical, both flips) | x = 8-bit screen x + or - the offset, the sprite hidden when it overflows; the loop stops when OAM is full | the same four loops for each page (eight), 16-bit x, shown within `[-M, 256 + M)`, its high byte to `$5100 + 4 n` (or `$5400 + 4 n`); the loops go on to the extension's second page (`$5300`) when the first is full, and stop when both are |
 | the frame's sprites (`$D1D4`, `$E1DD`: `$8C = 0`) | | also the first page in use and its high bytes back to 0 (the energy bars' writer writes none) |
 | bars and objects in turns (`$D1D8`) | the energy bars before the objects one frame, after them the next | the bars always first (nothing is left over to flicker) |
@@ -157,7 +158,9 @@ testing.
 
 * No sprite in the vertical margins: the extension carries a high byte for x only.
 * Only the enemies (slots 8 up) live in the margins; Mega Man's weapons keep the original screen.
-* An enemy asleep in a margin hangs where its entry puts it until the original screen reaches it.
+* An enemy asleep in a margin hangs where its entry puts it, in the pose of its first frame, until
+  the original screen reaches it.
+* An enemy spawned in a margin at the stage's start shows only once the camera moves.
 * The part of the stage the margins and the enemies keep to follows `$71`, which the game's own
   objects set as Mega Man goes: where it lets the camera on, the margins reach as far as the map.
 * The hack's sprite loops cost time: without overclock the game runs late more often than the
@@ -182,11 +185,16 @@ testing.
 ; them, in Mega Man 6's own engine (objects run as scripts, each removing itself through the test
 ; "on the screen" at $E485):
 ;
-;  * an enemy of the stage's list (object slots 8-22) spawns when it comes within the margin of
+;  * an enemy of the stage's list (object slots 8-21) spawns when it comes within the margin of
 ;    the screen, and lives and shows until it leaves it, all within the part of the stage the
 ;    camera may scroll over ($71);
-;  * one that spawns in a margin sleeps there: it shows but its script does not run until it comes
-;    onto the original screen; awake, it stays awake;
+;  * the list's controllers (type $80, always slot 22: what lets the camera on, down a shaft...)
+;    spawn there too and sleep until the original screen reaches them, then live as the original
+;    does: off the original screen, they remove themselves;
+;  * one that spawns in a margin sleeps there: its script runs its first frame (which sets up how
+;    it looks), then not again until it comes onto the original screen; awake, it stays awake; one
+;    that spawns while the camera stands (the stage's start: its tiles are still on their way to
+;    CHR-RAM) is not drawn until the camera moves;
 ;  * every object's sprites get the high byte of their 16-bit x, and the sprites that no longer
 ;    fit in the console's 64 go on to the extension's second page instead of being dropped;
 ;  * the game's collisions measure 16-bit distances: an enemy in a margin only touches what is
@@ -217,6 +225,7 @@ MAX_MARGIN      = 248           ; the most the extension shows sprites in
 OVERCLOCK_LINES = 64            ; pays for the hack's work and the enemies of the margins
 NO_SLOWDOWN_LINES = 255
 FIRST_ENEMY     = $08           ; the slots the stage's list spawns into: 8-21
+CONTROLLER      = $16           ; the slot of the list's type $80 entries (the stage's controllers)
 
 ; Variables in the extension's RAM ($5200-$57FF).
 WV_M            = $5200         ; margin of this frame
@@ -236,6 +245,11 @@ WV_XL           = $520D         ; the sprites' x base, signed 16-bit
 WV_XH           = $520E
 WV_YH           = $520F         ; the high byte of the sprite's y
 WV_DORMANT      = $5220         ; + slot: the list entry ($03FC + slot) of an enemy asleep, $FF awake
+WV_STARTED      = $5240         ; + slot: non-zero once an enemy asleep has run its script's first frame
+WV_HIDDEN       = $5260         ; + slot: non-zero while an enemy asleep is not drawn (see wide_spawned)
+WV_CAML         = $5210         ; the camera of the last spawn window, to tell whether it moved
+WV_CAMH         = $5211
+WV_MOVED        = $5212         ; non-zero when the camera moved since the last spawn window
 
 ; The game.
 OAM             = $0200
@@ -402,7 +416,7 @@ wide_inside:
 ; ---------------------------------------------------------------------------- ;
 ; Whether object X is on the screen ($E485, the whole routine; the scripts remove an object it
 ; finds off): carry clear when it is. The original: its y within the screen, its x - camera within
-; [4, 256). An enemy: also its x within the margins.
+; [4, 256). An enemy: also its x within the margins (not a controller: slot 22).
 wide_on_screen:
     LDA     OBJ_Y,x
     CMP     #$F8
@@ -418,6 +432,8 @@ wide_on_screen:
 @margin:
     CPX     #FIRST_ENEMY
     BCC     @off
+    CPX     #CONTROLLER
+    BCS     @off
     JMP     wide_inside
 @on:
     CLC
@@ -438,8 +454,16 @@ wide_place:
     BEQ     @original
     CPX     #FIRST_ENEMY
     BCC     @original
+    CPX     #CONTROLLER
+    BCS     @original
     LDA     OBJ_YH,x
     BNE     @hidden
+    LDA     WV_DORMANT,x                ; asleep, spawned while the camera stood: not yet
+    CMP     #$FF
+    BEQ     @inside
+    LDA     WV_HIDDEN,x
+    BNE     @hidden
+@inside:
     JMP     wide_inside
 @original:
     LDA     #$00                        ; the low byte alone, as the original
@@ -460,8 +484,9 @@ wide_place:
 
 ; ---------------------------------------------------------------------------- ;
 ; Sleeping enemies. An enemy of the stage list that spawns in a margin shows but its script does
-; not run until it comes onto the original screen; from then on it lives as the original does,
-; margins included.
+; not run until it comes onto the original screen, but for its first frame: the script sets up the
+; object's look there (shown before, it was a jumble of the tiles in place); from then on it lives
+; as the original does, margins included.
 
 ; The end of a list enemy's spawn (bank $3A $81EA, in place of LDA #0 / STA $04B4,X; X the slot):
 ; it sleeps when it spawned off the original screen.
@@ -477,11 +502,16 @@ wide_spawned:
     LDA     #$FF
 @set:
     STA     WV_DORMANT,x
+    LDA     #$00
+    STA     WV_STARTED,x
+    LDA     WV_MOVED                    ; spawned while the camera stands: hidden
+    EOR     #$01
+    STA     WV_HIDDEN,x
     RTS
 
 ; The object loop ($E43A, in place of LDA $03A0,X; then BEQ: next slot): an enemy asleep skips
-; its script while off the original screen (past the margins it is removed, as its script would);
-; on it, it wakes.
+; its script while off the original screen (past the margins it is removed, as its script would),
+; but for its first frame; on it, it wakes.
 wide_think:
     CPX     #FIRST_ENEMY
     BCC     @run
@@ -494,7 +524,7 @@ wide_think:
     LDA     WV_SH
     BEQ     @wake
     JSR     wide_inside
-    BCC     @asleep
+    BCC     @first
     LDA     #$00                        ; past the margins: removed ($E456)
     STA     OBJ_TYPE,x
     LDA     #$FF
@@ -503,6 +533,13 @@ wide_think:
 @asleep:
     LDA     #$00                        ; as if the slot were free
     RTS
+@first:
+    CPX     #CONTROLLER                 ; a controller does nothing before its time
+    BCS     @asleep
+    LDA     WV_STARTED,x
+    BNE     @asleep
+    INC     WV_STARTED,x                ; its first frame: the script runs, the enemy still asleep
+    BNE     @run
 @wake:
     LDA     #$FF
     STA     WV_DORMANT,x
@@ -513,8 +550,31 @@ wide_think:
 ; ---------------------------------------------------------------------------- ;
 ; The spawn window (bank $3A $8120, in place of $03:$02 = camera + 254, $01:$00 = camera + 8):
 ; the stage list (entries sorted by place, one list for each way) spawns the enemies between
-; camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show.
+; camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show. Whether
+; the camera moved since the last call is kept first: if it did, the enemies hidden show.
 wide_spawn_window:
+    LDA     #$00                        ; whether the camera moved: the hidden enemies show
+    STA     WV_MOVED
+    LDA     CAM_LO
+    CMP     WV_CAML
+    BNE     @moved
+    LDA     CAM_HI
+    CMP     WV_CAMH
+    BEQ     @window
+@moved:
+    INC     WV_MOVED
+    LDA     CAM_LO
+    STA     WV_CAML
+    LDA     CAM_HI
+    STA     WV_CAMH
+    LDX     #CONTROLLER - 1
+    LDA     #$00
+@show:
+    STA     WV_HIDDEN,x
+    DEX
+    CPX     #FIRST_ENEMY
+    BCS     @show
+@window:
     JSR     wide_part
     CLC                                 ; left = camera + 8 - M
     LDA     CAM_LO
