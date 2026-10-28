@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `68BF7497` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `851CA121` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -72,7 +72,7 @@ and `$064A` the next entries right and left of the spawn window.
 | object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | a free slot: no sleep left in it (an object made there later is awake); an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks, then goes to the **reserve**; on the original screen it wakes for good |
 | the reserve (after the list's spawns, before the objects run; drawn before the rest of OAM is hidden) | | enemies asleep in the margins, out of the game's 14 enemy slots: 8 entries of the 29 object tables (`$03A0`-`$0624`, 23 bytes apart); an entry reaching the original screen takes a free slot again and wakes (it waits at the edge while none is), one past the margins is dropped; each is drawn as the drawer draws an object, in a free slot or in slot 21 borrowed (its object set aside meanwhile), its animation stepping on |
 | an entry's free slot (bank `$3A` `$81C4`, `JSR $E590`) | none while a slot holds the entry | none while the reserve holds it either |
-| the game empties its slots (`$D6F1`, a scroll to another screen) | | the reserve emptied too (also whenever the game sets its list pointers) |
+| the game empties its slots (`$D6F1`, a scroll to another screen; hooked at the end of its loop, `$D6FD`) | | the reserve emptied too (also whenever the game sets its list pointers) |
 | "on the screen" (`$E485`) | y on the screen, x - camera within `[4, 256)` | the same for slots 0-7 and the controller (22); an enemy also within `[LO, HI)` |
 | an object's place (`$E24B`, in the drawer) | not drawn when flagged off the screen (`$03B7` bit 0), its y off the screen or its x - camera (low byte) below 4 | the same on the original screen; an enemy off it is drawn within `[LO, HI)`, the flag aside (the game sets it only for objects it never draws: those off the screen it removes), unless it is hidden or, asleep, on a screen other than the one whose enemies' tiles the game loaded to CHR-RAM (`$0680`, `$FF` while loading) and the next one: the original spawns no enemy elsewhere, and those of a further screen showed as a jumble |
 | an object's sprites (`$E315`, the jump to one of the four loops: none, horizontal, vertical, both flips) | x = 8-bit screen x + or - the offset, the sprite hidden when it overflows; the loop stops when OAM is full | the same four loops for each page (eight), 16-bit x, shown within `[-M, 256 + M)`, its high byte to `$5100 + 4 n` (or `$5400 + 4 n`); the loops go on to the extension's second page (`$5300`) when the first is full, and stop when both are |
@@ -141,7 +141,7 @@ banks `$38` and `$3A` run at `$8000`.
 | bank `$3A` `$8120` | `$03:$02 = camera + 254`, `$01:$00 = camera + 8` (26 bytes) | `JMP wide_spawns` |
 | bank `$3A` `$81A7` | `TYA / AND #$07 / TAX` | `JSR wide_spawn_filter` |
 | bank `$3A` `$81C4` | `JSR $E590` | `JSR wide_free_slot` |
-| `$D6F1` | `LDX #$15 / LDA #$00` | `JSR wide_slots_cleared` |
+| `$D6FD` | `DEX / BNE $D6F3 / RTS` (the end of the loop emptying the slots; its branch comes back to `$D6F3`, so not its head) | `JMP wide_slots_cleared` |
 | bank `$3A` `$81EA` | `LDA #$00 / STA $04B4,X` | `JSR wide_spawned` |
 | bank `$38` `$8F72` | `LDA $A2 / BNE $8F95 / LDA $96 / BNE $8F95` | `JSR wide_hurt / BNE $8F95` |
 
@@ -314,6 +314,7 @@ BANK_SELECT     = $4C
 MMC3_SELECT     = $8000
 MMC3_BANK       = $8001
 LIST_WALK       = $813A         ; bank $3A: the walk of the list, through the window $00-$03, to an RTS
+SLOTS_CLEAR_LOOP = $D6F3        ; the game's loop emptying slots 21 to 1
 FREE_SLOT       = $E590         ; a free enemy slot for list entry Y in X, carry clear; set: none
 SET_BANK        = $CBC0         ; the 8 KiB banks Y at $8000 and Y + 1 at $A000
 DRAW_SPRITES    = $E2A9         ; an object's sprites, X the slot, $00 its screen x
@@ -1274,12 +1275,21 @@ wide_reserve_clear:
     BPL     @clear
     RTS
 
-; The game empties its object slots ($D6F1, a scroll to another screen; in place of LDX #$15 /
-; LDA #$00): the reserve too.
+; The game empties its object slots ($D6F1, a scroll to another screen): the reserve too, at the
+; end of its loop ($D6FD, in place of DEX / BNE $D6F3 / RTS; the loop's branch comes back to $D6F3,
+; so the hook cannot be at its head). Back with X 0, A $FF and Y as the original leaves them.
 wide_slots_cleared:
+    DEX
+    BEQ     @done
+    JMP     SLOTS_CLEAR_LOOP
+@done:
+    TYA
+    PHA
     JSR     wide_reserve_clear
-    LDX     #$15
-    LDA     #$00
+    PLA
+    TAY
+    LDX     #$00
+    LDA     #$FF
     RTS
 
 ; A list entry's free slot ($81C4, in place of JSR $E590; Y the entry): none while the entry waits
@@ -1551,7 +1561,7 @@ def hooks(sym):
     put(0x3A, 0x81EA, 'a9 00 9d b4 04', jsr(sym['wide_spawned']))
     # The reserve: a list entry waiting there gets no slot; the game emptying its slots empties it.
     put(0x3A, 0x81C4, '20 90 e5', jsr(sym['wide_free_slot']))
-    put(62, 0xD6F1, 'a2 15 a9 00', jsr(sym['wide_slots_cleared']))
+    put(62, 0xD6FD, 'ca d0 f3 60', jmp(sym['wide_slots_cleared']))
     # Invincibility: Mega Man's damage.
     put(0x38, 0x8F72, 'a5 a2 d0 1f a5 96 d0 1b', jsr(sym['wide_hurt']) + bytes([0xD0, 0x1E]))  # BNE $8F95
     return out
