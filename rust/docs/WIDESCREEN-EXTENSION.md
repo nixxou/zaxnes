@@ -772,7 +772,12 @@ down); structure `n` is 4 block bytes at `($66) + 4 n`, row first; block `b` is 
 left, bottom right), in sub-palette `($62)[1024 + b] & 3`. The camera is `$57:$56`, `$59:$58`; only
 rows of a camera on a screen's top are decoded (a vertical scroll leaves the margins to the
 nametables). The camera stops at its screen's edges unless `$71` lets it on (bit 0 right, bit 1
-left, set by objects of the stage as Mega Man goes): past such an edge nothing is drawn. Column 0
+left, set by objects of the stage as Mega Man goes): past such an edge nothing is drawn. Where
+`$71` lets it on, the margins go as far as the next controller of the stage's list (type `$80`,
+bank `$3A` through the pointers `$74`/`$78`/`$7C`/`$7E`, from the game's `$0649`/`$064A`) whose
+settings (bank `$39`, `$82EB`/`$836B` by its y: the first byte, or the third after a routine's
+address) will not let it on, on the screen the camera then stops on: the screen before or after in
+the list may be above or below, not beside (it showed a shaft beside the room it led down to). Column 0
 is decoded while the game hides it, and the screen's last column redrawn (`redrawn_right_columns`
 1), as in Mega Man 3 to 5. Its first two columns are redrawn too (`redrawn_left_columns` 2): the
 column the game draws past the right edge wraps on a single nametable's width over the screen's

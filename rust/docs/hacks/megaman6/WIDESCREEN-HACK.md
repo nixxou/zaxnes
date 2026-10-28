@@ -29,7 +29,7 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `003E85D9` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `68BF7497` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
 
@@ -67,6 +67,7 @@ and `$064A` the next entries right and left of the spawn window.
 |---|---|---|
 | the list's spawns (bank `$3A` `$8120`, the window, then the walk from `$813A`) | entries between camera + 8 and camera + 254 spawn, the walk keeping its place in `$0649` / `$064A` | two walks: the original's, its window and its pointers, for the controllers alone (type `$80`, all in slot 22: the stage counts on one at a time in the window; with a wider one a controller took the slot of the next, which stayed marked spawned, and the camera never went on); then one between camera + 8 - M and camera + 254 + M, within the part of the stage the camera may show (`$71`), for the enemies alone, with pointers of its own (taken from the game's whenever the game sets them); first, whether the camera moved since the last frame (if so, the enemies hidden show) |
 | an entry's spawn (bank `$3A` `$81A7`) | | only the kind of the walk under way |
+| the part of the stage enemies live in (`wide_part`) | | the camera's screen, extended where `$71` lets the camera on, as far as the next controller of the list on that side whose settings will not (`wide_reach`, worked out each frame before the walks, as Zaxnes' decoder does for the margins: bank `$39` at `$8000` and the list's bank `$3A` at `$A000` through the game's `$CBC0`, its banks put back as its NMI does) |
 | a list object's spawn (bank `$3A` `$81EA`) | | it sleeps when its place is off the original screen; an enemy spawned while the camera stands (the stage's start, while the game is still copying the enemies' tiles to CHR-RAM: they showed as a jumble) is hidden until the camera moves |
 | object loop (`$E43A`, `LDA $03A0,X / BEQ` next) | resumes every object's script | a free slot: no sleep left in it (an object made there later is awake); an object asleep is skipped while off the original screen (past the margins it is removed), but an enemy runs its script's first frame, which sets up how it looks, then goes to the **reserve**; on the original screen it wakes for good |
 | the reserve (after the list's spawns, before the objects run; drawn before the rest of OAM is hidden) | | enemies asleep in the margins, out of the game's 14 enemy slots: 8 entries of the 29 object tables (`$03A0`-`$0624`, 23 bytes apart); an entry reaching the original screen takes a free slot again and wakes (it waits at the edge while none is), one past the margins is dropped; each is drawn as the drawer draws an object, in a free slot or in slot 21 borrowed (its object set aside meanwhile), its animation stepping on |
@@ -116,7 +117,8 @@ full), the part of the stage `WV_FIRST $520B` and `WV_END $520C` (screens), the 
 `$FF` awake: a slot another object took since is awake), `WV_STARTED $5240 + slot`, `WV_HIDDEN
 $5260 + slot`, the camera of the last spawns `WV_CAM $5210`/`$5211`, `WV_MOVED $5212`, the walk
 under way `WV_PASS $5213`, the game's list pointers as its walk left them `WV_O $5214`/`$5215`, the
-enemies' walk's own `WV_E $5216`/`$5217`, `WV_RES $5218`, `WV_BORROW $5219`; the reserve:
+enemies' walk's own `WV_E $5216`/`$5217`, `WV_RES $5218`, `WV_BORROW $5219`, where the camera stops past `$71` `WV_LSTOP $521A` and `WV_RSTOP
+$521B` (`$FF`: none), the game's banks while they are worked out `WV_BANKS $521C`/`$521D`; the reserve:
 `RES_USED $5280 + e`, `RES_ENTRY $5288 + e`, `RES_HIDDEN $5290 + e`, its object tables at `$5500 +
 8 f + e`, the borrowed slot's at `$5600 + f`.
 
@@ -282,6 +284,9 @@ WV_E49          = $5216         ; the enemies' walk's list pointers
 WV_E4A          = $5217
 WV_RES          = $5218         ; the reserve entry at hand
 WV_BORROW       = $5219         ; non-zero while slot BORROWED holds a reserve entry being drawn
+WV_LSTOP        = $521A         ; the screen the camera stops on going left, past where $71 lets it
+WV_RSTOP        = $521B         ; the screen it last stops in going right ($FF both: the stage's end)
+WV_BANKS        = $521C         ; the game's banks at $8000 and $A000 ($4A, $4B) while wide_reach reads
 RES_COUNT       = 8             ; the reserve: enemies asleep in the margins, out of the game's slots
 RES_USED        = $5280         ; + entry: non-zero when in use
 RES_ENTRY       = $5288         ; + entry: its stage list entry
@@ -297,9 +302,20 @@ CAM_LO          = $56           ; the camera's x: pixel and screen
 LIST_RIGHT      = $0649         ; the stage list's next entries right and left of the spawn window
 LIST_LEFT       = $064A
 LIST_TYPE       = $7E           ; pointer to the stage list's entry types
+LIST_SCREENS    = $74           ; pointers to the stage list's screens, x and y (the controllers'
+LIST_XS         = $78           ; settings), in bank $3A at $8000
+LIST_YS         = $7C
+CONTROLLER_BANK = $39           ; the controllers' script and settings ($824D, $82EB / $836B)
+SETTINGS_LO     = $82EB         ; + setting (the entry's y): the controller's settings, low and high
+SETTINGS_HI     = $836B
+BANK_8000       = $4A           ; the game's banks at $8000 and $A000 and its bank register, as it
+BANK_A000       = $4B           ; keeps them (its NMI puts them back)
+BANK_SELECT     = $4C
+MMC3_SELECT     = $8000
+MMC3_BANK       = $8001
 LIST_WALK       = $813A         ; bank $3A: the walk of the list, through the window $00-$03, to an RTS
 FREE_SLOT       = $E590         ; a free enemy slot for list entry Y in X, carry clear; set: none
-SET_BANK        = $CBC0         ; the 8 KiB bank Y at $A000
+SET_BANK        = $CBC0         ; the 8 KiB banks Y at $8000 and Y + 1 at $A000
 DRAW_SPRITES    = $E2A9         ; an object's sprites, X the slot, $00 its screen x
 OBJ_ANIM_BANK   = $0458         ; + slot: its animation's bank
 OBJ_ANIM_END    = $04F9         ; + slot: its animation's length (steps of 2)
@@ -377,6 +393,9 @@ wide_part:
     LDA     SCROLL
     AND     #$02
     BEQ     @own
+    LDA     WV_LSTOP                    ; on to where a controller will stop it, or the start
+    CMP     #$FF
+    BNE     @first
     LDA     #$00
     BEQ     @first
 @own:
@@ -386,6 +405,13 @@ wide_part:
     LDA     SCROLL
     AND     #$01
     BEQ     @stop
+    LDA     WV_RSTOP                    ; on to where a controller will stop it, or the map's end
+    CMP     #$FF
+    BEQ     @map
+    CLC
+    ADC     #$02
+    BNE     @end
+@map:
     LDA     #$40
     BNE     @end
 @stop:
@@ -667,6 +693,7 @@ wide_spawns:
     PLA
     TAX
 @window:
+    JSR     wide_reach
     LDA     LIST_RIGHT                  ; the game set its pointers: the enemies' walk starts there
     CMP     WV_O49
     BNE     @reset
@@ -1052,6 +1079,134 @@ wide_hurt:
     AND     #OPT_INVINCIBLE
     ORA     $A2
     ORA     $96
+    RTS
+
+; ---------------------------------------------------------------------------- ;
+; How far the camera goes past its screen's edges where $71 lets it on (as Zaxnes' decoder works
+; it out): to the first controller of the stage list on that side that will not let it on (a
+; controller sets $71 when it spawns, from its settings: entry y of $82EB / $836B in bank $39, the
+; first byte, or the third when the first has bit 7). Going left, the screen it stops on is that of
+; the controller's x - 8 (the window's left edge, camera + 8, spawns it); going right, the last it
+; stops in is that of its x - 254. The list (bank $3A) is read at $A000, bank $39 at $8000
+; ($CBC0 maps both), the game's banks put back after.
+
+; A byte of the list whose pointer is at X (zero page), entry Y: $A000 + its offset in bank $3A.
+wide_list_byte:
+    LDA     $00,x
+    STA     $00
+    LDA     $01,x
+    CLC
+    ADC     #$20
+    STA     $01
+    LDA     ($00),y
+    RTS
+
+; The $71 the controller of entry Y sets (Y kept).
+wide_settings:
+    STY     WV_T0
+    LDX     #LIST_YS
+    JSR     wide_list_byte
+    TAY
+    LDA     SETTINGS_LO,y
+    STA     $00
+    LDA     SETTINGS_HI,y
+    STA     $01
+    LDY     #$00
+    LDA     ($00),y
+    BPL     @done
+    LDY     #$02
+    LDA     ($00),y
+@done:
+    LDY     WV_T0
+    RTS
+
+wide_reach:
+    TXA                                 ; X kept, and the game's scratch $00 / $01
+    PHA
+    LDA     $00
+    PHA
+    LDA     $01
+    PHA
+    LDA     BANK_8000
+    STA     WV_BANKS
+    LDA     BANK_A000
+    STA     WV_BANKS + 1
+    LDY     #CONTROLLER_BANK
+    JSR     SET_BANK
+    LDA     #$FF
+    STA     WV_LSTOP
+    STA     WV_RSTOP
+    LDY     LIST_LEFT                   ; going left: the entries before $064A
+@left:
+    CPY     #$00
+    BEQ     @right
+    DEY
+    LDX     #LIST_SCREENS
+    JSR     wide_list_byte
+    CMP     #$FF
+    BEQ     @right
+    STA     WV_T1
+    LDX     #LIST_TYPE
+    JSR     wide_list_byte
+    CMP     #$80
+    BNE     @left
+    JSR     wide_settings
+    AND     #$02
+    BNE     @left
+    LDX     #LIST_XS                    ; it stops the camera: the screen of its x - 8
+    JSR     wide_list_byte
+    CMP     #$08
+    LDA     WV_T1
+    SBC     #$00
+    BCS     :+
+    LDA     #$00
+:   STA     WV_LSTOP
+@right:
+    LDY     LIST_RIGHT                  ; going right: from $0649 on
+@next:
+    LDX     #LIST_SCREENS
+    JSR     wide_list_byte
+    CMP     #$FF
+    BEQ     @done
+    STA     WV_T1
+    LDX     #LIST_TYPE
+    JSR     wide_list_byte
+    CMP     #$80
+    BNE     @on
+    JSR     wide_settings
+    AND     #$01
+    BNE     @on
+    LDX     #LIST_XS                    ; it stops the camera: the screen of its x - 254
+    JSR     wide_list_byte
+    CMP     #$FE
+    LDA     WV_T1
+    SBC     #$00
+    BCS     :+
+    LDA     #$00
+:   STA     WV_RSTOP
+    JMP     @done
+@on:
+    INY
+    BNE     @next
+@done:
+    LDA     #$06                        ; the game's banks back, as its NMI puts them back
+    STA     BANK_SELECT
+    STA     MMC3_SELECT
+    LDA     WV_BANKS
+    STA     BANK_8000
+    STA     MMC3_BANK
+    LDA     #$07
+    STA     BANK_SELECT
+    STA     MMC3_SELECT
+    LDA     WV_BANKS + 1
+    STA     BANK_A000
+    STA     MMC3_BANK
+    PLA
+    STA     $01
+    PLA
+    STA     $00
+    PLA
+    TAX
     RTS
 
 ; ---------------------------------------------------------------------------- ;
