@@ -773,13 +773,23 @@ down); structure `n` is 4 block bytes at `($66) + 4 n`, row first; block `b` is 
 `($62)[b]`, `($62)[256 + b]`, `($62)[512 + b]`, `($62)[768 + b]` (top left, top right, bottom
 left, bottom right), in sub-palette `($62)[1024 + b] & 3`. The camera is `$57:$56`, `$59:$58`; only
 rows of a camera on a screen's top are decoded (a vertical scroll leaves the margins to the
-nametables). The camera stops at its screen's edges unless `$71` lets it on (bit 0 right, bit 1
-left, set by objects of the stage as Mega Man goes): past such an edge nothing is drawn. Where
-`$71` lets it on, the margins go as far as the next controller of the stage's list (type `$80`,
-bank `$3A` through the pointers `$74`/`$78`/`$7C`/`$7E`, from the game's `$0649`/`$064A`) whose
-settings (bank `$39`, `$82EB`/`$836B` by its y: the first byte, or the third after a routine's
-address) will not let it on, on the screen the camera then stops on: the screen before or after in
-the list may be above or below, not beside (it showed a shaft beside the room it led down to). Column 0
+nametables). A stage is a straight list of screens, the next one beside, above or below: the
+margins show the screens beside the camera's, as far as a join that is not (past it, black). The
+stage's controllers (type `$80` in the stage list, bank `$3A` through the pointers
+`$74`/`$78`/`$7C`/`$7E`) say which: their settings (bank `$39`, `$82EB`/`$836B` by the entry's
+y) are `$71`, two bytes, then actions (kind, `$73`, `$72`, a screen of their own with bit 7): 1
+and 3 scroll down to the next or previous screen, 2 and 4 up (ladders), 5 and 6 through a door
+to a screen. Without a screen of their own they act from the controller's screen, a controller
+that scrolls to the next screen taking its scroll back from that next one; with one, a door
+leaves its join apart; settings with `$71` past 3 or a kind past 6 (a boss's) say nothing.
+Checked on movies of a stage against every change of screen they show (23 joins, 15 beside, 8
+not). `$71` (bit 0 right, bit 1 left: where the camera may go now) no longer bounds the margins:
+a screen beside past a lock shows. Two raster effects show rows that are not the stage at the
+camera, decoded as a layer that goes on as the nametables do: the sunset's band of sky (`$F4` on,
+handlers from 14 on in `$0677`, the line after `$0672`, 62 lines: scroll 0, then 0 or 1 every 3
+lines, the shimmer) and the empty band above the submarine (rows the game shows from the other
+nametable than `$FA` bit 0's, pushing the stage's lower rows down as it rises and sinks); before,
+the stage's layout there showed a wall beside the sun and blocks of ice afloat. Column 0
 is decoded while the game hides it, and the screen's last column redrawn (`redrawn_right_columns`
 1), as in Mega Man 3 to 5. Its first two columns are redrawn too (`redrawn_left_columns` 2): the
 column the game draws past the right edge wraps on a single nametable's width over the screen's

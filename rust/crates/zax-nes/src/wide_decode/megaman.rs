@@ -82,6 +82,26 @@ pub(super) fn decode_row(
     true
 }
 
+/// Decodes the margins of `row`, a band the game scrolls apart from the stage (Mega Man 6's
+/// sunset sky, a layer of its own): it goes on past the screen's edges as the nametables do, as a
+/// wider screen would show it, its own scroll and all (the layout there is another part of the
+/// stage).
+pub(super) fn decode_layer(
+    memory: &DecoderMemory<'_>,
+    row: BackgroundRow,
+    columns: &mut dyn Iterator<Item = i32>,
+    out: &mut Vec<DecodedTile>,
+) {
+    for column in columns {
+        let (tile, palette) = nametable_tile(memory, row, column);
+        out.push(DecodedTile {
+            column,
+            tile,
+            palette,
+        });
+    }
+}
+
 /// Whether screen column `column` of the nametables (on the plane of two) holds world tile column
 /// `world`, not an older column of the ring: its rows that differ from the layout were all written
 /// after every row that matches it, and enough rows match.
