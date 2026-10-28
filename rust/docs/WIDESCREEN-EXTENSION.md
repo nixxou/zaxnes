@@ -704,6 +704,10 @@ others built from the area's data as `SetupRoom` does (kept, by bank and data ad
 decoded when 28 of its 32 columns show the room's tile (the title, the password screen and the
 transitions are left to the nametables), checked on the screen's nearest row that reaches neither
 edge; scrolling up and down the game draws the row coming in at the edge (`covers_overscan`).
+Scrolling across, the game draws the column coming in at the screen's edge (`$E70C`) with
+attribute bytes that cover two columns, so the visible column next to it shows the incoming one's
+colours for a moment: the decoder redraws the two columns at each edge (`redrawn_left_columns`,
+`redrawn_right_columns` 2), from the room in PRG-RAM.
 An area has two room palettes, 0 and 5 of its palette pointers (`$9560`; `$76` holds one plus the
 one in use); the game toggles them when Samus goes through a palette change room (special item
 `$0A` of the area's table at `$9598`, `$EEFA`), leaving it by the other door than the one she came
@@ -808,7 +812,8 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
-  at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller). `NesCore::run_frame` ends the
+  at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller; Metroid: its main loop's wait
+  `TAY / LDA $1A / BNE / JMP` at `$C0CB`-`$C0D2`). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
