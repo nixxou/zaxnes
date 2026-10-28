@@ -20,6 +20,7 @@
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`blastermasterwide`, `tools/build.py`) |
 //! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end; one source for both builds (`mm4wide`, `tools/build.py`) |
 //! | Mega Man 5 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm5wide`, `tools/build.py`) |
+//! | Mega Man 6 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm6wide`, `tools/build.py`) |
 //! | Mega Man 3 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm3wide`, `tools/build.py`) |
 //! | Mega Man (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`mm1wide`, `tools/build.py`) |
 
@@ -93,9 +94,11 @@ pub const MEGAMAN4_USA: &str = "Mega Man 4 (USA) widescreen";
 pub const MEGAMAN4_USA_REV1: &str = "Mega Man 4 (USA) (Rev 1) widescreen";
 /// Name of the Mega Man 5 (USA) widescreen patch (advanced mode).
 pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
+/// Name of the Mega Man 6 (USA) widescreen patch (advanced mode).
+pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 17] = [
+pub const PATCHES: [BuiltinPatch; 18] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -576,10 +579,26 @@ pub const PATCHES: [BuiltinPatch; 17] = [
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEAE, 0xFEC3)),
     },
+    BuiltinPatch {
+        name: MEGAMAN6_USA,
+        game: "Mega Man 6",
+        rom_name: "Mega Man 6 (USA)",
+        source_crc: 0x9887_98A8,
+        bps: include_bytes!("../patches/megaman6-usa-widescreen.bps"),
+        options: MEGAMAN4_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // No room in the game for code that would unlock the extension: its added PRG bank (32
+        // in 16 KiB units) is open in the window from power-on.
+        boot_window: Some((0xA0, 0x00)),
+        // The task scheduler's wait for the NMI (no task ready).
+        idle_loop: Some((0xC581, 0xC584)),
+    },
 ];
 
-/// The options of both Mega Man 4 patches, the same hack built for each, and of the Mega Man 5 one:
-/// a testing aid, off by default, and the overclock.
+/// The options of both Mega Man 4 patches, the same hack built for each, and of the Mega Man 5 and 6
+/// ones: a testing aid, off by default, and the overclock.
 const MEGAMAN4_OPTIONS: &[HackOption] = &[
     // No damage from an enemy's touch (pits and spikes still kill).
     HackOption {

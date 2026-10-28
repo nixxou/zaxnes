@@ -41,7 +41,9 @@ Man 3 (USA) one, an advanced mode as well
 Man 4 (USA) one, built for its Rev 1 too, an advanced mode as well
 ([`hacks/megaman4/WIDESCREEN-HACK.md`](hacks/megaman4/WIDESCREEN-HACK.md)), and the Mega
 Man 5 (USA) one, an advanced mode as well
-([`hacks/megaman5/WIDESCREEN-HACK.md`](hacks/megaman5/WIDESCREEN-HACK.md)).
+([`hacks/megaman5/WIDESCREEN-HACK.md`](hacks/megaman5/WIDESCREEN-HACK.md)), and the Mega
+Man 6 (USA) one, an advanced mode as well
+([`hacks/megaman6/WIDESCREEN-HACK.md`](hacks/megaman6/WIDESCREEN-HACK.md)).
 
 Nothing changes for any other ROM: the register window stays transparent until a ROM writes the
 unlock sequence, and the captures, savestates and goldens of every other game are the standard
@@ -356,6 +358,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Mega Man 3 (USA) (data CRC-32 `603AAA57`), unpatched and with its built-in patch | the stage layout in PRG-ROM, within the section being played | `megaman3.rs` (with `megaman.rs`), see below |
 | Mega Man 4 (USA), both builds (data CRC-32 `2BC67AA8`, Rev 1 `18A2E74F`), unpatched and with their built-in patches | the stage layout in PRG-ROM, within the section being played | `megaman4.rs` (Mega Man 3's `Layout`), see below |
 | Mega Man 5 (USA) (data CRC-32 `3EDCF7E8`), unpatched and with its built-in patch | the stage layout in PRG-ROM, within the section being played | `megaman5.rs` (Mega Man 3's `Layout`), see below |
+| Mega Man 6 (USA) (data CRC-32 `988798A8`), unpatched and with its built-in patch | the stage map in PRG-ROM through the pointers the game keeps in RAM, within the part of the stage the camera may show | `megaman6.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns
@@ -717,6 +720,27 @@ shows the first 2 KiB from power-on (`boot_window`). `idle_loop` `$FEAE`-`$FEC3`
 Charge Man's stage, 500 frames: the hack at a margin of 0 without overclock lags 50 frames, at a
 128-pixel margin with 64 lines 23, with 255 none.
 
+Mega Man 6 has an engine of its own. The decoder reads where the stage is from the pointers the
+game keeps in RAM for its column drawer (`$D1FB`; map lookup `$D8AB`, `$D900`), the 8 KiB banks
+`$6E` at `$8000` and `$6F` at `$A000`: the map at `($52)`, one 256-byte page a row of 32 x 32
+structures (8 rows a screen), the screen's 8 structures at `8 s` in the page (wrapping in it), `s`
+the camera's screen x plus its screen y (a stage is a straight list of screens, going right or
+down); structure `n` is 4 block bytes at `($66) + 4 n`, row first; block `b` is CHR tiles
+`($62)[b]`, `($62)[256 + b]`, `($62)[512 + b]`, `($62)[768 + b]` (top left, top right, bottom
+left, bottom right), in sub-palette `($62)[1024 + b] & 3`. The camera is `$57:$56`, `$59:$58`; only
+rows of a camera on a screen's top are decoded (a vertical scroll leaves the margins to the
+nametables). The camera stops at its screen's edges unless `$71` lets it on (bit 0 right, bit 1
+left, set by objects of the stage as Mega Man goes): past such an edge nothing is drawn. Column 0
+is decoded while the game hides it. The built-in patch (`MEGAMAN6_USA`, an advanced mode,
+`mm6wide`) draws the enemies in the margins: Mega Man 6's objects run as scripts that remove
+themselves through the test "on the screen" (`$E485`), which the hack widens for the enemies; its
+sprite loops are the game's four (none, horizontal, vertical, both flips) for each page. Its code
+is a 16 KiB PRG bank added to the game (8 KiB banks 64-65 of 68, the fixed banks copied to banks 66
+and 67), of which the window shows the first 2 KiB from power-on (`boot_window`). `idle_loop`
+`$C581`-`$C584`. Measured on Plant Man's stage, 500 frames: the game with the hack's sprite
+routines left out lags 19 frames; the hack at a margin of 0 without overclock 75, at a 128-pixel
+margin with 64 lines 62, with 255 none.
+
 ---
 
 ## 5. The 3D engine
@@ -811,7 +835,7 @@ pub struct BuiltinPatch {
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
   at `$B759`; Final Fantasy: `JMP $FEBB` to itself, the NMI returning to the wait's caller; Mega
-  Man: `LDA $1F / BEQ` at `$C02B`; Mega Man 3: its task scheduler's wait at `$FEAD`-`$FEC2`; Mega Man 4: at `$FEA8`-`$FEBC`; Mega Man 5: at `$FEAE`-`$FEC3`). `NesCore::run_frame` ends the
+  Man: `LDA $1F / BEQ` at `$C02B`; Mega Man 3: its task scheduler's wait at `$FEAD`-`$FEC2`; Mega Man 4: at `$FEA8`-`$FEBC`; Mega Man 5: at `$FEAE`-`$FEC3`; Mega Man 6: `LDA $F2 / BEQ` at `$C581`). `NesCore::run_frame` ends the
   overclock (`WideExtension::end_stall`) as soon as the CPU is there: the cycles left would only
   run the wait loop, so the game is the same, and a frame that does not need the overclock costs
   nothing more ("yield", owner request). Super Mario Bros. at 128 pixels with 255 lines: 1.38 ms
