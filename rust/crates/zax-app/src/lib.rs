@@ -14,6 +14,7 @@ pub mod frame_rate_counter;
 pub mod game_session;
 pub mod graphics;
 pub mod handheld_mode;
+pub mod head_on_pull;
 pub mod input;
 pub mod library_game_catalog;
 pub mod neutral_assets;

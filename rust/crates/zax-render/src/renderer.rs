@@ -287,7 +287,11 @@ impl SceneRenderer {
         #[allow(clippy::cast_precision_loss)] // Target sizes are far below 2^24.
         let aspect = target.width as f32 / target.height as f32;
         let view = if scene.two_dimensional_mode && scene.picture_head_on {
-            scene.camera.picture_view(scene.picture_clipping(), aspect)
+            scene.camera.picture_view(
+                scene.picture_clipping(),
+                aspect,
+                crate::numerics::Vector3::new(scene.picture_tilt[0], scene.picture_tilt[1], 0.0),
+            )
         } else {
             scene.camera.build_view(scene.view_clipping(), aspect)
         };

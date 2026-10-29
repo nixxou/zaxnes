@@ -284,7 +284,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     fn execute_video(&mut self, command: Command, args: &CommandArgs) {
         match command {
             Command::ToggleTwoDimensional => self.two_dimensional_view = !self.two_dimensional_view,
-            Command::ResetView => self.scene.camera.reset_view(),
+            Command::ResetView => {
+                self.scene.camera.reset_view();
+                // The 2D picture head on again (Rust-only, owner request).
+                self.scene.picture_head_on = true;
+            }
             Command::SetCameraMode => {
                 // SPEC-06 REQ-SCN-006: the two camera modes, with their own setpoints. The
                 // menu entry "Mode caméra" of REQ-UI-200 switches between them; REQ-SCN-009's
