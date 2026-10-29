@@ -145,6 +145,8 @@ impl HacksModel {
             if let Some((patch, _)) = image.as_deref().and_then(builtin_patches::pack_for) {
                 hacks.capable = true;
                 hacks.patch = Some(patch);
+                // Not another version of the game after all: no "made for another ROM" note.
+                hacks.other_rom = None;
                 hacks.patch_options = host.patch_options(patch);
                 hacks.compat = image
                     .as_deref()
