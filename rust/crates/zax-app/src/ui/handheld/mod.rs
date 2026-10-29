@@ -462,7 +462,9 @@ impl HandheldUi {
             (HeadOn::Shown, false) | (HeadOn::Off, _) => HeadOn::Off,
             (HeadOn::Waiting, false) => HeadOn::Waiting,
         };
-        let shown = self.head_on == HeadOn::Shown;
+        // Head on whenever the game is in 2D (owner request: always from the front, filling the
+        // height), not only once asked for.
+        let shown = two_dimensional;
         if host.scene().picture_head_on != shown {
             host.scene_mut().picture_head_on = shown;
         }

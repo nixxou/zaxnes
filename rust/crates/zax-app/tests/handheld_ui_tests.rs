@@ -108,16 +108,18 @@ fn a_plays_the_game_in_2d_and_the_screen_gives_way_to_it() {
 }
 
 #[test]
-fn y_held_shows_the_2d_picture_head_on_and_leaves_the_camera_alone() {
-    // The profiles of the harness hold no pattern: the game shows in 2D from the start.
+fn the_2d_picture_is_seen_head_on_and_leaves_the_camera_alone() {
+    // The profiles of the harness hold no pattern: the game shows in 2D from the start, head on
+    // (owner request: always from the front, filling the height).
     let (mut harness, mut handheld) = start(&["Castle Quest"], &["Castle Quest.nes"]);
     tap(&mut harness, &mut handheld, PadButton::A);
     press(&mut harness, &mut handheld, &[]);
     assert_eq!(Screen::InGame, handheld.screen());
-    assert!(!harness.host.scene().picture_head_on);
+    assert!(harness.host.showing_two_dimensional());
+    assert!(harness.host.scene().picture_head_on);
     let camera = *harness.host.scene().camera.current();
 
-    // Held for most of a second: 2D, seen head on.
+    // Y held for most of a second: still 2D, head on.
     let mut held = PadState::new();
     held.set(PadButton::Y, true);
     for _ in 0..8 {
