@@ -20,11 +20,17 @@
 //! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
 //! | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 //! | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
+//! | `$500B` | R/W | execution zone: bit 7 on, bits 0-6 the page of the pack's code shown at `$2800`-`$3FFF` |
 //! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it); `$5800`-`$5FFF` shows PRG-ROM instead while the window is on |
 //!
 //! The margin in use is `min($5003, $5002)` rounded down to a multiple of 8. `$5004` and
 //! `$5005` are read each time a band of tiles is captured, so a game can hide the sides behind
 //! a status bar or past the end of a level by writing them mid-frame.
+//!
+//! The execution zone (`$500B`) shows a hack pack's code to the CPU's instruction fetches only
+//! in `$2000`-`$3FFF` (the PPU's register mirrors, where no game runs code): `$2000`-`$27FF` its
+//! first 2 KiB, always, `$2800`-`$3FFF` the 6 KiB of page `n` (`$800 + n * $1800` on). Every data
+//! read and write there still reaches the PPU, those of the hack's own code too.
 //!
 //! The overclock (`$5006`) holds the PPU and the APU still for that many
 //! scanlines' worth of CPU cycles when the picture is done (line 240), so the game's frame
@@ -49,6 +55,14 @@ const RAM_SIZE: usize = 0x0E00;
 
 /// CPU cycles one overclock scanline stands for: 341 dots at three dots per cycle, rounded up.
 const CYCLES_PER_SCANLINE: u32 = 114;
+
+/// The execution zone: `$2000`-`$27FF` shows the code's first bytes, always; `$2800`-`$3FFF` a
+/// page of it.
+const ZONE_FIRST: u16 = 0x2000;
+const ZONE_PAGED: u16 = 0x2800;
+const ZONE_LAST: u16 = 0x3FFF;
+/// Bytes of the code a page of the zone shows.
+const ZONE_PAGE_SIZE: usize = 0x1800;
 
 /// Version the ROM reads at `$5001`.
 const VERSION: u8 = 1;
@@ -115,6 +129,8 @@ pub struct WideExtension {
     window_bank: u8,
     /// PRG window: first page of the bank.
     window_page: u8,
+    /// Execution zone: bit 7 on, bits 0-6 the page shown at `$2800`-`$3FFF`.
+    zone: u8,
     /// The code of the hack pack that runs, which the PRG window shows instead of PRG-ROM
     /// (empty: PRG-ROM). Not part of a state: the pack gives it again on a load or a restore.
     code: Vec<u8>,
@@ -151,6 +167,7 @@ impl WideExtension {
             decoded: false,
             window_bank: 0,
             window_page: 0,
+            zone: 0,
             code: Vec::new(),
             stall: 0,
         }
@@ -268,6 +285,35 @@ impl WideExtension {
         i32::from(i16::from_le_bytes([low, high]))
     }
 
+    /// Unlocked with the execution zone on, page 0, as a built-in patch whose code runs there
+    /// asks at power-on and reset.
+    pub fn boot_zone(&mut self) {
+        self.unlocked = true;
+        self.zone = 0x80;
+    }
+
+    /// The offset in the hack pack's code an instruction fetch of `address` reads in the
+    /// execution zone, or `None` when the zone is off, there is no code, or `address` is
+    /// outside it. The offset may be past the end of the code: the caller reads `$FF` there.
+    #[must_use]
+    pub fn zone_offset(&self, address: u16) -> Option<usize> {
+        if !(ZONE_FIRST..=ZONE_LAST).contains(&address)
+            || !self.unlocked
+            || self.zone & 0x80 == 0
+            || self.code.is_empty()
+        {
+            return None;
+        }
+        if address < ZONE_PAGED {
+            return Some(usize::from(address - ZONE_FIRST));
+        }
+        Some(
+            usize::from(ZONE_PAGED - ZONE_FIRST)
+                + (usize::from(self.zone & 0x7F) * ZONE_PAGE_SIZE)
+                + usize::from(address - ZONE_PAGED),
+        )
+    }
+
     /// Unlocked with the PRG window open on `window_bank` (bit 7 set), `window_page`, as a
     /// built-in patch with a boot window asks at power-on and reset.
     pub fn boot(&mut self, window_bank: u8, window_page: u8, over_prg_ram: bool) {
@@ -322,6 +368,7 @@ impl WideExtension {
             0x5008 => Some(self.window_bank),
             0x5009 => Some(self.window_page),
             0x500A => Some(self.host_options),
+            0x500B => Some(self.zone),
             FIRST_RAM..=LAST_REGISTER => {
                 self.scratch.get(usize::from(address - FIRST_RAM)).copied()
             }
@@ -349,6 +396,7 @@ impl WideExtension {
             0x5007 => self.layout = value,
             0x5008 => self.window_bank = value,
             0x5009 => self.window_page = value,
+            0x500B => self.zone = value,
             0x5100..=0x51FF => {
                 self.pending_high[usize::from(address & 0xFF) / 4] = value;
             }
@@ -502,10 +550,12 @@ impl WideExtension {
         writer.write_u8(self.window_bank);
         writer.write_u8(self.window_page);
         writer.write_u32(self.stall);
+        writer.write_u8(self.zone);
     }
 
     /// Restores the register state written by [`WideExtension::save_state`]; `with_window`
-    /// false reads the earlier block, without the PRG window registers (the window stays off).
+    /// false reads the earlier block, without the PRG window registers (the window stays off),
+    /// `with_zone` false the one before the execution zone (the zone stays off).
     ///
     /// # Errors
     /// [`InvalidState`] when the block is truncated.
@@ -513,6 +563,7 @@ impl WideExtension {
         &mut self,
         reader: &mut StateReader,
         with_window: bool,
+        with_zone: bool,
     ) -> Result<(), InvalidState> {
         self.unlock_progress = reader.read_u8()?.min(3);
         self.unlocked = reader.read_bool()?;
@@ -532,6 +583,7 @@ impl WideExtension {
             self.window_page = 0;
         }
         self.stall = reader.read_u32()?;
+        self.zone = if with_zone { reader.read_u8()? } else { 0 };
         Ok(())
     }
 }
@@ -547,6 +599,51 @@ mod tests {
             wide.write(0x5000, byte);
         }
         wide
+    }
+
+    #[test]
+    fn the_execution_zone_maps_its_resident_and_paged_parts() {
+        let mut wide = unlocked(0);
+        wide.set_code(&[0; 0x10]);
+        assert_eq!(wide.zone_offset(0x2000), None, "the zone off");
+        wide.write(0x500B, 0x80);
+        assert_eq!(wide.zone_offset(0x2000), Some(0));
+        assert_eq!(wide.zone_offset(0x27FF), Some(0x7FF));
+        assert_eq!(wide.zone_offset(0x2800), Some(0x800));
+        wide.write(0x500B, 0x82);
+        assert_eq!(wide.read(0x500B), Some(0x82));
+        assert_eq!(wide.zone_offset(0x2800), Some(0x800 + 2 * 0x1800));
+        assert_eq!(wide.zone_offset(0x3FFF), Some(0x800 + 2 * 0x1800 + 0x17FF));
+        assert_eq!(wide.zone_offset(0x1FFF), None);
+        assert_eq!(wide.zone_offset(0x4000), None);
+        wide.set_code(&[]);
+        assert_eq!(wide.zone_offset(0x2000), None, "no pack code");
+    }
+
+    #[test]
+    fn the_execution_zone_is_saved_and_an_earlier_block_leaves_it_off() {
+        let mut wide = unlocked(0);
+        wide.write(0x500B, 0x83);
+        let mut writer = StateWriter::with_capacity(0);
+        wide.save_state(&mut writer);
+        let block = writer.into_vec();
+
+        let mut restored = WideExtension::new();
+        restored
+            .load_state(&mut StateReader::new(&block, 0).unwrap(), true, true)
+            .unwrap();
+        assert_eq!(restored.read(0x500B), Some(0x83));
+
+        // The block before the zone: the same bytes without its last one.
+        let mut earlier = WideExtension::new();
+        earlier
+            .load_state(
+                &mut StateReader::new(&block[..block.len() - 1], 0).unwrap(),
+                true,
+                false,
+            )
+            .unwrap();
+        assert_eq!(earlier.read(0x500B), Some(0));
     }
 
     #[test]

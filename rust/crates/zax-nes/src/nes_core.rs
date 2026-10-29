@@ -192,7 +192,9 @@ impl NesCore {
         }
         match i32::from_le_bytes([header[4], header[5], header[6], header[7]]) {
             Self::STATE_VERSION => Some(false),
-            Self::WIDE_STATE_VERSION | Self::WIDE_STATE_VERSION_5 => Some(true),
+            Self::WIDE_STATE_VERSION | Self::WIDE_STATE_VERSION_6 | Self::WIDE_STATE_VERSION_5 => {
+                Some(true)
+            }
             _ => None,
         }
     }
@@ -236,10 +238,21 @@ impl NesCore {
 
     /// Version of a block that also carries the widescreen extension registers: written only
     /// once a ROM unlocked the extension, so every other block keeps [`Self::STATE_VERSION`].
-    pub const WIDE_STATE_VERSION: i32 = 6;
+    pub const WIDE_STATE_VERSION: i32 = 7;
+
+    /// The earlier widescreen block, without the execution zone register; still read.
+    pub const WIDE_STATE_VERSION_6: i32 = 6;
 
     /// The earlier widescreen block, without the PRG window registers; still read.
     pub const WIDE_STATE_VERSION_5: i32 = 5;
+
+    /// Whether `version` is one of a block with the widescreen extension's registers.
+    const fn is_wide_state_version(version: i32) -> bool {
+        matches!(
+            version,
+            Self::WIDE_STATE_VERSION | Self::WIDE_STATE_VERSION_6 | Self::WIDE_STATE_VERSION_5
+        )
+    }
 
     /// Tile grid dimensions: always (33, 31, 128) (REQ-CORE-031).
     pub const VIDEO_INFO: VideoInfo = VideoInfo::STANDARD;
@@ -534,14 +547,17 @@ impl NesCore {
     /// Unlocks the widescreen extension with its PRG window open when the built-in patch named
     /// `patch` asks for it (`BuiltinPatch::boot_window`).
     fn boot_patch_window(&mut self, patch: Option<&'static str>) {
-        if let Some(((bank, page), keeps_prg_ram)) = patch
-            .and_then(crate::builtin_patches::by_name)
-            .and_then(|known| Some((known.boot_window?, known.boot_window_keeps_prg_ram)))
+        let known = patch.and_then(crate::builtin_patches::by_name);
+        if let Some(((bank, page), keeps_prg_ram)) =
+            known.and_then(|known| Some((known.boot_window?, known.boot_window_keeps_prg_ram)))
         {
             self.bus
                 .ppu_mut()
                 .wide_mut()
                 .boot(bank, page, !keeps_prg_ram);
+        }
+        if known.is_some_and(|known| known.boot_zone) {
+            self.bus.ppu_mut().wide_mut().boot_zone();
         }
     }
 
@@ -656,6 +672,10 @@ impl NesCore {
             .and_then(|(patch, _)| Some((patch.boot_window?, patch.boot_window_keeps_prg_ram)))
         {
             wide.boot(bank, page, !keeps_prg_ram);
+        }
+        // And on its execution zone, for a pack whose code runs there.
+        if running.is_some_and(|(patch, _)| patch.boot_zone) {
+            wide.boot_zone();
         }
         self.sync_aids();
     }
@@ -960,10 +980,7 @@ impl NesCore {
         }
 
         let version = reader.read_i32()?;
-        if version != Self::STATE_VERSION
-            && version != Self::WIDE_STATE_VERSION
-            && version != Self::WIDE_STATE_VERSION_5
-        {
+        if version != Self::STATE_VERSION && !Self::is_wide_state_version(version) {
             return Err(InvalidState::corrupt(format!(
                 "Corrupt savestate: format version {version} is not supported (expected {}).",
                 Self::STATE_VERSION
@@ -1043,17 +1060,18 @@ impl NesCore {
         // extension, which must not stay as the hack left it (four nametables, margins).
         let unpatched_hack = patch.1.is_none() && patchable;
         let wide = self.bus.ppu_mut().wide_mut();
-        if (version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5)
-            && !unpatched_hack
-        {
-            wide.load_state(&mut reader, version == Self::WIDE_STATE_VERSION)?;
+        if Self::is_wide_state_version(version) && !unpatched_hack {
+            wide.load_state(
+                &mut reader,
+                version != Self::WIDE_STATE_VERSION_5,
+                version == Self::WIDE_STATE_VERSION,
+            )?;
         } else {
             wide.reset();
         }
 
         // A state made the other way (the patch ran and does not now, or the reverse).
-        let made_with_patch =
-            version == Self::WIDE_STATE_VERSION || version == Self::WIDE_STATE_VERSION_5;
+        let made_with_patch = Self::is_wide_state_version(version);
         if made_with_patch != patch.1.is_some() {
             self.put_right_other_way_state(rom_patch);
         }

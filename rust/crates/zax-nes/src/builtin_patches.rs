@@ -60,6 +60,10 @@ pub struct BuiltinPatch {
     /// has run. Otherwise the boot window covers `$6000-$7FFF` too, a ROM with no room for
     /// anything there.
     pub boot_window_keeps_prg_ram: bool,
+    /// The widescreen extension unlocked at power-on, reset and restore with its execution zone
+    /// on (`$500B` = `$80`): a hack pack whose code runs at `$2000`-`$3FFF`, shown to the CPU's
+    /// instruction fetches only (`WideExtension::zone_offset`).
+    pub boot_zone: bool,
     /// The game's wait for the next frame, first to last address of its loop: the overclock
     /// (`$5006`) ends as soon as the CPU is there, the cycles left being of no use to the game
     /// (Rust-only, owner request: "yield"; the same game, the CPU time only when a frame needs it).
@@ -145,6 +149,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // extension itself); 2 KiB: the game's battery-backed PRG-RAM is at $6000.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
         idle_loop: Some((0xC010, 0xC01A)),
     },
@@ -190,6 +195,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // did).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // The frame's wait: LDA $1D / BEQ (the NMI sets $1D).
         idle_loop: Some((0xC08E, 0xC091)),
     },
@@ -235,6 +241,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // Everything runs in the NMI; the main loop is a JMP to itself.
         idle_loop: Some((0x8057, 0x8059)),
     },
@@ -271,6 +278,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // did).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // The frame's wait in bank 4: BIT $15 / BPL (the NMI sets $15).
         idle_loop: Some((0x9A87, 0x9A8A)),
     },
@@ -316,6 +324,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // did).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // GraphicsBuf_Prep_And_WaitVSync: LDA VBlank_Tick / BPL, until the NMI counts it down.
         idle_loop: Some((0x96FB, 0x96FE)),
     },
@@ -338,6 +347,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // did).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -360,6 +370,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // did).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -405,6 +416,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The main loop's wait for the NMI: LDA $0B / BNE.
         idle_loop: Some((0xB759, 0xB75C)),
     },
@@ -433,6 +445,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // Everything runs in the NMI; the main loop draws random numbers while it waits:
         // JSR $D326 / LDA $48 / BMI / BEQ.
         idle_loop: Some((0xC1D8, 0xC1E0)),
@@ -463,6 +476,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // did).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // The wait for the NMI: JMP to itself, the NMI returning to the wait's caller.
         idle_loop: Some((0xFEBB, 0xFEBD)),
     },
@@ -510,6 +524,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // did).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // Everything runs in the NMI; the reset ends in a JMP to itself.
         idle_loop: Some((0xFFC3, 0xFFC5)),
     },
@@ -555,6 +570,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The frame's wait: BIT $12 / BMI, until the NMI clears it.
         idle_loop: Some((0xE93A, 0xE93D)),
     },
@@ -600,6 +616,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on (2 KiB: the game's PRG-RAM is at $6000).
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
+        boot_zone: false,
         // The main loop's wait: TAY / LDA $1A / BNE / JMP (the NMI sets $1A).
         idle_loop: Some((0xC0CB, 0xC0D2)),
     },
@@ -636,6 +653,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The frame's wait: LDA $1F / BEQ, until the NMI sets it.
         idle_loop: Some((0xC02B, 0xC02E)),
     },
@@ -672,6 +690,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEAD, 0xFEC2)),
     },
@@ -691,6 +710,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEA8, 0xFEBC)),
     },
@@ -711,6 +731,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEA8, 0xFEBC)),
     },
@@ -730,6 +751,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEAE, 0xFEC3)),
     },
@@ -749,6 +771,7 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // in the window from power-on.
         boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
+        boot_zone: false,
         // The task scheduler's wait for the NMI (no task ready).
         idle_loop: Some((0xC581, 0xC584)),
     },

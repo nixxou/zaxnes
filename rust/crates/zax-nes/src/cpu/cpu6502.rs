@@ -187,8 +187,8 @@ impl Cpu6502 {
         self.poll_nmi = false;
         self.poll_irq = false;
 
-        self.read(bus, self.pc);
-        self.read(bus, self.pc);
+        self.read_code(bus, self.pc);
+        self.read_code(bus, self.pc);
         for _ in 0..3 {
             self.read(bus, 0x0100 | u16::from(self.s));
             self.s = self.s.wrapping_sub(1);
@@ -212,7 +212,7 @@ impl Cpu6502 {
         let before = bus.cycle_count();
 
         if self.jammed {
-            self.read(bus, self.pc);
+            self.read_code(bus, self.pc);
         } else if self.poll_nmi {
             // Cleared before the sequence runs, so that an edge arriving during the seven
             // cycles of the handler entry is still latched for the next boundary.
@@ -244,11 +244,19 @@ impl Cpu6502 {
         self.end_cycle(bus);
     }
 
+    /// A read of the instruction stream ([`CpuBus::read_code`]).
+    #[inline]
+    fn read_code<B: CpuBus + ?Sized>(&mut self, bus: &mut B, address: u16) -> u8 {
+        let value = bus.read_code(address);
+        self.end_cycle(bus);
+        value
+    }
+
     #[inline]
     fn read_pc<B: CpuBus + ?Sized>(&mut self, bus: &mut B) -> u8 {
         let pc = self.pc;
         self.pc = pc.wrapping_add(1);
-        self.read(bus, pc)
+        self.read_code(bus, pc)
     }
 
     /// Closes a CPU cycle: promotes the previous cycle's IRQ sample to the decision used at
@@ -311,8 +319,8 @@ impl Cpu6502 {
             // BRK has already consumed its opcode; it also skips the signature byte.
             self.read_pc(bus);
         } else {
-            self.read(bus, self.pc);
-            self.read(bus, self.pc);
+            self.read_code(bus, self.pc);
+            self.read_code(bus, self.pc);
         }
 
         let [pc_lo, pc_hi] = self.pc.to_le_bytes();
@@ -504,18 +512,18 @@ impl Cpu6502 {
             }
 
             CpuOperation::Rts => {
-                self.read(bus, self.pc);
+                self.read_code(bus, self.pc);
                 self.read(bus, self.stack_address());
                 let lo = self.pull(bus);
                 let hi = self.pull(bus);
                 let target = word(lo, hi);
-                self.read(bus, target); // Dummy read while PC is incremented.
+                self.read_code(bus, target); // Dummy read while PC is incremented.
                 self.pc = target.wrapping_add(1);
                 return;
             }
 
             CpuOperation::Rti => {
-                self.read(bus, self.pc);
+                self.read_code(bus, self.pc);
                 self.read(bus, self.stack_address());
                 let status = self.pull(bus);
                 self.set_p(status);
@@ -531,19 +539,19 @@ impl Cpu6502 {
             }
 
             CpuOperation::Pha => {
-                self.read(bus, self.pc);
+                self.read_code(bus, self.pc);
                 self.push(bus, self.a);
                 return;
             }
 
             CpuOperation::Php => {
-                self.read(bus, self.pc);
+                self.read_code(bus, self.pc);
                 self.push(bus, self.p | Self::FLAG_B);
                 return;
             }
 
             CpuOperation::Pla => {
-                self.read(bus, self.pc);
+                self.read_code(bus, self.pc);
                 self.read(bus, self.stack_address());
                 self.a = self.pull(bus);
                 self.set_zero_negative(self.a);
@@ -551,7 +559,7 @@ impl Cpu6502 {
             }
 
             CpuOperation::Plp => {
-                self.read(bus, self.pc);
+                self.read_code(bus, self.pc);
                 self.read(bus, self.stack_address());
                 let status = self.pull(bus);
                 self.set_p(status);
@@ -569,7 +577,7 @@ impl Cpu6502 {
 
             CpuOperation::Jam => {
                 self.jammed = true;
-                self.read(bus, self.pc);
+                self.read_code(bus, self.pc);
                 return;
             }
 
@@ -577,7 +585,7 @@ impl Cpu6502 {
         }
 
         // Everything left takes exactly two cycles: the opcode fetch and one dummy read.
-        self.read(bus, self.pc);
+        self.read_code(bus, self.pc);
 
         match info.operation {
             CpuOperation::Asl | CpuOperation::Lsr | CpuOperation::Rol | CpuOperation::Ror => {
@@ -659,7 +667,7 @@ impl Cpu6502 {
         let poll_irq_before_taken = self.poll_irq;
         let poll_nmi_before_taken = self.poll_nmi;
 
-        self.read(bus, self.pc); // Dummy read: one extra cycle when the branch is taken.
+        self.read_code(bus, self.pc); // Dummy read: one extra cycle when the branch is taken.
         let target = self.pc.wrapping_add_signed(i16::from(offset));
 
         if (target & 0xFF00) == (self.pc & 0xFF00) {
@@ -670,7 +678,7 @@ impl Cpu6502 {
         } else {
             // Second extra cycle: the high byte of PC is fixed up. The poll is then the
             // ordinary one, so nothing is restored.
-            self.read(bus, (self.pc & 0xFF00) | (target & 0x00FF));
+            self.read_code(bus, (self.pc & 0xFF00) | (target & 0x00FF));
         }
 
         self.pc = target;

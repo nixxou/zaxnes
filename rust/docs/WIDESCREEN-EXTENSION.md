@@ -138,6 +138,7 @@ until then.
 | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
 | `$500A` | R | the options of the ROM's built-in patch the player turned on, one bit each (see 7) |
+| `$500B` | R/W | execution zone: bit 7 on, bits 0-6 the page of the hack pack's code shown at `$2800`-`$3FFF` (below) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
 | `$5300`-`$53FF` | RAM | with `$5007` bit 2: a second page of 64 sprites, OAM format |
 | `$5400`-`$54FF` | RAM | with `$5007` bit 2: high byte of the x of its sprite *n* at `$5400 + 4n` |
@@ -187,6 +188,24 @@ Details:
   `$5008` bits 0-6 is then a 16 KiB part of that code, `$FF` past its end. The code is the
   build's, set by the core at each load and restore; it is not part of a state, and `reset()`
   keeps it.
+* **Execution zone** (`$500B`): a hack pack's code shown to the CPU's **instruction fetches
+  only** in `$2000`-`$3FFF`, the PPU's register mirrors, where no game made for the console runs
+  code (the PPU always answers there). `$2000`-`$27FF` is the code's first 2 KiB, always;
+  `$2800`-`$3FFF` the 6 KiB of page `n` (`$500B` bits 0-6: code offset `$800 + n * $1800`), `$FF`
+  past the code's end (`WideExtension::zone_offset`). The CPU tells its instruction stream from
+  its data (`CpuBus::read_code`, `Cpu6502::read_code`): the opcode and operands, and every dummy
+  read of the program counter (single-byte instructions, `BRK`/`RTS`/`RTI`, a taken branch and
+  its page fix-up, `RTS`'s read of the return address, the two reads of an interrupt's entry).
+  `NesBus::read_code` sends those to the pack's code while the zone is on, the extension
+  unlocked and a pack's code set; every data read and write of `$2000`-`$3FFF`, the hack's own
+  code's included, still reaches the PPU (a game's accesses to the mirrors, deliberate or not,
+  are untouched). So the hack's tables cannot live in the zone, nor be read past a `JSR` there
+  (a routine reading the bytes after its caller's `JSR`): they go to the extension's RAM or into
+  immediates. A routine cannot switch the page it runs from: the resident 2 KiB hold the entry
+  points and the page switches. Off (`$500B` bit 7 clear, as at power-on), nothing changes for
+  any ROM. Purpose: room for a hack's code without taking any address a game or a ROM hack uses
+  (`$5800`-`$5FFF` can clash with a ROM hack that moves to MMC5, `$6000`-`$7FFF` with one that
+  adds PRG-RAM).
 * **Second sprite page** (`$5007` bit 2): at each OAM DMA the extension latches its RAM at
   `$5300` (64 sprites, OAM format) and `$5400 + 4n` (the high bytes of their x). The core captures
   them after the console's 64, as records 128 and up (below them all in priority), 8 x 8 only; the
@@ -975,6 +994,9 @@ pub struct BuiltinPatch {
   and reset with the extension unlocked (`WideExtension::boot`), and again after a restore that
   left it locked: for a ROM with no room for the code that would unlock it, whose reset or NMI then
   jumps straight into the window.
+* `BuiltinPatch::boot_zone`: the extension unlocked with its execution zone on (`$500B` =
+  `$80`, `WideExtension::boot_zone`) at power-on and reset, and again after a restore
+  (`install_pack`), for a hack pack whose code runs at `$2000`-`$3FFF`. Off for every patch so far.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
@@ -1086,9 +1108,10 @@ length, the original bytes, the new ones).
 ### 8.1 Core block
 
 `NesCore::save_state` writes format version **4** for a machine whose ROM never unlocked the
-extension (byte for byte the standard block) and **6** once it did: the extension's registers,
-sprite high bytes, RAM, overclock, layout, PRG window and stall counter follow the cartridge
-block. Version 5 (before the PRG window) is still read. The block carries the **original** ROM
+extension (byte for byte the standard block) and **7** once it did: the extension's registers,
+sprite high bytes, RAM, overclock, layout, PRG window, stall counter and execution zone follow
+the cartridge block. Versions 6 (before the execution zone, which stays off) and 5 (before the
+PRG window) are still read. The block carries the **original** ROM
 image; `restore_state` applies the built-in patch of the running build to it (when the patches
 are on), so a state survives a new version of the hack's code.
 
