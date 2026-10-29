@@ -1688,7 +1688,8 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
         state.picture_height = session.copy_nes_picture(&mut state.picture);
-        // The cut sides blacked out; in Resize the head-on view leaves them out too.
+        // The cut sides left out, the scene's background showing there; in Resize the head-on
+        // view frames the rest.
         let in_force = overscan.in_force(
             session
                 .engine()
@@ -1696,12 +1697,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
                 .map_or(0, ConversionFrame::margin),
             state.picture_height == 240 || session.nes_picture_hides_overscan(),
         );
-        // Through the camera, which shows the whole plane, they are left out instead.
-        if scene.picture_head_on {
-            in_force.black_out(&mut state.picture, state.picture_height);
-        } else {
-            in_force.leave_out(&mut state.picture, state.picture_height);
-        }
+        in_force.leave_out(&mut state.picture, state.picture_height);
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],
             in_force.crop()[1],
