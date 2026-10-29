@@ -285,6 +285,14 @@ impl GameOptionsModel {
         self.normalise();
     }
 
+    /// Gives the game's own `id` (a setting of a row's own screen, the overscan's) the value
+    /// `value`; the global value is not kept as the game's own.
+    pub fn set_setting(&mut self, id: SettingId, value: i32) {
+        self.edited
+            .set(id, zax_settings::values::SettingValue::Enum(value));
+        self.normalise();
+    }
+
     /// Every row back to the global value; the game's options of other screens stay.
     pub fn reset_all(&mut self) {
         self.edited.clear_game_values();
@@ -381,6 +389,19 @@ mod tests {
         assert!(model.is_own(OptionRow::Region));
         model.handle(PadButton::Right);
         assert!(!model.is_own(OptionRow::Region), "{:?}", model.options());
+    }
+
+    #[test]
+    fn a_game_keeps_an_overscan_side_of_its_own_until_it_is_global_again() {
+        let mut model = model(GameOptions::new());
+        model.set_setting(SettingId::VideoOverscanTop, 8);
+        assert!(model.is_own(OptionRow::Overscan));
+        assert_eq!(
+            model.options(),
+            [(SettingId::VideoOverscanTop, SettingValue::Enum(8))]
+        );
+        model.set_setting(SettingId::VideoOverscanTop, -1);
+        assert!(!model.is_own(OptionRow::Overscan), "{:?}", model.options());
     }
 
     #[test]
