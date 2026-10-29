@@ -1049,8 +1049,8 @@ pub struct BuiltinPatch {
 are in `docs/HACK-PACKS.md`. A `BuiltinPatch` whose `bps` starts with `ZXPK` is a pack
 (`hack_pack::is_pack`); every built-in patch is one now, and every one has its code in the
 extension's memory: the pack holds the code, the boot window is `$80`/0 (the extension unlocked,
-the window on the pack's code from power-on; Zelda II's runs in the execution zone instead,
-`boot_zone`), and the ROM keeps its size: no bank added, no fixed
+the window on the pack's code from power-on; Zelda II's and Castlevania's run in the execution
+zone instead, `boot_zone`, the other packs moving there one by one), and the ROM keeps its size: no bank added, no fixed
 bank copied to the end, no CHR-ROM moved, nothing written in the game's free space.
 
 * **The hacks that added a PRG bank for the window** (Mega Man, 3 to 6, Super Mario Bros.,
