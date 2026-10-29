@@ -96,7 +96,7 @@ impl Ppu2C02 {
         let layout = self.layout_of(Some(cartridge));
         let mut nametables = [0usize; 4];
         for (table, start) in (0u16..).zip(nametables.iter_mut()) {
-            let page = cartridge.nametable_page(i32::from(table));
+            let page = self.nametable_page(0x2000 + (table << 10), Some(cartridge));
             if page == Cartridge::SERVED_BY_CARTRIDGE {
                 return false;
             }
