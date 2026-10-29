@@ -387,19 +387,22 @@ mod tests {
     fn a_game_keeps_a_palette_of_its_own() {
         let mut model = model(GameOptions::new());
         go_to(&mut model, OptionRow::Palette);
-        // Every palette, the global one (Zaxnes) first.
+        // Every palette; the global one is Mesen's.
         let choices = model.choices(OptionRow::Palette);
         assert_eq!(
             choices.len(),
             zax_engine3d::palette::NesPalette::LABELS.len()
         );
-        assert_eq!(choices[2], "FCEUX");
-        model.choose(OptionRow::Palette, 1);
+        let zaxnes = choices
+            .iter()
+            .position(|choice| choice == "Zaxnes")
+            .unwrap();
+        model.choose(OptionRow::Palette, zaxnes);
         assert_eq!(
             model.options(),
-            [(SettingId::VideoNesPalette, SettingValue::Enum(1))]
+            [(SettingId::VideoNesPalette, SettingValue::Enum(0))]
         );
-        assert_eq!(model.value_text(OptionRow::Palette), "Mesen");
+        assert_eq!(model.value_text(OptionRow::Palette), "Zaxnes");
         model.use_global(OptionRow::Palette);
         assert!(!model.is_own(OptionRow::Palette));
     }

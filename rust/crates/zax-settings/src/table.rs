@@ -1461,13 +1461,14 @@ fn video_overscan(out: &mut Vec<SettingDescriptor>) {
 fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
     // Rust-only (owner request): the RGB table the 64 NES colours are shown in, the 2D picture
     // and the 3D view alike. The console outputs a composite signal, which each emulator decodes
-    // into a table of its own: Zaxnes' (3DSen's, the default) or one of the main emulators'
+    // into a table of its own: Zaxnes' (3DSen's) or one of the main emulators' (Mesen's the default)
     // (`zax_engine3d::palette::NesPalette`, in this order). Not exposed to Lua.
     out.push(
         SettingDescriptor::new(
             SettingId::VideoNesPalette,
             SettingKind::Enum,
-            SettingValue::Enum(0),
+            // Mesen's (owner request).
+            SettingValue::Enum(1),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Video,
