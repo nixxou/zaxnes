@@ -118,7 +118,17 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // A hack pack (see `crate::hack_pack`, built by `z2pack`): the code in the extension's
         // memory, the hooks checked and applied by the core; the ROM keeps its size.
         bps: include_bytes!("../patches/zelda2-usa-widescreen.zxpk"),
-        options: &[],
+        options: &[
+            // Nearly a frame more of CPU time in the side view ($5006 = 255, ended once the game
+            // waits for the next frame); off, the hack's 48 lines.
+            HackOption {
+                key: "no_slowdown",
+                label: "No slowdown",
+                label_fr: "Sans ralentissements",
+                bit: 2,
+                default: true,
+            },
+        ],
         after_other_way_state: Some(zelda2_after_other_way_state),
         advanced: false,
         // The pack's code is open in the window from power-on (the hack no longer unlocks the

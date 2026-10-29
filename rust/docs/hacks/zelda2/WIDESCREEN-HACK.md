@@ -79,7 +79,11 @@ there. The hack makes Zelda II such a ROM:
    112 pixels past each edge), scrolls on 9 bits, and makes the encounters ("blobs") live and move
    in the margins.
 4. **CPU time**: drawing and running enemies in the margins costs time the console does not have;
-   the hack asks for 48 extra scanlines per frame (extension overclock).
+   the hack asks for 48 extra scanlines per frame (extension overclock). The hack pack reads the
+   option "No slowdown" (bit 2 of `$500A`, on by default): on, it asks for 255 in the side view,
+   which Zaxnes ends once the game waits for the next frame (`idle_loop`), so a frame that does
+   not need it costs nothing; the 48 lines were short on the frames that stream a column with
+   enemies past the edges (lag frames, the status bar then drawn with the playfield's scroll).
 5. **Robustness**: the extension is unlocked at power-on and again by the NMI if it finds it
    locked (a state made without the hack restored with it).
 
