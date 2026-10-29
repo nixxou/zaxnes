@@ -39,7 +39,10 @@ selects banks 0-6 (through the bus-conflict table at `$C000`), so the added bank
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/megaman1-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes' shared builder
+(`hackpack.py`): NTSC, UxROM, each hook a 16 KiB bank and a CPU address, the widescreen in one group
+("core", Base); no checks yet. The code goes to the extension's
 memory, which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with
 the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank
 added, nothing moved or copied). The option "Invincible" is a component of its own (`LDA #$A2 /
@@ -758,11 +761,13 @@ Usage: python -I tools/build.py <Mega Man (USA).nes> [out.bps]
 4. Writes build/mm1wide.nes (header: 16 PRG banks) and, if asked, the BPS patch (data without
    iNES header; the game's banks moved or copied come from the player's ROM).
 
-With --pack, the layout and the patched ROM give way to a Zaxnes hack pack (tools/make_pack.py):
-the code (its used part), and the hooks as offsets in the game's data, the ROM keeping its size.
+With --pack, the layout and the patched ROM give way to a Zaxnes hack pack, format 2, written
+by Zaxnes' shared builder (tools/hackpack.py of Zaxnes, its folder in the environment variable
+ZAXNES_TOOLS): NTSC, UxROM, the code (its used part), and the hooks as a 16 KiB bank and a CPU address
+each, the ROM keeping its size.
 The invincibility hook is a component of its own, "invincible" (`LDA #$A2 / RTS`, back from the
 collision routine), applied by Zaxnes while that option is on, with or without the widescreen;
-every other hook is the "widescreen" component.
+every other hook is the "widescreen" component, in one group ("core", Base).
 """
 
 import os
@@ -871,25 +876,28 @@ INVINCIBLE_HOOK = (0x05, 0xa23f)
 
 
 def pack(data, code, sym, out):
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
-    widescreen = []
-    invincible = []
-    for bank, address, original, new in hooks(sym):
-        offset = bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
-        assert data[offset:offset + len(original)] == original, \
-            f'bank {bank:02X} ${address:04X}: not the expected bytes'
-        if (bank, address) == INVINCIBLE_HOOK:
-            # LDA #$A2 / RTS: A as wide_hurt's PLA / PLA leaves it (the high byte of its return).
-            invincible.append((offset, original, bytes([0xA9, 0xA2, 0x60]) + bytes([NOP]) * (len(original) - 3)))
-        else:
-            widescreen.append((offset, original, bytes(new)))
-    assert len(invincible) == 1
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
     used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    result = make_pack.make('Mega Man (USA) widescreen', code[:used],
-                            [('widescreen', widescreen), ('invincible', invincible)])
+    pack = hackpack.Pack('Mega Man (USA) widescreen', code[:used], region='ntsc', mappers=(2,))
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    aid = pack.component('invincible').group('invincible', label='Invincible',
+                                             label_fr='Invincible')
+    for bank, address, original, new in hooks(sym):
+        invincible = (bank, address) == INVINCIBLE_HOOK
+        if invincible:
+            # LDA #$A2 / RTS: A as wide_hurt's PLA / PLA leaves it (the high byte of its return).
+            aid.hook(bank, address, original, bytes([0xA9, 0xA2, 0x60]))
+        else:
+            core.hook(bank, address, original, new)
+    assert len(aid.hooks) == 1
+    result = pack.build(data, 8 * 0x4000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():

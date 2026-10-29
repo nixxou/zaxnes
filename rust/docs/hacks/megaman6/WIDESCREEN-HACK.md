@@ -32,7 +32,7 @@ where it does without a vertical margin.
 | Target data | CRC-32 `06C20CA3` (the BPS build's; `tools/build.py` prints it). With the pack, the hack's version in savestate headers is the pack's CRC-32, which `tools/build.py --pack` prints |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
-| Hack pack | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.zxpk`, what Zaxnes ships now (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code in the extension's memory, the window opened on it at power-on (`$5008` = `$80`, page 0); the hooks as offsets in the game's data, checked before they apply; the PRG-ROM stays 512 KiB. The BPS above is kept to compare: the same movies replay with the same RAM every frame either way (the stack page aside: `JMP` for `JSR` in the damage hook) |
+| Hack pack | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.zxpk`, what Zaxnes ships now (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code in the extension's memory, the window opened on it at power-on (`$5008` = `$80`, page 0); the pack format 2, written by Zaxnes' shared builder (`hackpack.py`, `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`): NTSC, MMC3, each hook a 16 KiB bank and a CPU address, checked before it applies, the widescreen in one group ("core", Base), no checks yet; the PRG-ROM stays 512 KiB. The BPS above is kept to compare: the same movies replay with the same RAM every frame either way (the stack page aside: `JMP` for `JSR` in the damage hook) |
 
 The code runs from the widescreen extension's PRG window at `$5800-$7FFF` (10 KiB), which Zaxnes
 opens on bank 32, page 0 at power-on for this patch (`boot_window`): the game has no free room for
@@ -173,9 +173,9 @@ assembles `src/wide.s` for `$5800` (one 16 KiB bank, the code within its first 1
 from `ld65 -Ln`), lays the PRG out in 68 banks of 8 KiB, writes the hooks, `build/mm6wide.nes` and
 the BPS patch (`tools/make_bps.py`: the fixed banks' copies are SourceCopy from the player's ROM,
 the added banks and the hooks TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
-testing. With `--pack` it writes the hack pack instead (`tools/make_pack.py`, which refuses two
-components hooking the same bytes): the code up to `wide_end` rounded up to 256 bytes, the
-"invincible" component (bank `$38` `$8F72`), and every other hook as the "widescreen" component.
+testing. With `--pack` it writes the hack pack instead (Zaxnes' `tools/hackpack.py`, which refuses
+two hooks on the same bytes): the code up to `wide_end` rounded up to 256 bytes, the
+"invincible" component (bank `$38` `$8F72`), and every other hook as the "widescreen" component, in one group ("core").
 
 ## 7. Limits
 
@@ -1591,10 +1591,12 @@ Usage: python -I tools/build.py <Mega Man 6 (USA).nes> [out.bps]
 4. Writes build/mm6wide.nes (header: 34 PRG banks of 16 KiB) and, if asked, the BPS patch (data
    without iNES header; the game's banks copied come from the player's ROM).
 
-With --pack, steps 2 to 4 give way to a Zaxnes hack pack (tools/make_pack.py): the code (its used
-part), and the hooks as offsets in the game's data, the ROM keeping its size. The damage hook is a
+With --pack, steps 2 to 4 give way to a Zaxnes hack pack, format 2, written by Zaxnes'
+shared builder (tools/hackpack.py of Zaxnes, its folder in the environment variable
+ZAXNES_TOOLS): NTSC, MMC3, the code (its used part), and the hooks as a 16 KiB bank and a CPU address
+each, the ROM keeping its size. The damage hook is a
 component of its own, "invincible" (`JMP $8F95`), applied by Zaxnes while that option is on, with
-or without the widescreen; every other hook is the "widescreen" component.
+or without the widescreen; every other hook is the "widescreen" component, in one group ("core", Base).
 """
 
 import os
@@ -1709,21 +1711,30 @@ INVINCIBLE_HOOK = (0x38, 0x8F72)
 
 
 def pack(data, code, sym, out):
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
-    widescreen = []
-    for bank, address, original, new in hooks(sym):
-        offset = bank * BANK_SIZE + (address & (BANK_SIZE - 1))
-        assert data[offset:offset + len(original)] == original,             f'bank {bank:02X} ${address:04X}: not the expected bytes'
-        if (bank, address) == INVINCIBLE_HOOK:
-            invincible = [(offset, original, jmp(0x8F95) + bytes([NOP]) * (len(original) - 3))]
-        else:
-            widescreen.append((offset, original, bytes(new)))
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
     used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    result = make_pack.make('Mega Man 6 (USA) widescreen', code[:used],
-                            [('widescreen', widescreen), ('invincible', invincible)])
+    pack = hackpack.Pack('Mega Man 6 (USA) widescreen', code[:used], region='ntsc', mappers=(4,))
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    aid = pack.component('invincible').group('invincible', label='Invincible',
+                                             label_fr='Invincible')
+    for bank, address, original, new in hooks(sym):
+        invincible = (bank, address) == INVINCIBLE_HOOK
+        # A place of the format is a 16 KiB bank: the 8 KiB bank's half of it in the address.
+        bank, address = bank // 2, (address & ~0x2000) | ((bank & 1) << 13)
+        if invincible:
+            # JMP $8F95: past the damage.
+            aid.hook(bank, address, original, jmp(0x8F95))
+        else:
+            core.hook(bank, address, original, new)
+    assert len(aid.hooks) == 1
+    result = pack.build(data, 32 * 0x4000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -1864,49 +1875,4 @@ def make(source, target, moved=(), fresh=()):
     patch += zlib.crc32(target).to_bytes(4, 'little')
     patch += zlib.crc32(bytes(patch)).to_bytes(4, 'little')
     return bytes(patch)
-```
-
-### D. `tools/make_pack.py`
-
-```python
-"""Writes a Zaxnes hack pack: the hack's code and its hooks, by component (see Zaxnes,
-docs/HACK-PACKS.md).
-
-Little-endian throughout:
-
-    "ZXPK", u8 format version (1)
-    u8 length + the pack's name (UTF-8)
-    u32 length + the code, assembled for $5800 (what the extension's PRG window shows)
-    u8 components, each:
-        u8 length + its name ("widescreen", or the key of the option that turns it on)
-        u16 hooks, each:
-            u32 offset in the PRG-ROM, u8 length, the original bytes, the new bytes
-"""
-
-import struct
-
-FORMAT = 1
-
-
-def text(value):
-    data = value.encode('utf-8')
-    assert len(data) < 256
-    return bytes([len(data)]) + data
-
-
-def make(name, code, components):
-    """components: [(name, [(prg offset, original bytes, new bytes)])]"""
-    out = bytearray(b'ZXPK') + bytes([FORMAT]) + text(name)
-    out += struct.pack('<I', len(code)) + code
-    out.append(len(components))
-    seen = set()
-    for component, hooks in components:
-        out += text(component) + struct.pack('<H', len(hooks))
-        for offset, original, new in hooks:
-            assert len(original) == len(new) and 0 < len(new) < 256
-            span = set(range(offset, offset + len(new)))
-            assert not span & seen, f'two components hook ${offset:05X}'
-            seen |= span
-            out += struct.pack('<IB', offset, len(new)) + original + new
-    return bytes(out)
 ```
