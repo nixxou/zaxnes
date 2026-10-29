@@ -364,7 +364,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Excitebike",
         rom_name: "Excitebike (Japan, USA) (En)",
         source_crc: 0x49AE_B3A6,
-        bps: include_bytes!("../patches/excitebike-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the game's 16 KiB as they are (NROM mirrors them).
+        bps: include_bytes!("../patches/excitebike-widescreen.zxpk"),
         options: &[
             // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
             HackOption {
@@ -378,9 +380,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the riders.
         advanced: true,
-        // No free byte in the game for code that would unlock the extension: its added PRG bank
-        // (2, after the game and its copy) is open in the window from power-on.
-        boot_window: Some((0x82, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // Everything runs in the NMI; the main loop draws random numbers while it waits:
         // JSR $D326 / LDA $48 / BMI / BEQ.
@@ -457,7 +459,10 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Blaster Master",
         rom_name: "Blaster Master (USA)",
         source_crc: 0x3F0F_D764,
-        bps: include_bytes!("../patches/blastermaster-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core (its aids need the hack's code: they stay with the
+        // widescreen).
+        bps: include_bytes!("../patches/blastermaster-usa-widescreen.zxpk"),
         options: &[
             // Testing aids: a new game starts with the game's own area select (up / down,
             // Start); no damage (the player only).
@@ -487,9 +492,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (8)
-        // is open in the window from power-on.
-        boot_window: Some((0x88, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The frame's wait: BIT $12 / BMI, until the NMI clears it.
         idle_loop: Some((0xE93A, 0xE93D)),
@@ -499,7 +504,10 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Metroid",
         rom_name: "Metroid (USA)",
         source_crc: 0x7008_0810,
-        bps: include_bytes!("../patches/metroid-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core (its aids need the hack's code: they stay with the
+        // widescreen).
+        bps: include_bytes!("../patches/metroid-usa-widescreen.zxpk"),
         options: &[
             // Testing aids: a new game starts in the area a direction held at START picks, as a
             // password starts one; no damage.
@@ -529,9 +537,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (8)
-        // is open in the window from power-on (2 KiB: the game's PRG-RAM is at $6000).
-        boot_window: Some((0x88, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the game's PRG-RAM is at $6000).
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: true,
         // The main loop's wait: TAY / LDA $1A / BNE / JMP (the NMI sets $1A).
         idle_loop: Some((0xC0CB, 0xC0D2)),
