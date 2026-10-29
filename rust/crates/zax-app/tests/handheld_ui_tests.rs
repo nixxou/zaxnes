@@ -478,16 +478,12 @@ fn the_hacks_open_from_the_list_the_game_options_and_the_menu() {
     // The list reads no file: the ROM is studied when its hacks open.
     assert!(handheld.roms().entries()[0].crc.is_none());
 
-    tap(&mut harness, &mut handheld, PadButton::Start);
+    tap(&mut harness, &mut handheld, PadButton::L2);
     assert_eq!(Screen::Hacks, handheld.screen());
     assert_eq!(0, handheld.hacks().unwrap().rows().len());
     assert!(handheld.roms().entries()[0].crc.is_some());
     assert!(!handheld.roms().entries()[0].widescreen);
     tap(&mut harness, &mut handheld, PadButton::B);
-    assert_eq!(Screen::Home, handheld.screen());
-
-    // L2 does nothing for a game no widescreen hack is made for.
-    tap(&mut harness, &mut handheld, PadButton::L2);
     assert_eq!(Screen::Home, handheld.screen());
 
     tap(&mut harness, &mut handheld, PadButton::Select);
@@ -533,28 +529,35 @@ fn the_game_options_keep_the_hacks_of_the_game() {
     assert_eq!(vec![widescreen], harness.host.game_options(&rom));
 }
 
-/// A version of a game a widescreen hack is made for another ROM of (here by its name): a red
-/// [W] on the list, and L2 explains why the widescreen cannot be turned on instead of doing it.
+/// A version of a game a widescreen hack is made for another ROM of (here by its name): a dark
+/// grey [W] while the ROM was not studied, then L2 opens its widescreen and hacks, which study it:
+/// no hack fits, the [W] turns red and nothing changes in the game's options.
 #[test]
-fn another_version_of_a_widened_game_says_why_l2_does_nothing() {
+fn another_version_of_a_widened_game_is_studied_when_its_hacks_open() {
     let (mut harness, mut handheld) =
         start(&[], &["Zelda II - The Adventure of Link (Europe).nes"]);
     let entry = &handheld.roms().entries()[0];
     assert!(!entry.widescreen);
+    assert!(entry.widescreen_unstudied);
     assert_eq!(
         Some(zax_nes::builtin_patches::ZELDA2_USA),
         entry.widescreen_other
     );
     tap(&mut harness, &mut handheld, PadButton::L2);
-    let question = harness.host.pending_confirmation().unwrap();
-    assert!(
-        question.message.contains("BA322865"),
-        "{}",
-        question.message
+    assert_eq!(Screen::Hacks, handheld.screen());
+    assert_eq!(
+        Some(zax_nes::builtin_patches::ZELDA2_USA),
+        handheld
+            .hacks()
+            .unwrap()
+            .other_rom_patch()
+            .map(|patch| patch.name)
     );
-    assert_eq!("", question.cancel_label);
-    tap(&mut harness, &mut handheld, PadButton::A);
-    assert!(harness.host.pending_confirmation().is_none());
+    let entry = &handheld.roms().entries()[0];
+    assert!(!entry.widescreen_unstudied, "studied as the hacks opened");
+    assert!(!entry.widescreen);
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Home, handheld.screen());
     let rom = harness
         .root
         .path()

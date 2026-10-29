@@ -252,7 +252,6 @@ pub const HACKS_FORCED_NOTE: &str = "hacks.forced_note";
 pub const HACK_OFF: &str = "hacks.off";
 pub const MENU_HACKS: &str = "menu.hacks";
 pub const HANDHELD_HINT_HACKS: &str = "handheld.hint.hacks";
-pub const HANDHELD_HINT_WIDESCREEN: &str = "handheld.hint.widescreen";
 
 // ------------------------------------------------- commands of REQ-UI-205
 pub const COMMAND_PREFIX: &str = "cmd.";
@@ -491,5 +490,4 @@ pub const PUBLISHED: &[&str] = &[
     HACK_OFF,
     MENU_HACKS,
     HANDHELD_HINT_HACKS,
-    HANDHELD_HINT_WIDESCREEN,
 ];

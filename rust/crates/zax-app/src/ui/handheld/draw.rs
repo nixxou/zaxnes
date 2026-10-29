@@ -473,7 +473,7 @@ impl HandheldUi {
                 (hint.button, strings::get(hint.meaning), colour)
             })
             .collect();
-        // L2 turns the widescreen of the selected game on or off, Start opens its hacks.
+        // L2 opens the widescreen and the hacks of the selected game, in the colour of its [W].
         if let Some(entry) = self
             .roms
             .selected_entry()
@@ -490,8 +490,7 @@ impl HandheldUi {
             } else {
                 TEXT
             };
-            hints.push(("L2", strings::get(keys::HANDHELD_HINT_WIDESCREEN), colour));
-            hints.push(("Start", strings::get(keys::HANDHELD_HINT_HACKS), TEXT));
+            hints.push(("L2", strings::get(keys::HANDHELD_HINT_HACKS), colour));
         }
         painter.hint_entries(&hints);
     }

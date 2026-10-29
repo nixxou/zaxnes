@@ -404,8 +404,8 @@ impl HandheldUi {
         self.update_flat_view(pad, seconds, frame.host);
         let presses: Vec<PadButton> = pad.presses().collect();
         for button in presses.iter().copied() {
-            // A key that is A and Start at once (Enter) plays the game rather than open its
-            // hacks as well, and Start with Select held is the exit combination.
+            // A key that is A and Start at once (Enter) plays the game once, and Start with
+            // Select held is the exit combination.
             let both = button == PadButton::Start
                 && (presses.contains(&PadButton::A) || pad.is_held(PadButton::Select));
             if both && self.screen == Screen::Home {
@@ -728,47 +728,6 @@ impl HandheldUi {
             }
             RomListCommand::GameOptions(path) => self.open_game_options(&path, host),
             RomListCommand::Options => self.open_options(host),
-            RomListCommand::ToggleWidescreen(path) => {
-                let entry = self.roms.entries().iter().find(|entry| entry.path == path);
-                // A version of the game the hack is not made for: why, and whether to force it,
-                // instead of nothing; once forced, L2 turns its widescreen on and off.
-                // A hack pack whose signatures the ROM has is made for it all the same.
-                let other = entry
-                    .filter(|entry| !entry.widescreen && !entry.widescreen_forced)
-                    .map(|entry| HacksModel::for_rom(host, &path, entry.profile_title()))
-                    .filter(|hacks| !hacks.is_capable());
-                self.note_study(&path, host);
-                if let Some(hacks) = other {
-                    let (Some(message), Some(other)) =
-                        (hacks.other_rom_message(), hacks.other_rom_patch())
-                    else {
-                        return;
-                    };
-                    let title = strings::get(keys::HACK_WIDESCREEN);
-                    if hacks.forceable() {
-                        let question =
-                            format!("{message}\n\n{}", strings::get(keys::HACKS_FORCE_QUESTION));
-                        host.ask_to_force_patch(
-                            (&title, &question),
-                            (
-                                &strings::get(keys::HACKS_FORCE_BUTTON),
-                                &strings::get(keys::BUTTON_CANCEL),
-                            ),
-                            &path.to_string_lossy(),
-                            other.name,
-                        );
-                    } else {
-                        host.inform(&title, &message);
-                    }
-                    return;
-                }
-                let title = self.profile_title_of(&path);
-                let mut hacks = HacksModel::for_rom(host, &path, title.as_deref());
-                hacks.toggle_widescreen();
-                hacks.apply(host);
-                self.note_widescreen(&path, hacks.widescreen_on());
-                self.note_study(&path, host);
-            }
             RomListCommand::Hacks(path) => {
                 let title = self.profile_title_of(&path);
                 self.open_hacks(&path, title.as_deref(), Screen::Home, host);
