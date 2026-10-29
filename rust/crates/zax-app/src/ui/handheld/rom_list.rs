@@ -95,9 +95,7 @@ pub enum RomListCommand {
     GameOptions(PathBuf),
     /// Open the options.
     Options,
-    /// Turn the widescreen of the selected game on or off (Rust-only, owner request).
-    ToggleWidescreen(PathBuf),
-    /// Open the hacks of the selected game.
+    /// Open the widescreen and the hacks of the selected game (Rust-only, owner request).
     Hacks(PathBuf),
 }
 
@@ -276,16 +274,16 @@ impl RomListModel {
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
             }
             PadButton::Y => return Some(RomListCommand::Options),
+            // L2 opens the widescreen and the hacks; Start plays, as A does (owner request).
             PadButton::L2 => {
                 return self
                     .selected_entry()
-                    .filter(|entry| entry.widescreen || entry.widescreen_other.is_some())
-                    .map(|entry| RomListCommand::ToggleWidescreen(entry.path.clone()));
+                    .map(|entry| RomListCommand::Hacks(entry.path.clone()));
             }
             PadButton::Start => {
                 return self
                     .selected_entry()
-                    .map(|entry| RomListCommand::Hacks(entry.path.clone()));
+                    .map(|entry| RomListCommand::Play(entry.path.clone()));
             }
             PadButton::Select => {
                 return self
