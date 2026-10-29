@@ -1035,10 +1035,11 @@ pub struct BuiltinPatch {
 * `BuiltinPatch::boot_zone`: the extension unlocked with its execution zone on (`$500B` =
   `$80`, `WideExtension::boot_zone`) at power-on and reset, and again after a restore
   (`install_pack`), for a hack pack whose code runs in the zone fantôme (`$2000`-`$3FFF`): Zelda
-  II, Castlevania (widescreen fantôme), Mega Man 2.
+  II, Castlevania, Mega Man 2 (all three in widescreen MMC5).
 * `BuiltinPatch::zone_data`: with `boot_zone`, the zone holds its data too (`$500B` = `$C0`,
-  section 2; widescreen MMC5): Mega Man 2, whose MMC5 conversions keep `$5000`-`$5FFF` for the
-  MMC5.
+  section 2; widescreen MMC5): Zelda II, Castlevania, Mega Man 2 (whose MMC5 conversions keep
+  `$5000`-`$5FFF` for the MMC5). Over their movies the RAM is the same as in widescreen fantôme,
+  frame by frame, the stack included.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
