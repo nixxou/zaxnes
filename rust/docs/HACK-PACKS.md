@@ -219,3 +219,9 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   repository (`tools/make_doc.py`). Done: the six Mega Man (`mm1wide`, UxROM; `mm2wide`, MMC1;
   `mm3wide` to `mm6wide`, MMC3, whose 8 KiB banks become the format's 16 KiB ones, the half in the
   address). The pack of Mega Man 4 serves its Rev 1 too: built from either ROM it is the same.
+  Then the ten others, each from its repository the same way: Castlevania and its Rev 1
+  (`cvwide`, UxROM), Super Mario Bros. (`smb1wide`, NROM), Super Mario Bros. 3 Rev 1 (`smb3wide`,
+  MMC3), Final Fantasy (`ff1wide`, MMC1), Ninja Gaiden III (`ng3wide`, MMC3), Metal Force
+  (`metalforcewide`, mapper 156), Metroid (`metroidwide`, MMC1), Adventure Island (`aiwide`,
+  CNROM), Blaster Master (`blastermasterwide`, MMC1) and Excitebike (`excitebikewide`, NROM). Every
+  built-in pack is now format 2; `zax-harness packs` takes each reference ROM whole.

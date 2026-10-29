@@ -28,7 +28,10 @@ on the original screen).
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/metalforce-korea-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
+`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
+shared builder (`hackpack.py`): NTSC, mapper 156, each hook a 16 KiB bank and a CPU address, the
+widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
 memory instead of the game's free space described here (the source assembled for `$5800`, without
 the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
 from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
@@ -699,7 +702,9 @@ Usage: python -I tools/build.py <Metal Force [Korea][Unl][!].nes> [out.bps]
 2. Writes the hooks into the fixed bank and bank 13, each checked against the bytes it replaces.
 3. Writes build/metalforcewide.nes and, if asked, the BPS patch (data without iNES header).
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: src/wide.s assembled with PACK for
+With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, mapper 156,
+each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); src/wide.s assembled with PACK for
 $5800 of the extension's memory (2 KiB at most), which Zaxnes shows in the PRG window from
 power-on, the extension unlocked; the hooks, but for the reset hook, each with the game's bytes it
 replaces, checked by Zaxnes before it applies them. Nothing goes in the game's free space and the
@@ -827,33 +832,45 @@ def assemble(pack=False):
 INVINCIBLE = (0xE76F, 0xE7A3, 0xE7DA, 0xE814, 0xE84E)
 
 
+def pack_place(offset, address):
+    """The place of format 2 for `offset` in the PRG-ROM, run at `address`: its 16 KiB bank, and
+    the address with the offset's place in that bank (an 8 KiB bank's half of it)."""
+    return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
+
+
 def pack(data, out):
     code, sym = assemble(pack=True)
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
+    pack = hackpack.Pack('', b'', region='ntsc', mappers=(156,))
     bank = BANK * BANK_SIZE
     fixed, banked = hooks(sym, pack=True)
-    widescreen = []
-    invincible = []
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    aid = pack.component('invincible').group('invincible', label='Invincible',
+                                             label_fr='Invincible')
     for number, address, original, new in banked:
         at = number * BANK_SIZE + address - 0x8000
         assert data[at:at + len(original)] == original, f'bank {number} ${address:04X}: not the expected bytes'
-        widescreen.append((at, bytes(original), bytes(new)))
+        core.hook(*pack_place(at, address), bytes(original), bytes(new))
     for address, original, new in fixed:
         at = bank + address - FIXED
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
         if address in INVINCIBLE:
             # LDA #$02 in place of LDA HIT_TIMER: the timer found running, as wide_hurt leaves A.
-            invincible.append((at, bytes(original), bytes([0xA9, 0x02, 0xEA])))
+            aid.hook(*pack_place(at, address), bytes(original), bytes([0xA9, 0x02, 0xEA]))
         else:
-            widescreen.append((at, bytes(original), bytes(new)))
-    assert len(invincible) == len(INVINCIBLE)
+            core.hook(*pack_place(at, address), bytes(original), bytes(new))
+    assert len(aid.hooks) == len(INVINCIBLE)
     # Zaxnes reads $FF past the code's end: its trailing fill is left out.
     used = (len(code.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    result = make_pack.make('Metal Force (Korea) widescreen', code[:used],
-                            [('widescreen', widescreen), ('invincible', invincible)])
+    pack.name = 'Metal Force (Korea) widescreen'
+    pack.code = code[:used]
+    result = pack.build(data, 0x40000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
           f'pack CRC {zlib.crc32(result):08X}')
 
 
