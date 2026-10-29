@@ -20,7 +20,7 @@
 //! | `$5100`-`$51FF` | W | high byte of the x of sprite `(address & $FF) / 4`, taken at the next OAM DMA |
 //! | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 //! | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
-//! | `$500B` | R/W | execution zone: bit 7 on, bits 0-6 the page of the pack's code shown at `$2800`-`$3FFF` |
+//! | `$500B` | R/W | execution zone: bit 7 on, bit 6 its data at `$3000`-`$3FFF` (below), bits 0-5 the page of the pack's code shown at `$2800`-`$3FFF` (`$2FFF` with bit 6) |
 //! | `$5200`-`$5FFF` | R/W | 3.5 KiB of RAM for the ROM's own variables and code (the CPU runs code from it); `$5800`-`$5FFF` shows PRG-ROM instead while the window is on |
 //!
 //! The margin in use is `min($5003, $5002)` rounded down to a multiple of 8. `$5004` and
@@ -30,7 +30,11 @@
 //! The execution zone (`$500B`) shows a hack pack's code to the CPU's instruction fetches only
 //! in `$2000`-`$3FFF` (the PPU's register mirrors, where no game runs code): `$2000`-`$27FF` its
 //! first 2 KiB, always, `$2800`-`$3FFF` the 6 KiB of page `n` (`$800 + n * $1800` on). Every data
-//! read and write there still reaches the PPU, those of the hack's own code too.
+//! read and write there still reaches the PPU, those of the hack's own code too, unless the zone
+//! holds its data (`$500B` bit 6): then the data accesses at `$3000`-`$3FFF` made by an
+//! instruction fetched from the zone reach the extension's registers and RAM (`$3xxx` standing for
+//! `$5xxx`), the page's code stops at `$2FFF`, and `$5000`-`$5FFF` is left to the cartridge (MMC5,
+//! Namco 163). The game's own accesses, from its ROM, still reach the PPU: it sees no change.
 //!
 //! The overclock (`$5006`) holds the PPU and the APU still for that many
 //! scanlines' worth of CPU cycles when the picture is done (line 240), so the game's frame
@@ -61,6 +65,12 @@ const CYCLES_PER_SCANLINE: u32 = 114;
 const ZONE_FIRST: u16 = 0x2000;
 const ZONE_PAGED: u16 = 0x2800;
 const ZONE_LAST: u16 = 0x3FFF;
+/// `$500B`: the zone on (bit 7), its data at `$3000`-`$3FFF` (bit 6), the page (bits 0-5).
+const ZONE_ON: u8 = 0x80;
+const ZONE_DATA: u8 = 0x40;
+const ZONE_PAGE: u8 = 0x3F;
+/// Where the zone's data starts, when it holds its data.
+const ZONE_DATA_FIRST: u16 = 0x3000;
 /// Bytes of the code a page of the zone shows.
 const ZONE_PAGE_SIZE: usize = 0x1800;
 
@@ -286,10 +296,18 @@ impl WideExtension {
     }
 
     /// Unlocked with the execution zone on, page 0, as a built-in patch whose code runs there
-    /// asks at power-on and reset.
-    pub fn boot_zone(&mut self) {
+    /// asks at power-on and reset; with its data at `$3000`-`$3FFF` too when `data` (bit 6).
+    pub fn boot_zone(&mut self, data: bool) {
         self.unlocked = true;
-        self.zone = 0x80;
+        self.zone = ZONE_ON | if data { ZONE_DATA } else { 0 };
+    }
+
+    /// Whether the execution zone holds the extension's registers and RAM at `$3000`-`$3FFF`
+    /// for the zone's own instructions (`$500B` bit 6): `$5000`-`$5FFF` is then the cartridge's
+    /// alone (MMC5, Namco 163), and the zone's code stops at `$2FFF`.
+    #[must_use]
+    pub const fn zone_data(&self) -> bool {
+        self.unlocked && self.zone & (ZONE_ON | ZONE_DATA) == ZONE_ON | ZONE_DATA
     }
 
     /// The offset in the hack pack's code an instruction fetch of `address` reads in the
@@ -299,8 +317,9 @@ impl WideExtension {
     pub fn zone_offset(&self, address: u16) -> Option<usize> {
         if !(ZONE_FIRST..=ZONE_LAST).contains(&address)
             || !self.unlocked
-            || self.zone & 0x80 == 0
+            || self.zone & ZONE_ON == 0
             || self.code.is_empty()
+            || (self.zone_data() && address >= ZONE_DATA_FIRST)
         {
             return None;
         }
@@ -309,7 +328,7 @@ impl WideExtension {
         }
         Some(
             usize::from(ZONE_PAGED - ZONE_FIRST)
-                + (usize::from(self.zone & 0x7F) * ZONE_PAGE_SIZE)
+                + (usize::from(self.zone & ZONE_PAGE) * ZONE_PAGE_SIZE)
                 + usize::from(address - ZONE_PAGED),
         )
     }

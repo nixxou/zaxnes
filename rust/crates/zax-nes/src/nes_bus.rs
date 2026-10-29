@@ -42,6 +42,10 @@ pub struct NesBus {
     /// NMI line or the cartridge's IRQ line may next change.
     ppu_deadline: i64,
     deferred_ppu: bool,
+    /// Whether the instruction being run was fetched from the extension's execution zone: its
+    /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
+    /// (`WideExtension::zone_data`), the game's still reach the PPU.
+    zone_instruction: bool,
 }
 
 impl NesBus {
@@ -74,6 +78,7 @@ impl NesBus {
             ppu_lag: 0,
             ppu_deadline: 0,
             deferred_ppu: false,
+            zone_instruction: false,
         }
     }
 
@@ -309,6 +314,10 @@ impl NesBus {
         }
 
         if address < 0x4000 {
+            // The extension's registers, as a read of `$5xxx` reaches them (no PPU catch-up).
+            if let Some(register) = self.zone_data_address(address) {
+                return self.ppu.wide().read(register).unwrap_or(self.open_bus);
+            }
             self.sync_ppu();
             // The PPU drives its own data-bus latch for the undefined bits, separate from
             // the CPU's open bus (nesdev, "PPU registers"; ppu_open_bus).
@@ -326,7 +335,7 @@ impl NesBus {
             };
         }
 
-        if WideExtension::claims(address) {
+        if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
             if let Some(value) = self.wide_window_read(address) {
                 return value;
             }
@@ -354,6 +363,10 @@ impl NesBus {
 
         if address < 0x4000 {
             self.sync_ppu();
+            if let Some(register) = self.zone_data_address(address) {
+                self.ppu.wide_mut().write(register, value);
+                return;
+            }
             self.ppu
                 .write(address & 0x07, value, self.cartridge.as_mut());
             return;
@@ -369,7 +382,7 @@ impl NesBus {
         }
 
         self.sync_ppu();
-        if WideExtension::claims(address) {
+        if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
             // The window only listens: the cartridge still gets the write.
             self.ppu.wide_mut().write(address, value);
         }
@@ -416,6 +429,14 @@ impl NesBus {
         (&self.ram, &mut self.ppu, self.cartridge.as_ref())
     }
 
+    /// The extension's register (`$5000`-`$5FFF`) a data access of `address` reaches, when it is
+    /// in `$3000`-`$3FFF`, made by an instruction of the execution zone, and the zone holds its
+    /// data there; `None` for every other access, the game's among them.
+    fn zone_data_address(&self, address: u16) -> Option<u16> {
+        (self.zone_instruction && address >= 0x3000 && self.ppu.wide().zone_data())
+            .then_some(address + 0x2000)
+    }
+
     fn wide_window_read(&self, address: u16) -> Option<u8> {
         let offset = self.ppu.wide().prg_window(address)?;
         // A hack pack's code, when one runs; PRG-ROM otherwise.
@@ -446,7 +467,9 @@ impl CpuBus for NesBus {
     /// An instruction fetch in the widescreen extension's execution zone (`$2000`-`$3FFF`, while
     /// a pack's code runs there) reads that code; any other is a plain read.
     fn read_code(&mut self, address: u16) -> u8 {
-        if let Some(offset) = self.ppu.wide().zone_offset(address) {
+        let zone = self.ppu.wide().zone_offset(address);
+        self.zone_instruction = zone.is_some();
+        if let Some(offset) = zone {
             self.tick();
             let value = self.ppu.wide().code().get(offset).copied().unwrap_or(0xFF);
             self.open_bus = value;
@@ -475,7 +498,7 @@ impl CpuBus for NesBus {
             return 0;
         }
 
-        if WideExtension::claims(address) {
+        if WideExtension::claims(address) && !self.ppu.wide().zone_data() {
             if let Some(value) = self.wide_window_read(address) {
                 return value;
             }

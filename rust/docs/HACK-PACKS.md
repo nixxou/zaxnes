@@ -237,7 +237,9 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   System is left aside (no mapper 99, VS PPUs or coins in the core);
   Mega Man 2 next: its pack in the execution zone, three groups (core, enemies, stage fixes) with
   checks, MMC1, UxROM and MMC3, the European ROM's pack (PAL) and Rockman 2's
-  (`docs/hacks/megaman2/WIDESCREEN-HACK.md`); 616 of 703 ROMs take a whole pack;
+  (`docs/hacks/megaman2/WIDESCREEN-HACK.md`). Its code reaches the extension at `$3000`-`$3FFF`
+  (zone data, `WIDESCREEN-EXTENSION.md` 2), so the MMC5 conversions take it too: 636 of 703 ROMs
+  take a whole pack, the same RAM as without zone data over its movies;
   a table of the dumps whose header gives the wrong TV region (`rom::region_exception`, by data
   CRC-32: so far Castlevania (Europe) (Virtual Console), PAL) stands for the header at load (the
   automatic TV mode starts them right, a region the player chose stays) and in the packs' region

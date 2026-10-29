@@ -16,7 +16,7 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 |---|---|
 | Source ROM | *Mega Man 2 (USA)*, MMC1, 256 KiB PRG (16 banks of 16 KiB, bank 15 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `0FCFC04D` |
-| Target data | CRC-32 `AA52E0AD` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `CE1870B9` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$F300` of bank 15 (in the `$FF` fill `$F2E3`-`$F8FF`), hooks in bank 15, bank 14 and bank 11 |
 | Patch | `rust/crates/zax-nes/patches/megaman2-usa-widescreen.bps`, made against the data without header |
 
@@ -26,9 +26,9 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 `rust/crates/zax-nes/patches/megaman2-usa-widescreen.zxpk`, with `megaman2-europe-widescreen` and
 `rockman2-japan-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set
 to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The packs are
-format 2, written by Zaxnes' shared builder (`hackpack.py`): MMC1, UxROM or MMC3 (conversions keep
-the banks; MMC5's registers share `$5000`-`$5FFF` with the extension, it is left out), each hook a
-bank and a CPU address. The widescreen is in three groups: "core" (Base: the NMI and the sprites),
+format 2, written by Zaxnes' shared builder (`hackpack.py`): MMC1, UxROM, MMC3 or MMC5 (conversions
+keep the banks; the code reaches the extension at `$3000`-`$3FFF`, Zaxnes' zone data, leaving
+`$5000`-`$5FFF` to an MMC5), each hook a bank and a CPU address. The widescreen is in three groups: "core" (Base: the NMI and the sprites),
 "enemies" (their spawn window, removal, collisions and dormancy) and "stage fixes" (Air Man's cloud
 devils' palette, Bubble Man's lantern fish's), each needing the one before. Checks (`CHECKS`) hold
 the game's code the hack's code relies on: the routine removing an object, the enemy loop's next
@@ -39,14 +39,15 @@ The same source makes three packs: the USA's; the European ROM's (the same code 
 hooks and calls, the same stage layouts: the same pack, PAL); and Rockman 2's (`-D JAPAN`: its
 fixed bank's code 3 bytes earlier from `$C700` and `$22` from `$E9C0`, `JAPAN_MOVED`; banks 11 and
 14, the RAM and the stage layouts as the USA's). Against a set of 703 Mega Man 2 and Rockman 2 ROMs:
-616 take a whole pack, 61 in part (ROM hacks that changed Air Man's or Bubble Man's enemies keep
-the core and the enemies, Mega Man 2 DA the core, trainers lose the aid), 26 none (the MMC5
-conversions, Mega Man II Optimum, Rockman CX, a bad dump).
+636 take a whole pack, 61 in part (ROM hacks that changed Air Man's or Bubble Man's enemies keep
+the core and the enemies, Mega Man 2 DA the core, trainers lose the aid), 6 none (Rockman CX, a bad
+dump).
 
 The code goes to the extension's execution zone instead of the game's free space described here
 (the source assembled for `$2000`, without the reset hook and the NMI's unlock: Zaxnes unlocks the
-extension and shows the code to instruction fetches only from power-on, `$500B` = `$80`; the code
-reads no data of its own, the list of the enemies never dormant compared inline), and the hooks, each with the game's bytes it replaces, are
+extension and shows the code to instruction fetches only from power-on, its data at `$3000`-`$3FFF`
+for the code's own accesses, `$500B` = `$C0`; the code reads no data of its own, the list of the
+enemies never dormant compared inline), and the hooks, each with the game's bytes it replaces, are
 checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free space). The
 option "Invincible" is a component of its own (the four invincibility hooks, their routines' result
 inline), applied with or without the advanced mode. The BPS patch described here is kept to
@@ -191,8 +192,8 @@ SourceRead / TargetRead only). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
 ; or, with PACK defined (a Zaxnes hack pack), for $2000: the extension's execution zone, which
 ; Zaxnes shows to instruction fetches only from power-on, the extension unlocked: no reset hook
 ; then, and no unlock in the NMI (the code only runs while the extension is unlocked). Data reads
-; at $2000-$3FFF reach the PPU: the code reads no data of its own (its variables are in the
-; extension's RAM at $5200).
+; at $2000-$2FFF reach the PPU: the code reads no data of its own (its variables are in the
+; extension's RAM, at $3200 in a pack).
 ; Talks to the Zaxnes widescreen extension (rust/docs/WIDESCREEN-EXTENSION.md); the background of
 ; the margins comes from the emulator's Mega Man 2 margin decoder, the hack does the objects:
 ;
@@ -205,18 +206,26 @@ SourceRead / TargetRead only). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
 ;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
 
-WIDE_SIG        = $5000         ; W: unlock "WIDE"; R: $57 once unlocked
-WIDE_HOST       = $5002         ; R: margin the host offers on each side
-WIDE_REQ        = $5003         ; W: margin asked for
-WIDE_LEFT       = $5004         ; W: background extents (the decoder draws the margins)
-WIDE_RIGHT      = $5005
-WIDE_OVERCLOCK  = $5006         ; W: extra CPU time each frame, in scanlines
-WIDE_LAYOUT     = $5007         ; W: bit 1, sprites free of the background extents
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on (bit 0: enemies in the margins,
+; The extension's registers and RAM: at $5000-$5FFF, or, in a pack, at $3000-$3FFF, where the
+; execution zone holds them for its own instructions (Zaxnes, BuiltinPatch::zone_data):
+; $5000-$5FFF is then the cartridge's alone (an MMC5 conversion keeps its registers there).
+.ifdef PACK
+EXT             = $3000
+.else
+EXT             = $5000
+.endif
+WIDE_SIG        = EXT + $000         ; W: unlock "WIDE"; R: $57 once unlocked
+WIDE_HOST       = EXT + $002         ; R: margin the host offers on each side
+WIDE_REQ        = EXT + $003         ; W: margin asked for
+WIDE_LEFT       = EXT + $004         ; W: background extents (the decoder draws the margins)
+WIDE_RIGHT      = EXT + $005
+WIDE_OVERCLOCK  = EXT + $006         ; W: extra CPU time each frame, in scanlines
+WIDE_LAYOUT     = EXT + $007         ; W: bit 1, sprites free of the background extents
+WIDE_OPTIONS    = EXT + $00A         ; R: the options the player turned on (bit 0: enemies in the margins,
                                 ; bit 1: invincible, bit 2: no slowdown)
-WIDE_SPRHI      = $5100         ; W: high byte of the x of sprite n at $5100 + 4n
-EXTRA_OAM       = $5300         ; the second sprite page ($5007 bit 2), OAM format
-EXTRA_SPRHI     = $5400         ; high byte of the x of its sprite n at $5400 + 4n
+WIDE_SPRHI      = EXT + $100         ; W: high byte of the x of sprite n at $5100 + 4n
+EXTRA_OAM       = EXT + $300         ; the second sprite page ($5007 bit 2), OAM format
+EXTRA_SPRHI     = EXT + $400         ; high byte of the x of its sprite n at $5400 + 4n
 OAM             = $0200
 
 MAX_MARGIN      = 248           ; the widest margin the extension's 8-bit registers carry
@@ -226,18 +235,18 @@ NO_SLOWDOWN_LINES = 255         ; with the option "No slowdown": the game never 
 .endif
 
 ; Variables in the extension's RAM.
-WV_M            = $5200         ; margin of this frame
-WV_LOL          = $5201         ; screen x range objects may live in: [LO, HI), signed 16-bit
-WV_LOH          = $5202
-WV_HIL          = $5203
-WV_HIH          = $5204
-WV_SL           = $5205         ; screen x of the object at hand, signed 16-bit
-WV_SH           = $5206
-WV_T0           = $5207
-WV_T1           = $5208
-WV_PAGE         = $5209         ; bit 7: the sprites being placed go to the second page
-WV_MOBJ         = $520A         ; margin enemies spawn and live in: WV_M, or 0 with the option off
-WV_DORMANT      = $5220         ; + slot ($10-$1F): non-zero while an enemy that spawned out of
+WV_M            = EXT + $200         ; margin of this frame
+WV_LOL          = EXT + $201         ; screen x range objects may live in: [LO, HI), signed 16-bit
+WV_LOH          = EXT + $202
+WV_HIL          = EXT + $203
+WV_HIH          = EXT + $204
+WV_SL           = EXT + $205         ; screen x of the object at hand, signed 16-bit
+WV_SH           = EXT + $206
+WV_T0           = EXT + $207
+WV_T1           = EXT + $208
+WV_PAGE         = EXT + $209         ; bit 7: the sprites being placed go to the second page
+WV_MOBJ         = EXT + $20A         ; margin enemies spawn and live in: WV_M, or 0 with the option off
+WV_DORMANT      = EXT + $220         ; + slot ($10-$1F): non-zero while an enemy that spawned out of
                                 ; sight has not come onto the original screen yet
 
 ; Game RAM (original meanings).
@@ -896,7 +905,8 @@ data of its own); the hooks, but for the reset hook,
 each a bank and a CPU address with the game's bytes it replaces, checked by Zaxnes before it
 applies them. The widescreen is in three groups: "core" (Base), "enemies" (needing it) and "stage
 fixes" (needing the enemies), with checks of the game's code the hack relies on (CHECKS). MMC1,
-UxROM or MMC3 (conversions); from the European ROM, the same pack for PAL; from Rockman 2
+UxROM, MMC3 or MMC5 (conversions; the code reaches the extension at $3000-$3FFF, the zone holding
+its data there); from the European ROM, the same pack for PAL; from Rockman 2
 (Japan), its pack (-D JAPAN; JAPAN_MOVED, its fixed bank's places). Nothing goes in the game's free space and the
 ROM keeps its size. The invincibility hooks a component of their own, "invincible", whose bytes do what the hack's routines do when the
 option is on: Zaxnes applies it while that option is on, with or without the widescreen.
@@ -1104,12 +1114,13 @@ def pack(data, out, crc=SOURCE_CRC):
                 new = bytes(new).replace(jmp(usa), jmp(JAPAN_MOVED[usa]))
         return new
 
-    # The European build is the same pack for a PAL ROM. MMC3 and UxROM conversions keep the
-    # banks where they are; MMC5 is left out (its registers share $5000-$5FFF with the extension).
+    # The European build is the same pack for a PAL ROM. MMC3, UxROM and MMC5 conversions keep
+    # the banks where they are; the pack's code reaches the extension at $3000-$3FFF (Zaxnes'
+    # zone_data), leaving $5000-$5FFF to an MMC5's registers.
     europe = crc == EUROPE_CRC
     name = 'Rockman 2 (Japan)' if japan else 'Mega Man 2 (Europe)' if europe else 'Mega Man 2 (USA)'
     pack = hackpack.Pack(f'{name} widescreen', code[:used], region='pal' if europe else 'ntsc',
-                         mappers=(1, 2, 4))
+                         mappers=(1, 2, 4, 5))
     widescreen = pack.component('widescreen')
     groups = {
         'core': widescreen.group('core', label='Base', label_fr='Base'),
