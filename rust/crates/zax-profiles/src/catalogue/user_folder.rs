@@ -365,11 +365,36 @@ pub fn derived_id(bytes: &[u8]) -> String {
 
 fn title_of(header: &ProfileHeader, path: &Path) -> String {
     match header.title.as_deref() {
-        Some(title) if !title.is_empty() => title.to_owned(),
+        Some(title) if !title.is_empty() => shown_title(title, path),
         _ => path
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_default(),
+    }
+}
+
+/// The titles of the profiles many others were made from, kept by mistake in those (Rust-only,
+/// owner request).
+const TEMPLATE_TITLES: [&str; 2] = ["Tetris", "Tennis"];
+
+/// The title shown for a profile titled `title` in the file `path`: the file name without its
+/// extension when the title is one of a template ("Tetris", "Tennis") the file name does not
+/// say, else `title`.
+#[must_use]
+pub fn shown_title(title: &str, path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let template = TEMPLATE_TITLES
+        .iter()
+        .any(|template| title.eq_ignore_ascii_case(template));
+    let says_template = TEMPLATE_TITLES
+        .iter()
+        .any(|template| stem.contains(&template.to_lowercase()));
+    match path.file_stem() {
+        Some(file) if template && !says_template => file.to_string_lossy().into_owned(),
+        _ => title.to_owned(),
     }
 }
 
@@ -381,4 +406,22 @@ pub(crate) fn sort_ordinal(paths: &mut [PathBuf]) {
 /// True when two paths are the same text, ignoring case.
 pub(crate) fn same_path(left: &Path, right: &Path) -> bool {
     text::ordinal_ignore_case(&left.to_string_lossy(), &right.to_string_lossy()).is_eq()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_template_title_the_file_name_does_not_say_gives_the_file_name() {
+        let title = |title, file| shown_title(title, Path::new(file));
+        assert_eq!(
+            "Final_Fantasy_USA",
+            title("Tetris", "p/Final_Fantasy_USA.3dn")
+        );
+        assert_eq!("TwinBee", title("tennis", "p/TwinBee.3dn"));
+        assert_eq!("Tetris", title("Tetris", "p/Tetris-Nintendo.3dn"));
+        assert_eq!("Tennis", title("Tennis", "p/Tennis (JU).3dn"));
+        assert_eq!("Zelda II", title("Zelda II", "p/z2.3dn"));
+    }
 }
