@@ -32,13 +32,15 @@ The ROM keeps its size and layout: a state made without the hack restores with i
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/castlevania-usa-
-widescreen` and `castlevania-usa-rev1-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): no code goes to the extension's memory: the
-bytes the hack changes (its hooks and its code in the game's free space) are the pack's hooks, each
-with the game's bytes it replaces, checked and applied by Zaxnes; the ROM keeps its size and the
-layout described here. The option "Invincible" is a component of its own (`LDA #$02` in place of
-the health subtraction), applied with or without the advanced mode. The level selector needs the
+**Hack pack.** Zaxnes ships this hack as a hack pack,
+`rust/crates/zax-nes/patches/castlevania-usa-widescreen` and `castlevania-usa-rev1-widescreen.zxpk`
+(`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1):
+the code goes to the extension's memory instead of the game's free space described here (the source
+assembled for `$5800`, without the reset hook and the NMI's unlock: Zaxnes unlocks the extension
+and shows the code in the window from power-on, `$5008` = `$80`, page 0), and the hooks, each with
+the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (nothing
+written in its free space). The option "Invincible" is a component of its own (`LDA #$02` in place
+of the health subtraction), applied with or without the advanced mode. The level selector needs the
 hack's code: it stays with the widescreen. The BPS patch described here is kept to compare.
 
 ## 2. The extension and the code's place
@@ -229,7 +231,9 @@ of `$FF` as a TargetCopy). `WIDE_SKIP=<hex addresses>` leaves hooks out, for tes
 ; The code is WINDOW, 2 KiB of the free end of PRG bank 5 (from its page $1F, free in both
 ; builds), which the extension's PRG window shows at $5800-$5FFF. The game's fixed bank has no
 ; room for code that would unlock the extension, so the built-in patch opens the window from
-; power-on (BuiltinPatch::boot_window): the hack needs Zaxnes.
+; power-on (BuiltinPatch::boot_window): the hack needs Zaxnes. In the Zaxnes hack pack
+; (tools/build.py --pack), WINDOW is the pack's code instead, in the extension's memory, which the
+; window shows from power-on: nothing goes in bank 5.
 ;
 ; The ROM keeps its size and layout: a state of the unpatched game restores into the patched one.
 ;
@@ -908,10 +912,10 @@ addresses of the game's routines (ca65 -D REV1).
 3. Writes build/<build>.nes and, if asked, the BPS patch (data without iNES header). WIDE_SKIP
    (comma-separated hex addresses) leaves hooks out, for testing.
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
-extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
-as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
-it applies them; the ROM keeps its size. The damage hook is a component of its own,
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the WINDOW segment is the pack's
+code, for $5800 of the extension's memory, which Zaxnes shows in the PRG window from power-on;
+the hooks, each with the game's bytes it replaces, checked by Zaxnes before it applies them.
+Nothing goes in the game's free space and the ROM keeps its size. The damage hook is a component of its own,
 "invincible" (LDA #$02 in place of the subtraction), applied by Zaxnes while that option is on,
 with or without the widescreen.
 """
@@ -1056,6 +1060,30 @@ def assemble(name, defines):
 INVINCIBLE = {BASE: 0xE734, REV1: 0xE758}
 
 
+def pack(data, crc, window, sym, out):
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import make_pack
+    widescreen = []
+    invincible = []
+    for bank, address, original, new in hooks(crc, sym):
+        at = offset(bank, address)
+        assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
+        if address == INVINCIBLE[crc]:
+            # LDA #$02, health kept: A as wide_damage leaves it.
+            invincible.append((at, bytes(original), bytes([0xA9, 0x02, NOP, NOP, NOP])))
+        else:
+            widescreen.append((at, bytes(original), bytes(new)))
+    assert len(invincible) == 1
+    game = 'Castlevania (USA) (Rev 1)' if crc == REV1 else 'Castlevania (USA)'
+    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
+    used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
+    result = make_pack.make(game + ' widescreen', window[:used],
+                            [('widescreen', widescreen), ('invincible', invincible)])
+    open(out, 'wb').write(result)
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -1071,15 +1099,15 @@ def main():
 
     window, sym = assemble(name, defines)
     assert len(window) == WINDOW_SIZE
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(bytes(data), crc, window, sym, sys.argv[3])
+        return
     prg = bytearray(data)
     assert prg[WINDOW_AT:WINDOW_AT + WINDOW_SIZE] == bytes([0xFF]) * WINDOW_SIZE, \
         'bank 5: the space is not free'
     prg[WINDOW_AT:WINDOW_AT + WINDOW_SIZE] = window
 
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
-    pack = len(sys.argv) > 3 and sys.argv[2] == '--pack'
-    if pack:
-        skip.add(INVINCIBLE[crc])               # a component of its own
     for bank, address, original, new in hooks(crc, sym):
         if address in skip:
             continue
@@ -1091,20 +1119,6 @@ def main():
     out = os.path.join(ROOT, 'build', name + '.nes')
     open(out, 'wb').write(bytes(image[:header]) + target)
     print(f'{out}: data CRC {zlib.crc32(target):08X}')
-    if pack:
-        sys.path.insert(0, os.path.join(ROOT, 'tools'))
-        import make_pack
-        game = 'Castlevania (USA) (Rev 1)' if crc == REV1 else 'Castlevania (USA)'
-        at = offset(7, INVINCIBLE[crc])
-        # LDA #$02, health kept: A as wide_damage leaves it.
-        invincible = [(at, bytes(data[at:at + 5]), bytes([0xA9, 0x02, NOP, NOP, NOP]))]
-        assert invincible[0][1] == bytes.fromhex('38 e5 4b 85 45')
-        result = make_pack.make(game + ' widescreen', b'',
-                                [('widescreen', make_pack.runs(bytes(data), target)),
-                                 ('invincible', invincible)])
-        open(sys.argv[3], 'wb').write(result)
-        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
-        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps

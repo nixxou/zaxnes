@@ -11,15 +11,15 @@
 //! | ROM | Patch | Source |
 //! |---|---|---|
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; written in a fork of the FiendsOfTheElements Zelda II disassembly (`z2wide`), moved out of the game by `z2pack` |
-//! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the hack's code written over the fixed bank's free space as hooks, the hooks checked and applied by the core; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
+//! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
-//! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
-//! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; part of the code seen through the extension's window (`smb3wide`, `tools/build.py --pack`) |
-//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; the code seen through the extension's window open from power-on; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
+//! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
+//! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`smb3wide`, `tools/build.py --pack`) |
+//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
 //! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`aiwide`, `tools/build.py --pack`) |
 //! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`excitebikewide`, `tools/build.py --pack`) |
-//! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; the code seen through the extension's window open from power-on (`ff1wide`, `tools/build.py --pack`) |
-//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
+//! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ff1wide`, `tools/build.py --pack`) |
+//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
 //! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`metroidwide`, `tools/build.py --pack`) |
 //! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one pack for both builds (`mm4wide`, `tools/build.py --pack`) |
@@ -133,9 +133,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man 2",
         rom_name: "Mega Man 2 (USA)",
         source_crc: 0x0FCF_C04D,
-        // A hack pack (see `crate::hack_pack`) with no code of its own in the extension's memory:
-        // the hack unlocks the extension itself, its code written over the fixed bank's free
-        // space as hooks; "Invincible" a component of its own.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the ROM keeps its size. "Invincible" a component of
+        // its own.
         bps: include_bytes!("../patches/megaman2-usa-widescreen.zxpk"),
         options: &[
             HackOption {
@@ -164,8 +164,11 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         ],
         after_other_way_state: None,
         advanced: false,
-        boot_window: None,
-        boot_window_keeps_prg_ram: false,
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
+        // did).
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // The frame's wait: LDA $1D / BEQ (the NMI sets $1D).
         idle_loop: Some((0xC08E, 0xC091)),
     },
@@ -219,8 +222,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Ninja Gaiden III",
         rom_name: "Ninja Gaiden III - The Ancient Ship of Doom (USA)",
         source_crc: 0x902E_3168,
-        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
-        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the ROM keeps its size.
         bps: include_bytes!("../patches/ng3-usa-widescreen.zxpk"),
         options: &[
             HackOption {
@@ -242,8 +245,11 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
-        boot_window: None,
-        boot_window_keeps_prg_ram: false,
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
+        // did).
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // The frame's wait in bank 4: BIT $15 / BPL (the NMI sets $15).
         idle_loop: Some((0x9A87, 0x9A8A)),
     },
@@ -252,8 +258,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Super Mario Bros. 3",
         rom_name: "Super Mario Bros. 3 (USA) (Rev 1)",
         source_crc: 0x2E63_01ED,
-        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
-        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the ROM keeps its size.
         bps: include_bytes!("../patches/smb3-usa-rev1-widescreen.zxpk"),
         options: &[
             // Testing aids: B on the 1P/2P menu opens the game's own debug menu (Up/Down: the
@@ -284,10 +290,11 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // The NMI unlocks the extension and opens its window itself (code in bank 31's free
-        // space).
-        boot_window: None,
-        boot_window_keeps_prg_ram: false,
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
+        // did).
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // GraphicsBuf_Prep_And_WaitVSync: LDA VBlank_Tick / BPL, until the NMI counts it down.
         idle_loop: Some((0x96FB, 0x96FE)),
     },
@@ -296,8 +303,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Castlevania",
         rom_name: "Castlevania (USA)",
         source_crc: 0x0AC1_AA8F,
-        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
-        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the ROM keeps its size.
         // "Invincible" a component of its own (the level selector needs the hack's code: it stays
         // with the widescreen).
         bps: include_bytes!("../patches/castlevania-usa-widescreen.zxpk"),
@@ -305,10 +312,11 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
-        // No room in the fixed bank for code that would unlock the extension: the free end of
-        // PRG bank 5 (from its page $1F) is open in the window from power-on.
-        boot_window: Some((0x85, 0x1F)),
-        boot_window_keeps_prg_ram: false,
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
+        // did).
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -317,8 +325,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Castlevania",
         rom_name: "Castlevania (USA) (Rev 1)",
         source_crc: 0xB668_C7FC,
-        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
-        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the ROM keeps its size.
         // "Invincible" a component of its own (the level selector needs the hack's code: it stays
         // with the widescreen).
         bps: include_bytes!("../patches/castlevania-usa-rev1-widescreen.zxpk"),
@@ -326,10 +334,11 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
-        // No room in the fixed bank for code that would unlock the extension: the free end of
-        // PRG bank 5 (from its page $1F) is open in the window from power-on.
-        boot_window: Some((0x85, 0x1F)),
-        boot_window_keeps_prg_ram: false,
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
+        // did).
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -412,8 +421,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Final Fantasy",
         rom_name: "Final Fantasy (USA)",
         source_crc: 0xCEBD_2A31,
-        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
-        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the ROM keeps its size.
         bps: include_bytes!("../patches/final-fantasy-usa-widescreen.zxpk"),
         options: &[
             // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
@@ -428,10 +437,11 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the people and vehicles.
         advanced: true,
-        // No room in the fixed bank for code that would unlock the extension: the free end of
-        // PRG bank 6 (from its page $30) is open in the window from power-on.
-        boot_window: Some((0x86, 0x30)),
-        boot_window_keeps_prg_ram: false,
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
+        // did).
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // The wait for the NMI: JMP to itself, the NMI returning to the wait's caller.
         idle_loop: Some((0xFEBB, 0xFEBD)),
     },
@@ -440,8 +450,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Metal Force",
         rom_name: "Metal Force (Korea) (Unl)",
         source_crc: 0xEC6D_910E,
-        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
-        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; the ROM keeps its size.
         // "Invincible" a component of its own (the level selector needs the hack's code: it stays
         // with the widescreen).
         bps: include_bytes!("../patches/metalforce-korea-widescreen.zxpk"),
@@ -474,8 +484,11 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        boot_window: None,
-        boot_window_keeps_prg_ram: false,
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
+        // did).
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // Everything runs in the NMI; the reset ends in a JMP to itself.
         idle_loop: Some((0xFFC3, 0xFFC5)),
     },
