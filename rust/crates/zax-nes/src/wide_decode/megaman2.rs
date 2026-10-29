@@ -75,8 +75,20 @@ impl MarginDecoder for MegaMan2 {
             }
         }
 
-        let first = i32::from(memory.ram(SECTION_FIRST)) * 32;
-        let end = (i32::from(memory.ram(SECTION_LAST)) + 1) * 32;
+        // The section's screens; right after a vertical transition the game updates them some
+        // frames after the camera (Wood Man's falls: 33 frames), the camera then outside them:
+        // until it does, the camera's screen alone (the screen it left lies above or below, not
+        // beside it).
+        let (mut first_screen, mut last_screen) = (
+            i32::from(memory.ram(SECTION_FIRST)),
+            i32::from(memory.ram(SECTION_LAST)),
+        );
+        let camera_screen = camera >> 8;
+        if !(first_screen..=last_screen).contains(&camera_screen) {
+            (first_screen, last_screen) = (camera_screen, camera_screen);
+        }
+        let first = first_screen * 32;
+        let end = (last_screen + 1) * 32;
         for column in columns {
             let world = first_column + column;
             if !(first..end).contains(&world) {
