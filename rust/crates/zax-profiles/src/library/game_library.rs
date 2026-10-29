@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::store::{GameLibraryFile, GameLibraryRecord, RomPathRecord};
 use crate::catalogue::{
-    ProfileCatalogue, ProfileOrigin, UserProfile, DEFAULT_THREE_DIMENSIONAL_TITLE,
+    shown_title, ProfileCatalogue, ProfileOrigin, UserProfile, DEFAULT_THREE_DIMENSIONAL_TITLE,
     TWO_DIMENSIONAL_MODE_TITLE,
 };
 use crate::format::{ProfileLog, NULL_PROFILE_LOG};
@@ -59,6 +59,17 @@ pub struct GameLibraryEntry {
 }
 
 impl GameLibraryEntry {
+    /// The title kept for the game, `title` as the library file has it: a template's title
+    /// the profile's file name does not say gives that name (`shown_title`), as it does when
+    /// the profile is read.
+    fn kept_title(&self, title: &str) -> String {
+        if self.source == GameProfileSource::User {
+            shown_title(title, &self.profile_path)
+        } else {
+            title.to_owned()
+        }
+    }
+
     fn new(
         id: &str,
         title: &str,
@@ -296,7 +307,7 @@ impl GameLibrary {
             entry.rom_path.clone_from(&record.rom_path);
             entry.last_played = record.last_time;
             if !record.title.is_empty() {
-                entry.title.clone_from(&record.title);
+                entry.title = entry.kept_title(&record.title);
             }
             applied += 1;
         }
@@ -348,7 +359,7 @@ impl GameLibrary {
                 continue;
             };
             if let Some(title) = record.title.as_deref().filter(|title| !title.is_empty()) {
-                title.clone_into(&mut entry.title);
+                entry.title = entry.kept_title(title);
             }
             entry.rom_path = record.rom_path.clone().unwrap_or_default();
             entry.last_played = record.last_played;

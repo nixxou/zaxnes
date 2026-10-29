@@ -14,6 +14,6 @@ pub use profile_catalogue::{
     DEMO_EDITION, FULL_EDITION, TWO_DIMENSIONAL_MODE_TITLE,
 };
 pub use user_folder::{
-    derived_id, import_messages, ProfileImportOutcome, ProfileImportResult, ProfileOrigin,
-    UserProfile, UserProfileFolder,
+    derived_id, import_messages, shown_title, ProfileImportOutcome, ProfileImportResult,
+    ProfileOrigin, UserProfile, UserProfileFolder,
 };
