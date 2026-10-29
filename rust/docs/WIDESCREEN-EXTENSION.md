@@ -16,8 +16,10 @@ A game takes part in one of two ways, which work together:
 
 Both come with a **built-in patch**: a BPS patch shipped inside the emulator and applied in memory
 to the ROM it was made for: the Zelda II (USA) widescreen hack
-([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)) and the Mega Man 2 (USA)
-one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), the Super Mario
+([`hacks/zelda2/WIDESCREEN-HACK.md`](hacks/zelda2/WIDESCREEN-HACK.md)), an advanced mode (owner
+request: the plain widescreen is its margin decoder alone, as for the other games), and the Mega
+Man 2 (USA) one ([`hacks/megaman2/WIDESCREEN-HACK.md`](hacks/megaman2/WIDESCREEN-HACK.md)), an
+advanced mode too, the Super Mario
 Bros. (World) one, its advanced mode ([`hacks/smb1/WIDESCREEN-HACK.md`](hacks/smb1/WIDESCREEN-HACK.md)),
 the Ninja Gaiden III (USA) one, its advanced mode too
 ([`hacks/ng3/WIDESCREEN-HACK.md`](hacks/ng3/WIDESCREEN-HACK.md)), the Super Mario Bros. 3
@@ -363,6 +365,14 @@ How the core uses it (`NesCore::run_frame`, then `Ppu2C02::decode_margins`):
    table `palette + 4` (`draw_list.rs`, REQ-E3D-560). A script that writes those tables as a
    custom palette sees them overwritten in such a frame. Nothing changes for a decoder without
    one.
+7. A decoder's `masking_sprites(memory)` (default `None`) names sprites the game puts in a
+   column of the centre only to hide the background under them (`MaskingSprites`: their x and
+   their sprite numbers), which the wide picture would show as a band across its middle: Zelda
+   II's world map hides x 248-255, the column it draws as it goes, under 15 sprites (2-16, tile
+   `$FF`). `decode_margins` drops their sprite records (`TileBuffer::retain_sprites`, both
+   halves of an 8 x 16 sprite: numbers `n` and `64 + n`) and redraws the centre from that column
+   to its right edge on the rows it decodes, as `redrawn_right_columns` does. For Zelda II in the
+   plain widescreen (no hack, which puts them out of sight itself).
 
 The CHR banks of the decoded rows: `Mapper::chr_peek_view` (default: `chr_view`) is the view
 `ppu_peek` reads, side effects aside. MMC3 has one (its peek is the default one through its bank

@@ -657,7 +657,8 @@ mod tests {
                 HackRow::Force,
                 HackRow::Widescreen,
                 HackRow::Ratio,
-                HackRow::Margin
+                HackRow::Margin,
+                HackRow::Advanced
             ]
             .as_slice(),
             hacks.rows().as_slice()
@@ -733,6 +734,7 @@ mod tests {
                 HackRow::Widescreen,
                 HackRow::Ratio,
                 HackRow::Margin,
+                HackRow::Advanced,
                 HackRow::PatchOption(0),
                 HackRow::PatchOption(1),
                 HackRow::PatchOption(2),
@@ -796,7 +798,7 @@ mod tests {
         assert_eq!(1, hacks.selected_index());
         assert_eq!(None, hacks.handle(PadButton::Up));
         assert_eq!(None, hacks.handle(PadButton::Up));
-        assert_eq!(5, hacks.selected_index(), "wraps round");
+        assert_eq!(6, hacks.selected_index(), "wraps round");
         assert_eq!(Some(HacksCommand::Close), hacks.handle(PadButton::B));
     }
 }

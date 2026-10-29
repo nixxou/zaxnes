@@ -126,6 +126,17 @@ pub struct DecodedTile {
     pub palette: u8,
 }
 
+/// Sprites a game puts at one place only to hide the background under them, which the wide
+/// picture would show in its middle (see [`MarginDecoder::masking_sprites`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MaskingSprites {
+    /// Their screen x: the left edge of the 8-pixel column of the centre they cover.
+    pub x: i16,
+    /// The first and last of their sprite numbers (OAM order, 0-63).
+    pub first: i32,
+    pub last: i32,
+}
+
 /// A margin decoder for one game.
 pub trait MarginDecoder: Sync {
     /// Decodes the tiles of `row` at screen columns `columns` (the margins of the frame) into
@@ -214,6 +225,16 @@ pub trait MarginDecoder: Sync {
     /// shows a neighbour of the screen in other colours than the screen's (Metroid, a room past
     /// one where the game changes the palette). `None`, as by default, when it has none.
     fn margin_palette(&self, _memory: &DecoderMemory<'_>) -> Option<[u8; 16]> {
+        None
+    }
+
+    /// Sprites the game puts in a column of the centre this frame only to hide the background
+    /// there (Zelda II's world map: 15 sprites at x 248 over the column it draws as it goes),
+    /// which the wide picture would show as a band across its middle. Their sprite records are
+    /// dropped, and the decoder redraws the centre from that column to its right edge on the rows
+    /// it decodes, as with [`MarginDecoder::redrawn_right_columns`]. `None`, as by default, when
+    /// there are none.
+    fn masking_sprites(&self, _memory: &DecoderMemory<'_>) -> Option<MaskingSprites> {
         None
     }
 }

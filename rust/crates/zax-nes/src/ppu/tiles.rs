@@ -16,7 +16,9 @@ use super::{
     palette_index, Cart, Ppu2C02, TileBuffer, SCREEN_WIDTH, SCREEN_WIDTH_I32, VISIBLE_SCANLINES,
 };
 use crate::cartridges::{Cartridge, ChrFetch};
-use crate::wide_decode::{BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
+use crate::wide_decode::{
+    BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder, MaskingSprites,
+};
 use crate::{nes_colors, NametableMirroring, TileRecord};
 
 /// The screen x where screen column `column` of a row with fine X `fine_x` starts (0 at least).
@@ -309,8 +311,11 @@ impl Ppu2C02 {
         // And the centre's first columns, for a decoder that redraws them.
         let left_columns = decoder.redrawn_left_columns().clamp(0, 31);
         let first_centre = i32::from(masked_column).max(left_columns);
-        // And the centre's last columns, for a decoder that redraws them.
-        let first_right = 32 - decoder.redrawn_right_columns().clamp(0, 31);
+        // And the centre's last columns, for a decoder that redraws them, from the column of
+        // sprites that only mask the background, if any, which go.
+        let masking = decoder.masking_sprites(memory);
+        let first_right = masking.map_or(32, |sprites| i32::from(sprites.x.clamp(8, 248)) / 8);
+        let first_right = first_right.min(32 - decoder.redrawn_right_columns().clamp(0, 31));
         let mut decoded_rows = [false; 31];
         let mut redrawn_from = [256i16; 30];
         let mut redrawn_to = [0i16; 30];
@@ -406,6 +411,20 @@ impl Ppu2C02 {
         for record in records {
             self.tiles.add(record);
         }
+        if let Some(sprites) = masking {
+            self.drop_masking_sprites(sprites);
+        }
+    }
+
+    /// Drops the sprite records of `sprites` ([`MarginDecoder::masking_sprites`]): both halves
+    /// of an 8 x 16 sprite (its number, and 64 more for the lower half); the second page (128 up)
+    /// is not the game's OAM.
+    fn drop_masking_sprites(&mut self, sprites: MaskingSprites) {
+        self.tiles.retain_sprites(|record| {
+            record.x != sprites.x
+                || record.index >= 128
+                || !(sprites.first..=sprites.last).contains(&(record.index % 64))
+        });
     }
 
     /// The rows of the vertical margin, for a decoder that can read rows the PPU did not draw
