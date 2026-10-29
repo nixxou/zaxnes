@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use imgui::Ui;
+use zax_settings::catalogue::SettingId;
 
 use super::ZaxUi;
 use crate::application::AppHost;
@@ -10,7 +11,7 @@ use crate::emulation::commands::{Command, CommandArgs};
 use crate::ui::commands::UiCommand;
 use crate::ui::handheld::game_options::{self, GameOptionsModel, GAME_ROWS};
 use crate::ui::handheld::hacks::HacksModel;
-use crate::ui::handheld::options;
+use crate::ui::handheld::{options, overscan};
 use crate::ui::menu_bar::{Menu, MenuBarModel, MenuItem, MenuItemKind, MenuWarning};
 use crate::ui::{keys, strings};
 
@@ -103,6 +104,10 @@ fn draw_game_options(ui: &Ui, host: &mut AppHost) -> (bool, bool) {
         };
         let global =
             GameOptionsModel::new(PathBuf::new(), String::new(), host.settings(), Vec::new());
+        if *row == options::OptionRow::Overscan {
+            changed |= draw_game_overscan(ui, &mut model, &global);
+            continue;
+        }
         let use_global = global.value_text(*row);
         if ui.menu_item_config(&use_global).selected(!own).build() {
             model.use_global(*row);
@@ -126,6 +131,46 @@ fn draw_game_options(ui: &Ui, host: &mut AppHost) -> (bool, bool) {
         host.set_game_options(&rom, model.options());
     }
     (true, hacks)
+}
+
+/// The game's overscan (Rust-only, owner request): a submenu per side, "Global" (its region's)
+/// or 0 to 32 pixels, and one for the mode, "Use Global" first. Returns whether a value changed.
+fn draw_game_overscan(ui: &Ui, model: &mut GameOptionsModel, global: &GameOptionsModel) -> bool {
+    let mut changed = false;
+    for (index, id) in overscan::GAME_ROWS.iter().enumerate() {
+        let _id = ui.push_id_usize(index);
+        let own = model.edited().has_game_value(*id);
+        let value = overscan::value_text(*id, model.edited());
+        let label = format!("{}: {value}", overscan::label(*id));
+        let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
+        let submenu = ui.begin_menu(&label);
+        drop(colour);
+        let Some(_submenu) = submenu else {
+            continue;
+        };
+        let current = model.edited().get(*id).as_int();
+        if *id == SettingId::VideoOverscanMode {
+            let global_value = global.edited().get(*id).as_int();
+            let use_global = strings::format(
+                &strings::get(keys::HANDHELD_USE_GLOBAL),
+                &[&overscan::value_text(*id, global.edited())],
+            );
+            if ui.menu_item_config(&use_global).selected(!own).build() {
+                model.set_setting(*id, global_value);
+                changed = true;
+            }
+            ui.separator();
+        }
+        for (value, text) in overscan::choices(*id) {
+            let _value = ui.push_id_int(value);
+            let selected = value == current && (own || *id != SettingId::VideoOverscanMode);
+            if ui.menu_item_config(&text).selected(selected).build() {
+                model.set_setting(*id, value);
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 impl ZaxUi {

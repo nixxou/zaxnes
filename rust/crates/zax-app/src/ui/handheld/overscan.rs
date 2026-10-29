@@ -137,6 +137,22 @@ pub fn step(id: SettingId, settings: &mut SettingsModel, step: i32) {
     }
 }
 
+/// The values of `id` with their text, in order (a menu lists them).
+#[must_use]
+pub fn choices(id: SettingId) -> Vec<(i32, String)> {
+    catalogue::descriptor(id)
+        .domain()
+        .options()
+        .unwrap_or_default()
+        .iter()
+        .map(|option| {
+            #[allow(clippy::cast_possible_truncation)] // -1 to 32.
+            let value = option.value as i32;
+            (value, text::label_of_option(&option.label))
+        })
+        .collect()
+}
+
 /// The label of the row `id`.
 #[must_use]
 pub fn label(id: SettingId) -> String {
