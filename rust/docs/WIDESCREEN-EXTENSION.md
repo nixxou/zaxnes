@@ -1021,10 +1021,11 @@ bank copied to the end, no CHR-ROM moved, nothing written in the game's free spa
   window), since the boot window unlocks the extension and the code only runs while it is
   unlocked. Their code is under 2 KiB: the boot window keeps `$6000`-`$7FFF` for the game
   (`boot_window_keeps_prg_ram`), as the hacks' own code did.
-* **Zelda II**: its hack, written in a fork of a disassembly, was moved out of the game
-  (`z2pack`: the code for `$5800`, its 36 hooks, and 11 of its own for the enemies past the
-  edges); its boot window keeps the game's PRG-RAM, the window showing 2 KiB. `tools/pack_from_roms.py` makes a pack of the bytes a same-size build
-  changes, for a hack not yet written as hooks (it made Zelda II's first pack).
+* **Zelda II**: its hack, written in a fork of a disassembly, was moved out of the game (`z2pack`:
+  the code for `$5800`, 35 of its 36 hooks (not the encounters' life), and 11 of its own for the
+  enemies past the edges); its boot window keeps the game's PRG-RAM, the window showing 2 KiB.
+  `tools/pack_from_roms.py` makes a pack of the bytes a same-size build changes, for a hack not yet
+  written as hooks (it made Zelda II's first pack).
 
 The testing aids are components of their own where their hook can do the hack's work in place
 of the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Castlevania and

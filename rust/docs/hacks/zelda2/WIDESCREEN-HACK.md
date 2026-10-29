@@ -50,13 +50,14 @@ where the target differs from the ROM, so either can be checked.
 `rust/crates/zax-nes/patches/zelda2-usa-widescreen.zxpk`, built by the `z2pack` repository
 (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the hack moved out of the game. Its code
 (this fork's `inc/wide_bank0.asm`, bank 0 part and window part together) is assembled for the
-extension's memory at `$5800` (2034 bytes, with the pack's own code of 5.5), which Zaxnes shows
+extension's memory at `$5800` (1953 bytes, with the pack's own code of 5.5), which Zaxnes shows
 from power-on (`$5008` = `$80`, page 0; 2 KiB, the PRG-RAM staying at `$6000`); the game's code is
-changed only by the 36 hooks of section 4 onwards, the same bytes but for the addresses of the
-hack's routines, and the pack's own 11 (5.5). Not in the pack: the power-on detour and the NMI's
-unlock and window reopening (Zaxnes keeps the window open; the NMI hook calls `wr_nmi` directly),
-and the base's differences with the ROM (1.1), where the game keeps its bytes. The segments of
-section 3 and the BPS patch describe this fork's build, kept to compare.
+changed only by the hooks of section 4 onwards (all but the encounters' life, 6.1: 35), the same
+bytes but for the addresses of the hack's routines, and the pack's own 11 (5.5). Not in the pack:
+the power-on detour and the NMI's unlock and window reopening (Zaxnes keeps the window open; the
+NMI hook calls `wr_nmi` directly), and the base's differences with the ROM (1.1), where the game
+keeps its bytes. The segments of section 3 and the BPS patch describe this fork's build, kept to
+compare.
 
 ## 2. What the hack does
 
@@ -335,9 +336,9 @@ ring; the scroll is `$FD` plus `$0747` bit 0. They live on screen x `-M .. 247 +
   encounter left of Link (table x below `$80`) starts M further left, right of Link M further
   right, above or below stays; `WV_T3 = M / 16` extra life. Life (`$831A`): `STA $050E,x` becomes
   `JSR wide_blob_life` (adds `WV_T3`).
-  In the hack pack (`z2pack`) the push is half the margin and the extra life `M / 32`: the game
-  puts an encounter 32 or 64 pixels beside Link, and pushing it out by the whole margin made it
-  much easier to avoid.
+  In the hack pack (`z2pack`) neither: an encounter spawns where the game puts it (32 or 64
+  pixels beside Link), with the game's life (`$831A` left alone); pushing it out made it much
+  easier to avoid.
 * Move and place (`$8359`, 20 bytes) become `JSR wide_blob_x / JMP $836D / NOP x14`: 9-bit move
   by `$0575,x`, screen x via `wide_blob_screen` (-152..359), OAM x of both halves (`$0283,y`, `$0287,y`) and their high
   bytes (`$5180 + y`, `$5184 + y`); past the margins, OAM y `$F8`.
