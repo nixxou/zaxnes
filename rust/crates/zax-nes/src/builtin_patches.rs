@@ -119,6 +119,15 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // memory, the hooks checked and applied by the core; the ROM keeps its size.
         bps: include_bytes!("../patches/zelda2-usa-widescreen.zxpk"),
         options: &[
+            // A testing aid, a component of its own (with or without the widescreen): no hit
+            // hurts Link (pits and lava still kill).
+            HackOption {
+                key: "invincible",
+                label: "Invincible",
+                label_fr: "Invincible",
+                bit: 1,
+                default: false,
+            },
             // Nearly a frame more of CPU time in the side view ($5006 = 255, ended once the game
             // waits for the next frame); off, the hack's 48 lines.
             HackOption {

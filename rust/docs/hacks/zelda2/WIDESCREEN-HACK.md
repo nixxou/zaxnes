@@ -84,6 +84,11 @@ there. The hack makes Zelda II such a ROM:
    which Zaxnes ends once the game waits for the next frame (`idle_loop`), so a frame that does
    not need it costs nothing; the 48 lines were short on the frames that stream a column with
    enemies past the edges (lag frames, the status bar then drawn with the playfield's scroll).
+   The pack also has the option "Invincible" (a testing aid, off by default), a component of its
+   own that Zaxnes applies with or without the widescreen: every hit on Link goes through
+   `bank7_Link_Hit_Routine` (`$E2EF`), whose two reads of his immunity timer (`LDA $0518` at
+   `$E2F1`, before a thief takes experience, and at `$E30F`, before the damage and the recoil)
+   become `LDA #$01`. Pits and lava still kill.
 5. **Robustness**: the extension is unlocked at power-on and again by the NMI if it finds it
    locked (a state made without the hack restored with it).
 

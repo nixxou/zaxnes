@@ -1027,9 +1027,9 @@ bank copied to the end, no CHR-ROM moved, nothing written in the game's free spa
   `tools/pack_from_roms.py` makes a pack of the bytes a same-size build changes, for a hack not yet
   written as hooks (it made Zelda II's first pack).
 
-The testing aids are components of their own where their hook can do the hack's work in place
-of the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Castlevania and
-Metal Force); the others (the level selectors, the invincibility of Super Mario Bros. 3,
+The testing aids are components of their own where their hook can do the hack's work in place of
+the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Zelda II, Castlevania
+and Metal Force); the others (the level selectors, the invincibility of Super Mario Bros. 3,
 Adventure Island, Blaster Master and Metroid) need the hack's code and stay in the widescreen
 component, with the advanced mode only.
 
