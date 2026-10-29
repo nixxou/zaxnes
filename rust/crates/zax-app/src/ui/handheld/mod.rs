@@ -298,27 +298,54 @@ impl HandheldUi {
         let global_on = global.get(SettingId::VideoWidescreen).as_int() != 0;
         for entry in &mut entries {
             entry.profile = self.profile_of(host, entry);
-            entry.crc = host.rom_data_crc(&entry.path);
-            entry.widescreen = entry
-                .crc
-                .is_some_and(zax_nes::builtin_patches::widescreen_capable);
-            entry.widescreen_other = (!entry.widescreen)
-                .then(|| hacks::other_rom_patch(entry.profile_title(), &entry.name))
-                .flatten()
-                .map(|patch| patch.name);
-            let own = host.game_options(&entry.path.to_string_lossy());
-            entry.widescreen_forced = entry.widescreen_other.is_some_and(|patch| {
-                own.iter()
-                    .any(|(id, value)| *id == SettingId::EmuForcedPatch && value.as_text() == patch)
-            });
+            Self::find_widescreen(host, entry);
             entry.widescreen_on = host
                 .game_options(&entry.path.to_string_lossy())
                 .iter()
                 .find(|(id, _)| *id == SettingId::VideoWidescreen)
                 .map_or(global_on, |(_, value)| value.as_int() != 0);
         }
-        host.save_rom_crcs();
         self.roms.replace(entries);
+    }
+
+    /// Whether a widescreen hack fits the game of `entry`, without reading its file (owner
+    /// request): what the study of the ROM found (its hacks screen, its start), or the CRC the
+    /// cache keeps, or else the patch its profile or its name says, not studied yet.
+    fn find_widescreen(host: &AppHost, entry: &mut RomEntry) {
+        use crate::persistence::hack_compat_cache::Certificate;
+        entry.crc = host.known_rom_crc(&entry.path);
+        let certificate = host.rom_certificate(&entry.path);
+        entry.widescreen = match &certificate {
+            Some(Certificate::Fits { .. }) => true,
+            Some(Certificate::Unfit) => false,
+            None => entry
+                .crc
+                .is_some_and(zax_nes::builtin_patches::widescreen_capable),
+        };
+        entry.widescreen_other = (!entry.widescreen)
+            .then(|| hacks::other_rom_patch(entry.profile_title(), &entry.name))
+            .flatten()
+            .map(|patch| patch.name);
+        entry.widescreen_unstudied =
+            certificate.is_none() && !entry.widescreen && entry.widescreen_other.is_some();
+        let own = host.game_options(&entry.path.to_string_lossy());
+        entry.widescreen_forced = entry.widescreen_other.is_some_and(|patch| {
+            own.iter()
+                .any(|(id, value)| *id == SettingId::EmuForcedPatch && value.as_text() == patch)
+        });
+    }
+
+    /// The list shows what the study of the ROM in `path` found, once its hacks screen opened
+    /// or its game started.
+    fn note_study(&mut self, path: &Path, host: &AppHost) {
+        if let Some(entry) = self
+            .roms
+            .entries_mut()
+            .iter_mut()
+            .find(|entry| entry.path == path)
+        {
+            Self::find_widescreen(host, entry);
+        }
     }
 
     /// The profile a game plays with: the one remembered for the file, the one that owns the
@@ -686,6 +713,7 @@ impl HandheldUi {
                     Some(id) => host.launch_rom_with_profile(&rom, &id),
                     None => host.enqueue(Command::OpenRom, CommandArgs::of_text(&rom)),
                 }
+                self.note_study(&path, host);
             }
             RomListCommand::ChooseProfile(path) => {
                 if let Some(entry) = self
@@ -709,6 +737,7 @@ impl HandheldUi {
                     .filter(|entry| !entry.widescreen && !entry.widescreen_forced)
                     .map(|entry| HacksModel::for_rom(host, &path, entry.profile_title()))
                     .filter(|hacks| !hacks.is_capable());
+                self.note_study(&path, host);
                 if let Some(hacks) = other {
                     let (Some(message), Some(other)) =
                         (hacks.other_rom_message(), hacks.other_rom_patch())
@@ -738,6 +767,7 @@ impl HandheldUi {
                 hacks.toggle_widescreen();
                 hacks.apply(host);
                 self.note_widescreen(&path, hacks.widescreen_on());
+                self.note_study(&path, host);
             }
             RomListCommand::Hacks(path) => {
                 let title = self.profile_title_of(&path);
@@ -760,6 +790,7 @@ impl HandheldUi {
     /// B goes back to `return_to`.
     fn open_hacks(&mut self, path: &Path, title: Option<&str>, return_to: Screen, host: &AppHost) {
         self.hacks = Some(HacksModel::for_rom(host, path, title));
+        self.note_study(path, host);
         self.hacks_return = return_to;
         self.screen = Screen::Hacks;
     }

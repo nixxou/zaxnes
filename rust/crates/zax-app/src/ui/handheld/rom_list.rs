@@ -19,6 +19,7 @@ pub struct ProfileMatch {
 
 /// One game of the ROM folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct RomEntry {
     /// The file.
     pub path: PathBuf,
@@ -37,6 +38,10 @@ pub struct RomEntry {
     pub widescreen_other: Option<&'static str>,
     /// Whether that patch is forced on the game all the same.
     pub widescreen_forced: bool,
+    /// Whether the ROM was not studied yet (its hacks screen never opened, the game never
+    /// started): `widescreen_other` is the patch its profile or its name says, which may fit it
+    /// or not ([W] in dark grey).
+    pub widescreen_unstudied: bool,
 }
 
 impl RomEntry {
@@ -55,6 +60,7 @@ impl RomEntry {
             widescreen_on: false,
             widescreen_other: None,
             widescreen_forced: false,
+            widescreen_unstudied: false,
         }
     }
 

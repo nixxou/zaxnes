@@ -132,6 +132,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             store.games_mut().note_rom_opened(&rom_path);
             store.schedule_write(self.elapsed);
         }
+        // The ROM is studied as it starts: the list of the ROMs shows whether a hack fits it.
+        self.certify_rom(Path::new(&rom_path), &rom.image);
         let mut job = LoadJob::new(LoadKind::Launch);
         job.game = Some(game);
         job.rom = Some(rom);

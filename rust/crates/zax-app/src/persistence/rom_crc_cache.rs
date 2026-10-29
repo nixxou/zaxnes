@@ -17,14 +17,14 @@ const VERSION: u32 = 2;
 
 /// What tells a file changed: its size and its modification time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Stamp {
-    size: u64,
-    seconds: u64,
-    nanos: u32,
+pub(crate) struct Stamp {
+    pub(crate) size: u64,
+    pub(crate) seconds: u64,
+    pub(crate) nanos: u32,
 }
 
 impl Stamp {
-    fn of(path: &Path) -> Option<Self> {
+    pub(crate) fn of(path: &Path) -> Option<Self> {
         let metadata = std::fs::metadata(path).ok()?;
         let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
         Some(Self {
@@ -91,6 +91,28 @@ impl RomCrcCache {
         self.entries.insert(key, (stamp, crc));
         self.dirty = true;
         Some(crc)
+    }
+
+    /// The CRC-32 kept for the ROM in `path` while the file is as it was then, without reading
+    /// the file: none when it was not seen as it is.
+    pub fn known(&mut self, path: &Path) -> Option<u32> {
+        self.load();
+        let stamp = Stamp::of(path)?;
+        let (kept, crc) = self.entries.get(&*path.to_string_lossy())?;
+        (*kept == stamp).then_some(*crc)
+    }
+
+    /// Keeps `crc` for the ROM in `path`, taken from an image read elsewhere.
+    pub fn remember(&mut self, path: &Path, crc: u32) {
+        self.load();
+        let Some(stamp) = Stamp::of(path) else {
+            return;
+        };
+        let key = path.to_string_lossy().into_owned();
+        if self.entries.get(&key) != Some(&(stamp, crc)) {
+            self.entries.insert(key, (stamp, crc));
+            self.dirty = true;
+        }
     }
 
     /// Writes the cache when it learned something since it was read or last written.

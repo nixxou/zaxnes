@@ -127,8 +127,11 @@ impl HacksModel {
     /// host knows them.
     #[must_use]
     pub fn for_rom(host: &AppHost, rom: &Path, title: Option<&str>) -> Self {
-        let crc = host.rom_data_crc(rom);
-        host.save_rom_crcs();
+        // The ROM is studied as the screen opens: the list of the ROMs shows what was found.
+        let image = crate::emulation::rom_file::read(rom)
+            .ok()
+            .map(|rom| rom.image);
+        let crc = image.as_deref().map(|image| host.certify_rom(rom, image));
         let mut hacks = Self::new(
             rom.to_path_buf(),
             crc,
@@ -139,7 +142,6 @@ impl HacksModel {
         if !hacks.capable {
             // Not by its CRC: by the signatures of a hack pack (another version of the game, a ROM
             // hack), the hooks finding the bytes they replace.
-            let image = std::fs::read(rom).ok();
             if let Some((patch, _)) = image.as_deref().and_then(builtin_patches::pack_for) {
                 hacks.capable = true;
                 hacks.patch = Some(patch);

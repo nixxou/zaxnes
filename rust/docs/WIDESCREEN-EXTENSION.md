@@ -72,10 +72,20 @@ global options window no longer shows them, nor `emu.builtin_patches`.
 | `video.widescreen_strict_edges` | bool | false | see 5.3 (global, Video options) |
 | `emu.builtin_patches` | bool | true | allows the built-in patches; a ROM is patched at load only when its `video.widescreen` is on too (see 7) |
 
-The ROM list knows the games a hack is made for from the CRC-32 of their data
-(`builtin_patches::widescreen_capable`: a built-in patch or a margin decoder), kept in
-`rom_crc.json` of the user data with each file's size and modification time
-(`persistence/rom_crc_cache.rs`, version 2). The data is the PRG-ROM and CHR-ROM within the sizes
+The ROM list reads no ROM file. A ROM is **studied** when its hacks screen opens
+(`HacksModel::for_rom`) and when it starts (`open_rom` of the load jobs), by `certify_rom` of the
+host: a widescreen hack fits it by the CRC-32 of its data (`builtin_patches::widescreen_capable`:
+a built-in patch or a margin decoder) or by the signatures of a hack pack (`pack_for`, see 7.1).
+What the study finds is kept in `hack_compat.json` of the user data
+(`persistence/hack_compat_cache.rs`): per file its size, its modification time, whether a hack
+fits, the patch and whether every part applies, under a fingerprint of the built-in patches (the
+CRC-32 of their names, ROM CRCs and bytes; another fingerprint drops the whole file, so a new
+version of the hacks studies every ROM again). The CRC goes to `rom_crc.json` with each file's
+size and modification time (`persistence/rom_crc_cache.rs`, version 2); the list takes it from
+there only (`known`), never from the file. Not studied yet, a ROM whose 3D profile title or file
+name says a game a patch is made for shows a dark grey [W]; studied, a coloured [W] (grey while
+off), or the red [W] below when no hack fits it. On the selected row the [W] sits on a dark pill,
+in its own colour. The data is the PRG-ROM and CHR-ROM within the sizes
 the iNES (or NES 2.0) header gives, without the header, a trainer or an overdump
 (`builtin_patches::rom_data`, `data_crc`): the CRC No-Intro gives, and what the BPS patches are
 made against.
