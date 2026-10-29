@@ -1072,12 +1072,32 @@ the code (assembled for the window at `$5800`), `u8` component count, then each 
 name, `u16` hook count and each hook (`u32` offset in the ROM data without iNES header, `u8`
 length, the original bytes, the new ones).
 
+Format 2 (`zax-nes/src/hack_pack.rs` gives the layout; built by the shared `tools/hackpack.py`),
+for a pack that should follow other dumps, translations and ROM hacks of its game: the region the
+pack is made for (NTSC, PAL or any) and the iNES mappers it runs on, then components made of
+**groups**. A place is a 16 KiB bank, counted from the end for the reference ROM's last (its
+fixed bank, which a ROM whose banks were added to moves to the end), and a CPU address: the
+offset is worked out from the PRG size of the ROM loaded (`Place::offset`). A group has hooks
+and **checks** (the game's code or data its hack code relies on, a routine it calls or jumps
+into: compared, not replaced) and the earlier groups it requires. `HackPack::resolve` judges a
+ROM (`RomTraits::of`: PRG size, mapper and region from its iNES header): the region and the
+mapper first (a header that does not say leaves it to the bytes), then each **component apart**
+(the widescreen and each aid never depend on each other, owner request): it applies when its
+first group finds every byte of its hooks and checks; each other group then applies on its own
+when it does too and the groups it requires apply. `AppliedPack` holds the components that apply
+(their hooks at their offsets) and the groups left out with why (`Refusal`: region, mapper,
+bytes, a required group). Format 1 reads as one group per component, any region and mapper.
+
 * **Code.** It never goes in the ROM: the extension's PRG window shows it (section 2), the boot
   window (`boot_window`, `$80`/0 for Mega Man 6) opening it at power-on. The ROM keeps its size.
-* **Hooks.** The pack fits a ROM when every hook of every component finds its original bytes
-  (`HackPack::matches`); a pack is applied whole or not at all. It is found by the ROM's CRC-32,
-  and failing that by its hooks (`builtin_patches::pack_for`, `patch_for`): another build of the
-  game whose hooked code is the same takes it too.
+* **Hooks.** A pack is resolved against the ROM (`HackPack::resolve`, above): each component,
+  and each group of a format 2 one, applies on its own when it finds its bytes. It is found by
+  the ROM's CRC-32, and failing that by its signatures (`builtin_patches::pack_for`,
+  `patch_for`: the first pack of which some component applies): another build of the game, a
+  translation or a ROM hack whose hooked code is the same takes it too. The widescreen runs when
+  its component applies (`apply_with`), with the groups of it that do; a group left out keeps
+  the game's own code there (Zelda II's world map then widens by its margin decoder alone). The
+  hacks screen tells the parts left out (`HacksModel::pack_note`, `hacks.pack_partial`).
 * **Components.** `"widescreen"` follows the advanced mode: `apply_with` writes its hooks into
   the patched image, like a BPS patch, and `PatchedRom::code` carries the code. Every other
   component is a **testing aid** named after its option's key (Mega Man 6: `"invincible"`). The

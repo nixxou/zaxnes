@@ -184,3 +184,22 @@ Still to do:
   the widescreen: the code would have to be in the window without the hack running;
 * the BPS files are still in `patches/`, no longer referenced: to remove once the packs are
   validated.
+
+Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md` 7.1):
+
+* the format: region, mappers, hooks placed by 16 KiB bank (the last counted from the end),
+  groups with the earlier groups they require, checks of the game's code the hack relies on;
+  each component judged apart, each group on its own; format 1 still read. The shared builder is
+  `tools/hackpack.py` (a hack's build imports it from `ZAXNES_TOOLS`); `zax-harness packs <dir>`
+  tells how the built-in packs apply to each ROM of a folder;
+* Zelda II converted (`z2pack`): NTSC, MMC1 or MMC3; "widescreen" in groups "core", "enemies",
+  "edge spawns" (needs "enemies") and "world map", and the aid "invincible". On the USA ROM the
+  same RAM as before over 12000 frames (margins 0 and 128). Against a set of 661 Zelda II ROMs
+  (dumps, translations, ROM hacks): 598 take the whole pack (585 did with format 1: the Korean
+  translation, 256 KiB with its fixed bank at the end, now finds its hooks), 27 all but the world
+  map (Winter Solstice, z22 and their translations change its code), 1 the aid only (a European
+  dump whose header says NTSC: its code differs but for the aid's bytes), 35 none (the European
+  versions, the MMC5 and mapper 19 conversions, Korean ROMs a 128 KiB hack was put over). Whether
+  each one runs right is phase 4's;
+* the region is the header's: a dump whose header says otherwise than its game passes on its
+  bytes alone (no database of the games' regions in the core).

@@ -917,23 +917,23 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
     let crc = crc32(data);
     let (patch, checked) = match PATCHES.iter().find(|patch| patch.source_crc == crc) {
         Some(patch) => (patch, true),
-        None => match pack_matching(data) {
+        None => match pack_matching(image, data) {
             Some((patch, _)) => (patch, true),
             None => (forced?, false),
         },
     };
     if crate::hack_pack::is_pack(patch.bps) {
-        // A hack pack: its hooks all checked, the widescreen's applied; the ROM keeps its size,
-        // the code goes to the extension's memory.
-        let pack = crate::hack_pack::HackPack::read(patch.bps).filter(|pack| pack.matches(data))?;
+        // A hack pack: the widescreen's hooks checked and applied (the groups of it that find
+        // their bytes); the ROM keeps its size, the code goes to the extension's memory.
+        let pack = crate::hack_pack::HackPack::read(patch.bps)?;
+        let applied = pack.resolve(data, &crate::hack_pack::RomTraits::of(image, data));
+        let widescreen = applied.component(crate::hack_pack::WIDESCREEN)?;
         let mut patched_image = image[..end].to_vec();
-        if let Some(widescreen) = pack.component(crate::hack_pack::WIDESCREEN) {
-            widescreen.apply(&mut patched_image[start..], true);
-        }
+        widescreen.apply(&mut patched_image[start..], true);
         return Some(PatchedRom {
             image: patched_image,
             name: patch.name,
-            code: pack.code,
+            code: applied.code,
         });
     }
     let patched = apply_bps_checked(patch.bps, data, checked).ok()?;
@@ -952,27 +952,34 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
     })
 }
 
-/// The built-in hack pack whose hooks all find their bytes in `data` (a ROM's PRG-ROM and
-/// CHR-ROM), whatever its CRC: another build of the game whose hooked code is the same.
-fn pack_matching(data: &[u8]) -> Option<(&'static BuiltinPatch, crate::hack_pack::HackPack)> {
+/// The built-in hack pack of which some component applies to `image` (its data `data`, PRG-ROM
+/// then CHR-ROM), whatever its CRC: another build of the game, or a ROM hack, whose hooked code
+/// (and the code the hack relies on) is the same, of the region and on a mapper the pack is made
+/// for (see [`crate::hack_pack`]).
+fn pack_matching(
+    image: &[u8],
+    data: &[u8],
+) -> Option<(&'static BuiltinPatch, crate::hack_pack::AppliedPack)> {
+    let traits = crate::hack_pack::RomTraits::of(image, data);
     PATCHES.iter().find_map(|patch| {
-        let pack = crate::hack_pack::HackPack::read(patch.bps)?;
-        pack.matches(data).then_some((patch, pack))
+        let applied = crate::hack_pack::HackPack::read(patch.bps)?.resolve(data, &traits);
+        applied.applies().then_some((patch, applied))
     })
 }
 
-/// The hack pack of the built-in patch made for `image`, when that patch is one and its hooks
-/// all find their bytes: what the core takes the pack's aids from (their options), with or
-/// without the advanced mode.
+/// The hack pack of the built-in patch made for `image`, as it applies to it (its components
+/// that find their bytes, each judged apart): what the core takes the pack's aids from (their
+/// options), with or without the advanced mode.
 #[must_use]
-pub fn pack_for(image: &[u8]) -> Option<(&'static BuiltinPatch, crate::hack_pack::HackPack)> {
+pub fn pack_for(image: &[u8]) -> Option<(&'static BuiltinPatch, crate::hack_pack::AppliedPack)> {
     let data = rom_data(image);
     match for_data_crc(crc32(data)) {
         Some(patch) => {
-            let pack = crate::hack_pack::HackPack::read(patch.bps)?;
-            pack.matches(data).then_some((patch, pack))
+            let applied = crate::hack_pack::HackPack::read(patch.bps)?
+                .resolve(data, &crate::hack_pack::RomTraits::of(image, data));
+            applied.applies().then_some((patch, applied))
         }
-        None => pack_matching(data),
+        None => pack_matching(image, data),
     }
 }
 
@@ -1000,7 +1007,8 @@ fn resize_prg(header: &mut [u8], before: usize, after: usize) {
 /// The built-in patch made for `image` (iNES header or not), if any.
 #[must_use]
 pub fn patch_for(image: &[u8]) -> Option<&'static BuiltinPatch> {
-    for_data_crc(data_crc(image)).or_else(|| pack_matching(rom_data(image)).map(|(patch, _)| patch))
+    for_data_crc(data_crc(image))
+        .or_else(|| pack_matching(image, rom_data(image)).map(|(patch, _)| patch))
 }
 
 /// The built-in patch called `name`, if any.

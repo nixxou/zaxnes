@@ -68,6 +68,10 @@ pub struct HacksModel {
     /// Whether that patch can be forced on this ROM: its data has the size the patch was made
     /// for.
     forceable: bool,
+    /// The parts of the hack that do not apply to this ROM, for a ROM taken by the signatures of
+    /// a hack pack (another version, a ROM hack): the groups of the widescreen by name, the aids
+    /// by their option's label.
+    pack_left_out: Vec<String>,
     selected: usize,
     /// The global values: the preferences, without the scripts' or a game's.
     global: SettingsModel,
@@ -104,6 +108,7 @@ impl HacksModel {
             crc,
             other_rom,
             forceable: true,
+            pack_left_out: Vec::new(),
             selected: 0,
             global,
             own,
@@ -128,10 +133,11 @@ impl HacksModel {
             // Not by its CRC: by the signatures of a hack pack (another version of the game, a ROM
             // hack), the hooks finding the bytes they replace.
             let image = std::fs::read(rom).ok();
-            if let Some((patch, _)) = image.as_deref().and_then(builtin_patches::pack_for) {
+            if let Some((patch, applied)) = image.as_deref().and_then(builtin_patches::pack_for) {
                 hacks.capable = true;
                 hacks.patch = Some(patch);
                 hacks.patch_options = host.patch_options(patch);
+                hacks.pack_left_out = Self::left_out(patch, &applied);
                 return hacks;
             }
             hacks.other_rom = other_rom_patch(title, &hacks.name);
@@ -153,6 +159,34 @@ impl HacksModel {
     pub fn forced(&self) -> bool {
         self.other_rom
             .is_some_and(|other| self.value(SettingId::EmuForcedPatch).as_text() == other.name)
+    }
+
+    /// The parts of `patch`'s hack pack that `applied` leaves out: a group of the widescreen by its
+    /// name, an aid by its option's label.
+    fn left_out(patch: &BuiltinPatch, applied: &hack_pack::AppliedPack) -> Vec<String> {
+        let mut parts: Vec<String> = Vec::new();
+        for &(component, group, _) in &applied.refused {
+            let part = if component == hack_pack::WIDESCREEN {
+                group.to_owned()
+            } else {
+                patch
+                    .options
+                    .iter()
+                    .find(|option| option.key == component)
+                    .map_or(component, |option| {
+                        if strings::language() == strings::UiLanguage::French {
+                            option.label_fr
+                        } else {
+                            option.label
+                        }
+                    })
+                    .to_owned()
+            };
+            if !parts.contains(&part) {
+                parts.push(part);
+            }
+        }
+        parts
     }
 
     /// The built-in patch made for another ROM of the game, when this one is such a version.
@@ -182,6 +216,18 @@ impl HacksModel {
                 self.set(SettingId::VideoWidescreen, SettingValue::Enum(RATIOS[0]));
             }
         }
+    }
+
+    /// The parts of the hack that do not apply to a ROM taken by the signatures of its hack pack,
+    /// when some do not.
+    #[must_use]
+    pub fn pack_note(&self) -> Option<String> {
+        (!self.pack_left_out.is_empty()).then(|| {
+            strings::format(
+                &strings::get(keys::HACKS_PACK_PARTIAL),
+                &[&self.pack_left_out.join(", ")],
+            )
+        })
     }
 
     /// Why the widescreen cannot be turned on, for a version of a game the hack is made for

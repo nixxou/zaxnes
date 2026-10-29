@@ -68,7 +68,7 @@ pub struct NesCore {
     /// their options either way.
     pack: Option<(
         &'static crate::builtin_patches::BuiltinPatch,
-        crate::hack_pack::HackPack,
+        crate::hack_pack::AppliedPack,
     )>,
     /// The options whose aid components are applied to the cartridge's PRG-ROM now.
     aids_on: u8,

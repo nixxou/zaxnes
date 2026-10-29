@@ -538,7 +538,11 @@ impl HandheldUi {
             }
         }
         // Another version of the game: what it is, under the rows that force the patch.
-        let other = hacks.other_rom_message().filter(|_| !rows.is_empty());
+        // Or, for a ROM taken by a hack pack's signatures, the parts of the hack left out.
+        let other = hacks
+            .other_rom_message()
+            .or_else(|| hacks.pack_note())
+            .filter(|_| !rows.is_empty());
         // The note on the patch takes the place of a row or two at the bottom.
         let visible = self.metrics.visible_rows(painter.size[1]);
         let visible = if other.is_some() {

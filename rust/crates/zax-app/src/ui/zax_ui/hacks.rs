@@ -44,6 +44,9 @@ impl ZaxUi {
                     }
                     None => ui.text_wrapped(strings::get(keys::HACKS_NONE)),
                 }
+            } else if let Some(note) = hacks.pack_note() {
+                // A ROM taken by a hack pack's signatures: the parts of the hack left out.
+                ui.text_wrapped(note);
             }
             for (index, row) in hacks.rows().into_iter().enumerate() {
                 let _id = ui.push_id_usize(index);
