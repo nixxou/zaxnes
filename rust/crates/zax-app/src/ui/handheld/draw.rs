@@ -34,7 +34,8 @@ const PROFILE: [f32; 4] = [0.45, 0.92, 0.55, 1.0];
 const PROFILE_ON_FOCUS: [f32; 4] = [0.02, 0.32, 0.08, 1.0];
 const BAR: [f32; 4] = [0.1, 0.1, 0.16, 1.0];
 const WARNING: [f32; 4] = [1.0, 0.45, 0.35, 1.0];
-const WARNING_ON_FOCUS: [f32; 4] = [0.6, 0.06, 0.02, 1.0];
+/// The [W] of a game whose ROM was not studied yet: its profile or its name says a hack.
+const UNSTUDIED: [f32; 4] = [0.42, 0.44, 0.5, 1.0];
 /// A value a game has of its own, and the hint of the list when the game has some.
 const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
 const GAME_OWN_ON_FOCUS: [f32; 4] = [0.0, 0.3, 0.4, 1.0];
@@ -199,15 +200,22 @@ impl Painter<'_> {
         };
         if let Some((badge, colour)) = badge {
             let badge_x = clip_to - self.width(badge);
-            let colour = if !selected {
-                colour
-            } else if colour == GAME_OWN {
-                GAME_OWN_ON_FOCUS
-            } else if colour == WARNING {
-                WARNING_ON_FOCUS
-            } else {
-                ON_FOCUS
-            };
+            // On the bright bar the badge sits on a dark pill, so it keeps its own colour.
+            if selected {
+                let pad = metrics.padding * 0.3;
+                self.list
+                    .add_rect(
+                        [badge_x - pad, y - pad * 0.5],
+                        [
+                            badge_x + self.width(badge) + pad,
+                            y + metrics.font + pad * 0.5,
+                        ],
+                        BAR,
+                    )
+                    .filled(true)
+                    .rounding(pad)
+                    .build();
+            }
             self.text(badge_x, y, colour, badge);
             clip_to = badge_x - metrics.padding;
         }
@@ -426,9 +434,11 @@ impl HandheldUi {
             if entry.widescreen || entry.widescreen_other.is_some() {
                 // Grey while off, coloured once on, red for a version of the game the hack is
                 // not made for (owner request).
-                // Orange once forced and on.
+                // Orange once forced and on; dark grey while the ROM was not studied.
                 let badge = if entry.widescreen_forced && entry.widescreen_on {
                     OTHER_MODE
+                } else if entry.widescreen_unstudied {
+                    UNSTUDIED
                 } else if entry.widescreen_other.is_some() {
                     WARNING
                 } else if entry.widescreen_on {
@@ -471,6 +481,8 @@ impl HandheldUi {
         {
             let colour = if entry.widescreen_forced && entry.widescreen_on {
                 OTHER_MODE
+            } else if entry.widescreen_unstudied {
+                TEXT
             } else if entry.widescreen_other.is_some() {
                 WARNING
             } else if entry.widescreen_on {

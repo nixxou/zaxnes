@@ -475,11 +475,14 @@ fn another_rom_folder_lists_its_games() {
 fn the_hacks_open_from_the_list_the_game_options_and_the_menu() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     assert!(!handheld.roms().entries()[0].widescreen);
-    assert!(handheld.roms().entries()[0].crc.is_some());
+    // The list reads no file: the ROM is studied when its hacks open.
+    assert!(handheld.roms().entries()[0].crc.is_none());
 
     tap(&mut harness, &mut handheld, PadButton::Start);
     assert_eq!(Screen::Hacks, handheld.screen());
     assert_eq!(0, handheld.hacks().unwrap().rows().len());
+    assert!(handheld.roms().entries()[0].crc.is_some());
+    assert!(!handheld.roms().entries()[0].widescreen);
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Home, handheld.screen());
 

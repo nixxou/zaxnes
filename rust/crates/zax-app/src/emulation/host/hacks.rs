@@ -4,13 +4,14 @@
 
 use std::path::Path;
 
-use zax_nes::builtin_patches::{BuiltinPatch, HackOption};
+use zax_nes::builtin_patches::{self, BuiltinPatch, HackOption};
 use zax_settings::catalogue::{self, SettingId};
 use zax_settings::values::SettingValue;
 
 use super::hack_options::{is_on, with_option};
 use super::{EmulationHost, GameView};
 use crate::emulation::game_catalog::GameCatalog;
+use crate::persistence::hack_compat_cache::Certificate;
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The CRC-32 of the data of the ROM in `path` (iNES header excluded), read from the file
@@ -20,12 +21,56 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.rom_crcs.borrow_mut().crc_of(path)
     }
 
+    /// The CRC-32 the cache keeps for the ROM in `path`, without reading the file: none when
+    /// the cache has not seen it as it is.
+    #[must_use]
+    pub fn known_rom_crc(&self, path: &Path) -> Option<u32> {
+        self.rom_crcs.borrow_mut().known(path)
+    }
+
     /// Writes the cache of the ROM CRCs when it learned something.
     pub fn save_rom_crcs(&self) {
         let written = self.rom_crcs.borrow_mut().save();
         if let Err(error) = written {
             self.log(&format!("the ROM CRC cache could not be written: {error}"));
         }
+    }
+
+    /// What the study of the ROM in `path` found, while the file is as it was then; none when
+    /// it was not studied as it is (the list of the ROMs reads no file).
+    #[must_use]
+    pub fn rom_certificate(&self, path: &Path) -> Option<Certificate> {
+        self.hack_compat.borrow_mut().certificate(path)
+    }
+
+    /// Studies the ROM in `path`, whose image is `image`: whether a widescreen hack fits it, by
+    /// the CRC of its data or by the signatures of a hack pack. What it finds is kept, with the
+    /// CRC, for the list of the ROMs; gives the CRC.
+    pub fn certify_rom(&self, path: &Path, image: &[u8]) -> u32 {
+        let crc = builtin_patches::data_crc(image);
+        self.rom_crcs.borrow_mut().remember(path, crc);
+        self.save_rom_crcs();
+        let certificate = if builtin_patches::widescreen_capable(crc) {
+            Certificate::Fits {
+                patch: builtin_patches::for_data_crc(crc).map(|patch| patch.name.to_owned()),
+                whole: true,
+            }
+        } else if let Some((patch, applied)) = builtin_patches::pack_for(image) {
+            Certificate::Fits {
+                patch: Some(patch.name.to_owned()),
+                whole: applied.refused.is_empty(),
+            }
+        } else {
+            Certificate::Unfit
+        };
+        let mut cache = self.hack_compat.borrow_mut();
+        cache.certify(path, certificate);
+        if let Err(error) = cache.save() {
+            self.log(&format!(
+                "the hack study cache could not be written: {error}"
+            ));
+        }
+        crc
     }
 
     /// Whether the built-in patch of a ROM applies when it loads: the patches are allowed and

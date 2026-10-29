@@ -217,6 +217,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
         std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
     /// The CRC of the data of the ROM files, which tells the games a hack is made for.
     rom_crcs: std::cell::RefCell<crate::persistence::rom_crc_cache::RomCrcCache>,
+    /// What the study of each ROM file found: whether a widescreen hack fits it.
+    hack_compat: std::cell::RefCell<crate::persistence::hack_compat_cache::HackCompatCache>,
     /// The Zapper.
     pub zapper: ZapperState,
     /// How far the frame clock catches up when the command line or the environment says so;
@@ -265,6 +267,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 paths
                     .root
                     .join(crate::persistence::rom_crc_cache::FILE_NAME)
+            }),
+        );
+        let hack_compat = crate::persistence::hack_compat_cache::HackCompatCache::new(
+            settings_store.is_some().then(|| {
+                paths
+                    .root
+                    .join(crate::persistence::hack_compat_cache::FILE_NAME)
             }),
         );
         let mut slots = SaveSlotIndex::load(&paths, now());
@@ -317,6 +326,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             slots,
             slot_patch_cache: std::cell::RefCell::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
+            hack_compat: std::cell::RefCell::new(hack_compat),
             zapper: ZapperState::new(),
             catch_up: None,
             defer_conversion: false,
