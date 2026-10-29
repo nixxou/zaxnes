@@ -1692,10 +1692,7 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         // view frames the rest. The picture's own size tells its margins: one 256 wide has none,
         // whatever margin the 3D conversion was asked for.
         let width = state.picture.len() / state.picture_height.max(1);
-        let in_force = overscan.in_force(
-            i32::try_from(width).map_or(0, |width| (width - 256) / 2),
-            state.picture_height == 240 || session.nes_picture_hides_overscan(),
-        );
+        let in_force = overscan.in_force(i32::try_from(width).map_or(0, |width| (width - 256) / 2));
         in_force.leave_out(&mut state.picture, state.picture_height);
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],

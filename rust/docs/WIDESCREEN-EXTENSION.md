@@ -774,7 +774,8 @@ both sections: their decoders draw nothing while the vertical scroll `$FA` is no
 decodes nothing off a screen's top). During such a scroll the game draws the rows coming in at the screen's
 top or bottom edge a piece at a time, which a television hid: the Mega Man decoders ask the
 screen's top and bottom 8 lines hidden with a vertical margin as without one
-(`MarginDecoder::hides_overscan`, see section 6).
+(`MarginDecoder::hides_overscan`, see section 6; the host now applies the overscan's top and
+bottom with any vertical margin, so it no longer reads it).
 The built-in patch (`MEGAMAN1_USA`, an advanced mode, `mm1wide`) draws the enemies in the margins.
 Its code is a 16 KiB PRG bank added to the game (bank 8 of 16, the fixed bank copied to bank 15,
 the one UxROM fixes), open in the window from power-on (`boot_window`). Options: "Invincible" (a
@@ -983,17 +984,14 @@ temporary.
   256 + margin, y up to `margin_y` past the top and bottom of the NES plane), cached per
   `(margin, margin_y)`. The overscan (`video.overscan_*`, `zax-app/src/overscan.rs`: per side, 0
   to 32 pixels, for the NTSC games and the PAL ones, a game's own sides over its region's; the
-  cut sides drawn black, or in Resize the rest enlarged to fill the 2D view, and the tiles half
-  or more in them left out of the 3D conversion) cuts the left and right sides of a picture
-  without a horizontal margin only; its top and bottom apply to a picture with a vertical margin only
-  when the frame's margin decoder asks for it (`MarginDecoder::hides_overscan`, false by default:
-  a vertical margin goes on past those lines; true for the Mega Man decoders, whose vertical margin
-  stays empty while the game draws rows there a piece at a time). The core latches it per frame
-  (`Ppu2C02::hides_overscan`, `NesCore::hides_overscan`), the session carries it with the
-  picture it keeps while the core is away (`GameSession::nes_picture_hides_overscan`), and
-  `hide_overscan_lines` blacks those lines and the vertical margin past them (the picture ends
-  where it does without a vertical margin: only the rows across the screen's edges the PPU drew
-  reached into it). Both backends (GL `gl/picture.rs`, wgpu `wgpu_backend/resources.rs`)
+  cut sides left out, transparent, or in Resize the rest enlarged to fill the 2D view, and the
+  tiles half or more in them left out of the 3D conversion) cuts the left and right sides of a
+  picture 256 wide only (a horizontal margin goes on past them, which cutting would undo); its top
+  and bottom always (owner request: set, they apply), with the vertical margin past them
+  (`Overscan::leave_out`: the picture ends where it does without a vertical margin). The host no
+  longer reads `MarginDecoder::hides_overscan` (still latched by the core, `Ppu2C02::hides_overscan`,
+  `NesCore::hides_overscan`), which asked this of a vertical margin for the Mega Man decoders
+  only. Both backends (GL `gl/picture.rs`, wgpu `wgpu_backend/resources.rs`)
   reallocate the picture texture when its size changes.
 
 ---
