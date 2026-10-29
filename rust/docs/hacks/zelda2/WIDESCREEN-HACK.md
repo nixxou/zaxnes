@@ -53,7 +53,9 @@ where the target differs from the ROM, so either can be checked.
 extension's execution zone at `$2000` (2078 bytes, with the pack's own code of 5.5), which Zaxnes
 shows to instruction fetches only from power-on (the zone fantôme; widescreen MMC5, `$500B` = `$C0`:
 the code reaches the extension's registers and RAM at `$3000`-`$3FFF`, `-D ZONE_DATA`;
-`WIDESCREEN-EXTENSION.md` section 2): it takes no address the game or a ROM hack uses, and holds no table it reads (the world map's
+`WIDESCREEN-EXTENSION.md` section 2; so the ROM hack moving the game to MMC5 takes a pack of its
+own, `zelda2-usa-mmc5-widescreen.zxpk`, built from it: the USA's code with its fixed bank at bank 7
+of 32): it takes no address the game or a ROM hack uses, and holds no table it reads (the world map's
 vertical step dispatch compares the states instead of the game's routine reading a table after its
 `JSR`); the game's code is changed only by the hooks of section 4 onwards (all but the encounters'
 life, 6.1: 35), the same bytes but for the addresses of the hack's routines, and the pack's own 11

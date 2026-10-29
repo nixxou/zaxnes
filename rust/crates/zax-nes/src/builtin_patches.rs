@@ -86,6 +86,8 @@ pub const ZELDA2_EUROPE: &str = "Zelda II (Europe) widescreen";
 pub const ZELDA2_EUROPE_REV1: &str = "Zelda II (Europe) (Rev 1) widescreen";
 /// Name of the Zelda II (Europe) (Rev 2) widescreen patch.
 pub const ZELDA2_EUROPE_REV2: &str = "Zelda II (Europe) (Rev 2) widescreen";
+/// Name of the Zelda II (USA) MMC5 patch's widescreen patch (advanced mode).
+pub const ZELDA2_USA_MMC5: &str = "Zelda II (USA) (MMC5) widescreen";
 
 /// The options of the European builds of the Zelda II hack (those of the USA one).
 const ZELDA2_OPTIONS: &[HackOption] = &[
@@ -155,7 +157,7 @@ pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 27] = [
+pub const PATCHES: [BuiltinPatch; 28] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -262,6 +264,26 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
         zone_data: true,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
+        idle_loop: Some((0xC010, 0xC01A)),
+    },
+    BuiltinPatch {
+        name: ZELDA2_USA_MMC5,
+        game: "Zelda II",
+        rom_name: "Zelda II - The Adventure of Link (USA) (MMC5 patch)",
+        source_crc: 0x7D3A_2AEF,
+        // The USA hack for the ROM hack that moves the game to MMC5 (512 KiB, its fixed bank left
+        // at bank 7): the USA's code and addresses, its places counted from the start (`z2pack`,
+        // `tools/build.py`); its translations take it by their signatures.
+        bps: include_bytes!("../patches/zelda2-usa-mmc5-widescreen.zxpk"),
+        options: ZELDA2_OPTIONS,
+        after_other_way_state: Some(zelda2_after_other_way_state),
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the MMC5 keeps $5000-$5FFF, the extension is at $3000-$3FFF.
+        zone_data: true,
         idle_loop: Some((0xC010, 0xC01A)),
     },
     BuiltinPatch {
