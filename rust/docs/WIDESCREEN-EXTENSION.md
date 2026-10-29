@@ -981,8 +981,11 @@ temporary.
   carries the wide picture and its rows. `interop::picture_size(len, height)` validates it,
   `interop::wide_quad_for(picture, height, cached)` builds the textured quad (x from -margin to
   256 + margin, y up to `margin_y` past the top and bottom of the NES plane), cached per
-  `(margin, margin_y)`. `video.hide_overscan` (the screen's top and bottom 8 lines drawn black,
-  and their tiles left out of the 3D conversion) applies to a picture with a vertical margin only
+  `(margin, margin_y)`. The overscan (`video.overscan_*`, `zax-app/src/overscan.rs`: per side, 0
+  to 32 pixels, for the NTSC games and the PAL ones, a game's own sides over its region's; the
+  cut sides drawn black, or in Resize the rest enlarged to fill the 2D view, and the tiles half
+  or more in them left out of the 3D conversion) cuts the left and right sides of a picture
+  without a horizontal margin only; its top and bottom apply to a picture with a vertical margin only
   when the frame's margin decoder asks for it (`MarginDecoder::hides_overscan`, false by default:
   a vertical margin goes on past those lines; true for the Mega Man decoders, whose vertical margin
   stays empty while the game draws rows there a piece at a time). The core latches it per frame

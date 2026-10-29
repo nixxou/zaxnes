@@ -193,6 +193,7 @@ pub const HANDHELD_OPTION_FRAME_CAP: &str = "handheld.option.frame_cap";
 pub const HANDHELD_OPTION_CAMERA: &str = "handheld.option.camera";
 pub const HANDHELD_OPTION_CONTROLS: &str = "handheld.option.controls";
 pub const HANDHELD_OPTION_REGION: &str = "handheld.option.region";
+pub const HANDHELD_OPTION_OVERSCAN: &str = "handheld.option.overscan";
 pub const HANDHELD_OPTION_CATCH_UP: &str = "handheld.option.catch_up";
 pub const HANDHELD_OPTION_PIPELINE: &str = "handheld.option.pipeline";
 pub const HANDHELD_REGION_AUTO: &str = "handheld.region.auto";
@@ -437,6 +438,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_OPTION_CAMERA,
     HANDHELD_OPTION_CONTROLS,
     HANDHELD_OPTION_REGION,
+    HANDHELD_OPTION_OVERSCAN,
     HANDHELD_OPTION_CATCH_UP,
     HANDHELD_OPTION_PIPELINE,
     HANDHELD_REGION_AUTO,

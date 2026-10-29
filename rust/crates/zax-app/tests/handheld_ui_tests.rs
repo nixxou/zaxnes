@@ -294,9 +294,24 @@ fn the_options_change_the_settings_of_the_host() {
     tap(&mut harness, &mut handheld, PadButton::Left);
     assert!((harness.host.settings().volume() - 0.9).abs() < 1.0e-6);
     for _ in 0..4 {
-        // render scale, shadows, palette, frame cap
+        // render scale, shadows, palette, overscan
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
+    // The overscan's own screen: the NTSC top first.
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(Screen::Overscan, handheld.screen());
+    tap(&mut harness, &mut handheld, PadButton::Right);
+    assert_eq!(
+        1,
+        harness
+            .host
+            .settings()
+            .get(SettingId::VideoOverscanNtscTop)
+            .as_int()
+    );
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Options, handheld.screen());
+    tap(&mut harness, &mut handheld, PadButton::Down); // frame cap
     tap(&mut harness, &mut handheld, PadButton::A);
     assert_eq!(2, harness.host.settings().vsync());
     tap(&mut harness, &mut handheld, PadButton::B);

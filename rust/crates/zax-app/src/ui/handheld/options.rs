@@ -31,6 +31,8 @@ pub enum OptionRow {
     Shadows,
     /// The table the NES colours are shown in (`video.nes_palette`).
     Palette,
+    /// The picture's edges cut (`video.overscan_*`, Rust-only): opens its own screen.
+    Overscan,
     /// The frame cap: 60 every refresh, 30 every other refresh of a 60 Hz screen.
     FrameCap,
     /// The frame counter.
@@ -54,12 +56,13 @@ pub enum OptionRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 15] = [
+pub const ROWS: [OptionRow; 16] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
     OptionRow::Palette,
+    OptionRow::Overscan,
     OptionRow::FrameCap,
     OptionRow::ShowFps,
     OptionRow::Profiler,
@@ -149,6 +152,8 @@ pub enum OptionsCommand {
     Close,
     /// Show the list of the gamepad bindings.
     OpenControls,
+    /// Show the overscan's screen.
+    OpenOverscan,
     /// Step the camera preset.
     StepCamera(i32),
 }
@@ -240,6 +245,7 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             settings.set_show_fps(!on);
         }
         OptionRow::Camera => return Some(OptionsCommand::StepCamera(step)),
+        OptionRow::Overscan => return Some(OptionsCommand::OpenOverscan),
         OptionRow::CatchUp => {
             let next = *cycled(&CATCH_UPS, &catch_up(settings), step);
             settings.set(SettingId::EmuCatchUp, SettingValue::Enum(next));
@@ -273,6 +279,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::RenderScale => strings::get(keys::HANDHELD_OPTION_RENDER_SCALE),
         OptionRow::Shadows => text::label_of(catalogue::descriptor(SettingId::RenderShadow)),
         OptionRow::Palette => text::label_of(catalogue::descriptor(SettingId::VideoNesPalette)),
+        OptionRow::Overscan => strings::get(keys::HANDHELD_OPTION_OVERSCAN),
         OptionRow::FrameCap => strings::get(keys::HANDHELD_OPTION_FRAME_CAP),
         OptionRow::ShowFps => text::label_of(catalogue::descriptor(SettingId::UiShowFps)),
         OptionRow::Profiler => text::label_of(catalogue::descriptor(SettingId::UiProfiler)),
@@ -310,6 +317,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             .unwrap_or_default()
             .get(usize::try_from(palette(settings)).unwrap_or(0))
             .map_or_else(String::new, |option| text::label_of_option(&option.label)),
+        OptionRow::Overscan => super::overscan::summary(settings),
         OptionRow::FrameCap => format!("{} fps", frame_cap(settings)),
         OptionRow::ShowFps => switch(settings.show_fps()),
         OptionRow::Profiler => switch(settings.get(SettingId::UiProfiler).as_bool()),

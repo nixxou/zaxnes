@@ -127,7 +127,19 @@ setting_ids! {
     VideoWidescreenStrictEdges => "video.widescreen_strict_edges",
     VideoWidescreenAdvanced => "video.widescreen_advanced",
     VideoRemoveSpriteLimit => "video.remove_sprite_limit",
-    VideoHideOverscan => "video.hide_overscan",
+    VideoOverscanNtscTop => "video.overscan_ntsc_top",
+    VideoOverscanNtscBottom => "video.overscan_ntsc_bottom",
+    VideoOverscanNtscLeft => "video.overscan_ntsc_left",
+    VideoOverscanNtscRight => "video.overscan_ntsc_right",
+    VideoOverscanPalTop => "video.overscan_pal_top",
+    VideoOverscanPalBottom => "video.overscan_pal_bottom",
+    VideoOverscanPalLeft => "video.overscan_pal_left",
+    VideoOverscanPalRight => "video.overscan_pal_right",
+    VideoOverscanTop => "video.overscan_top",
+    VideoOverscanBottom => "video.overscan_bottom",
+    VideoOverscanLeft => "video.overscan_left",
+    VideoOverscanRight => "video.overscan_right",
+    VideoOverscanMode => "video.overscan_mode",
     VideoNesPalette => "video.nes_palette",
     EmuBuiltinPatches => "emu.builtin_patches",
     EmuForcedPatch => "emu.forced_patch",
@@ -183,7 +195,7 @@ pub fn is_valid_key(key: &str) -> bool {
 
 /// Keys a former version persisted and this one no longer knows (AMD-031 §3). They are read
 /// without error and dropped on the next write, rather than kept as unknown keys.
-const RETIRED_KEYS: [&str; 1] = ["scene.tv_box"];
+const RETIRED_KEYS: [&str; 2] = ["scene.tv_box", "video.hide_overscan"];
 
 /// The catalogue, built once: the table in its order, with the lookups by key and Lua path.
 struct Catalogue {

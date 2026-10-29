@@ -1553,29 +1553,6 @@ fn widescreen_margin(choice: i32, extra: i32, size: (i32, i32)) -> (i32, i32) {
     )
 }
 
-/// The lines at the top and at the bottom of the NES picture an NTSC TV did not show.
-const OVERSCAN_LINES: usize = 8;
-
-/// Blacks out the [`OVERSCAN_LINES`] at the top and bottom of the screen in `picture` (colour
-/// indices, `height` rows, as wide and as tall as its widescreen margins make it, the screen's
-/// 240 lines in the middle), and the vertical margin past them: the picture ends where it does
-/// without a vertical margin. A taller picture is given to it only when its decoder asks
-/// (`GameSession::nes_picture_hides_overscan`): its vertical margin holds nothing of the decoder's,
-/// only the rows across the screen's edges the PPU drew, reaching into it.
-fn hide_overscan_lines(picture: &mut [u8], height: usize) {
-    const SCREEN: usize = 240;
-    const BLACK: u8 = 0x0F;
-    if height < SCREEN || picture.is_empty() {
-        return;
-    }
-    let width = picture.len() / height;
-    let top = (height - SCREEN) / 2;
-    let start = (top + OVERSCAN_LINES) * width;
-    let end = (top + SCREEN - OVERSCAN_LINES) * width;
-    picture[..start].fill(BLACK);
-    picture[end..].fill(BLACK);
-}
-
 fn update_scene(host: &mut AppHost, state: &mut RunState) {
     let two_dimensional = host.showing_two_dimensional();
     let (widescreen, widescreen_y) = widescreen_margin(
@@ -1589,7 +1566,6 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         .settings()
         .get(SettingId::VideoWidescreenStrictEdges)
         .as_bool();
-    let hide_overscan = host.settings().get(SettingId::VideoHideOverscan).as_int();
     // The colours the NES ones are shown in: the whole process's.
     zax_engine3d::palette::select_nes_palette(
         u8::try_from(host.settings().get(SettingId::VideoNesPalette).as_int()).unwrap_or(0),
@@ -1604,11 +1580,15 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         1 => SpriteLimit::Removed,
         _ => SpriteLimit::Smart,
     };
-    let mut hidden_overscan = false;
+    let mut overscan = crate::overscan::Overscan::default();
+    let ntsc = host
+        .session()
+        .is_some_and(|session| session.nominal_frame_rate() > 55);
+    if host.session().is_some() {
+        overscan = crate::overscan::Overscan::from_settings(host.settings(), ntsc);
+    }
     if let Some(session) = host.session_mut() {
-        let ntsc = session.nominal_frame_rate() > 55;
-        hidden_overscan = hide_overscan == 2 || (hide_overscan == 1 && ntsc);
-        session.set_hide_overscan(hidden_overscan);
+        session.set_overscan(overscan);
         session.core_mut().set_hack_options(hack_options);
         session.core_mut().set_sprite_limit(sprite_limit);
         session.core_mut().set_widescreen_margin(widescreen);
@@ -1644,10 +1624,23 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     scene.two_dimensional_mode = two_dimensional;
     if two_dimensional {
         state.picture_height = session.copy_nes_picture(&mut state.picture);
-        if hidden_overscan && (state.picture_height == 240 || session.nes_picture_hides_overscan())
-        {
-            hide_overscan_lines(&mut state.picture, state.picture_height);
-        }
+        // The cut sides blacked out; in Resize the head-on view leaves them out too.
+        let in_force = overscan.in_force(
+            session
+                .engine()
+                .published_frame()
+                .map_or(0, ConversionFrame::margin),
+            state.picture_height == 240 || session.nes_picture_hides_overscan(),
+        );
+        in_force.black_out(&mut state.picture, state.picture_height);
+        scene.picture_crop = zax_profiles::values::Vec4F::new(
+            in_force.crop()[0],
+            in_force.crop()[1],
+            in_force.crop()[2],
+            in_force.crop()[3],
+        );
+    } else {
+        scene.picture_crop = zax_profiles::values::Vec4F::new(0.0, 0.0, 0.0, 0.0);
     }
     // REQ-SCN-022: the renderer needs the followed shape to find the occluders.
     scene.followed_shape = session.followed_shape();
@@ -1790,36 +1783,6 @@ fn reveal_folder(folder: &Path) {
     });
     if let Err(error) = result {
         log(&format!("the data folder could not be opened: {error}"));
-    }
-}
-
-#[cfg(test)]
-mod overscan_tests {
-    use super::hide_overscan_lines;
-
-    #[test]
-    fn a_taller_picture_ends_where_the_screen_does_without_a_margin() {
-        // 2 columns, a vertical margin of 4 lines above and below the 240 of the screen.
-        let height = 248;
-        let mut picture = vec![1u8; 2 * height];
-        hide_overscan_lines(&mut picture, height);
-        let line = |y: usize| &picture[y * 2..y * 2 + 2];
-        assert_eq!(line(0), [0x0F, 0x0F], "the margin above");
-        assert_eq!(line(11), [0x0F, 0x0F], "the screen's eighth line");
-        assert_eq!(line(12), [1, 1], "its ninth");
-        assert_eq!(line(235), [1, 1], "its ninth from the bottom");
-        assert_eq!(line(236), [0x0F, 0x0F], "its eighth from the bottom");
-        assert_eq!(line(247), [0x0F, 0x0F], "the margin below");
-    }
-
-    #[test]
-    fn a_plain_picture_loses_its_top_and_bottom_8_lines() {
-        let mut picture = vec![1u8; 240];
-        hide_overscan_lines(&mut picture, 240);
-        assert!(picture[..8].iter().all(|&colour| colour == 0x0F));
-        assert_eq!(picture[8], 1);
-        assert_eq!(picture[231], 1);
-        assert!(picture[232..].iter().all(|&colour| colour == 0x0F));
     }
 }
 
