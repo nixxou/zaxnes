@@ -291,6 +291,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         source_crc: 0x0AC1_AA8F,
         // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
         // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // "Invincible" a component of its own (the level selector needs the hack's code: it stays
+        // with the widescreen).
         bps: include_bytes!("../patches/castlevania-usa-widescreen.zxpk"),
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
@@ -310,6 +312,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         source_crc: 0xB668_C7FC,
         // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
         // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // "Invincible" a component of its own (the level selector needs the hack's code: it stays
+        // with the widescreen).
         bps: include_bytes!("../patches/castlevania-usa-rev1-widescreen.zxpk"),
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
@@ -431,6 +435,8 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         source_crc: 0xEC6D_910E,
         // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
         // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        // "Invincible" a component of its own (the level selector needs the hack's code: it stays
+        // with the widescreen).
         bps: include_bytes!("../patches/metalforce-korea-widescreen.zxpk"),
         options: &[
             // Testing aids: left / right on the mission screen pick the mission; no damage (pits
