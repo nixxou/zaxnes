@@ -870,10 +870,12 @@ Usage: python -I tools/build.py <Mega Man 2 (USA).nes> [out.bps]
 2. Writes the hooks into the fixed bank, each checked against the bytes it replaces.
 3. Writes build/mm2wide.nes and, if asked, the BPS patch (data without iNES header).
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: src/wide.s assembled with PACK for
-$5800 of the extension's memory (2 KiB at most), which Zaxnes shows in the PRG window from
-power-on, the extension unlocked; the hooks, but for the reset hook, each with the game's bytes it
-replaces, checked by Zaxnes before it applies them. Nothing goes in the game's free space and the
+With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1;
+src/wide.s assembled with PACK for $5800 of the extension's memory (2 KiB at most), which Zaxnes
+shows in the PRG window from power-on, the extension unlocked; the hooks, but for the reset hook,
+each a bank and a CPU address with the game's bytes it replaces, checked by Zaxnes before it
+applies them, in one group of the widescreen ("core", Base). Nothing goes in the game's free space and the
 ROM keeps its size. The invincibility hooks a component of their own, "invincible", whose bytes do what the hack's routines do when the
 option is on: Zaxnes applies it while that option is on, with or without the widescreen.
 """
@@ -892,6 +894,7 @@ CODE_START = 0xF300
 CODE_END = 0xF900
 PACK_START = 0x5800             # the pack's code: the extension's PRG window
 PACK_SIZE = 0x800
+PRG_SIZE = 16 * BANK_SIZE
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -1023,25 +1026,27 @@ INVINCIBLE = {
 
 
 def pack(data, out):
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
     code, sym = assemble(pack=True)
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
     fixed, banked = hooks(sym, pack=True)
-    widescreen = []
-    invincible = []
-    for number, address, original, new in [(BANK, a, o, n) for a, o, n in fixed] + banked:
-        offset = number * BANK_SIZE + address - (FIXED if number == BANK else 0x8000)
-        assert data[offset:offset + len(original)] == original,             f'bank {number} ${address:04X}: not the expected bytes'
-        if (number, address) in INVINCIBLE:
-            invincible.append((offset, original, INVINCIBLE[(number, address)]))
-        else:
-            widescreen.append((offset, original, bytes(new)))
-    assert len(invincible) == len(INVINCIBLE)
     used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
-    result = make_pack.make('Mega Man 2 (USA) widescreen', code[:used],
-                            [('widescreen', widescreen), ('invincible', invincible)])
+    pack = hackpack.Pack('Mega Man 2 (USA) widescreen', code[:used], region='ntsc', mappers=(1,))
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    aid = pack.component('invincible').group('invincible', label='Invincible',
+                                             label_fr='Invincible')
+    for number, address, original, new in [(BANK, a, o, n) for a, o, n in fixed] + banked:
+        if (number, address) in INVINCIBLE:
+            aid.hook(number, address, original, INVINCIBLE[(number, address)])
+        else:
+            core.hook(number, address, original, new)
+    assert len(aid.hooks) == len(INVINCIBLE)
+    result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
           f'pack CRC {zlib.crc32(result):08X}')
 
 
