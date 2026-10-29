@@ -335,6 +335,9 @@ ring; the scroll is `$FD` plus `$0747` bit 0. They live on screen x `-M .. 247 +
   encounter left of Link (table x below `$80`) starts M further left, right of Link M further
   right, above or below stays; `WV_T3 = M / 16` extra life. Life (`$831A`): `STA $050E,x` becomes
   `JSR wide_blob_life` (adds `WV_T3`).
+  In the hack pack (`z2pack`) the push is half the margin and the extra life `M / 32`: the game
+  puts an encounter 32 or 64 pixels beside Link, and pushing it out by the whole margin made it
+  much easier to avoid.
 * Move and place (`$8359`, 20 bytes) become `JSR wide_blob_x / JMP $836D / NOP x14`: 9-bit move
   by `$0575,x`, screen x via `wide_blob_screen` (-152..359), OAM x of both halves (`$0283,y`, `$0287,y`) and their high
   bytes (`$5180 + y`, `$5184 + y`); past the margins, OAM y `$F8`.
