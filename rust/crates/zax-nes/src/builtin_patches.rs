@@ -212,7 +212,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Ninja Gaiden III",
         rom_name: "Ninja Gaiden III - The Ancient Ship of Doom (USA)",
         source_crc: 0x902E_3168,
-        bps: include_bytes!("../patches/ng3-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
+        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        bps: include_bytes!("../patches/ng3-usa-widescreen.zxpk"),
         options: &[
             HackOption {
                 key: "enemies_in_margins",
@@ -243,7 +245,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Super Mario Bros. 3",
         rom_name: "Super Mario Bros. 3 (USA) (Rev 1)",
         source_crc: 0x2E63_01ED,
-        bps: include_bytes!("../patches/smb3-usa-rev1-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
+        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        bps: include_bytes!("../patches/smb3-usa-rev1-widescreen.zxpk"),
         options: &[
             // Testing aids: B on the 1P/2P menu opens the game's own debug menu (Up/Down: the
             // world); Mario never hurt (pits still kill).
@@ -285,7 +289,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Castlevania",
         rom_name: "Castlevania (USA)",
         source_crc: 0x0AC1_AA8F,
-        bps: include_bytes!("../patches/castlevania-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
+        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        bps: include_bytes!("../patches/castlevania-usa-widescreen.zxpk"),
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -302,7 +308,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Castlevania",
         rom_name: "Castlevania (USA) (Rev 1)",
         source_crc: 0xB668_C7FC,
-        bps: include_bytes!("../patches/castlevania-usa-rev1-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
+        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        bps: include_bytes!("../patches/castlevania-usa-rev1-widescreen.zxpk"),
         options: CASTLEVANIA_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
@@ -393,7 +401,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Final Fantasy",
         rom_name: "Final Fantasy (USA)",
         source_crc: 0xCEBD_2A31,
-        bps: include_bytes!("../patches/final-fantasy-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
+        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        bps: include_bytes!("../patches/final-fantasy-usa-widescreen.zxpk"),
         options: &[
             // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
             HackOption {
@@ -419,7 +429,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Metal Force",
         rom_name: "Metal Force (Korea) (Unl)",
         source_crc: 0xEC6D_910E,
-        bps: include_bytes!("../patches/metalforce-korea-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the hack's bytes (its hooks, its code in the
+        // game's free space) as hooks, checked and applied by the core; the ROM keeps its size.
+        bps: include_bytes!("../patches/metalforce-korea-widescreen.zxpk"),
         options: &[
             // Testing aids: left / right on the mission screen pick the mission; no damage (pits
             // still kill).
