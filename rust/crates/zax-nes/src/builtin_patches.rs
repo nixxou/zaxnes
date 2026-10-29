@@ -19,11 +19,11 @@
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`blastermasterwide`, `tools/build.py`) |
 //! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the fixed bank and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`metroidwide`, `tools/build.py`) |
-//! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end; one source for both builds (`mm4wide`, `tools/build.py`) |
-//! | Mega Man 5 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm5wide`, `tools/build.py`) |
+//! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one pack for both builds (`mm4wide`, `tools/build.py --pack`) |
+//! | Mega Man 5 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm5wide`, `tools/build.py --pack`) |
 //! | Mega Man 6 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
-//! | Mega Man 3 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed banks copied to the end (`mm3wide`, `tools/build.py`) |
-//! | Mega Man (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`mm1wide`, `tools/build.py`) |
+//! | Mega Man 3 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm3wide`, `tools/build.py --pack`) |
+//! | Mega Man (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm1wide`, `tools/build.py --pack`) |
 
 /// One built-in patch.
 #[derive(Debug, Clone, Copy)]
@@ -532,7 +532,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man",
         rom_name: "Mega Man (USA)",
         source_crc: 0x6EE4_BB0A,
-        bps: include_bytes!("../patches/megaman1-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; "Invincible" a component of its own.
+        bps: include_bytes!("../patches/megaman1-usa-widescreen.zxpk"),
         options: &[
             // A testing aid: no damage (pits and spikes still kill).
             HackOption {
@@ -554,9 +556,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (8)
-        // is open in the window from power-on.
-        boot_window: Some((0x88, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The frame's wait: LDA $1F / BEQ, until the NMI sets it.
         idle_loop: Some((0xC02B, 0xC02E)),
@@ -566,7 +568,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man 3",
         rom_name: "Mega Man 3 (USA)",
         source_crc: 0x603A_AA57,
-        bps: include_bytes!("../patches/megaman3-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; "Invincible" a component of its own.
+        bps: include_bytes!("../patches/megaman3-usa-widescreen.zxpk"),
         options: &[
             // A testing aid: no damage from an enemy's touch (pits and spikes still kill).
             HackOption {
@@ -588,9 +592,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (16
-        // in 16 KiB units) is open in the window from power-on.
-        boot_window: Some((0x90, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEAD, 0xFEC2)),
@@ -600,14 +604,16 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man 4",
         rom_name: "Mega Man 4 (USA)",
         source_crc: 0x2BC6_7AA8,
-        bps: include_bytes!("../patches/megaman4-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; "Invincible" a component of its own.
+        bps: include_bytes!("../patches/megaman4-usa-widescreen.zxpk"),
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (32
-        // in 16 KiB units) is open in the window from power-on.
-        boot_window: Some((0xA0, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEA8, 0xFEBC)),
@@ -617,14 +623,17 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man 4",
         rom_name: "Mega Man 4 (USA) (Rev 1)",
         source_crc: 0x18A2_E74F,
-        bps: include_bytes!("../patches/megaman4-usa-rev1-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; "Invincible" a component of its own.
+        // The pack of Mega Man 4 (USA): its hooks find their bytes in this revision too.
+        bps: include_bytes!("../patches/megaman4-usa-widescreen.zxpk"),
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (32
-        // in 16 KiB units) is open in the window from power-on.
-        boot_window: Some((0xA0, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEA8, 0xFEBC)),
@@ -634,14 +643,16 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man 5",
         rom_name: "Mega Man 5 (USA)",
         source_crc: 0x3EDC_F7E8,
-        bps: include_bytes!("../patches/megaman5-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; "Invincible" a component of its own.
+        bps: include_bytes!("../patches/megaman5-usa-widescreen.zxpk"),
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (16
-        // in 16 KiB units) is open in the window from power-on.
-        boot_window: Some((0x90, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEAE, 0xFEC3)),
