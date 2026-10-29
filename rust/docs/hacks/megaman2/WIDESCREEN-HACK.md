@@ -43,6 +43,13 @@ fixed bank's code 3 bytes earlier from `$C700` and `$22` from `$E9C0`, `JAPAN_MO
 the core and the enemies, Mega Man 2 DA the core, trainers lose the aid), 6 none (Rockman CX, a bad
 dump).
 
+In a vertical transition the game moves the objects' screen (`$0440`) to the next section's
+before the camera's (`$20`), and draws with the low byte only (`$CE7D`): Mega Man showed a screen to
+the right, in the margin. Mega Man being always on the screen, `wide_clear_oam` (each frame's first
+sprite routine) sets `WV_XCORR` to the screen he is drawn away from (1 or -1, only ever with the
+camera on a screen edge: a transition), and `wide_draw_origin` draws every object of the frame back
+by it.
+
 The code goes to the extension's execution zone instead of the game's free space described here
 (the source assembled for `$2000`, without the reset hook and the NMI's unlock: Zaxnes unlocks the
 extension and shows the code to instruction fetches only from power-on, its data at `$3000`-`$3FFF`
@@ -245,6 +252,7 @@ WV_SH           = EXT + $206
 WV_T0           = EXT + $207
 WV_T1           = EXT + $208
 WV_PAGE         = EXT + $209         ; bit 7: the sprites being placed go to the second page
+WV_XCORR        = EXT + $20B         ; screens the objects are drawn back by: 1 in a vertical transition
 WV_MOBJ         = EXT + $20A         ; margin enemies spawn and live in: WV_M, or 0 with the option off
 WV_DORMANT      = EXT + $220         ; + slot ($10-$1F): non-zero while an enemy that spawned out of
                                 ; sight has not come onto the original screen yet
@@ -254,6 +262,7 @@ CAM_LO          = $1F           ; camera x, pixel
 CAM_HI          = $20           ; camera x, screen
 SECTION_FIRST   = $14           ; first screen of the section
 SECTION_LAST    = $15           ; last screen of the section
+OBJ_FLAGS       = $0420         ; object flags: bit 7 active
 OBJ_X_HI        = $0440         ; object x, screen
 OBJ_X_LO        = $0460         ; object x, pixel
 
@@ -522,6 +531,10 @@ wide_hit_flags:
 ; LDA $0440,X / SBC $20): $00 = screen x low byte, WV_S = the 16-bit screen x.
 wide_draw_origin:
     JSR      wide_screen_x
+    SEC                                 ; drawn back by WV_XCORR screens (a vertical transition)
+    LDA      WV_SH
+    SBC      WV_XCORR
+    STA      WV_SH
     LDA      WV_SL
     STA      $00
     RTS
@@ -628,6 +641,22 @@ wide_spawn_window:
 ; 0 (they are kept from one page to the next: the page and its high bytes are rebuilt together),
 ; back to the first page.
 wide_clear_oam:
+    ; Mega Man (slot 0) is always on the screen: drawn a screen away from the camera's, a vertical
+    ; transition has moved the objects' screens ahead of it (the game draws with the low byte
+    ; only, $CE7D): this frame's objects are drawn back by that screen.
+    LDX      #$00
+    STX      WV_XCORR
+    LDA      OBJ_FLAGS
+    BPL      @set
+    JSR      wide_screen_x
+    LDA      WV_SH
+    CMP      #$01
+    BEQ      @transition
+    CMP      #$FF
+    BNE      @set
+@transition:
+    STA      WV_XCORR
+@set:
     LDX      #$00
 @hide:
     LDA      #$00
