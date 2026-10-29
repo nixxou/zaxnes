@@ -269,7 +269,10 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
 #[must_use]
 pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
     match patch {
-        crate::builtin_patches::ZELDA2_USA => Some(&zelda2::Zelda2),
+        crate::builtin_patches::ZELDA2_USA
+        | crate::builtin_patches::ZELDA2_EUROPE
+        | crate::builtin_patches::ZELDA2_EUROPE_REV1
+        | crate::builtin_patches::ZELDA2_EUROPE_REV2 => Some(&zelda2::Zelda2),
         crate::builtin_patches::MEGAMAN2_USA => Some(&megaman2::MegaMan2),
         crate::builtin_patches::SMB1_WORLD => Some(&smb1::SuperMarioBros),
         crate::builtin_patches::ADVENTURE_ISLAND_USA => Some(&adventure_island::AdventureIsland),

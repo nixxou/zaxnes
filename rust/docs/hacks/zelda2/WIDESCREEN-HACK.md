@@ -61,6 +61,13 @@ the window open; the NMI hook calls `wr_nmi` directly), and the base's differenc
 (1.1), where the game keeps its bytes. The segments of section 3 and the BPS patch describe this
 fork's build, kept to compare.
 
+**European builds.** The same source builds PAL packs for Zelda II (Europe) and its Rev 1 (one
+pack) and for its Rev 2 (`z2pack`, `tools/build.py`: the game's moved addresses per build in
+`BUILDS` and `src/game.inc`, each hook checked byte by byte), the built-in patches `ZELDA2_EUROPE`,
+`ZELDA2_EUROPE_REV1` and `ZELDA2_EUROPE_REV2`. The status bar split is the game's own in both
+builds: the European one waits for sprite 0 to clear first, then makes the same writes the hook
+replaces.
+
 ## 2. What the hack does
 
 The NES draws 256 pixels across. Zaxnes can show more: a ROM that unlocks the widescreen
