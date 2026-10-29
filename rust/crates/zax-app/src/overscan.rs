@@ -67,14 +67,15 @@ impl Overscan {
         self.top == 0 && self.bottom == 0 && self.left == 0 && self.right == 0
     }
 
-    /// The sides cut for a picture with a widescreen `margin` on each side, its top and bottom
-    /// only when `vertical` (no vertical margin, or the game's decoder asks): a margin goes on
-    /// past the screen's edges, which then stay.
+    /// The sides cut for a picture with a widescreen `margin` on each side: the left and right
+    /// ones only without a margin, which goes on past the screen's edges (cutting them would
+    /// undo the widescreen). The top and bottom ones always (owner request: set, they apply),
+    /// the vertical margin past them going with them.
     #[must_use]
-    pub const fn in_force(self, margin: i32, vertical: bool) -> Self {
+    pub const fn in_force(self, margin: i32) -> Self {
         Self {
-            top: if vertical { self.top } else { 0 },
-            bottom: if vertical { self.bottom } else { 0 },
+            top: self.top,
+            bottom: self.bottom,
             left: if margin == 0 { self.left } else { 0 },
             right: if margin == 0 { self.right } else { 0 },
             resize: self.resize,
@@ -213,8 +214,8 @@ mod tests {
     #[test]
     fn a_margin_keeps_the_sides_it_goes_on_past() {
         let overscan = sides(8, 8, 8, 8);
-        assert_eq!(sides(8, 8, 0, 0), overscan.in_force(64, true));
-        assert_eq!(sides(0, 0, 8, 8), overscan.in_force(0, false));
+        assert_eq!(sides(8, 8, 0, 0), overscan.in_force(64));
+        assert_eq!(overscan, overscan.in_force(0));
     }
 
     #[test]
