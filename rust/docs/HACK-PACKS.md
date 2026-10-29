@@ -234,6 +234,10 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
 * the signatures, game by game (checks of the game's code the hack's code relies on, groups a ROM
   hack may lack): Castlevania first, with a European variant (PAL, and the same pack as NTSC for
   the ROMs of that code whose header says NTSC) and a Japanese one (Akumajou Dracula); the VS.
-  System is left aside (no mapper 99, VS PPUs or coins in the core); `docs/hacks/castlevania/WIDESCREEN-HACK.md`
+  System is left aside (no mapper 99, VS PPUs or coins in the core);
+  a table of the dumps whose header gives the wrong TV region (`rom::region_exception`, by data
+  CRC-32: so far Castlevania (Europe) (Virtual Console), PAL) stands for the header at load (the
+  automatic TV mode starts them right, a region the player chose stays) and in the packs' region
+  gate; `docs/hacks/castlevania/WIDESCREEN-HACK.md`
   gives its groups, checks and the ROM set it was tried against. `pack_for` now falls back to the
   signatures when the pack of the ROM's CRC is refused by its gate (another region).

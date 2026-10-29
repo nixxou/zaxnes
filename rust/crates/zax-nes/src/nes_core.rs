@@ -289,10 +289,13 @@ impl NesCore {
             }
         };
 
-        let region = cartridge.rom().announced_region();
+        let crc = crate::builtin_patches::data_crc(image);
+        // The header's region, unless the dump is known to be of another one.
+        let region =
+            crate::rom::region_exception(crc).unwrap_or_else(|| cartridge.rom().announced_region());
         self.battery_ram_imported = false;
         self.builtin_patch = patched.as_ref().map(|patched| patched.name);
-        self.rom_crc = Some(crate::builtin_patches::data_crc(image));
+        self.rom_crc = Some(crc);
         // The patch's options start as they are by default; a host sets the player's choice.
         let options = self
             .builtin_patch
