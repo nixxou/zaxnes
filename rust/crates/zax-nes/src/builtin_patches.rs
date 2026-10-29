@@ -17,6 +17,7 @@
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`smb3wide`, `tools/build.py --pack`) |
 //! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's execution zone at `$2000` (`boot_zone`), the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
+//! | Castlevania (Europe) | the same, PAL | the USA hack's pack built for the European code (`cvwide`, `tools/build.py --pack`), in the execution zone |
 //! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`aiwide`, `tools/build.py --pack`) |
 //! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`excitebikewide`, `tools/build.py --pack`) |
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ff1wide`, `tools/build.py --pack`) |
@@ -111,6 +112,10 @@ pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
 pub const CASTLEVANIA_USA: &str = "Castlevania (USA) widescreen";
 /// Name of the Castlevania (USA) (Rev 1) widescreen patch (advanced mode).
 pub const CASTLEVANIA_USA_REV1: &str = "Castlevania (USA) (Rev 1) widescreen";
+/// Name of the Castlevania (Europe) widescreen patch (advanced mode).
+pub const CASTLEVANIA_EUROPE: &str = "Castlevania (Europe) widescreen";
+/// Name of the same patch for an NTSC ROM of the European code (advanced mode).
+pub const CASTLEVANIA_EUROPE_NTSC: &str = "Castlevania (Europe) (NTSC) widescreen";
 /// Name of the Adventure Island (USA) widescreen patch (advanced mode).
 pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
 /// Name of the Excitebike (Japan, USA) widescreen patch (advanced mode).
@@ -137,7 +142,7 @@ pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 22] = [
+pub const PATCHES: [BuiltinPatch; 24] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -457,6 +462,44 @@ pub const PATCHES: [BuiltinPatch; 22] = [
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
         // Everything runs in the NMI; the main loop stirs the random number.
+        idle_loop: Some((0xC030, 0xC03E)),
+    },
+    BuiltinPatch {
+        name: CASTLEVANIA_EUROPE,
+        game: "Castlevania",
+        rom_name: "Castlevania (Europe)",
+        source_crc: 0xA935_27E2,
+        // The USA hack built for the European code (`cvwide`, `tools/build.py --pack`: the same
+        // source, the game's moved addresses for this build; the USA builds' data banks and RAM;
+        // a PAL pack).
+        bps: include_bytes!("../patches/castlevania-europe-widescreen.zxpk"),
+        options: CASTLEVANIA_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the objects.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // The Rev 1's main loop, at the same place.
+        idle_loop: Some((0xC030, 0xC03E)),
+    },
+    BuiltinPatch {
+        name: CASTLEVANIA_EUROPE_NTSC,
+        game: "Castlevania",
+        rom_name: "Castlevania (Europe)",
+        // The European build's CRC, its PAL entry above taking it first: this one is for the
+        // ROMs of the European code whose header says NTSC (most of its dumps, translations and
+        // ROM hacks), taken by their signatures.
+        source_crc: 0xA935_27E2,
+        // The European pack as an NTSC one (`cvwide`, `tools/build.py --pack <out> --ntsc`).
+        bps: include_bytes!("../patches/castlevania-europe-ntsc-widescreen.zxpk"),
+        options: CASTLEVANIA_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
         idle_loop: Some((0xC030, 0xC03E)),
     },
     BuiltinPatch {
@@ -1078,14 +1121,15 @@ fn pack_matching(
 #[must_use]
 pub fn pack_for(image: &[u8]) -> Option<(&'static BuiltinPatch, crate::hack_pack::AppliedPack)> {
     let data = rom_data(image);
-    match for_data_crc(crc32(data)) {
-        Some(patch) => {
+    // The pack of the ROM's CRC first; when its gate refuses it (a header that says another
+    // region), the pack its signatures take, another build's of the same code among them.
+    for_data_crc(crc32(data))
+        .and_then(|patch| {
             let applied = crate::hack_pack::HackPack::read(patch.bps)?
                 .resolve(data, &crate::hack_pack::RomTraits::of(image, data));
             applied.applies().then_some((patch, applied))
-        }
-        None => pack_matching(image, data),
-    }
+        })
+        .or_else(|| pack_matching(image, data))
 }
 
 /// A patch that adds PRG-ROM (16 KiB banks after the game's, for the widescreen extension's PRG
