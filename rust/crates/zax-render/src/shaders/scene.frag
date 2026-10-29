@@ -62,6 +62,11 @@ void main()
         else
         {
             vec4 direct = texelFetch(uColorTexture, texel, 0);
+            // A pixel of the 2D picture left out (interop::HIDDEN_PIXEL) is not drawn.
+            if (direct.a == 0.0)
+            {
+                discard;
+            }
             albedo = direct.rgb;
             texelAlpha = direct.a;
         }

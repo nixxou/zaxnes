@@ -7,6 +7,9 @@
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 
+/// The colour the cut sides are drawn in.
+const BLACK: u8 = 0x0F;
+
 /// The NES screen, in pixels.
 const SCREEN_WIDTH: i32 = 256;
 const SCREEN_HEIGHT: i32 = 240;
@@ -96,7 +99,17 @@ impl Overscan {
     /// margin past the top and bottom ones: the picture ends where it does without a vertical
     /// margin. The left and right sides are cut on a picture without a horizontal margin only.
     pub fn black_out(&self, picture: &mut [u8], height: usize) {
-        const BLACK: u8 = 0x0F;
+        self.fill(picture, height, BLACK);
+    }
+
+    /// As [`Self::black_out`], the cut sides left out of the picture instead
+    /// (`zax_render::interop::HIDDEN_PIXEL`): the 2D picture seen through the camera, which
+    /// shows the whole plane, ends where they start, as the 3D scene's tiles do.
+    pub fn leave_out(&self, picture: &mut [u8], height: usize) {
+        self.fill(picture, height, zax_render::interop::HIDDEN_PIXEL);
+    }
+
+    fn fill(&self, picture: &mut [u8], height: usize, colour: u8) {
         let height_i = i32::try_from(height).unwrap_or(0);
         if height_i < SCREEN_HEIGHT || picture.is_empty() {
             return;
@@ -106,11 +119,11 @@ impl Overscan {
         let top = usize::try_from((height_i - SCREEN_HEIGHT) / 2).unwrap_or(0);
         if self.top > 0 {
             let start = (top + usize::try_from(self.top).unwrap_or(0)) * width;
-            picture[..start.min(length)].fill(BLACK);
+            picture[..start.min(length)].fill(colour);
         }
         if self.bottom > 0 {
             let end = (top + usize::try_from(SCREEN_HEIGHT - self.bottom).unwrap_or(0)) * width;
-            picture[end.min(length)..].fill(BLACK);
+            picture[end.min(length)..].fill(colour);
         }
         let (left, right) = (
             usize::try_from(self.left).unwrap_or(0),
@@ -118,8 +131,8 @@ impl Overscan {
         );
         if (left > 0 || right > 0) && width == usize::try_from(SCREEN_WIDTH).unwrap_or(0) {
             for row in picture.chunks_mut(width) {
-                row[..left.min(width)].fill(BLACK);
-                row[width.saturating_sub(right)..].fill(BLACK);
+                row[..left.min(width)].fill(colour);
+                row[width.saturating_sub(right)..].fill(colour);
             }
         }
     }
@@ -182,6 +195,14 @@ mod tests {
         assert_eq!(1, at(3, 100));
         assert_eq!(1, at(250, 100));
         assert_eq!(0x0F, at(251, 100), "right");
+    }
+
+    #[test]
+    fn the_sides_left_out_are_hidden_pixels() {
+        let mut picture = vec![1u8; 256 * 240];
+        sides(8, 0, 0, 0).leave_out(&mut picture, 240);
+        assert_eq!(zax_render::interop::HIDDEN_PIXEL, picture[256 * 7]);
+        assert_eq!(1, picture[256 * 8]);
     }
 
     #[test]

@@ -1696,7 +1696,12 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
                 .map_or(0, ConversionFrame::margin),
             state.picture_height == 240 || session.nes_picture_hides_overscan(),
         );
-        in_force.black_out(&mut state.picture, state.picture_height);
+        // Through the camera, which shows the whole plane, they are left out instead.
+        if scene.picture_head_on {
+            in_force.black_out(&mut state.picture, state.picture_height);
+        } else {
+            in_force.leave_out(&mut state.picture, state.picture_height);
+        }
         scene.picture_crop = zax_profiles::values::Vec4F::new(
             in_force.crop()[0],
             in_force.crop()[1],
