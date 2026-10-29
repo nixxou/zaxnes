@@ -7,6 +7,7 @@ use imgui::{Condition, StyleColor, Ui, WindowFlags};
 
 use super::{centre, ZaxUi};
 use crate::application::AppHost;
+use crate::ui::handheld::compat::Tone;
 use crate::ui::handheld::hacks::HackRow;
 use crate::ui::{keys, strings};
 
@@ -44,9 +45,6 @@ impl ZaxUi {
                     }
                     None => ui.text_wrapped(strings::get(keys::HACKS_NONE)),
                 }
-            } else if let Some(note) = hacks.pack_note() {
-                // A ROM taken by a hack pack's signatures: the parts of the hack left out.
-                ui.text_wrapped(note);
             }
             for (index, row) in hacks.rows().into_iter().enumerate() {
                 let _id = ui.push_id_usize(index);
@@ -64,6 +62,23 @@ impl ZaxUi {
                         if ui.checkbox(&label, &mut on) {
                             hacks.step(row, 1);
                             changed = true;
+                        }
+                    }
+                    HackRow::Compatibility => {
+                        // How the hack fits this ROM: the summary, the detail under it.
+                        let header = format!("{label}: {}###compat", hacks.value_text(row));
+                        if ui.collapsing_header(&header, imgui::TreeNodeFlags::empty()) {
+                            let _wrap = ui.push_text_wrap_pos_with_pos(440.0);
+                            for (text, tone) in hacks.compat_lines() {
+                                let colour = match tone {
+                                    Tone::Good => [0.45, 0.92, 0.55, 1.0],
+                                    Tone::Warning => [1.0, 0.62, 0.2, 1.0],
+                                    Tone::Bad => [1.0, 0.45, 0.35, 1.0],
+                                    Tone::Plain => ui.style_color(StyleColor::Text),
+                                };
+                                let _colour = ui.push_style_color(StyleColor::Text, colour);
+                                ui.text_wrapped(text);
+                            }
                         }
                     }
                     HackRow::Ratio | HackRow::Margin => {

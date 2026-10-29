@@ -1096,8 +1096,14 @@ bytes, a required group). Format 1 reads as one group per component, any region 
   `patch_for`: the first pack of which some component applies): another build of the game, a
   translation or a ROM hack whose hooked code is the same takes it too. The widescreen runs when
   its component applies (`apply_with`), with the groups of it that do; a group left out keeps
-  the game's own code there (Zelda II's world map then widens by its margin decoder alone). The
-  hacks screen tells the parts left out (`HacksModel::pack_note`, `hacks.pack_partial`).
+  the game's own code there (Zelda II's world map then widens by its margin decoder alone). Each
+  group carries its label in English and in French, and `AppliedPack::parts` how much of it the
+  ROM has (its hooks and checks found, of all of them, and the first place that differs). The
+  hacks screen, when it opens (from the ROM list or in play; not while the ROMs are listed),
+  judges the ROM (`ui/handheld/compat.rs`): it shows only the options of the parts that apply
+  and an entry "Hack compatibility" whose detail says the ROM is the original one, or fits whole
+  (x/total), or in part (each part with its x/total, the place where the game's code differs),
+  or not at all (the mapper or region, or the parts, and the ROM the hack is made for).
 * **Components.** `"widescreen"` follows the advanced mode: `apply_with` writes its hooks into
   the patched image, like a BPS patch, and `PatchedRom::code` carries the code. Every other
   component is a **testing aid** named after its option's key (Mega Man 6: `"invincible"`). The

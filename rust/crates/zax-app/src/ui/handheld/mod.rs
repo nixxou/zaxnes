@@ -5,6 +5,7 @@
 //! In the console mode of the desktop the mouse acts too, through the same presses
 //! ([`pointer`]).
 
+pub mod compat;
 pub mod defaults;
 mod draw;
 pub mod exit_combo;
