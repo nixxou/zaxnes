@@ -18,6 +18,7 @@
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`smb3wide`, `tools/build.py --pack`) |
 //! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's execution zone at `$2000` (`boot_zone`), the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
 //! | Castlevania (Europe) | the same, PAL | the USA hack's pack built for the European code (`cvwide`, `tools/build.py --pack`), in the execution zone |
+//! | Akumajou Dracula (Japan) | the same | the USA hack's pack built for the Japanese code (`cvwide`, `tools/build.py --pack`), in the execution zone |
 //! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`aiwide`, `tools/build.py --pack`) |
 //! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`excitebikewide`, `tools/build.py --pack`) |
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ff1wide`, `tools/build.py --pack`) |
@@ -116,6 +117,8 @@ pub const CASTLEVANIA_USA_REV1: &str = "Castlevania (USA) (Rev 1) widescreen";
 pub const CASTLEVANIA_EUROPE: &str = "Castlevania (Europe) widescreen";
 /// Name of the same patch for an NTSC ROM of the European code (advanced mode).
 pub const CASTLEVANIA_EUROPE_NTSC: &str = "Castlevania (Europe) (NTSC) widescreen";
+/// Name of the Akumajou Dracula (Japan) widescreen patch (advanced mode).
+pub const AKUMAJOU_DRACULA_JAPAN: &str = "Akumajou Dracula (Japan) widescreen";
 /// Name of the Adventure Island (USA) widescreen patch (advanced mode).
 pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
 /// Name of the Excitebike (Japan, USA) widescreen patch (advanced mode).
@@ -142,7 +145,7 @@ pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 24] = [
+pub const PATCHES: [BuiltinPatch; 25] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -501,6 +504,25 @@ pub const PATCHES: [BuiltinPatch; 24] = [
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
         idle_loop: Some((0xC030, 0xC03E)),
+    },
+    BuiltinPatch {
+        name: AKUMAJOU_DRACULA_JAPAN,
+        game: "Castlevania",
+        rom_name: "Akumajou Dracula (Japan)",
+        source_crc: 0xA0F9_9BB8,
+        // The USA hack built for the Japanese code (`cvwide`, `tools/build.py --pack`, -D JAPAN:
+        // its moved addresses, its shorter state dispatch, a hit's damage from its table; the
+        // same RAM and states).
+        bps: include_bytes!("../patches/akumajou-dracula-japan-widescreen.zxpk"),
+        options: CASTLEVANIA_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Its main loop, which stirs the random number.
+        idle_loop: Some((0xC056, 0xC064)),
     },
     BuiltinPatch {
         name: ADVENTURE_ISLAND_USA,

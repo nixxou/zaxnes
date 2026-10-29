@@ -69,12 +69,22 @@ pub static EUROPE: Castlevania = Castlevania {
     swaps: 0xFBDD,
 };
 
+/// Akumajou Dracula (Japan): its own tables.
+pub static JAPAN: Castlevania = Castlevania {
+    maps: 0xFB8E,
+    blocks: 0xFA65,
+    lengths: 0xFC1B,
+    swaps: 0xFC41,
+};
+
 /// CRC-32 of the base build's data (no CHR-ROM, iNES header excluded).
 pub const SOURCE_CRC: u32 = 0x0AC1_AA8F;
 /// CRC-32 of Rev 1's data.
 pub const SOURCE_CRC_REV1: u32 = 0xB668_C7FC;
 /// CRC-32 of the European build's data.
 pub const SOURCE_CRC_EUROPE: u32 = 0xA935_27E2;
+/// CRC-32 of the Japanese build's data.
+pub const SOURCE_CRC_JAPAN: u32 = 0xA0F9_9BB8;
 
 const STAGE: u16 = 0x0028;
 const ROOM: u16 = 0x0046;
