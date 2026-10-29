@@ -1158,8 +1158,21 @@ impl Ppu2C02 {
         self.read_nametable_inner(address, cartridge)
     }
 
-    fn read_nametable_inner(&self, address: u16, cartridge: Option<&Cartridge>) -> u8 {
+    /// Where nametable `address` lies: the console VRAM page the cartridge maps it to,
+    /// [`Cartridge::FOLLOW_MIRRORING`] or [`Cartridge::SERVED_BY_CARTRIDGE`]. With the widescreen
+    /// extension's four nametables, one the cartridge maps to console VRAM follows them instead:
+    /// an MMC5 picks its pages itself (`$5105`), the hack's layout must win over it.
+    fn nametable_page(&self, address: u16, cartridge: Option<&Cartridge>) -> i32 {
         let page = cartridge_nametable_page(address, cartridge);
+        if page >= 0 && self.wide.four_screen() {
+            Cartridge::FOLLOW_MIRRORING
+        } else {
+            page
+        }
+    }
+
+    fn read_nametable_inner(&self, address: u16, cartridge: Option<&Cartridge>) -> u8 {
+        let page = self.nametable_page(address, cartridge);
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             if let Some(cartridge) = cartridge {
                 return cartridge.read_nametable(address);
@@ -1176,7 +1189,7 @@ impl Ppu2C02 {
     /// The rendered frame a nametable byte was last written in (0: not since power-on or the
     /// last state load; always 0 for nametables the cartridge serves).
     fn nametable_written(&self, address: u16, cartridge: Option<&Cartridge>) -> u32 {
-        let page = cartridge_nametable_page(address, cartridge);
+        let page = self.nametable_page(address, cartridge);
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             return 0;
         }
@@ -1188,7 +1201,7 @@ impl Ppu2C02 {
     }
 
     fn write_nametable_byte(&mut self, address: u16, value: u8, cart: Cart<'_, '_>) {
-        let page = cartridge_nametable_page(address, cart.as_deref());
+        let page = self.nametable_page(address, cart.as_deref());
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             if let Some(cartridge) = cart.as_deref_mut() {
                 cartridge.write_nametable(address, value);
