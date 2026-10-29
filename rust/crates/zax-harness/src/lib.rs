@@ -9,6 +9,7 @@ pub mod golden_core;
 mod json_text;
 pub mod lua_api;
 pub mod meshes;
+pub mod packs;
 pub mod render;
 
 pub use error::HarnessError;

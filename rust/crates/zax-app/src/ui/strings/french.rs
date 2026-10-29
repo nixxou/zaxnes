@@ -318,6 +318,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HACKS_FORCE_QUESTION, "Forcer quand même ? Un hack de la ROM proche de l'original a de bonnes chances de fonctionner ; sinon le jeu peut planter."),
     (keys::HACKS_FORCE_BUTTON, "Forcer"),
     (keys::HACKS_PACK_SIGNATURES, "Elle n'a pas non plus le code que le hack modifie, là où il le modifie : le hack ne peut pas s'y appliquer."),
+    (keys::HACKS_PACK_PARTIAL, "Cette ROM n'est pas celle pour laquelle le hack est fait : certaines de ses parties ne s'appliquent pas ({0}), le jeu y garde son fonctionnement."),
     (keys::HACKS_FORCE_SIZE, "Sa taille n'est pas celle pour laquelle le hack est fait : il ne peut pas non plus être forcé."),
     (keys::HACKS_OTHER_ROM, "Le hack écran large de {0} est fait pour la ROM « {1} » (CRC {2}). Cette ROM-ci ne correspond pas : {3} (CRC {4}). L'écran large ne peut pas être activé pour elle."),
     (keys::HACK_OFF, "désactivé"),

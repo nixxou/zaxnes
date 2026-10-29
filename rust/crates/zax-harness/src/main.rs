@@ -5,14 +5,15 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use zax_harness::{bench_core, compare, golden_core, lua_api, meshes, render, HarnessError};
+use zax_harness::{bench_core, compare, golden_core, lua_api, meshes, packs, render, HarnessError};
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
        zax-harness meshes --profile <file|name> [options] (zax-harness help for the options)
        zax-harness lua-api [--out <file>]
        zax-harness render --out <dir> [--frames synthetic[:<scene>]] [options]
        zax-harness bench-core <rom.nes> [options] (ms per frame of each stage)
-       zax-harness compare <reference> <capture> [--tolerance <levels>] [--min <percent>]";
+       zax-harness compare <reference> <capture> [--tolerance <levels>] [--min <percent>]
+       zax-harness packs <roms dir> (how the built-in hack packs apply to each ROM)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -30,6 +31,10 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
                 "golden-core: {} ROMs run, {} files, {frames} frames each -> {out_path}",
                 summary.run, summary.files
             );
+            Ok(())
+        }
+        [command, dir] if command == "packs" => {
+            print!("{}", packs::run(Path::new(dir))?);
             Ok(())
         }
         [command, rest @ ..] if command == "meshes" => {
