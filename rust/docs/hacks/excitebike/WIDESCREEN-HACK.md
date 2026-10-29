@@ -35,12 +35,13 @@ accordingly when it applies the patch.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/excitebike-
-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
-EXTENSION.md` 7.1): the code goes to the extension's memory, which the window shows from power-on
-(`$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are checked and
-applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). The game has no
-testing aid. The BPS patch described here is kept to compare.
+**Hack pack.** Zaxnes ships this hack as a hack pack,
+`rust/crates/zax-nes/patches/excitebike-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`;
+`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's memory,
+which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with the game's
+bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank added,
+nothing moved or copied). The game has no testing aid. The BPS patch described here is kept to
+compare.
 
 ## 2. What the game does, and what changes
 

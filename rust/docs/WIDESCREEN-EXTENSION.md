@@ -545,9 +545,9 @@ columns show what the map gives there or are such a column of the nametables (cr
 broken in the centre leave the row decoded; the title, the intermissions and the transitions are
 left to the nametables).
 The built-in patches of both builds (`CASTLEVANIA_USA`, `CASTLEVANIA_USA_REV1`, an advanced
-mode) are one hack built for each (`cvwide`): its code is the free end of PRG bank 5, the same in
-both, which the fixed bank has no room to unlock, so the window is open from power-on
-(`boot_window`). It draws the objects in the margins: an object's x is 9-bit there (bit 0 of
+mode) are one hack built for each (`cvwide`): its code, in the free end of PRG bank 5 in the
+hack's own build, is the pack's code (7.1), open in the window from power-on (`boot_window`): the
+fixed bank has no room to unlock the extension. It draws the objects in the margins: an object's x is 9-bit there (bit 0 of
 `$0300` its bit 8, 256-383 right of the screen and 384-511 left of it, as the game's own `$EF45`
 reads it), the game keeps its candles and spawners' objects alive from 64 pixels left of the
 screen to 64 right of it, and the hack draws them past the edges (the sprite builder of bank 0,
@@ -623,9 +623,9 @@ row coming in over the leaving one, at the screen's top or bottom edge, so the d
 overscan (`covers_overscan`). A room (`$0D`) only changes the palette (`$03E0`) and which people
 show: its tiles are the map's. The people, the vehicles, the bridge and the canal are sprites,
 which the game leaves out past the edges: the built-in patch (`FINAL_FANTASY_USA`, an advanced
-mode, `ff1wide`) draws them in the margins. Its code is the free end of PRG bank 6 (from its page
-`$30`, zeros in the game), open in the window from power-on (`boot_window`); the window is not laid
-over `$6000-$7FFF`, where the game keeps its save and maps. Where the game puts a person
+mode, `ff1wide`) draws them in the margins. Its code, in the free end of PRG bank 6 in the hack's
+own build, is the pack's code (7.1), open in the window from power-on (`boot_window`); the window is
+not laid over `$6000-$7FFF`, where the game keeps its save and maps. Where the game puts a person
 (`$E70D`) or a vehicle (`$E3F4`) on the screen, the hack works out a 16-bit x (the distance in
 tiles signed) and keeps it within the host's margin; the sprite builder (`$E301`) writes the high
 bytes. Once a frame, at the game's wait for the NMI (`$FEA8`), it sets `$5003` to the host margin,
@@ -1005,21 +1005,26 @@ pub struct BuiltinPatch {
 
 `zax-nes/src/hack_pack.rs`, packs in `zax-nes/patches/*.zxpk`; the proposal and its decisions
 are in `docs/HACK-PACKS.md`. A `BuiltinPatch` whose `bps` starts with `ZXPK` is a pack
-(`hack_pack::is_pack`); every built-in patch is one now. Three kinds:
+(`hack_pack::is_pack`); every built-in patch is one now, and every one has its code in the
+extension's memory: the pack holds the code, the boot window is `$80`/0 (the extension unlocked,
+the window on the pack's code from power-on), and the ROM keeps its size: no bank added, no fixed
+bank copied to the end, no CHR-ROM moved, nothing written in the game's free space.
 
-* **Code in the extension's memory** (Mega Man, 3 to 6, Super Mario Bros., Adventure Island,
-  Excitebike, Blaster Master, Metroid): the hacks that added a PRG bank for the window. The pack
-  holds the code, the boot window is `$80`/0, and the ROM keeps its size: no bank added, no
-  fixed bank copied to the end, no CHR-ROM moved.
-* **Code in the game's free space** (Mega Man 2, Super Mario Bros. 3, Castlevania, Final
-  Fantasy, Ninja Gaiden III, Metal Force): the pack has no code; the hack's changed bytes (its
-  hooks and its code over the free space, `$FF` or zeros) are hooks of at most 255 bytes. A
-  boot window, if any, still shows the game's own bank.
-* **Zelda II** is of the first kind too: its hack, written in a fork of a disassembly, was
-  moved out of the game (`z2pack`: the code for `$5800`, its 36 hooks); its boot window keeps the
-  game's PRG-RAM (`boot_window_keeps_prg_ram`), the window showing 2 KiB.
-  `tools/pack_from_roms.py` makes a pack of the bytes a same-size build changes, for a hack not
-  yet written as hooks (it made Zelda II's first pack).
+* **The hacks that added a PRG bank for the window** (Mega Man, 3 to 6, Super Mario Bros.,
+  Adventure Island, Excitebike, Blaster Master, Metroid): their bank is the pack's code, up to
+  10 KiB for a game with no PRG-RAM (`$5800`-`$7FFF`).
+* **The hacks that had their code in the game's free space** (Mega Man 2, Super Mario Bros. 3,
+  Castlevania, Final Fantasy, Ninja Gaiden III, Metal Force): their source assembles for `$5800`
+  when the pack is built (`tools/build.py --pack`; ca65 `-D PACK` for the hacks whose code was in
+  the fixed bank). Their reset hook and the NMI's unlock are gone (Super Mario Bros. 3: the
+  fixed bank's NMI code that unlocked and opened the window, its NMI hook now jumping into the
+  window), since the boot window unlocks the extension and the code only runs while it is
+  unlocked. Their code is under 2 KiB: the boot window keeps `$6000`-`$7FFF` for the game
+  (`boot_window_keeps_prg_ram`), as the hacks' own code did.
+* **Zelda II**: its hack, written in a fork of a disassembly, was moved out of the game
+  (`z2pack`: the code for `$5800`, its 36 hooks); its boot window keeps the game's PRG-RAM, the
+  window showing 2 KiB. `tools/pack_from_roms.py` makes a pack of the bytes a same-size build
+  changes, for a hack not yet written as hooks (it made Zelda II's first pack).
 
 The testing aids are components of their own where their hook can do the hack's work in place
 of the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Castlevania and
@@ -1122,8 +1127,9 @@ way also needs the machine put right, which the core does in `restore_state`:
 * a state made the other way in either direction: the patch's `after_other_way_state` runs on CPU
   RAM (Zelda II: the world map is sent back through the game's map initialisation, which redraws
   it in the layout the running code expects);
-* a state without the hack restored with it: the extension starts locked; the hack itself
-  unlocks it again on the next NMI.
+* a state without the hack restored with it: the extension starts locked; the core unlocks it
+  again with the window on the pack's code (`install_pack`, the patch's `boot_window`), since no
+  hack unlocks the extension itself any more.
 
 ---
 

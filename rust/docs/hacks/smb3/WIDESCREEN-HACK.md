@@ -33,11 +33,13 @@ game. A state made without the hack restores with it as it is.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/smb3-usa-
-rev1-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
-EXTENSION.md` 7.1): no code goes to the extension's memory: the bytes the hack changes (its hooks
-and its code in the game's free space) are the pack's hooks, each with the game's bytes it
-replaces, checked and applied by Zaxnes; the ROM keeps its size and the layout described here. Its
+**Hack pack.** Zaxnes ships this hack as a hack pack,
+`rust/crates/zax-nes/patches/smb3-usa-rev1-widescreen.zxpk` (`tools/build.py <rom> --pack
+<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+memory instead of the game's free space described here (the source assembled for `$5800`, without
+the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
+from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
+checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free space). Its
 testing aids need the hack's code: they stay with the widescreen (the advanced mode). The BPS patch
 described here is kept to compare.
 
@@ -202,6 +204,10 @@ lag counters (`$57F0` lag frames, `$57F2` NMIs, 16-bit), for measuring only.
 ;
 ; The ROM keeps its size and layout: a state of the unpatched game restores into the patched one.
 ;
+; With PACK defined (a Zaxnes hack pack), WINDOW only, for $5800 of the extension's memory, which
+; Zaxnes shows in the PRG window from power-on, the extension unlocked: no FIXED, the NMI hook jumps
+; to pack_nmi in the window (the code only runs while the extension is unlocked, the window open).
+;
 ; The background of the margins is not the hack's work: Zaxnes' margin decoder draws it.
 
 ; ---------------------------------------------------------------------------- ;
@@ -309,6 +315,7 @@ LOSBS_LOOK_AHEAD_HI = $B834     ; and high
 DELETE_RANGE_LO = $D3CC         ; bank 0: the deletion limits, right (even) and left (odd)
 DELETE_RANGE_HI = $D3D2
 
+.ifndef PACK
 ; ---------------------------------------------------------------------------- ;
 .segment "FIXED"
 
@@ -336,9 +343,17 @@ fixed_nmi:
     JSR     wide_nmi
 @game:
     JMP     GAME_NMI
+.endif
 
 ; ---------------------------------------------------------------------------- ;
 .segment "WINDOW"
+
+.ifdef PACK
+; The NMI ($F496, in place of JMP PRG030_SUB_9F40; the registers are saved).
+pack_nmi:
+    JSR     wide_nmi
+    JMP     GAME_NMI
+.endif
 
 ; The extension's settings for the frame.
 wide_nmi:
@@ -1057,10 +1072,11 @@ Usage: python -I tools/build.py <Super Mario Bros. 3 (USA) (Rev 1).nes> [out.bps
    (each checked against the bytes it replaces). The ROM keeps its size and layout.
 3. Writes build/smb3wide.nes and, if asked, the BPS patch (data without iNES header).
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
-extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
-as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
-it applies them; the ROM keeps its size.
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: src/wide.s assembled with PACK, the
+WINDOW segment only, for $5800 of the extension's memory, which Zaxnes shows in the PRG window
+from power-on, the extension unlocked (no FIXED: the NMI hook jumps to pack_nmi); the hooks, each
+with the game's bytes it replaces, checked by Zaxnes before it applies them. Nothing goes in the
+game's free space and the ROM keeps its size.
 """
 
 import os
@@ -1097,7 +1113,7 @@ def offset(bank, address):
     return bank * BANK_8K + (address & (BANK_8K - 1))
 
 
-def hooks(sym):
+def hooks(sym, pack=False):
     """The patches of the game's PRG-ROM: (bank, address, original bytes, new bytes)."""
     out = []
 
@@ -1108,7 +1124,7 @@ def hooks(sym):
         out.append((bank, address, original, new))
 
     # NMI: the extension unlocked and set for the frame, then the game's NMI (JMP PRG030_SUB_9F40).
-    put(31, 0xF496, '4c 40 9f', jmp(sym['fixed_nmi']))
+    put(31, 0xF496, '4c 40 9f', jmp(sym['pack_nmi' if pack else 'fixed_nmi']))
     # An object's sprite columns: those within the margins shown too (Object_DetermineHorzVisY).
     put(0, 0xD7B8, 'a9 00 9d 51 06', jmp(sym['wide_horz_vis']))
     # The end of the frame's work: the high bytes of the objects' sprites
@@ -1155,26 +1171,26 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(pack=False):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
     fixed_bin = os.path.join(build, 'fixed.bin')
     window_bin = os.path.join(build, 'window.bin')
+    fixed_memory = ('' if pack else
+                    f'  FIXED: start = ${FIXED_START:04X}, size = ${FIXED_SIZE:04X}, fill = yes, '
+                    f'fillval = $FF, file = "{wsl_path(fixed_bin)}";\n')
     open(cfg, 'w', newline='\n').write(
-        'MEMORY {\n'
-        f'  FIXED: start = ${FIXED_START:04X}, size = ${FIXED_SIZE:04X}, fill = yes, fillval = $FF, '
-        f'file = "{wsl_path(fixed_bin)}";\n'
+        'MEMORY {\n' + fixed_memory +
         f'  WINDOW: start = ${WINDOW_START:04X}, size = ${WINDOW_SIZE:04X}, fill = yes, fillval = $FF, '
         f'file = "{wsl_path(window_bin)}";\n'
         '}\n'
-        'SEGMENTS {\n'
-        '  FIXED: load = FIXED, type = ro;\n'
+        'SEGMENTS {\n' + ('' if pack else '  FIXED: load = FIXED, type = ro;\n') +
         '  WINDOW: load = WINDOW, type = ro;\n'
         '}\n')
     obj = os.path.join(build, 'wide.o')
     labels = os.path.join(build, 'wide.labels')
-    defines = []
+    defines = ['-D', 'PACK'] if pack else []
     for name in os.environ.get('WIDE_DEFINES', '').split(','):
         if name:
             defines += ['-D', name]
@@ -1187,7 +1203,26 @@ def assemble():
         parts = line.split()
         if len(parts) >= 3 and parts[0] == 'al':
             sym[parts[2].lstrip('.')] = int(parts[1], 16)
-    return open(fixed_bin, 'rb').read(), open(window_bin, 'rb').read(), sym
+    return None if pack else open(fixed_bin, 'rb').read(), open(window_bin, 'rb').read(), sym
+
+
+def pack(data, out):
+    _, window, sym = assemble(pack=True)
+    assert len(window) == WINDOW_SIZE
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import make_pack
+    widescreen = []
+    for bank, address, original, new in hooks(sym, pack=True):
+        at = offset(bank, address)
+        assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
+        widescreen.append((at, bytes(original), bytes(new)))
+    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
+    used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
+    result = make_pack.make('Super Mario Bros. 3 (USA) (Rev 1) widescreen', window[:used],
+                            [('widescreen', widescreen)])
+    open(out, 'wb').write(result)
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -1197,6 +1232,9 @@ def main():
     data = image[header:header + PRG_SIZE + CHR_SIZE]
     assert zlib.crc32(data) == SOURCE_CRC, 'not Super Mario Bros. 3 (USA) (Rev 1)'
 
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(bytes(data), sys.argv[3])
+        return
     fixed, window, sym = assemble()
     assert len(fixed) == FIXED_SIZE and len(window) == WINDOW_SIZE
     prg = bytearray(data[:PRG_SIZE])
@@ -1216,14 +1254,6 @@ def main():
     out = os.path.join(ROOT, 'build', 'smb3wide.nes')
     open(out, 'wb').write(bytes(image[:header]) + target)
     print(f'{out}: data CRC {zlib.crc32(target):08X}')
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        sys.path.insert(0, os.path.join(ROOT, 'tools'))
-        import make_pack
-        result = make_pack.make('Super Mario Bros. 3 (USA) (Rev 1) widescreen', b'',
-                                [('widescreen', make_pack.runs(bytes(data), target))])
-        open(sys.argv[3], 'wb').write(result)
-        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
-        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps

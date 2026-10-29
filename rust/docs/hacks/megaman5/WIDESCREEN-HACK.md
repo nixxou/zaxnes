@@ -39,13 +39,14 @@ hack has set it): the game's board may have PRG-RAM there. The game only ever se
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/megaman5-usa-
-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
-EXTENSION.md` 7.1): the code goes to the extension's memory, which the window shows from power-on
-(`$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are checked and
-applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). The option
-"Invincible" is a component of its own (`LDA #$02 / SEC` in place of the touch test's `JSR`),
-applied with or without the advanced mode. The BPS patch described here is kept to compare.
+**Hack pack.** Zaxnes ships this hack as a hack pack,
+`rust/crates/zax-nes/patches/megaman5-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
+<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+memory, which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with
+the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank
+added, nothing moved or copied). The option "Invincible" is a component of its own (`LDA #$02 /
+SEC` in place of the touch test's `JSR`), applied with or without the advanced mode. The BPS patch
+described here is kept to compare.
 
 ## 2. What the game does, and what changes
 

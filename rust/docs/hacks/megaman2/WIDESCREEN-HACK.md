@@ -22,11 +22,13 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/megaman2-usa-
-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
-EXTENSION.md` 7.1): no code goes to the extension's memory: the bytes the hack changes (its hooks
-and its code in the game's free space) are the pack's hooks, each with the game's bytes it
-replaces, checked and applied by Zaxnes; the ROM keeps its size and the layout described here. The
+**Hack pack.** Zaxnes ships this hack as a hack pack,
+`rust/crates/zax-nes/patches/megaman2-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
+<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+memory instead of the game's free space described here (the source assembled for `$5800`, without
+the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
+from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
+checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free space). The
 option "Invincible" is a component of its own (the four invincibility hooks, their routines' result
 inline), applied with or without the advanced mode. The BPS patch described here is kept to
 compare.
@@ -166,7 +168,10 @@ SourceRead / TargetRead only). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
 ```asm
 ; Mega Man 2 (USA) widescreen hack: the code the patched fixed bank calls.
 ;
-; Assembled for $F300 of the fixed bank (PRG bank 15), the unused $FF fill from $F2E3 to $F8FF.
+; Assembled for $F300 of the fixed bank (PRG bank 15), the unused $FF fill from $F2E3 to $F8FF;
+; or, with PACK defined (a Zaxnes hack pack), for $5800 of the extension's memory, which Zaxnes
+; shows in the PRG window from power-on, the extension unlocked: no reset hook then, and no unlock
+; in the NMI (the code only runs while the extension is unlocked).
 ; Talks to the Zaxnes widescreen extension (rust/docs/WIDESCREEN-EXTENSION.md); the background of
 ; the margins comes from the emulator's Mega Man 2 margin decoder, the hack does the objects:
 ;
@@ -234,6 +239,9 @@ STAGE_ENEMY_TYPE = $B900        ; stage bank: the type of each entry of the enem
 FIRST_ENEMY     = $10
 
 .segment "CODE"
+.ifdef PACK
+.org $5800
+.else
 .org $F300
 
 ; ---------------------------------------------------------------------------- ;
@@ -254,16 +262,19 @@ wide_unlock:
     LDA      #$00
     STA      WV_M
     RTS
+.endif
 
 ; ---------------------------------------------------------------------------- ;
 ; NMI ($CFFD, in place of LDA $F7 / AND #$7C / STA $F7): the extension's settings for the next
 ; frame (unlocked again first if a state made without the hack left it locked).
 wide_nmi:
+.ifndef PACK
     LDA      WIDE_SIG
     CMP      #$57
     BEQ      @set
     JSR      wide_unlock
 @set:
+.endif
     LDA      WIDE_HOST
     CMP      #MAX_MARGIN
     BCC      @margin
@@ -856,10 +867,11 @@ Usage: python -I tools/build.py <Mega Man 2 (USA).nes> [out.bps]
 2. Writes the hooks into the fixed bank, each checked against the bytes it replaces.
 3. Writes build/mm2wide.nes and, if asked, the BPS patch (data without iNES header).
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: no code in the extension's memory
-(the hack unlocks the extension itself, from its reset hook), the code written over the fixed
-bank's $FF fill as hooks of at most 255 bytes, checked like the others, and the invincibility
-hooks a component of their own, "invincible", whose bytes do what the hack's routines do when the
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: src/wide.s assembled with PACK for
+$5800 of the extension's memory (2 KiB at most), which Zaxnes shows in the PRG window from
+power-on, the extension unlocked; the hooks, but for the reset hook, each with the game's bytes it
+replaces, checked by Zaxnes before it applies them. Nothing goes in the game's free space and the
+ROM keeps its size. The invincibility hooks a component of their own, "invincible", whose bytes do what the hack's routines do when the
 option is on: Zaxnes applies it while that option is on, with or without the widescreen.
 """
 
@@ -875,6 +887,8 @@ BANK_SIZE = 0x4000
 FIXED = 0xC000
 CODE_START = 0xF300
 CODE_END = 0xF900
+PACK_START = 0x5800             # the pack's code: the extension's PRG window
+PACK_SIZE = 0x800
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -897,9 +911,10 @@ BCS, BCC, BEQ, BNE = 0xB0, 0x90, 0xF0, 0xD0
 NOP = 0xEA
 
 
-def hooks(sym):
+def hooks(sym, pack=False):
     """The patches: (address, original bytes, new bytes) of the fixed bank, and
-    (bank, address, original bytes, new bytes) of a switchable bank ($8000-$BFFF)."""
+    (bank, address, original bytes, new bytes) of a switchable bank ($8000-$BFFF). The pack has
+    no reset hook: Zaxnes unlocks the extension."""
     out = []
     banked = []
 
@@ -910,7 +925,8 @@ def hooks(sym):
         out.append((address, original, new))
 
     # Reset: unlock the extension first.
-    put(0xFFE4, '4c d1 f2', jmp(sym['wide_reset']))
+    if not pack:
+        put(0xFFE4, '4c d1 f2', jmp(sym['wide_reset']))
     # NMI: the extension's settings for the next frame.
     put(0xCFFD, 'a5 f7 29 7c 85 f7', jsr(sym['wide_nmi']))
     # Spawn window.
@@ -969,19 +985,20 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(pack=False):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if pack else (CODE_START, CODE_END - CODE_START)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${CODE_END - CODE_START:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
-                   check=True)
+    subprocess.run(tool('ca65') + ['-g'] + (['-D', 'PACK'] if pack else [])
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)], check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
     sym = {}
@@ -1002,10 +1019,11 @@ INVINCIBLE = {
 }
 
 
-def pack(data, code, sym, out):
+def pack(data, out):
+    code, sym = assemble(pack=True)
     sys.path.insert(0, os.path.join(ROOT, 'tools'))
     import make_pack
-    fixed, banked = hooks(sym)
+    fixed, banked = hooks(sym, pack=True)
     widescreen = []
     invincible = []
     for number, address, original, new in [(BANK, a, o, n) for a, o, n in fixed] + banked:
@@ -1016,17 +1034,12 @@ def pack(data, code, sym, out):
         else:
             widescreen.append((offset, original, bytes(new)))
     assert len(invincible) == len(INVINCIBLE)
-    start = BANK * BANK_SIZE + CODE_START - FIXED
-    used = code[:sym['wide_end'] - CODE_START]
-    for at in range(0, len(used), 255):
-        piece = used[at:at + 255]
-        original = data[start + at:start + at + len(piece)]
-        assert all(b == 0xFF for b in original), 'the code space is not free'
-        widescreen.append((start + at, bytes(original), piece))
-    result = make_pack.make('Mega Man 2 (USA) widescreen', b'',
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    result = make_pack.make('Mega Man 2 (USA) widescreen', code[:used],
                             [('widescreen', widescreen), ('invincible', invincible)])
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -1036,10 +1049,10 @@ def main():
     data = image[header:]
     assert zlib.crc32(data) == SOURCE_CRC, 'not Mega Man 2 (USA)'
 
-    code, sym = assemble()
     if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), code, sym, sys.argv[3])
+        pack(bytes(data), sys.argv[3])
         return
+    code, sym = assemble()
     bank = BANK * BANK_SIZE
     start = bank + CODE_START - FIXED
     assert all(b == 0xFF for b in data[start:start + len(code)]), 'the code space is not free'

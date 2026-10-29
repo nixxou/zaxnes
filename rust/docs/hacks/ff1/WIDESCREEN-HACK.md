@@ -29,12 +29,14 @@ the battery file is the same.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/final-fantasy-
-usa-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
-EXTENSION.md` 7.1): no code goes to the extension's memory: the bytes the hack changes (its hooks
-and its code in the game's free space) are the pack's hooks, each with the game's bytes it
-replaces, checked and applied by Zaxnes; the ROM keeps its size and the layout described here. The
-game has no testing aid. The BPS patch described here is kept to compare.
+**Hack pack.** Zaxnes ships this hack as a hack pack,
+`rust/crates/zax-nes/patches/final-fantasy-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
+<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+memory instead of the game's free space described here (the source assembled for `$5800`, without
+the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
+from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
+checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free space). The game
+has no testing aid. The BPS patch described here is kept to compare.
 
 ## 2. The extension and the code's place
 
@@ -173,7 +175,9 @@ the game travels in it. `make_doc.py` writes this document's appendices from the
 ; The code is WINDOW, 2 KiB of the free end of PRG bank 6 (from its page $30, zeros in the game),
 ; which the extension's PRG window shows at $5800-$5FFF. The game's fixed bank has no room for
 ; code that would unlock the extension, so the built-in patch opens the window from power-on
-; (BuiltinPatch::boot_window): the hack needs Zaxnes.
+; (BuiltinPatch::boot_window): the hack needs Zaxnes. In the Zaxnes hack pack
+; (tools/build.py --pack), WINDOW is the pack's code instead, in the extension's memory, which the
+; window shows from power-on: nothing goes in bank 6.
 ;
 ; Once a frame, as the game waits for the NMI, the hack writes the extension's settings and the
 ; overclock of the option "No slowdown".
@@ -362,10 +366,11 @@ Usage: python -I tools/build.py <Final Fantasy (USA).nes> [out.bps]
 3. Writes build/final-fantasy-usa.nes and, if asked, the BPS patch (data without iNES header).
    WIDE_SKIP (comma-separated hex addresses) leaves hooks out, for testing.
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
-extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
-as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
-it applies them; the ROM keeps its size.
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the WINDOW segment (filled with
+$FF, what Zaxnes reads past the pack's code) is the pack's code, for $5800 of the extension's
+memory, which Zaxnes shows in the PRG window from power-on; the hooks, each with the game's bytes
+it replaces, checked by Zaxnes before it applies them. Nothing goes in the game's free space and
+the ROM keeps its size.
 """
 
 import os
@@ -452,14 +457,15 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(pack=False):
     build = os.path.join(ROOT, 'build', NAME)
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
     window_bin = os.path.join(build, 'window.bin')
     open(cfg, 'w', newline='\n').write(
         'MEMORY {\n'
-        f'  WINDOW: start = ${WINDOW_START:04X}, size = ${WINDOW_SIZE:04X}, fill = yes, fillval = $00, '
+        f'  WINDOW: start = ${WINDOW_START:04X}, size = ${WINDOW_SIZE:04X}, fill = yes, '
+        f'fillval = ${0xFF if pack else 0:02X}, '
         f'file = "{wsl_path(window_bin)}";\n'
         '}\n'
         'SEGMENTS {\n'
@@ -482,6 +488,24 @@ def assemble():
     return open(window_bin, 'rb').read(), sym
 
 
+def pack(data, out):
+    window, sym = assemble(pack=True)
+    assert len(window) == WINDOW_SIZE
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import make_pack
+    widescreen = []
+    for bank, address, original, new in hooks(sym):
+        at = offset(bank, address)
+        assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
+        widescreen.append((at, bytes(original), bytes(new)))
+    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
+    used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
+    result = make_pack.make('Final Fantasy (USA) widescreen', window[:used], [('widescreen', widescreen)])
+    open(out, 'wb').write(result)
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -491,6 +515,9 @@ def main():
     if crc != SOURCE_CRC:
         sys.exit(f'{rom_path}: not Final Fantasy (USA) (data CRC {crc:08X})')
 
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(bytes(data), sys.argv[3])
+        return
     window, sym = assemble()
     assert len(window) == WINDOW_SIZE
     prg = bytearray(data)
@@ -510,14 +537,6 @@ def main():
     out = os.path.join(ROOT, 'build', NAME + '.nes')
     open(out, 'wb').write(bytes(image[:header]) + target)
     print(f'{out}: data CRC {zlib.crc32(target):08X}')
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        sys.path.insert(0, os.path.join(ROOT, 'tools'))
-        import make_pack
-        result = make_pack.make('Final Fantasy (USA) widescreen', b'',
-                                [('widescreen', make_pack.runs(bytes(data), target))])
-        open(sys.argv[3], 'wb').write(result)
-        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
-        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps

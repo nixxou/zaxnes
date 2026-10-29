@@ -148,7 +148,7 @@ Done, branch `hack-rewrite`:
 * MMC3 recomputes its bank windows after a restore: a state of the BPS build (68 banks) restores
   on the pack (64).
 
-* every other hack converted (`WIDESCREEN-EXTENSION.md` 7.1 lists the three kinds): Mega Man,
+* every other hack converted (`WIDESCREEN-EXTENSION.md` 7.1 lists the kinds): Mega Man,
   2, 3, 4 (one pack for both builds) and 5, Super Mario Bros., Super Mario Bros. 3, Castlevania
   (both builds), Adventure Island, Excitebike, Final Fantasy, Ninja Gaiden III, Metal Force,
   Blaster Master, Metroid, Zelda II. Each checked by RAM traces against its BPS: movies where
@@ -160,6 +160,15 @@ Done, branch `hack-rewrite`:
 * Zelda II rebuilt as hooks and code (`z2pack`), from its fork of the disassembly: checked
   against the pack of the fork's build over 12000 frames (a new game, a palace, the world map),
   the same RAM but for a few transient bytes from its shorter NMI;
+* the six hacks that had their code in the game's free space (Mega Man 2, Super Mario Bros. 3,
+  Castlevania, both builds, Final Fantasy, Ninja Gaiden III, Metal Force) moved to the
+  extension's memory: their source assembled for `$5800` (`tools/build.py --pack`), without the
+  reset hook and the NMI's unlock, the boot window `$80`/0 keeping `$6000`-`$7FFF` for the game.
+  Checked against their free-space packs, 6000 frames from power-on with scripted inputs each:
+  the same RAM every frame for Mega Man 2, Castlevania and Final Fantasy; transient bytes for
+  Super Mario Bros. 3 (temporaries over 35 frames, from its shorter NMI) and Ninja Gaiden III
+  (three scratch bytes, `$30`-`$32`); Metal Force one frame behind from power-on (its NMI counter
+  `$034D` one less, without the old reset hook's work), which only changes its sprite flicker;
 
 * the hacks screen: by the ROM's CRC first, then by the packs' signatures; a ROM that has them
   (another revision, a ROM hack leaving the hooked code alone) gets the hack, its options and
