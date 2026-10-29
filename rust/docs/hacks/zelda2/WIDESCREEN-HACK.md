@@ -46,6 +46,12 @@ where the target differs from the ROM, so either can be checked.
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/zelda2-usa-
+widescreen.zxpk` (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1), made from the hack's build
+by Zaxnes' `tools/pack_from_roms.py`: the bytes the rewritten code changes, as hooks of at most 255
+bytes, each with the game's bytes it replaces, checked and applied by Zaxnes; the ROM keeps its
+size. The BPS patch described here is kept to compare.
+
 ## 2. What the hack does
 
 The NES draws 256 pixels across. Zaxnes can show more: a ROM that unlocks the widescreen

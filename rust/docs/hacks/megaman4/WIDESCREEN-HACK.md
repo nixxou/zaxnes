@@ -39,6 +39,15 @@ hack has set it): the game's board may have PRG-RAM there. The game only ever se
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/megaman4-usa-
+widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
+EXTENSION.md` 7.1): the code goes to the extension's memory, which the window shows from power-on
+(`$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are checked and
+applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). The option
+"Invincible" is a component of its own (`LDA #$02 / SEC` in place of the touch test's `JSR`),
+applied with or without the advanced mode. One pack serves both builds. The BPS patch described
+here is kept to compare.
+
 ## 2. What the game does, and what changes
 
 As Mega Man 3's, the game runs as tasks under a scheduler; it waits for one to wake at
@@ -809,6 +818,7 @@ wide_end:
 """Builds the Mega Man 4 (USA) widescreen hack (advanced mode) and its BPS patch, for either build.
 
 Usage: python -I tools/build.py <Mega Man 4 (USA).nes or its Rev 1> [out.bps]
+       python -I tools/build.py <Mega Man 4 (USA).nes or its Rev 1> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank whose first 2 KiB the widescreen extension's PRG window shows at $5800-$5FFF (Zaxnes
@@ -822,6 +832,12 @@ Usage: python -I tools/build.py <Mega Man 4 (USA).nes or its Rev 1> [out.bps]
 4. Writes build/mm4wide.nes or build/mm4wide-rev1.nes (header: 34 PRG banks of 16 KiB) and, if
    asked, the BPS patch (data without iNES header; the game's banks copied come from the player's
    ROM).
+
+With --pack, the layout and the patched ROM give way to a Zaxnes hack pack (tools/make_pack.py):
+the code (its used part), and the hooks as offsets in the game's data, the ROM keeping its size.
+The invincibility hook is a component of its own, "invincible" (`LDA #$02 / SEC` for the `JSR` of
+the touch test: no touch), applied by Zaxnes while that option is on, with or without the
+widescreen; every other hook is the "widescreen" component.
 """
 
 import os
@@ -923,6 +939,32 @@ def assemble():
     return open(binary, 'rb').read(), sym
 
 
+# The hook of the option "Invincible": a component of the pack of its own.
+INVINCIBLE_HOOK = (0x3a, 0x81c1)
+
+
+def pack(data, code, sym, out):
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import make_pack
+    widescreen = []
+    invincible = []
+    for bank, address, original, new in hooks(sym):
+        offset = bank * BANK_SIZE + (address & (BANK_SIZE - 1))
+        assert data[offset:offset + len(original)] == original, \
+            f'bank {bank:02X} ${address:04X}: not the expected bytes'
+        if (bank, address) == INVINCIBLE_HOOK:
+            # LDA #$02 / SEC: A and the flags as wide_touch leaves them.
+            invincible.append((offset, original, bytes([0xA9, 0x02, 0x38])))
+        else:
+            widescreen.append((offset, original, bytes(new)))
+    assert len(invincible) == 1
+    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
+    result = make_pack.make('Mega Man 4 (USA) widescreen', code[:used],
+                            [('widescreen', widescreen), ('invincible', invincible)])
+    open(out, 'wb').write(result)
+    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -933,6 +975,9 @@ def main():
 
     code, sym = assemble()
     assert len(code) == CODE_SIZE
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(data, code, sym, sys.argv[3])
+        return
     banks = [bytearray(data[n * BANK_SIZE:(n + 1) * BANK_SIZE]) for n in range(PRG_BANKS)]
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for bank, address, original, new in hooks(sym):

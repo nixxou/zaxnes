@@ -25,6 +25,13 @@ show in the margins.
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/ng3-usa-
+widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
+EXTENSION.md` 7.1): no code goes to the extension's memory: the bytes the hack changes (its hooks
+and its code in the game's free space) are the pack's hooks, each with the game's bytes it
+replaces, checked and applied by Zaxnes; the ROM keeps its size and the layout described here. The
+game has no testing aid. The BPS patch described here is kept to compare.
+
 ## 2. What the game does, and what changes
 
 The main loop (`$CD1C`, fixed bank) waits for the NMI (`$9A87`, bank 4 at `$8000`: `BIT $15 /
@@ -670,11 +677,17 @@ wide_list_x:
 """Builds the Ninja Gaiden III (USA) widescreen hack and its BPS patch.
 
 Usage: python -I tools/build.py <Ninja Gaiden III (USA).nes> [out.bps]
+       python -I tools/build.py <Ninja Gaiden III (USA).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $E700 of the
    fixed bank (PRG bank 15), into the unused $FF fill from $E6F2 to $F001.
 2. Writes the hooks, each checked against the bytes it replaces.
 3. Writes build/ng3wide.nes and, if asked, the BPS patch (data without iNES header).
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
+extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
+as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
+it applies them; the ROM keeps its size.
 """
 
 import os
@@ -816,6 +829,14 @@ def main():
     out = os.path.join(ROOT, 'build', 'ng3wide.nes')
     open(out, 'wb').write(bytes(image[:header]) + bytes(data))
     print(f'{out}: data CRC {zlib.crc32(data):08X}')
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import make_pack
+        result = make_pack.make('Ninja Gaiden III (USA) widescreen', b'',
+                                [('widescreen', make_pack.runs(bytes(image[header:]), bytes(data)))])
+        open(sys.argv[3], 'wb').write(result)
+        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps

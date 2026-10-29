@@ -148,6 +148,16 @@ Done, branch `hack-rewrite`:
 * MMC3 recomputes its bank windows after a restore: a state of the BPS build (68 banks) restores
   on the pack (64).
 
+* every other hack converted (`WIDESCREEN-EXTENSION.md` 7.1 lists the three kinds): Mega Man,
+  2, 3, 4 (one pack for both builds) and 5, Super Mario Bros., Super Mario Bros. 3, Castlevania
+  (both builds), Adventure Island, Excitebike, Final Fantasy, Ninja Gaiden III, Metal Force,
+  Blaster Master, Metroid, Zelda II. Each checked by RAM traces against its BPS: movies where
+  there were some, otherwise a few thousand frames from power-on with scripted inputs; the
+  same RAM every frame, but where the BPS's invincibility routine ran at every touch with the
+  option off and the pack runs the game's own code: there a few cycles of drift (Mega Man 2 to
+  5: where the raster IRQ interrupts the main code), the same with the BPS built without that
+  hook (`WIDE_SKIP`). The owner played Mega Man, 3 to 6 on the packs;
+
 * the hacks screen: by the ROM's CRC first, then by the packs' signatures; a ROM that has them
   (another revision, a ROM hack leaving the hooked code alone) gets the hack, its options and
   the margin decoder without forcing. Checked on a Mega Man 6 ROM with one byte changed outside
@@ -158,4 +168,9 @@ Still to do:
 * states taken at the game's wait for the next frame (`idle_loop`) and restored with or without
   the pack (question 6): the application still classes a state by its patch mode (section 8.3 of
   `WIDESCREEN-EXTENSION.md`);
-* the other hacks, one at a time, each checked the same way.
+* the aids that need the hack's code (the level selectors, some invincibilities) apart from
+  the widescreen: the code would have to be in the window without the hack running;
+* Zelda II's pack is made from its build, not by its repository (`z2wide`), whose document
+  has the pack's paragraph only in the Zaxnes copy;
+* the BPS files are still in `patches/`, no longer referenced: to remove once the packs are
+  validated.
