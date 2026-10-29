@@ -50,13 +50,13 @@ where the target differs from the ROM, so either can be checked.
 `rust/crates/zax-nes/patches/zelda2-usa-widescreen.zxpk`, built by the `z2pack` repository
 (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the hack moved out of the game. Its code
 (this fork's `inc/wide_bank0.asm`, bank 0 part and window part together) is assembled for the
-extension's memory at `$5800` (1779 bytes), which Zaxnes shows from power-on (`$5008` = `$80`, page
-0; 2 KiB, the PRG-RAM staying at `$6000`); the game's code is changed only by the 36 hooks of
-section 4 onwards, the same bytes but for the addresses of the hack's routines. Not in the pack:
-the power-on detour and the NMI's unlock and window reopening (Zaxnes keeps the window open; the
-NMI hook calls `wr_nmi` directly), and the base's differences with the ROM (1.1), where the game
-keeps its bytes. The segments of section 3 and the BPS patch describe this fork's build, kept to
-compare.
+extension's memory at `$5800` (2034 bytes, with the pack's own code of 5.5), which Zaxnes shows
+from power-on (`$5008` = `$80`, page 0; 2 KiB, the PRG-RAM staying at `$6000`); the game's code is
+changed only by the 36 hooks of section 4 onwards, the same bytes but for the addresses of the
+hack's routines, and the pack's own 11 (5.5). Not in the pack: the power-on detour and the NMI's
+unlock and window reopening (Zaxnes keeps the window open; the NMI hook calls `wr_nmi` directly),
+and the base's differences with the ROM (1.1), where the game keeps its bytes. The segments of
+section 3 and the BPS patch describe this fork's build, kept to compare.
 
 ## 2. What the hack does
 
@@ -71,7 +71,9 @@ there. The hack makes Zelda II such a ROM:
 2. **Enemies** in the side view are drawn past the edges (display only: the game's logic still
    works on its 8-bit screen x, so contact, removal and AI are unchanged), their sprites get the
    high byte of their 16-bit x, and new enemies spawn past the margins instead of popping in.
-   Townsfolk walk in from past the margins.
+   Townsfolk walk in from past the margins. The hack pack (`z2pack`) goes further: enemies live
+   as far as the margins need, and those the game makes at an edge of the screen come in from
+   past the margin, stopping before a wall (5.5).
 3. **World map**: the hack switches to four nametables, keeps 32 metatile columns drawn (at least
    112 pixels past each edge), scrolls on 9 bits, and makes the encounters ("blobs") live and move
    in the margins.
@@ -240,6 +242,37 @@ keep high byte 0 (the extension resets the page at each OAM DMA).
 * Townsfolk (bank 3, `$9722` and `$972A`): `ADC table_low,y` and `ADC table_high,y` become
   `JSR wr_town` and `JSR wr_town_hi`. The offsets from the scroll become `-32 - margin` (Y = 0)
   and `264 + margin` (Y = 1) instead of -32 and 264.
+
+### 5.5 Enemies past the edges (the hack pack, `z2pack`)
+
+The game keeps an enemy alive, its behaviour running and its slot taken (6 slots, `$B6,x`), up to
+96 pixels past the edges of the screen, and removes it further out (`LDE6C`, after the common
+display and collision code `LDE40`); off the screen it touches nothing. The margins show those
+enemies as they are. The pack adds (all of it only with a margin):
+
+* **How far they live.** At `$DE7A` and `$DE8B` the limits `LDA $072C / SEC / SBC #$60 / STA $01`
+  and `LDA $072D / CLC / ADC #$60 / STA $03` become `JSR wr_live_left` and `JSR wr_live_right`:
+  96 pixels as the game for a margin up to 72, `M + 48` above (the level list's enemies then
+  spawn up to `M + 42` pixels out, 5.4).
+* **Enemies made at an edge of the screen.** The generators (Mau heads and Tinsuits in the
+  palaces, Mobys and Moblins outside) and the heads that come back (Ra and its like) put their
+  enemy at the scroll plus a table's screen x (8 or 248, 0 or 239, 48 or 208...), which the
+  margins would show in the middle of the picture. In the six places that do it (bank 1 `$9B66`,
+  bank 4 `$ACB5`, `$B899`, `$B943`, `$B9FC`, bank 5 `$9643`), `LDA $072C / ADC table,y /
+  STA $4E,x / LDA $072A / ADC #0 / STA $3C,x` becomes `LDA table,y / JSR wr_edge_spawn`: the
+  game's place, then moved out by the margin 8 pixels at a time, stopping before a solid tile in
+  the rows of Link's body (screen y `$29 - 32` and `$29 - 16`, the level starting below the
+  32-pixel status bar; the tile read from the level at `$6000 + page * $D0`, its solidity the area
+  bank's own test at `$850C`) or the end of the level: no enemy starts in a wall or behind one.
+  The Bago Bagos (bank 7 `$D7AF`) are left alone: the game removes them as soon as they are off
+  the screen.
+* **Heads that come back.** Ra and its like (bank 4 `$ACDA`, `$BA20`, bank 5 `$9667`) are placed
+  anew once their middle columns leave the screen (`LDA $C9 / AND #$0C`): that becomes
+  `JSR wr_head_gone`, which tests the display mask of the wide view (`WV_DMASK`) instead, or a
+  head made past the margin would be placed anew every frame.
+
+The collision rule stays the game's: an enemy in the margins touches nothing until it is on the
+original screen.
 
 ---
 
