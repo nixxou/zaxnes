@@ -8,7 +8,7 @@
 //! | ROM | Patch | Source |
 //! |---|---|---|
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
-//! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | hooks and new code assembled into the original ROM (`mm2wide`, `tools/build.py`) |
+//! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the hack's code written over the fixed bank's free space as hooks, the hooks checked and applied by the core; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM's free space (`ng3wide`, `tools/build.py`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, part of it seen through the extension's window; the ROM keeps its size (`smb3wide`, `tools/build.py`) |
@@ -126,7 +126,10 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Mega Man 2",
         rom_name: "Mega Man 2 (USA)",
         source_crc: 0x0FCF_C04D,
-        bps: include_bytes!("../patches/megaman2-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`) with no code of its own in the extension's memory:
+        // the hack unlocks the extension itself, its code written over the fixed bank's free
+        // space as hooks; "Invincible" a component of its own.
+        bps: include_bytes!("../patches/megaman2-usa-widescreen.zxpk"),
         options: &[
             HackOption {
                 key: "enemies_in_margins",
