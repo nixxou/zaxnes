@@ -111,6 +111,13 @@ impl MarginDecoder for MegaMan2 {
         }
         true
     }
+
+    /// The game draws the rows coming in at the screen's top or bottom edge a piece at a time
+    /// while it scrolls to another section (which a television hid): those 8 lines stay hidden
+    /// with a vertical margin as without one, when the host hides them.
+    fn hides_overscan(&self) -> bool {
+        true
+    }
 }
 
 /// Whether screen column `column` of the nametables (on the plane of two) holds world tile column
