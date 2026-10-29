@@ -1,14 +1,12 @@
 //! The picture's edges a television did not show (Rust-only, owner request), as Mesen sets them:
 //! per side, from the settings of the game's region (`video.overscan_ntsc_*`,
 //! `video.overscan_pal_*`) unless the game has its own (`video.overscan_top` and the others),
-//! and whether they are blacked out, the picture keeping its size ("Fit"), or the rest enlarged
-//! to fill the view in 2D ("Resize", `video.overscan_mode`).
+//! and whether they are left out, the picture keeping its size ("Fit"), or the rest enlarged to
+//! fill the view in 2D ("Resize", `video.overscan_mode`). Left out, not blacked out (owner
+//! request): the scene's background shows there, as where the 3D scene's tiles are left out.
 
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
-
-/// The colour the cut sides are drawn in.
-const BLACK: u8 = 0x0F;
 
 /// The NES screen, in pixels.
 const SCREEN_WIDTH: i32 = 256;
@@ -94,22 +92,13 @@ impl Overscan {
             && (self.right == 0 || x < SCREEN_WIDTH - self.right)
     }
 
-    /// Blacks out the cut sides in `picture` (colour indices, `height` rows, as wide and as tall
+    /// Leaves the cut sides out of `picture` (colour indices, `height` rows, as wide and as tall
     /// as the widescreen margins make it, the screen's 240 lines in the middle), and the vertical
     /// margin past the top and bottom ones: the picture ends where it does without a vertical
     /// margin. The left and right sides are cut on a picture without a horizontal margin only.
-    pub fn black_out(&self, picture: &mut [u8], height: usize) {
-        self.fill(picture, height, BLACK);
-    }
-
-    /// As [`Self::black_out`], the cut sides left out of the picture instead
-    /// (`zax_render::interop::HIDDEN_PIXEL`): the 2D picture seen through the camera, which
-    /// shows the whole plane, ends where they start, as the 3D scene's tiles do.
+    /// A pixel left out is `zax_render::interop::HIDDEN_PIXEL`, which is not drawn.
     pub fn leave_out(&self, picture: &mut [u8], height: usize) {
-        self.fill(picture, height, zax_render::interop::HIDDEN_PIXEL);
-    }
-
-    fn fill(&self, picture: &mut [u8], height: usize, colour: u8) {
+        const HIDDEN: u8 = zax_render::interop::HIDDEN_PIXEL;
         let height_i = i32::try_from(height).unwrap_or(0);
         if height_i < SCREEN_HEIGHT || picture.is_empty() {
             return;
@@ -119,11 +108,11 @@ impl Overscan {
         let top = usize::try_from((height_i - SCREEN_HEIGHT) / 2).unwrap_or(0);
         if self.top > 0 {
             let start = (top + usize::try_from(self.top).unwrap_or(0)) * width;
-            picture[..start.min(length)].fill(colour);
+            picture[..start.min(length)].fill(HIDDEN);
         }
         if self.bottom > 0 {
             let end = (top + usize::try_from(SCREEN_HEIGHT - self.bottom).unwrap_or(0)) * width;
-            picture[end.min(length)..].fill(colour);
+            picture[end.min(length)..].fill(HIDDEN);
         }
         let (left, right) = (
             usize::try_from(self.left).unwrap_or(0),
@@ -131,25 +120,30 @@ impl Overscan {
         );
         if (left > 0 || right > 0) && width == usize::try_from(SCREEN_WIDTH).unwrap_or(0) {
             for row in picture.chunks_mut(width) {
-                row[..left.min(width)].fill(colour);
-                row[width.saturating_sub(right)..].fill(colour);
+                row[..left.min(width)].fill(HIDDEN);
+                row[width.saturating_sub(right)..].fill(HIDDEN);
             }
         }
     }
 
     /// The sides the 2D picture's head-on view leaves out in Resize, `(left, bottom, right,
-    /// top)` in scene units (a pixel each), as the profile's clipping: none in Fit.
+    /// top)` in scene units, as the profile's clipping (a pixel each): none in Fit. The clipping
+    /// counts from a frame 240 high, while the picture's rows lie 8 higher, row 239 at y = 8 to
+    /// 9 and row 0 at 247 to 248 (REQ-E3D-410): `bottom` lines cut end at y = 8 + `bottom`, and
+    /// `top` lines at 248 - `top`, 8 under the frame's top (the frame leaves the top 8 lines out
+    /// by itself).
     #[must_use]
     pub fn crop(&self) -> [f32; 4] {
         if !self.resize {
             return [0.0; 4];
         }
-        #[allow(clippy::cast_precision_loss)] // 0..=32.
+        let bottom = if self.bottom > 0 { self.bottom + 8 } else { 0 };
+        #[allow(clippy::cast_precision_loss)] // -8..=40.
         [
             self.left as f32,
-            self.bottom as f32,
+            bottom as f32,
             self.right as f32,
-            self.top as f32,
+            (self.top - 8) as f32,
         ]
     }
 }
@@ -157,6 +151,8 @@ impl Overscan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const HIDDEN: u8 = zax_render::interop::HIDDEN_PIXEL;
 
     fn sides(top: i32, bottom: i32, left: i32, right: i32) -> Overscan {
         Overscan {
@@ -173,36 +169,45 @@ mod tests {
         // 2 columns, a vertical margin of 4 lines above and below the 240 of the screen.
         let height = 248;
         let mut picture = vec![1u8; 2 * height];
-        sides(8, 8, 0, 0).black_out(&mut picture, height);
+        sides(8, 8, 0, 0).leave_out(&mut picture, height);
         let line = |y: usize| &picture[y * 2..y * 2 + 2];
-        assert_eq!(line(0), [0x0F, 0x0F], "the margin above");
-        assert_eq!(line(11), [0x0F, 0x0F], "the screen's eighth line");
+        assert_eq!(line(0), [HIDDEN, HIDDEN], "the margin above");
+        assert_eq!(line(11), [HIDDEN, HIDDEN], "the screen's eighth line");
         assert_eq!(line(12), [1, 1], "its ninth");
         assert_eq!(line(235), [1, 1], "its ninth from the bottom");
-        assert_eq!(line(236), [0x0F, 0x0F], "its eighth from the bottom");
-        assert_eq!(line(247), [0x0F, 0x0F], "the margin below");
+        assert_eq!(line(236), [HIDDEN, HIDDEN], "its eighth from the bottom");
+        assert_eq!(line(247), [HIDDEN, HIDDEN], "the margin below");
     }
 
     #[test]
     fn each_side_is_cut_on_its_own() {
         let mut picture = vec![1u8; 256 * 240];
-        sides(2, 0, 3, 5).black_out(&mut picture, 240);
+        sides(2, 0, 3, 5).leave_out(&mut picture, 240);
         let at = |x: usize, y: usize| picture[y * 256 + x];
-        assert_eq!(0x0F, at(100, 1), "top");
+        assert_eq!(HIDDEN, at(100, 1), "top");
         assert_eq!(1, at(100, 2));
         assert_eq!(1, at(100, 239), "no bottom");
-        assert_eq!(0x0F, at(2, 100), "left");
+        assert_eq!(HIDDEN, at(2, 100), "left");
         assert_eq!(1, at(3, 100));
         assert_eq!(1, at(250, 100));
-        assert_eq!(0x0F, at(251, 100), "right");
+        assert_eq!(HIDDEN, at(251, 100), "right");
     }
 
     #[test]
-    fn the_sides_left_out_are_hidden_pixels() {
-        let mut picture = vec![1u8; 256 * 240];
-        sides(8, 0, 0, 0).leave_out(&mut picture, 240);
-        assert_eq!(zax_render::interop::HIDDEN_PIXEL, picture[256 * 7]);
-        assert_eq!(1, picture[256 * 8]);
+    fn resize_cuts_the_picture_rows_where_they_lie_in_the_scene() {
+        let mut overscan = sides(8, 8, 6, 0);
+        assert_eq!([0.0; 4], overscan.crop(), "Fit");
+        overscan.resize = true;
+        // The bottom 8 rows end at y = 16, the top 8 at 240: the frame's own top.
+        assert_eq!([6.0, 16.0, 0.0, 0.0], overscan.crop());
+        assert_eq!(
+            [0.0, 0.0, 0.0, -8.0],
+            Overscan {
+                resize: true,
+                ..Overscan::default()
+            }
+            .crop()
+        );
     }
 
     #[test]

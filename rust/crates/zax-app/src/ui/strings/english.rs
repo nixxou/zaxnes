@@ -253,7 +253,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.overscan_bottom", "Overscan: bottom"),
     ("setting.video.overscan_left", "Overscan: left"),
     ("setting.video.overscan_right", "Overscan: right"),
-    ("setting.video.overscan_mode", "Overscan: fit (black edges) or resize (enlarged)"),
+    ("setting.video.overscan_mode", "Overscan: fit (edges hidden) or resize (enlarged)"),
     ("setting.video.nes_palette", "NES colour palette"),
     ("setting.emu.builtin_patches", "Built-in ROM patches (at the next ROM load)"),
     ("setting.audio.volume", "Master volume"),
