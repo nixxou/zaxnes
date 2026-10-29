@@ -10,7 +10,7 @@
 //!
 //! | ROM | Patch | Source |
 //! |---|---|---|
-//! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a hack pack (`crate::hack_pack`) made from the build of a fork of the FiendsOfTheElements Zelda II disassembly (ca65) by `tools/pack_from_roms.py`: the bytes its rewritten code changes as hooks, checked and applied by the core, the ROM keeping its size |
+//! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; written in a fork of the FiendsOfTheElements Zelda II disassembly (`z2wide`), moved out of the game by `z2pack` |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the hack's code written over the fixed bank's free space as hooks, the hooks checked and applied by the core; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
@@ -115,15 +115,16 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Zelda II",
         rom_name: "Zelda II - The Adventure of Link (USA)",
         source_crc: 0xBA32_2865,
-        // A hack pack (see `crate::hack_pack`) made from the hack's build (`tools/pack_from_roms.py`):
-        // the bytes its rewritten code changes as hooks, checked and applied by the core; the ROM
-        // keeps its size.
+        // A hack pack (see `crate::hack_pack`, built by `z2pack`): the code in the extension's
+        // memory, the hooks checked and applied by the core; the ROM keeps its size.
         bps: include_bytes!("../patches/zelda2-usa-widescreen.zxpk"),
         options: &[],
         after_other_way_state: Some(zelda2_after_other_way_state),
         advanced: false,
-        boot_window: None,
-        boot_window_keeps_prg_ram: false,
+        // The pack's code is open in the window from power-on (the hack no longer unlocks the
+        // extension itself); 2 KiB: the game's battery-backed PRG-RAM is at $6000.
+        boot_window: Some((0x80, 0x00)),
+        boot_window_keeps_prg_ram: true,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
         idle_loop: Some((0xC010, 0xC01A)),
     },

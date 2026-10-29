@@ -47,10 +47,15 @@ where the target differs from the ROM, so either can be checked.
 ---
 
 **Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/zelda2-usa-
-widescreen.zxpk` (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1), made from the hack's build
-by Zaxnes' `tools/pack_from_roms.py`: the bytes the rewritten code changes, as hooks of at most 255
-bytes, each with the game's bytes it replaces, checked and applied by Zaxnes; the ROM keeps its
-size. The BPS patch described here is kept to compare.
+widescreen.zxpk`, built by the `z2pack` repository (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md`
+7.1): the hack moved out of the game. Its code (this fork's `inc/wide_bank0.asm`, bank 0 part and
+window part together) is assembled for the extension's memory at `$5800` (1779 bytes), which Zaxnes
+shows from power-on (`$5008` = `$80`, page 0; 2 KiB, the PRG-RAM staying at `$6000`); the game's
+code is changed only by the 36 hooks of section 4 onwards, the same bytes but for the addresses of
+the hack's routines. Not in the pack: the power-on detour and the NMI's unlock and window reopening
+(Zaxnes keeps the window open; the NMI hook calls `wr_nmi` directly), and the base's differences
+with the ROM (1.1), where the game keeps its bytes. The segments of section 3 and the BPS patch
+describe this fork's build, kept to compare.
 
 ## 2. What the hack does
 
