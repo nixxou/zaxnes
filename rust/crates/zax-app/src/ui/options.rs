@@ -57,7 +57,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 9] = [
+pub const EXCLUDED: [SettingId; 13] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -68,6 +68,11 @@ pub const EXCLUDED: [SettingId; 9] = [
     SettingId::VideoWidescreen,
     SettingId::VideoWidescreenExtra,
     SettingId::VideoWidescreenAdvanced,
+    // Rust-only (owner request): a game's own overscan, in its options.
+    SettingId::VideoOverscanTop,
+    SettingId::VideoOverscanBottom,
+    SettingId::VideoOverscanLeft,
+    SettingId::VideoOverscanRight,
 ];
 
 /// The settings the window edits as a folder: a field and a button that picks it.

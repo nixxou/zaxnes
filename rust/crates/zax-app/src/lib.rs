@@ -17,6 +17,7 @@ pub mod handheld_mode;
 pub mod input;
 pub mod library_game_catalog;
 pub mod neutral_assets;
+pub mod overscan;
 pub mod persistence;
 pub mod physical_file_system;
 pub mod pipeline;

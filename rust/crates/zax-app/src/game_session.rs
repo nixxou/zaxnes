@@ -252,9 +252,9 @@ pub struct GameSession {
     /// `video.widescreen_strict_edges`: whether the engine is told where each band of a
     /// widescreen frame stops being drawn, so that a shape cut there stays unfinished.
     strict_wide_edges: bool,
-    /// `video.hide_overscan`, for this game: whether the tiles of the picture's top and bottom
-    /// 8 lines are left out of the 3D scene (without a vertical widescreen margin).
-    hide_overscan: bool,
+    /// The picture's sides cut for this game (`crate::overscan`): the tiles half or more in them
+    /// are left out of the 3D scene.
+    overscan: crate::overscan::Overscan,
     /// The movie being recorded or played (see `zax_nes::movie`).
     movie: Option<MovieRun>,
 }
@@ -393,7 +393,7 @@ impl GameSession {
             aimed: None,
             batch_records: Vec::new(),
             strict_wide_edges: false,
-            hide_overscan: false,
+            overscan: crate::overscan::Overscan::default(),
             movie: None,
             pipeline: FramePipeline::default(),
         };
@@ -534,9 +534,9 @@ impl GameSession {
         self.strict_wide_edges = strict;
     }
 
-    /// Sets `video.hide_overscan` for this game (see the field `hide_overscan`).
-    pub fn set_hide_overscan(&mut self, hide: bool) {
-        self.hide_overscan = hide;
+    /// Sets the picture's sides cut for this game (see the field `overscan`).
+    pub fn set_overscan(&mut self, overscan: crate::overscan::Overscan) {
+        self.overscan = overscan;
     }
 
     /// The conversion engine.
@@ -1131,9 +1131,12 @@ impl GameSession {
         };
         let counter = self.frame_counter;
         let mut records = std::mem::take(&mut self.batch_records);
-        if self.hide_overscan && (margin_y == 0 || self.core.hides_overscan()) {
-            // A tile half or more in the top or bottom 8 lines is not shown.
-            records.retain(|record| record.y > 4 && record.y < 228);
+        let overscan = self
+            .overscan
+            .in_force(margin, margin_y == 0 || self.core.hides_overscan());
+        if !overscan.is_none() {
+            // A tile half or more in a cut side is not shown.
+            records.retain(|record| overscan.keeps(record.x, record.y));
         }
         // The conversion is synchronous, right after the frame, as REQ-LOOP-060 (c) requires.
         let batch = FrameBatch {

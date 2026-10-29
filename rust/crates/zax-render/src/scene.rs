@@ -254,6 +254,10 @@ pub struct SceneState {
     /// ([`crate::camera::SceneCamera::picture_view`]) instead of through the camera (Rust-only,
     /// owner request: the "2D from the front" of the handheld).
     pub picture_head_on: bool,
+    /// The sides of the 2D picture the head-on view leaves out besides the profile's clipping,
+    /// `(left, bottom, right, top)` in scene units: the overscan in Resize (Rust-only, owner
+    /// request), the rest enlarged to fill the view.
+    pub picture_crop: Vec4F,
     /// The shape the subjective camera follows, or `None` (REQ-SCN-021). In FPV it decides
     /// which tiles count as occluders and are drawn at half opacity (REQ-SCN-022).
     pub followed_shape: Option<ShapeId>,
@@ -280,6 +284,7 @@ impl Default for SceneState {
             nes_background_color: Rgb24::default(),
             two_dimensional_mode: false,
             picture_head_on: false,
+            picture_crop: Vec4F::new(0.0, 0.0, 0.0, 0.0),
             followed_shape: None,
             real_time: 0.0,
             emulated_time: 0.0,
@@ -317,6 +322,18 @@ impl SceneState {
             self.clipping.y - self.margin_y,
             self.clipping.z - self.margin,
             self.clipping.w - self.margin_y,
+        )
+    }
+
+    /// The clipping of the 2D picture's head-on view: the profile's, each side at least the
+    /// overscan's in Resize ([`Self::picture_crop`]).
+    #[must_use]
+    pub fn picture_clipping(&self) -> Vec4F {
+        Vec4F::new(
+            self.clipping.x.max(self.picture_crop.x),
+            self.clipping.y.max(self.picture_crop.y),
+            self.clipping.z.max(self.picture_crop.z),
+            self.clipping.w.max(self.picture_crop.w),
         )
     }
 }

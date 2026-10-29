@@ -7,12 +7,14 @@ use std::cell::RefCell;
 
 use imgui::{Condition, DrawListMut, StyleColor, StyleVar, Ui, WindowFlags, WindowToken};
 use zax_platform::input::labels;
+use zax_settings::catalogue::SettingId;
 
 use super::compat::Tone;
 use super::game_options::{GameOptionsModel, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
 use super::options::{self, ROWS};
 use super::overlay::{OverlayItem, ITEMS};
+use super::overscan;
 use super::pointer::{self, Zone, ZoneAction};
 use super::rom_list::{first_visible, ProfileMatch, RomEntry, RomListModel};
 use super::states::{SlotState, StatesMode};
@@ -372,6 +374,7 @@ impl HandheldUi {
             Screen::Profiles => self.draw_profiles(ui),
             Screen::Options => self.draw_options(ui, frame),
             Screen::Controls => self.draw_controls(ui, frame),
+            Screen::Overscan => self.draw_overscan(ui, frame),
             Screen::Overlay => self.draw_overlay(ui, frame),
             Screen::States => self.draw_states(ui, frame),
             Screen::InGame => {}
@@ -669,6 +672,7 @@ impl HandheldUi {
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
                 options::OptionRow::Controls => String::new(),
+                options::OptionRow::Overscan => format!("{value} >"),
                 _ => format!("< {value} >"),
             };
             painter.row(
@@ -679,6 +683,51 @@ impl HandheldUi {
             );
         }
         painter.hints(layout::hints(Screen::Options));
+    }
+
+    /// The overscan (Rust-only): the NTSC and PAL sides and the mode, or a game's own.
+    fn draw_overscan(&self, ui: &Ui, frame: &UiFrame<'_>) {
+        let Some(_window) = full_screen(ui, "##overscan", BACKGROUND) else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let game = self
+            .game_options
+            .as_ref()
+            .filter(|_| self.overscan.is_game());
+        let title = strings::get(keys::HANDHELD_OPTION_OVERSCAN);
+        let title = game.map_or(title.clone(), |options| {
+            format!("{title} : {}", options.name())
+        });
+        painter.title(&title, "");
+        let ids = self.overscan.rows();
+        let rows = self.metrics.visible_rows(painter.size[1]);
+        let selected = self.overscan.selected_index();
+        let first = first_visible(selected, rows, ids.len());
+        for (slot, (index, id)) in ids.iter().enumerate().skip(first).take(rows).enumerate() {
+            let focused = index == selected;
+            let (shown, colour) = match game {
+                Some(options) => {
+                    let own = options.edited().has_game_value(*id);
+                    let value = overscan::value_text(*id, options.edited());
+                    let colour = match (own, focused) {
+                        (true, true) => GAME_OWN_ON_FOCUS,
+                        (true, false) => GAME_OWN,
+                        (false, _) => DIM,
+                    };
+                    let value = if own || *id != SettingId::VideoOverscanMode {
+                        value
+                    } else {
+                        strings::format(&strings::get(keys::HANDHELD_USE_GLOBAL), &[&value])
+                    };
+                    (value, colour)
+                }
+                None => (overscan::value_text(*id, frame.host.settings()), DIM),
+            };
+            let shown = format!("< {shown} >");
+            painter.row(slot, focused, &overscan::label(*id), (&shown, colour));
+        }
+        painter.hints(layout::hints(Screen::Overscan));
     }
 
     fn draw_controls(&mut self, ui: &Ui, frame: &UiFrame<'_>) {

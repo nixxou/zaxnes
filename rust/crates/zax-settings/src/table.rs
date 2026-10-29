@@ -1373,29 +1373,87 @@ fn video_sprite_limit(out: &mut Vec<SettingDescriptor>) {
     );
 }
 
-/// `video.hide_overscan` (Rust-only).
+/// The overscan values: 0 to 32 pixels, and with `global` the value that follows the
+/// preferences (a game's own).
+fn overscan_pixels(global: bool) -> Vec<SettingOption> {
+    let mut options = Vec::new();
+    if global {
+        options.push(opt(-1, "Global"));
+    }
+    options.extend((0..=32).map(|pixels| opt(pixels, &format!("{pixels} px"))));
+    options
+}
+
+/// `video.overscan_*` (Rust-only).
 fn video_overscan(out: &mut Vec<SettingDescriptor>) {
-    // Rust-only (owner request): the picture's top and bottom 8 lines, which an NTSC TV did not
-    // show (games leave scrolling garbage there), are blacked out in 2D and their tiles left out
-    // of the 3D scene. "Auto" does it for the NTSC games only: a PAL TV showed the 240 lines.
-    // Never with a vertical widescreen margin, which goes on past those lines. Not exposed to
-    // Lua.
+    // Rust-only (owner request): the picture's edges a television did not show (games leave
+    // scrolling garbage there), as Mesen sets them: per side, for the NTSC games and for the PAL
+    // ones, 0 by default (the whole picture). A game has the four sides of its own
+    // (`video.overscan_top` and the others, "Global" by default: its region's), and the way they
+    // show: blacked out, the picture keeping its size ("Fit"), or the rest enlarged to fill the
+    // view in 2D ("Resize"). With a widescreen margin the left and right sides are not cut (the
+    // margins go on past them), with a vertical one the top and bottom are not either but where
+    // the game's margin decoder asks. Not exposed to Lua.
+    let sides = [
+        (SettingId::VideoOverscanNtscTop, "Overscan NTSC: top", false),
+        (
+            SettingId::VideoOverscanNtscBottom,
+            "Overscan NTSC: bottom",
+            false,
+        ),
+        (
+            SettingId::VideoOverscanNtscLeft,
+            "Overscan NTSC: left",
+            false,
+        ),
+        (
+            SettingId::VideoOverscanNtscRight,
+            "Overscan NTSC: right",
+            false,
+        ),
+        (SettingId::VideoOverscanPalTop, "Overscan PAL: top", false),
+        (
+            SettingId::VideoOverscanPalBottom,
+            "Overscan PAL: bottom",
+            false,
+        ),
+        (SettingId::VideoOverscanPalLeft, "Overscan PAL: left", false),
+        (
+            SettingId::VideoOverscanPalRight,
+            "Overscan PAL: right",
+            false,
+        ),
+        (SettingId::VideoOverscanTop, "Overscan: top", true),
+        (SettingId::VideoOverscanBottom, "Overscan: bottom", true),
+        (SettingId::VideoOverscanLeft, "Overscan: left", true),
+        (SettingId::VideoOverscanRight, "Overscan: right", true),
+    ];
+    for (id, label, global) in sides {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Enum,
+                SettingValue::Enum(if global { -1 } else { 0 }),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Video,
+            )
+            .with_domain(Domain::choice(overscan_pixels(global)))
+            .with_label(label),
+        );
+    }
     out.push(
         SettingDescriptor::new(
-            SettingId::VideoHideOverscan,
+            SettingId::VideoOverscanMode,
             SettingKind::Enum,
-            // Auto (owner request).
+            // Resize (owner request).
             SettingValue::Enum(1),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Video,
         )
-        .with_domain(Domain::choice(vec![
-            opt(0, "Disabled"),
-            opt(1, "Auto"),
-            opt(2, "Always"),
-        ]))
-        .with_label("Hide the overscan"),
+        .with_domain(Domain::choice(vec![opt(0, "Fit"), opt(1, "Resize")]))
+        .with_label("Overscan: fit or resize"),
     );
 }
 

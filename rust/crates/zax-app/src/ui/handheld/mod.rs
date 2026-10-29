@@ -15,6 +15,7 @@ pub mod keyboard;
 pub mod layout;
 pub mod options;
 pub mod overlay;
+pub mod overscan;
 pub mod pad;
 pub mod pointer;
 pub mod profile_list;
@@ -36,6 +37,7 @@ use self::hacks::{HacksCommand, HacksModel};
 use self::layout::Metrics;
 use self::options::{HandheldOptionsModel, OptionsCommand};
 use self::overlay::{CameraPreset, OverlayCommand, OverlayModel};
+use self::overscan::{OverscanCommand, OverscanModel};
 use self::pad::{PadButton, PadState};
 use self::pointer::{PointerInput, Zone};
 use self::profile_list::{ProfileListCommand, ProfileListModel};
@@ -73,6 +75,8 @@ pub enum Screen {
     Hacks,
     /// The gamepad bindings of player one.
     Controls,
+    /// The overscan (Rust-only): from the options, or a game's from its options.
+    Overscan,
     /// The in-game menu.
     Overlay,
     /// The save state slots, to save or to load (from the in-game menu).
@@ -106,6 +110,8 @@ pub struct HandheldUi {
     /// Where the hacks go back to: the list, the game's options or the in-game menu.
     hacks_return: Screen,
     controls: ControlsState,
+    /// The overscan's screen; a game's goes back to its options, the other to the options.
+    overscan: OverscanModel,
     keys: KeyConfigModel,
     combo: ExitCombo,
     metrics: Metrics,
@@ -178,6 +184,7 @@ impl HandheldUi {
             game_options: None,
             hacks: None,
             hacks_return: Screen::Home,
+            overscan: OverscanModel::new(false),
             controls: ControlsState::default(),
             keys: KeyConfigModel::new(),
             combo: ExitCombo::new(),
@@ -547,6 +554,10 @@ impl HandheldUi {
                 self.game_options = None;
                 self.screen = Screen::InGame;
             }
+            (true, Screen::Overscan) if self.overscan.is_game() => {
+                self.game_options = None;
+                self.screen = Screen::InGame;
+            }
             (true, Screen::Hacks) if hacks_of_the_list => {
                 self.game_options = None;
                 self.hacks = None;
@@ -675,6 +686,7 @@ impl HandheldUi {
                 }
             }
             Screen::Controls => self.press_controls(button, frame),
+            Screen::Overscan => self.press_overscan(button, frame.host),
             Screen::Overlay => {
                 if let Some(command) = self.overlay.handle(button) {
                     self.carry_out_overlay(command, frame.host);
@@ -822,6 +834,10 @@ impl HandheldUi {
                 self.game_options = None;
                 self.screen = Screen::Home;
             }
+            GameOptionsCommand::OpenOverscan => {
+                self.overscan = OverscanModel::new(true);
+                self.screen = Screen::Overscan;
+            }
             GameOptionsCommand::OpenHacks => {
                 if let Some(rom) = self
                     .game_options
@@ -858,7 +874,10 @@ impl HandheldUi {
     }
 
     fn open_options(&mut self, host: &AppHost) {
-        if !matches!(self.screen, Screen::Options | Screen::Controls) {
+        if !matches!(
+            self.screen,
+            Screen::Options | Screen::Controls | Screen::Overscan
+        ) {
             let playing = host.current_game_id().is_some();
             self.return_to = if playing {
                 Screen::Overlay
@@ -876,10 +895,44 @@ impl HandheldUi {
                 self.controls = ControlsState::default();
                 self.screen = Screen::Controls;
             }
+            OptionsCommand::OpenOverscan => {
+                self.overscan = OverscanModel::new(false);
+                self.screen = Screen::Overscan;
+            }
             OptionsCommand::StepCamera(step) => {
                 let preset = self.overlay.step_camera(step);
                 apply_camera(preset, frame.host);
             }
+        }
+    }
+
+    /// A press on the overscan's screen: a game's values go to its options, the others to the
+    /// preferences.
+    fn press_overscan(&mut self, button: PadButton, host: &mut AppHost) {
+        let overscan = &mut self.overscan;
+        let command = if overscan.is_game() {
+            let Some(options) = self.game_options.as_mut() else {
+                self.screen = Screen::Home;
+                return;
+            };
+            overscan.handle(button, |id, step| options.step_setting(id, step))
+        } else {
+            host.update_settings(|settings| {
+                overscan.handle(button, |id, step| overscan::step(id, settings, step))
+            })
+        };
+        match command {
+            Some(OverscanCommand::Changed) if self.overscan.is_game() => {
+                self.carry_out_game_options(GameOptionsCommand::Save, host);
+            }
+            Some(OverscanCommand::Close) => {
+                self.screen = if self.overscan.is_game() {
+                    Screen::GameOptions
+                } else {
+                    Screen::Options
+                };
+            }
+            _ => {}
         }
     }
 
@@ -1024,6 +1077,11 @@ impl HandheldUi {
             Screen::Controls => {
                 self.controls = ControlsState::default();
                 self.screen = Screen::Controls;
+            }
+            Screen::Overscan => {
+                self.open_options_for_capture();
+                self.overscan = OverscanModel::new(false);
+                self.screen = Screen::Overscan;
             }
             // The hacks of Mega Man 2 (USA), told by the CRC of its data, the widescreen on.
             Screen::Hacks => {

@@ -203,7 +203,7 @@ pub trait MarginDecoder: Sync {
     }
 
     /// Whether the screen's top and bottom 8 lines stay hidden with a vertical margin when the
-    /// host hides them without one (`video.hide_overscan`): for a game whose vertical margin the
+    /// host hides them without one (`video.overscan_*`): for a game whose vertical margin the
     /// decoder leaves empty, and which draws rows there a piece at a time (Mega Man, scrolling
     /// to another section). Off by default: a vertical margin shows those lines, going on past
     /// them.

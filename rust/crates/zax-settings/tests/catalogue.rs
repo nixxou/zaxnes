@@ -50,7 +50,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_advanced,
     // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
-    // video.hide_overscan and video.nes_palette:
+    // video.overscan_* and video.nes_palette:
     // Rust-only settings (owner request).
     assert_eq!(
         additions,
@@ -70,8 +70,20 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "ui.show_fps",
             "video.backend",
             "video.dynamic_resolution",
-            "video.hide_overscan",
             "video.nes_palette",
+            "video.overscan_bottom",
+            "video.overscan_left",
+            "video.overscan_mode",
+            "video.overscan_ntsc_bottom",
+            "video.overscan_ntsc_left",
+            "video.overscan_ntsc_right",
+            "video.overscan_ntsc_top",
+            "video.overscan_pal_bottom",
+            "video.overscan_pal_left",
+            "video.overscan_pal_right",
+            "video.overscan_pal_top",
+            "video.overscan_right",
+            "video.overscan_top",
             "video.remove_sprite_limit",
             "video.widescreen",
             "video.widescreen_advanced",

@@ -16,11 +16,12 @@ use crate::ui::{keys, strings};
 
 /// The rows a game can have a value of its own for: the options, without the language, the
 /// camera and the bindings, which belong to the player rather than to the game.
-pub const GAME_ROWS: [OptionRow; 12] = [
+pub const GAME_ROWS: [OptionRow; 13] = [
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
     OptionRow::Palette,
+    OptionRow::Overscan,
     OptionRow::FrameCap,
     OptionRow::ShowFps,
     OptionRow::Profiler,
@@ -43,6 +44,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         ],
         OptionRow::Shadows => &[SettingId::RenderShadow],
         OptionRow::Palette => &[SettingId::VideoNesPalette],
+        OptionRow::Overscan => &super::overscan::GAME_ROWS,
         OptionRow::FrameCap => &[SettingId::VideoVSync],
         OptionRow::ShowFps => &[SettingId::UiShowFps],
         OptionRow::Profiler => &[SettingId::UiProfiler],
@@ -71,6 +73,8 @@ pub enum GameOptionsCommand {
     Close,
     /// Open the hacks of the game (its last row, Rust-only).
     OpenHacks,
+    /// Open the game's overscan (Rust-only).
+    OpenOverscan,
 }
 
 /// The options of one game and the selection; row 0 is "reset everything".
@@ -249,6 +253,11 @@ impl GameOptionsModel {
             PadButton::A | PadButton::Right if self.selected == Self::HACKS_ROW => {
                 return Some(GameOptionsCommand::OpenHacks);
             }
+            PadButton::A | PadButton::Left | PadButton::Right
+                if self.selected_row() == Some(OptionRow::Overscan) =>
+            {
+                return Some(GameOptionsCommand::OpenOverscan);
+            }
             PadButton::Left => return self.step(-1),
             PadButton::A if self.selected == 0 => return self.reset(),
             PadButton::Right | PadButton::A => return self.step(1),
@@ -257,6 +266,23 @@ impl GameOptionsModel {
             _ => {}
         }
         None
+    }
+
+    /// The row of [`GAME_ROWS`] selected, none on the first and last rows.
+    fn selected_row(&self) -> Option<OptionRow> {
+        GAME_ROWS.get(self.selected.checked_sub(1)?).copied()
+    }
+
+    /// The global values with the game's own over them.
+    #[must_use]
+    pub const fn edited(&self) -> &SettingsModel {
+        &self.edited
+    }
+
+    /// Steps the game's own `id` (a setting of a row's own screen, the overscan's) by `step`.
+    pub fn step_setting(&mut self, id: SettingId, step: i32) {
+        super::overscan::step(id, &mut self.edited, step);
+        self.normalise();
     }
 
     /// Every row back to the global value; the game's options of other screens stay.

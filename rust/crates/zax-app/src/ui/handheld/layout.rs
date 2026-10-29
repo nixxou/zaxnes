@@ -137,7 +137,7 @@ pub const fn hints(screen: Screen) -> &'static [Hint] {
     match screen {
         Screen::Home => HOME_HINTS,
         Screen::Profiles => PROFILES_HINTS,
-        Screen::Options => OPTIONS_HINTS,
+        Screen::Options | Screen::Overscan => OPTIONS_HINTS,
         Screen::GameOptions => GAME_OPTIONS_HINTS,
         Screen::Hacks => HACKS_HINTS,
         Screen::Controls => CONTROLS_HINTS,
