@@ -67,7 +67,7 @@ fn the_picture_seen_head_on_fills_the_height_of_the_view() {
         camera.current_mut().angles = Vector3::new(20.0, -35.0, 5.0);
         camera.snap_to_setpoints();
         let before = camera.clone();
-        let view = camera.picture_view(clipping, aspect);
+        let view = camera.picture_view(clipping, aspect, zax_render::numerics::Vector3::ZERO);
         assert_eq!(before, camera);
         // The first visible row at the top edge, the last at the bottom one, centred.
         let (_, top) = projected(&view, centre, top_y);

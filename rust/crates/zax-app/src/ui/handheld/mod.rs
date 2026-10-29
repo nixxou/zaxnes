@@ -122,6 +122,9 @@ pub struct HandheldUi {
     flat_view: Option<(f32, bool)>,
     /// Where the head-on 2D picture of a held Y stands.
     head_on: HeadOn,
+    /// Whether the game was in 2D at the last look: going into it puts the picture head on,
+    /// leaving it gives the camera back.
+    was_two_dimensional: bool,
     states: StatesModel,
     /// The slot and the save time of the thumbnail shown, and whether it has one.
     shown_picture: Option<(i32, i64, bool)>,
@@ -194,6 +197,7 @@ impl HandheldUi {
             camera_memory: CameraMemory::default(),
             flat_view: None,
             head_on: HeadOn::Off,
+            was_two_dimensional: false,
             states: StatesModel::new(StatesMode::Save, 1),
             states_return: Screen::Overlay,
             device: true,
@@ -469,12 +473,13 @@ impl HandheldUi {
             (HeadOn::Shown, false) | (HeadOn::Off, _) => HeadOn::Off,
             (HeadOn::Waiting, false) => HeadOn::Waiting,
         };
-        // Head on whenever the game is in 2D (owner request: always from the front, filling the
-        // height), not only once asked for.
-        let shown = two_dimensional;
-        if host.scene().picture_head_on != shown {
-            host.scene_mut().picture_head_on = shown;
+        // Head on whenever the game goes into 2D (owner request: always from the front, filling
+        // the height), not only once asked for; a pull on the picture gives it to the camera
+        // until the next time (`crate::head_on_pull`).
+        if two_dimensional != self.was_two_dimensional {
+            host.scene_mut().picture_head_on = two_dimensional;
         }
+        self.was_two_dimensional = two_dimensional;
     }
 
     /// L2 in game: a hold keeps the camera, a short press puts it back.

@@ -1286,6 +1286,10 @@ struct RunState {
     version: String,
     shadow_map_reported: bool,
     drag_origin: Option<[f32; 2]>,
+    /// The pull on the head-on 2D picture (`crate::head_on_pull`).
+    head_on_pull: crate::head_on_pull::HeadOnPull,
+    /// Whether the game was in 2D last frame: going into it puts the picture head on.
+    was_two_dimensional: bool,
     picture: Vec<u8>,
     /// Its rows.
     picture_height: usize,
@@ -1303,6 +1307,8 @@ impl RunState {
             version,
             shadow_map_reported: false,
             drag_origin: None,
+            head_on_pull: crate::head_on_pull::HeadOnPull::new(),
+            was_two_dimensional: false,
             picture: Vec::new(),
             picture_height: 0,
         }
@@ -1468,6 +1474,17 @@ fn handle_camera_input(
         host.port_type(1),
     ));
     let scene = host.scene_mut();
+    // Rust-only (owner request): going into 2D puts the picture head on.
+    if scene.two_dimensional_mode && !state.was_two_dimensional {
+        scene.picture_head_on = true;
+    }
+    state.was_two_dimensional = scene.two_dimensional_mode;
+    if scene.two_dimensional_mode && scene.picture_head_on {
+        pull_head_on(scene, snapshot, camera_actions, real, state);
+        return;
+    }
+    state.head_on_pull.clear();
+    scene.picture_tilt = [0.0; 2];
     controls::apply(&mut scene.camera, camera_actions, real);
     // REQ-INP-090: the wheel is ignored over a piece of interface and while a zoom action is
     // held; 5 scene units per notch (DEC-08-3).
@@ -1487,6 +1504,53 @@ fn handle_camera_input(
         state.drag_origin = Some(snapshot.pointer);
     } else {
         state.drag_origin = None;
+    }
+}
+
+/// The 2D picture seen head on (Rust-only, owner request): the camera does not turn, the
+/// rotation asked for (camera actions, a drag; not the zoom) pulls the picture instead, which
+/// gives way to the camera past the gauge's limit (`crate::head_on_pull`).
+fn pull_head_on(
+    scene: &mut SceneState,
+    snapshot: &InputSnapshot,
+    camera_actions: controls::CameraAction,
+    real: f32,
+    state: &mut RunState,
+) {
+    use crate::head_on_pull::Pull;
+    use zax_render::numerics::Vector3;
+    // The rotation asked for, on a copy of the camera (its zoom is not kept).
+    let mut asked = scene.camera.clone();
+    controls::apply(&mut asked, camera_actions, real);
+    if snapshot.left_button && !snapshot.pointer_over_ui {
+        if let Some(origin) = state.drag_origin {
+            controls::apply_drag(
+                &mut asked,
+                snapshot.pointer[0] - origin[0],
+                origin[1] - snapshot.pointer[1],
+            );
+        }
+        state.drag_origin = Some(snapshot.pointer);
+    } else {
+        state.drag_origin = None;
+    }
+    let before = scene.camera.current().angles;
+    let after = asked.current().angles;
+    match state
+        .head_on_pull
+        .update([after.x - before.x, after.y - before.y], real)
+    {
+        Pull::Held(tilt) => scene.picture_tilt = tilt,
+        Pull::Released(tilt, whole) => {
+            let clipping = scene.picture_clipping();
+            scene.camera.leave_picture_view(
+                clipping,
+                Vector3::new(tilt[0], tilt[1], 0.0),
+                Vector3::new(whole[0], whole[1], 0.0),
+            );
+            scene.picture_head_on = false;
+            scene.picture_tilt = [0.0; 2];
+        }
     }
 }
 

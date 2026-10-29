@@ -254,6 +254,9 @@ pub struct SceneState {
     /// ([`crate::camera::SceneCamera::picture_view`]) instead of through the camera (Rust-only,
     /// owner request: the "2D from the front" of the handheld).
     pub picture_head_on: bool,
+    /// The tilt of the head-on picture, `(rx, ry)` in degrees: the pull of a camera rotation
+    /// before the picture gives way to the camera (Rust-only, owner request).
+    pub picture_tilt: [f32; 2],
     /// The sides of the 2D picture the head-on view leaves out besides the profile's clipping,
     /// `(left, bottom, right, top)` in scene units: the overscan in Resize (Rust-only, owner
     /// request), the rest enlarged to fill the view.
@@ -284,6 +287,7 @@ impl Default for SceneState {
             nes_background_color: Rgb24::default(),
             two_dimensional_mode: false,
             picture_head_on: false,
+            picture_tilt: [0.0; 2],
             picture_crop: Vec4F::new(0.0, 0.0, 0.0, 0.0),
             followed_shape: None,
             real_time: 0.0,
