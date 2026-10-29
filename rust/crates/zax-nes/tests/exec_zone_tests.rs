@@ -117,3 +117,43 @@ fn without_the_zone_a_fetch_there_is_a_plain_read() {
     assert_ne!(0x11, bus.read(0x2000));
     assert_eq!(0x11, bus.read_code(0x2000));
 }
+
+#[test]
+fn with_its_data_the_zone_reaches_the_extension_at_3000_and_the_game_still_the_ppu() {
+    // The game, at $8000: LDA #$22 / STA $3205 (a PPU mirror) / JMP $2000.
+    let program = [0xA9, 0x22, 0x8D, 0x05, 0x32, 0x4C, 0x00, 0x20];
+    // The zone, at $2000: LDA #$40 / STA $3003 / LDA $3003 / STA $0300 / LDA #$77 / STA $3210 /
+    // JMP $2010 (an endless loop).
+    let code = [
+        0xA9, 0x40, 0x8D, 0x03, 0x30, 0xAD, 0x03, 0x30, 0x8D, 0x00, 0x03, 0xA9, 0x77, 0x8D, 0x10,
+        0x32, 0x4C, 0x10, 0x20,
+    ];
+    let (mut cpu, mut bus) = zone_machine(&program, &code, 0x40);
+    for _ in 0..10 {
+        cpu.step(&mut bus);
+    }
+    assert_eq!(0x2010, cpu.pc, "looping in the zone");
+    let wide = bus.ppu().wide();
+    assert!(wide.zone_data());
+    assert_eq!(
+        Some(0x40),
+        wide.read(0x5003),
+        "the zone's STA $3003: the margin asked for"
+    );
+    assert_eq!(0x40, bus.ram()[0x0300], "the zone's LDA $3003 read it back");
+    assert_eq!(
+        Some(0x77),
+        wide.read(0x5210),
+        "the zone's STA $3210: the extension's RAM"
+    );
+    assert_eq!(
+        Some(0x00),
+        wide.read(0x5205),
+        "the game's STA $3205 went to the PPU"
+    );
+    // $5000-$5FFF is the cartridge's: the game reads no register there.
+    assert_ne!(0x40, bus.read(0x5003));
+    // The zone's code stops at $2FFF: $3000 is no code fetch.
+    assert_eq!(None, bus.ppu().wide().zone_offset(0x3000));
+    assert!(bus.ppu().wide().zone_offset(0x2FFF).is_some());
+}

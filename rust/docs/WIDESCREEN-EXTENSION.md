@@ -148,7 +148,7 @@ until then.
 | `$5008` | R/W | PRG window: bit 7 on, bits 0-6 the 16 KiB PRG-ROM bank shown at `$5800`-`$5FFF` |
 | `$5009` | R/W | PRG window: first 256-byte page of that bank it shows |
 | `$500A` | R | the options of the ROM's built-in patch the player turned on, one bit each (see 7) |
-| `$500B` | R/W | execution zone: bit 7 on, bits 0-6 the page of the hack pack's code shown at `$2800`-`$3FFF` (below) |
+| `$500B` | R/W | execution zone: bit 7 on, bit 6 its data at `$3000`-`$3FFF`, bits 0-5 the page of the hack pack's code shown at `$2800`-`$3FFF` (`$2FFF` with bit 6) (below) |
 | `$5100`-`$51FF` | W | high byte of the x of sprite *n* = (address & `$FF`) / 4 |
 | `$5300`-`$53FF` | RAM | with `$5007` bit 2: a second page of 64 sprites, OAM format |
 | `$5400`-`$54FF` | RAM | with `$5007` bit 2: high byte of the x of its sprite *n* at `$5400 + 4n` |
@@ -201,7 +201,7 @@ Details:
 * **Execution zone** (`$500B`): a hack pack's code shown to the CPU's **instruction fetches
   only** in `$2000`-`$3FFF`, the PPU's register mirrors, where no game made for the console runs
   code (the PPU always answers there). `$2000`-`$27FF` is the code's first 2 KiB, always;
-  `$2800`-`$3FFF` the 6 KiB of page `n` (`$500B` bits 0-6: code offset `$800 + n * $1800`), `$FF`
+  `$2800`-`$3FFF` the 6 KiB of page `n` (`$500B` bits 0-5: code offset `$800 + n * $1800`), `$FF`
   past the code's end (`WideExtension::zone_offset`). The CPU tells its instruction stream from
   its data (`CpuBus::read_code`, `Cpu6502::read_code`): the opcode and operands, and every dummy
   read of the program counter (single-byte instructions, `BRK`/`RTS`/`RTI`, a taken branch and
@@ -216,6 +216,16 @@ Details:
   any ROM. Purpose: room for a hack's code without taking any address a game or a ROM hack uses
   (`$5800`-`$5FFF` can clash with a ROM hack that moves to MMC5, `$6000`-`$7FFF` with one that
   adds PRG-RAM).
+* **Zone data** (`$500B` bit 6, with bit 7): the zone also holds the extension's registers and
+  RAM, for its own instructions. A data access of `$3000`-`$3FFF` made by an instruction fetched
+  from the zone (`NesBus::zone_instruction`, set by each code fetch) reaches the extension at
+  `$5000`-`$5FFF` (`$3xxx` standing for `$5xxx`: `WideExtension::read`, `write`; a read takes no
+  PPU catch-up, as a read of `$5xxx` does not); the game's accesses there, from its ROM, still
+  reach the PPU, so it sees no change, mirrors included. The page's code then stops at `$2FFF`
+  (2 KiB a page), and the extension leaves `$5000`-`$5FFF` to the cartridge, reads and writes
+  alike: an MMC5 keeps its sound, banks, IRQ, multiplier and ExRAM there (a Namco 163 its
+  registers). The hack's code is assembled with its extension addresses at `$3xxx` (Mega Man 2:
+  `EXT` in `src/wide.s`). In a state, bit 6 is part of `$500B`: no format change.
 * **Second sprite page** (`$5007` bit 2): at each OAM DMA the extension latches its RAM at
   `$5300` (64 sprites, OAM format) and `$5400 + 4n` (the high bytes of their x). The core captures
   them after the console's 64, as records 128 and up (below them all in priority), 8 x 8 only; the
@@ -1006,7 +1016,10 @@ pub struct BuiltinPatch {
   jumps straight into the window.
 * `BuiltinPatch::boot_zone`: the extension unlocked with its execution zone on (`$500B` =
   `$80`, `WideExtension::boot_zone`) at power-on and reset, and again after a restore
-  (`install_pack`), for a hack pack whose code runs at `$2000`-`$3FFF`: Zelda II.
+  (`install_pack`), for a hack pack whose code runs at `$2000`-`$3FFF`: Zelda II, Castlevania,
+  Mega Man 2.
+* `BuiltinPatch::zone_data`: with `boot_zone`, the zone holds its data too (`$500B` = `$C0`,
+  section 2): Mega Man 2, whose MMC5 conversions keep `$5000`-`$5FFF` for the MMC5.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`

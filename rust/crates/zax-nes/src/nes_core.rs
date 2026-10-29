@@ -559,8 +559,8 @@ impl NesCore {
                 .wide_mut()
                 .boot(bank, page, !keeps_prg_ram);
         }
-        if known.is_some_and(|known| known.boot_zone) {
-            self.bus.ppu_mut().wide_mut().boot_zone();
+        if let Some(known) = known.filter(|known| known.boot_zone) {
+            self.bus.ppu_mut().wide_mut().boot_zone(known.zone_data);
         }
     }
 
@@ -677,8 +677,8 @@ impl NesCore {
             wide.boot(bank, page, !keeps_prg_ram);
         }
         // And on its execution zone, for a pack whose code runs there.
-        if running.is_some_and(|(patch, _)| patch.boot_zone) {
-            wide.boot_zone();
+        if let Some((patch, _)) = running.filter(|(patch, _)| patch.boot_zone) {
+            wide.boot_zone(patch.zone_data);
         }
         self.sync_aids();
     }
