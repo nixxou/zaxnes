@@ -32,6 +32,15 @@ The ROM keeps its size and layout: a state made without the hack restores with i
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/castlevania-usa-
+widescreen` and `castlevania-usa-rev1-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`;
+`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): no code goes to the extension's memory: the
+bytes the hack changes (its hooks and its code in the game's free space) are the pack's hooks, each
+with the game's bytes it replaces, checked and applied by Zaxnes; the ROM keeps its size and the
+layout described here. The option "Invincible" is a component of its own (`LDA #$02` in place of
+the health subtraction), applied with or without the advanced mode. The level selector needs the
+hack's code: it stays with the widescreen. The BPS patch described here is kept to compare.
+
 ## 2. The extension and the code's place
 
 The fixed bank has no room for code that would unlock the extension. The hack's code is the free
@@ -885,6 +894,7 @@ wide_platform_x:
 USA builds.
 
 Usage: python -I tools/build.py <Castlevania (USA).nes or (Rev 1)> [out.bps]
+       python -I tools/build.py <Castlevania (USA).nes or (Rev 1)> --pack <out.zxpk>
 
 The build is told by the ROM's data CRC-32. The two builds share their data banks 0-4; their code
 (banks 5-7) was rebuilt, so each has its own hook addresses (HOOKS) and src/wide.s its own
@@ -897,6 +907,13 @@ addresses of the game's routines (ca65 -D REV1).
    (each checked against the bytes it replaces). The ROM keeps its size and layout.
 3. Writes build/<build>.nes and, if asked, the BPS patch (data without iNES header). WIDE_SKIP
    (comma-separated hex addresses) leaves hooks out, for testing.
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
+extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
+as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
+it applies them; the ROM keeps its size. The damage hook is a component of its own,
+"invincible" (LDA #$02 in place of the subtraction), applied by Zaxnes while that option is on,
+with or without the widescreen.
 """
 
 import os
@@ -1034,6 +1051,11 @@ def assemble(name, defines):
     return open(window_bin, 'rb').read(), sym
 
 
+# The hook of the option "Invincible" (SEC / SBC DAMAGE / STA HEALTH, bank 7) per build: in the
+# pack, a component of its own.
+INVINCIBLE = {BASE: 0xE734, REV1: 0xE758}
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -1055,6 +1077,9 @@ def main():
     prg[WINDOW_AT:WINDOW_AT + WINDOW_SIZE] = window
 
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
+    pack = len(sys.argv) > 3 and sys.argv[2] == '--pack'
+    if pack:
+        skip.add(INVINCIBLE[crc])               # a component of its own
     for bank, address, original, new in hooks(crc, sym):
         if address in skip:
             continue
@@ -1066,6 +1091,20 @@ def main():
     out = os.path.join(ROOT, 'build', name + '.nes')
     open(out, 'wb').write(bytes(image[:header]) + target)
     print(f'{out}: data CRC {zlib.crc32(target):08X}')
+    if pack:
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import make_pack
+        game = 'Castlevania (USA) (Rev 1)' if crc == REV1 else 'Castlevania (USA)'
+        at = offset(7, INVINCIBLE[crc])
+        # LDA #$02, health kept: A as wide_damage leaves it.
+        invincible = [(at, bytes(data[at:at + 5]), bytes([0xA9, 0x02, NOP, NOP, NOP]))]
+        assert invincible[0][1] == bytes.fromhex('38 e5 4b 85 45')
+        result = make_pack.make(game + ' widescreen', b'',
+                                [('widescreen', make_pack.runs(bytes(data), target)),
+                                 ('invincible', invincible)])
+        open(sys.argv[3], 'wb').write(result)
+        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps

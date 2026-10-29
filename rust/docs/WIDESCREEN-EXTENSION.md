@@ -1005,7 +1005,24 @@ pub struct BuiltinPatch {
 
 `zax-nes/src/hack_pack.rs`, packs in `zax-nes/patches/*.zxpk`; the proposal and its decisions
 are in `docs/HACK-PACKS.md`. A `BuiltinPatch` whose `bps` starts with `ZXPK` is a pack
-(`hack_pack::is_pack`); Mega Man 6 is the first.
+(`hack_pack::is_pack`); every built-in patch is one now. Three kinds:
+
+* **Code in the extension's memory** (Mega Man, 3 to 6, Super Mario Bros., Adventure Island,
+  Excitebike, Blaster Master, Metroid): the hacks that added a PRG bank for the window. The pack
+  holds the code, the boot window is `$80`/0, and the ROM keeps its size: no bank added, no
+  fixed bank copied to the end, no CHR-ROM moved.
+* **Code in the game's free space** (Mega Man 2, Super Mario Bros. 3, Castlevania, Final
+  Fantasy, Ninja Gaiden III, Metal Force): the pack has no code; the hack's changed bytes (its
+  hooks and its code over the free space, `$FF` or zeros) are hooks of at most 255 bytes. A
+  boot window, if any, still shows the game's own bank.
+* **Zelda II**: its hack is a rewritten disassembly of the same size; the pack holds the bytes
+  its build changes (`tools/pack_from_roms.py`, from the game and the built ROM).
+
+The testing aids are components of their own where their hook can do the hack's work in place
+of the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Castlevania and
+Metal Force); the others (the level selectors, the invincibility of Super Mario Bros. 3,
+Adventure Island, Blaster Master and Metroid) need the hack's code and stay in the widescreen
+component, with the advanced mode only.
 
 Format 1, little-endian: `ZXPK`, `u8` format, name (`u8` length + UTF-8), `u32` code length and
 the code (assembled for the window at `$5800`), `u8` component count, then each component: its

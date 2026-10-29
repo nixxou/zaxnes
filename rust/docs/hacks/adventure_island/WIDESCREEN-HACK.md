@@ -35,6 +35,14 @@ applies the patch.
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/adventure-
+island-usa-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's memory, which the window shows
+from power-on (`$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
+checked and applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). Its
+testing aids need the hack's code: they stay with the widescreen (the advanced mode). The BPS patch
+described here is kept to compare.
+
 ## 2. What the game does, and what changes
 
 The main loop waits for the NMI at `$B759` (`LDA $0B / BNE`, the yield's idle loop); the NMI copies
@@ -1754,6 +1762,7 @@ wide_end:
 """Builds the Adventure Island (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Adventure Island (USA).nes> [out.bps]
+       python -I tools/build.py <Adventure Island (USA).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank added after the game's 32 KiB, which the widescreen extension's PRG window shows at
@@ -1762,6 +1771,11 @@ Usage: python -I tools/build.py <Adventure Island (USA).nes> [out.bps]
 2. Writes the hooks into the game's PRG-ROM, each checked against the bytes it replaces.
 3. Writes build/aiwide.nes (header: 3 PRG banks) and, if asked, the BPS patch (data without
    iNES header; the CHR-ROM, moved after the new bank, is copied from the player's ROM).
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the code (its used part) for the
+extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in the
+PRG-ROM, the ROM keeping its size. The level selector and invincibility need the hack's code: they
+stay in the "widescreen" component with the other hooks.
 """
 
 import os
@@ -1866,6 +1880,20 @@ def assemble():
     return open(binary, 'rb').read(), sym
 
 
+def pack(data, code, sym, out):
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import make_pack
+    widescreen = []
+    for address, original, new in hooks(sym):
+        offset = address - 0x8000
+        assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
+        widescreen.append((offset, original, bytes(new)))
+    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
+    result = make_pack.make('Adventure Island (USA) widescreen', code[:used], [('widescreen', widescreen)])
+    open(out, 'wb').write(result)
+    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -1875,6 +1903,9 @@ def main():
 
     code, sym = assemble()
     assert len(code) == BANK_SIZE
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(bytes(data), code, sym, sys.argv[3])
+        return
     prg = bytearray(data[:PRG_SIZE])
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for address, original, new in hooks(sym):

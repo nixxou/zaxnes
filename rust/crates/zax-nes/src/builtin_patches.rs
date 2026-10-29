@@ -1,24 +1,27 @@
 //! Patches built into the emulator and applied in memory to the ROMs they were made for.
 //!
 //! A known ROM is recognised by the CRC-32 of its data without the iNES header (the header of
-//! one dump differs from another's), then patched with a BPS patch made against that data; the
-//! player's header is kept. The patches carry the hacks' own bytes only: everything else is
-//! copied from the player's ROM. A ROM nothing matches is loaded as it is.
+//! one dump differs from another's), or by the signatures of a hack pack, then patched; the
+//! player's header is kept. Every patch is now a hack pack (`crate::hack_pack`): the hack's hooks,
+//! each with the game's bytes it replaces, and its code for the extension's memory. The patches
+//! carry the hacks' own bytes only. A ROM nothing matches is loaded as it is. A BPS patch is
+//! still applied if one is listed (`apply_bps_checked`); the BPS of each converted hack stays in
+//! `patches/` to compare.
 //!
 //! | ROM | Patch | Source |
 //! |---|---|---|
-//! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a fork of the FiendsOfTheElements Zelda II disassembly (ca65), `tools/make_bps.py` |
+//! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a hack pack (`crate::hack_pack`) made from the build of a fork of the FiendsOfTheElements Zelda II disassembly (ca65) by `tools/pack_from_roms.py`: the bytes its rewritten code changes as hooks, checked and applied by the core, the ROM keeping its size |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the hack's code written over the fixed bank's free space as hooks, the hooks checked and applied by the core; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
-//! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`smb1wide`, `tools/build.py`) |
-//! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM's free space (`ng3wide`, `tools/build.py`) |
-//! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, part of it seen through the extension's window; the ROM keeps its size (`smb3wide`, `tools/build.py`) |
-//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size; one source for both builds (`cvwide`, `tools/build.py`) |
-//! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window (`aiwide`, `tools/build.py`) |
-//! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | hooks into both copies of the original 16 KiB (the PRG laid out as the game, its copy for the $C000 mirror, then a 16 KiB bank for the extension's window) (`excitebikewide`, `tools/build.py`) |
-//! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and code in its free space, seen through the extension's window open from power-on; the ROM keeps its size (`ff1wide`, `tools/build.py`) |
-//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks and new code assembled into the original ROM (`metalforcewide`, `tools/build.py`) |
-//! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the original ROM and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`blastermasterwide`, `tools/build.py`) |
-//! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | hooks into the fixed bank and a 16 KiB PRG bank added for the extension's window, the fixed bank copied to bank 15 (`metroidwide`, `tools/build.py`) |
+//! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
+//! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
+//! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; part of the code seen through the extension's window (`smb3wide`, `tools/build.py --pack`) |
+//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; the code seen through the extension's window open from power-on; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
+//! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`aiwide`, `tools/build.py --pack`) |
+//! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`excitebikewide`, `tools/build.py --pack`) |
+//! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; the code seen through the extension's window open from power-on (`ff1wide`, `tools/build.py --pack`) |
+//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`) without code in the extension's memory: the bytes the hack changes (its hooks, its code in the game's free space) as hooks, checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
+//! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
+//! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`metroidwide`, `tools/build.py --pack`) |
 //! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one pack for both builds (`mm4wide`, `tools/build.py --pack`) |
 //! | Mega Man 5 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm5wide`, `tools/build.py --pack`) |
 //! | Mega Man 6 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
@@ -112,7 +115,10 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Zelda II",
         rom_name: "Zelda II - The Adventure of Link (USA)",
         source_crc: 0xBA32_2865,
-        bps: include_bytes!("../patches/zelda2-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`) made from the hack's build (`tools/pack_from_roms.py`):
+        // the bytes its rewritten code changes as hooks, checked and applied by the core; the ROM
+        // keeps its size.
+        bps: include_bytes!("../patches/zelda2-usa-widescreen.zxpk"),
         options: &[],
         after_other_way_state: Some(zelda2_after_other_way_state),
         advanced: false,

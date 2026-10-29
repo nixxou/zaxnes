@@ -33,6 +33,14 @@ game. A state made without the hack restores with it as it is.
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/smb3-usa-
+rev1-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
+EXTENSION.md` 7.1): no code goes to the extension's memory: the bytes the hack changes (its hooks
+and its code in the game's free space) are the pack's hooks, each with the game's bytes it
+replaces, checked and applied by Zaxnes; the ROM keeps its size and the layout described here. Its
+testing aids need the hack's code: they stay with the widescreen (the advanced mode). The BPS patch
+described here is kept to compare.
+
 ## 2. The extension and the code's place
 
 The game's NMI (`IntNMI`, `$F486`) saves the registers and jumps to `$9F40`; the hook at `$F496`
@@ -1038,6 +1046,7 @@ wide_crushed:
 """Builds the Super Mario Bros. 3 (USA) (Rev 1) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Super Mario Bros. 3 (USA) (Rev 1).nes> [out.bps]
+       python -I tools/build.py <Super Mario Bros. 3 (USA) (Rev 1).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH): the FIXED segment
    for $E240 of PRG bank 31 (the last 8 KiB bank, fixed at $E000; free space), the WINDOW segment
@@ -1047,6 +1056,11 @@ Usage: python -I tools/build.py <Super Mario Bros. 3 (USA) (Rev 1).nes> [out.bps
 2. Writes both into the game's free space (checked to be all $FF) and the hooks into its code
    (each checked against the bytes it replaces). The ROM keeps its size and layout.
 3. Writes build/smb3wide.nes and, if asked, the BPS patch (data without iNES header).
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
+extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
+as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
+it applies them; the ROM keeps its size.
 """
 
 import os
@@ -1202,6 +1216,14 @@ def main():
     out = os.path.join(ROOT, 'build', 'smb3wide.nes')
     open(out, 'wb').write(bytes(image[:header]) + target)
     print(f'{out}: data CRC {zlib.crc32(target):08X}')
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import make_pack
+        result = make_pack.make('Super Mario Bros. 3 (USA) (Rev 1) widescreen', b'',
+                                [('widescreen', make_pack.runs(bytes(data), target))])
+        open(sys.argv[3], 'wb').write(result)
+        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps

@@ -33,6 +33,15 @@ PRG bank count of the player's header accordingly when it applies the patch.
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/smb1-world-
+widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
+EXTENSION.md` 7.1): the code goes to the extension's memory, which the window shows from power-on
+(`$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are checked and
+applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). The option
+"Invincible" is a component of its own (`LDA #$02` in place of `LDA InjuryTimer`), applied with or
+without the advanced mode. The level selector needs the hack's code: it stays with the widescreen.
+The BPS patch described here is kept to compare.
+
 ## 2. What the game does, and what changes
 
 The game runs everything in its NMI; its main loop is `JMP $8057` (the yield's idle loop).
@@ -1373,6 +1382,7 @@ wide_end:
 """Builds the Super Mario Bros. (World) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Super Mario Bros. (World).nes> [out.bps]
+       python -I tools/build.py <Super Mario Bros. (World).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank added after the game's 32 KiB, which the widescreen extension's PRG window shows at
@@ -1381,6 +1391,13 @@ Usage: python -I tools/build.py <Super Mario Bros. (World).nes> [out.bps]
 2. Writes the hooks into the game's PRG-ROM, each checked against the bytes it replaces.
 3. Writes build/smb1wide.nes (header: 3 PRG banks) and, if asked, the BPS patch (data without
    iNES header; the CHR-ROM, moved after the new bank, is copied from the player's ROM).
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the code (its used part) for the
+extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in
+the PRG-ROM, the ROM keeping its size. Invincibility is a component of its own, "invincible"
+(LDA #$02, the injury timer found running), applied by Zaxnes while that option is on, with or
+without the widescreen; the level selector needs the hack's code and stays in the "widescreen"
+component with the other hooks.
 """
 
 import os
@@ -1483,6 +1500,30 @@ def assemble():
     return open(binary, 'rb').read(), sym
 
 
+# The hook of the option "Invincible" and its bytes in the pack's "invincible" component.
+INVINCIBLE = {0xD92C: bytes([0xA9, 0x02, NOP])}     # LDA #$02: the injury timer running
+
+
+def pack(data, code, sym, out):
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import make_pack
+    widescreen = []
+    invincible = []
+    for address, original, new in hooks(sym):
+        offset = address - 0x8000
+        assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
+        if address in INVINCIBLE:
+            invincible.append((offset, original, INVINCIBLE[address]))
+        else:
+            widescreen.append((offset, original, bytes(new)))
+    assert len(invincible) == len(INVINCIBLE)
+    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
+    result = make_pack.make('Super Mario Bros. (World) widescreen', code[:used],
+                            [('widescreen', widescreen), ('invincible', invincible)])
+    open(out, 'wb').write(result)
+    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -1492,6 +1533,9 @@ def main():
 
     code, sym = assemble()
     assert len(code) == BANK_SIZE
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(bytes(data), code, sym, sys.argv[3])
+        return
     prg = bytearray(data[:PRG_SIZE])
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for address, original, new in hooks(sym):

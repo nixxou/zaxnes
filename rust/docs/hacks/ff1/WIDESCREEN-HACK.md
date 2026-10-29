@@ -29,6 +29,13 @@ the battery file is the same.
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/final-fantasy-
+usa-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
+EXTENSION.md` 7.1): no code goes to the extension's memory: the bytes the hack changes (its hooks
+and its code in the game's free space) are the pack's hooks, each with the game's bytes it
+replaces, checked and applied by Zaxnes; the ROM keeps its size and the layout described here. The
+game has no testing aid. The BPS patch described here is kept to compare.
+
 ## 2. The extension and the code's place
 
 The fixed bank has no room for code that would unlock the extension. The hack's code is the free
@@ -344,6 +351,7 @@ show:   pla
 """Builds the Final Fantasy (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Final Fantasy (USA).nes> [out.bps]
+       python -I tools/build.py <Final Fantasy (USA).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH): the WINDOW segment
    for $5800, 2 KiB the widescreen extension's PRG window shows there, taken from the free end of
@@ -353,6 +361,11 @@ Usage: python -I tools/build.py <Final Fantasy (USA).nes> [out.bps]
    (each checked against the bytes it replaces). The ROM keeps its size and layout.
 3. Writes build/final-fantasy-usa.nes and, if asked, the BPS patch (data without iNES header).
    WIDE_SKIP (comma-separated hex addresses) leaves hooks out, for testing.
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
+extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
+as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
+it applies them; the ROM keeps its size.
 """
 
 import os
@@ -497,6 +510,14 @@ def main():
     out = os.path.join(ROOT, 'build', NAME + '.nes')
     open(out, 'wb').write(bytes(image[:header]) + target)
     print(f'{out}: data CRC {zlib.crc32(target):08X}')
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import make_pack
+        result = make_pack.make('Final Fantasy (USA) widescreen', b'',
+                                [('widescreen', make_pack.runs(bytes(data), target))])
+        open(sys.argv[3], 'wb').write(result)
+        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps

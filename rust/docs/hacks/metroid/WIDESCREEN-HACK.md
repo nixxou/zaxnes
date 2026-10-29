@@ -31,6 +31,14 @@ rooms and its world map in PRG-RAM at `$6000-$7FFF`.
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/metroid-usa-
+widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-
+EXTENSION.md` 7.1): the code goes to the extension's memory, which the window shows from power-on
+(`$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are checked and
+applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). Its testing
+aids need the hack's code: they stay with the widescreen (the advanced mode). The BPS patch
+described here is kept to compare.
+
 ## 2. What the game does, and what changes
 
 The main loop (`$C0BC`) runs the frame's work, then waits for the NMI (`$C0C7`: `LDA #$00 /
@@ -1338,6 +1346,7 @@ wide_new_game:
 """Builds the Metroid (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Metroid (USA).nes> [out.bps]
+       python -I tools/build.py <Metroid (USA).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank whose first 2 KiB the widescreen extension's PRG window shows at $5800-$5FFF (Zaxnes
@@ -1349,6 +1358,11 @@ Usage: python -I tools/build.py <Metroid (USA).nes> [out.bps]
    checked against the bytes it replaces.
 4. Writes build/metroidwide.nes (header: 16 PRG banks) and, if asked, the BPS patch (data
    without iNES header; the game's banks moved or copied come from the player's ROM).
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the code (its used part) for the
+extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in the
+PRG-ROM, the ROM keeping its size. The testing aids need the hack's code: they stay in the
+"widescreen" component with the other hooks.
 """
 
 import os
@@ -1456,6 +1470,22 @@ def assemble():
     return open(binary, 'rb').read(), sym
 
 
+def pack(data, code, sym, out):
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import make_pack
+    widescreen = []
+    for hook in hooks(sym):
+        bank, address, original, new = hook if len(hook) == 4 else (None, *hook)
+        offset = bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
+        assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
+        widescreen.append((offset, original, bytes(new)))
+    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
+    used = (len(code.rstrip(b'\xff')) + 0xFF) & ~0xFF
+    result = make_pack.make('Metroid (USA) widescreen', code[:used], [('widescreen', widescreen)])
+    open(out, 'wb').write(result)
+    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -1465,6 +1495,9 @@ def main():
 
     code, sym = assemble()
     assert len(code) == BANK_SIZE
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(bytes(data), code, sym, sys.argv[3])
+        return
     # The window shows 2 KiB: the code must end before $6000.
     assert all(code[WINDOW_SIZE:] == bytes([0xFF]) * (BANK_SIZE - WINDOW_SIZE) for _ in [0]),         'the code does not fit in the window'
     banks = [bytearray(data[n * BANK_SIZE:(n + 1) * BANK_SIZE]) for n in range(PRG_BANKS)]

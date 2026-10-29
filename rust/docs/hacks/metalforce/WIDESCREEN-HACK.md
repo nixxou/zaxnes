@@ -26,6 +26,15 @@ on the original screen).
 
 ---
 
+**Hack pack.** Zaxnes ships this hack as a hack pack, `rust/crates/zax-nes/patches/metalforce-
+korea-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1): no code goes to the extension's memory: the bytes the hack changes
+(its hooks and its code in the game's free space) are the pack's hooks, each with the game's bytes
+it replaces, checked and applied by Zaxnes; the ROM keeps its size and the layout described here.
+The option "Invincible" is a component of its own (`LDA #$02` in place of `LDA HIT_TIMER` in the
+five damage routines), applied with or without the advanced mode. The level selector needs the
+hack's code: it stays with the widescreen. The BPS patch described here is kept to compare.
+
 ## 2. What the game does, and what changes
 
 The whole game runs in the NMI (`$EA78`): PPU updates, sprite DMA, sound (`$EB40`), joypad
@@ -672,11 +681,19 @@ wide_level_select:
 """Builds the Metal Force (Korea) widescreen hack and its BPS patch.
 
 Usage: python -I tools/build.py <Metal Force [Korea][Unl][!].nes> [out.bps]
+       python -I tools/build.py <Metal Force [Korea][Unl][!].nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $F940 of the
    fixed bank, into the unused $FF fill from $F936 to $FF7F.
 2. Writes the hooks into the fixed bank and bank 13, each checked against the bytes it replaces.
 3. Writes build/metalforcewide.nes and, if asked, the BPS patch (data without iNES header).
+
+With --pack, a Zaxnes hack pack (tools/make_pack.py) instead of the BPS patch: no code for the
+extension's memory, the bytes the hack changes (its hooks and its code in the game's free space)
+as hooks, each run of changed bytes with the game's bytes it replaces, checked by Zaxnes before
+it applies them; the ROM keeps its size. The five damage hooks are a component of their own,
+"invincible" (LDA #$02 in place of LDA HIT_TIMER), applied by Zaxnes while that option is on, with
+or without the widescreen.
 """
 
 import os
@@ -788,6 +805,11 @@ def assemble():
     return open(binary, 'rb').read(), sym
 
 
+# The hooks of the option "Invincible" (LDA HIT_TIMER in the five damage routines): in the pack,
+# a component of its own.
+INVINCIBLE = (0xE76F, 0xE7A3, 0xE7DA, 0xE814, 0xE84E)
+
+
 def main():
     rom_path = sys.argv[1]
     image = bytearray(open(rom_path, 'rb').read())
@@ -802,6 +824,9 @@ def main():
     data[start:start + len(code)] = code
 
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
+    pack = len(sys.argv) > 3 and sys.argv[2] == '--pack'
+    if pack:
+        skip |= set(INVINCIBLE)                 # a component of its own
     fixed, banked = hooks(sym)
     for number, address, original, new in banked:
         if address in skip:
@@ -819,6 +844,18 @@ def main():
     out = os.path.join(ROOT, 'build', 'metalforcewide.nes')
     open(out, 'wb').write(bytes(image[:header]) + bytes(data))
     print(f'{out}: data CRC {zlib.crc32(data):08X}')
+    if pack:
+        sys.path.insert(0, os.path.join(ROOT, 'tools'))
+        import make_pack
+        # LDA #$02 in place of LDA HIT_TIMER: the timer found running, as wide_hurt leaves A.
+        invincible = [(bank + address - FIXED, bytes.fromhex('ad 2b 03'), bytes([0xA9, 0x02, 0xEA]))
+                      for address in INVINCIBLE]
+        result = make_pack.make('Metal Force (Korea) widescreen', b'',
+                                [('widescreen', make_pack.runs(bytes(image[header:]), bytes(data))),
+                                 ('invincible', invincible)])
+        open(sys.argv[3], 'wb').write(result)
+        print(f'{sys.argv[3]}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+        return
     if len(sys.argv) > 2:
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import make_bps
