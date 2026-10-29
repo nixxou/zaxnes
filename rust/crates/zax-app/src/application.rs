@@ -325,6 +325,9 @@ impl Running {
         let mut host = build_host(parts);
         host.set_profiling(profiling);
         configure_pacing(&mut host, options);
+        // The game in 2D (the "2D Mode" profile, F11) is seen head on and fills the height of the
+        // view, not through the 3D camera (owner request); the console mode does the same.
+        host.scene_mut().picture_head_on = true;
         report_startup_problems(&mut host, &paths);
         start_game_from_command_line(&mut host, options, startup_game.as_deref());
         let ui_graphics = match &graphics {
