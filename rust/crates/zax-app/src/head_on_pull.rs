@@ -6,9 +6,9 @@
 //! pulls, so a brush of a stick never adds up to a release. The head-on view comes back with the
 //! default view and each time the game goes into 2D.
 
-/// The rotation, in degrees, the gauge holds when the picture gives way: 80 pixels of drag, or a
-/// stick held about a quarter of a second.
-pub const RELEASE_DEGREES: f32 = 8.0;
+/// The rotation, in degrees, the gauge holds when the picture gives way: 160 pixels of drag, or
+/// a stick held about half a second (owner request: 8 was too soft).
+pub const RELEASE_DEGREES: f32 = 16.0;
 
 /// The tilt of the picture, in degrees, when the gauge is full.
 pub const MAX_TILT_DEGREES: f32 = 2.0;
@@ -75,15 +75,15 @@ mod tests {
     #[test]
     fn a_brush_of_a_stick_never_adds_up_to_a_release() {
         let mut pull = HeadOnPull::new();
-        // A stick at 30 degrees a second, a tenth of a second every half second, for a minute.
+        // A stick at 30 degrees a second, a fifth of a second every half second, for a minute.
         for frame in 0..3600 {
-            let asked = if frame % 30 < 6 { 30.0 * FRAME } else { 0.0 };
+            let asked = if frame % 30 < 12 { 30.0 * FRAME } else { 0.0 };
             assert!(matches!(pull.update([0.0, asked], FRAME), Pull::Held(_)));
         }
     }
 
     #[test]
-    fn a_stick_held_a_quarter_of_a_second_releases_the_picture() {
+    fn a_stick_held_half_a_second_releases_the_picture() {
         let mut pull = HeadOnPull::new();
         let mut frames = 0;
         loop {
@@ -97,7 +97,7 @@ mod tests {
                 }
             }
         }
-        assert!((15..=17).contains(&frames), "{frames}");
+        assert!((31..=33).contains(&frames), "{frames}");
         assert_eq!(Pull::Held([0.0, 0.0]), pull.update([0.0; 2], FRAME));
     }
 
@@ -108,6 +108,6 @@ mod tests {
         let Pull::Held(tilt) = pull.update([0.0; 2], HALF_LIFE_SECONDS) else {
             panic!("released");
         };
-        assert!((tilt[0] - 0.5).abs() < 1e-4, "{tilt:?}");
+        assert!((tilt[0] - 0.25).abs() < 1e-4, "{tilt:?}");
     }
 }

@@ -87,6 +87,10 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             albedo = textureLoad(palette, vec2<i32>(entry, 0), 0).rgb;
         } else {
             let direct = zax_color_texel(draw, texel);
+            // A pixel of the 2D picture left out (interop::HIDDEN_PIXEL) is not drawn.
+            if (direct.a == 0.0) {
+                discard;
+            }
             albedo = direct.rgb;
             texel_alpha = direct.a;
         }

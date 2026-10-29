@@ -401,6 +401,10 @@ impl TextureStore {
         let (width, height) = crate::interop::picture_size(indices.len(), height)?;
         self.picture_pixels.resize(width * height * 4, 0);
         for (pixel, &index) in self.picture_pixels.chunks_exact_mut(4).zip(indices) {
+            if index == crate::interop::HIDDEN_PIXEL {
+                pixel.copy_from_slice(&[0; 4]);
+                continue;
+            }
             let color = nes_color(usize::from(index));
             pixel.copy_from_slice(&[color.r, color.g, color.b, 255]);
         }

@@ -157,6 +157,10 @@ pub fn picture_quad() -> Result<TileMesh, TriangleCountError> {
     picture_quad_wide(0, 0)
 }
 
+/// The colour index of a pixel of the 2D picture that is not drawn (Rust-only, owner request:
+/// the overscan's cut sides seen through the camera), transparent in the picture's texture.
+pub const HIDDEN_PIXEL: u8 = 0xFF;
+
 /// The width and height in pixels of a 2D-mode picture of `len` colour indices in `height` rows
 /// (0 reads as 240): 256 x 240, or wider and taller by widescreen margins on each side; `None`
 /// for any other size.
