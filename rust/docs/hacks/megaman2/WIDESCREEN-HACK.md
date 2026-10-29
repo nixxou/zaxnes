@@ -24,7 +24,10 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/megaman2-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes' shared builder
+(`hackpack.py`): NTSC, MMC1, each hook a bank and a CPU address, the widescreen in one group
+("core", Base); no checks yet. The code goes to the extension's
 memory instead of the game's free space described here (the source assembled for `$5800`, without
 the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
 from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are

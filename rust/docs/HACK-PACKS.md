@@ -211,3 +211,8 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   European ones (Europe, Rev 1, Rev 2, the Rev 2 Virtual Console, the Spanish and German
   translations, built on the Rev 2) among them; the European builds run 12000 frames with the
   hack.
+* the other hacks move to format 2 one by one, each from its own repository: its `build.py
+  --pack` writes the pack through `hackpack.py` (its `make_pack.py` of format 1 removed), the
+  widescreen in one group ("core") and each aid a component, checks left for a second pass, game
+  by game. Each converted pack patches the reference ROM exactly as its format 1 pack did (the
+  code, and the data with each component applied). Done: Mega Man 2 (`mm2wide`, MMC1).
