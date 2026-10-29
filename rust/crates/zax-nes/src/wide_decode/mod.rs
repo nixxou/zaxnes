@@ -252,6 +252,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         castlevania::SOURCE_CRC => Some(&castlevania::USA),
         castlevania::SOURCE_CRC_REV1 => Some(&castlevania::USA_REV1),
         castlevania::SOURCE_CRC_EUROPE => Some(&castlevania::EUROPE),
+        castlevania::SOURCE_CRC_JAPAN => Some(&castlevania::JAPAN),
         excitebike::SOURCE_CRC => Some(&excitebike::Excitebike),
         ff1::SOURCE_CRC => Some(&ff1::FinalFantasy),
         metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
@@ -284,6 +285,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::CASTLEVANIA_USA_REV1 => Some(&castlevania::USA_REV1),
         crate::builtin_patches::CASTLEVANIA_EUROPE
         | crate::builtin_patches::CASTLEVANIA_EUROPE_NTSC => Some(&castlevania::EUROPE),
+        crate::builtin_patches::AKUMAJOU_DRACULA_JAPAN => Some(&castlevania::JAPAN),
         crate::builtin_patches::FINAL_FANTASY_USA => Some(&ff1::FinalFantasy),
         crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
         crate::builtin_patches::BLASTERMASTER_USA => Some(&blastermaster::BlasterMaster),

@@ -34,7 +34,8 @@ The ROM keeps its size and layout: a state made without the hack restores with i
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/castlevania-usa-widescreen`, `castlevania-usa-rev1-widescreen`,
-`castlevania-europe-widescreen` and `castlevania-europe-ntsc-widescreen.zxpk` (`tools/build.py <rom>
+`castlevania-europe-widescreen`, `castlevania-europe-ntsc-widescreen` and
+`akumajou-dracula-japan-widescreen.zxpk` (`tools/build.py <rom>
 --pack <out.zxpk> [--ntsc]`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
 `WIDESCREEN-EXTENSION.md` 7.1). The packs are format 2, written by Zaxnes' shared builder
 (`hackpack.py`): UxROM, each hook a 16 KiB bank and a CPU address. The widescreen is in four
@@ -44,16 +45,20 @@ Relics, takes the rest). Checks (`CHECKS`) hold the game's code the hack's code 
 state dispatch's start, the routine moving an object by the scroll, the reads of the rooms'
 lengths and of each stage's graphics block, the graphics loader's start, the spawners' loop.
 
-One source makes the three builds' packs: the USA and its Rev 1 (NTSC), and the European build
+One source makes the four builds' packs: the USA and its Rev 1 (NTSC), the Japanese build
+(Akumajou Dracula, `-D JAPAN`: its code banks rebuilt, most routines `$60`-`$70` further, a shorter
+state dispatch, a hit's damage read from a table, `SBC $E7C3,Y`; the same RAM and states), and the
+European build
 (`-D EUROPE`, its code banks rebuilt from the Rev 1's, most routines `$0C` further; the USA data
 banks and RAM). The European pack is PAL; the same pack as an NTSC one (`--ntsc`, its own entry)
 takes the ROMs of the European code whose header says NTSC: the GoodSet dumps and translations,
 the European Virtual Console, and ROM hacks built on that code (Horror of Dracula, Overflow
 Darkness, Prince of Darkness, Reborn, Hell's Fury, The Holy Relics). Against a set of 260
-Castlevania ROMs: 227 take a whole pack, 5 in part (3 The Holy Relics without "copies", 2 trainer
-builds without the aid), 28 none (the Japanese build, the MMC3 and MMC5 conversions, The Red Wizard,
-PlayChoice-10 and VS. System). Run 2400 frames with inputs, each accepted ROM plays as it does
-without the pack, and its frames go on. The code goes to the extension's memory instead of the game's free space described here (the source
+Castlevania ROMs: 241 take a whole pack, 8 in part (3 The Holy Relics without "copies", 5 trainer
+builds without the aid), 11 none (the MMC3 and MMC5 conversions, The Red Wizard, PlayChoice-10 and
+VS. System). Run 2400 frames with inputs, each accepted ROM plays as it does without the pack, and
+its frames go on (The Holy Relics, whose title these inputs do not pass, runs as it does without
+the pack). The code goes to the extension's memory instead of the game's free space described here (the source
 assembled for `$2000`, without the reset hook and the NMI's unlock: Zaxnes unlocks the extension
 and shows the code in its execution zone from power-on, `$500B` = `$80`, to instruction fetches
 only; the code reads no data of its own, its variables are in the extension's RAM at `$5200`), and the hooks, each with
@@ -300,7 +305,17 @@ OPT_NO_SLOWDOWN = $04           ; 255 lines of overclock: no lag frame
 ; ---------------------------------------------------------------------------- ;
 ; The game.
 
-.if .defined(EUROPE)
+.if .defined(JAPAN)
+; Akumajou Dracula (Japan): the same RAM and states, its code banks rebuilt (most routines $60-$70
+; further), a shorter state dispatch, and a hit's damage read from a table (DAMAGE_TABLE,Y).
+DISPATCH        = $C20A
+MOVE_SCROLL     = $EB38
+SPAWNER_NEXT    = $F3EA
+ROOM_LENGTHS    = $FC1B
+LOAD_BLOCK      = $FD8E
+BLOCK_OF_STAGE  = $C8D4
+DAMAGE_TABLE    = $E7C3
+.elseif .defined(EUROPE)
 ; Castlevania (Europe): the USA builds' data banks, its code banks rebuilt (as the Rev 1's, most
 ; routines $0C further), the same RAM.
 DISPATCH        = $C1E4
@@ -409,7 +424,11 @@ wide_damage:
         BNE @keep
         LDA HEALTH
         SEC
+.ifdef JAPAN
+        SBC DAMAGE_TABLE,Y      ; Y as the game set it
+.else
         SBC DAMAGE
+.endif
         STA HEALTH
 @keep:  RTS
 
@@ -926,7 +945,8 @@ wide_platform_x:
 USA builds.
 
 Usage: python -I tools/build.py <Castlevania (USA).nes or (Rev 1)> [out.bps]
-       python -I tools/build.py <Castlevania (USA).nes, (Rev 1) or (Europe)> --pack <out.zxpk> [--ntsc]
+       python -I tools/build.py <Castlevania (USA).nes, (Rev 1), (Europe) or Akumajou Dracula (Japan)>
+           --pack <out.zxpk> [--ntsc]
 
 The build is told by the ROM's data CRC-32. The two builds share their data banks 0-4; their code
 (banks 5-7) was rebuilt, so each has its own hook addresses (HOOKS) and src/wide.s its own
@@ -977,6 +997,7 @@ NOP = 0xEA
 BASE = 0x0AC1AA8F
 REV1 = 0xB668C7FC
 EUROPE = 0xA93527E2             # Castlevania (Europe): a pack only (--pack)
+JAPAN = 0xA0F99BB8              # Akumajou Dracula (Japan): a pack only (--pack)
 
 
 def jsr(target):
@@ -1010,7 +1031,8 @@ def hooks(build, sym):
     put(0, 0x806D, 'bd 00 03', jsr(sym['wide_visible']))
     put(0, 0x811C, '18 65 02 9d 03 02', jsr(sym['wide_sprite_x']))
     # The moving platforms (bank 6, the same in both builds): their 16-bit x kept, whole in the view.
-    put(6, 0xAB5B, 'a5 10 18 69 10 9d 8c 03', jsr(sym['wide_platform_x']), 'platforms')
+    put(6, 0xAB6A if build == JAPAN else 0xAB5B, 'a5 10 18 69 10 9d 8c 03',
+        jsr(sym['wide_platform_x']), 'platforms')
     if build == BASE:
         # The NMI's call of the game's state dispatch: the level select first.
         put(7, 0xC0A0, '20 a1 c1', jsr(sym['wide_frame']))
@@ -1027,6 +1049,15 @@ def hooks(build, sym):
                  'spawner': 0xF3D3, 'spawner_return': (0xF41D, '7c f3'),
                  'weapon': 0xE5FA, 'hide9': 0xEAF5, 'far9': 0xEAFD,
                  'copies': (0xE050, 0xED23, 0xED92), 'copy_back': 0xEFE9}
+    elif build == JAPAN:
+        # Japan: its own build of the code; a hit's damage from a table (SEC / SBC $E7C3,Y /
+        # STA $45).
+        put(7, 0xC0CA, '20 0a c2', jsr(sym['wide_frame']))
+        put(7, 0xE7BC, '38 f9 c3 e7 85 45', jsr(sym['wide_damage']))
+        fixed = {'bounds': (0xEA9D, '20 38 eb'), 'terrain': 0xECA2, 'hide': 0xDDAB,
+                 'spawner': 0xF440, 'spawner_return': (0xF48A, 'e9 f3'),
+                 'weapon': 0xE657, 'hide9': 0xEB62, 'far9': 0xEB6A,
+                 'copies': (0xE0AB, 0xED90, 0xEDFF), 'copy_back': 0xF056}
     else:
         # Europe: the Rev 1's code, most of it $0C further.
         put(7, 0xC0A4, '20 e4 c1', jsr(sym['wide_frame']))
@@ -1109,7 +1140,7 @@ def assemble(name, defines, start=WINDOW_START):
 
 # The hook of the option "Invincible" (SEC / SBC DAMAGE / STA HEALTH, bank 7) per build: in the
 # pack, a component of its own.
-INVINCIBLE = {BASE: 0xE734, REV1: 0xE758, EUROPE: 0xE764}
+INVINCIBLE = {BASE: 0xE734, REV1: 0xE758, EUROPE: 0xE764, JAPAN: 0xE7BC}
 
 
 # The game's code and data the hack's code relies on, by group, per build: (bank, address, length),
@@ -1128,10 +1159,13 @@ CHECKS = {
     EUROPE: {'core': [(7, 0xC1E4, 8), (7, 0xEAD7, 18), (7, 0xD017, 3), (7, 0xFD2A, 12),
                       (7, 0xC7F9, 3)],
              'edge spawns': [(7, 0xF389, 6)]},
+    JAPAN: {'core': [(7, 0xC20A, 7), (7, 0xEB38, 18), (7, 0xD069, 3), (7, 0xFD8E, 12),
+                     (7, 0xC81D, 3)],
+            'edge spawns': [(7, 0xF3EA, 6)]},
 }
 
 # The region each build's pack is made for.
-REGION = {BASE: 'ntsc', REV1: 'ntsc', EUROPE: 'pal'}
+REGION = {BASE: 'ntsc', REV1: 'ntsc', EUROPE: 'pal', JAPAN: 'ntsc'}
 
 
 def pack_place(offset, address):
@@ -1175,7 +1209,7 @@ def pack(data, crc, window, sym, out, ntsc=False):
             group.hook(*pack_place(at, address), bytes(original), bytes(new))
     assert len(aid.hooks) == 1
     game = {BASE: 'Castlevania (USA)', REV1: 'Castlevania (USA) (Rev 1)',
-            EUROPE: 'Castlevania (Europe)'}[crc]
+            EUROPE: 'Castlevania (Europe)', JAPAN: 'Akumajou Dracula (Japan)'}[crc]
     # Zaxnes reads $FF past the code's end: its trailing fill is left out.
     used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
     pack.name = game + (' (NTSC)' if ntsc and REGION[crc] != 'ntsc' else '') + ' widescreen'
@@ -1198,15 +1232,18 @@ def main():
         name, defines = 'castlevania-usa-rev1', ['REV1']
     elif crc == EUROPE:
         name, defines = 'castlevania-europe', ['EUROPE']
+    elif crc == JAPAN:
+        name, defines = 'akumajou-dracula-japan', ['JAPAN']
     else:
-        sys.exit(f'{rom_path}: not Castlevania (USA), its Rev 1 or (Europe) (data CRC {crc:08X})')
+        sys.exit(f'{rom_path}: not Castlevania (USA), its Rev 1, (Europe) or Akumajou Dracula '
+                 f'(Japan) (data CRC {crc:08X})')
 
     if len(sys.argv) > 3 and sys.argv[2] == '--pack':
         zone, sym = assemble(name, defines, ZONE_START)
         pack(bytes(data), crc, zone, sym, sys.argv[3], '--ntsc' in sys.argv[4:])
         return
-    if crc == EUROPE:
-        sys.exit('Castlevania (Europe): a pack only (--pack)')
+    if crc in (EUROPE, JAPAN):
+        sys.exit('Castlevania (Europe) and Akumajou Dracula (Japan): a pack only (--pack)')
     window, sym = assemble(name, defines)
     assert len(window) == WINDOW_SIZE
     prg = bytearray(data)
