@@ -135,7 +135,8 @@ pub struct RomTraits {
     pub prg_len: usize,
     /// Its iNES mapper, if it has a header.
     pub mapper: Option<u16>,
-    /// Its region as the header gives it: 0 NTSC, 1 PAL, 2 both, 3 Dendy; `None` without one.
+    /// Its region as the header gives it (or `rom::region_exception`, for a dump whose header is
+    /// wrong about it): 0 NTSC, 1 PAL, 2 both, 3 Dendy; `None` without one.
     pub region: Option<u8>,
 }
 
@@ -169,6 +170,9 @@ impl RomTraits {
         } else {
             image[9] & 0x01
         };
+        // A dump whose header is known to be wrong about its region (`rom::region_exception`).
+        let region = crate::rom::region_exception(crate::builtin_patches::crc32(data))
+            .map_or(region, |region| region as u8);
         Self {
             prg_len: prg_len.min(data.len()),
             mapper: Some(mapper),
