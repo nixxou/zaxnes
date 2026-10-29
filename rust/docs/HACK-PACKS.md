@@ -202,4 +202,12 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   versions, the MMC5 and mapper 19 conversions, Korean ROMs a 128 KiB hack was put over). Whether
   each one runs right is phase 4's;
 * the region is the header's: a dump whose header says otherwise than its game passes on its
-  bytes alone (no database of the games' regions in the core).
+  bytes alone (no database of the games' regions in the core);
+* the signature search takes the pack that applies best (its widescreen, then the most groups):
+  two builds of a game may share an aid's bytes but not the widescreen's;
+* Zelda II's European builds: PAL packs from the same source (`z2pack`, the game's moved
+  addresses per build), one for Europe and its Rev 1, one for the Rev 2, with entries of their
+  own (`ZELDA2_EUROPE`, `_REV1`, `_REV2`). On the 661 ROMs: 606 take a whole pack, the 8
+  European ones (Europe, Rev 1, Rev 2, the Rev 2 Virtual Console, the Spanish and German
+  translations, built on the Rev 2) among them; the European builds run 12000 frames with the
+  hack.

@@ -11,6 +11,7 @@
 //! | ROM | Patch | Source |
 //! |---|---|---|
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; written in a fork of the FiendsOfTheElements Zelda II disassembly (`z2wide`), moved out of the game by `z2pack` |
+//! | Zelda II - The Adventure of Link (Europe), its Rev 1 and its Rev 2 | widescreen, the USA hack built for each European build's code | hack packs of the PAL builds (`crate::hack_pack`), from the same source with the game's moved addresses (`z2pack`, `tools/build.py`); one for Europe and its Rev 1, one for the Rev 2 |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
@@ -72,6 +73,29 @@ pub struct BuiltinPatch {
 
 /// Name of the Zelda II (USA) widescreen patch.
 pub const ZELDA2_USA: &str = "Zelda II (USA) widescreen";
+/// Name of the Zelda II (Europe) widescreen patch, and of its Rev 1's (the same pack).
+pub const ZELDA2_EUROPE: &str = "Zelda II (Europe) widescreen";
+pub const ZELDA2_EUROPE_REV1: &str = "Zelda II (Europe) (Rev 1) widescreen";
+/// Name of the Zelda II (Europe) (Rev 2) widescreen patch.
+pub const ZELDA2_EUROPE_REV2: &str = "Zelda II (Europe) (Rev 2) widescreen";
+
+/// The options of the European builds of the Zelda II hack (those of the USA one).
+const ZELDA2_OPTIONS: &[HackOption] = &[
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
 
 /// Name of the Mega Man 2 (USA) widescreen patch.
 pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
@@ -113,7 +137,7 @@ pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 19] = [
+pub const PATCHES: [BuiltinPatch; 22] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -148,6 +172,66 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         // The pack's code runs in the execution zone ($2000-$3FFF, instruction fetches only),
         // open from power-on (the hack does not unlock the extension itself): no address the
         // game or a ROM hack of it uses, the PRG window and $6000 left alone.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
+        idle_loop: Some((0xC010, 0xC01A)),
+    },
+    BuiltinPatch {
+        name: ZELDA2_EUROPE,
+        game: "Zelda II",
+        rom_name: "Zelda II - The Adventure of Link (Europe)",
+        source_crc: 0x47FD_88CF,
+        // The USA hack built for the European code (`z2pack`, `tools/build.py`: the same source,
+        // the game's moved addresses for this build; a PAL pack).
+        bps: include_bytes!("../patches/zelda2-europe-widescreen.zxpk"),
+        options: ZELDA2_OPTIONS,
+        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The margin decoder alone widens the game; the patch adds the enemies and the world map
+        // past the edges.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
+        idle_loop: Some((0xC010, 0xC01A)),
+    },
+    BuiltinPatch {
+        name: ZELDA2_EUROPE_REV1,
+        game: "Zelda II",
+        rom_name: "Zelda II - The Adventure of Link (Europe) (Rev 1)",
+        source_crc: 0x97D5_2C06,
+        // The USA hack built for the European code (`z2pack`, `tools/build.py`: the same source,
+        // the game's moved addresses for this build; a PAL pack); the pack of the Europe build: this revision has the same code where the hack hooks it.
+        bps: include_bytes!("../patches/zelda2-europe-widescreen.zxpk"),
+        options: ZELDA2_OPTIONS,
+        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The margin decoder alone widens the game; the patch adds the enemies and the world map
+        // past the edges.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
+        idle_loop: Some((0xC010, 0xC01A)),
+    },
+    BuiltinPatch {
+        name: ZELDA2_EUROPE_REV2,
+        game: "Zelda II",
+        rom_name: "Zelda II - The Adventure of Link (Europe) (Rev 2)",
+        source_crc: 0x47B6_A39F,
+        // The USA hack built for the European code (`z2pack`, `tools/build.py`: the same source,
+        // the game's moved addresses for this build; a PAL pack).
+        bps: include_bytes!("../patches/zelda2-europe-rev2-widescreen.zxpk"),
+        options: ZELDA2_OPTIONS,
+        after_other_way_state: Some(zelda2_after_other_way_state),
+        // The margin decoder alone widens the game; the patch adds the enemies and the world map
+        // past the edges.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
@@ -952,19 +1036,40 @@ pub fn apply_with(image: &[u8], forced: Option<&'static BuiltinPatch>) -> Option
     })
 }
 
-/// The built-in hack pack of which some component applies to `image` (its data `data`, PRG-ROM
-/// then CHR-ROM), whatever its CRC: another build of the game, or a ROM hack, whose hooked code
-/// (and the code the hack relies on) is the same, of the region and on a mapper the pack is made
-/// for (see [`crate::hack_pack`]).
+/// The built-in hack pack that applies best to `image` (its data `data`, PRG-ROM then CHR-ROM),
+/// whatever its CRC: another build of the game, or a ROM hack, whose hooked code (and the code
+/// the hack relies on) is the same, of the region and on a mapper the pack is made for (see
+/// [`crate::hack_pack`]). Best: its widescreen applies, then the most groups, then the first in
+/// [`PATCHES`] (two builds of a game may share an aid's bytes but not the widescreen's).
 fn pack_matching(
     image: &[u8],
     data: &[u8],
 ) -> Option<(&'static BuiltinPatch, crate::hack_pack::AppliedPack)> {
     let traits = crate::hack_pack::RomTraits::of(image, data);
-    PATCHES.iter().find_map(|patch| {
-        let applied = crate::hack_pack::HackPack::read(patch.bps)?.resolve(data, &traits);
-        applied.applies().then_some((patch, applied))
-    })
+    let score = |applied: &crate::hack_pack::AppliedPack| {
+        let widescreen = applied.component(crate::hack_pack::WIDESCREEN).is_some();
+        let groups: usize = applied
+            .components
+            .iter()
+            .map(|component| component.groups.len())
+            .sum();
+        (widescreen, groups)
+    };
+    let mut best: Option<(&'static BuiltinPatch, crate::hack_pack::AppliedPack)> = None;
+    for patch in &PATCHES {
+        let Some(pack) = crate::hack_pack::HackPack::read(patch.bps) else {
+            continue;
+        };
+        let applied = pack.resolve(data, &traits);
+        if applied.applies()
+            && best
+                .as_ref()
+                .is_none_or(|(_, kept)| score(&applied) > score(kept))
+        {
+            best = Some((patch, applied));
+        }
+    }
+    best
 }
 
 /// The hack pack of the built-in patch made for `image`, as it applies to it (its components
@@ -1079,9 +1184,11 @@ pub fn for_data_crc(crc: u32) -> Option<&'static BuiltinPatch> {
 pub fn for_game_name(name: &str) -> Option<&'static BuiltinPatch> {
     let wanted = words(name);
     // The longest game that names it, and not one whose number goes on ("Super Mario Bros. 3"
-    // is not "Super Mario Bros.", "Castlevania II" not "Castlevania").
+    // is not "Super Mario Bros.", "Castlevania II" not "Castlevania"); of a game's several
+    // builds, the first listed (`max_by_key` keeps the last of equals: the list reversed).
     PATCHES
         .iter()
+        .rev()
         .filter(|patch| {
             let game = words(patch.game);
             !game.is_empty()

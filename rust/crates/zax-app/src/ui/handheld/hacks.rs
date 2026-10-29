@@ -657,7 +657,7 @@ mod tests {
     #[test]
     fn another_rom_of_a_game_a_hack_is_made_for_says_which_one_it_needs() {
         let hacks = HacksModel::new(
-            PathBuf::from("/roms/Zelda II - The Adventure of Link (Europe).nes"),
+            PathBuf::from("/roms/Zelda II - The Adventure of Link (Japan).nes"),
             Some(0x0123_ABCD),
             &SettingsModel::new(),
             Vec::new(),
@@ -669,7 +669,7 @@ mod tests {
         for part in [
             "Zelda II - The Adventure of Link (USA)",
             "BA322865",
-            "Zelda II - The Adventure of Link (Europe).nes",
+            "Zelda II - The Adventure of Link (Japan).nes",
             "0123ABCD",
         ] {
             assert!(message.contains(part), "{part} in {message}");
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn the_patch_of_another_rom_can_be_forced_and_taken_back() {
         let mut hacks = HacksModel::new(
-            PathBuf::from("/roms/Zelda II - The Adventure of Link (Europe).nes"),
+            PathBuf::from("/roms/Zelda II - The Adventure of Link (Japan).nes"),
             Some(0x0123_ABCD),
             &SettingsModel::new(),
             Vec::new(),
