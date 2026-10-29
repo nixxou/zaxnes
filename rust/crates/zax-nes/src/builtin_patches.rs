@@ -167,7 +167,10 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Super Mario Bros.",
         rom_name: "Super Mario Bros. (World)",
         source_crc: 0xD445_F698,
-        bps: include_bytes!("../patches/smb1-world-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core; "Invincible" a component of its own (the level selector
+        // needs the hack's code: it stays with the widescreen).
+        bps: include_bytes!("../patches/smb1-world-widescreen.zxpk"),
         options: &[
             // Testing aids: B on the title screen goes through every level; Mario never hurt
             // (falls and the timer still kill).
@@ -197,9 +200,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (2)
-        // is open in the window from power-on.
-        boot_window: Some((0x82, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // Everything runs in the NMI; the main loop is a JMP to itself.
         idle_loop: Some((0x8057, 0x8059)),
@@ -316,7 +319,10 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         game: "Adventure Island",
         rom_name: "Adventure Island (USA)",
         source_crc: 0xF8A7_13BE,
-        bps: include_bytes!("../patches/adventure-island-usa-widescreen.bps"),
+        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
+        // checked and applied by the core (its aids need the hack's code: they stay with the
+        // widescreen).
+        bps: include_bytes!("../patches/adventure-island-usa-widescreen.zxpk"),
         options: &[
             // Testing aids: Select on the title screen goes through every round; no injury from
             // the enemies (falls, the water and hunger still kill).
@@ -346,9 +352,9 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the sprites and objects.
         advanced: true,
-        // No room in the game for code that would unlock the extension: its added PRG bank (2)
-        // is open in the window from power-on.
-        boot_window: Some((0x82, 0x00)),
+        // No room in the game for code that would unlock the extension: the pack's code is open
+        // in the window from power-on.
+        boot_window: Some((0x80, 0x00)),
         boot_window_keeps_prg_ram: false,
         // The main loop's wait for the NMI: LDA $0B / BNE.
         idle_loop: Some((0xB759, 0xB75C)),
