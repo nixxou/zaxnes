@@ -50,14 +50,16 @@ where the target differs from the ROM, so either can be checked.
 `rust/crates/zax-nes/patches/zelda2-usa-widescreen.zxpk`, built by the `z2pack` repository
 (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the hack moved out of the game. Its code
 (this fork's `inc/wide_bank0.asm`, bank 0 part and window part together) is assembled for the
-extension's memory at `$5800` (1953 bytes, with the pack's own code of 5.5), which Zaxnes shows
-from power-on (`$5008` = `$80`, page 0; 2 KiB, the PRG-RAM staying at `$6000`); the game's code is
-changed only by the hooks of section 4 onwards (all but the encounters' life, 6.1: 35), the same
-bytes but for the addresses of the hack's routines, and the pack's own 11 (5.5). Not in the pack:
-the power-on detour and the NMI's unlock and window reopening (Zaxnes keeps the window open; the
-NMI hook calls `wr_nmi` directly), and the base's differences with the ROM (1.1), where the game
-keeps its bytes. The segments of section 3 and the BPS patch describe this fork's build, kept to
-compare.
+extension's execution zone at `$2000` (2078 bytes, with the pack's own code of 5.5), which Zaxnes
+shows to instruction fetches only from power-on (`$500B` = `$80`, `WIDESCREEN-EXTENSION.md` section
+2): it takes no address the game or a ROM hack uses, and holds no table it reads (the world map's
+vertical step dispatch compares the states instead of the game's routine reading a table after its
+`JSR`); the game's code is changed only by the hooks of section 4 onwards (all but the encounters'
+life, 6.1: 35), the same bytes but for the addresses of the hack's routines, and the pack's own 11
+(5.5). Not in the pack: the power-on detour and the NMI's unlock and window reopening (Zaxnes keeps
+the window open; the NMI hook calls `wr_nmi` directly), and the base's differences with the ROM
+(1.1), where the game keeps its bytes. The segments of section 3 and the BPS patch describe this
+fork's build, kept to compare.
 
 ## 2. What the hack does
 

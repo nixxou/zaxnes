@@ -145,11 +145,12 @@ pub const PATCHES: [BuiltinPatch; 19] = [
         after_other_way_state: Some(zelda2_after_other_way_state),
         // The margin decoder alone widens the game; the patch adds the enemies and the world map past the edges.
         advanced: true,
-        // The pack's code is open in the window from power-on (the hack no longer unlocks the
-        // extension itself); 2 KiB: the game's battery-backed PRG-RAM is at $6000.
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
+        // The pack's code runs in the execution zone ($2000-$3FFF, instruction fetches only),
+        // open from power-on (the hack does not unlock the extension itself): no address the
+        // game or a ROM hack of it uses, the PRG window and $6000 left alone.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
         idle_loop: Some((0xC010, 0xC01A)),
     },

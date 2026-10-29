@@ -996,7 +996,7 @@ pub struct BuiltinPatch {
   jumps straight into the window.
 * `BuiltinPatch::boot_zone`: the extension unlocked with its execution zone on (`$500B` =
   `$80`, `WideExtension::boot_zone`) at power-on and reset, and again after a restore
-  (`install_pack`), for a hack pack whose code runs at `$2000`-`$3FFF`. Off for every patch so far.
+  (`install_pack`), for a hack pack whose code runs at `$2000`-`$3FFF`: Zelda II.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
@@ -1039,7 +1039,8 @@ pub struct BuiltinPatch {
 are in `docs/HACK-PACKS.md`. A `BuiltinPatch` whose `bps` starts with `ZXPK` is a pack
 (`hack_pack::is_pack`); every built-in patch is one now, and every one has its code in the
 extension's memory: the pack holds the code, the boot window is `$80`/0 (the extension unlocked,
-the window on the pack's code from power-on), and the ROM keeps its size: no bank added, no fixed
+the window on the pack's code from power-on; Zelda II's runs in the execution zone instead,
+`boot_zone`), and the ROM keeps its size: no bank added, no fixed
 bank copied to the end, no CHR-ROM moved, nothing written in the game's free space.
 
 * **The hacks that added a PRG bank for the window** (Mega Man, 3 to 6, Super Mario Bros.,
@@ -1054,10 +1055,11 @@ bank copied to the end, no CHR-ROM moved, nothing written in the game's free spa
   unlocked. Their code is under 2 KiB: the boot window keeps `$6000`-`$7FFF` for the game
   (`boot_window_keeps_prg_ram`), as the hacks' own code did.
 * **Zelda II**: its hack, written in a fork of a disassembly, was moved out of the game (`z2pack`:
-  the code for `$5800`, 35 of its 36 hooks (not the encounters' life), and 11 of its own for the
-  enemies past the edges); its boot window keeps the game's PRG-RAM, the window showing 2 KiB.
-  `tools/pack_from_roms.py` makes a pack of the bytes a same-size build changes, for a hack not yet
-  written as hooks (it made Zelda II's first pack).
+  its code, 35 of its 36 hooks (not the encounters' life), and 11 of its own for the
+  enemies past the edges); its code runs in the execution zone at `$2000` (`boot_zone`, section 2),
+  with no table it reads (its world map dispatch compares the states): it takes no address the game
+  or a ROM hack uses. `tools/pack_from_roms.py` makes a pack of the bytes a same-size build
+  changes, for a hack not yet written as hooks (it made Zelda II's first pack).
 
 The testing aids are components of their own where their hook can do the hack's work in place of
 the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Zelda II, Castlevania
