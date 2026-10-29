@@ -374,6 +374,8 @@ fn build_menus() -> Vec<Menu> {
             MenuItem::rule(),
             item(Command::FastForward),
             item(Command::Rollback),
+            item(Command::FrameBack),
+            item(Command::FrameAdvance),
             MenuItem::rule(),
             MenuItem::sub(text::speed(), Submenu::Speed),
             MenuItem::sub(text::region(), Submenu::Region),

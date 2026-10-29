@@ -74,6 +74,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Ok(()) => {
                 self.movie_file = Some(PathBuf::from(path));
                 self.rollback.clear();
+                self.frame_steps.clear();
                 if wanted_options.is_some_and(|bits| bits != u64::from(self.hack_option_bits())) {
                     self.notifications.show(
                         &text(

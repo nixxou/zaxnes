@@ -127,6 +127,18 @@ pub fn all() -> Vec<MenuShortcut> {
             "Ctrl+R",
         ),
         shortcut(
+            Key::J,
+            ShortcutModifiers::NONE,
+            host(Command::FrameBack),
+            "J",
+        ),
+        shortcut(
+            Key::K,
+            ShortcutModifiers::NONE,
+            host(Command::FrameAdvance),
+            "K",
+        ),
+        shortcut(
             Key::F11,
             ShortcutModifiers::NONE,
             host(Command::ToggleTwoDimensional),

@@ -170,6 +170,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.emulation.stop", "Arrêter"),
     ("cmd.emulation.fast_forward", "Avance rapide"),
     ("cmd.emulation.rollback", "Rollback"),
+    ("cmd.emulation.frame_back", "Image précédente"),
+    ("cmd.emulation.frame_advance", "Image suivante"),
     ("cmd.emulation.set_speed", "Vitesse"),
     ("cmd.emulation.speed_up", "Plus vite"),
     ("cmd.emulation.speed_down", "Moins vite"),

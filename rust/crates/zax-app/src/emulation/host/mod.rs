@@ -195,6 +195,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub pacer: FramePacer,
     /// The rollback history.
     pub rollback: RollbackHistory,
+    /// The last frames one by one, for stepping back (J) and on (K).
+    frame_steps: crate::emulation::frame_steps::FrameSteps,
+    /// The input of the last tick, which a frame stepped on (K) runs with.
+    step_input: (crate::input::InputAction, crate::input::InputAction),
     /// Whether the rollback snapshots are taken (REQ-LOOP-030); off on a handheld (Rust-only,
     /// owner request): no savestate every 60 frames, and the rollback finds nothing to go back to.
     pub rollback_enabled: bool,
@@ -318,6 +322,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             was_running_before_suspend: false,
             stage_clock: StageClock::default(),
             rollback: RollbackHistory::new(),
+            frame_steps: crate::emulation::frame_steps::FrameSteps::new(),
+            step_input: Default::default(),
             rollback_enabled: true,
             separate_core: false,
             core_ahead: true,
@@ -764,6 +770,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         player_one: crate::input::InputAction,
         player_two: crate::input::InputAction,
     ) -> u32 {
+        self.step_input = (player_one, player_two);
         if self.state != EmulationState::Running
             || !self.session.as_ref().is_some_and(GameSession::has_rom)
         {
@@ -796,6 +803,14 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     .rollback
                     .capture_with(|buffer| core.save_state_to(false, buffer));
                 self.stage_clock.stop(Stage::Rollback, started);
+            }
+            // Every frame, for stepping back one at a time (J).
+            if self.rollback_enabled {
+                let _ = self.frame_steps.capture_with(
+                    |buffer| core.save_state_to(false, buffer),
+                    player_one,
+                    player_two,
+                );
             }
             if ahead {
                 // The accounting touches the core: it comes before the frame leaves.
@@ -1232,6 +1247,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.game_options_rom = None;
             self.pause_thumbnail = None;
             self.rollback.clear();
+            self.frame_steps.clear();
             self.fast_forward.clear();
             // REQ-PERS-012: the speed setting goes back to 0 at the end of a game.
             self.settings.end_of_game();

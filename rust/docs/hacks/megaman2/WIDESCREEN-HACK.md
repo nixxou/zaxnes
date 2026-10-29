@@ -43,6 +43,13 @@ fixed bank's code 3 bytes earlier from `$C700` and `$22` from `$E9C0`, `JAPAN_MO
 the core and the enemies, Mega Man 2 DA the core, trainers lose the aid), 6 none (Rockman CX, a bad
 dump).
 
+The pack leaves the game's NMI alone: in a vertical transition its vblank is full (the next
+section's rows and attributes), and the hook that set the extension there pushed the game's scroll
+writes past it (the picture scrolled twice as fast, from the wrong place, then jumped).
+`wide_settings` runs from `wide_clear_oam` instead, in the frame's logic; the BPS build keeps its
+NMI hook (it unlocks the extension again after a state made without the hack). Over a movie, the
+picture's centre is now the same as the game's without the hack, frame by frame.
+
 In a vertical transition the game moves the objects' screen (`$0440`) to the next section's
 before the camera's (`$20`), and draws with the low byte only (`$CE7D`): Mega Man showed a screen to
 the right, in the margin. Mega Man being always on the screen, `wide_clear_oam` (each frame's first
@@ -308,16 +315,27 @@ wide_unlock:
 .endif
 
 ; ---------------------------------------------------------------------------- ;
-; NMI ($CFFD, in place of LDA $F7 / AND #$7C / STA $F7): the extension's settings for the next
-; frame (unlocked again first if a state made without the hack left it locked).
-wide_nmi:
+; NMI ($CFFD, in place of LDA $F7 / AND #$7C / STA $F7; the BPS build only): the extension's
+; settings for the next frame (unlocked again first if a state made without the hack left it
+; locked). The pack leaves the NMI alone: its vblank is full in a vertical transition (the rows and
+; attributes of the next section), and the settings' cycles there pushed the game's scroll writes
+; past it (the picture scrolled wrong); it sets them from wide_clear_oam, in the frame's logic.
 .ifndef PACK
+wide_nmi:
     LDA      WIDE_SIG
     CMP      #$57
     BEQ      @set
     JSR      wide_unlock
 @set:
+    JSR      wide_settings
+    LDA      $F7
+    AND      #$7C
+    STA      $F7
+    RTS
 .endif
+
+; The extension's settings: the margin, the extents, the layout and the overclock.
+wide_settings:
     LDA      WIDE_HOST
     CMP      #MAX_MARGIN
     BCC      @margin
@@ -345,9 +363,6 @@ wide_nmi:
     CLC
     ADC      #OVERCLOCK_LINES
     STA      WIDE_OVERCLOCK
-    LDA      $F7
-    AND      #$7C
-    STA      $F7
     RTS
 
 ; ---------------------------------------------------------------------------- ;
@@ -641,6 +656,9 @@ wide_spawn_window:
 ; 0 (they are kept from one page to the next: the page and its high bytes are rebuilt together),
 ; back to the first page.
 wide_clear_oam:
+.ifdef PACK
+    JSR      wide_settings
+.endif
     ; Mega Man (slot 0) is always on the screen: drawn a screen away from the camera's, a vertical
     ; transition has moved the objects' screens ahead of it (the game draws with the low byte
     ; only, $CE7D): this frame's objects are drawn back by that screen.
@@ -1008,7 +1026,9 @@ def hooks(sym, pack=False):
     if not pack:
         put(0xFFE4, '4c d1 f2', jmp(sym['wide_reset']))
     # NMI: the extension's settings for the next frame.
-    put(0xCFFD, 'a5 f7 29 7c 85 f7', jsr(sym['wide_nmi']))
+    # (the pack leaves the NMI alone: wide_clear_oam sets the extension each frame)
+    if not pack:
+        put(0xCFFD, 'a5 f7 29 7c 85 f7', jsr(sym['wide_nmi']))
     # Spawn window.
     put(0xD65F, '18 a5 1f 85 0a 69 ff 85 08 a5 20 85 0b 69 00 85 09',
         jsr(sym['wide_spawn_window']) + jmp(0xD670))
