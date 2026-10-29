@@ -35,7 +35,10 @@ game. A state made without the hack restores with it as it is.
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/smb3-usa-rev1-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
+`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
+shared builder (`hackpack.py`): NTSC, MMC3, each hook a 16 KiB bank and a CPU address, the
+widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
 memory instead of the game's free space described here (the source assembled for `$5800`, without
 the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
 from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
@@ -1072,7 +1075,9 @@ Usage: python -I tools/build.py <Super Mario Bros. 3 (USA) (Rev 1).nes> [out.bps
    (each checked against the bytes it replaces). The ROM keeps its size and layout.
 3. Writes build/smb3wide.nes and, if asked, the BPS patch (data without iNES header).
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: src/wide.s assembled with PACK, the
+With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC3,
+each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); src/wide.s assembled with PACK, the
 WINDOW segment only, for $5800 of the extension's memory, which Zaxnes shows in the PRG window
 from power-on, the extension unlocked (no FIXED: the NMI hook jumps to pack_nmi); the hooks, each
 with the game's bytes it replaces, checked by Zaxnes before it applies them. Nothing goes in the
@@ -1206,22 +1211,33 @@ def assemble(pack=False):
     return None if pack else open(fixed_bin, 'rb').read(), open(window_bin, 'rb').read(), sym
 
 
+def pack_place(offset, address):
+    """The place of format 2 for `offset` in the PRG-ROM, run at `address`: its 16 KiB bank, and
+    the address with the offset's place in that bank (an 8 KiB bank's half of it)."""
+    return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
+
+
 def pack(data, out):
     _, window, sym = assemble(pack=True)
     assert len(window) == WINDOW_SIZE
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
-    widescreen = []
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
+    pack = hackpack.Pack('', b'', region='ntsc', mappers=(4,))
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
     for bank, address, original, new in hooks(sym, pack=True):
         at = offset(bank, address)
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
-        widescreen.append((at, bytes(original), bytes(new)))
+        core.hook(*pack_place(at, address), bytes(original), bytes(new))
     # Zaxnes reads $FF past the code's end: its trailing fill is left out.
     used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    result = make_pack.make('Super Mario Bros. 3 (USA) (Rev 1) widescreen', window[:used],
-                            [('widescreen', widescreen)])
+    pack.name = 'Super Mario Bros. 3 (USA) (Rev 1) widescreen'
+    pack.code = window[:used]
+    result = pack.build(data, 0x40000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
           f'pack CRC {zlib.crc32(result):08X}')
 
 

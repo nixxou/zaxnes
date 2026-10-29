@@ -34,8 +34,10 @@ The ROM keeps its size and layout: a state made without the hack restores with i
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/castlevania-usa-widescreen` and `castlevania-usa-rev1-widescreen.zxpk`
-(`tools/build.py <rom> --pack <out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1):
-the code goes to the extension's memory instead of the game's free space described here (the source
+(`tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
+`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The packs are format 2, written by Zaxnes'
+shared builder (`hackpack.py`): NTSC, UxROM, each hook a 16 KiB bank and a CPU address, the
+widescreen in one group ("core", Base); no checks yet. The code goes to the extension's memory instead of the game's free space described here (the source
 assembled for `$5800`, without the reset hook and the NMI's unlock: Zaxnes unlocks the extension
 and shows the code in the window from power-on, `$5008` = `$80`, page 0), and the hooks, each with
 the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (nothing
@@ -912,7 +914,9 @@ addresses of the game's routines (ca65 -D REV1).
 3. Writes build/<build>.nes and, if asked, the BPS patch (data without iNES header). WIDE_SKIP
    (comma-separated hex addresses) leaves hooks out, for testing.
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the WINDOW segment is the pack's
+With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, UxROM,
+each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the WINDOW segment is the pack's
 code, for $5800 of the extension's memory, which Zaxnes shows in the PRG window from power-on;
 the hooks, each with the game's bytes it replaces, checked by Zaxnes before it applies them.
 Nothing goes in the game's free space and the ROM keeps its size. The damage hook is a component of its own,
@@ -1060,27 +1064,39 @@ def assemble(name, defines):
 INVINCIBLE = {BASE: 0xE734, REV1: 0xE758}
 
 
+def pack_place(offset, address):
+    """The place of format 2 for `offset` in the PRG-ROM, run at `address`: its 16 KiB bank, and
+    the address with the offset's place in that bank (an 8 KiB bank's half of it)."""
+    return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
+
+
 def pack(data, crc, window, sym, out):
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
-    widescreen = []
-    invincible = []
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
+    pack = hackpack.Pack('', b'', region='ntsc', mappers=(2,))
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    aid = pack.component('invincible').group('invincible', label='Invincible',
+                                             label_fr='Invincible')
     for bank, address, original, new in hooks(crc, sym):
         at = offset(bank, address)
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
         if address == INVINCIBLE[crc]:
             # LDA #$02, health kept: A as wide_damage leaves it.
-            invincible.append((at, bytes(original), bytes([0xA9, 0x02, NOP, NOP, NOP])))
+            aid.hook(*pack_place(at, address), bytes(original), bytes([0xA9, 0x02, NOP, NOP, NOP]))
         else:
-            widescreen.append((at, bytes(original), bytes(new)))
-    assert len(invincible) == 1
+            core.hook(*pack_place(at, address), bytes(original), bytes(new))
+    assert len(aid.hooks) == 1
     game = 'Castlevania (USA) (Rev 1)' if crc == REV1 else 'Castlevania (USA)'
     # Zaxnes reads $FF past the code's end: its trailing fill is left out.
     used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    result = make_pack.make(game + ' widescreen', window[:used],
-                            [('widescreen', widescreen), ('invincible', invincible)])
+    pack.name = game + ' widescreen'
+    pack.code = window[:used]
+    result = pack.build(data, 0x20000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
           f'pack CRC {zlib.crc32(result):08X}')
 
 

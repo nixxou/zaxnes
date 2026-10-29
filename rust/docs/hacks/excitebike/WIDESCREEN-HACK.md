@@ -36,8 +36,10 @@ accordingly when it applies the patch.
 ---
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/excitebike-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's memory,
+`rust/crates/zax-nes/patches/excitebike-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
+`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
+shared builder (`hackpack.py`): NTSC, NROM, each hook a 16 KiB bank and a CPU address, the
+widescreen in one group ("core", Base); no checks yet. The code goes to the extension's memory,
 which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with the game's
 bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank added,
 nothing moved or copied). The game has no testing aid. The BPS patch described here is kept to
@@ -317,7 +319,9 @@ Usage: python -I tools/build.py <Excitebike (Japan, USA) (En).nes> [out.bps]
 4. Writes build/excitebikewide.nes (header: 3 PRG banks) and, if asked, the BPS patch (data
    without iNES header; the copy and the CHR-ROM are copied from the player's ROM).
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the code (its used part) for the
+With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, NROM,
+each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the code (its used part) for the
 extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in the
 PRG-ROM, the ROM keeping its size. The game's 16 KiB stay as they are (NROM mirrors them at $C000
 itself); it has no testing aid.
@@ -395,16 +399,28 @@ def assemble():
     return open(binary, 'rb').read(), sym
 
 
+def pack_place(offset, address):
+    """The place of format 2 for `offset` in the PRG-ROM, run at `address`: its 16 KiB bank, and
+    the address with the offset's place in that bank (an 8 KiB bank's half of it)."""
+    return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
+
+
 def pack(data, code, sym, out):
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
-    widescreen = []
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
+    pack = hackpack.Pack('', b'', region='ntsc', mappers=(0,))
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
     for address, original, new in hooks(sym):
         offset = address & (PRG_SIZE - 1)
         assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
-        widescreen.append((offset, original, bytes(new)))
+        core.hook(*pack_place(offset, address), original, bytes(new))
     used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    result = make_pack.make('Excitebike (Japan, USA) widescreen', code[:used], [('widescreen', widescreen)])
+    pack.name = 'Excitebike (Japan, USA) widescreen'
+    pack.code = code[:used]
+    result = pack.build(data, 0x4000)
     open(out, 'wb').write(result)
     print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
 

@@ -31,7 +31,10 @@ the battery file is the same.
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/final-fantasy-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code goes to the extension's
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
+`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
+shared builder (`hackpack.py`): NTSC, MMC1, each hook a 16 KiB bank and a CPU address, the
+widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
 memory instead of the game's free space described here (the source assembled for `$5800`, without
 the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
 from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
@@ -366,7 +369,9 @@ Usage: python -I tools/build.py <Final Fantasy (USA).nes> [out.bps]
 3. Writes build/final-fantasy-usa.nes and, if asked, the BPS patch (data without iNES header).
    WIDE_SKIP (comma-separated hex addresses) leaves hooks out, for testing.
 
-With --pack, a Zaxnes hack pack (tools/make_pack.py) instead: the WINDOW segment (filled with
+With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1,
+each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the WINDOW segment (filled with
 $FF, what Zaxnes reads past the pack's code) is the pack's code, for $5800 of the extension's
 memory, which Zaxnes shows in the PRG window from power-on; the hooks, each with the game's bytes
 it replaces, checked by Zaxnes before it applies them. Nothing goes in the game's free space and
@@ -488,21 +493,33 @@ def assemble(pack=False):
     return open(window_bin, 'rb').read(), sym
 
 
+def pack_place(offset, address):
+    """The place of format 2 for `offset` in the PRG-ROM, run at `address`: its 16 KiB bank, and
+    the address with the offset's place in that bank (an 8 KiB bank's half of it)."""
+    return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
+
+
 def pack(data, out):
     window, sym = assemble(pack=True)
     assert len(window) == WINDOW_SIZE
-    sys.path.insert(0, os.path.join(ROOT, 'tools'))
-    import make_pack
-    widescreen = []
+    tools = os.environ.get('ZAXNES_TOOLS')
+    if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
+        sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
+    sys.path.insert(0, tools)
+    import hackpack
+    pack = hackpack.Pack('', b'', region='ntsc', mappers=(1,))
+    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
     for bank, address, original, new in hooks(sym):
         at = offset(bank, address)
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
-        widescreen.append((at, bytes(original), bytes(new)))
+        core.hook(*pack_place(at, address), bytes(original), bytes(new))
     # Zaxnes reads $FF past the code's end: its trailing fill is left out.
     used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    result = make_pack.make('Final Fantasy (USA) widescreen', window[:used], [('widescreen', widescreen)])
+    pack.name = 'Final Fantasy (USA) widescreen'
+    pack.code = window[:used]
+    result = pack.build(data, 0x40000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(widescreen)} hooks), '
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
           f'pack CRC {zlib.crc32(result):08X}')
 
 
