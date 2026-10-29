@@ -443,6 +443,18 @@ impl CpuBus for NesBus {
         value
     }
 
+    /// An instruction fetch in the widescreen extension's execution zone (`$2000`-`$3FFF`, while
+    /// a pack's code runs there) reads that code; any other is a plain read.
+    fn read_code(&mut self, address: u16) -> u8 {
+        if let Some(offset) = self.ppu.wide().zone_offset(address) {
+            self.tick();
+            let value = self.ppu.wide().code().get(offset).copied().unwrap_or(0xFF);
+            self.open_bus = value;
+            return value;
+        }
+        self.read(address)
+    }
+
     fn write(&mut self, address: u16, value: u8) {
         self.tick();
         self.open_bus = value;

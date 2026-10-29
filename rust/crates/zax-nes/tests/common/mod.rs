@@ -30,6 +30,8 @@ pub struct TestBus {
     pub irq_asserted: bool,
     /// Every address read or written, in order, for dummy-cycle assertions.
     pub access_log: Vec<u16>,
+    /// The addresses read as the instruction stream ([`CpuBus::read_code`]), in order.
+    pub code_log: Vec<u16>,
 }
 
 impl TestBus {
@@ -40,6 +42,7 @@ impl TestBus {
             nmi_asserted: false,
             irq_asserted: false,
             access_log: Vec::new(),
+            code_log: Vec::new(),
         }
     }
 
@@ -56,6 +59,7 @@ impl TestBus {
         cpu.s = stack_pointer;
         self.cycle_count = 0;
         self.access_log.clear();
+        self.code_log.clear();
         cpu
     }
 
@@ -83,6 +87,11 @@ impl CpuBus for TestBus {
         self.cycle_count += 1;
         self.access_log.push(address);
         self.memory[usize::from(address)]
+    }
+
+    fn read_code(&mut self, address: u16) -> u8 {
+        self.code_log.push(address);
+        self.read(address)
     }
 
     fn write(&mut self, address: u16, value: u8) {

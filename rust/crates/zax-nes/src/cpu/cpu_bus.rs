@@ -6,6 +6,15 @@ pub trait CpuBus {
     /// Reads a byte, consuming one CPU cycle. Side effects of the read apply.
     fn read(&mut self, address: u16) -> u8;
 
+    /// Reads a byte of the instruction stream, consuming one CPU cycle: an opcode, an operand,
+    /// or one of the 6502's dummy reads of the program counter (single-byte instructions,
+    /// `BRK`/`RTS`/`RTI`, a taken branch and its page fix-up, the return address of `RTS`, an
+    /// interrupt's entry). The same as [`CpuBus::read`] unless the bus shows code somewhere to
+    /// instruction fetches only (the widescreen extension's execution zone).
+    fn read_code(&mut self, address: u16) -> u8 {
+        self.read(address)
+    }
+
     /// Writes a byte, consuming one CPU cycle.
     fn write(&mut self, address: u16, value: u8);
 
