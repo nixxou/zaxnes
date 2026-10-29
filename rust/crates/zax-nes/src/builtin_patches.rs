@@ -16,7 +16,7 @@
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`smb3wide`, `tools/build.py --pack`) |
-//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
+//! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's execution zone at `$2000` (`boot_zone`), the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
 //! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`aiwide`, `tools/build.py --pack`) |
 //! | Excitebike (Japan, USA) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`excitebikewide`, `tools/build.py --pack`) |
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ff1wide`, `tools/build.py --pack`) |
@@ -430,9 +430,9 @@ pub const PATCHES: [BuiltinPatch; 22] = [
         // No room in the game for code that would unlock the extension: the pack's code is open
         // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
         // did).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -453,9 +453,9 @@ pub const PATCHES: [BuiltinPatch; 22] = [
         // No room in the game for code that would unlock the extension: the pack's code is open
         // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
         // did).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },

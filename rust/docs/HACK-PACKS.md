@@ -225,3 +225,9 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   (`metalforcewide`, mapper 156), Metroid (`metroidwide`, MMC1), Adventure Island (`aiwide`,
   CNROM), Blaster Master (`blastermasterwide`, MMC1) and Excitebike (`excitebikewide`, NROM). Every
   built-in pack is now format 2; `zax-harness packs` takes each reference ROM whole.
+* the packs move from the PRG window (`$5800`, `boot_window`) to the execution zone (`$2000`,
+  `boot_zone`) one by one: the code assembled for `$2000` by the hack's `--pack` build (its BPS
+  build keeps the window), once checked to read no data of its own (data reads at `$2000`-`$3FFF`
+  reach the PPU). Done: Zelda II, Castlevania and its Rev 1 (`cvwide`; the same RAM as with the
+  window, the stack page aside, over 25 movies of the USA build and 6000 frames of the Rev 1's
+  demo).

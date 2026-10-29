@@ -38,8 +38,9 @@ The ROM keeps its size and layout: a state made without the hack restores with i
 `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The packs are format 2, written by Zaxnes'
 shared builder (`hackpack.py`): NTSC, UxROM, each hook a 16 KiB bank and a CPU address, the
 widescreen in one group ("core", Base); no checks yet. The code goes to the extension's memory instead of the game's free space described here (the source
-assembled for `$5800`, without the reset hook and the NMI's unlock: Zaxnes unlocks the extension
-and shows the code in the window from power-on, `$5008` = `$80`, page 0), and the hooks, each with
+assembled for `$2000`, without the reset hook and the NMI's unlock: Zaxnes unlocks the extension
+and shows the code in its execution zone from power-on, `$500B` = `$80`, to instruction fetches
+only; the code reads no data of its own, its variables are in the extension's RAM at `$5200`), and the hooks, each with
 the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (nothing
 written in its free space). The option "Invincible" is a component of its own (`LDA #$02` in place
 of the health subtraction), applied with or without the advanced mode. The level selector needs the
@@ -916,9 +917,11 @@ addresses of the game's routines (ca65 -D REV1).
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
 (tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, UxROM,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the WINDOW segment is the pack's
-code, for $5800 of the extension's memory, which Zaxnes shows in the PRG window from power-on;
-the hooks, each with the game's bytes it replaces, checked by Zaxnes before it applies them.
+each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base). The
+WINDOW segment is the pack's code, assembled for $2000: the extension's execution zone, which
+Zaxnes shows to instruction fetches only at $2000-$3FFF from power-on (data reads there reach the
+PPU: the code reads no data of its own, its variables are in the extension's RAM at $5200); the
+hooks, each with the game's bytes it replaces, checked by Zaxnes before it applies them.
 Nothing goes in the game's free space and the ROM keeps its size. The damage hook is a component of its own,
 "invincible" (LDA #$02 in place of the subtraction), applied by Zaxnes while that option is on,
 with or without the widescreen.
@@ -936,6 +939,7 @@ WINDOW_START = 0x5800
 WINDOW_SIZE = 0x800
 WINDOW_BANK = 5
 WINDOW_PAGE = 0x1F
+ZONE_START = 0x2000             # the pack's code: the extension's execution zone
 WINDOW_AT = WINDOW_BANK * BANK_16K + WINDOW_PAGE * 0x100
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1029,14 +1033,14 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble(name, defines):
+def assemble(name, defines, start=WINDOW_START):
     build = os.path.join(ROOT, 'build', name)
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
     window_bin = os.path.join(build, 'window.bin')
     open(cfg, 'w', newline='\n').write(
         'MEMORY {\n'
-        f'  WINDOW: start = ${WINDOW_START:04X}, size = ${WINDOW_SIZE:04X}, fill = yes, fillval = $FF, '
+        f'  WINDOW: start = ${start:04X}, size = ${WINDOW_SIZE:04X}, fill = yes, fillval = $FF, '
         f'file = "{wsl_path(window_bin)}";\n'
         '}\n'
         'SEGMENTS {\n'
@@ -1113,11 +1117,12 @@ def main():
     else:
         sys.exit(f'{rom_path}: not Castlevania (USA) or its Rev 1 (data CRC {crc:08X})')
 
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        zone, sym = assemble(name, defines, ZONE_START)
+        pack(bytes(data), crc, zone, sym, sys.argv[3])
+        return
     window, sym = assemble(name, defines)
     assert len(window) == WINDOW_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), crc, window, sym, sys.argv[3])
-        return
     prg = bytearray(data)
     assert prg[WINDOW_AT:WINDOW_AT + WINDOW_SIZE] == bytes([0xFF]) * WINDOW_SIZE, \
         'bank 5: the space is not free'
