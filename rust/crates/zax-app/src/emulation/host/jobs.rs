@@ -490,6 +490,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         self.current_game = Some(game.clone());
         self.rollback.clear();
+        self.frame_steps.clear();
         // DEC-09-Q4: the ROM fingerprint is only logged, never a reason to refuse.
         if !state.header.rom_sha1.is_empty() {
             if let Some(current) = self.current_rom_fingerprint() {
@@ -561,6 +562,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .apu_mut()
             .drop_pending_samples();
         self.rollback.clear();
+        self.frame_steps.clear();
         self.fast_forward.clear();
         self.apply_speed();
         self.pacer.reset();

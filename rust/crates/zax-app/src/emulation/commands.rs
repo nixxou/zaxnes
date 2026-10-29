@@ -122,6 +122,8 @@ commands! {
     Stop => "emulation.stop", Shortcut::None, false;
     FastForward => "emulation.fast_forward", Shortcut::Key("shortcut.fast_forward"), true;
     Rollback => "emulation.rollback", Shortcut::Key("shortcut.rollback"), false;
+    FrameBack => "emulation.frame_back", Shortcut::Fixed("J"), false;
+    FrameAdvance => "emulation.frame_advance", Shortcut::Fixed("K"), false;
     SetSpeed => "emulation.set_speed", Shortcut::None, false;
     SpeedUp => "emulation.speed_up", Shortcut::None, false;
     SpeedDown => "emulation.speed_down", Shortcut::None, false;

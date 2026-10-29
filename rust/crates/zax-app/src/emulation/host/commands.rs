@@ -55,7 +55,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     .unwrap_or_else(|| numbered_slot_id(args.number));
                 !loading && self.slots.is_occupied(&slot)
             }
-            Command::PauseResume | Command::Stop | Command::Rollback => !stopped && !loading,
+            Command::PauseResume
+            | Command::Stop
+            | Command::Rollback
+            | Command::FrameBack
+            | Command::FrameAdvance => !stopped && !loading,
             Command::Pause => self.state == EmulationState::Running && !loading,
             Command::Resume => self.state == EmulationState::Paused && !loading,
             Command::FastForward => self.state == EmulationState::Running,
@@ -153,6 +157,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::Stop
             | Command::FastForward
             | Command::Rollback
+            | Command::FrameBack
+            | Command::FrameAdvance
             | Command::SetSpeed
             | Command::SpeedUp
             | Command::SpeedDown
@@ -241,6 +247,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::Stop => self.stop_current_game(true, true),
             Command::FastForward => self.request_fast_forward(),
             Command::Rollback => self.perform_rollback(),
+            Command::FrameBack => self.step_frame_back(),
+            Command::FrameAdvance => self.step_frame(),
             Command::SetSpeed => self.update_settings(|model| model.set_game_speed(args.number)),
             Command::SpeedUp => self.update_settings(|model| {
                 let speed = speed_setting::clamp(model.game_speed() + 1);

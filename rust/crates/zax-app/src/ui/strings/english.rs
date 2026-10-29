@@ -171,6 +171,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.emulation.stop", "Stop"),
     ("cmd.emulation.fast_forward", "Fast forward"),
     ("cmd.emulation.rollback", "Rollback"),
+    ("cmd.emulation.frame_back", "Previous frame"),
+    ("cmd.emulation.frame_advance", "Next frame"),
     ("cmd.emulation.set_speed", "Speed"),
     ("cmd.emulation.speed_up", "Faster"),
     ("cmd.emulation.speed_down", "Slower"),

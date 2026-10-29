@@ -187,6 +187,67 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .or_else(|| self.pause_thumbnail.clone())
     }
 
+    /// One frame on, the emulation paused (K, Rust-only, owner request): the frame runs with the
+    /// input held now, the core's state before it kept so that J can come back to it.
+    pub(super) fn step_frame(&mut self) {
+        if !self.can_step() {
+            return;
+        }
+        self.pause();
+        self.take_core_back();
+        let (one, two) = self.step_input;
+        if let Some(session) = self.session.as_ref() {
+            let core = session.core();
+            let _ =
+                self.frame_steps
+                    .capture_with(|buffer| core.save_state_to(false, buffer), one, two);
+        }
+        self.run_session_frame(one, two);
+        self.show_frame_number();
+    }
+
+    /// One frame back, the emulation paused (J): the state before the frame that came before the
+    /// one on screen, run again with its input, shows that frame. Nothing past the history's
+    /// oldest frame (five seconds), nor on a handheld (no history there).
+    pub(super) fn step_frame_back(&mut self) {
+        if !self.can_step() {
+            return;
+        }
+        self.pause();
+        self.take_core_back();
+        let Some((state, one, two)) = self.frame_steps.step_back() else {
+            return;
+        };
+        if let Some(session) = self.session.as_mut() {
+            if let Err(error) = session.restore_core(&state) {
+                self.log(&format!("frame step refused: {error}"));
+                return;
+            }
+        }
+        self.run_session_frame(one, two);
+        self.show_frame_number();
+    }
+
+    fn can_step(&self) -> bool {
+        self.state != EmulationState::Stopped
+            && !self.loading
+            && self
+                .session
+                .as_ref()
+                .is_some_and(crate::game_session::GameSession::has_rom)
+    }
+
+    fn show_frame_number(&mut self) {
+        if let Some(session) = self.session.as_ref() {
+            let frame = session.core().frame_count();
+            self.notifications.show(
+                &format!("Frame {frame}"),
+                SHORT_SECONDS,
+                NotificationSeverity::Normal,
+            );
+        }
+    }
+
     /// Goes back to the second-to-last snapshot (REQ-LOOP-032).
     pub(super) fn perform_rollback(&mut self) {
         if self.state == EmulationState::Stopped

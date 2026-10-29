@@ -4,6 +4,7 @@ pub mod commands;
 pub mod emulation_state;
 pub mod fast_forward_state;
 pub mod frame_pacer;
+pub mod frame_steps;
 pub mod game_catalog;
 pub mod host;
 pub mod hotkey_tracker;
