@@ -1689,12 +1689,11 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
     if two_dimensional {
         state.picture_height = session.copy_nes_picture(&mut state.picture);
         // The cut sides left out, the scene's background showing there; in Resize the head-on
-        // view frames the rest.
+        // view frames the rest. The picture's own size tells its margins: one 256 wide has none,
+        // whatever margin the 3D conversion was asked for.
+        let width = state.picture.len() / state.picture_height.max(1);
         let in_force = overscan.in_force(
-            session
-                .engine()
-                .published_frame()
-                .map_or(0, ConversionFrame::margin),
+            i32::try_from(width).map_or(0, |width| (width - 256) / 2),
             state.picture_height == 240 || session.nes_picture_hides_overscan(),
         );
         in_force.leave_out(&mut state.picture, state.picture_height);
