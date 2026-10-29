@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use imgui::{Condition, DrawListMut, StyleColor, StyleVar, Ui, WindowFlags, WindowToken};
 use zax_platform::input::labels;
 
+use super::compat::Tone;
 use super::game_options::{GameOptionsModel, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
 use super::options::{self, ROWS};
@@ -274,6 +275,23 @@ impl Painter<'_> {
         self.ui.text_wrapped(text);
     }
 
+    /// Paragraphs one under the other from the top of the list area, each in its colour.
+    fn lines(&self, lines: &[(String, [f32; 4])]) {
+        let metrics = &self.metrics;
+        let width = self.size[0] - 4.0 * metrics.padding;
+        self.ui
+            .set_cursor_pos([2.0 * metrics.padding, self.row_top(0) + metrics.padding]);
+        let _wrap = self
+            .ui
+            .push_text_wrap_pos_with_pos(2.0 * metrics.padding + width);
+        for (text, colour) in lines {
+            let y = self.ui.cursor_pos()[1];
+            self.ui.set_cursor_pos([2.0 * metrics.padding, y]);
+            let _colour = self.ui.push_style_color(StyleColor::Text, *colour);
+            self.ui.text_wrapped(text);
+        }
+    }
+
     /// A paragraph in the middle of the list area.
     fn message(&self, text: &str, colour: [f32; 4]) {
         let metrics = &self.metrics;
@@ -530,6 +548,25 @@ impl HandheldUi {
         let painter = self.painter(ui);
         let title = strings::format(&strings::get(keys::HACKS_TITLE), &[hacks.name()]);
         painter.title(&title, "");
+        // The detail of how the hack fits this ROM, in place of the rows.
+        if hacks.compat_open() {
+            let lines: Vec<_> = hacks
+                .compat_lines()
+                .into_iter()
+                .map(|(text, tone)| {
+                    let colour = match tone {
+                        Tone::Good => PROFILE,
+                        Tone::Warning => OTHER_MODE,
+                        Tone::Bad => WARNING,
+                        Tone::Plain => DIM,
+                    };
+                    (text, colour)
+                })
+                .collect();
+            painter.lines(&lines);
+            painter.hints(layout::hints(Screen::Hacks));
+            return;
+        }
         let rows = hacks.rows();
         if rows.is_empty() {
             match hacks.other_rom_message() {
@@ -538,11 +575,7 @@ impl HandheldUi {
             }
         }
         // Another version of the game: what it is, under the rows that force the patch.
-        // Or, for a ROM taken by a hack pack's signatures, the parts of the hack left out.
-        let other = hacks
-            .other_rom_message()
-            .or_else(|| hacks.pack_note())
-            .filter(|_| !rows.is_empty());
+        let other = hacks.other_rom_message().filter(|_| !rows.is_empty());
         // The note on the patch takes the place of a row or two at the bottom.
         let visible = self.metrics.visible_rows(painter.size[1]);
         let visible = if other.is_some() {

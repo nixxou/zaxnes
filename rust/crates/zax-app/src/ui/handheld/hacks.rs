@@ -16,6 +16,7 @@ use zax_settings::games::GameOptions;
 use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
 
+use super::compat::{Compat, Tone};
 use super::pad::PadButton;
 use super::rom_list::RomEntry;
 use crate::application::AppHost;
@@ -36,6 +37,8 @@ pub enum HackRow {
     Advanced,
     /// Option n of the game's built-in patch.
     PatchOption(usize),
+    /// How the game's hack pack fits this ROM: A shows the detail.
+    Compatibility,
 }
 
 /// The ratios of the widescreen row when it is on (`video.widescreen`): automatic, 3:2, 16:10,
@@ -68,10 +71,11 @@ pub struct HacksModel {
     /// Whether that patch can be forced on this ROM: its data has the size the patch was made
     /// for.
     forceable: bool,
-    /// The parts of the hack that do not apply to this ROM, for a ROM taken by the signatures of
-    /// a hack pack (another version, a ROM hack): the groups of the widescreen by name, the aids
-    /// by their option's label.
-    pack_left_out: Vec<String>,
+    /// How the game's hack pack fits this ROM, when the game's patch is one: worked out when the
+    /// screen opens (`for_rom`), not while the ROMs are listed.
+    compat: Option<Compat>,
+    /// Whether its detail is shown in place of the rows.
+    compat_open: bool,
     selected: usize,
     /// The global values: the preferences, without the scripts' or a game's.
     global: SettingsModel,
@@ -108,7 +112,10 @@ impl HacksModel {
             crc,
             other_rom,
             forceable: true,
-            pack_left_out: Vec::new(),
+            compat: patch
+                .filter(|patch| hack_pack::is_pack(patch.bps))
+                .map(|_| Compat::Original),
+            compat_open: false,
             selected: 0,
             global,
             own,
@@ -133,15 +140,21 @@ impl HacksModel {
             // Not by its CRC: by the signatures of a hack pack (another version of the game, a ROM
             // hack), the hooks finding the bytes they replace.
             let image = std::fs::read(rom).ok();
-            if let Some((patch, applied)) = image.as_deref().and_then(builtin_patches::pack_for) {
+            if let Some((patch, _)) = image.as_deref().and_then(builtin_patches::pack_for) {
                 hacks.capable = true;
                 hacks.patch = Some(patch);
                 hacks.patch_options = host.patch_options(patch);
-                hacks.pack_left_out = Self::left_out(patch, &applied);
+                hacks.compat = image
+                    .as_deref()
+                    .and_then(|image| Compat::evaluate(patch, image));
                 return hacks;
             }
             hacks.other_rom = other_rom_patch(title, &hacks.name);
             if let Some(other) = hacks.other_rom {
+                // A hack pack that does not fit: why, part by part.
+                hacks.compat = image
+                    .as_deref()
+                    .and_then(|image| Compat::evaluate(other, image));
                 // A forced patch applies to data of the size it was made for only; a hack pack is
                 // never forced (its signatures decide, above).
                 let size = image.map(|image| builtin_patches::rom_data(&image).len());
@@ -159,34 +172,6 @@ impl HacksModel {
     pub fn forced(&self) -> bool {
         self.other_rom
             .is_some_and(|other| self.value(SettingId::EmuForcedPatch).as_text() == other.name)
-    }
-
-    /// The parts of `patch`'s hack pack that `applied` leaves out: a group of the widescreen by its
-    /// name, an aid by its option's label.
-    fn left_out(patch: &BuiltinPatch, applied: &hack_pack::AppliedPack) -> Vec<String> {
-        let mut parts: Vec<String> = Vec::new();
-        for &(component, group, _) in &applied.refused {
-            let part = if component == hack_pack::WIDESCREEN {
-                group.to_owned()
-            } else {
-                patch
-                    .options
-                    .iter()
-                    .find(|option| option.key == component)
-                    .map_or(component, |option| {
-                        if strings::language() == strings::UiLanguage::French {
-                            option.label_fr
-                        } else {
-                            option.label
-                        }
-                    })
-                    .to_owned()
-            };
-            if !parts.contains(&part) {
-                parts.push(part);
-            }
-        }
-        parts
     }
 
     /// The built-in patch made for another ROM of the game, when this one is such a version.
@@ -216,18 +201,6 @@ impl HacksModel {
                 self.set(SettingId::VideoWidescreen, SettingValue::Enum(RATIOS[0]));
             }
         }
-    }
-
-    /// The parts of the hack that do not apply to a ROM taken by the signatures of its hack pack,
-    /// when some do not.
-    #[must_use]
-    pub fn pack_note(&self) -> Option<String> {
-        (!self.pack_left_out.is_empty()).then(|| {
-            strings::format(
-                &strings::get(keys::HACKS_PACK_PARTIAL),
-                &[&self.pack_left_out.join(", ")],
-            )
-        })
     }
 
     /// Why the widescreen cannot be turned on, for a version of a game the hack is made for
@@ -300,6 +273,8 @@ impl HacksModel {
         let mut rows = Vec::new();
         if !self.capable {
             if !self.forceable() {
+                // A hack pack that does not fit this ROM: only why.
+                rows.extend(self.compat.is_some().then_some(HackRow::Compatibility));
                 return rows;
             }
             rows.push(HackRow::Force);
@@ -307,10 +282,19 @@ impl HacksModel {
                 return rows;
             }
         }
-        rows.extend([HackRow::Widescreen, HackRow::Ratio, HackRow::Margin]);
+        // On another ROM, only the parts of the hack pack that fit it.
+        let fits = |component: &str| {
+            self.compat
+                .as_ref()
+                .is_none_or(|compat| compat.component_applies(component))
+        };
+        let widescreen = fits(hack_pack::WIDESCREEN);
         let advanced_patch = self.patch().is_some_and(|patch| patch.advanced);
-        if advanced_patch {
-            rows.push(HackRow::Advanced);
+        if widescreen {
+            rows.extend([HackRow::Widescreen, HackRow::Ratio, HackRow::Margin]);
+            if advanced_patch {
+                rows.push(HackRow::Advanced);
+            }
         }
         // The options of an advanced patch are those of its mode, but for the aids of its hack
         // pack, which apply without it.
@@ -321,11 +305,28 @@ impl HacksModel {
                 .iter()
                 .enumerate()
                 .filter(|(_, (option, _))| {
-                    all || patch.is_some_and(|patch| patch.is_aid(option.key))
+                    let aid = patch.is_some_and(|patch| patch.is_aid(option.key));
+                    (all || aid) && if aid { fits(option.key) } else { widescreen }
                 })
                 .map(|(index, _)| HackRow::PatchOption(index)),
         );
+        rows.extend(self.compat.is_some().then_some(HackRow::Compatibility));
         rows
+    }
+
+    /// Whether the detail of the compatibility is shown in place of the rows.
+    #[must_use]
+    pub const fn compat_open(&self) -> bool {
+        self.compat_open
+    }
+
+    /// The detail of how the game's hack pack fits this ROM, line by line (empty without one).
+    #[must_use]
+    pub fn compat_lines(&self) -> Vec<(String, Tone)> {
+        match (&self.compat, self.patch.or(self.other_rom)) {
+            (Some(compat), Some(patch)) => compat.lines(patch, self.crc),
+            _ => Vec::new(),
+        }
     }
 
     /// The index of the selected row.
@@ -387,6 +388,7 @@ impl HacksModel {
     /// Steps `row` by `step`.
     pub fn step(&mut self, row: HackRow, step: i32) {
         match row {
+            HackRow::Compatibility => {}
             HackRow::Force => self.toggle_force(),
             HackRow::Widescreen => self.toggle_widescreen(),
             HackRow::Advanced => {
@@ -435,9 +437,11 @@ impl HacksModel {
                 .iter()
                 .map(|label| text::label_of_option(label))
                 .collect(),
-            HackRow::Force | HackRow::Widescreen | HackRow::Advanced | HackRow::PatchOption(_) => {
-                Vec::new()
-            }
+            HackRow::Force
+            | HackRow::Widescreen
+            | HackRow::Advanced
+            | HackRow::PatchOption(_)
+            | HackRow::Compatibility => Vec::new(),
         }
     }
 
@@ -455,7 +459,11 @@ impl HacksModel {
             HackRow::Margin => {
                 usize::try_from(self.value(SettingId::VideoWidescreenExtra).as_int()).unwrap_or(0)
             }
-            HackRow::Force | HackRow::Widescreen | HackRow::Advanced | HackRow::PatchOption(_) => 0,
+            HackRow::Force
+            | HackRow::Widescreen
+            | HackRow::Advanced
+            | HackRow::PatchOption(_)
+            | HackRow::Compatibility => 0,
         }
     }
 
@@ -472,7 +480,11 @@ impl HacksModel {
                     self.set(SettingId::VideoWidescreenExtra, SettingValue::Enum(value));
                 }
             }
-            HackRow::Force | HackRow::Widescreen | HackRow::Advanced | HackRow::PatchOption(_) => {}
+            HackRow::Force
+            | HackRow::Widescreen
+            | HackRow::Advanced
+            | HackRow::PatchOption(_)
+            | HackRow::Compatibility => {}
         }
     }
 
@@ -484,12 +496,19 @@ impl HacksModel {
             HackRow::Widescreen => self.widescreen_on(),
             HackRow::Advanced => self.advanced_on(),
             HackRow::PatchOption(index) => self.patch_options.get(index).is_some_and(|(_, on)| *on),
-            HackRow::Ratio | HackRow::Margin => false,
+            HackRow::Ratio | HackRow::Margin | HackRow::Compatibility => false,
         }
     }
 
     /// One press of a button.
     pub fn handle(&mut self, button: PadButton) -> Option<HacksCommand> {
+        // The detail of the compatibility: A or B goes back to the rows.
+        if self.compat_open {
+            if matches!(button, PadButton::A | PadButton::B) {
+                self.compat_open = false;
+            }
+            return None;
+        }
         let rows = self.rows();
         let count = rows.len();
         match button {
@@ -497,6 +516,10 @@ impl HacksModel {
             PadButton::Down if count > 0 => self.selected = (self.selected + 1) % count,
             PadButton::Left | PadButton::Right | PadButton::A => {
                 let row = *rows.get(self.selected)?;
+                if row == HackRow::Compatibility {
+                    self.compat_open = button == PadButton::A;
+                    return None;
+                }
                 self.step(row, if button == PadButton::Left { -1 } else { 1 });
                 return Some(HacksCommand::Save);
             }
@@ -530,6 +553,7 @@ impl HacksModel {
             HackRow::Ratio => strings::get(keys::HACK_RATIO),
             HackRow::Margin => strings::get(keys::HACK_MARGIN),
             HackRow::Advanced => strings::get(keys::HACK_ADVANCED),
+            HackRow::Compatibility => strings::get(keys::HACK_COMPAT),
             HackRow::PatchOption(index) => self
                 .patch_options
                 .get(index)
@@ -567,6 +591,10 @@ impl HacksModel {
             HackRow::PatchOption(index) => {
                 switch(self.patch_options.get(index).is_some_and(|(_, on)| *on))
             }
+            HackRow::Compatibility => self
+                .compat
+                .as_ref()
+                .map_or_else(String::new, Compat::summary),
         }
     }
 
@@ -578,7 +606,7 @@ impl HacksModel {
             HackRow::Widescreen | HackRow::Ratio => SettingId::VideoWidescreen,
             HackRow::Margin => SettingId::VideoWidescreenExtra,
             HackRow::Advanced => SettingId::VideoWidescreenAdvanced,
-            HackRow::PatchOption(_) => return false,
+            HackRow::PatchOption(_) | HackRow::Compatibility => return false,
         };
         self.own.iter().any(|(own, _)| *own == id)
     }
@@ -784,6 +812,7 @@ mod tests {
                 HackRow::PatchOption(0),
                 HackRow::PatchOption(1),
                 HackRow::PatchOption(2),
+                HackRow::Compatibility,
             ]
             .as_slice(),
             hacks.rows().as_slice()
@@ -844,7 +873,13 @@ mod tests {
         assert_eq!(1, hacks.selected_index());
         assert_eq!(None, hacks.handle(PadButton::Up));
         assert_eq!(None, hacks.handle(PadButton::Up));
-        assert_eq!(6, hacks.selected_index(), "wraps round");
+        assert_eq!(7, hacks.selected_index(), "wraps round");
+        // The compatibility row: A shows the detail, A or B goes back to the rows.
+        assert_eq!(None, hacks.handle(PadButton::A));
+        assert!(hacks.compat_open());
+        assert!(hacks.compat_lines()[0].0.contains("0FCFC04D"));
+        assert_eq!(None, hacks.handle(PadButton::B));
+        assert!(!hacks.compat_open());
         assert_eq!(Some(HacksCommand::Close), hacks.handle(PadButton::B));
     }
 }

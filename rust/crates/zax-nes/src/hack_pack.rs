@@ -23,7 +23,7 @@
 //! | region | u8: 0 NTSC, 1 PAL, `$FF` any |
 //! | mappers | u8 count (0: any), each a u16 iNES mapper number |
 //! | code | u32 length + the code |
-//! | components | u8 count, each: name as above, u8 groups, each: u8 length + its name, u8 count + the indexes of the groups of the component it requires, u16 hooks, each: a place, u8 length, the original bytes, the new bytes; u16 checks, each: a place, u8 length, the bytes expected there |
+//! | components | u8 count, each: name as above, u8 groups, each: u8 length + its name, its label in English then in French (each u8 length + UTF-8: what the hacks screen calls it), u8 count + the indexes of the groups of the component it requires, u16 hooks, each: a place, u8 length, the original bytes, the new bytes; u16 checks, each: a place, u8 length, the bytes expected there |
 //!
 //! A place is a u8 bank of 16 KiB (bit 7: counted from the end of the PRG-ROM, `$80` its last
 //! bank) and a u16 CPU address, of which the low 14 bits are the offset in that bank: the same
@@ -83,6 +83,9 @@ pub struct Component {
 pub struct Group {
     /// Its name.
     pub name: &'static str,
+    /// What the hacks screen calls it, in English and in French (format 1: its name).
+    pub label: &'static str,
+    pub label_fr: &'static str,
     /// The indexes of the groups of its component it needs.
     pub requires: Vec<usize>,
     /// Its hooks.
@@ -201,6 +204,28 @@ pub struct AppliedPack {
     pub components: Vec<AppliedComponent>,
     /// The groups that do not, with why: (component, group, reason).
     pub refused: Vec<(&'static str, &'static str, Refusal)>,
+    /// Why no part applies, when the ROM's region or mapper is not one the pack is made for.
+    pub gate: Option<Refusal>,
+    /// Every group, in the pack's order, with how much of it the ROM has.
+    pub parts: Vec<PartReport>,
+}
+
+/// How much of a group a ROM has: its hooks and checks that find their bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartReport {
+    /// Its component's name and its own.
+    pub component: &'static str,
+    pub group: &'static str,
+    /// What the hacks screen calls it, in English and in French.
+    pub label: &'static str,
+    pub label_fr: &'static str,
+    /// Its hooks and checks that find their bytes, of all of them.
+    pub found: usize,
+    pub total: usize,
+    /// The first that does not, if any.
+    pub first_miss: Option<Place>,
+    /// Why it does not apply, if it does not.
+    pub refusal: Option<Refusal>,
 }
 
 /// A component that applies to a ROM.
@@ -260,6 +285,8 @@ impl HackPack {
                 name,
                 groups: vec![Group {
                     name,
+                    label: name,
+                    label_fr: name,
                     requires: Vec::new(),
                     hooks,
                     checks: Vec::new(),
@@ -299,6 +326,8 @@ impl HackPack {
             }
             for index in 0..group_count {
                 let group_name = reader.text()?;
+                let label = reader.text()?;
+                let label_fr = reader.text()?;
                 let mut requires = Vec::new();
                 for _ in 0..reader.u8()? {
                     let earlier = reader.u8()?;
@@ -329,6 +358,8 @@ impl HackPack {
                 }
                 groups.push(Group {
                     name: group_name,
+                    label,
+                    label_fr,
                     requires,
                     hooks,
                     checks,
@@ -362,8 +393,10 @@ impl HackPack {
             code: self.code,
             components: Vec::new(),
             refused: Vec::new(),
+            gate: self.gate(traits),
+            parts: Vec::new(),
         };
-        let gate = self.gate(traits);
+        let gate = applied.gate;
         for component in &self.components {
             let mut on = vec![false; component.groups.len()];
             let mut hooks = Vec::new();
@@ -387,6 +420,17 @@ impl HackPack {
                     on[index] = true;
                     groups.push(group.name);
                 }
+                let (found, total, first_miss) = group.tally(data, traits.prg_len);
+                applied.parts.push(PartReport {
+                    component: component.name,
+                    group: group.name,
+                    label: group.label,
+                    label_fr: group.label_fr,
+                    found,
+                    total,
+                    first_miss,
+                    refusal,
+                });
             }
             if on[0] {
                 applied.components.push(AppliedComponent {
@@ -443,6 +487,35 @@ impl Place {
 }
 
 impl Group {
+    /// How many of its hooks and checks find their bytes in `data`, of how many, and the place
+    /// of the first that does not.
+    fn tally(&self, data: &[u8], prg_len: usize) -> (usize, usize, Option<Place>) {
+        let places = self
+            .hooks
+            .iter()
+            .map(|hook| (hook.place, hook.original))
+            .chain(
+                self.checks
+                    .iter()
+                    .map(|check| (check.place, check.expected)),
+            );
+        let mut found = 0;
+        let mut total = 0;
+        let mut first_miss = None;
+        for (place, bytes) in places {
+            total += 1;
+            let there = place
+                .offset(prg_len)
+                .and_then(|offset| data.get(offset..offset.checked_add(bytes.len())?));
+            if there == Some(bytes) {
+                found += 1;
+            } else if first_miss.is_none() {
+                first_miss = Some(place);
+            }
+        }
+        (found, total, first_miss)
+    }
+
     /// Its hooks at their offsets in `data`, when every hook and check finds its bytes there.
     fn placed(&self, data: &[u8], prg_len: usize) -> Option<Vec<PlacedHook>> {
         let found = |place: Place, bytes: &[u8]| {
@@ -583,9 +656,10 @@ mod tests {
         const PACK: &[u8] = &[
             b'Z', b'X', b'P', b'K', 2, 1, b'T', 0, 1, 1, 0, 0, 0, 0, 0, 1, 10, b'w', b'i', b'd',
             b'e', b's', b'c', b'r', b'e', b'e', b'n', 2, // two groups
-            4, b'c', b'o', b'r', b'e', 0, 1, 0, 0x80, 0x02, 0xC0, 1, 0x12, 0x56, 1, 0, 0x00, 0x01,
-            0x80, 1, 0xAA, // core
-            3, b'm', b'a', b'p', 1, 0, 1, 0, 0x00, 0x03, 0x80, 1, 0x34, 0x78, 0, 0, // map
+            4, b'c', b'o', b'r', b'e', 4, b'C', b'o', b'r', b'e', 4, b'B', b'a', b's', b'e', 0, 1,
+            0, 0x80, 0x02, 0xC0, 1, 0x12, 0x56, 1, 0, 0x00, 0x01, 0x80, 1, 0xAA, // core
+            3, b'm', b'a', b'p', 3, b'M', b'a', b'p', 5, b'C', b'a', b'r', b't', b'e', 1, 0, 1, 0,
+            0x00, 0x03, 0x80, 1, 0x34, 0x78, 0, 0, // map
         ];
         HackPack::read(PACK).expect("a format 2 pack")
     }
@@ -630,6 +704,19 @@ mod tests {
             ["core"]
         );
         assert_eq!(applied.refused, [(WIDESCREEN, "map", Refusal::Bytes)]);
+        // The report: each group, how much of it the ROM has, the first place that differs.
+        let map = applied.parts[1];
+        assert_eq!((map.label, map.label_fr), ("Map", "Carte"));
+        assert_eq!((map.found, map.total), (0, 1));
+        assert_eq!(
+            map.first_miss,
+            Some(Place::Bank {
+                bank: 0,
+                from_end: false,
+                offset: 0x8003
+            })
+        );
+        assert_eq!((applied.parts[0].found, applied.parts[0].total), (2, 2));
 
         // A check that fails: the core goes, and the map with it.
         let mut prg = rom(8);

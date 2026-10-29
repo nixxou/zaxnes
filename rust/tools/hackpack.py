@@ -30,8 +30,10 @@ REGIONS = {'ntsc': 0, 'pal': 1, 'any': 0xFF}
 
 
 class Group:
-    def __init__(self, name, requires):
+    def __init__(self, name, requires, label, label_fr):
         self.name = name
+        self.label = label
+        self.label_fr = label_fr
         self.requires = list(requires)
         self.hooks = []         # (bank, address, original bytes, new bytes)
         self.checks = []        # (bank, address, length)
@@ -61,15 +63,18 @@ class Component:
         self.name = name
         self.groups = []
 
-    def group(self, name, requires=()):
+    def group(self, name, requires=(), label=None, label_fr=None):
         """The group called `name`, made the first time with the groups it `requires` (names
-        of earlier groups of this component); the first group is the component itself."""
+        of earlier groups of this component) and what the hacks screen calls it, in English
+        and in French (`label`, `label_fr`; its name by default); the first group is the
+        component itself."""
         for group in self.groups:
             if group.name == name:
                 return group
         for required in requires:
             assert any(group.name == required for group in self.groups), (name, required)
-        group = Group(name, requires)
+        label = label or name
+        group = Group(name, requires, label, label_fr or label)
         self.groups.append(group)
         return group
 
@@ -107,7 +112,8 @@ class Pack:
             out += text(component.name) + bytes([len(component.groups)])
             names = [group.name for group in component.groups]
             for group in component.groups:
-                out += text(group.name) + bytes([len(group.requires)])
+                out += text(group.name) + text(group.label) + text(group.label_fr)
+                out += bytes([len(group.requires)])
                 out += bytes(names.index(required) for required in group.requires)
                 out += struct.pack('<H', len(group.hooks))
                 for bank, address, original, new in group.hooks:

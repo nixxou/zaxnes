@@ -231,7 +231,22 @@ pub const HACKS_FORCE_BUTTON: &str = "hacks.force_button";
 pub const HACKS_FORCE_SIZE: &str = "hacks.force_size";
 /// What is said when the hack is a hack pack, which is never forced: its signatures decide.
 pub const HACKS_PACK_SIGNATURES: &str = "hacks.pack_signatures";
-pub const HACKS_PACK_PARTIAL: &str = "hacks.pack_partial";
+pub const HACK_COMPAT: &str = "hack.compat";
+pub const HACK_COMPAT_ORIGINAL: &str = "hack.compat.original";
+pub const HACK_COMPAT_FULL: &str = "hack.compat.full";
+pub const HACK_COMPAT_PARTIAL: &str = "hack.compat.partial";
+pub const HACK_COMPAT_NONE: &str = "hack.compat.none";
+pub const HACKS_COMPAT_ORIGINAL: &str = "hacks.compat.original";
+pub const HACKS_COMPAT_FULL: &str = "hacks.compat.full";
+pub const HACKS_COMPAT_FULL_BODY: &str = "hacks.compat.full_body";
+pub const HACKS_COMPAT_PARTIAL: &str = "hacks.compat.partial";
+pub const HACKS_COMPAT_PARTIAL_BODY: &str = "hacks.compat.partial_body";
+pub const HACKS_COMPAT_NONE: &str = "hacks.compat.none";
+pub const HACKS_COMPAT_MAPPER: &str = "hacks.compat.mapper";
+pub const HACKS_COMPAT_REGION: &str = "hacks.compat.region";
+pub const HACKS_COMPAT_PART_DIFFERS: &str = "hacks.compat.part_differs";
+pub const HACKS_COMPAT_PART_NEEDS: &str = "hacks.compat.part_needs";
+pub const HACKS_COMPAT_EXPECTED: &str = "hacks.compat.expected";
 /// What the hacks of a game say once the patch of another ROM of it is forced.
 pub const HACKS_FORCED_NOTE: &str = "hacks.forced_note";
 pub const HACK_OFF: &str = "hacks.off";
@@ -456,7 +471,22 @@ pub const PUBLISHED: &[&str] = &[
     HACKS_FORCE_BUTTON,
     HACKS_FORCE_SIZE,
     HACKS_PACK_SIGNATURES,
-    HACKS_PACK_PARTIAL,
+    HACK_COMPAT,
+    HACK_COMPAT_ORIGINAL,
+    HACK_COMPAT_FULL,
+    HACK_COMPAT_PARTIAL,
+    HACK_COMPAT_NONE,
+    HACKS_COMPAT_ORIGINAL,
+    HACKS_COMPAT_FULL,
+    HACKS_COMPAT_FULL_BODY,
+    HACKS_COMPAT_PARTIAL,
+    HACKS_COMPAT_PARTIAL_BODY,
+    HACKS_COMPAT_NONE,
+    HACKS_COMPAT_MAPPER,
+    HACKS_COMPAT_REGION,
+    HACKS_COMPAT_PART_DIFFERS,
+    HACKS_COMPAT_PART_NEEDS,
+    HACKS_COMPAT_EXPECTED,
     HACKS_FORCED_NOTE,
     HACK_OFF,
     MENU_HACKS,
