@@ -193,7 +193,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
         idle_loop: Some((0xC010, 0xC01A)),
     },
@@ -214,7 +215,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
         idle_loop: Some((0xC010, 0xC01A)),
     },
@@ -235,7 +237,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
         idle_loop: Some((0xC010, 0xC01A)),
     },
@@ -256,7 +259,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Everything runs in the NMI; the main loop waits for a game mode that loads an area.
         idle_loop: Some((0xC010, 0xC01A)),
     },
@@ -476,7 +480,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -500,7 +505,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Everything runs in the NMI; the main loop stirs the random number.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -521,7 +527,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The Rev 1's main loop, at the same place.
         idle_loop: Some((0xC030, 0xC03E)),
     },
@@ -541,7 +548,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         idle_loop: Some((0xC030, 0xC03E)),
     },
     BuiltinPatch {
@@ -560,7 +568,8 @@ pub const PATCHES: [BuiltinPatch; 27] = [
         boot_window: None,
         boot_window_keeps_prg_ram: false,
         boot_zone: true,
-        zone_data: false,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Its main loop, which stirs the random number.
         idle_loop: Some((0xC056, 0xC064)),
     },

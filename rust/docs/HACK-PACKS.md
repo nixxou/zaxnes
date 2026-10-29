@@ -239,7 +239,9 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   checks, MMC1, UxROM and MMC3, the European ROM's pack (PAL) and Rockman 2's
   (`docs/hacks/megaman2/WIDESCREEN-HACK.md`). Its code reaches the extension at `$3000`-`$3FFF`
   (zone data, `WIDESCREEN-EXTENSION.md` 2), so the MMC5 conversions take it too: 636 of 703 ROMs
-  take a whole pack, the same RAM as without zone data over its movies;
+  take a whole pack, the same RAM as without zone data over its movies. Zelda II and Castlevania
+  then moved to widescreen MMC5 too (the zone fantôme holding the extension's data), the same RAM
+  over their movies;
   a table of the dumps whose header gives the wrong TV region (`rom::region_exception`, by data
   CRC-32: so far Castlevania (Europe) (Virtual Console), PAL) stands for the header at load (the
   automatic TV mode starts them right, a region the player chose stays) and in the packs' region

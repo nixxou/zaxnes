@@ -51,8 +51,9 @@ where the target differs from the ROM, so either can be checked.
 (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the hack moved out of the game. Its code
 (this fork's `inc/wide_bank0.asm`, bank 0 part and window part together) is assembled for the
 extension's execution zone at `$2000` (2078 bytes, with the pack's own code of 5.5), which Zaxnes
-shows to instruction fetches only from power-on (`$500B` = `$80`, `WIDESCREEN-EXTENSION.md` section
-2): it takes no address the game or a ROM hack uses, and holds no table it reads (the world map's
+shows to instruction fetches only from power-on (the zone fantôme; widescreen MMC5, `$500B` = `$C0`:
+the code reaches the extension's registers and RAM at `$3000`-`$3FFF`, `-D ZONE_DATA`;
+`WIDESCREEN-EXTENSION.md` section 2): it takes no address the game or a ROM hack uses, and holds no table it reads (the world map's
 vertical step dispatch compares the states instead of the game's routine reading a table after its
 `JSR`); the game's code is changed only by the hooks of section 4 onwards (all but the encounters'
 life, 6.1: 35), the same bytes but for the addresses of the hack's routines, and the pack's own 11

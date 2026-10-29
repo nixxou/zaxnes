@@ -60,8 +60,9 @@ VS. System). Run 2400 frames with inputs, each accepted ROM plays as it does wit
 its frames go on (The Holy Relics, whose title these inputs do not pass, runs as it does without
 the pack). The code goes to the extension's memory instead of the game's free space described here (the source
 assembled for `$2000`, without the reset hook and the NMI's unlock: Zaxnes unlocks the extension
-and shows the code in its execution zone from power-on, `$500B` = `$80`, to instruction fetches
-only; the code reads no data of its own, its variables are in the extension's RAM at `$5200`), and the hooks, each with
+and shows the code in the zone fantôme from power-on, to instruction fetches only; widescreen
+MMC5, `$500B` = `$C0`: the code reaches the extension's registers and RAM at `$3000`-`$3FFF`, its
+variables at `$3200`, `-D ZONE_DATA`; the code reads no data of its own), and the hooks, each with
 the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (nothing
 written in its free space). The option "Invincible" is a component of its own (`LDA #$02` in place
 of the health subtraction), applied with or without the advanced mode. The level selector needs the
@@ -266,36 +267,44 @@ of `$FF` as a TargetCopy). `WIDE_SKIP=<hex addresses>` leaves hooks out, for tes
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1: sprites free of the extents
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+; The extension's registers and RAM: at $5000-$5FFF, or, in a pack (ZONE_DATA), at $3000-$3FFF of
+; the zone fantôme, which Zaxnes sends to the extension for the pack's own instructions
+; (widescreen MMC5, BuiltinPatch::zone_data): $5000-$5FFF is then the cartridge's alone.
+.ifdef ZONE_DATA
+EXT             = $3000
+.else
+EXT             = $5000
+.endif
+WIDE_HOST       = EXT + $002         ; R: the margin the host offers
+WIDE_REQ        = EXT + $003         ; W: the margin asked for
+WIDE_LEFT       = EXT + $004         ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005         ; and right of it
+WIDE_OVERCLOCK  = EXT + $006         ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007         ; bit 1: sprites free of the extents
+WIDE_OPTIONS    = EXT + $00A         ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
 MAX_MARGIN      = 248           ; the most the extension shows sprites in
 MAX_OBJECTS     = 120           ; the most an object goes past an edge (the 9-bit x keeps both
                                 ; sides apart below 128)
 
 ; Extension RAM ($5200-$57FF).
-WV_M            = $5200         ; margin of this frame
-WV_XLO          = $5201         ; the screen x of the object being drawn, 16-bit
-WV_XHI          = $5202
-WV_FRAME        = $5203         ; counts the frames
-WV_MO           = $5204         ; the objects' margin: min(M + 16, 120)
-WV_MOL          = $5205         ; and 256 - it
-WV_T            = $5206         ; scratch
-WV_END          = $5207         ; the room's end, in screens
-WV_FAR          = $5208         ; the 9-bit objects' margin: max(MO, 64)
-WV_FARL         = $5209         ; and 256 - it
-WV_SPX          = $520A         ; the x of the spawner being run
+WV_M            = EXT + $200         ; margin of this frame
+WV_XLO          = EXT + $201         ; the screen x of the object being drawn, 16-bit
+WV_XHI          = EXT + $202
+WV_FRAME        = EXT + $203         ; counts the frames
+WV_MO           = EXT + $204         ; the objects' margin: min(M + 16, 120)
+WV_MOL          = EXT + $205         ; and 256 - it
+WV_T            = EXT + $206         ; scratch
+WV_END          = EXT + $207         ; the room's end, in screens
+WV_FAR          = EXT + $208         ; the 9-bit objects' margin: max(MO, 64)
+WV_FARL         = EXT + $209         ; and 256 - it
+WV_SPX          = EXT + $20A         ; the x of the spawner being run
 ; Per object slot: the 16-bit screen x of an object the game removes at the edges of the screen,
 ; followed from frame to frame, and the frame it was last followed.
-WX_LO           = $5220
-WX_HI           = $5240
-WX_SEEN         = $5260
+WX_LO           = EXT + $220
+WX_HI           = EXT + $240
+WX_SEEN         = EXT + $260
 
 ; The options ($500A).
 OPT_LEVEL_SELECT = $01          ; Select in a stage: the next stage
@@ -965,9 +974,10 @@ With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared bu
 each hook a 16 KiB bank and a CPU address, the widescreen in four groups: "core" (Base), "edge
 spawns", "platforms" and "copies" (each needing the core), with checks of the game's code the hack relies on
 (CHECKS). The
-WINDOW segment is the pack's code, assembled for $2000: the extension's execution zone, which
-Zaxnes shows to instruction fetches only at $2000-$3FFF from power-on (data reads there reach the
-PPU: the code reads no data of its own, its variables are in the extension's RAM at $5200); the
+WINDOW segment is the pack's code, assembled for $2000: the zone fantôme, which Zaxnes shows to
+instruction fetches only at $2000-$3FFF from power-on (the game's data reads there reach the PPU;
+the code reads no data of its own). Widescreen MMC5 (-D ZONE_DATA): the code reaches the
+extension's registers and RAM at $3000-$3FFF, Zaxnes leaving $5000-$5FFF to the cartridge; the
 hooks, each with the game's bytes it replaces, checked by Zaxnes before it applies them.
 Nothing goes in the game's free space and the ROM keeps its size. The damage hook is a component of its own,
 "invincible" (LDA #$02 in place of the subtraction), applied by Zaxnes while that option is on,
@@ -1239,7 +1249,8 @@ def main():
                  f'(Japan) (data CRC {crc:08X})')
 
     if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        zone, sym = assemble(name, defines, ZONE_START)
+        # Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone, sym = assemble(name, defines + ['ZONE_DATA'], ZONE_START)
         pack(bytes(data), crc, zone, sym, sys.argv[3], '--ntsc' in sys.argv[4:])
         return
     if crc in (EUROPE, JAPAN):
