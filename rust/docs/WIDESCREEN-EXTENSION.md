@@ -198,7 +198,25 @@ Details:
   `$5008` bits 0-6 is then a 16 KiB part of that code, `$FF` past its end. The code is the
   build's, set by the core at each load and restore; it is not part of a state, and `reset()`
   keeps it.
-* **Execution zone** (`$500B`): a hack pack's code shown to the CPU's **instruction fetches
+* **Terms** (the owner's names, used in this document, the hacks' documents and the code's
+  comments):
+  * **zone fantôme** (phantom zone): `$2000`-`$3FFF`, the 8 KiB of the PPU's register mirrors
+    where the execution zone shows a hack pack's code to instruction fetches only; for the game
+    it stays the PPU, data reads and writes alike, mirrors included;
+  * **widescreen fantôme**: a pack whose zone fantôme holds code only (`$500B` = `$80`,
+    `BuiltinPatch::boot_zone`): 8 KiB of code shown (2 KiB resident, a 6 KiB page), the
+    extension's registers and RAM at `$5000`-`$5FFF`;
+  * **widescreen MMC5**: a pack whose zone fantôme holds its code and the extension's data
+    (`$500B` = `$C0`, `BuiltinPatch::zone_data`): 4 KiB of code shown (2 KiB resident, a 2 KiB
+    page), the extension's registers and RAM at `$3000`-`$3FFF` for the pack's own instructions,
+    `$5000`-`$5FFF` left whole to the cartridge (MMC5, Namco 163, a game's stray write to
+    `$500B`).
+
+  Both run at the same speed (an absolute access of `$3xxx` costs what one of `$5xxx` does; Mega
+  Man 2's movies give the same RAM frame by frame either way). Widescreen MMC5 is the default for
+  the packs moved to the zone fantôme, for its robustness; widescreen fantôme stays for a hack that
+  needs more than 4 KiB of code shown at once.
+* **Execution zone** (`$500B`, the zone fantôme): a hack pack's code shown to the CPU's **instruction fetches
   only** in `$2000`-`$3FFF`, the PPU's register mirrors, where no game made for the console runs
   code (the PPU always answers there). `$2000`-`$27FF` is the code's first 2 KiB, always;
   `$2800`-`$3FFF` the 6 KiB of page `n` (`$500B` bits 0-5: code offset `$800 + n * $1800`), `$FF`
@@ -216,7 +234,7 @@ Details:
   any ROM. Purpose: room for a hack's code without taking any address a game or a ROM hack uses
   (`$5800`-`$5FFF` can clash with a ROM hack that moves to MMC5, `$6000`-`$7FFF` with one that
   adds PRG-RAM).
-* **Zone data** (`$500B` bit 6, with bit 7): the zone also holds the extension's registers and
+* **Zone data** (`$500B` bit 6, with bit 7; widescreen MMC5): the zone also holds the extension's registers and
   RAM, for its own instructions. A data access of `$3000`-`$3FFF` made by an instruction fetched
   from the zone (`NesBus::zone_instruction`, set by each code fetch) reaches the extension at
   `$5000`-`$5FFF` (`$3xxx` standing for `$5xxx`: `WideExtension::read`, `write`; a read takes no
@@ -1016,10 +1034,11 @@ pub struct BuiltinPatch {
   jumps straight into the window.
 * `BuiltinPatch::boot_zone`: the extension unlocked with its execution zone on (`$500B` =
   `$80`, `WideExtension::boot_zone`) at power-on and reset, and again after a restore
-  (`install_pack`), for a hack pack whose code runs at `$2000`-`$3FFF`: Zelda II, Castlevania,
-  Mega Man 2.
+  (`install_pack`), for a hack pack whose code runs in the zone fantôme (`$2000`-`$3FFF`): Zelda
+  II, Castlevania (widescreen fantôme), Mega Man 2.
 * `BuiltinPatch::zone_data`: with `boot_zone`, the zone holds its data too (`$500B` = `$C0`,
-  section 2): Mega Man 2, whose MMC5 conversions keep `$5000`-`$5FFF` for the MMC5.
+  section 2; widescreen MMC5): Mega Man 2, whose MMC5 conversions keep `$5000`-`$5FFF` for the
+  MMC5.
 * `BuiltinPatch::idle_loop`: first and last address of the game's wait for the next frame (Mega
   Man 2: `LDA $1D / BEQ` at `$C08E`; Super Mario Bros.: its main loop `JMP $8057`; Zelda II: its
   main loop `$C010`-`$C01A`, everything else running in the NMI; Ninja Gaiden III: `BIT $15 / BPL` at `$9A87` of bank 4; Adventure Island: `LDA $0B / BNE`
