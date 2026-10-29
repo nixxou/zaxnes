@@ -1015,8 +1015,11 @@ are in `docs/HACK-PACKS.md`. A `BuiltinPatch` whose `bps` starts with `ZXPK` is 
   Fantasy, Ninja Gaiden III, Metal Force): the pack has no code; the hack's changed bytes (its
   hooks and its code over the free space, `$FF` or zeros) are hooks of at most 255 bytes. A
   boot window, if any, still shows the game's own bank.
-* **Zelda II**: its hack is a rewritten disassembly of the same size; the pack holds the bytes
-  its build changes (`tools/pack_from_roms.py`, from the game and the built ROM).
+* **Zelda II** is of the first kind too: its hack, written in a fork of a disassembly, was
+  moved out of the game (`z2pack`: the code for `$5800`, its 36 hooks); its boot window keeps the
+  game's PRG-RAM (`boot_window_keeps_prg_ram`), the window showing 2 KiB.
+  `tools/pack_from_roms.py` makes a pack of the bytes a same-size build changes, for a hack not
+  yet written as hooks (it made Zelda II's first pack).
 
 The testing aids are components of their own where their hook can do the hack's work in place
 of the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Castlevania and

@@ -157,6 +157,9 @@ Done, branch `hack-rewrite`:
   option off and the pack runs the game's own code: there a few cycles of drift (Mega Man 2 to
   5: where the raster IRQ interrupts the main code), the same with the BPS built without that
   hook (`WIDE_SKIP`). The owner played Mega Man, 3 to 6 on the packs;
+* Zelda II rebuilt as hooks and code (`z2pack`), from its fork of the disassembly: checked
+  against the pack of the fork's build over 12000 frames (a new game, a palace, the world map),
+  the same RAM but for a few transient bytes from its shorter NMI;
 
 * the hacks screen: by the ROM's CRC first, then by the packs' signatures; a ROM that has them
   (another revision, a ROM hack leaving the hooked code alone) gets the hack, its options and
@@ -170,7 +173,5 @@ Still to do:
   `WIDESCREEN-EXTENSION.md`);
 * the aids that need the hack's code (the level selectors, some invincibilities) apart from
   the widescreen: the code would have to be in the window without the hack running;
-* Zelda II's pack is made from its build, not by its repository (`z2wide`), whose document
-  has the pack's paragraph only in the Zaxnes copy;
 * the BPS files are still in `patches/`, no longer referenced: to remove once the packs are
   validated.
