@@ -17,7 +17,9 @@
 //! says which instance of that wrapping plane is meant ([`super::resolve_ring`]): RAM is read
 //! once the frame has run and may already be a step ahead of the scroll the frame used.
 
-use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
+use super::{
+    resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder, MaskingSprites,
+};
 
 /// The decoder.
 pub struct Zelda2;
@@ -36,6 +38,8 @@ const SCROLL_LOW: u16 = 0x072C;
 /// World map: Link's cell row (map row + `$1E`) and column.
 const MAP_ROW: u16 = 0x0073;
 const MAP_COLUMN: u16 = 0x0074;
+/// World map: the first of the sprites hiding x 248-255 in the page the game copies to OAM.
+const MASK_SPRITE: u16 = 0x0208;
 /// World map: pixels left in the step under way, and its direction (1 right, 2 left).
 const STEP_PIXELS: u16 = 0x007D;
 const STEP_FACING: u16 = 0x0562;
@@ -108,6 +112,21 @@ impl MarginDecoder for Zelda2 {
         out: &mut Vec<DecodedTile>,
     ) -> bool {
         memory.ram(GAME_MODE) == MODE_WORLD_MAP && world_map(memory, *row, columns, out)
+    }
+
+    /// The world map hides x 248-255, the column it draws as it goes, under 15 sprites (`$877C`:
+    /// sprites 2-16, tile `$FF`, x 248) that the wide picture would show as a band down its
+    /// middle. The widescreen hack puts them out of sight itself (their y `$F8`).
+    fn masking_sprites(&self, memory: &DecoderMemory<'_>) -> Option<MaskingSprites> {
+        (memory.ram(GAME_MODE) == MODE_WORLD_MAP
+            && memory.ram(MASK_SPRITE + 1) == 0xFF
+            && memory.ram(MASK_SPRITE + 3) == 0xF8
+            && memory.ram(MASK_SPRITE) < 0xEF)
+            .then_some(MaskingSprites {
+                x: 248,
+                first: 2,
+                last: 16,
+            })
     }
 }
 
@@ -391,6 +410,48 @@ mod tests {
             ..status
         };
         assert!(!Zelda2.decode_row(&memory, &level, &mut (0..2), &mut out));
+    }
+
+    #[test]
+    fn the_world_maps_masking_column_is_reported_while_shown() {
+        let mut ram = vec![0u8; 0x800];
+        ram[usize::from(GAME_MODE)] = MODE_WORLD_MAP;
+        let sprite = usize::from(MASK_SPRITE);
+        ram[sprite..sprite + 4].copy_from_slice(&[0x10, 0xFF, 0x01, 0xF8]);
+        let memory = DecoderMemory {
+            ram: &ram,
+            prg_ram: &[0; 0x2000],
+            prg_rom: &vec![0; 8 * BANK_SIZE],
+            nametable: &|_| 0,
+            nametable_written: &|_| 0,
+        };
+        assert_eq!(
+            Zelda2.masking_sprites(&memory),
+            Some(MaskingSprites {
+                x: 248,
+                first: 2,
+                last: 16
+            })
+        );
+        // Out of sight (the widescreen hack), or the side view: none.
+        let mut hidden = ram.clone();
+        hidden[sprite] = 0xF8;
+        assert_eq!(
+            Zelda2.masking_sprites(&DecoderMemory {
+                ram: &hidden,
+                ..memory
+            }),
+            None
+        );
+        let mut side = ram.clone();
+        side[usize::from(GAME_MODE)] = MODE_SIDE_VIEW;
+        assert_eq!(
+            Zelda2.masking_sprites(&DecoderMemory {
+                ram: &side,
+                ..memory
+            }),
+            None
+        );
     }
 
     #[test]

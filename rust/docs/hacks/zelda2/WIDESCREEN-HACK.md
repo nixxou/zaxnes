@@ -407,7 +407,14 @@ These are not part of the ROM, but the hack is designed with them:
     Tiles and sub-palettes per terrain: see `TERRAIN_TILES` / `TERRAIN_PALETTES`. Left column:
     `resolve_ring(ring_x mod 256, 256, 16 * ($74 - 8) -/+ $7D)` (`$0562` 1 right, 2 left), row:
     `resolve_ring((nt_y * 30 + coarse_y) / 2, 30, $73 - $1E - 7 + line / 16)`. The world map also
-    fills the vertical margin.
+    fills the vertical margin;
+  * the game's column of 15 sprites hiding x 248-255 of the world map (`$877C`, sprites 2-16,
+    tile `$FF`), shown (y below `$EF`): the decoder names them (`masking_sprites`), the core drops
+    them and the decoder redraws that column.
+* **Plain and advanced widescreen.** The built-in patch is an advanced mode (owner request, as
+  for the other games): the plain widescreen is the margin decoder alone on the unpatched game
+  (the side view and the world map widened, the enemies and encounters only on the original
+  screen); the advanced mode adds the hack.
 * **A state made the other way** (`after_other_way_state`): a world map state (`$0736 == 5`)
   restored with the hack set the other way gets `$0736 = 2` (the game's map initialisation),
   which redraws the map around Link in the layout the running code expects (two or four

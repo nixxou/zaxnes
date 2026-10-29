@@ -97,6 +97,17 @@ impl TileBuffer {
             .count();
     }
 
+    /// Keeps the sprite records `keep` accepts, and every background record.
+    pub fn retain_sprites(&mut self, mut keep: impl FnMut(&TileRecord) -> bool) {
+        self.records
+            .retain(|record| record.background || keep(record));
+        self.sprite_count = self
+            .records
+            .iter()
+            .filter(|record| !record.background)
+            .count();
+    }
+
     pub fn clear(&mut self) {
         self.records.clear();
         self.background_count = 0;
