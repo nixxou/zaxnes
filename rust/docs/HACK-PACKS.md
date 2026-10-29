@@ -235,6 +235,9 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   hack may lack): Castlevania first, with a European variant (PAL, and the same pack as NTSC for
   the ROMs of that code whose header says NTSC) and a Japanese one (Akumajou Dracula); the VS.
   System is left aside (no mapper 99, VS PPUs or coins in the core);
+  Mega Man 2 next: its pack in the execution zone, three groups (core, enemies, stage fixes) with
+  checks, MMC1, UxROM and MMC3, the European ROM's pack (PAL) and Rockman 2's
+  (`docs/hacks/megaman2/WIDESCREEN-HACK.md`); 616 of 703 ROMs take a whole pack;
   a table of the dumps whose header gives the wrong TV region (`rom::region_exception`, by data
   CRC-32: so far Castlevania (Europe) (Virtual Console), PAL) stands for the header at load (the
   automatic TV mode starts them right, a region the player chose stays) and in the packs' region

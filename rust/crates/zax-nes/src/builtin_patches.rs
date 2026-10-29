@@ -13,6 +13,7 @@
 //! | Zelda II - The Adventure of Link (USA) | widescreen (see `docs/WIDESCREEN-EXTENSION.md`) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; written in a fork of the FiendsOfTheElements Zelda II disassembly (`z2wide`), moved out of the game by `z2pack` |
 //! | Zelda II - The Adventure of Link (Europe), its Rev 1 and its Rev 2 | widescreen, the USA hack built for each European build's code | hack packs of the PAL builds (`crate::hack_pack`), from the same source with the game's moved addresses (`z2pack`, `tools/build.py`); one for Europe and its Rev 1, one for the Rev 2 |
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
+//! | Mega Man 2 (Europe), Rockman 2 (Japan) | the same | the USA hack's pack built from the European ROM (PAL) and for the Japanese code (`mm2wide`, `tools/build.py --pack`), in the execution zone |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`smb3wide`, `tools/build.py --pack`) |
@@ -101,6 +102,10 @@ const ZELDA2_OPTIONS: &[HackOption] = &[
 
 /// Name of the Mega Man 2 (USA) widescreen patch.
 pub const MEGAMAN2_USA: &str = "Mega Man 2 (USA) widescreen";
+/// Name of the Mega Man 2 (Europe) widescreen patch (advanced mode).
+pub const MEGAMAN2_EUROPE: &str = "Mega Man 2 (Europe) widescreen";
+/// Name of the Rockman 2 (Japan) widescreen patch (advanced mode).
+pub const ROCKMAN2_JAPAN: &str = "Rockman 2 (Japan) widescreen";
 
 /// Name of the Super Mario Bros. (World) widescreen patch (advanced mode).
 pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
@@ -145,7 +150,7 @@ pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 25] = [
+pub const PATCHES: [BuiltinPatch; 27] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -251,45 +256,57 @@ pub const PATCHES: [BuiltinPatch; 25] = [
         game: "Mega Man 2",
         rom_name: "Mega Man 2 (USA)",
         source_crc: 0x0FCF_C04D,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core; the ROM keeps its size. "Invincible" a component of
-        // its own.
+        // A hack pack (see `crate::hack_pack`): the code in the extension's execution zone at
+        // $2000, the hooks checked and applied by the core; the ROM keeps its size. "Invincible"
+        // a component of its own.
         bps: include_bytes!("../patches/megaman2-usa-widescreen.zxpk"),
-        options: &[
-            HackOption {
-                key: "enemies_in_margins",
-                label: "Enemies in the margins",
-                label_fr: "Ennemis dans les marges",
-                bit: 0,
-                default: true,
-            },
-            // A testing aid: no damage, spikes harmless (pits still kill).
-            HackOption {
-                key: "invincible",
-                label: "Invincible",
-                label_fr: "Invincible",
-                bit: 1,
-                default: false,
-            },
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 2,
-                default: true,
-            },
-        ],
+        options: MEGAMAN2_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
-        // did).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
+        // No room in the game for code that would unlock the extension: the pack's code runs in
+        // the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
         // The frame's wait: LDA $1D / BEQ (the NMI sets $1D).
+        idle_loop: Some((0xC08E, 0xC091)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN2_EUROPE,
+        game: "Mega Man 2",
+        rom_name: "Mega Man 2 (Europe)",
+        source_crc: 0xA663_8CBA,
+        // The USA pack built from the European ROM, PAL (`mm2wide`, `tools/build.py --pack`): its
+        // code is the same where the hack hooks and calls, its stage layouts too.
+        bps: include_bytes!("../patches/megaman2-europe-widescreen.zxpk"),
+        options: MEGAMAN2_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // The frame's wait, at the same place.
+        idle_loop: Some((0xC08E, 0xC091)),
+    },
+    BuiltinPatch {
+        name: ROCKMAN2_JAPAN,
+        game: "Mega Man 2",
+        rom_name: "Rockman 2 - Dr. Wily no Nazo (Japan)",
+        source_crc: 0x6150_517C,
+        // The USA hack built for the Japanese code (`mm2wide`, `tools/build.py --pack`, -D JAPAN:
+        // its fixed bank's places moved; banks 11 and 14, the RAM and the stage layouts as the
+        // USA's).
+        bps: include_bytes!("../patches/rockman2-japan-widescreen.zxpk"),
+        options: MEGAMAN2_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // The frame's wait, at the same place.
         idle_loop: Some((0xC08E, 0xC091)),
     },
     BuiltinPatch {
@@ -924,6 +941,33 @@ pub const PATCHES: [BuiltinPatch; 25] = [
         boot_zone: false,
         // The task scheduler's wait for the NMI (no task ready).
         idle_loop: Some((0xC581, 0xC584)),
+    },
+];
+
+/// The options of both Mega Man 2 patches.
+const MEGAMAN2_OPTIONS: &[HackOption] = &[
+    HackOption {
+        key: "enemies_in_margins",
+        label: "Enemies in the margins",
+        label_fr: "Ennemis dans les marges",
+        bit: 0,
+        default: true,
+    },
+    // A testing aid: no damage, spikes harmless (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
     },
 ];
 

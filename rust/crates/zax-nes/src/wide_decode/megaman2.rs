@@ -26,6 +26,10 @@ pub struct MegaMan2;
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x0FCF_C04D;
+/// CRC-32 of the European build's data: the same stage layouts.
+pub const SOURCE_CRC_EUROPE: u32 = 0xA663_8CBA;
+/// CRC-32 of Rockman 2 (Japan)'s data: the same stage layouts and RAM.
+pub const SOURCE_CRC_JAPAN: u32 = 0x6150_517C;
 
 const STAGE: u16 = 0x002A;
 const CAMERA_LOW: u16 = 0x001F;
