@@ -23,14 +23,30 @@ section 4). The hack does the objects: enemies that spawn, live and show in the 
 ---
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/megaman2-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
-`WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes' shared builder
-(`hackpack.py`): NTSC, MMC1, each hook a bank and a CPU address, the widescreen in one group
-("core", Base); no checks yet. The code goes to the extension's
-memory instead of the game's free space described here (the source assembled for `$5800`, without
-the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
-from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
+`rust/crates/zax-nes/patches/megaman2-usa-widescreen.zxpk`, with `megaman2-europe-widescreen` and
+`rockman2-japan-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set
+to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The packs are
+format 2, written by Zaxnes' shared builder (`hackpack.py`): MMC1, UxROM or MMC3 (conversions keep
+the banks; MMC5's registers share `$5000`-`$5FFF` with the extension, it is left out), each hook a
+bank and a CPU address. The widescreen is in three groups: "core" (Base: the NMI and the sprites),
+"enemies" (their spawn window, removal, collisions and dormancy) and "stage fixes" (Air Man's cloud
+devils' palette, Bubble Man's lantern fish's), each needing the one before. Checks (`CHECKS`) hold
+the game's code the hack's code relies on: the routine removing an object, the enemy loop's next
+slot, the game's read of the stage's enemy types (`$B900,Y`; Mega Man 2 DA moved it, it keeps the
+core), the cloud devils' fade-in step and background palette 2's writer.
+
+The same source makes three packs: the USA's; the European ROM's (the same code where the hack
+hooks and calls, the same stage layouts: the same pack, PAL); and Rockman 2's (`-D JAPAN`: its
+fixed bank's code 3 bytes earlier from `$C700` and `$22` from `$E9C0`, `JAPAN_MOVED`; banks 11 and
+14, the RAM and the stage layouts as the USA's). Against a set of 703 Mega Man 2 and Rockman 2 ROMs:
+616 take a whole pack, 61 in part (ROM hacks that changed Air Man's or Bubble Man's enemies keep
+the core and the enemies, Mega Man 2 DA the core, trainers lose the aid), 26 none (the MMC5
+conversions, Mega Man II Optimum, Rockman CX, a bad dump).
+
+The code goes to the extension's execution zone instead of the game's free space described here
+(the source assembled for `$2000`, without the reset hook and the NMI's unlock: Zaxnes unlocks the
+extension and shows the code to instruction fetches only from power-on, `$500B` = `$80`; the code
+reads no data of its own, the list of the enemies never dormant compared inline), and the hooks, each with the game's bytes it replaces, are
 checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free space). The
 option "Invincible" is a component of its own (the four invincibility hooks, their routines' result
 inline), applied with or without the advanced mode. The BPS patch described here is kept to
@@ -172,9 +188,11 @@ SourceRead / TargetRead only). `WIDE_SKIP=<hex addresses>` leaves hooks out, for
 ; Mega Man 2 (USA) widescreen hack: the code the patched fixed bank calls.
 ;
 ; Assembled for $F300 of the fixed bank (PRG bank 15), the unused $FF fill from $F2E3 to $F8FF;
-; or, with PACK defined (a Zaxnes hack pack), for $5800 of the extension's memory, which Zaxnes
-; shows in the PRG window from power-on, the extension unlocked: no reset hook then, and no unlock
-; in the NMI (the code only runs while the extension is unlocked).
+; or, with PACK defined (a Zaxnes hack pack), for $2000: the extension's execution zone, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked: no reset hook
+; then, and no unlock in the NMI (the code only runs while the extension is unlocked). Data reads
+; at $2000-$3FFF reach the PPU: the code reads no data of its own (its variables are in the
+; extension's RAM at $5200).
 ; Talks to the Zaxnes widescreen extension (rust/docs/WIDESCREEN-EXTENSION.md); the background of
 ; the margins comes from the emulator's Mega Man 2 margin decoder, the hack does the objects:
 ;
@@ -231,7 +249,11 @@ OBJ_X_HI        = $0440         ; object x, screen
 OBJ_X_LO        = $0460         ; object x, pixel
 
 ORIGINAL_RESET  = $F2D1
+.ifdef JAPAN
+KILL            = $EF6A         ; Rockman 2 (Japan): its fixed bank's code $22 earlier there
+.else
 KILL            = $EF8C         ; removes object X (and lets its enemy spawn again), SEC / RTS
+.endif
 NEXT_ENEMY      = $9299         ; bank 14: the enemy loop's next slot
 TIKKI_PALETTE   = $AF4C         ; bank 14: writes step Y/4 of a cloud devil's fade-in to palette X
 LAST_SLOT       = $1F           ; the last enemy slot
@@ -243,7 +265,7 @@ FIRST_ENEMY     = $10
 
 .segment "CODE"
 .ifdef PACK
-.org $5800
+.org $2000
 .else
 .org $F300
 
@@ -720,12 +742,10 @@ wide_spawned:
     TYA
     STA      $0100,x
     LDA      STAGE_ENEMY_TYPE,y
-    LDY      #NEVER_DORMANT_COUNT - 1
-@exempt:
-    CMP      wide_never_dormant,y
+    CMP      #TIKKI                     ; compared inline: no table in the code (the pack's
+    BEQ      @awake                     ; code is read by instruction fetches only)
+    CMP      #TIKKI + 1
     BEQ      @awake
-    DEY
-    BPL      @exempt
     LDA      #$01
     BNE      @set
 @awake:
@@ -735,9 +755,7 @@ wide_spawned:
     LDY      $0100,x                    ; Y back to the list entry
     RTS
 
-wide_never_dormant:
-.byt    $40, $41                        ; Air Tikki (cloud devil), both kinds
-NEVER_DORMANT_COUNT = * - wide_never_dormant
+TIKKI           = $40                   ; Air Tikki (cloud devil), both kinds: $40 and $41
 
 ; The enemy loop (bank 14, $9283, in place of LDY $0400,X; $2E/$2F the enemy's screen x): a
 ; dormant enemy off the original screen skips its behaviour (it is still removed past the
@@ -863,7 +881,7 @@ wide_end:
 """Builds the Mega Man 2 (USA) widescreen hack and its BPS patch.
 
 Usage: python -I tools/build.py <Mega Man 2 (USA).nes> [out.bps]
-       python -I tools/build.py <Mega Man 2 (USA).nes> --pack <out.zxpk>
+       python -I tools/build.py <Mega Man 2 (USA).nes, (Europe) or Rockman 2> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $F300 of the
    fixed bank, into the unused $FF fill from $F2E3 to $F8FF.
@@ -872,10 +890,14 @@ Usage: python -I tools/build.py <Mega Man 2 (USA).nes> [out.bps]
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
 (tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1;
-src/wide.s assembled with PACK for $5800 of the extension's memory (2 KiB at most), which Zaxnes
-shows in the PRG window from power-on, the extension unlocked; the hooks, but for the reset hook,
+src/wide.s assembled with PACK for $2000 (2 KiB at most): the extension's execution zone, which
+Zaxnes shows to instruction fetches only from power-on, the extension unlocked (the code reads no
+data of its own); the hooks, but for the reset hook,
 each a bank and a CPU address with the game's bytes it replaces, checked by Zaxnes before it
-applies them, in one group of the widescreen ("core", Base). Nothing goes in the game's free space and the
+applies them. The widescreen is in three groups: "core" (Base), "enemies" (needing it) and "stage
+fixes" (needing the enemies), with checks of the game's code the hack relies on (CHECKS). MMC1,
+UxROM or MMC3 (conversions); from the European ROM, the same pack for PAL; from Rockman 2
+(Japan), its pack (-D JAPAN; JAPAN_MOVED, its fixed bank's places). Nothing goes in the game's free space and the
 ROM keeps its size. The invincibility hooks a component of their own, "invincible", whose bytes do what the hack's routines do when the
 option is on: Zaxnes applies it while that option is on, with or without the widescreen.
 """
@@ -887,12 +909,25 @@ import sys
 import zlib
 
 SOURCE_CRC = 0x0FCFC04D
+EUROPE_CRC = 0xA6638CBA         # Mega Man 2 (Europe): the same code where the hack hooks; a pack only
+JAPAN_CRC = 0x6150517C          # Rockman 2 (Japan): its fixed bank's code moved; a pack only
+
+# Rockman 2 (Japan): where the fixed bank's places of the USA build are (its code 3 bytes earlier
+# from $C700, $22 from $E9C0; banks 11 and 14, the RAM and the routines there as the USA's). A
+# hook's relative branches move with it; its absolute jumps into the game are moved here too.
+JAPAN_MOVED = {
+    0xCFFD: 0xCFFA, 0xD65F: 0xD65C, 0xD670: 0xD66D, 0xEF43: 0xEF21, 0xEF75: 0xEF53,
+    0xE4E9: 0xE4E6, 0xEFE8: 0xEFC6, 0xEEBE: 0xEE9C, 0xEFB7: 0xEF95, 0xCE7D: 0xCE7A,
+    0xCECE: 0xCECB, 0xCEE2: 0xCEDF, 0xD763: 0xD760, 0xE596: 0xE593, 0xCC6C: 0xCC69,
+    0xCE9A: 0xCE97, 0xCFAD: 0xCFAA, 0xCFC9: 0xCFC6, 0xCFCE: 0xCFCB, 0xCFD3: 0xCFD0,
+    0xEF8C: 0xEF6A, 0xD779: 0xD776,
+}
 BANK = 15
 BANK_SIZE = 0x4000
 FIXED = 0xC000
 CODE_START = 0xF300
 CODE_END = 0xF900
-PACK_START = 0x5800             # the pack's code: the extension's PRG window
+PACK_START = 0x2000             # the pack's code: the extension's execution zone
 PACK_SIZE = 0x800
 PRG_SIZE = 16 * BANK_SIZE
 
@@ -991,7 +1026,7 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble(pack=False):
+def assemble(pack=False, defines=()):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
@@ -1004,6 +1039,7 @@ def assemble(pack=False):
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
     subprocess.run(tool('ca65') + ['-g'] + (['-D', 'PACK'] if pack else [])
+                   + [flag for symbol in defines for flag in ('-D', symbol)]
                    + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)], check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
@@ -1025,24 +1061,73 @@ INVINCIBLE = {
 }
 
 
-def pack(data, out):
+# The groups of the widescreen, by hook (bank, address), when not the "core" (the NMI and the
+# sprites): the enemies in the margins (their spawn window, removal, collisions and dormancy), and
+# two stage fixes the margins need (Air Man's cloud devils' palette, Bubble Man's lantern fish's),
+# which a ROM hack that changed those enemies lacks (Mega Man 2 DA).
+GROUPS = {
+    (BANK, 0xD65F): 'enemies', (BANK, 0xEF43): 'enemies', (BANK, 0xEF75): 'enemies',
+    (BANK, 0xE4E9): 'enemies', (BANK, 0xEFE8): 'enemies', (BANK, 0xEEBE): 'enemies',
+    (BANK, 0xEFB7): 'enemies', (BANK, 0xD763): 'enemies', (14, 0x9283): 'enemies',
+    (14, 0xAF9D): 'stage fixes', (14, 0x95AB): 'stage fixes',
+}
+
+# The game's code the hack's code relies on, by group: (bank, address, length), checked by Zaxnes
+# to be the reference ROM's bytes. Enemies: the routine that removes an object (whole), the enemy
+# loop's next slot, the game's read of the stage's enemy types ($B900,Y). Stage fixes: the cloud
+# devils' fade-in step and background palette 2's writer (their starts).
+CHECKS = {
+    'enemies': [(BANK, 0xEF8C, 18), (14, 0x9299, 9), (BANK, 0xD779, 3)],
+    'stage fixes': [(14, 0xAF4C, 8), (14, 0x998D, 7)],
+}
+
+
+def pack(data, out, crc=SOURCE_CRC):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    code, sym = assemble(pack=True)
+    japan = crc == JAPAN_CRC
+    code, sym = assemble(pack=True, defines=['JAPAN'] if japan else [])
     fixed, banked = hooks(sym, pack=True)
     used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
-    pack = hackpack.Pack('Mega Man 2 (USA) widescreen', code[:used], region='ntsc', mappers=(1,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+
+    def place(number, address):
+        """The build's place of a USA one: Rockman 2's fixed bank moved."""
+        return (number, JAPAN_MOVED[address]) if japan and number == BANK else (number, address)
+
+    def moved_jumps(new):
+        """A hook's absolute jumps into the game, at the build's places."""
+        if japan:
+            for usa in (0xD670, 0xCEE2):
+                new = bytes(new).replace(jmp(usa), jmp(JAPAN_MOVED[usa]))
+        return new
+
+    # The European build is the same pack for a PAL ROM. MMC3 and UxROM conversions keep the
+    # banks where they are; MMC5 is left out (its registers share $5000-$5FFF with the extension).
+    europe = crc == EUROPE_CRC
+    name = 'Rockman 2 (Japan)' if japan else 'Mega Man 2 (Europe)' if europe else 'Mega Man 2 (USA)'
+    pack = hackpack.Pack(f'{name} widescreen', code[:used], region='pal' if europe else 'ntsc',
+                         mappers=(1, 2, 4))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'enemies': widescreen.group('enemies', requires=['core'], label='Enemies in the margins',
+                                    label_fr='Ennemis dans les marges'),
+        'stage fixes': widescreen.group('stage fixes', requires=['enemies'], label='Stage fixes',
+                                        label_fr='Correctifs de niveaux'),
+    }
+    core = groups['core']
+    for name, checks in CHECKS.items():
+        for bank, address, length in checks:
+            groups[name].check(*place(bank, address), length)
     aid = pack.component('invincible').group('invincible', label='Invincible',
                                              label_fr='Invincible')
     for number, address, original, new in [(BANK, a, o, n) for a, o, n in fixed] + banked:
-        if (number, address) in INVINCIBLE:
-            aid.hook(number, address, original, INVINCIBLE[(number, address)])
-        else:
-            core.hook(number, address, original, new)
+        group = aid if (number, address) in INVINCIBLE else groups[GROUPS.get((number, address), 'core')]
+        new = INVINCIBLE.get((number, address), new)
+        group.hook(*place(number, address), original, moved_jumps(new))
     assert len(aid.hooks) == len(INVINCIBLE)
     result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
@@ -1055,11 +1140,13 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = image[header:]
-    assert zlib.crc32(data) == SOURCE_CRC, 'not Mega Man 2 (USA)'
+    crc = zlib.crc32(data)
+    assert crc in (SOURCE_CRC, EUROPE_CRC, JAPAN_CRC), 'not Mega Man 2 (USA), (Europe) or Rockman 2'
 
     if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), sys.argv[3])
+        pack(bytes(data), sys.argv[3], crc)
         return
+    assert crc == SOURCE_CRC, 'Mega Man 2 (Europe) and Rockman 2: a pack only (--pack)'
     code, sym = assemble()
     bank = BANK * BANK_SIZE
     start = bank + CODE_START - FIXED
