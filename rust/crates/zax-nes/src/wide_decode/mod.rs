@@ -276,7 +276,8 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::ZELDA2_USA
         | crate::builtin_patches::ZELDA2_EUROPE
         | crate::builtin_patches::ZELDA2_EUROPE_REV1
-        | crate::builtin_patches::ZELDA2_EUROPE_REV2 => Some(&zelda2::Zelda2),
+        | crate::builtin_patches::ZELDA2_EUROPE_REV2
+        | crate::builtin_patches::ZELDA2_USA_MMC5 => Some(&zelda2::Zelda2),
         crate::builtin_patches::MEGAMAN2_USA
         | crate::builtin_patches::MEGAMAN2_EUROPE
         | crate::builtin_patches::ROCKMAN2_JAPAN => Some(&megaman2::MegaMan2),

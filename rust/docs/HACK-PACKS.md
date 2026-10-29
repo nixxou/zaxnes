@@ -242,6 +242,11 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   take a whole pack, the same RAM as without zone data over its movies. Zelda II and Castlevania
   then moved to widescreen MMC5 too (the zone fantôme holding the extension's data), the same RAM
   over their movies;
+  widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its
+  fixed bank left at bank 7): a pack built from that ROM (`ZELDA2_USA_MMC5`, places counted from
+  the start), taken by 13 of its 14 ROMs (the Korean translation changes the fixed bank); 619 of
+  the 661 Zelda II ROMs now take a whole pack. Castlevania's MMC5 conversions stay refused (their
+  code moved);
   a table of the dumps whose header gives the wrong TV region (`rom::region_exception`, by data
   CRC-32: so far Castlevania (Europe) (Virtual Console), PAL) stands for the header at load (the
   automatic TV mode starts them right, a region the player chose stays) and in the packs' region
