@@ -231,3 +231,8 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   reach the PPU). Done: Zelda II, Castlevania and its Rev 1 (`cvwide`; the same RAM as with the
   window, the stack page aside, over 25 movies of the USA build and 6000 frames of the Rev 1's
   demo).
+* the signatures, game by game (checks of the game's code the hack's code relies on, groups a ROM
+  hack may lack): Castlevania first, with a European variant (PAL, and the same pack as NTSC for
+  the ROMs of that code whose header says NTSC); `docs/hacks/castlevania/WIDESCREEN-HACK.md`
+  gives its groups, checks and the ROM set it was tried against. `pack_for` now falls back to the
+  signatures when the pack of the ROM's CRC is refused by its gate (another region).

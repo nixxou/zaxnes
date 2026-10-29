@@ -61,10 +61,20 @@ pub static USA_REV1: Castlevania = Castlevania {
     swaps: 0xFBD6,
 };
 
+/// Europe: the Rev 1's tables, 7 bytes further.
+pub static EUROPE: Castlevania = Castlevania {
+    maps: 0xFB2A,
+    blocks: 0xFA01,
+    lengths: 0xFBB7,
+    swaps: 0xFBDD,
+};
+
 /// CRC-32 of the base build's data (no CHR-ROM, iNES header excluded).
 pub const SOURCE_CRC: u32 = 0x0AC1_AA8F;
 /// CRC-32 of Rev 1's data.
 pub const SOURCE_CRC_REV1: u32 = 0xB668_C7FC;
+/// CRC-32 of the European build's data.
+pub const SOURCE_CRC_EUROPE: u32 = 0xA935_27E2;
 
 const STAGE: u16 = 0x0028;
 const ROOM: u16 = 0x0046;

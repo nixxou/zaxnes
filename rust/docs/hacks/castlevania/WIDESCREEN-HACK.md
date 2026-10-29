@@ -33,11 +33,27 @@ The ROM keeps its size and layout: a state made without the hack restores with i
 ---
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/castlevania-usa-widescreen` and `castlevania-usa-rev1-widescreen.zxpk`
-(`tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The packs are format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, UxROM, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's memory instead of the game's free space described here (the source
+`rust/crates/zax-nes/patches/castlevania-usa-widescreen`, `castlevania-usa-rev1-widescreen`,
+`castlevania-europe-widescreen` and `castlevania-europe-ntsc-widescreen.zxpk` (`tools/build.py <rom>
+--pack <out.zxpk> [--ntsc]`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1). The packs are format 2, written by Zaxnes' shared builder
+(`hackpack.py`): UxROM, each hook a 16 KiB bank and a CPU address. The widescreen is in four
+groups: "core" (Base), and, each needing it, "edge spawns", "platforms" and "copies" (the four
+places an object takes its parent's x: a ROM hack that put something else at one of them, The Holy
+Relics, takes the rest). Checks (`CHECKS`) hold the game's code the hack's code relies on: the
+state dispatch's start, the routine moving an object by the scroll, the reads of the rooms'
+lengths and of each stage's graphics block, the graphics loader's start, the spawners' loop.
+
+One source makes the three builds' packs: the USA and its Rev 1 (NTSC), and the European build
+(`-D EUROPE`, its code banks rebuilt from the Rev 1's, most routines `$0C` further; the USA data
+banks and RAM). The European pack is PAL; the same pack as an NTSC one (`--ntsc`, its own entry)
+takes the ROMs of the European code whose header says NTSC: the GoodSet dumps and translations,
+the European Virtual Console, and ROM hacks built on that code (Horror of Dracula, Overflow
+Darkness, Prince of Darkness, Reborn, Hell's Fury, The Holy Relics). Against a set of 260
+Castlevania ROMs: 227 take a whole pack, 5 in part (3 The Holy Relics without "copies", 2 trainer
+builds without the aid), 28 none (the Japanese build, the MMC3 and MMC5 conversions, The Red Wizard,
+PlayChoice-10 and VS. System). Run 2400 frames with inputs, each accepted ROM plays as it does
+without the pack, and its frames go on. The code goes to the extension's memory instead of the game's free space described here (the source
 assembled for `$2000`, without the reset hook and the NMI's unlock: Zaxnes unlocks the extension
 and shows the code in its execution zone from power-on, `$500B` = `$80`, to instruction fetches
 only; the code reads no data of its own, its variables are in the extension's RAM at `$5200`), and the hooks, each with
@@ -284,7 +300,16 @@ OPT_NO_SLOWDOWN = $04           ; 255 lines of overclock: no lag frame
 ; ---------------------------------------------------------------------------- ;
 ; The game.
 
-.ifdef REV1
+.if .defined(EUROPE)
+; Castlevania (Europe): the USA builds' data banks, its code banks rebuilt (as the Rev 1's, most
+; routines $0C further), the same RAM.
+DISPATCH        = $C1E4
+MOVE_SCROLL     = $EAD7
+SPAWNER_NEXT    = $F389
+ROOM_LENGTHS    = $FBB7
+LOAD_BLOCK      = $FD2A
+BLOCK_OF_STAGE  = $C8B0
+.elseif .defined(REV1)
 DISPATCH        = $C1E4         ; the game's state dispatch, called by the NMI
 MOVE_SCROLL     = $EACB         ; an object's x moved by the scroll of the frame
 SPAWNER_NEXT    = $F37D         ; the spawners' loop, on to the next one
@@ -901,7 +926,7 @@ wide_platform_x:
 USA builds.
 
 Usage: python -I tools/build.py <Castlevania (USA).nes or (Rev 1)> [out.bps]
-       python -I tools/build.py <Castlevania (USA).nes or (Rev 1)> --pack <out.zxpk>
+       python -I tools/build.py <Castlevania (USA).nes, (Rev 1) or (Europe)> --pack <out.zxpk> [--ntsc]
 
 The build is told by the ROM's data CRC-32. The two builds share their data banks 0-4; their code
 (banks 5-7) was rebuilt, so each has its own hook addresses (HOOKS) and src/wide.s its own
@@ -917,7 +942,9 @@ addresses of the game's routines (ca65 -D REV1).
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
 (tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, UxROM,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base). The
+each hook a 16 KiB bank and a CPU address, the widescreen in four groups: "core" (Base), "edge
+spawns", "platforms" and "copies" (each needing the core), with checks of the game's code the hack relies on
+(CHECKS). The
 WINDOW segment is the pack's code, assembled for $2000: the extension's execution zone, which
 Zaxnes shows to instruction fetches only at $2000-$3FFF from power-on (data reads there reach the
 PPU: the code reads no data of its own, its variables are in the extension's RAM at $5200); the
@@ -949,6 +976,7 @@ NOP = 0xEA
 # The data CRC-32 of the two builds.
 BASE = 0x0AC1AA8F
 REV1 = 0xB668C7FC
+EUROPE = 0xA93527E2             # Castlevania (Europe): a pack only (--pack)
 
 
 def jsr(target):
@@ -961,22 +989,28 @@ def offset(bank, address):
     return bank * BANK_16K + (address & (BANK_16K - 1))
 
 
+# The group of the pack each hook is in, by (bank, address), when not the "core" (hooks()).
+HOOK_GROUP = {}
+
+
 def hooks(build, sym):
     """The patches of the game's PRG-ROM: (bank, address, original bytes, new bytes)."""
     out = []
 
-    def put(bank, address, original, new):
+    def put(bank, address, original, new, group='core'):
         original = bytes.fromhex(original)
         new = bytes(new) + bytes([NOP]) * (len(original) - len(new))
         assert len(new) == len(original), hex(address)
         out.append((bank, address, original, new))
+        if group != 'core':
+            HOOK_GROUP[(bank, address)] = group
 
     # The sprite builder (bank 0, the same in both builds): objects off the screen drawn in the
     # margins, their sprites' x 16-bit.
     put(0, 0x806D, 'bd 00 03', jsr(sym['wide_visible']))
     put(0, 0x811C, '18 65 02 9d 03 02', jsr(sym['wide_sprite_x']))
     # The moving platforms (bank 6, the same in both builds): their 16-bit x kept, whole in the view.
-    put(6, 0xAB5B, 'a5 10 18 69 10 9d 8c 03', jsr(sym['wide_platform_x']))
+    put(6, 0xAB5B, 'a5 10 18 69 10 9d 8c 03', jsr(sym['wide_platform_x']), 'platforms')
     if build == BASE:
         # The NMI's call of the game's state dispatch: the level select first.
         put(7, 0xC0A0, '20 a1 c1', jsr(sym['wide_frame']))
@@ -986,13 +1020,21 @@ def hooks(build, sym):
                  'spawner': 0xF3AF, 'spawner_return': (0xF3F9, '58 f3'),
                  'weapon': 0xE5D6, 'hide9': 0xEAD1, 'far9': 0xEAD9,
                  'copies': (0xE02B, 0xECFF, 0xED6E), 'copy_back': 0xEFC5}
-    else:
+    elif build == REV1:
         put(7, 0xC0A4, '20 e4 c1', jsr(sym['wide_frame']))
         put(7, 0xE758, '38 e5 4b 85 45', jsr(sym['wide_damage']))
         fixed = {'bounds': (0xEA30, '20 cb ea'), 'terrain': 0xEC35, 'hide': 0xDD50,
                  'spawner': 0xF3D3, 'spawner_return': (0xF41D, '7c f3'),
                  'weapon': 0xE5FA, 'hide9': 0xEAF5, 'far9': 0xEAFD,
                  'copies': (0xE050, 0xED23, 0xED92), 'copy_back': 0xEFE9}
+    else:
+        # Europe: the Rev 1's code, most of it $0C further.
+        put(7, 0xC0A4, '20 e4 c1', jsr(sym['wide_frame']))
+        put(7, 0xE764, '38 e5 4b 85 45', jsr(sym['wide_damage']))
+        fixed = {'bounds': (0xEA3C, '20 d7 ea'), 'terrain': 0xEC41, 'hide': 0xDD5B,
+                 'spawner': 0xF3DF, 'spawner_return': (0xF429, '88 f3'),
+                 'weapon': 0xE606, 'hide9': 0xEB01, 'far9': 0xEB09,
+                 'copies': (0xE05B, 0xED2F, 0xED9E), 'copy_back': 0xEFF5}
     # After an object's routine: the bounds it is removed past (its JSR MOVE_SCROLL, base build
     # $EA0C; the compares after it stay, the objects moved by $EE70 jump to them), past the
     # margins.
@@ -1003,10 +1045,10 @@ def hooks(build, sym):
     # The room's spawners: before each kind's routine (STY $0C / LDA $0166,Y), and the return the
     # loop pushes for it (the word read by LDA / PHA, data), into the hack: enemies made at an edge
     # come in from the margins.
-    put(7, fixed['spawner'], '84 0c b9 66 01', jsr(sym['wide_before_spawner']))
+    put(7, fixed['spawner'], '84 0c b9 66 01', jsr(sym['wide_before_spawner']), 'edge spawns')
     address, word = fixed['spawner_return']
     target = sym['wide_after_spawner'] - 1
-    put(7, address, word, bytes([target & 0xFF, target >> 8]))
+    put(7, address, word, bytes([target & 0xFF, target >> 8]), 'edge spawns')
     # Simon's weapons: one past an edge touches nothing (LDA $0584,Y / CMP #6).
     put(7, fixed['weapon'], 'b9 84 05 c9 06', jsr(sym['wide_weapon_hits']))
     # The objects the game keeps in 9 bits: not hidden near the edges, and kept as far as the
@@ -1014,9 +1056,11 @@ def hooks(build, sym):
     put(7, fixed['hide9'], 'a9 80 9d 00 03', jsr(sym['wide_hide_near_edge']))
     put(7, fixed['far9'], 'c0 40 90 f9 c0 c0 b0 f5', jsr(sym['wide_far']) + bytes([0xB0, 0xF8]))
     # An object made at another's place takes its x's bit 8 too (LDA $038C,X / STA $038C,Y).
+    # A group of their own: a ROM hack that put something else at one of them (The Holy Relics)
+    # still takes the rest, an object born in a margin then copying its parent's 8-bit x only.
     for address in fixed['copies']:
-        put(7, address, 'bd 8c 03 99 8c 03', jsr(sym['wide_copy_x']))
-    put(7, fixed['copy_back'], 'b9 8c 03 9d 8c 03', jsr(sym['wide_copy_x_back']))
+        put(7, address, 'bd 8c 03 99 8c 03', jsr(sym['wide_copy_x']), 'copies')
+    put(7, fixed['copy_back'], 'b9 8c 03 9d 8c 03', jsr(sym['wide_copy_x_back']), 'copies')
     # Candles and torches are not hidden near the edges.
     put(7, fixed['hide'], 'bd 00 03 09 80 9d 00 03', jsr(sym['wide_edge_hide']))
     return out
@@ -1065,7 +1109,29 @@ def assemble(name, defines, start=WINDOW_START):
 
 # The hook of the option "Invincible" (SEC / SBC DAMAGE / STA HEALTH, bank 7) per build: in the
 # pack, a component of its own.
-INVINCIBLE = {BASE: 0xE734, REV1: 0xE758}
+INVINCIBLE = {BASE: 0xE734, REV1: 0xE758, EUROPE: 0xE764}
+
+
+# The game's code and data the hack's code relies on, by group, per build: (bank, address, length),
+# checked by Zaxnes to be the reference ROM's bytes (a ROM hack that changed them gets the groups
+# that still fit). Core: the state dispatch the NMI hook calls on to (its start), the routine that
+# moves an object's x by the scroll (whole), the game's read of the rooms' lengths (the table is
+# where the hack reads it), and for the level select the graphics loader (its start) and the
+# game's read of each stage's block. Edge spawns: the spawners' loop, on to the next one.
+CHECKS = {
+    BASE: {'core': [(7, 0xC1A1, 8), (7, 0xEAA7, 18), (7, 0xCFF2, 3), (7, 0xFCFF, 12),
+                    (7, 0xC7AA, 3)],
+           'edge spawns': [(7, 0xF359, 6)]},
+    REV1: {'core': [(7, 0xC1E4, 8), (7, 0xEACB, 18), (7, 0xD017, 3), (7, 0xFD23, 12),
+                    (7, 0xC7F9, 3)],
+           'edge spawns': [(7, 0xF37D, 6)]},
+    EUROPE: {'core': [(7, 0xC1E4, 8), (7, 0xEAD7, 18), (7, 0xD017, 3), (7, 0xFD2A, 12),
+                      (7, 0xC7F9, 3)],
+             'edge spawns': [(7, 0xF389, 6)]},
+}
+
+# The region each build's pack is made for.
+REGION = {BASE: 'ntsc', REV1: 'ntsc', EUROPE: 'pal'}
 
 
 def pack_place(offset, address):
@@ -1074,14 +1140,28 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
-def pack(data, crc, window, sym, out):
+def pack(data, crc, window, sym, out, ntsc=False):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(2,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    # --ntsc: the European pack for the ROMs of its code whose header says NTSC.
+    pack = hackpack.Pack('', b'', region='ntsc' if ntsc else REGION[crc], mappers=(2,))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'edge spawns': widescreen.group('edge spawns', requires=['core'], label='Edge spawns',
+                                        label_fr='Apparitions au bord'),
+        'platforms': widescreen.group('platforms', requires=['core'], label='Moving platforms',
+                                      label_fr='Plateformes mobiles'),
+        'copies': widescreen.group('copies', requires=['core'], label='Objects born in the margins',
+                                   label_fr='Objets nés dans les marges'),
+    }
+    core = groups['core']
+    for name, checks in CHECKS[crc].items():
+        for bank, address, length in checks:
+            groups[name].check(bank, address, length)
     aid = pack.component('invincible').group('invincible', label='Invincible',
                                              label_fr='Invincible')
     for bank, address, original, new in hooks(crc, sym):
@@ -1091,12 +1171,14 @@ def pack(data, crc, window, sym, out):
             # LDA #$02, health kept: A as wide_damage leaves it.
             aid.hook(*pack_place(at, address), bytes(original), bytes([0xA9, 0x02, NOP, NOP, NOP]))
         else:
-            core.hook(*pack_place(at, address), bytes(original), bytes(new))
+            group = groups[HOOK_GROUP.get((bank, address), 'core')]
+            group.hook(*pack_place(at, address), bytes(original), bytes(new))
     assert len(aid.hooks) == 1
-    game = 'Castlevania (USA) (Rev 1)' if crc == REV1 else 'Castlevania (USA)'
+    game = {BASE: 'Castlevania (USA)', REV1: 'Castlevania (USA) (Rev 1)',
+            EUROPE: 'Castlevania (Europe)'}[crc]
     # Zaxnes reads $FF past the code's end: its trailing fill is left out.
     used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    pack.name = game + ' widescreen'
+    pack.name = game + (' (NTSC)' if ntsc and REGION[crc] != 'ntsc' else '') + ' widescreen'
     pack.code = window[:used]
     result = pack.build(data, 0x20000)
     open(out, 'wb').write(result)
@@ -1114,13 +1196,17 @@ def main():
         name, defines = 'castlevania-usa', []
     elif crc == REV1:
         name, defines = 'castlevania-usa-rev1', ['REV1']
+    elif crc == EUROPE:
+        name, defines = 'castlevania-europe', ['EUROPE']
     else:
-        sys.exit(f'{rom_path}: not Castlevania (USA) or its Rev 1 (data CRC {crc:08X})')
+        sys.exit(f'{rom_path}: not Castlevania (USA), its Rev 1 or (Europe) (data CRC {crc:08X})')
 
     if len(sys.argv) > 3 and sys.argv[2] == '--pack':
         zone, sym = assemble(name, defines, ZONE_START)
-        pack(bytes(data), crc, zone, sym, sys.argv[3])
+        pack(bytes(data), crc, zone, sym, sys.argv[3], '--ntsc' in sys.argv[4:])
         return
+    if crc == EUROPE:
+        sys.exit('Castlevania (Europe): a pack only (--pack)')
     window, sym = assemble(name, defines)
     assert len(window) == WINDOW_SIZE
     prg = bytearray(data)
