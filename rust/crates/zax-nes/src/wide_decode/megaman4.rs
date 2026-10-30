@@ -15,6 +15,9 @@ use super::megaman3::{Layout, StageBank};
 pub const SOURCE_CRC: u32 = 0x2BC6_7AA8;
 /// The same for the Rev 1 build.
 pub const SOURCE_CRC_REV1: u32 = 0x18A2_E74F;
+/// CRC-32 of the other builds' data with the same stage layouts: Mega Man 4 (Europe), Rockman 4
+/// (Japan) and its Rev 1.
+pub const OTHER_CRCS: [u32; 3] = [0x1B93_2BEA, 0xF161_A5D8, 0xE0FF_ECCD];
 
 /// The decoder.
 pub const MEGAMAN4: Layout = Layout {
