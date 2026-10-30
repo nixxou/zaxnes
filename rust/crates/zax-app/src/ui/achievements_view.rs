@@ -34,8 +34,9 @@ fn badge(ui: &Ui, system: &AchievementSystem, url: &str, size: f32) {
 }
 
 /// The pop-ups, the challenges and the progress over the game. `top` is where the pop-up
-/// starts (under the menu bar).
-pub fn draw_overlay(ui: &Ui, system: &AchievementSystem, top: f32) {
+/// starts (under the menu bar); the challenges under way show only when `challenges` (owner
+/// request: an option, off by default).
+pub fn draw_overlay(ui: &Ui, system: &AchievementSystem, top: f32, challenges: bool) {
     if !system.is_enabled() {
         return;
     }
@@ -86,7 +87,11 @@ pub fn draw_overlay(ui: &Ui, system: &AchievementSystem, top: f32) {
             bottom -= ui.window_size()[1] + line * 0.25;
         }
     }
-    let challenges = system.challenges().to_vec();
+    let challenges = if challenges {
+        system.challenges().to_vec()
+    } else {
+        Vec::new()
+    };
     if !challenges.is_empty() {
         let window = ui
             .window("##achievement_challenges")
@@ -111,6 +116,16 @@ pub fn draw_overlay(ui: &Ui, system: &AchievementSystem, top: f32) {
             }
         }
     }
+}
+
+/// The share of the achievements unlocked, in words: "34 %" (owner request).
+#[must_use]
+pub fn percent_text(unlocked: u32, total: u32) -> String {
+    if total == 0 {
+        return String::new();
+    }
+    let percent = (u64::from(unlocked) * 100 / u64::from(total)).min(100);
+    strings::format(&strings::get(keys::ACH_PERCENT), &[&percent.to_string()])
 }
 
 /// The title of a group of the list.
@@ -160,7 +175,9 @@ pub fn draw_list(ui: &Ui, system: &AchievementSystem) {
     if game.summary.core > 0 {
         #[allow(clippy::cast_precision_loss)] // counts far below 2^24
         let fraction = game.summary.unlocked as f32 / game.summary.core as f32;
-        ProgressBar::new(fraction).overlay_text("").build(ui);
+        ProgressBar::new(fraction)
+            .overlay_text(percent_text(game.summary.unlocked, game.summary.core))
+            .build(ui);
     }
     ui.separator();
     let list = system.achievements();

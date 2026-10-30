@@ -14,12 +14,13 @@ use super::compat::Tone;
 use super::game_options::{GameOptionsModel, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
 use super::options::{self, ROWS};
-use super::overlay::{OverlayItem, ITEMS};
+use super::overlay::OverlayItem;
 use super::overscan;
 use super::pointer::{self, Zone, ZoneAction};
 use super::rom_list::{first_visible, ProfileMatch, RomEntry, RomListModel};
 use super::states::{SlotState, StatesMode};
 use super::{slot_state, HandheldUi, Screen, STATE_PICTURE_ID};
+use crate::achievements::KnownGame;
 use crate::input::BindingDeviceKind;
 use crate::persistence::save_slots::numbered_slot_id;
 use crate::ui::confirm_dialog::ConfirmationView;
@@ -140,30 +141,30 @@ impl Painter<'_> {
         right: (&str, [f32; 4]),
         x1: f32,
     ) {
-        self.row_parts(slot, (selected, focus), left, None, right, x1);
+        self.row_parts(slot, (selected, focus), left, &[], right, x1);
     }
 
-    /// One row of a list with `badge` before `right` (the [W] of a game a widescreen hack is
-    /// made for).
+    /// One row of a list with `badges` before `right`, left to right (the [W] of a game a
+    /// widescreen hack is made for, the share of its achievements the player has).
     fn row_badged(
         &self,
         slot: usize,
         selected: bool,
         left: &str,
-        badge: (&str, [f32; 4]),
+        badges: &[(&str, [f32; 4])],
         right: (&str, [f32; 4]),
     ) {
         let x1 = self.size[0] - self.metrics.padding * 0.5;
-        self.row_parts(slot, (selected, FOCUS), left, Some(badge), right, x1);
+        self.row_parts(slot, (selected, FOCUS), left, badges, right, x1);
     }
 
-    /// One row of a list that ends at `x1`: `left`, then `badge` if any, then `right`.
+    /// One row of a list that ends at `x1`: `left`, then `badges`, then `right`.
     fn row_parts(
         &self,
         slot: usize,
         (selected, focus): (bool, [f32; 4]),
         left: &str,
-        badge: Option<(&str, [f32; 4])>,
+        badges: &[(&str, [f32; 4])],
         right: (&str, [f32; 4]),
         x1: f32,
     ) {
@@ -204,7 +205,7 @@ impl Painter<'_> {
         } else {
             right_x - metrics.padding
         };
-        if let Some((badge, colour)) = badge {
+        for &(badge, colour) in badges.iter().rev() {
             let badge_x = clip_to - self.width(badge);
             // On the bright bar the badge sits on a dark pill, so it keeps its own colour.
             if selected {
@@ -352,6 +353,44 @@ impl Painter<'_> {
 }
 
 /// A window over the whole display, with no frame, no scrolling and no focus of its own.
+/// The share of the achievements of the game in `path` the player has, as the list studied it
+/// (owner request: RetroAchievements on).
+fn achievement_percent(frame: &UiFrame<'_>, path: &std::path::Path) -> Option<String> {
+    frame
+        .host
+        .achievements
+        .known_game(path)
+        .flatten()
+        .and_then(KnownGame::percent)
+        .map(|percent| crate::ui::achievements_view::percent_text(percent, 100))
+}
+
+/// The achievement selected in the grid, told at `y`: its title and points, its description.
+fn draw_grid_choice(
+    painter: &Painter<'_>,
+    achievement: &crate::achievements::KnownAchievement,
+    y: f32,
+) {
+    let metrics = &painter.metrics;
+    let points = strings::format(
+        &strings::get(keys::ACH_POINTS),
+        &[&achievement.points.to_string()],
+    );
+    let colour = if achievement.unlocked { FOCUS } else { TEXT };
+    painter.text(
+        metrics.padding,
+        y,
+        colour,
+        &format!("{}  {points}", achievement.title),
+    );
+    painter.text(
+        metrics.padding,
+        y + metrics.font * 1.2,
+        DIM,
+        &achievement.description,
+    );
+}
+
 fn full_screen<'ui>(ui: &'ui Ui, name: &str, background: [f32; 4]) -> Option<WindowToken<'ui>> {
     full_screen_with(
         ui,
@@ -415,6 +454,7 @@ impl HandheldUi {
             Screen::Achievements => self.draw_achievements(ui, frame),
             Screen::Keyboard => self.draw_keyboard(ui),
             Screen::AchievementList => self.draw_achievement_list(ui, frame),
+            Screen::AchievementGrid => self.draw_achievement_grid(ui, frame),
             Screen::InGame => {}
         }
         if let Some(question) = ZaxUi::confirmation(frame.host) {
@@ -473,6 +513,10 @@ impl HandheldUi {
         {
             let selected = index == self.roms.selected();
             let tag = profile_tag(entry);
+            // The share of the game's achievements the player has, once the list studied it
+            // (owner request: RetroAchievements on).
+            let percent = achievement_percent(frame, &entry.path);
+            let mut badges: Vec<(&str, [f32; 4])> = Vec::new();
             let colour = if selected && tag.1 == PROFILE {
                 PROFILE_ON_FOCUS
             } else {
@@ -493,15 +537,15 @@ impl HandheldUi {
                 } else {
                     DIM
                 };
-                painter.row_badged(
-                    slot,
-                    selected,
-                    &entry.name,
-                    ("[W]", badge),
-                    (&tag.0, colour),
-                );
-            } else {
+                badges.push(("[W]", badge));
+            }
+            if let Some(percent) = &percent {
+                badges.push((percent, FOCUS));
+            }
+            if badges.is_empty() {
                 painter.row(slot, selected, &entry.name, (&tag.0, colour));
+            } else {
+                painter.row_badged(slot, selected, &entry.name, &badges, (&tag.0, colour));
             }
         }
         // "Game options" in cyan when the selected game has some (owner request).
@@ -539,6 +583,10 @@ impl HandheldUi {
             };
             hints.push(("L1", strings::get(keys::HACK_WIDESCREEN), colour));
             hints.push(("R1", strings::get(keys::MENU_AIDS), TEXT));
+        }
+        // R2 the game's achievements, while RetroAchievements is on (owner request).
+        if frame.host.achievements.is_enabled() && self.roms.selected_entry().is_some() {
+            hints.push(("R2", strings::get(keys::TAB_ACHIEVEMENTS), TEXT));
         }
         painter.hint_entries(&hints);
     }
@@ -843,7 +891,7 @@ impl HandheldUi {
         let painter = self.painter(ui);
         let metrics = &self.metrics;
         // The menu is a panel in the middle, so the game stays visible around it.
-        let rows = ITEMS.len();
+        let rows = self.overlay.items().len();
         let panel_height = metrics.title_band()
             + metrics.row * f32::from(u16::try_from(rows).unwrap_or(u16::MAX))
             + metrics.padding;
@@ -878,7 +926,7 @@ impl HandheldUi {
                 &strings::get(keys::HANDHELD_MENU_TITLE),
             );
         }
-        for (index, item) in ITEMS.iter().enumerate() {
+        for (index, item) in self.overlay.items().iter().enumerate() {
             let slot = f32::from(u16::try_from(index).unwrap_or(0));
             let row_top = top + metrics.title_band() + slot * metrics.row;
             let selected = index == self.overlay.selected_index();
@@ -929,6 +977,7 @@ impl HandheldUi {
             OverlayItem::Options => keys::WINDOW_OPTIONS,
             OverlayItem::Widescreen => keys::HACK_WIDESCREEN,
             OverlayItem::Hacks => keys::MENU_AIDS,
+            OverlayItem::Achievements => keys::TAB_ACHIEVEMENTS,
             OverlayItem::QuitToList => keys::HANDHELD_MENU_QUIT_TO_LIST,
             OverlayItem::ExitToLauncher => keys::HANDHELD_MENU_EXIT,
         })
@@ -1334,6 +1383,106 @@ impl HandheldUi {
     }
 
     /// The game's achievements, scrolled with the gamepad.
+    /// A game's achievements as a grid of icons (owner request): the unlocked first, the
+    /// others grey; the selected one told under the grid.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )] // small positive counts and sizes
+    fn draw_achievement_grid(&self, ui: &Ui, frame: &UiFrame<'_>) {
+        let (Some(_window), Some((grid, _))) = (
+            full_screen(ui, "##achievement_grid", BACKGROUND),
+            &self.grid,
+        ) else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let metrics = self.metrics;
+        let system = &frame.host.achievements;
+        let Some(game) = super::achievement_grid::game_of(grid.source(), system) else {
+            painter.title(&strings::get(keys::ACH_LIST), "");
+            let studying = match grid.source() {
+                super::achievement_grid::GridSource::Rom(path) => system.is_studying(path),
+                super::achievement_grid::GridSource::Playing => false,
+            };
+            let message = if studying {
+                strings::get(keys::ACH_GRID_STUDYING)
+            } else if !matches!(
+                system.account(),
+                crate::achievements::Account::SignedIn { .. }
+            ) {
+                strings::get(keys::ACH_GRID_SIGNED_OUT)
+            } else {
+                strings::get(keys::ACH_GRID_NONE)
+            };
+            painter.message(&message, DIM);
+            painter.hints(layout::hints(Screen::AchievementGrid));
+            return;
+        };
+        let total = game.achievements.len();
+        let unlocked = game.unlocked();
+        let count = format!(
+            "{unlocked}/{total}  {}",
+            crate::ui::achievements_view::percent_text(
+                u32::try_from(unlocked).unwrap_or(0),
+                u32::try_from(total).unwrap_or(1)
+            )
+        );
+        painter.title(&game.title, &count);
+        let top = metrics.title_band() + metrics.padding * 0.5;
+        let info = metrics.row * 2.0;
+        let bottom = painter.size[1] - metrics.hint_band() - info;
+        let icon = metrics.row * 1.4;
+        let gap = metrics.padding * 0.6;
+        let cell = icon + gap;
+        let width = painter.size[0] - 2.0 * metrics.padding;
+        let columns = (((width + gap) / cell).floor() as usize).max(1);
+        grid.laid_out(columns, total);
+        let lines = (((bottom - top + gap) / cell).floor() as usize).max(1);
+        let selected = grid.selected();
+        let line = selected / columns;
+        let first_line = (line + 1).saturating_sub(lines);
+        let x0 = (painter.size[0] - (columns as f32 * cell - gap)) * 0.5;
+        for (index, achievement) in game.achievements.iter().enumerate() {
+            let line = index / columns;
+            if line < first_line || line >= first_line + lines {
+                continue;
+            }
+            let x = x0 + (index % columns) as f32 * cell;
+            let y = top + (line - first_line) as f32 * cell;
+            if index == selected {
+                let pad = gap * 0.45;
+                painter
+                    .list
+                    .add_rect([x - pad, y - pad], [x + icon + pad, y + icon + pad], FOCUS)
+                    .filled(true)
+                    .rounding(pad)
+                    .build();
+            }
+            let url = if achievement.unlocked {
+                &achievement.badge_url
+            } else {
+                &achievement.badge_locked_url
+            };
+            match system.badge(url) {
+                Some(id) => painter
+                    .list
+                    .add_image(imgui::TextureId::new(id), [x, y], [x + icon, y + icon])
+                    .build(),
+                None => painter
+                    .list
+                    .add_rect([x, y], [x + icon, y + icon], BAR)
+                    .filled(true)
+                    .build(),
+            }
+        }
+        if let Some(achievement) = game.achievements.get(selected) {
+            draw_grid_choice(&painter, achievement, bottom + metrics.padding * 0.3);
+        }
+        painter.hints(layout::hints(Screen::AchievementGrid));
+    }
+
     fn draw_achievement_list(&self, ui: &Ui, frame: &UiFrame<'_>) {
         let Some(_window) = full_screen(ui, "##achievement_list", BACKGROUND) else {
             return;

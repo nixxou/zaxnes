@@ -19,6 +19,8 @@ pub enum AchievementsRow {
     Unofficial,
     /// `achievements.sound`.
     Sound,
+    /// `achievements.challenges`.
+    Challenges,
     /// The account's name, typed on the keyboard.
     Username,
     /// The password, typed on the keyboard.
@@ -30,11 +32,12 @@ pub enum AchievementsRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [AchievementsRow; 8] = [
+pub const ROWS: [AchievementsRow; 9] = [
     AchievementsRow::Enabled,
     AchievementsRow::Encore,
     AchievementsRow::Unofficial,
     AchievementsRow::Sound,
+    AchievementsRow::Challenges,
     AchievementsRow::Username,
     AchievementsRow::Password,
     AchievementsRow::Account,
@@ -50,6 +53,7 @@ impl AchievementsRow {
             Self::Encore => Some(SettingId::AchievementsEncore),
             Self::Unofficial => Some(SettingId::AchievementsUnofficial),
             Self::Sound => Some(SettingId::AchievementsSound),
+            Self::Challenges => Some(SettingId::AchievementsChallenges),
             _ => None,
         }
     }
@@ -341,7 +345,7 @@ mod tests {
         let mut model = AchievementsModel::new();
         assert_eq!(None, model.handle(PadButton::A, &mut settings, false));
         assert!(settings.get(SettingId::AchievementsEnabled).as_bool());
-        for _ in 0..4 {
+        for _ in 0..5 {
             model.handle(PadButton::Down, &mut settings, false);
         }
         assert_eq!(

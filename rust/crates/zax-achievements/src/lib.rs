@@ -368,6 +368,13 @@ impl Client {
         unsafe { ffi::zax_ra_logout(self.raw.as_ptr()) };
     }
 
+    /// The `User-Agent` of the client's requests ("Zaxnes/0.3.0 rcheevos/12.5.0"), for other
+    /// requests to the same server.
+    #[must_use]
+    pub fn user_agent(&self) -> String {
+        self.host().user_agent.borrow().clone()
+    }
+
     /// The player signed in.
     #[must_use]
     pub fn user(&self) -> Option<User> {
@@ -659,6 +666,19 @@ impl std::fmt::Debug for Client {
             .field("pending", &self.pending.len())
             .finish_non_exhaustive()
     }
+}
+
+/// The hash RetroAchievements knows a NES game by, from its ROM as an iNES file (the header is
+/// left out): what a game's achievements are asked by. `None` for an image rcheevos refuses.
+#[must_use]
+pub fn nes_hash(image: &[u8]) -> Option<String> {
+    let mut hash = [0 as c_char; 33];
+    // SAFETY: `image` is readable for its length and `hash` writable for the 33 bytes rcheevos
+    // writes (32 digits and the NUL).
+    let found = unsafe { ffi::zax_ra_hash_nes(image.as_ptr(), image.len(), hash.as_mut_ptr()) };
+    (found != 0)
+        .then(|| text(hash.as_ptr()))
+        .filter(|hash| hash.len() == 32)
 }
 
 /// A C string as an owned one; empty for null.

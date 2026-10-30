@@ -296,6 +296,12 @@ pub const ACH_MENU: &str = "achievements.menu";
 pub const ACH_LIST: &str = "achievements.list";
 /// What the list says without a game's achievements.
 pub const ACH_LIST_EMPTY: &str = "achievements.list_empty";
+/// The grid of a game's achievements while the list asks the server.
+pub const ACH_GRID_STUDYING: &str = "achievements.grid_studying";
+/// The grid of a game's achievements while nobody is signed in.
+pub const ACH_GRID_SIGNED_OUT: &str = "achievements.grid_signed_out";
+/// The grid of a game RetroAchievements does not know.
+pub const ACH_GRID_NONE: &str = "achievements.grid_none";
 /// Its entry that opens the RetroAchievements options.
 pub const ACH_ACCOUNT: &str = "achievements.account";
 /// The account: nobody signed in.
@@ -328,6 +334,8 @@ pub const ACH_COMPLETED: &str = "achievements.completed";
 pub const ACH_COMPLETED_TEXT: &str = "achievements.completed_text";
 /// Second line of the pop-up of a game: {0} of {1} unlocked, {2} of {3} points.
 pub const ACH_GAME_SUMMARY: &str = "achievements.game_summary";
+/// The share of a game's achievements unlocked: "{0} %".
+pub const ACH_PERCENT: &str = "achievements.percent";
 /// Same, for a game without achievements.
 pub const ACH_GAME_NO_ACHIEVEMENTS: &str = "achievements.game_no_achievements";
 /// Notification: the ROM is not known.
@@ -598,6 +606,9 @@ pub const PUBLISHED: &[&str] = &[
     ACH_MENU,
     ACH_LIST,
     ACH_LIST_EMPTY,
+    ACH_GRID_STUDYING,
+    ACH_GRID_SIGNED_OUT,
+    ACH_GRID_NONE,
     ACH_ACCOUNT,
     ACH_SIGNED_OUT,
     ACH_SIGNING_IN,
@@ -614,6 +625,7 @@ pub const PUBLISHED: &[&str] = &[
     ACH_COMPLETED,
     ACH_COMPLETED_TEXT,
     ACH_GAME_SUMMARY,
+    ACH_PERCENT,
     ACH_GAME_NO_ACHIEVEMENTS,
     ACH_GAME_UNKNOWN,
     ACH_GAME_FAILED,

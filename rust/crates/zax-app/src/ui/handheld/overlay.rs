@@ -25,6 +25,8 @@ pub enum OverlayItem {
     Widescreen,
     /// The hacks of the game, its aids (Rust-only, owner request).
     Hacks,
+    /// The game's achievements (Rust-only, owner request): shown while RetroAchievements is on.
+    Achievements,
     /// Stop the game and show the ROM list.
     QuitToList,
     /// Leave the application.
@@ -32,7 +34,7 @@ pub enum OverlayItem {
 }
 
 /// The rows, in order.
-pub const ITEMS: [OverlayItem; 10] = [
+pub const ITEMS: [OverlayItem; 11] = [
     OverlayItem::Resume,
     OverlayItem::SaveState,
     OverlayItem::LoadState,
@@ -41,6 +43,7 @@ pub const ITEMS: [OverlayItem; 10] = [
     OverlayItem::Options,
     OverlayItem::Widescreen,
     OverlayItem::Hacks,
+    OverlayItem::Achievements,
     OverlayItem::QuitToList,
     OverlayItem::ExitToLauncher,
 ];
@@ -92,6 +95,8 @@ pub enum OverlayCommand {
     Widescreen,
     /// Show the hacks of the game.
     Hacks,
+    /// Show the game's achievements.
+    Achievements,
     /// Stop the game, back to the ROM list.
     QuitToList,
     /// Leave the application.
@@ -104,6 +109,8 @@ pub struct OverlayModel {
     selected: usize,
     slot: i32,
     camera: CameraPreset,
+    /// Whether the achievements' row shows (RetroAchievements on).
+    achievements: bool,
 }
 
 impl Default for OverlayModel {
@@ -120,13 +127,29 @@ impl OverlayModel {
             selected: 0,
             slot: 1,
             camera: CameraPreset::Orbit,
+            achievements: false,
         }
+    }
+
+    /// Shows the achievements' row or not (RetroAchievements on or off).
+    pub const fn set_achievements(&mut self, shown: bool) {
+        self.achievements = shown;
+    }
+
+    /// The rows shown, in order.
+    #[must_use]
+    pub fn items(&self) -> Vec<OverlayItem> {
+        ITEMS
+            .into_iter()
+            .filter(|item| self.achievements || *item != OverlayItem::Achievements)
+            .collect()
     }
 
     /// The selected row.
     #[must_use]
     pub fn selected(&self) -> OverlayItem {
-        ITEMS[self.selected]
+        let items = self.items();
+        items[self.selected.min(items.len() - 1)]
     }
 
     /// The index of the selected row.
@@ -160,8 +183,11 @@ impl OverlayModel {
     /// One press of a button.
     pub fn handle(&mut self, button: PadButton) -> Option<OverlayCommand> {
         match button {
-            PadButton::Up => self.selected = (self.selected + ITEMS.len() - 1) % ITEMS.len(),
-            PadButton::Down => self.selected = (self.selected + 1) % ITEMS.len(),
+            PadButton::Up => {
+                let count = self.items().len();
+                self.selected = (self.selected + count - 1) % count;
+            }
+            PadButton::Down => self.selected = (self.selected + 1) % self.items().len(),
             PadButton::Left => return self.step(-1),
             PadButton::Right => return self.step(1),
             PadButton::A => return Some(self.activate()),
@@ -201,6 +227,7 @@ impl OverlayModel {
             OverlayItem::Options => OverlayCommand::Options,
             OverlayItem::Widescreen => OverlayCommand::Widescreen,
             OverlayItem::Hacks => OverlayCommand::Hacks,
+            OverlayItem::Achievements => OverlayCommand::Achievements,
             OverlayItem::QuitToList => OverlayCommand::QuitToList,
             OverlayItem::ExitToLauncher => OverlayCommand::ExitToLauncher,
         }

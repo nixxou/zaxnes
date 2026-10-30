@@ -101,6 +101,8 @@ pub enum RomListCommand {
     Widescreen(PathBuf),
     /// Open the hacks of the selected game, its aids (Rust-only, owner request).
     Hacks(PathBuf),
+    /// Open the achievements of the selected game (R2, while RetroAchievements is on).
+    Achievements(PathBuf),
 }
 
 /// The ROM files of `directory`, sorted by name without regard to case. A folder that cannot be
@@ -260,6 +262,11 @@ impl RomListModel {
                 return self
                     .selected_entry()
                     .map(|entry| RomListCommand::Hacks(entry.path.clone()));
+            }
+            PadButton::R2 => {
+                return self
+                    .selected_entry()
+                    .map(|entry| RomListCommand::Achievements(entry.path.clone()));
             }
             PadButton::Start => {
                 return self

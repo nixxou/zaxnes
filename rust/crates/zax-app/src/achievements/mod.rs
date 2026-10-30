@@ -8,9 +8,11 @@
 //! indicators, the list of the game's achievements and their icons.
 
 mod badges;
+mod library;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use zax_achievements::{
@@ -21,12 +23,16 @@ use zax_platform::ui_image::PictureUpdate;
 use zax_platform::WaveAudio;
 
 pub use badges::{decode_png, BadgeCache, FIRST_BADGE_ID};
+pub use library::{AchievementLibrary, KnownAchievement, KnownGame};
 
 use crate::audio::chip_voices;
 use crate::ui::{keys, strings};
 
 /// The environment variable that names another server than retroachievements.org, for tests.
 pub const HOST_VARIABLE: &str = "ZAXNES_RA_HOST";
+
+/// The folder of the user data the icons and the games studied are kept in.
+pub const CACHE_FOLDER: &str = "achievements";
 
 /// How long an unlock stays on screen, in real seconds.
 pub const UNLOCK_SECONDS: f64 = 5.0;
@@ -149,6 +155,12 @@ pub struct AchievementSystem {
     badges: RefCell<BadgeCache>,
     /// Whether the last sign-in was with a saved token.
     token_login: bool,
+    /// What the list found of each ROM.
+    library: AchievementLibrary,
+    /// The file of the game being played, whose entry of the library follows its achievements.
+    rom_path: Option<PathBuf>,
+    /// Whether the game's achievements changed since the library last had them.
+    library_stale: bool,
 }
 
 impl AchievementSystem {
@@ -182,7 +194,19 @@ impl AchievementSystem {
             sound: false,
             log: Vec::new(),
             token_login: false,
+            library: AchievementLibrary::new(),
+            rom_path: None,
+            library_stale: false,
         }
+    }
+
+    /// Keeps the icons in `directory` (the user data's `achievements` folder), when there is
+    /// one: they are downloaded once.
+    #[must_use]
+    pub fn with_cache(mut self, directory: Option<PathBuf>) -> Self {
+        self.library.set_directory(directory.as_deref());
+        self.badges.get_mut().set_directory(directory);
+        self
     }
 
     // ------------------------------------------------------------------ configuration
@@ -288,6 +312,101 @@ impl AchievementSystem {
         self.forget_game();
     }
 
+    /// The file of the game being played: what its achievements become is kept for the list.
+    pub fn set_rom_path(&mut self, path: Option<PathBuf>) {
+        self.rom_path = path;
+    }
+
+    // ------------------------------------------------------------------ the list's games
+
+    /// What RetroAchievements has for the ROM in `path`, as the player signed in has it:
+    /// `Some(None)` for a ROM it does not know, `None` when not studied yet (or nobody is
+    /// signed in).
+    #[must_use]
+    pub fn known_game(&self, path: &Path) -> Option<Option<&KnownGame>> {
+        let user = self.client.as_ref()?.user()?;
+        self.library.game(path, &user.username)
+    }
+
+    /// Studies the ROM in `path` (the list rests on it), unless it is known or being studied:
+    /// its game and the player's achievements in it come in the background.
+    pub fn study_rom(&mut self, path: &Path) {
+        if self.known_game(path).is_some() || self.library.is_studying(path) {
+            return;
+        }
+        let Some(client) = &self.client else {
+            return;
+        };
+        let Some(user) = client.user() else {
+            return;
+        };
+        let credentials = library::Credentials {
+            server: server(),
+            username: user.username,
+            token: user.token,
+            user_agent: client.user_agent(),
+        };
+        self.library
+            .study(path, credentials, Arc::clone(&self.transport));
+    }
+
+    /// The game being played and its official achievements, once they are loaded.
+    #[must_use]
+    pub fn current_game(&self) -> Option<KnownGame> {
+        self.game.as_ref()?;
+        let client = self.client.as_ref()?;
+        let game = client.game()?;
+        let achievements = client
+            .achievements()
+            .into_iter()
+            .filter(|achievement| {
+                !matches!(
+                    achievement.bucket,
+                    zax_achievements::Bucket::Unofficial | zax_achievements::Bucket::Unsupported
+                )
+            })
+            .map(|achievement| KnownAchievement {
+                id: achievement.id,
+                title: achievement.title,
+                description: achievement.description,
+                points: achievement.points,
+                badge_url: achievement.badge_url,
+                badge_locked_url: achievement.badge_locked_url,
+                unlocked: achievement.unlocked,
+            })
+            .collect();
+        Some(KnownGame {
+            id: game.id,
+            title: game.title,
+            icon_url: game.badge_url,
+            achievements,
+        })
+    }
+
+    /// The game being played as the library keeps it, once its achievements changed.
+    fn update_library(&mut self) {
+        if !self.library_stale {
+            return;
+        }
+        let Some(known) = self.current_game() else {
+            return;
+        };
+        let (Some(user), Some(path)) = (
+            self.client.as_ref().and_then(Client::user),
+            self.rom_path.clone(),
+        ) else {
+            return;
+        };
+        self.library_stale = false;
+        self.library.remember(&path, &user.username, known);
+    }
+
+    /// Whether the ROM in `path` is being studied.
+    #[must_use]
+    pub fn is_studying(&self, path: &Path) -> bool {
+        self.library.is_studying(path)
+    }
+
     /// The console was reset: every achievement starts over.
     pub fn reset(&mut self, core: &NesCore) {
         self.last_frame = Some(core.frame_count());
@@ -342,6 +461,8 @@ impl AchievementSystem {
     /// ran, the events, the timers of the pop-ups.
     pub fn tick(&mut self, core: Option<&NesCore>, real_seconds: f64, frames_ran: bool) {
         self.badges.get_mut().poll();
+        self.library.poll();
+        self.log.extend(self.library.take_log());
         let Some(client) = &mut self.client else {
             return;
         };
@@ -362,6 +483,7 @@ impl AchievementSystem {
         for event in events {
             self.on_event(core, event);
         }
+        self.update_library();
         self.advance(real_seconds);
     }
 
@@ -410,6 +532,7 @@ impl AchievementSystem {
             Event::GameLoaded(result) => self.on_game_loaded(core, result),
             Event::AchievementUnlocked(item) => {
                 self.refresh_summary();
+                self.library_stale = true;
                 self.popups.push_back(Popup {
                     kind: PopupKind::Unlocked,
                     title: strings::get(keys::ACH_UNLOCKED),
@@ -527,6 +650,7 @@ impl AchievementSystem {
             return;
         };
         let summary = client.summary();
+        self.library_stale = true;
         if let (Some(progress), Some(core)) = (self.pending_progress.take(), core) {
             let progress = (!progress.is_empty()).then_some(progress.as_slice());
             if !client.restore_progress(&CoreMemory(core), progress) {
@@ -668,6 +792,22 @@ impl std::fmt::Debug for AchievementSystem {
             .field("account", &self.account)
             .field("game", &self.game)
             .finish_non_exhaustive()
+    }
+}
+
+/// The server the requests go to: retroachievements.org, or the one `ZAXNES_RA_HOST` names (a
+/// name without a scheme reached over plain HTTP, as rcheevos does).
+fn server() -> String {
+    match std::env::var(HOST_VARIABLE) {
+        Ok(host) if !host.trim().is_empty() => {
+            let host = host.trim();
+            if host.contains("://") {
+                host.to_owned()
+            } else {
+                format!("http://{host}")
+            }
+        }
+        _ => "https://retroachievements.org".to_owned(),
     }
 }
 

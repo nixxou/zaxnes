@@ -1508,6 +1508,12 @@ fn achievements(out: &mut Vec<SettingDescriptor>) {
             "Test unofficial achievements",
         ),
         (SettingId::AchievementsSound, true, "Unlock sound"),
+        // The icons of the challenges under way, in a corner of the game (owner request: off).
+        (
+            SettingId::AchievementsChallenges,
+            false,
+            "Show the challenges under way",
+        ),
     ] {
         out.push(
             SettingDescriptor::new(

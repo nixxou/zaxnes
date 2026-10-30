@@ -64,6 +64,7 @@ unsafe extern "C" {
         log_level: c_int,
     ) -> *mut ZaxRa;
     pub fn zax_ra_destroy(ra: *mut ZaxRa);
+    pub fn zax_ra_hash_nes(data: *const u8, size: usize, hash: *mut c_char) -> c_int;
     pub fn zax_ra_complete(pending: *mut c_void, body: *const c_char, length: usize, status: c_int);
     pub fn zax_ra_discard(pending: *mut c_void);
     pub fn zax_ra_user_agent_clause(ra: *mut ZaxRa, buffer: *mut c_char, size: usize) -> usize;
