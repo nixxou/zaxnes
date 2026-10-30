@@ -179,7 +179,7 @@ const WIDESCREEN_HOLD_SECONDS: f32 = 0.5;
 /// The widescreen of a game asked for with a button (A in the in-game menu or on the widescreen
 /// row of its options, L2 on the list), which may be held.
 #[derive(Debug, Clone)]
-struct WidescreenHold {
+pub(super) struct WidescreenHold {
     button: PadButton,
     rom: PathBuf,
     title: Option<String>,
