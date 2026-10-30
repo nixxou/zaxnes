@@ -778,8 +778,11 @@ public sealed class ConversionEngine
                     || cell.Y >= ConversionGrid.Height - 1)
                 {
                     // The grid has one cell of margin on each side precisely so that growth
-                    // never needs a bounds test (SPEC-04 §2). With the clip margins of §4.2 no
-                    // tile can land there; one that would is dropped.
+                    // never needs a bounds test (SPEC-04 §2). The core never emits a record
+                    // there — background x = 8k − fx with k ≤ 32 and fx ≤ 7, so x ∈ [−7, 255]
+                    // and the cell column stays in 1..33 (SPEC-02 REQ-CORE-037) — whatever the
+                    // clip margins, negative ones included (AMD-047). A synthetic record that
+                    // would land in the margin is dropped. // Q-080
                     continue;
                 }
 
@@ -798,9 +801,11 @@ public sealed class ConversionEngine
 
     /// <summary>
     /// The clip test of REQ-E3D-002: kept when <c>x + 8 &gt; g</c>, <c>x ≤ 256 − d</c>,
-    /// <c>y + 8 &gt; h</c> and <c>y ≤ 248 − b</c>.
+    /// <c>y + 8 &gt; h</c> and <c>y ≤ 248 − b</c>. The four margins are any finite reals,
+    /// negative included (AMD-047 REQ-PERS-087): the comparisons carry over unchanged, a
+    /// negative margin simply widening the kept area.
     /// </summary>
-    internal static bool IsInsideClipArea(int x, int y, Vec4F clipping)
+    public static bool IsInsideClipArea(int x, int y, Vec4F clipping)
         => x + 8 > clipping.X
         && x <= 256 - clipping.Z
         && y + 8 > clipping.W

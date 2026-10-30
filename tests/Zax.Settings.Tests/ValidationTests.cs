@@ -115,18 +115,42 @@ public sealed class ValidationTests
         Assert.Equal(1, dual.GetInt(SettingKeys.EmuCore));
     }
 
-    /// <summary>§4.1.5: a clipping margin outside its interval is clamped.</summary>
-    [Theory]
-    [InlineData(SettingKeys.ClipLeft, -4f, 0f)]
-    [InlineData(SettingKeys.ClipLeft, 300f, 256f)]
-    [InlineData(SettingKeys.ClipBottom, 300f, 248f)]
-    [InlineData(SettingKeys.ClipTop, 300f, 248f)]
-    [InlineData(SettingKeys.ClipRight, 300f, 256f)]
-    public void A_clipping_margin_is_clamped(string key, float written, float expected)
+    /// <summary>
+    /// §4.1.5 as amended by AMD-047: a clipping margin keeps any finite real, negative or
+    /// larger than the reference dimensions included.
+    /// </summary>
+    [Theory] // REQ-PERS-087
+    [InlineData(SettingKeys.ClipLeft, -128f)]
+    [InlineData(SettingKeys.ClipLeft, 300f)]
+    [InlineData(SettingKeys.ClipBottom, -80f)]
+    [InlineData(SettingKeys.ClipBottom, 300f)]
+    [InlineData(SettingKeys.ClipTop, -4f)]
+    [InlineData(SettingKeys.ClipRight, -16f)]
+    public void A_clipping_margin_keeps_any_finite_real(string key, float written)
     {
         SettingsModel model = new();
         model.SetFloat(key, written);
-        Assert.Equal(expected, model.GetFloat(key));
+        Assert.Equal(written, model.GetFloat(key));
+    }
+
+    /// <summary>
+    /// §4.1.5 as amended by AMD-047: a non-finite margin is out of domain and no rule repairs
+    /// it, so the margin's own default applies (REQ-PERS-003).
+    /// </summary>
+    [Theory] // REQ-PERS-087, REQ-PERS-003
+    [InlineData(SettingKeys.ClipLeft, 0.1f)]
+    [InlineData(SettingKeys.ClipBottom, 8.1f)]
+    [InlineData(SettingKeys.ClipRight, 8.1f)]
+    [InlineData(SettingKeys.ClipTop, 0.1f)]
+    public void A_non_finite_clipping_margin_takes_its_default(string key, float fallback)
+    {
+        foreach (float written in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
+        {
+            SettingsModel model = new();
+            model.SetFloat(key, -32f);
+            model.SetFloat(key, written);
+            Assert.Equal(fallback, model.GetFloat(key), 4);
+        }
     }
 
     /// <summary>§4.1.2: a script's field of view is bounded to [10, 150].</summary>

@@ -32,11 +32,29 @@ public sealed class SettingDomain
     /// <summary>The step a <see cref="OutOfDomainRule.Snap"/> domain lands on, or 0.</summary>
     public double Step { get; private init; }
 
+    /// <summary>
+    /// Whether the domain is the finite reals, so that NaN and ±∞ are outside it. See
+    /// <see cref="Finite"/>.
+    /// </summary>
+    public bool FiniteOnly { get; private init; }
+
     /// <summary>A closed interval; a value outside it is clamped.</summary>
     public static SettingDomain Range(double minimum, double maximum) => new(OutOfDomainRule.Clamp)
     {
         Minimum = minimum,
         Maximum = maximum,
+    };
+
+    /// <summary>
+    /// Every finite real, negative included. Only NaN and ±∞ are outside, and the column
+    /// "Domaine" gives no rule to bring them back, so the setting's default applies — the
+    /// general rule of REQ-PERS-003. The four clip margins have this domain since AMD-047
+    /// (REQ-PERS-087): 256 and 248 are no longer bounds but the reference dimensions of the
+    /// picture and of the conversion grid.
+    /// </summary>
+    public static SettingDomain Finite { get; } = new(OutOfDomainRule.UseDefault)
+    {
+        FiniteOnly = true,
     };
 
     /// <summary>A half-open interval <c>(minimum, ∞)</c>; a value outside takes the default.</summary>
@@ -215,6 +233,13 @@ public sealed class SettingDomain
         }
 
         double number = value.Kind == SettingKind.Bool ? (value.AsBool ? 1d : 0d) : value.AsDouble;
+
+        // AMD-047 REQ-PERS-087: NaN and ±∞ are outside the finite reals and no rule repairs
+        // them, so the default applies (REQ-PERS-003).
+        if (FiniteOnly && !double.IsFinite(number))
+        {
+            return fallback;
+        }
 
         // AMD-040 §3: a stepped domain repairs any number, so its own rule runs before the
         // "not one of the listed values" test the other enumerated domains apply.

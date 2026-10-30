@@ -395,11 +395,14 @@ public sealed class PersistenceModelTests
         model.SetVector3(SettingKeys.LightDirection, new SettingVector3(0f, 0f, 0f));
         Assert.Equal(new SettingVector3(1f, -1f, 1f), model.GetVector3(SettingKeys.LightDirection));
 
-        // The clip margins are clamped to their domain (REQ-PERS-003, §4.1.5).
+        // The clip margins take any finite real (AMD-047 REQ-PERS-087); only a non-finite one
+        // falls back on the default, by the general rule of REQ-PERS-003.
         model.SetFloat(SettingKeys.ClipBottom, 999f);
-        Assert.Equal(248f, model.GetFloat(SettingKeys.ClipBottom));
+        Assert.Equal(999f, model.GetFloat(SettingKeys.ClipBottom));
         model.SetFloat(SettingKeys.ClipLeft, -5f);
-        Assert.Equal(0f, model.GetFloat(SettingKeys.ClipLeft));
+        Assert.Equal(-5f, model.GetFloat(SettingKeys.ClipLeft));
+        model.SetFloat(SettingKeys.ClipLeft, float.NaN);
+        Assert.Equal(0.1f, model.GetFloat(SettingKeys.ClipLeft), 4);
 
         void Check(string key, int written, int effective)
         {

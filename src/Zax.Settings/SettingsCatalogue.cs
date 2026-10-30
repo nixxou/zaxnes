@@ -684,15 +684,15 @@ public static class SettingsCatalogue
     {
         // Index 0 left, 1 bottom, 2 right, 3 top (DEC-R2-T1, DEC-09-Q2). The non-integer
         // defaults are wanted: they avoid equalities at the edges.
-        (string Key, float Default, double Maximum, string Lua, string Field)[] margins =
+        (string Key, float Default, string Lua, string Field)[] margins =
         [
-            (SettingKeys.ClipLeft, 0.1f, 256d, "Clipping[0]", "4.1"),
-            (SettingKeys.ClipBottom, 8.1f, 248d, "Clipping[1]", "4.2"),
-            (SettingKeys.ClipRight, 8.1f, 256d, "Clipping[2]", "4.3"),
-            (SettingKeys.ClipTop, 0.1f, 248d, "Clipping[3]", "4.4"),
+            (SettingKeys.ClipLeft, 0.1f, "Clipping[0]", "4.1"),
+            (SettingKeys.ClipBottom, 8.1f, "Clipping[1]", "4.2"),
+            (SettingKeys.ClipRight, 8.1f, "Clipping[2]", "4.3"),
+            (SettingKeys.ClipTop, 0.1f, "Clipping[3]", "4.4"),
         ];
 
-        foreach ((string key, float value, double maximum, string lua, string field) in margins)
+        foreach ((string key, float value, string lua, string field) in margins)
         {
             list.Add(new SettingDescriptor(
                 key,
@@ -702,7 +702,10 @@ public static class SettingsCatalogue
                 SettingEffect.Immediate,
                 SettingTheme.Clipping)
             {
-                Domain = SettingDomain.Range(0d, maximum),
+                // AMD-047 REQ-PERS-087: any finite real, negative included — profiles such as
+                // the top-down ring of "Punch-Out!!" write −128 and −80. Only NaN and ±∞ fall
+                // back on the default.
+                Domain = SettingDomain.Finite,
                 LuaPath = lua,
                 ProfileField = field,
             });
