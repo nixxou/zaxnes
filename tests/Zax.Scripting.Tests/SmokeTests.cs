@@ -86,6 +86,28 @@ public sealed class SmokeTests
         Assert.Equal(1.0, session.Runtime.EvaluateNumber("return Setting.EngineMode"));
     }
 
+    /// <summary>
+    /// AMD-040 REQ-LUA-114 and AMD-041 REQ-LOOP-064: <c>Setting.RunAheadFrames</c> is read and
+    /// written, with a written value brought back into [0, 3].
+    /// </summary>
+    [Fact] // REQ-LUA-114, REQ-LOOP-064
+    public void The_run_ahead_setting_is_exposed_and_clamped()
+    {
+        using ScriptSession session = new ScriptProfileBuilder().Script("a", "-- nothing").Load();
+
+        Assert.Equal("number", session.Runtime.EvaluateText("return type(Setting.RunAheadFrames)"));
+        Assert.Equal(1.0, session.Runtime.EvaluateNumber("return Setting.RunAheadFrames"));
+
+        session.Runtime.Evaluate("Setting.RunAheadFrames = 7");
+        Assert.Equal(3.0, session.Runtime.EvaluateNumber("return Setting.RunAheadFrames"));
+
+        session.Runtime.Evaluate("Setting.RunAheadFrames = -1");
+        Assert.Equal(0.0, session.Runtime.EvaluateNumber("return Setting.RunAheadFrames"));
+
+        session.Runtime.Evaluate("Setting.RunAheadFrames = 2");
+        Assert.Equal(2.0, session.Runtime.EvaluateNumber("return Setting.RunAheadFrames"));
+    }
+
     [Fact]
     public void Frame_hooks_see_the_instances()
     {

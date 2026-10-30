@@ -105,3 +105,4 @@ app.engine_mode
 audio.mute
 ui.show_fps
 ui.language
+emu.run_ahead

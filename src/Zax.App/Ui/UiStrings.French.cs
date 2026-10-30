@@ -250,6 +250,7 @@ internal static partial class UiStrings
         ["setting." + SettingKeys.EmuAutoTvMode] = "Région détectée automatiquement",
         ["setting." + SettingKeys.EmuTvMode] = "Région vidéo",
         ["setting." + SettingKeys.EmuCore] = "Cœur d'émulation",
+        ["setting." + SettingKeys.EmuRunAhead] = "Run-ahead",
         ["setting." + SettingKeys.AudioVolume] = "Volume général",
         ["setting." + SettingKeys.AudioBgMusic] = "Musique de menu",
         ["setting." + SettingKeys.AudioMute] = "Muet",
@@ -275,5 +276,11 @@ internal static partial class UiStrings
         ["option.Recent"] = "Récent",
         ["option.en"] = "English",
         ["option.fr"] = "Français",
+
+        // Les quatre valeurs de Run-ahead d'AMD-041 §3.
+        ["option." + SettingKeys.EmuRunAhead + ".Off"] = "Désactivé",
+        ["option." + SettingKeys.EmuRunAhead + ".1 frame (Recommended)"] = "1 frame (recommandé)",
+        ["option." + SettingKeys.EmuRunAhead + ".2 frames"] = "2 frames",
+        ["option." + SettingKeys.EmuRunAhead + ".3 frames"] = "3 frames",
     };
 }

@@ -28,6 +28,14 @@ namespace Zax.App;
 internal sealed class GameSession : IDisposable
 {
     private readonly CoreScriptInput _input;
+
+    /// <summary>
+    /// The state of the real frame of REQ-LOOP-065 step 2. One buffer for the whole session: it
+    /// is rewritten at every real frame and read back at the end of the same frame, so run-ahead
+    /// allocates nothing once the buffer has grown to its size (REQ-CORE-121).
+    /// </summary>
+    private readonly Zax.Nes.State.CoreState _realFrameState = new();
+
     private bool _started;
 
     private GameSession(
@@ -61,8 +69,37 @@ internal sealed class GameSession : IDisposable
     /// <summary>The title of the loaded profile, for the window and the overlay.</summary>
     public string Title { get; }
 
-    /// <summary>Emulated frames run since the game started (REQ-E3D-043).</summary>
+    /// <summary>
+    /// Displayed frames run since the game started (REQ-E3D-043): one per call to
+    /// <see cref="RunFrame"/>, so it counts <b>real</b> frames whatever
+    /// <see cref="RunAheadFrames"/> says.
+    /// </summary>
+    /// <remarks>
+    /// This is the counter the conversion stamps its frames with and the one the Lua global
+    /// <c>frame</c> reads, and it is the displayed frame's number: the sequence of displayed
+    /// frames is contiguous, which is what REQ-LOOP-066 relies on to call a savestate of the
+    /// camera and of the learned conversion state coherent. The core's own counter
+    /// (REQ-CORE-006) follows the real frame and is <see cref="NesCore.FrameCount"/>.
+    /// </remarks>
     public int FrameCounter { get; private set; }
+
+    /// <summary>
+    /// Run-ahead frames N, 0 to 3 (AMD-041 REQ-LOOP-064). 0 — the value a freshly created
+    /// session carries — runs the frame of REQ-LOOP-060 unchanged.
+    /// </summary>
+    /// <remarks>
+    /// The setting <c>emu.run_ahead</c> belongs to the desktop loop, which writes this property
+    /// before every real frame: that is how « applied at the next real frame » is honoured, and
+    /// why the value is a property of the session rather than an argument of
+    /// <see cref="RunFrame"/>. A host that drives the session itself gets no run-ahead unless it
+    /// asks for it, which is what AMD-041 §4 requires of the libretro frontend, where the value
+    /// is 0 and the host provides run-ahead from the serialisation instead.
+    /// </remarks>
+    public int RunAheadFrames
+    {
+        get => field;
+        set => field = Zax.Settings.SettingsCatalogue.ClampRunAhead(value);
+    }
 
     /// <summary>Names of the profile's Lua scripts, in the hook order of REQ-LUA-004.</summary>
     public IReadOnlyList<string> ScriptNames =>
@@ -379,7 +416,8 @@ internal sealed class GameSession : IDisposable
     }
 
     /// <summary>
-    /// Runs one emulated frame and publishes the converted frame (REQ-LOOP-060, REQ-E3D-280).
+    /// Runs one <b>real</b> frame and publishes the converted displayed frame (REQ-LOOP-060,
+    /// REQ-LOOP-065, REQ-E3D-280).
     /// </summary>
     /// <param name="playerOneActions">
     /// The action mask of player 1, every source combined (SPEC-08 REQ-INP-002).
@@ -389,6 +427,18 @@ internal sealed class GameSession : IDisposable
     /// The byte a port of type <c>Zapper</c> carries (SPEC-08 §4.1): bit 4 set when the trigger
     /// is released, cleared while it is held (DEC-02-Q1).
     /// </param>
+    /// <remarks>
+    /// <para>
+    /// With <see cref="RunAheadFrames"/> = 0 this is the frame of REQ-LOOP-060 as it was: read
+    /// the inputs, run the core once, convert, run the frame hooks. With N ≥ 1 it is the sequence
+    /// of REQ-LOOP-065 — the real frame silent and invisible, its state kept, N − 1 more silent
+    /// frames, then the displayed frame with its image and its sound, then the real state back.
+    /// </para>
+    /// <para>
+    /// The script pad of REQ-INP-071 is asked <b>once</b>, with the frame hooks, so every one of
+    /// the N + 1 emulated frames sees the very same inputs E, as REQ-LOOP-065 requires.
+    /// </para>
+    /// </remarks>
     public void RunFrame(
         int playerOneActions,
         int playerTwoActions = 0,
@@ -413,10 +463,54 @@ internal sealed class GameSession : IDisposable
             Core.GetPortType(1),
             zapperByte);
 
-        Core.RunFrame(word);
+        RunAhead(word);
         Engine.Publish();
         FrameCounter++;
     }
+
+    /// <summary>
+    /// The five steps of REQ-LOOP-065 for the input word <paramref name="word"/>, or the single
+    /// frame of REQ-LOOP-060 when run-ahead is off.
+    /// </summary>
+    private void RunAhead(ushort word)
+    {
+        int ahead = RunAheadFrames;
+        if (ahead <= 0)
+        {
+            Core.RunFrame(word, FrameOutput.All);
+            return;
+        }
+
+        // REQ-LOOP-068: with a Zapper on a port, every emulated frame renders its pixels and
+        // detects the light on its own frame, exactly as it would without run-ahead. With no
+        // Zapper the hidden frames skip the image, which costs nothing anywhere else.
+        FrameOutput hidden = HasZapperPort ? FrameOutput.Pixels : FrameOutput.None;
+
+        // Step 1: the real frame, no image for the display and no sound.
+        Core.RunFrame(word, hidden);
+
+        // Step 2: its complete state, in memory (REQ-CORE-121).
+        Core.CaptureState(_realFrameState);
+
+        // Step 3: N − 1 frames in advance, still silent and invisible.
+        for (int frame = 1; frame < ahead; frame++)
+        {
+            Core.RunFrame(word, hidden);
+        }
+
+        // Step 4: the displayed frame, with its sound and its image. The video callback converts
+        // it and runs the Lua frame hooks, which see this frame's RAM and counter
+        // (REQ-LOOP-067) because step 5 has not happened yet.
+        Core.RunFrame(word, FrameOutput.All);
+
+        // Step 5: back to the real state, the sound just produced left untouched.
+        Core.RestoreState(_realFrameState);
+    }
+
+    /// <summary>Whether a port carries a Zapper (REQ-INP-061, REQ-LOOP-068).</summary>
+    private bool HasZapperPort
+        => Core.GetPortType(0) == ControllerPortType.Zapper
+        || Core.GetPortType(1) == ControllerPortType.Zapper;
 
     /// <summary>The device type of <paramref name="port"/> (0 or 1), REQ-INP-060.</summary>
     public ControllerPortType PortType(int port) => Core.GetPortType(port);

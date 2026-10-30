@@ -59,6 +59,38 @@ public sealed class SettingDomain
         Options = options,
     };
 
+    /// <summary>
+    /// A closed interval whose whole values each carry a label, so an interface can show a list
+    /// while a value outside the interval is <b>clamped</b> rather than replaced by the default.
+    /// That is the domain « 0 à 3 » of the Run-ahead setting (AMD-041 §3, REQ-LOOP-064).
+    /// </summary>
+    /// <param name="minimum">Lower bound, the value of the first label.</param>
+    /// <param name="labels">
+    /// One label per whole value from <paramref name="minimum"/> upwards; the last one sets the
+    /// upper bound.
+    /// </param>
+    public static SettingDomain ClampedChoice(double minimum, params string[] labels)
+    {
+        ArgumentNullException.ThrowIfNull(labels);
+        if (labels.Length == 0)
+        {
+            throw new ArgumentException("A clamped choice needs at least one label.", nameof(labels));
+        }
+
+        SettingOption[] options = new SettingOption[labels.Length];
+        for (int i = 0; i < labels.Length; i++)
+        {
+            options[i] = new SettingOption(minimum + i, labels[i]);
+        }
+
+        return new SettingDomain(OutOfDomainRule.Clamp)
+        {
+            Minimum = minimum,
+            Maximum = minimum + labels.Length - 1,
+            Options = options,
+        };
+    }
+
     /// <summary>The two booleans, labelled as libretro expects them (REQ-PERS-083).</summary>
     public static SettingDomain Switch { get; } = new(OutOfDomainRule.Unbounded)
     {
@@ -137,7 +169,10 @@ public sealed class SettingDomain
 
         double number = value.Kind == SettingKind.Bool ? (value.AsBool ? 1d : 0d) : value.AsDouble;
 
-        if (Options is not null && Rule != OutOfDomainRule.Unbounded && LabelOf(number) is null)
+        // A listed value that is not in the list takes the default, which is the rule
+        // REQ-PERS-003 gives for video.frame_rate, scene.skybox and video.res_scale. A list that
+        // clamps instead — the Run-ahead of AMD-041 — says so through its rule and goes on.
+        if (Options is not null && Rule == OutOfDomainRule.UseDefault && LabelOf(number) is null)
         {
             return fallback;
         }

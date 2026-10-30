@@ -332,13 +332,50 @@ public sealed class NesCore
     /// The video callback is then invoked once, synchronously (REQ-CORE-020,
     /// REQ-CORE-021).
     /// </remarks>
-    public long RunFrame(ushort inputWord)
+    public long RunFrame(ushort inputWord) => RunFrame(inputWord, FrameOutput.All);
+
+    /// <summary>
+    /// Runs one frame and chooses what it hands to the host (AMD-041 REQ-LOOP-065).
+    /// </summary>
+    /// <param name="inputWord">The input word of <see cref="RunFrame(ushort)"/>.</param>
+    /// <param name="output">
+    /// What the frame produces. <see cref="FrameOutput.All"/> is an ordinary frame; anything less
+    /// is a run-ahead frame that is not displayed, not heard, or neither.
+    /// </param>
+    /// <returns>The number of CPU cycles the frame took, or 0 when no ROM is loaded.</returns>
+    /// <remarks>
+    /// The emulation itself does not depend on <paramref name="output"/>: the same frame run twice
+    /// with two different values leaves the machine in the very same state, which is what makes
+    /// the sequence of REQ-LOOP-065 faithful. Only the three output paths — the video callback,
+    /// the audio queue and the pixel image — are switched.
+    /// </remarks>
+    public long RunFrame(ushort inputWord, FrameOutput output)
     {
         if (_cartridge is null)
         {
             return 0;
         }
 
+        bool audio = (output & FrameOutput.Audio) != 0;
+        bool pixels = (output & FrameOutput.Pixels) != 0;
+        _apu.OutputEnabled = audio;
+        _ppu.PixelOutputEnabled = pixels;
+
+        try
+        {
+            return RunFrameCore(inputWord, (output & FrameOutput.Video) != 0);
+        }
+        finally
+        {
+            // The switches belong to the frame, not to the machine: a host that calls the
+            // one-argument overload must always get an ordinary frame.
+            _apu.OutputEnabled = true;
+            _ppu.PixelOutputEnabled = true;
+        }
+    }
+
+    private long RunFrameCore(ushort inputWord, bool video)
+    {
         _input.BeginFrame(inputWord);
 
         // The aimed position is sampled once, at the start of the frame, and stays fixed
@@ -366,8 +403,10 @@ public sealed class NesCore
         FrameCount++;
 
         // The callback is invoked once, synchronously, even when the batch is empty
-        // (REQ-CORE-020, REQ-CORE-021).
-        if (VideoCallback is { } callback)
+        // (REQ-CORE-020, REQ-CORE-021). A run-ahead frame that is not the displayed one hands
+        // nothing over, which is how the conversion and the Lua frame hooks of REQ-LOOP-067 see
+        // exactly one frame per real frame.
+        if (video && VideoCallback is { } callback)
         {
             var batch = new FrameBatch(
                 _ppu.TileRecords,
@@ -509,6 +548,100 @@ public sealed class NesCore
 
         return romBytes + fixedBytes + 256 + (_rom?.Name.Length * 4 ?? 0);
     }
+
+    // -------------------------------------------------------- in-memory state
+
+    /// <summary>
+    /// Captures the complete state of the machine into <paramref name="state"/>, ROM image
+    /// excluded (AMD-041 REQ-CORE-121).
+    /// </summary>
+    /// <param name="state">The buffer to fill; its previous content is overwritten.</param>
+    /// <exception cref="InvalidOperationException">No ROM is loaded.</exception>
+    /// <remarks>
+    /// Work RAM, the mapper, the CPU, the PPU, the APU, the inputs and the frame counter, in the
+    /// same order and through the same per-component code as a savestate, so the two can never
+    /// drift apart. What is left out is the portable wrapping — magic number, format version,
+    /// core name, ROM image and ROM name — which is what REQ-LOOP-065 says the state of a real
+    /// frame does not need, and the reason this is affordable at every frame.
+    /// </remarks>
+    public void CaptureState(CoreState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (_cartridge is null || _rom is null)
+        {
+            throw new InvalidOperationException("No ROM is loaded: there is no state to capture.");
+        }
+
+        StateWriter writer = state.Begin();
+        writer.WriteInt64(FrameCount);
+        writer.WriteByte((byte)_region);
+
+        _bus.SaveState(writer);
+        _cpu.SaveState(writer);
+        _ppu.SaveState(writer);
+        _apu.SaveState(writer);
+        _input.SaveState(writer);
+        _cartridge.SaveState(writer);
+    }
+
+    /// <summary>
+    /// Restores a state <see cref="CaptureState"/> produced, <b>keeping the audio already
+    /// produced</b> (AMD-041 REQ-CORE-121).
+    /// </summary>
+    /// <param name="state">A state captured from this very instance, ROM unchanged.</param>
+    /// <exception cref="InvalidOperationException">
+    /// No ROM is loaded, or <paramref name="state"/> holds nothing.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// The samples the host has not read yet are left in the queue, unlike a savestate restore
+    /// (REQ-CORE-074, Q-006): step 5 of REQ-LOOP-065 undoes the frames in advance, not the sound
+    /// the displayed frame produced, which the player is about to hear.
+    /// </para>
+    /// <para>
+    /// The pixel image of <see cref="PixelFrame"/> is not part of the block either, so the
+    /// picture of the displayed frame survives the restore and the host can still show it. It is
+    /// rewritten in full by the next frame that renders.
+    /// </para>
+    /// </remarks>
+    public void RestoreState(CoreState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (_cartridge is null)
+        {
+            throw new InvalidOperationException("No ROM is loaded: there is no state to restore.");
+        }
+
+        if (state.IsEmpty)
+        {
+            throw new InvalidOperationException("The in-memory state holds nothing to restore.");
+        }
+
+        StateReader reader = state.Read();
+        FrameCount = reader.ReadInt64();
+        var region = (NesRegion)reader.ReadByte();
+
+        _bus.LoadState(reader);
+        _cpu.LoadState(reader);
+        _ppu.LoadState(reader);
+        _apu.LoadState(reader, keepPendingSamples: true);
+        _input.LoadState(reader);
+        _cartridge.LoadState(reader);
+
+        if (region != _region)
+        {
+            // Unreachable inside one real frame — the region only changes between two of them —
+            // but a state is a state: it carries the region and putting it back costs nothing.
+            _region = region;
+            ApplyRegion();
+        }
+    }
+
+    /// <summary>
+    /// Upper bound on the size of an in-memory state for the ROM currently loaded
+    /// (REQ-CORE-121, REQ-ARCH-013): <see cref="MaxStateSize"/> without the ROM image.
+    /// </summary>
+    public int MaxCoreStateSize() => MaxStateSize() - (_rom?.Raw.Length ?? 0);
 
     /// <summary>
     /// Restores a state block (REQ-CORE-091).

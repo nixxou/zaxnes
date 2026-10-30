@@ -69,6 +69,16 @@ public sealed class AppSettings
         set => Model.SetBool(SettingKeys.EmuAutoTvMode, value);
     }
 
+    /// <summary>
+    /// <c>emu.run_ahead</c>: run-ahead frames N, 0 to 3, default 1 (AMD-041 REQ-LOOP-064). The
+    /// loop reads it again at every real frame, so a change applies at the next one.
+    /// </summary>
+    public int RunAheadFrames
+    {
+        get => Model.GetInt(SettingKeys.EmuRunAhead);
+        set => Model.SetInt(SettingKeys.EmuRunAhead, value);
+    }
+
     /// <summary><c>audio.volume</c>: <c>V</c> in [0 ; 1], default 1 (REQ-AUD-006).</summary>
     public float Volume
     {

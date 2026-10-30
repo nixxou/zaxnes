@@ -33,7 +33,12 @@ internal static class RenderExport
                                    'synthetic:<scene>' renders one of them;
                                    a path renders the frames a JSON file describes.
           --rom <file.nes>         Run a real ROM headless and capture it (REQ-ARCH-031).
-          --run <n>                Emulated frames to run before capturing (default 120).
+          --run <n>                Real frames to run before capturing (default 120).
+          --run-ahead <n>          Run-ahead frames N, 0 to 3 (default 0, AMD-041). Every real
+                                   frame then emulates N + 1 frames and the capture is the
+                                   displayed one. N is written to render.json and to the
+                                   '--dump-frame' file: a frame, tile or conversion sequence is
+                                   only comparable with another one at equal N (REQ-ARCH-012).
           --sav <file>             Battery-backed PRG-RAM to import before the run, so that a
                                    capture can start from a saved game (REQ-CORE-095).
           --dump-frame <file.json> Write the captured frame as a '--frames' JSON file, so the
@@ -88,6 +93,7 @@ internal static class RenderExport
         string? battery = null;
         string? dumpFrame = null;
         int runFrames = 120;
+        int runAhead = 0;
         int width = 640;
         int height = 480;
         float fov = 70f;
@@ -130,6 +136,15 @@ internal static class RenderExport
 
                 case "--run":
                     runFrames = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    break;
+
+                case "--run-ahead":
+                    runAhead = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    if (runAhead is < 0 or > 3)
+                    {
+                        throw new ArgumentException("--run-ahead expects 0, 1, 2 or 3 (AMD-041 REQ-LOOP-064).");
+                    }
+
                     break;
 
                 case "--press":
@@ -253,7 +268,16 @@ internal static class RenderExport
         {
             scenes = rom is null
                 ? BuildScenes(frames, profile, assets, mesh)
-                : [FromRom(rom, runFrames, profile, assets, mesh, InputScript.Parse(press), battery, dumpFrame)];
+                : [FromRom(
+                    rom,
+                    runFrames,
+                    profile,
+                    assets,
+                    mesh,
+                    InputScript.Parse(press),
+                    battery,
+                    dumpFrame,
+                    runAhead)];
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or JsonException
             or InvalidOperationException or ProfileCatalogueException)
@@ -350,7 +374,7 @@ internal static class RenderExport
                 ? Bench(renderer, context, scene, bench)
                 : null;
 
-            report.Add(Describe(scene, renderer.Statistics, statistics, measured, width, height));
+            report.Add(Describe(scene, renderer.Statistics, statistics, measured, width, height, runAhead));
 
             string timing = measured is { } ms
                 ? string.Create(CultureInfo.InvariantCulture, $"  {ms.Median:F2} ms median, {ms.P99:F2} ms p99")
@@ -477,11 +501,15 @@ internal static class RenderExport
     }
 
     /// <summary>
-    /// Runs a real ROM headless for <paramref name="runFrames"/> emulated frames and captures the
-    /// last one: the "load a ROM and a profile, replay, export an offscreen capture" of
+    /// Runs a real ROM headless for <paramref name="runFrames"/> real frames and captures the
+    /// last displayed one: the "load a ROM and a profile, replay, export an offscreen capture" of
     /// SPEC-01 REQ-ARCH-031. The controllers stay idle; replaying an input sequence comes with
     /// the input lot.
     /// </summary>
+    /// <remarks>
+    /// <c>runAhead</c> is the N of AMD-041 REQ-LOOP-065. 0 runs one frame per real frame, which
+    /// is what the harness did before the amendment and what a libretro frontend does (§4).
+    /// </remarks>
     private static SyntheticScene FromRom(
         string romPath,
         int runFrames,
@@ -490,7 +518,8 @@ internal static class RenderExport
         RenderAlgorithm mesh,
         InputScript input,
         string? batteryPath,
-        string? dumpFrame)
+        string? dumpFrame,
+        int runAhead)
     {
         GameProfile profile = LoadProfile(profileName, assets);
         ConversionEngine engine = new();
@@ -542,9 +571,32 @@ internal static class RenderExport
             engine.Convert(batch, counter);
         };
         core.Reset();
+
+        // The five steps of AMD-041 REQ-LOOP-065, the same ones the desktop loop runs: the real
+        // frame silent and invisible, its state kept, N − 1 more hidden frames, the displayed
+        // frame with its image and its sound, then the real state back. With N = 0 this is one
+        // ordinary frame, exactly as before.
+        Zax.Nes.State.CoreState real = new();
         for (; counter < Math.Max(1, runFrames); counter++)
         {
-            core.RunFrame(input.At(counter));
+            if (runAhead <= 0)
+            {
+                core.RunFrame(input.At(counter), FrameOutput.All);
+            }
+            else
+            {
+                ushort word = input.At(counter);
+                core.RunFrame(word, FrameOutput.None);
+                core.CaptureState(real);
+                for (int ahead = 1; ahead < runAhead; ahead++)
+                {
+                    core.RunFrame(word, FrameOutput.None);
+                }
+
+                core.RunFrame(word, FrameOutput.All);
+                core.RestoreState(real);
+            }
+
             engine.Publish();
         }
 
@@ -553,7 +605,7 @@ internal static class RenderExport
 
         if (dumpFrame is not null)
         {
-            File.WriteAllText(dumpFrame, FrameJson.Write(lastRecords, lastPalette));
+            File.WriteAllText(dumpFrame, FrameJson.Write(lastRecords, lastPalette, runAhead));
             Console.Out.WriteLine($"render: frame written to {dumpFrame}");
         }
 
@@ -573,7 +625,8 @@ internal static class RenderExport
             Path.GetFileNameWithoutExtension(romPath),
             scene,
             engine,
-            $"{Path.GetFileName(romPath)} after {counter} emulated frames, profile '{profile.Title ?? "2D Mode"}'")
+            $"{Path.GetFileName(romPath)} after {counter} real frames at run-ahead {runAhead}, "
+                + $"profile '{profile.Title ?? "2D Mode"}'")
         {
             NesPicture = picture,
         };
@@ -689,7 +742,8 @@ internal static class RenderExport
         CaptureStatistics capture,
         (double Median, double P99)? timing,
         int width,
-        int height)
+        int height,
+        int runAhead)
     {
         string bench = timing is { } ms
             ? string.Create(
@@ -701,6 +755,10 @@ internal static class RenderExport
             CultureInfo.InvariantCulture,
             $"{{ \"scene\": \"{scene.Name}\", \"description\": \"{scene.Description}\", "
                 + $"\"width\": {width}, \"height\": {height}, "
+
+                // AMD-041: the run-ahead the frames were produced with is part of the export, so
+                // two sequences are never compared at different N (REQ-ARCH-012, REQ-ARCH-013).
+                + $"\"runAhead\": {runAhead}, "
                 + $"\"opaqueTiles\": {render.OpaqueTiles}, \"transparentTiles\": {render.TransparentTiles}, "
                 + $"\"hudTiles\": {render.HudTiles}, \"shadowCasters\": {render.ShadowCasters}, "
                 + $"\"drawCalls\": {render.DrawCalls}, \"triangles\": {render.Triangles}, "

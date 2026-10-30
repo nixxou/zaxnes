@@ -202,4 +202,17 @@ internal static class UiKeys
 
     /// <summary>The label key of the domain value <paramref name="label"/> of SPEC-09 §4.1.</summary>
     public static string Option(string label) => OptionPrefix + label;
+
+    /// <summary>
+    /// The label key of the domain value <paramref name="label"/> <b>of one setting</b>, which
+    /// wins over the shared key above when the table has it.
+    /// </summary>
+    /// <remarks>
+    /// Two settings can share a domain label and still need two different translations: the
+    /// « Off » of <c>video.vsync</c> is « Désactivée » — a synchronisation — and the « Off » of
+    /// the Run-ahead of AMD-041 §3 is « Désactivé ». The scoped key gives each its own entry
+    /// without renaming the stable domain labels.
+    /// </remarks>
+    public static string Option(string settingKey, string label)
+        => OptionPrefix + settingKey + "." + label;
 }
