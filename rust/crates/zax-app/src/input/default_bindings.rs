@@ -213,11 +213,12 @@ pub fn create_gamepad(standard: bool) -> BindingSet {
 }
 
 /// The gamepad set of the desktop, which plays as its console mode (Rust-only, owner request):
-/// the handheld defaults, NES A on the pad's A and NES B on its B as an `XInput` pad labels them,
-/// and the rollback, which a handheld has not, on the right stick's click.
+/// the handheld defaults with the face buttons where a handheld has them, not by their labels,
+/// as Mesen has them: NES A on the right button (Xbox B), NES B on the bottom one (Xbox A). The
+/// rollback, which a handheld has not, goes on the right stick's click.
 #[must_use]
 pub fn create_desktop_console_gamepad(standard: bool) -> BindingSet {
-    let mut set = create_handheld_gamepad(standard);
+    let mut set = create_former_desktop_console_gamepad(standard);
     if standard {
         set.set_action(
             InputAction::ROLL_BACK,
@@ -227,9 +228,7 @@ pub fn create_desktop_console_gamepad(standard: bool) -> BindingSet {
     set
 }
 
-/// The desktop's console set of an earlier version, what a pad saved then still has: the face
-/// buttons at a handheld's places (NES A on the right button, Xbox B; NES B on the bottom one,
-/// Xbox A) and no rollback.
+/// The desktop's console set before the rollback had a button: what a pad saved then still has.
 #[must_use]
 pub fn create_former_desktop_console_gamepad(standard: bool) -> BindingSet {
     let mut set = create_handheld_gamepad(standard);
