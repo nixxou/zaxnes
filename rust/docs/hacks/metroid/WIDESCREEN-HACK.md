@@ -20,7 +20,7 @@ the original's on the original screen).
 |---|---|
 | Source ROM | *Metroid (USA)*, MMC1 (SNROM), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM, 8 KiB PRG-RAM |
 | Source data (iNES header excluded) | CRC-32 `70080810` |
-| Target data | CRC-32 `FCE641DC` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `EC5FE12E` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (Zaxnes' MMC1 fixes bank 15 modulo the bank count); hooks in banks 0-5 and 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/metroid-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -31,16 +31,32 @@ rooms and its world map in PRG-RAM at `$6000-$7FFF`.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/metroid-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, MMC1, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
-memory, which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with
-the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank
-added, nothing moved or copied). Its testing aids need the hack's code: they stay with the
-widescreen (the advanced mode). The BPS patch described here is kept to compare.
+**Hack pack.** Zaxnes ships this hack as hack packs, both from this source:
+`rust/crates/zax-nes/patches/metroid-usa-widescreen.zxpk`, NTSC, and
+`metroid-europe-widescreen.zxpk`, the same for PAL (Metroid (Europe), data CRC-32 `7751588D`, has
+the same code and the area banks' tables at the same places) (`tools/build.py <rom> --pack
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1). The packs are format 2, written by Zaxnes' shared builder
+(`hackpack.py`): MMC1, each hook a 16 KiB bank and a CPU address with the game's bytes it
+replaces, checked and applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or
+copied). `src/wide.s` is assembled with `-D PACK` for `$2000`: the zone fantôme, which Zaxnes
+shows to instruction fetches only from power-on, the extension unlocked; its registers and RAM
+are at `$3000`-`$3FFF` (widescreen MMC5: `$5000`-`$5FFF` stays the cartridge's), no window. The
+game's data reads at `$2000`-`$3FFF` reach the PPU, so the code reads no data of its own: the sizes
+of a room's entries are a test (`entry_size`, in the BPS build too). The widescreen is in groups:
+"core" (Base: the settings, the rooms of the nametables, the position test and the sprites' high
+bytes), "enemies", "doors" (the doors, their twins and the items), "previews" (the enemies of the
+rooms ahead), and the two testing aids, "invincible" and "level select", which need the hack's
+code; each but the core needs it. Checks of the game's code the hack relies on go with them: the
+nametable a room is built on; an enemy's resting animation, its update without moving and where
+its drawing goes on; an object's animation and drawing and where they go on; a game's start in an
+area. Over a pool of 116 ROMs of the game (the USA, European, Virtual Console and PlayChoice-10
+dumps, the French translations, the ROM hacks that are not combined with a translation), 111 take a
+whole pack and 2 all but the doors; the others are ROM hacks that rework the game's code (Rogue
+Dawn) or put it on MMC3 or MMC5. 3000 frames of each with scripted inputs play as without the
+pack, but for four hard ROM hacks where the scripted Samus dies sooner (the enemies of the
+margins reach her): with "Invincible" on they go as far. The BPS patch described here is kept to
+compare.
 
 ## 2. What the game does, and what changes
 
@@ -202,19 +218,32 @@ hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out, fo
 ;  * Samus, her shots and the other objects keep the original screen;
 ;  * the option "Level select" starts a new game in the area a direction held picks.
 ;
+; In a Zaxnes hack pack (-D PACK) the code is assembled for $2000 instead: the zone fantôme, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
+; reads there still reach the PPU, so the code reads no data of its own (the sizes of a room's
+; entries are a test). Its registers and RAM are at $3000-$3FFF, which the zone holds for its own
+; instructions (widescreen MMC5: $5000-$5FFF stays the cartridge's), and no window is opened.
+; Metroid (Europe) has the same code at the same places.
+;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
 
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, bit 3 high bytes kept
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1 sprites free of the extents, bit 3 high bytes kept
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
 OPT_LEVEL_SELECT = $01         ; a testing aid: a new game in the area a direction held picks
 OPT_INVINCIBLE  = $02           ; a testing aid: Samus takes no damage
@@ -228,43 +257,43 @@ NO_SLOWDOWN_LINES = 255
 PROJECTILES     = $60           ; enemy slot offsets: 0-$50 the room's enemies, $60 up what
                                 ; enemies fire and the like
 
-; Variables in the extension's RAM ($5200-$57FF).
-WV_M            = $5200         ; the margin enemies show in, this frame
-WV_ORIG         = $5201         ; the last position test: 1 on the original screen, else 0
-WV_WIDE         = $5202         ; and 1 within the margins, else 0
-WV_VALID        = $5203         ; non-zero while WV_BASE is the object being drawn
-WV_BASEL        = $5204         ; the 16-bit screen x of that object ($0E and its high byte)
-WV_BASEH        = $5205
-WV_ASLEEP       = $5206         ; the last enemy test: 1 when it sleeps in a margin
-WV_NT_X         = $5210         ; + nametable (0, 1): the map x and y of the room the game built
-WV_NT_Y         = $5212         ; there last
-WV_T0           = $5214         ; scratch
-WV_T1           = $5215
-WV_TWIN         = $5216         ; non-zero while a door's twin is drawn
-WV_TWIN_SIDE    = $5217         ; its side: 1 right, $FF left
-WV_CNTRL        = $5218         ; the door's $6B
-WV_PREVIEW      = $5219         ; non-zero while a preview is drawn
-WV_PREV_XL      = $521A         ; its 16-bit screen x and its screen y
-WV_PREV_XH      = $521B
-WV_PREV_Y       = $521C
-WV_CX           = $521D         ; the map room previewed
-WV_CY           = $521E
-WV_OXL          = $5220         ; its top left corner on the screen, 16-bit
-WV_OXH          = $5221
-WV_OYL          = $5222
-WV_OYH          = $5223
-WV_PTRL         = $5224         ; where its data is read
-WV_PTRH         = $5225
-WV_PTYPE        = $5226         ; the enemy entry read: type, position
-WV_PPOS         = $5227
-WV_FRESH        = $5228         ; 1 + the nametable the game built a room on last
-WV_SPAWNED      = $5229         ; non-zero when the game placed a room's enemy this frame
-WV_HI_BUF       = $5400         ; + 4 n: the high byte of sprite n, as the frame writes them
-WV_PSAVE        = $5230         ; slot $50 set aside (32 bytes, to $524F)
-WV_SLEEP        = $5300         ; + enemy slot offset: 1 asleep (placed by its room, not yet on
+; Variables in the extension's RAM (EXT + $200 to EXT + $7FF).
+WV_M            = EXT + $200    ; the margin enemies show in, this frame
+WV_ORIG         = EXT + $201    ; the last position test: 1 on the original screen, else 0
+WV_WIDE         = EXT + $202    ; and 1 within the margins, else 0
+WV_VALID        = EXT + $203    ; non-zero while WV_BASE is the object being drawn
+WV_BASEL        = EXT + $204    ; the 16-bit screen x of that object ($0E and its high byte)
+WV_BASEH        = EXT + $205
+WV_ASLEEP       = EXT + $206    ; the last enemy test: 1 when it sleeps in a margin
+WV_NT_X         = EXT + $210    ; + nametable (0, 1): the map x and y of the room the game built
+WV_NT_Y         = EXT + $212    ; there last
+WV_T0           = EXT + $214    ; scratch
+WV_T1           = EXT + $215
+WV_TWIN         = EXT + $216    ; non-zero while a door's twin is drawn
+WV_TWIN_SIDE    = EXT + $217    ; its side: 1 right, $FF left
+WV_CNTRL        = EXT + $218    ; the door's $6B
+WV_PREVIEW      = EXT + $219    ; non-zero while a preview is drawn
+WV_PREV_XL      = EXT + $21A    ; its 16-bit screen x and its screen y
+WV_PREV_XH      = EXT + $21B
+WV_PREV_Y       = EXT + $21C
+WV_CX           = EXT + $21D    ; the map room previewed
+WV_CY           = EXT + $21E
+WV_OXL          = EXT + $220    ; its top left corner on the screen, 16-bit
+WV_OXH          = EXT + $221
+WV_OYL          = EXT + $222
+WV_OYH          = EXT + $223
+WV_PTRL         = EXT + $224    ; where its data is read
+WV_PTRH         = EXT + $225
+WV_PTYPE        = EXT + $226    ; the enemy entry read: type, position
+WV_PPOS         = EXT + $227
+WV_FRESH        = EXT + $228    ; 1 + the nametable the game built a room on last
+WV_SPAWNED      = EXT + $229    ; non-zero when the game placed a room's enemy this frame
+WV_HI_BUF       = EXT + $400    ; + 4 n: the high byte of sprite n, as the frame writes them
+WV_PSAVE        = EXT + $230    ; slot $50 set aside (32 bytes)
+WV_SLEEP        = EXT + $300    ; + enemy slot offset: 1 asleep (placed by its room, not yet on
                                 ; the original screen)
-WV_STYPE        = $5301         ; + enemy slot offset: the type it was placed as
-WV_SEEN         = $5302         ; + enemy slot offset: 1 when it showed on the original screen at
+WV_STYPE        = EXT + $301    ; + enemy slot offset: the type it was placed as
+WV_SEEN         = EXT + $302    ; + enemy slot offset: 1 when it showed on the original screen at
                                 ; its last drawing
 
 ; The game.
@@ -332,7 +361,11 @@ AREA_START      = $930D         ; bank 0 (the title's): a game started in the ar
                                 ; password starts one
 
 .segment "CODE"
+.ifdef PACK
+.org $2000
+.else
 .org $5800
+.endif
 
 ; ---------------------------------------------------------------------------- ;
 ; The main loop's wait for the NMI ($C0C7, in place of LDA #$00 / STA $1A, the game's work for
@@ -1089,16 +1122,32 @@ preview_room:
     LDA     #$01
 @size:
     TAY
-    LDA     ENTRY_SIZES,Y
+    JSR     entry_size
     JSR     preview_step
     JMP     @entry
 @none:
     RTS
 
-; The sizes of a room's entries after $FD, by type ($EAD4): enemy 3, door 2, elevator 2,
-; statues 1, pipe of bugs 3.
-ENTRY_SIZES:
-    .byte   1, 3, 2, 1, 2, 1, 1, 3, 1, 1, 1, 1, 1, 1, 1, 1
+; A = the size of a room's entry after $FD of type Y ($EAD4): enemy (1) 3, door (2) 2, elevator
+; (4) 2, pipe of bugs (7) 3, the others (statues) 1. A test, not a table: in the pack the code's
+; data reads would reach the PPU.
+entry_size:
+    CPY     #$01
+    BEQ     @three
+    CPY     #$07
+    BEQ     @three
+    CPY     #$02
+    BEQ     @two
+    CPY     #$04
+    BEQ     @two
+    LDA     #$01
+    RTS
+@two:
+    LDA     #$02
+    RTS
+@three:
+    LDA     #$03
+    RTS
 
 ; Moves the room data pointer A bytes on and loads it into $00/$01.
 preview_step:
@@ -1341,6 +1390,13 @@ wide_new_game:
 @area:
     STY     IN_AREA
     JMP     AREA_START
+
+wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
+.assert wide_end <= $6000, error, "widescreen code past the window"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -1349,7 +1405,7 @@ wide_new_game:
 """Builds the Metroid (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Metroid (USA).nes> [out.bps]
-       python -I tools/build.py <Metroid (USA).nes> --pack <out.zxpk>
+       python -I tools/build.py <Metroid (USA) or (Europe).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank whose first 2 KiB the widescreen extension's PRG window shows at $5800-$5FFF (Zaxnes
@@ -1363,11 +1419,14 @@ Usage: python -I tools/build.py <Metroid (USA).nes> [out.bps]
    without iNES header; the game's banks moved or copied come from the player's ROM).
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
-(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the code (its used part) for the
-extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in the
-PRG-ROM, the ROM keeping its size. The testing aids need the hack's code: they stay in the
-"widescreen" component with the other hooks.
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): MMC1, each hook
+a 16 KiB bank and a CPU address, the widescreen in groups ("core", Base: the settings, the rooms
+of the nametables, the sprites in the margins; "enemies"; "doors": the doors, their twins and the
+items; "previews"; "invincible" and "level select", the aids, which need the hack's code) with
+checks of the game's code the hack relies on; src/wide.s assembled with PACK for $2000, the zone
+fantôme, which Zaxnes shows to instruction fetches from power-on, the extension unlocked; the hooks
+as offsets in the PRG-ROM, the ROM keeping its size. Metroid (Europe), the same code at the same
+places, gets the same pack for PAL.
 """
 
 import os
@@ -1377,6 +1436,7 @@ import sys
 import zlib
 
 SOURCE_CRC = 0x70080810
+EUROPE = 0x7751588D
 BANK_SIZE = 0x4000
 PRG_BANKS = 8
 PRG_SIZE = PRG_BANKS * BANK_SIZE
@@ -1385,6 +1445,8 @@ TARGET_BANKS = 16
 HACK_BANK = 8
 FIXED = 7
 CODE_START = 0x5800
+PACK_START = 0x2000             # the pack's code: the zone fantôme, below the extension at $3000
+PACK_SIZE = 0x1000
 WINDOW_SIZE = 0x800
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1452,19 +1514,20 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(pack=False):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if pack else (CODE_START, BANK_SIZE)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${BANK_SIZE:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
-                   check=True)
+    subprocess.run(tool('ca65') + ['-g'] + (['-D', 'PACK'] if pack else [])
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)], check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
     sym = {}
@@ -1481,26 +1544,66 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
-def pack(data, code, sym, out):
+# The groups past the core: (address of the hook).
+GROUPS = {
+    'enemies': {0xDE1B, 0xF39F, 0xECB4, 0xEB5E},
+    'doors': {0xDED2, 0x8BCC},
+    'previews': {0xCB66},
+    'invincible': {0xCE92},
+    'level select': {0x9354},
+}
+
+# The game's code the hack's code relies on, by group: (bank, address, length), checked by Zaxnes
+# to be the reference ROM's bytes. Core: the nametable a room is built on. Enemies: an enemy's
+# resting animation, its update without moving and where its drawing goes on. Doors: an object's
+# animation and drawing and where they go on. Level select: a game's start in an area (bank 0).
+CHECKS = {
+    'core': [(FIXED, 0xEB85, 3)],
+    'enemies': [(FIXED, 0xF682, 3), (FIXED, 0xF438, 3), (FIXED, 0xDEDE, 3), (FIXED, 0xDE53, 3)],
+    'doors': [(FIXED, 0xDE47, 3), (FIXED, 0xDE4A, 3), (FIXED, 0xDEE3, 3)],
+    'level select': [(0, 0x930D, 3)],
+}
+
+
+def pack(data, crc, out):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(1,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
-    for hook in hooks(sym):
-        bank, address, original, new = hook if len(hook) == 4 else (None, *hook)
-        offset = bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
-        assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
-        core.hook(*pack_place(offset, address), original, bytes(new))
-    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
-    used = (len(code.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    pack.name = 'Metroid (USA) widescreen'
-    pack.code = code[:used]
-    result = pack.build(data, 0x20000)
+    code, sym = assemble(pack=True)
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    europe = crc == EUROPE
+    name = 'Metroid (Europe)' if europe else 'Metroid (USA)'
+    pack = hackpack.Pack(name + ' widescreen', code[:used], region='pal' if europe else 'ntsc',
+                         mappers=(1,))
+    widescreen = pack.component('widescreen')
+    groups = {'core': widescreen.group('core', label='Base', label_fr='Base')}
+    for group, label, label_fr in (('enemies', 'Enemies in the margins', 'Ennemis dans les marges'),
+                                   ('doors', 'Doors and items in the margins',
+                                    'Portes et objets dans les marges'),
+                                   ('previews', 'Enemies of the rooms ahead',
+                                    'Ennemis des salles à venir'),
+                                   ('invincible', 'Invincible', 'Invincible'),
+                                   ('level select', 'Level select', 'Sélecteur de niveau')):
+        groups[group] = widescreen.group(group, requires=['core'], label=label, label_fr=label_fr)
+
+    def offset(bank, address):
+        return bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
+
+    for group, checks in CHECKS.items():
+        for bank, address, length in checks:
+            groups[group].check(*pack_place(offset(bank, address), address), length)
+    for bank, address, original, new in hooks(sym):
+        at = offset(bank, address)
+        assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
+        group = next((g for g, hooked in GROUPS.items() if address in hooked), 'core')
+        groups[group].hook(*pack_place(at, address), original, bytes(new))
+    result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, '
+          f'{" + ".join(str(len(group.hooks)) for group in groups.values())} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -1508,13 +1611,15 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = bytes(image[header:header + PRG_SIZE + CHR_SIZE])
-    assert zlib.crc32(data) == SOURCE_CRC, 'not Metroid (USA)'
+    crc = zlib.crc32(data)
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        assert crc in (SOURCE_CRC, EUROPE), 'not Metroid (USA) or (Europe)'
+        pack(bytes(data), crc, sys.argv[3])
+        return
+    assert crc == SOURCE_CRC, 'not Metroid (USA)'
 
     code, sym = assemble()
     assert len(code) == BANK_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), code, sym, sys.argv[3])
-        return
     # The window shows 2 KiB: the code must end before $6000.
     assert all(code[WINDOW_SIZE:] == bytes([0xFF]) * (BANK_SIZE - WINDOW_SIZE) for _ in [0]),         'the code does not fit in the window'
     banks = [bytearray(data[n * BANK_SIZE:(n + 1) * BANK_SIZE]) for n in range(PRG_BANKS)]

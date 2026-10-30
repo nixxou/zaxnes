@@ -1,4 +1,4 @@
-//! Metroid (USA): the margins of the world, decoded from its map and its rooms.
+//! Metroid (USA) and (Europe): the margins of the world, decoded from its map and its rooms.
 //!
 //! The world is a map of 32 x 32 rooms, one screen (256 x 240) each, its room numbers at `$7000`
 //! in PRG-RAM (`$FF`: no room); a room number is an entry of the area's room table. The game
@@ -44,6 +44,8 @@ pub struct Metroid;
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x7008_0810;
+/// The same of Metroid (Europe): its code and the area banks' tables at the same places.
+pub const SOURCE_CRC_EUROPE: u32 = 0x7751_588D;
 
 const GAME_MODE: u16 = 0x001D;
 const AREA_POINTERS: u16 = 0x003B;

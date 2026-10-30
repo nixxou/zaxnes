@@ -24,8 +24,8 @@
 //! | Excitebike (Japan, USA), and (Europe) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the settings, the riders in the margins), the ROM keeping its size; the European one the same for PAL (`excitebikewide`, `tools/build.py --pack`) |
 //! | Final Fantasy (USA), and (Japan) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the people and vehicles), the ROM keeping its size; the Japanese one for its code, which its Rev 1 takes (`ff1wide`, `tools/build.py --pack`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies), the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
-//! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
-//! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`metroidwide`, `tools/build.py --pack`) |
+//! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the enemies, the two aids), the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
+//! | Metroid (USA), and (Europe) | widescreen enemies, doors and items, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the enemies, the doors and items, the previews, the two aids), the ROM keeping its size; the European one the same for PAL (`metroidwide`, `tools/build.py --pack`) |
 //! | Mega Man 4 (USA), its Rev 1, and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; one pack for both USA builds and Rockman 4 (Japan), the same built from the European ROM, PAL; "Invincible" a component of its own, with or without the advanced mode (`mm4wide`, `tools/build.py --pack`) |
 //! | Mega Man 5 (USA), and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; Rockman 5 (Japan) by its signatures, the European build's own pack, PAL; "Invincible" a component of its own, with or without the advanced mode (`mm5wide`, `tools/build.py --pack`) |
 //! | Mega Man 6 (USA), and Rockman 6 (Japan) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; the Japanese build's own pack; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
@@ -169,6 +169,8 @@ pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
 pub const BLASTERMASTER_USA: &str = "Blaster Master (USA) widescreen";
 /// Name of the Metroid (USA) widescreen patch (advanced mode).
 pub const METROID_USA: &str = "Metroid (USA) widescreen";
+/// Name of the Metroid (Europe) widescreen patch (advanced mode).
+pub const METROID_EUROPE: &str = "Metroid (Europe) widescreen";
 /// Name of the Mega Man (USA) widescreen patch (advanced mode).
 pub const MEGAMAN1_USA: &str = "Mega Man (USA) widescreen";
 /// Name of the Mega Man (Europe) widescreen patch (advanced mode).
@@ -203,7 +205,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 51] = [
+pub const PATCHES: [BuiltinPatch; 52] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -966,9 +968,9 @@ pub const PATCHES: [BuiltinPatch; 51] = [
         game: "Blaster Master",
         rom_name: "Blaster Master (USA)",
         source_crc: 0x3F0F_D764,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core (its aids need the hack's code: they stay with the
-        // widescreen).
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in groups (the sprites, the enemies in the margins, and the two
+        // aids, which need the hack's code; `blastermasterwide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/blastermaster-usa-widescreen.zxpk"),
         options: &[
             // Testing aids: a new game starts with the game's own area select (up / down,
@@ -999,12 +1001,12 @@ pub const PATCHES: [BuiltinPatch; 51] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on.
-        boot_window: Some((0x80, 0x00)),
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
         boot_window_keeps_prg_ram: false,
-        boot_zone: false,
-        zone_data: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The frame's wait: BIT $12 / BMI, until the NMI clears it.
         idle_loop: Some((0xE93A, 0xE93D)),
     },
@@ -1013,45 +1015,41 @@ pub const PATCHES: [BuiltinPatch; 51] = [
         game: "Metroid",
         rom_name: "Metroid (USA)",
         source_crc: 0x7008_0810,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core (its aids need the hack's code: they stay with the
-        // widescreen).
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in groups (the sprites, the enemies, the doors and items, the
+        // previews, and the two aids, which need the hack's code; `metroidwide`, `tools/build.py
+        // --pack`).
         bps: include_bytes!("../patches/metroid-usa-widescreen.zxpk"),
-        options: &[
-            // Testing aids: a new game starts in the area a direction held at START picks, as a
-            // password starts one; no damage.
-            HackOption {
-                key: "level_select",
-                label: "Level select (hold a direction at START: up Norfair, right Kraid, left Tourian, down Ridley)",
-                label_fr: "Sélecteur de niveau (maintenir une direction sur START : haut Norfair, droite Kraid, gauche Tourian, bas Ridley)",
-                bit: 0,
-                default: false,
-            },
-            HackOption {
-                key: "invincible",
-                label: "Invincible",
-                label_fr: "Invincible",
-                bit: 1,
-                default: false,
-            },
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 2,
-                default: true,
-            },
-        ],
+        options: METROID_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on (2 KiB: the game's PRG-RAM is at $6000).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
-        zone_data: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The main loop's wait: TAY / LDA $1A / BNE / JMP (the NMI sets $1A).
+        idle_loop: Some((0xC0CB, 0xC0D2)),
+    },
+    BuiltinPatch {
+        name: METROID_EUROPE,
+        game: "Metroid",
+        rom_name: "Metroid (Europe)",
+        source_crc: 0x7751_588D,
+        // The same pack for PAL: the European code is the same at the same places.
+        bps: include_bytes!("../patches/metroid-europe-widescreen.zxpk"),
+        options: METROID_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The main loop's wait: TAY / LDA $1A / BNE / JMP (the NMI sets $1A).
         idle_loop: Some((0xC0CB, 0xC0D2)),
     },
@@ -1441,6 +1439,34 @@ const MEGAMAN2_OPTIONS: &[HackOption] = &[
         default: true,
     },
     // A testing aid: no damage, spikes harmless (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Metroid packs: testing aids, off by default, and the overclock.
+const METROID_OPTIONS: &[HackOption] = &[
+    // Testing aids: a new game starts in the area a direction held at START picks, as a
+    // password starts one; no damage.
+    HackOption {
+        key: "level_select",
+        label: "Level select (hold a direction at START: up Norfair, right Kraid, left Tourian, down Ridley)",
+        label_fr: "Sélecteur de niveau (maintenir une direction sur START : haut Norfair, droite Kraid, gauche Tourian, bas Ridley)",
+        bit: 0,
+        default: false,
+    },
     HackOption {
         key: "invincible",
         label: "Invincible",
