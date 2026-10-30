@@ -214,8 +214,11 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pub fast_forward: FastForwardState,
     /// The notification area.
     pub notifications: NotificationCenter,
-    /// The save slots.
+    /// The save slots of the game chosen (owner request: its ROM's files; none without a game).
     pub slots: SaveSlotIndex,
+    /// The slots shared by every game before the files were named after the ROM: a game's
+    /// states move to its files when it is chosen.
+    pub legacy_slots: SaveSlotIndex,
     /// Whether each slot's state fits the built-in ROM patches, by slot, save time and setting.
     slot_patch_cache:
         std::cell::RefCell<std::collections::HashMap<(String, i64, bool), jobs::SlotPatchStatus>>,
@@ -280,8 +283,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     .join(crate::persistence::hack_compat_cache::FILE_NAME)
             }),
         );
-        let mut slots = SaveSlotIndex::load(&paths, now());
-        slots.reconcile(&paths, |game_id| games.exists(game_id));
+        let mut legacy_slots = SaveSlotIndex::load(&paths, now());
+        legacy_slots.reconcile(&paths, |game_id| games.exists(game_id));
         let mut host = Self {
             pacer: FramePacer::new(
                 f64::from(RegionTiming::for_region(NesRegion::Ntsc).nominal_frames_per_second),
@@ -329,7 +332,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             core_ahead: true,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),
-            slots,
+            slots: SaveSlotIndex::new(),
+            legacy_slots,
             slot_patch_cache: std::cell::RefCell::default(),
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             hack_compat: std::cell::RefCell::new(hack_compat),
@@ -936,7 +940,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub fn shutdown(&mut self) {
         self.complete_frame_in_flight();
         self.stop_current_game(true, true);
-        if self.slots.save(&self.paths).is_err() {
+        if self.legacy_slots.save(&self.paths).is_err() {
             self.log("the save slot index could not be written.");
         }
         if let Some(store) = &mut self.settings_store {
@@ -1245,6 +1249,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if clear_current_game {
             self.current_game = None;
             self.game_options_rom = None;
+            // No game: no slots shown (owner request).
+            self.slots = SaveSlotIndex::new();
             self.pause_thumbnail = None;
             self.rollback.clear();
             self.frame_steps.clear();

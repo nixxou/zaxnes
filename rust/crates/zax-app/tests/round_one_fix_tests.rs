@@ -161,6 +161,7 @@ fn req_pers_042_a_user_game_is_deleted_with_its_states_its_file_and_its_cover() 
             .games_mut()
             .set_cover("mine", Some(&cover.file_name().unwrap().to_string_lossy()));
     }
+    let rom = harness.host.rom_file_name("mine");
     harness.run(Command::DeleteGame, CommandArgs::of_text("mine"));
     // The interface asked first, with the exact text of SPEC-10 REQ-UI-037.
     let request = harness.host.pending_confirmation().unwrap().clone();
@@ -176,8 +177,8 @@ fn req_pers_042_a_user_game_is_deleted_with_its_states_its_file_and_its_cover() 
     assert!(harness.host.current_game_id().is_none());
     assert!(!harness.host.slots.find("3").unwrap().is_occupied());
     assert!(!harness.host.slots.find("quick").unwrap().is_occupied());
-    assert!(!harness.paths.slot_state_file("3").exists());
-    assert!(!harness.paths.slot_state_file("quick").exists());
+    assert!(!harness.paths.slot_state_file(&rom, "3").exists());
+    assert!(!harness.paths.slot_state_file(&rom, "quick").exists());
     assert!(!profile_file.exists());
     assert!(!cover.exists());
     assert!(harness.host.games().library().find("mine").is_none());
@@ -221,7 +222,7 @@ fn req_ui_052_deleting_a_slot_asks_the_documented_question() {
     harness.run(Command::DeleteSlot, CommandArgs::of_number(5));
     assert!(harness.host.confirm_pending());
     assert!(!harness.host.slots.find("5").unwrap().is_occupied());
-    assert!(!harness.paths.slot_state_file("5").exists());
+    assert!(!harness.host.slot_state_file("5").exists());
 }
 
 #[test]

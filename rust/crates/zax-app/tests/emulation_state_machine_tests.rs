@@ -234,12 +234,13 @@ fn req_loop_052_the_exit_persists_settings_and_slots() {
         model.set_volume(0.25);
         model.set_auto_tv_mode(true);
     });
+    let rom = harness.host.rom_file_name("g1");
     harness.run(Command::Quit);
     assert!(harness.host.quit_requested());
     harness.host.shutdown();
     assert!(harness.paths.settings_file.is_file());
-    assert!(harness.paths.save_index_file.is_file());
-    assert!(!harness.paths.slot_state_file(QUICK_SLOT_ID).exists());
+    // Owner request: a ROM's states are its files; there is no index of them to write.
+    assert!(!harness.paths.slot_state_file(&rom, QUICK_SLOT_ID).exists());
     let mut reread = SettingsModel::new();
     let now = OffsetDateTime::from_unix_timestamp(harness.now()).expect("a valid instant");
     SettingsStore::new(&harness.paths).load(&mut reread, now);

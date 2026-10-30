@@ -97,22 +97,45 @@ impl UserDataPaths {
         }
     }
 
-    /// The save state file of `slot_id`.
+    /// The save state file of `slot_id` for the ROM whose file name, without its extension, is
+    /// `rom` (owner request): `<rom>.ss<n>`, the quick slot's `<rom>.ss0`.
     #[must_use]
-    pub fn slot_state_file(&self, slot_id: &str) -> PathBuf {
+    pub fn slot_state_file(&self, rom: &str, slot_id: &str) -> PathBuf {
+        self.saves_directory
+            .join(format!("{rom}.{}", slot_extension(slot_id)))
+    }
+
+    /// The thumbnail of `slot_id` for the ROM `rom`: `<rom>.ss<n>.png`.
+    #[must_use]
+    pub fn slot_thumbnail_file(&self, rom: &str, slot_id: &str) -> PathBuf {
+        self.saves_directory
+            .join(format!("{rom}.{}.png", slot_extension(slot_id)))
+    }
+
+    /// The save state file of `slot_id` as the slots shared by every game had it
+    /// (`<slot>.state`), before the files were named after the ROM.
+    #[must_use]
+    pub fn legacy_slot_state_file(&self, slot_id: &str) -> PathBuf {
         self.saves_directory.join(format!("{slot_id}.state"))
     }
 
-    /// The thumbnail of `slot_id`.
+    /// The thumbnail of `slot_id` as the shared slots had it (`<slot>.png`).
     #[must_use]
-    pub fn slot_thumbnail_file(&self, slot_id: &str) -> PathBuf {
+    pub fn legacy_slot_thumbnail_file(&self, slot_id: &str) -> PathBuf {
         self.saves_directory.join(format!("{slot_id}.png"))
     }
 
-    /// The battery RAM file of the ROM whose fingerprint is `rom_sha1`.
+    /// The battery RAM file `<name>.srm`: the ROM's file name without its extension (owner
+    /// request), or, as the files were named before, the ROM's fingerprint.
     #[must_use]
-    pub fn battery_file(&self, rom_sha1: &str) -> PathBuf {
-        self.battery_directory.join(format!("{rom_sha1}.srm"))
+    pub fn battery_file(&self, name: &str) -> PathBuf {
+        self.battery_directory.join(format!("{name}.srm"))
+    }
+
+    /// Movie `number` of the ROM `rom`: `<rom>.mv<number>` (owner request).
+    #[must_use]
+    pub fn movie_file(&self, rom: &str, number: u32) -> PathBuf {
+        self.movies_directory.join(format!("{rom}.mv{number}"))
     }
 
     /// Resolves the root, in this order: the explicit root, the portable folder when the marker
@@ -241,6 +264,26 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     let temporary = path.with_file_name(name);
     fs::write(&temporary, contents)?;
     fs::rename(temporary, path)
+}
+
+/// The extension of the state file of `slot_id`: `ss<n>`, the quick slot's `ss0`.
+#[must_use]
+pub fn slot_extension(slot_id: &str) -> String {
+    if slot_id == crate::persistence::save_slots::QUICK_SLOT_ID {
+        "ss0".to_owned()
+    } else {
+        format!("ss{slot_id}")
+    }
+}
+
+/// The name the files of the ROM `rom_path` are given (owner request): its file name without
+/// its extension (an archive's for a ROM in one).
+#[must_use]
+pub fn rom_file_stem(rom_path: &str) -> Option<String> {
+    Path::new(rom_path)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty())
 }
 
 /// Sets an unreadable file aside as `<path>.corrupt-<timestamp>` (REQ-PERS-022). Nothing else

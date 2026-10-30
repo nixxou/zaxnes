@@ -1160,7 +1160,7 @@ fn slot_state(host: &AppHost, slot: i32) -> SlotState {
 /// The thumbnail of the numbered slot `slot`, as the renderer takes it: none when it has no
 /// readable one.
 fn state_picture(host: &AppHost, slot: i32) -> Option<UiPicture> {
-    let file = host.paths().slot_thumbnail_file(&numbered_slot_id(slot));
+    let file = host.slot_thumbnail_file(&numbered_slot_id(slot));
     let image = zax_render::assets::png_image::decode(&std::fs::read(file).ok()?).ok()?;
     Some(UiPicture {
         width: u32::try_from(image.width).ok()?,

@@ -203,10 +203,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if self.current_game_id() == Some(game_id) {
             self.stop_current_game(true, true);
         }
-        // 2. Every slot of that game, the quick slot included.
-        for slot in self.slots.occupied_for(game_id) {
-            self.delete_slot(&slot.id);
+        // 2. Every slot of that game, the quick slot included: its ROM's files, and those of the
+        // slots shared by every game before.
+        let rom = self.rom_file_name(game_id);
+        let index = save_slots::SaveSlotIndex::for_rom(&self.paths, &rom);
+        for slot in index.occupied_for(game_id) {
+            index.delete_files(&self.paths, &slot.id);
         }
+        if self.slots.rom() == Some(rom.as_str()) {
+            self.slots = save_slots::SaveSlotIndex::new();
+        }
+        for slot in self.legacy_slots.occupied_for(game_id) {
+            self.legacy_slots.delete_files(&self.paths, &slot.id);
+            self.legacy_slots.vacate(&slot.id);
+        }
+        self.save_slot_index();
         // 3 to 5. The profile file, the cover art and the library entry, then library.json.
         if !self.games.delete_game(game_id) {
             return false;
@@ -293,7 +304,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if !save_slots::is_valid_slot_id(slot_id) {
             return;
         }
-        save_slots::delete_files(&self.paths, slot_id);
+        self.slots.delete_files(&self.paths, slot_id);
         self.slots.vacate(slot_id);
         self.save_slot_index();
     }
@@ -319,7 +330,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     pub(super) fn save_slot_index(&self) {
-        if self.slots.save(&self.paths).is_err() {
+        if self.legacy_slots.save(&self.paths).is_err() {
             self.log("the save slot index could not be written.");
         }
     }

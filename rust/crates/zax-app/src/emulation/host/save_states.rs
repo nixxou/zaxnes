@@ -9,11 +9,46 @@ use crate::audio::UiSound;
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::notification_center::{NotificationSeverity, DEFAULT_SECONDS, SHORT_SECONDS};
-use crate::persistence::save_slots::{is_valid_slot_id, QUICK_SLOT_ID};
+use crate::persistence::save_slots::{self, is_valid_slot_id, SaveSlotIndex, QUICK_SLOT_ID};
 use crate::persistence::save_state_file::{self, SaveStateContent, SaveStateHeader};
-use crate::user_data_paths::{remove_file_if_present, write_atomic};
+use crate::user_data_paths::{remove_file_if_present, rom_file_stem, write_atomic};
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
+    /// The name the files of `game_id` are given (owner request): its ROM's file name without
+    /// its extension, or the game's identifier for a game without a ROM file.
+    #[must_use]
+    pub fn rom_file_name(&self, game_id: &str) -> String {
+        self.games
+            .rom_path(game_id)
+            .as_deref()
+            .and_then(rom_file_stem)
+            .unwrap_or_else(|| game_id.to_owned())
+    }
+
+    /// Makes the slots those of `game_id`'s ROM (owner request: only its states are shown), its
+    /// states of the slots shared by every game before moved to its files first, and its movies
+    /// of before renamed after the ROM.
+    pub(super) fn choose_slots(&mut self, game_id: &str) {
+        let rom = self.rom_file_name(game_id);
+        if save_slots::move_legacy_states(&self.paths, &mut self.legacy_slots, game_id, &rom) > 0 {
+            self.save_slot_index();
+        }
+        self.rename_legacy_movies(game_id, &rom);
+        self.slots = SaveSlotIndex::for_rom(&self.paths, &rom);
+    }
+
+    /// The state file of `slot_id` of the game chosen.
+    #[must_use]
+    pub fn slot_state_file(&self, slot_id: &str) -> std::path::PathBuf {
+        self.slots.state_file(&self.paths, slot_id)
+    }
+
+    /// The thumbnail of `slot_id` of the game chosen.
+    #[must_use]
+    pub fn slot_thumbnail_file(&self, slot_id: &str) -> std::path::PathBuf {
+        self.slots.thumbnail_file(&self.paths, slot_id)
+    }
+
     /// Captures the state of the game being played for `slot_id`: the core, the scripts' data,
     /// the camera and the learned conversion state (REQ-PERS-055).
     pub fn capture_save_state(&mut self, slot_id: &str) -> Option<SaveStateContent> {
@@ -136,7 +171,6 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             content.header.saved_at,
             picture.is_some(),
         );
-        self.slots.save(&self.paths)?;
         let file = save_state_file::write(content);
         let bound = self.session.as_ref().map_or(0, |session| {
             save_state_file::max_file_size(session.core().max_state_size())
@@ -149,8 +183,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 "savestate of slot {slot_id} is larger than the announced bound."
             ));
         }
-        write_atomic(&self.paths.slot_state_file(slot_id), &file)?;
-        let thumbnail_file = self.paths.slot_thumbnail_file(slot_id);
+        write_atomic(&self.slot_state_file(slot_id), &file)?;
+        let thumbnail_file = self.slot_thumbnail_file(slot_id);
         if let Some(picture) = picture {
             let png = png_image::encode_rgb(
                 u32::try_from(THUMBNAIL_WIDTH).unwrap_or(0),

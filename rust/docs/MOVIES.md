@@ -18,7 +18,7 @@ Tools menu:
 | Entry | Command | What it does |
 |---|---|---|
 | Record a movie | `tools.record_movie` (toggle) | starts recording from the state on screen; again, stops and saves |
-| Play a movie | `tools.play_movie` (path in the argument) | submenu of the 15 newest movies of the `movies` folder; loads the movie's start state and plays its inputs, then gives the game back to the player |
+| Play a movie | `tools.play_movie` (path in the argument) | submenu of the 15 newest movies of the game chosen (none without a game); loads the movie's start state and plays its inputs, then gives the game back to the player |
 | Note on this frame… | `tools.annotate_movie`, Ctrl+M | pauses the game and asks for a note on the frame on screen (Write button or Ctrl+Enter; Escape cancels) |
 | Stop the movie | `tools.stop_movie` | stops recording (saves) or playing |
 
@@ -35,8 +35,12 @@ from the menu.
   written back to its file when it stops.
 * A movie being recorded is saved when it stops, and also when the game stops, is reset, or is
   reloaded (switching the built-in hack).
-* Files: `<user data>/movies/<game> <date>.zmv` (Windows: `%LOCALAPPDATA%\Zaxnes\movies`); each
-  note is also written to the log (`movie note at frame N: …`).
+* Files: `<user data>/movies/<rom>.mv<n>` (Windows: `%LOCALAPPDATA%\Zaxnes\movies`), named after
+  the ROM's file name without its extension, `<n>` one past the highest of that ROM (owner
+  request); a movie named as before (`<game> <date>.zmv`) is renamed so when its game is chosen.
+  Each note is also written to the log (`movie note at frame N: …`). Save states follow the same
+  rule (`saves/<rom>.ss<n>`, the quick slot `.ss0`, the thumbnail `.ss<n>.png`; only those of the
+  game chosen are listed), and so does the battery RAM (`battery/<rom>.srm`).
 
 ## 2. The clock
 

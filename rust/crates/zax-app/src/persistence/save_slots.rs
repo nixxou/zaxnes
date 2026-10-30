@@ -1,5 +1,8 @@
-//! The index of the save slots (SPEC-09 REQ-PERS-040 to 047): 36 numbered slots and the quick
-//! one, each either empty or naming the game and the instant it holds.
+//! The save slots of a ROM (SPEC-09 REQ-PERS-040 to 047): 36 numbered slots and the quick one,
+//! each either empty or naming the game and the instant it holds. Owner request: a ROM's states
+//! are files named after it (`<rom>.ss<n>`, the quick slot's `<rom>.ss0`), read from the files
+//! when the game is chosen; only its slots are shown. The slots shared by every game before
+//! (`index.json`, `<slot>.state`) are read once more to move a game's states to its files.
 
 use std::fs;
 
@@ -60,6 +63,9 @@ struct SaveSlotIndexFile {
 #[derive(Debug, Clone)]
 pub struct SaveSlotIndex {
     slots: Vec<SaveSlotRecord>,
+    /// The ROM whose states the slots hold (its file name without extension); `None` for the
+    /// shared slots of before, or for none.
+    rom: Option<String>,
     /// Whether the index file was unreadable and has been rebuilt from the state files.
     pub was_recovered: bool,
 }
@@ -86,8 +92,49 @@ impl SaveSlotIndex {
         });
         Self {
             slots,
+            rom: None,
             was_recovered: false,
         }
+    }
+
+    /// The slots of the ROM `rom`, read from its state files.
+    #[must_use]
+    pub fn for_rom(paths: &UserDataPaths, rom: &str) -> Self {
+        let mut index = Self::new();
+        index.rom = Some(rom.to_owned());
+        index.rebuild_from_files(paths);
+        index
+    }
+
+    /// The ROM whose slots these are, if any.
+    #[must_use]
+    pub fn rom(&self) -> Option<&str> {
+        self.rom.as_deref()
+    }
+
+    /// The state file of `slot_id`: the ROM's, or the shared slots' of before.
+    #[must_use]
+    pub fn state_file(&self, paths: &UserDataPaths, slot_id: &str) -> std::path::PathBuf {
+        self.rom.as_deref().map_or_else(
+            || paths.legacy_slot_state_file(slot_id),
+            |rom| paths.slot_state_file(rom, slot_id),
+        )
+    }
+
+    /// The thumbnail of `slot_id`: the ROM's, or the shared slots' of before.
+    #[must_use]
+    pub fn thumbnail_file(&self, paths: &UserDataPaths, slot_id: &str) -> std::path::PathBuf {
+        self.rom.as_deref().map_or_else(
+            || paths.legacy_slot_thumbnail_file(slot_id),
+            |rom| paths.slot_thumbnail_file(rom, slot_id),
+        )
+    }
+
+    /// Deletes the state and the thumbnail of `slot_id`. A file that cannot be removed is left:
+    /// the slot is empty either way.
+    pub fn delete_files(&self, paths: &UserDataPaths, slot_id: &str) {
+        remove_file_if_present(&self.state_file(paths, slot_id));
+        remove_file_if_present(&self.thumbnail_file(paths, slot_id));
     }
 
     /// Every slot, in menu order.
@@ -122,13 +169,20 @@ impl SaveSlotIndex {
         saved_at: i64,
         has_thumbnail: bool,
     ) -> bool {
+        let rom = self.rom.clone();
         let Some(slot) = self.find_mut(slot_id) else {
             return false;
         };
         game_id.clone_into(&mut slot.game_id);
         slot.saved_at = saved_at;
-        slot.file = Some(format!("{slot_id}.state"));
-        slot.thumbnail = has_thumbnail.then(|| format!("{slot_id}.png"));
+        let extension = crate::user_data_paths::slot_extension(slot_id);
+        if let Some(rom) = rom.as_deref() {
+            slot.file = Some(format!("{rom}.{extension}"));
+            slot.thumbnail = has_thumbnail.then(|| format!("{rom}.{extension}.png"));
+        } else {
+            slot.file = Some(format!("{slot_id}.state"));
+            slot.thumbnail = has_thumbnail.then(|| format!("{slot_id}.png"));
+        }
         true
     }
 
@@ -155,8 +209,10 @@ impl SaveSlotIndex {
         found
     }
 
-    /// Reads the index. A missing file gives empty slots; an unreadable one is set aside and the
-    /// index is rebuilt from the state files (REQ-PERS-047).
+    /// Reads the index of the slots shared by every game before the files were named after the
+    /// ROM (owner request), whose states are moved to the files of their game when it is
+    /// chosen. A missing file gives empty slots; an unreadable one is set aside and the index is
+    /// rebuilt from the state files (REQ-PERS-047).
     #[must_use]
     pub fn load(paths: &UserDataPaths, now: OffsetDateTime) -> Self {
         let mut index = Self::new();
@@ -194,8 +250,19 @@ impl SaveSlotIndex {
     /// Reads the header of every state file and fills the slots from them. A slot whose file
     /// cannot be read stays empty.
     pub fn rebuild_from_files(&mut self, paths: &UserDataPaths) {
+        let rom = self.rom.clone();
         for slot in &mut self.slots {
-            let Ok(bytes) = fs::read(paths.slot_state_file(&slot.id)) else {
+            let (state, thumbnail) = match rom.as_deref() {
+                Some(rom) => (
+                    paths.slot_state_file(rom, &slot.id),
+                    paths.slot_thumbnail_file(rom, &slot.id),
+                ),
+                None => (
+                    paths.legacy_slot_state_file(&slot.id),
+                    paths.legacy_slot_thumbnail_file(&slot.id),
+                ),
+            };
+            let Ok(bytes) = fs::read(&state) else {
                 continue;
             };
             let Some(content) = save_state_file::try_read(&bytes) else {
@@ -203,11 +270,14 @@ impl SaveSlotIndex {
             };
             slot.game_id = content.header.game_id;
             slot.saved_at = content.header.saved_at;
-            slot.file = Some(format!("{}.state", slot.id));
-            slot.thumbnail = paths
-                .slot_thumbnail_file(&slot.id)
+            slot.file = state
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned());
+            slot.thumbnail = thumbnail
                 .is_file()
-                .then(|| format!("{}.png", slot.id));
+                .then(|| thumbnail.file_name())
+                .flatten()
+                .map(|name| name.to_string_lossy().into_owned());
         }
     }
 
@@ -224,8 +294,9 @@ impl SaveSlotIndex {
                 continue;
             }
             if !game_exists(&slot.game_id) {
-                delete_files(paths, &slot.id);
-            } else if paths.slot_state_file(&slot.id).is_file() {
+                remove_file_if_present(&paths.legacy_slot_state_file(&slot.id));
+                remove_file_if_present(&paths.legacy_slot_thumbnail_file(&slot.id));
+            } else if paths.legacy_slot_state_file(&slot.id).is_file() {
                 continue;
             }
             slot.game_id.clear();
@@ -237,12 +308,18 @@ impl SaveSlotIndex {
         cleared
     }
 
-    /// Writes the index, unless the root is read-only.
+    /// Writes the index of the shared slots of before, unless the root is read-only; once every
+    /// state has gone to its game's files, the index file goes. The slots of a ROM have no index:
+    /// their files are their index.
     ///
     /// # Errors
     /// The file could not be written.
     pub fn save(&self, paths: &UserDataPaths) -> std::io::Result<()> {
-        if !paths.is_writable {
+        if !paths.is_writable || self.rom.is_some() {
+            return Ok(());
+        }
+        if !self.slots.iter().any(SaveSlotRecord::is_occupied) {
+            remove_file_if_present(&paths.save_index_file);
             return Ok(());
         }
         let file = SaveSlotIndexFile {
@@ -269,9 +346,31 @@ pub fn is_valid_slot_id(slot_id: &str) -> bool {
             .is_ok_and(|number| (1..=NUMBERED_SLOT_COUNT).contains(&number))
 }
 
-/// Deletes the state and the thumbnail of `slot_id`. A file that cannot be removed is left: the
-/// slot is empty in the index either way.
-pub fn delete_files(paths: &UserDataPaths, slot_id: &str) {
-    remove_file_if_present(&paths.slot_state_file(slot_id));
-    remove_file_if_present(&paths.slot_thumbnail_file(slot_id));
+/// Moves the states of `game_id` from the shared slots of before (`legacy`) to the files of its
+/// ROM `rom`, keeping their slot, unless the ROM has a state there already; the slots moved are
+/// emptied in `legacy`. Returns how many were moved.
+pub fn move_legacy_states(
+    paths: &UserDataPaths,
+    legacy: &mut SaveSlotIndex,
+    game_id: &str,
+    rom: &str,
+) -> usize {
+    let mut moved = 0;
+    let ids: Vec<String> = legacy
+        .occupied_for(game_id)
+        .into_iter()
+        .map(|slot| slot.id)
+        .collect();
+    for id in ids {
+        let target = paths.slot_state_file(rom, &id);
+        if !target.exists() && fs::rename(paths.legacy_slot_state_file(&id), &target).is_ok() {
+            let thumbnail = paths.legacy_slot_thumbnail_file(&id);
+            if thumbnail.is_file() {
+                let _ = fs::rename(&thumbnail, paths.slot_thumbnail_file(rom, &id));
+            }
+            legacy.vacate(&id);
+            moved += 1;
+        }
+    }
+    moved
 }
