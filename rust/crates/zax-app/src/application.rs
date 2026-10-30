@@ -1203,10 +1203,15 @@ const GROUP_DRAWS_VARIABLE: &str = "ZAXNES_GROUP_DRAWS";
 fn load_bindings(store: &mut FileInputBindingStore, device: bool) -> crate::input::InputBindings {
     let mut bindings = crate::input::InputBindings::new();
     store.load(&mut bindings);
+    let loaded = bindings.revision();
     if device {
         bindings.use_handheld_defaults();
     } else {
         bindings.use_desktop_console_defaults();
+    }
+    // A pad moved to the new defaults is written, so that the file says what it plays with.
+    if bindings.revision() != loaded {
+        store.save(&bindings);
     }
     bindings
 }
