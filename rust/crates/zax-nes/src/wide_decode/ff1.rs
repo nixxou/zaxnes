@@ -1,4 +1,4 @@
-//! Final Fantasy (USA): the margins of the world map and of the towns, castles and dungeons,
+//! Final Fantasy (USA) and (Japan): the margins of the world map and of the towns, castles and dungeons,
 //! decoded from their maps.
 //!
 //! Both kinds of map are grids of tiles of 16 x 16 pixels, drawn through the tileset the game
@@ -36,6 +36,9 @@ pub struct FinalFantasy;
 
 /// CRC-32 of the ROM's data, iNES header excluded: Final Fantasy (USA).
 pub const SOURCE_CRC: u32 = 0xCEBD_2A31;
+/// The same of Final Fantasy (Japan) and its Rev 1: the world map in the same banks, the same RAM.
+pub const SOURCE_CRC_JAPAN: u32 = 0x466E_FDC2;
+pub const SOURCE_CRC_JAPAN_REV1: u32 = 0xF71E_7EDD;
 
 const MAP_FLAGS: u16 = 0x002D;
 const WORLD_SCROLL_X: u16 = 0x0027;

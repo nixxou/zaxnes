@@ -29,17 +29,27 @@ the battery file is the same.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/final-fantasy-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, MMC1, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
-memory instead of the game's free space described here (the source assembled for `$5800`, without
-the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
-from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
-checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free space). The game
-has no testing aid. The BPS patch described here is kept to compare.
+**Hack pack.** Zaxnes ships this hack as hack packs (`tools/build.py <rom> --pack <out.zxpk>`,
+with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md`
+7.1), both from this source: `final-fantasy-usa-widescreen.zxpk` and
+`final-fantasy-japan-widescreen.zxpk` for Final Fantasy (Japan) (data CRC-32 `466EFDC2`), which its
+Rev 1 takes: the same code and RAM, the fixed bank's sprite code `$8F` bytes later and its wait for
+the NMI `$33` later, the world map in the same banks. The packs are format 2, written by Zaxnes'
+shared builder (`hackpack.py`): NTSC, MMC1, each hook a 16 KiB bank and a CPU address with the
+game's bytes it replaces, checked and applied by Zaxnes; the ROM keeps its size (nothing written in
+its free space). `src/wide.s` is assembled with `-D PACK` for `$2000`: the zone fantôme, which
+Zaxnes shows to instruction fetches only from power-on, the extension unlocked; its registers and
+RAM are at `$3000`-`$3FFF` (widescreen MMC5: `$5000`-`$5FFF` stays the cartridge's), no window.
+The code reads no data of its own (the game's data reads at `$2000`-`$3FFF` reach the PPU: the
+`LDA $2002` of the wait still reads the PPU's status). The widescreen is in two groups: "core"
+(Base: the settings, the sprites' high bytes) and "people" (People and vehicles in the margins,
+needing it), with checks of the game's code the hack relies on: where the sprite builder goes on,
+and where a person and a vehicle, shown or not, go on. Over a pool of 137 ROMs of the game (the
+USA, Japanese, beta and Virtual Console dumps, the French translations, the ROM hacks that are not
+combined with a translation), 125 take a whole pack; the others are ROM hacks that move the wait
+for the NMI or put the game on MMC3. 3000 frames of each with scripted inputs (the party made,
+then walking on the world map and fighting) play as without the pack. The game has no testing aid.
+The BPS patch described here is kept to compare.
 
 ## 2. The extension and the code's place
 
@@ -173,14 +183,18 @@ the game travels in it. `make_doc.py` writes this document's appendices from the
 ; map and the standard maps there. The hack draws the people of a standard map (towns, castles,
 ; dungeons) and the vehicles, the bridge and the canal of the world map past the edges of the
 ; screen, where the game leaves them out: their sprites get a 16-bit x (the extension's high
-; bytes at $5100).
+; bytes, WIDE_SPRHI).
 ;
 ; The code is WINDOW, 2 KiB of the free end of PRG bank 6 (from its page $30, zeros in the game),
 ; which the extension's PRG window shows at $5800-$5FFF. The game's fixed bank has no room for
 ; code that would unlock the extension, so the built-in patch opens the window from power-on
 ; (BuiltinPatch::boot_window): the hack needs Zaxnes. In the Zaxnes hack pack
-; (tools/build.py --pack), WINDOW is the pack's code instead, in the extension's memory, which the
-; window shows from power-on: nothing goes in bank 6.
+; (tools/build.py --pack, -D PACK), WINDOW is the pack's code instead, assembled for $2000: the
+; zone fantôme, which Zaxnes shows to instruction fetches only from power-on, the extension
+; unlocked; nothing goes in bank 6. The game's data reads there still reach the PPU (the code reads
+; no data of its own), and the extension's registers and RAM are at $3000-$3FFF, which the zone
+; holds for its own instructions (widescreen MMC5: $5000-$5FFF stays the cartridge's). Final
+; Fantasy (Japan) and its Rev 1 have the same code and RAM, at other places.
 ;
 ; Once a frame, as the game waits for the NMI, the hack writes the extension's settings and the
 ; overclock of the option "No slowdown".
@@ -190,18 +204,23 @@ the game travels in it. `make_doc.py` writes this document's appendices from the
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1: sprites free of the extents
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1: sprites free of the extents
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
-; Extension RAM ($5200-$57FF).
-WV_XHI          = $5200         ; the high byte of the x of the next sprite drawn ($E301), 0 after
-WV_T            = $5201         ; scratch
+; Extension RAM (EXT + $200 to EXT + $7FF).
+WV_XHI          = EXT + $200    ; the high byte of the x of the next sprite drawn ($E301), 0 after
+WV_T            = EXT + $201    ; scratch
 
 ; The options ($500A).
 OPT_NO_SLOWDOWN = $01           ; 255 lines of overclock: no lag frame
@@ -350,6 +369,11 @@ show:   pla
         clc
         rts
 .endproc
+
+wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -358,7 +382,7 @@ show:   pla
 """Builds the Final Fantasy (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Final Fantasy (USA).nes> [out.bps]
-       python -I tools/build.py <Final Fantasy (USA).nes> --pack <out.zxpk>
+       python -I tools/build.py <Final Fantasy (USA) or (Japan).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH): the WINDOW segment
    for $5800, 2 KiB the widescreen extension's PRG window shows there, taken from the free end of
@@ -371,11 +395,14 @@ Usage: python -I tools/build.py <Final Fantasy (USA).nes> [out.bps]
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
 (tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the WINDOW segment (filled with
-$FF, what Zaxnes reads past the pack's code) is the pack's code, for $5800 of the extension's
-memory, which Zaxnes shows in the PRG window from power-on; the hooks, each with the game's bytes
-it replaces, checked by Zaxnes before it applies them. Nothing goes in the game's free space and
-the ROM keeps its size.
+each hook a 16 KiB bank and a CPU address, the widescreen in two groups ("core", Base: the
+settings and the sprites' high bytes; "people", needing it: the people and the vehicles in the
+margins) with checks of the game's code the hack relies on; the WINDOW segment, assembled with
+PACK for $2000 (the zone fantôme, which Zaxnes shows to instruction fetches from power-on), is the
+pack's code; the hooks, each with the game's bytes it replaces, checked by Zaxnes before it
+applies them. Nothing goes in the game's free space and the ROM keeps its size. Final Fantasy
+(Japan) gets its own pack, which its Rev 1 takes: the same code and RAM, the fixed bank's at other
+places.
 """
 
 import os
@@ -398,8 +425,11 @@ NAME = 'final-fantasy-usa'
 
 NOP = 0xEA
 
-# The data CRC-32 of Final Fantasy (USA).
+# The data CRC-32 of Final Fantasy (USA), and of Final Fantasy (Japan).
 SOURCE_CRC = 0xCEBD2A31
+JAPAN = 0x466EFDC2
+PACK_START = 0x2000             # the pack's code: the zone fantôme, below the extension at $3000
+PACK_SIZE = 0x1000
 
 
 def jsr(target):
@@ -467,9 +497,10 @@ def assemble(pack=False):
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
     window_bin = os.path.join(build, 'window.bin')
+    start, size = (PACK_START, PACK_SIZE) if pack else (WINDOW_START, WINDOW_SIZE)
     open(cfg, 'w', newline='\n').write(
         'MEMORY {\n'
-        f'  WINDOW: start = ${WINDOW_START:04X}, size = ${WINDOW_SIZE:04X}, fill = yes, '
+        f'  WINDOW: start = ${start:04X}, size = ${size:04X}, fill = yes, '
         f'fillval = ${0xFF if pack else 0:02X}, '
         f'file = "{wsl_path(window_bin)}";\n'
         '}\n'
@@ -478,7 +509,7 @@ def assemble(pack=False):
         '}\n')
     obj = os.path.join(build, 'wide.o')
     labels = os.path.join(build, 'wide.labels')
-    flags = []
+    flags = ['-D', 'PACK'] if pack else []
     for symbol in [d for d in os.environ.get('WIDE_DEFINES', '').split(',') if d]:
         flags += ['-D', symbol]
     subprocess.run(tool('ca65') + ['-g'] + flags +
@@ -499,27 +530,61 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
-def pack(data, out):
+# Where Final Fantasy (Japan) and its Rev 1 have the USA's places the pack hooks or checks (the
+# same instructions and RAM): the fixed bank's sprite code $8F bytes later, the wait for the NMI
+# $33 later.
+JAPAN_PLACES = {0xFEA8: 0xFEDB, 0xE316: 0xE3A5, 0xE31B: 0xE3AA, 0xE70D: 0xE79C, 0xE3F4: 0xE483,
+                0xE72E: 0xE7BD, 0xE72C: 0xE7BB, 0xE409: 0xE498, 0xE40D: 0xE49C}
+
+# The people group: a standard map's people and the world map's vehicles.
+PEOPLE = {0xE70D, 0xE3F4}
+
+# The game's code the hack's code relies on, by group: (address, length) in the fixed bank,
+# checked by Zaxnes to be the reference ROM's bytes. Core: where the sprite builder goes on.
+# People: where a person and a vehicle shown or not go on.
+CHECKS = {
+    'core': [(0xE31B, 3)],
+    'people': [(0xE72E, 2), (0xE72C, 2), (0xE409, 2), (0xE40D, 2)],
+}
+
+
+def pack(data, crc, out):
     window, sym = assemble(pack=True)
-    assert len(window) == WINDOW_SIZE
+    assert len(window) == PACK_SIZE
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(1,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    japan = crc == JAPAN
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    name = 'Final Fantasy (Japan)' if japan else 'Final Fantasy (USA)'
+    pack = hackpack.Pack(name + ' widescreen', window[:used], region='ntsc', mappers=(1,))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'people': widescreen.group('people', requires=['core'],
+                                   label='People and vehicles in the margins',
+                                   label_fr='Personnages et véhicules dans les marges'),
+    }
+
+    def place(address):
+        if japan:
+            address = JAPAN_PLACES[address]
+        at = offset(FIXED_BANK, address)
+        return at, pack_place(at, address)
+
+    for group, checks in CHECKS.items():
+        for address, length in checks:
+            groups[group].check(*place(address)[1], length)
     for bank, address, original, new in hooks(sym):
-        at = offset(bank, address)
+        at, where = place(address)
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
-        core.hook(*pack_place(at, address), bytes(original), bytes(new))
-    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
-    used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    pack.name = 'Final Fantasy (USA) widescreen'
-    pack.code = window[:used]
-    result = pack.build(data, 0x40000)
+        groups['people' if address in PEOPLE else 'core'].hook(*where, bytes(original), bytes(new))
+    result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
+    print(f'{out}: {len(result)} bytes ({used} of code, '
+          f'{" + ".join(str(len(group.hooks)) for group in groups.values())} hooks), '
           f'pack CRC {zlib.crc32(result):08X}')
 
 
@@ -529,12 +594,13 @@ def main():
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = image[header:header + PRG_SIZE]
     crc = zlib.crc32(data)
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        if crc not in (SOURCE_CRC, JAPAN):
+            sys.exit(f'{rom_path}: not Final Fantasy (USA) or (Japan) (data CRC {crc:08X})')
+        pack(bytes(data), crc, sys.argv[3])
+        return
     if crc != SOURCE_CRC:
         sys.exit(f'{rom_path}: not Final Fantasy (USA) (data CRC {crc:08X})')
-
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), sys.argv[3])
-        return
     window, sym = assemble()
     assert len(window) == WINDOW_SIZE
     prg = bytearray(data)
