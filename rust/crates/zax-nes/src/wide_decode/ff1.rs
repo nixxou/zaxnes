@@ -1,5 +1,5 @@
-//! Final Fantasy (USA) and (Japan): the margins of the world map and of the towns, castles and dungeons,
-//! decoded from their maps.
+//! Final Fantasy (USA) and (Japan): the margins of the world map and of the towns, castles and
+//! dungeons, decoded from their maps.
 //!
 //! Both kinds of map are grids of tiles of 16 x 16 pixels, drawn through the tileset the game
 //! keeps in RAM: tile `t` is the CHR tiles at `$0500 + t` (top left), `$0580 + t` (top right),
