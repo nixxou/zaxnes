@@ -6,19 +6,23 @@ using Zax.Platform.Input;
 namespace Zax.Acceptance.Tests;
 
 /// <summary>
-/// SPEC-08 §3.1, §3.2 and §3.4: the 19 actions and their bit values, the combination of the
+/// SPEC-08 §3.1, §3.2 and §3.4: the actions and their bit values, the combination of the
 /// sources, the byte the core receives, the keyboard defaults and the analog thresholds.
 /// </summary>
+/// <remarks>
+/// The table of §4.1 has 19 rows; AMD-044 REQ-INP-125 adds a twentieth, <c>SoftReset</c>, at the
+/// next free code of the extended-action table, with no default binding.
+/// </remarks>
 public sealed class InputCoreTests
 {
-    /// <summary>REQ-INP-001: exactly two players and 19 actions each, and no J3.</summary>
+    /// <summary>REQ-INP-001 and AMD-044: two players, 20 actions each, and no J3.</summary>
     [Fact]
-    public void REQ_INP_001_two_players_and_nineteen_actions()
+    public void REQ_INP_001_two_players_and_twenty_actions()
     {
         Assert.Equal(2, InputActions.PlayerCount);
-        Assert.Equal(19, InputActions.Count);
-        Assert.Equal(19, InputActions.All.Count);
-        Assert.Equal(19, InputActions.All.Distinct().Count());
+        Assert.Equal(20, InputActions.Count);
+        Assert.Equal(20, InputActions.All.Count);
+        Assert.Equal(20, InputActions.All.Distinct().Count());
 
         InputBindings bindings = new();
         Assert.NotNull(bindings.Keyboard(0));
@@ -49,6 +53,7 @@ public sealed class InputCoreTests
     [InlineData("FastForward", 0x10000)]
     [InlineData("QuickSave", 0x20000)]
     [InlineData("QuickLoad", 0x40000)]
+    [InlineData("SoftReset", 0x80000)] // AMD-044 REQ-INP-125, next free code
     public void REQ_INP_003_the_bit_of_each_action_is_the_one_of_the_table(string name, int bit)
     {
         InputAction? action = InputActions.Parse(name);
@@ -56,7 +61,10 @@ public sealed class InputCoreTests
         Assert.Equal(bit, (int)action!.Value);
     }
 
-    /// <summary>REQ-INP-040: the 19 actions in the display order of §4.1, with their names.</summary>
+    /// <summary>
+    /// REQ-INP-040: the actions in the display order of §4.1, with their names, the soft reset
+    /// of AMD-044 last.
+    /// </summary>
     [Fact]
     public void REQ_INP_040_the_actions_are_listed_in_the_order_of_the_table()
     {
@@ -65,6 +73,7 @@ public sealed class InputCoreTests
             "Left", "Right", "Up", "Down", "A", "B", "Select", "Start",
             "RotLeft", "RotRight", "RotUp", "RotDown", "ZoomIn", "ZoomOut",
             "Menu", "RollBack", "FastForward", "QuickSave", "QuickLoad",
+            "SoftReset",
         ];
 
         List<string> actual = [.. InputActions.All.Select(InputActions.NameOf)];
@@ -128,7 +137,8 @@ public sealed class InputCoreTests
     public void REQ_INP_006_the_camera_and_system_bits_never_reach_the_core()
     {
         InputAction held = InputAction.RollBack | InputAction.RotLeft | InputAction.FastForward
-            | InputAction.Menu | InputAction.QuickSave | InputAction.QuickLoad | InputAction.ZoomIn;
+            | InputAction.Menu | InputAction.QuickSave | InputAction.QuickLoad | InputAction.ZoomIn
+            | InputAction.SoftReset;
 
         Assert.Equal(0, InputActions.ControllerByte(held));
         Assert.Equal(0, InputRouting.CoreWord(held, held));
@@ -146,7 +156,7 @@ public sealed class InputCoreTests
             Assert.DoesNotContain("repeat", InputActions.NameOf(action), StringComparison.OrdinalIgnoreCase);
         }
 
-        Assert.Equal(19, InputActions.All.Count);
+        Assert.Equal(20, InputActions.All.Count);
     }
 
     /// <summary>

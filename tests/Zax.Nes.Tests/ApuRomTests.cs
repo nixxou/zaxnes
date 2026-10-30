@@ -123,6 +123,46 @@ public sealed class ApuRomTests
         Assert.Contains("Press RESET", result.Text, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// AMD-044 REQ-CORE-122: the <b>reset</b> half of the same six ROMs passes under the soft
+    /// reset, which keeps the RAM their reset counter lives in and leaves the <c>$4017</c> mode
+    /// alone. That is the documented <i>after reset</i> state of the APU the requirement asks
+    /// for, measured rather than asserted: <c>4015_cleared</c>, <c>irq_flag_cleared</c> and
+    /// <c>len_ctrs_enabled</c> check the silencing, <c>4017_written</c> checks that the mode
+    /// survives, and <c>4017_timing</c> checks that the frame sequencer restarts with the same
+    /// 9-to-12-cycle delay as at power-on.
+    /// </summary>
+    /// <remarks>
+    /// These six are not on the list SPEC-02 §3.12 as amended by AMD-044 makes mandatory — that
+    /// list names the two <c>cpu_reset</c> ROMs, which
+    /// <see cref="CpuResetRomTests"/> covers — but they pass, so they are kept as a gate on the
+    /// APU's own after-reset state.
+    /// </remarks>
+    [RomTheory(
+        "apu_reset/4015_cleared.nes",
+        "apu_reset/4017_timing.nes",
+        "apu_reset/4017_written.nes",
+        "apu_reset/irq_flag_cleared.nes",
+        "apu_reset/len_ctrs_enabled.nes",
+        "apu_reset/works_immediately.nes")]
+    [InlineData("4015_cleared.nes")]
+    [InlineData("4017_timing.nes")]
+    [InlineData("4017_written.nes")]
+    [InlineData("irq_flag_cleared.nes")]
+    [InlineData("len_ctrs_enabled.nes")]
+    [InlineData("works_immediately.nes")]
+    public void REQ_CORE_122_the_apu_reset_tests_pass_under_a_soft_reset(string rom)
+    {
+        string path = TestRomLibrary.Find($"apu_reset/{rom}")!;
+        TestRomRunner.Result result = TestRomRunner.RunShellRom(
+            path,
+            maxFrames: 20_000,
+            pressReset: true,
+            softReset: true);
+
+        Assert.True(result.Passed, $"apu_reset/{rom}: {result.Describe()}");
+    }
+
     [RomFact("apu_reset/4017_timing.nes")]
     public void REQ_CORE_004_the_frame_sequencer_starts_nine_to_twelve_cycles_before_the_first_instruction()
     {
@@ -157,12 +197,14 @@ public sealed class ApuRomTests
 public sealed class ApuRomPendingTests
 {
     [PendingTheory(
-        "Reset is a power cycle here (REQ-CORE-004, DEC-02-Q3), so it clears work RAM and "
+        "The *hard* reset is a power cycle (REQ-CORE-004, DEC-02-Q3), so it clears work RAM and "
         + "rewrites $4017 with $00. These ROMs keep their reset counter in RAM across the "
         + "reset (run_at_reset.s: num_resets_ lives in nv_ram) and 4017_written also requires "
-        + "the last $4017 value to survive, so the reset half of each test cannot run. This is "
-        + "the same deliberate divergence the REQ-CORE-004 notes record for "
-        + "cpu_reset/ram_after_reset. The power-on half of all six is checked by "
+        + "the last $4017 value to survive, so the reset half of each test cannot run under it. "
+        + "This is the same deliberate divergence the REQ-CORE-004 notes record for "
+        + "cpu_reset/ram_after_reset. Since AMD-044 the core also has a soft reset, under which "
+        + "all six pass: see ApuRomTests.REQ_CORE_122_the_apu_reset_tests_pass_under_a_soft_reset. "
+        + "The power-on half of all six is checked by "
         + "ApuRomTests.REQ_CORE_004_the_power_on_half_of_the_apu_reset_tests_passes.")]
     [InlineData("apu_reset/4015_cleared.nes")]
     [InlineData("apu_reset/4017_timing.nes")]

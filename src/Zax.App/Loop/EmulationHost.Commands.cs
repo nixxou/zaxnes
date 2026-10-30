@@ -189,6 +189,17 @@ internal sealed partial class EmulationHost
             static () => "Ctrl+R",
             _ => _currentGame is not null && !IsLoading);
 
+        // AMD-044 REQ-LOOP-072: the soft reset sits next to the hard one in the game menu. It
+        // needs a running session, not just a current game: there is nothing to reset in a
+        // core that holds no ROM.
+        Commands.Register(
+            ZaxCommands.SoftReset,
+            LabelOf(ZaxCommands.SoftReset),
+            _ => SoftResetGame(),
+            canExecute: _ => _session is { HasRom: true }
+                && State != EmulationState.Stopped
+                && !IsLoading);
+
         Commands.Register(
             ZaxCommands.Stop,
             LabelOf(ZaxCommands.Stop),
@@ -451,6 +462,29 @@ internal sealed partial class EmulationHost
         {
             LaunchGame(game.Id);
         }
+    }
+
+    /// <summary>
+    /// The soft reset of AMD-044 REQ-LOOP-072: the core imitates a press on the RESET button
+    /// and the rest of the program behaves as it does after the hard reset of REQ-LOOP-050 —
+    /// the pause is lifted, the pacing clock is reset, the rollback history is emptied
+    /// (REQ-LOOP-031). What it does <b>not</b> do is relaunch the profile: the ROM is not read
+    /// again, no <c>End</c> or <c>Start</c> hook runs, and the learned conversion state stays.
+    /// </summary>
+    private void SoftResetGame()
+    {
+        if (_session is not { HasRom: true } session || State == EmulationState.Stopped || IsLoading)
+        {
+            return;
+        }
+
+        session.SoftReset();
+
+        Rollback.Clear();
+        FastForward.Clear();
+        ApplySpeed();
+        SetState(EmulationState.Running);
+        Pacer.Reset();
     }
 
     private void RequestFastForward()

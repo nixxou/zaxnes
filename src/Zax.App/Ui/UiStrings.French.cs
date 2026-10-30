@@ -202,7 +202,9 @@ internal static partial class UiStrings
         ["cmd.emulation.pause_resume"] = "Pause / Reprise",
         ["cmd.emulation.pause"] = "Pause",
         ["cmd.emulation.resume"] = "Reprise",
-        ["cmd.emulation.reset"] = "Reset",
+        // AMD-044 §3: the two resets now sit side by side, so the hard one is named as such.
+        ["cmd.emulation.reset"] = "Reset complet",
+        ["cmd.emulation.soft_reset"] = "Reset doux",
         ["cmd.emulation.stop"] = "Arrêter",
         ["cmd.emulation.fast_forward"] = "Avance rapide",
         ["cmd.emulation.rollback"] = "Rollback",

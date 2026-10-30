@@ -289,4 +289,31 @@ public sealed class CoreAccuracyTests
         RomSuite.Outcome outcome = RomSuite.RunShell(path, 20_000);
         Assert.True(outcome.Code != 0, $"the spec expects this ROM to fail: {outcome.Describe()}");
     }
+
+    /// <summary>
+    /// SPEC-02 §3.12 as amended by AMD-044, REQ-CORE-122 and REQ-ACC-001: the two
+    /// <c>cpu_reset</c> ROMs of blargg, which ask for a press on RESET, <b>pass</b> under the
+    /// soft reset. The note of REQ-CORE-004 — <c>ram_after_reset</c> fails on purpose — stays
+    /// true for the hard reset, which the test above still checks.
+    /// </summary>
+    /// <remarks>
+    /// The two ROMs are public but are not redistributed here. They come from blargg's
+    /// <c>cpu_reset.zip</c> (nesdev "Emulator tests" page); drop <c>ram_after_reset.nes</c> and
+    /// <c>registers.nes</c> into <c>impl/tests/roms/cpu_reset/</c>. The test is skipped — not
+    /// failed — when they are absent, like every other public ROM of the suite.
+    /// </remarks>
+    [Theory] // REQ-CORE-122, REQ-ACC-001
+    [InlineData("cpu_reset/ram_after_reset.nes")]
+    [InlineData("cpu_reset/registers.nes")]
+    public void The_cpu_reset_roms_pass_under_a_soft_reset(string relative)
+    {
+        string? path = RomSuite.Find(relative);
+        if (path is null)
+        {
+            return;
+        }
+
+        RomSuite.Outcome outcome = RomSuite.RunShell(path, 20_000, softReset: true);
+        Assert.True(outcome.Code == 0, $"{relative}: {outcome.Describe()}");
+    }
 }

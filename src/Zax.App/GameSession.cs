@@ -337,8 +337,9 @@ internal sealed class GameSession : IDisposable
     /// </summary>
     /// <remarks>
     /// This is also what <c>retro_serialize</c> captures (REQ-LUA-075, DEC-R2-D5). The rollback
-    /// of SPEC-07 must <b>not</b> call it: it restores the core alone and never <c>Save</c> or
-    /// <c>Load</c> (REQ-LUA-074, DEC-07-Q3).
+    /// of SPEC-07 must <b>not</b> call it: it carries the 64 entries too (AMD-042
+    /// REQ-LOOP-069), but reads and writes them directly, without a <c>Save</c> or a
+    /// <c>Load</c> hook (REQ-LOOP-070, REQ-LUA-074) — see <see cref="CaptureRollbackData"/>.
     /// </remarks>
     public byte[] CaptureScriptState()
     {
@@ -365,6 +366,36 @@ internal sealed class GameSession : IDisposable
         FrameCounter = 0;
         Start();
         Scripts.InvokeLoad();
+    }
+
+    /// <summary>
+    /// The 64 <c>PData</c> values a rollback snapshot carries (AMD-042 REQ-LOOP-069), read the
+    /// way <c>GetPData(i)</c> reads them. The <c>Save</c> hook is <b>not</b> called: it stays
+    /// reserved for savestates and for serialisation (REQ-LOOP-070, REQ-LUA-075).
+    /// </summary>
+    public byte[] CaptureRollbackData() => Scripts.CapturePersistentData();
+
+    /// <summary>
+    /// Writes the 64 <c>PData</c> values of a rollback snapshot back, exactly as
+    /// <c>SetPData</c> would (AMD-042 REQ-LOOP-070). The <c>Load</c> hook is <b>not</b> called.
+    /// </summary>
+    public void RestoreRollbackData(ReadOnlySpan<byte> block) => Scripts.RestorePersistentData(block);
+
+    /// <summary>
+    /// The soft reset of AMD-044 REQ-CORE-122 and REQ-LOOP-072: the core imitates a press on
+    /// the RESET button and the frame counter goes back to 0, but the profile is <b>not</b>
+    /// relaunched — no <c>End</c>, no <c>Start</c>, the Lua state and <c>PData</c> untouched.
+    /// </summary>
+    /// <remarks>
+    /// The converted frames in flight belong to before the reset and are dropped, as they are
+    /// on a relaunch and on a savestate restore (REQ-E3D-281); the learned conversion state is
+    /// kept, which is what distinguishes this from <see cref="Reset"/>.
+    /// </remarks>
+    public void SoftReset()
+    {
+        Core.SoftReset();
+        FrameCounter = 0;
+        Engine.ClearFrames();
     }
 
     /// <summary>

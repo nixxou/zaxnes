@@ -1,19 +1,40 @@
+using Zax.Render;
+
 namespace Zax.App.Loop;
 
 /// <summary>
-/// The rollback history of SPEC-07 §3.4: a snapshot of the <b>core alone</b> every 60 emulated
-/// frames, at most 30 of them, and a restore that goes back to the second-to-last one.
+/// One entry of the rollback history (AMD-042 REQ-LOOP-069): the core state, the 64
+/// <c>PData</c> values and the camera state, all taken at the same instant.
+/// </summary>
+/// <param name="Core">
+/// The complete core state; an in-memory one is enough (REQ-CORE-121), so the ROM image is
+/// left out.
+/// </param>
+/// <param name="PersistentData">
+/// The 256-byte block of the 64 <c>PData</c> entries, read the way <c>GetPData(i)</c> reads
+/// them (SPEC-05 §4.6).
+/// </param>
+/// <param name="Camera">
+/// The camera state a savestate carries, REQ-SCN-024 being its single reference.
+/// </param>
+public sealed record RollbackSnapshot(byte[] Core, byte[] PersistentData, CameraStateData Camera);
+
+/// <summary>
+/// The rollback history of SPEC-07 §3.4: a snapshot every 60 emulated frames, at most 30 of
+/// them, and a restore that goes back to the second-to-last one.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A snapshot holds the core and nothing else — not the scripts' persistent data, not the
-/// camera, not the 3D scene (REQ-LOOP-030, DEC-07-Q3). The depth is therefore about 30 s in
-/// NTSC and 36 s in PAL/Dendy.
+/// A snapshot holds the core, the scripts' 64 <c>PData</c> values and the camera state
+/// (AMD-042 REQ-LOOP-069, which replaces the last sentence of REQ-LOOP-030's notes). It still
+/// holds neither the learned conversion state, nor the converted frames, nor the meshes. The
+/// depth is therefore about 30 s in NTSC and 36 s in PAL/Dendy.
 /// </para>
 /// <para>
 /// The history is never persisted (SPEC-09 REQ-PERS-058). It is cleared when a game is
-/// launched, when a savestate is loaded and on every reset, and <b>not</b> by a pause, a quick
-/// save or a rollback (REQ-LOOP-031).
+/// launched, when a savestate is loaded, on every reset — the soft one of AMD-044 included —
+/// and at the <b>end</b> of a game (AMD-042 REQ-LOOP-071); it is <b>not</b> cleared by a
+/// pause, a quick save or a rollback (REQ-LOOP-031).
 /// </para>
 /// </remarks>
 public sealed class RollbackHistory
@@ -24,7 +45,7 @@ public sealed class RollbackHistory
     /// <summary>A snapshot is taken on every frame counter that is a multiple of 60.</summary>
     public const int IntervalFrames = 60;
 
-    private readonly List<byte[]> _snapshots = [];
+    private readonly List<RollbackSnapshot> _snapshots = [];
 
     /// <summary>Snapshots currently held, oldest first.</summary>
     public int Count => _snapshots.Count;
@@ -40,16 +61,16 @@ public sealed class RollbackHistory
         => coreFrameCount >= 0 && coreFrameCount % IntervalFrames == 0;
 
     /// <summary>Appends a snapshot, dropping the oldest one when the history is full.</summary>
-    public void Capture(byte[] coreState)
+    public void Capture(RollbackSnapshot snapshot)
     {
-        ArgumentNullException.ThrowIfNull(coreState);
+        ArgumentNullException.ThrowIfNull(snapshot);
 
         if (_snapshots.Count == Capacity)
         {
             _snapshots.RemoveAt(0);
         }
 
-        _snapshots.Add(coreState);
+        _snapshots.Add(snapshot);
     }
 
     /// <summary>
@@ -62,8 +83,8 @@ public sealed class RollbackHistory
     /// original misbehaves in both cases and is deliberately not reproduced
     /// (REQ-LOOP-032, notes).
     /// </remarks>
-    /// <returns>The core state to restore, or null when the history is empty.</returns>
-    public byte[]? TakeRollbackTarget()
+    /// <returns>The snapshot to restore, or null when the history is empty.</returns>
+    public RollbackSnapshot? TakeRollbackTarget()
     {
         if (_snapshots.Count == 0)
         {
@@ -72,12 +93,12 @@ public sealed class RollbackHistory
 
         if (_snapshots.Count == 1)
         {
-            byte[] only = _snapshots[0];
+            RollbackSnapshot only = _snapshots[0];
             _snapshots.Clear();
             return only;
         }
 
-        byte[] target = _snapshots[^2];
+        RollbackSnapshot target = _snapshots[^2];
         _snapshots.RemoveAt(_snapshots.Count - 1);
         _snapshots.RemoveAt(_snapshots.Count - 1);
         return target;
@@ -87,15 +108,15 @@ public sealed class RollbackHistory
     /// The optional history panel of REQ-LOOP-033: restoring entry <paramref name="index"/>
     /// (0 = oldest) keeps only the entries before it.
     /// </summary>
-    /// <returns>The core state to restore, or null when the index is out of range.</returns>
-    public byte[]? TakeAt(int index)
+    /// <returns>The snapshot to restore, or null when the index is out of range.</returns>
+    public RollbackSnapshot? TakeAt(int index)
     {
         if (index < 0 || index >= _snapshots.Count)
         {
             return null;
         }
 
-        byte[] target = _snapshots[index];
+        RollbackSnapshot target = _snapshots[index];
         _snapshots.RemoveRange(index, _snapshots.Count - index);
         return target;
     }

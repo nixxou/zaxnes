@@ -13,10 +13,17 @@ public readonly record struct CameraModeState(float Distance, Vector3 Angles, Ve
 /// <b>both</b> modes and what is left of the mode transition window.
 /// </summary>
 /// <remarks>
+/// <para>
 /// This is data only: writing it to a savestate file is SPEC-07's business (lot L6). On restore
 /// the setpoints go back as they are and the displayed camera takes them immediately, with its
-/// smoothing velocities reset (AMD-045 REQ-SCN-073); the window comes back as a remaining time
-/// bounded to <c>[0, 3]</c> s, which is how AMD-042 amends REQ-SCN-024 — it spoke of a deadline.
+/// smoothing velocities reset (AMD-045 REQ-SCN-073).
+/// </para>
+/// <para>
+/// REQ-SCN-024 as amended by AMD-042 records a <b>remaining time</b> in [0, 3] s rather than a
+/// deadline, which an absolute one would make stale the moment the state is read back. It is
+/// also the single reference for what a rollback snapshot carries of the camera
+/// (REQ-LOOP-069).
+/// </para>
 /// </remarks>
 /// <param name="Mode">The current mode.</param>
 /// <param name="Tpv">Setpoints of the orbital mode.</param>

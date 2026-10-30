@@ -26,6 +26,12 @@ public enum HotkeyEvents
 
     /// <summary>Quick load (REQ-INP-104).</summary>
     QuickLoad = 1 << 5,
+
+    /// <summary>
+    /// Rising edge of SoftReset (AMD-044 REQ-INP-125). The action has no default binding, so
+    /// this only ever fires once the player has bound it by hand.
+    /// </summary>
+    SoftReset = 1 << 6,
 }
 
 /// <summary>
@@ -58,6 +64,7 @@ public sealed class HotkeyTracker
     private EdgeDetector _rollback;
     private EdgeDetector _quickSave;
     private EdgeDetector _quickLoad;
+    private EdgeDetector _softReset;
 
     /// <summary>How long the Menu action has been held, for the UI.</summary>
     public float MenuHeldSeconds => _menu.HeldSeconds;
@@ -99,6 +106,13 @@ public sealed class HotkeyTracker
         if (_quickLoad.Rising(mask.HasFlag(InputAction.QuickLoad)))
         {
             events |= HotkeyEvents.QuickLoad;
+        }
+
+        // AMD-044 REQ-INP-125: one soft reset per press, like Rollback — holding the control
+        // must not reset the console sixty times a second.
+        if (_softReset.Rising(mask.HasFlag(InputAction.SoftReset)))
+        {
+            events |= HotkeyEvents.SoftReset;
         }
 
         events |= _combinations[0].Update(playerOne, realSeconds);

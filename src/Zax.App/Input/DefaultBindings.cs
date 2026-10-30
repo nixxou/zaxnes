@@ -36,7 +36,8 @@ public static class DefaultBindings
         (InputAction.FastForward, Key.Period),
 
         // QuickSave and QuickLoad have no default key: the combinations of REQ-INP-104 are the
-        // only default route to the quick slot (SPEC-08 §4.2, §4.3).
+        // only default route to the quick slot (SPEC-08 §4.2, §4.3). SoftReset has none either,
+        // on the keyboard or on a pad: it goes through the game menu (AMD-044 REQ-INP-125).
     ];
 
     /// <summary>

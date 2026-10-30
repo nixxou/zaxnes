@@ -38,13 +38,14 @@ public sealed class InputActionTests
         => Assert.Equal(bit, (int)action);
 
     /// <summary>
-    /// REQ-INP-001 and REQ-INP-040: exactly 19 actions, in the display order of the table of
-    /// §4.1, with its English labels, and exactly two players.
+    /// REQ-INP-001 and REQ-INP-040: the 19 actions of the table of §4.1 in its display order,
+    /// with its English labels, plus the twentieth AMD-044 REQ-INP-125 adds at the end of the
+    /// extended-action table, and exactly two players.
     /// </summary>
     [Fact]
-    public void REQ_INP_001_there_are_nineteen_actions_in_the_order_of_the_table()
+    public void REQ_INP_001_there_are_twenty_actions_in_the_order_of_the_table()
     {
-        Assert.Equal(19, InputActions.Count);
+        Assert.Equal(20, InputActions.Count);
         Assert.Equal(InputActions.Count, InputActions.All.Count);
         Assert.Equal(2, InputActions.PlayerCount);
         Assert.Equal(InputActions.All.Count, InputActions.All.Distinct().Count());
@@ -54,6 +55,7 @@ public sealed class InputActionTests
                 "Left", "Right", "Up", "Down", "A", "B", "Select", "Start",
                 "RotLeft", "RotRight", "RotUp", "RotDown", "ZoomIn", "ZoomOut",
                 "Menu", "RollBack", "FastForward", "QuickSave", "QuickLoad",
+                "SoftReset",
             ],
             InputActions.All.Select(InputActions.NameOf));
 
@@ -394,7 +396,7 @@ public sealed class InputActionTests
             name => name.Contains("Turbo", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("Repeat", StringComparison.OrdinalIgnoreCase));
 
-        // Every action of the enumeration is one of the 19 of §4.1, bar the three masks.
+        // Every action of the enumeration is one of the 20 of the table, bar the three masks.
         foreach (InputAction action in Enum.GetValues<InputAction>())
         {
             if (action is InputAction.None

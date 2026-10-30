@@ -272,8 +272,11 @@ public sealed class SceneCamera
     /// (AMD-042).
     /// </summary>
     /// <remarks>
-    /// This is the single entry point for every reload of the camera — savestate, quick save
-    /// and, later, a rollback snapshot (AMD-042) — so they all snap the same way.
+    /// This is the single entry point for every reload of the camera — savestate, quick save and
+    /// rollback snapshot (AMD-042 REQ-LOOP-070) — so they all snap the same way. The remaining
+    /// transition time is bounded to [0, 3] s, which is what REQ-SCN-024 as amended by AMD-042
+    /// records: a file written by another build, or one predating the amendment, can therefore
+    /// never leave the window stuck open.
     /// </remarks>
     public void Restore(in CameraStateData state)
     {
