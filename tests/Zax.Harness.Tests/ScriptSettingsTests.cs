@@ -185,57 +185,7 @@ public sealed class ScriptSettingsTests
     /// carrying <paramref name="source"/> as its only script.
     /// </summary>
     private static SyntheticScene Capture(string source, int runFrames = 4, string? title = null)
-    {
-        GameProfile profile = GameProfile.CreateEmpty();
-        if (source.Length > 0)
-        {
-            profile.Scripts.Add(new ProfileScript("a.lua", true, source, "*"));
-        }
-
-        string rom = Path.Combine(
-            Path.GetTempPath(),
-            $"zax-harness-{Guid.NewGuid():N}.nes");
-        File.WriteAllBytes(rom, BlankRom());
-        try
-        {
-            return RenderExport.FromRom(
-                rom,
-                runFrames,
-                profile,
-                title ?? "2D Mode",
-                RenderAlgorithm.Greedy,
-                InputScript.Parse(null));
-        }
-        finally
-        {
-            File.Delete(rom);
-        }
-    }
-
-    /// <summary>A 32 KiB PRG + 8 KiB CHR NROM image whose program is an endless loop.</summary>
-    private static byte[] BlankRom()
-    {
-        byte[] image = new byte[16 + (32 * 1024) + (8 * 1024)];
-        image[0] = 0x4E;
-        image[1] = 0x45;
-        image[2] = 0x53;
-        image[3] = 0x1A;
-        image[4] = 2;
-        image[5] = 1;
-        image[6] = 0x01;
-
-        // JMP $8000 at the reset vector, which the three vectors all point to.
-        image[16] = 0x4C;
-        image[17] = 0x00;
-        image[18] = 0x80;
-        for (int vector = 0; vector < 3; vector++)
-        {
-            image[16 + (32 * 1024) - 6 + (vector * 2)] = 0x00;
-            image[16 + (32 * 1024) - 5 + (vector * 2)] = 0x80;
-        }
-
-        return image;
-    }
+        => CaptureHarness.Capture(CaptureHarness.WithScript(source), runFrames, title);
 
     private sealed class VectorComparer : IEqualityComparer<Vector3>
     {

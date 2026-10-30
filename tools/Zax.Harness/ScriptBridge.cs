@@ -24,18 +24,34 @@ internal static class ScriptBridge
     /// settings, memory and input bound to <paramref name="scene"/> and
     /// <paramref name="core"/>. The chunks run here (REQ-LUA-015 step 1).
     /// </summary>
+    /// <param name="profile">The profile whose scripts run.</param>
+    /// <param name="engine">The conversion engine the scripts drive.</param>
+    /// <param name="core">The core the memory and input objects read.</param>
+    /// <param name="scene">The scene the settings, camera, light and backdrop reach.</param>
+    /// <param name="mesh">
+    /// The mesh algorithm <c>--mesh</c> asked for. A user setting (REQ-E3D-340), so it is written
+    /// through the model like the options window writes it: the mirror into the engine slice is
+    /// the only path, and a value written straight into that slice would be put back to the
+    /// default by the first mirror.
+    /// </param>
     public static ProfileScriptRuntime Create(
         GameProfile profile,
         ConversionEngine engine,
         NesCore core,
-        SceneState scene)
+        SceneState scene,
+        RenderAlgorithm mesh = RenderAlgorithm.Greedy)
     {
-        ScriptSettings settings = new(engine.Settings, new HarnessLight(scene));
+        // The light the model backs, which is what the application uses: the direction, the
+        // colour and the intensity are settings of SPEC-09 §4.1.3, so a profile's embedded
+        // direction reaches the scene by the same single path as every other P setting
+        // (REQ-PROF-041, REQ-SCN-025).
+        ScriptSettings settings = new(engine.Settings);
 
         // Before the chunks run, as the host does (Zax.App's SceneSettingBridge.Connect): from
         // here on every write of a scene-owned setting reaches the scene at once, wherever it
         // comes from — the main level of a chunk, Start or a frame hook (REQ-PERS-007).
         Connect(settings, scene);
+        settings.RenderMode = (int)mesh;
 
         ScriptEnvironment environment = new()
         {
@@ -97,8 +113,21 @@ internal static class ScriptBridge
         scene.Settings.Skybox = (SkyboxKind)settings.Skybox;
         scene.Settings.CustomBackgroundColor = settings.CustomBgColor.ToRgb24();
         scene.UseNesBackgroundColor = settings.BgColor;
-        scene.Settings.LightIntensity = settings.Light.Intensity;
         scene.Clipping = settings.ClippingVector;
+        PushLight(settings, scene);
+    }
+
+    /// <summary>
+    /// The three light values the model holds, pushed into the renderer's working copy, exactly
+    /// as <c>SceneSettingBridge.PushLight</c> does in the application (SPEC-09 §4.1.3,
+    /// REQ-SCN-025).
+    /// </summary>
+    private static void PushLight(ScriptSettings settings, SceneState scene)
+    {
+        Vec3 direction = settings.Light.Direction;
+        scene.Light.Direction = new System.Numerics.Vector3(direction.X, direction.Y, direction.Z);
+        scene.Light.Color = settings.Light.Color.ToRgb24();
+        scene.Settings.LightIntensity = settings.Light.Intensity;
     }
 
     /// <summary>
@@ -114,9 +143,9 @@ internal static class ScriptBridge
             case "light.color":
             case "light.intensity":
 
-                // The harness light writes the direction and the colour straight into the
-                // scene; only the intensity is a value of its own to carry over.
-                scene.Settings.LightIntensity = settings.Light.Intensity;
+                // The three light values are settings of §4.1.3; the renderer's light is a
+                // working copy the model pushes into.
+                PushLight(settings, scene);
                 break;
             case "camera.fov":
                 scene.Settings.Fov = settings.Fov;
@@ -232,36 +261,6 @@ internal static class ScriptBridge
         public override void ResetView() => camera.ResetView();
 
         public override float ResetDistance => camera.ResetDistance;
-    }
-
-    private sealed class HarnessLight(SceneState scene) : ScriptLight
-    {
-        private float _intensity = 1f;
-
-        public override Vec3 Direction
-        {
-            get => new(scene.Light.Direction.X, scene.Light.Direction.Y, scene.Light.Direction.Z);
-            set => scene.Light.Direction = new System.Numerics.Vector3(value.X, value.Y, value.Z);
-        }
-
-        public override LuaColor Color
-        {
-            get => LuaColor.FromBytes(scene.Light.Color.R, scene.Light.Color.G, scene.Light.Color.B);
-            set => scene.Light.Color = value.ToRgb24();
-        }
-
-        public override float Intensity
-        {
-            get => _intensity;
-
-            // The direction and the colour above write into the scene's light directly; the
-            // intensity is the renderer's, so it is pushed here as the application pushes it.
-            set
-            {
-                _intensity = value;
-                scene.Settings.LightIntensity = value;
-            }
-        }
     }
 
     private sealed class HarnessBackdrop(BackdropState backdrop) : ScriptBackdrop

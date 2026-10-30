@@ -54,7 +54,7 @@ internal static class RenderExport
                                    the scene assets are the procedural ones (REQ-PUB-003/004).
           --size <w>x<h>           Capture size in pixels (default 640x480).
           --fov <degrees>          Field of view, 45 to 95. Left out, the scene keeps what the
-                                   profile's scripts set, or 70.
+                                   profile and its scripts set, or 70.
           --angles <rx>,<ry>[,<rz>]  Camera setpoint angles in degrees (default 0.81,0.81,0).
           --distance <d>           Camera setpoint distance (default 132.7964 / tan(FOV/2),
                                    AMD-045 REQ-SCN-069).
@@ -71,9 +71,9 @@ internal static class RenderExport
           --flat-2d                scene.bend_2d_mode off: the 2D-mode rectangle stays at its
                                    flat position under the bending (AMD-046 REQ-SCN-074).
           --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049). Left out,
-                                   the scene keeps what the profile's scripts set.
+                                   the scene keeps what the profile and its scripts set.
           --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046). Left out,
-                                   the scene keeps what the profile's scripts set.
+                                   the scene keeps what the profile and its scripts set.
           --real-time <seconds>    Real time the star twinkle uses (REQ-SCN-050).
           --sky-bodies             Light the procedural sun, moon and clouds of the skybox,
                                    which REQ-SCN-050 leaves off by default (REQ-PUB-003, Q-064).
@@ -307,67 +307,27 @@ internal static class RenderExport
             return 1;
         }
 
-        // The options the user really passed, applied after the scene is built and therefore
-        // after the profile's scripts: an override wins, and an option left out keeps what the
-        // scripts decided (REQ-SCN-049, REQ-SCN-046, REQ-SCN-005). The values below are the same
-        // as the scene's own defaults, so a capture without a profile is unchanged.
+        // The options the user really passed, applied after the scene is built and therefore last
+        // of the four layers (see SceneOverrides).
+        SceneOverrides overrides = new()
+        {
+            Fov = fov,
+            Angles = angles,
+            Distance = distance,
+            Skybox = skybox,
+            CustomBackground = customBackground,
+            Shadows = shadows,
+            Bend = bend,
+            Bend2dMode = bend2dMode,
+            AntiAlias = antiAlias,
+            ShadowMapSize = shadowMapSize,
+            RealTime = realTime,
+            SkyBodies = skyBodies,
+        };
+
         foreach (SyntheticScene scene in scenes)
         {
-            if (fov is { } degrees)
-            {
-                scene.Scene.Settings.Fov = degrees;
-                scene.Scene.Camera.Fov = degrees;
-            }
-
-            if (angles is { } r)
-            {
-                scene.Scene.Camera.Current.Angles = r;
-            }
-
-            if (distance is { } d)
-            {
-                scene.Scene.Camera.Current.Distance = d;
-            }
-
-            scene.Scene.Camera.SnapToSetpoints();
-            if (skybox is { } sky)
-            {
-                scene.Scene.Settings.Skybox = sky;
-            }
-
-            // AMD-043 REQ-SCN-066: the four curvature settings, as the options window writes
-            // them.
-            scene.Scene.Settings.BendLeftRight = bend.Lr;
-            scene.Scene.Settings.BendTopBottom = bend.Tb;
-            scene.Scene.Settings.ArcHorizontal = bend.Arc;
-            scene.Scene.Settings.ArcAtEdge = bend.Centre != 0;
-            scene.Scene.Settings.Bend2dMode = bend2dMode;
-            if (customBackground is { } colour)
-            {
-                scene.Scene.Settings.CustomBackgroundColor = colour;
-            }
-
-            scene.Scene.RealTime = realTime;
-
-            // Q-064: the three bodies exist and are parametric, but REQ-SCN-050 leaves them
-            // off; this is what a capture turns them on with.
-            if (skyBodies)
-            {
-                scene.Scene.Settings.SkyBodies.SunGain = 1f;
-                scene.Scene.Settings.SkyBodies.MoonGain = 1f;
-                scene.Scene.Settings.SkyBodies.CloudGain = 0.6f;
-                scene.Scene.Settings.SkyBodies.CloudCoverage = 0.3f;
-            }
-
-            if (!shadows)
-            {
-                scene.Scene.Settings.Shadows = false;
-                scene.Engine.Settings.Shadow = false;
-            }
-
-            // AMD-032 §2: video.anti_alias as the application applies it.
-            scene.Scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(antiAlias);
-            scene.Scene.Settings.ShadowMapSize = shadowMapSize;
+            overrides.ApplyTo(scene);
         }
 
         using OffscreenContext context = OffscreenContext.Create(width, height);
@@ -596,7 +556,6 @@ internal static class RenderExport
         ArgumentNullException.ThrowIfNull(profile);
         ConversionEngine engine = new();
         engine.UseGeometry();
-        engine.Settings.RenderAlgorithm = mesh;
         engine.TwoDimensionalMode = profile.PermanentPatterns.Count == 0
             && profile.TemporaryPatterns.Count == 0;
 
@@ -619,18 +578,34 @@ internal static class RenderExport
 
         // SPEC-05 REQ-LUA-015: the chunks run first, then the profile's settings and the
         // patterns with their BuildPattern hooks, then Start before the first emulated frame.
-        using ProfileScriptRuntime runtime = ScriptBridge.Create(profile, engine, core, scene);
+        using ProfileScriptRuntime runtime = ScriptBridge.Create(profile, engine, core, scene, mesh);
 
         // The frame hooks are timed on their own, which is what the budget of REQ-LUA-110 is
         // about: steps 1 to 5 of REQ-LUA-025, not the conversion around them.
         TimedScriptHost timed = new(runtime);
         engine.ScriptHost = timed;
-        engine.LoadProfile(profile);
+
+        // REQ-LUA-015 step 2, REQ-PROF-041 and REQ-PERS-005: the profile's own P settings land in
+        // the settings model, which mirrors them into the engine slice and pushes them into the
+        // scene through the bridge connected above — the light direction and colour, the top-down
+        // camera and the clip margins included. This is what GameSession.Create does, and it runs
+        // *after* the chunks so that an assignment made at the main level of a chunk is
+        // overwritten, as REQ-LUA-015 demands. A capture always loads the profile's data, so this
+        // is always the "different game" case of REQ-PERS-005.
+        runtime.Settings.Model.ApplyProfile(
+            profile.Settings is { } embedded
+                ? ProfileSettingApplication.ToSettingValues(embedded)
+                : []);
+
+        // Step 3. The settings were applied above, through the model, so the engine must not copy
+        // them a second time.
+        engine.LoadProfile(profile, applySettings: false);
 
         // REQ-LUA-015 step 4. ScriptBridge.Create connected the settings to the scene, so every
         // write Start or a later hook makes already reaches it. The push before the hook is the
-        // application's (GameSession.ApplyProfileScene); the one after it costs nothing and
-        // covers a write that landed on an already equal value and therefore raised no change.
+        // application's (GameSession.ApplyProfileScene) and carries the P settings applied above;
+        // the one after it costs nothing and covers a write that landed on an already equal value
+        // and therefore raised no change.
         ScriptBridge.Push(runtime, scene);
         runtime.InvokeStart();
         ScriptBridge.Push(runtime, scene);
@@ -940,6 +915,116 @@ internal static class RenderExport
         }
 
         return (width, height);
+    }
+}
+
+/// <summary>
+/// The scene values a <c>render</c> command line overrides, applied once the scene is built and
+/// therefore last of the four layers that decide what a capture shows: the scene's own defaults,
+/// the profile's embedded P settings (REQ-PROF-041), the writes its scripts make, then these.
+/// </summary>
+/// <remarks>
+/// A nullable field left null means the option was not given, which keeps what the profile and
+/// its scripts decided (REQ-SCN-049, REQ-SCN-046, REQ-SCN-005); the non-nullable ones default to
+/// the scene's own values, so a capture without a profile is unchanged.
+/// </remarks>
+internal sealed class SceneOverrides
+{
+    /// <summary><c>--fov</c>, in degrees.</summary>
+    public float? Fov { get; init; }
+
+    /// <summary><c>--angles</c>, the camera setpoint angles in degrees.</summary>
+    public System.Numerics.Vector3? Angles { get; init; }
+
+    /// <summary><c>--distance</c>, the camera setpoint distance.</summary>
+    public float? Distance { get; init; }
+
+    /// <summary><c>--skybox</c> (REQ-SCN-049).</summary>
+    public SkyboxKind? Skybox { get; init; }
+
+    /// <summary><c>--bg-color</c>, the custom background colour (REQ-SCN-046).</summary>
+    public Rgb24? CustomBackground { get; init; }
+
+    /// <summary>False for <c>--no-shadows</c>.</summary>
+    public bool Shadows { get; init; } = true;
+
+    /// <summary><c>--bend</c>, the four curvature settings (AMD-043 REQ-SCN-066).</summary>
+    public (int Lr, int Tb, int Arc, int Centre) Bend { get; init; }
+
+    /// <summary>False for <c>--flat-2d</c> (AMD-046 REQ-SCN-074).</summary>
+    public bool Bend2dMode { get; init; } = true;
+
+    /// <summary><c>--anti-alias</c>: 0 off, 1 MSAA 4x, 2 MSAA 8x (AMD-032).</summary>
+    public int AntiAlias { get; init; }
+
+    /// <summary><c>--shadow-map</c>, the side of the shadow map (AMD-034).</summary>
+    public int ShadowMapSize { get; init; } = SceneConstants.ShadowMapSize;
+
+    /// <summary><c>--real-time</c>, the real time the star twinkle uses (REQ-SCN-050).</summary>
+    public float RealTime { get; init; }
+
+    /// <summary><c>--sky-bodies</c> (Q-064).</summary>
+    public bool SkyBodies { get; init; }
+
+    /// <summary>Applies the overrides to one built scene.</summary>
+    public void ApplyTo(SyntheticScene scene)
+    {
+        ArgumentNullException.ThrowIfNull(scene);
+
+        if (Fov is { } degrees)
+        {
+            scene.Scene.Settings.Fov = degrees;
+            scene.Scene.Camera.Fov = degrees;
+        }
+
+        if (Angles is { } r)
+        {
+            scene.Scene.Camera.Current.Angles = r;
+        }
+
+        if (Distance is { } d)
+        {
+            scene.Scene.Camera.Current.Distance = d;
+        }
+
+        scene.Scene.Camera.SnapToSetpoints();
+        if (Skybox is { } sky)
+        {
+            scene.Scene.Settings.Skybox = sky;
+        }
+
+        // AMD-043 REQ-SCN-066: the four curvature settings, as the options window writes them.
+        scene.Scene.Settings.BendLeftRight = Bend.Lr;
+        scene.Scene.Settings.BendTopBottom = Bend.Tb;
+        scene.Scene.Settings.ArcHorizontal = Bend.Arc;
+        scene.Scene.Settings.ArcAtEdge = Bend.Centre != 0;
+        scene.Scene.Settings.Bend2dMode = Bend2dMode;
+        if (CustomBackground is { } colour)
+        {
+            scene.Scene.Settings.CustomBackgroundColor = colour;
+        }
+
+        scene.Scene.RealTime = RealTime;
+
+        // Q-064: the three bodies exist and are parametric, but REQ-SCN-050 leaves them off;
+        // this is what a capture turns them on with.
+        if (SkyBodies)
+        {
+            scene.Scene.Settings.SkyBodies.SunGain = 1f;
+            scene.Scene.Settings.SkyBodies.MoonGain = 1f;
+            scene.Scene.Settings.SkyBodies.CloudGain = 0.6f;
+            scene.Scene.Settings.SkyBodies.CloudCoverage = 0.3f;
+        }
+
+        if (!Shadows)
+        {
+            scene.Scene.Settings.Shadows = false;
+            scene.Engine.Settings.Shadow = false;
+        }
+
+        // AMD-032 §2: video.anti_alias as the application applies it.
+        scene.Scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(AntiAlias);
+        scene.Scene.Settings.ShadowMapSize = ShadowMapSize;
     }
 }
 
