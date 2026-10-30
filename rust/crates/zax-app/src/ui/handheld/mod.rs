@@ -33,7 +33,7 @@ use zax_settings::values::SettingValue;
 
 use self::exit_combo::{ComboEvent, ExitCombo};
 use self::game_options::{GameOptionsCommand, GameOptionsModel};
-use self::hacks::{HacksCommand, HacksModel};
+use self::hacks::{HacksCommand, HacksModel, HacksView};
 use self::layout::Metrics;
 use self::options::{HandheldOptionsModel, OptionsCommand};
 use self::overlay::{CameraPreset, OverlayCommand, OverlayModel};
@@ -107,6 +107,9 @@ pub struct HandheldUi {
     game_options: Option<GameOptionsModel>,
     /// The hacks of one game, while their screen is open.
     hacks: Option<HacksModel>,
+    /// How long A has been held on the widescreen of the in-game menu (owner request: released,
+    /// it turns the widescreen on or off; held, it shows its settings).
+    widescreen_hold: Option<f32>,
     /// Where the hacks go back to: the list, the game's options or the in-game menu.
     hacks_return: Screen,
     controls: ControlsState,
@@ -170,6 +173,8 @@ enum HeadOn {
 
 /// How long L2 is held to keep the camera, and Y to see the game in 2D from the front.
 const CAMERA_KEEP_SECONDS: f32 = 0.6;
+/// How long A is held on the widescreen of the in-game menu before its settings open.
+const WIDESCREEN_HOLD_SECONDS: f32 = 0.5;
 
 impl HandheldUi {
     /// The interface for a display `height` pixels high, listing the ROMs of `roms_directory`.
@@ -186,6 +191,7 @@ impl HandheldUi {
             options: HandheldOptionsModel::new(),
             game_options: None,
             hacks: None,
+            widescreen_hold: None,
             hacks_return: Screen::Home,
             overscan: OverscanModel::new(false),
             controls: ControlsState::default(),
@@ -413,6 +419,7 @@ impl HandheldUi {
         self.update_capture(seconds, frame);
         self.update_camera_memory(pad, seconds, frame.host);
         self.update_flat_view(pad, seconds, frame.host);
+        self.update_widescreen_hold(pad, seconds, frame.host);
         let presses: Vec<PadButton> = pad.presses().collect();
         for button in presses.iter().copied() {
             // A key that is A and Start at once (Enter) plays the game once, and Start with
@@ -424,6 +431,40 @@ impl HandheldUi {
             }
             self.press(button, frame);
         }
+    }
+
+    /// A held on the widescreen of the in-game menu: past [`WIDESCREEN_HOLD_SECONDS`] its
+    /// settings open; let go before, it is turned on with everything or off.
+    fn update_widescreen_hold(&mut self, pad: &PadState, seconds: f32, host: &mut AppHost) {
+        let Some(held) = self.widescreen_hold else {
+            return;
+        };
+        let Some(rom) = host.current_rom_path().map(PathBuf::from) else {
+            self.widescreen_hold = None;
+            return;
+        };
+        let title = host.current_game_title().map(str::to_owned);
+        if pad.is_held(PadButton::A) {
+            let held = held + seconds;
+            if held >= WIDESCREEN_HOLD_SECONDS {
+                self.widescreen_hold = None;
+                self.open_hacks(
+                    &rom,
+                    title.as_deref(),
+                    Screen::Overlay,
+                    host,
+                    HacksView::Widescreen,
+                );
+            } else {
+                self.widescreen_hold = Some(held);
+            }
+            return;
+        }
+        self.widescreen_hold = None;
+        let mut hacks = HacksModel::for_rom(host, &rom, title.as_deref());
+        hacks.toggle_widescreen_all();
+        hacks.apply(host);
+        self.note_widescreen(&rom, hacks.widescreen_on());
     }
 
     /// The mouse of the desktop's console mode (owner request): what it did over the screen
@@ -753,7 +794,7 @@ impl HandheldUi {
             RomListCommand::Options => self.open_options(host),
             RomListCommand::Hacks(path) => {
                 let title = self.profile_title_of(&path);
-                self.open_hacks(&path, title.as_deref(), Screen::Home, host);
+                self.open_hacks(&path, title.as_deref(), Screen::Home, host, HacksView::All);
             }
         }
     }
@@ -770,8 +811,15 @@ impl HandheldUi {
 
     /// Opens the hacks of the game in `path` (whose profile is called `title`, if it has one);
     /// B goes back to `return_to`.
-    fn open_hacks(&mut self, path: &Path, title: Option<&str>, return_to: Screen, host: &AppHost) {
-        self.hacks = Some(HacksModel::for_rom(host, path, title));
+    fn open_hacks(
+        &mut self,
+        path: &Path,
+        title: Option<&str>,
+        return_to: Screen,
+        host: &AppHost,
+        view: HacksView,
+    ) {
+        self.hacks = Some(HacksModel::for_rom(host, path, title).with_view(view));
         self.note_study(path, host);
         self.hacks_return = return_to;
         self.screen = Screen::Hacks;
@@ -854,7 +902,13 @@ impl HandheldUi {
                     .map(|options| options.rom().clone())
                 {
                     let title = self.profile_title_of(&rom);
-                    self.open_hacks(&rom, title.as_deref(), Screen::GameOptions, host);
+                    self.open_hacks(
+                        &rom,
+                        title.as_deref(),
+                        Screen::GameOptions,
+                        host,
+                        HacksView::All,
+                    );
                 }
             }
         }
@@ -963,10 +1017,17 @@ impl HandheldUi {
             }
             OverlayCommand::SetCamera(preset) => apply_camera(preset, host),
             OverlayCommand::Options => self.open_options(host),
+            OverlayCommand::Widescreen => self.widescreen_hold = Some(0.0),
             OverlayCommand::Hacks => {
                 if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
                     let title = host.current_game_title().map(str::to_owned);
-                    self.open_hacks(&rom, title.as_deref(), Screen::Overlay, host);
+                    self.open_hacks(
+                        &rom,
+                        title.as_deref(),
+                        Screen::Overlay,
+                        host,
+                        HacksView::Aids,
+                    );
                 }
             }
             OverlayCommand::QuitToList => {

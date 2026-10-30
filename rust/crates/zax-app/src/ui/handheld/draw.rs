@@ -876,7 +876,8 @@ impl HandheldUi {
             OverlayItem::FastForward => keys::HANDHELD_MENU_FAST_FORWARD,
             OverlayItem::Camera => keys::HANDHELD_OPTION_CAMERA,
             OverlayItem::Options => keys::WINDOW_OPTIONS,
-            OverlayItem::Hacks => keys::HANDHELD_HINT_HACKS,
+            OverlayItem::Widescreen => keys::HACK_WIDESCREEN,
+            OverlayItem::Hacks => keys::MENU_AIDS,
             OverlayItem::QuitToList => keys::HANDHELD_MENU_QUIT_TO_LIST,
             OverlayItem::ExitToLauncher => keys::HANDHELD_MENU_EXIT,
         })
@@ -890,6 +891,15 @@ impl HandheldUi {
                 format!("< {} >", menu_bar::slot_label(slot, record))
             }
             OverlayItem::Camera => format!("< {} >", options::camera_label(self.overlay.camera())),
+            OverlayItem::Widescreen => {
+                let settings = frame.host.settings();
+                let on = settings.get(SettingId::VideoWidescreen).as_int() != 0;
+                format!(
+                    "{} - {}",
+                    strings::get(if on { keys::HACK_ON } else { keys::HACK_OFF }),
+                    strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS)
+                )
+            }
             _ => String::new(),
         }
     }

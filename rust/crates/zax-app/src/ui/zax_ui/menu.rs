@@ -10,7 +10,7 @@ use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::ui::commands::UiCommand;
 use crate::ui::handheld::game_options::{self, GameOptionsModel, GAME_ROWS};
-use crate::ui::handheld::hacks::HacksModel;
+use crate::ui::handheld::hacks::{HackRow, HacksModel, HacksView};
 use crate::ui::handheld::{options, overscan};
 use crate::ui::menu_bar::{Menu, MenuBarModel, MenuItem, MenuItemKind, MenuWarning};
 use crate::ui::{keys, strings};
@@ -40,10 +40,10 @@ impl ZaxUi {
                 chosen = chosen.or(draw_items(ui, items, host));
             }
         }
-        let (open, hacks) = draw_game_options(ui, host);
+        let (open, hacks) = draw_game_options(ui, host, &mut self.menu_hacks);
         engaged |= open;
         if hacks {
-            self.open_hacks(host);
+            self.open_hacks(host, HacksView::Widescreen);
             self.menu_chosen = true;
         }
         match chosen {
@@ -58,10 +58,16 @@ impl ZaxUi {
     }
 }
 
-/// The options of the game in play (Rust-only, owner request): its hacks (a window), a submenu
+/// The options of the game in play (Rust-only, owner request): the widescreen (a click turns it
+/// on with everything or off, its settings a window), the hacks (a submenu of the aids), a submenu
 /// per option with its values, "Use Global" first, and an entry that puts everything back.
-/// Greyed with no game. Returns whether the menu is open, and whether the hacks were asked for.
-fn draw_game_options(ui: &Ui, host: &mut AppHost) -> (bool, bool) {
+/// Greyed with no game. Returns whether the menu is open, and whether the widescreen's settings
+/// were asked for.
+fn draw_game_options(
+    ui: &Ui,
+    host: &mut AppHost,
+    menu_hacks: &mut Option<HacksModel>,
+) -> (bool, bool) {
     let title = strings::get(keys::HANDHELD_HINT_GAME_OPTIONS);
     let Some(rom) = host.current_rom_path().map(str::to_owned) else {
         // Greyed: there is no game to set options for.
@@ -78,7 +84,17 @@ fn draw_game_options(ui: &Ui, host: &mut AppHost) -> (bool, bool) {
     let Some(_menu) = menu else {
         return (false, false);
     };
-    let hacks = ui.menu_item(strings::get(keys::MENU_HACKS));
+    // Owner request: the widescreen and the hacks apart. The hacks are studied as the menu
+    // opens, and kept while it is open.
+    let path = std::path::Path::new(&rom);
+    if ui.is_window_appearing() || menu_hacks.as_ref().is_none_or(|hacks| hacks.rom() != path) {
+        *menu_hacks = Some(
+            HacksModel::for_rom(host, path, host.current_game_title()).with_view(HacksView::Aids),
+        );
+    }
+    let hacks = menu_hacks
+        .as_mut()
+        .is_some_and(|hacks| draw_widescreen_and_aids(ui, host, hacks));
     ui.separator();
     let name = host.current_game_title().unwrap_or_default().to_owned();
     let mut model = GameOptionsModel::new(PathBuf::from(&rom), name, host.settings(), options);
@@ -174,18 +190,55 @@ fn draw_game_overscan(ui: &Ui, model: &mut GameOptionsModel, global: &GameOption
 }
 
 impl ZaxUi {
-    /// Opens the hacks window on the game in play.
-    pub(super) fn open_hacks(&mut self, host: &AppHost) {
+    /// Opens the hacks window on the game in play, showing the rows of `view`.
+    pub(super) fn open_hacks(&mut self, host: &AppHost, view: HacksView) {
         let Some(rom) = host.current_rom_path() else {
             return;
         };
-        self.hacks = Some(HacksModel::for_rom(
-            host,
-            std::path::Path::new(rom),
-            host.current_game_title(),
-        ));
+        self.hacks = Some(
+            HacksModel::for_rom(host, std::path::Path::new(rom), host.current_game_title())
+                .with_view(view),
+        );
         self.state.hacks = true;
     }
+}
+
+/// The widescreen of the game `rom` in play (a check turning it on with its advanced mode and
+/// every option of it, or off; its settings in a window) and its hacks (a submenu with a check
+/// per aid, which works with or without the widescreen). Returns whether the widescreen's
+/// settings were asked for.
+fn draw_widescreen_and_aids(ui: &Ui, host: &mut AppHost, hacks: &mut HacksModel) -> bool {
+    let mut changed = false;
+    if hacks.is_capable()
+        && ui
+            .menu_item_config(strings::get(keys::HACK_WIDESCREEN))
+            .selected(hacks.widescreen_all_on())
+            .build()
+    {
+        hacks.toggle_widescreen_all();
+        changed = true;
+    }
+    let settings = ui.menu_item(strings::get(keys::MENU_WIDESCREEN_SETTINGS));
+    let rows = hacks.rows();
+    let menu = ui.begin_menu_with_enabled(strings::get(keys::MENU_AIDS), !rows.is_empty());
+    if let Some(_menu) = menu {
+        for row in rows {
+            if let HackRow::PatchOption(_) = row {
+                if ui
+                    .menu_item_config(hacks.label(row))
+                    .selected(hacks.is_on(row))
+                    .build()
+                {
+                    hacks.step(row, 1);
+                    changed = true;
+                }
+            }
+        }
+    }
+    if changed {
+        hacks.apply(host);
+    }
+    settings
 }
 
 /// What the user chose in a menu: a command of the host, or one of the interface.

@@ -45,6 +45,19 @@ pub enum HackRow {
 /// 16:9.
 const RATIOS: [i32; 4] = [1, 2, 3, 4];
 
+/// What the hacks screen shows (owner request: the widescreen and the hacks apart).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HacksView {
+    /// Every row (the hacks of a game of the list).
+    #[default]
+    All,
+    /// The widescreen: on or off, its ratio, its margin, its advanced mode and its options.
+    Widescreen,
+    /// The hacks: the aids of the game's hack pack (invincibility, level select...), which work
+    /// with or without the widescreen.
+    Aids,
+}
+
 /// What the screen asks of the application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HacksCommand {
@@ -83,6 +96,8 @@ pub struct HacksModel {
     own: GameOptions,
     /// The options of the patch, each with whether it is on.
     patch_options: Vec<(HackOption, bool)>,
+    /// The rows shown.
+    view: HacksView,
 }
 
 impl HacksModel {
@@ -120,6 +135,59 @@ impl HacksModel {
             global,
             own,
             patch_options: patch.or(other_rom).map(patch_options).unwrap_or_default(),
+            view: HacksView::All,
+        }
+    }
+
+    /// The same, showing the rows of `view`.
+    #[must_use]
+    pub fn with_view(mut self, view: HacksView) -> Self {
+        self.view = view;
+        self
+    }
+
+    /// The rows shown.
+    #[must_use]
+    pub const fn view(&self) -> HacksView {
+        self.view
+    }
+
+    /// Whether option `index` of the patch is an aid of its hack pack (a component of its own).
+    #[must_use]
+    pub fn is_aid_option(&self, index: usize) -> bool {
+        match (self.patch(), self.patch_options.get(index)) {
+            (Some(patch), Some((option, _))) => patch.is_aid(option.key),
+            _ => false,
+        }
+    }
+
+    /// Whether the widescreen is on as one press puts it: on, in its advanced mode for a game
+    /// whose patch is an advanced one.
+    #[must_use]
+    pub fn widescreen_all_on(&self) -> bool {
+        self.widescreen_on()
+            && (self.advanced_on() || !self.patch().is_some_and(|patch| patch.advanced))
+    }
+
+    /// The widescreen at one press (owner request): on with its advanced mode and every option
+    /// of it, or off.
+    pub fn toggle_widescreen_all(&mut self) {
+        if self.widescreen_all_on() {
+            self.set(SettingId::VideoWidescreen, SettingValue::Enum(0));
+            return;
+        }
+        if !self.widescreen_on() {
+            self.set(SettingId::VideoWidescreen, SettingValue::Enum(RATIOS[0]));
+        }
+        if self.patch().is_some_and(|patch| patch.advanced) {
+            self.set(SettingId::VideoWidescreenAdvanced, SettingValue::Bool(true));
+        }
+        for index in 0..self.patch_options.len() {
+            if !self.is_aid_option(index) {
+                if let Some((_, on)) = self.patch_options.get_mut(index) {
+                    *on = true;
+                }
+            }
         }
     }
 
@@ -315,7 +383,13 @@ impl HacksModel {
                 .map(|(index, _)| HackRow::PatchOption(index)),
         );
         rows.extend(self.compat.is_some().then_some(HackRow::Compatibility));
-        rows
+        // The widescreen or the hacks apart (owner request).
+        let aid = |row: &HackRow| matches!(row, HackRow::PatchOption(index) if self.is_aid_option(*index));
+        match self.view {
+            HacksView::All => rows,
+            HacksView::Widescreen => rows.into_iter().filter(|row| !aid(row)).collect(),
+            HacksView::Aids => rows.into_iter().filter(aid).collect(),
+        }
     }
 
     /// Whether the detail of the compatibility is shown in place of the rows.

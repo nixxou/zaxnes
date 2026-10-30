@@ -255,6 +255,9 @@ pub const HACKS_COMPAT_EXPECTED: &str = "hacks.compat.expected";
 pub const HACKS_FORCED_NOTE: &str = "hacks.forced_note";
 pub const HACK_OFF: &str = "hacks.off";
 pub const MENU_HACKS: &str = "menu.hacks";
+pub const MENU_WIDESCREEN_SETTINGS: &str = "menu.widescreen_settings";
+pub const MENU_AIDS: &str = "menu.aids";
+pub const HANDHELD_HOLD_FOR_SETTINGS: &str = "handheld.hold_for_settings";
 pub const HANDHELD_HINT_HACKS: &str = "handheld.hint.hacks";
 
 // ------------------------------------------------- commands of REQ-UI-205
@@ -497,5 +500,8 @@ pub const PUBLISHED: &[&str] = &[
     HACKS_FORCED_NOTE,
     HACK_OFF,
     MENU_HACKS,
+    MENU_WIDESCREEN_SETTINGS,
+    MENU_AIDS,
+    HANDHELD_HOLD_FOR_SETTINGS,
     HANDHELD_HINT_HACKS,
 ];
