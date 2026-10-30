@@ -142,6 +142,14 @@ internal static class UiKeys
     public const string TabEmulation = "options.tab.emulation";
     public const string TabInterface = "options.tab.interface";
 
+    // ------------------------------------------- groups inside an options tab
+
+    /// <summary>The « Geometry » group of AMD-043 §6, marked advanced.</summary>
+    public const string GroupGeometry = "options.group.geometry";
+
+    /// <summary>What marks a group as advanced (AMD-043 §6).</summary>
+    public const string HintAdvanced = "hint.advanced";
+
     // ------------------------------------------------- key configuration sections
 
     public const string KeysPlayerOne = "keys.section.player_one";
@@ -195,6 +203,13 @@ internal static class UiKeys
 
     /// <summary>The label key of the setting whose stable key is <paramref name="key"/>.</summary>
     public static string Setting(string key) => SettingPrefix + key;
+
+    // --------------------------------- help texts of SPEC-09 settings (AMD-043 §6)
+
+    public const string HelpPrefix = "help.";
+
+    /// <summary>The help key of the setting whose stable key is <paramref name="key"/>.</summary>
+    public static string Help(string key) => HelpPrefix + key;
 
     // ------------------------------------------- labels of enumerated values
 

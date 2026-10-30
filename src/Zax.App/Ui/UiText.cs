@@ -274,6 +274,25 @@ internal static class UiText
             : text;
     }
 
+    /// <summary>
+    /// The help text of <paramref name="descriptor"/>, or null when the setting has none. Only
+    /// the curvature settings of AMD-043 §6 carry one so far.
+    /// </summary>
+    public static string? HelpOf(SettingDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+
+        string key = UiKeys.Help(descriptor.Key);
+        string text = UiStrings.Get(key);
+        return string.Equals(text, key, StringComparison.Ordinal) ? null : text;
+    }
+
+    /// <summary>The title of a group inside an options tab (AMD-043 §6).</summary>
+    public static string GroupTitle(string groupKey) => UiStrings.Get(groupKey);
+
+    /// <summary>What marks a group of settings as advanced (AMD-043 §6).</summary>
+    public static string Advanced => UiStrings.Get(UiKeys.HintAdvanced);
+
     /// <summary>The label of an enumerated value, or the raw domain label when there is none.</summary>
     public static string LabelOf(SettingDescriptor descriptor, string option)
     {

@@ -64,6 +64,17 @@ public static class SettingsCatalogue
         new SettingOption(4d, "L3"),
         new SettingOption(5d, "L4"));
 
+    /// <summary>The −180° to 180° ladder, step 30, of AMD-043 §6: thirteen values.</summary>
+    public static SettingDomain BendDomain { get; } = SettingDomain.Stepped(-180d, 180d, 30d, "0");
+
+    /// <summary>The two arc centres of AMD-043 §6, with the labels the options list shows.</summary>
+    public static SettingDomain ArcCenterDomain { get; } = SettingDomain.Stepped(
+        0d,
+        1d,
+        1d,
+        new SettingOption(0d, "Screen Center"),
+        new SettingOption(1d, "Screen Edge"));
+
     private static readonly SettingDescriptor[] Descriptors = Build();
 
     private static readonly Dictionary<string, SettingDescriptor> ByKeyIndex = BuildKeyIndex(Descriptors);
@@ -545,7 +556,104 @@ public static class SettingsCatalogue
             LuaPath = "MapEnable",
             ProfileField = "5",
         });
+
+        AddBending(list);
     }
+
+    /// <summary>
+    /// The four curvature settings of AMD-043 §6 and the visual style of AMD-040 §3. The
+    /// curvature ones have no Lua path: their SPEC-09 line names the style-parameter methods of
+    /// REQ-LUA-114, which <see cref="VisualStyleParameters"/> maps onto these very keys, so a
+    /// script and the options window write the same value.
+    /// </summary>
+    private static void AddBending(List<SettingDescriptor> list)
+    {
+        foreach ((string key, string label) in ((string, string)[])
+        [
+            (SettingKeys.SceneBendLeftRight, "Bend Left-Right"),
+            (SettingKeys.SceneBendTopBottom, "Bend Top-Bottom"),
+            (SettingKeys.SceneArcHorizontal, "Arc Horizontal"),
+        ])
+        {
+            list.Add(new SettingDescriptor(
+                key,
+                SettingKind.Int,
+                SettingValue.OfInt(0),
+                SettingScope.User,
+                SettingEffect.Immediate,
+                SettingTheme.Scene)
+            {
+                Domain = BendDomain,
+                UiLabel = label,
+                LibretroValues = BendDomain.Options,
+            });
+        }
+
+        list.Add(new SettingDescriptor(
+            SettingKeys.SceneArcCenter,
+            SettingKind.Int,
+            SettingValue.OfInt(0),
+            SettingScope.User,
+            SettingEffect.Immediate,
+            SettingTheme.Scene)
+        {
+            Domain = ArcCenterDomain,
+            UiLabel = "Arc Center",
+            LibretroValues = ArcCenterDomain.Options,
+        });
+
+        // AMD-040 §3: stored, immediately, with no rendering effect and no interface of its
+        // own; not exposed to libretro either.
+        list.Add(new SettingDescriptor(
+            SettingKeys.RenderVisualStyle,
+            SettingKind.Int,
+            SettingValue.OfInt(0),
+            SettingScope.User,
+            SettingEffect.Immediate,
+            SettingTheme.Render)
+        {
+            Domain = SettingDomain.Choice(
+                new SettingOption(0d, "Classic"),
+                new SettingOption(1d, "Enhanced")),
+            LuaPath = "VisualStyle",
+        });
+    }
+
+    /// <summary>
+    /// The parameters of the visual styles of AMD-040 §3, by style number: the identifier a
+    /// script passes to <c>Setting:Get/SetVisualStyleParameter</c> and the setting it stands
+    /// for. Style 0 (Classic) has none; style 1 (Enhanced) has the four of AMD-043.
+    /// </summary>
+    /// <remarks>
+    /// Every other identifier of 3dSen 2.0 is unspecified, so for Zaxnes it is « unknown » in
+    /// the sense of REQ-LUA-114: reading gives 0 and writing answers false.
+    /// </remarks>
+    public static IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> VisualStyleParameters { get; } =
+        new Dictionary<int, IReadOnlyDictionary<string, string>>
+        {
+            [0] = new Dictionary<string, string>(StringComparer.Ordinal),
+            [1] = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["spl.bend_zx"] = SettingKeys.SceneBendLeftRight,
+                ["spl.bend_zy"] = SettingKeys.SceneBendTopBottom,
+                ["spl.arc_yx"] = SettingKeys.SceneArcHorizontal,
+                ["spl.arc_center"] = SettingKeys.SceneArcCenter,
+            },
+        };
+
+    /// <summary>
+    /// The setting the parameter <paramref name="id"/> of style <paramref name="style"/>
+    /// designates, or null when either is unknown (REQ-LUA-114).
+    /// </summary>
+    public static string? VisualStyleParameter(int style, string? id)
+        => id is not null
+            && VisualStyleParameters.TryGetValue(style, out IReadOnlyDictionary<string, string>? parameters)
+            && parameters.TryGetValue(id, out string? key)
+            ? key
+            : null;
+
+    /// <summary>Whether <paramref name="style"/> is one of the two styles of AMD-040 §3.</summary>
+    public static bool IsVisualStyle(int style) => VisualStyleParameters.ContainsKey(style);
 
     /// <summary>The background presets of DEC-09-Q5, as packed RGB with their labels.</summary>
     public static IReadOnlyList<SettingOption> CustomBackgroundPresets => BackgroundPresets;

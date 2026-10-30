@@ -75,6 +75,11 @@ internal static partial class LuaApi
         Whole("SpriteTolerance", () => settings.SpriteTolerance, v => settings.SpriteTolerance = v);
         Whole("ScanDirection", () => settings.ScanDirection, v => settings.ScanDirection = v);
         Whole("Skybox", () => settings.Skybox, v => settings.Skybox = v);
+
+        // AMD-040 REQ-LUA-114: the visual style and its parameters. Zaxnes has a single
+        // renderer, so the style is stored and handed back; its parameters are the curvature
+        // settings of AMD-043, which a script and the options window share.
+        Whole("VisualStyle", () => settings.VisualStyle, v => settings.VisualStyle = v);
         Whole("Core", () => settings.Core, v => settings.Core = v);
         Whole("TVMode", () => settings.TVMode, v => settings.TVMode = v);
 
@@ -152,6 +157,30 @@ internal static partial class LuaApi
             int second = b.CheckInteger(l, 3, "SetInputType");
             runtime.Environment.Input.SetPortTypes(first, second);
             settings.SetPortTypes(first, second);
+            return 0;
+        });
+
+        type.Function("GetVisualStyleParameter", (b, l) =>
+        {
+            Require(b, l, "GetVisualStyleParameter");
+            int style = b.CheckInteger(l, 2, "GetVisualStyleParameter");
+            string id = b.CheckString(l, 3, "GetVisualStyleParameter");
+            return Number(l, settings.GetVisualStyleParameter(style, id));
+        });
+
+        type.Function("SetVisualStyleParameter", (b, l) =>
+        {
+            Require(b, l, "SetVisualStyleParameter");
+            int style = b.CheckInteger(l, 2, "SetVisualStyleParameter");
+            string id = b.CheckString(l, 3, "SetVisualStyleParameter");
+            double value = b.CheckNumber(l, 4, "SetVisualStyleParameter");
+            return Boolean(l, settings.SetVisualStyleParameter(style, id, value));
+        });
+
+        type.Function("ResetVisualStyleParameters", (b, l) =>
+        {
+            Require(b, l, "ResetVisualStyleParameters");
+            settings.ResetVisualStyleParameters(b.CheckInteger(l, 2, "ResetVisualStyleParameters"));
             return 0;
         });
 

@@ -109,6 +109,14 @@ internal sealed class NesPictureTexture : IDisposable
         }
     }
 
+    /// <summary>
+    /// Cells per side of <see cref="Quad"/>. The quad spans the whole 256 × 240 reference
+    /// frame, so AMD-043 REQ-SCN-068 — large flat surfaces should be subdivided — applies to it
+    /// as it does to the backdrop, and for the same reason (Q-079).
+    /// </summary>
+    // Q-079
+    private const int Cells = 32;
+
     private static TileMesh BuildQuad()
     {
         const float top = SceneConstants.SceneHeight;
@@ -116,15 +124,41 @@ internal sealed class NesPictureTexture : IDisposable
         Vec3 normal = new(0f, 0f, -1f);
 
         // Same winding as the −Z face of the unit box (REQ-E3D-505): bottom-left, top-left,
-        // top-right, bottom-right.
-        MeshVertex[] vertices =
-        [
-            new MeshVertex(new Vec3(0f, bottom, 0f), normal, new Vec2(0f, Height)),
-            new MeshVertex(new Vec3(0f, top, 0f), normal, new Vec2(0f, 0f)),
-            new MeshVertex(new Vec3(Width, top, 0f), normal, new Vec2(Width, 0f)),
-            new MeshVertex(new Vec3(Width, bottom, 0f), normal, new Vec2(Width, Height)),
-        ];
+        // top-right, bottom-right, cut into a grid of cells.
+        List<MeshVertex> vertices = new((Cells + 1) * (Cells + 1));
+        for (int row = 0; row <= Cells; row++)
+        {
+            float v = row / (float)Cells;
+            float y = bottom + ((top - bottom) * v);
+            for (int column = 0; column <= Cells; column++)
+            {
+                float u = column / (float)Cells;
+                vertices.Add(new MeshVertex(
+                    new Vec3(Width * u, y, 0f),
+                    normal,
+                    new Vec2(Width * u, Height * (1f - v))));
+            }
+        }
 
-        return new TileMesh(vertices, [0, 1, 2, 0, 2, 3]);
+        List<int> triangles = new(Cells * Cells * 6);
+        int stride = Cells + 1;
+        for (int row = 0; row < Cells; row++)
+        {
+            for (int column = 0; column < Cells; column++)
+            {
+                int corner = (row * stride) + column;
+                triangles.AddRange(
+                [
+                    corner,
+                    corner + stride,
+                    corner + stride + 1,
+                    corner,
+                    corner + stride + 1,
+                    corner + 1,
+                ]);
+            }
+        }
+
+        return new TileMesh(vertices, triangles);
     }
 }

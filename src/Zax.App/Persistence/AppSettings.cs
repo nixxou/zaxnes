@@ -154,6 +154,44 @@ public sealed class AppSettings
         set => Model.Set(SettingKeys.SceneSkybox, SettingValue.OfEnum(value));
     }
 
+    /// <summary><c>scene.bend_lr</c>: left-right bend in degrees (AMD-043 REQ-SCN-066).</summary>
+    public int BendLeftRight
+    {
+        get => Model.GetInt(SettingKeys.SceneBendLeftRight);
+        set => Model.SetInt(SettingKeys.SceneBendLeftRight, value);
+    }
+
+    /// <summary><c>scene.bend_tb</c>: top-bottom bend in degrees (REQ-SCN-066).</summary>
+    public int BendTopBottom
+    {
+        get => Model.GetInt(SettingKeys.SceneBendTopBottom);
+        set => Model.SetInt(SettingKeys.SceneBendTopBottom, value);
+    }
+
+    /// <summary><c>scene.arc_h</c>: horizontal arc in degrees (REQ-SCN-066).</summary>
+    public int ArcHorizontal
+    {
+        get => Model.GetInt(SettingKeys.SceneArcHorizontal);
+        set => Model.SetInt(SettingKeys.SceneArcHorizontal, value);
+    }
+
+    /// <summary><c>scene.arc_center</c>: 0 screen centre, 1 bottom edge (REQ-SCN-066).</summary>
+    public int ArcCenter
+    {
+        get => Model.GetInt(SettingKeys.SceneArcCenter);
+        set => Model.SetInt(SettingKeys.SceneArcCenter, value);
+    }
+
+    /// <summary>
+    /// <c>render.visual_style</c>: 0 Classic, 1 Enhanced (AMD-040 §3). Stored and handed back;
+    /// Zaxnes has one renderer, so it changes nothing of what is drawn.
+    /// </summary>
+    public int VisualStyle
+    {
+        get => Model.GetInt(SettingKeys.RenderVisualStyle);
+        set => Model.SetInt(SettingKeys.RenderVisualStyle, value);
+    }
+
     /// <summary><c>camera.fov</c>: vertical field of view in degrees, default 70.</summary>
     public float Fov
     {

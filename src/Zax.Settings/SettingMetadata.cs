@@ -158,6 +158,12 @@ public enum OutOfDomainRule
 
     /// <summary>Any value is accepted: the setting has no domain.</summary>
     Unbounded,
+
+    /// <summary>
+    /// Bring the value into the bounds, then onto the nearest multiple of the step, ties going
+    /// to the even multiple (AMD-040 §3). The four curvature settings of AMD-043 use it.
+    /// </summary>
+    Snap,
 }
 
 /// <summary>One admitted value of an enumerated domain, with the label the file and the

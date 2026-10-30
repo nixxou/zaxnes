@@ -105,3 +105,8 @@ app.engine_mode
 audio.mute
 ui.show_fps
 ui.language
+scene.bend_lr
+scene.bend_tb
+scene.arc_h
+scene.arc_center
+render.visual_style

@@ -41,6 +41,7 @@ public sealed class SceneRenderer : ISceneRenderer
     private bool _shadowEnabled;
     private bool _mirroredWinding;
     private bool _mirroredNormal;
+    private SpaceBend _bend = SpaceBend.None;
 
     /// <summary>Creates the renderer for an existing, current GL 3.3 core context.</summary>
     /// <param name="gl">The GL API of the host context.</param>
@@ -237,6 +238,9 @@ public sealed class SceneRenderer : ISceneRenderer
             // Nothing else is in the scene in 2D mode, so the quad neither casts nor receives.
             ReceiveShadow = false,
             Clip = true,
+            // REQ-SCN-068: the quad is the game scene in 2D mode, so the curvature reaches it
+            // like the tiles it stands in for (Q-079).
+            Bend = true,
             BoundsMin = NesPictureTexture.Quad.BoundsMin,
             BoundsMax = NesPictureTexture.Quad.BoundsMax,
         });
@@ -263,23 +267,7 @@ public sealed class SceneRenderer : ISceneRenderer
             return;
         }
 
-        // REQ-SCN-037: the renderer is the sole owner of the ±0.1 sprite depth nudge, applied
-        // in the object's local frame, before the scale and the rotation, exactly once.
-        float nudge = tile.Sprite
-            ? tile.BehindBackground ? SceneConstants.SpriteNudge : -SceneConstants.SpriteNudge
-            : 0f;
-        Mat4 model = tile.Transform;
-        if (nudge != 0f)
-        {
-            model *= Mat4.Translation(new Vec3(0f, 0f, nudge));
-        }
-
-        bool hud = tile.Container == SceneContainer.Interface;
-        if (hud)
-        {
-            // REQ-SCN-045: the HUD lives in a plane attached to the camera.
-            model = hudMatrix * model;
-        }
+        Mat4 model = ScenePlacement.TileModel(tile, hudMatrix, out bool hud);
 
         // REQ-SCN-022: in FPV, an opaque tile of another shape that crosses the eye-to-target
         // segment is drawn transparent at 0.5 for this frame only.
@@ -317,6 +305,8 @@ public sealed class SceneRenderer : ISceneRenderer
             ReceiveShadow = tile.ReceiveShadow && !hud && material != MaterialClass.Transparent,
             Clip = !hud,
             Hud = hud,
+            // REQ-SCN-068: the converted tiles and sprites bend, the HUD stays flat.
+            Bend = !hud,
             Deform = tile.Deform,
         };
 
@@ -349,7 +339,10 @@ public sealed class SceneRenderer : ISceneRenderer
     private void CollectBackdrop(SceneState scene, in CameraView view)
     {
         BackdropState backdrop = scene.Backdrop;
-        GpuMesh? gpu = _meshes.Get(BoxMesh.Unit);
+
+        // REQ-SCN-068: the backdrop is subdivided, at least 32 × 32 cells per face, so that the
+        // curvature shows inside a face instead of only tilting it.
+        GpuMesh? gpu = _meshes.Get(BoxMesh.Subdivided);
         if (gpu is not { } resident)
         {
             return;
@@ -371,8 +364,10 @@ public sealed class SceneRenderer : ISceneRenderer
             // REQ-SCN-048: never casts, receives when asked, never clipped by R.
             ReceiveShadow = scene.Settings.Shadows && backdrop.ReceiveShadow,
             Clip = false,
-            BoundsMin = BoxMesh.Unit.BoundsMin,
-            BoundsMax = BoxMesh.Unit.BoundsMax,
+            // REQ-SCN-068: the backdrop bends with the scene it stands behind.
+            Bend = true,
+            BoundsMin = BoxMesh.Subdivided.BoundsMin,
+            BoundsMax = BoxMesh.Subdivided.BoundsMax,
         });
 
         _ = view;
@@ -391,11 +386,16 @@ public sealed class SceneRenderer : ISceneRenderer
         Statistics.ShadowMapSize = _shadowMap.Size;
         Statistics.RequestedShadowMapSize = _shadowMap.Requested;
 
+        SpaceBend bend = scene.Settings.Bend;
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
         foreach (DrawItem caster in _casters)
         {
-            Vector3 point = MatrixInterop.ToVector(caster.Model.TransformPoint(Vec3.Zero));
+            Vec3 anchor = caster.Model.TransformPoint(Vec3.Zero);
+
+            // REQ-SCN-068: the shadow pass draws the bent geometry, so the volume has to be
+            // fitted on the bent anchors or the casters at the edges fall outside the map.
+            Vector3 point = MatrixInterop.ToVector(caster.Bend ? bend.Apply(anchor) : anchor);
             min = Vector3.Min(min, point);
             max = Vector3.Max(max, point);
         }
@@ -430,6 +430,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _shadowPass.Use();
         _shadowPass.Set("uLightViewProjection", volume.ViewProjection);
         _shadowPass.Set("uTime", scene.EmulatedTime);
+        SetBendConstants(_shadowPass, bend);
 
         foreach (DrawItem caster in _casters)
         {
@@ -438,6 +439,7 @@ public sealed class SceneRenderer : ISceneRenderer
             SetWinding(Determinant(caster.Model) < 0f);
             _shadowPass.Set("uModel", MatrixInterop.ToNumerics(caster.Model));
             SetDeformation(_shadowPass, caster.Deform);
+            _shadowPass.Set("uBend", caster.Bend && !bend.IsIdentity ? 1 : 0);
             Draw(caster.Mesh);
         }
 
@@ -639,6 +641,10 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass.Set("uNormalOffset", SceneConstants.ShadowNormalOffset);
         _shadowEnabled = volume.HasContent;
 
+        // REQ-SCN-067: the per-axis constants are the same for every vertex of the frame.
+        _bend = scene.Settings.Bend;
+        SetBendConstants(_scenePass, _bend);
+
         _scenePass.Set("uIndexTexture", 0);
         _scenePass.Set("uColorTexture", 1);
         _scenePass.Set("uPalette", 2);
@@ -691,6 +697,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass.Set("uAlpha", opaque ? 1f : item.Alpha);
         _scenePass.Set("uClip", item.Clip ? 1 : 0);
         _scenePass.Set("uReceiveShadow", _shadowEnabled && item.ReceiveShadow ? 1 : 0);
+        _scenePass.Set("uBend", item.Bend && !_bend.IsIdentity ? 1 : 0);
         SetDeformation(_scenePass, item.Deform);
 
         _gl.ActiveTexture(TextureUnit.Texture0);
@@ -738,6 +745,19 @@ public sealed class SceneRenderer : ISceneRenderer
 
         _gl.DepthMask(true);
         _gl.DepthFunc(DepthFunction.Less);
+    }
+
+    /// <summary>
+    /// Uploads the per-frame constants of the space bending (REQ-SCN-067): the curvature, the
+    /// recentring factor and the offset of each of the three axes, and the arc pivot.
+    /// </summary>
+    private static void SetBendConstants(ShaderProgram program, SpaceBend bend)
+    {
+        program.Set("uBendK", MatrixInterop.ToVector(bend.Curvature));
+        program.Set("uBendF", MatrixInterop.ToVector(bend.Recentring));
+        program.Set("uBendH", MatrixInterop.ToVector(bend.Offset));
+        program.Set("uBendOn", MatrixInterop.ToVector(bend.Active));
+        program.Set("uBendPivot", bend.ArcPivot);
     }
 
     private void SetDeformation(ShaderProgram program, DeformParameters? deform)
@@ -791,6 +811,10 @@ public sealed class SceneRenderer : ISceneRenderer
         public bool ReceiveShadow;
         public bool Clip;
         public bool Hud;
+
+        /// <summary>Whether the space bending of REQ-SCN-068 reaches this item.</summary>
+        public bool Bend;
+
         public DeformParameters? Deform;
 
         /// <summary>

@@ -78,6 +78,90 @@ internal static class SceneShaders
         """;
 
     /// <summary>
+    /// The space bending of SPEC-06 REQ-SCN-067 (AMD-043), the GLSL counterpart of
+    /// <see cref="Zax.Engine3D.SpaceBend"/>. The per-axis constants <c>k</c>, <c>f</c> and
+    /// <c>h</c> are computed once per frame on the CPU and handed over as uniforms, so a vertex
+    /// only pays for the wrapping itself.
+    /// </summary>
+    /// <remarks>
+    /// The Jacobian is carried along because REQ-SCN-068 has the shading normal transported by
+    /// the curvature (amending REQ-SCN-028). Its cofactor matrix is built from the cross
+    /// products of its columns, which needs neither <c>inverse</c> nor a special case for the
+    /// singular Jacobian the depth limit produces.
+    /// </remarks>
+    private const string Bend = """
+        uniform int uBend;
+        uniform vec3 uBendK;
+        uniform vec3 uBendF;
+        uniform vec3 uBendH;
+        uniform vec3 uBendOn;
+        uniform float uBendPivot;
+
+        const vec3 zaxBendCenter = vec3(128.0, 120.0, 0.0);
+        const float zaxBendDepthLimit = 0.95;
+
+        // E(k, f, h) of REQ-SCN-067 step 2, with its four partial derivatives in
+        // d = (du/du, du/dw, dw/du, dw/dw).
+        vec2 zaxWrap(float k, float f, float h, vec2 p, out vec4 d)
+        {
+            bool held = p.y * k > zaxBendDepthLimit;
+            float depth = held ? zaxBendDepthLimit / k : p.y;
+            float slope = held ? 0.0 : 1.0;
+
+            float a = p.x * k;
+            float s = sin(a);
+            float c = cos(a);
+            float radial = 1.0 - depth * k;
+
+            d = vec4(f * radial * c, -f * slope * s, f * radial * s, f * slope * c);
+            return vec2(f * radial * s / k, f * ((1.0 - c) / k + depth * c - h));
+        }
+
+        vec3 zaxBend(vec3 scene, out mat3 jacobian)
+        {
+            vec3 q = scene - zaxBendCenter;
+            jacobian = mat3(1.0);
+            vec4 d;
+
+            if (uBendOn.x != 0.0)
+            {
+                vec2 r = zaxWrap(uBendK.x, uBendF.x, uBendH.x, vec2(q.x, q.z), d);
+                q.x = r.x;
+                q.z = r.y;
+                jacobian = mat3(d.x, 0.0, d.z, 0.0, 1.0, 0.0, d.y, 0.0, d.w) * jacobian;
+            }
+
+            if (uBendOn.y != 0.0)
+            {
+                vec2 r = zaxWrap(uBendK.y, uBendF.y, uBendH.y, vec2(q.y, q.z), d);
+                q.y = r.x;
+                q.z = r.y;
+                jacobian = mat3(1.0, 0.0, 0.0, 0.0, d.x, d.z, 0.0, d.y, d.w) * jacobian;
+            }
+
+            if (uBendOn.z != 0.0)
+            {
+                // The arc wraps (u, p − v) and reads the second component back as p − s.
+                vec2 r = zaxWrap(uBendK.z, uBendF.z, uBendH.z, vec2(q.x, uBendPivot - q.y), d);
+                q.x = r.x;
+                q.y = uBendPivot - r.y;
+                jacobian = mat3(d.x, -d.z, 0.0, -d.y, d.w, 0.0, 0.0, 0.0, 1.0) * jacobian;
+            }
+
+            return q + zaxBendCenter;
+        }
+
+        vec3 zaxBendNormal(mat3 jacobian, vec3 n)
+        {
+            vec3 k0 = cross(jacobian[1], jacobian[2]);
+            vec3 k1 = cross(jacobian[2], jacobian[0]);
+            vec3 k2 = cross(jacobian[0], jacobian[1]);
+            vec3 t = k0 * n.x + k1 * n.y + k2 * n.z;
+            return dot(t, t) > 1e-12 ? t : n;
+        }
+        """;
+
+    /// <summary>
     /// Vertex shader of the scene pass. The scene frame is left-handed (REQ-E3D-400), so the
     /// clip position is built from <c>(x, y, −z)</c> (REQ-SCN-001).
     /// </summary>
@@ -94,7 +178,10 @@ internal static class SceneShaders
 
         {{Deformation}}
 
+        {{Bend}}
+
         out vec3 vScene;
+        out vec3 vBent;
         out vec3 vNormal;
         out vec2 vUv;
 
@@ -107,13 +194,29 @@ internal static class SceneShaders
             }
 
             vec4 scene = uModel * vec4(local, 1.0);
+
+            // REQ-SCN-068: the clipping of REQ-SCN-036 is evaluated on the position *before*
+            // bending, so a tile the margins keep stays visible wherever its bent image lands.
             vScene = scene.xyz;
+
             // REQ-SCN-028: the normal is the mesh normal, unchanged by the deformation.
             // uNormalSign is −1 for a mirrored placement, whose cofactor matrix points the
             // normal inwards (Q-069).
             vNormal = uNormalSign * (uNormalMatrix * aNormal);
+
+            vec3 placed = scene.xyz;
+            if (uBend != 0)
+            {
+                // REQ-SCN-067, applied last: after the animated deformation and after the
+                // object's own transform. REQ-SCN-068 transports the normal with it.
+                mat3 jacobian;
+                placed = zaxBend(scene.xyz, jacobian);
+                vNormal = zaxBendNormal(jacobian, vNormal);
+            }
+
+            vBent = placed;
             vUv = aUv;
-            gl_Position = uViewProjection * vec4(scene.x, scene.y, -scene.z, 1.0);
+            gl_Position = uViewProjection * vec4(placed.x, placed.y, -placed.z, 1.0);
         }
         """;
 
@@ -124,6 +227,7 @@ internal static class SceneShaders
     public static string SceneFragment { get; } = $$"""
         #version 330 core
         in vec3 vScene;
+        in vec3 vBent;
         in vec3 vNormal;
         in vec2 vUv;
         out vec4 oColor;
@@ -201,8 +305,10 @@ internal static class SceneShaders
             float shadow = 1.0;
             if (uReceiveShadow != 0)
             {
-                // REQ-SCN-031: a normal offset and a depth bias of about 0.02 unit.
-                vec3 biased = vScene + n * uNormalOffset;
+                // REQ-SCN-031: a normal offset and a depth bias of about 0.02 unit. The
+                // shadow map holds the bent geometry (REQ-SCN-068), so the lookup uses the
+                // bent position.
+                vec3 biased = vBent + n * uNormalOffset;
                 vec4 light = uLightViewProjection * vec4(biased.x, biased.y, -biased.z, 1.0);
                 vec3 projected = light.xyz / light.w * 0.5 + 0.5;
                 if (projected.x >= 0.0 && projected.x <= 1.0
@@ -274,6 +380,8 @@ internal static class SceneShaders
 
         {{Deformation}}
 
+        {{Bend}}
+
         void main()
         {
             vec3 local = aPosition;
@@ -283,7 +391,17 @@ internal static class SceneShaders
             }
 
             vec4 scene = uModel * vec4(local, 1.0);
-            gl_Position = uLightViewProjection * vec4(scene.x, scene.y, -scene.z, 1.0);
+
+            // REQ-SCN-068: the shadow pass is bent too, so the shadows follow the curved
+            // surface instead of sliding off it.
+            vec3 placed = scene.xyz;
+            if (uBend != 0)
+            {
+                mat3 jacobian;
+                placed = zaxBend(scene.xyz, jacobian);
+            }
+
+            gl_Position = uLightViewProjection * vec4(placed.x, placed.y, -placed.z, 1.0);
         }
         """;
 
