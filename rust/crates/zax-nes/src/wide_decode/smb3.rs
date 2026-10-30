@@ -1,5 +1,5 @@
-//! Super Mario Bros. 3 (USA) (Rev 1): the margins of a level, decoded from its tile map in
-//! PRG-RAM.
+//! Super Mario Bros. 3 (USA) (Rev 1), (Japan), its Rev 1 and (Europe): the margins of a level,
+//! decoded from its tile map in PRG-RAM.
 //!
 //! The game lays a whole level out in PRG-RAM before it starts (`Tile_Mem`, `$6000-$794F`) and
 //! keeps it up to date as blocks are hit, coins taken or bricks broken; the nametables only show
@@ -9,7 +9,7 @@
 //! A tile `t` is four CHR tiles, `layout[256 q + t]` for quarter `q` (0 top left, 1 bottom left,
 //! 2 top right, 3 bottom right) of the tileset's layout table, and its sub-palette is `t >> 6`.
 //! The layout of tileset `n` (`$070A`) is the pointer `TileLayout_ByTileset[n]` (`$99F7` of PRG
-//! bank 30, which the game keeps at `$8000`): at `$A000` of bank `PAGE_A000_ByTileset[n]`
+//! bank 30, 15 bytes earlier in Japan's builds and 7 in Europe's, which the game keeps at `$8000`): at `$A000` of bank `PAGE_A000_ByTileset[n]`
 //! (`$83E9`), or at `$C000` of bank `PAGE_C000_ByTileset[n]` (`$83D6`). Banks 0-29 keep their
 //! place with the built-in patch; banks 30 and 31 are the last two.
 //!
@@ -31,11 +31,33 @@
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
-/// The decoder.
-pub struct SuperMarioBros3;
+/// The decoder of a build: where its tile layouts' table is.
+pub struct SuperMarioBros3 {
+    /// Offset in PRG bank 30 of `TileLayout_ByTileset`.
+    tile_layout_by_tileset: usize,
+}
+
+/// The USA builds.
+pub const USA: SuperMarioBros3 = SuperMarioBros3 {
+    tile_layout_by_tileset: 0x19F7,
+};
+/// The Japanese builds.
+pub const JAPAN: SuperMarioBros3 = SuperMarioBros3 {
+    tile_layout_by_tileset: 0x19E8,
+};
+/// The European build.
+pub const EUROPE: SuperMarioBros3 = SuperMarioBros3 {
+    tile_layout_by_tileset: 0x19F0,
+};
 
 /// CRC-32 of the ROM's data, iNES header excluded: Super Mario Bros. 3 (USA) (Rev 1).
 pub const SOURCE_CRC: u32 = 0x2E63_01ED;
+/// The same of Super Mario Bros. 3 (Japan): the same RAM and level data.
+pub const SOURCE_CRC_JAPAN: u32 = 0xE7DD_FEE3;
+/// The same of Super Mario Bros. 3 (Japan) (Rev 1).
+pub const SOURCE_CRC_JAPAN_REV1: u32 = 0x52E2_B5E0;
+/// The same of Super Mario Bros. 3 (Europe).
+pub const SOURCE_CRC_EUROPE: u32 = 0x1ED5_C801;
 
 const HORZ_SCROLL: u16 = 0x00FD;
 const HORZ_SCROLL_HI: u16 = 0x0012;
@@ -44,10 +66,9 @@ const LEVEL_WIDTH: u16 = 0x0022;
 const LEVEL_VERTICAL: u16 = 0x03EF;
 const LEVEL_TILESET: u16 = 0x070A;
 
-/// Offsets in PRG bank 30 of the game's tables. The bank is the one before the last, which MMC3
-/// fixes at `$8000` in the game's PRG mode: 16 KiB before the end of the PRG-ROM, with the
-/// built-in patch (which adds a bank before those two) or without.
-const TILE_LAYOUT_BY_TILESET: usize = 0x19F7;
+/// Offsets in PRG bank 30 of the game's tables (the layouts' is the build's). The bank is the one
+/// before the last, which MMC3 fixes at `$8000` in the game's PRG mode: 16 KiB before the end of
+/// the PRG-ROM, with the built-in patch (which adds a bank before those two) or without.
 const PAGE_C000_BY_TILESET: usize = 0x03D6;
 const PAGE_A000_BY_TILESET: usize = 0x03E9;
 const TILESETS: u8 = 19;
@@ -88,7 +109,7 @@ struct Level<'a> {
 }
 
 impl Level<'_> {
-    fn of<'a>(memory: &DecoderMemory<'a>) -> Option<Level<'a>> {
+    fn of<'a>(game: &SuperMarioBros3, memory: &DecoderMemory<'a>) -> Option<Level<'a>> {
         if memory.ram(LEVEL_VERTICAL) != 0 {
             return None;
         }
@@ -98,7 +119,7 @@ impl Level<'_> {
         }
         let rom = memory.prg_rom;
         let bank_30 = rom.len().checked_sub(2 * BANK_SIZE)?;
-        let entry = bank_30 + TILE_LAYOUT_BY_TILESET + (2 * usize::from(tileset));
+        let entry = bank_30 + game.tile_layout_by_tileset + (2 * usize::from(tileset));
         let pointer = u16::from_le_bytes([*rom.get(entry)?, *rom.get(entry + 1)?]);
         let pages = bank_30
             + if pointer >= 0xC000 {
@@ -201,7 +222,7 @@ impl MarginDecoder for SuperMarioBros3 {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        let Some(level) = Level::of(memory) else {
+        let Some(level) = Level::of(self, memory) else {
             return false;
         };
         let tile_row = level_row(memory, *row);
@@ -250,7 +271,7 @@ impl MarginDecoder for SuperMarioBros3 {
         if row.line >= SCREEN_LINES {
             return true;
         }
-        let Some(level) = Level::of(memory) else {
+        let Some(level) = Level::of(self, memory) else {
             return false;
         };
         // The PPU did not draw this row: the screen must show the level, checked on a row it

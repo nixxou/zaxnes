@@ -444,7 +444,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
 | Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
 | Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
-| Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), with its built-in patch (also listed for the unpatched ROM) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
+| Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), (Japan) (`E7DDFEE3`), its Rev 1 (`52E2B5E0`) and (Europe) (`1ED5C801`), with their built-in patches (also listed for the unpatched ROMs; the Japanese and European builds' table of tile layouts 15 and 7 bytes earlier) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 | Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched and with their built-in patches | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
 | Excitebike (Japan, USA) (data CRC-32 `49AEB3A6`), unpatched and with its built-in patch | a race's track, laid out by the game's own routine in the sandbox, one lap | `excitebike.rs`, see below |
 | Final Fantasy (USA) (data CRC-32 `CEBD2A31`), unpatched and with its built-in patch | the world map (unpacked from PRG-ROM) and the standard maps (PRG-RAM); vertical margin, overscan | `ff1.rs`, see below |
@@ -1107,9 +1107,9 @@ bank copied to the end, no CHR-ROM moved, nothing written in the game's free spa
 
 The testing aids are components of their own where their hook can do the hack's work in place of
 the bytes it replaces ("Invincible" of Mega Man, 2 to 6, Super Mario Bros., Zelda II, Castlevania
-and Metal Force); the others (the level selectors, the invincibility of Super Mario Bros. 3,
-Adventure Island, Blaster Master and Metroid) need the hack's code and stay in the widescreen
-component, with the advanced mode only.
+and Metal Force; both aids of Super Mario Bros. 3, since its packs moved to the zone fantôme); the
+others (the level selectors, the invincibility of Adventure Island, Blaster Master and Metroid)
+need the hack's code and stay in the widescreen component, with the advanced mode only.
 
 Format 1, little-endian: `ZXPK`, `u8` format, name (`u8` length + UTF-8), `u32` code length and
 the code (assembled for the window at `$5800`), `u8` component count, then each component: its
