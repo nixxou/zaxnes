@@ -14,8 +14,8 @@ pub struct InputBindings {
     structure_revision: u64,
     /// Whether the pads get the handheld defaults (`default_bindings::handheld_gamepad_set`).
     handheld: bool,
-    /// Whether those defaults go by the positions of a handheld's buttons rather than by their
-    /// labels (the desktop, `default_bindings::create_desktop_console_gamepad`).
+    /// Whether those defaults are the desktop's (`default_bindings::create_desktop_console_gamepad`):
+    /// the handheld's with the rollback on the right stick's click.
     positional: bool,
 }
 
@@ -70,15 +70,17 @@ impl InputBindings {
     }
 
     /// Gives the pads the defaults of the desktop's console mode from now on: those of a
-    /// handheld, the face buttons where a handheld has them (owner request). A pad whose saved set
-    /// is still a default of an earlier version (the desktop's, or the handheld's by labels) gets
-    /// them at once; a set the player changed is kept.
+    /// handheld, NES A and B on the pad's A and B, the rollback on the right stick's click (owner
+    /// request). A pad whose saved set is still a default of an earlier version (the desktop's,
+    /// the handheld's, or the console's with the face buttons at a handheld's places) gets them at
+    /// once; a set the player changed is kept.
     pub fn use_desktop_console_defaults(&mut self) {
         self.handheld = true;
         self.positional = true;
         let former = [
             default_bindings::create_gamepad(true),
             default_bindings::create_handheld_gamepad(true),
+            default_bindings::create_former_desktop_console_gamepad(true),
         ];
         let console = default_bindings::create_desktop_console_gamepad(true);
         for (_, set) in &mut self.gamepads {

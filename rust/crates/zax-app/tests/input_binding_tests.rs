@@ -1069,12 +1069,12 @@ fn a_saved_desktop_default_pad_moves_to_the_handheld_defaults() {
     );
 }
 
-/// The desktop plays as its console mode with the face buttons where a handheld has them (owner
-/// request): NES A on the right button (Xbox B), NES B on the bottom one (Xbox A). A pad saved
-/// with an earlier default (the desktop's, or the handheld's by labels) moves to it; one the
-/// player changed is kept.
+/// The desktop plays as its console mode (owner request): NES A and B on the pad's A and B, the
+/// rollback on the right stick's click. A pad saved with an earlier default (the desktop's, the
+/// handheld's, or the console's with the face buttons at a handheld's places) moves to it; one
+/// the player changed is kept.
 #[test]
-fn a_desktop_pad_gets_the_handheld_buttons_at_their_places() {
+fn a_desktop_pad_gets_the_console_defaults() {
     let mut bindings = InputBindings::new();
     bindings.gamepad_mut("desktop default", true);
     let mut labelled = InputBindings::new();
@@ -1083,22 +1083,36 @@ fn a_desktop_pad_gets_the_handheld_buttons_at_their_places() {
     bindings
         .gamepad_mut("handheld default", true)
         .replace(by_labels.bindings().iter().cloned());
+    let former = zax_app::input::default_bindings::create_former_desktop_console_gamepad(true);
+    bindings
+        .gamepad_mut("former console default", true)
+        .replace(former.bindings().iter().cloned());
     bindings
         .gamepad_mut("changed", true)
         .set_action(InputAction::A, PhysicalControl::button(pad_map::NORTH));
 
     bindings.use_desktop_console_defaults();
 
-    for name in ["desktop default", "handheld default", "new pad"] {
+    for name in [
+        "desktop default",
+        "handheld default",
+        "former console default",
+        "new pad",
+    ] {
         let set = bindings.gamepad_mut(name, true);
         assert_eq!(
             set.get_action(InputAction::A),
-            PhysicalControl::button(pad_map::EAST),
+            PhysicalControl::button(pad_map::SOUTH),
             "{name}"
         );
         assert_eq!(
             set.get_action(InputAction::B),
-            PhysicalControl::button(pad_map::SOUTH),
+            PhysicalControl::button(pad_map::EAST),
+            "{name}"
+        );
+        assert_eq!(
+            set.get_action(InputAction::ROLL_BACK),
+            PhysicalControl::button(pad_map::RIGHT_STICK),
             "{name}"
         );
         assert_eq!(
