@@ -129,6 +129,8 @@ pub const CASTLEVANIA_USA_REV1: &str = "Castlevania (USA) (Rev 1) widescreen";
 pub const CASTLEVANIA_EUROPE: &str = "Castlevania (Europe) widescreen";
 /// Name of the same patch for an NTSC ROM of the European code (advanced mode).
 pub const CASTLEVANIA_EUROPE_NTSC: &str = "Castlevania (Europe) (NTSC) widescreen";
+/// Name of the Castlevania (PlayChoice-10) widescreen patch (advanced mode).
+pub const CASTLEVANIA_PC10: &str = "Castlevania (PlayChoice-10) widescreen";
 /// Name of the Akumajou Dracula (Japan) widescreen patch (advanced mode).
 pub const AKUMAJOU_DRACULA_JAPAN: &str = "Akumajou Dracula (Japan) widescreen";
 /// Name of the Adventure Island (USA) widescreen patch (advanced mode).
@@ -157,7 +159,7 @@ pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 28] = [
+pub const PATCHES: [BuiltinPatch; 29] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -572,6 +574,27 @@ pub const PATCHES: [BuiltinPatch; 28] = [
         boot_zone: true,
         // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
         zone_data: true,
+        idle_loop: Some((0xC030, 0xC03E)),
+    },
+    BuiltinPatch {
+        name: CASTLEVANIA_PC10,
+        game: "Castlevania",
+        rom_name: "Castlevania (PlayChoice-10)",
+        source_crc: 0xCD65_49EA,
+        // The USA hack built for the PlayChoice-10 code (`cvwide`, `tools/build.py --pack`,
+        // -D PC10: the base build's code rebuilt, its routines moved; the same data banks, RAM
+        // and states).
+        bps: include_bytes!("../patches/castlevania-pc10-widescreen.zxpk"),
+        options: CASTLEVANIA_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The base build's main loop, at the same place.
         idle_loop: Some((0xC030, 0xC03E)),
     },
     BuiltinPatch {
