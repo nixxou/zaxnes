@@ -30,26 +30,32 @@ room for code that would unlock the extension.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/blastermaster-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
-`WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes' shared builder
-(`hackpack.py`): NTSC, MMC1 (and MMC3, for the ROM hacks that put the game on it), each hook a 16
-KiB bank and a CPU address with the game's bytes it replaces, checked and applied by Zaxnes; the
-ROM keeps its size (no bank added, nothing moved or copied). `src/wide.s` is assembled with
-`-D PACK` for `$2000`: the zone fantôme, which Zaxnes shows to instruction fetches only from
-power-on, the extension unlocked; its registers and RAM are at `$3000`-`$3FFF` (widescreen MMC5:
-`$5000`-`$5FFF` stays the cartridge's), no window (`$5007` = `$02`). The code reads no data of its
-own (the game's data reads at `$2000`-`$3FFF` reach the PPU). The widescreen is in groups: "core"
-(Base: the settings, the position test and the sprites' copy to OAM), "enemies" (the enemies of
-the margins, sleeping ones included), and the two testing aids, "invincible" and "level select",
-which need the hack's code; each but the core needs it. Checks of the game's code the hack relies
-on go with them: the position test's tail and the byte that keeps the sprites moving in OAM; an
-object's routine, the slot search and the sound request where the hooks go on; the game's area
-select and a new game's start. Over a pool of 33 ROMs of the game (the dumps, the ROM hacks that
-are not combined with a translation; it has no French translation), 21 take a whole pack and 3
-all but the level selector; the others are the Japanese, European and beta builds, whose code is
-laid out otherwise, and a conversion to MMC5. 3000 frames of each with scripted inputs play as
+**Hack pack.** Zaxnes ships this hack as hack packs (`tools/build.py <rom> --pack <out.zxpk>`,
+with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md`
+7.1), all from this source: `blastermaster-usa-widescreen.zxpk`, NTSC;
+`blastermaster-japan-widescreen.zxpk` for Chou-Wakusei Senki MetaFight (Japan) (data CRC-32
+`039B4A9C`, `-D JAPAN`); `blastermaster-europe-widescreen.zxpk` for Blaster Master (Europe)
+(`8106E694`, `-D EUROPE`), PAL, with `blastermaster-europe-ntsc-widescreen.zxpk` for the ROMs of the
+European code whose header says NTSC (`--ntsc`). The Japanese and European builds have the same
+RAM and routines, their code laid out otherwise (the USA's bank 4 is their bank 3, and 5; their
+fixed banks moved by up to 3 KiB); they start a game otherwise, so their packs have no level
+selector. The packs are format 2, written by Zaxnes' shared builder (`hackpack.py`): MMC1 (and
+MMC3, for the ROM hacks that put the game on it), each hook a 16 KiB bank and a CPU address with
+the game's bytes it replaces, checked and applied by Zaxnes; the ROM keeps its size (no bank
+added, nothing moved or copied). `src/wide.s` is assembled with `-D PACK` for `$2000`: the zone
+fantôme, which Zaxnes shows to instruction fetches only from power-on, the extension unlocked;
+its registers and RAM are at `$3000`-`$3FFF` (widescreen MMC5: `$5000`-`$5FFF` stays the
+cartridge's), no window (`$5007` = `$02`). The code reads no data of its own (the game's data
+reads at `$2000`-`$3FFF` reach the PPU). The widescreen is in groups: "core" (Base: the settings,
+the position test and the sprites' copy to OAM), "enemies" (the enemies of the margins, sleeping
+ones included), and the two testing aids, "invincible" and "level select", which need the hack's
+code; each but the core needs it. Checks of the game's code the hack relies on go with them: the
+position test's tail and the byte that keeps the sprites moving in OAM; an object's routine, the
+slot search and the sound request where the hooks go on; the game's area select and a new game's
+start. The margin decoder reads each build's area tables at their places. Over a pool of 33 ROMs
+of the game (the dumps, the ROM hacks that are not combined with a translation; it has no French
+translation), 26 take a whole pack and 3 all but the level selector; the others are the beta
+builds, a conversion to MMC5 and a bad dump. 3000 frames of each with scripted inputs play as
 without the pack. The BPS patch described here is kept to compare.
 
 ## 2. What the game does, and what changes
@@ -194,7 +200,9 @@ the hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out
 ; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
 ; reads there still reach the PPU, so the code reads no data of its own. Its registers and RAM are
 ; at $3000-$3FFF, which the zone holds for its own instructions (widescreen MMC5: $5000-$5FFF stays
-; the cartridge's), and no window is opened.
+; the cartridge's), and no window is opened. Chou-Wakusei Senki MetaFight (Japan) (-D JAPAN) and
+; Blaster Master (Europe) (-D EUROPE) have the same RAM and routines, their code laid out otherwise
+; (the USA's bank 4 is their bank 3, and 5).
 ;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
 
@@ -274,16 +282,35 @@ SPRITE_COUNT    = $3C           ; bytes in the buffer
 SPRITE_NEXT     = $3D           ; where the next object's sprites go in OAM (the flicker)
 FRAME_COUNT     = $11
 OAM             = $0200
-NO_FLICKER      = $E6BE         ; a ROM byte, 0: the sprites move in OAM every other frame
+.if .defined(JAPAN)
+NO_FLICKER      = $F03B         ; a ROM byte, 0: the sprites move in OAM every other frame
+.elseif .defined(EUROPE)
+NO_FLICKER      = $F1B7
+.else
+NO_FLICKER      = $E6BE
+.endif
 
 ; The game's routines.
-POSITION_TAIL   = $EFD7         ; $3E -= 4, $3F -= 5 or 9
-RUN_OBJECT      = $C9A4         ; the object's routine (by its type)
 AREA_SELECT     = $F465         ; the game's own area select (SELECT START AREA / PRESS START)
 NEW_GAME_INIT   = $CDBA         ; a new game's first call, after the area is set
-NEW_GAME_GO     = $C2C6         ; a new game, past its opening scene ($F5D9)
-SLOT_SEARCH_GO  = $D7D2         ; the free slot search, after its LDA $0400,X
-SOUND_GO        = $DECF         ; a sound request, after its STA $E1 / TXA
+NEW_GAME_GO     = $C2C6         ; a new game, past its opening scene ($F5D9); the USA build only:
+                                ; the others start a game otherwise (no level selector)
+.if .defined(JAPAN)
+POSITION_TAIL   = $F8A5         ; $3E -= 4, $3F -= 5 or 9
+RUN_OBJECT      = $C8EC         ; the object's routine (by its type)
+SLOT_SEARCH_GO  = $D6AC         ; the free slot search, after its LDA $0400,X
+SOUND_GO        = $EC29         ; a sound request, after its STA $E1 / TXA
+.elseif .defined(EUROPE)
+POSITION_TAIL   = $FB45
+RUN_OBJECT      = $C95C
+SLOT_SEARCH_GO  = $D6FD
+SOUND_GO        = $E011
+.else
+POSITION_TAIL   = $EFD7
+RUN_OBJECT      = $C9A4
+SLOT_SEARCH_GO  = $D7D2
+SOUND_GO        = $DECF
+.endif
 
 .segment "CODE"
 .ifdef PACK
@@ -846,7 +873,8 @@ wide_end:
 """Builds the Blaster Master (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Blaster Master (USA).nes> [out.bps]
-       python -I tools/build.py <Blaster Master (USA).nes> --pack <out.zxpk>
+       python -I tools/build.py <Blaster Master (USA), (Europe) or Chou-Wakusei Senki MetaFight
+                                (Japan).nes> --pack <out.zxpk> [--ntsc]
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank the widescreen extension's PRG window shows at $5800-$7FFF (Zaxnes opens it at
@@ -866,7 +894,11 @@ widescreen in groups ("core", Base: the settings and the sprites in the margins;
 enemies of the margins, sleeping ones included; "invincible" and "level select", the aids, which
 need the hack's code) with checks of the game's code the hack relies on; src/wide.s assembled with
 PACK for $2000, the zone fantôme, which Zaxnes shows to instruction fetches from power-on, the
-extension unlocked; the hooks as offsets in the PRG-ROM, the ROM keeping its size.
+extension unlocked; the hooks as offsets in the PRG-ROM, the ROM keeping its size. Chou-Wakusei
+Senki MetaFight (Japan) (-D JAPAN) and Blaster Master (Europe) (-D EUROPE, PAL, with an NTSC twin
+for the ROMs of its code whose header says NTSC: --ntsc) get packs of their own, without the
+level selector (they start a game otherwise): the same RAM and routines, their code laid out
+otherwise.
 """
 
 import os
@@ -876,6 +908,8 @@ import sys
 import zlib
 
 SOURCE_CRC = 0x3F0FD764
+JAPAN = 0x039B4A9C              # Chou-Wakusei Senki MetaFight (Japan)
+EUROPE = 0x8106E694
 BANK_SIZE = 0x4000
 PRG_BANKS = 8
 PRG_SIZE = PRG_BANKS * BANK_SIZE
@@ -948,7 +982,7 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble(pack=False):
+def assemble(pack=False, defines=()):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
@@ -961,6 +995,7 @@ def assemble(pack=False):
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
     subprocess.run(tool('ca65') + ['-g'] + (['-D', 'PACK'] if pack else [])
+                   + [a for d in defines for a in ('-D', d)]
                    + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)], check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
@@ -977,6 +1012,30 @@ def pack_place(offset, address):
     the address with the offset's place in that bank (an 8 KiB bank's half of it)."""
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
+
+# Where the Japanese and European builds have the USA's places the pack hooks or checks: (bank,
+# address) of the USA's, then theirs (the same instructions and RAM; the USA's bank 4 is their bank 3
+# and 5).
+PLACES = {
+    'japan': {(7, 0xE936): (7, 0xF2B5), (7, 0xEF2B): (7, 0xF7F9), (7, 0xEC73): (7, 0xF541),
+              (7, 0xC987): (7, 0xC8CF), (7, 0xD7CF): (7, 0xD6A9), (7, 0xDECC): (7, 0xEC26),
+              (7, 0xCAA4): (7, 0xCA24), (7, 0xD6A2): (7, 0xD57C), (6, 0x8134): (6, 0x8134),
+              (4, 0x8B01): (3, 0x81AA), (6, 0x8141): (6, 0x8141), (4, 0x8B0E): (3, 0x81B7),
+              (6, 0x82C8): (6, 0x82C8), (6, 0x8605): (6, 0x8603), (6, 0x89A7): (6, 0x89A5),
+              (4, 0x8DE6): (3, 0x8492), (4, 0x8C94): (3, 0x833D),
+              (7, 0xEFD7): (7, 0xF8A5), (7, 0xE6BE): (7, 0xF03B), (7, 0xC9A4): (7, 0xC8EC),
+              (7, 0xD7D2): (7, 0xD6AC), (7, 0xDECF): (7, 0xEC29)},
+    'europe': {(7, 0xE936): (7, 0xF66A), (7, 0xEF2B): (7, 0xFA99), (7, 0xEC73): (7, 0xF787),
+               (7, 0xC987): (7, 0xC93F), (7, 0xD7CF): (7, 0xD6FA), (7, 0xDECC): (7, 0xE00E),
+               (7, 0xCAA4): (7, 0xCA3F), (7, 0xD6A2): (7, 0xD5B5), (6, 0x8134): (6, 0x8134),
+               (4, 0x8B01): (5, 0x8B11), (6, 0x8141): (6, 0x8141), (4, 0x8B0E): (5, 0x8B1E),
+               (6, 0x82C8): (6, 0x82E5), (6, 0x8605): (6, 0x862D), (6, 0x89A7): (6, 0x89D5),
+               (4, 0x8DE6): (5, 0x8E19), (4, 0x8C94): (5, 0x8CA9),
+               (7, 0xEFD7): (7, 0xFB45), (7, 0xE6BE): (7, 0xF1B7), (7, 0xC9A4): (7, 0xC95C),
+               (7, 0xD7D2): (7, 0xD6FD), (7, 0xDECF): (7, 0xE011)},
+}
+# Their hooks whose bytes differ (the JSR's target moved).
+ORIGINAL = {'japan': {0xC987: '20 ec c8'}, 'europe': {0xC987: '20 5c c9'}}
 
 # The groups past the core: (address of the hook).
 GROUPS = {
@@ -996,34 +1055,48 @@ CHECKS = {
 }
 
 
-def pack(data, out):
+def pack(data, crc, out, ntsc=False):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    code, sym = assemble(pack=True)
+    build = {JAPAN: 'japan', EUROPE: 'europe'}.get(crc)
+    code, sym = assemble(pack=True, defines=[build.upper()] if build else [])
     used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
-    pack = hackpack.Pack('Blaster Master (USA) widescreen', code[:used], region='ntsc',
-                         mappers=(1, 4))
+    name = {'japan': 'Chou-Wakusei Senki MetaFight (Japan)', 'europe': 'Blaster Master (Europe)'}.get(
+        build, 'Blaster Master (USA)') + (' (NTSC)' if build == 'europe' and ntsc else '')
+    region = 'pal' if build == 'europe' and not ntsc else 'ntsc'
+    pack = hackpack.Pack(name + ' widescreen', code[:used], region=region, mappers=(1, 4))
     widescreen = pack.component('widescreen')
     groups = {'core': widescreen.group('core', label='Base', label_fr='Base')}
-    for name, label, label_fr in (('enemies', 'Enemies in the margins', 'Ennemis dans les marges'),
-                                  ('invincible', 'Invincible', 'Invincible'),
-                                  ('level select', 'Level select', 'Sélecteur de niveau')):
-        groups[name] = widescreen.group(name, requires=['core'], label=label, label_fr=label_fr)
+    for group, label, label_fr in (('enemies', 'Enemies in the margins', 'Ennemis dans les marges'),
+                                   ('invincible', 'Invincible', 'Invincible'),
+                                   ('level select', 'Level select', 'Sélecteur de niveau')):
+        if not (build and group == 'level select'):
+            groups[group] = widescreen.group(group, requires=['core'], label=label,
+                                             label_fr=label_fr)
 
-    def offset(bank, address):
-        return bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
+    def place(bank, address):
+        """The build's bank and address for the USA's, and its offset in the PRG-ROM."""
+        if build:
+            bank, address = PLACES[build][(bank, address)]
+        return bank, address, bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
 
     for group, checks in CHECKS.items():
         for address, length in checks:
-            groups[group].check(*pack_place(offset(FIXED, address), address), length)
+            if group in groups:
+                bank, at_address, at = place(FIXED, address)
+                groups[group].check(*pack_place(at, at_address), length)
     for bank, address, original, new in hooks(sym):
-        at = offset(bank, address)
-        assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
         group = next((g for g, hooked in GROUPS.items() if address in hooked), 'core')
-        groups[group].hook(*pack_place(at, address), original, bytes(new))
+        if group not in groups:
+            continue
+        if build and address in ORIGINAL[build]:
+            original = bytes.fromhex(ORIGINAL[build][address])
+        bank, at_address, at = place(bank, address)
+        assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
+        groups[group].hook(*pack_place(at, at_address), original, bytes(new))
     result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
     print(f'{out}: {len(result)} bytes ({used} of code, '
@@ -1036,11 +1109,12 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = bytes(image[header:header + PRG_SIZE + CHR_SIZE])
-    assert zlib.crc32(data) == SOURCE_CRC, 'not Blaster Master (USA)'
-
+    crc = zlib.crc32(data)
     if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(data, sys.argv[3])
+        assert crc in (SOURCE_CRC, JAPAN, EUROPE), 'not a known build of Blaster Master'
+        pack(data, crc, sys.argv[3], ntsc='--ntsc' in sys.argv[4:])
         return
+    assert crc == SOURCE_CRC, 'not Blaster Master (USA)'
     code, sym = assemble()
     assert len(code) == BANK_SIZE
     banks = [bytearray(data[n * BANK_SIZE:(n + 1) * BANK_SIZE]) for n in range(PRG_BANKS)]

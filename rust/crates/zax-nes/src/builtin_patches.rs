@@ -24,7 +24,7 @@
 //! | Excitebike (Japan, USA), and (Europe) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the settings, the riders in the margins), the ROM keeping its size; the European one the same for PAL (`excitebikewide`, `tools/build.py --pack`) |
 //! | Final Fantasy (USA), and (Japan) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the people and vehicles), the ROM keeping its size; the Japanese one for its code, which its Rev 1 takes (`ff1wide`, `tools/build.py --pack`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies), the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
-//! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the enemies, the two aids), the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
+//! | Blaster Master (USA), (Europe) and Chou-Wakusei Senki MetaFight (Japan) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the enemies, the two aids), the ROM keeping its size; the Japanese and European ones built for their code, without the level selector, the European one PAL with an NTSC twin (`blastermasterwide`, `tools/build.py --pack`) |
 //! | Metroid (USA), and (Europe) | widescreen enemies, doors and items, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the enemies, the doors and items, the previews, the two aids), the ROM keeping its size; the European one the same for PAL (`metroidwide`, `tools/build.py --pack`) |
 //! | Mega Man 4 (USA), its Rev 1, and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; one pack for both USA builds and Rockman 4 (Japan), the same built from the European ROM, PAL; "Invincible" a component of its own, with or without the advanced mode (`mm4wide`, `tools/build.py --pack`) |
 //! | Mega Man 5 (USA), and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; Rockman 5 (Japan) by its signatures, the European build's own pack, PAL; "Invincible" a component of its own, with or without the advanced mode (`mm5wide`, `tools/build.py --pack`) |
@@ -167,6 +167,12 @@ pub const FINAL_FANTASY_JAPAN: &str = "Final Fantasy (Japan) widescreen";
 pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
 /// Name of the Blaster Master (USA) widescreen patch (advanced mode).
 pub const BLASTERMASTER_USA: &str = "Blaster Master (USA) widescreen";
+/// Name of the Chou-Wakusei Senki `MetaFight` (Japan) widescreen patch (advanced mode).
+pub const BLASTERMASTER_JAPAN: &str = "Chou-Wakusei Senki MetaFight (Japan) widescreen";
+/// Name of the Blaster Master (Europe) widescreen patch (advanced mode).
+pub const BLASTERMASTER_EUROPE: &str = "Blaster Master (Europe) widescreen";
+/// Name of the same patch for an NTSC ROM of the European code (advanced mode).
+pub const BLASTERMASTER_EUROPE_NTSC: &str = "Blaster Master (Europe) (NTSC) widescreen";
 /// Name of the Metroid (USA) widescreen patch (advanced mode).
 pub const METROID_USA: &str = "Metroid (USA) widescreen";
 /// Name of the Metroid (Europe) widescreen patch (advanced mode).
@@ -205,7 +211,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 52] = [
+pub const PATCHES: [BuiltinPatch; 55] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -972,32 +978,7 @@ pub const PATCHES: [BuiltinPatch; 52] = [
         // and applied by the core in groups (the sprites, the enemies in the margins, and the two
         // aids, which need the hack's code; `blastermasterwide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/blastermaster-usa-widescreen.zxpk"),
-        options: &[
-            // Testing aids: a new game starts with the game's own area select (up / down,
-            // Start); no damage (the player only).
-            HackOption {
-                key: "level_select",
-                label: "Level select (at a new game)",
-                label_fr: "Sélecteur de niveau (en début de partie)",
-                bit: 0,
-                default: false,
-            },
-            HackOption {
-                key: "invincible",
-                label: "Invincible",
-                label_fr: "Invincible",
-                bit: 1,
-                default: false,
-            },
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 2,
-                default: true,
-            },
-        ],
+        options: BLASTERMASTER_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
@@ -1009,6 +990,71 @@ pub const PATCHES: [BuiltinPatch; 52] = [
         zone_data: true,
         // The frame's wait: BIT $12 / BMI, until the NMI clears it.
         idle_loop: Some((0xE93A, 0xE93D)),
+    },
+    BuiltinPatch {
+        name: BLASTERMASTER_JAPAN,
+        game: "Blaster Master",
+        rom_name: "Chou-Wakusei Senki MetaFight (Japan)",
+        source_crc: 0x039B_4A9C,
+        // The USA hack built for the Japanese code (`blastermasterwide`, -D JAPAN: the same RAM
+        // and routines, the code laid out otherwise; it starts a game otherwise: no level
+        // selector).
+        bps: include_bytes!("../patches/blastermaster-japan-widescreen.zxpk"),
+        options: BLASTERMASTER_OTHER_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The frame's wait: BIT $12 / BMI, until the NMI clears it.
+        idle_loop: Some((0xF2BB, 0xF2BE)),
+    },
+    BuiltinPatch {
+        name: BLASTERMASTER_EUROPE,
+        game: "Blaster Master",
+        rom_name: "Blaster Master (Europe)",
+        source_crc: 0x8106_E694,
+        // The USA hack built for the European code (`blastermasterwide`, -D EUROPE, as the
+        // Japanese one), PAL.
+        bps: include_bytes!("../patches/blastermaster-europe-widescreen.zxpk"),
+        options: BLASTERMASTER_OTHER_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The frame's wait: BIT $12 / BMI, until the NMI clears it.
+        idle_loop: Some((0xF66E, 0xF671)),
+    },
+    BuiltinPatch {
+        name: BLASTERMASTER_EUROPE_NTSC,
+        game: "Blaster Master",
+        rom_name: "Blaster Master (Europe)",
+        source_crc: 0x8106_E694,
+        // The European build's CRC, its PAL entry above taking it first: this one is for the
+        // ROMs of the European code whose header says NTSC, taken by their signatures
+        // (`blastermasterwide`, `tools/build.py --pack <out> --ntsc`).
+        bps: include_bytes!("../patches/blastermaster-europe-ntsc-widescreen.zxpk"),
+        options: BLASTERMASTER_OTHER_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the enemies.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The frame's wait: BIT $12 / BMI, until the NMI clears it.
+        idle_loop: Some((0xF66E, 0xF671)),
     },
     BuiltinPatch {
         name: METROID_USA,
@@ -1439,6 +1485,55 @@ const MEGAMAN2_OPTIONS: &[HackOption] = &[
         default: true,
     },
     // A testing aid: no damage, spikes harmless (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Blaster Master (USA) pack: testing aids, off by default, and the overclock.
+const BLASTERMASTER_OPTIONS: &[HackOption] = &[
+    // Testing aids: a new game starts with the game's own area select (up / down, Start); no
+    // damage (the player only).
+    HackOption {
+        key: "level_select",
+        label: "Level select (at a new game)",
+        label_fr: "Sélecteur de niveau (en début de partie)",
+        bit: 0,
+        default: false,
+    },
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Japanese and European packs of Blaster Master: they start a game otherwise
+/// (no level selector).
+const BLASTERMASTER_OTHER_OPTIONS: &[HackOption] = &[
+    // A testing aid: no damage (the player only).
     HackOption {
         key: "invincible",
         label: "Invincible",

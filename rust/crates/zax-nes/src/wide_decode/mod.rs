@@ -268,7 +268,9 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
             Some(&ff1::FinalFantasy)
         }
         metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
-        blastermaster::SOURCE_CRC => Some(&blastermaster::BlasterMaster),
+        blastermaster::SOURCE_CRC => Some(&blastermaster::USA),
+        blastermaster::SOURCE_CRC_JAPAN => Some(&blastermaster::JAPAN),
+        blastermaster::SOURCE_CRC_EUROPE => Some(&blastermaster::EUROPE),
         megaman1::SOURCE_CRC | megaman1::SOURCE_CRC_EUROPE | megaman1::SOURCE_CRC_JAPAN => {
             Some(&megaman1::MegaMan1)
         }
@@ -327,7 +329,10 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
             Some(&ff1::FinalFantasy)
         }
         crate::builtin_patches::METALFORCE_KOREA => Some(&metalforce::MetalForce),
-        crate::builtin_patches::BLASTERMASTER_USA => Some(&blastermaster::BlasterMaster),
+        crate::builtin_patches::BLASTERMASTER_USA => Some(&blastermaster::USA),
+        crate::builtin_patches::BLASTERMASTER_JAPAN => Some(&blastermaster::JAPAN),
+        crate::builtin_patches::BLASTERMASTER_EUROPE
+        | crate::builtin_patches::BLASTERMASTER_EUROPE_NTSC => Some(&blastermaster::EUROPE),
         crate::builtin_patches::MEGAMAN1_USA
         | crate::builtin_patches::MEGAMAN1_EUROPE
         | crate::builtin_patches::MEGAMAN1_EUROPE_NTSC => Some(&megaman1::MegaMan1),
