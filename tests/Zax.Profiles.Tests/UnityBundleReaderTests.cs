@@ -69,7 +69,18 @@ public sealed class UnityBundleReaderTests
         ["no type tree"] = new SyntheticBundleOptions { TypeTree = false },
         ["bundle format version 6"] = new SyntheticBundleOptions { FormatVersion = 6 },
         ["bundle format version 8"] = new SyntheticBundleOptions { FormatVersion = 8 },
+        ["3dSen 2.0: format 8, flag 0x200"] = ThreeDSen2,
+        ["3dSen 2.0 flags with the info block at the end"] = ThreeDSen2AtEnd,
     };
+
+    /// <summary>The header of 3dSen 2.0 (AMD-039 §2).</summary>
+    private static SyntheticBundleOptions ThreeDSen2 => SyntheticUnityBundle.ThreeDSen2;
+
+    /// <summary>
+    /// The same flags with the information block at the end (bit 0x80), where AMD-039 §2 says
+    /// bit 0x200 has no effect.
+    /// </summary>
+    private static SyntheticBundleOptions ThreeDSen2AtEnd => ThreeDSen2 with { InfoAtEnd = true };
 
     /// <summary>The names of <see cref="LayoutsByName"/>, one test case each.</summary>
     public static TheoryData<string> Layouts() => [.. LayoutsByName.Keys];
@@ -80,16 +91,72 @@ public sealed class UnityBundleReaderTests
     {
         byte[] bundle = SyntheticUnityBundle.Build(Assets, LayoutsByName[layout]);
 
-        IReadOnlyList<UnityTextAsset> assets = ThreeDSenProfileBundle.ReadTextAssets(bundle);
+        AssertAssetsRead(layout, ThreeDSenProfileBundle.ReadTextAssets(bundle));
+    }
 
-        Assert.Equal(Assets.Length, assets.Count);
-        for (int index = 0; index < Assets.Length; index++)
-        {
-            Assert.Equal(Assets[index].Name, assets[index].Name);
-            Assert.True(
-                Assets[index].Script.AsSpan().SequenceEqual(assets[index].Script.Span),
-                $"{layout}: the payload of \"{Assets[index].Name}\" came back changed.");
-        }
+    /// <summary>
+    /// AMD-039 §4, first bullet: a format 8 bundle with flags 0x243 whose compressed information
+    /// block does not end on a multiple of 16 gives the expected <c>TextAsset</c>s — the data
+    /// blocks are found at the next 16-byte boundary and not right after the block.
+    /// </summary>
+    [Fact] // AMD-039 §2, §4
+    public void The_data_blocks_of_a_bundle_with_flag_0x200_start_on_a_multiple_of_16()
+    {
+        SyntheticBundleLayout layout = SyntheticUnityBundle.BuildWithLayout(Assets, ThreeDSen2);
+
+        // The flags of the measured 2.0 header: LZ4HC (3), file list (0x40), alignment (0x200).
+        Assert.Equal(0x243u, layout.Flags);
+
+        // The case that matters: like the measured 1429-byte block ending at 1493, this one does
+        // not end on a boundary, so the padding is what the reader must skip.
+        Assert.NotEqual(0, layout.InfoEnd % 16);
+        Assert.Equal((layout.InfoEnd + 15) / 16 * 16, layout.DataStart);
+        Assert.Equal(
+            new byte[layout.DataStart - layout.InfoEnd],
+            layout.Bytes[layout.InfoEnd..layout.DataStart]);
+
+        AssertAssetsRead("flag 0x200", ThreeDSenProfileBundle.ReadTextAssets(layout.Bytes));
+    }
+
+    /// <summary>
+    /// AMD-039 §4, second bullet: the very same bytes with bit 0x200 taken out of the header —
+    /// the padding still in front of the data — import no profile at all and do not crash
+    /// (AMD-030 §5).
+    /// </summary>
+    [Fact] // AMD-039 §2, §4
+    public void The_same_bundle_without_flag_0x200_is_refused_rather_than_misread()
+    {
+        SyntheticBundleLayout aligned = SyntheticUnityBundle.BuildWithLayout(Assets, ThreeDSen2);
+        SyntheticBundleLayout same = SyntheticUnityBundle.BuildWithLayout(
+            Assets, ThreeDSen2 with { AlignDataFlag = false });
+
+        // Only the flag word differs: the bundle still carries its padding bytes.
+        Assert.Equal(0x43u, same.Flags);
+        Assert.Equal(aligned.Bytes.Length, same.Bytes.Length);
+        Assert.Equal(aligned.DataStart, same.DataStart);
+
+        // A refusal with a message, which is how AMD-030 §5 asks a bundle that cannot be read to
+        // come out: no exception of another kind, and no profile.
+        Assert.Throws<UnityAssetFormatException>(
+            () => ThreeDSenProfileBundle.ReadTextAssets(same.Bytes));
+    }
+
+    /// <summary>
+    /// AMD-039 §4, third bullet: with bits 0x80 and 0x200 both set, the data blocks follow the
+    /// aligned header and bit 0x200 adds nothing.
+    /// </summary>
+    [Fact] // AMD-039 §2, §4
+    public void Flag_0x200_has_no_effect_when_the_information_block_is_at_the_end()
+    {
+        SyntheticBundleLayout layout = SyntheticUnityBundle.BuildWithLayout(Assets, ThreeDSen2AtEnd);
+
+        Assert.Equal(0x2C3u, layout.Flags);
+
+        // The header of this bundle ends at 50 and its data start at 64, the aligned position of
+        // AMD-030 §4.2: no further padding was inserted.
+        Assert.Equal(64, layout.DataStart);
+
+        AssertAssetsRead("flags 0x80 and 0x200", ThreeDSenProfileBundle.ReadTextAssets(layout.Bytes));
     }
 
     [Fact] // AMD-030 §4.1
@@ -337,6 +404,22 @@ public sealed class UnityBundleReaderTests
         byte[] cut = serialized[..(serialized.Length / 2)];
 
         Assert.Throws<UnityAssetFormatException>(() => UnitySerializedFile.Read(cut));
+    }
+
+    /// <summary>
+    /// Checks that <paramref name="read"/> is <see cref="Assets"/>, name for name and byte for
+    /// byte; <paramref name="what"/> names the layout in the failure message.
+    /// </summary>
+    private static void AssertAssetsRead(string what, IReadOnlyList<UnityTextAsset> read)
+    {
+        Assert.Equal(Assets.Length, read.Count);
+        for (int index = 0; index < Assets.Length; index++)
+        {
+            Assert.Equal(Assets[index].Name, read[index].Name);
+            Assert.True(
+                Assets[index].Script.AsSpan().SequenceEqual(read[index].Script.Span),
+                $"{what}: the payload of \"{Assets[index].Name}\" came back changed.");
+        }
     }
 
     /// <summary>

@@ -5,11 +5,12 @@ using Zax.Profiles.Import;
 namespace Zax.Profiles.Tests;
 
 /// <summary>
-/// How a synthetic bundle is laid out. Every field exists because AMD-030 §6 asks for that
-/// variation: no compression and LZ4, one block and several, information block at the start and
-/// at the end, serialized file little- and big-endian.
+/// How a synthetic bundle is laid out. Every field exists because AMD-030 §6 or AMD-039 §4 asks
+/// for that variation: no compression and LZ4, one block and several, information block at the
+/// start and at the end, serialized file little- and big-endian, header flag 0x200. It is a
+/// record so that a layout can be stated as a variation of another with <c>with</c>.
 /// </summary>
-internal sealed class SyntheticBundleOptions
+internal sealed record SyntheticBundleOptions
 {
     /// <summary>Bundle format version, 6 to 8 (7 is the measured one).</summary>
     public uint FormatVersion { get; init; } = 7;
@@ -28,6 +29,21 @@ internal sealed class SyntheticBundleOptions
 
     /// <summary>Whether the file list is announced (flag 0x40); clear makes the bundle unusable.</summary>
     public bool FileList { get; init; } = true;
+
+    /// <summary>
+    /// Whether the bundle is built the way 3dSen 2.0 builds it (AMD-039 §2, flag 0x200): the
+    /// header carries bit 0x200 and, when the information block comes first, the data blocks are
+    /// padded to the next multiple of 16. With <see cref="InfoAtEnd"/> only the bit is written,
+    /// since the data already follow the aligned header.
+    /// </summary>
+    public bool AlignData { get; init; }
+
+    /// <summary>
+    /// Whether bit 0x200 is written in the header, when that is to differ from
+    /// <see cref="AlignData"/>. <c>AlignData</c> with this set to false forges the bundle of
+    /// AMD-039 §4, second bullet: the padding bytes are there and the flag is not.
+    /// </summary>
+    public bool? AlignDataFlag { get; init; }
 
     /// <summary>Version of the serialized file, 17 to 22.</summary>
     public uint SerializedVersion { get; init; } = 21;
@@ -64,17 +80,50 @@ internal sealed class SyntheticBundleOptions
 }
 
 /// <summary>
+/// Where the pieces of a synthetic bundle ended up, so that a test can state the offsets
+/// AMD-039 §2 talks about instead of recomputing them from the header.
+/// </summary>
+/// <param name="Bytes">The bundle, whole.</param>
+/// <param name="Flags">The flag word written in the header.</param>
+/// <param name="InfoEnd">
+/// Where the information block's compressed bytes end, when it comes first; 0 with flag 0x80.
+/// </param>
+/// <param name="DataStart">Where the first data block starts.</param>
+internal sealed record SyntheticBundleLayout(byte[] Bytes, uint Flags, int InfoEnd, int DataStart);
+
+/// <summary>
 /// Builds Unity « UnityFS » bundles from scratch, following the public format AMD-030 §4
 /// describes, so the reader can be exercised without any file of 3dSen (AMD-030 §6, second
-/// bullet).
+/// bullet; AMD-039 §4 for the 2.0 header).
 /// </summary>
 internal static class SyntheticUnityBundle
 {
     /// <summary>The engine version the measured bundle carries.</summary>
     public const string EngineVersion = "2019.4.41f2";
 
+    /// <summary>
+    /// The header of 3dSen 2.0 as AMD-039 §2 measures it: format version 8, flags 0x243 — LZ4HC,
+    /// file list, and bit 0x200 which starts the data blocks on the next 16-byte boundary after
+    /// the compressed information block — and a serialized file in version 22.
+    /// </summary>
+    public static SyntheticBundleOptions ThreeDSen2 => new()
+    {
+        FormatVersion = 8,
+        InfoCompression = UnityCompression.Lz4Hc,
+        BlockCompression = UnityCompression.Lz4Hc,
+        BlockSize = 128 * 1024,
+        SerializedVersion = 22,
+        AlignData = true,
+    };
+
     /// <summary>Builds a bundle holding the given <c>TextAsset</c>s.</summary>
     public static byte[] Build(
+        IReadOnlyList<(string Name, byte[] Script)> assets,
+        SyntheticBundleOptions? options = null)
+        => BuildWithLayout(assets, options).Bytes;
+
+    /// <summary>Builds a bundle and reports where its pieces landed.</summary>
+    public static SyntheticBundleLayout BuildWithLayout(
         IReadOnlyList<(string Name, byte[] Script)> assets,
         SyntheticBundleOptions? options = null)
     {
@@ -180,8 +229,8 @@ internal static class SyntheticUnityBundle
         return file.ToArray();
     }
 
-    /// <summary>Wraps a serialized file into a bundle (AMD-030 §4.1, §4.2).</summary>
-    public static byte[] Wrap(byte[] serialized, SyntheticBundleOptions options)
+    /// <summary>Wraps a serialized file into a bundle (AMD-030 §4.1, §4.2; AMD-039 §2).</summary>
+    public static SyntheticBundleLayout Wrap(byte[] serialized, SyntheticBundleOptions options)
     {
         // The data blocks: the stream is the single file node, cut into blocks.
         int blockSize = Math.Min(options.BlockSize, Math.Max(serialized.Length, 1));
@@ -229,6 +278,11 @@ internal static class SyntheticUnityBundle
             flags |= 0x80;
         }
 
+        if (options.AlignDataFlag ?? options.AlignData)
+        {
+            flags |= 0x200;
+        }
+
         ByteWriter header = new(bigEndian: true);
         header.CString(UnityBundle.Signature);
         header.UInt32(options.FormatVersion);
@@ -245,11 +299,22 @@ internal static class SyntheticUnityBundle
             header.AlignTo(16);
         }
 
+        int infoEnd = 0;
         if (!options.InfoAtEnd)
         {
             header.Bytes(storedInfo);
+            infoEnd = header.Length;
+
+            // AMD-039 §2: 3dSen 2.0 pads to the next multiple of 16 after the compressed
+            // information block. The padding is written whatever the flag says, so that the
+            // same bytes can be presented with bit 0x200 clear (AMD-039 §4, second bullet).
+            if (options.AlignData)
+            {
+                header.AlignTo(16);
+            }
         }
 
+        int dataStart = header.Length;
         foreach ((int _, byte[] stored) in blocks)
         {
             header.Bytes(stored);
@@ -262,7 +327,7 @@ internal static class SyntheticUnityBundle
 
         byte[] bundle = header.ToArray();
         BinaryPrimitives.WriteInt64BigEndian(bundle.AsSpan(sizeField, 8), bundle.Length);
-        return bundle;
+        return new SyntheticBundleLayout(bundle, flags, infoEnd, dataStart);
     }
 
     private static byte[] Store(byte[] plain, UnityCompression compression) => compression switch
