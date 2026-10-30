@@ -29,7 +29,7 @@
 //! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one pack for both builds (`mm4wide`, `tools/build.py --pack`) |
 //! | Mega Man 5 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm5wide`, `tools/build.py --pack`) |
 //! | Mega Man 6 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
-//! | Mega Man 3 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm3wide`, `tools/build.py --pack`) |
+//! | Mega Man 3 (USA), Rockman 3 (Japan), (Europe) and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; a pack per build, the European ones PAL with NTSC twins; "Invincible" a component of its own, with or without the advanced mode (`mm3wide`, `tools/build.py --pack`) |
 //! | Mega Man (USA), and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; Rockman (Japan) and the conversions by its signatures; the European build's pack, PAL, and the same as NTSC; "Invincible" a component of its own, with or without the advanced mode (`mm1wide`, `tools/build.py --pack`) |
 
 /// One built-in patch.
@@ -153,6 +153,16 @@ pub const MEGAMAN1_EUROPE: &str = "Mega Man (Europe) widescreen";
 pub const MEGAMAN1_EUROPE_NTSC: &str = "Mega Man (Europe) (NTSC) widescreen";
 /// Name of the Mega Man 3 (USA) widescreen patch (advanced mode).
 pub const MEGAMAN3_USA: &str = "Mega Man 3 (USA) widescreen";
+/// Name of the Rockman 3 (Japan) widescreen patch (advanced mode).
+pub const ROCKMAN3_JAPAN: &str = "Rockman 3 (Japan) widescreen";
+/// Name of the Mega Man 3 (Europe) widescreen patch (advanced mode).
+pub const MEGAMAN3_EUROPE: &str = "Mega Man 3 (Europe) widescreen";
+/// Name of the same patch for an NTSC ROM of the European code (advanced mode).
+pub const MEGAMAN3_EUROPE_NTSC: &str = "Mega Man 3 (Europe) (NTSC) widescreen";
+/// Name of the Mega Man 3 (Europe) (Rev 1) widescreen patch (advanced mode).
+pub const MEGAMAN3_EUROPE_REV1: &str = "Mega Man 3 (Europe) (Rev 1) widescreen";
+/// Name of the same patch for an NTSC ROM of the Rev 1's code (advanced mode).
+pub const MEGAMAN3_EUROPE_REV1_NTSC: &str = "Mega Man 3 (Europe) (Rev 1) (NTSC) widescreen";
 /// Name of the Mega Man 4 (USA) widescreen patch (advanced mode).
 pub const MEGAMAN4_USA: &str = "Mega Man 4 (USA) widescreen";
 /// Name of the Mega Man 4 (USA) (Rev 1) widescreen patch (advanced mode).
@@ -163,7 +173,7 @@ pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 31] = [
+pub const PATCHES: [BuiltinPatch; 36] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -941,37 +951,119 @@ pub const PATCHES: [BuiltinPatch; 31] = [
         game: "Mega Man 3",
         rom_name: "Mega Man 3 (USA)",
         source_crc: 0x603A_AA57,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core; "Invincible" a component of its own.
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in two groups (the sprites, the enemies in the margins);
+        // "Invincible" a component of its own (`mm3wide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/megaman3-usa-widescreen.zxpk"),
-        options: &[
-            // A testing aid: no damage from an enemy's touch (pits and spikes still kill).
-            HackOption {
-                key: "invincible",
-                label: "Invincible",
-                label_fr: "Invincible",
-                bit: 1,
-                default: false,
-            },
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 2,
-                default: true,
-            },
-        ],
+        options: MEGAMAN3_OPTIONS,
         after_other_way_state: None,
-        // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on.
-        boot_window: Some((0x80, 0x00)),
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
         boot_window_keeps_prg_ram: false,
-        boot_zone: false,
-        zone_data: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
+        idle_loop: Some((0xFEAD, 0xFEC2)),
+    },
+    BuiltinPatch {
+        name: ROCKMAN3_JAPAN,
+        game: "Mega Man 3",
+        rom_name: "Rockman 3 - Dr. Wily no Saigo!? (Japan)",
+        source_crc: 0xD9F1_E47C,
+        // The USA hack built for the Japanese code (`mm3wide`, -D JAPAN: its sprite code
+        // moved in the fixed bank; the same RAM and routines).
+        bps: include_bytes!("../patches/rockman3-japan-widescreen.zxpk"),
+        options: MEGAMAN3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, at the same place.
+        idle_loop: Some((0xFEAD, 0xFEC2)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN3_EUROPE,
+        game: "Mega Man 3",
+        rom_name: "Mega Man 3 (Europe)",
+        source_crc: 0x837A_3D8A,
+        // The USA hack built for the European code (`mm3wide`, -D EUROPE: its sprite code
+        // moved in the fixed bank), PAL.
+        bps: include_bytes!("../patches/megaman3-europe-widescreen.zxpk"),
+        options: MEGAMAN3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, at the same place.
+        idle_loop: Some((0xFEAD, 0xFEC2)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN3_EUROPE_NTSC,
+        game: "Mega Man 3",
+        rom_name: "Mega Man 3 (Europe)",
+        source_crc: 0x837A_3D8A,
+        // The European pack as an NTSC one, for the ROMs of that code whose header says NTSC,
+        // taken by their signatures (its PAL entry above takes the CRC first).
+        bps: include_bytes!("../patches/megaman3-europe-ntsc-widescreen.zxpk"),
+        options: MEGAMAN3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, at the same place.
+        idle_loop: Some((0xFEAD, 0xFEC2)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN3_EUROPE_REV1,
+        game: "Mega Man 3",
+        rom_name: "Mega Man 3 (Europe) (Rev 1)",
+        source_crc: 0x0013_88B3,
+        // The USA hack built for the code of the European Rev 1 (`mm3wide`, -D EUROPE_REV1:
+        // its sprite code and the hiding of the rest of OAM moved), PAL.
+        bps: include_bytes!("../patches/megaman3-europe-rev1-widescreen.zxpk"),
+        options: MEGAMAN3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, at the same place.
+        idle_loop: Some((0xFEAD, 0xFEC2)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN3_EUROPE_REV1_NTSC,
+        game: "Mega Man 3",
+        rom_name: "Mega Man 3 (Europe) (Rev 1)",
+        source_crc: 0x0013_88B3,
+        // The Rev 1's pack as an NTSC one, for the ROMs of that code whose header says NTSC.
+        bps: include_bytes!("../patches/megaman3-europe-rev1-ntsc-widescreen.zxpk"),
+        options: MEGAMAN3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, at the same place.
         idle_loop: Some((0xFEAD, 0xFEC2)),
     },
     BuiltinPatch {
@@ -1058,6 +1150,26 @@ pub const PATCHES: [BuiltinPatch; 31] = [
         zone_data: false,
         // The task scheduler's wait for the NMI (no task ready).
         idle_loop: Some((0xC581, 0xC584)),
+    },
+];
+
+/// The options of the Mega Man 3 packs.
+const MEGAMAN3_OPTIONS: &[HackOption] = &[
+    // A testing aid: no damage from an enemy's touch (pits and spikes still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
     },
 ];
 

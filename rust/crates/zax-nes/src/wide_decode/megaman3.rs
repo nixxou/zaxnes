@@ -23,6 +23,11 @@ use super::{megaman, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x603A_AA57;
+/// CRC-32 of the other builds' data with the same stage layouts and stage table: Rockman 3
+/// (Japan) and Mega Man 3 (Europe).
+pub const OTHER_CRCS: [u32; 2] = [0xD9F1_E47C, 0x837A_3D8A];
+/// CRC-32 of Mega Man 3 (Europe) (Rev 1)'s data: its stage table moved.
+pub const SOURCE_CRC_EUROPE_REV1: u32 = 0x0013_88B3;
 
 /// Where a game of the series keeps a stage, as offsets in the stage's 8 KiB bank (seen at
 /// `$A000`), and its camera and section in RAM.
@@ -85,6 +90,15 @@ pub const MEGAMAN3: Layout = Layout {
     structures: 0x1700,
     tiles: 0x1B00,
     palettes: 0x1F00,
+};
+
+/// Mega Man 3 (Europe) (Rev 1): its stage table $38 bytes further, as the code around it.
+pub const MEGAMAN3_EUROPE_REV1: Layout = Layout {
+    stage_bank: StageBank::Table {
+        offset: 0x4000 - 0x08F1,
+        count: 20,
+    },
+    ..MEGAMAN3
 };
 
 const BANK_SIZE: usize = 0x2000;
