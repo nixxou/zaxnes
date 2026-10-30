@@ -25,7 +25,7 @@ picture then ends where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man (USA)*, UxROM (mapper 2), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `6EE4BB0A` |
-| Target data | CRC-32 `164D836E` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `6292CD89` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | PRG grown to 256 KiB (16 banks): the game's banks 0-7 where they were, the hack's code as bank 8, banks 9-14 of `$FF`, the fixed bank copied to bank 15 (the one UxROM fixes at `$C000`); hooks in bank 5 and bank 7 (both copies of the fixed bank) |
 | Patch | `rust/crates/zax-nes/patches/megaman1-usa-widescreen.bps`, made against the data without header; the fixed bank's copy is SourceCopy, no game data in the patch |
 
@@ -37,15 +37,27 @@ selects banks 0-6 (through the bus-conflict table at `$C000`), so the added bank
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/megaman1-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
-`WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes' shared builder
-(`hackpack.py`): NTSC, UxROM, each hook a 16 KiB bank and a CPU address, the widescreen in one group
-("core", Base); no checks yet. The code goes to the extension's
-memory, which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with
-the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank
-added, nothing moved or copied). The option "Invincible" is a component of its own (`LDA #$A2 /
+**Hack pack.** Zaxnes ships this hack as hack packs, format 2, written by Zaxnes' shared
+builder (`hackpack.py`; `tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set to
+Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1):
+`rust/crates/zax-nes/patches/megaman1-usa-widescreen.zxpk`, and from the European ROM
+`megaman1-europe-widescreen.zxpk` (PAL) and `megaman1-europe-ntsc-widescreen.zxpk` (`--ntsc`, for
+the ROMs of the European code whose header says NTSC). `src/wide.s` is assembled with `-D PACK`
+for `$2000`: the zone fantôme, which Zaxnes shows to instruction fetches only from power-on, the
+extension unlocked (the code reads no data of its own); its registers and RAM are at
+`$3000`-`$3FFF` (widescreen MMC5: `$5000`-`$5FFF` stays the cartridge's, an MMC5 conversion's
+registers). The pack leaves the game's NMI alone: the extension's settings are made from
+`wide_clear_oam` (`$D478`), in the frame's logic, and the NMI's hook is the BPS build's only. The
+European build (`-D EUROPE`) has the same routines, its fixed bank's code 6 bytes further from
+`$D000`. Each hook is a 16 KiB bank and a CPU address with the game's bytes it replaces, checked
+and applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). UxROM, MMC3,
+MMC5 and GxROM (the conversions). The widescreen is in two groups: "core" (Base: the sprites, their
+16-bit x, the second page, the energy bars) and "enemies" (Enemies in the margins, needing it: the
+spawn window, the culling, the sleeping enemies), with checks of the game's code the hack relies on:
+the sprite loop the hack's repeats (`$D245`, 48 bytes) and the start of its exit when the sprites are
+full (`$C3B3`, up to its mapper write), and the start of an enemy's frame (`$AA29` of bank 5). Over
+455 ROMs of the game (dumps, translations, ROM hacks, conversions), 452 take the whole pack, Rockman
+(Japan) by the USA pack's signatures. The option "Invincible" is a component of its own (`LDA #$A2 /
 RTS` in place of the health subtraction), applied with or without the advanced mode. The BPS patch
 described here is kept to compare.
 
@@ -197,21 +209,35 @@ fixed bank's copy is SourceCopy from the player's ROM, the hooks and the code Ta
 ;  * Mega Man and his shots (slots $00-$0F) keep the original limits.
 ;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
+;
+; In a Zaxnes hack pack (-D PACK) the code is assembled for $2000 instead: the zone fantôme, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
+; reads there still reach the PPU, and the code reads no data of its own. Its registers and RAM are
+; at $3000-$3FFF, which the zone holds for its own instructions (widescreen MMC5: $5000-$5FFF stays
+; the cartridge's, an MMC5 conversion's registers). The game's NMI is left alone: the settings are
+; made from wide_clear_oam, in the frame's logic (a hook in the NMI pushed the game's writes of the
+; vblank later, as in Mega Man 2's vertical transitions). -D EUROPE: Mega Man (Europe), the same
+; routines, its fixed bank's hooks 6 bytes further (tools/build.py).
 
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, bit 2 second sprite page,
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1 sprites free of the extents, bit 2 second sprite page,
                                 ; bit 3 high bytes kept, bit 4 the window to $7FFF
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
-EXTRA_OAM       = $5300         ; the second sprite page, OAM format
-EXTRA_SPRHI     = $5400         ; + 4 n: high byte of the x of its sprite n
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+EXTRA_OAM       = EXT + $300    ; the second sprite page, OAM format
+EXTRA_SPRHI     = EXT + $400    ; + 4 n: high byte of the x of its sprite n
 
 OPT_INVINCIBLE  = $02           ; a testing aid: Mega Man takes no damage
 OPT_NO_SLOWDOWN = $04           ; nearly a frame more of CPU time: the game never runs late
@@ -221,19 +247,19 @@ OVERCLOCK_LINES = 64            ; pays for the hack's work and the enemies of th
 NO_SLOWDOWN_LINES = 255
 FIRST_ENEMY     = $10           ; the slots the stage's list spawns into
 
-; Variables in the extension's RAM ($5200-$57FF).
-WV_M            = $5200         ; margin of this frame
-WV_LOL          = $5201         ; screen x range objects may live in: [LO, HI), signed 16-bit
-WV_LOH          = $5202
-WV_HIL          = $5203
-WV_HIH          = $5204
-WV_SL           = $5205         ; screen x of the object at hand, signed 16-bit
-WV_SH           = $5206
-WV_T0           = $5207         ; scratch
-WV_T1           = $5208
-WV_PAGE         = $5209         ; bit 7: the sprites being placed go to the second page
-WV_X            = $520A         ; X, kept
-WV_DORMANT      = $5220         ; + slot: the list entry ($6B + slot) of an enemy asleep, $FF awake
+; Variables in the extension's RAM (EXT + $200 to EXT + $2FF).
+WV_M            = EXT + $200    ; margin of this frame
+WV_LOL          = EXT + $201    ; screen x range objects may live in: [LO, HI), signed 16-bit
+WV_LOH          = EXT + $202
+WV_HIL          = EXT + $203
+WV_HIH          = EXT + $204
+WV_SL           = EXT + $205    ; screen x of the object at hand, signed 16-bit
+WV_SH           = EXT + $206
+WV_T0           = EXT + $207    ; scratch
+WV_T1           = EXT + $208
+WV_PAGE         = EXT + $209    ; bit 7: the sprites being placed go to the second page
+WV_X            = EXT + $20A    ; X, kept
+WV_DORMANT      = EXT + $220    ; + slot: the list entry ($6B + slot) of an enemy asleep, $FF awake
 
 ; The game.
 OAM             = $0200
@@ -256,12 +282,26 @@ NEXT_OBJECT     = $998A         ; bank 5: the object loop's next slot
 LOOP_FULL       = $C3B3         ; the sprite loop's exit when OAM is full (maps bank 5 back)
 
 .segment "CODE"
+.ifdef PACK
+.org $2000
+.else
 .org $5800
+.endif
 
 ; ---------------------------------------------------------------------------- ;
-; NMI ($D4B7, in place of LDA $2002 / LDA #0 / STA $2003): the extension's settings for the next
-; frame.
+; NMI ($D4B7, in place of LDA $2002 / LDA #0 / STA $2003; the BPS build only): the extension's
+; settings for the next frame.
+.ifndef PACK
 wide_nmi:
+    JSR     wide_settings
+    LDA     $2002
+    LDA     #$00
+    STA     $2003
+    RTS
+.endif
+
+; The extension's settings: the margin, the extents, the layout and the overclock (A only).
+wide_settings:
     LDA     WIDE_HOST
     CMP     #MAX_MARGIN
     BCC     @margin
@@ -272,9 +312,12 @@ wide_nmi:
     LDA     #$00
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$1E                        ; sprites free of the extents, second sprite page, high
-                                        ; bytes kept (every sprite placed gets one), the window
-                                        ; kept to $7FFF
+.ifdef PACK
+    LDA     #$0E                        ; sprites free of the extents, second sprite page, high
+                                        ; bytes kept (every sprite placed gets one)
+.else
+    LDA     #$1E                        ; the same, and the window kept to $7FFF
+.endif
     STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS
     AND     #OPT_NO_SLOWDOWN
@@ -285,9 +328,6 @@ wide_nmi:
     LDA     #OVERCLOCK_LINES
 @overclock:
     STA     WIDE_OVERCLOCK
-    LDA     $2002
-    LDA     #$00
-    STA     $2003
     RTS
 
 ; ---------------------------------------------------------------------------- ;
@@ -523,6 +563,9 @@ wide_pass_left:
 ; every high byte (they are kept from one page to the next: the page and its high bytes are
 ; rebuilt together), back to the first page.
 wide_clear_oam:
+.ifdef PACK
+    JSR     wide_settings               ; the pack's settings, once a frame (X and Y kept)
+.endif
     LDA     #$F8
 @game:
     STA     OAM,y
@@ -740,7 +783,11 @@ wide_hurt:
     RTS
 
 wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
 .assert wide_end <= $8000, error, "widescreen code past the window"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -749,7 +796,7 @@ wide_end:
 """Builds the Mega Man (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Mega Man (USA).nes> [out.bps]
-       python -I tools/build.py <Mega Man (USA).nes> --pack <out.zxpk>
+       python -I tools/build.py <Mega Man (USA).nes or (Europe)> --pack <out.zxpk> [--ntsc]
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank the widescreen extension's PRG window shows at $5800-$7FFF (Zaxnes opens it at
@@ -763,11 +810,18 @@ Usage: python -I tools/build.py <Mega Man (USA).nes> [out.bps]
 
 With --pack, the layout and the patched ROM give way to a Zaxnes hack pack, format 2, written
 by Zaxnes' shared builder (tools/hackpack.py of Zaxnes, its folder in the environment variable
-ZAXNES_TOOLS): NTSC, UxROM, the code (its used part), and the hooks as a 16 KiB bank and a CPU address
-each, the ROM keeping its size.
+ZAXNES_TOOLS): src/wide.s assembled with PACK for $2000, the zone fantôme Zaxnes shows to
+instruction fetches only from power-on (the code reads no data of its own), the extension's
+registers and RAM at $3000-$3FFF (widescreen MMC5: $5000-$5FFF left to the cartridge); the hooks
+as a 16 KiB bank and a CPU address each, but for the NMI's (the pack makes its settings from
+wide_clear_oam), checked by Zaxnes before it applies them; the ROM keeping its size. UxROM, MMC3,
+MMC5 and GxROM (conversions). The widescreen is in two groups: "core" (Base: the sprites, their
+16-bit x and the second page) and "enemies" (needing it: their spawn window, life and sleep in the
+margins), with checks of the game's code the hack relies on (CHECKS). From the European ROM, its
+pack (-D EUROPE, its fixed bank's hooks 6 bytes further), PAL; with --ntsc the same pack for the
+ROMs of that code whose header says NTSC.
 The invincibility hook is a component of its own, "invincible" (`LDA #$A2 / RTS`, back from the
-collision routine), applied by Zaxnes while that option is on, with or without the widescreen;
-every other hook is the "widescreen" component, in one group ("core", Base).
+collision routine), applied by Zaxnes while that option is on, with or without the widescreen.
 """
 
 import os
@@ -777,6 +831,7 @@ import sys
 import zlib
 
 SOURCE_CRC = 0x6EE4BB0A
+EUROPE_CRC = 0x94476A70         # Mega Man (Europe): its fixed bank's hooks 6 bytes further; a pack only
 BANK_SIZE = 0x4000
 PRG_BANKS = 8
 PRG_SIZE = PRG_BANKS * BANK_SIZE
@@ -785,6 +840,8 @@ TARGET_BANKS = 16
 HACK_BANK = 8
 FIXED = 7
 CODE_START = 0x5800
+PACK_START = 0x2000             # the pack's code: the zone fantôme
+PACK_SIZE = 0x1000              # its code half ($3000-$3FFF holds the extension)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -810,7 +867,8 @@ def hooks(sym):
         out.append((bank, address, original, new))
 
     # The NMI: the extension's settings.
-    put(7, 0xD4B7, 'ad 02 20 a9 00 8d 03 20', jsr(sym['wide_nmi']))
+    # (the pack has no wide_nmi: it leaves this hook out, NMI_HOOK).
+    put(7, 0xD4B7, 'ad 02 20 a9 00 8d 03 20', jsr(sym.get('wide_nmi', 0)))
     # Sprites: both pages hidden, an object's 16-bit screen x, its sprite loop, the energy bars.
     put(7, 0xD478, 'a9 f8 99', jmp(sym['wide_clear_oam']))
     put(7, 0xD21F, 'a0 02 38 bd 80 04 e5 1a 85 0f', jsr(sym['wide_draw_origin']))
@@ -848,18 +906,20 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(defines=()):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if 'PACK' in defines else (CODE_START, BANK_SIZE)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${BANK_SIZE:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
+    subprocess.run(tool('ca65') + ['-g'] + [flag for symbol in defines for flag in ('-D', symbol)]
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
                    check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
@@ -875,24 +935,66 @@ def assemble():
 INVINCIBLE_HOOK = (0x05, 0xa23f)
 
 
-def pack(data, code, sym, out):
+# The NMI's hook: the BPS build's only (the pack makes its settings from wide_clear_oam).
+NMI_HOOK = (FIXED, 0xD4B7)
+
+# The hooks of the group "enemies" (their spawn window, life and sleep in the margins); the others
+# but the invincibility's are the "core" (the sprites).
+ENEMIES = {(5, 0x9946), (5, 0xBE76), (5, 0x9905), (FIXED, 0xD8BF), (FIXED, 0xD95A),
+           (FIXED, 0xD921), (FIXED, 0xD934), (FIXED, 0xD93E), (FIXED, 0xD8FC), (FIXED, 0xD906),
+           (FIXED, 0xD90F), (FIXED, 0xD9EA)}
+
+# The game's code the hack's code relies on, by group: (bank, address, length), checked by Zaxnes
+# to be the reference ROM's bytes. Core: the sprite loop the hack's own repeats (its tables at
+# $833A-$863A of bank 5 and its steps), and the start of the exit taken when the sprites are full
+# (bank 5 mapped back: up to the mapper write, which a conversion makes its own). Enemies: the
+# start of an enemy's frame (wide_think jumps to it).
+CHECKS = {
+    'core': [(FIXED, 0xD245, 48), (FIXED, 0xC3B3, 6)],
+    'enemies': [(5, 0xAA29, 9)],
+}
+
+
+def europe_place(bank, address):
+    """Mega Man (Europe): its fixed bank's code 6 bytes further from $D000 (banks 0-6 and the
+    routines the hack calls where the USA's are)."""
+    return (bank, address + 6) if bank == FIXED and address >= 0xD000 else (bank, address)
+
+
+def pack(data, out, crc=SOURCE_CRC, ntsc=False):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    pack = hackpack.Pack('Mega Man (USA) widescreen', code[:used], region='ntsc', mappers=(2,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    europe = crc == EUROPE_CRC
+    code, sym = assemble(['PACK'] + (['EUROPE'] if europe else []))
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    place = europe_place if europe else (lambda bank, address: (bank, address))
+    name = 'Mega Man (Europe)' + (' (NTSC)' if ntsc else '') if europe else 'Mega Man (USA)'
+    pack = hackpack.Pack(f'{name} widescreen', code[:used],
+                         region='pal' if europe and not ntsc else 'ntsc', mappers=(2, 4, 5, 66))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'enemies': widescreen.group('enemies', requires=['core'], label='Enemies in the margins',
+                                    label_fr='Ennemis dans les marges'),
+    }
+    core = groups['core']
+    for group, checks in CHECKS.items():
+        for bank, address, length in checks:
+            groups[group].check(*place(bank, address), length)
     aid = pack.component('invincible').group('invincible', label='Invincible',
                                              label_fr='Invincible')
     for bank, address, original, new in hooks(sym):
-        invincible = (bank, address) == INVINCIBLE_HOOK
-        if invincible:
+        if (bank, address) == NMI_HOOK:
+            continue
+        if (bank, address) == INVINCIBLE_HOOK:
             # LDA #$A2 / RTS: A as wide_hurt's PLA / PLA leaves it (the high byte of its return).
-            aid.hook(bank, address, original, bytes([0xA9, 0xA2, 0x60]))
+            aid.hook(*place(bank, address), original, bytes([0xA9, 0xA2, 0x60]))
         else:
-            core.hook(bank, address, original, new)
+            group = groups['enemies' if (bank, address) in ENEMIES else 'core']
+            group.hook(*place(bank, address), original, new)
     assert len(aid.hooks) == 1
     result = pack.build(data, 8 * 0x4000)
     open(out, 'wb').write(result)
@@ -905,13 +1007,15 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = bytes(image[header:header + PRG_SIZE + CHR_SIZE])
-    assert zlib.crc32(data) == SOURCE_CRC, 'not Mega Man (USA)'
+    crc = zlib.crc32(data)
+    assert crc in (SOURCE_CRC, EUROPE_CRC), 'not Mega Man (USA) or (Europe)'
 
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(data, sys.argv[3], crc, '--ntsc' in sys.argv[4:])
+        return
+    assert crc == SOURCE_CRC, 'Mega Man (Europe): a pack only (--pack)'
     code, sym = assemble()
     assert len(code) == BANK_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(data, code, sym, sys.argv[3])
-        return
     banks = [bytearray(data[n * BANK_SIZE:(n + 1) * BANK_SIZE]) for n in range(PRG_BANKS)]
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for bank, address, original, new in hooks(sym):

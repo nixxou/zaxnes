@@ -242,7 +242,13 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   (zone data, `WIDESCREEN-EXTENSION.md` 2), so the MMC5 conversions take it too: 636 of 703 ROMs
   take a whole pack, the same RAM as without zone data over its movies. Zelda II and Castlevania
   then moved to widescreen MMC5 too (the zone fantôme holding the extension's data), the same RAM
-  over their movies;
+  over their movies; Mega Man next (`docs/hacks/megaman1/WIDESCREEN-HACK.md`): its pack in the zone
+  fantôme with zone data, two groups (core, enemies) with checks, the game's NMI left alone (the
+  settings made in the frame's logic), UxROM, MMC3, MMC5 and GxROM, the European ROM's pack (PAL,
+  and as NTSC for the ROMs of that code whose header says NTSC); 452 of its 455 ROMs take a whole
+  pack, Rockman (Japan) by the USA pack's signatures. A "dirty" iNES header (bytes 12 to 15 not
+  zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
+  (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its
   fixed bank left at bank 7): a pack built from that ROM (`ZELDA2_USA_MMC5`, places counted from
   the start), taken by 13 of its 14 ROMs (the Korean translation changes the fixed bank); 619 of
