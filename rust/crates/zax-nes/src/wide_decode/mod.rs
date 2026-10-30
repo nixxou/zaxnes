@@ -268,7 +268,8 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman3::SOURCE_CRC_EUROPE_REV1 => Some(&megaman3::MEGAMAN3_EUROPE_REV1),
         megaman4::SOURCE_CRC | megaman4::SOURCE_CRC_REV1 => Some(&megaman4::MEGAMAN4),
         crc if megaman4::OTHER_CRCS.contains(&crc) => Some(&megaman4::MEGAMAN4),
-        megaman5::SOURCE_CRC => Some(&megaman5::MEGAMAN5),
+        megaman5::SOURCE_CRC | megaman5::SOURCE_CRC_JAPAN => Some(&megaman5::MEGAMAN5),
+        megaman5::SOURCE_CRC_EUROPE => Some(&megaman5::MEGAMAN5_EUROPE),
         megaman6::SOURCE_CRC => Some(&megaman6::MegaMan6),
         metroid::SOURCE_CRC => Some(&metroid::Metroid),
         _ => None,
@@ -316,6 +317,7 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         | crate::builtin_patches::MEGAMAN4_USA_REV1
         | crate::builtin_patches::MEGAMAN4_EUROPE => Some(&megaman4::MEGAMAN4),
         crate::builtin_patches::MEGAMAN5_USA => Some(&megaman5::MEGAMAN5),
+        crate::builtin_patches::MEGAMAN5_EUROPE => Some(&megaman5::MEGAMAN5_EUROPE),
         crate::builtin_patches::MEGAMAN6_USA => Some(&megaman6::MegaMan6),
         crate::builtin_patches::METROID_USA => Some(&metroid::Metroid),
         _ => None,

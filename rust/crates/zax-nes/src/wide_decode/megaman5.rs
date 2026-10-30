@@ -12,6 +12,10 @@ use super::megaman3::{Layout, StageBank};
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x3EDC_F7E8;
+/// CRC-32 of Rockman 5 (Japan)'s data: the same layouts and tables.
+pub const SOURCE_CRC_JAPAN: u32 = 0xFDDF_2135;
+/// CRC-32 of Mega Man 5 (Europe)'s data: its per-screen table 2 bytes earlier.
+pub const SOURCE_CRC_EUROPE: u32 = 0xA4DC_F72E;
 
 /// The decoder.
 pub const MEGAMAN5: Layout = Layout {
@@ -32,4 +36,15 @@ pub const MEGAMAN5: Layout = Layout {
     structures: 0x1200,
     tiles: 0x0D00,
     palettes: 0x1100,
+};
+
+/// Mega Man 5 (Europe): its fixed banks' code and the per-screen table 2 bytes earlier.
+pub const MEGAMAN5_EUROPE: Layout = Layout {
+    stage_bank: StageBank::Ram {
+        bank: 0x0027,
+        switch: 0x0026,
+        value: 0x0E,
+        per_screen: 0x4000 - 0x1791,
+    },
+    ..MEGAMAN5
 };

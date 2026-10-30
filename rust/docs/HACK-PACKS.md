@@ -251,7 +251,10 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   Rev 1, the European ones PAL with NTSC twins): 268 of its 494 ROMs take a whole pack, its
   512 KiB ROM hacks (their code reworked where the hack hooks) none. Mega Man 4 too
   (`docs/hacks/megaman4/WIDESCREEN-HACK.md`): one pack for both USA builds and Rockman 4, the same
-  built from the European ROM (PAL); 272 of its 279 ROMs take a whole pack. A "dirty" iNES header (bytes 12 to 15 not
+  built from the European ROM (PAL); 272 of its 279 ROMs take a whole pack. Mega Man 5 too
+  (`docs/hacks/megaman5/WIDESCREEN-HACK.md`): the USA pack, which Rockman 5 takes, and the European
+  build's own (its fixed banks' code 2 bytes earlier), PAL; 419 of its 442 ROMs take a whole
+  pack. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its
