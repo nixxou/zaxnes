@@ -1,5 +1,6 @@
-//! The home screen as data: the `.nes` files of the ROM folder, sorted, with the selection, the
-//! A-Z jump of the shoulder buttons and the 3D profile each game matches. It draws nothing.
+//! The home screen as data: the `.nes` files of the ROM folder, sorted, with the selection and the
+//! 3D profile each game matches; the shoulder buttons are the widescreen and the hacks of the
+//! selected game (owner request). It draws nothing.
 
 use std::path::{Path, PathBuf};
 
@@ -73,7 +74,8 @@ impl RomEntry {
             .map(|profile| profile.title.as_str())
     }
 
-    /// The letter the A-Z jump files the game under; `#` for a name that starts otherwise.
+    /// The letter the game is filed under, which the title shows; `#` for a name that starts
+    /// otherwise.
     #[must_use]
     pub fn initial(&self) -> char {
         self.name
@@ -95,7 +97,10 @@ pub enum RomListCommand {
     GameOptions(PathBuf),
     /// Open the options.
     Options,
-    /// Open the widescreen and the hacks of the selected game (Rust-only, owner request).
+    /// L1 went down on the selected game (Rust-only, owner request): released, its widescreen is
+    /// turned on with everything or off; held, its settings show.
+    Widescreen(PathBuf),
+    /// Open the hacks of the selected game, its aids (Rust-only, owner request).
     Hacks(PathBuf),
 }
 
@@ -228,32 +233,6 @@ impl RomListModel {
         self.selected = usize::try_from((current + delta).rem_euclid(count)).unwrap_or(0);
     }
 
-    /// Jumps to the first game of the next letter, or of the previous one: from the middle of a
-    /// letter, backwards goes to the start of that letter first. Wraps round the ends.
-    pub fn jump_letter(&mut self, forward: bool) {
-        let Some(current) = self.selected_entry().map(RomEntry::initial) else {
-            return;
-        };
-        let first_of = |letter: char| self.entries.iter().position(|e| e.initial() == letter);
-        let letters: Vec<char> = {
-            let mut letters: Vec<char> = self.entries.iter().map(RomEntry::initial).collect();
-            letters.dedup();
-            letters
-        };
-        let Some(position) = letters.iter().position(|letter| *letter == current) else {
-            return;
-        };
-        let start_of_current = first_of(current).unwrap_or(0);
-        let target = if forward {
-            letters[(position + 1) % letters.len()]
-        } else if self.selected > start_of_current {
-            current
-        } else {
-            letters[(position + letters.len() - 1) % letters.len()]
-        };
-        self.selected = first_of(target).unwrap_or(0);
-    }
-
     /// One press of a button.
     pub fn handle(&mut self, button: PadButton) -> Option<RomListCommand> {
         match button {
@@ -261,8 +240,6 @@ impl RomListModel {
             PadButton::Down => self.move_by(1),
             PadButton::Left => self.move_by(-PAGE),
             PadButton::Right => self.move_by(PAGE),
-            PadButton::L1 => self.jump_letter(false),
-            PadButton::R1 => self.jump_letter(true),
             PadButton::A => {
                 return self
                     .selected_entry()
@@ -274,8 +251,13 @@ impl RomListModel {
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
             }
             PadButton::Y => return Some(RomListCommand::Options),
-            // L2 opens the widescreen and the hacks; Start plays, as A does (owner request).
-            PadButton::L2 => {
+            // L1 the widescreen, R1 the hacks; Start plays, as A does (owner request).
+            PadButton::L1 => {
+                return self
+                    .selected_entry()
+                    .map(|entry| RomListCommand::Widescreen(entry.path.clone()));
+            }
+            PadButton::R1 => {
                 return self
                     .selected_entry()
                     .map(|entry| RomListCommand::Hacks(entry.path.clone()));
@@ -365,40 +347,6 @@ mod tests {
         assert_eq!(0, model.selected());
         model.handle(PadButton::Right);
         assert_eq!(2, model.selected(), "a page is 8 rows, wrapped over 3");
-    }
-
-    #[test]
-    fn the_shoulders_jump_from_letter_to_letter() {
-        let mut model = list(&[
-            "1942",
-            "Adventure",
-            "Alien",
-            "Bomb",
-            "Castle",
-            "Cave",
-            "Zip",
-        ]);
-        assert_eq!('#', model.selected_entry().unwrap().initial());
-        model.handle(PadButton::R1);
-        assert_eq!("Adventure", model.selected_entry().unwrap().name);
-        model.handle(PadButton::R1);
-        assert_eq!("Bomb", model.selected_entry().unwrap().name);
-        model.handle(PadButton::Down);
-        model.handle(PadButton::Down);
-        assert_eq!("Cave", model.selected_entry().unwrap().name);
-        // Backwards from the middle of a letter goes to its start, then to the letter before.
-        model.handle(PadButton::L1);
-        assert_eq!("Castle", model.selected_entry().unwrap().name);
-        model.handle(PadButton::L1);
-        assert_eq!("Bomb", model.selected_entry().unwrap().name);
-        model.jump_letter(true);
-        model.jump_letter(true);
-        model.jump_letter(true);
-        assert_eq!(
-            "1942",
-            model.selected_entry().unwrap().name,
-            "forwards wraps"
-        );
     }
 
     #[test]

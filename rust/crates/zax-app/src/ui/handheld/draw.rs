@@ -476,7 +476,7 @@ impl HandheldUi {
                 (hint.button, strings::get(hint.meaning), colour)
             })
             .collect();
-        // L2 opens the widescreen and the hacks of the selected game, in the colour of its [W].
+        // L1 the widescreen of the selected game, in the colour of its [W]; R1 its hacks.
         if let Some(entry) = self
             .roms
             .selected_entry()
@@ -493,7 +493,8 @@ impl HandheldUi {
             } else {
                 TEXT
             };
-            hints.push(("L2", strings::get(keys::HANDHELD_HINT_HACKS), colour));
+            hints.push(("L1", strings::get(keys::HACK_WIDESCREEN), colour));
+            hints.push(("R1", strings::get(keys::MENU_AIDS), TEXT));
         }
         painter.hint_entries(&hints);
     }
@@ -517,13 +518,17 @@ impl HandheldUi {
         let first = first_visible(selected, rows, total);
         for (slot, index) in (0..total).skip(first).take(rows).enumerate() {
             let focused = index == selected;
-            if index == GameOptionsModel::HACKS_ROW {
+            if index == GameOptionsModel::WIDESCREEN_ROW {
                 painter.row(
                     slot,
                     focused,
-                    &strings::get(keys::HANDHELD_HINT_HACKS),
-                    (">", DIM),
+                    &strings::get(keys::HACK_WIDESCREEN),
+                    (&strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS), DIM),
                 );
+                continue;
+            }
+            if index == GameOptionsModel::HACKS_ROW {
+                painter.row(slot, focused, &strings::get(keys::MENU_AIDS), (">", DIM));
                 continue;
             }
             let Some(row) = index.checked_sub(1).map(|row| GAME_ROWS[row]) else {
