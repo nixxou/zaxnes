@@ -433,13 +433,8 @@ impl HandheldUi {
                 .widescreen_hold
                 .as_ref()
                 .filter(|hold| hold.held > 0.0)
-                .map(|hold| {
-                    let label = match hold.button {
-                        super::pad::PadButton::L1 => "L1",
-                        _ => "A",
-                    };
-                    (label, (hold.held / super::WIDESCREEN_HOLD_SECONDS).min(1.0))
-                }),
+                // Only A is held for the widescreen now: L1 on the list opens its settings.
+                .map(|hold| ("A", (hold.held / super::WIDESCREEN_HOLD_SECONDS).min(1.0))),
         }
     }
 

@@ -822,8 +822,15 @@ impl HandheldUi {
             RomListCommand::GameOptions(path) => self.open_game_options(&path, host),
             RomListCommand::Options => self.open_options(host),
             RomListCommand::Widescreen(path) => {
+                // L1 opens the widescreen's settings, no quick toggle on the list (owner request).
                 let title = self.profile_title_of(&path);
-                self.hold_widescreen(PadButton::L1, path, title, Screen::Home);
+                self.open_hacks(
+                    &path,
+                    title.as_deref(),
+                    Screen::Home,
+                    host,
+                    HacksView::Widescreen,
+                );
             }
             RomListCommand::Hacks(path) => {
                 let title = self.profile_title_of(&path);

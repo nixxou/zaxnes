@@ -97,8 +97,7 @@ pub enum RomListCommand {
     GameOptions(PathBuf),
     /// Open the options.
     Options,
-    /// L1 went down on the selected game (Rust-only, owner request): released, its widescreen is
-    /// turned on with everything or off; held, its settings show.
+    /// L1 went down on the selected game (Rust-only, owner request): its widescreen's settings show.
     Widescreen(PathBuf),
     /// Open the hacks of the selected game, its aids (Rust-only, owner request).
     Hacks(PathBuf),
