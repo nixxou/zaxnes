@@ -1505,12 +1505,13 @@ With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared bu
 and MMC3 (ROM hacks of the same code on those), each hook a 16 KiB bank and a CPU address, the ROM
 keeping its size. src/wide.s is assembled with -D PACK for $2000: the zone fantôme, which Zaxnes
 shows to instruction fetches from power-on, the extension unlocked and at $3000-$3FFF; the
-settings are made from the NMI's call of UpdateTopScore instead of its start. The widescreen is in three groups, "core" (Base: the enemies' sprites, the
-platforms and the firebars in the margins), "enemies" (Enemies in the margins: the reserve and the
-previews) and "level select" (the title screen's selector, which needs the hack's code), each with
-checks of the game's code the hack relies on. Invincibility is a component of its own,
-"invincible" (LDA #$02, the injury timer found running), applied by Zaxnes while that option is
-on, with or without the widescreen. A pack per build whose code moved: the World one (the
+settings are made from the NMI's call of UpdateTopScore instead of its start. The widescreen is
+in two groups, "core" (Base: the enemies' sprites, the platforms and the firebars in the margins)
+and "enemies" (Enemies in the margins: the reserve and the previews), each with checks of the
+game's code the hack relies on. The aids are components of their own, applied by Zaxnes while
+their option is on, with or without the widescreen: "level_select" (the title screen's selector,
+its code in the zone with the widescreen's) and "invincible" (LDA #$02, the injury timer found
+running). A pack per build whose code moved: the World one (the
 PlayChoice-10's too) and Europe's (-D EUROPE, PAL; --ntsc: the same for the ROMs of its code whose
 header says NTSC).
 """
@@ -1692,8 +1693,10 @@ def pack(data, crc, out, ntsc=False):
         'core': widescreen.group('core', label='Base', label_fr='Base'),
         'enemies': widescreen.group('enemies', requires=['core'], label='Enemies in the margins',
                                     label_fr='Ennemis dans les marges'),
-        'level select': widescreen.group('level select', requires=['core'],
-                                         label='Level select', label_fr='Sélecteur de niveau'),
+        # An aid: a component of its own, applied while its option is on, with or without the
+        # widescreen (its code in the zone, its hooks its own).
+        'level select': pack.component('level_select').group(
+            'level_select', label='Level select', label_fr='Sélecteur de niveau'),
     }
     for group, checks in CHECKS.items():
         for address, length in checks:
