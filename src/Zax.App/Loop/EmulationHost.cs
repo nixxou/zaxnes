@@ -538,6 +538,14 @@ internal sealed partial class EmulationHost : IDisposable
                 _scene.Settings.Skybox = (SkyboxKind)Settings.Skybox;
                 break;
 
+            // AMD-043 REQ-SCN-066: the curvature applies hot, at the next rendered frame.
+            case Zax.Settings.SettingKeys.SceneBendLeftRight:
+            case Zax.Settings.SettingKeys.SceneBendTopBottom:
+            case Zax.Settings.SettingKeys.SceneArcHorizontal:
+            case Zax.Settings.SettingKeys.SceneArcCenter:
+                PublishBending();
+                break;
+
             case "camera.local_cam":
                 // REQ-SCN-009: the top-down camera is a profile setting the "Mode caméra"
                 // submenu also writes, so it is applied here as well as by the script bridge —
@@ -557,6 +565,19 @@ internal sealed partial class EmulationHost : IDisposable
             default:
                 break;
         }
+    }
+
+    /// <summary>
+    /// Pushes the four curvature settings of AMD-043 REQ-SCN-066 onto the scene. The renderer
+    /// rebuilds <c>B</c> from them, so a change is in force at the next rendered frame.
+    /// </summary>
+    internal void PublishBending()
+    {
+        _scene.Settings.SceneScale = SceneScale;
+        _scene.Settings.BendLeftRight = Settings.BendLeftRight;
+        _scene.Settings.BendTopBottom = Settings.BendTopBottom;
+        _scene.Settings.ArcHorizontal = Settings.ArcHorizontal;
+        _scene.Settings.ArcAtEdge = Settings.ArcCenter != 0;
     }
 
     // ---------------------------------------------------------------- Zapper
@@ -601,7 +622,10 @@ internal sealed partial class EmulationHost : IDisposable
             snapshot.PointerSize,
             snapshot.RightButton,
             _session?.ZapperOffset ?? System.Numerics.Vector3.Zero,
-            SceneScale);
+            SceneScale,
+
+            // REQ-INP-124: aiming on the bent scene, with the curvature of the frame.
+            _scene.Settings.Bend);
     }
 
     /// <summary>

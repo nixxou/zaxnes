@@ -43,6 +43,15 @@ internal sealed record OptionsRow(
     /// </summary>
     public string Label => UiText.LabelOf(Descriptor);
 
+    /// <summary>The help text of AMD-043 §6, or null when the setting has none.</summary>
+    public string? Help => UiText.HelpOf(Descriptor);
+
+    /// <summary>
+    /// The key of the group the row belongs to inside its tab, or null when it stands on its
+    /// own (AMD-043 §6).
+    /// </summary>
+    public string? GroupKey => OptionsModel.GroupOf(Descriptor);
+
     /// <summary>Whether the setting is a profile parameter a profile load will overwrite.</summary>
     public bool IsProfileScoped => Descriptor.Scope == SettingScope.Profile;
 }
@@ -82,8 +91,59 @@ internal sealed class OptionsModel
     /// publishable version has no menu music, so the setting has no effect. It stays in the
     /// model so that an existing <c>settings.json</c> still reads.
     /// </remarks>
+    /// <remarks>
+    /// <c>render.visual_style</c> is excluded because AMD-040 §3 gives its SPEC-09 line no
+    /// interface at all: Zaxnes has a single renderer, so the setting is stored for the scripts
+    /// that read it and nothing more.
+    /// </remarks>
     public static IReadOnlyList<string> ExcludedKeys { get; } =
-        [SettingKeys.UiLastBrowseDir, SettingKeys.UiWindowRect, SettingKeys.AudioBgMusic];
+    [
+        SettingKeys.UiLastBrowseDir,
+        SettingKeys.UiWindowRect,
+        SettingKeys.AudioBgMusic,
+        SettingKeys.RenderVisualStyle,
+    ];
+
+    /// <summary>
+    /// The settings of the advanced « Geometry » group of AMD-043 §6, in the order the
+    /// amendment lists them.
+    /// </summary>
+    public static IReadOnlyList<string> GeometryKeys { get; } =
+    [
+        SettingKeys.SceneBendLeftRight,
+        SettingKeys.SceneBendTopBottom,
+        SettingKeys.SceneArcHorizontal,
+        SettingKeys.SceneArcCenter,
+    ];
+
+    /// <summary>
+    /// The group <paramref name="descriptor"/> is shown in inside its tab, or null when it
+    /// stands on its own.
+    /// </summary>
+    public static string? GroupOf(SettingDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        return GeometryKeys.Contains(descriptor.Key) ? UiKeys.GroupGeometry : null;
+    }
+
+    /// <summary>The groups a tab holds, in the order their first row appears.</summary>
+    public IReadOnlyList<string> Groups(OptionsTab tab)
+    {
+        List<string> groups = [];
+        foreach (OptionsRow row in _rows[tab])
+        {
+            if (row.GroupKey is { } group && !groups.Contains(group))
+            {
+                groups.Add(group);
+            }
+        }
+
+        return groups;
+    }
+
+    /// <summary>The rows of a tab that belong to <paramref name="group"/>.</summary>
+    public IReadOnlyList<OptionsRow> RowsOfGroup(OptionsTab tab, string? group)
+        => [.. _rows[tab].Where(row => string.Equals(row.GroupKey, group, StringComparison.Ordinal))];
 
     /// <summary>
     /// The settings that are not user preferences but that SPEC-10 REQ-UI-061 showed, so the

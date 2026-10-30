@@ -57,9 +57,28 @@ internal sealed partial class ZaxUi
 
                 ImGui.Separator();
 
-                foreach (OptionsRow row in _optionsModel.Rows(tab))
+                foreach (OptionsRow row in _optionsModel.RowsOfGroup(tab, group: null))
                 {
                     DrawRow(model, row);
+                }
+
+                // AMD-043 §6: the curvature settings sit in a « Geometry » group marked
+                // advanced, that is folded away until the user asks for it.
+                foreach (string group in _optionsModel.Groups(tab))
+                {
+                    ImGui.Separator();
+                    bool opened = ImGui.CollapsingHeader(UiText.GroupTitle(group));
+                    ImGui.SameLine();
+                    ImGui.TextDisabled(UiText.Advanced);
+                    if (!opened)
+                    {
+                        continue;
+                    }
+
+                    foreach (OptionsRow row in _optionsModel.RowsOfGroup(tab, group))
+                    {
+                        DrawRow(model, row);
+                    }
                 }
 
                 ImGui.EndTabItem();
@@ -107,6 +126,12 @@ internal sealed partial class ZaxUi
                         SettingKind.Int => DrawInt(model, row),
                         _ => DrawFloat(model, row),
                     };
+
+            // AMD-043 §6: the help text of a setting that has one, on the row itself.
+            if (row.Help is { Length: > 0 } help && ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip(help);
+            }
 
             if (changed && OptionsModel.PlaysValidationSound(descriptor.Key))
             {

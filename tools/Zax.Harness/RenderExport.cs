@@ -63,6 +63,9 @@ internal static class RenderExport
                                    granted size is reported.
           --anti-alias <n>         video.anti_alias: 0 off (default), 1 MSAA 4x, 2 MSAA 8x
                                    (AMD-032). The granted sample count is reported.
+          --bend <lr,tb,arc[,c]>   Space bending in degrees, −180 to 180 by steps of 30, and
+                                   the arc centre 0 (screen) or 1 (bottom edge) (AMD-043
+                                   REQ-SCN-066).
           --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049).
           --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046).
           --real-time <seconds>    Real time the star twinkle uses (REQ-SCN-050).
@@ -103,6 +106,7 @@ internal static class RenderExport
         bool explain = false;
         int bench = 0;
         SkyboxKind skybox = SkyboxKind.Default;
+        (int Lr, int Tb, int Arc, int Centre) bend = default;
         Rgb24 customBackground = default;
         float realTime = 0f;
         bool skyBodies = false;
@@ -206,6 +210,10 @@ internal static class RenderExport
                     explain = true;
                     break;
 
+                case "--bend":
+                    bend = ParseBend(Next(args, ref i));
+                    break;
+
                 case "--skybox":
                     skybox = Next(args, ref i).ToLowerInvariant() switch
                     {
@@ -302,6 +310,13 @@ internal static class RenderExport
 
             scene.Scene.Camera.SnapToSetpoints();
             scene.Scene.Settings.Skybox = skybox;
+
+            // AMD-043 REQ-SCN-066: the four curvature settings, as the options window writes
+            // them.
+            scene.Scene.Settings.BendLeftRight = bend.Lr;
+            scene.Scene.Settings.BendTopBottom = bend.Tb;
+            scene.Scene.Settings.ArcHorizontal = bend.Arc;
+            scene.Scene.Settings.ArcAtEdge = bend.Centre != 0;
             scene.Scene.Settings.CustomBackgroundColor = customBackground;
             scene.Scene.RealTime = realTime;
 
@@ -793,6 +808,26 @@ internal static class RenderExport
             byte.Parse(parts[0], CultureInfo.InvariantCulture),
             byte.Parse(parts[1], CultureInfo.InvariantCulture),
             byte.Parse(parts[2], CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// The four curvature settings of AMD-043 REQ-SCN-066, as
+    /// <c>&lt;lr&gt;,&lt;tb&gt;,&lt;arc&gt;[,&lt;centre&gt;]</c>.
+    /// </summary>
+    private static (int Lr, int Tb, int Arc, int Centre) ParseBend(string value)
+    {
+        string[] parts = value.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length is < 3 or > 4)
+        {
+            throw new ArgumentException($"--bend expects <lr>,<tb>,<arc>[,<centre>], got '{value}'.");
+        }
+
+        int Degrees(int index) => int.Parse(parts[index], CultureInfo.InvariantCulture);
+        return (
+            Degrees(0),
+            Degrees(1),
+            Degrees(2),
+            parts.Length == 4 ? Degrees(3) : 0);
     }
 
     private static System.Numerics.Vector3 ParseAngles(string value)

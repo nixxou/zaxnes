@@ -115,6 +115,7 @@ internal static partial class UiStrings
         [UiKeys.HintAtNextStart] = "(at the next start)",
         [UiKeys.HintAtNextLoad] = "(at the next load)",
         [UiKeys.HintProfileSetting] = "(profile setting)",
+        [UiKeys.HintAdvanced] = "(advanced)",
 
         // ---------------------------------------------------- fields, columns
         [UiKeys.FieldSearch] = "Search",
@@ -142,6 +143,9 @@ internal static partial class UiStrings
         [UiKeys.TabAudio] = "Audio",
         [UiKeys.TabEmulation] = "Emulation",
         [UiKeys.TabInterface] = "Interface",
+
+        // ------------------------------- groups inside a tab (AMD-043 §6)
+        [UiKeys.GroupGeometry] = "Geometry",
 
         // ---------------------------------------- key configuration sections
         [UiKeys.KeysPlayerOne] = "Player 1 — NES buttons",
@@ -244,6 +248,22 @@ internal static partial class UiStrings
         ["setting." + SettingKeys.LightIntensity] = "Light intensity",
         ["setting." + SettingKeys.SceneSkybox] = "Background (skybox)",
         ["setting." + SettingKeys.SceneCustomBgColor] = "Background colour",
+
+        // AMD-043 §6, word for word.
+        ["setting." + SettingKeys.SceneBendLeftRight] = "Bend Left-Right",
+        ["setting." + SettingKeys.SceneBendTopBottom] = "Bend Top-Bottom",
+        ["setting." + SettingKeys.SceneArcHorizontal] = "Arc Horizontal",
+        ["setting." + SettingKeys.SceneArcCenter] = "Arc Center",
+        ["help." + SettingKeys.SceneBendLeftRight] =
+            "Bends the scene horizontally. Positive values bulge it outwards like a CRT screen; "
+            + "negative values curve it around the player.",
+        ["help." + SettingKeys.SceneBendTopBottom] =
+            "Bends the scene vertically. Positive values bulge it outwards; negative values "
+            + "curve it around the player.",
+        ["help." + SettingKeys.SceneArcHorizontal] =
+            "Rolls the level onto an arc, as if it stood on a tiny planet. Works best with "
+            + "side-scrollers.",
+
         ["setting." + SettingKeys.EmuGameSpeed] = "Game speed",
         ["setting." + SettingKeys.EmuAutoTvMode] = "Region detected automatically",
         ["setting." + SettingKeys.EmuTvMode] = "Video region",
@@ -274,6 +294,8 @@ internal static partial class UiStrings
         ["option.Recent"] = "Recent",
         ["option.en"] = "English",
         ["option.fr"] = "Français",
+        ["option.Screen Center"] = "Screen Center",
+        ["option.Screen Edge"] = "Screen Edge",
 
         // The four Run-ahead values of AMD-041 §3. Their keys carry the setting, because « Off »
         // is not translated the same way here as for the vertical synchronisation.

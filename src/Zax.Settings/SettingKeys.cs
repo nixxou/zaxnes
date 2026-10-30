@@ -83,6 +83,31 @@ public static class SettingKeys
     /// <summary>Kept for data compatibility; no observable effect.</summary>
     public const string SceneMapEnable = "scene.map_enable";
 
+    // AMD-043 §6 — space bending. Four user preferences that act on the rendering only; the
+    // Lua column of their SPEC-09 lines is the pair of style-parameter methods of REQ-LUA-114,
+    // not a member of Setting, so none of them carries a Lua path of its own.
+
+    /// <summary>Left-right bend in degrees, −180 to 180 by steps of 30 (REQ-SCN-066).</summary>
+    public const string SceneBendLeftRight = "scene.bend_lr";
+
+    /// <summary>Top-bottom bend in degrees, −180 to 180 by steps of 30 (REQ-SCN-066).</summary>
+    public const string SceneBendTopBottom = "scene.bend_tb";
+
+    /// <summary>Horizontal arc in degrees, −180 to 180 by steps of 30 (REQ-SCN-066).</summary>
+    public const string SceneArcHorizontal = "scene.arc_h";
+
+    /// <summary>
+    /// Centre of the arc: 0 the screen centre, 1 the bottom edge of the reference frame
+    /// (REQ-SCN-066).
+    /// </summary>
+    public const string SceneArcCenter = "scene.arc_center";
+
+    /// <summary>
+    /// The visual style of AMD-040 §3: 0 Classic, 1 Enhanced. Stored and handed back; Zaxnes
+    /// has a single renderer, so it changes nothing of what is drawn (REQ-LUA-114).
+    /// </summary>
+    public const string RenderVisualStyle = "render.visual_style";
+
     // §4.1.5 Clipping
 
     /// <summary>Left margin, Lua index 0.</summary>

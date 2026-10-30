@@ -270,6 +270,96 @@ public sealed class OptionsWindowTests
         Assert.Equal(0, Play(SettingKeys.CameraFov));
     }
 
+    /// <summary>
+    /// AMD-043 §6: the four curvature settings are in the Video tab, in an advanced
+    /// « Geometry » group, with the labels and the help texts of the amendment in both
+    /// languages. <c>render.visual_style</c> has no interface at all (AMD-040 §3).
+    /// </summary>
+    [Fact] // REQ-SCN-066, REQ-LUA-114
+    public void REQ_SCN_066_the_curvature_settings_are_an_advanced_geometry_group()
+    {
+        using UiLanguageScope language = new();
+        OptionsModel model = new();
+
+        Assert.Equal<string[]>([UiKeys.GroupGeometry], [.. model.Groups(OptionsTab.Video)]);
+        Assert.Equal<string[]>(
+            [.. OptionsModel.GeometryKeys],
+            [.. model.RowsOfGroup(OptionsTab.Video, UiKeys.GroupGeometry).Select(row => row.Descriptor.Key)]);
+
+        // No other tab holds a group, and no ungrouped row of the Video tab is a geometry one.
+        foreach (OptionsTab tab in OptionsModel.Tabs.Where(t => t != OptionsTab.Video))
+        {
+            Assert.Empty(model.Groups(tab));
+        }
+
+        Assert.DoesNotContain(
+            SettingKeys.RenderVisualStyle,
+            model.AllRows().Select(row => row.Descriptor.Key));
+
+        Assert.Equal("Geometry", UiText.GroupTitle(UiKeys.GroupGeometry));
+        Assert.Equal("(advanced)", UiText.Advanced);
+        Assert.Equal(
+            ["Bend Left-Right", "Bend Top-Bottom", "Arc Horizontal", "Arc Center"],
+            model.RowsOfGroup(OptionsTab.Video, UiKeys.GroupGeometry).Select(row => row.Label));
+        Assert.StartsWith(
+            "Bends the scene horizontally.",
+            Row(model, SettingKeys.SceneBendLeftRight).Help,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            ["Screen Center", "Screen Edge"],
+            SettingsCatalogue.Get(SettingKeys.SceneArcCenter).Domain.Options!
+                .Select(option => UiText.LabelOf(
+                    SettingsCatalogue.Get(SettingKeys.SceneArcCenter),
+                    option.Label)));
+
+        UiStrings.Language = UiLanguage.French;
+        Assert.Equal("Géométrie", UiText.GroupTitle(UiKeys.GroupGeometry));
+        Assert.Equal("(avancé)", UiText.Advanced);
+        Assert.Equal(
+            ["Courbure gauche-droite", "Courbure haut-bas", "Arc horizontal", "Centre de l'arc"],
+            model.RowsOfGroup(OptionsTab.Video, UiKeys.GroupGeometry).Select(row => row.Label));
+        Assert.StartsWith(
+            "Courbe la scène horizontalement.",
+            Row(model, SettingKeys.SceneBendLeftRight).Help,
+            StringComparison.Ordinal);
+        Assert.Equal(
+            ["Centre de l'écran", "Bord de l'écran"],
+            SettingsCatalogue.Get(SettingKeys.SceneArcCenter).Domain.Options!
+                .Select(option => UiText.LabelOf(
+                    SettingsCatalogue.Get(SettingKeys.SceneArcCenter),
+                    option.Label)));
+
+        // A setting without a help text answers null rather than its key.
+        Assert.Null(UiText.HelpOf(SettingsCatalogue.Get(SettingKeys.CameraFov)));
+    }
+
+    /// <summary>
+    /// AMD-043 REQ-SCN-066: a change made through the model reaches the scene at the next
+    /// rendered frame, and the « Valeurs par défaut » button of the Video tab puts the whole
+    /// group back to 0.
+    /// </summary>
+    [Fact] // REQ-SCN-066
+    public void REQ_SCN_066_the_curvature_reaches_the_scene_and_the_reset_clears_it()
+    {
+        using UiHarness harness = new("Arkanoid");
+        SettingsModel settings = harness.Settings.Model;
+
+        settings.SetInt(SettingKeys.SceneBendLeftRight, 45);
+        settings.SetInt(SettingKeys.SceneArcHorizontal, -60);
+        settings.SetInt(SettingKeys.SceneArcCenter, 1);
+
+        Assert.Equal(60, harness.Scene.Settings.BendLeftRight);
+        Assert.Equal(-60, harness.Scene.Settings.ArcHorizontal);
+        Assert.True(harness.Scene.Settings.ArcAtEdge);
+        Assert.False(harness.Scene.Settings.Bend.IsIdentity);
+
+        harness.Ui.Options.ResetTab(settings, OptionsTab.Video);
+        Assert.Equal(0, harness.Scene.Settings.BendLeftRight);
+        Assert.Equal(0, harness.Scene.Settings.ArcHorizontal);
+        Assert.False(harness.Scene.Settings.ArcAtEdge);
+        Assert.True(harness.Scene.Settings.Bend.IsIdentity);
+    }
+
     private static IEnumerable<string> Keys(OptionsModel model, OptionsTab tab)
         => model.Rows(tab).Select(static row => row.Descriptor.Key);
 

@@ -253,6 +253,12 @@ internal sealed class ZaxApplication : IDisposable
         _scene.Settings.VSync = _settings.VSync;
         _scene.Settings.LightIntensity = _settings.LightIntensity;
         _scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(_settings.AntiAlias);
+
+        // AMD-043 REQ-SCN-066: the persisted curvature is in force from the first frame.
+        _scene.Settings.BendLeftRight = _settings.BendLeftRight;
+        _scene.Settings.BendTopBottom = _settings.BendTopBottom;
+        _scene.Settings.ArcHorizontal = _settings.ArcHorizontal;
+        _scene.Settings.ArcAtEdge = _settings.ArcCenter != 0;
         _scene.Camera.SnapToSetpoints();
     }
 

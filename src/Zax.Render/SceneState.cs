@@ -31,6 +31,12 @@ public sealed class RenderSettings
     private int _antiAliasSamples = 1;
     private int _vsync;
     private int _targetFrameRate = 90;
+    private int _bendLeftRight;
+    private int _bendTopBottom;
+    private int _arcHorizontal;
+    private bool _arcAtEdge;
+    private float _sceneScale = 1f;
+    private SpaceBend _bend = SpaceBend.None;
 
     /// <summary>Vertical field of view in degrees, 45 to 95 by steps of 5 (REQ-SCN-005).</summary>
     public float Fov { get; set; } = SceneConstants.DefaultFov;
@@ -117,6 +123,94 @@ public sealed class RenderSettings
     /// colour rules of REQ-SCN-046.
     /// </summary>
     public bool SkyboxDrawn => Skybox is SkyboxKind.Gradient or SkyboxKind.Fantasy;
+
+    /// <summary>
+    /// Left-right bend <c>scene.bend_lr</c> in degrees, −180 to 180 (AMD-043 REQ-SCN-066).
+    /// </summary>
+    /// <remarks>
+    /// The renderer only bounds the angle; the step of 30° is the settings model's business
+    /// (AMD-040 §3), so a script or a test may hand over any angle inside the bounds and get
+    /// the continuous transform REQ-SCN-067 defines.
+    /// </remarks>
+    public int BendLeftRight
+    {
+        get => _bendLeftRight;
+        set => Rebuild(ref _bendLeftRight, Math.Clamp(value, -180, 180));
+    }
+
+    /// <summary>Top-bottom bend <c>scene.bend_tb</c> in degrees, −180 to 180 (REQ-SCN-066).</summary>
+    public int BendTopBottom
+    {
+        get => _bendTopBottom;
+        set => Rebuild(ref _bendTopBottom, Math.Clamp(value, -180, 180));
+    }
+
+    /// <summary>Horizontal arc <c>scene.arc_h</c> in degrees, −180 to 180 (REQ-SCN-066).</summary>
+    public int ArcHorizontal
+    {
+        get => _arcHorizontal;
+        set => Rebuild(ref _arcHorizontal, Math.Clamp(value, -180, 180));
+    }
+
+    /// <summary>
+    /// <c>scene.arc_center</c>: false for the screen centre, true for the bottom edge of the
+    /// reference frame (REQ-SCN-066).
+    /// </summary>
+    public bool ArcAtEdge
+    {
+        get => _arcAtEdge;
+        set
+        {
+            if (_arcAtEdge == value)
+            {
+                return;
+            }
+
+            _arcAtEdge = value;
+            RebuildBend();
+        }
+    }
+
+    /// <summary>The scene scale <c>s</c> of REQ-SCN-002; 1 on desktop.</summary>
+    public float SceneScale
+    {
+        get => _sceneScale;
+        set
+        {
+            float scale = value is > 0f and <= float.MaxValue ? value : 1f;
+            if (_sceneScale.Equals(scale))
+            {
+                return;
+            }
+
+            _sceneScale = scale;
+            RebuildBend();
+        }
+    }
+
+    /// <summary>
+    /// The transform <c>B</c> of REQ-SCN-067 the four settings above define. It is rebuilt only
+    /// when one of them changes, so the per-frame cost is nil.
+    /// </summary>
+    public SpaceBend Bend => _bend;
+
+    private void Rebuild(ref int field, int value)
+    {
+        if (field == value)
+        {
+            return;
+        }
+
+        field = value;
+        RebuildBend();
+    }
+
+    private void RebuildBend() => _bend = new SpaceBend(
+        _bendLeftRight,
+        _bendTopBottom,
+        _arcHorizontal,
+        _arcAtEdge,
+        _sceneScale);
 }
 
 /// <summary>

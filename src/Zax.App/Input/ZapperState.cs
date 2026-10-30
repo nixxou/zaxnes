@@ -1,4 +1,5 @@
 using System.Numerics;
+using Zax.Engine3D;
 using Zax.Nes;
 using Zax.Render;
 
@@ -60,6 +61,10 @@ public sealed class ZapperState
     /// <param name="rightButton">Whether the right mouse button is held (REQ-INP-062).</param>
     /// <param name="offset">The scripts' <c>ZapperOffset</c>, in scene units.</param>
     /// <param name="sceneScale">The scene scale <c>e</c>; 1 on desktop (DEC-08-4).</param>
+    /// <param name="bend">
+    /// The space bending in force (AMD-043 REQ-INP-124); the identity gives the aim of
+    /// REQ-INP-063 unchanged.
+    /// </param>
     public void Update(
         bool active,
         in CameraView view,
@@ -67,7 +72,8 @@ public sealed class ZapperState
         Vector2 size,
         bool rightButton,
         Vector3 offset,
-        float sceneScale = 1f)
+        float sceneScale = 1f,
+        SpaceBend bend = default)
     {
         if (!active)
         {
@@ -76,7 +82,7 @@ public sealed class ZapperState
 
         TriggerHeld = rightButton;
 
-        if (ZapperAim.TryAim(view, pointer, size, offset, sceneScale, out ZapperPosition aimed))
+        if (ZapperAim.TryAim(view, pointer, size, offset, sceneScale, bend, out ZapperPosition aimed))
         {
             Position = aimed;
             HasPosition = true;

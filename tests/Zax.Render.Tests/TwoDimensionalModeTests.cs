@@ -36,7 +36,10 @@ public sealed class TwoDimensionalModeTests
 
         Assert.Equal(1, renderer.Statistics.OpaqueTiles);
         Assert.Equal(0, renderer.Statistics.TransparentTiles);
-        Assert.Equal(2, renderer.Statistics.Triangles);
+
+        // One object, cut into 32 × 32 cells since AMD-043 REQ-SCN-068: a surface that spans
+        // the whole frame has to be subdivided for the curvature to show inside it (Q-079).
+        Assert.Equal(2 * 32 * 32, renderer.Statistics.Triangles);
         Assert.False(renderer.Statistics.ShadowPass);
     }
 

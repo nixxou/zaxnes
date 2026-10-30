@@ -166,6 +166,71 @@ public sealed class ScriptSettings : IDisposable
         set => Write(SettingKeys.RenderShadow, value);
     }
 
+    /// <summary>
+    /// The visual style of AMD-040 REQ-LUA-114: 0 Classic, 1 Enhanced, 0 by default. Any other
+    /// value written gives 0. Zaxnes has a single renderer, so it is stored and handed back and
+    /// changes nothing of what is drawn; the curvature of AMD-043 acts whatever it says.
+    /// </summary>
+    public int VisualStyle
+    {
+        get => Int(SettingKeys.RenderVisualStyle);
+        set => Write(SettingKeys.RenderVisualStyle, value);
+    }
+
+    /// <summary>
+    /// The value of the style parameter <paramref name="id"/> of style
+    /// <paramref name="style"/>, or its default when it has never been written (REQ-LUA-114).
+    /// </summary>
+    /// <returns>0 when the style or the identifier is unknown.</returns>
+    public double GetVisualStyleParameter(int style, string? id)
+        => SettingsCatalogue.VisualStyleParameter(style, id) is { } key ? _model.GetInt(key) : 0d;
+
+    /// <summary>
+    /// Records <paramref name="value"/>, normalised as AMD-040 §3 requires, in the setting the
+    /// parameter stands for (REQ-LUA-114). Writing from a script and writing from the options
+    /// window reach the same value.
+    /// </summary>
+    /// <returns>
+    /// False, without recording anything, when the style is unknown or when the identifier does
+    /// not exist for that style.
+    /// </returns>
+    public bool SetVisualStyleParameter(int style, string? id, double value)
+    {
+        if (SettingsCatalogue.VisualStyleParameter(style, id) is not { } key)
+        {
+            return false;
+        }
+
+        // The model's domain carries the normalisation, so the rounding happens in exactly one
+        // place whoever writes.
+        Write(key, (int)SettingsCatalogue.Get(key).Domain.Snap(value));
+        return true;
+    }
+
+    /// <summary>
+    /// Every parameter of <paramref name="style"/> back to its default (REQ-LUA-114); nothing
+    /// happens when the style is unknown.
+    /// </summary>
+    /// <remarks>
+    /// The defaults are written like any other script write, so they land in the session layer
+    /// and the user's own preference comes back at the end of the game (REQ-PERS-010): a script
+    /// may undo a curvature for its game without erasing what the user chose.
+    /// </remarks>
+    public void ResetVisualStyleParameters(int style)
+    {
+        if (!SettingsCatalogue.VisualStyleParameters.TryGetValue(
+                style,
+                out IReadOnlyDictionary<string, string>? parameters))
+        {
+            return;
+        }
+
+        foreach (string key in parameters.Values)
+        {
+            Write(key, SettingsCatalogue.Get(key).DefaultValue.AsInt);
+        }
+    }
+
     #endregion
 
     #region camera (§4.1.2)

@@ -119,6 +119,7 @@ internal static partial class UiStrings
         [UiKeys.HintAtNextStart] = "(au prochain démarrage)",
         [UiKeys.HintAtNextLoad] = "(au prochain chargement)",
         [UiKeys.HintProfileSetting] = "(réglage de profil)",
+        [UiKeys.HintAdvanced] = "(avancé)",
 
         // ---------------------------------------------------- fields, columns
         [UiKeys.FieldSearch] = "Rechercher",
@@ -146,6 +147,9 @@ internal static partial class UiStrings
         [UiKeys.TabAudio] = "Audio",
         [UiKeys.TabEmulation] = "Émulation",
         [UiKeys.TabInterface] = "Interface",
+
+        // ------------------------------- groups inside a tab (AMD-043 §6)
+        [UiKeys.GroupGeometry] = "Géométrie",
 
         // ---------------------------------------- key configuration sections
         [UiKeys.KeysPlayerOne] = "Joueur 1 — boutons NES",
@@ -248,6 +252,22 @@ internal static partial class UiStrings
         ["setting." + SettingKeys.LightIntensity] = "Intensité lumineuse",
         ["setting." + SettingKeys.SceneSkybox] = "Fond (skybox)",
         ["setting." + SettingKeys.SceneCustomBgColor] = "Couleur de fond",
+
+        // AMD-043 §6, mot pour mot.
+        ["setting." + SettingKeys.SceneBendLeftRight] = "Courbure gauche-droite",
+        ["setting." + SettingKeys.SceneBendTopBottom] = "Courbure haut-bas",
+        ["setting." + SettingKeys.SceneArcHorizontal] = "Arc horizontal",
+        ["setting." + SettingKeys.SceneArcCenter] = "Centre de l'arc",
+        ["help." + SettingKeys.SceneBendLeftRight] =
+            "Courbe la scène horizontalement. Une valeur positive la bombe comme un écran "
+            + "cathodique ; une valeur négative l'enroule autour du joueur.",
+        ["help." + SettingKeys.SceneBendTopBottom] =
+            "Courbe la scène verticalement. Une valeur positive la bombe ; une valeur négative "
+            + "l'enroule autour du joueur.",
+        ["help." + SettingKeys.SceneArcHorizontal] =
+            "Pose le niveau sur un arc, comme sur une toute petite planète. Idéal pour les jeux "
+            + "à défilement horizontal.",
+
         ["setting." + SettingKeys.EmuGameSpeed] = "Vitesse de jeu",
         ["setting." + SettingKeys.EmuAutoTvMode] = "Région détectée automatiquement",
         ["setting." + SettingKeys.EmuTvMode] = "Région vidéo",
@@ -278,6 +298,8 @@ internal static partial class UiStrings
         ["option.Recent"] = "Récent",
         ["option.en"] = "English",
         ["option.fr"] = "Français",
+        ["option.Screen Center"] = "Centre de l'écran",
+        ["option.Screen Edge"] = "Bord de l'écran",
 
         // Les quatre valeurs de Run-ahead d'AMD-041 §3.
         ["option." + SettingKeys.EmuRunAhead + ".Off"] = "Désactivé",
