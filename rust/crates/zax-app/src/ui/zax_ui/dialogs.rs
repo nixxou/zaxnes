@@ -236,6 +236,7 @@ impl ZaxUi {
         };
         let (title, message) = (view.title().to_owned(), view.message());
         let (confirm, cancel) = (view.confirm_label(), view.cancel_label());
+        let alternative = view.alternative_label();
         let flags = WindowFlags::NO_COLLAPSE
             | WindowFlags::NO_RESIZE
             | WindowFlags::NO_SAVED_SETTINGS
@@ -258,6 +259,14 @@ impl ZaxUi {
         if ui.button_with_size(&confirm, [110.0, 0.0]) {
             play(host, UiSound::Confirm);
             host.confirm_pending();
+        }
+        // The question's second answer, if it has one.
+        if let Some(alternative) = alternative {
+            ui.same_line();
+            if ui.button_with_size(&alternative, [110.0, 0.0]) {
+                play(host, UiSound::Confirm);
+                host.alternative_pending();
+            }
         }
         // A message to acknowledge has no cancelling button.
         if !cancel.is_empty() {

@@ -455,7 +455,7 @@ fn slot_items(numbered: Command, quick: Command, host: &AppHost) -> Vec<MenuItem
         let mut label = slot_label(slot, host.slots.find(&id));
         let warning = match status {
             SlotPatchStatus::Fits => MenuWarning::None,
-            SlotPatchStatus::OtherMode { .. } => {
+            SlotPatchStatus::OtherComponents => {
                 label = format!("{label} ({})", text::slot_other_patch());
                 MenuWarning::Switch
             }

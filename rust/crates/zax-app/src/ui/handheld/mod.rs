@@ -633,6 +633,10 @@ impl HandheldUi {
                         self.refresh_roms(frame.host);
                     }
                 }
+                // The question's second answer, if it has one.
+                PadButton::X => {
+                    frame.host.alternative_pending();
+                }
                 // A message with one button goes with B as well.
                 PadButton::B | PadButton::Menu => frame.host.cancel_pending(),
                 _ => {}
@@ -1148,7 +1152,7 @@ fn slot_state(host: &AppHost, slot: i32) -> SlotState {
     }
     match host.slot_patch_status(&id) {
         SlotPatchStatus::Fits => SlotState::Fits,
-        SlotPatchStatus::OtherMode { .. } => SlotState::OtherMode,
+        SlotPatchStatus::OtherComponents => SlotState::OtherMode,
         SlotPatchStatus::OtherVersion => SlotState::OtherVersion,
     }
 }

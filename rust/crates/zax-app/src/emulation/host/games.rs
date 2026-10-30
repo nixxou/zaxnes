@@ -27,13 +27,10 @@ pub enum ConfirmedAction {
     DeleteGame(String),
     /// Delete the slot with this identifier.
     DeleteSlot(String),
-    /// Turn the built-in hack on (`hack`) or off, then load the slot.
-    LoadSlotSwitchingHack {
-        /// The slot.
-        slot_id: String,
-        /// Whether the hack is turned on.
-        hack: bool,
-    },
+    /// Load the slot with the components of the built-in hack set now.
+    LoadSlotAsSet(String),
+    /// Set the components of the built-in hack as the slot's state had them, then load it.
+    LoadSlotAligned(String),
     /// Nothing: a message the user only acknowledges (no cancelling button).
     Acknowledge,
     /// Force the built-in patch called `patch` on the ROM in `rom` (Rust-only).
@@ -58,6 +55,8 @@ pub struct ConfirmationRequest {
     pub cancel_label: String,
     /// What agreeing does.
     pub action: ConfirmedAction,
+    /// A second answer, with its button's label, besides agreeing and cancelling.
+    pub alternative: Option<(String, ConfirmedAction)>,
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
@@ -88,6 +87,24 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// The user chose the question's second answer, if it has one: does it. Returns whether
+    /// there was one.
+    pub fn alternative_pending(&mut self) -> bool {
+        match self.confirmation.take() {
+            Some(ConfirmationRequest {
+                alternative: Some((_, action)),
+                ..
+            }) => {
+                self.perform(action);
+                true
+            }
+            other => {
+                self.confirmation = other;
+                false
+            }
+        }
+    }
+
     /// The user declined: forgets the question.
     pub fn cancel_pending(&mut self) {
         self.confirmation = None;
@@ -108,9 +125,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.delete_game(&game_id);
             }
             ConfirmedAction::DeleteSlot(slot_id) => self.delete_slot(&slot_id),
-            ConfirmedAction::LoadSlotSwitchingHack { slot_id, hack } => {
-                self.load_slot_switching_hack(&slot_id, hack);
-            }
+            ConfirmedAction::LoadSlotAsSet(slot_id) => self.load_slot_checked(&slot_id, false),
+            ConfirmedAction::LoadSlotAligned(slot_id) => self.load_slot_aligned(&slot_id),
             ConfirmedAction::Acknowledge => {}
             ConfirmedAction::ForcePatch { rom, patch } => self.force_patch(&rom, &patch),
         }
@@ -131,6 +147,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             message: message.to_owned(),
             confirm_label: force.to_owned(),
             cancel_label: cancel.to_owned(),
+            alternative: None,
             action: ConfirmedAction::ForcePatch {
                 rom: rom.to_owned(),
                 patch: patch.to_owned(),
@@ -147,6 +164,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             message: message.to_owned(),
             confirm_label: "OK".to_owned(),
             cancel_label: String::new(),
+            alternative: None,
             action: ConfirmedAction::Acknowledge,
         });
     }
@@ -165,6 +183,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             message: DELETE_GAME_QUESTION.to_owned(),
             confirm_label: YES_LABEL.to_owned(),
             cancel_label: NO_LABEL.to_owned(),
+            alternative: None,
             action: ConfirmedAction::DeleteGame(game_id.to_owned()),
         })
     }
@@ -294,6 +313,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             message: delete_slot_question(slot_id),
             confirm_label: YES_LABEL.to_owned(),
             cancel_label: NO_LABEL.to_owned(),
+            alternative: None,
             action: ConfirmedAction::DeleteSlot(slot_id.to_owned()),
         })
     }

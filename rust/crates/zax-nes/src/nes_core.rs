@@ -909,6 +909,71 @@ impl NesCore {
         Ok(buffer)
     }
 
+    /// The state block of [`NesCore::save_state`], taken once the game waits for the next frame
+    /// (the `idle_loop` of its built-in patch, or of the patch whose hack pack gives it its
+    /// aids): the CPU is then in the game's own wait, no code of the hack running nor on the
+    /// stack, so the state restores with other components of the hack applied (an aid on or off).
+    /// The machine runs on through the vertical blank to get there (the NMI's work done); a game
+    /// that does not reach its wait before the picture starts again, or whose wait is not known,
+    /// is saved where it is. Returns the block and whether it was taken at the wait.
+    ///
+    /// # Errors
+    /// [`NoRomLoaded`] when there is nothing to save.
+    pub fn save_state_at_idle(
+        &mut self,
+        include_rom_image: bool,
+    ) -> Result<(Vec<u8>, bool), NoRomLoaded> {
+        if self.bus.cartridge().is_none() {
+            return Err(NoRomLoaded);
+        }
+        let idle_loop = self
+            .builtin_patch
+            .and_then(crate::builtin_patches::by_name)
+            .or_else(|| self.pack.as_ref().map(|(patch, _)| *patch))
+            .and_then(|patch| patch.idle_loop);
+        let mut at_idle = false;
+        if let Some((first, last)) = idle_loop {
+            // A bound past any vertical blank, for a machine stalled by the overclock.
+            for _ in 0..100_000 {
+                if (first..=last).contains(&self.cpu.pc) {
+                    at_idle = true;
+                    break;
+                }
+                let ppu = self.bus.ppu();
+                if ppu.scanline() < 240 || ppu.scanline() >= ppu.pre_render_scanline() {
+                    break;
+                }
+                self.cpu.step(&mut self.bus);
+                if (first..=last).contains(&self.cpu.pc) && self.bus.ppu().wide().stalling() {
+                    self.bus.ppu_mut().wide_mut().end_stall();
+                }
+            }
+        }
+        Ok((self.save_state(include_rom_image)?, at_idle))
+    }
+
+    /// The components of the built-in hack pack applied to the ROM loaded: `widescreen` while
+    /// the pack's widescreen runs (its patch applied), and the key of each aid whose option is
+    /// on (see [`crate::hack_pack`]); none for a ROM without a pack.
+    #[must_use]
+    pub fn applied_components(&self) -> Vec<&'static str> {
+        let Some((patch, pack)) = &self.pack else {
+            return Vec::new();
+        };
+        let mut components = Vec::new();
+        if self.builtin_patch == Some(patch.name)
+            && pack.component(crate::hack_pack::WIDESCREEN).is_some()
+        {
+            components.push(crate::hack_pack::WIDESCREEN);
+        }
+        for option in patch.options {
+            if pack.component(option.key).is_some() && self.aids_on & (1 << (option.bit & 7)) != 0 {
+                components.push(option.key);
+            }
+        }
+        components
+    }
+
     /// [`NesCore::save_state`] written into `buffer`, whose earlier content is replaced and
     /// whose allocation is kept (the rollback history recycles its oldest snapshot this way).
     /// The bytes are those of [`NesCore::save_state`]; on an error `buffer` is untouched.

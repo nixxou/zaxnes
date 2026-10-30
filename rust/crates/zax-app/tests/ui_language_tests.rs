@@ -375,6 +375,7 @@ fn amd_036_in_french_the_fixed_texts_are_translated_where_they_are_shown() {
         confirm_label: YES_LABEL.to_owned(),
         cancel_label: NO_LABEL.to_owned(),
         action: ConfirmedAction::DeleteSlot("4".to_owned()),
+        alternative: None,
     };
     let view = ConfirmationView::new(&request);
     assert_eq!("Voulez-vous supprimer l'emplacement 4 ?", view.message());
