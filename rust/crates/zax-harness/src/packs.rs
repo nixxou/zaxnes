@@ -1,6 +1,7 @@
 //! `zax-harness packs <roms dir>`: how the built-in hack packs apply to each ROM of a folder (a
 //! game's dumps, translations and ROM hacks): the patch found by its CRC or by a pack's
-//! signatures, its components and groups that apply, and those that do not with why.
+//! signatures, its components and groups that apply, and those that do not with why (and where
+//! a group first missed).
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -47,7 +48,16 @@ pub fn run(dir: &Path) -> Result<String, HarnessError> {
                 let refused: Vec<String> = applied
                     .refused
                     .iter()
-                    .map(|(component, group, why)| format!("{component}/{group}:{why:?}"))
+                    .map(|(component, group, why)| {
+                        // Where the group's first hook or check missed, when one did.
+                        let miss = applied
+                            .parts
+                            .iter()
+                            .find(|part| part.component == *component && part.group == *group)
+                            .and_then(|part| part.first_miss)
+                            .map_or_else(String::new, |place| format!("@{place:?}"));
+                        format!("{component}/{group}:{why:?}{miss}")
+                    })
                     .collect();
                 format!(
                     "{} by {}: {}{}",

@@ -152,6 +152,9 @@ impl RomTraits {
             };
         }
         let nes2 = image[7] & 0x0C == 0x08;
+        // A "dirty" header (not NES 2.0, bytes 12 to 15 not all zero: "DiskDude!" and the like)
+        // is read as the core reads it: bytes 7 to 15 left out, NTSC (`rom::ines_header`).
+        let dirty = !nes2 && image[12..16].iter().any(|&byte| byte != 0);
         let high = if nes2 {
             usize::from(image[9] & 0x0F)
         } else {
@@ -159,13 +162,15 @@ impl RomTraits {
         };
         let prg_len = (usize::from(image[4]) | (high << 8)) * BANK_SIZE;
         let mapper = u16::from(image[6] >> 4)
-            | u16::from(image[7] & 0xF0)
+            | if dirty { 0 } else { u16::from(image[7] & 0xF0) }
             | if nes2 {
                 u16::from(image[8] & 0x0F) << 8
             } else {
                 0
             };
-        let region = if nes2 {
+        let region = if dirty {
+            0
+        } else if nes2 {
             image[12] & 0x03
         } else {
             image[9] & 0x01
@@ -768,5 +773,11 @@ mod tests {
         assert_eq!(traits.prg_len, 2 * BANK_SIZE);
         assert_eq!(traits.mapper, Some(1));
         assert_eq!(traits.region, Some(1));
+        // A dirty header: its bytes 7 to 15 a comment, the mapper's high nibble and the PAL bit
+        // not read.
+        image[7..16].copy_from_slice(b"DiskDude!");
+        let traits = RomTraits::of(&image, &image[16..]);
+        assert_eq!(traits.mapper, Some(1));
+        assert_eq!(traits.region, Some(0));
     }
 }
