@@ -249,7 +249,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         }
         smb1::SOURCE_CRC | smb1::SOURCE_CRC_EUROPE => Some(&smb1::SuperMarioBros),
         adventure_island::SOURCE_CRC => Some(&adventure_island::AdventureIsland),
-        ng3::SOURCE_CRC => Some(&ng3::NinjaGaiden3),
+        ng3::SOURCE_CRC | ng3::SOURCE_CRC_JAPAN => Some(&ng3::NinjaGaiden3),
         smb3::SOURCE_CRC => Some(&smb3::USA),
         smb3::SOURCE_CRC_JAPAN | smb3::SOURCE_CRC_JAPAN_REV1 => Some(&smb3::JAPAN),
         smb3::SOURCE_CRC_EUROPE => Some(&smb3::EUROPE),
@@ -295,7 +295,9 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         | crate::builtin_patches::SMB1_EUROPE_NTSC => Some(&smb1::SuperMarioBros),
         crate::builtin_patches::ADVENTURE_ISLAND_USA => Some(&adventure_island::AdventureIsland),
         crate::builtin_patches::EXCITEBIKE => Some(&excitebike::Excitebike),
-        crate::builtin_patches::NG3_USA => Some(&ng3::NinjaGaiden3),
+        crate::builtin_patches::NG3_USA | crate::builtin_patches::NG3_JAPAN => {
+            Some(&ng3::NinjaGaiden3)
+        }
         crate::builtin_patches::SMB3_USA => Some(&smb3::USA),
         crate::builtin_patches::SMB3_JAPAN | crate::builtin_patches::SMB3_JAPAN_REV1 => {
             Some(&smb3::JAPAN)

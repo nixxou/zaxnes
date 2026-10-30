@@ -1,4 +1,5 @@
-//! Ninja Gaiden III (USA): the margins of an area, decoded from its layout in PRG-ROM.
+//! Ninja Gaiden III (USA) and Ninja Ryuuken Den III (Japan): the margins of an area, decoded from
+//! its layout in PRG-ROM.
 //!
 //! The game draws its areas from PRG banks 0 to 3 (`$C01E`, in the fixed bank, with banks 0 and 1
 //! at `$8000` and banks 2 and 3 at `$A000` in turn):
@@ -27,6 +28,9 @@ pub struct NinjaGaiden3;
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x902E_3168;
+/// The same of Ninja Ryuuken Den III (Japan): its layouts, blocks and area tables at the USA's
+/// places, the same RAM.
+pub const SOURCE_CRC_JAPAN: u32 = 0x2F2E_30F7;
 
 const AREA: u16 = 0x005F;
 const CAMERA_LOW: u16 = 0x00DB;
