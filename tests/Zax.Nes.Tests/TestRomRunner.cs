@@ -84,13 +84,24 @@ internal static class TestRomRunner
     /// power-on half of a reset test is read on a core whose reset is a power cycle
     /// (REQ-CORE-004).
     /// </param>
-    public static Result RunShellRom(string path, int maxFrames = 4000, bool pressReset = true)
+    /// <param name="softReset">
+    /// Whether the press is the <b>soft</b> reset of AMD-044 REQ-CORE-122 — the RESET button —
+    /// rather than the power cycle of REQ-CORE-004. SPEC-02 §3.12 as amended by AMD-044
+    /// requires <c>cpu_reset/ram_after_reset</c> and <c>cpu_reset/registers</c> to pass this
+    /// way.
+    /// </param>
+    public static Result RunShellRom(
+        string path,
+        int maxFrames = 4000,
+        bool pressReset = true,
+        bool softReset = false)
     {
         NesCore core = Load(path);
 
         long frames = 0;
         bool started = false;
         int resetDelay = 0;
+        bool pressed = false;
 
         while (frames < maxFrames)
         {
@@ -99,7 +110,16 @@ internal static class TestRomRunner
 
             if (resetDelay > 0 && --resetDelay == 0)
             {
-                core.Reset();
+                if (softReset)
+                {
+                    core.SoftReset();
+                }
+                else
+                {
+                    core.Reset();
+                }
+
+                pressed = true;
                 continue;
             }
 
@@ -125,15 +145,27 @@ internal static class TestRomRunner
                     return new Result(status, Passed: false, ReadText(core), frames, TimedOut: false);
                 }
 
-                // "Emulator should wait a couple of frames after seeing $81."
-                resetDelay = 3;
+                // The readme asks for a delay of at least 100 ms after $81 appears, which is
+                // six NTSC frames. The countdown is armed once per request: re-arming it on
+                // every frame the status reads $81 would push the press back for ever, and a
+                // soft reset keeps the RAM — so $6000 still reads $81 for a few frames after
+                // the press, which must not be taken for a second request.
+                if (resetDelay == 0 && !pressed)
+                {
+                    resetDelay = 12;
+                }
+
                 continue;
             }
 
-            if (status != 0x80)
+            if (status == 0x80)
             {
-                return new Result(status, status == 0, ReadText(core), frames, TimedOut: false);
+                // The ROM is running again, so a later $81 is a genuine second request.
+                pressed = false;
+                continue;
             }
+
+            return new Result(status, status == 0, ReadText(core), frames, TimedOut: false);
         }
 
         return new Result(core.ReadMemory(ShellStatus), Passed: false, ReadText(core), frames, TimedOut: true);

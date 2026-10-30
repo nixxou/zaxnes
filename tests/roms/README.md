@@ -63,7 +63,8 @@ The CPU trace comparison needs **both** files: `nestest.nes` and the reference l
 | `apu_test/rom_singles/1..8` | `ApuRomTests` | REQ-CORE-113 | passes |
 | `blargg_apu_2005.07.30/01..11` | `ApuRomTests` | REQ-CORE-113 | passes |
 | `cpu_interrupts_v2/rom_singles/{1-cli_latency,4-irq_and_dma}.nes` | `ApuRomTests` | REQ-CORE-111 | passes |
-| `apu_reset/*.nes` (6) | `ApuRomTests` | REQ-CORE-004 | power-on half passes; reset half pending |
+| `apu_reset/*.nes` (6) | `ApuRomTests` | REQ-CORE-004, REQ-CORE-122 | power-on half passes; reset half passes under the soft reset, pending under the hard one |
+| `cpu_reset/{ram_after_reset,registers}.nes` | `CpuResetRomTests`, `CoreAccuracyTests` | REQ-CORE-122 (AMD-044), REQ-ACC-001 | pass under the soft reset; `ram_after_reset` still fails under the hard one, on purpose |
 | `cpu_interrupts_v2/rom_singles/{2,3,5}.nes` | `ApuRomPendingTests` | REQ-CORE-111 | pending — CPU interrupt hijacking |
 | `dmc_dma_during_read4/*.nes` (5) | `ApuRomPendingTests` | REQ-CORE-113 (P3) | pending — DMA model |
 | `sprdma_and_dmc_dma/*.nes` (2) | `ApuRomPendingTests` | — | pending — DMA model |
@@ -118,8 +119,12 @@ Two protocols are in use, and `TestRomRunner` reads both without any emulator ho
   sources but not the console, and uses `$00F0` as well, located the same way.
 
 `power_up_palette` is excluded on purpose: the palette starts at 0 (REQ-CORE-112).
-`cpu_reset/ram_after_reset` is expected to **fail**, because a reset here is a power cycle
-(REQ-CORE-004, DEC-02-Q3).
+`cpu_reset/ram_after_reset` is expected to **fail** under the hard reset, which is a power
+cycle (REQ-CORE-004, DEC-02-Q3). Since AMD-044 the core also offers a **soft** reset
+(REQ-CORE-122), and SPEC-02 §3.12 as amended requires `cpu_reset/ram_after_reset` and
+`cpu_reset/registers` to pass under it; both do. Those two ROMs come from blargg's
+`cpu_reset.zip` (nesdev "Emulator tests"), and the `nes-test-roms` clone above already brings
+them; the tests are skipped, not failed, when they are absent.
 
 ## Licences
 

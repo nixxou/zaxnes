@@ -226,9 +226,18 @@ internal sealed partial class EmulationHost
     }
 
     /// <summary>
-    /// The rollback of REQ-LOOP-032: the notification, the second-to-last snapshot restored
-    /// into the core, and the state forced to Running with the clock reset.
+    /// The rollback of REQ-LOOP-032: the notification, the second-to-last snapshot restored —
+    /// the core, then the 64 <c>PData</c> values, then the camera (AMD-042 REQ-LOOP-070) — and
+    /// the state forced to Running with the clock reset.
     /// </summary>
+    /// <remarks>
+    /// The <c>Save</c> and <c>Load</c> hooks of the scripts are never called by a rollback: the
+    /// entries are written back the way <c>SetPData</c> writes them, and the hooks stay
+    /// reserved for savestates and for serialisation (REQ-LOOP-070, REQ-LUA-074, REQ-LUA-075).
+    /// The camera goes back through <c>SceneCamera.Restore</c>, the one path a savestate load
+    /// also uses, so that the "shown straight at its setpoints" of REQ-SCN-073 applies to both
+    /// at once rather than being reimplemented here.
+    /// </remarks>
     private void PerformRollback()
     {
         if (_session is not { HasRom: true } session || State == EmulationState.Stopped)
@@ -240,11 +249,14 @@ internal sealed partial class EmulationHost
 
         if (Rollback.TakeRollbackTarget() is { } snapshot)
         {
-            // DEC-07-Q3: the core alone. Neither the camera nor the scripts' persistent data
-            // are restored, and no Save or Load hook runs (REQ-LUA-074).
-            if (!session.RestoreCore(snapshot, out string? error))
+            if (!session.RestoreCore(snapshot.Core, out string? error))
             {
                 _log($"rollback snapshot refused: {error}");
+            }
+            else
+            {
+                session.RestoreRollbackData(snapshot.PersistentData);
+                _scene.Camera.Restore(snapshot.Camera);
             }
         }
 

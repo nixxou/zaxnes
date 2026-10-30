@@ -274,6 +274,9 @@ internal sealed class MenuBarModel
         [
             MenuItem.Of(Need(ZaxCommands.PauseResume)),
             MenuItem.Of(Need(ZaxCommands.Reset)),
+
+            // AMD-044 REQ-LOOP-072: the soft reset sits right next to the hard one.
+            MenuItem.Of(Need(ZaxCommands.SoftReset)),
             MenuItem.Of(Need(ZaxCommands.Stop)),
             MenuItem.Rule,
             MenuItem.Of(Need(ZaxCommands.FastForward)),

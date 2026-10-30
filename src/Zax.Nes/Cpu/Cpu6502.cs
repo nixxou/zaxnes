@@ -197,6 +197,46 @@ public sealed class Cpu6502
     }
 
     /// <summary>
+    /// Runs the <b>soft</b> reset sequence of the RESET button (AMD-044 REQ-CORE-122): the
+    /// same seven cycles and three stack pointer decrements, but A, X, Y and every flag but
+    /// <c>I</c> are kept (nesdev, "CPU power up state", section <i>after reset</i>).
+    /// </summary>
+    /// <remarks>
+    /// Nothing is written to the stack: the three accesses are reads, exactly as in
+    /// <see cref="Reset"/>. The internal memory is untouched, which is the whole point of the
+    /// soft reset — <c>cpu_reset/ram_after_reset</c> checks precisely that.
+    /// </remarks>
+    public void SoftReset()
+    {
+        Jammed = false;
+        _p |= FlagI;
+        _nmiPending = false;
+        _irqSample = false;
+        _pollNmi = false;
+        _pollIrq = false;
+
+        Read(PC);
+        Read(PC);
+        Read((ushort)(0x0100 | S));
+        S--;
+        Read((ushort)(0x0100 | S));
+        S--;
+        Read((ushort)(0x0100 | S));
+        S--;
+
+        byte lo = Read(ResetVector);
+        byte hi = Read((ushort)(ResetVector + 1));
+        PC = (ushort)(lo | (hi << 8));
+
+        // Same edge-detection reference as a power-on reset: an NMI asserted before the
+        // button was pressed is not replayed.
+        _nmiLine = _bus.NmiAsserted;
+        _nmiPending = false;
+        _pollNmi = false;
+        _pollIrq = false;
+    }
+
+    /// <summary>
     /// Executes one instruction, or services a pending interrupt, and returns the number
     /// of CPU cycles it took.
     /// </summary>

@@ -1,8 +1,8 @@
 namespace Zax.App.Input;
 
 /// <summary>
-/// The 19 logical actions of SPEC-08 §4.1, with the bit values the Lua scripts see
-/// (REQ-INP-003).
+/// The 20 logical actions of SPEC-08 §4.1, with the bit values the Lua scripts see
+/// (REQ-INP-003); the twentieth is the soft reset of AMD-044 REQ-INP-125.
 /// </summary>
 /// <remarks>
 /// These values are an interoperability fact: the profiles' scripts read a player's state and
@@ -73,24 +73,33 @@ public enum InputAction
     /// <summary>Quick load.</summary>
     QuickLoad = 0x40000,
 
+    /// <summary>
+    /// Soft reset — the RESET button of the console (AMD-044 REQ-INP-125). The next free code
+    /// of the extended-action table, with no default keyboard or gamepad binding.
+    /// </summary>
+    SoftReset = 0x80000,
+
     /// <summary>The eight low bits, which form the NES controller byte (SPEC-08 §4.1).</summary>
     ControllerByte = 0xFF,
 
     /// <summary>The six camera actions (§3.9).</summary>
     CameraMask = ZoomIn | ZoomOut | RotLeft | RotRight | RotUp | RotDown,
 
-    /// <summary>The five system hotkey actions (§3.11).</summary>
-    HotkeyMask = Menu | RollBack | FastForward | QuickSave | QuickLoad,
+    /// <summary>The six system hotkey actions (§3.11, AMD-044 REQ-INP-125).</summary>
+    HotkeyMask = Menu | RollBack | FastForward | QuickSave | QuickLoad | SoftReset,
 }
 
 /// <summary>
-/// The action table of SPEC-08 §4.1 as data: the 19 actions in the display order of the key
+/// The action table of SPEC-08 §4.1 as data: the 20 actions in the display order of the key
 /// configuration screen, with the English labels that screen shows (REQ-INP-040).
 /// </summary>
 public static class InputActions
 {
-    /// <summary>How many logical actions each player has (REQ-INP-001).</summary>
-    public const int Count = 19;
+    /// <summary>
+    /// How many logical actions each player has (REQ-INP-001): the 19 of SPEC-08 §4.1 plus the
+    /// soft reset AMD-044 REQ-INP-125 adds to the extended-action table.
+    /// </summary>
+    public const int Count = 20;
 
     /// <summary>How many logical players there are: J1 and J2, never a J3 (REQ-INP-001).</summary>
     public const int PlayerCount = 2;
@@ -120,6 +129,7 @@ public static class InputActions
         InputAction.FastForward,
         InputAction.QuickSave,
         InputAction.QuickLoad,
+        InputAction.SoftReset,
     ];
 
     /// <summary>The label of §4.1 for <paramref name="action"/>, the English name of the table.</summary>
@@ -144,6 +154,7 @@ public static class InputActions
         InputAction.FastForward => "FastForward",
         InputAction.QuickSave => "QuickSave",
         InputAction.QuickLoad => "QuickLoad",
+        InputAction.SoftReset => "SoftReset",
         _ => action.ToString(),
     };
 

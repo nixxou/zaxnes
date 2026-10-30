@@ -64,11 +64,19 @@ internal static class RomSuite
     /// asks for a reset, and the final code afterwards; 0 means "Passed". The text printed on
     /// screen is a zero-terminated string at <c>$6004</c>.
     /// </summary>
-    public static Outcome RunShell(string path, int maxFrames = 20_000)
+    /// <param name="path">ROM to run.</param>
+    /// <param name="maxFrames">Frame budget before the run is declared timed out.</param>
+    /// <param name="softReset">
+    /// Whether the reset the ROM asks for is the <b>soft</b> one of AMD-044 REQ-CORE-122 — the
+    /// console's RESET button — instead of the power cycle REQ-CORE-004 describes. SPEC-02
+    /// §3.12 as amended by AMD-044 requires the two <c>cpu_reset</c> ROMs to pass that way.
+    /// </param>
+    public static Outcome RunShell(string path, int maxFrames = 20_000, bool softReset = false)
     {
         NesCore core = Load(path);
         bool started = false;
         long resetAt = -1;
+        bool pressed = false;
 
         for (long frame = 0; frame < maxFrames; frame++)
         {
@@ -84,20 +92,39 @@ internal static class RomSuite
             if (status == 0x80)
             {
                 started = true;
+
+                // The ROM is running again, so a later $81 is a genuine second request.
+                pressed = false;
                 continue;
             }
 
             if (status == 0x81)
             {
-                // The ROM asks for a reset, no sooner than 100 ms later.
+                // The ROM asks for a reset, no sooner than 100 ms later. One press per
+                // request: a soft reset keeps the RAM, so $6000 still reads $81 for a few
+                // frames afterwards and must not be taken for a second request.
+                if (pressed)
+                {
+                    continue;
+                }
+
                 if (resetAt < 0)
                 {
                     resetAt = frame + 10;
                 }
                 else if (frame >= resetAt)
                 {
-                    core.Reset();
+                    if (softReset)
+                    {
+                        core.SoftReset();
+                    }
+                    else
+                    {
+                        core.Reset();
+                    }
+
                     resetAt = -1;
+                    pressed = true;
                 }
 
                 continue;

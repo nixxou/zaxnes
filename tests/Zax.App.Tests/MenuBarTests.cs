@@ -64,6 +64,7 @@ public sealed class MenuBarTests
             (UiText.MenuFile, ZaxCommands.Quit),
             (UiText.MenuEmulation, ZaxCommands.PauseResume),
             (UiText.MenuEmulation, ZaxCommands.Reset),
+            (UiText.MenuEmulation, ZaxCommands.SoftReset), // AMD-044 REQ-LOOP-072
             (UiText.MenuEmulation, ZaxCommands.Stop),
             (UiText.MenuEmulation, ZaxCommands.FastForward),
             (UiText.MenuEmulation, ZaxCommands.Rollback),

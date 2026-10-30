@@ -342,10 +342,15 @@ internal sealed partial class EmulationHost : IDisposable
         for (int frame = 0; frame < due; frame++)
         {
             // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
-            // counter is a multiple of 60, so before that frame executes.
+            // counter is a multiple of 60, so before that frame executes. AMD-042
+            // REQ-LOOP-069: it carries the 64 PData values and the camera state as well, read
+            // as they stand at that instant and with no script hook involved.
             if (RollbackHistory.IsSnapshotFrame(session.Core.FrameCount))
             {
-                Rollback.Capture(session.Core.SaveState(includeRomImage: false));
+                Rollback.Capture(new RollbackSnapshot(
+                    session.Core.SaveState(includeRomImage: false),
+                    session.CaptureRollbackData(),
+                    _scene.Camera.Capture()));
             }
 
             try
@@ -648,6 +653,12 @@ internal sealed partial class EmulationHost : IDisposable
         if (events.HasFlag(HotkeyEvents.QuickLoad))
         {
             Enqueue(ZaxCommands.QuickLoad);
+        }
+
+        // AMD-044 REQ-INP-125: the bound action triggers the command of REQ-LOOP-072.
+        if (events.HasFlag(HotkeyEvents.SoftReset))
+        {
+            Enqueue(ZaxCommands.SoftReset);
         }
     }
 

@@ -803,8 +803,16 @@ public sealed class LoopTests
     // ------------------------------------------------------------------ §3.4 rollback
 
     /// <summary>
-    /// REQ-LOOP-030 — a snapshot of the core alone is taken at the start of every emulated frame
-    /// whose counter is a multiple of 60, and at most 30 are kept.
+    /// A snapshot whose core block is one recognisable byte: AMD-042 REQ-LOOP-069 made a
+    /// snapshot carry the <c>PData</c> block and the camera state as well, which the history's
+    /// own bookkeeping does not look at.
+    /// </summary>
+    private static RollbackSnapshot Snapshot(byte core)
+        => new([core], new byte[Zax.Scripting.PersistentData.BlockSize], default);
+
+    /// <summary>
+    /// REQ-LOOP-030 — a snapshot is taken at the start of every emulated frame whose counter is
+    /// a multiple of 60, and at most 30 are kept.
     /// </summary>
     [Fact] // REQ-LOOP-030
     public void The_history_keeps_thirty_snapshots_taken_every_sixty_frames()
@@ -821,20 +829,19 @@ public sealed class LoopTests
         RollbackHistory history = new();
         for (int index = 0; index < 45; index++)
         {
-            history.Capture([(byte)index]);
+            history.Capture(Snapshot((byte)index));
         }
 
         Assert.Equal(30, history.Count);
 
         // The oldest kept is the 15th taken: the earlier ones were dropped.
-        byte[]? target = history.TakeRollbackTarget();
+        RollbackSnapshot? target = history.TakeRollbackTarget();
         Assert.NotNull(target);
-        Assert.Equal(43, target[0]);
+        Assert.Equal(43, target.Core[0]);
     }
 
     /// <summary>
-    /// REQ-LOOP-030 — in the host: 45 s of NTSC play leave 30 snapshots and the snapshot holds
-    /// the core alone.
+    /// REQ-LOOP-030 — in the host: 45 s of NTSC play leave 30 snapshots.
     /// </summary>
     [Trait("Requires", "OriginalAssets")]
     [HostFact] // REQ-LOOP-030
@@ -889,18 +896,18 @@ public sealed class LoopTests
     public void A_rollback_takes_the_second_to_last_snapshot()
     {
         RollbackHistory history = new();
-        history.Capture([0]);
-        history.Capture([60]);
+        history.Capture(Snapshot(0));
+        history.Capture(Snapshot(60));
 
-        byte[]? target = history.TakeRollbackTarget();
+        RollbackSnapshot? target = history.TakeRollbackTarget();
         Assert.NotNull(target);
-        Assert.Equal(0, target[0]);
+        Assert.Equal(0, target.Core[0]);
         Assert.Equal(0, history.Count);
 
         // A single snapshot is restored and removed.
         RollbackHistory single = new();
-        single.Capture([7]);
-        Assert.Equal(7, single.TakeRollbackTarget()![0]);
+        single.Capture(Snapshot(7));
+        Assert.Equal(7, single.TakeRollbackTarget()!.Core[0]);
         Assert.True(single.IsEmpty);
 
         // An empty history restores nothing.
@@ -949,12 +956,12 @@ public sealed class LoopTests
         RollbackHistory history = new();
         for (int index = 0; index < 10; index++)
         {
-            history.Capture([(byte)index]);
+            history.Capture(Snapshot((byte)index));
         }
 
-        byte[]? fourth = history.TakeAt(4);
+        RollbackSnapshot? fourth = history.TakeAt(4);
         Assert.NotNull(fourth);
-        Assert.Equal(4, fourth[0]);
+        Assert.Equal(4, fourth.Core[0]);
         Assert.Equal(4, history.Count);
 
         Assert.Null(history.TakeAt(-1));

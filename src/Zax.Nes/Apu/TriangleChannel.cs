@@ -124,6 +124,13 @@ internal sealed class TriangleChannel
         _linearReload = false;
     }
 
+    /// <summary>
+    /// Puts the sequencer back on its first step, which a RESET press does (nesdev, "CPU power
+    /// up state", <i>after reset</i>: "APU triangle phase is reset to 0", so the channel puts
+    /// out 15 again). AMD-044 REQ-CORE-122.
+    /// </summary>
+    public void ResetPhase() => _sequencePosition = 0;
+
     /// <summary>Appends the channel state to <paramref name="writer"/> (REQ-CORE-090).</summary>
     public void SaveState(StateWriter writer)
     {

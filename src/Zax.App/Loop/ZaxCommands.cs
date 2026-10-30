@@ -88,6 +88,12 @@ public static class ZaxCommands
     /// <summary>Full relaunch of the current game, a cold start (REQ-LOOP-050).</summary>
     public const string Reset = "emulation.reset";
 
+    /// <summary>
+    /// The soft reset of AMD-044 REQ-LOOP-072: the RESET button of the console. The ROM is not
+    /// read again, the profile is not relaunched, and the learned conversion state survives.
+    /// </summary>
+    public const string SoftReset = "emulation.soft_reset";
+
     /// <summary>Stop the current game and go back to Stopped (REQ-LOOP-051).</summary>
     public const string Stop = "emulation.stop";
 

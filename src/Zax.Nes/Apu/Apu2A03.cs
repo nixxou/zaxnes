@@ -272,6 +272,39 @@ public sealed class Apu2A03
     }
 
     /// <summary>
+    /// The documented <i>after reset</i> state of the APU (AMD-044 REQ-CORE-122): the five
+    /// channels are silenced as a <c>$4015 = 0</c> write would, the frame IRQ flag goes away,
+    /// the triangle phase goes back to 0 and the DMC output is ANDed with 1. The <c>$4017</c>
+    /// mode — five-step and IRQ inhibit — is <b>unchanged</b> (nesdev, "CPU power up state").
+    /// </summary>
+    /// <remarks>
+    /// The frame sequencer is put back where <see cref="Reset"/> leaves it, which is the
+    /// 2A03G behaviour and keeps the two resets consistent; the letterless revision leaves it
+    /// running. The choice is recorded in <c>spec/changes/Q-078.md</c>. The pending samples and
+    /// the resampler's history are <b>kept</b>: a RESET press does not interrupt the session,
+    /// the channels simply fall silent (REQ-AUD-012).
+    /// </remarks>
+    // Q-078
+    public void SoftReset()
+    {
+        // $4015 = 0.
+        _pulse1.Length.SetEnabled(false);
+        _pulse2.Length.SetEnabled(false);
+        _triangle.Length.SetEnabled(false);
+        _noise.Length.SetEnabled(false);
+        _dmc.SetEnabled(false);
+
+        _triangle.ResetPhase();
+        _dmc.SoftReset();
+
+        _frameIrqFlag = false;
+        _frameIrqPending = false;
+        _frameCounter = 0;
+        _frameStep = 0;
+        _pendingSequencerReset = 0;
+    }
+
+    /// <summary>
     /// Drops every pending sample and the resampler's history, so that the audio restarts
     /// from silence (REQ-CORE-074). Reset and closing the ROM do this.
     /// </summary>

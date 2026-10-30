@@ -298,6 +298,31 @@ public sealed partial class Ppu2C02
         _dot = 1;
     }
 
+    /// <summary>
+    /// The documented <i>after reset</i> state of the PPU (AMD-044 REQ-CORE-122): PPUCTRL and
+    /// PPUMASK go to 0, the <c>$2005</c>/<c>$2006</c> write latch is cleared, the scroll
+    /// register <c>t</c> and the <c>$2007</c> read buffer go to 0, and the odd-frame flag goes
+    /// back to "even" (nesdev, "PPU power up state").
+    /// </summary>
+    /// <remarks>
+    /// Nothing else moves: PPUSTATUS, OAMADDR, the current address <c>v</c>, the nametable
+    /// RAM, the OAM, the palette RAM and the CHR RAM are all unchanged, and the PPU keeps
+    /// clocking from where it was — a RESET press does not restart the frame. The ~29658-cycle
+    /// window during which the hardware ignores writes to PPUCTRL, PPUMASK, PPUSCROLL and
+    /// PPUADDR is not modelled, no more than it is for the power-on reset (Q-078).
+    /// </remarks>
+    // Q-078
+    public void SoftReset()
+    {
+        _control = 0;
+        _mask = 0;
+        _writeToggle = false;
+        _t = 0;
+        _fineX = 0;
+        _readBuffer = 0;
+        _oddFrame = false;
+    }
+
     /// <summary>Advances the PPU by the dots of one CPU cycle of the current region.</summary>
     public void StepCpuCycle()
     {

@@ -27,6 +27,7 @@ public sealed class CommandModelTests
             ZaxCommands.DeleteSlot, ZaxCommands.DeleteGame, ZaxCommands.CreateGameArt,
             ZaxCommands.ImportCover, ZaxCommands.CancelModal, ZaxCommands.Quit,
             ZaxCommands.PauseResume, ZaxCommands.Pause, ZaxCommands.Resume, ZaxCommands.Reset,
+            ZaxCommands.SoftReset, // AMD-044 REQ-LOOP-072
             ZaxCommands.Stop, ZaxCommands.FastForward, ZaxCommands.Rollback,
             ZaxCommands.SetSpeed, ZaxCommands.SpeedUp, ZaxCommands.SpeedDown,
             ZaxCommands.SetRegion, ZaxCommands.ToggleAutoRegion, ZaxCommands.SetPortType,

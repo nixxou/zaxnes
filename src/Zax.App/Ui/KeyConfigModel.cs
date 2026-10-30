@@ -151,11 +151,14 @@ internal sealed class KeyConfigModel
         InputAction.ZoomIn, InputAction.ZoomOut,
     ];
 
-    /// <summary>The five system hotkeys of §3.11.</summary>
+    /// <summary>
+    /// The system hotkeys of §3.11, plus the soft reset of AMD-044 REQ-INP-125 — which is
+    /// bindable here and has no default binding at all.
+    /// </summary>
     public static IReadOnlyList<InputAction> Hotkeys { get; } =
     [
         InputAction.Menu, InputAction.RollBack, InputAction.FastForward,
-        InputAction.QuickSave, InputAction.QuickLoad,
+        InputAction.QuickSave, InputAction.QuickLoad, InputAction.SoftReset,
     ];
 
     /// <summary>

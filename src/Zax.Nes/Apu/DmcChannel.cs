@@ -211,6 +211,18 @@ internal sealed class DmcChannel
         IrqFlag = false;
     }
 
+    /// <summary>
+    /// The documented <i>after reset</i> state of the DMC (AMD-044 REQ-CORE-122): the output
+    /// level is ANDed with 1 — the upper six bits are cleared — and the IRQ flag goes away.
+    /// The sample address, the length and the rate are kept, as nesdev describes; the
+    /// channel's own "playing" state is stopped by the <c>$4015 = 0</c> the APU applies.
+    /// </summary>
+    public void SoftReset()
+    {
+        Output &= 1;
+        IrqFlag = false;
+    }
+
     /// <summary>Appends the channel state to <paramref name="writer"/> (REQ-CORE-090).</summary>
     public void SaveState(StateWriter writer)
     {

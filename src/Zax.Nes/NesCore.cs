@@ -102,7 +102,10 @@ public sealed class NesCore
     /// <summary>Name of the loaded ROM, empty when none is loaded (REQ-CORE-014).</summary>
     public string RomName => _rom?.Name ?? string.Empty;
 
-    /// <summary>Frame counter; +1 per emulated frame (REQ-CORE-006).</summary>
+    /// <summary>
+    /// Frame counter; +1 per emulated frame, back to 0 when a ROM is loaded, on a hard reset
+    /// and on a soft reset (REQ-CORE-006, amended by AMD-044).
+    /// </summary>
     public long FrameCount { get; set; }
 
     /// <summary>Master CPU cycle count since power-on.</summary>
@@ -212,6 +215,44 @@ public sealed class NesCore
         }
 
         PowerOn();
+    }
+
+    /// <summary>
+    /// The <b>soft</b> reset of AMD-044 REQ-CORE-122, which imitates a press on the console's
+    /// RESET button: the internal RAM, the save RAM and the CHR RAM are <b>kept</b>, the CPU
+    /// keeps A, X, Y and every flag but <c>I</c> while S drops by 3 and PC comes from the reset
+    /// vector, and the PPU, the APU, the mapper and the controller ports go to their documented
+    /// <i>after reset</i> state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    /// </summary>
+    /// <remarks>
+    /// The hard reset of <see cref="Reset"/> is unchanged: it stays a power cycle (DEC-02-Q3),
+    /// which is why <c>cpu_reset/ram_after_reset</c> fails under it on purpose (REQ-CORE-004)
+    /// and passes under this one.
+    /// </remarks>
+    public void SoftReset()
+    {
+        if (_cartridge is null)
+        {
+            return;
+        }
+
+        // The order of PowerOn, minus everything that clears memory: the PPU, the APU and the
+        // mapper are put back first, so that the CPU's own seven reset cycles — real bus
+        // accesses — already run against the after-reset machine.
+        _ppu.SoftReset();
+        _apu.SoftReset();
+
+        // The latch and the shift registers of the ports go to zero. This is a choice of the
+        // reimplementation and has no effect on the buttons the player is holding, which are
+        // read again on the next frame (AMD-044 §2).
+        _input.Reset();
+
+        // The mapper follows its documented after-reset state; the volatile RAM it owns —
+        // PRG-RAM and CHR-RAM — is deliberately not cleared.
+        _cartridge.Reset();
+
+        _cpu.SoftReset();
+        FrameCount = 0;
     }
 
     private void PowerOn()

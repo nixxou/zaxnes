@@ -243,12 +243,21 @@ public sealed class SceneCamera
     /// <b>not</b> snapped: they join the restored setpoints through the smoothing of
     /// REQ-SCN-019.
     /// </summary>
+    /// <remarks>
+    /// This is the single path a savestate load and a rollback snapshot both take
+    /// (AMD-042 REQ-LOOP-070). The remaining transition time is bounded to [0, 3] s, which is
+    /// what REQ-SCN-024 as amended by AMD-042 records: a file written by another build, or one
+    /// predating the amendment, can therefore never leave the window stuck open.
+    /// </remarks>
     public void Restore(in CameraStateData state)
     {
         Apply(CameraMode.Tpv, state.Tpv);
         Apply(CameraMode.Fpv, state.Fpv);
         Mode = state.Mode;
-        TransitionRemaining = MathF.Max(0f, state.TransitionRemaining);
+        TransitionRemaining = Math.Clamp(
+            state.TransitionRemaining,
+            0f,
+            SceneConstants.ModeTransitionSeconds);
     }
 
     /// <summary>Puts the displayed values on the setpoints at once, without smoothing.</summary>
