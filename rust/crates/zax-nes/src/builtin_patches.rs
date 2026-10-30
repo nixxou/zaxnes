@@ -16,7 +16,7 @@
 //! | Mega Man 2 (Europe), Rockman 2 (Japan) | the same | the USA hack's pack built from the European ROM (PAL) and for the Japanese code (`mm2wide`, `tools/build.py --pack`), in the execution zone |
 //! | Super Mario Bros. (World) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
 //! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
-//! | Super Mario Bros. 3 (USA) (Rev 1) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`smb3wide`, `tools/build.py --pack`) |
+//! | Super Mario Bros. 3 (USA) (Rev 1), (Japan), its Rev 1, and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in three groups (the objects' sprites, the enemies in the margins, Mario in the margins), the ROM keeping its size; a pack per build whose code moved, the European one PAL with an NTSC twin; the level select and "Invincible" components of their own, without code (`smb3wide`, `tools/build.py --pack`) |
 //! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's execution zone at `$2000` (`boot_zone`), the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
 //! | Castlevania (Europe) | the same, PAL | the USA hack's pack built for the European code (`cvwide`, `tools/build.py --pack`), in the execution zone |
 //! | Akumajou Dracula (Japan) | the same | the USA hack's pack built for the Japanese code (`cvwide`, `tools/build.py --pack`), in the execution zone |
@@ -121,6 +121,14 @@ pub const SMB1_WORLD: &str = "Super Mario Bros. (World) widescreen";
 pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
 pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
+/// Name of the Super Mario Bros. 3 (Japan) (Rev 1) widescreen patch (advanced mode).
+pub const SMB3_JAPAN_REV1: &str = "Super Mario Bros. 3 (Japan) (Rev 1) widescreen";
+/// Name of the Super Mario Bros. 3 (Japan) widescreen patch (advanced mode).
+pub const SMB3_JAPAN: &str = "Super Mario Bros. 3 (Japan) widescreen";
+/// Name of the Super Mario Bros. 3 (Europe) widescreen patch (advanced mode).
+pub const SMB3_EUROPE: &str = "Super Mario Bros. 3 (Europe) widescreen";
+/// Name of the same patch for an NTSC ROM of the European code (advanced mode).
+pub const SMB3_EUROPE_NTSC: &str = "Super Mario Bros. 3 (Europe) (NTSC) widescreen";
 /// Name of the Castlevania (USA) widescreen patch (advanced mode).
 pub const CASTLEVANIA_USA: &str = "Castlevania (USA) widescreen";
 /// Name of the Castlevania (USA) (Rev 1) widescreen patch (advanced mode).
@@ -179,7 +187,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 39] = [
+pub const PATCHES: [BuiltinPatch; 43] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -462,47 +470,101 @@ pub const PATCHES: [BuiltinPatch; 39] = [
         game: "Super Mario Bros. 3",
         rom_name: "Super Mario Bros. 3 (USA) (Rev 1)",
         source_crc: 0x2E63_01ED,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in three groups (the objects' sprites, the enemies in the
+        // margins, Mario in the margins); the level select and "Invincible" components of their
+        // own, without code (`smb3wide`, `tools/build.py --pack`). The first revision takes it
+        // by its bytes.
         bps: include_bytes!("../patches/smb3-usa-rev1-widescreen.zxpk"),
-        options: &[
-            // Testing aids: B on the 1P/2P menu opens the game's own debug menu (Up/Down: the
-            // world); Mario never hurt (pits still kill).
-            HackOption {
-                key: "level_select",
-                label: "Level select (B on the 1P/2P menu)",
-                label_fr: "Sélecteur de niveau (B sur le menu 1P/2P)",
-                bit: 0,
-                default: false,
-            },
-            HackOption {
-                key: "invincible",
-                label: "Invincible",
-                label_fr: "Invincible",
-                bit: 1,
-                default: false,
-            },
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 2,
-                default: true,
-            },
-        ],
+        options: SMB3_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
-        // did).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
-        zone_data: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // GraphicsBuf_Prep_And_WaitVSync: LDA VBlank_Tick / BPL, until the NMI counts it down.
         idle_loop: Some((0x96FB, 0x96FE)),
+    },
+    BuiltinPatch {
+        name: SMB3_JAPAN_REV1,
+        game: "Super Mario Bros. 3",
+        rom_name: "Super Mario Bros. 3 (Japan) (Rev 1)",
+        source_crc: 0x52E2_B5E0,
+        // The USA hack built for the Japanese code (`smb3wide`, -D JAPAN: the end of the frame's
+        // work 15 bytes earlier, Mario's screen limit 23; the same RAM and level data).
+        bps: include_bytes!("../patches/smb3-japan-rev1-widescreen.zxpk"),
+        options: SMB3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, 15 bytes earlier.
+        idle_loop: Some((0x96EC, 0x96EF)),
+    },
+    BuiltinPatch {
+        name: SMB3_JAPAN,
+        game: "Super Mario Bros. 3",
+        rom_name: "Super Mario Bros. 3 (Japan)",
+        source_crc: 0xE7DD_FEE3,
+        // The Japanese pack with the first revision's title screen (its 1P/2P menu 39 bytes
+        // earlier: the level select's place).
+        bps: include_bytes!("../patches/smb3-japan-widescreen.zxpk"),
+        options: SMB3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, 15 bytes earlier.
+        idle_loop: Some((0x96EC, 0x96EF)),
+    },
+    BuiltinPatch {
+        name: SMB3_EUROPE,
+        game: "Super Mario Bros. 3",
+        rom_name: "Super Mario Bros. 3 (Europe)",
+        source_crc: 0x1ED5_C801,
+        // The USA hack built for the European code (`smb3wide`, -D EUROPE: the end of the frame's
+        // work and Mario's screen limit 7 bytes earlier), PAL.
+        bps: include_bytes!("../patches/smb3-europe-widescreen.zxpk"),
+        options: SMB3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, 7 bytes earlier.
+        idle_loop: Some((0x96F4, 0x96F7)),
+    },
+    BuiltinPatch {
+        name: SMB3_EUROPE_NTSC,
+        game: "Super Mario Bros. 3",
+        rom_name: "Super Mario Bros. 3 (Europe)",
+        source_crc: 0x1ED5_C801,
+        // The European build's CRC, its PAL entry above taking it first: this one is for the
+        // ROMs of the European code whose header says NTSC, taken by their signatures
+        // (`smb3wide`, `tools/build.py --pack <out> --ntsc`).
+        bps: include_bytes!("../patches/smb3-europe-ntsc-widescreen.zxpk"),
+        options: SMB3_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, 7 bytes earlier.
+        idle_loop: Some((0x96F4, 0x96F7)),
     },
     BuiltinPatch {
         name: CASTLEVANIA_USA,
@@ -1276,6 +1338,35 @@ const MEGAMAN2_OPTIONS: &[HackOption] = &[
         default: true,
     },
     // A testing aid: no damage, spikes harmless (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Super Mario Bros. 3 packs: testing aids, off by default (components of
+/// their own, without code), and the overclock.
+const SMB3_OPTIONS: &[HackOption] = &[
+    // Testing aids: B on the 1P/2P menu opens the game's own debug menu (Up/Down: the world);
+    // Mario never hurt (pits still kill).
+    HackOption {
+        key: "level_select",
+        label: "Level select (B on the 1P/2P menu)",
+        label_fr: "Sélecteur de niveau (B sur le menu 1P/2P)",
+        bit: 0,
+        default: false,
+    },
     HackOption {
         key: "invincible",
         label: "Invincible",
