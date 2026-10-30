@@ -107,9 +107,9 @@ pub struct HandheldUi {
     game_options: Option<GameOptionsModel>,
     /// The hacks of one game, while their screen is open.
     hacks: Option<HacksModel>,
-    /// How long A has been held on the widescreen of the in-game menu (owner request: released,
-    /// it turns the widescreen on or off; held, it shows its settings).
-    widescreen_hold: Option<f32>,
+    /// The widescreen button held (owner request: released, it turns the widescreen on with
+    /// everything or off; held, it shows its settings).
+    widescreen_hold: Option<WidescreenHold>,
     /// Where the hacks go back to: the list, the game's options or the in-game menu.
     hacks_return: Screen,
     controls: ControlsState,
@@ -173,8 +173,20 @@ enum HeadOn {
 
 /// How long L2 is held to keep the camera, and Y to see the game in 2D from the front.
 const CAMERA_KEEP_SECONDS: f32 = 0.6;
-/// How long A is held on the widescreen of the in-game menu before its settings open.
+/// How long the widescreen button is held before its settings open.
 const WIDESCREEN_HOLD_SECONDS: f32 = 0.5;
+
+/// The widescreen of a game asked for with a button (A in the in-game menu or on the widescreen
+/// row of its options, L2 on the list), which may be held.
+#[derive(Debug, Clone)]
+struct WidescreenHold {
+    button: PadButton,
+    rom: PathBuf,
+    title: Option<String>,
+    /// The screen its settings go back to.
+    return_to: Screen,
+    held: f32,
+}
 
 impl HandheldUi {
     /// The interface for a display `height` pixels high, listing the ROMs of `roms_directory`.
@@ -433,38 +445,55 @@ impl HandheldUi {
         }
     }
 
-    /// A held on the widescreen of the in-game menu: past [`WIDESCREEN_HOLD_SECONDS`] its
-    /// settings open; let go before, it is turned on with everything or off.
+    /// The widescreen button held: past [`WIDESCREEN_HOLD_SECONDS`] its settings open; let go
+    /// before, the widescreen is turned on with everything or off.
     fn update_widescreen_hold(&mut self, pad: &PadState, seconds: f32, host: &mut AppHost) {
-        let Some(held) = self.widescreen_hold else {
+        let Some(mut hold) = self.widescreen_hold.take() else {
             return;
         };
-        let Some(rom) = host.current_rom_path().map(PathBuf::from) else {
-            self.widescreen_hold = None;
-            return;
-        };
-        let title = host.current_game_title().map(str::to_owned);
-        if pad.is_held(PadButton::A) {
-            let held = held + seconds;
-            if held >= WIDESCREEN_HOLD_SECONDS {
-                self.widescreen_hold = None;
+        if pad.is_held(hold.button) {
+            hold.held += seconds;
+            if hold.held >= WIDESCREEN_HOLD_SECONDS {
                 self.open_hacks(
-                    &rom,
-                    title.as_deref(),
-                    Screen::Overlay,
+                    &hold.rom,
+                    hold.title.as_deref(),
+                    hold.return_to,
                     host,
                     HacksView::Widescreen,
                 );
             } else {
-                self.widescreen_hold = Some(held);
+                self.widescreen_hold = Some(hold);
             }
             return;
         }
-        self.widescreen_hold = None;
-        let mut hacks = HacksModel::for_rom(host, &rom, title.as_deref());
+        let mut hacks = HacksModel::for_rom(host, &hold.rom, hold.title.as_deref());
         hacks.toggle_widescreen_all();
         hacks.apply(host);
-        self.note_widescreen(&rom, hacks.widescreen_on());
+        self.note_widescreen(&hold.rom, hacks.widescreen_on());
+        // The options of the game are read again, with the widescreen as it is now.
+        if hold.return_to == Screen::GameOptions && self.screen == Screen::GameOptions {
+            self.open_game_options(&hold.rom, host);
+            if let Some(options) = &mut self.game_options {
+                options.select(GameOptionsModel::WIDESCREEN_ROW);
+            }
+        }
+    }
+
+    /// Starts a press of the widescreen button `button` for the game in `rom`.
+    fn hold_widescreen(
+        &mut self,
+        button: PadButton,
+        rom: PathBuf,
+        title: Option<String>,
+        return_to: Screen,
+    ) {
+        self.widescreen_hold = Some(WidescreenHold {
+            button,
+            rom,
+            title,
+            return_to,
+            held: 0.0,
+        });
     }
 
     /// The mouse of the desktop's console mode (owner request): what it did over the screen
@@ -792,9 +821,13 @@ impl HandheldUi {
             }
             RomListCommand::GameOptions(path) => self.open_game_options(&path, host),
             RomListCommand::Options => self.open_options(host),
+            RomListCommand::Widescreen(path) => {
+                let title = self.profile_title_of(&path);
+                self.hold_widescreen(PadButton::L1, path, title, Screen::Home);
+            }
             RomListCommand::Hacks(path) => {
                 let title = self.profile_title_of(&path);
-                self.open_hacks(&path, title.as_deref(), Screen::Home, host, HacksView::All);
+                self.open_hacks(&path, title.as_deref(), Screen::Home, host, HacksView::Aids);
             }
         }
     }
@@ -895,6 +928,26 @@ impl HandheldUi {
                 self.overscan = OverscanModel::new(true);
                 self.screen = Screen::Overscan;
             }
+            GameOptionsCommand::Widescreen | GameOptionsCommand::OpenWidescreen => {
+                if let Some(rom) = self
+                    .game_options
+                    .as_ref()
+                    .map(|options| options.rom().clone())
+                {
+                    let title = self.profile_title_of(&rom);
+                    if command == GameOptionsCommand::Widescreen {
+                        self.hold_widescreen(PadButton::A, rom, title, Screen::GameOptions);
+                    } else {
+                        self.open_hacks(
+                            &rom,
+                            title.as_deref(),
+                            Screen::GameOptions,
+                            host,
+                            HacksView::Widescreen,
+                        );
+                    }
+                }
+            }
             GameOptionsCommand::OpenHacks => {
                 if let Some(rom) = self
                     .game_options
@@ -907,7 +960,7 @@ impl HandheldUi {
                         title.as_deref(),
                         Screen::GameOptions,
                         host,
-                        HacksView::All,
+                        HacksView::Aids,
                     );
                 }
             }
@@ -1017,7 +1070,12 @@ impl HandheldUi {
             }
             OverlayCommand::SetCamera(preset) => apply_camera(preset, host),
             OverlayCommand::Options => self.open_options(host),
-            OverlayCommand::Widescreen => self.widescreen_hold = Some(0.0),
+            OverlayCommand::Widescreen => {
+                if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
+                    let title = host.current_game_title().map(str::to_owned);
+                    self.hold_widescreen(PadButton::A, rom, title, Screen::Overlay);
+                }
+            }
             OverlayCommand::Hacks => {
                 if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
                     let title = host.current_game_title().map(str::to_owned);

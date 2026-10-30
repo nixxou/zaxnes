@@ -91,7 +91,6 @@ const HOME_HINTS: &[Hint] = &[
     hint("A", keys::HANDHELD_HINT_PLAY),
     hint("X", keys::HANDHELD_HINT_PROFILE),
     hint("Y", keys::HANDHELD_HINT_OPTIONS),
-    hint("L/R", keys::HANDHELD_HINT_JUMP),
     hint("Select", keys::HANDHELD_HINT_GAME_OPTIONS),
 ];
 const HACKS_HINTS: &[Hint] = &[

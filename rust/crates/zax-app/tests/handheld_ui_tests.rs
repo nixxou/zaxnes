@@ -496,7 +496,7 @@ fn the_hacks_open_from_the_list_the_game_options_and_the_menu() {
     // The list reads no file: the ROM is studied when its hacks open.
     assert!(handheld.roms().entries()[0].crc.is_none());
 
-    tap(&mut harness, &mut handheld, PadButton::L2);
+    tap(&mut harness, &mut handheld, PadButton::R1);
     assert_eq!(Screen::Hacks, handheld.screen());
     assert_eq!(0, handheld.hacks().unwrap().rows().len());
     assert!(handheld.roms().entries()[0].crc.is_some());
@@ -592,7 +592,7 @@ fn another_version_of_a_widened_game_is_studied_when_its_hacks_open() {
         Some(zax_nes::builtin_patches::ZELDA2_USA),
         entry.widescreen_other
     );
-    tap(&mut harness, &mut handheld, PadButton::L2);
+    tap(&mut harness, &mut handheld, PadButton::R1);
     assert_eq!(Screen::Hacks, handheld.screen());
     assert_eq!(
         Some(zax_nes::builtin_patches::ZELDA2_USA),

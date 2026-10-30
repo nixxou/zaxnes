@@ -56,6 +56,8 @@ pub fn hint_action(button: &str) -> Option<ZoneAction> {
         "B" => ZoneAction::Button(PadButton::B),
         "X" => ZoneAction::Button(PadButton::X),
         "Y" => ZoneAction::Button(PadButton::Y),
+        "L1" => ZoneAction::Button(PadButton::L1),
+        "R1" => ZoneAction::Button(PadButton::R1),
         "L2" => ZoneAction::Button(PadButton::L2),
         "Select" => ZoneAction::Button(PadButton::Select),
         "Start" => ZoneAction::Button(PadButton::Start),

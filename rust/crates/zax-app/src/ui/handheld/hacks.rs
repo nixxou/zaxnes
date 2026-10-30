@@ -388,7 +388,11 @@ impl HacksModel {
         match self.view {
             HacksView::All => rows,
             HacksView::Widescreen => rows.into_iter().filter(|row| !aid(row)).collect(),
-            HacksView::Aids => rows.into_iter().filter(aid).collect(),
+            // The compatibility in both (owner request), though it tells of every part.
+            HacksView::Aids => rows
+                .into_iter()
+                .filter(|row| aid(row) || *row == HackRow::Compatibility)
+                .collect(),
         }
     }
 

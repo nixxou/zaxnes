@@ -73,6 +73,11 @@ pub enum GameOptionsCommand {
     Close,
     /// Open the hacks of the game (its last row, Rust-only).
     OpenHacks,
+    /// Open the settings of the widescreen of the game.
+    OpenWidescreen,
+    /// A went down on the widescreen row: released, it turns it on with everything or off;
+    /// held, its settings show.
+    Widescreen,
     /// Open the game's overscan (Rust-only).
     OpenOverscan,
 }
@@ -127,11 +132,15 @@ impl GameOptionsModel {
         &self.name
     }
 
-    /// The rows of the screen: "reset everything", the rows of [`GAME_ROWS`], then "Hacks".
-    pub const ROW_COUNT: usize = GAME_ROWS.len() + 2;
+    /// The rows of the screen: "reset everything", the rows of [`GAME_ROWS`], then the
+    /// widescreen and the hacks (owner request: apart).
+    pub const ROW_COUNT: usize = GAME_ROWS.len() + 3;
+
+    /// The row of the widescreen of the game.
+    pub const WIDESCREEN_ROW: usize = GAME_ROWS.len() + 1;
 
     /// The row that opens the hacks of the game, the last one.
-    pub const HACKS_ROW: usize = GAME_ROWS.len() + 1;
+    pub const HACKS_ROW: usize = GAME_ROWS.len() + 2;
 
     /// The index of the selected row, 0 being "reset everything".
     #[must_use]
@@ -252,6 +261,12 @@ impl GameOptionsModel {
             PadButton::Down => self.selected = (self.selected + 1) % count,
             PadButton::A | PadButton::Right if self.selected == Self::HACKS_ROW => {
                 return Some(GameOptionsCommand::OpenHacks);
+            }
+            PadButton::A if self.selected == Self::WIDESCREEN_ROW => {
+                return Some(GameOptionsCommand::Widescreen);
+            }
+            PadButton::Right if self.selected == Self::WIDESCREEN_ROW => {
+                return Some(GameOptionsCommand::OpenWidescreen);
             }
             PadButton::A | PadButton::Left | PadButton::Right
                 if self.selected_row() == Some(OptionRow::Overscan) =>
