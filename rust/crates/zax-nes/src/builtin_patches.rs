@@ -26,7 +26,7 @@
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
 //! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`metroidwide`, `tools/build.py --pack`) |
-//! | Mega Man 4 (USA), and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one pack for both builds (`mm4wide`, `tools/build.py --pack`) |
+//! | Mega Man 4 (USA), its Rev 1, and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; one pack for both USA builds and Rockman 4 (Japan), the same built from the European ROM, PAL; "Invincible" a component of its own, with or without the advanced mode (`mm4wide`, `tools/build.py --pack`) |
 //! | Mega Man 5 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm5wide`, `tools/build.py --pack`) |
 //! | Mega Man 6 (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): hooks checked and applied by the core, the code in the extension's memory, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`mm6wide`, `tools/build.py --pack`) |
 //! | Mega Man 3 (USA), Rockman 3 (Japan), (Europe) and its Rev 1 | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; a pack per build, the European ones PAL with NTSC twins; "Invincible" a component of its own, with or without the advanced mode (`mm3wide`, `tools/build.py --pack`) |
@@ -167,13 +167,15 @@ pub const MEGAMAN3_EUROPE_REV1_NTSC: &str = "Mega Man 3 (Europe) (Rev 1) (NTSC) 
 pub const MEGAMAN4_USA: &str = "Mega Man 4 (USA) widescreen";
 /// Name of the Mega Man 4 (USA) (Rev 1) widescreen patch (advanced mode).
 pub const MEGAMAN4_USA_REV1: &str = "Mega Man 4 (USA) (Rev 1) widescreen";
+/// Name of the Mega Man 4 (Europe) widescreen patch (advanced mode).
+pub const MEGAMAN4_EUROPE: &str = "Mega Man 4 (Europe) widescreen";
 /// Name of the Mega Man 5 (USA) widescreen patch (advanced mode).
 pub const MEGAMAN5_USA: &str = "Mega Man 5 (USA) widescreen";
 /// Name of the Mega Man 6 (USA) widescreen patch (advanced mode).
 pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 36] = [
+pub const PATCHES: [BuiltinPatch; 37] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1071,19 +1073,22 @@ pub const PATCHES: [BuiltinPatch; 36] = [
         game: "Mega Man 4",
         rom_name: "Mega Man 4 (USA)",
         source_crc: 0x2BC6_7AA8,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core; "Invincible" a component of its own.
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in two groups (the sprites, the enemies in the margins);
+        // "Invincible" a component of its own (`mm4wide`, `tools/build.py --pack`). Rockman 4
+        // (Japan), whose code is the USA's where the hack hooks and calls, takes it by its
+        // signatures.
         bps: include_bytes!("../patches/megaman4-usa-widescreen.zxpk"),
         options: MEGAMAN4_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on.
-        boot_window: Some((0x80, 0x00)),
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
         boot_window_keeps_prg_ram: false,
-        boot_zone: false,
-        zone_data: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
         idle_loop: Some((0xFEA8, 0xFEBC)),
     },
@@ -1100,13 +1105,33 @@ pub const PATCHES: [BuiltinPatch; 36] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on.
-        boot_window: Some((0x80, 0x00)),
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
         boot_window_keeps_prg_ram: false,
-        boot_zone: false,
-        zone_data: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The task scheduler's wait for a task to wake (the NMI wakes them).
+        idle_loop: Some((0xFEA8, 0xFEBC)),
+    },
+    BuiltinPatch {
+        name: MEGAMAN4_EUROPE,
+        game: "Mega Man 4",
+        rom_name: "Mega Man 4 (Europe)",
+        source_crc: 0x1B93_2BEA,
+        // The USA pack built from the European ROM, PAL (`mm4wide`, `tools/build.py --pack`): its
+        // code is the same where the hack hooks and calls.
+        bps: include_bytes!("../patches/megaman4-europe-widescreen.zxpk"),
+        options: MEGAMAN4_OPTIONS,
+        after_other_way_state: None,
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The same wait, at the same place.
         idle_loop: Some((0xFEA8, 0xFEBC)),
     },
     BuiltinPatch {
