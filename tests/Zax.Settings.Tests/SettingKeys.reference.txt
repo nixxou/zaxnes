@@ -110,4 +110,5 @@ scene.bend_lr
 scene.bend_tb
 scene.arc_h
 scene.arc_center
+scene.bend_2d_mode
 render.visual_style

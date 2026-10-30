@@ -268,6 +268,12 @@ internal static partial class UiStrings
             "Pose le niveau sur un arc, comme sur une toute petite planète. Idéal pour les jeux "
             + "à défilement horizontal.",
 
+        // AMD-046 §3, mot pour mot.
+        ["setting." + SettingKeys.SceneBend2dMode] = "Courber le mode 2D",
+        ["help." + SettingKeys.SceneBend2dMode] =
+            "Applique aussi la courbure à l'image plate du mode 2D. Désactivez-le pour garder "
+            + "l'image plate.",
+
         ["setting." + SettingKeys.EmuGameSpeed] = "Vitesse de jeu",
         ["setting." + SettingKeys.EmuAutoTvMode] = "Région détectée automatiquement",
         ["setting." + SettingKeys.EmuTvMode] = "Région vidéo",

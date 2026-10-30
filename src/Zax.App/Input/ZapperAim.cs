@@ -29,6 +29,18 @@ public static class ZapperAim
     public const float SceneHeight = 248f;
 
     /// <summary>
+    /// The curvature the aim is to be computed with, as AMD-046 REQ-SCN-074 amends REQ-INP-124:
+    /// in 2D mode with « Bend 2D Mode » off, the rectangle the pointer designates is at its flat
+    /// position, so REQ-INP-124 does not apply and the aim is the one of REQ-INP-063 — the
+    /// identity. Everywhere else, <paramref name="bend"/> is handed back unchanged.
+    /// </summary>
+    /// <param name="twoDimensionalMode">Whether the view shows the 2D-mode rectangle.</param>
+    /// <param name="bend2dMode">The setting <c>scene.bend_2d_mode</c>.</param>
+    /// <param name="bend">The curvature of the frame (REQ-SCN-067).</param>
+    public static SpaceBend AimBend(bool twoDimensionalMode, bool bend2dMode, SpaceBend bend)
+        => twoDimensionalMode && !bend2dMode ? SpaceBend.None : bend;
+
+    /// <summary>
     /// The ray the pointer casts through the camera, in scene coordinates.
     /// </summary>
     /// <param name="view">The camera view of the frame.</param>

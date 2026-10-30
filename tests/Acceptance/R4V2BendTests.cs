@@ -669,12 +669,12 @@ public sealed class R4V2BendTests
     }
 
     /// <summary>
-    /// Q-079, provisional choice (reading 1): in 2D mode the single 256 × 240 quad is the game
-    /// scene, so it bends like the tiles it stands in for, and it is subdivided into 32 × 32
-    /// cells — 2 048 triangles instead of 2.
+    /// Q-079, closed by AMD-046 as reading 1 (REQ-SCN-074): in 2D mode the 256 × 240 rectangle
+    /// is the game scene, so it bends like the tiles it stands in for, and it is subdivided into
+    /// 32 × 32 cells — 2 048 triangles instead of 2.
     /// </summary>
-    [Fact] // REQ-SCN-068, Q-079
-    public void REQ_SCN_068_the_two_dimensional_quad_follows_the_provisional_choice_of_Q079()
+    [Fact] // REQ-SCN-068, REQ-SCN-074
+    public void REQ_SCN_068_the_two_dimensional_quad_bends_as_REQ_SCN_074_settles_Q079()
     {
         SceneFixture fixture = new() { TwoDimensionalMode = true };
         SceneState scene = fixture.Build();

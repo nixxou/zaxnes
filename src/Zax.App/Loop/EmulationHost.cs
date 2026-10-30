@@ -543,6 +543,9 @@ internal sealed partial class EmulationHost : IDisposable
             case Zax.Settings.SettingKeys.SceneBendTopBottom:
             case Zax.Settings.SettingKeys.SceneArcHorizontal:
             case Zax.Settings.SettingKeys.SceneArcCenter:
+
+            // AMD-046 REQ-SCN-074: « Bend 2D Mode » applies hot too, at the next rendered frame.
+            case Zax.Settings.SettingKeys.SceneBend2dMode:
                 PublishBending();
                 break;
 
@@ -568,8 +571,9 @@ internal sealed partial class EmulationHost : IDisposable
     }
 
     /// <summary>
-    /// Pushes the four curvature settings of AMD-043 REQ-SCN-066 onto the scene. The renderer
-    /// rebuilds <c>B</c> from them, so a change is in force at the next rendered frame.
+    /// Pushes the four curvature settings of AMD-043 REQ-SCN-066, and the 2D-mode switch of
+    /// AMD-046 REQ-SCN-074, onto the scene. The renderer rebuilds <c>B</c> from them, so a
+    /// change is in force at the next rendered frame.
     /// </summary>
     internal void PublishBending()
     {
@@ -578,6 +582,7 @@ internal sealed partial class EmulationHost : IDisposable
         _scene.Settings.BendTopBottom = Settings.BendTopBottom;
         _scene.Settings.ArcHorizontal = Settings.ArcHorizontal;
         _scene.Settings.ArcAtEdge = Settings.ArcCenter != 0;
+        _scene.Settings.Bend2dMode = Settings.Bend2dMode;
     }
 
     // ---------------------------------------------------------------- Zapper
@@ -624,8 +629,9 @@ internal sealed partial class EmulationHost : IDisposable
             _session?.ZapperOffset ?? System.Numerics.Vector3.Zero,
             SceneScale,
 
-            // REQ-INP-124: aiming on the bent scene, with the curvature of the frame.
-            _scene.Settings.Bend);
+            // REQ-INP-124: aiming on the bent scene, with the curvature of the frame — except
+            // on a 2D mode kept flat, where REQ-SCN-074 sends the aim back to REQ-INP-063.
+            ZapperAim.AimBend(ShowingTwoDimensional, Settings.Bend2dMode, _scene.Settings.Bend));
     }
 
     /// <summary>

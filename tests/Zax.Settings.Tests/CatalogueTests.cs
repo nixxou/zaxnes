@@ -47,11 +47,12 @@ public sealed class CatalogueTests
                 // recorded here.
                 SettingKeys.EmuRunAhead,
 
-                // AMD-043 §6 and AMD-040 §3 add their own SPEC-09 lines.
+                // AMD-043 §6, AMD-046 §3 and AMD-040 §3 add their own SPEC-09 lines.
                 SettingKeys.SceneBendLeftRight,
                 SettingKeys.SceneBendTopBottom,
                 SettingKeys.SceneArcHorizontal,
                 SettingKeys.SceneArcCenter,
+                SettingKeys.SceneBend2dMode,
                 SettingKeys.RenderVisualStyle,
             }.Order(),
             model.Except(specified).Order());

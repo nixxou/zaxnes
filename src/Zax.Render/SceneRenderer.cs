@@ -214,8 +214,8 @@ public sealed class SceneRenderer : ISceneRenderer
     }
 
     /// <summary>
-    /// The textured quad of the 2D mode (AMD-009): the core's 256 × 240 picture mapped on the
-    /// NES plane of REQ-E3D-410, shaded like any other front-facing tile.
+    /// The 2D-mode rectangle of AMD-046 REQ-SCN-074 (AMD-009 Q-022): the core's 256 × 240
+    /// picture mapped on the NES plane of REQ-E3D-410, shaded like any other front-facing tile.
     /// </summary>
     private bool CollectPictureQuad(SceneState scene, in CameraView view)
     {
@@ -235,12 +235,14 @@ public sealed class SceneRenderer : ISceneRenderer
             TextureSize = new Vector2(NesPictureTexture.Width, NesPictureTexture.Height),
             TexTilting = Vector2.One,
             Alpha = 1f,
-            // Nothing else is in the scene in 2D mode, so the quad neither casts nor receives.
+            // REQ-SCN-074: the 2D-mode rectangle casts no shadow and receives none, whatever
+            // the setting says. It is never added to the casters either.
             ReceiveShadow = false,
             Clip = true,
-            // REQ-SCN-068: the quad is the game scene in 2D mode, so the curvature reaches it
-            // like the tiles it stands in for (Q-079).
-            Bend = true,
+            // REQ-SCN-074: the rectangle is the game scene in 2D mode, so the curvature of
+            // REQ-SCN-067 reaches it like the tiles it stands in for — unless « Bend 2D Mode »
+            // is off, which puts every one of its vertices back at its flat position.
+            Bend = scene.Settings.Bend2dMode,
             BoundsMin = NesPictureTexture.Quad.BoundsMin,
             BoundsMax = NesPictureTexture.Quad.BoundsMax,
         });

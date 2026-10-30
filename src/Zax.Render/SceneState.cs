@@ -171,6 +171,13 @@ public sealed class RenderSettings
         }
     }
 
+    /// <summary>
+    /// <c>scene.bend_2d_mode</c>: whether the curvature reaches the 2D-mode rectangle, true by
+    /// default (AMD-046 REQ-SCN-074). It is read at every frame, so a change is in force at the
+    /// next rendered one; in 3D mode nothing reads it.
+    /// </summary>
+    public bool Bend2dMode { get; set; } = true;
+
     /// <summary>The scene scale <c>s</c> of REQ-SCN-002; 1 on desktop.</summary>
     public float SceneScale
     {

@@ -110,11 +110,12 @@ internal sealed class NesPictureTexture : IDisposable
     }
 
     /// <summary>
-    /// Cells per side of <see cref="Quad"/>. The quad spans the whole 256 × 240 reference
-    /// frame, so AMD-043 REQ-SCN-068 — large flat surfaces should be subdivided — applies to it
-    /// as it does to the backdrop, and for the same reason (Q-079).
+    /// Cells per side of <see cref="Quad"/>. AMD-046 REQ-SCN-074 asks for at least 32 × 32
+    /// cells, unconditionally — the same figure REQ-SCN-068 gives the backdrop, and for the same
+    /// reason: a surface that spans the whole frame has to be subdivided for the curvature to
+    /// show inside it. 32 × 32 cells make a grid of 33 × 33 = 1 089 distinct vertices.
     /// </summary>
-    // Q-079
+    // REQ-SCN-074
     private const int Cells = 32;
 
     private static TileMesh BuildQuad()

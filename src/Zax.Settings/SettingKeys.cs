@@ -103,6 +103,12 @@ public static class SettingKeys
     public const string SceneArcCenter = "scene.arc_center";
 
     /// <summary>
+    /// Whether the curvature reaches the 2D-mode rectangle (AMD-046 REQ-SCN-074). A setting of
+    /// Zaxnes alone, with no Lua path: the original program has none <b>(D)</b>.
+    /// </summary>
+    public const string SceneBend2dMode = "scene.bend_2d_mode";
+
+    /// <summary>
     /// The visual style of AMD-040 §3: 0 Classic, 1 Enhanced. Stored and handed back; Zaxnes
     /// has a single renderer, so it changes nothing of what is drawn (REQ-LUA-114).
     /// </summary>

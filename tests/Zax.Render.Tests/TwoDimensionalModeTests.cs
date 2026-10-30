@@ -37,8 +37,8 @@ public sealed class TwoDimensionalModeTests
         Assert.Equal(1, renderer.Statistics.OpaqueTiles);
         Assert.Equal(0, renderer.Statistics.TransparentTiles);
 
-        // One object, cut into 32 × 32 cells since AMD-043 REQ-SCN-068: a surface that spans
-        // the whole frame has to be subdivided for the curvature to show inside it (Q-079).
+        // One object, cut into 32 × 32 cells by AMD-046 REQ-SCN-074: a surface that spans the
+        // whole frame has to be subdivided for the curvature to show inside it.
         Assert.Equal(2 * 32 * 32, renderer.Statistics.Triangles);
         Assert.False(renderer.Statistics.ShadowPass);
     }
@@ -137,6 +137,32 @@ public sealed class TwoDimensionalModeTests
         gl.Render(renderer, scene);
 
         Assert.True(renderer.Statistics.OpaqueTiles > 1);
+    }
+
+    /// <summary>
+    /// AMD-046 REQ-SCN-074: the rectangle is subdivided into at least 32 × 32 cells whatever the
+    /// setting says, and it neither casts nor receives a shadow — so a 2D-mode frame runs no
+    /// shadow pass even with the shadows switched on.
+    /// </summary>
+    [GlTheory] // REQ-SCN-074, REQ-SCN-030
+    [InlineData(true)]
+    [InlineData(false)]
+    public void REQ_SCN_074_the_rectangle_is_subdivided_and_takes_no_part_in_the_shadow_pass(
+        bool bend2dMode)
+    {
+        using GlFixture gl = GlFixture.Create(320, 300);
+        using SceneRenderer renderer = new(gl.Gl);
+
+        SceneState scene = Scene(Picture(0x30));
+        scene.Settings.Shadows = true;
+        scene.Settings.BendLeftRight = 90;
+        scene.Settings.Bend2dMode = bend2dMode;
+
+        gl.Render(renderer, scene);
+
+        Assert.Equal(1, renderer.Statistics.OpaqueTiles);
+        Assert.Equal(2 * 32 * 32, renderer.Statistics.Triangles);
+        Assert.False(renderer.Statistics.ShadowPass);
     }
 
     private static SceneState Scene(byte[] picture)

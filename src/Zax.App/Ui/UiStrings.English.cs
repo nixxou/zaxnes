@@ -264,6 +264,12 @@ internal static partial class UiStrings
             "Rolls the level onto an arc, as if it stood on a tiny planet. Works best with "
             + "side-scrollers.",
 
+        // AMD-046 §3, word for word.
+        ["setting." + SettingKeys.SceneBend2dMode] = "Bend 2D Mode",
+        ["help." + SettingKeys.SceneBend2dMode] =
+            "Also applies the bend settings to the flat picture of 2D mode. Turn it off to keep "
+            + "the picture flat.",
+
         ["setting." + SettingKeys.EmuGameSpeed] = "Game speed",
         ["setting." + SettingKeys.EmuAutoTvMode] = "Region detected automatically",
         ["setting." + SettingKeys.EmuTvMode] = "Video region",

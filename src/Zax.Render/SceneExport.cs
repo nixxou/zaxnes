@@ -59,6 +59,10 @@ public static class SceneExport
 
         if (scene.TwoDimensionalMode)
         {
+            // AMD-046 REQ-SCN-074: the 2D-mode rectangle bends when « Bend 2D Mode » is on and
+            // sits at its flat position when it is off, whatever the angles of REQ-SCN-066 say.
+            // Its subdivision does not depend on the setting, and neither does the cut by the
+            // visible rectangle, which is judged on the unbent positions.
             objects.Add(Export(
                 NesPictureTexture.Quad,
                 Mat4.Identity,
@@ -66,7 +70,7 @@ public static class SceneExport
                 time,
                 bend,
                 hud: false,
-                bent: true,
+                bent: scene.Settings.Bend2dMode,
                 clipped: true));
             return objects;
         }

@@ -259,6 +259,9 @@ internal sealed class ZaxApplication : IDisposable
         _scene.Settings.BendTopBottom = _settings.BendTopBottom;
         _scene.Settings.ArcHorizontal = _settings.ArcHorizontal;
         _scene.Settings.ArcAtEdge = _settings.ArcCenter != 0;
+
+        // AMD-046 REQ-SCN-074: and so is « Bend 2D Mode ».
+        _scene.Settings.Bend2dMode = _settings.Bend2dMode;
         _scene.Camera.SnapToSetpoints();
     }
 

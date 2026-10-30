@@ -106,7 +106,8 @@ internal sealed class OptionsModel
 
     /// <summary>
     /// The settings of the advanced « Geometry » group of AMD-043 §6, in the order the
-    /// amendment lists them.
+    /// amendment lists them, followed by the 2D-mode switch AMD-046 §3 puts right after
+    /// « Arc Center ».
     /// </summary>
     public static IReadOnlyList<string> GeometryKeys { get; } =
     [
@@ -114,6 +115,7 @@ internal sealed class OptionsModel
         SettingKeys.SceneBendTopBottom,
         SettingKeys.SceneArcHorizontal,
         SettingKeys.SceneArcCenter,
+        SettingKeys.SceneBend2dMode,
     ];
 
     /// <summary>

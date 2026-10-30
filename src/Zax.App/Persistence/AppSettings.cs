@@ -193,6 +193,16 @@ public sealed class AppSettings
     }
 
     /// <summary>
+    /// <c>scene.bend_2d_mode</c>: whether the curvature reaches the 2D-mode rectangle, on by
+    /// default (AMD-046 REQ-SCN-074).
+    /// </summary>
+    public bool Bend2dMode
+    {
+        get => Model.GetBool(SettingKeys.SceneBend2dMode);
+        set => Model.SetBool(SettingKeys.SceneBend2dMode, value);
+    }
+
+    /// <summary>
     /// <c>render.visual_style</c>: 0 Classic, 1 Enhanced (AMD-040 §3). Stored and handed back;
     /// Zaxnes has one renderer, so it changes nothing of what is drawn.
     /// </summary>

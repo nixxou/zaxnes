@@ -561,10 +561,12 @@ public static class SettingsCatalogue
     }
 
     /// <summary>
-    /// The four curvature settings of AMD-043 §6 and the visual style of AMD-040 §3. The
-    /// curvature ones have no Lua path: their SPEC-09 line names the style-parameter methods of
-    /// REQ-LUA-114, which <see cref="VisualStyleParameters"/> maps onto these very keys, so a
-    /// script and the options window write the same value.
+    /// The four curvature settings of AMD-043 §6, the 2D-mode switch of AMD-046 §3 and the
+    /// visual style of AMD-040 §3. The four curvature ones have no Lua path: their SPEC-09 line
+    /// names the style-parameter methods of REQ-LUA-114, which
+    /// <see cref="VisualStyleParameters"/> maps onto these very keys, so a script and the
+    /// options window write the same value. <c>scene.bend_2d_mode</c> has none either, and for
+    /// another reason: it is a setting of Zaxnes alone (AMD-046 §2, notes).
     /// </summary>
     private static void AddBending(List<SettingDescriptor> list)
     {
@@ -600,6 +602,22 @@ public static class SettingsCatalogue
             Domain = ArcCenterDomain,
             UiLabel = "Arc Center",
             LibretroValues = ArcCenterDomain.Options,
+        });
+
+        // AMD-046 §3 (REQ-SCN-074): the only curvature line of Zaxnes' own making, right after
+        // « Arc Center » in the « Geometry » group. It has no Lua path at all — the original
+        // program exposes no such setting to the scripts.
+        list.Add(new SettingDescriptor(
+            SettingKeys.SceneBend2dMode,
+            SettingKind.Bool,
+            SettingValue.OfBool(true),
+            SettingScope.User,
+            SettingEffect.Immediate,
+            SettingTheme.Scene)
+        {
+            Domain = SettingDomain.Switch,
+            UiLabel = "Bend 2D Mode",
+            LibretroValues = [new SettingOption(1d, "enabled"), new SettingOption(0d, "disabled")],
         });
 
         // AMD-040 §3: stored, immediately, with no rendering effect and no interface of its

@@ -305,6 +305,21 @@ public sealed class GlFactAttribute : FactAttribute
     }
 }
 
+/// <summary>The theory counterpart of <see cref="GlFactAttribute"/>.</summary>
+[XunitTestCaseDiscoverer("Xunit.Sdk.TheoryDiscoverer", "xunit.execution.dotnet")]
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
+public sealed class GlTheoryAttribute : TheoryAttribute
+{
+    /// <summary>Creates the attribute.</summary>
+    public GlTheoryAttribute()
+    {
+        if (GlAvailability.Reason is { } reason)
+        {
+            Skip = reason;
+        }
+    }
+}
+
 /// <summary>Probes once whether a GL 3.3 core context can be created in this process.</summary>
 internal static class GlAvailability
 {

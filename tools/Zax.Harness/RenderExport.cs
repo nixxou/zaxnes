@@ -66,6 +66,8 @@ internal static class RenderExport
           --bend <lr,tb,arc[,c]>   Space bending in degrees, −180 to 180 by steps of 30, and
                                    the arc centre 0 (screen) or 1 (bottom edge) (AMD-043
                                    REQ-SCN-066).
+          --flat-2d                scene.bend_2d_mode off: the 2D-mode rectangle stays at its
+                                   flat position under the bending (AMD-046 REQ-SCN-074).
           --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049).
           --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046).
           --real-time <seconds>    Real time the star twinkle uses (REQ-SCN-050).
@@ -107,6 +109,7 @@ internal static class RenderExport
         int bench = 0;
         SkyboxKind skybox = SkyboxKind.Default;
         (int Lr, int Tb, int Arc, int Centre) bend = default;
+        bool bend2dMode = true;
         Rgb24 customBackground = default;
         float realTime = 0f;
         bool skyBodies = false;
@@ -214,6 +217,12 @@ internal static class RenderExport
                     bend = ParseBend(Next(args, ref i));
                     break;
 
+                // AMD-046 REQ-SCN-074: « Bend 2D Mode » off, which keeps the 2D-mode rectangle
+                // at its flat position.
+                case "--flat-2d":
+                    bend2dMode = false;
+                    break;
+
                 case "--skybox":
                     skybox = Next(args, ref i).ToLowerInvariant() switch
                     {
@@ -317,6 +326,7 @@ internal static class RenderExport
             scene.Scene.Settings.BendTopBottom = bend.Tb;
             scene.Scene.Settings.ArcHorizontal = bend.Arc;
             scene.Scene.Settings.ArcAtEdge = bend.Centre != 0;
+            scene.Scene.Settings.Bend2dMode = bend2dMode;
             scene.Scene.Settings.CustomBackgroundColor = customBackground;
             scene.Scene.RealTime = realTime;
 

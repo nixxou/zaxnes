@@ -273,9 +273,10 @@ public sealed class OptionsWindowTests
     /// <summary>
     /// AMD-043 §6: the four curvature settings are in the Video tab, in an advanced
     /// « Geometry » group, with the labels and the help texts of the amendment in both
-    /// languages. <c>render.visual_style</c> has no interface at all (AMD-040 §3).
+    /// languages, followed by the « Bend 2D Mode » checkbox of AMD-046 §3.
+    /// <c>render.visual_style</c> has no interface at all (AMD-040 §3).
     /// </summary>
-    [Fact] // REQ-SCN-066, REQ-LUA-114
+    [Fact] // REQ-SCN-066, REQ-SCN-074, REQ-LUA-114
     public void REQ_SCN_066_the_curvature_settings_are_an_advanced_geometry_group()
     {
         using UiLanguageScope language = new();
@@ -299,12 +300,16 @@ public sealed class OptionsWindowTests
         Assert.Equal("Geometry", UiText.GroupTitle(UiKeys.GroupGeometry));
         Assert.Equal("(advanced)", UiText.Advanced);
         Assert.Equal(
-            ["Bend Left-Right", "Bend Top-Bottom", "Arc Horizontal", "Arc Center"],
+            ["Bend Left-Right", "Bend Top-Bottom", "Arc Horizontal", "Arc Center", "Bend 2D Mode"],
             model.RowsOfGroup(OptionsTab.Video, UiKeys.GroupGeometry).Select(row => row.Label));
         Assert.StartsWith(
             "Bends the scene horizontally.",
             Row(model, SettingKeys.SceneBendLeftRight).Help,
             StringComparison.Ordinal);
+        Assert.Equal(
+            "Also applies the bend settings to the flat picture of 2D mode. Turn it off to keep "
+            + "the picture flat.",
+            Row(model, SettingKeys.SceneBend2dMode).Help);
         Assert.Equal(
             ["Screen Center", "Screen Edge"],
             SettingsCatalogue.Get(SettingKeys.SceneArcCenter).Domain.Options!
@@ -316,12 +321,22 @@ public sealed class OptionsWindowTests
         Assert.Equal("Géométrie", UiText.GroupTitle(UiKeys.GroupGeometry));
         Assert.Equal("(avancé)", UiText.Advanced);
         Assert.Equal(
-            ["Courbure gauche-droite", "Courbure haut-bas", "Arc horizontal", "Centre de l'arc"],
+            [
+                "Courbure gauche-droite",
+                "Courbure haut-bas",
+                "Arc horizontal",
+                "Centre de l'arc",
+                "Courber le mode 2D",
+            ],
             model.RowsOfGroup(OptionsTab.Video, UiKeys.GroupGeometry).Select(row => row.Label));
         Assert.StartsWith(
             "Courbe la scène horizontalement.",
             Row(model, SettingKeys.SceneBendLeftRight).Help,
             StringComparison.Ordinal);
+        Assert.Equal(
+            "Applique aussi la courbure à l'image plate du mode 2D. Désactivez-le pour garder "
+            + "l'image plate.",
+            Row(model, SettingKeys.SceneBend2dMode).Help);
         Assert.Equal(
             ["Centre de l'écran", "Bord de l'écran"],
             SettingsCatalogue.Get(SettingKeys.SceneArcCenter).Domain.Options!

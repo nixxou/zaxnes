@@ -35,7 +35,7 @@ public sealed class LibretroOptionTests
     /// SPEC-09 §4.6: the normative extract, entry by entry. The ten entries of the table are
     /// what the generator must produce, with <c>video.graphic_quality</c> and
     /// <c>emu.tv_mode</c> withdrawn by v1.1 and <c>scene.tv_box</c> by AMD-031; AMD-043 §6 adds
-    /// the four curvature options.
+    /// the four curvature options and AMD-046 §3 the 2D-mode switch.
     /// </summary>
     [Fact]
     public void The_table_is_the_normative_extract_of_the_specification()
@@ -56,6 +56,9 @@ public sealed class LibretroOptionTests
                 "zaxnes_scene_arc_h",
                 "zaxnes_scene_arc_center",
 
+                // AMD-046 §3 adds one line to the table of §4.6, right after them.
+                "zaxnes_scene_bend_2d_mode",
+
                 // AMD-031 retired scene.tv_box, so the extract is one entry shorter.
                 "zaxnes_emu_game_speed",
                 "zaxnes_emu_auto_tv_mode",
@@ -73,6 +76,9 @@ public sealed class LibretroOptionTests
     [InlineData("zaxnes_render_mesh_algo", "GREEDY", "GREEDY,MARCHING,GREEDY_MULTICOLOR")]
     [InlineData("zaxnes_render_shadow", "enabled", "enabled,disabled")]
     [InlineData("zaxnes_emu_auto_tv_mode", "disabled", "enabled,disabled")]
+
+    // AMD-046 §3: default « enabled », the two labels REQ-PERS-083 asks for.
+    [InlineData("zaxnes_scene_bend_2d_mode", "enabled", "enabled,disabled")]
     public void The_single_line_entries_match(string key, string expectedDefault, string expectedValues)
     {
         LibretroCoreOption option = Assert.NotNull(LibretroCoreOptions.Find(key));
