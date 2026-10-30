@@ -246,7 +246,10 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   fantôme with zone data, two groups (core, enemies) with checks, the game's NMI left alone (the
   settings made in the frame's logic), UxROM, MMC3, MMC5 and GxROM, the European ROM's pack (PAL,
   and as NTSC for the ROMs of that code whose header says NTSC); 452 of its 455 ROMs take a whole
-  pack, Rockman (Japan) by the USA pack's signatures. A "dirty" iNES header (bytes 12 to 15 not
+  pack, Rockman (Japan) by the USA pack's signatures. Mega Man 3 the same way
+  (`docs/hacks/megaman3/WIDESCREEN-HACK.md`), with a pack per build (USA, Rockman 3, Europe and its
+  Rev 1, the European ones PAL with NTSC twins): 268 of its 494 ROMs take a whole pack, its
+  512 KiB ROM hacks (their code reworked where the hack hooks) none. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its

@@ -264,6 +264,8 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
             Some(&megaman1::MegaMan1)
         }
         megaman3::SOURCE_CRC => Some(&megaman3::MEGAMAN3),
+        crc if megaman3::OTHER_CRCS.contains(&crc) => Some(&megaman3::MEGAMAN3),
+        megaman3::SOURCE_CRC_EUROPE_REV1 => Some(&megaman3::MEGAMAN3_EUROPE_REV1),
         megaman4::SOURCE_CRC | megaman4::SOURCE_CRC_REV1 => Some(&megaman4::MEGAMAN4),
         megaman5::SOURCE_CRC => Some(&megaman5::MEGAMAN5),
         megaman6::SOURCE_CRC => Some(&megaman6::MegaMan6),
@@ -301,7 +303,14 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::MEGAMAN1_USA
         | crate::builtin_patches::MEGAMAN1_EUROPE
         | crate::builtin_patches::MEGAMAN1_EUROPE_NTSC => Some(&megaman1::MegaMan1),
-        crate::builtin_patches::MEGAMAN3_USA => Some(&megaman3::MEGAMAN3),
+        crate::builtin_patches::MEGAMAN3_USA
+        | crate::builtin_patches::ROCKMAN3_JAPAN
+        | crate::builtin_patches::MEGAMAN3_EUROPE
+        | crate::builtin_patches::MEGAMAN3_EUROPE_NTSC => Some(&megaman3::MEGAMAN3),
+        crate::builtin_patches::MEGAMAN3_EUROPE_REV1
+        | crate::builtin_patches::MEGAMAN3_EUROPE_REV1_NTSC => {
+            Some(&megaman3::MEGAMAN3_EUROPE_REV1)
+        }
         crate::builtin_patches::MEGAMAN4_USA | crate::builtin_patches::MEGAMAN4_USA_REV1 => {
             Some(&megaman4::MEGAMAN4)
         }
