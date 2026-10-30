@@ -82,6 +82,9 @@ struct Painter<'ui> {
     heading: Option<imgui::FontId>,
     /// Where the rows and the hints drawn lie.
     zones: &'ui RefCell<Vec<Zone>>,
+    /// The widescreen button being held (owner request): its hint's label and how far the hold
+    /// is to the widescreen's settings, 0 to 1, drawn as a ring filling round the label.
+    hold_ring: Option<(&'static str, f32)>,
 }
 
 impl Painter<'_> {
@@ -257,6 +260,9 @@ impl Painter<'_> {
         let mut x = metrics.padding;
         for (button, meaning, colour) in hints {
             let start = x;
+            if let Some((_, progress)) = self.hold_ring.filter(|(label, _)| label == button) {
+                self.ring(x, y, button, progress);
+            }
             self.text(x, y, FOCUS, button);
             x += self.width(button) + metrics.padding * 0.5;
             self.text(x, y, *colour, meaning);
@@ -270,6 +276,34 @@ impl Painter<'_> {
                 );
             }
         }
+    }
+
+    /// A ring round the label `button` drawn at `x`, `y`, filled clockwise from the top to
+    /// `progress` (0 to 1): a held button's way to its long press.
+    fn ring(&self, x: f32, y: f32, button: &str, progress: f32) {
+        const SEGMENTS: f32 = 40.0;
+        let width = self.width(button);
+        let height = self.ui.text_line_height();
+        let centre = [x + width * 0.5, y + height * 0.5];
+        let radius = width.max(height) * 0.5 + self.metrics.padding * 0.35;
+        // At least two points, a short arc at the start of the hold.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 1 to 40.
+        let steps = (SEGMENTS * progress).ceil().max(1.0) as usize;
+        let points: Vec<[f32; 2]> = (0..=steps)
+            .map(|step| {
+                #[allow(clippy::cast_precision_loss)] // at most 40
+                let angle = -std::f32::consts::FRAC_PI_2
+                    + std::f32::consts::TAU * progress * (step as f32 / steps as f32);
+                [
+                    centre[0] + radius * angle.cos(),
+                    centre[1] + radius * angle.sin(),
+                ]
+            })
+            .collect();
+        self.list
+            .add_polyline(points, FOCUS)
+            .thickness(self.metrics.padding * 0.18)
+            .build();
     }
 
     /// A paragraph in small print under the row `slot` of the list area.
@@ -395,6 +429,17 @@ impl HandheldUi {
             size: ui.io().display_size,
             heading: self.heading_font,
             zones: &self.zones,
+            hold_ring: self
+                .widescreen_hold
+                .as_ref()
+                .filter(|hold| hold.held > 0.0)
+                .map(|hold| {
+                    let label = match hold.button {
+                        super::pad::PadButton::L1 => "L1",
+                        _ => "A",
+                    };
+                    (label, (hold.held / super::WIDESCREEN_HOLD_SECONDS).min(1.0))
+                }),
         }
     }
 
