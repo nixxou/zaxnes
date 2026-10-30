@@ -134,7 +134,7 @@ fn a_save_state_carries_the_progress_of_the_achievements() {
     });
     harness.run_frames(30);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(3));
-    let file = std::fs::read(harness.paths.slot_state_file("3")).unwrap();
+    let file = std::fs::read(harness.host.slot_state_file("3")).unwrap();
     let content = save_state_file::try_read(&file).expect("a readable state");
     assert_ne!(Vec::<u8>::new(), content.achievements);
 
