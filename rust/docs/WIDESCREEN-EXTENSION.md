@@ -442,7 +442,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 |---|---|---|
 | Zelda II (USA) | side view (level RAM), world map (run-length map), vertical margin on the world map | `zelda2.rs`, adapted from z2rs (MIT), see the Zelda II document |
 | Mega Man 2 (USA) (data CRC-32 `0FCFC04D`), with its built-in patch (also listed for the unpatched ROM) | the stage layout in PRG-ROM, within the section being played | `megaman2.rs`, see below |
-| Super Mario Bros. (World) (data CRC-32 `D445F698`), unpatched | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
+| Super Mario Bros. (World) (data CRC-32 `D445F698`) and (Europe) (`9A2DB086`, its area parser at the same places), unpatched and with their built-in patches | the area, laid out by the game's own area parser run in a sandbox | `smb1.rs`, see below |
 | Ninja Gaiden III (USA) (data CRC-32 `902E3168`), unpatched and with its built-in patch | the horizontal areas' layout in PRG-ROM, parallax bands included | `ng3.rs`, see below |
 | Super Mario Bros. 3 (USA) (Rev 1) (data CRC-32 `2E6301ED`), (Japan) (`E7DDFEE3`), its Rev 1 (`52E2B5E0`) and (Europe) (`1ED5C801`), with their built-in patches (also listed for the unpatched ROMs; the Japanese and European builds' table of tile layouts 15 and 7 bytes earlier) | a horizontal level or a world map, from its tile map in PRG-RAM, and the vertical margin | `smb3.rs`, see below |
 | Castlevania (USA), both builds (data CRC-32 `0AC1AA8F`, Rev 1 `B668C7FC`), unpatched and with their built-in patches | the room in play, from its map and its stage's blocks in PRG-ROM | `castlevania.rs`, see below |
