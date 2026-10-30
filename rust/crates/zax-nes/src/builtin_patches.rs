@@ -22,7 +22,7 @@
 //! | Akumajou Dracula (Japan) | the same | the USA hack's pack built for the Japanese code (`cvwide`, `tools/build.py --pack`), in the execution zone |
 //! | Adventure Island (USA), Classic (Europe), Takahashi Meijin no Bouken-jima (Japan) and Kiddy Sun in Fantasia (Asia) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the ghosts, the previews, the two aids), the ROM keeping its size; the European one the same for PAL, the Japanese one built for its code, the Asian one the Japanese one but for its NMI's place, without the level selector (`aiwide`, `tools/build.py --pack`) |
 //! | Excitebike (Japan, USA), and (Europe) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the settings, the riders in the margins), the ROM keeping its size; the European one the same for PAL (`excitebikewide`, `tools/build.py --pack`) |
-//! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ff1wide`, `tools/build.py --pack`) |
+//! | Final Fantasy (USA), and (Japan) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the people and vehicles), the ROM keeping its size; the Japanese one for its code, which its Rev 1 takes (`ff1wide`, `tools/build.py --pack`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
 //! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`metroidwide`, `tools/build.py --pack`) |
@@ -161,6 +161,8 @@ pub const EXCITEBIKE: &str = "Excitebike (Japan, USA) widescreen";
 pub const EXCITEBIKE_EUROPE: &str = "Excitebike (Europe) widescreen";
 /// Name of the Final Fantasy (USA) widescreen patch (advanced mode).
 pub const FINAL_FANTASY_USA: &str = "Final Fantasy (USA) widescreen";
+/// Name of the Final Fantasy (Japan) widescreen patch (advanced mode).
+pub const FINAL_FANTASY_JAPAN: &str = "Final Fantasy (Japan) widescreen";
 /// Name of the Metal Force (Korea) widescreen patch (advanced mode).
 pub const METALFORCE_KOREA: &str = "Metal Force (Korea) widescreen";
 /// Name of the Blaster Master (USA) widescreen patch (advanced mode).
@@ -201,7 +203,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 50] = [
+pub const PATCHES: [BuiltinPatch; 51] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -873,31 +875,43 @@ pub const PATCHES: [BuiltinPatch; 50] = [
         game: "Final Fantasy",
         rom_name: "Final Fantasy (USA)",
         source_crc: 0xCEBD_2A31,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in two groups (the sprites, the people and vehicles in the
+        // margins); the ROM keeps its size (`ff1wide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/final-fantasy-usa-widescreen.zxpk"),
-        options: &[
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 0,
-                default: true,
-            },
-        ],
+        options: FINAL_FANTASY_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the people and vehicles.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
-        // did).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
-        zone_data: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The wait for the NMI: JMP to itself, the NMI returning to the wait's caller.
         idle_loop: Some((0xFEBB, 0xFEBD)),
+    },
+    BuiltinPatch {
+        name: FINAL_FANTASY_JAPAN,
+        game: "Final Fantasy",
+        rom_name: "Final Fantasy (Japan)",
+        source_crc: 0x466E_FDC2,
+        // The USA hack built for the Japanese code, which its Rev 1 takes too: the same code and
+        // RAM, the fixed bank's at other places (`ff1wide`, `tools/build.py --pack`).
+        bps: include_bytes!("../patches/final-fantasy-japan-widescreen.zxpk"),
+        options: FINAL_FANTASY_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the people and vehicles.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The wait for the NMI: JMP to itself, the NMI returning to the wait's caller.
+        idle_loop: Some((0xFEEE, 0xFEF0)),
     },
     BuiltinPatch {
         name: METALFORCE_KOREA,
@@ -1441,6 +1455,18 @@ const MEGAMAN2_OPTIONS: &[HackOption] = &[
         label: "No slowdown",
         label_fr: "Sans ralentissements",
         bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Final Fantasy packs: the overclock.
+const FINAL_FANTASY_OPTIONS: &[HackOption] = &[
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 0,
         default: true,
     },
 ];
