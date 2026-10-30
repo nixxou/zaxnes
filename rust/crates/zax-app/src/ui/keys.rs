@@ -287,6 +287,96 @@ pub fn option(label: &str) -> String {
     format!("{OPTION_PREFIX}{label}")
 }
 
+// ----------------------------------------------------------- RetroAchievements (Rust-only)
+/// Tab of the options window: RetroAchievements.
+pub const TAB_ACHIEVEMENTS: &str = "options.tab.achievements";
+/// Menu of the menu bar.
+pub const ACH_MENU: &str = "achievements.menu";
+/// Its entry, and the window, of the game's achievements.
+pub const ACH_LIST: &str = "achievements.list";
+/// What the list says without a game's achievements.
+pub const ACH_LIST_EMPTY: &str = "achievements.list_empty";
+/// Its entry that opens the RetroAchievements options.
+pub const ACH_ACCOUNT: &str = "achievements.account";
+/// The account: nobody signed in.
+pub const ACH_SIGNED_OUT: &str = "achievements.signed_out";
+/// The account: a sign-in under way.
+pub const ACH_SIGNING_IN: &str = "achievements.signing_in";
+/// The account: {0} the name, {1} the softcore points.
+pub const ACH_SIGNED_IN: &str = "achievements.signed_in";
+/// Field of the sign-in.
+pub const ACH_USERNAME: &str = "achievements.username";
+/// Field of the sign-in.
+pub const ACH_PASSWORD: &str = "achievements.password";
+/// Button of the sign-in.
+pub const ACH_SIGN_IN: &str = "achievements.sign_in";
+/// Button that signs out.
+pub const ACH_SIGN_OUT: &str = "achievements.sign_out";
+/// What the sign-in does with the password.
+pub const ACH_PASSWORD_HINT: &str = "achievements.password_hint";
+/// What softcore means.
+pub const ACH_SOFTCORE_HINT: &str = "achievements.softcore_hint";
+/// Why the sign-in is not offered.
+pub const ACH_TURN_ON_HINT: &str = "achievements.turn_on_hint";
+/// First line of the pop-up of an unlock.
+pub const ACH_UNLOCKED: &str = "achievements.unlocked";
+/// Its second line: {0} the title, {1} the points.
+pub const ACH_UNLOCKED_TEXT: &str = "achievements.unlocked_text";
+/// First line of the pop-up of a completed game.
+pub const ACH_COMPLETED: &str = "achievements.completed";
+/// Its second line: {0} the game.
+pub const ACH_COMPLETED_TEXT: &str = "achievements.completed_text";
+/// Second line of the pop-up of a game: {0} of {1} unlocked, {2} of {3} points.
+pub const ACH_GAME_SUMMARY: &str = "achievements.game_summary";
+/// Same, for a game without achievements.
+pub const ACH_GAME_NO_ACHIEVEMENTS: &str = "achievements.game_no_achievements";
+/// Notification: the ROM is not known.
+pub const ACH_GAME_UNKNOWN: &str = "achievements.game_unknown";
+/// Notification: {0} the reason.
+pub const ACH_GAME_FAILED: &str = "achievements.game_failed";
+/// Notification of a sign-in: {0} the name, {1} the points.
+pub const ACH_WELCOME: &str = "achievements.welcome";
+/// Notification: {0} the server's reason.
+pub const ACH_SIGN_IN_FAILED: &str = "achievements.sign_in_failed";
+/// Notification: {0} the server's message.
+pub const ACH_SERVER_ERROR: &str = "achievements.server_error";
+/// Notification: unlocks wait for the server.
+pub const ACH_DISCONNECTED: &str = "achievements.disconnected";
+/// Notification: they reached it.
+pub const ACH_RECONNECTED: &str = "achievements.reconnected";
+/// Indicator of a challenge under way.
+pub const ACH_CHALLENGE: &str = "achievements.challenge";
+/// Points of an achievement in the list: {0}.
+pub const ACH_POINTS: &str = "achievements.points";
+/// Share of players who have it: {0}.
+pub const ACH_RARITY: &str = "achievements.rarity";
+/// Group of the list.
+pub const ACH_BUCKET_LOCKED: &str = "achievements.bucket.locked";
+/// Group of the list.
+pub const ACH_BUCKET_UNLOCKED: &str = "achievements.bucket.unlocked";
+/// Group of the list.
+pub const ACH_BUCKET_RECENT: &str = "achievements.bucket.recent";
+/// Group of the list.
+pub const ACH_BUCKET_CHALLENGE: &str = "achievements.bucket.challenge";
+/// Group of the list.
+pub const ACH_BUCKET_ALMOST: &str = "achievements.bucket.almost";
+/// Group of the list.
+pub const ACH_BUCKET_UNOFFICIAL: &str = "achievements.bucket.unofficial";
+/// Group of the list.
+pub const ACH_BUCKET_UNSUPPORTED: &str = "achievements.bucket.unsupported";
+/// Group of the list.
+pub const ACH_BUCKET_UNSYNCED: &str = "achievements.bucket.unsynced";
+/// Hint of the keyboard on the screen: types the key.
+pub const ACH_KEY_TYPE: &str = "achievements.key.type";
+/// Hint and key: removes the last character.
+pub const ACH_KEY_DELETE: &str = "achievements.key.delete";
+/// Hint: the next layout of keys.
+pub const ACH_KEY_SHIFT: &str = "achievements.key.shift";
+/// Key: a space.
+pub const ACH_KEY_SPACE: &str = "achievements.key.space";
+/// Hint and key: the text is done.
+pub const ACH_KEY_DONE: &str = "achievements.key.done";
+
 /// Every key published above, for the parity tests (the prefixes are not keys).
 pub const PUBLISHED: &[&str] = &[
     MENU_FILE,
@@ -504,4 +594,48 @@ pub const PUBLISHED: &[&str] = &[
     MENU_AIDS,
     HANDHELD_HOLD_FOR_SETTINGS,
     HANDHELD_HINT_HACKS,
+    TAB_ACHIEVEMENTS,
+    ACH_MENU,
+    ACH_LIST,
+    ACH_LIST_EMPTY,
+    ACH_ACCOUNT,
+    ACH_SIGNED_OUT,
+    ACH_SIGNING_IN,
+    ACH_SIGNED_IN,
+    ACH_USERNAME,
+    ACH_PASSWORD,
+    ACH_SIGN_IN,
+    ACH_SIGN_OUT,
+    ACH_PASSWORD_HINT,
+    ACH_SOFTCORE_HINT,
+    ACH_TURN_ON_HINT,
+    ACH_UNLOCKED,
+    ACH_UNLOCKED_TEXT,
+    ACH_COMPLETED,
+    ACH_COMPLETED_TEXT,
+    ACH_GAME_SUMMARY,
+    ACH_GAME_NO_ACHIEVEMENTS,
+    ACH_GAME_UNKNOWN,
+    ACH_GAME_FAILED,
+    ACH_WELCOME,
+    ACH_SIGN_IN_FAILED,
+    ACH_SERVER_ERROR,
+    ACH_DISCONNECTED,
+    ACH_RECONNECTED,
+    ACH_CHALLENGE,
+    ACH_POINTS,
+    ACH_RARITY,
+    ACH_BUCKET_LOCKED,
+    ACH_BUCKET_UNLOCKED,
+    ACH_BUCKET_RECENT,
+    ACH_BUCKET_CHALLENGE,
+    ACH_BUCKET_ALMOST,
+    ACH_BUCKET_UNOFFICIAL,
+    ACH_BUCKET_UNSUPPORTED,
+    ACH_BUCKET_UNSYNCED,
+    ACH_KEY_TYPE,
+    ACH_KEY_DELETE,
+    ACH_KEY_SHIFT,
+    ACH_KEY_SPACE,
+    ACH_KEY_DONE,
 ];

@@ -9,6 +9,7 @@ use imgui::{Condition, DrawListMut, StyleColor, StyleVar, Ui, WindowFlags, Windo
 use zax_platform::input::labels;
 use zax_settings::catalogue::SettingId;
 
+use super::achievements::{AchievementsRow, SpecialKey, SPECIAL_KEYS};
 use super::compat::Tone;
 use super::game_options::{GameOptionsModel, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
@@ -411,6 +412,9 @@ impl HandheldUi {
             Screen::Overscan => self.draw_overscan(ui, frame),
             Screen::Overlay => self.draw_overlay(ui, frame),
             Screen::States => self.draw_states(ui, frame),
+            Screen::Achievements => self.draw_achievements(ui, frame),
+            Screen::Keyboard => self.draw_keyboard(ui),
+            Screen::AchievementList => self.draw_achievement_list(ui, frame),
             Screen::InGame => {}
         }
         if let Some(question) = ZaxUi::confirmation(frame.host) {
@@ -717,7 +721,9 @@ impl HandheldUi {
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
                 options::OptionRow::Controls => String::new(),
-                options::OptionRow::Overscan => format!("{value} >"),
+                options::OptionRow::Overscan | options::OptionRow::Achievements => {
+                    format!("{value} >")
+                }
                 _ => format!("< {value} >"),
             };
             painter.row(
@@ -1159,5 +1165,193 @@ fn profile_tag(entry: &RomEntry) -> (String, [f32; 4]) {
     match &entry.profile {
         Some(profile) if !profile.two_dimensional => (profile.title.clone(), PROFILE),
         _ => (strings::get(keys::HANDHELD_TAG_2D), DIM),
+    }
+}
+
+/// RetroAchievements in the console mode (Rust-only, owner request).
+impl HandheldUi {
+    /// The switches and the account.
+    fn draw_achievements(&self, ui: &Ui, frame: &UiFrame<'_>) {
+        let Some(_window) = full_screen(ui, "##achievements", BACKGROUND) else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let system = &frame.host.achievements;
+        painter.title(
+            &strings::get(keys::TAB_ACHIEVEMENTS),
+            &crate::ui::achievements_view::account_text(system),
+        );
+        let signed_in = matches!(
+            system.account(),
+            crate::achievements::Account::SignedIn { .. }
+        );
+        let settings = frame.host.settings();
+        let rows = self.metrics.visible_rows(painter.size[1]).saturating_sub(1);
+        let selected = self.achievements.selected_index();
+        let all = super::achievements::ROWS;
+        let first = first_visible(selected, rows, all.len());
+        for (slot, (index, row)) in all.iter().enumerate().skip(first).take(rows).enumerate() {
+            let switch = |id| {
+                let on = settings.get(id).as_bool();
+                format!(
+                    "< {} >",
+                    text::label_of_option(if on { "enabled" } else { "disabled" })
+                )
+            };
+            let (label, value) = match row {
+                AchievementsRow::Username => (
+                    strings::get(keys::ACH_USERNAME),
+                    format!("{} >", self.achievements.username),
+                ),
+                AchievementsRow::Password => (
+                    strings::get(keys::ACH_PASSWORD),
+                    format!(
+                        "{} >",
+                        "\u{2022}".repeat(self.achievements.password.chars().count())
+                    ),
+                ),
+                AchievementsRow::Account if signed_in => {
+                    (strings::get(keys::ACH_SIGN_OUT), String::new())
+                }
+                AchievementsRow::Account => (strings::get(keys::ACH_SIGN_IN), String::new()),
+                AchievementsRow::List => (
+                    strings::get(keys::ACH_LIST),
+                    system.game().map_or_else(String::new, |game| {
+                        format!("{}/{} >", game.summary.unlocked, game.summary.core)
+                    }),
+                ),
+                switch_row => (
+                    switch_row
+                        .setting()
+                        .map(|id| text::label_of(zax_settings::catalogue::descriptor(id)))
+                        .unwrap_or_default(),
+                    switch_row.setting().map(switch).unwrap_or_default(),
+                ),
+            };
+            painter.row(slot, index == selected, &label, (&value, DIM));
+        }
+        let note = if settings.get(SettingId::AchievementsEnabled).as_bool() {
+            strings::get(keys::ACH_SOFTCORE_HINT)
+        } else {
+            strings::get(keys::ACH_TURN_ON_HINT)
+        };
+        painter.note(rows.min(all.len()), &note);
+        painter.hints(layout::hints(Screen::Achievements));
+    }
+
+    /// The keyboard on the screen: the text typed, then the rows of keys and the bottom row.
+    fn draw_keyboard(&self, ui: &Ui) {
+        let Some(_window) = full_screen(ui, "##keyboard", BACKGROUND) else {
+            return;
+        };
+        let Some(keyboard) = self.keyboard.as_ref() else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let metrics = self.metrics;
+        let title = match keyboard.field() {
+            super::achievements::Field::Username => strings::get(keys::ACH_USERNAME),
+            super::achievements::Field::Password => strings::get(keys::ACH_PASSWORD),
+        };
+        painter.title(&title, "");
+        let width = painter.size[0];
+        let field_top = metrics.title_band() + metrics.padding;
+        painter
+            .list
+            .add_rect(
+                [metrics.padding, field_top],
+                [width - metrics.padding, field_top + metrics.row],
+                BAR,
+            )
+            .filled(true)
+            .rounding(metrics.padding * 0.4)
+            .build();
+        let shown = format!("{}_", keyboard.shown_text());
+        painter.text(
+            metrics.padding * 2.0,
+            field_top + (metrics.row - metrics.font) * 0.5,
+            TEXT,
+            &shown,
+        );
+        let keys_top = field_top + metrics.row + metrics.padding;
+        let room = painter.size[1] - metrics.hint_band() - metrics.padding - keys_top;
+        let key_height = (room / 5.0).min(metrics.row);
+        let (cursor_row, cursor_column) = keyboard.cursor();
+        let gap = metrics.padding * 0.3;
+        let draw_key = |left: f32, top: f32, key_width: f32, label: &str, selected: bool| {
+            let colour = if selected { FOCUS } else { PANEL };
+            painter
+                .list
+                .add_rect(
+                    [left + gap, top + gap],
+                    [left + key_width - gap, top + key_height - gap],
+                    colour,
+                )
+                .filled(true)
+                .rounding(metrics.padding * 0.3)
+                .build();
+            let text_colour = if selected { ON_FOCUS } else { TEXT };
+            painter.text(
+                left + (key_width - painter.width(label)) * 0.5,
+                top + (key_height - metrics.font) * 0.5,
+                text_colour,
+                label,
+            );
+        };
+        let usable = width - 2.0 * metrics.padding;
+        for (row, characters) in keyboard.rows().iter().enumerate() {
+            let count = characters.chars().count();
+            #[allow(clippy::cast_precision_loss)] // at most ten keys
+            let key_width = usable / 10.0;
+            #[allow(clippy::cast_precision_loss)] // at most ten keys
+            let left = metrics.padding + (usable - key_width * count as f32) * 0.5;
+            #[allow(clippy::cast_precision_loss)] // five rows
+            let top = keys_top + key_height * row as f32;
+            for (column, character) in characters.chars().enumerate() {
+                #[allow(clippy::cast_precision_loss)] // at most ten keys
+                let x = left + key_width * column as f32;
+                let selected = (row, column) == (cursor_row, cursor_column);
+                draw_key(x, top, key_width, &character.to_string(), selected);
+            }
+        }
+        let shift = ["abc", "ABC", "#+="][(keyboard.layout() + 1) % 3];
+        let top = keys_top + key_height * 4.0;
+        #[allow(clippy::cast_precision_loss)] // four keys
+        let key_width = usable / SPECIAL_KEYS.len() as f32;
+        for (column, key) in SPECIAL_KEYS.iter().enumerate() {
+            let label = match key {
+                SpecialKey::Shift => shift.to_owned(),
+                SpecialKey::Space => strings::get(keys::ACH_KEY_SPACE),
+                SpecialKey::Delete => strings::get(keys::ACH_KEY_DELETE),
+                SpecialKey::Done => strings::get(keys::ACH_KEY_DONE),
+            };
+            #[allow(clippy::cast_precision_loss)] // four keys
+            let x = metrics.padding + key_width * column as f32;
+            let selected = (4, column) == (cursor_row, cursor_column);
+            draw_key(x, top, key_width, &label, selected);
+        }
+        painter.hints(layout::hints(Screen::Keyboard));
+    }
+
+    /// The game's achievements, scrolled with the gamepad.
+    fn draw_achievement_list(&self, ui: &Ui, frame: &UiFrame<'_>) {
+        let Some(_window) = full_screen(ui, "##achievement_list", BACKGROUND) else {
+            return;
+        };
+        let painter = self.painter(ui);
+        let metrics = self.metrics;
+        painter.title(&strings::get(keys::ACH_LIST), "");
+        let top = metrics.title_band() + metrics.padding * 0.5;
+        let height = painter.size[1] - metrics.hint_band() - top;
+        ui.set_cursor_pos([metrics.padding, top]);
+        ui.child_window("##achievement_list_items")
+            .size([painter.size[0] - 2.0 * metrics.padding, height])
+            .scroll_bar(false)
+            .build(|| {
+                ui.set_scroll_y(self.list_scroll);
+                crate::ui::achievements_view::draw_list(ui, &frame.host.achievements);
+                self.list_scroll_max.set(ui.scroll_max_y());
+            });
+        painter.hints(layout::hints(Screen::AchievementList));
     }
 }

@@ -19,25 +19,31 @@ enum Screen {
     FileMenu,
     Options,
     OptionsInterface,
+    /// The RetroAchievements tab (Rust-only).
+    OptionsAchievements,
     Keys,
     ProfileChooser,
     About,
+    /// The window of the game's achievements (Rust-only).
+    AchievementList,
     /// A screen of the handheld interface.
     Handheld(HandheldScreen),
 }
 
-const DESKTOP_PLAN: [(&str, Screen); 7] = [
+const DESKTOP_PLAN: [(&str, Screen); 9] = [
     ("accueil", Screen::Welcome),
     ("menu-fichier", Screen::FileMenu),
     ("options", Screen::Options),
     ("options-interface", Screen::OptionsInterface),
+    ("options-retroachievements", Screen::OptionsAchievements),
     ("touches", Screen::Keys),
     ("profil", Screen::ProfileChooser),
     ("a-propos", Screen::About),
+    ("succes", Screen::AchievementList),
 ];
 
 /// The handheld screens, photographed at the size of the window (640x480 for the devices).
-const HANDHELD_PLAN: [(&str, Screen); 8] = [
+const HANDHELD_PLAN: [(&str, Screen); 11] = [
     ("handheld-accueil", Screen::Handheld(HandheldScreen::Home)),
     (
         "handheld-profils",
@@ -63,6 +69,18 @@ const HANDHELD_PLAN: [(&str, Screen); 8] = [
     (
         "handheld-etats-sauver",
         Screen::Handheld(HandheldScreen::States),
+    ),
+    (
+        "handheld-retroachievements",
+        Screen::Handheld(HandheldScreen::Achievements),
+    ),
+    (
+        "handheld-clavier",
+        Screen::Handheld(HandheldScreen::Keyboard),
+    ),
+    (
+        "handheld-succes",
+        Screen::Handheld(HandheldScreen::AchievementList),
     ),
 ];
 
@@ -152,8 +170,13 @@ fn arrange(ui: &mut ZaxUi, screen: Screen) {
             ui.state.options = true;
             ui.force_options_tab = Some(OptionsTab::Interface);
         }
+        Screen::OptionsAchievements => {
+            ui.state.options = true;
+            ui.force_options_tab = Some(OptionsTab::Achievements);
+        }
         Screen::Keys => ui.state.key_config = true,
         Screen::ProfileChooser => ui.open_profile_chooser_for_capture(),
         Screen::About => ui.state.about = true,
+        Screen::AchievementList => ui.state.achievements = true,
     }
 }

@@ -514,6 +514,13 @@ impl GameSession {
         result
     }
 
+    /// Whether the core is here, not away running a frame on the emulation thread (where
+    /// [`GameSession::core`] is a stand-in).
+    #[must_use]
+    pub const fn core_is_home(&self) -> bool {
+        !self.pipeline.in_flight
+    }
+
     /// The core, for reading.
     #[must_use]
     pub fn core(&self) -> &NesCore {

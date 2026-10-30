@@ -42,6 +42,7 @@ impl ZaxUi {
         }
         let (open, hacks) = draw_game_options(ui, host, &mut self.menu_hacks);
         engaged |= open;
+        engaged |= self.draw_achievements_menu(ui, host);
         if hacks {
             self.open_hacks(host, HacksView::Widescreen);
             self.menu_chosen = true;

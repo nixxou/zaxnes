@@ -47,6 +47,11 @@ impl ZaxUi {
                         play(host, UiSound::Confirm);
                     }
                     ui.separator();
+                    if tab == options::OptionsTab::Achievements
+                        && crate::ui::achievements_view::draw_account(ui, host, &mut self.sign_in)
+                    {
+                        play(host, UiSound::Confirm);
+                    }
                     for row in self.options.rows(tab).to_vec() {
                         if options::is_folder(&row) {
                             self.draw_folder_row(ui, host, &row);

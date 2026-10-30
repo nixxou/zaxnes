@@ -25,6 +25,8 @@ pub enum OptionsTab {
     Emulation,
     /// The interface.
     Interface,
+    /// RetroAchievements (Rust-only): the account and the switches.
+    Achievements,
 }
 
 /// One setting of a tab, with the bounds of its widget.
@@ -57,7 +59,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 13] = [
+pub const EXCLUDED: [SettingId; 15] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -73,6 +75,9 @@ pub const EXCLUDED: [SettingId; 13] = [
     SettingId::VideoOverscanBottom,
     SettingId::VideoOverscanLeft,
     SettingId::VideoOverscanRight,
+    // Rust-only: the account of RetroAchievements, written by its sign-in only.
+    SettingId::AchievementsUsername,
+    SettingId::AchievementsToken,
 ];
 
 /// The settings the window edits as a folder: a field and a button that picks it.
@@ -86,13 +91,14 @@ pub const INCLUDED_PROFILE: [SettingId; 1] = [SettingId::EmuTvMode];
 pub const SILENT: [SettingId; 2] = [SettingId::EmuGameSpeed, SettingId::CameraFov];
 
 /// The tabs, in order.
-pub const TABS: [OptionsTab; 6] = [
+pub const TABS: [OptionsTab; 7] = [
     OptionsTab::Video,
     OptionsTab::Camera,
     OptionsTab::Light,
     OptionsTab::Audio,
     OptionsTab::Emulation,
     OptionsTab::Interface,
+    OptionsTab::Achievements,
 ];
 
 /// The title of `tab`, in the language in force.
@@ -105,6 +111,7 @@ pub fn title_of(tab: OptionsTab) -> String {
         OptionsTab::Audio => keys::TAB_AUDIO,
         OptionsTab::Emulation => keys::TAB_EMULATION,
         OptionsTab::Interface => keys::TAB_INTERFACE,
+        OptionsTab::Achievements => keys::TAB_ACHIEVEMENTS,
     })
 }
 
@@ -196,6 +203,7 @@ pub fn tab_of(descriptor: &SettingDescriptor) -> Option<OptionsTab> {
         | SettingTheme::Clipping
         | SettingTheme::Layers => Some(OptionsTab::Emulation),
         SettingTheme::Interface => Some(OptionsTab::Interface),
+        SettingTheme::Achievements => Some(OptionsTab::Achievements),
         _ => None,
     }
 }

@@ -86,6 +86,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let mut picture = Vec::new();
         session.copy_nes_picture(&mut picture);
         let thumbnail = save_state_file::thumbnail_jpeg(&picture).unwrap_or_default();
+        let achievements = self
+            .achievements
+            .progress()
+            .filter(|progress| progress.len() <= save_state_file::MAX_ACHIEVEMENTS_BYTES)
+            .unwrap_or_default();
         Some(SaveStateContent {
             header: SaveStateHeader {
                 core_id: NesCore::CORE_NAME.to_owned(),
@@ -109,6 +114,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             camera,
             conversion,
             thumbnail,
+            achievements,
         })
     }
 

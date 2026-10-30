@@ -589,6 +589,57 @@ En 2D, ces lignes sont noires ; en 3D, les tuiles qui sont au moins à moitié d
 sont pas montrées. Le réglage ne s'applique pas avec une marge verticale d'écran large : l'image
 continue alors au-delà de ces lignes, que le décodeur de marge redessine.
 
+### RetroAchievements (mode softcore)
+
+Zaxnes débloque les succès de [RetroAchievements](https://retroachievements.org) en **mode
+softcore** uniquement : sauvegardes d'état, rollback, retour image par image, avance rapide et
+patchs intégrés restent permis, et les succès comptent comme succès softcore sur le site. Il faut
+un compte RetroAchievements (gratuit, créé sur le site).
+
+L'onglet **RetroAchievements** de la fenêtre d'options (aussi **RetroAchievements ▸ Compte et
+options…** dans la barre de menus) porte :
+
+- **Activer RetroAchievements** (`achievements.enabled`, désactivé par défaut) : sans lui, Zaxnes
+  ne contacte jamais le serveur ;
+- **Mode encore** (`achievements.encore`) : les succès déjà obtenus se redéclenchent ;
+- **Tester les succès non officiels** (`achievements.unofficial`) ;
+- **Son de déblocage** (`achievements.sound`, activé par défaut) : un petit jingle synthétisé ;
+- la **connexion** : nom d'utilisateur et mot de passe, puis **Se connecter**. Le mot de passe
+  n'est envoyé qu'une fois à retroachievements.org et n'est **jamais enregistré** : le serveur
+  renvoie un jeton, gardé dans `settings.json` avec le nom (`achievements.username`,
+  `achievements.token`), qui reconnecte au lancement suivant. **Se déconnecter** efface le jeton.
+
+En mode console (et sur les consoles portables), la même chose est dans **Options ▸
+RetroAchievements** : les champs se remplissent avec un clavier à l'écran (A tape la touche, X
+efface, Y passe aux majuscules puis aux symboles, Start valide, B annule).
+
+Au lancement d'un jeu, Zaxnes calcule l'empreinte de la ROM comme RetroAchievements (en-tête iNES
+exclu ; avec un patch intégré, c'est la ROM du joueur, avant le patch, qui est identifiée), charge
+ses succès et affiche en haut de l'écran le titre du jeu et la progression (« 3 succès débloqués
+sur 20 »). Pendant la partie :
+
+- un **succès débloqué** s'affiche en haut de l'écran avec son icône, son titre et ses points ;
+- un **défi en cours** (succès qu'il ne faut pas rater jusqu'au bout) garde son icône en bas à
+  droite ;
+- la **progression** d'un succès mesuré (« 12/50 ») s'affiche quelques secondes en bas à droite.
+
+**RetroAchievements ▸ Succès du jeu** (en mode console : **Options ▸ RetroAchievements ▸ Succès
+du jeu**) liste les succès du jeu par groupe (défis en cours, presque débloqués, verrouillés,
+débloqués), avec leur icône, leurs points, leur description, leur progression et la part des
+joueurs qui les ont, ainsi que la présence enrichie du jeu (« World 1-2, 3 lives »).
+
+Les sauvegardes d'état gardent l'état des succès en cours (compteurs, valeurs mesurées) dans une
+section de plus du fichier : charger un état les remet où ils en étaient. Un état sans cette
+section (plus ancien) remet les succès à zéro. Le reset du jeu les remet aussi à zéro. Le
+rollback et le retour image par image ne les changent pas.
+
+Les classements (leaderboards) ne fonctionnent qu'en hardcore chez RetroAchievements : ils ne sont pas
+proposés.
+
+Sans réseau, un succès débloqué est gardé et renvoyé dès que le serveur répond (une notification
+le dit). Pour tester sans compte, la variable d'environnement `ZAXNES_RA_HOST` désigne un autre
+serveur que retroachievements.org (`http://127.0.0.1:8765`, par exemple).
+
 ### Langue de l'interface
 
 L'onglet **Interface** porte le réglage **Langue** (`ui.language`), qui vaut `en` (« English »)

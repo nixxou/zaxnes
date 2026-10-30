@@ -177,6 +177,12 @@ setting_ids! {
     UiProfiler => "ui.profiler",
     UiLanguage => "ui.language",
     UiRomsFolder => "ui.roms_folder",
+    AchievementsEnabled => "achievements.enabled",
+    AchievementsEncore => "achievements.encore",
+    AchievementsUnofficial => "achievements.unofficial",
+    AchievementsSound => "achievements.sound",
+    AchievementsUsername => "achievements.username",
+    AchievementsToken => "achievements.token",
 }
 
 /// Whether `key` is a stable key of the grammar of REQ-PERS-080: dot-separated segments of `a-z`,
