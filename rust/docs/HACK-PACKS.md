@@ -1,6 +1,6 @@
 # Hack packs
 
-Status: Excitebike converted, see section 7. Branch `hack-rewrite`.
+Status: Adventure Island converted, see section 7. Branch `hack-rewrite`.
 
 ## 1. Why
 
@@ -270,7 +270,12 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   (Japan)'s own (the same code, moved by a few bytes); 42 of its 45 ROMs take a whole pack.
   Excitebike too (`docs/hacks/excitebike/WIDESCREEN-HACK.md`): its code from the window to the
   zone fantôme, two groups (core, riders) with checks, NROM, MMC1 and MMC3; the pack and the
-  European one, the same code for PAL; 63 of its 68 ROMs take a whole pack. A "dirty" iNES header (bytes 12 to 15 not
+  European one, the same code for PAL; 63 of its 68 ROMs take a whole pack. Adventure Island
+  too (`docs/hacks/adventure_island/WIDESCREEN-HACK.md`): its code from the window to the zone
+  fantôme, its second sprite page with it, groups (core, enemies, previews, its two aids) with
+  checks; the USA pack, the European one for PAL, the Japanese one (the same code, moved; the
+  margin decoder's tables per build) and the Asian one (Kiddy Sun in Fantasia, the Japanese one
+  without the level selector); 75 of its 97 ROMs take a whole pack, 14 all but the selector. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its

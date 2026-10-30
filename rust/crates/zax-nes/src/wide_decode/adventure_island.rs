@@ -1,4 +1,5 @@
-//! Adventure Island (USA): the margins of a round, laid out from its tables in PRG-ROM.
+//! Adventure Island (USA), Classic (Europe) and Takahashi Meijin no Bouken-jima (Japan): the
+//! margins of a round, laid out from its tables in PRG-ROM.
 //!
 //! The game draws a round one tile column at a time, a little past the right edge of the screen
 //! (`$B4C3`, `$B4E9`, `$B53A`, `$B55A`, `$B397`), from tables whose addresses it keeps in RAM for
@@ -44,11 +45,56 @@
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
-/// The decoder.
-pub struct AdventureIsland;
+/// The decoder, with the places of a build's tables in PRG-ROM.
+pub struct AdventureIsland {
+    places: Places,
+}
+
+/// The CPU addresses of the PRG-ROM tables the decoder reads past the round's own.
+struct Places {
+    /// The masks and steps of the slopes, indexed by the slope minus one.
+    slope_masks: u16,
+    slope_steps: u16,
+    /// The platforms' tiles and sub-palettes of each style, the third of the ground's y they take.
+    platform_tiles: u32,
+    platform_palettes: u32,
+    platform_lift: u32,
+    /// The change of the ground's y per section.
+    ground_rise: u32,
+}
+
+/// Adventure Island (USA) and Classic (Europe).
+pub const USA: AdventureIsland = AdventureIsland {
+    places: Places {
+        slope_masks: 0xBE5D,
+        slope_steps: 0xBE63,
+        platform_tiles: 0xA80F,
+        platform_palettes: 0xA81F,
+        platform_lift: 0xA604,
+        ground_rise: 0xBF43,
+    },
+};
+/// Takahashi Meijin no Bouken-jima (Japan) and Kiddy Sun in Fantasia (Asia): the same RAM, their
+/// tables moved with their code.
+pub const JAPAN: AdventureIsland = AdventureIsland {
+    places: Places {
+        slope_masks: 0xBDF7,
+        slope_steps: 0xBDFD,
+        platform_tiles: 0xA80A,
+        platform_palettes: 0xA81A,
+        platform_lift: 0xA5FF,
+        ground_rise: 0xBEDD,
+    },
+};
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0xF8A7_13BE;
+/// The same of Adventure Island Classic (Europe): its code and tables at the same places.
+pub const SOURCE_CRC_EUROPE: u32 = 0x8686_7830;
+/// The same of Takahashi Meijin no Bouken-jima (Japan).
+pub const SOURCE_CRC_JAPAN: u32 = 0x6A45_7A43;
+/// The same of Kiddy Sun in Fantasia (Asia): the Japanese tables.
+pub const SOURCE_CRC_KIDDY_SUN: u32 = 0x6230_20FB;
 
 /// The round's tables: sections, screens, structures, top and bottom parts, metatiles, their
 /// attributes (pointers, low byte first).
@@ -59,9 +105,7 @@ const WINDOW_ROW: u16 = 0x0032;
 const COLUMN: u16 = 0x0035;
 /// The round's length in sections.
 const SECTIONS: u16 = 0x002F;
-/// The masks and steps of the slopes (`$BE5D`, `$BE63`), indexed by the slope minus one.
-const SLOPE_MASKS: u16 = 0xBE5D;
-const SLOPE_STEPS: u16 = 0xBE63;
+/// The slopes (`Places::slope_masks`).
 const SLOPES: u8 = 6;
 
 /// The tile rows of a column.
@@ -84,7 +128,7 @@ impl MarginDecoder for AdventureIsland {
         if i32::from(row.coarse_y()) >= RING_ROWS {
             return false;
         }
-        let view = View::new(memory);
+        let view = View::new(memory, &self.places);
         let first_column = view.first_column(*row);
         let plane_row = View::plane_row(memory, *row);
         if !view.centre_matches(memory, *row, first_column, plane_row) {
@@ -122,7 +166,7 @@ impl MarginDecoder for AdventureIsland {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        let view = View::new(memory);
+        let view = View::new(memory, &self.places);
         // The screen's row nearest this one, whole on the screen (a row across its edge shows,
         // past it, a row the game does not show); for a row at the edge, the next one in.
         let edge = row.line > -8 && row.line < VISIBLE_LINES;
@@ -185,8 +229,8 @@ struct View<'a> {
 }
 
 impl<'a> View<'a> {
-    fn new(memory: &DecoderMemory<'a>) -> Self {
-        let round = Round::new(memory);
+    fn new(memory: &DecoderMemory<'a>, places: &'a Places) -> Self {
+        let round = Round::new(memory, places);
         let drawing = (i32::from(memory.ram(SECTION)) * 16) + i32::from(memory.ram(COLUMN) & 15);
         let rows = ColumnRows::new(&round, drawing, i32::from(memory.ram(COLUMN_ROW)));
         Self {
@@ -262,6 +306,8 @@ impl<'a> View<'a> {
 /// The round being played: its tables, as the game's RAM points to them, in PRG-ROM.
 struct Round<'a> {
     prg_rom: &'a [u8],
+    /// The build's tables past the round's own.
+    places: &'a Places,
     /// `$1A`-`$27`: sections, screens, structures, top parts, bottom parts, metatiles,
     /// attributes.
     tables: [u16; 7],
@@ -270,7 +316,7 @@ struct Round<'a> {
 }
 
 impl<'a> Round<'a> {
-    fn new(memory: &DecoderMemory<'a>) -> Self {
+    fn new(memory: &DecoderMemory<'a>, places: &'a Places) -> Self {
         let mut tables = [0; 7];
         for (index, table) in (0u16..).zip(tables.iter_mut()) {
             *table = u16::from_le_bytes([
@@ -280,6 +326,7 @@ impl<'a> Round<'a> {
         }
         Self {
             prg_rom: memory.prg_rom,
+            places,
             tables,
             columns: i32::from(memory.ram(SECTIONS)) * 16,
         }
@@ -348,8 +395,8 @@ impl<'a> Round<'a> {
         if slope == 0 || slope > SLOPES {
             return None;
         }
-        let mask = self.byte(u32::from(SLOPE_MASKS + u16::from(slope) - 1))?;
-        let step = self.byte(u32::from(SLOPE_STEPS + u16::from(slope) - 1))?;
+        let mask = self.byte(u32::from(self.places.slope_masks + u16::from(slope) - 1))?;
+        let step = self.byte(u32::from(self.places.slope_steps + u16::from(slope) - 1))?;
         #[allow(clippy::cast_possible_wrap)] // A signed step.
         Some((i32::from(mask), i32::from(step as i8)))
     }
@@ -421,7 +468,10 @@ impl View<'_> {
             return Some(tables);
         }
         let style = u32::from(memory.ram(0x008E));
-        let palette = self.round.byte(PLATFORM_PALETTES + style)? & 3;
+        let palette = self
+            .round
+            .byte(self.round.places.platform_palettes + style)?
+            & 3;
         Some((tile, palette))
     }
 
@@ -547,12 +597,9 @@ struct Platform {
     palette: u8,
 }
 
-/// The platforms' kind, the tiles and sub-palettes of each style (`$8E`), the third of the
-/// ground's y they take (by `$2B`).
+/// The platforms' kind (their tiles and sub-palettes by style, `$8E`, and the third of the
+/// ground's y they take, by `$2B`, are the build's `Places`).
 const PLATFORM_KIND: u8 = 0x3B;
-const PLATFORM_TILES: u32 = 0xA80F;
-const PLATFORM_PALETTES: u32 = 0xA81F;
-const PLATFORM_LIFT: u32 = 0xA604;
 /// Their columns.
 const PLATFORM_COLUMNS: i32 = 8;
 /// The object lists: read pointers (`$7C` + list), bits left in the byte read (`$FF`: over) and
@@ -565,12 +612,11 @@ const LIST_NEXT: u16 = 0x0540;
 const LIST_AHEAD: usize = 8;
 /// How far past the column being drawn platforms are looked for.
 const PLATFORM_REACH: i32 = 48;
-/// The ground: the y, shape and part-3 section of the game's 5 parts of 128 pixels, the change of
-/// y per section (`$BF43`).
+/// The ground: the y, shape and part-3 section of the game's 5 parts of 128 pixels (the change of
+/// y per section is `Places::ground_rise`).
 const GROUND_Y: u16 = 0x0506;
 const GROUND_SHAPE: u16 = 0x050B;
 const GROUND_SECTION: u16 = 0x003B;
-const GROUND_RISE: u32 = 0xBF43;
 
 impl Platforms {
     fn new(memory: &DecoderMemory<'_>, view: &View<'_>) -> Self {
@@ -578,10 +624,11 @@ impl Platforms {
         let ram = |address: u16| memory.ram(address);
         let style = ram(0x008E);
         let byte = |address: u32| view.round.byte(address);
+        let places = view.round.places;
         let (Some(tiles_low), Some(tiles_high), Some(palette)) = (
-            byte(PLATFORM_TILES + (2 * u32::from(style))),
-            byte(PLATFORM_TILES + (2 * u32::from(style)) + 1),
-            byte(PLATFORM_PALETTES + u32::from(style)),
+            byte(places.platform_tiles + (2 * u32::from(style))),
+            byte(places.platform_tiles + (2 * u32::from(style)) + 1),
+            byte(places.platform_palettes + u32::from(style)),
         ) else {
             return Self { list };
         };
@@ -660,7 +707,9 @@ impl Platforms {
         let x = (8 * first) + 260 - scroll;
         let ground = ground_y(memory, &view.round, x)?;
         let third = ram(0x002B);
-        let lift = view.round.byte(PLATFORM_LIFT + u32::from(third))?;
+        let lift = view
+            .round
+            .byte(view.round.places.platform_lift + u32::from(third))?;
         let mut y = ground.wrapping_sub(0x10).wrapping_add(lift);
         if y & 7 >= 4 {
             y = y.wrapping_add(3);
@@ -719,7 +768,7 @@ fn ground_y(memory: &DecoderMemory<'_>, round: &Round<'_>, x: i32) -> Option<u8>
                     return None;
                 }
                 let rise = (round.section(section, 1)? >> 2) & 7;
-                y = y.wrapping_add(round.byte(GROUND_RISE + u32::from(rise))?);
+                y = y.wrapping_add(round.byte(round.places.ground_rise + u32::from(rise))?);
                 shape = round.section(section, 2)? & 0x0F;
             }
             (y, shape)
@@ -861,8 +910,9 @@ mod tests {
         }
         ram[usize::from(SECTIONS)] = 2;
         let at = |address: u16| usize::from(address - 0x8000);
-        prg[at(SLOPE_MASKS)..at(SLOPE_MASKS) + 6].copy_from_slice(&[7, 7, 15, 15, 15, 15]);
-        prg[at(SLOPE_STEPS)..at(SLOPE_STEPS) + 6].copy_from_slice(&[0xFE, 2, 0xFC, 4, 0xF8, 8]);
+        let (masks, steps) = (USA.places.slope_masks, USA.places.slope_steps);
+        prg[at(masks)..at(masks) + 6].copy_from_slice(&[7, 7, 15, 15, 15, 15]);
+        prg[at(steps)..at(steps) + 6].copy_from_slice(&[0xFE, 2, 0xFC, 4, 0xF8, 8]);
         // Section 0: screen 1, flat; section 1: screen 0, slope 2 (2 rows down every 8 columns).
         prg[at(0x9000)..at(0x9006)].copy_from_slice(&[1 << 2, 0, 0, 0, 2 << 5, 0]);
         // Screen 1: structures 3, 0, 0, 0 (six bits each, the first in the high bits).
@@ -896,7 +946,7 @@ mod tests {
     #[test]
     fn a_column_is_56_tiles_of_its_structure_s_metatiles() {
         let (prg, ram) = round_image();
-        let round = Round::new(&memory(&prg, &ram));
+        let round = Round::new(&memory(&prg, &ram), &USA.places);
         // World column 1 is column 1 of structure 3 (the first of screen 1).
         assert_eq!(
             round.tile(1, 0),
@@ -963,7 +1013,7 @@ mod tests {
     #[test]
     fn slopes_move_the_rows_of_the_columns() {
         let (prg, ram) = round_image();
-        let round = Round::new(&memory(&prg, &ram));
+        let round = Round::new(&memory(&prg, &ram), &USA.places);
         // The column being drawn is world column 10, at row 100; section 1 (from 16) moves the
         // row by 2 at columns 16 and 24.
         let rows = ColumnRows::new(&round, 10, 100);

@@ -20,7 +20,7 @@
 //! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's execution zone at `$2000` (`boot_zone`), the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
 //! | Castlevania (Europe) | the same, PAL | the USA hack's pack built for the European code (`cvwide`, `tools/build.py --pack`), in the execution zone |
 //! | Akumajou Dracula (Japan) | the same | the USA hack's pack built for the Japanese code (`cvwide`, `tools/build.py --pack`), in the execution zone |
-//! | Adventure Island (USA) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`aiwide`, `tools/build.py --pack`) |
+//! | Adventure Island (USA), Classic (Europe), Takahashi Meijin no Bouken-jima (Japan) and Kiddy Sun in Fantasia (Asia) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the ghosts, the previews, the two aids), the ROM keeping its size; the European one the same for PAL, the Japanese one built for its code, the Asian one the Japanese one but for its NMI's place, without the level selector (`aiwide`, `tools/build.py --pack`) |
 //! | Excitebike (Japan, USA), and (Europe) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the settings, the riders in the margins), the ROM keeping its size; the European one the same for PAL (`excitebikewide`, `tools/build.py --pack`) |
 //! | Final Fantasy (USA) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ff1wide`, `tools/build.py --pack`) |
 //! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
@@ -149,6 +149,12 @@ pub const CASTLEVANIA_PC10: &str = "Castlevania (PlayChoice-10) widescreen";
 pub const AKUMAJOU_DRACULA_JAPAN: &str = "Akumajou Dracula (Japan) widescreen";
 /// Name of the Adventure Island (USA) widescreen patch (advanced mode).
 pub const ADVENTURE_ISLAND_USA: &str = "Adventure Island (USA) widescreen";
+/// Name of the Adventure Island Classic (Europe) widescreen patch (advanced mode).
+pub const ADVENTURE_ISLAND_EUROPE: &str = "Adventure Island Classic (Europe) widescreen";
+/// Name of the Takahashi Meijin no Bouken-jima (Japan) widescreen patch (advanced mode).
+pub const ADVENTURE_ISLAND_JAPAN: &str = "Takahashi Meijin no Bouken-jima (Japan) widescreen";
+/// Name of the Kiddy Sun in Fantasia (Asia) widescreen patch (advanced mode).
+pub const ADVENTURE_ISLAND_KIDDY_SUN: &str = "Kiddy Sun in Fantasia (Asia) widescreen";
 /// Name of the Excitebike (Japan, USA) widescreen patch (advanced mode).
 pub const EXCITEBIKE: &str = "Excitebike (Japan, USA) widescreen";
 /// Name of the Excitebike (Europe) widescreen patch (advanced mode).
@@ -195,7 +201,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 47] = [
+pub const PATCHES: [BuiltinPatch; 50] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -737,47 +743,84 @@ pub const PATCHES: [BuiltinPatch; 47] = [
         game: "Adventure Island",
         rom_name: "Adventure Island (USA)",
         source_crc: 0xF8A7_13BE,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core (its aids need the hack's code: they stay with the
-        // widescreen).
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in groups (the sprites, the ghosts, the previews, and the two
+        // aids, which need the hack's code; `aiwide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/adventure-island-usa-widescreen.zxpk"),
-        options: &[
-            // Testing aids: Select on the title screen goes through every round; no injury from
-            // the enemies (falls, the water and hunger still kill).
-            HackOption {
-                key: "level_select",
-                label: "Level select (Select on the title screen)",
-                label_fr: "Sélecteur de niveau (Select sur l'écran titre)",
-                bit: 0,
-                default: false,
-            },
-            HackOption {
-                key: "invincible",
-                label: "Invincible",
-                label_fr: "Invincible",
-                bit: 1,
-                default: false,
-            },
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 2,
-                default: true,
-            },
-        ],
+        options: ADVENTURE_ISLAND_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the sprites and objects.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on.
-        boot_window: Some((0x80, 0x00)),
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
         boot_window_keeps_prg_ram: false,
-        boot_zone: false,
-        zone_data: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The main loop's wait for the NMI: LDA $0B / BNE.
         idle_loop: Some((0xB759, 0xB75C)),
+    },
+    BuiltinPatch {
+        name: ADVENTURE_ISLAND_EUROPE,
+        game: "Adventure Island",
+        rom_name: "Adventure Island Classic (Europe)",
+        source_crc: 0x8686_7830,
+        // The same pack for PAL: the European code is the same at the same places.
+        bps: include_bytes!("../patches/adventure-island-europe-widescreen.zxpk"),
+        options: ADVENTURE_ISLAND_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the sprites and objects.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The main loop's wait for the NMI: LDA $0B / BNE.
+        idle_loop: Some((0xB759, 0xB75C)),
+    },
+    BuiltinPatch {
+        name: ADVENTURE_ISLAND_JAPAN,
+        game: "Adventure Island",
+        rom_name: "Takahashi Meijin no Bouken-jima (Japan)",
+        source_crc: 0x6A45_7A43,
+        // The USA hack built for the Japanese code (`aiwide`, -D JAPAN: the same code and RAM,
+        // moved).
+        bps: include_bytes!("../patches/adventure-island-japan-widescreen.zxpk"),
+        options: ADVENTURE_ISLAND_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the sprites and objects.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The main loop's wait for the NMI: LDA $0B / BNE.
+        idle_loop: Some((0xB6ED, 0xB6F0)),
+    },
+    BuiltinPatch {
+        name: ADVENTURE_ISLAND_KIDDY_SUN,
+        game: "Adventure Island",
+        rom_name: "Kiddy Sun in Fantasia (Asia)",
+        source_crc: 0x6230_20FB,
+        // The Japanese pack but for the NMI's place (4 bytes earlier) and the level selector, its
+        // title screen being its own (`aiwide`, `tools/build.py --pack`).
+        bps: include_bytes!("../patches/adventure-island-kiddy-sun-widescreen.zxpk"),
+        options: ADVENTURE_ISLAND_KIDDY_SUN_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the sprites and objects.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The main loop's wait for the NMI: LDA $0B / BNE.
+        idle_loop: Some((0xB6ED, 0xB6F0)),
     },
     BuiltinPatch {
         name: EXCITEBIKE,
@@ -1385,6 +1428,54 @@ const MEGAMAN2_OPTIONS: &[HackOption] = &[
         default: true,
     },
     // A testing aid: no damage, spikes harmless (pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Adventure Island packs: testing aids, off by default, and the overclock.
+const ADVENTURE_ISLAND_OPTIONS: &[HackOption] = &[
+    // Testing aids: Select on the title screen goes through every round; no injury from
+    // the enemies (falls, the water and hunger still kill).
+    HackOption {
+        key: "level_select",
+        label: "Level select (Select on the title screen)",
+        label_fr: "Sélecteur de niveau (Select sur l'écran titre)",
+        bit: 0,
+        default: false,
+    },
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Kiddy Sun in Fantasia pack: its title screen is its own (no level selector).
+const ADVENTURE_ISLAND_KIDDY_SUN_OPTIONS: &[HackOption] = &[
+    // A testing aid: no injury from the enemies (falls, the water and hunger still kill).
     HackOption {
         key: "invincible",
         label: "Invincible",
