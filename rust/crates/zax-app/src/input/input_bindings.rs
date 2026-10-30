@@ -3,7 +3,8 @@
 
 use super::binding_set::BindingSet;
 use super::default_bindings;
-use super::input_action::PLAYER_COUNT;
+use super::input_action::{InputAction, PLAYER_COUNT};
+use zax_platform::input::{standard_gamepad, PhysicalControl};
 
 /// The keyboards, the remembered gamepads and the pad each player used last.
 #[derive(Debug, Clone)]
@@ -14,8 +15,8 @@ pub struct InputBindings {
     structure_revision: u64,
     /// Whether the pads get the handheld defaults (`default_bindings::handheld_gamepad_set`).
     handheld: bool,
-    /// Whether those defaults are the desktop's (`default_bindings::create_desktop_console_gamepad`):
-    /// the handheld's with the rollback on the right stick's click.
+    /// Whether those defaults go by the positions of a handheld's buttons rather than by their
+    /// labels (the desktop, `default_bindings::create_desktop_console_gamepad`).
     positional: bool,
 }
 
@@ -70,17 +71,23 @@ impl InputBindings {
     }
 
     /// Gives the pads the defaults of the desktop's console mode from now on: those of a
-    /// handheld, NES A and B on the pad's A and B, the rollback on the right stick's click (owner
-    /// request). A pad whose saved set is still a default of an earlier version (the desktop's,
-    /// the handheld's, or the console's with the face buttons at a handheld's places) gets them at
-    /// once; a set the player changed is kept.
+    /// handheld, the face buttons where a handheld has them, the rollback on the right stick's
+    /// click (owner request). A pad whose saved set is still a default of an earlier version (the
+    /// desktop's, the handheld's, the console's without the rollback, or the one that had NES A
+    /// and B on the pad's A and B) gets them at once; a set the player changed is kept.
     pub fn use_desktop_console_defaults(&mut self) {
         self.handheld = true;
         self.positional = true;
+        let mut by_labels = default_bindings::create_handheld_gamepad(true);
+        by_labels.set_action(
+            InputAction::ROLL_BACK,
+            PhysicalControl::button(standard_gamepad::RIGHT_STICK),
+        );
         let former = [
             default_bindings::create_gamepad(true),
             default_bindings::create_handheld_gamepad(true),
             default_bindings::create_former_desktop_console_gamepad(true),
+            by_labels,
         ];
         let console = default_bindings::create_desktop_console_gamepad(true);
         for (_, set) in &mut self.gamepads {
