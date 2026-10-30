@@ -1,6 +1,6 @@
 # Hack packs
 
-Status: Ninja Gaiden III converted, see section 7. Branch `hack-rewrite`.
+Status: Excitebike converted, see section 7. Branch `hack-rewrite`.
 
 ## 1. Why
 
@@ -267,7 +267,10 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   its NTSC twin); 69 of a pool of 100 ROMs take a whole pack, 10 more the core. Ninja Gaiden
   III too (`docs/hacks/ng3/WIDESCREEN-HACK.md`): its code from the 2 KiB window to the zone
   fantôme, two groups (core, enemies) with checks; the USA pack and Ninja Ryuuken Den III
-  (Japan)'s own (the same code, moved by a few bytes); 42 of its 45 ROMs take a whole pack. A "dirty" iNES header (bytes 12 to 15 not
+  (Japan)'s own (the same code, moved by a few bytes); 42 of its 45 ROMs take a whole pack.
+  Excitebike too (`docs/hacks/excitebike/WIDESCREEN-HACK.md`): its code from the window to the
+  zone fantôme, two groups (core, riders) with checks, NROM, MMC1 and MMC3; the pack and the
+  European one, the same code for PAL; 63 of its 68 ROMs take a whole pack. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its

@@ -1,4 +1,4 @@
-//! Excitebike (Japan, USA): the margins of a race, from the track as the game's own routine lays
+//! Excitebike (Japan, USA) and (Europe): the margins of a race, from the track as the game's own routine lays
 //! it out.
 //!
 //! The screen is the stands, the sky with its signs and the grass above the track (tile rows
@@ -33,6 +33,9 @@ pub struct Excitebike;
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x49AE_B3A6;
+/// The same of Excitebike (Europe): its code and tracks at the same places (a table of speeds
+/// differs).
+pub const SOURCE_CRC_EUROPE: u32 = 0x8A0C_7337;
 
 /// The routine that draws the track's next column, when `$EB` reaches `$E0`.
 const DRAW_COLUMN: u16 = 0xF4FF;

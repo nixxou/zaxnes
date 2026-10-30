@@ -35,15 +35,26 @@ accordingly when it applies the patch.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/excitebike-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, NROM, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's memory,
-which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with the game's
-bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank added,
-nothing moved or copied). The game has no testing aid. The BPS patch described here is kept to
-compare.
+**Hack pack.** Zaxnes ships this hack as hack packs (`tools/build.py <rom> --pack <out.zxpk>`,
+with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md`
+7.1): `excitebike-widescreen.zxpk`, NTSC, and `excitebike-europe-widescreen.zxpk`, the same for
+PAL (Excitebike (Europe), data CRC-32 `8A0C7337`, has the same code at the same places: 17 bytes
+differ, a table of speeds). The packs are format 2, written by Zaxnes' shared builder
+(`hackpack.py`): NROM, and MMC1 and MMC3 for the ROM hacks that put the game on those mappers, each
+hook a 16 KiB bank and a CPU address with the game's bytes it replaces, checked and applied by
+Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). `src/wide.s` is assembled
+with `-D PACK` for `$2000`: the zone fantôme, which Zaxnes shows to instruction fetches only from
+power-on, the extension unlocked; its registers and RAM are at `$3000`-`$3FFF` (widescreen MMC5:
+`$5000`-`$5FFF` stays the cartridge's), no window (`$5007` = `$02`). The code reads no data of its
+own (the game's data reads at `$2000`-`$3FFF` reach the PPU; the columns' offsets are read from
+the game). The widescreen is in two groups: "core" (Base: the settings, in the NMI) and "riders"
+(Riders in the margins, needing it), with checks of the game's code the hack relies on: the
+routine that hides a column and the columns' offsets (`$E4AD`, `$D8DC`). Over the 68 ROMs of the
+game in a GoodNES-style set (the Japanese and American, European, Virtual Console, Switch Online,
+GameCube and PlayChoice-10 dumps, translations and ROM hacks), 63 take a whole pack; the others
+are the VS. System versions and two Polish translations combined with a ROM hack. 3000 frames of
+each with scripted inputs (a race of selection A) play as without the pack. The game has no
+testing aid. The BPS patch described here is kept to compare.
 
 ## 2. What the game does, and what changes
 
@@ -142,6 +153,13 @@ from `tools/doc_body.md` and the sources.
 ; both copies (tools/build.py). The background of the margins is not the hack's work: Zaxnes'
 ; margin decoder draws it.
 ;
+; In a Zaxnes hack pack (-D PACK) the code is assembled for $2000 instead: the zone fantôme, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
+; reads there still reach the PPU, so the code reads no data of its own. Its registers and RAM are
+; at $3000-$3FFF, which the zone holds for its own instructions (widescreen MMC5: $5000-$5FFF stays
+; the cartridge's), and no window is opened. Excitebike (Europe) has the same code at the same
+; places.
+;
 ;  * the riders past the screen's edges show in the margins: the game keeps them up to some 112
 ;    pixels past an edge and hides their sprites there; the hack gives a column of their sprites
 ;    within the wide view the high byte of its x instead;
@@ -152,22 +170,27 @@ from `tools/doc_body.md` and the sources.
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, bit 4 window to $7FFF
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1 sprites free of the extents, bit 4 window to $7FFF
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
 MAX_MARGIN      = 248           ; the most the extension shows sprites in
 
-; Extension RAM ($5200-$57FF; $5800 up is the window).
-WV_M            = $5200         ; margin of this frame
-WV_T0           = $5201         ; scratch
-WV_COLUMN       = $5202         ; the rider's sprite column at hand
-WV_RIDER        = $5203         ; the rider at hand
+; Extension RAM (EXT + $200 to EXT + $7FF; in the BPS build $5800 up is the window).
+WV_M            = EXT + $200    ; margin of this frame
+WV_T0           = EXT + $201    ; scratch
+WV_COLUMN       = EXT + $202    ; the rider's sprite column at hand
+WV_RIDER        = EXT + $203    ; the rider at hand
 
 ; The game.
 OAM_POINTER     = $00           ; the column's sprites (sub_E4AD: $07 + its offset, page 2)
@@ -185,7 +208,17 @@ COLUMN_OFFSETS  = $D8DC         ; + column: the column's first sprite from the r
 OPT_NO_SLOWDOWN = $04
 NO_SLOWDOWN_LINES = 255
 
+; The layout: sprites free of the extents; in the BPS build the window on over $6000-$7FFF too.
+.ifdef PACK
+WIDE_LAYOUT_SET = $02
+.else
+WIDE_LAYOUT_SET = $12
+.endif
+
 .segment "CODE"
+.ifdef PACK
+.org $2000
+.endif
 
 ; ---------------------------------------------------------------------------- ;
 ; NMI ($C24B, in place of LDA #$00 / STA $2003): the extension's settings for the frame.
@@ -200,8 +233,8 @@ wide_nmi:
     LDA     #$00                        ; no nametable columns: the decoder draws the background
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$12                        ; sprites free of those extents, the window on over
-    STA     WIDE_LAYOUT                 ; $6000-$7FFF
+    LDA     #WIDE_LAYOUT_SET            ; sprites free of those extents
+    STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS                ; no slowdown (option bit 2)
     AND     #OPT_NO_SLOWDOWN
     BEQ     @overclock
@@ -215,7 +248,7 @@ wide_nmi:
 ; ---------------------------------------------------------------------------- ;
 ; The riders' sprite columns past the screen ($E492, in place of JSR sub_E49B; X the rider): the
 ; game hides each column whose page is not the screen's; within the wide view the hack shows it,
-; the high byte of its x ($5100 + its sprites' OAM offsets) as its page says (page - 1).
+; the high byte of its x (WIDE_SPRHI + its sprites' OAM offsets) as its page says (page - 1).
 wide_rider_columns:
     LDY     #$00
 @column:
@@ -298,7 +331,11 @@ wide_x_shown:
     RTS
 
 wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
 .assert wide_end <= $8000, error, "widescreen code past the window"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -307,7 +344,7 @@ wide_end:
 """Builds the Excitebike (Japan, USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Excitebike (Japan, USA) (En).nes> [out.bps]
-       python -I tools/build.py <Excitebike (Japan, USA) (En).nes> --pack <out.zxpk>
+       python -I tools/build.py <Excitebike (Japan, USA) (En) or (Europe).nes> --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank, which the widescreen extension's PRG window shows at $5800-$7FFF (Zaxnes opens it at
@@ -320,11 +357,14 @@ Usage: python -I tools/build.py <Excitebike (Japan, USA) (En).nes> [out.bps]
    without iNES header; the copy and the CHR-ROM are copied from the player's ROM).
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
-(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, NROM,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the code (its used part) for the
-extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in the
-PRG-ROM, the ROM keeping its size. The game's 16 KiB stay as they are (NROM mirrors them at $C000
-itself); it has no testing aid.
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NROM, and the
+ROM hacks that put the game on MMC1 or MMC3, each hook a 16 KiB bank and a CPU address, the
+widescreen in two groups ("core", Base: the settings; "riders", needing it: the riders in the
+margins) with checks of the game's code the hack relies on; src/wide.s assembled with PACK for
+$2000, the zone fantôme, which Zaxnes shows to instruction fetches from power-on, the extension
+unlocked; the hooks as offsets in the PRG-ROM, the ROM keeping its size. The game's 16 KiB stay as
+they are (NROM mirrors them at $C000 itself); it has no testing aid. Excitebike (Europe), the same
+code at the same places, gets the same pack for PAL.
 """
 
 import os
@@ -334,10 +374,13 @@ import sys
 import zlib
 
 SOURCE_CRC = 0x49AEB3A6
+EUROPE = 0x8A0C7337
 PRG_SIZE = 0x4000
 CHR_SIZE = 0x2000
 BANK_SIZE = 0x4000
 CODE_START = 0x5800
+PACK_START = 0x2000             # the pack's code: the zone fantôme, below the extension at $3000
+PACK_SIZE = 0x1000
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -376,19 +419,20 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(pack=False):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if pack else (CODE_START, BANK_SIZE)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${BANK_SIZE:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
-                   check=True)
+    subprocess.run(tool('ca65') + ['-g'] + (['-D', 'PACK'] if pack else [])
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)], check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
     sym = {}
@@ -405,24 +449,51 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
-def pack(data, code, sym, out):
+# The riders group: their sprite columns past the screen.
+RIDERS = {0xE492}
+
+# The game's code the hack's code relies on, by group: (address, length), checked by Zaxnes to be
+# the reference ROM's bytes. Riders: the routine that hides a column, and the columns' first
+# sprites from the rider's (0, 12, 24), read from the game.
+CHECKS = {
+    'riders': [(0xE4AD, 3), (0xD8DC, 3)],
+}
+
+
+def pack(data, crc, out):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(0,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    code, sym = assemble(pack=True)
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    europe = crc == EUROPE
+    name = 'Excitebike (Europe)' if europe else 'Excitebike (Japan, USA)'
+    pack = hackpack.Pack(name + ' widescreen', code[:used], region='pal' if europe else 'ntsc',
+                         mappers=(0, 1, 4))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'riders': widescreen.group('riders', requires=['core'], label='Riders in the margins',
+                                   label_fr='Pilotes dans les marges'),
+    }
+
+    def place(address):
+        return pack_place(address & (PRG_SIZE - 1), address)
+
+    for group, checks in CHECKS.items():
+        for address, length in checks:
+            groups[group].check(*place(address), length)
     for address, original, new in hooks(sym):
         offset = address & (PRG_SIZE - 1)
         assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
-        core.hook(*pack_place(offset, address), original, bytes(new))
-    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    pack.name = 'Excitebike (Japan, USA) widescreen'
-    pack.code = code[:used]
-    result = pack.build(data, 0x4000)
+        groups['riders' if address in RIDERS else 'core'].hook(*place(address), original, bytes(new))
+    result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, '
+          f'{" + ".join(str(len(group.hooks)) for group in groups.values())} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -430,13 +501,15 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = image[header:header + PRG_SIZE + CHR_SIZE]
-    assert zlib.crc32(data) == SOURCE_CRC, 'not Excitebike (Japan, USA)'
+    crc = zlib.crc32(data)
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        assert crc in (SOURCE_CRC, EUROPE), 'not Excitebike (Japan, USA) or (Europe)'
+        pack(bytes(data), crc, sys.argv[3])
+        return
+    assert crc == SOURCE_CRC, 'not Excitebike (Japan, USA)'
 
     code, sym = assemble()
     assert len(code) == BANK_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), code, sym, sys.argv[3])
-        return
     prg = bytearray(data[:PRG_SIZE])
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for address, original, new in hooks(sym):

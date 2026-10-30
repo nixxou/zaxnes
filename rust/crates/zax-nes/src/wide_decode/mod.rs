@@ -258,7 +258,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         castlevania::SOURCE_CRC_EUROPE => Some(&castlevania::EUROPE),
         castlevania::SOURCE_CRC_JAPAN => Some(&castlevania::JAPAN),
         castlevania::SOURCE_CRC_PC10 => Some(&castlevania::PC10),
-        excitebike::SOURCE_CRC => Some(&excitebike::Excitebike),
+        excitebike::SOURCE_CRC | excitebike::SOURCE_CRC_EUROPE => Some(&excitebike::Excitebike),
         ff1::SOURCE_CRC => Some(&ff1::FinalFantasy),
         metalforce::SOURCE_CRC => Some(&metalforce::MetalForce),
         blastermaster::SOURCE_CRC => Some(&blastermaster::BlasterMaster),
@@ -294,7 +294,9 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         | crate::builtin_patches::SMB1_EUROPE
         | crate::builtin_patches::SMB1_EUROPE_NTSC => Some(&smb1::SuperMarioBros),
         crate::builtin_patches::ADVENTURE_ISLAND_USA => Some(&adventure_island::AdventureIsland),
-        crate::builtin_patches::EXCITEBIKE => Some(&excitebike::Excitebike),
+        crate::builtin_patches::EXCITEBIKE | crate::builtin_patches::EXCITEBIKE_EUROPE => {
+            Some(&excitebike::Excitebike)
+        }
         crate::builtin_patches::NG3_USA | crate::builtin_patches::NG3_JAPAN => {
             Some(&ng3::NinjaGaiden3)
         }
