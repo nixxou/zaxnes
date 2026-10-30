@@ -116,6 +116,7 @@ fn category_of(theme: SettingTheme) -> &'static str {
         SettingTheme::Audio => "Audio",
         SettingTheme::Input => "Input",
         SettingTheme::Interface => "Interface",
+        SettingTheme::Achievements => "Achievements",
         _ => "Advanced",
     }
 }

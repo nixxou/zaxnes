@@ -464,6 +464,11 @@ impl ImguiFrontend {
                 debug_overlay::draw(ui, frame.host, self.ui.chrome_height, debug);
             }
         }
+        // RetroAchievements' pop-ups and indicators, over either interface (Rust-only).
+        let top = if shown { 0.0 } else { self.ui.chrome_height };
+        super::achievements_view::draw_overlay(ui, &frame.host.achievements, top);
+        self.pictures
+            .extend(frame.host.achievements.take_picture_updates());
         if leave_console {
             self.switch_console(frame.host, false, false);
         }

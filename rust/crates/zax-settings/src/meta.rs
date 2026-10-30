@@ -72,6 +72,8 @@ pub enum SettingTheme {
     Audio,
     Input,
     Interface,
+    /// RetroAchievements (Rust-only).
+    Achievements,
     /// VR, out of scope (REQ-PERS-011).
     Vr,
     /// Profile editor, out of scope (REQ-PERS-016).

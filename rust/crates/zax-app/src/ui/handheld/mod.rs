@@ -5,6 +5,7 @@
 //! In the console mode of the desktop the mouse acts too, through the same presses
 //! ([`pointer`]).
 
+pub mod achievements;
 pub mod compat;
 pub mod defaults;
 mod draw;
@@ -22,7 +23,7 @@ pub mod profile_list;
 pub mod rom_list;
 pub mod states;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 
 use zax_platform::ui_image::{PictureUpdate, UiPicture, FIRST_PICTURE_ID};
@@ -31,6 +32,9 @@ use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
 
+use self::achievements::{
+    AchievementsCommand, AchievementsModel, Field, KeyboardCommand, KeyboardModel,
+};
 use self::exit_combo::{ComboEvent, ExitCombo};
 use self::game_options::{GameOptionsCommand, GameOptionsModel};
 use self::hacks::{HacksCommand, HacksModel, HacksView};
@@ -81,6 +85,12 @@ pub enum Screen {
     Overlay,
     /// The save state slots, to save or to load (from the in-game menu).
     States,
+    /// RetroAchievements' switches and account (Rust-only), from the options.
+    Achievements,
+    /// The keyboard on the screen, typing a field of the RetroAchievements screen.
+    Keyboard,
+    /// The game's achievements, from the RetroAchievements screen.
+    AchievementList,
     /// The game itself, with no interface.
     InGame,
 }
@@ -148,6 +158,14 @@ pub struct HandheldUi {
     body_font: Option<imgui::FontId>,
     /// Where the rows and the hints of the last drawn screen lie, for the mouse.
     zones: RefCell<Vec<Zone>>,
+    /// The RetroAchievements screen.
+    achievements: AchievementsModel,
+    /// The keyboard on the screen, while it types.
+    keyboard: Option<KeyboardModel>,
+    /// How far the list of the game's achievements is scrolled, in pixels, and how far it can
+    /// go (known once drawn).
+    list_scroll: f32,
+    list_scroll_max: Cell<f32>,
 }
 
 /// L2 in game (Rust-only, owner request): held, it keeps the camera's angles and distance; a
@@ -230,6 +248,10 @@ impl HandheldUi {
             pictures: Vec::new(),
             confirming: false,
             zones: RefCell::new(Vec::new()),
+            achievements: AchievementsModel::new(),
+            keyboard: None,
+            list_scroll: 0.0,
+            list_scroll_max: Cell::new(0.0),
         };
         ui.refresh_roms(host);
         ui
@@ -801,6 +823,9 @@ impl HandheldUi {
             }
             Screen::Controls => self.press_controls(button, frame),
             Screen::Overscan => self.press_overscan(button, frame.host),
+            Screen::Achievements => self.press_achievements(button, frame.host),
+            Screen::Keyboard => self.press_keyboard(button),
+            Screen::AchievementList => self.press_achievement_list(button),
             Screen::Overlay => {
                 if let Some(command) = self.overlay.handle(button) {
                     self.carry_out_overlay(command, frame.host);
@@ -1034,7 +1059,12 @@ impl HandheldUi {
     fn open_options(&mut self, host: &AppHost) {
         if !matches!(
             self.screen,
-            Screen::Options | Screen::Controls | Screen::Overscan
+            Screen::Options
+                | Screen::Controls
+                | Screen::Overscan
+                | Screen::Achievements
+                | Screen::Keyboard
+                | Screen::AchievementList
         ) {
             let playing = host.current_game_id().is_some();
             self.return_to = if playing {
@@ -1057,11 +1087,100 @@ impl HandheldUi {
                 self.overscan = OverscanModel::new(false);
                 self.screen = Screen::Overscan;
             }
+            OptionsCommand::OpenAchievements => {
+                if self.achievements.username.is_empty() {
+                    frame
+                        .host
+                        .settings()
+                        .get(SettingId::AchievementsUsername)
+                        .as_text()
+                        .clone_into(&mut self.achievements.username);
+                }
+                self.screen = Screen::Achievements;
+            }
             OptionsCommand::StepCamera(step) => {
                 let preset = self.overlay.step_camera(step);
                 apply_camera(preset, frame.host);
             }
         }
+    }
+
+    /// A press on the RetroAchievements screen.
+    fn press_achievements(&mut self, button: PadButton, host: &mut AppHost) {
+        let signed_in = matches!(
+            host.achievements.account(),
+            crate::achievements::Account::SignedIn { .. }
+        );
+        let model = &mut self.achievements;
+        let command = host.update_settings(|settings| model.handle(button, settings, signed_in));
+        match command {
+            Some(AchievementsCommand::Close) => self.screen = Screen::Options,
+            Some(AchievementsCommand::Edit(field)) => {
+                let text = match field {
+                    Field::Username => self.achievements.username.clone(),
+                    Field::Password => self.achievements.password.clone(),
+                };
+                self.keyboard = Some(KeyboardModel::new(field, &text));
+                self.screen = Screen::Keyboard;
+            }
+            Some(AchievementsCommand::SignIn) => {
+                let username = self.achievements.username.trim().to_owned();
+                if username.is_empty() || self.achievements.password.is_empty() {
+                    return;
+                }
+                let password = std::mem::take(&mut self.achievements.password);
+                host.sign_in_to_achievements(&username, &password);
+            }
+            Some(AchievementsCommand::SignOut) => host.sign_out_of_achievements(),
+            Some(AchievementsCommand::OpenList) => {
+                self.list_scroll = 0.0;
+                self.screen = Screen::AchievementList;
+            }
+            None => {}
+        }
+    }
+
+    /// A press on the keyboard: the text goes to its field when done.
+    fn press_keyboard(&mut self, button: PadButton) {
+        let Some(keyboard) = self.keyboard.as_mut() else {
+            self.screen = Screen::Achievements;
+            return;
+        };
+        let field = keyboard.field();
+        match keyboard.handle(button) {
+            Some(KeyboardCommand::Done(text)) => {
+                match field {
+                    Field::Username => self.achievements.username = text,
+                    Field::Password => self.achievements.password = text,
+                }
+                self.keyboard = None;
+                self.screen = Screen::Achievements;
+            }
+            Some(KeyboardCommand::Cancel) => {
+                self.keyboard = None;
+                self.screen = Screen::Achievements;
+            }
+            None => {}
+        }
+    }
+
+    /// A press on the list of the game's achievements: up and down scroll a row, L and R a
+    /// page.
+    fn press_achievement_list(&mut self, button: PadButton) {
+        let row = self.metrics.row;
+        let page = row * 5.0;
+        let step = match button {
+            PadButton::Up => -row,
+            PadButton::Down => row,
+            PadButton::L1 | PadButton::Left => -page,
+            PadButton::R1 | PadButton::Right => page,
+            PadButton::B | PadButton::Menu => {
+                self.screen = Screen::Achievements;
+                return;
+            }
+            _ => return,
+        };
+        self.list_scroll = (self.list_scroll + step).clamp(0.0, self.list_scroll_max.get());
     }
 
     /// A press on the overscan's screen: a game's values go to its options, the others to the
@@ -1288,6 +1407,15 @@ impl HandheldUi {
                 };
                 self.states = StatesModel::new(mode, 1);
                 self.screen = Screen::States;
+            }
+            Screen::Achievements | Screen::AchievementList => {
+                self.open_options_for_capture();
+                "Player".clone_into(&mut self.achievements.username);
+                self.screen = screen;
+            }
+            Screen::Keyboard => {
+                self.keyboard = Some(KeyboardModel::new(Field::Username, "Player"));
+                self.screen = Screen::Keyboard;
             }
             Screen::Home | Screen::InGame => self.screen = screen,
         }

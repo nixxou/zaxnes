@@ -5,6 +5,7 @@
 //! mixer, the session of the game being played. Commands and events are enums; the
 //! interface drives the host through [`Command`]s and reads it through [`HostEvent`]s.
 
+mod achievements;
 mod commands;
 mod game_options;
 mod games;
@@ -33,6 +34,7 @@ use super::hotkey_tracker::{HotkeyEvents, HotkeyTracker};
 use super::notification_center::NotificationCenter;
 use super::rollback_history::RollbackHistory;
 use super::speed_setting;
+use crate::achievements::AchievementSystem;
 use crate::audio::AudioMixer;
 use crate::frame_profiler::{Stage, StageClock, StageTimes};
 use crate::game_session::{GameSession, SessionEvent, SessionFrame};
@@ -228,6 +230,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     hack_compat: std::cell::RefCell<crate::persistence::hack_compat_cache::HackCompatCache>,
     /// The Zapper.
     pub zapper: ZapperState,
+    /// RetroAchievements (Rust-only, owner request), softcore.
+    pub achievements: AchievementSystem,
     /// How far the frame clock catches up when the command line or the environment says so;
     /// `None` follows the `emu.catch_up` setting (Rust-only).
     pub catch_up: Option<CatchUp>,
@@ -338,6 +342,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             hack_compat: std::cell::RefCell::new(hack_compat),
             zapper: ZapperState::new(),
+            achievements: AchievementSystem::new(&format!("Zaxnes/{}", env!("CARGO_PKG_VERSION"))),
             catch_up: None,
             defer_conversion: false,
         };
@@ -347,6 +352,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let language = host.settings.language();
         host.events.push(HostEvent::LanguageChanged(language));
         host.apply_speed();
+        host.apply_achievement_settings();
         host.publish_state();
         host
     }
@@ -628,6 +634,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         // The core the emulation thread held during the last drawing comes back before anything
         // of this tick can read or change it: finished, or only captured with emulation ahead.
         self.take_core_back();
+        self.update_achievements(real_seconds);
         self.elapsed += real_seconds;
         // The notification timer is real time: neither the pause nor the game speed affect it
         // (REQ-UI-080).
@@ -794,6 +801,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         for round in 0..due {
             // The frame of the previous round comes back first.
             self.take_core_back();
+            self.evaluate_achievements();
             let Some(session) = self.session.as_mut() else {
                 break;
             };
@@ -1076,6 +1084,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 }
                 self.apply_speed();
             }
+            SettingId::AchievementsEnabled
+            | SettingId::AchievementsEncore
+            | SettingId::AchievementsUnofficial => self.apply_achievement_settings(),
             SettingId::AudioVolume | SettingId::AudioMute | SettingId::AudioBgMusic => {
                 self.publish_state();
             }
@@ -1247,6 +1258,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
         }
         if clear_current_game {
+            self.achievements.stop_game();
             self.current_game = None;
             self.game_options_rom = None;
             // No game: no slots shown (owner request).

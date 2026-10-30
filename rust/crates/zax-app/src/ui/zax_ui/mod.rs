@@ -6,6 +6,7 @@
 //! [`UiFrame`], and what it asks of the outside (a line for the log, the data folder opened in
 //! the file manager) is returned as [`UiEffect`]s for the loop to carry out.
 
+mod achievements;
 mod dialogs;
 mod hacks;
 mod key_config;
@@ -147,6 +148,8 @@ pub struct ZaxUi {
     folder_text: String,
     /// Whether the folder field has the focus (its text is then the one being typed).
     folder_editing: bool,
+    /// The RetroAchievements sign-in fields of the options.
+    sign_in: super::achievements_view::SignInForm,
 }
 
 /// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
@@ -189,6 +192,7 @@ impl ZaxUi {
             menu_hacks: None,
             folder_text: String::new(),
             folder_editing: false,
+            sign_in: super::achievements_view::SignInForm::default(),
             held_keys: Vec::new(),
             effects: Vec::new(),
         }
@@ -304,6 +308,9 @@ impl ZaxUi {
         }
         if self.state.hacks {
             self.draw_hacks(ui, frame.host);
+        }
+        if self.state.achievements {
+            self.draw_achievement_list(ui, frame.host);
         }
         // REQ-UI-110: the confirmation box is drawn last, so it sits over everything else.
         if self.state.dialog {

@@ -4,7 +4,9 @@
 //!
 //! Rust-only additions (owner request): a sixth, optional section holds a JPEG thumbnail of the
 //! 2D picture, and the header says whether the built-in hack ran, which version of it, the
-//! application version and the local date and time. Files without them still read.
+//! application version and the local date and time. Files without them still read. A seventh,
+//! optional section holds the state of the RetroAchievements under way (hit counts, measured
+//! values); the thumbnail section is then written even when empty.
 
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -107,6 +109,8 @@ pub struct SaveStateContent {
     pub conversion: Vec<u8>,
     /// A JPEG thumbnail of the 2D picture, or empty.
     pub thumbnail: Vec<u8>,
+    /// The state of the RetroAchievements under way, or empty.
+    pub achievements: Vec<u8>,
 }
 
 /// Serialises `content` into a state file.
@@ -123,7 +127,9 @@ pub fn write(content: &SaveStateContent) -> Vec<u8> {
             + content.camera.len()
             + content.conversion.len()
             + 4
-            + content.thumbnail.len(),
+            + content.thumbnail.len()
+            + 4
+            + content.achievements.len(),
     );
     file.extend_from_slice(SIGNATURE);
     file.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
@@ -137,9 +143,13 @@ pub fn write(content: &SaveStateContent) -> Vec<u8> {
         file.extend_from_slice(&section_length(section).to_le_bytes());
         file.extend_from_slice(section);
     }
-    if !content.thumbnail.is_empty() {
+    if !content.thumbnail.is_empty() || !content.achievements.is_empty() {
         file.extend_from_slice(&section_length(&content.thumbnail).to_le_bytes());
         file.extend_from_slice(&content.thumbnail);
+    }
+    if !content.achievements.is_empty() {
+        file.extend_from_slice(&section_length(&content.achievements).to_le_bytes());
+        file.extend_from_slice(&content.achievements);
     }
     file
 }
@@ -224,6 +234,11 @@ pub fn try_read(file: &[u8]) -> Option<SaveStateContent> {
     } else {
         read_section(&mut cursor)?
     };
+    let achievements = if cursor.is_empty() {
+        &[][..]
+    } else {
+        read_section(&mut cursor)?
+    };
     // Trailing bytes mean the file does not match the format it claims.
     if !cursor.is_empty() {
         return None;
@@ -242,6 +257,7 @@ pub fn try_read(file: &[u8]) -> Option<SaveStateContent> {
         camera: camera.to_vec(),
         conversion: conversion.to_vec(),
         thumbnail: thumbnail.to_vec(),
+        achievements: achievements.to_vec(),
     })
 }
 
@@ -265,10 +281,15 @@ pub fn max_file_size(core_max_state_size: usize) -> usize {
         + state_codec::RESERVED_CAPACITY
         + 4
         + MAX_THUMBNAIL_BYTES
+        + 4
+        + MAX_ACHIEVEMENTS_BYTES
 }
 
 /// Largest thumbnail section: a 320 x 240 JPEG stays far below it.
 pub const MAX_THUMBNAIL_BYTES: usize = 256 * 1024;
+
+/// Largest RetroAchievements section written: a NES set's state is a few kilobytes.
+pub const MAX_ACHIEVEMENTS_BYTES: usize = 64 * 1024;
 
 /// The JPEG thumbnail of a 2D picture of NES colour indices, 240 rows of `picture.len() / 240`
 /// pixels: wider than 4:3, the centre 320 columns only. `None` for a picture of no such size.

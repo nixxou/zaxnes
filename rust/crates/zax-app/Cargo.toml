@@ -34,6 +34,7 @@ zax-scripting = { path = "../zax-scripting" }
 zax-engine3d = { path = "../zax-engine3d" }
 zax-render = { path = "../zax-render" }
 zax-platform = { path = "../zax-platform" }
+zax-achievements = { path = "../zax-achievements" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = "2"
@@ -53,6 +54,7 @@ sys-locale = "0.3.2"
 rfd = { version = "0.17", default-features = false, features = ["xdg-portal"], optional = true }
 imgui = { version = "0.12", features = ["tables-api"] }
 jpeg-encoder = "0.7"
+png = "0.17"
 
 [dev-dependencies]
 rstest = "0.26"

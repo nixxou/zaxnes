@@ -48,6 +48,7 @@ pub(crate) fn build() -> Vec<SettingDescriptor> {
     audio_input_interface(&mut all);
     vr_editor_movie_derived(&mut all);
     reimplementation_extras(&mut all);
+    achievements(&mut all);
     all
 }
 
@@ -1488,4 +1489,50 @@ fn video_nes_palette(out: &mut Vec<SettingDescriptor>) {
         ]))
         .with_label("NES colour palette"),
     );
+}
+
+fn achievements(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): RetroAchievements, softcore only. The switches are read when a
+    // game starts; the account is the name and the token of the last sign-in (never the
+    // password), edited by the sign-in screen only. Not exposed to Lua.
+    for (id, default, label) in [
+        (
+            SettingId::AchievementsEnabled,
+            false,
+            "Enable RetroAchievements",
+        ),
+        (SettingId::AchievementsEncore, false, "Encore mode"),
+        (
+            SettingId::AchievementsUnofficial,
+            false,
+            "Test unofficial achievements",
+        ),
+        (SettingId::AchievementsSound, true, "Unlock sound"),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Bool,
+                SettingValue::Bool(default),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Achievements,
+            )
+            .with_domain(Domain::switch())
+            .with_label(label),
+        );
+    }
+    for id in [
+        SettingId::AchievementsUsername,
+        SettingId::AchievementsToken,
+    ] {
+        out.push(SettingDescriptor::new(
+            id,
+            SettingKind::Text,
+            SettingValue::from(""),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Achievements,
+        ));
+    }
 }

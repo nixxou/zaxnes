@@ -2,6 +2,7 @@
 //! and the Dear `ImGui` screens. The models draw nothing, so the tests check them without a
 //! window.
 
+pub mod achievements_view;
 pub mod commands;
 pub mod confirm_dialog;
 pub mod debug_overlay;

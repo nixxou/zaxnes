@@ -29,6 +29,8 @@ pub struct UiState {
     pub movie_note: bool,
     /// The hacks of the game in play (Rust-only).
     pub hacks: bool,
+    /// The achievements of the game in play (Rust-only).
+    pub achievements: bool,
 }
 
 impl UiState {
@@ -72,6 +74,7 @@ impl UiState {
             || self.dialog
             || self.movie_note
             || self.hacks
+            || self.achievements
     }
 
     /// Closes every window (Escape).
@@ -84,5 +87,6 @@ impl UiState {
         self.dialog = false;
         self.movie_note = false;
         self.hacks = false;
+        self.achievements = false;
     }
 }

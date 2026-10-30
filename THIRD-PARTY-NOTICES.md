@@ -46,6 +46,38 @@ suivante :
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
+### rcheevos — (c) 2018 RetroAchievements.org — licence MIT
+
+La prise en charge de RetroAchievements (`rust/crates/zax-achievements`) compile la bibliothèque
+**rcheevos** v12.5.0 (<https://github.com/RetroAchievements/rcheevos>), dont les sources utiles
+sont copiées, sans modification, dans `rust/crates/zax-achievements/rcheevos/` avec sa licence,
+la licence MIT suivante :
+
+    MIT License
+
+    Copyright (c) 2018 RetroAchievements.org
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+Les certificats racines qui servent à joindre le serveur en HTTPS viennent du paquet
+`webpki-roots` (données de Mozilla, licence CDLA-Permissive-2.0, listée plus bas).
+
 ### z2disassembly — FiendsOfTheElements — CC0 1.0
 
 Le correctif écran large de *Zelda II* que Zaxnes applique en mémoire
@@ -95,6 +127,7 @@ partie sur les travaux de l'Independent JPEG Group).
 | allocator-api2 | 0.2.21 | MIT OR Apache-2.0 |
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 |
 | ash | 0.38.0+1.3.281 | MIT OR Apache-2.0 |
+| base64 | 0.23.1 | MIT OR Apache-2.0 |
 | bit-set | 0.9.1 | Apache-2.0 OR MIT |
 | bit-vec | 0.9.1 | Apache-2.0 OR MIT |
 | bitflags | 1.3.2 | MIT/Apache-2.0 |
@@ -105,6 +138,7 @@ partie sur les travaux de l'Independent JPEG Group).
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT |
 | bytemuck_derive | 1.12.1 | Zlib OR Apache-2.0 OR MIT |
+| bytes | 1.12.1 | MIT |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
 | chlorine | 1.0.13 | Zlib OR Apache-2.0 OR MIT |
 | codespan-reporting | 0.13.1 | Apache-2.0 |
@@ -124,6 +158,7 @@ partie sur les travaux de l'Independent JPEG Group).
 | foldhash | 0.1.5 | Zlib |
 | foldhash | 0.2.0 | Zlib |
 | generic-array | 0.14.7 | MIT |
+| getrandom | 0.2.17 | MIT OR Apache-2.0 |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 |
 | glow | 0.16.0 | MIT OR Apache-2.0 OR Zlib |
 | gpu-allocator | 0.28.0 | MIT OR Apache-2.0 |
@@ -134,6 +169,8 @@ partie sur les travaux de l'Independent JPEG Group).
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
 | hexf-parse | 0.2.1 | CC0-1.0 |
+| http | 1.5.0 | MIT OR Apache-2.0 |
+| httparse | 1.10.1 | MIT OR Apache-2.0 |
 | hybrid-array | 0.4.15 | MIT OR Apache-2.0 |
 | imgui | 0.12.0 | MIT OR Apache-2.0 |
 | imgui-sys | 0.12.0 | MIT OR Apache-2.0 |
@@ -173,8 +210,12 @@ partie sur les travaux de l'Independent JPEG Group).
 | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib |
 | renderdoc-sys | 1.1.0 | MIT OR Apache-2.0 |
 | rfd | 0.17.2 | MIT |
+| ring | 0.17.14 | Apache-2.0 AND ISC |
 | rustc-hash | 1.1.0 | Apache-2.0/MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
+| rustls | 0.23.46 | Apache-2.0 OR ISC OR MIT |
+| rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
+| rustls-webpki | 0.103.16 | ISC |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
 | sdl2 | 0.38.0 | MIT |
@@ -189,6 +230,7 @@ partie sur les travaux de l'Independent JPEG Group).
 | smallvec | 1.16.3 | MIT OR Apache-2.0 |
 | spirv | 0.4.0+sdk-1.4.341.0 | Apache-2.0 |
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 |
+| subtle | 2.6.1 | BSD-3-Clause |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
 | syn | 3.0.9 | MIT OR Apache-2.0 |
 | sys-locale | 0.3.2 | MIT OR Apache-2.0 |
@@ -201,6 +243,11 @@ partie sur les travaux de l'Independent JPEG Group).
 | typenum | 1.20.1 | MIT OR Apache-2.0 |
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | unicode-width | 0.2.2 | MIT OR Apache-2.0 |
+| untrusted | 0.9.0 | ISC |
+| ureq | 3.5.0 | MIT OR Apache-2.0 |
+| ureq-proto | 0.6.5 | MIT OR Apache-2.0 |
+| utf8-zero | 0.8.1 | MIT OR Apache-2.0 |
+| webpki-roots | 1.0.11 | CDLA-Permissive-2.0 |
 | wgpu | 29.0.4 | MIT OR Apache-2.0 |
 | wgpu-core | 29.0.4 | MIT OR Apache-2.0 |
 | wgpu-core-deps-windows-linux-android | 29.0.4 | MIT OR Apache-2.0 |
@@ -221,6 +268,7 @@ partie sur les travaux de l'Independent JPEG Group).
 | windows-threading | 0.2.1 | MIT OR Apache-2.0 |
 | zerocopy | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT |
 | zerocopy-derive | 0.8.63 | BSD-2-Clause OR Apache-2.0 OR MIT |
+| zeroize | 1.9.1 | Apache-2.0 OR MIT |
 | zip | 7.4.0 | MIT |
 | zlib-rs | 0.6.8 | Zlib |
 | zmij | 1.0.23 | MIT |

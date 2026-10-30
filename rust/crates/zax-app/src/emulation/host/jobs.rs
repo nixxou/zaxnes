@@ -567,6 +567,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.fast_forward.clear();
         self.apply_speed();
         self.pacer.reset();
+        self.start_achievements(job.state.as_ref());
         self.load_progress = 1.0;
         self.set_state(EmulationState::Running);
         Step::Finished

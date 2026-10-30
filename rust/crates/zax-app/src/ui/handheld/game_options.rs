@@ -53,7 +53,9 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         OptionRow::LuaExperimental => &[SettingId::EmuLuaExperimental],
         OptionRow::Pipeline => &[SettingId::EmuPipeline],
         OptionRow::Region => &[SettingId::EmuAutoTvMode, SettingId::EmuTvMode],
-        OptionRow::Language | OptionRow::Camera | OptionRow::Controls => &[],
+        OptionRow::Language | OptionRow::Camera | OptionRow::Controls | OptionRow::Achievements => {
+            &[]
+        }
     }
 }
 

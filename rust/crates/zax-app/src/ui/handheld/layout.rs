@@ -130,6 +130,23 @@ const OVERLAY_HINTS: &[Hint] = &[
     hint("B", keys::HANDHELD_MENU_RESUME),
 ];
 
+const ACHIEVEMENTS_HINTS: &[Hint] = &[
+    hint("A", keys::HANDHELD_HINT_CHOOSE),
+    hint("</>", keys::HANDHELD_HINT_CHANGE),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
+const KEYBOARD_HINTS: &[Hint] = &[
+    hint("A", keys::ACH_KEY_TYPE),
+    hint("X", keys::ACH_KEY_DELETE),
+    hint("Y", keys::ACH_KEY_SHIFT),
+    hint("Start", keys::ACH_KEY_DONE),
+    hint("B", keys::HANDHELD_HINT_CANCEL),
+];
+const ACHIEVEMENT_LIST_HINTS: &[Hint] = &[
+    hint("L/R", keys::HANDHELD_HINT_PAGE),
+    hint("B", keys::HANDHELD_HINT_BACK),
+];
+
 /// The hints at the bottom of `screen`.
 #[must_use]
 pub const fn hints(screen: Screen) -> &'static [Hint] {
@@ -142,6 +159,9 @@ pub const fn hints(screen: Screen) -> &'static [Hint] {
         Screen::Controls => CONTROLS_HINTS,
         Screen::Overlay => OVERLAY_HINTS,
         Screen::States => STATES_SAVE_HINTS,
+        Screen::Achievements => ACHIEVEMENTS_HINTS,
+        Screen::Keyboard => KEYBOARD_HINTS,
+        Screen::AchievementList => ACHIEVEMENT_LIST_HINTS,
         Screen::InGame => &[],
     }
 }

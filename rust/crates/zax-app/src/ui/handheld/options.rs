@@ -53,10 +53,12 @@ pub enum OptionRow {
     Region,
     /// The gamepad bindings.
     Controls,
+    /// RetroAchievements (Rust-only): opens its own screen.
+    Achievements,
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 16] = [
+pub const ROWS: [OptionRow; 17] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -73,6 +75,7 @@ pub const ROWS: [OptionRow; 16] = [
     OptionRow::Pipeline,
     OptionRow::Region,
     OptionRow::Controls,
+    OptionRow::Achievements,
 ];
 
 /// The values of the palette row (`video.nes_palette`): the setting's choices.
@@ -154,6 +157,8 @@ pub enum OptionsCommand {
     OpenControls,
     /// Show the overscan's screen.
     OpenOverscan,
+    /// Show the RetroAchievements screen.
+    OpenAchievements,
     /// Step the camera preset.
     StepCamera(i32),
 }
@@ -195,10 +200,10 @@ impl HandheldOptionsModel {
             PadButton::Left => return self.step(settings, -1),
             PadButton::Right => return self.step(settings, 1),
             PadButton::A => {
-                return if self.selected() == OptionRow::Controls {
-                    Some(OptionsCommand::OpenControls)
-                } else {
-                    self.step(settings, 1)
+                return match self.selected() {
+                    OptionRow::Controls => Some(OptionsCommand::OpenControls),
+                    OptionRow::Achievements => Some(OptionsCommand::OpenAchievements),
+                    _ => self.step(settings, 1),
                 };
             }
             PadButton::B => return Some(OptionsCommand::Close),
@@ -266,6 +271,7 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
         }
         OptionRow::Controls => {}
+        OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
     }
     None
 }
@@ -294,6 +300,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
+        OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
     }
 }
 
@@ -339,6 +346,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             RegionChoice::Pal => "PAL".to_owned(),
         },
         OptionRow::Controls => String::new(),
+        OptionRow::Achievements => switch(settings.get(SettingId::AchievementsEnabled).as_bool()),
     }
 }
 

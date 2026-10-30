@@ -50,11 +50,17 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pipeline, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_advanced,
     // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
-    // video.overscan_* and video.nes_palette:
+    // video.overscan_*, video.nes_palette and achievements.*:
     // Rust-only settings (owner request).
     assert_eq!(
         additions,
         [
+            "achievements.enabled",
+            "achievements.encore",
+            "achievements.sound",
+            "achievements.token",
+            "achievements.unofficial",
+            "achievements.username",
             "audio.mute",
             "emu.builtin_patches",
             "emu.catch_up",

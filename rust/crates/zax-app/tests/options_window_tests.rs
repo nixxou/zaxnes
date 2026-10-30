@@ -93,6 +93,7 @@ fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
     let titles = |tabs: &[OptionsTab]| -> Vec<String> {
         tabs.iter().map(|tab| options::title_of(*tab)).collect()
     };
+    // The six of the amendment, then RetroAchievements (Rust-only, owner request).
     assert_eq!(
         vec![
             "Video",
@@ -100,7 +101,8 @@ fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
             "Light and shadows",
             "Audio",
             "Emulation",
-            "Interface"
+            "Interface",
+            "RetroAchievements"
         ],
         titles(&options::TABS)
     );
@@ -113,7 +115,8 @@ fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
             "Lumière et ombres",
             "Audio",
             "Émulation",
-            "Interface"
+            "Interface",
+            "RetroAchievements"
         ],
         titles(&options::TABS)
     );
