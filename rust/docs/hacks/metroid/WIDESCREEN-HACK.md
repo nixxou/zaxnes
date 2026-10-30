@@ -1422,8 +1422,9 @@ With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared bu
 (tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): MMC1, each hook
 a 16 KiB bank and a CPU address, the widescreen in groups ("core", Base: the settings, the rooms
 of the nametables, the sprites in the margins; "enemies"; "doors": the doors, their twins and the
-items; "previews"; "invincible" and "level select", the aids, which need the hack's code) with
-checks of the game's code the hack relies on; src/wide.s assembled with PACK for $2000, the zone
+items; "previews") with checks of the game's code the hack relies on; the aids, "invincible" and
+"level_select", components of their own (their code in the zone, applied while their option is
+on, with or without the widescreen); src/wide.s assembled with PACK for $2000, the zone
 fantôme, which Zaxnes shows to instruction fetches from power-on, the extension unlocked; the hooks
 as offsets in the PRG-ROM, the ROM keeping its size. Metroid (Europe), the same code at the same
 places, gets the same pack for PAL.
@@ -1583,10 +1584,14 @@ def pack(data, crc, out):
                                    ('doors', 'Doors and items in the margins',
                                     'Portes et objets dans les marges'),
                                    ('previews', 'Enemies of the rooms ahead',
-                                    'Ennemis des salles à venir'),
-                                   ('invincible', 'Invincible', 'Invincible'),
-                                   ('level select', 'Level select', 'Sélecteur de niveau')):
+                                    'Ennemis des salles à venir')):
         groups[group] = widescreen.group(group, requires=['core'], label=label, label_fr=label_fr)
+    # The aids: components of their own, applied while their option is on, with or without the
+    # widescreen (their code in the zone, their hooks their own).
+    for group, label, label_fr in (('invincible', 'Invincible', 'Invincible'),
+                                   ('level select', 'Level select', 'Sélecteur de niveau')):
+        key = group.replace(' ', '_')
+        groups[group] = pack.component(key).group(key, label=label, label_fr=label_fr)
 
     def offset(bank, address):
         return bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)

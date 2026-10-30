@@ -20,7 +20,7 @@ options.
 |---|---|
 | Source ROM | *Adventure Island (USA)*, CNROM (mapper 3), 32 KiB PRG, 32 KiB CHR |
 | Source data (iNES header excluded) | CRC-32 `F8A713BE` (the dump the [disassembly](https://github.com/cyneprepou4uk/NES-Games-Disassembly/tree/main/Adventure%20Island) rebuilds, SHA-1 of the iNES file `22EE75B8...`) |
-| Target data | CRC-32 `0F609D55` (the hack's version in savestate headers; `tools/build.py` prints it), 80 KiB: the game's 32 KiB of PRG, a 16 KiB PRG bank added, the 32 KiB of CHR |
+| Target data | CRC-32 `7DE620F4` (the hack's version in savestate headers; `tools/build.py` prints it), 80 KiB: the game's 32 KiB of PRG, a 16 KiB PRG bank added, the 32 KiB of CHR |
 | Changes | hooks in the game's PRG (same size as what they replace); the new code in the added bank |
 | Patch | `rust/crates/zax-nes/patches/adventure-island-usa-widescreen.bps`, made against the data without header; the CHR-ROM, moved after the new bank, is copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
 | Zaxnes declaration | `builtin_patches.rs`: `advanced: true` (applied only in the advanced mode), `boot_window: Some((0x82, 0x00))`, `idle_loop: Some((0xB759, 0xB75C))` |
@@ -1752,8 +1752,11 @@ wide_title_button:
     PLA
     JMP     TITLE_WAIT
 
-; The round selected, in the second sprite page: two digits.
+; The round selected, in the second sprite page: two digits. The page is turned on here too: the
+; level select is an aid of its own, which runs without the widescreen's settings.
 wide_show_level:
+    LDA     #WIDE_LAYOUT_SET
+    STA     WIDE_LAYOUT
     LDA     WV_LEVEL
     LSR
     LSR
@@ -1845,8 +1848,9 @@ With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared bu
 (tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): CNROM, each
 hook a 16 KiB bank and a CPU address, the widescreen in groups ("core", Base: the settings and the
 sprites in the margins; "enemies": the ghosts in the left margin; "previews": the objects ahead
-drawn in the right margin; "level select" and "invincible", the aids, which need the hack's code),
-with checks of the game's code the hack relies on; src/wide.s assembled with PACK for $2000, the
+drawn in the right margin), with checks of the game's code the hack relies on; the aids,
+"level_select" and "invincible", components of their own (their code in the zone, applied while
+their option is on, with or without the widescreen); src/wide.s assembled with PACK for $2000, the
 zone fantôme, which Zaxnes shows to instruction fetches from power-on, the extension unlocked; the
 hooks as offsets in the PRG-ROM, the ROM keeping its size. Adventure Island Classic (Europe), the
 same code at the same places, gets the same pack for PAL; Takahashi Meijin no Bouken-jima (Japan)
@@ -2034,11 +2038,12 @@ def pack(data, crc, out):
                                     label_fr='Ennemis dans les marges'),
         'previews': widescreen.group('previews', requires=['core'], label='Objects ahead',
                                      label_fr='Objets à venir'),
-        'level select': None if kiddy else widescreen.group(
-            'level select', requires=['core'], label='Level select',
-            label_fr='Sélecteur de niveau'),
-        'invincible': widescreen.group('invincible', requires=['core'], label='Invincible',
-                                       label_fr='Invincible'),
+        # The aids: components of their own, applied while their option is on, with or without
+        # the widescreen (their code in the zone, their hooks their own).
+        'level select': None if kiddy else pack.component('level_select').group(
+            'level_select', label='Level select', label_fr='Sélecteur de niveau'),
+        'invincible': pack.component('invincible').group('invincible', label='Invincible',
+                                                         label_fr='Invincible'),
     }
 
     def place(address):

@@ -372,6 +372,7 @@ impl NesCore {
         self.bus.reset();
         self.bus.ppu_mut().reset();
         self.boot_patch_window(self.builtin_patch);
+        self.boot_pack_zone();
         self.bus.apu_mut().reset();
         let clear_prg_ram = !self.battery_ram_imported;
         if let Some(cartridge) = self.bus.cartridge_mut() {
@@ -652,6 +653,28 @@ impl NesCore {
                 self.aids_on ^= mask;
             }
         }
+        self.boot_pack_zone();
+    }
+
+    /// Opens the extension's execution zone on the pack's code while its widescreen runs or one
+    /// of its aids is on, with or without the widescreen: an aid's hooks may call the pack's code
+    /// (a level selector, an invincibility that needs the hack's code). The zone shows the code
+    /// to instruction fetches only, which no game reaches but through the pack's hooks.
+    fn boot_pack_zone(&mut self) {
+        let Some((patch, pack)) = &self.pack else {
+            return;
+        };
+        let running = self.builtin_patch == Some(patch.name);
+        if !patch.boot_zone || pack.code.is_empty() || !(running || self.aids_on != 0) {
+            return;
+        }
+        let wide = self.bus.ppu_mut().wide_mut();
+        if wide.code() != pack.code {
+            wide.set_code(pack.code);
+        }
+        if !wide.unlocked() {
+            wide.boot_zone(patch.zone_data);
+        }
     }
 
     /// After a cartridge is attached for `image` (the host's, before any patch): the hack pack
@@ -676,7 +699,8 @@ impl NesCore {
         {
             wide.boot(bank, page, !keeps_prg_ram);
         }
-        // And on its execution zone, for a pack whose code runs there.
+        // And on its execution zone, for a pack whose code runs there (sync_aids opens it, its
+        // widescreen running or one of its aids on).
         if let Some((patch, _)) = running.filter(|(patch, _)| patch.boot_zone) {
             wide.boot_zone(patch.zone_data);
         }

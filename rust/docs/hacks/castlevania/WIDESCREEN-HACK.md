@@ -19,7 +19,7 @@ which live and show in the margins, and the options.
 |---|---|
 | Source ROMs | *Castlevania (USA)* and *Castlevania (USA) (Rev 1)*, UNROM (mapper 2), 128 KiB PRG (8 banks of 16 KiB, bank 7 fixed at `$C000`-`$FFFF`, the others switched at `$8000`), 8 KiB CHR-RAM |
 | Source data (iNES header excluded) | base build CRC-32 `0AC1AA8F`, Rev 1 CRC-32 `B668C7FC` |
-| Target data | base build CRC-32 `66E5E83F`, Rev 1 CRC-32 `8C4BB48C` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | base build CRC-32 `BCA66AEF`, Rev 1 CRC-32 `17A19A8D` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | 2 KiB of code at PRG offset `$15F00`-`$166FF` (bank 5 from its page `$1F`, `$FF` fill in both builds), hooks in banks 0, 6 and 7; size and layout unchanged |
 | Patches | `rust/crates/zax-nes/patches/castlevania-usa-widescreen.bps` and `castlevania-usa-rev1-widescreen.bps`, made against the data without header |
 
@@ -410,20 +410,40 @@ BUTTON_SELECT   = $20
 ; build keeps unused does ($CF61): the stage starts again from the state that begins a stage,
 ; with the graphics of its block, and the life that state takes is given back.
 
+;
+; In the pack (-D ZONE_DATA) the level select is an aid of its own, applied with or without the widescreen: the
+; state dispatch's start (INC $1A / LDA STATE, the same in every build) calls wide_level_select,
+; which does it again once the stage is picked.
+
 wide_frame:
         INC WV_FRAME
         JSR wide_settings
+.ifndef ZONE_DATA
+        JSR level_select
+.endif
+        JMP DISPATCH
+
+.ifdef ZONE_DATA
+; The state dispatch's start (in place of INC $1A / LDA STATE).
+wide_level_select:
+        JSR level_select
+        INC $1A
+        LDA STATE
+        RTS
+.endif
+
+level_select:
         LDA WIDE_OPTIONS
         AND #OPT_LEVEL_SELECT
-        BEQ @game
+        BEQ @rts
         LDA STATE
         CMP #STATE_PLAYING
-        BNE @game
+        BNE @rts
         LDA BUSY
-        BNE @game
+        BNE @rts
         LDA PRESSED
         AND #BUTTON_SELECT
-        BEQ @game
+        BEQ @rts
         LDA #STATE_NEW_STAGE
         STA STATE
         INC LIVES
@@ -435,7 +455,7 @@ wide_frame:
 :       STX STAGE
         LDA BLOCK_OF_STAGE,X
         JSR LOAD_BLOCK
-@game:  JMP DISPATCH
+@rts:   RTS
 
 ; ---------------------------------------------------------------------------- ;
 ; A hit on Simon (in place of SEC / SBC DAMAGE / STA HEALTH): none while invincible.
@@ -1099,6 +1119,10 @@ def hooks(build, sym):
                  'spawner': 0xF3DF, 'spawner_return': (0xF429, '88 f3'),
                  'weapon': 0xE606, 'hide9': 0xEB01, 'far9': 0xEB09,
                  'copies': (0xE05B, 0xED2F, 0xED9E), 'copy_back': 0xEFF5}
+    # The pack's level select, an aid of its own: the state dispatch's start (INC $1A / LDA $18,
+    # the same in every build).
+    if 'wide_level_select' in sym:
+        put(7, DISPATCH[build], 'e6 1a a5 18', jsr(sym['wide_level_select']), 'level_select')
     # After an object's routine: the bounds it is removed past (its JSR MOVE_SCROLL, base build
     # $EA0C; the compares after it stay, the objects moved by $EE70 jump to them), past the
     # margins.
@@ -1171,6 +1195,9 @@ def assemble(name, defines, start=WINDOW_START):
     return open(window_bin, 'rb').read(), sym
 
 
+# The game's state dispatch per build, which the NMI calls.
+DISPATCH = {BASE: 0xC1A1, REV1: 0xC1E4, EUROPE: 0xC1E4, JAPAN: 0xC20A, PC10: 0xC1C5}
+
 # The hook of the option "Invincible" (SEC / SBC DAMAGE / STA HEALTH, bank 7) per build: in the
 # pack, a component of its own.
 INVINCIBLE = {BASE: 0xE734, REV1: 0xE758, EUROPE: 0xE764, JAPAN: 0xE7BC, PC10: 0xE74D}
@@ -1178,26 +1205,27 @@ INVINCIBLE = {BASE: 0xE734, REV1: 0xE758, EUROPE: 0xE764, JAPAN: 0xE7BC, PC10: 0
 
 # The game's code and data the hack's code relies on, by group, per build: (bank, address, length),
 # checked by Zaxnes to be the reference ROM's bytes (a ROM hack that changed them gets the groups
-# that still fit). Core: the state dispatch the NMI hook calls on to (its start), the routine that
-# moves an object's x by the scroll (whole), the game's read of the rooms' lengths (the table is
-# where the hack reads it), and for the level select the graphics loader (its start) and the
-# game's read of each stage's block. Edge spawns: the spawners' loop, on to the next one.
+# that still fit). Core: the state dispatch the NMI hook calls on to (past its start, which the
+# level select hooks), the routine that moves an object's x by the scroll (whole), the game's read
+# of the rooms' lengths (the table is where the hack reads it). Edge spawns: the spawners' loop, on
+# to the next one. Level select: the graphics loader (its start) and the game's read of each
+# stage's block.
 CHECKS = {
-    BASE: {'core': [(7, 0xC1A1, 8), (7, 0xEAA7, 18), (7, 0xCFF2, 3), (7, 0xFCFF, 12),
-                    (7, 0xC7AA, 3)],
-           'edge spawns': [(7, 0xF359, 6)]},
-    REV1: {'core': [(7, 0xC1E4, 8), (7, 0xEACB, 18), (7, 0xD017, 3), (7, 0xFD23, 12),
-                    (7, 0xC7F9, 3)],
-           'edge spawns': [(7, 0xF37D, 6)]},
-    EUROPE: {'core': [(7, 0xC1E4, 8), (7, 0xEAD7, 18), (7, 0xD017, 3), (7, 0xFD2A, 12),
-                      (7, 0xC7F9, 3)],
-             'edge spawns': [(7, 0xF389, 6)]},
-    JAPAN: {'core': [(7, 0xC20A, 7), (7, 0xEB38, 18), (7, 0xD069, 3), (7, 0xFD8E, 12),
-                     (7, 0xC81D, 3)],
-            'edge spawns': [(7, 0xF3EA, 6)]},
-    PC10: {'core': [(7, 0xC1C5, 8), (7, 0xEAC0, 18), (7, 0xD00B, 3), (7, 0xFD18, 12),
-                    (7, 0xC7CE, 3)],
-           'edge spawns': [(7, 0xF372, 6)]},
+    BASE: {'core': [(7, 0xC1A5, 4), (7, 0xEAA7, 18), (7, 0xCFF2, 3)],
+           'edge spawns': [(7, 0xF359, 6)],
+           'level select': [(7, 0xFCFF, 12), (7, 0xC7AA, 3)]},
+    REV1: {'core': [(7, 0xC1E8, 4), (7, 0xEACB, 18), (7, 0xD017, 3)],
+           'edge spawns': [(7, 0xF37D, 6)],
+           'level select': [(7, 0xFD23, 12), (7, 0xC7F9, 3)]},
+    EUROPE: {'core': [(7, 0xC1E8, 4), (7, 0xEAD7, 18), (7, 0xD017, 3)],
+             'edge spawns': [(7, 0xF389, 6)],
+             'level select': [(7, 0xFD2A, 12), (7, 0xC7F9, 3)]},
+    JAPAN: {'core': [(7, 0xC20E, 3), (7, 0xEB38, 18), (7, 0xD069, 3)],
+            'edge spawns': [(7, 0xF3EA, 6)],
+            'level select': [(7, 0xFD8E, 12), (7, 0xC81D, 3)]},
+    PC10: {'core': [(7, 0xC1C9, 4), (7, 0xEAC0, 18), (7, 0xD00B, 3)],
+           'edge spawns': [(7, 0xF372, 6)],
+           'level select': [(7, 0xFD18, 12), (7, 0xC7CE, 3)]},
 }
 
 # The region each build's pack is made for.
@@ -1227,6 +1255,10 @@ def pack(data, crc, window, sym, out, ntsc=False):
                                       label_fr='Plateformes mobiles'),
         'copies': widescreen.group('copies', requires=['core'], label='Objects born in the margins',
                                    label_fr='Objets nés dans les marges'),
+        # An aid: a component of its own, applied while its option is on, with or without the
+        # widescreen (its code in the zone, its hook its own).
+        'level select': pack.component('level_select').group(
+            'level_select', label='Level select', label_fr='Sélecteur de niveau'),
     }
     core = groups['core']
     for name, checks in CHECKS[crc].items():
@@ -1241,7 +1273,7 @@ def pack(data, crc, window, sym, out, ntsc=False):
             # LDA #$02, health kept: A as wide_damage leaves it.
             aid.hook(*pack_place(at, address), bytes(original), bytes([0xA9, 0x02, NOP, NOP, NOP]))
         else:
-            group = groups[HOOK_GROUP.get((bank, address), 'core')]
+            group = groups[HOOK_GROUP.get((bank, address), 'core').replace('_', ' ')]
             group.hook(*pack_place(at, address), bytes(original), bytes(new))
     assert len(aid.hooks) == 1
     game = {BASE: 'Castlevania (USA)', REV1: 'Castlevania (USA) (Rev 1)',

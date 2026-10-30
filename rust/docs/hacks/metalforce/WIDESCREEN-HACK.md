@@ -263,6 +263,7 @@ OAM_DIRECTION   = $0300
 
 ORIGINAL_RESET  = $FF80
 SOUND           = $EB40
+SOUND_BANK      = $C010         ; the sound routine's bank select (LDA #$0B / STA, its start)
 ENEMY_HIT       = $A0EA         ; bank 13: an enemy's collisions, carry set when it is gone
 ENEMY_REMOVE    = $A3EE         ; bank 13: removes the enemy at slot Y, SEC / RTS
 ENEMY_VERTICAL  = $A3D4         ; bank 13: the vertical half of the off-screen test
@@ -378,7 +379,9 @@ wide_nmi:
     LDA      #OVERCLOCK_LINES
 @overclock:
     STA      WIDE_OVERCLOCK
+.ifndef PACK
     JSR      wide_level_select
+.endif
     JMP      SOUND
 
 ; ---------------------------------------------------------------------------- ;
@@ -667,7 +670,17 @@ wide_hurt:
 
 ; ---------------------------------------------------------------------------- ;
 ; Level select (option bit 0): on the mission screen (state 4, step 2), right and left pick the
-; next or previous mission, 1 to 7; the screen starts over with it.
+; next or previous mission, 1 to 7; the screen starts over with it. In the pack, an aid of its own
+; applied with or without the widescreen: the sound routine's start, which only the NMI calls
+; ($EB40, in place of LDA #$0B / STA $C010), calls it.
+.ifdef PACK
+wide_sound_start:
+    JSR      wide_level_select
+    LDA      #$0B
+    STA      SOUND_BANK
+    RTS
+.endif
+
 wide_level_select:
     LDA      WIDE_OPTIONS
     AND      #OPT_LEVEL_SELECT
@@ -808,6 +821,9 @@ def hooks(sym, pack=False):
     for at in (0xCA3D, 0xCACA, 0xCB57, 0xCBFA):
         put(at, 'a5 22 d0 0c b1 1d', jsr(sym['wide_sprite_visible']) + branch(BEQ, at + 3, at + 0x10))
     put(0xCC3C, 'ad 00 03', jsr(sym['wide_sprite_high']))
+    # The pack's level select, an aid of its own: the sound routine's start (only the NMI calls it).
+    if pack:
+        put(0xEB40, 'a9 0b 8d 10 c0', jsr(sym['wide_sound_start']))
     # Invincibility: the five damage routines.
     for at in (0xE76F, 0xE7A3, 0xE7DA, 0xE814, 0xE84E):
         put(at, 'ad 2b 03', jsr(sym['wide_hurt']))
@@ -860,15 +876,19 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
+# The level select's hook, in the pack's "level_select" component.
+LEVEL_SELECT = {0xEB40}
+
 # The enemies group: the level list's spawn window and spawns, the enemy loop's sleep and
 # off-screen test, the flyers.
 ENEMIES = {0xC010, 0xC0B8, 0x822A, 0xA3BC, 0x8775}
 
 # The game's code the hack's code relies on, by group: (bank, address, length), checked by Zaxnes
-# to be the reference ROM's bytes. Core: the sound the NMI hook calls on. Enemies: an enemy's
+# to be the reference ROM's bytes. Core: the sound the NMI hook calls on (past its start, which the
+# level select hooks). Enemies: an enemy's
 # collisions, its removal and the vertical half of the off-screen test (bank 13).
 CHECKS = {
-    'core': [(BANK, 0xEB40, 3)],
+    'core': [(BANK, 0xEB45, 3)],
     'enemies': [(13, 0xA0EA, 3), (13, 0xA3EE, 3), (13, 0xA3D4, 3)],
 }
 
@@ -893,6 +913,10 @@ def pack(data, out):
     }
     aid = pack.component('invincible').group('invincible', label='Invincible',
                                              label_fr='Invincible')
+    # The level select: a component of its own, applied while its option is on, with or without
+    # the widescreen (its code in the zone, its hook its own).
+    select = pack.component('level_select').group('level_select', label='Level select',
+                                                  label_fr='Sélecteur de niveau')
 
     def at_of(number, address):
         return (bank + address - FIXED) if address >= FIXED else number * BANK_SIZE + address - 0x8000
@@ -911,6 +935,8 @@ def pack(data, out):
         if address in INVINCIBLE:
             # LDA #$02 in place of LDA HIT_TIMER: the timer found running, as wide_hurt leaves A.
             aid.hook(*pack_place(at, address), bytes(original), bytes([0xA9, 0x02, 0xEA]))
+        elif address in LEVEL_SELECT:
+            select.hook(*pack_place(at, address), bytes(original), bytes(new))
         else:
             groups['enemies' if address in ENEMIES else 'core'].hook(*pack_place(at, address),
                                                                      bytes(original), bytes(new))

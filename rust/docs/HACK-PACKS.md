@@ -1,6 +1,6 @@
 # Hack packs
 
-Status: Blaster Master's Japanese and European builds converted, see section 7. Branch `hack-rewrite`.
+Status: the aids apart from the widescreen, see section 7. Branch `hack-rewrite`.
 
 ## 1. Why
 
@@ -288,7 +288,13 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   pack, 3 all but the level selector. Then its Japanese (Chou-Wakusei Senki MetaFight) and
   European builds (PAL, with an NTSC twin): the same RAM and routines, their code laid out
   otherwise, packs of their own without the level selector, the margin decoder's area tables per
-  build; 26 of the pool's ROMs take a whole pack. Metroid too (`docs/hacks/metroid/WIDESCREEN-HACK.md`): its
+  build; 26 of the pool's ROMs take a whole pack. The aids that need the hack's code then left the
+  widescreen component (owner request: the hacks apart from the widescreen, the aids working
+  with it off): Super Mario Bros.' and Castlevania's level selects (Castlevania's now on the
+  state dispatch's start), Adventure Island's, Blaster Master's and Metroid's level select and
+  invincibility, Metal Force's level select (on the sound routine's start, which only the NMI
+  calls), each a component named after its option. The core opens the execution zone on the
+  pack's code while the widescreen runs or an aid is on (`NesCore::boot_pack_zone`). Metroid too (`docs/hacks/metroid/WIDESCREEN-HACK.md`): its
   code from the window to the zone fantôme, its one table made a test, groups (core, enemies,
   doors, previews, its two aids) with checks; the USA pack and the European one, the same code
   for PAL; 111 of a pool of 116 ROMs take a whole pack, 2 all but the doors. A "dirty" iNES header (bytes 12 to 15 not

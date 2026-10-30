@@ -891,8 +891,9 @@ With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared bu
 (tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1 (and
 the ROM hacks that put the game on MMC3), each hook a 16 KiB bank and a CPU address, the
 widescreen in groups ("core", Base: the settings and the sprites in the margins; "enemies": the
-enemies of the margins, sleeping ones included; "invincible" and "level select", the aids, which
-need the hack's code) with checks of the game's code the hack relies on; src/wide.s assembled with
+enemies of the margins, sleeping ones included) with checks of the game's code the hack relies
+on; the aids, "invincible" and "level_select", components of their own (their code in the zone,
+applied while their option is on, with or without the widescreen); src/wide.s assembled with
 PACK for $2000, the zone fantôme, which Zaxnes shows to instruction fetches from power-on, the
 extension unlocked; the hooks as offsets in the PRG-ROM, the ROM keeping its size. Chou-Wakusei
 Senki MetaFight (Japan) (-D JAPAN) and Blaster Master (Europe) (-D EUROPE, PAL, with an NTSC twin
@@ -1070,12 +1071,16 @@ def pack(data, crc, out, ntsc=False):
     pack = hackpack.Pack(name + ' widescreen', code[:used], region=region, mappers=(1, 4))
     widescreen = pack.component('widescreen')
     groups = {'core': widescreen.group('core', label='Base', label_fr='Base')}
-    for group, label, label_fr in (('enemies', 'Enemies in the margins', 'Ennemis dans les marges'),
-                                   ('invincible', 'Invincible', 'Invincible'),
+    groups['enemies'] = widescreen.group('enemies', requires=['core'],
+                                         label='Enemies in the margins',
+                                         label_fr='Ennemis dans les marges')
+    # The aids: components of their own, applied while their option is on, with or without the
+    # widescreen (their code in the zone, their hooks their own).
+    for group, label, label_fr in (('invincible', 'Invincible', 'Invincible'),
                                    ('level select', 'Level select', 'Sélecteur de niveau')):
         if not (build and group == 'level select'):
-            groups[group] = widescreen.group(group, requires=['core'], label=label,
-                                             label_fr=label_fr)
+            key = group.replace(' ', '_')
+            groups[group] = pack.component(key).group(key, label=label, label_fr=label_fr)
 
     def place(bank, address):
         """The build's bank and address for the USA's, and its offset in the PRG-ROM."""
