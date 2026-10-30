@@ -32,14 +32,25 @@ room for code that would unlock the extension.
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/blastermaster-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, MMC1, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
-memory, which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with
-the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank
-added, nothing moved or copied). Its testing aids need the hack's code: they stay with the
-widescreen (the advanced mode). The BPS patch described here is kept to compare.
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes' shared builder
+(`hackpack.py`): NTSC, MMC1 (and MMC3, for the ROM hacks that put the game on it), each hook a 16
+KiB bank and a CPU address with the game's bytes it replaces, checked and applied by Zaxnes; the
+ROM keeps its size (no bank added, nothing moved or copied). `src/wide.s` is assembled with
+`-D PACK` for `$2000`: the zone fantôme, which Zaxnes shows to instruction fetches only from
+power-on, the extension unlocked; its registers and RAM are at `$3000`-`$3FFF` (widescreen MMC5:
+`$5000`-`$5FFF` stays the cartridge's), no window (`$5007` = `$02`). The code reads no data of its
+own (the game's data reads at `$2000`-`$3FFF` reach the PPU). The widescreen is in groups: "core"
+(Base: the settings, the position test and the sprites' copy to OAM), "enemies" (the enemies of
+the margins, sleeping ones included), and the two testing aids, "invincible" and "level select",
+which need the hack's code; each but the core needs it. Checks of the game's code the hack relies
+on go with them: the position test's tail and the byte that keeps the sprites moving in OAM; an
+object's routine, the slot search and the sound request where the hooks go on; the game's area
+select and a new game's start. Over a pool of 33 ROMs of the game (the dumps, the ROM hacks that
+are not combined with a translation; it has no French translation), 21 take a whole pack and 3
+all but the level selector; the others are the Japanese, European and beta builds, whose code is
+laid out otherwise, and a conversion to MMC5. 3000 frames of each with scripted inputs play as
+without the pack. The BPS patch described here is kept to compare.
 
 ## 2. What the game does, and what changes
 
@@ -179,19 +190,31 @@ the hooks and the code TargetRead). `WIDE_SKIP=<hex addresses>` leaves hooks out
 ;  * every sprite of an object gets the high byte of its 16-bit x;
 ;  * the player and the shots (slots 0-7) keep the original screen.
 ;
+; In a Zaxnes hack pack (-D PACK) the code is assembled for $2000 instead: the zone fantôme, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
+; reads there still reach the PPU, so the code reads no data of its own. Its registers and RAM are
+; at $3000-$3FFF, which the zone holds for its own instructions (widescreen MMC5: $5000-$5FFF stays
+; the cartridge's), and no window is opened.
+;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
 
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, bit 4 window to $7FFF
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1 sprites free of the extents, bit 4 window to $7FFF
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
 OPT_LEVEL_SELECT = $01          ; a testing aid: the game's own area select at a new game
 OPT_INVINCIBLE  = $02           ; a testing aid: the player takes no damage
@@ -200,29 +223,35 @@ OPT_NO_SLOWDOWN = $04           ; nearly a frame more of CPU time: the game neve
 MAX_MARGIN      = 248           ; the most the extension shows sprites in
 OVERCLOCK_LINES = 64            ; pays for the hack's work and the enemies of the margins
 NO_SLOWDOWN_LINES = 255
+; The layout: sprites free of the extents; in the BPS build the window kept to $7FFF too.
+.ifdef PACK
+WIDE_LAYOUT_SET = $02
+.else
+WIDE_LAYOUT_SET = $12
+.endif
 FIRST_ENEMY     = 8             ; the slots the area's list spawns into: 8-17
 INIT_FRAMES     = 4             ; frames a sleeping enemy runs for its start before it sleeps
 
-; Variables in the extension's RAM ($5200-$57FF).
-WV_M            = $5200         ; margin of this frame
-WV_K            = $5201         ; ceil(M / 16): the spawn and removal windows grow by that many
+; Variables in the extension's RAM (EXT + $200 to EXT + $7FF).
+WV_M            = EXT + $200    ; margin of this frame
+WV_K            = EXT + $201    ; ceil(M / 16): the spawn and removal windows grow by that many
                                 ; 16-pixel units on each side
-WV_ORIG         = $5202         ; the last position test: non-zero when on the original screen
-WV_VALID        = $5203         ; non-zero while WV_BASE is the object being drawn
-WV_BASEL        = $5204         ; the 16-bit screen x of that object (as $3E, after $EFD7)
-WV_BASEH        = $5205
-WV_T0           = $5206         ; scratch
-WV_T1           = $5207
-WV_HALF         = $5208         ; half the object's width
-WV_X            = $520A         ; X, kept across the position test
-WV_T2           = $520B         ; scratch
-WV_T3           = $520C
-WV_PLACED       = $520D         ; WV_VALID for the copy under way (WV_VALID is cleared at once)
-WV_FROZEN       = $5209         ; non-zero while a sleeping enemy's routine runs
-WV_SAVE         = $5210         ; its $46-$53 (14 bytes, to $521D)
-WV_DORM         = $5220         ; + slot (0-17): 0 awake, 1 asleep, $80 + n: coming out, n
+WV_ORIG         = EXT + $202    ; the last position test: non-zero when on the original screen
+WV_VALID        = EXT + $203    ; non-zero while WV_BASE is the object being drawn
+WV_BASEL        = EXT + $204    ; the 16-bit screen x of that object (as $3E, after $EFD7)
+WV_BASEH        = EXT + $205
+WV_T0           = EXT + $206    ; scratch
+WV_T1           = EXT + $207
+WV_HALF         = EXT + $208    ; half the object's width
+WV_X            = EXT + $20A    ; X, kept across the position test
+WV_T2           = EXT + $20B    ; scratch
+WV_T3           = EXT + $20C
+WV_PLACED       = EXT + $20D    ; WV_VALID for the copy under way (WV_VALID is cleared at once)
+WV_FROZEN       = EXT + $209    ; non-zero while a sleeping enemy's routine runs
+WV_SAVE         = EXT + $210    ; its $46-$53 (14 bytes)
+WV_DORM         = EXT + $220    ; + slot (0-17): 0 awake, 1 asleep, $80 + n: coming out, n
                                 ; frames left for the routine's own start (it runs)
-WV_DTYPE        = $5240         ; + slot: the type it fell asleep as
+WV_DTYPE        = EXT + $240    ; + slot: the type it fell asleep as
 
 ; The game.
 OBJ             = $46           ; the object at hand, 14 bytes ($46-$53): type, ...
@@ -257,7 +286,11 @@ SLOT_SEARCH_GO  = $D7D2         ; the free slot search, after its LDA $0400,X
 SOUND_GO        = $DECF         ; a sound request, after its STA $E1 / TXA
 
 .segment "CODE"
+.ifdef PACK
+.org $2000
+.else
 .org $5800
+.endif
 
 ; ---------------------------------------------------------------------------- ;
 ; The frame's wait ($E936, in place of LDA #$80 / STA $12, the game's work for the frame done):
@@ -280,7 +313,7 @@ wide_frame:
     LDA     #$00
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$12                        ; sprites free of the extents, the window kept to $7FFF
+    LDA     #WIDE_LAYOUT_SET            ; sprites free of the extents
     STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS
     AND     #OPT_NO_SLOWDOWN
@@ -462,8 +495,8 @@ wide_keep_base:
 ; ---------------------------------------------------------------------------- ;
 ; The object's sprites to OAM ($EC73, the whole routine): the game's copy of the buffer at $0600
 ; ($3C bytes) to OAM from $3D, moving on or back every other frame for the flicker; each sprite's
-; high byte goes with it to $5100: the 16-bit x nearest the object's (WV_BASE) whose low byte is
-; the sprite's, 0 for sprites no position test placed (the power gauges).
+; high byte goes with it to WIDE_SPRHI: the 16-bit x nearest the object's (WV_BASE) whose low
+; byte is the sprite's, 0 for sprites no position test placed (the power gauges).
 wide_copy:
     LDA     WV_VALID                    ; the base serves this copy only, whichever way it ends
     STA     WV_PLACED
@@ -798,6 +831,13 @@ wide_new_game:
     LDA     #$08
     STA     AREA
     RTS
+
+wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
+.assert wide_end <= $8000, error, "widescreen code past the window"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -820,11 +860,13 @@ Usage: python -I tools/build.py <Blaster Master (USA).nes> [out.bps]
    without iNES header; the game's banks moved or copied come from the player's ROM).
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
-(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the code (its used part) for the
-extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in the
-PRG-ROM, the ROM keeping its size. The testing aids need the hack's code: they stay in the
-"widescreen" component with the other hooks.
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, MMC1 (and
+the ROM hacks that put the game on MMC3), each hook a 16 KiB bank and a CPU address, the
+widescreen in groups ("core", Base: the settings and the sprites in the margins; "enemies": the
+enemies of the margins, sleeping ones included; "invincible" and "level select", the aids, which
+need the hack's code) with checks of the game's code the hack relies on; src/wide.s assembled with
+PACK for $2000, the zone fantôme, which Zaxnes shows to instruction fetches from power-on, the
+extension unlocked; the hooks as offsets in the PRG-ROM, the ROM keeping its size.
 """
 
 import os
@@ -842,6 +884,8 @@ TARGET_BANKS = 16
 HACK_BANK = 8
 FIXED = 7
 CODE_START = 0x5800
+PACK_START = 0x2000             # the pack's code: the zone fantôme, below the extension at $3000
+PACK_SIZE = 0x1000
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -904,19 +948,20 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(pack=False):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if pack else (CODE_START, BANK_SIZE)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${BANK_SIZE:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
-                   check=True)
+    subprocess.run(tool('ca65') + ['-g'] + (['-D', 'PACK'] if pack else [])
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)], check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
     sym = {}
@@ -933,26 +978,57 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
-def pack(data, code, sym, out):
+# The groups past the core: (address of the hook).
+GROUPS = {
+    'enemies': {0x8134, 0x8B01, 0xC987, 0xD7CF, 0xDECC, 0xCAA4, 0x8141, 0x8B0E},
+    'invincible': {0xD6A2, 0x82C8, 0x8605, 0x89A7, 0x8DE6, 0x8C94},
+    'level select': {0xC2BC},
+}
+
+# The game's code the hack's code relies on, by group: (address, length) in the fixed bank,
+# checked by Zaxnes to be the reference ROM's bytes. Core: the position test's tail, the byte that
+# keeps the sprites moving in OAM. Enemies: an object's routine, the slot search and the sound
+# request where the hooks go on. Level select: the game's area select and a new game's start.
+CHECKS = {
+    'core': [(0xEFD7, 3), (0xE6BE, 1)],
+    'enemies': [(0xC9A4, 3), (0xD7D2, 3), (0xDECF, 3)],
+    'level select': [(0xF465, 3), (0xCDBA, 3), (0xC2C6, 3)],
+}
+
+
+def pack(data, out):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(1,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
-    for hook in hooks(sym):
-        bank, address, original, new = hook if len(hook) == 4 else (None, *hook)
-        offset = bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
-        assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
-        core.hook(*pack_place(offset, address), original, bytes(new))
-    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
-    used = (len(code.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    pack.name = 'Blaster Master (USA) widescreen'
-    pack.code = code[:used]
-    result = pack.build(data, 0x20000)
+    code, sym = assemble(pack=True)
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    pack = hackpack.Pack('Blaster Master (USA) widescreen', code[:used], region='ntsc',
+                         mappers=(1, 4))
+    widescreen = pack.component('widescreen')
+    groups = {'core': widescreen.group('core', label='Base', label_fr='Base')}
+    for name, label, label_fr in (('enemies', 'Enemies in the margins', 'Ennemis dans les marges'),
+                                  ('invincible', 'Invincible', 'Invincible'),
+                                  ('level select', 'Level select', 'Sélecteur de niveau')):
+        groups[name] = widescreen.group(name, requires=['core'], label=label, label_fr=label_fr)
+
+    def offset(bank, address):
+        return bank * BANK_SIZE + address - (0xC000 if bank == FIXED else 0x8000)
+
+    for group, checks in CHECKS.items():
+        for address, length in checks:
+            groups[group].check(*pack_place(offset(FIXED, address), address), length)
+    for bank, address, original, new in hooks(sym):
+        at = offset(bank, address)
+        assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
+        group = next((g for g, hooked in GROUPS.items() if address in hooked), 'core')
+        groups[group].hook(*pack_place(at, address), original, bytes(new))
+    result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, '
+          f'{" + ".join(str(len(group.hooks)) for group in groups.values())} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -962,11 +1038,11 @@ def main():
     data = bytes(image[header:header + PRG_SIZE + CHR_SIZE])
     assert zlib.crc32(data) == SOURCE_CRC, 'not Blaster Master (USA)'
 
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(data, sys.argv[3])
+        return
     code, sym = assemble()
     assert len(code) == BANK_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), code, sym, sys.argv[3])
-        return
     banks = [bytearray(data[n * BANK_SIZE:(n + 1) * BANK_SIZE]) for n in range(PRG_BANKS)]
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for bank, address, original, new in hooks(sym):

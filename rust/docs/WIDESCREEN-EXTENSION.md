@@ -456,7 +456,7 @@ Decoders run only while the built-in patches are on for the game in play (see 7)
 | Mega Man 4 (USA), both builds (data CRC-32 `2BC67AA8`, Rev 1 `18A2E74F`), (Europe) (`1B932BEA`) and Rockman 4 (Japan), both builds (`F161A5D8`, `E0FFECCD`), unpatched and with their built-in patches | the stage layout in PRG-ROM, within the section being played | `megaman4.rs` (Mega Man 3's `Layout`), see below |
 | Mega Man 5 (USA) (data CRC-32 `3EDCF7E8`), Rockman 5 (Japan) (`FDDF2135`) and (Europe) (`A4DCF72E`, its per-screen table 2 bytes earlier), unpatched and with their built-in patches | the stage layout in PRG-ROM, within the section being played | `megaman5.rs` (Mega Man 3's `Layout`), see below |
 | Mega Man 6 (USA) (data CRC-32 `988798A8`) and Rockman 6 (Japan) (`2D664D99`), unpatched and with their built-in patches | the stage map in PRG-ROM through the pointers the game keeps in RAM, within the part of the stage the camera may show | `megaman6.rs`, see below |
-| Metroid (USA) (data CRC-32 `70080810`), unpatched and with its built-in patch | the world map's rooms around the screen: the two the game keeps in PRG-RAM, the others built from the area's data as the game does; vertical margin, overscan | `metroid.rs`, see below |
+| Metroid (USA) (data CRC-32 `70080810`) and (Europe) (`7751588D`, its tables at the same places), unpatched and with their built-in patches | the world map's rooms around the screen: the two the game keeps in PRG-RAM, the others built from the area's data as the game does; vertical margin, overscan | `metroid.rs`, see below |
 
 Mega Man 2: a stage lives in PRG bank `$2A & 7` (`$2A` the stage), as the game's collision lookup
 (`$CBC3`) and column drawer (`$C96B`) read it. Screen `s` is 64 bytes at `$8500 + 64 s`, 8 columns

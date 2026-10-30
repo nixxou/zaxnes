@@ -1,6 +1,6 @@
 # Hack packs
 
-Status: Metal Force converted, see section 7. Branch `hack-rewrite`.
+Status: Metroid converted, see section 7. Branch `hack-rewrite`.
 
 ## 1. Why
 
@@ -281,7 +281,14 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   Rev 1 takes (the same code at other places); 125 of a pool of 137 ROMs take a whole pack.
   Metal Force too (`docs/hacks/metalforce/WIDESCREEN-HACK.md`): its code from the window to the
   zone fantôme, two groups (core, enemies) with checks, "Invincible" a component of its own; the
-  dump and its ROM hack Mega Force take the whole pack. A "dirty" iNES header (bytes 12 to 15 not
+  dump and its ROM hack Mega Force take the whole pack. Blaster Master too
+  (`docs/hacks/blastermaster/WIDESCREEN-HACK.md`): its code from the window to the zone fantôme,
+  groups (core, enemies, its two aids) with checks, MMC1 and MMC3; the USA pack (the Japanese,
+  European and beta builds lay their code out otherwise); 21 of a pool of 33 ROMs take a whole
+  pack, 3 all but the level selector. Metroid too (`docs/hacks/metroid/WIDESCREEN-HACK.md`): its
+  code from the window to the zone fantôme, its one table made a test, groups (core, enemies,
+  doors, previews, its two aids) with checks; the USA pack and the European one, the same code
+  for PAL; 111 of a pool of 116 ROMs take a whole pack, 2 all but the doors. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its

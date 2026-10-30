@@ -280,7 +280,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman5::SOURCE_CRC | megaman5::SOURCE_CRC_JAPAN => Some(&megaman5::MEGAMAN5),
         megaman5::SOURCE_CRC_EUROPE => Some(&megaman5::MEGAMAN5_EUROPE),
         megaman6::SOURCE_CRC | megaman6::SOURCE_CRC_JAPAN => Some(&megaman6::MegaMan6),
-        metroid::SOURCE_CRC => Some(&metroid::Metroid),
+        metroid::SOURCE_CRC | metroid::SOURCE_CRC_EUROPE => Some(&metroid::Metroid),
         _ => None,
     }
 }
@@ -347,7 +347,9 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::MEGAMAN6_USA | crate::builtin_patches::ROCKMAN6_JAPAN => {
             Some(&megaman6::MegaMan6)
         }
-        crate::builtin_patches::METROID_USA => Some(&metroid::Metroid),
+        crate::builtin_patches::METROID_USA | crate::builtin_patches::METROID_EUROPE => {
+            Some(&metroid::Metroid)
+        }
         _ => None,
     }
 }
