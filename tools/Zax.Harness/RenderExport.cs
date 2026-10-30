@@ -43,6 +43,17 @@ internal static class RenderExport
                                    capture can start from a saved game (REQ-CORE-095).
           --dump-frame <file.json> Write the captured frame as a '--frames' JSON file, so the
                                    same scene can be replayed without the ROM.
+          --dump-meshes <file.json> Write one entry per drawn tile instance of the captured
+                                   frame — every tile of every active shape the renderer draws,
+                                   the HUD included and marked: the tile's screen position as
+                                   the core emitted it (the '--dump-frame' convention), its
+                                   sprite and HUD flags, its mesh sizes, the bounds of its mesh
+                                   in the tile's own centred frame (REQ-E3D-504: a full 8 x 8
+                                   tile spans [-4, 4] on x and y and [-D/2, D/2] on z) and after
+                                   the object transform of REQ-E3D-406 (bending excluded), the
+                                   extrusion depth sizeZ the conversion used, the mesh algorithm
+                                   and the shape's tags. Capturing several scenes writes one
+                                   file per scene, the name inserted before the extension.
           --press <spec>           Port 1 buttons to hold while replaying, as a comma
                                    separated list of <first>[-<last>]:<buttons>, the frame
                                    numbers counting from the reset and the buttons being
@@ -101,6 +112,7 @@ internal static class RenderExport
         string? press = null;
         string? battery = null;
         string? dumpFrame = null;
+        string? dumpMeshes = null;
         int runFrames = 120;
         int runAhead = 0;
         int width = 640;
@@ -168,6 +180,10 @@ internal static class RenderExport
 
                 case "--dump-frame":
                     dumpFrame = Next(args, ref i);
+                    break;
+
+                case "--dump-meshes":
+                    dumpMeshes = Next(args, ref i);
                     break;
 
                 case "--size":
@@ -351,6 +367,16 @@ internal static class RenderExport
             if (scene.NesPicture is { Length: >= 256 * 240 } picture)
             {
                 WriteNesPicture(Path.Combine(output, $"{scene.Name}-2d.png"), picture);
+            }
+
+            // The per-tile geometry of the very frame that was just captured: the draw list the
+            // renderer consumed, written out tile by tile (SPEC-04B REQ-E3D-641).
+            if (dumpMeshes is not null && scene.Scene.DrawList is { } meshes)
+            {
+                string dump = MeshDump.PathFor(dumpMeshes, scene.Name, scenes.Count == 1);
+                MeshDump.WriteFile(dump, meshes, scene.Engine.Settings.RenderAlgorithm, scene.Name);
+                Console.Out.WriteLine(
+                    $"render: {meshes.Tiles.Count} tile mesh(es) written to {dump}");
             }
 
             if (explain)
