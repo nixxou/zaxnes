@@ -287,6 +287,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     .join(crate::persistence::hack_compat_cache::FILE_NAME)
             }),
         );
+        // The icons of RetroAchievements and what the list found of each game, kept with them.
+        let achievement_cache = settings_store
+            .is_some()
+            .then(|| paths.root.join(crate::achievements::CACHE_FOLDER));
         let mut legacy_slots = SaveSlotIndex::load(&paths, now());
         legacy_slots.reconcile(&paths, |game_id| games.exists(game_id));
         let mut host = Self {
@@ -342,7 +346,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             rom_crcs: std::cell::RefCell::new(rom_crcs),
             hack_compat: std::cell::RefCell::new(hack_compat),
             zapper: ZapperState::new(),
-            achievements: AchievementSystem::new(&format!("Zaxnes/{}", env!("CARGO_PKG_VERSION"))),
+            achievements: AchievementSystem::new(&format!("Zaxnes/{}", env!("CARGO_PKG_VERSION")))
+                .with_cache(achievement_cache),
             catch_up: None,
             defer_conversion: false,
         };

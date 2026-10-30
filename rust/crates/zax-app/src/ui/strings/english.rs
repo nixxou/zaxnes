@@ -381,6 +381,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::ACH_MENU, "RetroAchievements"),
     (keys::ACH_LIST, "Achievements of the game"),
     (keys::ACH_LIST_EMPTY, "No achievements: no game is running, or RetroAchievements doesn't know it."),
+    (keys::ACH_GRID_STUDYING, "Asking RetroAchievements about this game..."),
+    (keys::ACH_GRID_SIGNED_OUT, "Sign in to RetroAchievements (Options > RetroAchievements) to see the achievements."),
+    (keys::ACH_GRID_NONE, "No achievements: RetroAchievements doesn't know this game, or it could not be reached."),
     (keys::ACH_ACCOUNT, "Account and options..."),
     (keys::ACH_SIGNED_OUT, "Not signed in."),
     (keys::ACH_SIGNING_IN, "Signing in..."),
@@ -397,6 +400,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::ACH_COMPLETED, "Game completed!"),
     (keys::ACH_COMPLETED_TEXT, "Every achievement of {0} is unlocked."),
     (keys::ACH_GAME_SUMMARY, "{0} of {1} achievements unlocked ({2}/{3} points, softcore)"),
+    (keys::ACH_PERCENT, "{0}%"),
     (keys::ACH_GAME_NO_ACHIEVEMENTS, "This game has no achievements yet."),
     (keys::ACH_GAME_UNKNOWN, "RetroAchievements doesn't know this ROM."),
     (keys::ACH_GAME_FAILED, "RetroAchievements: the game's achievements did not load ({0})."),
@@ -425,4 +429,5 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.achievements.encore", "Encore mode (unlocked achievements fire again)"),
     ("setting.achievements.unofficial", "Test the unofficial achievements"),
     ("setting.achievements.sound", "Unlock sound"),
+    ("setting.achievements.challenges", "Show the challenges under way"),
 ];

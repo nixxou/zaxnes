@@ -181,6 +181,7 @@ setting_ids! {
     AchievementsEncore => "achievements.encore",
     AchievementsUnofficial => "achievements.unofficial",
     AchievementsSound => "achievements.sound",
+    AchievementsChallenges => "achievements.challenges",
     AchievementsUsername => "achievements.username",
     AchievementsToken => "achievements.token",
 }

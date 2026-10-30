@@ -9,7 +9,7 @@ use super::pad::{PadButton, PadState};
 use crate::input::{InputAction, InputBindings};
 
 /// The fixed keys of each button.
-const FIXED: [(PadButton, &[Key]); 13] = [
+const FIXED: [(PadButton, &[Key]); 14] = [
     (PadButton::Up, &[Key::Up]),
     (PadButton::Down, &[Key::Down]),
     (PadButton::Left, &[Key::Left]),
@@ -23,6 +23,8 @@ const FIXED: [(PadButton, &[Key]); 13] = [
     (PadButton::L1, &[Key::Q]),
     (PadButton::R1, &[Key::E]),
     (PadButton::L2, &[Key::W]),
+    // The achievements of a game, on the list (Rust-only, owner request).
+    (PadButton::R2, &[Key::R]),
     (PadButton::Start, &[Key::H]),
 ];
 

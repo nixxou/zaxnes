@@ -55,6 +55,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     assert_eq!(
         additions,
         [
+            "achievements.challenges",
             "achievements.enabled",
             "achievements.encore",
             "achievements.sound",

@@ -194,6 +194,10 @@ impl SdlPlatform {
                 self.pad.set(PadButton::L2, value > i16::MAX / 2);
                 return;
             }
+            Axis::TriggerRight => {
+                self.pad.set(PadButton::R2, value > i16::MAX / 2);
+                return;
+            }
             _ => return,
         };
         self.pad.set_axis(horizontal, value);

@@ -147,6 +147,8 @@ const ACHIEVEMENT_LIST_HINTS: &[Hint] = &[
     hint("B", keys::HANDHELD_HINT_BACK),
 ];
 
+const ACHIEVEMENT_GRID_HINTS: &[Hint] = &[hint("B", keys::HANDHELD_HINT_BACK)];
+
 /// The hints at the bottom of `screen`.
 #[must_use]
 pub const fn hints(screen: Screen) -> &'static [Hint] {
@@ -162,6 +164,7 @@ pub const fn hints(screen: Screen) -> &'static [Hint] {
         Screen::Achievements => ACHIEVEMENTS_HINTS,
         Screen::Keyboard => KEYBOARD_HINTS,
         Screen::AchievementList => ACHIEVEMENT_LIST_HINTS,
+        Screen::AchievementGrid => ACHIEVEMENT_GRID_HINTS,
         Screen::InGame => &[],
     }
 }

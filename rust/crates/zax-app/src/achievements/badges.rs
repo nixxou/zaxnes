@@ -1,8 +1,10 @@
 //! The icons of the achievements and of the game: PNG files of the RetroAchievements media
 //! server, fetched when first drawn, kept in memory and handed to the interface renderer as
-//! pictures.
+//! pictures. Kept on disk too, when there is a folder for them (owner request): an icon is
+//! downloaded once.
 
 use std::collections::{HashMap, VecDeque};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
@@ -28,6 +30,8 @@ enum Badge {
 pub struct BadgeCache {
     transport: Arc<dyn Transport>,
     user_agent: String,
+    /// The folder the icons are kept in, if any.
+    directory: Option<PathBuf>,
     badges: HashMap<String, Badge>,
     waiting: VecDeque<String>,
     loading: usize,
@@ -45,6 +49,7 @@ impl BadgeCache {
         Self {
             transport,
             user_agent: user_agent.to_owned(),
+            directory: None,
             badges: HashMap::new(),
             waiting: VecDeque::new(),
             loading: 0,
@@ -53,6 +58,11 @@ impl BadgeCache {
             outbox,
             updates: Vec::new(),
         }
+    }
+
+    /// Keeps the icons in `directory` from now on, and reads them from it first.
+    pub fn set_directory(&mut self, directory: Option<PathBuf>) {
+        self.directory = directory;
     }
 
     /// The texture id of the icon at `url`, once it is there; the first call asks for it.
@@ -126,6 +136,10 @@ impl BadgeCache {
             self.loading += 1;
             let transport = Arc::clone(&self.transport);
             let outbox = self.outbox.clone();
+            let file = self
+                .directory
+                .as_ref()
+                .map(|directory| directory.join(file_name(&url)));
             let request = HttpRequest {
                 url: url.clone(),
                 post_data: None,
@@ -135,10 +149,7 @@ impl BadgeCache {
             let spawned = std::thread::Builder::new()
                 .name("zaxnes-badge".to_owned())
                 .spawn(move || {
-                    let answer = transport.send(&request);
-                    let picture = (answer.status == 200)
-                        .then(|| decode_png(&answer.body))
-                        .flatten();
+                    let picture = fetch(transport.as_ref(), &request, file.as_deref());
                     let _ = outbox.send((request.url, picture));
                 });
             if spawned.is_err() {
@@ -155,6 +166,52 @@ impl std::fmt::Debug for BadgeCache {
             .field("badges", &self.badges.len())
             .finish_non_exhaustive()
     }
+}
+
+/// The icon of `request`: the copy in `file` when there is one, or else the server's, then kept
+/// in `file`.
+fn fetch(
+    transport: &dyn Transport,
+    request: &HttpRequest,
+    file: Option<&Path>,
+) -> Option<UiPicture> {
+    if let Some(picture) = file
+        .and_then(|file| std::fs::read(file).ok())
+        .and_then(|bytes| decode_png(&bytes))
+    {
+        return Some(picture);
+    }
+    let answer = transport.send(request);
+    if answer.status != 200 {
+        return None;
+    }
+    let picture = decode_png(&answer.body)?;
+    if let Some(file) = file {
+        // A copy that cannot be written is fetched again next time: nothing else to do.
+        if let Some(directory) = file.parent() {
+            let _ = std::fs::create_dir_all(directory);
+        }
+        let _ = std::fs::write(file, &answer.body);
+    }
+    Some(picture)
+}
+
+/// The file an icon is kept in: its address past the server, as one name
+/// (`Badge/12345_lock.png` gives `Badge_12345_lock.png`).
+fn file_name(url: &str) -> String {
+    let path = url.split_once("://").map_or(url, |(_, rest)| {
+        rest.split_once('/').map_or(rest, |(_, path)| path)
+    });
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    path.chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '.' || character == '-' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// A PNG file as RGBA pixels; `None` for anything unreadable or too big.

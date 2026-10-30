@@ -383,6 +383,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::ACH_MENU, "RetroAchievements"),
     (keys::ACH_LIST, "Succès du jeu"),
     (keys::ACH_LIST_EMPTY, "Aucun succès : aucun jeu n'est lancé, ou RetroAchievements ne le connaît pas."),
+    (keys::ACH_GRID_STUDYING, "RetroAchievements est interrogé sur ce jeu..."),
+    (keys::ACH_GRID_SIGNED_OUT, "Connectez-vous à RetroAchievements (Options > RetroAchievements) pour voir les succès."),
+    (keys::ACH_GRID_NONE, "Aucun succès : RetroAchievements ne connaît pas ce jeu, ou n'a pas pu être joint."),
     (keys::ACH_ACCOUNT, "Compte et options..."),
     (keys::ACH_SIGNED_OUT, "Non connecté."),
     (keys::ACH_SIGNING_IN, "Connexion..."),
@@ -399,6 +402,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::ACH_COMPLETED, "Jeu terminé à 100 % !"),
     (keys::ACH_COMPLETED_TEXT, "Tous les succès de {0} sont débloqués."),
     (keys::ACH_GAME_SUMMARY, "{0} succès débloqués sur {1} ({2}/{3} points, softcore)"),
+    (keys::ACH_PERCENT, "{0} %"),
     (keys::ACH_GAME_NO_ACHIEVEMENTS, "Ce jeu n'a pas encore de succès."),
     (keys::ACH_GAME_UNKNOWN, "RetroAchievements ne connaît pas cette ROM."),
     (keys::ACH_GAME_FAILED, "RetroAchievements : les succès du jeu n'ont pas pu être chargés ({0})."),
@@ -427,4 +431,5 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.achievements.encore", "Mode encore (les succès déjà obtenus se redéclenchent)"),
     ("setting.achievements.unofficial", "Tester les succès non officiels"),
     ("setting.achievements.sound", "Son de déblocage"),
+    ("setting.achievements.challenges", "Afficher les défis en cours"),
 ];

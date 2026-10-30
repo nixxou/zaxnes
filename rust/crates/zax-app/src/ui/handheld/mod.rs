@@ -5,6 +5,7 @@
 //! In the console mode of the desktop the mouse acts too, through the same presses
 //! ([`pointer`]).
 
+pub mod achievement_grid;
 pub mod achievements;
 pub mod compat;
 pub mod defaults;
@@ -91,6 +92,8 @@ pub enum Screen {
     Keyboard,
     /// The game's achievements, from the RetroAchievements screen.
     AchievementList,
+    /// A game's achievements as a grid of icons (Rust-only): from the list or the in-game menu.
+    AchievementGrid,
     /// The game itself, with no interface.
     InGame,
 }
@@ -166,6 +169,8 @@ pub struct HandheldUi {
     /// go (known once drawn).
     list_scroll: f32,
     list_scroll_max: Cell<f32>,
+    /// The grid of a game's achievements, while it shows, and the screen it goes back to.
+    grid: Option<(achievement_grid::AchievementGridModel, Screen)>,
 }
 
 /// L2 in game (Rust-only, owner request): held, it keeps the camera's angles and distance; a
@@ -252,6 +257,7 @@ impl HandheldUi {
             keyboard: None,
             list_scroll: 0.0,
             list_scroll_max: Cell::new(0.0),
+            grid: None,
         };
         ui.refresh_roms(host);
         ui
@@ -538,7 +544,7 @@ impl HandheldUi {
 
     /// The list resting [`STUDY_AFTER_SECONDS`] on a game not studied yet studies its ROM (owner
     /// request): a few milliseconds, and the list then shows whether a widescreen hack fits it.
-    fn update_resting_study(&mut self, seconds: f32, host: &AppHost) {
+    fn update_resting_study(&mut self, seconds: f32, host: &mut AppHost) {
         let selected = (self.screen == Screen::Home && !self.confirming)
             .then(|| self.roms.selected_entry().map(|entry| entry.path.clone()))
             .flatten();
@@ -556,13 +562,14 @@ impl HandheldUi {
         }
         // Studied once: the same game stays without a new reading until the list moves.
         self.resting_on = Some((path.clone(), f32::NEG_INFINITY));
-        if host.rom_certificate(&path).is_some() {
-            return;
+        if host.rom_certificate(&path).is_none() {
+            if let Ok(rom) = crate::emulation::rom_file::read(&path) {
+                host.certify_rom(&path, &rom.image);
+                self.note_study(&path, host);
+            }
         }
-        if let Ok(rom) = crate::emulation::rom_file::read(&path) {
-            host.certify_rom(&path, &rom.image);
-            self.note_study(&path, host);
-        }
+        // Then its achievements, while RetroAchievements is on and someone is signed in.
+        host.achievements.study_rom(&path);
     }
 
     /// Y in game (owner request): a short press switches between 2D and 3D; a hold shows the game
@@ -728,6 +735,8 @@ impl HandheldUi {
             Screen::InGame => {
                 host.enqueue(Command::Pause, CommandArgs::default());
                 self.overlay.reopen();
+                self.overlay
+                    .set_achievements(host.achievements.is_enabled());
                 self.screen = Screen::Overlay;
             }
             Screen::Overlay => self.carry_out_overlay(OverlayCommand::Resume, host),
@@ -826,6 +835,14 @@ impl HandheldUi {
             Screen::Achievements => self.press_achievements(button, frame.host),
             Screen::Keyboard => self.press_keyboard(button),
             Screen::AchievementList => self.press_achievement_list(button),
+            Screen::AchievementGrid => {
+                if let Some((grid, back)) = &mut self.grid {
+                    if grid.handle(button) {
+                        self.screen = *back;
+                        self.grid = None;
+                    }
+                }
+            }
             Screen::Overlay => {
                 if let Some(command) = self.overlay.handle(button) {
                     self.carry_out_overlay(command, frame.host);
@@ -896,7 +913,20 @@ impl HandheldUi {
                 let title = self.profile_title_of(&path);
                 self.open_hacks(&path, title.as_deref(), Screen::Home, host, HacksView::Aids);
             }
+            RomListCommand::Achievements(path) => {
+                if host.achievements.is_enabled() {
+                    // Not studied yet: asked now, the grid shows it once it comes.
+                    host.achievements.study_rom(&path);
+                    self.open_grid(achievement_grid::GridSource::Rom(path), Screen::Home);
+                }
+            }
         }
+    }
+
+    /// Shows the grid of `source`'s achievements; B goes back to `back`.
+    fn open_grid(&mut self, source: achievement_grid::GridSource, back: Screen) {
+        self.grid = Some((achievement_grid::AchievementGridModel::new(source), back));
+        self.screen = Screen::AchievementGrid;
     }
 
     /// The title of the 3D profile the list found for the game in `path`, if any.
@@ -1237,6 +1267,9 @@ impl HandheldUi {
                     self.hold_widescreen(PadButton::A, rom, title, Screen::Overlay);
                 }
             }
+            OverlayCommand::Achievements => {
+                self.open_grid(achievement_grid::GridSource::Playing, Screen::Overlay);
+            }
             OverlayCommand::Hacks => {
                 if let Some(rom) = host.current_rom_path().map(PathBuf::from) {
                     let title = host.current_game_title().map(str::to_owned);
@@ -1407,6 +1440,9 @@ impl HandheldUi {
                 };
                 self.states = StatesModel::new(mode, 1);
                 self.screen = Screen::States;
+            }
+            Screen::AchievementGrid => {
+                self.open_grid(achievement_grid::GridSource::Playing, Screen::Home);
             }
             Screen::Achievements | Screen::AchievementList => {
                 self.open_options_for_capture();

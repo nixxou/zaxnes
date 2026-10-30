@@ -103,6 +103,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if let Some(image) = achievements::hash_image(core) {
             self.achievements.start_game(core, image);
         }
+        let path = self.current_rom_path().map(std::path::PathBuf::from);
+        self.achievements.set_rom_path(path);
         if let Some(state) = state {
             let progress = (!state.achievements.is_empty()).then_some(&state.achievements[..]);
             self.achievements.restore_progress(core, progress);
