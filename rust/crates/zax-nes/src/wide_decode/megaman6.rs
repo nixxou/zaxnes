@@ -26,6 +26,8 @@ pub struct MegaMan6;
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x9887_98A8;
+/// CRC-32 of Rockman 6 (Japan)'s data: the same RAM and stage data.
+pub const SOURCE_CRC_JAPAN: u32 = 0x2D66_4D99;
 
 const CAMERA_X_LOW: u16 = 0x0056;
 const CAMERA_X_HIGH: u16 = 0x0057;

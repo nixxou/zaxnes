@@ -254,7 +254,9 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   built from the European ROM (PAL); 272 of its 279 ROMs take a whole pack. Mega Man 5 too
   (`docs/hacks/megaman5/WIDESCREEN-HACK.md`): the USA pack, which Rockman 5 takes, and the European
   build's own (its fixed banks' code 2 bytes earlier), PAL; 419 of its 442 ROMs take a whole
-  pack. A "dirty" iNES header (bytes 12 to 15 not
+  pack. Mega Man 6 too (`docs/hacks/megaman6/WIDESCREEN-HACK.md`): its code (3.7 KiB) left the
+  10 KiB window for the zone fantôme; the USA pack and Rockman 6 (Japan)'s own (its fixed banks'
+  code 4 bytes later); 210 of its 215 ROMs take a whole pack. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its

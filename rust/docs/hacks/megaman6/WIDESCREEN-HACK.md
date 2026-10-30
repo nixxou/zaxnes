@@ -29,10 +29,10 @@ where it does without a vertical margin.
 |---|---|
 | Source ROM | *Mega Man 6 (USA)*, MMC3 (mapper 4), 512 KiB PRG (64 banks of 8 KiB, banks 62 and 63 fixed at `$C000` and `$E000`), CHR-RAM |
 | Source data (iNES header excluded) | CRC-32 `988798A8` |
-| Target data | CRC-32 `06C20CA3` (the BPS build's; `tools/build.py` prints it). With the pack, the hack's version in savestate headers is the pack's CRC-32, which `tools/build.py --pack` prints |
+| Target data | CRC-32 `B66BC050` (the BPS build's; `tools/build.py` prints it). With the pack, the hack's version in savestate headers is the pack's CRC-32, which `tools/build.py --pack` prints |
 | Changes | PRG grown to 544 KiB (68 banks of 8 KiB): the game's banks 0-63 where they were, the hack's code as banks 64-65 (16 KiB bank 32), the fixed banks copied to banks 66 and 67 (Zaxnes' MMC3 fixes the last two banks, whatever their count); hooks in banks `$38`, `$3A`, 62 and 63 (both copies of the fixed banks) |
 | Patch | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.bps`, made against the data without header; the fixed banks' copies are SourceCopy, the added banks never read from the source, no game data in the patch |
-| Hack pack | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.zxpk`, what Zaxnes ships now (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1): the code in the extension's memory, the window opened on it at power-on (`$5008` = `$80`, page 0); the pack format 2, written by Zaxnes' shared builder (`hackpack.py`, `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`): NTSC, MMC3, each hook a 16 KiB bank and a CPU address, checked before it applies, the widescreen in one group ("core", Base), no checks yet; the PRG-ROM stays 512 KiB. The BPS above is kept to compare: the same movies replay with the same RAM every frame either way (the stack page aside: `JMP` for `JSR` in the damage hook) |
+| Hack pack | `rust/crates/zax-nes/patches/megaman6-usa-widescreen.zxpk`, what Zaxnes ships now (`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1), and from Rockman 6 (Japan) `rockman6-japan-widescreen.zxpk` (`-D JAPAN`: its fixed banks' code 4 bytes later from `$D0D9` to `$FA8A`, `JAPAN_SHIFT`, and the banked hook that calls into it with its own bytes); the pack format 2, written by Zaxnes' shared builder (`hackpack.py`, `tools/build.py <rom> --pack <out.zxpk>`, `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`): NTSC, MMC3 and MMC5. `src/wide.s` is assembled with `-D PACK` for `$2000`: the zone fantôme, which Zaxnes shows to instruction fetches only from power-on, the extension unlocked (the code reads no data of its own); its registers and RAM are at `$3000`-`$3FFF` (widescreen MMC5: `$5000`-`$5FFF` stays the cartridge's), no window. The pack leaves the game's NMI alone: the extension's settings are made from `wide_frame_start` (`$D1D4`, `$E1DD`), in the frame's logic, and the NMI's hook is the BPS build's only. Each hook is a 16 KiB bank and a CPU address with the game's bytes it replaces, checked and applied by Zaxnes; the PRG-ROM stays 512 KiB. The widescreen is in two groups: "core" (Base: the sprites, their 16-bit x, the second page, the energy bars) and "enemies" (Enemies in the margins, needing it: the test "on the screen", the sleeping enemies, the stage list's spawns, the reserve's slots), with checks of the game's code the hack relies on: the end of the loop hiding the rest of OAM (`$E27A`), the list's walk (`$813A` of bank `$3A`), the bank switch (`$CBC0`), a free slot (`$E590`), the loop emptying the slots (`$D6F3`), an object's sprites (`$E2A9`), and for "Invincible" the damage routine's `RTS` (`$8F95` of bank `$38`). Over the 215 ROMs of the game, 210 take a whole pack (the 5 left are one ROM hack, its sprite code reworked). The BPS above is kept to compare |
 
 The code runs from the widescreen extension's PRG window at `$5800-$7FFF` (10 KiB), which Zaxnes
 opens on bank 32, page 0 at power-on for this patch (`boot_window`): the game has no free room for
@@ -231,21 +231,35 @@ two hooks on the same bytes): the code up to `wide_end` rounded up to 256 bytes,
 ;  * Mega Man and his weapons (slots 0-7) keep the original limits.
 ;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
+;
+; In a Zaxnes hack pack (-D PACK) the code is assembled for $2000 instead: the zone fantôme, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
+; reads there still reach the PPU, and the code reads no data of its own. Its registers and RAM are
+; at $3000-$3FFF, which the zone holds for its own instructions (widescreen MMC5: $5000-$5FFF stays
+; the cartridge's). The game's NMI is left alone: the settings are made from wide_frame_start, in
+; the frame's logic (a hook in the NMI pushed the game's writes of the vblank later, as in Mega
+; Man 2's vertical transitions). Rockman 6 (Japan) (-D JAPAN) has the USA's code with its fixed
+; banks' code 4 bytes later from $D0D9 to $FA8A.
 
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, bit 2 second sprite page,
-                                ; bit 3 high bytes kept
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
-EXTRA_OAM       = $5300         ; the second sprite page, OAM format
-EXTRA_SPRHI     = $5400         ; + 4 n: high byte of the x of its sprite n
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1 sprites free of the extents, bit 2 second sprite page,
+                                ; bit 3 high bytes kept, bit 4 the window on to $7FFF
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+EXTRA_OAM       = EXT + $300    ; the second sprite page, OAM format
+EXTRA_SPRHI     = EXT + $400    ; + 4 n: high byte of the x of its sprite n
 
 OPT_INVINCIBLE  = $02           ; a testing aid: Mega Man takes no damage
 OPT_NO_SLOWDOWN = $04           ; nearly a frame more of CPU time: the game never runs late
@@ -256,56 +270,56 @@ NO_SLOWDOWN_LINES = 255
 FIRST_ENEMY     = $08           ; the slots the stage's list spawns into: 8-21
 CONTROLLER      = $16           ; the slot of the list's type $80 entries (the stage's controllers)
 
-; Variables in the extension's RAM ($5200-$57FF).
-WV_M            = $5200         ; margin of this frame
-WV_LOL          = $5201         ; screen x range objects may live in: [LO, HI), signed 16-bit
-WV_LOH          = $5202
-WV_HIL          = $5203
-WV_HIH          = $5204
-WV_SL           = $5205         ; screen x of the object at hand, signed 16-bit
-WV_SH           = $5206
-WV_T0           = $5207         ; scratch
-WV_T1           = $5208
-WV_PAGE         = $5209         ; bit 7: the sprites being placed go to the second page
-WV_FULL         = $520A         ; non-zero once both pages are full
-WV_FIRST        = $520B         ; the first screen of the part of the stage the camera may show
-WV_END          = $520C         ; the screen past its last
-WV_XL           = $520D         ; the sprites' x base, signed 16-bit
-WV_XH           = $520E
-WV_YH           = $520F         ; the high byte of the sprite's y
-WV_DORMANT      = $5220         ; + slot: the list entry ($03FC + slot) of an enemy asleep, $FF awake
-WV_STARTED      = $5240         ; + slot: non-zero once an enemy asleep has run its script's first frame
-WV_HIDDEN       = $5260         ; + slot: non-zero while an enemy asleep is not drawn (see wide_spawned)
-WV_CAML         = $5210         ; the camera of the last spawn window, to tell whether it moved
-WV_CAMH         = $5211
-WV_MOVED        = $5212         ; non-zero when the camera moved since the last spawn window
-WV_PASS         = $5213         ; the walk of the stage list under way: $80 controllers, 0 enemies
-WV_O49          = $5214         ; the game's list pointers as its walk left them
-WV_O4A          = $5215
-WV_E49          = $5216         ; the enemies' walk's list pointers
-WV_E4A          = $5217
-WV_RES          = $5218         ; the reserve entry at hand
-WV_BORROW       = $5219         ; non-zero while slot BORROWED holds a reserve entry being drawn
-WV_LSTOP        = $521A         ; the first screen beside the camera's that enemies live in
-WV_RSTOP        = $521B         ; and the last (see wide_reach)
-WV_JL           = $5238         ; the joins wide_reach tests: before the camera's screen ($FF: none)
-WV_JR           = $5239         ; and after the last it shows
-WV_AL           = $523A         ; non-zero when that join's screens are not side by side
-WV_AR           = $523B
-WV_OWN          = $523C         ; the controller at hand: its screen, whether it scrolls to the
-WV_FWD          = $523D         ; next one, where its settings are read, its entry in the list
-WV_AT           = $523E
-WV_ENTRY        = $523F
-WV_TILES        = $5257         ; non-zero when the action at hand loads the stage's other tiles
-WV_RKEY         = $5258         ; what wide_reach last worked out for: camera screen * 2 + whether
+; Variables in the extension's RAM (EXT + $200 to EXT + $7FF).
+WV_M            = EXT + $200    ; margin of this frame
+WV_LOL          = EXT + $201    ; screen x range objects may live in: [LO, HI), signed 16-bit
+WV_LOH          = EXT + $202
+WV_HIL          = EXT + $203
+WV_HIH          = EXT + $204
+WV_SL           = EXT + $205    ; screen x of the object at hand, signed 16-bit
+WV_SH           = EXT + $206
+WV_T0           = EXT + $207    ; scratch
+WV_T1           = EXT + $208
+WV_PAGE         = EXT + $209    ; bit 7: the sprites being placed go to the second page
+WV_FULL         = EXT + $20A    ; non-zero once both pages are full
+WV_FIRST        = EXT + $20B    ; the first screen of the part of the stage the camera may show
+WV_END          = EXT + $20C    ; the screen past its last
+WV_XL           = EXT + $20D    ; the sprites' x base, signed 16-bit
+WV_XH           = EXT + $20E
+WV_YH           = EXT + $20F    ; the high byte of the sprite's y
+WV_DORMANT      = EXT + $220    ; + slot: the list entry ($03FC + slot) of an enemy asleep, $FF awake
+WV_STARTED      = EXT + $240    ; + slot: non-zero once an enemy asleep has run its script's first frame
+WV_HIDDEN       = EXT + $260    ; + slot: non-zero while an enemy asleep is not drawn (see wide_spawned)
+WV_CAML         = EXT + $210    ; the camera of the last spawn window, to tell whether it moved
+WV_CAMH         = EXT + $211
+WV_MOVED        = EXT + $212    ; non-zero when the camera moved since the last spawn window
+WV_PASS         = EXT + $213    ; the walk of the stage list under way: $80 controllers, 0 enemies
+WV_O49          = EXT + $214    ; the game's list pointers as its walk left them
+WV_O4A          = EXT + $215
+WV_E49          = EXT + $216    ; the enemies' walk's list pointers
+WV_E4A          = EXT + $217
+WV_RES          = EXT + $218    ; the reserve entry at hand
+WV_BORROW       = EXT + $219    ; non-zero while slot BORROWED holds a reserve entry being drawn
+WV_LSTOP        = EXT + $21A    ; the first screen beside the camera's that enemies live in
+WV_RSTOP        = EXT + $21B    ; and the last (see wide_reach)
+WV_JL           = EXT + $238    ; the joins wide_reach tests: before the camera's screen ($FF: none)
+WV_JR           = EXT + $239    ; and after the last it shows
+WV_AL           = EXT + $23A    ; non-zero when that join's screens are not side by side
+WV_AR           = EXT + $23B
+WV_OWN          = EXT + $23C    ; the controller at hand: its screen, whether it scrolls to the
+WV_FWD          = EXT + $23D    ; next one, where its settings are read, its entry in the list
+WV_AT           = EXT + $23E
+WV_ENTRY        = EXT + $23F
+WV_TILES        = EXT + $257    ; non-zero when the action at hand loads the stage's other tiles
+WV_RKEY         = EXT + $258    ; what wide_reach last worked out for: camera screen * 2 + whether
                                 ; it straddles the next, the stage list's pointer (3 bytes)
-WV_BANKS        = $521C         ; the game's banks at $8000 and $A000 ($4A, $4B) while wide_reach reads
+WV_BANKS        = EXT + $21C    ; the game's banks at $8000 and $A000 ($4A, $4B) while wide_reach reads
 RES_COUNT       = 8             ; the reserve: enemies asleep in the margins, out of the game's slots
-RES_USED        = $5280         ; + entry: non-zero when in use
-RES_ENTRY       = $5288         ; + entry: its stage list entry
-RES_HIDDEN      = $5290         ; + entry: its WV_HIDDEN
-RES_DATA        = $5500         ; object table f of entry e at RES_DATA + RES_COUNT f + e
-SAVE_DATA       = $5600         ; + f: the borrowed slot's object tables while it draws an entry
+RES_USED        = EXT + $280    ; + entry: non-zero when in use
+RES_ENTRY       = EXT + $288    ; + entry: its stage list entry
+RES_HIDDEN      = EXT + $290    ; + entry: its WV_HIDDEN
+RES_DATA        = EXT + $500    ; object table f of entry e at RES_DATA + RES_COUNT f + e
+SAVE_DATA       = EXT + $600    ; + f: the borrowed slot's object tables while it draws an entry
 OBJ_TABLES      = 29            ; the object tables, 23 bytes apart from $03A0 (slots 0-22)
 BORROWED        = $15           ; the slot borrowed to draw the reserve when none is free
 
@@ -327,10 +341,16 @@ BANK_SELECT     = $4C
 MMC3_SELECT     = $8000
 MMC3_BANK       = $8001
 LIST_WALK       = $813A         ; bank $3A: the walk of the list, through the window $00-$03, to an RTS
+SET_BANK        = $CBC0         ; the 8 KiB banks Y at $8000 and Y + 1 at $A000
+.ifdef JAPAN
+SLOTS_CLEAR_LOOP = $D6F7
+FREE_SLOT       = $E594
+DRAW_SPRITES    = $E2AD
+.else
 SLOTS_CLEAR_LOOP = $D6F3        ; the game's loop emptying slots 21 to 1
 FREE_SLOT       = $E590         ; a free enemy slot for list entry Y in X, carry clear; set: none
-SET_BANK        = $CBC0         ; the 8 KiB banks Y at $8000 and Y + 1 at $A000
 DRAW_SPRITES    = $E2A9         ; an object's sprites, X the slot, $00 its screen x
+.endif
 OBJ_ANIM_BANK   = $0458         ; + slot: its animation's bank
 OBJ_ANIM_END    = $04F9         ; + slot: its animation's length (steps of 2)
 OBJ_ANIM_STEP   = $0510         ; + slot: its animation's step
@@ -352,16 +372,33 @@ OAM_NEXT        = $8C           ; where the next sprite goes in OAM
 FLIPS           = $8D           ; the object's attributes: bit 6 horizontal flip, bit 7 vertical
 
 ; The game's routines.
+.ifdef JAPAN
+HIDE_REST_DONE  = $E27E
+.else
 HIDE_REST_DONE  = $E27A         ; after the loop hiding the rest of OAM
+.endif
 HURT_SKIP       = $8F95         ; bank $38: the damage routine's RTS
 
 .segment "CODE"
+.ifdef PACK
+.org $2000
+.else
 .org $5800
+.endif
 
 ; ---------------------------------------------------------------------------- ;
-; NMI ($C01F, in place of LDA $FB / STA $A000, the update of a frame the game finished): the
-; extension's settings for the next frame.
+; NMI ($C01F, in place of LDA $FB / STA $A000, the update of a frame the game finished; the BPS
+; build only): the extension's settings for the next frame.
+.ifndef PACK
 wide_nmi:
+    JSR     wide_settings
+    LDA     $FB
+    STA     $A000
+    RTS
+.endif
+
+; The extension's settings: the margin, the extents, the layout and the overclock (A only).
+wide_settings:
     LDA     WIDE_HOST
     CMP     #MAX_MARGIN
     BCC     @margin
@@ -372,9 +409,13 @@ wide_nmi:
     LDA     #$00
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$1E                        ; sprites free of the extents, second sprite page, high
-                                        ; bytes kept (every sprite placed gets one), the window
-                                        ; on to $7FFF (the hack's code; the game has no PRG-RAM)
+.ifdef PACK
+    LDA     #$0E                        ; sprites free of the extents, second sprite page, high
+                                        ; bytes kept (every sprite placed gets one)
+.else
+    LDA     #$1E                        ; the same, and the window on to $7FFF (the hack's code;
+                                        ; the game has no PRG-RAM)
+.endif
     STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS
     AND     #OPT_NO_SLOWDOWN
@@ -385,8 +426,6 @@ wide_nmi:
     LDA     #OVERCLOCK_LINES
 @overclock:
     STA     WIDE_OVERCLOCK
-    LDA     $FB
-    STA     $A000
     RTS
 
 ; ---------------------------------------------------------------------------- ;
@@ -808,8 +847,11 @@ wide_spawn_filter:
 
 ; The frame's sprites begin ($D1D4 and $E1DD, in place of LDA #0 / STA $8C): on the first page,
 ; its high bytes back to 0 (the energy bars' writer, $CF4A, writes none). X is kept, as by the
-; code replaced.
+; code replaced. In the pack, the extension's settings first.
 wide_frame_start:
+.ifdef PACK
+    JSR     wide_settings
+.endif
     TXA                                 ; X kept: $E1DD's callers count with it (the
     PHA                                 ; vertical scroll's loop, $D7CA, through $D701)
     LDA     #$00
@@ -1569,7 +1611,11 @@ wide_draw_one:
     RTS
 
 wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
 .assert wide_end <= $8000, error, "widescreen code past the 10 KiB window"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -1593,10 +1639,15 @@ Usage: python -I tools/build.py <Mega Man 6 (USA).nes> [out.bps]
 
 With --pack, steps 2 to 4 give way to a Zaxnes hack pack, format 2, written by Zaxnes'
 shared builder (tools/hackpack.py of Zaxnes, its folder in the environment variable
-ZAXNES_TOOLS): NTSC, MMC3, the code (its used part), and the hooks as a 16 KiB bank and a CPU address
-each, the ROM keeping its size. The damage hook is a
-component of its own, "invincible" (`JMP $8F95`), applied by Zaxnes while that option is on, with
-or without the widescreen; every other hook is the "widescreen" component, in one group ("core", Base).
+ZAXNES_TOOLS): NTSC, MMC3 and MMC5, the code assembled with -D PACK for $2000 (the zone fantôme,
+the extension at $3000-$3FFF; its used part), and the hooks as a 16 KiB bank and a CPU address
+each, the ROM keeping its size; the NMI's hook left out (the settings are made from
+wide_frame_start). The damage hook is a component of its own, "invincible" (`JMP $8F95`), applied
+by Zaxnes while that option is on, with or without the widescreen; every other hook is the
+"widescreen" component, in two groups, "core" (Base: the sprites) and "enemies" (Enemies in the
+margins: their spawns, sleep, reserve and life in the margins), each with checks of the game's
+code the hack relies on. Rockman 6 (Japan) gets a pack of its own (-D JAPAN: its fixed banks'
+code 4 bytes later from $D0D9 to $FA8A).
 """
 
 import os
@@ -1606,6 +1657,12 @@ import sys
 import zlib
 
 SOURCES = {0x988798A8: 'mm6wide'}
+JAPAN_CRC = 0x2D664D99          # Rockman 6 (Japan): its fixed banks' code moved; a pack only
+# Rockman 6 (Japan): its fixed banks' code 4 bytes later from $D0D9 to $FA8A (and 6 bytes earlier
+# from $CD2B to $D0D9: none of the hack's places), and the bytes of the banked hook that calls into
+# it (its JSR's target moved).
+JAPAN_SHIFT = (0xD0D9, 0xFA8A, 4)
+JAPAN_ORIGINAL = {(0x3A, 0x81C4): '20 94 e5'}
 BANK_SIZE = 0x2000
 PRG_BANKS = 64
 PRG_SIZE = PRG_BANKS * BANK_SIZE
@@ -1629,9 +1686,16 @@ def jmp(target):
     return bytes([0x4C, target & 0xFF, target >> 8])
 
 
-def hooks(sym):
+def japan(address):
+    """Where Rockman 6 (Japan) has the USA's place of its fixed banks."""
+    start, end, delta = JAPAN_SHIFT
+    return address + delta if start <= address < end else address
+
+
+def hooks(sym, moved=lambda address: address):
     """The patches: (bank, address, original bytes, new bytes); banks 62 and 63 are the fixed
-    ones ($C000, $E000), the others are seen at $8000."""
+    ones ($C000, $E000), the others are seen at $8000. moved: where the build has a place of the
+    fixed banks the hooks jump to."""
     out = []
 
     def put(bank, address, original, new):
@@ -1640,14 +1704,15 @@ def hooks(sym):
         assert len(new) == len(original), hex(address)
         out.append((bank, address, original, new))
 
-    # The NMI: the extension's settings.
-    put(62, 0xC01F, 'a5 fb 8d 00 a0', jsr(sym['wide_nmi']))
+    # The NMI: the extension's settings (the pack has no wide_nmi: it leaves this hook out,
+    # NMI_HOOK).
+    put(62, 0xC01F, 'a5 fb 8d 00 a0', jsr(sym.get('wide_nmi', 0)))
     # Sprites: the frame's first, an object's place, its sprite loop, the rest of OAM hidden.
     put(63, 0xE1DD, 'a9 00 85 8c', jsr(sym['wide_frame_start']))
     put(62, 0xD1D4, 'a9 00 85 8c', jsr(sym['wide_frame_start']))
     # The energy bars always before the objects (the game takes turns, to flicker when OAM is
     # full; with the second page nothing is left over).
-    put(62, 0xD1D8, 'a5 f3 29 01 f0 0e', jmp(0xD1EC))
+    put(62, 0xD1D8, 'a5 f3 29 01 f0 0e', jmp(moved(0xD1EC)))
     put(63, 0xE24B, 'bd b7 03 29 01 d0 17 bd b4 04 d0 12 bd 86 04 38 e5 f7 c9 04 90 08 85 00',
         jsr(sym['wide_place']) + bytes([0xB0, 0x19]))          # BCS $E269
     put(63, 0xE315, 'a6 8c a0 00 6c 08 00', jmp(sym['wide_sprites']))
@@ -1657,8 +1722,9 @@ def hooks(sym):
     put(63, 0xE485, 'bd cb 04', jmp(sym['wide_on_screen']))
     put(63, 0xE43A, 'bd a0 03', jsr(sym['wide_think']))
     # The stage list's spawns (two walks), an entry's spawn (each walk its kind), a list enemy's
-    # spawn.
-    put(0x3A, 0x8120, 'a5 56 18 69 fe 85 02 a5 57 69 00 85 03 a5 56 18 69 08 85 00 a5 57 69 00 85 01',
+    # spawn. The window's last STA $01 ($8138) stays: bank $3B calls it (JSR $8138: $01 = A, then
+    # the original's walk).
+    put(0x3A, 0x8120, 'a5 56 18 69 fe 85 02 a5 57 69 00 85 03 a5 56 18 69 08 85 00 a5 57 69 00',
         jmp(sym['wide_spawns']))
     put(0x3A, 0x81A7, '98 29 07 aa', jsr(sym['wide_spawn_filter']))
     put(0x3A, 0x81EA, 'a9 00 9d b4 04', jsr(sym['wide_spawned']))
@@ -1681,18 +1747,24 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+PACK_START = 0x2000             # the pack's code: the zone fantôme
+PACK_SIZE = 0x1000              # its code half ($3000-$3FFF holds the extension)
+
+
+def assemble(defines=()):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if 'PACK' in defines else (CODE_START, CODE_SIZE)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${CODE_SIZE:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
+    subprocess.run(tool('ca65') + ['-g'] + [flag for symbol in defines for flag in ('-D', symbol)]
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
                    check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
@@ -1710,31 +1782,73 @@ def assemble():
 INVINCIBLE_HOOK = (0x38, 0x8F72)
 
 
-def pack(data, code, sym, out):
+# The NMI's hook: the BPS build's only (the pack makes its settings from wide_frame_start).
+NMI_HOOK = (62, 0xC01F)
+
+# The hooks of the group "enemies" (the test "on the screen", the object loop's sleep, the stage
+# list's spawns and an entry's, the reserve's slots); the others but the invincibility's are the
+# "core" (the sprites).
+ENEMIES = {(63, 0xE485), (63, 0xE43A), (0x3A, 0x8120), (0x3A, 0x81A7), (0x3A, 0x81EA),
+           (0x3A, 0x81C4), (62, 0xD6FD)}
+
+# The game's code the hack's code relies on, by group: (8 KiB bank, address, length), checked by
+# Zaxnes to be the reference ROM's bytes. Core: the end of the loop hiding the rest of OAM (what
+# wide_hide_rest returns to). Enemies: the list's walk, the bank switch, a free slot, the loop
+# emptying the slots, an object's sprites (the reserve's). Invincible: the damage routine's RTS.
+CHECKS = {
+    'core': [(63, 0xE27A, 9)],
+    'enemies': [(0x3A, 0x813A, 6), (62, 0xCBC0, 15), (63, 0xE590, 8), (62, 0xD6F3, 10),
+                (63, 0xE2A9, 8)],
+    'invincible': [(0x38, 0x8F95, 1)],
+}
+
+
+def pack(data, out, japanese=False):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    pack = hackpack.Pack('Mega Man 6 (USA) widescreen', code[:used], region='ntsc', mappers=(4,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
-    aid = pack.component('invincible').group('invincible', label='Invincible',
-                                             label_fr='Invincible')
-    for bank, address, original, new in hooks(sym):
-        invincible = (bank, address) == INVINCIBLE_HOOK
-        # A place of the format is a 16 KiB bank: the 8 KiB bank's half of it in the address.
-        bank, address = bank // 2, (address & ~0x2000) | ((bank & 1) << 13)
-        if invincible:
+    code, sym = assemble(['PACK'] + (['JAPAN'] if japanese else []))
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    moved = japan if japanese else (lambda address: address)
+
+    def place(bank, address):
+        """The format's place of the build's (bank, address): a 16 KiB bank, the 8 KiB bank's
+        half of it in the address."""
+        if bank in FIXED:
+            address = moved(address)
+        return bank // 2, (address & ~0x2000) | ((bank & 1) << 13)
+
+    name = 'Rockman 6 (Japan)' if japanese else 'Mega Man 6 (USA)'
+    pack = hackpack.Pack(f'{name} widescreen', code[:used], region='ntsc', mappers=(4, 5))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'enemies': widescreen.group('enemies', requires=['core'], label='Enemies in the margins',
+                                    label_fr='Ennemis dans les marges'),
+        'invincible': pack.component('invincible').group('invincible', label='Invincible',
+                                                         label_fr='Invincible'),
+    }
+    for group, checks in CHECKS.items():
+        for bank, address, length in checks:
+            groups[group].check(*place(bank, address), length)
+    for bank, address, original, new in hooks(sym, moved):
+        if (bank, address) == NMI_HOOK:
+            continue
+        if japanese and (bank, address) in JAPAN_ORIGINAL:
+            original = bytes.fromhex(JAPAN_ORIGINAL[(bank, address)])
+        if (bank, address) == INVINCIBLE_HOOK:
             # JMP $8F95: past the damage.
-            aid.hook(bank, address, original, jmp(0x8F95))
+            groups['invincible'].hook(*place(bank, address), original, jmp(0x8F95))
         else:
-            core.hook(bank, address, original, new)
-    assert len(aid.hooks) == 1
+            group = groups['enemies' if (bank, address) in ENEMIES else 'core']
+            group.hook(*place(bank, address), original, new)
+    assert len(groups['invincible'].hooks) == 1
     result = pack.build(data, 32 * 0x4000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
-          f'pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, {len(groups["core"].hooks)} + '
+          f'{len(groups["enemies"].hooks)} hooks), pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -1742,14 +1856,16 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = bytes(image[header:header + PRG_SIZE + CHR_SIZE])
-    name = SOURCES.get(zlib.crc32(data))
-    assert name, 'not Mega Man 6 (USA)'
+    crc = zlib.crc32(data)
+    name = SOURCES.get(crc)
+    assert name or crc == JAPAN_CRC, 'not Mega Man 6 (USA) or Rockman 6 (Japan)'
 
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(data, sys.argv[3], crc == JAPAN_CRC)
+        return
+    assert name, 'Rockman 6 (Japan): a pack only (--pack)'
     code, sym = assemble()
     assert len(code) == CODE_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(data, code, sym, sys.argv[3])
-        return
     banks = [bytearray(data[n * BANK_SIZE:(n + 1) * BANK_SIZE]) for n in range(PRG_BANKS)]
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for bank, address, original, new in hooks(sym):
