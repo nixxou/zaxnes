@@ -28,7 +28,12 @@ public sealed class CameraSetpoint
         set => _distance = Math.Clamp(value, 0f, SceneConstants.MaxDistance);
     }
 
-    /// <summary>Setpoint angles <c>(rx, ry, rz)</c> in degrees; never bounded (REQ-SCN-011).</summary>
+    /// <summary>
+    /// Setpoint angles <c>(rx, ry, rz)</c> in degrees. A write is taken as it comes — the user
+    /// may orbit without limit — but every camera update brings each angle back into
+    /// <c>]−180°, 180°]</c> by whole turns (AMD-045 REQ-SCN-071, which replaces the second
+    /// sentence of REQ-SCN-011).
+    /// </summary>
     public Vector3 Angles { get; set; }
 
     /// <summary>Setpoint target <c>T</c> in scene coordinates.</summary>
@@ -145,6 +150,13 @@ public sealed class SceneCamera
     /// Field of view in degrees, a user setting of 45 to 95 by steps of 5 (REQ-SCN-005). Any
     /// change applies at once and triggers a view reset (REQ-SCN-012).
     /// </summary>
+    /// <remarks>
+    /// The <c>camera.fov</c> setting accepts [10, 150] from a script (SPEC-09 §4.1) while the
+    /// camera keeps the [45, 95] of REQ-SCN-005, so the <c>[0, 512]</c> bound AMD-045
+    /// REQ-SCN-069 puts on <c>d₀</c> — which it says a FOV of 29.1° would reach — never bites
+    /// here. <see cref="ResetDistance"/> reads this FOV, the one the camera really frames with.
+    /// </remarks>
+    // Q-077
     public float Fov
     {
         get => _fov;
@@ -185,8 +197,14 @@ public sealed class SceneCamera
     /// <summary>
     /// The view reset of REQ-SCN-012: the current FOV is applied, both modes get the angles
     /// <c>(0.81°, 0.81°, 0)</c> and the target <c>C</c>, and the <b>current</b> mode gets
-    /// <c>d₀ = 104 / atan(FOV_rad / 2)</c>. The other mode keeps its distance.
+    /// <c>d₀ = 132.7964 / tan(FOV / 2) × s</c> (AMD-045 REQ-SCN-069, which replaces the
+    /// <c>104 / atan(FOV_rad / 2)</c> of REQ-SCN-012). The other mode keeps its distance.
     /// </summary>
+    /// <remarks>
+    /// The distance goes through the setpoint, so it is bounded to <c>[0, 512]</c> as
+    /// REQ-SCN-069 asks (REQ-SCN-011). The unbounded value is <see cref="ResetDistance"/>, what
+    /// <c>Camera.ResetDistance</c> reads (AMD-040 REQ-LUA-113).
+    /// </remarks>
     public void ResetView()
     {
         foreach (CameraSetpoint setpoint in _setpoints)
@@ -195,8 +213,15 @@ public sealed class SceneCamera
             setpoint.Target = SceneConstants.Center;
         }
 
-        Current.Distance = SceneConstants.DefaultDistance(_fov);
+        Current.Distance = ResetDistance;
     }
+
+    /// <summary>
+    /// The framed distance <c>d₀</c> a view reset would write at the current FOV, <b>before</b>
+    /// the bound of REQ-SCN-011 (AMD-045 REQ-SCN-069). It follows every change of FOV, even
+    /// without a reset, which is what <c>Camera.ResetDistance</c> exposes to Lua (REQ-LUA-113).
+    /// </summary>
+    public float ResetDistance => SceneConstants.ResetDistance(_fov);
 
     /// <summary>
     /// Ends a game (REQ-SCN-013): back to TPV, smoothing time back to 0.4 s, then a view reset.
@@ -240,15 +265,26 @@ public sealed class SceneCamera
 
     /// <summary>
     /// Puts back a state <see cref="Capture"/> produced (REQ-SCN-024). The displayed values are
-    /// <b>not</b> snapped: they join the restored setpoints through the smoothing of
-    /// REQ-SCN-019.
+    /// snapped onto the restored setpoints at once and the smoothing velocities go back to zero,
+    /// so the first picture after the load already shows the saved view (AMD-045 REQ-SCN-073,
+    /// which replaces « the displayed camera joins them through the smoothing »). What is left
+    /// of the transition window is restored as a remaining time bounded to <c>[0, 3]</c> s
+    /// (AMD-042).
     /// </summary>
+    /// <remarks>
+    /// This is the single entry point for every reload of the camera — savestate, quick save
+    /// and, later, a rollback snapshot (AMD-042) — so they all snap the same way.
+    /// </remarks>
     public void Restore(in CameraStateData state)
     {
         Apply(CameraMode.Tpv, state.Tpv);
         Apply(CameraMode.Fpv, state.Fpv);
         Mode = state.Mode;
-        TransitionRemaining = MathF.Max(0f, state.TransitionRemaining);
+        TransitionRemaining = Math.Clamp(
+            state.TransitionRemaining,
+            0f,
+            SceneConstants.ModeTransitionSeconds);
+        SnapToSetpoints();
     }
 
     /// <summary>Puts the displayed values on the setpoints at once, without smoothing.</summary>
@@ -273,6 +309,7 @@ public sealed class SceneCamera
     /// </summary>
     public void Advance(float realSeconds)
     {
+        WrapSetpointAngles();
         if (realSeconds <= 0f)
         {
             return;
@@ -332,11 +369,14 @@ public sealed class SceneCamera
 
         if (Mode == CameraMode.Tpv && !LocalCamera)
         {
-            // REQ-SCN-008: the camera is oriented towards P*, with world Y as the vertical.
+            // REQ-SCN-008: the camera is oriented towards P*. The vertical is the camera's own,
+            // q·(0, 1, 0), not the world's Y axis (AMD-045 REQ-SCN-072, which replaces step 4 of
+            // REQ-SCN-007): rz therefore rolls the picture in TPV as it does in FPV, and the
+            // basis stays continuous when the camera looks straight down.
             aim = SceneConstants.AimPoint(eye, rect, target);
             forward = aim - eye;
             forward = forward.LengthSquared() > 0f ? Vector3.Normalize(forward) : qForward;
-            (right, up) = BasisFromForward(forward);
+            (right, up) = BasisFromForward(forward, qUp);
         }
         else
         {
@@ -370,6 +410,37 @@ public sealed class SceneCamera
             SceneConstants.HudDistance(_fov));
     }
 
+    /// <summary>
+    /// Brings the three setpoint angles of <b>each</b> mode back into <c>]−180°, 180°]</c> by
+    /// whole turns, and shifts the displayed angles of the current mode by the very same turns
+    /// (AMD-045 REQ-SCN-071). The orientation is therefore unchanged, and the smoothing
+    /// velocities are left alone: the lag between the displayed angle and its setpoint, which is
+    /// what the filter works on, is the same number before and after.
+    /// </summary>
+    private void WrapSetpointAngles()
+    {
+        for (int mode = 0; mode < _setpoints.Length; mode++)
+        {
+            CameraSetpoint setpoint = _setpoints[mode];
+            Vector3 angles = setpoint.Angles;
+            (float rx, float shiftX) = SceneConstants.WrapAngle(angles.X);
+            (float ry, float shiftY) = SceneConstants.WrapAngle(angles.Y);
+            (float rz, float shiftZ) = SceneConstants.WrapAngle(angles.Z);
+            if (shiftX == 0f && shiftY == 0f && shiftZ == 0f)
+            {
+                continue;
+            }
+
+            setpoint.Angles = new Vector3(rx, ry, rz);
+
+            // The displayed angle only exists for the current mode (REQ-SCN-019).
+            if (mode == (int)Mode)
+            {
+                _angles += new Vector3(shiftX, shiftY, shiftZ);
+            }
+        }
+    }
+
     private CameraModeState Snapshot(CameraMode mode)
     {
         CameraSetpoint setpoint = _setpoints[(int)mode];
@@ -385,16 +456,18 @@ public sealed class SceneCamera
     }
 
     /// <summary>
-    /// The camera basis that completes <paramref name="forward"/> with world Y as the vertical,
-    /// in the left-handed scene frame (REQ-SCN-007 step 4: no roll).
+    /// The camera basis that completes <paramref name="forward"/> with <paramref name="up"/> as
+    /// the vertical, in the left-handed scene frame. In TPV the vertical handed in is the
+    /// camera's own, <c>q·(0, 1, 0)</c> (AMD-045 REQ-SCN-072).
     /// </summary>
-    internal static (Vector3 Right, Vector3 Up) BasisFromForward(Vector3 forward)
+    /// <param name="forward">The aimed direction, normalised.</param>
+    /// <param name="up">The wanted vertical; it need not be orthogonal to the direction.</param>
+    internal static (Vector3 Right, Vector3 Up) BasisFromForward(Vector3 forward, Vector3 up)
     {
-        Vector3 worldUp = Vector3.UnitY;
-        Vector3 right = Vector3.Cross(worldUp, forward);
+        Vector3 right = Vector3.Cross(up, forward);
         if (right.LengthSquared() < 1e-8f)
         {
-            // Looking straight up or down: any horizontal axis will do.
+            // The vertical and the direction are parallel: any axis across them will do.
             right = Vector3.Cross(Vector3.UnitZ, forward);
             if (right.LengthSquared() < 1e-8f)
             {

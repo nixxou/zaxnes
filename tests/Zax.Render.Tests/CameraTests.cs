@@ -15,18 +15,35 @@ public sealed class CameraTests
     /// <summary>Clip margins of vector C2, those of the Super Mario Bros profile.</summary>
     private static Vec4F MarioClipping => new(0f, 7.9f, 0f, 0.1f);
 
-    [Theory]
+    [Theory] // REQ-SCN-069
     [InlineData(70f, 189.65f)]
-    [InlineData(45f, 277.93f)]
-    [InlineData(95f, 150.25f)]
-    [InlineData(90f, 156.21f)]
-    public void REQ_SCN_012_default_distance_is_104_over_atan_of_half_the_fov(float fov, float expected)
-        => Assert.Equal(expected, SceneConstants.DefaultDistance(fov), 0.05);
+    [InlineData(45f, 320.60f)]
+    [InlineData(95f, 121.69f)]
+    [InlineData(90f, 132.80f)]
+    public void REQ_SCN_069_reset_distance_is_132_7964_over_tan_of_half_the_fov(float fov, float expected)
+        => Assert.Equal(expected, SceneConstants.ResetDistance(fov), 0.05);
 
-    [Theory]
+    /// <summary>
+    /// REQ-SCN-069 — at the default FOV of 70° the new formula agrees with the
+    /// <c>104 / atan(FOV_rad / 2)</c> of REQ-SCN-012 to 10⁻³: 189.65291 against 189.65285.
+    /// </summary>
+    [Fact] // REQ-SCN-069
+    public void REQ_SCN_069_the_new_and_the_old_formula_agree_at_seventy_degrees()
+    {
+        double old = 104.0 / Math.Atan(70.0 * Math.PI / 180.0 / 2.0);
+        double now = 132.7964 / Math.Tan(70.0 * Math.PI / 180.0 / 2.0);
+
+        Assert.Equal(189.65285, old, 1e-4);
+        Assert.Equal(189.65291, now, 1e-4);
+        Assert.True(Math.Abs(now - old) < 1e-3, $"{now} against {old}.");
+    }
+
+    [Theory] // REQ-SCN-045
     [InlineData(70f, 109.42f)]
-    [InlineData(90f, 90.12f)]
-    public void REQ_SCN_045_hud_plane_distance_is_60_over_atan_of_half_the_fov(float fov, float expected)
+    [InlineData(45f, 184.96f)]
+    [InlineData(95f, 70.20f)]
+    [InlineData(90f, 76.61f)]
+    public void REQ_SCN_045_hud_plane_distance_is_76_6133_over_tan_of_half_the_fov(float fov, float expected)
         => Assert.Equal(expected, SceneConstants.HudDistance(fov), 0.05);
 
     [Fact]
@@ -126,13 +143,17 @@ public sealed class CameraTests
         camera.Current.Distance = 42f;
         camera.Fov = 90f;
 
-        Assert.Equal(156.21f, camera.Current.Distance, 0.05);
-        Assert.Equal(90.12f, SceneConstants.HudDistance(camera.Fov), 0.05);
+        Assert.Equal(132.80f, camera.Current.Distance, 0.05);
+        Assert.Equal(76.61f, SceneConstants.HudDistance(camera.Fov), 0.05);
         Assert.Equal(SceneConstants.DefaultAngles, camera.Current.Angles);
     }
 
-    [Fact]
-    public void Vector_C5_zoom_in_held_three_seconds_bottoms_out_at_the_bound()
+    /// <summary>
+    /// Vector C5, as AMD-045 REQ-SCN-070 changes it: a zoom in held long enough no longer
+    /// reaches 0 but stops at <c>16 × s</c>.
+    /// </summary>
+    [Fact] // REQ-SCN-070
+    public void Vector_C5_zoom_in_held_three_seconds_bottoms_out_at_the_minimum_user_distance()
     {
         SceneCamera camera = new();
         for (int step = 0; step < 180; step++)
@@ -140,11 +161,16 @@ public sealed class CameraTests
             CameraControls.Apply(camera, CameraAction.ZoomIn, 1f / 60f);
         }
 
-        Assert.Equal(0f, camera.Current.Distance);
+        Assert.Equal(SceneConstants.MinUserDistance, camera.Current.Distance);
     }
 
-    [Fact]
-    public void REQ_SCN_011_the_setpoint_distance_is_bounded_but_the_angles_are_not()
+    /// <summary>
+    /// REQ-SCN-011 — the setpoint distance is bounded to <c>[0, 512]</c>. Its second sentence,
+    /// « the angles are never bounded », is replaced by AMD-045 REQ-SCN-071: they are brought
+    /// back into <c>]−180°, 180°]</c> at every update.
+    /// </summary>
+    [Fact] // REQ-SCN-011, REQ-SCN-071
+    public void REQ_SCN_011_the_setpoint_distance_is_bounded_and_the_angles_stay_in_one_turn()
     {
         SceneCamera camera = new();
 
@@ -153,13 +179,17 @@ public sealed class CameraTests
         camera.Current.Distance = -5f;
         Assert.Equal(0f, camera.Current.Distance);
 
-        // Holding rotate down for 13 s takes rx past 360° (REQ-SCN-011).
+        // Holding rotate down for 13 s is 390°: rx comes back to about 30 (REQ-SCN-071).
+        camera.Current.Angles = Vector3.Zero;
+        camera.SnapToSetpoints();
         for (int step = 0; step < 13 * 60; step++)
         {
             CameraControls.Apply(camera, CameraAction.RotateDown, 1f / 60f);
+            camera.Advance(1f / 60f);
         }
 
-        Assert.True(camera.Current.Angles.X > 360f);
+        Assert.InRange(camera.Current.Angles.X, -180f, 180f);
+        Assert.Equal(30f, camera.Current.Angles.X, 0.5);
     }
 
     [Fact]
@@ -292,7 +322,7 @@ public sealed class CameraTests
 
         camera.ResetView();
 
-        Assert.Equal(SceneConstants.DefaultDistance(70f), camera.Setpoints(CameraMode.Tpv).Distance, 0.05);
+        Assert.Equal(SceneConstants.ResetDistance(70f), camera.Setpoints(CameraMode.Tpv).Distance, 0.05);
         Assert.Equal(40f, camera.Setpoints(CameraMode.Fpv).Distance);
         Assert.Equal(SceneConstants.DefaultAngles, camera.Setpoints(CameraMode.Fpv).Angles);
         Assert.Equal(SceneConstants.Center, camera.Setpoints(CameraMode.Fpv).Target);
@@ -341,7 +371,7 @@ public sealed class CameraTests
 
         Assert.Equal(CameraMode.Tpv, camera.Mode);
         Assert.Equal(CriticalSmoothing.DefaultSmoothTime, camera.SmoothTime);
-        Assert.Equal(SceneConstants.DefaultDistance(70f), camera.Current.Distance, 0.05);
+        Assert.Equal(SceneConstants.ResetDistance(70f), camera.Current.Distance, 0.05);
     }
 
     [Fact]
@@ -482,8 +512,12 @@ public sealed class CameraTests
         Assert.Equal(2f, state.TransitionRemaining, 2);
     }
 
-    [Fact]
-    public void REQ_SCN_024_restoring_brings_back_fpv_with_the_distance_of_the_save()
+    /// <summary>
+    /// REQ-SCN-024 as amended by AMD-045 REQ-SCN-073: the restored setpoints come back and the
+    /// displayed camera takes them <b>immediately</b>, instead of sliding towards them.
+    /// </summary>
+    [Fact] // REQ-SCN-024, REQ-SCN-073
+    public void REQ_SCN_073_restoring_brings_back_fpv_with_the_distance_of_the_save_at_once()
     {
         SceneCamera saved = new();
         saved.SetMode(CameraMode.Fpv);
@@ -501,15 +535,19 @@ public sealed class CameraTests
         Assert.Equal(CameraMode.Fpv, camera.Mode);
         Assert.Equal(40f, camera.Current.Distance, 3);
 
-        // The displayed values are not snapped: they join the setpoint by the smoothing of
-        // REQ-SCN-019.
-        Assert.Equal(300f, camera.Distance, 3);
-        Advance(camera, 3f);
-        Assert.Equal(40f, camera.Distance, 1);
+        // Snapped, with the smoothing velocities reset: the first frame after the load already
+        // shows the saved view, and it does not drift afterwards (REQ-SCN-073).
+        Assert.Equal(40f, camera.Distance, 3);
+        camera.Advance(1f / 60f);
+        Assert.Equal(40f, camera.Distance, 3);
     }
 
-    [Fact]
-    public void REQ_SCN_024_the_restored_distances_stay_inside_their_bounds()
+    /// <summary>
+    /// REQ-SCN-024 — the restored distances stay inside <c>[0, 512]</c> and the transition
+    /// window comes back as a remaining time bounded to <c>[0, 3]</c> s (AMD-042).
+    /// </summary>
+    [Fact] // REQ-SCN-024, REQ-SCN-073
+    public void REQ_SCN_024_the_restored_distances_and_window_stay_inside_their_bounds()
     {
         SceneCamera camera = new();
         camera.Restore(new CameraStateData(
@@ -521,6 +559,14 @@ public sealed class CameraTests
         Assert.Equal(SceneConstants.MaxDistance, camera.Setpoints(CameraMode.Tpv).Distance, 3);
         Assert.Equal(0f, camera.Setpoints(CameraMode.Fpv).Distance, 3);
         Assert.Equal(0f, camera.TransitionRemaining, 3);
+
+        camera.Restore(new CameraStateData(
+            CameraMode.Tpv,
+            new CameraModeState(100f, Vector3.Zero, Vector3.Zero),
+            new CameraModeState(0f, Vector3.Zero, Vector3.Zero),
+            90f));
+
+        Assert.Equal(SceneConstants.ModeTransitionSeconds, camera.TransitionRemaining, 3);
     }
 
     private static CameraView Steady(Vec4F clipping)

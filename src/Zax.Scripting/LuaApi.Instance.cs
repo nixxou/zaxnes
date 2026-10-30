@@ -557,6 +557,12 @@ internal static partial class LuaApi
             return 1;
         }, HostTypeId.Vector3);
 
+        // AMD-040 REQ-LUA-115: exporting the scene meshes is out of scope (PLAN §1), but the two
+        // methods have to exist and do nothing — a 2.0 script that called a missing one would
+        // lose every hook it registered (REQ-LUA-062). They take no argument and mean nothing.
+        type.Function("BuildExportMeshes", static (_, _) => 0);
+        type.Function("ReleaseExportMeshes", static (_, _) => 0);
+
         _ = runtime;
     }
 

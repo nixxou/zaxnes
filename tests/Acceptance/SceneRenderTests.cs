@@ -577,16 +577,17 @@ public sealed class SceneRenderTests
     // -------------------------------------------------------------------- §3.12 HUD
 
     /// <summary>
-    /// REQ-SCN-045 — the HUD plane is attached to the camera at
-    /// <c>E + d_HUD · f</c> with <c>d_HUD = 60 / atan(FOV_rad / 2)</c> and the scale 0.5; an
-    /// element at <c>p</c> in the reference frame appears at <c>(p − C) × 0.5</c> along the
-    /// camera axes.
+    /// REQ-SCN-045 — the HUD plane is attached to the camera at <c>E + d_HUD · f</c> with
+    /// <c>d_HUD = 76.6133 / tan(FOV / 2)</c> (AMD-045, in place of
+    /// <c>60 / atan(FOV_rad / 2)</c>; still 109.42 at 70°) and the scale 0.5; an element at
+    /// <c>p</c> in the reference frame appears at <c>(p − C) × 0.5</c> along the camera axes.
     /// </summary>
     [Fact] // REQ-SCN-045
     public void The_HUD_plane_hangs_at_the_documented_distance_and_scale()
     {
         Assert.Equal(109.42f, SceneConstants.HudDistance(70f), 0.02f);
-        Assert.Equal(90.12f, SceneConstants.HudDistance(90f), 0.02f);
+        Assert.Equal(184.96f, SceneConstants.HudDistance(45f), 0.05f);
+        Assert.Equal(70.20f, SceneConstants.HudDistance(95f), 0.05f);
         Assert.Equal(0.5f, SceneConstants.HudScale);
 
         SceneCamera camera = new();
@@ -604,9 +605,14 @@ public sealed class SceneRenderTests
         Assert.Equal(4f, Vector3.Dot(nesCentre - centre, view.Up), 1e-3);
         Assert.Equal(0f, Vector3.Dot(nesCentre - centre, view.Right), 1e-3);
 
-        // At FOV 70 the 256 × 240 frame covers about 78 % of the image height.
-        double visibleHeight = 2.0 * view.HudDistance * Math.Tan(70.0 * Math.PI / 180.0 / 2.0);
-        Assert.Equal(0.78, 240.0 * 0.5 / visibleHeight, 0.01);
+        // The 256 × 240 frame covers about 78 % of the image height — at every FOV now, which
+        // is the point of the new formula (AMD-045).
+        foreach (float fov in new[] { 45f, 70f, 95f })
+        {
+            double visibleHeight = 2.0 * SceneConstants.HudDistance(fov)
+                * Math.Tan(fov * Math.PI / 180.0 / 2.0);
+            Assert.Equal(0.78, 240.0 * 0.5 / visibleHeight, 0.01);
+        }
     }
 
     // ----------------------------------------------- §3.13 background and backdrop
@@ -858,7 +864,7 @@ public sealed class SceneRenderTests
 
         // The same camera and the same settings: nothing about the camera depends on the mode.
         Assert.Equal(CameraMode.Tpv, scene.Camera.Mode);
-        Assert.Equal(SceneConstants.DefaultDistance(70f), scene.Camera.Current.Distance, 2);
+        Assert.Equal(SceneConstants.ResetDistance(70f), scene.Camera.Current.Distance, 2);
     }
 
     /// <summary>

@@ -44,7 +44,7 @@ public sealed class RoundOneFixTests
         Assert.Equal(SceneConstants.DefaultAngles.X, camera.Current.Angles.X, 3);
         Assert.Equal(SceneConstants.DefaultAngles.Y, camera.Current.Angles.Y, 3);
         Assert.Equal(
-            SceneConstants.DefaultDistance(harness.Scene.Camera.Fov),
+            SceneConstants.ResetDistance(harness.Scene.Camera.Fov),
             camera.Current.Distance,
             3);
         Assert.Equal(CriticalSmoothing.DefaultSmoothTime, camera.SmoothTime, 4);

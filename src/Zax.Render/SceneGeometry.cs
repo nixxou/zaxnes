@@ -72,6 +72,13 @@ public static class SceneConstants
     /// <summary>Highest camera setpoint distance (REQ-SCN-011).</summary>
     public const float MaxDistance = 512f;
 
+    /// <summary>
+    /// Lowest setpoint distance a <b>user</b> zoom may reach, 16 × s — two NES tiles (AMD-045
+    /// REQ-SCN-070). The scene scale s is 1 on desktop (REQ-SCN-002), so it is left out, as it
+    /// is for <see cref="MaxDistance"/>.
+    /// </summary>
+    public const float MinUserDistance = 16f;
+
     /// <summary>Rotation speed of the extended actions, 30°/s (REQ-SCN-014).</summary>
     public const float RotationDegreesPerSecond = 30f;
 
@@ -220,15 +227,71 @@ public static class SceneConstants
     public const float OccluderAlpha = 0.5f;
 
     /// <summary>
-    /// The default setpoint distance <c>d₀ = 104 / atan(FOV_rad / 2)</c> (REQ-SCN-012). The
-    /// arc tangent really is taken of half the field of view expressed in radians.
+    /// Half-height the view reset frames, 132.7964 scene units (AMD-045 REQ-SCN-069): at
+    /// <see cref="ResetDistance"/> it fills exactly half the vertical field of view.
     /// </summary>
-    public static float DefaultDistance(float fovDegrees)
-        => 104f / MathF.Atan(fovDegrees * MathF.PI / 180f / 2f);
+    public const float ResetHalfHeight = 132.7964f;
 
-    /// <summary>The HUD plane distance <c>d_HUD = 60 / atan(FOV_rad / 2)</c> (REQ-SCN-045).</summary>
+    /// <summary>
+    /// Half-height the HUD plane frames, 76.6133 scene units (REQ-SCN-045 as amended by
+    /// AMD-045).
+    /// </summary>
+    public const float HudHalfHeight = 76.6133f;
+
+    /// <summary>
+    /// The reset setpoint distance <c>d₀ = 132.7964 / tan(FOV / 2) × s</c> of AMD-045
+    /// REQ-SCN-069, which replaces the <c>d₀ = 104 / atan(FOV_rad / 2)</c> of REQ-SCN-012. The
+    /// scene scale s is 1 on desktop (REQ-SCN-002). The value is <b>not</b> bounded here: the
+    /// view reset writes it through the <c>[0, 512]</c> bound of REQ-SCN-011, while
+    /// <c>Camera.ResetDistance</c> reads it raw (AMD-040 REQ-LUA-113).
+    /// </summary>
+    /// <remarks>
+    /// The two formulas agree to 7 · 10⁻⁵ at the default FOV of 70° — 189.65291 against
+    /// 189.65285 — and part company elsewhere: 320.60 against 277.93 at 45°, 121.69 against
+    /// 150.25 at 95°. The new one keeps the NES image at the same fraction of the picture
+    /// whatever the field of view.
+    /// </remarks>
+    public static float ResetDistance(float fovDegrees)
+        => ResetHalfHeight / MathF.Tan(fovDegrees * MathF.PI / 180f / 2f);
+
+    /// <summary>
+    /// The HUD plane distance <c>d_HUD = 76.6133 / tan(FOV / 2)</c> (REQ-SCN-045 as amended by
+    /// AMD-045, in place of <c>60 / atan(FOV_rad / 2)</c>). It still reads 109.42 at 70°, and
+    /// the HUD now keeps the same fraction of the picture whatever the field of view.
+    /// </summary>
     public static float HudDistance(float fovDegrees)
-        => 60f / MathF.Atan(fovDegrees * MathF.PI / 180f / 2f);
+        => HudHalfHeight / MathF.Tan(fovDegrees * MathF.PI / 180f / 2f);
+
+    /// <summary>
+    /// Where a <b>user</b> zoom in of <paramref name="amount"/> units leaves the setpoint
+    /// distance <paramref name="distance"/> (AMD-045 REQ-SCN-070): it stops at
+    /// <see cref="MinUserDistance"/>, and has no effect at all from a distance already there or
+    /// below — the FPV distance of 0 at launch, or one a profile, a script or the view reset
+    /// posted. Zooming out is not concerned.
+    /// </summary>
+    /// <param name="distance">The setpoint distance before the zoom.</param>
+    /// <param name="amount">How many units the zoom asks for; a negative value does nothing.</param>
+    public static float ZoomIn(float distance, float amount)
+        => MathF.Max(distance - MathF.Max(amount, 0f), MathF.Min(distance, MinUserDistance));
+
+    /// <summary>
+    /// A setpoint angle brought back into <c>]−180°, 180°]</c> by whole turns (AMD-045
+    /// REQ-SCN-071), with the shift that was applied — itself a multiple of 360°, which the
+    /// displayed angle of the current mode takes as well so that nothing jumps.
+    /// </summary>
+    /// <param name="degrees">The setpoint angle.</param>
+    /// <returns>The wrapped angle and the shift <c>wrapped − degrees</c>.</returns>
+    public static (float Angle, float Shift) WrapAngle(float degrees)
+    {
+        float turns = MathF.Ceiling((degrees - 180f) / 360f);
+        if (turns == 0f || !float.IsFinite(turns))
+        {
+            return (degrees, 0f);
+        }
+
+        float shift = -360f * turns;
+        return (degrees + shift, shift);
+    }
 
     /// <summary>
     /// The rotation <c>q = R_Y(ry) · R_X(rx) · R_Z(rz)</c> of REQ-SCN-007 step 1, in the
