@@ -247,7 +247,7 @@ pub fn for_rom(crc: u32) -> Option<&'static dyn MarginDecoder> {
         megaman2::SOURCE_CRC | megaman2::SOURCE_CRC_EUROPE | megaman2::SOURCE_CRC_JAPAN => {
             Some(&megaman2::MegaMan2)
         }
-        smb1::SOURCE_CRC => Some(&smb1::SuperMarioBros),
+        smb1::SOURCE_CRC | smb1::SOURCE_CRC_EUROPE => Some(&smb1::SuperMarioBros),
         adventure_island::SOURCE_CRC => Some(&adventure_island::AdventureIsland),
         ng3::SOURCE_CRC => Some(&ng3::NinjaGaiden3),
         smb3::SOURCE_CRC => Some(&smb3::USA),
@@ -290,7 +290,9 @@ pub fn for_patch(patch: &str) -> Option<&'static dyn MarginDecoder> {
         crate::builtin_patches::MEGAMAN2_USA
         | crate::builtin_patches::MEGAMAN2_EUROPE
         | crate::builtin_patches::ROCKMAN2_JAPAN => Some(&megaman2::MegaMan2),
-        crate::builtin_patches::SMB1_WORLD => Some(&smb1::SuperMarioBros),
+        crate::builtin_patches::SMB1_WORLD
+        | crate::builtin_patches::SMB1_EUROPE
+        | crate::builtin_patches::SMB1_EUROPE_NTSC => Some(&smb1::SuperMarioBros),
         crate::builtin_patches::ADVENTURE_ISLAND_USA => Some(&adventure_island::AdventureIsland),
         crate::builtin_patches::EXCITEBIKE => Some(&excitebike::Excitebike),
         crate::builtin_patches::NG3_USA => Some(&ng3::NinjaGaiden3),

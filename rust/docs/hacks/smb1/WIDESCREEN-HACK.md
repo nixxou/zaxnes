@@ -19,7 +19,7 @@ this patch: the enemies, platforms and firebars of the margins.
 |---|---|
 | Source ROM | *Super Mario Bros. (World)*, NROM, 32 KiB PRG, 8 KiB CHR |
 | Source data (iNES header excluded) | CRC-32 `D445F698` |
-| Target data | CRC-32 `5A8BA83E` (the hack's version in savestate headers; `tools/build.py` prints it), 56 KiB: the game's 32 KiB of PRG, a 16 KiB PRG bank added, the 8 KiB of CHR |
+| Target data | CRC-32 `666302BB` (the hack's version in savestate headers; `tools/build.py` prints it), 56 KiB: the game's 32 KiB of PRG, a 16 KiB PRG bank added, the 8 KiB of CHR |
 | Changes | hooks in the game's PRG (same size as what they replace); the new code in the added bank |
 | Patch | `rust/crates/zax-nes/patches/smb1-world-widescreen.bps`, made against the data without header; the CHR-ROM, moved after the new bank, is copied from the player's ROM (BPS SourceCopy), so the patch carries only the hack's bytes |
 | Zaxnes declaration | `builtin_patches.rs`: `advanced: true` (applied only in the advanced mode), `boot_window: Some((0x82, 0x00))`, `idle_loop: Some((0x8057, 0x8059))` |
@@ -33,16 +33,36 @@ PRG bank count of the player's header accordingly when it applies the patch.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/smb1-world-widescreen.zxpk` (`tools/build.py <rom> --pack <out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, NROM, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's memory,
-which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with the game's
-bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank added,
-nothing moved or copied). The option "Invincible" is a component of its own (`LDA #$02` in place of
-`LDA InjuryTimer`), applied with or without the advanced mode. The level selector needs the hack's
-code: it stays with the widescreen. The BPS patch described here is kept to compare.
+**Hack pack.** Zaxnes ships this hack as hack packs (`tools/build.py <rom> --pack <out.zxpk>`,
+with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md`
+7.1), one per build whose code moved, both from this source: `smb1-world-widescreen.zxpk` (the
+PlayChoice-10 ROM's data is the World's) and `smb1-europe-widescreen.zxpk` (`-D EUROPE`: most of
+its code from `$C905` on 6 to 8 bytes later, `OffscreenBoundsCheck` and `MoveSmallPlatform` 56
+bytes earlier, the same RAM; PAL), with `smb1-europe-ntsc-widescreen.zxpk`, the same for the ROMs
+of the European code whose header says NTSC (`--ntsc`). The packs are format 2, written by Zaxnes'
+shared builder (`hackpack.py`): NROM, CNROM and MMC3 (ROM hacks of the same code on those), each
+hook a 16 KiB bank and a CPU address with the game's bytes it replaces, checked and applied by
+Zaxnes; the ROM keeps its size (no bank added, nothing moved or copied). `src/wide.s` is assembled
+with `-D PACK` for `$2000`: the zone fantôme, which Zaxnes shows to instruction fetches only from
+power-on, the extension unlocked; its registers and RAM are at `$3000`-`$3FFF` (widescreen MMC5:
+`$5000`-`$5FFF` stays the cartridge's), no window. The game's data reads at `$2000`-`$3FFF` reach
+the PPU, so the code reads no data of its own: the reserved kinds, the second page's groups and the
+worlds with an entrance area are tests (`wide_reserved`, `wide_entry_oam`, `wide_next_level`). The
+NMI's start is left alone: the settings are made from its call of `UpdateTopScore` (`$80ED`),
+past its video work. The widescreen is in three groups: "core" (Base: the enemies' sprites, the
+platforms and the firebars in the margins), "enemies" (Enemies in the margins, needing it: the
+reserve and the previews) and "level select" (needing it: the title screen's selector), with
+checks of the game's code the hack relies on: `UpdateTopScore`, `GetXOffscreenBits` and where the
+firebar hook's branches go; the routines a reserve entry and a preview run through and where
+`wide_reserve` goes on (`ProcFireball_Bubble`); where `wide_next_level` goes on (`NullJoypad`).
+The option "Invincible" is a component of its own (`LDA #$02` in place of `LDA InjuryTimer`),
+applied with or without the advanced mode. The second page's last four sprites, which no group
+uses, are hidden each frame (the extension's RAM starts at 0: they would show tile 0 at the
+screen's top left). Over a pool of 100 ROMs of the game (the `[!]` dumps, the PlayChoice-10 and
+FDS conversion, the French translations, one version of each of the 100 hacks romhacking.net
+lists as the most downloaded that the set holds), 69 take a whole pack and 10 more the core; the
+others are ROM hacks that move the game's code (a larger PRG on MMC1 or MMC3, a translation 512
+bytes later). The BPS patch described here is kept to compare.
 
 ## 2. What the game does, and what changes
 
@@ -190,43 +210,57 @@ TargetCopy for runs of one value). `WIDE_SKIP=<hex addresses>` leaves hooks out,
 ; window shows it at $5800-$7FFF ($5007 bit 4), Zaxnes opening it at power-on (the patch's boot
 ; window: bank 2, page 0). The game reaches it through hooks in its own code (tools/build.py).
 ; The background of the margins is not the hack's work: Zaxnes' margin decoder draws it.
+;
+; In a Zaxnes hack pack (-D PACK) the code is assembled for $2000 instead: the zone fantôme, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
+; reads there still reach the PPU, so the code reads no data of its own (its lists are tests). Its
+; registers and RAM are at $3000-$3FFF, which the zone holds for its own instructions (widescreen
+; MMC5: $5000-$5FFF stays the cartridge's). The settings are made from the NMI's call of
+; UpdateTopScore, past its video work, instead of its start. Super Mario Bros. (Europe) (-D EUROPE)
+; has most of its code from $C905 on 6 to 8 bytes later, and some 56 bytes earlier.
 
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, 2 second page, 4 window to $7FFF
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1 sprites free of the extents, 2 second page, 4 window to $7FFF
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
 
 MAX_MARGIN      = 248           ; the most the extension shows sprites in
 
-; Extension RAM ($5200-$57FF; $5800 up is the window).
-WV_M            = $5200         ; margin of this frame
-WV_T0           = $5201         ; scratch
-WV_T1           = $5202
-WV_ENTRY        = $5203         ; the reserve entry at hand
-WV_SLOT         = $5204         ; the enemy slot it runs in
-WV_BORROW       = $5205         ; non-zero: that slot's own enemy is set aside meanwhile
-WV_RUNNING      = $5206         ; non-zero while a reserve entry runs
-WV_FAR          = $5207         ; set by the game's off-screen check during a run: 1 kept, 2 erased
-WV_SHOWN        = $5208         ; set when the object drawn last shows (WV_HI6)
-WV_COUNT        = $520B
-WV_T2           = $5227         ; scratch
-WV_T3           = $522E
-WV_AREA         = $520C         ; 2 bytes: the area the reserve belongs to ($E7/$E8)
-WV_SCREEN       = $520E         ; 2 bytes: the screen's left edge last frame (page, x)
-WV_SAVE         = $5210         ; the borrowed slot's enemy (FIELDS bytes, to $5226)
+; Extension RAM (EXT + $200 to EXT + $7FF; in the BPS build $5800 up is the window).
+WV_M            = EXT + $200    ; margin of this frame
+WV_T0           = EXT + $201    ; scratch
+WV_T1           = EXT + $202
+WV_ENTRY        = EXT + $203    ; the reserve entry at hand
+WV_SLOT         = EXT + $204    ; the enemy slot it runs in
+WV_BORROW       = EXT + $205    ; non-zero: that slot's own enemy is set aside meanwhile
+WV_RUNNING      = EXT + $206    ; non-zero while a reserve entry runs
+WV_FAR          = EXT + $207    ; set by the game's off-screen check during a run: 1 kept, 2 erased
+WV_SHOWN        = EXT + $208    ; set when the object drawn last shows (WV_HI6)
+WV_T4           = EXT + $209    ; scratch
+WV_COUNT        = EXT + $20B
+WV_T2           = EXT + $227    ; scratch
+WV_T3           = EXT + $22E
+WV_AREA         = EXT + $20C    ; 2 bytes: the area the reserve belongs to ($E7/$E8)
+WV_SCREEN       = EXT + $20E    ; 2 bytes: the screen's left edge last frame (page, x)
+WV_SAVE         = EXT + $210    ; the borrowed slot's enemy (FIELDS bytes, to EXT + $226)
 RES_COUNT       = 6             ; reserve entries (second page groups 0-5)
 PREVIEW_COUNT   = 4             ; preview groups (6-9)
-RES             = $5240         ; field f of entry e at RES + RES_COUNT f + e
+RES             = EXT + $240    ; field f of entry e at RES + RES_COUNT f + e
 RES_FLAG        = RES           ; field 0, Enemy_Flag: 0 = empty
-EXTRA_OAM       = $5300         ; the extension's second sprite page: 6 sprites per entry
-EXTRA_HIGH      = $5400         ; + 4 n: high byte of the x of its sprite n
+EXTRA_OAM       = EXT + $300    ; the extension's second sprite page: 6 sprites per entry
+EXTRA_HIGH      = EXT + $400    ; + 4 n: high byte of the x of its sprite n
 
 ; The game.
 OBJECT_OFFSET   = $08
@@ -264,24 +298,24 @@ OPT_INVINCIBLE  = $02           ; a testing aid: Mario is never hurt
 OPT_NO_SLOWDOWN = $04           ; nearly a frame more of CPU time: the game never runs late
 NO_SLOWDOWN_LINES = 255
 
-WV_HI6          = $5228         ; 6 bytes: the high byte of the x of each sprite of the object drawn
+WV_HI6          = EXT + $228    ; 6 bytes: the high byte of the x of each sprite of the object drawn
                                 ; last, when WV_SHOWN
-WV_FB_OFF       = $522F         ; the firebar part drawn last is off the screen: no collision
-WV_LEVEL        = $5230         ; the level selected on the title screen, 0-31
-WV_P_COUNT      = $5231         ; previews drawn this frame
-WV_P_OFF        = $5232         ; the list read ahead: offset, page, page select
-WV_P_PAGE       = $5233
-WV_P_SEL        = $5234
-WV_P_LIM        = $5235         ; 2 bytes: the wide view's right edge (x, page)
-WV_P_LEFT       = $5237         ; list entries left to read
-WV_P_B0         = $5238         ; the record at hand
-WV_P_B1         = $5239
-WV_P_X          = $523A         ; its x (page WV_P_PAGE)
-WV_P_ID         = $523B         ; the enemy to show, its y, its place, how many (group)
-WV_P_Y          = $523C
-WV_P_EX         = $523D
-WV_P_EPAGE      = $523E
-WV_P_N          = $523F
+WV_FB_OFF       = EXT + $22F    ; the firebar part drawn last is off the screen: no collision
+WV_LEVEL        = EXT + $230    ; the level selected on the title screen, 0-31
+WV_P_COUNT      = EXT + $231    ; previews drawn this frame
+WV_P_OFF        = EXT + $232    ; the list read ahead: offset, page, page select
+WV_P_PAGE       = EXT + $233
+WV_P_SEL        = EXT + $234
+WV_P_LIM        = EXT + $235    ; 2 bytes: the wide view's right edge (x, page)
+WV_P_LEFT       = EXT + $237    ; list entries left to read
+WV_P_B0         = EXT + $238    ; the record at hand
+WV_P_B1         = EXT + $239
+WV_P_X          = EXT + $23A    ; its x (page WV_P_PAGE)
+WV_P_ID         = EXT + $23B    ; the enemy to show, its y, its place, how many (group)
+WV_P_Y          = EXT + $23C
+WV_P_EX         = EXT + $23D
+WV_P_EPAGE      = EXT + $23E
+WV_P_N          = EXT + $23F
 
 SCREEN_RIGHT_PAGE = $071B       ; ScreenRight_PageLoc
 SCREEN_RIGHT_X  = $071D         ; ScreenRight_X_Pos
@@ -310,7 +344,24 @@ LAST_SMALL_PLATFORM = $2C
 
 ; Routines.
 NULL_JOYPAD     = $82BB         ; the title screen, after its world selection
+UPDATE_TOP_SCORE = $8F97
 PROC_FIREBALL_BUBBLE = $B624
+.ifdef EUROPE
+ERASE_ENEMY     = $C99E
+GET_OFFSCREEN_BITS = $F1B6
+RELATIVE_POSITION = $F159
+ENEMY_GFX       = $E884
+GET_BOUND_BOX   = $E24B
+ENEMY_BG_COLLISION = $DFC9
+ENEMY_MOVEMENT  = $C90B
+OFFSCREEN_BOUNDS = $D642
+GET_X_OFFSCREEN_BITS = $F1FD
+LARGE_PLATFORM_SUBS = $C988
+DRAW_LARGE_PLATFORM = $E5CF
+DRAW_SMALL_PLATFORM = $ED6D
+MOVE_SMALL_PLATFORM = $D61D
+PROC_FIREBAR    = $CD42
+.else
 ERASE_ENEMY     = $C998
 GET_OFFSCREEN_BITS = $F1AF
 RELATIVE_POSITION = $F152
@@ -325,6 +376,7 @@ DRAW_LARGE_PLATFORM = $E5C8
 DRAW_SMALL_PLATFORM = $ED66
 MOVE_SMALL_PLATFORM = $D655
 PROC_FIREBAR    = $CD3C
+.endif
 
 ; The enemy variables a reserve entry keeps, per slot (each is an array indexed by the slot).
 .macro EACH_FIELD m
@@ -376,8 +428,22 @@ RES_INTERVAL_TIMER = RES + RES_COUNT * 17
 .segment "CODE"
 
 ; ---------------------------------------------------------------------------- ;
+.ifdef PACK
+; The NMI's call of UpdateTopScore ($80ED, in place of JSR UpdateTopScore, past the frame's video
+; work): the extension's settings, then the game's routine.
+wide_frame:
+    JSR     wide_settings
+    JMP     UPDATE_TOP_SCORE
+.else
 ; NMI ($8082, in place of LDA Mirror_PPU_CTRL_REG1): the extension's settings for the frame.
 wide_nmi:
+    JSR     wide_settings
+    LDA     MIRROR_PPU_CTRL
+    RTS
+.endif
+
+; The extension's settings: the margin, the extents, the layout and the overclock.
+wide_settings:
     LDA     WIDE_HOST
     CMP     #MAX_MARGIN
     BCC     @margin
@@ -388,15 +454,23 @@ wide_nmi:
     LDA     #$00                        ; no nametable columns: the decoder draws the background
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$16                        ; sprites free of those extents, second sprite page, the
-    STA     WIDE_LAYOUT                 ; window on over $6000-$7FFF
+.ifdef PACK
+    LDA     #$06                        ; sprites free of those extents, second sprite page
+.else
+    LDA     #$16                        ; the same, and the window on over $6000-$7FFF
+.endif
+    STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS                ; no slowdown (option bit 2)
     AND     #OPT_NO_SLOWDOWN
     BEQ     @overclock
     LDA     #NO_SLOWDOWN_LINES
 @overclock:
     STA     WIDE_OVERCLOCK
-    LDA     MIRROR_PPU_CTRL
+    LDA     #$F8                        ; the second page's last 4 sprites, past the 10 groups,
+    STA     EXTRA_OAM + 240             ; hidden (the extension's RAM starts at 0: each would
+    STA     EXTRA_OAM + 244             ; show tile 0 at the screen's top left)
+    STA     EXTRA_OAM + 248
+    STA     EXTRA_OAM + 252
     RTS
 
 ; ---------------------------------------------------------------------------- ;
@@ -475,16 +549,39 @@ wide_enemy_sprites:
 ; to its entry; its sprites go to the second sprite page. One back within the game's own range
 ; stays in its slot when it ran in a free one.
 
-; Only these kinds go to the reserve (the others are erased as the game does).
-wide_reserved_kinds:
-    .byte   $00, $02, $03, $06, $0E, $12 ; Koopas, Buzzy Beetle, Goomba, Paratroopa (jumping), Spiny
-    .byte   $05, $07, $08, $0A, $0B, $0C ; Hammer Bro, Bloober, Bullet Bill, Cheep Cheeps, Podoboo
-    .byte   $0D, $0F, $10               ; Piranha Plant, Paratroopas (red, green flying)
-    .byte   $25, $26, $27, $28, $29, $2A ; large platforms (not the balance, $24)
-    .byte   $2B, $2C                    ; small platforms
-    .byte   $1B, $1C, $1D, $1E          ; short firebars
-    ; Not Lakitu ($11): the game sends him again when it has erased him.
-RESERVED_KINDS  = * - wide_reserved_kinds
+; Only these kinds go to the reserve (the others are erased as the game does): C set when kind A
+; is one, A kept. Koopas ($00, $03), Buzzy Beetle ($02), Hammer Bro ($05), Goomba ($06), Bloober
+; ($07), Bullet Bill ($08), Cheep Cheeps ($0A, $0B), Podoboo ($0C), Piranha Plant ($0D),
+; Paratroopas ($0E, $0F, $10), Spiny ($12), the short firebars ($1B-$1E), the large platforms
+; ($25-$2A, not the balance, $24) and the small ones ($2B, $2C). Not Lakitu ($11): the game sends
+; him again when it has erased him.
+wide_reserved:
+    CMP     #$11
+    BCS     @high
+    CMP     #$01
+    BEQ     @no
+    CMP     #$04
+    BEQ     @no
+    CMP     #$09
+    BEQ     @no
+@yes:
+    SEC
+    RTS
+@high:
+    BEQ     @no                         ; Lakitu
+    CMP     #$12
+    BEQ     @yes
+    CMP     #FIRST_FIREBAR
+    BCC     @no
+    CMP     #LAST_SHORT_FIREBAR + 1
+    BCC     @yes
+    CMP     #FIRST_LARGE_PLATFORM
+    BCC     @no
+    CMP     #LAST_SMALL_PLATFORM + 1
+    BCC     @yes
+@no:
+    CLC
+    RTS
 
 ; The game's off-screen check ($D6D2, TooFar, in place of JSR EraseEnemyObject): an enemy too far
 ; from the screen. A game enemy of a reserved kind within the margins goes to the reserve (its slot
@@ -507,12 +604,8 @@ wide_too_far:
     JMP     ERASE_ENEMY
 @within:
     LDA     ENEMY_ID,x
-    LDY     #RESERVED_KINDS - 1
-@kind:
-    CMP     wide_reserved_kinds,y
-    BEQ     @free_entry
-    DEY
-    BPL     @kind
+    JSR     wide_reserved
+    BCS     @free_entry
     JMP     ERASE_ENEMY
 @free_entry:
     LDY     #RES_COUNT - 1
@@ -922,7 +1015,7 @@ wide_firebar_hurts:
 wide_entry_sprites:
     LDA     ENEMY_SPR_DATA,x
     STA     WV_T0
-    LDX     wide_entry_oam,y
+    JSR     wide_entry_oam
     STX     WV_T1
     LDY     WV_T0
     LDA     #24
@@ -961,7 +1054,7 @@ wide_entry_sprites:
 
 ; Entry Y's sprites hidden in the second page.
 wide_hide_entry:
-    LDX     wide_entry_oam,y
+    JSR     wide_entry_oam
     LDA     #$F8
     STA     EXTRA_OAM,x
     STA     EXTRA_OAM+4,x
@@ -979,8 +1072,17 @@ wide_restore_slot:
     EACH_FIELD FROM_SAVE
     RTS
 
-wide_entry_oam:                         ; the second page's groups of six sprites
-    .byte   0, 24, 48, 72, 96, 120, 144, 168, 192, 216
+; X = 24 Y: entry Y's group of six sprites in the second page (Y 0-9); A lost.
+wide_entry_oam:
+    TYA
+    ASL
+    ASL
+    ASL
+    STA     WV_T4                       ; 8 Y
+    ASL                                 ; 16 Y, C clear
+    ADC     WV_T4
+    TAX
+    RTS
 
 ; The reserve belongs to one area and goes forward with the screen: another area, or the screen
 ; back (Mario restarting, a castle loop), empties it.
@@ -1203,12 +1305,8 @@ wide_preview_one:
     CMP     #PREVIEW_COUNT
     BCS     @skip
     LDA     WV_P_ID
-    LDY     #RESERVED_KINDS - 1
-@kind:
-    CMP     wide_reserved_kinds,y
-    BEQ     @drawn
-    DEY
-    BPL     @kind
+    JSR     wide_reserved
+    BCS     @drawn
 @skip:
     RTS
 @drawn:
@@ -1337,8 +1435,15 @@ wide_next_level:
     STA     LEVEL_NUMBER
     STA     OFF_LEVEL
     BEQ     @area                       ; level 1: area 0
+    CPY     #2                          ; worlds 1, 2, 4 and 7 (Y 0, 1, 3, 6): level 2 starts
+    BCC     @entrance                   ; with an entrance area
+    CPY     #3
+    BEQ     @entrance
+    CPY     #6
+    BNE     @area
+@entrance:
     CLC
-    ADC     wide_entrance_areas,y
+    ADC     #1
 @area:
     STA     AREA_NUMBER
     STA     OFF_AREA
@@ -1362,9 +1467,6 @@ wide_next_level:
     STA     VRAM_BUFFER1+7
     JMP     NULL_JOYPAD
 
-wide_entrance_areas:                    ; worlds whose level 2 starts with an entrance area
-    .byte   1, 1, 0, 1, 0, 0, 1, 0
-
 ; ---------------------------------------------------------------------------- ;
 ; Invincibility (option bit 1, a testing aid): InjurePlayer ($D92C, in place of LDA InjuryTimer)
 ; finds the injury timer running. Falling off the screen and the time running out still kill.
@@ -1375,7 +1477,11 @@ wide_injury:
     RTS
 
 wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
 .assert wide_end <= $8000, error, "widescreen code past the window"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -1384,7 +1490,7 @@ wide_end:
 """Builds the Super Mario Bros. (World) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Super Mario Bros. (World).nes> [out.bps]
-       python -I tools/build.py <Super Mario Bros. (World).nes> --pack <out.zxpk>
+       python -I tools/build.py <Super Mario Bros. (World) or (Europe).nes> --pack <out.zxpk> [--ntsc]
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank added after the game's 32 KiB, which the widescreen extension's PRG window shows at
@@ -1395,13 +1501,18 @@ Usage: python -I tools/build.py <Super Mario Bros. (World).nes> [out.bps]
    iNES header; the CHR-ROM, moved after the new bank, is copied from the player's ROM).
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
-(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, NROM,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the code (its used part) for the
-extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in
-the PRG-ROM, the ROM keeping its size. Invincibility is a component of its own, "invincible"
-(LDA #$02, the injury timer found running), applied by Zaxnes while that option is on, with or
-without the widescreen; the level selector needs the hack's code and stays in the "widescreen"
-component with the other hooks.
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NROM, CNROM
+and MMC3 (ROM hacks of the same code on those), each hook a 16 KiB bank and a CPU address, the ROM
+keeping its size. src/wide.s is assembled with -D PACK for $2000: the zone fantôme, which Zaxnes
+shows to instruction fetches from power-on, the extension unlocked and at $3000-$3FFF; the
+settings are made from the NMI's call of UpdateTopScore instead of its start. The widescreen is in three groups, "core" (Base: the enemies' sprites, the
+platforms and the firebars in the margins), "enemies" (Enemies in the margins: the reserve and the
+previews) and "level select" (the title screen's selector, which needs the hack's code), each with
+checks of the game's code the hack relies on. Invincibility is a component of its own,
+"invincible" (LDA #$02, the injury timer found running), applied by Zaxnes while that option is
+on, with or without the widescreen. A pack per build whose code moved: the World one (the
+PlayChoice-10's too) and Europe's (-D EUROPE, PAL; --ntsc: the same for the ROMs of its code whose
+header says NTSC).
 """
 
 import os
@@ -1411,6 +1522,7 @@ import sys
 import zlib
 
 SOURCE_CRC = 0xD445F698
+EUROPE = 0x9A2DB086
 PRG_SIZE = 0x8000
 CHR_SIZE = 0x2000
 BANK_SIZE = 0x4000
@@ -1446,8 +1558,12 @@ def hooks(sym):
         assert len(new) == len(original), hex(address)
         out.append((address, original, new))
 
-    # NMI: the extension's settings for the frame (LDA Mirror_PPU_CTRL_REG1 done there).
-    put(0x8082, 'ad 78 07', jsr(sym['wide_nmi']))
+    if 'wide_frame' in sym:
+        # The NMI's call of UpdateTopScore: the extension's settings for the frame first.
+        put(0x80ED, '20 97 8f', jsr(sym['wide_frame']))
+    else:
+        # NMI: the extension's settings for the frame (LDA Mirror_PPU_CTRL_REG1 done there).
+        put(0x8082, 'ad 78 07', jsr(sym['wide_nmi']))
     # An enemy's sprites: shown in the margins (SprObjectOffscrChk).
     put(0xEB64, 'a6 08 ad d1 03', jsr(sym['wide_enemy_sprites']))
     # The reserve: enemies too far for the game kept within the margins, run each frame.
@@ -1481,18 +1597,24 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+PACK_START = 0x2000             # the pack's code: the zone fantôme
+PACK_SIZE = 0x1000              # its code half ($3000-$3FFF holds the extension)
+
+
+def assemble(defines=()):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if 'PACK' in defines else (CODE_START, BANK_SIZE)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${BANK_SIZE:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
+    subprocess.run(tool('ca65') + ['-g'] + [flag for symbol in defines for flag in ('-D', symbol)]
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
                    check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
@@ -1514,30 +1636,85 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
-def pack(data, code, sym, out):
+# Where Super Mario Bros. (Europe) has the World's places the pack hooks or checks (the same
+# instructions; its RAM is the World's).
+EUROPE_PLACES = {
+    0xEB64: 0xEB6B, 0xD6D2: 0xD69A, 0xD92C: 0xD92D, 0xE60A: 0xE611, 0xEDB3: 0xEDBA,
+    0xCD3F: 0xCD45, 0xCD85: 0xCD8B, 0xCDD4: 0xCDDA, 0xCE0D: 0xCE13, 0xC998: 0xC99E,
+    0xF1AF: 0xF1B6, 0xF152: 0xF159, 0xE87D: 0xE884, 0xE243: 0xE24B, 0xDFC1: 0xDFC9,
+    0xC905: 0xC90B, 0xD67A: 0xD642, 0xF1F6: 0xF1FD, 0xC982: 0xC988, 0xE5C8: 0xE5CF,
+    0xED66: 0xED6D, 0xD655: 0xD61D, 0xCD3C: 0xCD42, 0xCDEE: 0xCDF4, 0xCE03: 0xCE09,
+}
+# Its hooks whose bytes differ (a JSR's or a JMP's target moved): the World's bytes, then its own.
+EUROPE_ORIGINAL = {0xD6D2: '20 9e c9', 0xE60A: '20 fd f1',
+                   0xCDD4: 'cd ae 03 b0 09 ad ae 03 38 e5 06 4c ec cd 38 ed ae 03 c9 59 90 04 a9 f8 '
+                           'd0 15'}
+
+# The groups past the core: (World address).
+ENEMIES = {0xD6D2, 0xAEFE}
+LEVEL_SELECT = {0x826C, 0x829C}
+
+# The game's code the hack's code relies on, by group: (World address, length), checked by Zaxnes
+# to be the reference ROM's bytes. Core: UpdateTopScore (where wide_frame goes on), GetXOffscreenBits
+# (a large platform off the wide view), where the firebar hook's branches go. Enemies: the routines
+# a reserve entry and a preview run through, and where wide_reserve goes on. Level select: where
+# wide_next_level goes on.
+CHECKS = {
+    'core': [(0x8F97, 3), (0xF1F6, 3), (0xCDEE, 3), (0xCE03, 3)],
+    'enemies': [(0xB624, 3), (0xC998, 6), (0xF1AF, 3), (0xF152, 3), (0xE87D, 3), (0xE243, 3),
+                (0xDFC1, 3), (0xC905, 3), (0xD67A, 3), (0xC982, 3), (0xE5C8, 3), (0xED66, 3),
+                (0xD655, 3), (0xCD3C, 3)],
+    'level select': [(0x82BB, 3)],
+}
+
+
+def pack(data, crc, out, ntsc=False):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(0,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    europe = crc == EUROPE
+    code, sym = assemble(['PACK'] + (['EUROPE'] if europe else []))
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+
+    def place(address):
+        if europe:
+            address = EUROPE_PLACES.get(address, address)
+        return pack_place(address - 0x8000, address)
+
+    region = 'pal' if europe and not ntsc else 'ntsc'
+    name = 'Super Mario Bros. (Europe)' if europe else 'Super Mario Bros. (World)'
+    name += ' (NTSC)' if europe and ntsc else ''
+    pack = hackpack.Pack(name + ' widescreen', code[:used], region=region, mappers=(0, 3, 4))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'enemies': widescreen.group('enemies', requires=['core'], label='Enemies in the margins',
+                                    label_fr='Ennemis dans les marges'),
+        'level select': widescreen.group('level select', requires=['core'],
+                                         label='Level select', label_fr='Sélecteur de niveau'),
+    }
+    for group, checks in CHECKS.items():
+        for address, length in checks:
+            groups[group].check(*place(address), length)
     aid = pack.component('invincible').group('invincible', label='Invincible',
                                              label_fr='Invincible')
     for address, original, new in hooks(sym):
-        offset = address - 0x8000
-        assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
+        if europe and address in EUROPE_ORIGINAL:
+            original = bytes.fromhex(EUROPE_ORIGINAL[address])
         if address in INVINCIBLE:
-            aid.hook(*pack_place(offset, address), original, INVINCIBLE[address])
+            aid.hook(*place(address), original, INVINCIBLE[address])
         else:
-            core.hook(*pack_place(offset, address), original, bytes(new))
+            group = ('enemies' if address in ENEMIES else
+                     'level select' if address in LEVEL_SELECT else 'core')
+            groups[group].hook(*place(address), original, bytes(new))
     assert len(aid.hooks) == len(INVINCIBLE)
-    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    pack.name = 'Super Mario Bros. (World) widescreen'
-    pack.code = code[:used]
     result = pack.build(data, 0x8000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, '
+          f'{" + ".join(str(len(group.hooks)) for group in groups.values())} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -1545,13 +1722,15 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = image[header:header + PRG_SIZE + CHR_SIZE]
-    assert zlib.crc32(data) == SOURCE_CRC, 'not Super Mario Bros. (World)'
+    crc = zlib.crc32(data)
+    assert crc in (SOURCE_CRC, EUROPE), 'not Super Mario Bros. (World) or (Europe)'
 
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        pack(bytes(data), crc, sys.argv[3], ntsc='--ntsc' in sys.argv[4:])
+        return
+    assert crc == SOURCE_CRC, 'Super Mario Bros. (Europe): a pack only (--pack)'
     code, sym = assemble()
     assert len(code) == BANK_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), code, sym, sys.argv[3])
-        return
     prg = bytearray(data[:PRG_SIZE])
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for address, original, new in hooks(sym):

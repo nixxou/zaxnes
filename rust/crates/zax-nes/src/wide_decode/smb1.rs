@@ -1,4 +1,5 @@
-//! Super Mario Bros. (World): the margins of an area, from the game's own area parser.
+//! Super Mario Bros. (World) and (Europe): the margins of an area, from the game's own area
+//! parser.
 //!
 //! The game keeps no level map: its area parser (`AreaParserCore`, `$93FC`) reads the area's
 //! objects as the screen scrolls and writes one column of 13 metatiles at a time
@@ -37,6 +38,9 @@ pub struct SuperMarioBros;
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0xD445_F698;
+/// The same of Super Mario Bros. (Europe): its area parser and metatile tables at the World's
+/// places (the code it moved is later), the same RAM.
+pub const SOURCE_CRC_EUROPE: u32 = 0x9A2D_B086;
 
 const INITIALIZE_AREA: u16 = 0x8FE4;
 const AREA_PARSER_CORE: u16 = 0x93FC;

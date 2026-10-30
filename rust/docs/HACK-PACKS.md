@@ -1,6 +1,6 @@
 # Hack packs
 
-Status: Super Mario Bros. 3 converted, see section 7. Branch `hack-rewrite`.
+Status: Super Mario Bros. converted, see section 7. Branch `hack-rewrite`.
 
 ## 1. Why
 
@@ -260,7 +260,11 @@ Format 2 and the signatures (`exec-zone` work, phase 3; `WIDESCREEN-EXTENSION.md
   (`docs/hacks/smb3/WIDESCREEN-HACK.md`): three groups (core, enemies, Mario in the margins) with
   checks, its NMI left alone, its two aids components without code; the USA pack (Rev 1, which
   the first revision takes), one per Japanese revision and the European one (PAL, with its NTSC
-  twin); 910 of its 1077 ROMs take a whole pack. A "dirty" iNES header (bytes 12 to 15 not
+  twin); 910 of its 1077 ROMs take a whole pack. Super Mario Bros. too
+  (`docs/hacks/smb1/WIDESCREEN-HACK.md`): its three tables made tests (the zone shows data reads
+  to the PPU), the settings from the NMI's call of `UpdateTopScore`, three groups (core, enemies,
+  level select) with checks, NROM, CNROM and MMC3; the World pack and the European one (PAL, with
+  its NTSC twin); 69 of a pool of 100 ROMs take a whole pack, 10 more the core. A "dirty" iNES header (bytes 12 to 15 not
   zero) is read as the core reads it, its mapper's high nibble and PAL bit left out
   (`RomTraits::of`);
   widescreen MMC5 then let Zelda II take its MMC5 conversion ("USA MMC5 patch", 512 KiB, its
