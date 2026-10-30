@@ -23,7 +23,7 @@
 //! | Adventure Island (USA), Classic (Europe), Takahashi Meijin no Bouken-jima (Japan) and Kiddy Sun in Fantasia (Asia) | widescreen sprites and objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in groups (the sprites, the ghosts, the previews, the two aids), the ROM keeping its size; the European one the same for PAL, the Japanese one built for its code, the Asian one the Japanese one but for its NMI's place, without the level selector (`aiwide`, `tools/build.py --pack`) |
 //! | Excitebike (Japan, USA), and (Europe) | widescreen riders, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the settings, the riders in the margins), the ROM keeping its size; the European one the same for PAL (`excitebikewide`, `tools/build.py --pack`) |
 //! | Final Fantasy (USA), and (Japan) | widescreen people and vehicles, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the people and vehicles), the ROM keeping its size; the Japanese one for its code, which its Rev 1 takes (`ff1wide`, `tools/build.py --pack`) |
-//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
+//! | Metal Force (Korea) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies), the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode (`metalforcewide`, `tools/build.py --pack`) |
 //! | Blaster Master (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`blastermasterwide`, `tools/build.py --pack`) |
 //! | Metroid (USA) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`metroidwide`, `tools/build.py --pack`) |
 //! | Mega Man 4 (USA), its Rev 1, and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the sprites, the enemies in the margins), the ROM keeping its size; one pack for both USA builds and Rockman 4 (Japan), the same built from the European ROM, PAL; "Invincible" a component of its own, with or without the advanced mode (`mm4wide`, `tools/build.py --pack`) |
@@ -918,10 +918,10 @@ pub const PATCHES: [BuiltinPatch; 51] = [
         game: "Metal Force",
         rom_name: "Metal Force (Korea) (Unl)",
         source_crc: 0xEC6D_910E,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core; the ROM keeps its size.
-        // "Invincible" a component of its own (the level selector needs the hack's code: it stays
-        // with the widescreen).
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in two groups (the sprites, the enemies in the margins); the ROM
+        // keeps its size. "Invincible" a component of its own (the level selector needs the
+        // hack's code: it stays with the widescreen; `metalforcewide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/metalforce-korea-widescreen.zxpk"),
         options: &[
             // Testing aids: left / right on the mission screen pick the mission; no damage (pits
@@ -952,13 +952,12 @@ pub const PATCHES: [BuiltinPatch; 51] = [
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the enemies.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
-        // did).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
-        zone_data: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // Everything runs in the NMI; the reset ends in a JMP to itself.
         idle_loop: Some((0xFFC3, 0xFFC5)),
     },

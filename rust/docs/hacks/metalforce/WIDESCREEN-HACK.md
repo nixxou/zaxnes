@@ -28,17 +28,25 @@ on the original screen).
 
 **Hack pack.** Zaxnes ships this hack as a hack pack,
 `rust/crates/zax-nes/patches/metalforce-korea-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, mapper 156, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
-memory instead of the game's free space described here (the source assembled for `$5800`, without
-the reset hook and the NMI's unlock: Zaxnes unlocks the extension and shows the code in the window
-from power-on, `$5008` = `$80`, page 0), and the hooks, each with the game's bytes it replaces, are
-checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free space). The
-option "Invincible" is a component of its own (`LDA #$02` in place of `LDA HIT_TIMER` in the five
-damage routines), applied with or without the advanced mode. The level selector needs the hack's
-code: it stays with the widescreen. The BPS patch described here is kept to compare.
+<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`,
+`WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes' shared builder
+(`hackpack.py`): NTSC, mapper 156, each hook a 16 KiB bank and a CPU address with the game's bytes
+it replaces, checked and applied by Zaxnes; the ROM keeps its size (nothing written in its free
+space). `src/wide.s` is assembled with `-D PACK` for `$2000`, without the reset hook and the NMI's
+unlock: the zone fantôme, which Zaxnes shows to instruction fetches only from power-on, the
+extension unlocked; its registers and RAM are at `$3000`-`$3FFF` (widescreen MMC5:
+`$5000`-`$5FFF` stays the cartridge's), no window. The code reads no data of its own (the game's
+data reads at `$2000`-`$3FFF` reach the PPU). The widescreen is in two groups: "core" (Base: the
+settings, the sprites in the margins) and "enemies" (Enemies in the margins, needing it: the level
+list's spawns, the sleeping enemies, the off-screen test, the flyers), with checks of the game's
+code the hack relies on: the sound the NMI hook calls on; an enemy's collisions, its removal and
+the vertical half of the off-screen test. The option "Invincible" is a component of its own
+(`LDA #$02` in place of `LDA HIT_TIMER` in the five damage routines), applied with or without the
+advanced mode. The level selector needs the hack's code: it stays with the widescreen. Both ROMs
+of the pool (the dump and the ROM hack Mega Force) take the whole pack and play as without it
+over 3000 frames of scripted inputs; against the BPS build, the same options, the pack runs a
+frame behind from power-on as before (its NMI counter `$034D` one less). The BPS patch described
+here is kept to compare.
 
 ## 2. What the game does, and what changes
 
@@ -167,10 +175,12 @@ for testing.
 ```asm
 ; Metal Force (Korea) widescreen hack: the code the patched fixed bank calls.
 ;
-; Assembled for $F940 of the fixed bank (PRG bank 15), in the unused $FF fill from $F936 to $FF7F;
-; or, with PACK defined (a Zaxnes hack pack), for $5800 of the extension's memory, which Zaxnes
-; shows in the PRG window from power-on, the extension unlocked: no reset hook then, and no unlock
-; in the NMI (the code only runs while the extension is unlocked).
+; Assembled for $F940 of the fixed bank (PRG bank 15), in the unused $FF fill from $F936 to $FF7F.
+; In a Zaxnes hack pack (-D PACK) it is assembled for $2000 instead: the zone fantôme, which Zaxnes
+; shows to instruction fetches only from power-on, the extension unlocked (no reset hook then, and
+; no unlock in the NMI); the game's data reads there still reach the PPU, so the code reads no data
+; of its own. Its registers and RAM are at $3000-$3FFF, which the zone holds for its own
+; instructions (widescreen MMC5: $5000-$5FFF stays the cartridge's).
 ; Talks to the Zaxnes widescreen extension (rust/docs/WIDESCREEN-EXTENSION.md); the background of
 ; the margins comes from the emulator's Metal Force margin decoder, the hack does the objects, the
 ; way the Mega Man 2 hack does them:
@@ -185,15 +195,20 @@ for testing.
 ;
 ; With a margin of 0 every routine does exactly what the code it replaces does.
 
-WIDE_SIG        = $5000         ; W: unlock "WIDE"; R: $57 once unlocked
-WIDE_HOST       = $5002         ; R: margin the host offers on each side
-WIDE_REQ        = $5003         ; W: margin asked for
-WIDE_LEFT       = $5004         ; W: background extents (the decoder draws the margins)
-WIDE_RIGHT      = $5005
-WIDE_OVERCLOCK  = $5006         ; W: extra CPU time each frame, in scanlines
-WIDE_LAYOUT     = $5007         ; W: bit 1, sprites free of the background extents
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; W: high byte of the x of sprite n at $5100 + 4n
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+WIDE_SIG        = EXT + $000    ; W: unlock "WIDE"; R: $57 once unlocked
+WIDE_HOST       = EXT + $002    ; R: margin the host offers on each side
+WIDE_REQ        = EXT + $003    ; W: margin asked for
+WIDE_LEFT       = EXT + $004    ; W: background extents (the decoder draws the margins)
+WIDE_RIGHT      = EXT + $005
+WIDE_OVERCLOCK  = EXT + $006    ; W: extra CPU time each frame, in scanlines
+WIDE_LAYOUT     = EXT + $007    ; W: bit 1, sprites free of the background extents
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; W: + 4 n: high byte of the x of sprite n
 
 OPT_LEVEL_SELECT = $01          ; a testing aid: left / right on the mission screen pick the mission
 OPT_INVINCIBLE  = $02           ; a testing aid: the player takes no damage
@@ -208,18 +223,18 @@ WAKE_RIGHT      = 48            ; spawn window, whatever the camera's fine x
 MISSIONS        = 7
 
 ; Variables in the extension's RAM.
-WV_M            = $5200         ; margin of this frame
-WV_K            = $5201         ; spawn columns added on each side: ceil(M / 16), at most 11
-WV_THR          = $5202         ; sleeping enemies are removed this far past the screen's right
-WV_THRL         = $5203         ; edge, and at 256 - this past its left edge (x high byte $FF)
-WV_AWAKE        = $5204         ; the same for the enemies awake: max(80, M + 16)...
-WV_AWAKEL       = $5205         ; ... and 256 - that
-WV_LIML         = $5206         ; scratch: a limit and a candidate world x, 16-bit
-WV_LIMH         = $5207
-WV_NEWL         = $5208
-WV_NEWH         = $5209
-WV_DORMANT      = $5240        ; + enemy slot offset ($00-$50): non-zero while asleep
-WV_DORMID       = $52A0         ; + slot: the list entry ($03A8) it slept for
+WV_M            = EXT + $200    ; margin of this frame
+WV_K            = EXT + $201    ; spawn columns added on each side: ceil(M / 16), at most 11
+WV_THR          = EXT + $202    ; sleeping enemies are removed this far past the screen's right
+WV_THRL         = EXT + $203    ; edge, and at 256 - this past its left edge (x high byte $FF)
+WV_AWAKE        = EXT + $204    ; the same for the enemies awake: max(80, M + 16)...
+WV_AWAKEL       = EXT + $205    ; ... and 256 - that
+WV_LIML         = EXT + $206    ; scratch: a limit and a candidate world x, 16-bit
+WV_LIMH         = EXT + $207
+WV_NEWL         = EXT + $208
+WV_NEWH         = EXT + $209
+WV_DORMANT      = EXT + $240    ; + enemy slot offset ($00-$50): non-zero while asleep
+WV_DORMID       = EXT + $2A0    ; + slot: the list entry ($03A8) it slept for
 
 ; Game RAM (original meanings).
 CAM_COLUMN      = $3C           ; camera, 16-pixel column of the screen's left edge
@@ -254,7 +269,7 @@ ENEMY_VERTICAL  = $A3D4         ; bank 13: the vertical half of the off-screen t
 
 .segment "CODE"
 .ifdef PACK
-.org $5800
+.org $2000
 .else
 .org $F940
 
@@ -687,6 +702,13 @@ wide_level_select:
     STA      GAME_STEP
 @rts:
     RTS
+
+wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
+.assert wide_end <= $FF80, error, "widescreen code past the free space"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -725,8 +747,8 @@ BANK_SIZE = 0x4000
 FIXED = 0xC000
 CODE_START = 0xF940
 CODE_END = 0xFF80
-PACK_START = 0x5800             # the pack's code: the extension's PRG window
-PACK_SIZE = 0x800
+PACK_START = 0x2000             # the pack's code: the zone fantôme, below the extension at $3000
+PACK_SIZE = 0x1000
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -838,6 +860,19 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
+# The enemies group: the level list's spawn window and spawns, the enemy loop's sleep and
+# off-screen test, the flyers.
+ENEMIES = {0xC010, 0xC0B8, 0x822A, 0xA3BC, 0x8775}
+
+# The game's code the hack's code relies on, by group: (bank, address, length), checked by Zaxnes
+# to be the reference ROM's bytes. Core: the sound the NMI hook calls on. Enemies: an enemy's
+# collisions, its removal and the vertical half of the off-screen test (bank 13).
+CHECKS = {
+    'core': [(BANK, 0xEB40, 3)],
+    'enemies': [(13, 0xA0EA, 3), (13, 0xA3EE, 3), (13, 0xA3D4, 3)],
+}
+
+
 def pack(data, out):
     code, sym = assemble(pack=True)
     tools = os.environ.get('ZAXNES_TOOLS')
@@ -845,32 +880,45 @@ def pack(data, out):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(156,))
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    pack = hackpack.Pack('Metal Force (Korea) widescreen', code[:used], region='ntsc',
+                         mappers=(156,))
     bank = BANK * BANK_SIZE
     fixed, banked = hooks(sym, pack=True)
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'enemies': widescreen.group('enemies', requires=['core'], label='Enemies in the margins',
+                                    label_fr='Ennemis dans les marges'),
+    }
     aid = pack.component('invincible').group('invincible', label='Invincible',
                                              label_fr='Invincible')
+
+    def at_of(number, address):
+        return (bank + address - FIXED) if address >= FIXED else number * BANK_SIZE + address - 0x8000
+
+    for group, checks in CHECKS.items():
+        for number, address, length in checks:
+            groups[group].check(*pack_place(at_of(number, address), address), length)
     for number, address, original, new in banked:
-        at = number * BANK_SIZE + address - 0x8000
+        at = at_of(number, address)
         assert data[at:at + len(original)] == original, f'bank {number} ${address:04X}: not the expected bytes'
-        core.hook(*pack_place(at, address), bytes(original), bytes(new))
+        groups['enemies' if address in ENEMIES else 'core'].hook(*pack_place(at, address),
+                                                                 bytes(original), bytes(new))
     for address, original, new in fixed:
-        at = bank + address - FIXED
+        at = at_of(BANK, address)
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
         if address in INVINCIBLE:
             # LDA #$02 in place of LDA HIT_TIMER: the timer found running, as wide_hurt leaves A.
             aid.hook(*pack_place(at, address), bytes(original), bytes([0xA9, 0x02, 0xEA]))
         else:
-            core.hook(*pack_place(at, address), bytes(original), bytes(new))
+            groups['enemies' if address in ENEMIES else 'core'].hook(*pack_place(at, address),
+                                                                     bytes(original), bytes(new))
     assert len(aid.hooks) == len(INVINCIBLE)
-    # Zaxnes reads $FF past the code's end: its trailing fill is left out.
-    used = (len(code.rstrip(b'\xff')) + 0xFF) & ~0xFF
-    pack.name = 'Metal Force (Korea) widescreen'
-    pack.code = code[:used]
     result = pack.build(data, 0x40000)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes ({used} of code, {len(core.hooks)} hooks), '
+    print(f'{out}: {len(result)} bytes ({used} of code, '
+          f'{" + ".join(str(len(group.hooks)) for group in groups.values())} hooks), '
           f'pack CRC {zlib.crc32(result):08X}')
 
 
