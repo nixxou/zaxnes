@@ -35,16 +35,34 @@ applies the patch.
 
 ---
 
-**Hack pack.** Zaxnes ships this hack as a hack pack,
-`rust/crates/zax-nes/patches/adventure-island-usa-widescreen.zxpk` (`tools/build.py <rom> --pack
-<out.zxpk>`, with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`;
-`docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md` 7.1). The pack is format 2, written by Zaxnes'
-shared builder (`hackpack.py`): NTSC, CNROM, each hook a 16 KiB bank and a CPU address, the
-widescreen in one group ("core", Base); no checks yet. The code goes to the extension's
-memory, which the window shows from power-on (`$5008` = `$80`, page 0), and the hooks, each with
-the game's bytes it replaces, are checked and applied by Zaxnes; the ROM keeps its size (no bank
-added, nothing moved or copied). Its testing aids need the hack's code: they stay with the
-widescreen (the advanced mode). The BPS patch described here is kept to compare.
+**Hack pack.** Zaxnes ships this hack as hack packs (`tools/build.py <rom> --pack <out.zxpk>`,
+with `ZAXNES_TOOLS` set to Zaxnes' `rust/tools`; `docs/HACK-PACKS.md`, `WIDESCREEN-EXTENSION.md`
+7.1), all from this source: `adventure-island-usa-widescreen.zxpk`, NTSC;
+`adventure-island-europe-widescreen.zxpk`, the same for PAL (Adventure Island Classic (Europe),
+data CRC-32 `86867830`, has the same code at the same places); `adventure-island-japan-widescreen.zxpk`
+for Takahashi Meijin no Bouken-jima (Japan) (`6A457A43`; `-D JAPAN`: the same code and RAM, most
+of it 5 bytes earlier, from `$AE00` on 25 and from `$B500` on some 100); and
+`adventure-island-kiddy-sun-widescreen.zxpk` for Kiddy Sun in Fantasia (Asia) (`623020FB`): the
+Japanese code with its NMI 4 bytes earlier and a title screen of its own, the Japanese pack
+without the level selector. The packs are format 2, written by Zaxnes' shared builder
+(`hackpack.py`): CNROM, each hook a 16 KiB bank and a CPU address with the game's bytes it
+replaces, checked and applied by Zaxnes; the ROM keeps its size (no bank added, nothing moved or
+copied). `src/wide.s` is assembled with `-D PACK` for `$2000`: the zone fantôme, which Zaxnes
+shows to instruction fetches only from power-on, the extension unlocked; its registers, its RAM
+and the second sprite page are at `$3000`-`$3FFF` (widescreen MMC5: `$5000`-`$5FFF` stays the
+cartridge's), no window (`$5007` = `$06`). The code reads no data of its own (the game's data
+reads at `$2000`-`$3FFF` reach the PPU). The widescreen is in groups: "core" (Base: the settings,
+the sprites in the margins), "enemies" (the ghosts in the left margin), "previews" (the objects
+ahead), and the two testing aids, "level select" and "invincible", which need the hack's code;
+each but the core needs it. Checks of the game's code the hack relies on go with them: where the
+sprite loop goes on and the single sprites' tiles; the objects' handler a ghost runs and where the
+left test and the slot search go on; the routines a preview's creation runs through and the
+ground's rises; the title screen's wait. The margin decoder reads the Japanese build's tables at
+their places. Over the 97 ROMs of the game in a GoodNES-style set (the USA, European, Japanese
+and Asian dumps, translations and ROM hacks), 75 take a whole pack and 14 all but the level
+selector (the ROM hacks that rework the title screen); the others are the ROM hacks that put the
+game on MMC3 and two pirate versions. 3000 frames of each with scripted inputs play as without
+the pack. The BPS patch described here is kept to compare.
 
 ## 2. What the game does, and what changes
 
@@ -219,6 +237,14 @@ TargetCopy for runs of one value). `WIDE_SKIP=<hex addresses>` leaves hooks out,
 ; this code through hooks in its own (tools/build.py). The background of the margins is not the
 ; hack's work: Zaxnes' margin decoder draws it.
 ;
+; In a Zaxnes hack pack (-D PACK) the code is assembled for $2000 instead: the zone fantôme, which
+; Zaxnes shows to instruction fetches only from power-on, the extension unlocked; the game's data
+; reads there still reach the PPU, so the code reads no data of its own. Its registers and RAM are
+; at $3000-$3FFF, which the zone holds for its own instructions (widescreen MMC5: $5000-$5FFF stays
+; the cartridge's), and no window is opened. Adventure Island Classic (Europe) has the same code
+; at the same places; Takahashi Meijin no Bouken-jima (Japan) (-D JAPAN) the same code and RAM,
+; most of it 5 bytes earlier, from $AE00 on 25 and from $B500 on some 100.
+;
 ;  * every sprite of an object within the wide view shows, with the high byte of its x;
 ;  * an object the game removes as it leaves the screen's left edge stays in the left margin as a
 ;    ghost until it leaves the view: it goes on moving, but touches nothing, creates no object and
@@ -231,93 +257,99 @@ TargetCopy for runs of one value). `WIDE_SKIP=<hex addresses>` leaves hooks out,
 ; ---------------------------------------------------------------------------- ;
 ; The widescreen extension (see Zaxnes, docs/WIDESCREEN-EXTENSION.md).
 
-WIDE_HOST       = $5002         ; R: the margin the host offers
-WIDE_REQ        = $5003         ; W: the margin asked for
-WIDE_LEFT       = $5004         ; nametable columns shown left of the screen
-WIDE_RIGHT      = $5005         ; and right of it
-WIDE_OVERCLOCK  = $5006         ; extra scanlines of CPU time per frame
-WIDE_LAYOUT     = $5007         ; bit 1 sprites free of the extents, 2 second page, 4 window to $7FFF
-WIDE_OPTIONS    = $500A         ; R: the options the player turned on
-WIDE_SPRHI      = $5100         ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
-EXTRA_OAM       = $5300         ; the second sprite page (the title's level, the previews)
-EXTRA_HI        = $5400         ; + 4 n: high byte of the x of its sprite n
+.ifdef PACK
+EXT             = $3000         ; the extension's registers and RAM, in the zone fantôme
+.else
+EXT             = $5000
+.endif
+
+WIDE_HOST       = EXT + $002    ; R: the margin the host offers
+WIDE_REQ        = EXT + $003    ; W: the margin asked for
+WIDE_LEFT       = EXT + $004    ; nametable columns shown left of the screen
+WIDE_RIGHT      = EXT + $005    ; and right of it
+WIDE_OVERCLOCK  = EXT + $006    ; extra scanlines of CPU time per frame
+WIDE_LAYOUT     = EXT + $007    ; bit 1 sprites free of the extents, 2 second page, 4 window to $7FFF
+WIDE_OPTIONS    = EXT + $00A    ; R: the options the player turned on
+WIDE_SPRHI      = EXT + $100    ; + 4 n: high byte of the x of sprite n, for the next OAM DMA
+EXTRA_OAM       = EXT + $300    ; the second sprite page (the title's level, the previews)
+EXTRA_HI        = EXT + $400    ; + 4 n: high byte of the x of its sprite n
 
 MAX_MARGIN      = 248           ; the most the extension shows sprites in
 
-; Extension RAM ($5200-$57FF; $5800 up is the window).
-WV_M            = $5200         ; margin of this frame
-WV_A            = $5201         ; scratch
-WV_T0           = $5202
-WV_T1           = $5203
-WV_LEVEL        = $5204         ; the level selected on the title screen, 0-31
-WV_MAGIC        = $5205         ; MAGIC once the extension's RAM is set up
-WV_GHOST_RUN    = $5206         ; non-zero while a ghost's behaviour runs
-WV_SOUND        = $5207         ; the sound asked for before it
-WV_PREVIEW      = $5208         ; non-zero while a preview's sprites are captured
-WV_PV_N         = $5209         ; the second page's next sprite (offset)
-WV_PV_FULL      = $520A         ; non-zero once the second page is full
-WV_PV_LAST      = $520B         ; the offset the previous frame's previews went up to
-WV_PV_S         = $520C         ; the object list at hand (0, 2, 4)
-WV_PV_D         = $520D         ; 2 bytes: x of the entry's object minus 256
-WV_PV_ID        = $520F         ; its kind
-WV_GHOST        = $5210         ; + slot: non-zero while the object is a ghost in the left margin
-WV_PV_L         = $5220         ; the list at hand / 2
-WV_PV_I         = $5221         ; the list's entry at hand (in LC_*)
-WV_PV_LIST      = $5222         ; 6 bytes: a list's state (LIST_PTR, LIST_BITS_LEFT, LIST_BITS, LIST_NEXT)
-WV_PV_TEMP      = $5228         ; 4 bytes: $054C-$054F, kept
-WV_PV_E         = $522C         ; the cache entry at hand
-WV_PV_SLOT      = $522D         ; the free slot borrowed
-WV_PV_X         = $522E         ; 2 bytes: the preview's x
-WV_PV_GLOBALS   = $5230         ; 10 bytes: the game's variables an object's creation writes, kept
-WV_PV_LIMIT     = $523A         ; 2 bytes: M + 32, how far past 256 an object may show
-WV_PV_MADE      = $523C         ; non-zero once an entry was read or a preview created this frame
-WV_PV_Y0        = $523D         ; the object's y as its sprites are captured
-WV_PV_XOFF      = $523E         ; a captured sprite's x - the object's
-WV_PV_DRAWING   = $52E0         ; 13 bytes: the drawing's variables ($58-$64), kept
+; Extension RAM (EXT + $200 to EXT + $7FF; in the BPS build $5800 up is the window).
+WV_M            = EXT + $200    ; margin of this frame
+WV_A            = EXT + $201    ; scratch
+WV_T0           = EXT + $202
+WV_T1           = EXT + $203
+WV_LEVEL        = EXT + $204    ; the level selected on the title screen, 0-31
+WV_MAGIC        = EXT + $205    ; MAGIC once the extension's RAM is set up
+WV_GHOST_RUN    = EXT + $206    ; non-zero while a ghost's behaviour runs
+WV_SOUND        = EXT + $207    ; the sound asked for before it
+WV_PREVIEW      = EXT + $208    ; non-zero while a preview's sprites are captured
+WV_PV_N         = EXT + $209    ; the second page's next sprite (offset)
+WV_PV_FULL      = EXT + $20A    ; non-zero once the second page is full
+WV_PV_LAST      = EXT + $20B    ; the offset the previous frame's previews went up to
+WV_PV_S         = EXT + $20C    ; the object list at hand (0, 2, 4)
+WV_PV_D         = EXT + $20D    ; 2 bytes: x of the entry's object minus 256
+WV_PV_ID        = EXT + $20F    ; its kind
+WV_GHOST        = EXT + $210    ; + slot: non-zero while the object is a ghost in the left margin
+WV_PV_L         = EXT + $220    ; the list at hand / 2
+WV_PV_I         = EXT + $221    ; the list's entry at hand (in LC_*)
+WV_PV_LIST      = EXT + $222    ; 6 bytes: a list's state (LIST_PTR, LIST_BITS_LEFT, LIST_BITS, LIST_NEXT)
+WV_PV_TEMP      = EXT + $228    ; 4 bytes: $054C-$054F, kept
+WV_PV_E         = EXT + $22C    ; the cache entry at hand
+WV_PV_SLOT      = EXT + $22D    ; the free slot borrowed
+WV_PV_X         = EXT + $22E    ; 2 bytes: the preview's x
+WV_PV_GLOBALS   = EXT + $230    ; 10 bytes: the game's variables an object's creation writes, kept
+WV_PV_LIMIT     = EXT + $23A    ; 2 bytes: M + 32, how far past 256 an object may show
+WV_PV_MADE      = EXT + $23C    ; non-zero once an entry was read or a preview created this frame
+WV_PV_Y0        = EXT + $23D    ; the object's y as its sprites are captured
+WV_PV_XOFF      = EXT + $23E    ; a captured sprite's x - the object's
+WV_PV_DRAWING   = EXT + $2E0    ; 13 bytes: the drawing's variables ($58-$64), kept
 MAGIC           = $A5
 
 ; The previews: one entry per object of the lists seen ahead, created once; its sprites captured
 ; then (at most PV_SPRITES), placed again from them each frame.
 PV_MAX          = 8
 PV_SPRITES      = 8
-PV_USED         = $5240         ; + entry: non-zero when in use
-PV_SEEN         = $5248         ; seen this frame
-PV_KS           = $5250         ; key: the list, the entry's position (low, high)
-PV_KLO          = $5258
-PV_KHI          = $5260
-PV_Y            = $5268         ; y (it moves with the screen as the objects' do)
-PV_NSPR         = $5270         ; sprites captured
-WV_PV_LAST_I    = $5278         ; past the list's last entry read
-WV_PV_TO        = $5279         ; entries moved down: to, from, how many
-WV_PV_FROM      = $527A
-WV_PV_LEFT      = $527B         ; (also the sprites still to place)
-WV_PV_SPR       = $527C         ; the sprite at hand in PV_SPR
-WV_PV_SX        = $527D         ; 2 bytes: its x
-WV_PV_SY        = $527F         ; its y
-WV_GR_POS       = $5280         ; the ground past the game's 5 parts: x in its part of 128 pixels,
-WV_GR_K         = $5281         ; the part (5 and up), the round's section read, the part it is,
-WV_GR_SEC       = $5282         ; the ground's y, the section's 3rd byte
-WV_GR_J         = $5283
-WV_GR_H         = $5284
-WV_GR_B3        = $5285
-WV_GR_Y         = $5286         ; the ground's y at the object's x, and its GROUND_Y
-WV_GR_3E        = $5287
-PV_SPR          = $5600         ; + 32 x entry + 4 x sprite: y - PV_Y, tile, attributes, x - its x
+PV_USED         = EXT + $240    ; + entry: non-zero when in use
+PV_SEEN         = EXT + $248    ; seen this frame
+PV_KS           = EXT + $250    ; key: the list, the entry's position (low, high)
+PV_KLO          = EXT + $258
+PV_KHI          = EXT + $260
+PV_Y            = EXT + $268    ; y (it moves with the screen as the objects' do)
+PV_NSPR         = EXT + $270    ; sprites captured
+WV_PV_LAST_I    = EXT + $278    ; past the list's last entry read
+WV_PV_TO        = EXT + $279    ; entries moved down: to, from, how many
+WV_PV_FROM      = EXT + $27A
+WV_PV_LEFT      = EXT + $27B    ; (also the sprites still to place)
+WV_PV_SPR       = EXT + $27C    ; the sprite at hand in PV_SPR
+WV_PV_SX        = EXT + $27D    ; 2 bytes: its x
+WV_PV_SY        = EXT + $27F    ; its y
+WV_GR_POS       = EXT + $280    ; the ground past the game's 5 parts: x in its part of 128 pixels,
+WV_GR_K         = EXT + $281    ; the part (5 and up), the round's section read, the part it is,
+WV_GR_SEC       = EXT + $282    ; the ground's y, the section's 3rd byte
+WV_GR_J         = EXT + $283
+WV_GR_H         = EXT + $284
+WV_GR_B3        = EXT + $285
+WV_GR_Y         = EXT + $286    ; the ground's y at the object's x, and its GROUND_Y
+WV_GR_3E        = EXT + $287
+PV_SPR          = EXT + $600    ; + 32 x entry + 4 x sprite: y - PV_Y, tile, attributes, x - its x
 
 ; The lists read ahead: per list (L = 0-2), its state the last time it was read and the state the
 ; reading went on from (the shadow), and up to LC_MAX entries read (index 4 L + j).
 LC_MAX          = 4
-LC_STATE        = $5500         ; + 6 L
-LC_SHADOW       = $5512         ; + 6 L
-LC_COUNT        = $5524         ; + L: entries read
-LC_END          = $5527         ; + L: non-zero once the shadow's list is over
-LC_PLO          = $5530         ; + entry: its position (the list's LIST_NEXT before it)
-LC_PHI          = $553C
-LC_ID           = $5548         ; its kind
-LC_E            = $5554         ; its extra bytes ($054E, $054F)
-LC_F            = $5560
-LC_AFTER        = $5570         ; + 6 x entry: the list's state once the game has created it
-WV_SLOT_SAVE    = $52C0         ; 20 bytes: the borrowed slot's variables
+LC_STATE        = EXT + $500    ; + 6 L
+LC_SHADOW       = EXT + $512    ; + 6 L
+LC_COUNT        = EXT + $524    ; + L: entries read
+LC_END          = EXT + $527    ; + L: non-zero once the shadow's list is over
+LC_PLO          = EXT + $530    ; + entry: its position (the list's LIST_NEXT before it)
+LC_PHI          = EXT + $53C
+LC_ID           = EXT + $548    ; its kind
+LC_E            = EXT + $554    ; its extra bytes ($054E, $054F)
+LC_F            = EXT + $560
+LC_AFTER        = EXT + $570    ; + 6 x entry: the list's state once the game has created it
+WV_SLOT_SAVE    = EXT + $2C0    ; 20 bytes: the borrowed slot's variables
 
 ; The game.
 SCRATCH_LO      = $00           ; the object's half width, 16-bit (sub_8310), at the left test
@@ -358,7 +390,11 @@ OBJ_INDEX       = $0634
 OBJ_ANIM_LO     = $0644
 OBJ_ANIM_HI     = $0654
 OBJ_TYPE        = $0684         ; + slot: how sub_8EC9 draws it (0 not at all)
-SPRITE_TILES    = $9F93         ; a single sprite's tile and attributes, by animation
+.ifdef JAPAN
+SPRITE_TILES    = $9F8E         ; a single sprite's tile and attributes, by animation
+.else
+SPRITE_TILES    = $9F93
+.endif
 AREA            = $37
 ROUND           = $38
 DEMO            = $40
@@ -377,27 +413,51 @@ OBJ_X_HI        = $0594
 OBJ_WIDTH       = $0614         ; + slot, collisions
 
 ; Routines and places of the game.
+.ifdef JAPAN
+OBJECT_HANDLER  = $9299
+SPAWN_OBJECTS   = $8C40         ; creates the objects of the lists the screen reaches
+READ_LIST       = $8D6F         ; reads Y bits of list X into $00-$01
+CREATE_IN_SLOT  = $8DBA         ; creates object NEW_KIND in slot X (its data, then its own setup)
+DRAW_OBJECT     = $91E9         ; draws the object of slot X by its type
+GROUND_AT       = $C147         ; the ground's y at the screen x $00-$01
+GROUND_RISE     = $BEDD         ; + 3 bits of a section's 2nd byte: the ground's change from the last
+SPRITE_SKIP     = $C462         ; the sprite loop's next sprite, this one left out
+ONE_SPRITE_END  = $C33D
+TITLE_WAIT      = $AE76         ; the title screen's wait, its demo timer set again
+.else
 OBJECT_HANDLER  = $929E
-SPAWN_OBJECTS   = $8C45         ; creates the objects of the lists the screen reaches
-READ_LIST       = $8D74         ; reads Y bits of list X into $00-$01
-CREATE_IN_SLOT  = $8DBF         ; creates object NEW_KIND in slot X (its data, then its own setup)
-DRAW_OBJECT     = $91EE         ; draws the object of slot X by its type
-GROUND_AT       = $C1AD         ; the ground's y at the screen x $00-$01
-GROUND_RISE     = $BF43         ; + 3 bits of a section's 2nd byte: the ground's change from the last
-SPRITE_SKIP     = $C4C8         ; the sprite loop's next sprite, this one left out
+SPAWN_OBJECTS   = $8C45
+READ_LIST       = $8D74
+CREATE_IN_SLOT  = $8DBF
+DRAW_OBJECT     = $91EE
+GROUND_AT       = $C1AD
+GROUND_RISE     = $BF43
+SPRITE_SKIP     = $C4C8
 ONE_SPRITE_END  = $C3A3
-TITLE_WAIT      = $AE8F         ; the title screen's wait, its demo timer set again
+TITLE_WAIT      = $AE8F
+.endif
 
-; The options ($500A).
+; The options (WIDE_OPTIONS).
 OPT_LEVEL_SELECT = $01
 OPT_INVINCIBLE  = $02
 OPT_NO_SLOWDOWN = $04
 NO_SLOWDOWN_LINES = 255
 
+; The layout: sprites free of the extents, the second sprite page; in the BPS build the window on
+; over $6000-$7FFF too.
+.ifdef PACK
+WIDE_LAYOUT_SET = $06
+.else
+WIDE_LAYOUT_SET = $16
+.endif
+
 GHOST_REACH     = 32            ; how far left of the view a ghost's x may be (its sprites' width)
 DIGIT_TILE      = $F5           ; the sprite tile of 0 (the status bar's digits)
 
 .segment "CODE"
+.ifdef PACK
+.org $2000
+.endif
 
 ; ---------------------------------------------------------------------------- ;
 ; NMI ($B717, in place of LDA #<ram_oam / STA $2003): the extension's settings for the frame.
@@ -417,8 +477,8 @@ wide_nmi:
     LDA     #$00                        ; no nametable columns: the decoder draws the background
     STA     WIDE_LEFT
     STA     WIDE_RIGHT
-    LDA     #$16                        ; sprites free of those extents, second sprite page, the
-    STA     WIDE_LAYOUT                 ; window on over $6000-$7FFF
+    LDA     #WIDE_LAYOUT_SET            ; sprites free of those extents, second sprite page
+    STA     WIDE_LAYOUT
     LDA     WIDE_OPTIONS                ; no slowdown (option bit 2)
     AND     #OPT_NO_SLOWDOWN
     BEQ     @overclock
@@ -1756,7 +1816,11 @@ wide_injury:
     RTS
 
 wide_end:
+.ifdef PACK
+.assert wide_end <= $3000, error, "widescreen code past the zone's code half"
+.else
 .assert wide_end <= $8000, error, "widescreen code past the window"
+.endif
 ```
 
 ### B. `tools/build.py`
@@ -1765,7 +1829,9 @@ wide_end:
 """Builds the Adventure Island (USA) widescreen hack (advanced mode) and its BPS patch.
 
 Usage: python -I tools/build.py <Adventure Island (USA).nes> [out.bps]
-       python -I tools/build.py <Adventure Island (USA).nes> --pack <out.zxpk>
+       python -I tools/build.py <Adventure Island (USA), Classic (Europe), Takahashi Meijin no
+                                Bouken-jima (Japan) or Kiddy Sun in Fantasia (Asia).nes>
+                                --pack <out.zxpk>
 
 1. Assembles src/wide.s (ca65 + ld65, run through WSL when not on the PATH) for $5800: a 16 KiB
    PRG bank added after the game's 32 KiB, which the widescreen extension's PRG window shows at
@@ -1776,11 +1842,17 @@ Usage: python -I tools/build.py <Adventure Island (USA).nes> [out.bps]
    iNES header; the CHR-ROM, moved after the new bank, is copied from the player's ROM).
 
 With --pack, a Zaxnes hack pack, format 2, instead, written by Zaxnes' shared builder
-(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): NTSC, CNROM,
-each hook a 16 KiB bank and a CPU address, the widescreen in one group ("core", Base); the code (its used part) for the
-extension's memory, which Zaxnes shows in the window from power-on, and the hooks as offsets in the
-PRG-ROM, the ROM keeping its size. The level selector and invincibility need the hack's code: they
-stay in the "widescreen" component with the other hooks.
+(tools/hackpack.py of Zaxnes, its folder in the environment variable ZAXNES_TOOLS): CNROM, each
+hook a 16 KiB bank and a CPU address, the widescreen in groups ("core", Base: the settings and the
+sprites in the margins; "enemies": the ghosts in the left margin; "previews": the objects ahead
+drawn in the right margin; "level select" and "invincible", the aids, which need the hack's code),
+with checks of the game's code the hack relies on; src/wide.s assembled with PACK for $2000, the
+zone fantôme, which Zaxnes shows to instruction fetches from power-on, the extension unlocked; the
+hooks as offsets in the PRG-ROM, the ROM keeping its size. Adventure Island Classic (Europe), the
+same code at the same places, gets the same pack for PAL; Takahashi Meijin no Bouken-jima (Japan)
+its own (-D JAPAN: the same code and RAM, moved); Kiddy Sun in Fantasia (Asia), the Japanese code
+with its NMI 4 bytes earlier and a title screen of its own, the Japanese one without the level
+selector.
 """
 
 import os
@@ -1790,10 +1862,15 @@ import sys
 import zlib
 
 SOURCE_CRC = 0xF8A713BE
+EUROPE = 0x86867830             # Adventure Island Classic (Europe)
+JAPAN = 0x6A457A43              # Takahashi Meijin no Bouken-jima (Japan)
+KIDDY = 0x623020FB              # Kiddy Sun in Fantasia (Asia)
 PRG_SIZE = 0x8000
 CHR_SIZE = 0x8000
 BANK_SIZE = 0x4000
 CODE_START = 0x5800
+PACK_START = 0x2000             # the pack's code: the zone fantôme, below the extension at $3000
+PACK_SIZE = 0x1000
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -1862,18 +1939,21 @@ def wsl_path(path):
     return '/mnt/' + drive[0].lower() + rest.replace('\\', '/')
 
 
-def assemble():
+def assemble(pack=False, japan=False):
     build = os.path.join(ROOT, 'build')
     os.makedirs(build, exist_ok=True)
     cfg = os.path.join(build, 'wide.cfg')
+    start, size = (PACK_START, PACK_SIZE) if pack else (CODE_START, BANK_SIZE)
     open(cfg, 'w', newline='\n').write(
-        f'MEMORY {{ CODE: start = ${CODE_START:04X}, size = ${BANK_SIZE:04X}, '
+        f'MEMORY {{ CODE: start = ${start:04X}, size = ${size:04X}, '
         'fill = yes, fillval = $FF, file = %O; }\n'
         'SEGMENTS { CODE: load = CODE, type = ro; }\n')
     obj = os.path.join(build, 'wide.o')
     binary = os.path.join(build, 'wide.bin')
     labels = os.path.join(build, 'wide.labels')
-    subprocess.run(tool('ca65') + ['-g', wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
+    subprocess.run(tool('ca65') + ['-g'] + (['-D', 'PACK'] if pack else [])
+                   + (['-D', 'JAPAN'] if japan else [])
+                   + [wsl_path(os.path.join(ROOT, 'src', 'wide.s')), '-o', wsl_path(obj)],
                    check=True)
     subprocess.run(tool('ld65') + ['-C', wsl_path(cfg), '-o', wsl_path(binary), '-Ln', wsl_path(labels),
                                    wsl_path(obj)], check=True)
@@ -1891,24 +1971,99 @@ def pack_place(offset, address):
     return offset // 0x4000, (address & 0xC000) | (offset & 0x3FFF)
 
 
-def pack(data, code, sym, out):
+# Where Takahashi Meijin no Bouken-jima (Japan) has the USA's places the pack hooks or checks (the
+# same instructions; its RAM is the USA's): most of its code 5 bytes earlier, from $AE00 on 25 and
+# from $B500 on some 100.
+JAPAN_PLACES = {
+    0xB717: 0xB6AD, 0xC305: 0xC29F, 0xC48B: 0xC425, 0xC4A9: 0xC443, 0xC378: 0xC312,
+    0x8EA7: 0x8EA2, 0x8E8E: 0x8E89, 0xBFF2: 0xBF8C, 0x8DB6: 0x8DB1, 0x9534: 0x952F,
+    0x8C41: 0x8C3C, 0x80EC: 0x80E7, 0xAE51: 0xAE38, 0x8078: 0x8073, 0xC04D: 0xBFE7,
+    0xC4C8: 0xC462, 0xC3A3: 0xC33D, 0x9F93: 0x9F8E, 0x929E: 0x9299, 0x8EC2: 0x8EBD,
+    0x8DBF: 0x8DBA, 0x8C45: 0x8C40, 0x8D74: 0x8D6F, 0x91EE: 0x91E9, 0xC1AD: 0xC147,
+    0xBF43: 0xBEDD, 0xAE8F: 0xAE76,
+}
+# Its hooks whose bytes differ (a JSR's target moved).
+JAPAN_ORIGINAL = {0x8E8E: '20 99 92', 0x80EC: '20 40 8c'}
+# Kiddy Sun in Fantasia (Asia): the Japanese places but its NMI's; its title screen is its own (no
+# level selector).
+KIDDY_PLACES = {**JAPAN_PLACES, 0xB717: 0xB6A9}
+
+# The groups past the core: (address of the hook).
+GROUPS = {
+    'enemies': {0x8EA7, 0x8E8E, 0xBFF2, 0x8DB6, 0x9534, 0x8C41},
+    'previews': {0x80EC},
+    'level select': {0xAE51, 0x8078},
+    'invincible': {0xC04D},
+}
+
+# The game's code the hack's code relies on, by group: (address, length), checked by Zaxnes to be
+# the reference ROM's bytes. Core: where the sprite loop goes on for a sprite left out and after a
+# single sprite, the single sprites' tiles. Enemies: the objects' handler a ghost runs, where the
+# left test and the free slot's search go on. Previews: the routines a preview's creation runs
+# through (the lists, a creation, the drawing, the ground) and the ground's rises. Level select:
+# the title screen's wait.
+CHECKS = {
+    'core': [(0xC4C8, 3), (0xC3A3, 3), (0x9F93, 3)],
+    'enemies': [(0x929E, 3), (0x8EC2, 3), (0x8DBF, 3)],
+    'previews': [(0x8C45, 3), (0x8D74, 3), (0x8DBF, 3), (0x91EE, 3), (0xC1AD, 3), (0xBF43, 8)],
+    'level select': [(0xAE8F, 3)],
+}
+
+
+def pack(data, crc, out):
     tools = os.environ.get('ZAXNES_TOOLS')
     if not tools or not os.path.isfile(os.path.join(tools, 'hackpack.py')):
         sys.exit('ZAXNES_TOOLS: the rust/tools folder of Zaxnes (its hackpack.py) is needed')
     sys.path.insert(0, tools)
     import hackpack
-    pack = hackpack.Pack('', b'', region='ntsc', mappers=(3,))
-    core = pack.component('widescreen').group('core', label='Base', label_fr='Base')
+    kiddy = crc == KIDDY
+    japan = crc in (JAPAN, KIDDY)
+    places = KIDDY_PLACES if kiddy else JAPAN_PLACES
+    code, sym = assemble(pack=True, japan=japan)
+    used = (sym['wide_end'] - PACK_START + 0xFF) & ~0xFF
+    europe = crc == EUROPE
+    name = ('Adventure Island Classic (Europe)' if europe else
+            'Kiddy Sun in Fantasia (Asia)' if kiddy else
+            'Takahashi Meijin no Bouken-jima (Japan)' if japan else 'Adventure Island (USA)')
+    pack = hackpack.Pack(name + ' widescreen', code[:used], region='pal' if europe else 'ntsc',
+                         mappers=(3,))
+    widescreen = pack.component('widescreen')
+    groups = {
+        'core': widescreen.group('core', label='Base', label_fr='Base'),
+        'enemies': widescreen.group('enemies', requires=['core'], label='Enemies in the margins',
+                                    label_fr='Ennemis dans les marges'),
+        'previews': widescreen.group('previews', requires=['core'], label='Objects ahead',
+                                     label_fr='Objets à venir'),
+        'level select': None if kiddy else widescreen.group(
+            'level select', requires=['core'], label='Level select',
+            label_fr='Sélecteur de niveau'),
+        'invincible': widescreen.group('invincible', requires=['core'], label='Invincible',
+                                       label_fr='Invincible'),
+    }
+
+    def place(address):
+        if japan:
+            address = places[address]
+        return pack_place(address - 0x8000, address)
+
+    for group, checks in CHECKS.items():
+        for address, length in checks:
+            if groups[group]:
+                groups[group].check(*place(address), length)
     for address, original, new in hooks(sym):
-        offset = address - 0x8000
+        group = next((g for g, hooked in GROUPS.items() if address in hooked), 'core')
+        if not groups[group]:
+            continue
+        if japan and address in JAPAN_ORIGINAL:
+            original = bytes.fromhex(JAPAN_ORIGINAL[address])
+        offset = (places[address] if japan else address) - 0x8000
         assert data[offset:offset + len(original)] == original, f'${address:04X}: not the expected bytes'
-        core.hook(*pack_place(offset, address), original, bytes(new))
-    used = (sym['wide_end'] - CODE_START + 0xFF) & ~0xFF
-    pack.name = 'Adventure Island (USA) widescreen'
-    pack.code = code[:used]
-    result = pack.build(data, 0x8000)
+        groups[group].hook(*place(address), original, bytes(new))
+    result = pack.build(data, PRG_SIZE)
     open(out, 'wb').write(result)
-    print(f'{out}: {len(result)} bytes, pack CRC {zlib.crc32(result):08X}')
+    print(f'{out}: {len(result)} bytes ({used} of code, '
+          f'{" + ".join(str(len(group.hooks)) for group in groups.values() if group)} hooks), '
+          f'pack CRC {zlib.crc32(result):08X}')
 
 
 def main():
@@ -1916,13 +2071,15 @@ def main():
     image = bytearray(open(rom_path, 'rb').read())
     header = 16 if image[:4] == b'NES\x1a' else 0
     data = image[header:header + PRG_SIZE + CHR_SIZE]
-    assert zlib.crc32(data) == SOURCE_CRC, 'not Adventure Island (USA)'
+    crc = zlib.crc32(data)
+    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
+        assert crc in (SOURCE_CRC, EUROPE, JAPAN, KIDDY), 'not a known build of Adventure Island'
+        pack(bytes(data), crc, sys.argv[3])
+        return
+    assert crc == SOURCE_CRC, 'not Adventure Island (USA)'
 
     code, sym = assemble()
     assert len(code) == BANK_SIZE
-    if len(sys.argv) > 3 and sys.argv[2] == '--pack':
-        pack(bytes(data), code, sym, sys.argv[3])
-        return
     prg = bytearray(data[:PRG_SIZE])
     skip = {int(a, 16) for a in os.environ.get('WIDE_SKIP', '').split(',') if a}
     for address, original, new in hooks(sym):
