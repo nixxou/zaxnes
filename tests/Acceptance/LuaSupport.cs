@@ -202,7 +202,14 @@ public sealed class LuaRun : IDisposable
             },
         };
 
-        settings.ViewReset = camera.ResetView;
+        // As the host does (SceneSettingBridge): a change of FOV lands in the camera, which
+        // resets the view (REQ-SCN-005, REQ-SCN-012), so that the framed distance of
+        // REQ-LUA-113 follows the setting.
+        settings.ViewReset = () =>
+        {
+            camera.Fov = settings.Fov;
+            camera.ResetView();
+        };
 
         // REQ-LUA-015, in the order the requirement fixes: (1) every chunk runs, (2) the
         // profile's embedded settings are applied — they overwrite what a chunk set at its main

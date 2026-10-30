@@ -143,6 +143,8 @@ internal static class ScriptBridge
         }
 
         public override void ResetView() => camera.ResetView();
+
+        public override float ResetDistance => camera.ResetDistance;
     }
 
     private sealed class HarnessLight(LightState light) : ScriptLight

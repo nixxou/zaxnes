@@ -53,6 +53,9 @@ internal sealed class SceneCameraBridge(SceneCamera camera) : ScriptCamera
 
     /// <inheritdoc/>
     public override void ResetView() => camera.ResetView();
+
+    /// <inheritdoc/>
+    public override float ResetDistance => camera.ResetDistance;
 }
 
 /// <summary>

@@ -39,6 +39,10 @@ internal static partial class LuaApi
             (_, l) => Number(l, camera.Distance),
             (b, l) => camera.Distance = (float)AssignedNumber(b, l, "Distance"));
 
+        // The framed distance a view reset would give at the current FOV, before the [0, 512]
+        // bound; read only (AMD-040 REQ-LUA-113, AMD-045 REQ-SCN-069).
+        type.Property("ResetDistance", (_, l) => Number(l, camera.ResetDistance));
+
         type.Property(
             "Mode",
             (_, l) => Number(l, camera.Mode),

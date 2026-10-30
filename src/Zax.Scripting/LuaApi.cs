@@ -164,6 +164,8 @@ internal static partial class LuaApi
             state.SetGlobal(name);
         }
 
+        InstallInfoTable(binder, state);
+
         // The constant values are pushed as floats like every other number the host hands to
         // Lua (REQ-LUA-040, REQ-LUA-046).
         foreach ((string name, (string Key, int Value)[] entries) in ConstantTables)
@@ -182,6 +184,90 @@ internal static partial class LuaApi
         return;
 
         void Push(HostTypeId id, object value) => binder.PushObject(state, id, value);
+    }
+
+    /// <summary>
+    /// What <c>CS.Nes3D.Info.Version</c> reads (AMD-040 REQ-LUA-112): a string whose leading
+    /// decimal integer is at least 2, which is how a 2.0 script knows it may read
+    /// <c>Camera.ResetDistance</c>.
+    /// </summary>
+    internal const string InfoVersion = "2.0";
+
+    /// <summary>
+    /// What <c>CS.Nes3D.Info.Title</c> reads (REQ-LUA-112): the product name of AMD-029, which
+    /// a script compares against <c>"3dSenMaker"</c> — the profile editor — to pick a FOV.
+    /// </summary>
+    internal const string InfoTitle = "Zaxnes";
+
+    /// <summary>
+    /// Installs the global <c>CS</c> of AMD-040 REQ-LUA-112: three nested tables ending in
+    /// <c>CS.Nes3D.Info</c>, which carries <c>Version</c> and <c>Title</c>.
+    /// </summary>
+    /// <remarks>
+    /// Each level is a shell whose fields live in a table only its metatable can reach. Reading
+    /// a field the requirement does not name therefore gives nil without an error, and a write
+    /// anywhere in the three tables is dropped — it cannot reach the program, and it cannot
+    /// disturb what the next script reads either. The metatable is hidden, so a script cannot
+    /// take it off.
+    /// </remarks>
+    private static void InstallInfoTable(LuaBinder binder, Lua state)
+    {
+        Shell(binder, state, s =>
+        {
+            s.PushString("Version");
+            s.PushString(InfoVersion);
+            s.RawSet(-3);
+            s.PushString("Title");
+            s.PushString(InfoTitle);
+            s.RawSet(-3);
+        });
+
+        Wrap(binder, state, "Info");
+        Wrap(binder, state, "Nes3D");
+        state.SetGlobal("CS");
+        return;
+
+        // Leaves a sealed table whose fields are the ones 'fill' writes into the table on top
+        // of the stack.
+        static void Shell(LuaBinder binder, Lua state, Action<Lua> fill)
+        {
+            state.NewTable();
+            state.NewTable();
+            state.PushString("__index");
+            state.NewTable();
+            fill(state);
+            state.RawSet(-3);
+            Seal(binder, state);
+        }
+
+        // Replaces the value on top of the stack by a sealed table whose single field 'name'
+        // holds it.
+        static void Wrap(LuaBinder binder, Lua state, string name)
+        {
+            state.NewTable();
+            state.NewTable();
+            state.PushString("__index");
+            state.NewTable();
+            state.PushString(name);
+            state.PushCopy(-6);
+            state.RawSet(-3);
+            state.RawSet(-3);
+            Seal(binder, state);
+            state.Remove(-2);
+        }
+
+        // Stack: the shell, then its metatable with __index already set. Adds the no-op
+        // __newindex and the metatable guard, then attaches it.
+        static void Seal(LuaBinder binder, Lua state)
+        {
+            state.PushString("__newindex");
+            binder.PushBoundFunction(state, static (_, _) => 0);
+            state.RawSet(-3);
+            state.PushString("__metatable");
+            state.PushString("CS");
+            state.RawSet(-3);
+            state.SetMetaTable(-2);
+        }
     }
 
     /// <summary>The single API table object of <paramref name="kind"/> for this runtime.</summary>

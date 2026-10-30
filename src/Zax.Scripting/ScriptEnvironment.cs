@@ -128,6 +128,22 @@ public abstract class ScriptCamera
 
     /// <summary>The upper bound of <see cref="Distance"/>, <c>512 × SceneScale</c>.</summary>
     public virtual float MaxDistance => 512f;
+
+    /// <summary>
+    /// The framed distance <c>d₀</c> a view reset would write at the current field of view,
+    /// <b>before</b> the bound of REQ-SCN-011 (AMD-040 REQ-LUA-113). It is readable at any time
+    /// and follows every change of FOV, even without a reset.
+    /// </summary>
+    public abstract float ResetDistance { get; }
+
+    /// <summary>
+    /// <c>d₀ = 132.7964 / tan(FOV / 2)</c>, the framed distance of SPEC-06 REQ-SCN-069
+    /// (AMD-045). The scene owns this formula; this is the copy the host-free camera uses, and
+    /// the acceptance suite checks that the two agree.
+    /// </summary>
+    /// <param name="fovDegrees">Vertical field of view in degrees.</param>
+    public static float FramedDistance(float fovDegrees)
+        => 132.7964f / MathF.Tan(fovDegrees * MathF.PI / 180f / 2f);
 }
 
 /// <summary>
@@ -153,6 +169,16 @@ public sealed class DetachedScriptCamera : ScriptCamera
 
     /// <inheritdoc/>
     public override Vec3 LookAt { get; set; } = new(128f, 120f, 0f);
+
+    /// <summary>
+    /// Vertical field of view in degrees, 70 by default (REQ-SCN-005). The host pushes the
+    /// <c>camera.fov</c> setting here, as it does into the real camera, so that
+    /// <see cref="ResetDistance"/> follows it.
+    /// </summary>
+    public float Fov { get; set; } = 70f;
+
+    /// <inheritdoc/>
+    public override float ResetDistance => FramedDistance(Fov);
 
     /// <summary>How many times <see cref="ResetView"/> was called.</summary>
     public int ResetCount { get; private set; }

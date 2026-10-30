@@ -278,7 +278,13 @@ internal sealed class ScriptSession : IDisposable
             },
         };
 
-        settings.ViewReset = camera.ResetView;
+        // As the host does: a change of FOV lands in the camera, which resets the view
+        // (REQ-SCN-005, REQ-SCN-012), so Camera.ResetDistance follows it (REQ-LUA-113).
+        settings.ViewReset = () =>
+        {
+            camera.Fov = settings.Fov;
+            camera.ResetView();
+        };
 
         // 1. the chunks, 2. the profile settings and 3. the patterns with BuildPattern.
         ProfileScriptRuntime runtime = ProfileScriptRuntime.Create(profile, environment);

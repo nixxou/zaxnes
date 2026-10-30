@@ -80,7 +80,8 @@ public static class CameraControls
         float zoom = SceneConstants.ZoomUnitsPerSecond * realSeconds;
         if (held.HasFlag(CameraAction.ZoomIn))
         {
-            setpoint.Distance -= zoom;
+            // A user zoom in never goes under 16 × s (REQ-SCN-070).
+            setpoint.Distance = SceneConstants.ZoomIn(setpoint.Distance, zoom);
         }
         else if (held.HasFlag(CameraAction.ZoomOut))
         {
@@ -92,6 +93,11 @@ public static class CameraControls
     /// Applies <paramref name="notches"/> of mouse wheel, 5 units of distance each, positive
     /// forward (REQ-SCN-016, DEC-08-3). It only acts when no zoom action is held.
     /// </summary>
+    /// <remarks>
+    /// The wheel is a user zoom, so forward notches stop at <c>16 × s</c> (REQ-SCN-070);
+    /// backward notches keep the upper bound of REQ-SCN-011 for their only limit. The touch
+    /// pinch the requirement also names has no counterpart on desktop.
+    /// </remarks>
     public static void ApplyWheel(SceneCamera camera, float notches, CameraAction held)
     {
         ArgumentNullException.ThrowIfNull(camera);
@@ -102,7 +108,11 @@ public static class CameraControls
             return;
         }
 
-        camera.Current.Distance -= notches * SceneConstants.WheelUnitsPerNotch;
+        CameraSetpoint setpoint = camera.Current;
+        float units = notches * SceneConstants.WheelUnitsPerNotch;
+        setpoint.Distance = units > 0f
+            ? SceneConstants.ZoomIn(setpoint.Distance, units)
+            : setpoint.Distance - units;
     }
 
     /// <summary>
