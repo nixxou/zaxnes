@@ -45,7 +45,11 @@ Relics, takes the rest). Checks (`CHECKS`) hold the game's code the hack's code 
 state dispatch's start, the routine moving an object by the scroll, the reads of the rooms'
 lengths and of each stage's graphics block, the graphics loader's start, the spawners' loop.
 
-One source makes the four builds' packs: the USA and its Rev 1 (NTSC), the Japanese build
+One source makes the five builds' packs: the USA and its Rev 1 (NTSC), the PlayChoice-10 build
+(`-D PC10`: the base build's code banks rebuilt, the state dispatch `$24` further and most
+routines from `$D000` on `$19` further, the level tables `$19` further too; the same data banks,
+RAM and states; its ROMs carry the INST-ROM after the PRG-ROM, which the data CRC leaves out),
+the Japanese build
 (Akumajou Dracula, `-D JAPAN`: its code banks rebuilt, most routines `$60`-`$70` further, a shorter
 state dispatch, a hit's damage read from a table, `SBC $E7C3,Y`; the same RAM and states), and the
 European build
@@ -324,6 +328,15 @@ ROOM_LENGTHS    = $FC1B
 LOAD_BLOCK      = $FD8E
 BLOCK_OF_STAGE  = $C8D4
 DAMAGE_TABLE    = $E7C3
+.elseif .defined(PC10)
+; Castlevania (PlayChoice-10): the base build's data banks, its code banks rebuilt (the state
+; dispatch $24 further, most routines from $D000 on $19 further), the same RAM.
+DISPATCH        = $C1C5
+MOVE_SCROLL     = $EAC0
+SPAWNER_NEXT    = $F372
+ROOM_LENGTHS    = $FBA5
+LOAD_BLOCK      = $FD18
+BLOCK_OF_STAGE  = $C885
 .elseif .defined(EUROPE)
 ; Castlevania (Europe): the USA builds' data banks, its code banks rebuilt (as the Rev 1's, most
 ; routines $0C further), the same RAM.
@@ -954,8 +967,8 @@ wide_platform_x:
 USA builds.
 
 Usage: python -I tools/build.py <Castlevania (USA).nes or (Rev 1)> [out.bps]
-       python -I tools/build.py <Castlevania (USA).nes, (Rev 1), (Europe) or Akumajou Dracula (Japan)>
-           --pack <out.zxpk> [--ntsc]
+       python -I tools/build.py <Castlevania (USA).nes, (Rev 1), (Europe), (PlayChoice-10) or
+           Akumajou Dracula (Japan)> --pack <out.zxpk> [--ntsc]
 
 The build is told by the ROM's data CRC-32. The two builds share their data banks 0-4; their code
 (banks 5-7) was rebuilt, so each has its own hook addresses (HOOKS) and src/wide.s its own
@@ -1008,6 +1021,7 @@ BASE = 0x0AC1AA8F
 REV1 = 0xB668C7FC
 EUROPE = 0xA93527E2             # Castlevania (Europe): a pack only (--pack)
 JAPAN = 0xA0F99BB8              # Akumajou Dracula (Japan): a pack only (--pack)
+PC10 = 0xCD6549EA               # Castlevania (PlayChoice-10): a pack only (--pack)
 
 
 def jsr(target):
@@ -1059,6 +1073,15 @@ def hooks(build, sym):
                  'spawner': 0xF3D3, 'spawner_return': (0xF41D, '7c f3'),
                  'weapon': 0xE5FA, 'hide9': 0xEAF5, 'far9': 0xEAFD,
                  'copies': (0xE050, 0xED23, 0xED92), 'copy_back': 0xEFE9}
+    elif build == PC10:
+        # PlayChoice-10: the base build's code rebuilt (the NMI's start and the state dispatch
+        # $24 further, most routines from $D000 on $19 further), the same data banks and RAM.
+        put(7, 0xC0A4, '20 c5 c1', jsr(sym['wide_frame']))
+        put(7, 0xE74D, '38 e5 4b 85 45', jsr(sym['wide_damage']))
+        fixed = {'bounds': (0xEA25, '20 c0 ea'), 'terrain': 0xEC2A, 'hide': 0xDD44,
+                 'spawner': 0xF3C8, 'spawner_return': (0xF412, '71 f3'),
+                 'weapon': 0xE5EF, 'hide9': 0xEAEA, 'far9': 0xEAF2,
+                 'copies': (0xE044, 0xED18, 0xED87), 'copy_back': 0xEFDE}
     elif build == JAPAN:
         # Japan: its own build of the code; a hit's damage from a table (SEC / SBC $E7C3,Y /
         # STA $45).
@@ -1150,7 +1173,7 @@ def assemble(name, defines, start=WINDOW_START):
 
 # The hook of the option "Invincible" (SEC / SBC DAMAGE / STA HEALTH, bank 7) per build: in the
 # pack, a component of its own.
-INVINCIBLE = {BASE: 0xE734, REV1: 0xE758, EUROPE: 0xE764, JAPAN: 0xE7BC}
+INVINCIBLE = {BASE: 0xE734, REV1: 0xE758, EUROPE: 0xE764, JAPAN: 0xE7BC, PC10: 0xE74D}
 
 
 # The game's code and data the hack's code relies on, by group, per build: (bank, address, length),
@@ -1172,10 +1195,13 @@ CHECKS = {
     JAPAN: {'core': [(7, 0xC20A, 7), (7, 0xEB38, 18), (7, 0xD069, 3), (7, 0xFD8E, 12),
                      (7, 0xC81D, 3)],
             'edge spawns': [(7, 0xF3EA, 6)]},
+    PC10: {'core': [(7, 0xC1C5, 8), (7, 0xEAC0, 18), (7, 0xD00B, 3), (7, 0xFD18, 12),
+                    (7, 0xC7CE, 3)],
+           'edge spawns': [(7, 0xF372, 6)]},
 }
 
 # The region each build's pack is made for.
-REGION = {BASE: 'ntsc', REV1: 'ntsc', EUROPE: 'pal', JAPAN: 'ntsc'}
+REGION = {BASE: 'ntsc', REV1: 'ntsc', EUROPE: 'pal', JAPAN: 'ntsc', PC10: 'ntsc'}
 
 
 def pack_place(offset, address):
@@ -1219,7 +1245,8 @@ def pack(data, crc, window, sym, out, ntsc=False):
             group.hook(*pack_place(at, address), bytes(original), bytes(new))
     assert len(aid.hooks) == 1
     game = {BASE: 'Castlevania (USA)', REV1: 'Castlevania (USA) (Rev 1)',
-            EUROPE: 'Castlevania (Europe)', JAPAN: 'Akumajou Dracula (Japan)'}[crc]
+            EUROPE: 'Castlevania (Europe)', JAPAN: 'Akumajou Dracula (Japan)',
+            PC10: 'Castlevania (PlayChoice-10)'}[crc]
     # Zaxnes reads $FF past the code's end: its trailing fill is left out.
     used = (len(window.rstrip(b'\xff')) + 0xFF) & ~0xFF
     pack.name = game + (' (NTSC)' if ntsc and REGION[crc] != 'ntsc' else '') + ' widescreen'
@@ -1244,17 +1271,20 @@ def main():
         name, defines = 'castlevania-europe', ['EUROPE']
     elif crc == JAPAN:
         name, defines = 'akumajou-dracula-japan', ['JAPAN']
+    elif crc == PC10:
+        name, defines = 'castlevania-pc10', ['PC10']
     else:
-        sys.exit(f'{rom_path}: not Castlevania (USA), its Rev 1, (Europe) or Akumajou Dracula '
-                 f'(Japan) (data CRC {crc:08X})')
+        sys.exit(f'{rom_path}: not Castlevania (USA), its Rev 1, (Europe), (PlayChoice-10) or '
+                 f'Akumajou Dracula (Japan) (data CRC {crc:08X})')
 
     if len(sys.argv) > 3 and sys.argv[2] == '--pack':
         # Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
         zone, sym = assemble(name, defines + ['ZONE_DATA'], ZONE_START)
         pack(bytes(data), crc, zone, sym, sys.argv[3], '--ntsc' in sys.argv[4:])
         return
-    if crc in (EUROPE, JAPAN):
-        sys.exit('Castlevania (Europe) and Akumajou Dracula (Japan): a pack only (--pack)')
+    if crc in (EUROPE, JAPAN, PC10):
+        sys.exit('Castlevania (Europe), (PlayChoice-10) and Akumajou Dracula (Japan): a pack only '
+                 '(--pack)')
     window, sym = assemble(name, defines)
     assert len(window) == WINDOW_SIZE
     prg = bytearray(data)

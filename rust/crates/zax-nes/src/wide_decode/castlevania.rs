@@ -69,6 +69,14 @@ pub static EUROPE: Castlevania = Castlevania {
     swaps: 0xFBDD,
 };
 
+/// Castlevania (PlayChoice-10): the base build's tables, $19 bytes further.
+pub static PC10: Castlevania = Castlevania {
+    maps: 0xFB18,
+    blocks: 0xF9EF,
+    lengths: 0xFBA5,
+    swaps: 0xFBCB,
+};
+
 /// Akumajou Dracula (Japan): its own tables.
 pub static JAPAN: Castlevania = Castlevania {
     maps: 0xFB8E,
@@ -83,6 +91,8 @@ pub const SOURCE_CRC: u32 = 0x0AC1_AA8F;
 pub const SOURCE_CRC_REV1: u32 = 0xB668_C7FC;
 /// CRC-32 of the European build's data.
 pub const SOURCE_CRC_EUROPE: u32 = 0xA935_27E2;
+/// CRC-32 of the PlayChoice-10 build's data (its PRG-ROM; the INST-ROM after it left out).
+pub const SOURCE_CRC_PC10: u32 = 0xCD65_49EA;
 /// CRC-32 of the Japanese build's data.
 pub const SOURCE_CRC_JAPAN: u32 = 0xA0F9_9BB8;
 
