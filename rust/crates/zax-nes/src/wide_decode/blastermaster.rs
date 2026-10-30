@@ -1,4 +1,5 @@
-//! Blaster Master (USA): the margins of an area, decoded from its map in PRG-ROM.
+//! Blaster Master (USA), (Europe) and (Japan): the margins of an area, decoded from its map in
+//! PRG-ROM.
 //!
 //! An area is 2048 x 2048 pixels, 8 x 8 screens of 256 x 256, laid out in four levels as the
 //! game's column and row drawers (`$DA15`, `$DAC4`) read them through the pointers `$D975` copies
@@ -30,11 +31,24 @@
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
-/// The decoder.
-pub struct BlasterMaster;
+/// The decoder, with the place of a build's area tables in its fixed bank.
+pub struct BlasterMaster {
+    /// Per area, the bank and entry of its header, then 16 bytes on those of its boundaries.
+    headers: usize,
+}
+
+/// Blaster Master (USA).
+pub const USA: BlasterMaster = BlasterMaster { headers: 0xC9F4 };
+/// Chou-Wakusei Senki `MetaFight` (Japan): the same RAM, its code laid out otherwise.
+pub const JAPAN: BlasterMaster = BlasterMaster { headers: 0xC93C };
+/// Blaster Master (Europe): the same.
+pub const EUROPE: BlasterMaster = BlasterMaster { headers: 0xD998 };
 
 /// CRC-32 of the ROM's data, iNES header excluded.
 pub const SOURCE_CRC: u32 = 0x3F0F_D764;
+/// The same of Chou-Wakusei Senki `MetaFight` (Japan) and of Blaster Master (Europe).
+pub const SOURCE_CRC_JAPAN: u32 = 0x039B_4A9C;
+pub const SOURCE_CRC_EUROPE: u32 = 0x8106_E694;
 
 const AREA: u16 = 0x0014;
 const PALETTES: u16 = 0x0027;
@@ -48,9 +62,8 @@ const SCROLL_X: u16 = 0x00FD;
 const SCROLL_Y: u16 = 0x00FC;
 const NAMETABLE: u16 = 0x00F1;
 
-/// In the fixed bank: per area, the bank and entry of its header and of its boundaries.
-const HEADERS: usize = 0xC9F4;
-const BOUNDARIES: usize = 0xCA04;
+/// In the fixed bank, past a build's headers: per area, the bank and entry of its boundaries.
+const BOUNDARIES: usize = 0x10;
 
 const BANK_SIZE: usize = 0x4000;
 const PLANE_WIDTH: i32 = 512;
@@ -86,11 +99,16 @@ struct Area<'a> {
 }
 
 impl<'a> Area<'a> {
-    fn of(memory: &DecoderMemory<'a>, margin_x: i32, margin_y: i32) -> Option<Self> {
+    fn of(
+        memory: &DecoderMemory<'a>,
+        headers: usize,
+        margin_x: i32,
+        margin_y: i32,
+    ) -> Option<Self> {
         let rom = memory.prg_rom;
         let fixed = rom.len().checked_sub(BANK_SIZE)?;
         let area = usize::from(memory.ram(AREA));
-        let header = *rom.get(fixed + HEADERS - 0xC000 + area)?;
+        let header = *rom.get(fixed + headers - 0xC000 + area)?;
         let bank_index = usize::from(header >> 4);
         let bank = rom.get(bank_index * BANK_SIZE..(bank_index + 1) * BANK_SIZE)?;
         let pointer = |address: u16| -> Option<usize> {
@@ -103,7 +121,7 @@ impl<'a> Area<'a> {
         let camera_x = word(memory, CAMERA_X) >> 4;
         let camera_y = word(memory, CAMERA_Y) >> 4;
         let scroll_x = i32::from(memory.ram(SCROLL_X)) + 256 * i32::from(memory.ram(NAMETABLE) & 1);
-        let boundaries = boundaries(rom, *rom.get(fixed + BOUNDARIES - 0xC000 + area)?)?;
+        let boundaries = boundaries(rom, *rom.get(fixed + headers + BOUNDARIES - 0xC000 + area)?)?;
         Some(Self {
             bank,
             palettes: pointer(PALETTES)?,
@@ -293,6 +311,7 @@ fn nametable_address(row: BackgroundRow, column: i32) -> u16 {
 
 impl BlasterMaster {
     fn decode_any(
+        &self,
         memory: &DecoderMemory<'_>,
         row: BackgroundRow,
         columns: &mut dyn Iterator<Item = i32>,
@@ -303,7 +322,7 @@ impl BlasterMaster {
         }
         // The widest margins the host may ask for: the screens they reach are worked out once
         // for any of them.
-        let Some(area) = Area::of(memory, 248, 240) else {
+        let Some(area) = Area::of(memory, self.headers, 248, 240) else {
             return false;
         };
         let first_column = area.first_column(row);
@@ -351,7 +370,7 @@ impl MarginDecoder for BlasterMaster {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        Self::decode_any(memory, *row, columns, out)
+        self.decode_any(memory, *row, columns, out)
     }
 
     fn decode_extra_row(
@@ -361,7 +380,7 @@ impl MarginDecoder for BlasterMaster {
         columns: &mut dyn Iterator<Item = i32>,
         out: &mut Vec<DecodedTile>,
     ) -> bool {
-        Self::decode_any(memory, *row, columns, out)
+        self.decode_any(memory, *row, columns, out)
     }
 
     fn covers_overscan(&self) -> bool {
