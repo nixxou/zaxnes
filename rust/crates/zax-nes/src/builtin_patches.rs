@@ -15,7 +15,7 @@
 //! | Mega Man 2 (USA) | widescreen objects (the margin decoder draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the widescreen (`mm2wide`, `tools/build.py --pack`) |
 //! | Mega Man 2 (Europe), Rockman 2 (Japan) | the same | the USA hack's pack built from the European ROM (PAL) and for the Japanese code (`mm2wide`, `tools/build.py --pack`), in the execution zone |
 //! | Super Mario Bros. (World), and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in three groups (the sprites, the enemies in the margins, the level select), the ROM keeping its size; the European one PAL with an NTSC twin; "Invincible" a component of its own, with or without the advanced mode (`smb1wide`, `tools/build.py --pack`) |
-//! | Ninja Gaiden III - The Ancient Ship of Doom (USA) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's memory, the hooks checked and applied by the core, the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
+//! | Ninja Gaiden III - The Ancient Ship of Doom (USA), and Ninja Ryuuken Den III (Japan) | widescreen objects, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in two groups (the objects in the margins, the enemy list's), the ROM keeping its size (`ng3wide`, `tools/build.py --pack`) |
 //! | Super Mario Bros. 3 (USA) (Rev 1), (Japan), its Rev 1, and (Europe) | widescreen enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the zone fantôme (widescreen MMC5), hooks checked and applied by the core in three groups (the objects' sprites, the enemies in the margins, Mario in the margins), the ROM keeping its size; a pack per build whose code moved, the European one PAL with an NTSC twin; the level select and "Invincible" components of their own, without code (`smb3wide`, `tools/build.py --pack`) |
 //! | Castlevania (USA), and its Rev 1 | widescreen objects and enemies, advanced mode (the margin decoder alone draws the background) | a hack pack (`crate::hack_pack`): the code in the extension's execution zone at `$2000` (`boot_zone`), the hooks checked and applied by the core, the ROM keeping its size; "Invincible" a component of its own, with or without the advanced mode; one source for both builds (`cvwide`, `tools/build.py --pack`) |
 //! | Castlevania (Europe) | the same, PAL | the USA hack's pack built for the European code (`cvwide`, `tools/build.py --pack`), in the execution zone |
@@ -123,6 +123,8 @@ pub const SMB1_EUROPE_NTSC: &str = "Super Mario Bros. (Europe) (NTSC) widescreen
 
 /// Name of the Ninja Gaiden III (USA) widescreen patch (advanced mode).
 pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
+/// Name of the Ninja Ryuuken Den III (Japan) widescreen patch (advanced mode).
+pub const NG3_JAPAN: &str = "Ninja Ryuuken Den III (Japan) widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
 pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
 /// Name of the Super Mario Bros. 3 (Japan) (Rev 1) widescreen patch (advanced mode).
@@ -191,7 +193,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 45] = [
+pub const PATCHES: [BuiltinPatch; 46] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -455,38 +457,43 @@ pub const PATCHES: [BuiltinPatch; 45] = [
         game: "Ninja Gaiden III",
         rom_name: "Ninja Gaiden III - The Ancient Ship of Doom (USA)",
         source_crc: 0x902E_3168,
-        // A hack pack (see `crate::hack_pack`): the code in the extension's memory, the hooks
-        // checked and applied by the core; the ROM keeps its size.
+        // A hack pack (see `crate::hack_pack`): the code in the zone fantôme, the hooks checked
+        // and applied by the core in two groups (the objects in the margins, the enemy list's);
+        // the ROM keeps its size (`ng3wide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/ng3-usa-widescreen.zxpk"),
-        options: &[
-            HackOption {
-                key: "enemies_in_margins",
-                label: "Enemies in the margins",
-                label_fr: "Ennemis dans les marges",
-                bit: 0,
-                default: true,
-            },
-            // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
-            HackOption {
-                key: "no_slowdown",
-                label: "No slowdown",
-                label_fr: "Sans ralentissements",
-                bit: 2,
-                default: true,
-            },
-        ],
+        options: NG3_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
-        // No room in the game for code that would unlock the extension: the pack's code is open
-        // in the window from power-on (2 KiB: the window stops at $5FFF, as the hack's own code
-        // did).
-        boot_window: Some((0x80, 0x00)),
-        boot_window_keeps_prg_ram: true,
-        boot_zone: false,
-        zone_data: false,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
         // The frame's wait in bank 4: BIT $15 / BPL (the NMI sets $15).
         idle_loop: Some((0x9A87, 0x9A8A)),
+    },
+    BuiltinPatch {
+        name: NG3_JAPAN,
+        game: "Ninja Gaiden III",
+        rom_name: "Ninja Ryuuken Den III - Yomi no Hakobune (Japan)",
+        source_crc: 0x2F2E_30F7,
+        // The USA hack built for the Japanese code (`ng3wide`, -D JAPAN: the same code and RAM,
+        // moved by a few bytes).
+        bps: include_bytes!("../patches/ng3-japan-widescreen.zxpk"),
+        options: NG3_OPTIONS,
+        after_other_way_state: None,
+        // The margin decoder alone widens the game; the patch adds the objects.
+        advanced: true,
+        // The pack's code runs in the execution zone, open from power-on.
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // The frame's wait in bank 4: BIT $15 / BPL (the NMI sets $15).
+        idle_loop: Some((0x9A77, 0x9A7A)),
     },
     BuiltinPatch {
         name: SMB3_USA,
@@ -1367,6 +1374,25 @@ const MEGAMAN2_OPTIONS: &[HackOption] = &[
         label_fr: "Invincible",
         bit: 1,
         default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+];
+
+/// The options of the Ninja Gaiden III packs: the enemies in the margins and the overclock.
+const NG3_OPTIONS: &[HackOption] = &[
+    HackOption {
+        key: "enemies_in_margins",
+        label: "Enemies in the margins",
+        label_fr: "Ennemis dans les marges",
+        bit: 0,
+        default: true,
     },
     // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
     HackOption {
