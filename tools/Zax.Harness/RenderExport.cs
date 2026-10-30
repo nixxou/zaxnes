@@ -53,9 +53,11 @@ internal static class RenderExport
                                    cubemaps, meshes and textures the scene uses. Without it
                                    the scene assets are the procedural ones (REQ-PUB-003/004).
           --size <w>x<h>           Capture size in pixels (default 640x480).
-          --fov <degrees>          Field of view, 45 to 95 (default 70).
+          --fov <degrees>          Field of view, 45 to 95. Left out, the scene keeps what the
+                                   profile's scripts set, or 70.
           --angles <rx>,<ry>[,<rz>]  Camera setpoint angles in degrees (default 0.81,0.81,0).
-          --distance <d>           Camera setpoint distance (default 104 / atan(FOV/2)).
+          --distance <d>           Camera setpoint distance (default 132.7964 / tan(FOV/2),
+                                   AMD-045 REQ-SCN-069).
           --mesh <algorithm>       greedy (default), marching or multicolor (REQ-E3D-340).
           --no-shadows             Render with the shadows off.
           --shadow-map <texels>    Side of the shadow map (default 4096, AMD-034). A size the
@@ -68,8 +70,10 @@ internal static class RenderExport
                                    REQ-SCN-066).
           --flat-2d                scene.bend_2d_mode off: the 2D-mode rectangle stays at its
                                    flat position under the bending (AMD-046 REQ-SCN-074).
-          --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049).
-          --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046).
+          --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049). Left out,
+                                   the scene keeps what the profile's scripts set.
+          --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046). Left out,
+                                   the scene keeps what the profile's scripts set.
           --real-time <seconds>    Real time the star twinkle uses (REQ-SCN-050).
           --sky-bodies             Light the procedural sun, moon and clouds of the skybox,
                                    which REQ-SCN-050 leaves off by default (REQ-PUB-003, Q-064).
@@ -101,16 +105,16 @@ internal static class RenderExport
         int runAhead = 0;
         int width = 640;
         int height = 480;
-        float fov = 70f;
+        float? fov = null;
         bool shadows = true;
         int shadowMapSize = SceneConstants.ShadowMapSize;
         int antiAlias = 0;
         bool explain = false;
         int bench = 0;
-        SkyboxKind skybox = SkyboxKind.Default;
+        SkyboxKind? skybox = null;
         (int Lr, int Tb, int Arc, int Centre) bend = default;
         bool bend2dMode = true;
-        Rgb24 customBackground = default;
+        Rgb24? customBackground = null;
         float realTime = 0f;
         bool skyBodies = false;
         System.Numerics.Vector3? angles = null;
@@ -303,10 +307,18 @@ internal static class RenderExport
             return 1;
         }
 
+        // The options the user really passed, applied after the scene is built and therefore
+        // after the profile's scripts: an override wins, and an option left out keeps what the
+        // scripts decided (REQ-SCN-049, REQ-SCN-046, REQ-SCN-005). The values below are the same
+        // as the scene's own defaults, so a capture without a profile is unchanged.
         foreach (SyntheticScene scene in scenes)
         {
-            scene.Scene.Settings.Fov = fov;
-            scene.Scene.Camera.Fov = fov;
+            if (fov is { } degrees)
+            {
+                scene.Scene.Settings.Fov = degrees;
+                scene.Scene.Camera.Fov = degrees;
+            }
+
             if (angles is { } r)
             {
                 scene.Scene.Camera.Current.Angles = r;
@@ -318,7 +330,10 @@ internal static class RenderExport
             }
 
             scene.Scene.Camera.SnapToSetpoints();
-            scene.Scene.Settings.Skybox = skybox;
+            if (skybox is { } sky)
+            {
+                scene.Scene.Settings.Skybox = sky;
+            }
 
             // AMD-043 REQ-SCN-066: the four curvature settings, as the options window writes
             // them.
@@ -327,7 +342,11 @@ internal static class RenderExport
             scene.Scene.Settings.ArcHorizontal = bend.Arc;
             scene.Scene.Settings.ArcAtEdge = bend.Centre != 0;
             scene.Scene.Settings.Bend2dMode = bend2dMode;
-            scene.Scene.Settings.CustomBackgroundColor = customBackground;
+            if (customBackground is { } colour)
+            {
+                scene.Scene.Settings.CustomBackgroundColor = colour;
+            }
+
             scene.Scene.RealTime = realTime;
 
             // Q-064: the three bodies exist and are parametric, but REQ-SCN-050 leaves them
@@ -546,7 +565,35 @@ internal static class RenderExport
         string? dumpFrame,
         int runAhead)
     {
-        GameProfile profile = LoadProfile(profileName, assets);
+        GameProfile profile = LoadProfile(profileName, assets, out string label);
+        return FromRom(
+            romPath,
+            runFrames,
+            profile,
+            label,
+            mesh,
+            input,
+            batteryPath,
+            dumpFrame,
+            runAhead);
+    }
+
+    /// <summary>
+    /// The same run on a profile the caller already holds, <c>profileLabel</c> being how the
+    /// capture names it: its title, or « 2D Mode » when there is none.
+    /// </summary>
+    internal static SyntheticScene FromRom(
+        string romPath,
+        int runFrames,
+        GameProfile profile,
+        string profileLabel,
+        RenderAlgorithm mesh,
+        InputScript input,
+        string? batteryPath = null,
+        string? dumpFrame = null,
+        int runAhead = 0)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
         ConversionEngine engine = new();
         engine.UseGeometry();
         engine.Settings.RenderAlgorithm = mesh;
@@ -579,8 +626,14 @@ internal static class RenderExport
         TimedScriptHost timed = new(runtime);
         engine.ScriptHost = timed;
         engine.LoadProfile(profile);
-        ScriptBridge.Apply(runtime, scene);
+
+        // REQ-LUA-015 step 4. ScriptBridge.Create connected the settings to the scene, so every
+        // write Start or a later hook makes already reaches it. The push before the hook is the
+        // application's (GameSession.ApplyProfileScene); the one after it costs nothing and
+        // covers a write that landed on an already equal value and therefore raised no change.
+        ScriptBridge.Push(runtime, scene);
         runtime.InvokeStart();
+        ScriptBridge.Push(runtime, scene);
 
         int counter = 0;
         TileRecord[] lastRecords = [];
@@ -651,7 +704,7 @@ internal static class RenderExport
             scene,
             engine,
             $"{Path.GetFileName(romPath)} after {counter} real frames at run-ahead {runAhead}, "
-                + $"profile '{profile.Title ?? "2D Mode"}'")
+                + $"profile '{profileLabel}'")
         {
             NesPicture = picture,
         };
@@ -674,16 +727,35 @@ internal static class RenderExport
     }
 
     private static GameProfile LoadProfile(string? name, string? assets)
+        => LoadProfile(name, assets, out _);
+
+    /// <summary>
+    /// Loads the profile <paramref name="name"/> designates and, in
+    /// <paramref name="label"/>, how a capture names it. « 2D Mode » is the label of the
+    /// <b>absent</b> profile only: a built-in one takes its title from the catalogue, not from
+    /// its metadata fields, which are usually empty (REQ-PROF-022, REQ-PROF-060).
+    /// </summary>
+    internal static GameProfile LoadProfile(string? name, string? assets, out string label)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
+            label = ProfileCatalogue.TwoDimensionalModeTitle;
             return GameProfile.CreateEmpty();
         }
 
         if (File.Exists(name))
         {
             ProfileLoadResult direct = ProfileFormat.Load(File.ReadAllBytes(name), sourceName: name);
-            return direct.IsSuccess ? direct.Profile! : throw new InvalidOperationException(direct.Message!);
+            GameProfile loaded = direct.IsSuccess
+                ? direct.Profile!
+                : throw new InvalidOperationException(direct.Message!);
+
+            // A profile given by path carries its own title; without one the file name is what
+            // the user asked for.
+            label = loaded.Title is { Length: > 0 } title
+                ? title
+                : Path.GetFileNameWithoutExtension(name);
+            return loaded;
         }
 
         string root = LocateAssets(assets)
@@ -701,6 +773,7 @@ internal static class RenderExport
             }
 
             ProfileLoadResult result = catalogue.LoadProfile(PhysicalProfileFileSystem.Instance, entry);
+            label = entry.Title;
             return result.IsSuccess ? result.Profile! : throw new InvalidOperationException(result.Message!);
         }
 

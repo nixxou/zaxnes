@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>
+      Tests of the development harness itself: the headless 'render --rom' path, which has to
+      behave like the desktop host without a window.
+    </Description>
+
+    <!-- The root of this solution, so that the reference below names no parent of it. -->
+    <ImplRoot>$(MSBuildThisFileDirectory)..\..\</ImplRoot>
+  </PropertyGroup>
+
+  <!--
+    The harness is an executable; referencing it gives the tests its internal types, through the
+    InternalsVisibleTo its project declares. No GL context is needed: the run and the scripts of
+    a ROM capture happen before anything is drawn.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="$(ImplRoot)tools\Zax.Harness\Zax.Harness.csproj" />
+  </ItemGroup>
+
+</Project>

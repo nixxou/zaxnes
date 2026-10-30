@@ -30,7 +30,13 @@ internal static class ScriptBridge
         NesCore core,
         SceneState scene)
     {
-        ScriptSettings settings = new(engine.Settings, new HarnessLight(scene.Light));
+        ScriptSettings settings = new(engine.Settings, new HarnessLight(scene));
+
+        // Before the chunks run, as the host does (Zax.App's SceneSettingBridge.Connect): from
+        // here on every write of a scene-owned setting reaches the scene at once, wherever it
+        // comes from — the main level of a chunk, Start or a frame hook (REQ-PERS-007).
+        Connect(settings, scene);
+
         ScriptEnvironment environment = new()
         {
             Engine = engine,
@@ -54,10 +60,35 @@ internal static class ScriptBridge
         return ProfileScriptRuntime.Create(profile, environment);
     }
 
-    /// <summary>Pushes the scene-owned settings a script may have changed (DEC-06-Q5).</summary>
-    public static void Apply(ProfileScriptRuntime runtime, SceneState scene)
+    /// <summary>
+    /// Connects <paramref name="settings"/> to <paramref name="scene"/> and pushes everything
+    /// once, which is what <c>SceneSettingBridge.Connect</c> does in the application: the
+    /// renderer's copy of a setting is refreshed on every real change (REQ-PERS-007,
+    /// REQ-PERS-009), so a write made in <c>Start</c> or in a frame hook is not lost.
+    /// </summary>
+    public static void Connect(ScriptSettings settings, SceneState scene)
     {
-        ScriptSettings settings = runtime.Settings;
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(scene);
+
+        settings.ViewReset = scene.Camera.ResetView;
+        settings.Changed = key => Apply(key, settings, scene);
+        Push(settings, scene);
+    }
+
+    /// <summary>Pushes the scene-owned settings a script may have changed (DEC-06-Q5).</summary>
+    public static void Push(ProfileScriptRuntime runtime, SceneState scene)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+        Push(runtime.Settings, scene);
+    }
+
+    /// <summary>Pushes every scene-owned setting at once, which a game start needs.</summary>
+    public static void Push(ScriptSettings settings, SceneState scene)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(scene);
+
         scene.Settings.Fov = settings.Fov;
         scene.Camera.Fov = settings.Fov;
         scene.Camera.SmoothTime = settings.SmoothTime;
@@ -66,6 +97,62 @@ internal static class ScriptBridge
         scene.Settings.Skybox = (SkyboxKind)settings.Skybox;
         scene.Settings.CustomBackgroundColor = settings.CustomBgColor.ToRgb24();
         scene.UseNesBackgroundColor = settings.BgColor;
+        scene.Settings.LightIntensity = settings.Light.Intensity;
+        scene.Clipping = settings.ClippingVector;
+    }
+
+    /// <summary>
+    /// The one setting <paramref name="key"/> names, the per-key half of
+    /// <see cref="Push(ScriptSettings, SceneState)"/>. The keys are the stable ones of SPEC-09
+    /// §4.1 and the switch is the application's.
+    /// </summary>
+    private static void Apply(string key, ScriptSettings settings, SceneState scene)
+    {
+        switch (key)
+        {
+            case "light.direction":
+            case "light.color":
+            case "light.intensity":
+
+                // The harness light writes the direction and the colour straight into the
+                // scene; only the intensity is a value of its own to carry over.
+                scene.Settings.LightIntensity = settings.Light.Intensity;
+                break;
+            case "camera.fov":
+                scene.Settings.Fov = settings.Fov;
+                scene.Camera.Fov = settings.Fov;
+                break;
+            case "camera.smooth_time":
+                scene.Camera.SmoothTime = settings.SmoothTime;
+                break;
+
+            // REQ-SCN-009: the local camera is a profile setting, so a script may turn it on in
+            // Start or later and the capture has to show it.
+            case "camera.local_cam":
+                scene.Camera.LocalCamera = settings.LocalCam;
+                break;
+            case "render.shadow":
+                scene.Settings.Shadows = settings.Shadow;
+                break;
+            case "scene.skybox":
+                scene.Settings.Skybox = (SkyboxKind)settings.Skybox;
+                break;
+            case "scene.custom_bg_color":
+                scene.Settings.CustomBackgroundColor = settings.CustomBgColor.ToRgb24();
+                break;
+            case "scene.use_nes_bg_color":
+                scene.UseNesBackgroundColor = settings.BgColor;
+                break;
+            case "clip.left":
+            case "clip.bottom":
+            case "clip.right":
+            case "clip.top":
+                scene.Clipping = settings.ClippingVector;
+                break;
+            default:
+                // Every other setting is held in the session layer and read from there.
+                break;
+        }
     }
 
     /// <summary>Prints what ran and the hook budget of REQ-LUA-110.</summary>
@@ -147,26 +234,33 @@ internal static class ScriptBridge
         public override float ResetDistance => camera.ResetDistance;
     }
 
-    private sealed class HarnessLight(LightState light) : ScriptLight
+    private sealed class HarnessLight(SceneState scene) : ScriptLight
     {
         private float _intensity = 1f;
 
         public override Vec3 Direction
         {
-            get => new(light.Direction.X, light.Direction.Y, light.Direction.Z);
-            set => light.Direction = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+            get => new(scene.Light.Direction.X, scene.Light.Direction.Y, scene.Light.Direction.Z);
+            set => scene.Light.Direction = new System.Numerics.Vector3(value.X, value.Y, value.Z);
         }
 
         public override LuaColor Color
         {
-            get => LuaColor.FromBytes(light.Color.R, light.Color.G, light.Color.B);
-            set => light.Color = value.ToRgb24();
+            get => LuaColor.FromBytes(scene.Light.Color.R, scene.Light.Color.G, scene.Light.Color.B);
+            set => scene.Light.Color = value.ToRgb24();
         }
 
         public override float Intensity
         {
             get => _intensity;
-            set => _intensity = value;
+
+            // The direction and the colour above write into the scene's light directly; the
+            // intensity is the renderer's, so it is pushed here as the application pushes it.
+            set
+            {
+                _intensity = value;
+                scene.Settings.LightIntensity = value;
+            }
         }
     }
 
