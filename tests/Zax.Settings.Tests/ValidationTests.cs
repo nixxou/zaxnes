@@ -32,6 +32,46 @@ public sealed class ValidationTests
         Assert.Equal(expected, model.GetFloat(SettingKeys.EmuGameSpeed), 4);
     }
 
+    /// <summary>
+    /// AMD-041 REQ-LOOP-064: Run-ahead is a list of four values whose out-of-domain rule is a
+    /// <b>clamp</b>, not the default — 7 gives 3 and −1 gives 0, where a plain choice domain
+    /// would give 1.
+    /// </summary>
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 1)]
+    [InlineData(3, 3)]
+    [InlineData(7, 3)]
+    [InlineData(-1, 0)]
+    public void Run_ahead_is_clamped_to_its_four_values(int written, int expected)
+    {
+        SettingsModel model = new();
+        Assert.Equal(1, model.GetInt(SettingKeys.EmuRunAhead));
+
+        model.SetInt(SettingKeys.EmuRunAhead, written);
+        Assert.Equal(expected, model.GetInt(SettingKeys.EmuRunAhead));
+        Assert.Equal(expected, SettingsCatalogue.ClampRunAhead(written));
+    }
+
+    /// <summary>
+    /// A finite list whose rule is « take the default » keeps that behaviour, which is what every
+    /// other enumerated setting of §4.1 relies on.
+    /// </summary>
+    [Fact]
+    public void A_plain_choice_still_falls_back_to_the_default()
+    {
+        SettingDomain choice = SettingDomain.Choice(
+            new SettingOption(0d, "a"),
+            new SettingOption(2d, "b"));
+
+        Assert.Equal(
+            2,
+            choice.Coerce(SettingValue.OfInt(9), SettingValue.OfInt(2)).AsInt);
+        Assert.Equal(
+            0,
+            choice.Coerce(SettingValue.OfInt(0), SettingValue.OfInt(2)).AsInt);
+    }
+
     /// <summary>REQ-PERS-003 rule 4 and §5.1: a negative sprite tolerance becomes its absolute value.</summary>
     [Fact]
     public void Sprite_tolerance_drops_its_sign()

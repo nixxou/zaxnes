@@ -772,6 +772,34 @@ public static class SettingsCatalogue
         });
 
         list.Add(new SettingDescriptor(
+            SettingKeys.EmuRunAhead,
+            SettingKind.Int,
+            SettingValue.OfInt(RunAheadDefault),
+            SettingScope.User,
+
+            // AMD-041 §3 writes the effect « à la frame réelle suivante », which is the next
+            // emulated frame and therefore within the next rendered frame: « imm. » in the terms
+            // of REQ-PERS-084, with nothing for a frontend to warn about. The loop reads the
+            // setting again at every real frame, so that is literally when it applies.
+            SettingEffect.Immediate,
+            SettingTheme.Emulation)
+        {
+            // The four values of AMD-041 §3, each with its label, and a value outside [0, 3]
+            // brought back into the interval rather than replaced by the default (REQ-LOOP-064).
+            Domain = SettingDomain.ClampedChoice(
+                RunAheadMin,
+                RunAheadOffLabel,
+                RunAheadOneFrameLabel,
+                "2 frames",
+                "3 frames"),
+            LuaPath = "RunAheadFrames",
+            UiLabel = "Run-ahead",
+
+            // AMD-041 §4: in libretro the host provides run-ahead from the serialisation, so the
+            // setting is not a core option there and the value is 0.
+        });
+
+        list.Add(new SettingDescriptor(
             SettingKeys.EmuCore,
             SettingKind.Int,
             SettingValue.OfInt(0),
@@ -1265,6 +1293,32 @@ public static class SettingsCatalogue
 
     /// <summary>The <c>ui.language</c> text for French (AMD-035).</summary>
     public const string LanguageFrench = "fr";
+
+    #endregion
+
+    #region Run-ahead (AMD-041 §3)
+
+    /// <summary>Lowest value of <c>emu.run_ahead</c>: run-ahead off (REQ-LOOP-064).</summary>
+    public const int RunAheadMin = 0;
+
+    /// <summary>Highest value of <c>emu.run_ahead</c> (REQ-LOOP-064).</summary>
+    public const int RunAheadMax = 3;
+
+    /// <summary>Default value of <c>emu.run_ahead</c>, the value marked « recommended ».</summary>
+    public const int RunAheadDefault = 1;
+
+    /// <summary>Domain label of the value 0 of <c>emu.run_ahead</c> (AMD-041 §3).</summary>
+    public const string RunAheadOffLabel = "Off";
+
+    /// <summary>Domain label of the value 1, the recommended one (AMD-041 §3).</summary>
+    public const string RunAheadOneFrameLabel = "1 frame (Recommended)";
+
+    /// <summary>
+    /// Brings <paramref name="frames"/> into [0, 3], which is what REQ-LOOP-064 asks of every
+    /// value that reaches the setting — including the one a script assigns to
+    /// <c>Setting.RunAheadFrames</c> (AMD-040 REQ-LUA-114).
+    /// </summary>
+    public static int ClampRunAhead(int frames) => Math.Clamp(frames, RunAheadMin, RunAheadMax);
 
     #endregion
 }

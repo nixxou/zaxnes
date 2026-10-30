@@ -119,6 +119,19 @@ public sealed class Apu2A03
     public bool IrqAsserted => _frameIrqFlag || _dmc.IrqFlag;
 
     /// <summary>
+    /// Whether the samples the resampler produces reach the output queue
+    /// (<see cref="FrameOutput.Audio"/>). <see cref="NesCore.RunFrame(ushort, FrameOutput)"/> owns
+    /// it and puts it back after every frame.
+    /// </summary>
+    /// <remarks>
+    /// A silent run-ahead frame (REQ-LOOP-065 steps 1 and 3) clears it. The resampler keeps
+    /// running: its filter history and its fractional position are part of the APU state
+    /// (REQ-CORE-090) and must advance exactly as they would otherwise, so only the enqueueing is
+    /// skipped. Nothing the emulation reads back depends on the queue.
+    /// </remarks>
+    public bool OutputEnabled { get; set; } = true;
+
+    /// <summary>
     /// The mixed output level of the five channels on the cycle just stepped, in [−1, 1]
     /// (REQ-CORE-073), before resampling and before the DC blocker.
     /// </summary>
@@ -677,6 +690,14 @@ public sealed class Apu2A03
 
     private void Enqueue(float sample)
     {
+        // A silent frame of run-ahead drops the sample instead of queueing it (REQ-LOOP-065):
+        // the resampler has already advanced, so the machine is in the very same state either
+        // way.
+        if (!OutputEnabled)
+        {
+            return;
+        }
+
         lock (_bufferLock)
         {
             if (_available == _buffer.Length)
@@ -783,7 +804,20 @@ public sealed class Apu2A03
     }
 
     /// <summary>Restores the APU state from <paramref name="reader"/> (REQ-CORE-091).</summary>
-    public void LoadState(StateReader reader)
+    public void LoadState(StateReader reader) => LoadState(reader, keepPendingSamples: false);
+
+    /// <summary>
+    /// Restores the APU state, optionally leaving the samples the host has not read yet where
+    /// they are (AMD-041 REQ-CORE-121).
+    /// </summary>
+    /// <param name="reader">The block to read.</param>
+    /// <param name="keepPendingSamples">
+    /// True for the in-memory restore that ends a real frame of run-ahead: the sound the
+    /// displayed frame has just produced belongs to a future that <em>does</em> happen — it is
+    /// the one the player hears — so REQ-CORE-121 requires it to survive the restore. False for
+    /// a savestate or a rollback, where REQ-CORE-074 drops it.
+    /// </param>
+    public void LoadState(StateReader reader, bool keepPendingSamples)
     {
         ArgumentNullException.ThrowIfNull(reader);
 
@@ -810,6 +844,9 @@ public sealed class Apu2A03
 
         // Pending audio is dropped on restore (REQ-CORE-074); the resampler's own history was
         // restored above, so the sound picks up from the state that was saved (Q-006).
-        DropPendingSamples();
+        if (!keepPendingSamples)
+        {
+            DropPendingSamples();
+        }
     }
 }

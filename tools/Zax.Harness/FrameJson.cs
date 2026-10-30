@@ -14,13 +14,19 @@ namespace Zax.Harness;
 internal static class FrameJson
 {
     /// <summary>Serialises <paramref name="records"/> and the 32 palette bytes.</summary>
-    public static string Write(IReadOnlyList<TileRecord> records, IReadOnlyList<byte> palette)
+    /// <param name="records">The tile records of the frame.</param>
+    /// <param name="palette">The 32 bytes of palette RAM.</param>
+    /// <param name="runAhead">
+    /// The run-ahead the frame was produced with (AMD-041). It is written down because a tile
+    /// sequence is only comparable with another one at equal N (REQ-ARCH-012).
+    /// </param>
+    public static string Write(IReadOnlyList<TileRecord> records, IReadOnlyList<byte> palette, int runAhead = 0)
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(palette);
 
         StringBuilder text = new();
-        text.Append("{\n  \"palette\": [");
+        text.Append(CultureInfo.InvariantCulture, $"{{\n  \"runAhead\": {runAhead},\n  \"palette\": [");
         for (int entry = 0; entry < palette.Count; entry++)
         {
             text.Append(entry == 0 ? string.Empty : ", ");

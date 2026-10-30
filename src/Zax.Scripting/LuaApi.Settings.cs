@@ -78,6 +78,10 @@ internal static partial class LuaApi
         Whole("Core", () => settings.Core, v => settings.Core = v);
         Whole("TVMode", () => settings.TVMode, v => settings.TVMode = v);
 
+        // AMD-040 REQ-LUA-114: the Run-ahead of AMD-041, read and written, a write brought back
+        // into [0, 3] by the setting's domain.
+        Whole("RunAheadFrames", () => settings.RunAheadFrames, v => settings.RunAheadFrames = v);
+
         // AMD-031 §3: the TV box is gone but the property stays, so a script that reads or
         // writes it runs without error. The reading is always 0 — « none ».
         Whole("TVBox", () => settings.TVBox, v => settings.TVBox = v);

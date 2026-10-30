@@ -248,6 +248,7 @@ internal static partial class UiStrings
         ["setting." + SettingKeys.EmuAutoTvMode] = "Region detected automatically",
         ["setting." + SettingKeys.EmuTvMode] = "Video region",
         ["setting." + SettingKeys.EmuCore] = "Emulation core",
+        ["setting." + SettingKeys.EmuRunAhead] = "Run-ahead",
         ["setting." + SettingKeys.AudioVolume] = "Master volume",
         ["setting." + SettingKeys.AudioBgMusic] = "Menu music",
         ["setting." + SettingKeys.AudioMute] = "Mute",
@@ -273,5 +274,12 @@ internal static partial class UiStrings
         ["option.Recent"] = "Recent",
         ["option.en"] = "English",
         ["option.fr"] = "Français",
+
+        // The four Run-ahead values of AMD-041 §3. Their keys carry the setting, because « Off »
+        // is not translated the same way here as for the vertical synchronisation.
+        ["option." + SettingKeys.EmuRunAhead + ".Off"] = "Off",
+        ["option." + SettingKeys.EmuRunAhead + ".1 frame (Recommended)"] = "1 frame (Recommended)",
+        ["option." + SettingKeys.EmuRunAhead + ".2 frames"] = "2 frames",
+        ["option." + SettingKeys.EmuRunAhead + ".3 frames"] = "3 frames",
     };
 }

@@ -25,6 +25,13 @@ public sealed class StateWriter
     /// <summary>Number of bytes written so far.</summary>
     public int Length => _length;
 
+    /// <summary>
+    /// Forgets everything written and keeps the buffer, so the same writer can build one block
+    /// after another without allocating. The in-memory core state of AMD-041 REQ-CORE-121 is
+    /// rebuilt at every real frame and needs exactly that.
+    /// </summary>
+    public void Reset() => _length = 0;
+
     /// <summary>Writes one byte.</summary>
     public void WriteByte(byte value)
     {
@@ -103,6 +110,12 @@ public sealed class StateWriter
 
     /// <summary>Returns the bytes written so far without copying.</summary>
     public ReadOnlySpan<byte> AsSpan() => _buffer.AsSpan(0, _length);
+
+    /// <summary>
+    /// The bytes written so far, as the memory a <see cref="StateReader"/> reads back without a
+    /// copy. Valid until the next write.
+    /// </summary>
+    public ReadOnlyMemory<byte> AsMemory() => _buffer.AsMemory(0, _length);
 
     private void Ensure(int extra)
     {

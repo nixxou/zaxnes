@@ -142,6 +142,9 @@ public static class SettingKeys
     /// <summary>Core index.</summary>
     public const string EmuCore = "emu.core";
 
+    /// <summary>Run-ahead frames, 0 to 3 (AMD-041 §3, REQ-LOOP-064).</summary>
+    public const string EmuRunAhead = "emu.run_ahead";
+
     /// <summary>Derived region timing block.</summary>
     public const string EmuTvData = "emu.tv_data";
 

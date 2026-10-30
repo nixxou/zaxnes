@@ -347,6 +347,21 @@ public sealed class ScriptSettings : IDisposable
         set => Write(SettingKeys.EmuCore, value);
     }
 
+    /// <summary>
+    /// Run-ahead frames, 0 to 3, 1 by default; a written value is brought back into the interval
+    /// (AMD-041 REQ-LOOP-064, AMD-040 REQ-LUA-114).
+    /// </summary>
+    /// <remarks>
+    /// The clamping is the setting's own domain (<c>SettingDomain.ClampedChoice</c>), so writing
+    /// 7 reads back 3 and writing −1 reads back 0 wherever the write comes from — a script, the
+    /// options window or the settings file.
+    /// </remarks>
+    public int RunAheadFrames
+    {
+        get => Int(SettingKeys.EmuRunAhead);
+        set => Write(SettingKeys.EmuRunAhead, value);
+    }
+
     #endregion
 
     #region conversion (§4.1.8)

@@ -224,7 +224,10 @@ internal sealed partial class EmulationHost : IDisposable
     /// <summary>Title of the current game, or null.</summary>
     public string? CurrentGameTitle => _currentGame?.Title;
 
-    /// <summary>Emulated frames run since the host was created.</summary>
+    /// <summary>
+    /// Real frames run since the host was created (REQ-LOOP-065): one per frame the clock said
+    /// was due, whatever the run-ahead setting says the core emulated behind it.
+    /// </summary>
     public long EmulatedFrames { get; private set; }
 
     /// <summary>Whether a quit was asked for (REQ-LOOP-052).</summary>
@@ -341,10 +344,15 @@ internal sealed partial class EmulationHost : IDisposable
         int due = Pacer.DueFrames();
         for (int frame = 0; frame < due; frame++)
         {
-            // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
-            // counter is a multiple of 60, so before that frame executes. AMD-042
-            // REQ-LOOP-069: it carries the 64 PData values and the camera state as well, read
-            // as they stand at that instant and with no script hook involved.
+            // REQ-LOOP-064: the setting is read again here, so a change made during the game
+            // applies at the next real frame and never in the middle of one.
+            session.RunAheadFrames = Settings.RunAheadFrames;
+
+            // REQ-LOOP-030 and REQ-LOOP-066: the snapshot is taken at the start of a frame whose
+            // core frame counter is a multiple of 60, so before that frame executes — and the
+            // counter is the real one, the core being in the real state R at this point.
+            // AMD-042 REQ-LOOP-069: it carries the 64 PData values and the camera state as well,
+            // read as they stand at that instant and with no script hook involved (AMD-042 §3).
             if (RollbackHistory.IsSnapshotFrame(session.Core.FrameCount))
             {
                 Rollback.Capture(new RollbackSnapshot(

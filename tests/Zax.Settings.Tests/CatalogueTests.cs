@@ -36,7 +36,17 @@ public sealed class CatalogueTests
 
         Assert.Empty(specified.Except(model));
         Assert.Equal(
-            new[] { SettingKeys.AudioMute, SettingKeys.UiShowFps, SettingKeys.UiLanguage }.Order(),
+            new[]
+            {
+                SettingKeys.AudioMute,
+                SettingKeys.UiShowFps,
+                SettingKeys.UiLanguage,
+
+                // Published by AMD-041 §3 as a line of §4.1, like ui.language by AMD-035: the
+                // transcription above is the table of SPEC-09 itself, so an amendment's line is
+                // recorded here.
+                SettingKeys.EmuRunAhead,
+            }.Order(),
             model.Except(specified).Order());
     }
 

@@ -275,10 +275,20 @@ internal static class UiText
     }
 
     /// <summary>The label of an enumerated value, or the raw domain label when there is none.</summary>
+    /// <remarks>
+    /// The entry of this one setting is looked up first, so that a label two settings share can
+    /// still be translated differently (AMD-041 §3 and <see cref="UiKeys.Option(string, string)"/>).
+    /// </remarks>
     public static string LabelOf(SettingDescriptor descriptor, string option)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(option);
+
+        string scoped = UiKeys.Option(descriptor.Key, option);
+        if (UiStrings.EnglishTable.ContainsKey(scoped))
+        {
+            return UiStrings.Get(scoped);
+        }
 
         string key = UiKeys.Option(option);
         string text = UiStrings.Get(key);

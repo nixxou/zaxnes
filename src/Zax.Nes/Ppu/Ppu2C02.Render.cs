@@ -55,6 +55,21 @@ public sealed partial class Ppu2C02
     /// </summary>
     public ReadOnlySpan<byte> PixelFrame => _pixels;
 
+    /// <summary>
+    /// Whether the composed colour of each visible dot is stored into
+    /// <see cref="PixelFrame"/> (<see cref="FrameOutput.Pixels"/>).
+    /// <see cref="NesCore.RunFrame(ushort, FrameOutput)"/> owns it and puts it back after every
+    /// frame.
+    /// </summary>
+    /// <remarks>
+    /// A hidden run-ahead frame may clear it, which REQ-LOOP-068 allows as long as nothing else
+    /// changes. Nothing else does: the sprite 0 hit is decided before the store, the palette read
+    /// has no side effect, and the colour the Zapper sees is composed from the tile records of
+    /// REQ-CORE-062, which are emitted whatever this flag says. A machine with a Zapper port
+    /// keeps it set on every emulated frame.
+    /// </remarks>
+    public bool PixelOutputEnabled { get; set; } = true;
+
     /// <summary>Number of sprites the evaluation of the previous line found, 0 to 8.</summary>
     public int SpritesOnLine => _spritesLoaded;
 
@@ -555,6 +570,13 @@ public sealed partial class Ppu2C02
         if (spriteIsZero && spritePixel != 0 && backgroundPixel != 0 && x != ScreenWidth - 1)
         {
             _spriteZeroHit = true;
+        }
+
+        // The sprite 0 hit above is the only thing the rest of the machine reads from here, so a
+        // frame that produces no image stops at this point (REQ-LOOP-068).
+        if (!PixelOutputEnabled)
+        {
+            return;
         }
 
         int entry;
