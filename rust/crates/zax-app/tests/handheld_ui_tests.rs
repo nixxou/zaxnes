@@ -12,6 +12,7 @@ use common::SyntheticRom;
 use ui_harness::{ImGuiHarness, UiHarness};
 use zax_app::emulation::emulation_state::EmulationState;
 use zax_app::persistence::app_settings::{AppSettings as _, AppSettingsMut as _};
+use zax_app::ui::handheld::hacks::HacksView;
 use zax_app::ui::handheld::pad::{PadButton, PadState};
 use zax_app::ui::handheld::states::StatesMode;
 use zax_app::ui::handheld::{HandheldUi, Screen};
@@ -132,7 +133,7 @@ fn the_2d_picture_is_seen_head_on_and_leaves_the_camera_alone() {
 
     // Leaving the 2D mode (here, the game) puts the camera back in charge.
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..7 {
+    for _ in 0..8 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
@@ -224,8 +225,9 @@ fn the_load_screen_loads_a_state_and_leaves_an_empty_slot_alone() {
 fn quit_to_the_rom_list_stops_the_game() {
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     play(&mut harness, &mut handheld);
-    // Quit to ROM list is the eighth row (no Rewind row on the handheld; Hacks before it).
-    for _ in 0..7 {
+    // Quit to ROM list is the ninth row (no Rewind row on the handheld; Widescreen and Hacks
+    // before it).
+    for _ in 0..8 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);
@@ -348,7 +350,7 @@ fn the_options_of_a_game_hold_only_what_changes_and_play_with_it() {
     assert_eq!(Screen::InGame, handheld.screen());
     assert_eq!(!shadows, harness.host.settings().shadow());
     tap(&mut harness, &mut handheld, PadButton::Menu);
-    for _ in 0..7 {
+    for _ in 0..8 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
@@ -511,14 +513,45 @@ fn the_hacks_open_from_the_list_the_game_options_and_the_menu() {
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Home, handheld.screen());
 
+    // The in-game menu (owner request): the hacks, the aids alone, then the widescreen.
     play(&mut harness, &mut handheld);
-    for _ in 0..6 {
+    for _ in 0..7 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     tap(&mut harness, &mut handheld, PadButton::A);
     assert_eq!(Screen::Hacks, handheld.screen());
+    assert_eq!(HacksView::Aids, handheld.hacks().unwrap().view());
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Overlay, handheld.screen());
+    // A on the widescreen let go at once turns it on, again off.
+    tap(&mut harness, &mut handheld, PadButton::Up);
+    let widescreen = |harness: &UiHarness| {
+        harness
+            .host
+            .settings()
+            .get(SettingId::VideoWidescreen)
+            .as_int()
+            != 0
+    };
+    let before = widescreen(&harness);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::Overlay, handheld.screen());
+    assert_ne!(before, widescreen(&harness));
+    tap(&mut harness, &mut handheld, PadButton::A);
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(before, widescreen(&harness));
+    // A held shows its settings.
+    let mut held = PadState::new();
+    held.set(PadButton::A, true);
+    for _ in 0..6 {
+        frame(&mut harness, &mut handheld, &held, 0.1);
+        // Held, not pressed again.
+        held.end_frame();
+    }
+    assert_eq!(Screen::Hacks, handheld.screen());
+    assert_eq!(HacksView::Widescreen, handheld.hacks().unwrap().view());
+    assert_eq!(before, widescreen(&harness));
 }
 
 /// The options of a game saved from their screen keep its hacks, which are not theirs: the

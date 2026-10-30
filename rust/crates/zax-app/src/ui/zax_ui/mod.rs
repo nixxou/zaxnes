@@ -140,6 +140,9 @@ pub struct ZaxUi {
     movie_note: String,
     /// The hacks of the game in play, while their window is open (`state.hacks`).
     hacks: Option<HacksModel>,
+    /// The hacks of the game in play as the game options menu shows them, studied once as the
+    /// menu opens (the study reads the ROM and its hack packs' signatures).
+    menu_hacks: Option<HacksModel>,
     /// The text of the folder field of the options while it is being typed.
     folder_text: String,
     /// Whether the folder field has the focus (its text is then the one being typed).
@@ -183,6 +186,7 @@ impl ZaxUi {
             fps_countdown: 0.0,
             movie_note: String::new(),
             hacks: None,
+            menu_hacks: None,
             folder_text: String::new(),
             folder_editing: false,
             held_keys: Vec::new(),
