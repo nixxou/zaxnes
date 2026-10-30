@@ -123,6 +123,8 @@ pub struct HandheldUi {
     camera_memory: CameraMemory,
     /// How long Y has been held in game, while it is, and whether the hold already acted.
     flat_view: Option<(f32, bool)>,
+    /// The game the list rests on and for how long, until it is studied (owner request).
+    resting_on: Option<(PathBuf, f32)>,
     /// Where the head-on 2D picture of a held Y stands.
     head_on: HeadOn,
     /// Whether the game was in 2D at the last look: going into it puts the picture head on,
@@ -175,6 +177,8 @@ enum HeadOn {
 const CAMERA_KEEP_SECONDS: f32 = 0.6;
 /// How long the widescreen button is held before its settings open.
 const WIDESCREEN_HOLD_SECONDS: f32 = 0.5;
+/// Seconds the list rests on a game before its ROM is studied (owner request).
+const STUDY_AFTER_SECONDS: f32 = 1.0;
 
 /// The widescreen of a game asked for with a button (A in the in-game menu or on the widescreen
 /// row of its options, L2 on the list), which may be held.
@@ -213,6 +217,7 @@ impl HandheldUi {
             heading_font: None,
             effects: Vec::new(),
             camera_memory: CameraMemory::default(),
+            resting_on: None,
             flat_view: None,
             head_on: HeadOn::Off,
             was_two_dimensional: false,
@@ -432,6 +437,7 @@ impl HandheldUi {
         self.update_camera_memory(pad, seconds, frame.host);
         self.update_flat_view(pad, seconds, frame.host);
         self.update_widescreen_hold(pad, seconds, frame.host);
+        self.update_resting_study(seconds, frame.host);
         let presses: Vec<PadButton> = pad.presses().collect();
         for button in presses.iter().copied() {
             // A key that is A and Start at once (Enter) plays the game once, and Start with
@@ -505,6 +511,35 @@ impl HandheldUi {
         let presses = pointer::presses(&self.zones.borrow(), input);
         for button in presses {
             self.press(button, frame);
+        }
+    }
+
+    /// The list resting [`STUDY_AFTER_SECONDS`] on a game not studied yet studies its ROM (owner
+    /// request): a few milliseconds, and the list then shows whether a widescreen hack fits it.
+    fn update_resting_study(&mut self, seconds: f32, host: &AppHost) {
+        let selected = (self.screen == Screen::Home && !self.confirming)
+            .then(|| self.roms.selected_entry().map(|entry| entry.path.clone()))
+            .flatten();
+        let Some(path) = selected else {
+            self.resting_on = None;
+            return;
+        };
+        let held = match self.resting_on.take() {
+            Some((rested, held)) if rested == path => held + seconds,
+            _ => 0.0,
+        };
+        if held < STUDY_AFTER_SECONDS {
+            self.resting_on = Some((path, held));
+            return;
+        }
+        // Studied once: the same game stays without a new reading until the list moves.
+        self.resting_on = Some((path.clone(), f32::NEG_INFINITY));
+        if host.rom_certificate(&path).is_some() {
+            return;
+        }
+        if let Ok(rom) = crate::emulation::rom_file::read(&path) {
+            host.certify_rom(&path, &rom.image);
+            self.note_study(&path, host);
         }
     }
 

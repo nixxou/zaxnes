@@ -1,7 +1,7 @@
 //! What the study of each ROM file found (Rust-only, owner request): whether a widescreen hack
 //! fits it, by its CRC or by the signatures of a hack pack. A ROM is studied when its hacks
-//! screen opens or when it starts, never while the ROMs are listed (that would read every file);
-//! the list shows what was found. Kept in `hack_compat.json` of the user data with the size and
+//! screen opens, when it starts, or when the console's list rests a second on it, never while
+//! the ROMs are listed (that would read every file); the list shows what was found. Kept in `hack_compat.json` of the user data with the size and
 //! the modification time of each file and a fingerprint of the built-in hacks, so that a changed
 //! file or a new version of the hacks makes the ROM studied again.
 
