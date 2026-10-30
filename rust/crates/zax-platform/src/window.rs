@@ -216,6 +216,12 @@ impl HostWindow {
         &self.sdl
     }
 
+    /// The system clipboard, for the text fields of the interface.
+    #[must_use]
+    pub fn clipboard(&self) -> sdl2::clipboard::ClipboardUtil {
+        self.video.clipboard()
+    }
+
     /// Which GL the context is.
     #[must_use]
     pub fn gl_flavor(&self) -> GlFlavor {

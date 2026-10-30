@@ -339,7 +339,8 @@ impl Running {
                     .ok_or("the wgpu renderer has no wgpu window")?,
             ),
         };
-        let ui = ImguiFrontend::new(ui_graphics, &host, options, height)?;
+        let mut ui = ImguiFrontend::new(ui_graphics, &host, options, height)?;
+        ui.set_clipboard(window.clipboard());
         Ok(Self {
             options: options.clone(),
             ui,

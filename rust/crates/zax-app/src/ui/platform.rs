@@ -11,6 +11,25 @@ use sdl2::mouse::MouseButton as SdlButton;
 
 use super::handheld::pad::{PadButton, PadState};
 
+/// The system clipboard as `ImGui` reads and writes it: without it, a text field can neither
+/// copy nor paste (the account fields of RetroAchievements, owner request).
+pub struct SdlClipboard(pub sdl2::clipboard::ClipboardUtil);
+
+impl imgui::ClipboardBackend for SdlClipboard {
+    fn get(&mut self) -> Option<String> {
+        if self.0.has_clipboard_text() {
+            self.0.clipboard_text().ok()
+        } else {
+            None
+        }
+    }
+
+    fn set(&mut self, value: &str) {
+        // A clipboard that refuses the text leaves it as it was: nothing else to do.
+        let _ = self.0.set_clipboard_text(value);
+    }
+}
+
 /// The state between events: how the window's coordinates scale to the drawable's.
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)] // independent switches of each kind of platform
