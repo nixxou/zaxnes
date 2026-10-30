@@ -28,6 +28,7 @@ public sealed record UnityBundleFile(string Path, uint Flags, byte[] Data);
 /// <summary>
 /// Reader of a Unity « UnityFS » asset bundle, the public format AMD-030 §4 describes: header,
 /// 16-byte alignment, information block at the start or at the end, data blocks, file nodes.
+/// Format versions 6 to 8 are read, the 2.0 header flag 0x200 included (AMD-039 §2).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -60,6 +61,13 @@ public sealed class UnityBundle
 
     /// <summary>Bit 0x80: the information block sits at the end of the file.</summary>
     private const uint InfoAtEndFlag = 0x80;
+
+    /// <summary>
+    /// Bit 0x200 (AMD-039 §2): the data blocks start on the next 16-byte boundary after the
+    /// information block. It only matters when the information block comes first (bit 0x80
+    /// clear); with bit 0x80 the data already follow the aligned header.
+    /// </summary>
+    private const uint DataAlignedFlag = 0x200;
 
     /// <summary>Largest accepted information block, decompressed.</summary>
     private const int MaximumInfoSize = 64 * 1024 * 1024;
@@ -185,6 +193,16 @@ public sealed class UnityBundle
         else
         {
             compressedInfo = reader.ReadBytes(checked((int)compressedInfoSize));
+
+            // AMD-039 §2: with bit 0x200, the data blocks start on the next multiple of 16 after
+            // the information block's *compressed* bytes — the 2.0 bundle ends its 1429-byte
+            // information block at 1493 and starts its data at 1504. Without the bit the blocks
+            // follow immediately, as AMD-030 §4.2 has it.
+            if ((flags & DataAlignedFlag) != 0)
+            {
+                reader.Align(16);
+            }
+
             dataStart = reader.Position;
             dataEnd = bytes.Length;
         }

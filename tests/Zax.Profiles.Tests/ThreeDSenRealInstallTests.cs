@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Zax.Profiles.Catalogue;
@@ -47,8 +48,37 @@ internal static class ThreeDSenInstall
         "No catalogue asset folder is available: neither " + CatalogueVariable
         + " nor assets-neutral next to the solution.";
 
+    /// <summary>The message a test of the 1.1.2 criteria reports when the installation is a 2.0.</summary>
+    public const string NotVersion112Message =
+        "The 3dSen installation named by " + InstallVariable + " is a 2.0 (bundle format 8): the "
+        + "reference inventory describes the 1.1.2, so its fingerprints are not compared "
+        + "(AMD-039 §4, §5).";
+
     /// <summary>The installation folder, or null when it is not there.</summary>
     public static string? Root { get; } = Locate();
+
+    /// <summary>
+    /// The format version of the installation's profile bundle, or null when there is no
+    /// installation or no readable bundle in it. AMD-039 §2 measures 7 on the 1.1.2 and 8 on the
+    /// 2.0, which is what tells the two apart without opening anything else of the installation.
+    /// </summary>
+    public static uint? BundleFormatVersion { get; } = ReadBundleFormatVersion();
+
+    /// <summary>True when the installation is a 3dSen 2.0 (AMD-039 §2).</summary>
+    public static bool IsVersion2 => BundleFormatVersion >= 8;
+
+    /// <summary>
+    /// The four profiles of a 2.0 installation that are not byte-for-byte those of the 1.1.2:
+    /// they differ by their Lua scripts alone (AMD-039 §5), in the order their file names sort in.
+    /// </summary>
+    public static string[] LuaDifferingProfiles =>
+        ["DQ3_DW3", "Final_Fantasy_USA", "Super Mario Bros", "punchout"];
+
+    /// <summary>
+    /// The version of the serialized file the bundle holds: 21 on the 1.1.2 and 22 on the 2.0
+    /// (AMD-039 §2, table).
+    /// </summary>
+    public static uint ExpectedSerializedVersion => IsVersion2 ? 22u : 21u;
 
     /// <summary>
     /// The asset folder of the catalogue in use, or null when there is none: what
@@ -126,6 +156,31 @@ internal static class ThreeDSenInstall
         return null;
     }
 
+    /// <summary>
+    /// Reads the format version out of the bundle header: <c>"UnityFS\0"</c> then a big-endian
+    /// u32 (AMD-030 §4.1). Only those twelve bytes are read, so a 43 MB bundle costs nothing to
+    /// tell apart.
+    /// </summary>
+    private static uint? ReadBundleFormatVersion()
+    {
+        if (Root is null || ThreeDSenInstallation.FindBundle(Root) is not { } bundle)
+        {
+            return null;
+        }
+
+        try
+        {
+            using FileStream stream = File.OpenRead(bundle);
+            Span<byte> head = stackalloc byte[12];
+            stream.ReadExactly(head);
+            return BinaryPrimitives.ReadUInt32BigEndian(head[8..]);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
     private static string? LocateCatalogue()
     {
         string? named = Environment.GetEnvironmentVariable(CatalogueVariable);
@@ -171,23 +226,30 @@ public sealed class ThreeDSenCatalogueFactAttribute : FactAttribute
 }
 
 /// <summary>
-/// A fact that is skipped, rather than failed, when the stand-in installation is not there.
+/// A fact that needs an installation and the reference inventory, and that installation to be a
+/// 3dSen 1.1.2, since the inventory describes that version (AMD-039 §4, third bullet, and §5).
+/// It is skipped, rather than failed, in any other case.
 /// </summary>
-public sealed class ThreeDSenFactAttribute : FactAttribute
+public sealed class ThreeDSen112FactAttribute : FactAttribute
 {
     /// <summary>Creates the attribute.</summary>
-    public ThreeDSenFactAttribute()
+    public ThreeDSen112FactAttribute()
     {
         if (!ThreeDSenInstall.Available)
         {
             Skip = ThreeDSenInstall.MissingMessage;
         }
+        else if (ThreeDSenInstall.IsVersion2)
+        {
+            Skip = ThreeDSenInstall.NotVersion112Message;
+        }
     }
 }
 
 /// <summary>
-/// The acceptance criteria of AMD-030 §6 on a real installation: 101 profiles imported, each one
-/// byte-for-byte a profile of the reference inventory, and a second import that adds nothing.
+/// The acceptance criteria of AMD-030 §6 and AMD-039 §4 on a real installation, of either
+/// version: 101 profiles imported, a second import that adds nothing, and — on a 1.1.2 only —
+/// each profile byte-for-byte one of the reference inventory.
 /// </summary>
 /// <remarks>
 /// Opt-in: the whole class carries <c>Requires=OriginalAssets</c> and is skipped when the
@@ -196,30 +258,35 @@ public sealed class ThreeDSenFactAttribute : FactAttribute
 [Trait("Requires", "OriginalAssets")]
 public sealed class ThreeDSenRealInstallTests
 {
-    [ThreeDSenFact] // AMD-030 §3
+    [ThreeDSenInstallFact] // AMD-030 §3, AMD-039 §2 last bullet
     public void The_bundle_is_found_from_the_installation_folder()
     {
         string? bundle = ThreeDSenInstallation.FindBundle(ThreeDSenInstall.Root!);
 
         Assert.NotNull(bundle);
         Assert.True(ThreeDSenInstallation.IsBundleName(Path.GetFileName(bundle)));
+
+        // The path pattern does not change in 2.0, only the platform folder, which is
+        // StandaloneWindows64 there and StandaloneWindows in 1.1.2.
         Assert.Contains("StandaloneWindows", bundle, StringComparison.Ordinal);
     }
 
-    [ThreeDSenFact] // AMD-030 §4
+    [ThreeDSenInstallFact] // AMD-030 §4, AMD-039 §2
     public void The_bundle_holds_the_101_profiles_and_the_asset_bundle_object()
     {
         string bundle = ThreeDSenInstallation.LocateBundle(ThreeDSenInstall.Root!);
         UnityBundle container = UnityBundle.Read(File.ReadAllBytes(bundle));
 
-        // §4.1 and §4.2: version 7, one CAB- node, blocks of 128 KiB.
-        Assert.Equal(7u, container.FormatVersion);
+        // §4.1 and §4.2: format version 7 on the 1.1.2 and 8 on the 2.0, one CAB- node,
+        // blocks of 128 KiB.
+        Assert.Equal(ThreeDSenInstall.BundleFormatVersion, container.FormatVersion);
+        Assert.InRange(container.FormatVersion, 7u, 8u);
         UnityBundleFile node = Assert.Single(container.Files);
         Assert.StartsWith("CAB-", node.Path, StringComparison.Ordinal);
 
-        // §4.3: version 21, little-endian, 102 objects.
+        // §4.3: version 21 in 1.1.2 and 22 in 2.0 (AMD-039 §2), little-endian, 102 objects.
         UnitySerializedFile serialized = UnitySerializedFile.Read(node.Data);
-        Assert.Equal(21u, serialized.Version);
+        Assert.Equal(ThreeDSenInstall.ExpectedSerializedVersion, serialized.Version);
         Assert.False(serialized.IsBigEndian);
         Assert.Equal(ThreeDSenInstall.ProfileCount + 1, serialized.Objects.Count);
 
@@ -228,7 +295,7 @@ public sealed class ThreeDSenRealInstallTests
         Assert.All(assets, asset => Assert.NotEqual(string.Empty, asset.Name));
     }
 
-    [ThreeDSenFact] // AMD-030 §5, §6
+    [ThreeDSenInstallFact] // AMD-030 §5, §6; AMD-039 §4
     public void Every_payload_decodes_with_the_spec_03_decoder()
     {
         string bundle = ThreeDSenInstallation.LocateBundle(ThreeDSenInstall.Root!);
@@ -240,12 +307,15 @@ public sealed class ThreeDSenRealInstallTests
         }
     }
 
-    [ThreeDSenFact] // AMD-030 §6, first and second bullets
-    public void The_import_writes_101_profiles_of_the_inventory_and_the_second_one_adds_nothing()
+    /// <summary>
+    /// AMD-030 §6, second bullet, and AMD-039 §4, second part: whichever version the installation
+    /// is, the import writes the 101 profiles with no failure, and a second import finds them all
+    /// already present. The fingerprints are not looked at here, since the reference inventory
+    /// describes the 1.1.2 only (AMD-039 §4, §5).
+    /// </summary>
+    [ThreeDSenInstallFact] // AMD-030 §6, AMD-039 §4
+    public void The_import_writes_the_101_profiles_and_the_second_one_adds_nothing()
     {
-        HashSet<string> reference = ThreeDSenInstall.ReferenceHashes();
-        Assert.Equal(ThreeDSenInstall.ProfileCount, reference.Count);
-
         // Outside the repository on purpose: no file of 3dSen ever lands in the tree.
         string destination = Path.Combine(
             Path.GetTempPath(), "zax-p8-" + Guid.NewGuid().ToString("N"), "profiles");
@@ -264,13 +334,7 @@ public sealed class ThreeDSenRealInstallTests
             Assert.All(written, path => Assert.EndsWith(
                 UserProfileFolder.Extension, path, StringComparison.Ordinal));
 
-            // Each produced file is, byte for byte, a profile of the reference inventory.
-            foreach (string path in written)
-            {
-                Assert.Contains(ThreeDSenInstall.HashOf(path), reference);
-            }
-
-            // One profile per inventory entry: no duplicate, nothing missing.
+            // 101 distinct files: no profile was written twice under two names.
             Assert.Equal(
                 ThreeDSenInstall.ProfileCount,
                 written.Select(ThreeDSenInstall.HashOf).Distinct(StringComparer.OrdinalIgnoreCase).Count());
@@ -281,6 +345,39 @@ public sealed class ThreeDSenRealInstallTests
             Assert.Equal(ThreeDSenInstall.ProfileCount, second.AlreadyPresent);
             Assert.Equal(0, second.Failed);
             Assert.Equal(ThreeDSenInstall.ProfileCount, Directory.GetFiles(destination).Length);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(destination)!, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// AMD-030 §6, first bullet, kept unchanged by AMD-039 §4, third bullet: on a 1.1.2, every
+    /// imported file is byte for byte a profile of the reference inventory. It is skipped on a
+    /// 2.0, where four of the 101 differ by their Lua scripts (AMD-039 §5, AMD-040 §1).
+    /// </summary>
+    [ThreeDSen112Fact] // AMD-030 §6, AMD-039 §4
+    public void The_imported_profiles_are_those_of_the_reference_inventory()
+    {
+        HashSet<string> reference = ThreeDSenInstall.ReferenceHashes();
+        Assert.Equal(ThreeDSenInstall.ProfileCount, reference.Count);
+
+        string destination = Path.Combine(
+            Path.GetTempPath(), "zax-p8-" + Guid.NewGuid().ToString("N"), "profiles");
+        try
+        {
+            ThreeDSenImportSummary summary =
+                new ThreeDSenImporter(PhysicalProfileFileSystem.Instance, destination)
+                    .ImportFrom(ThreeDSenInstall.Root!);
+            Assert.Equal(ThreeDSenInstall.ProfileCount, summary.Imported);
+
+            string[] written = Directory.GetFiles(destination);
+            Assert.Equal(ThreeDSenInstall.ProfileCount, written.Length);
+            foreach (string path in written)
+            {
+                Assert.Contains(ThreeDSenInstall.HashOf(path), reference);
+            }
         }
         finally
         {
@@ -358,6 +455,12 @@ public sealed class ThreeDSenRealInstallTests
     /// appears twice — every imported file is a built-in profile byte for byte, so each is
     /// reported once and adds nothing.
     /// </summary>
+    /// <remarks>
+    /// On a 2.0 installation four of the 101 are not byte-for-byte the catalogue's own, since
+    /// their Lua scripts differ (AMD-039 §5): those four are kept as user profiles, the other 97
+    /// are reported identical, and each of the four adds a library entry because its identifier
+    /// is not one of the catalogue's. What the interface is to show then is Q-076.
+    /// </remarks>
     [ThreeDSenCatalogueFact] // REQ-PROF-060, REQ-PROF-062
     public void AMD_037_with_the_catalogue_assets_no_game_appears_twice()
     {
@@ -381,19 +484,37 @@ public sealed class ThreeDSenRealInstallTests
                     BuiltInProfileIndex.For(PhysicalProfileFileSystem.Instance, catalogue))
                 .Scan(catalogue.Ids);
 
-            // Each of the 101 files is one of the catalogue's own profiles: none adds a game,
-            // and each is reported once.
-            Assert.Empty(profiles);
+            // Each file is one of the catalogue's own profiles and adds no game — but for the
+            // four of AMD-039 §5 on a 2.0, which differ by their Lua scripts.
             Assert.Equal(
-                ThreeDSenInstall.ProfileCount,
+                ThreeDSenInstall.IsVersion2 ? ThreeDSenInstall.LuaDifferingProfiles : [],
+                profiles
+                    .Select(profile => Path.GetFileNameWithoutExtension(profile.FilePath))
+                    .Order(StringComparer.Ordinal));
+            Assert.Equal(
+                ThreeDSenInstall.ProfileCount - profiles.Count,
                 log.Informations.Count(line => line.Contains(
                     "identical to the built-in profile", StringComparison.Ordinal)));
 
             GameLibrary library = GameLibrary.Build(catalogue, profiles);
-            Assert.Equal(catalogue.Entries.Count, library.Entries.Count);
+
+            // Whichever version: one entry per identifier, nothing hidden by a clash.
             Assert.Equal(
                 library.Entries.Count,
                 library.Entries.Select(entry => entry.Id).Distinct(StringComparer.Ordinal).Count());
+
+            if (ThreeDSenInstall.IsVersion2)
+            {
+                // Q-076: the four profiles of AMD-039 §5 carry identifiers of their own, so each
+                // adds a game beside the catalogue entry of the same game instead of replacing
+                // it. AMD-039 §4 keeps the criterion of AMD-037 §4 for a 1.1.2 installation, and
+                // says nothing of what a 2.0 is to show here; AMD-040 is where those four
+                // profiles are dealt with.
+                Assert.Equal(catalogue.Entries.Count + profiles.Count, library.Entries.Count);
+                return;
+            }
+
+            Assert.Equal(catalogue.Entries.Count, library.Entries.Count);
             Assert.Equal(
                 library.Entries.Count,
                 library.Entries

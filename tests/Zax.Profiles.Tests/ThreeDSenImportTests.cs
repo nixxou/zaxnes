@@ -328,6 +328,73 @@ public sealed class ThreeDSenImportTests
         }
     }
 
+    /// <summary>
+    /// AMD-039 §4, first bullet, at the level of the import: an installation of 3dSen 2.0 — path
+    /// of §2, bundle in format 8 with flags 0x243 — hands its profiles over like a 1.1.2 one.
+    /// </summary>
+    [Fact] // AMD-039 §2, §3, §4
+    public void A_3dsen_2_installation_is_imported_like_a_1_1_2_one()
+    {
+        string folder = TempFolder();
+        try
+        {
+            // AMD-039 §2, last bullet: the path pattern is the one of AMD-030 §3, under
+            // StandaloneWindows64.
+            string bundle = Layout(folder, "3dSen_Data", "StandaloneWindows64", "0f1e2d3c");
+            File.WriteAllBytes(
+                bundle,
+                SyntheticUnityBundle.Build(
+                    [
+                        ("Pinball", Profile("ABCDEFGHIJKL", "Pinball")),
+                        ("Tetris", Profile("MNOPQRSTUVWX", "Tetris")),
+                    ],
+                    SyntheticUnityBundle.ThreeDSen2));
+
+            FakeProfileFileSystem files = new();
+            ThreeDSenImportSummary summary = new ThreeDSenImporter(files, Destination).ImportFrom(folder);
+
+            Assert.Equal(2, summary.Imported);
+            Assert.Equal(0, summary.Failed);
+            Assert.Equal(bundle, summary.BundlePath);
+            Assert.True(files.FileExists(Path.Combine(Destination, "Pinball.3dn")));
+            Assert.True(files.FileExists(Path.Combine(Destination, "Tetris.3dn")));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// AMD-039 §4, second bullet: the same bundle with bit 0x200 cleared and its padding bytes
+    /// left in place imports no profile and does not crash (AMD-030 §5).
+    /// </summary>
+    [Fact] // AMD-039 §2, §4
+    public void A_bundle_padded_without_flag_0x200_imports_nothing_and_writes_nothing()
+    {
+        string folder = TempFolder();
+        try
+        {
+            string bundle = Layout(folder, "3dSen_Data", "StandaloneWindows64", "0f1e2d3c");
+            File.WriteAllBytes(
+                bundle,
+                SyntheticUnityBundle.Build(
+                    [("Pinball", Profile("ABCDEFGHIJKL", "Pinball"))],
+                    SyntheticUnityBundle.ThreeDSen2 with { AlignDataFlag = false }));
+
+            FakeProfileFileSystem files = new();
+            ThreeDSenImporter importer = new(files, Destination);
+
+            // A message, not a crash: the import stops on the bundle and nothing is written.
+            Assert.Throws<UnityAssetFormatException>(() => importer.ImportFrom(folder));
+            Assert.Empty(files.Paths);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     /// <summary>Builds the bytes of a profile SPEC-03 accepts.</summary>
     internal static byte[] Profile(string id, string title)
     {

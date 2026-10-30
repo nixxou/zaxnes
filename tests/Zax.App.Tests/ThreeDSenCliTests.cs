@@ -49,6 +49,29 @@ public sealed class ThreeDSenCliTests
         Assert.Equal(2, Directory.GetFiles(sandbox.ProfilesDirectory, "*.3dn").Length);
     }
 
+    /// <summary>
+    /// AMD-039 §2, §4: the same command line on an installation of 3dSen 2.0 — the path of §2
+    /// under <c>StandaloneWindows64</c> and a bundle in format 8 with flags 0x243 — which used to
+    /// stop on an LZ4 error.
+    /// </summary>
+    [Fact] // AMD-039 §2, §4
+    public void An_import_from_a_3dsen_2_installation_exits_with_zero()
+    {
+        using Sandbox sandbox = new();
+        sandbox.WriteBundle(
+            [("Pinball", Profile("ABCDEFGHIJKL")), ("Tetris", Profile("MNOPQRSTUVWX"))],
+            platform: "StandaloneWindows64",
+            options: SyntheticUnityBundle.ThreeDSen2);
+
+        int code = sandbox.Run(sandbox.InstallRoot);
+
+        Assert.Equal(0, code);
+        Assert.Contains("2 profile(s) imported", sandbox.Output, StringComparison.Ordinal);
+        Assert.Contains("0 failed", sandbox.Output, StringComparison.Ordinal);
+        Assert.Empty(sandbox.Errors);
+        Assert.Equal(2, Directory.GetFiles(sandbox.ProfilesDirectory, "*.3dn").Length);
+    }
+
     [Fact] // AMD-030 §2: the bundle may be named directly.
     public void The_bundle_file_can_be_named_on_the_command_line()
     {
@@ -181,11 +204,17 @@ public sealed class ThreeDSenCliTests
 
         public string Errors => _errors.ToString();
 
-        /// <summary>Writes a synthetic bundle in the layout of AMD-030 §3.</summary>
-        public string WriteBundle(IReadOnlyList<(string Name, byte[] Script)> assets)
+        /// <summary>
+        /// Writes a synthetic bundle in the layout of AMD-030 §3, by default the one of a 1.1.2
+        /// installation.
+        /// </summary>
+        public string WriteBundle(
+            IReadOnlyList<(string Name, byte[] Script)> assets,
+            string platform = "StandaloneWindows",
+            SyntheticBundleOptions? options = null)
         {
             string directory = Path.Combine(
-                InstallRoot, "3dSen_Data", "StreamingAssets", "aa", "StandaloneWindows");
+                InstallRoot, "3dSen_Data", "StreamingAssets", "aa", platform);
             Directory.CreateDirectory(directory);
 
             string bundle = Path.Combine(
@@ -196,7 +225,7 @@ public sealed class ThreeDSenCliTests
                 bundle,
                 SyntheticUnityBundle.Build(
                     assets,
-                    new SyntheticBundleOptions
+                    options ?? new SyntheticBundleOptions
                     {
                         BlockCompression = UnityCompression.Lz4,
                         BlockSize = 128 * 1024,
