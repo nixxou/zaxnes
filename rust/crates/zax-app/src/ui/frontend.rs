@@ -95,6 +95,12 @@ pub struct ImguiFrontend {
 }
 
 impl ImguiFrontend {
+    /// Gives the text fields the system clipboard (Ctrl+C, Ctrl+X, Ctrl+V).
+    pub fn set_clipboard(&mut self, clipboard: sdl2::clipboard::ClipboardUtil) {
+        self.context
+            .set_clipboard_backend(super::platform::SdlClipboard(clipboard));
+    }
+
     /// Builds the context, loads the fonts and uploads the atlas. `drawable_height` sizes the
     /// fonts and the rows of the handheld interface.
     ///
