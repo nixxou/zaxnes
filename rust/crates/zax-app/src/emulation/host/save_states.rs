@@ -28,7 +28,20 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 return None;
             }
         };
-        let core = session.core().save_state(true).ok()?;
+        // Taken at the game's wait for the next frame: it restores with other components of the
+        // hack applied (an aid on or off).
+        let (core, at_idle) = session.core_mut().save_state_at_idle(true).ok()?;
+        let components: Vec<String> = session
+            .core()
+            .applied_components()
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        // The pack whose components are applied, its widescreen running or an aid on.
+        let pack = (!components.is_empty())
+            .then(|| session.core().options_patch())
+            .flatten()
+            .and_then(builtin_patches::by_name);
         let camera = save_state_file::write_camera(&self.scene.camera.capture());
         let conversion = state_codec::write(session.engine());
         let hack = session
@@ -47,8 +60,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 saved_at,
                 slot_id: slot_id.to_owned(),
                 is_hack: Some(hack.is_some()),
-                hack_name: hack.map(|patch| patch.name.to_owned()),
-                hack_version: hack.map(|patch| format!("{:08X}", patch.version())),
+                hack_name: hack.or(pack).map(|patch| patch.name.to_owned()),
+                hack_version: hack
+                    .or(pack)
+                    .map(|patch| format!("{:08X}", patch.version())),
+                hack_components: Some(components),
+                at_idle: Some(at_idle),
                 app_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
                 saved_at_local: Some(save_state_file::local_date_time(saved_at)),
             },

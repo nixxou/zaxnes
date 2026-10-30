@@ -1065,6 +1065,12 @@ impl HandheldUi {
         let cancel = question.cancel_label();
         if cancel.is_empty() {
             painter.hint_texts(&[("A", question.confirm_label())]);
+        } else if let Some(alternative) = question.alternative_label() {
+            painter.hint_texts(&[
+                ("A", question.confirm_label()),
+                ("X", alternative),
+                ("B", cancel),
+            ]);
         } else {
             painter.hint_texts(&[("A", question.confirm_label()), ("B", cancel)]);
         }

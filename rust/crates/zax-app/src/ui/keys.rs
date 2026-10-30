@@ -73,6 +73,9 @@ pub const NOTIFY_STATE_OTHER_PATCH: &str = "notify.state_other_patch";
 pub const NOTIFY_STATE_OTHER_HACK_VERSION: &str = "notify.state_other_hack_version";
 pub const CONFIRM_TURN_HACK_ON: &str = "confirm.turn_hack_on";
 pub const CONFIRM_TURN_HACK_OFF: &str = "confirm.turn_hack_off";
+pub const CONFIRM_OTHER_COMPONENTS: &str = "confirm.other_components";
+pub const BUTTON_LOAD_AS_SET: &str = "button.load_as_set";
+pub const BUTTON_LOAD_ALIGNED: &str = "button.load_aligned";
 pub const NOTIFY_UNCOMPRESSION_FAILED: &str = "notify.uncompression_failed";
 pub const NOTIFY_INVALID_ROM: &str = "notify.invalid_rom";
 pub const NOTIFY_GAME_MISSING: &str = "notify.game_missing";
@@ -342,6 +345,9 @@ pub const PUBLISHED: &[&str] = &[
     NOTIFY_STATE_OTHER_HACK_VERSION,
     CONFIRM_TURN_HACK_ON,
     CONFIRM_TURN_HACK_OFF,
+    CONFIRM_OTHER_COMPONENTS,
+    BUTTON_LOAD_AS_SET,
+    BUTTON_LOAD_ALIGNED,
     NOTIFY_UNCOMPRESSION_FAILED,
     NOTIFY_INVALID_ROM,
     NOTIFY_GAME_MISSING,

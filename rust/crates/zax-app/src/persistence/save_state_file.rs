@@ -34,6 +34,12 @@ pub const OTHER_HACK_VERSION_MESSAGE: &str =
 /// The question asked before a state made with the built-in hack loads while it is off.
 pub const TURN_HACK_ON_QUESTION: &str = "To play this save state, the built-in hack will be turned on: the game reloads, then the save state loads. Continue?";
 /// The question asked before a state made without the built-in hack loads while it is on.
+pub const OTHER_COMPONENTS_QUESTION: &str = "This save state was made with other parts of the built-in hack (the widescreen, the aids) than those set now. Load it with the parts set now, or set them as the save state had them (the game reloads)?";
+/// The button of [`OTHER_COMPONENTS_QUESTION`] that loads the state with the parts set now.
+pub const LOAD_AS_SET_LABEL: &str = "Parts set now";
+/// The button of [`OTHER_COMPONENTS_QUESTION`] that sets the parts as the state had them.
+pub const LOAD_ALIGNED_LABEL: &str = "Parts of the save";
+/// The question asked to turn the built-in hack off for a state made without it.
 pub const TURN_HACK_OFF_QUESTION: &str = "To play this save state, the built-in hack will be turned off: the game reloads, then the save state loads. Continue?";
 /// Notification text of a state whose game is gone (REQ-LOOP-044).
 pub const GAME_MISSING_MESSAGE: &str = "The game profile doesn't exist anymore.";
@@ -70,6 +76,14 @@ pub struct SaveStateHeader {
     /// The built-in patch's version (`BuiltinPatch::version`, 8 hex digits), when one ran.
     #[serde(default)]
     pub hack_version: Option<String>,
+    /// The components of the built-in hack pack applied (`widescreen`, the keys of the aids on;
+    /// `None` in files older than the field).
+    #[serde(default)]
+    pub hack_components: Option<Vec<String>>,
+    /// Whether the state was taken at the game's wait for the next frame, no code of the hack
+    /// running (`None` in files older than the field).
+    #[serde(default)]
+    pub at_idle: Option<bool>,
     /// The version of the application that wrote the file.
     #[serde(default)]
     pub app_version: Option<String>,
@@ -149,6 +163,19 @@ fn header_json(header: &SaveStateHeader) -> Vec<u8> {
             "hackVersion",
             header.hack_version.clone().map(serde_json::Value::String),
         ),
+        (
+            "hackComponents",
+            header.hack_components.as_ref().map(|components| {
+                serde_json::Value::Array(
+                    components
+                        .iter()
+                        .cloned()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                )
+            }),
+        ),
+        ("atIdle", header.at_idle.map(serde_json::Value::Bool)),
         (
             "appVersion",
             header.app_version.clone().map(serde_json::Value::String),

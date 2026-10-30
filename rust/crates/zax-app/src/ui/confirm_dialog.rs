@@ -36,6 +36,16 @@ impl<'a> ConfirmationView<'a> {
         notifications::translate(&self.request.confirm_label)
     }
 
+    /// The label of the button of the question's second answer, in the language of the
+    /// interface, when it has one.
+    #[must_use]
+    pub fn alternative_label(&self) -> Option<String> {
+        self.request
+            .alternative
+            .as_ref()
+            .map(|(label, _)| notifications::translate(label))
+    }
+
     /// The label of the cancelling button, in the language of the interface.
     #[must_use]
     pub fn cancel_label(&self) -> String {

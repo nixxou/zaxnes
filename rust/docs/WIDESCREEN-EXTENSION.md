@@ -1237,6 +1237,17 @@ way also needs the machine put right, which the core does in `restore_state`:
   again with the window on the pack's code (`install_pack`, the patch's `boot_window`), since no
   hack unlocks the extension itself any more.
 
+Since the aids left the widescreen (`HACK-PACKS.md`), a state records the components of the hack
+pack applied (`hackComponents`: `widescreen`, the keys of the aids on) and whether it was taken at
+the game's wait for the next frame (`atIdle`): `NesCore::save_state_at_idle` runs the machine
+on through the vertical blank until the CPU is in the patch's `idle_loop`, no hack code running
+nor on the stack. `state_patch_status` then compares the components with those set now (a file
+older than the field: the widescreen only); `OtherComponents` (orange) replaces `OtherMode`.
+Choosing such a state asks (`CONFIRM_OTHER_COMPONENTS`): load it with the components set now
+(the first answer), or set them as the state had them (`load_slot_aligned`: the widescreen,
+its advanced mode and the aids' options), the game reloading. `OtherVersion` (red) stays refused,
+the version now recorded for a state of the aids alone too.
+
 ---
 
 ## 9. Tools
