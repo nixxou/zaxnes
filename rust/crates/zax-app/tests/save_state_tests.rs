@@ -5,7 +5,6 @@ mod common;
 
 use common::LoopHarness;
 use rstest::rstest;
-use time::OffsetDateTime;
 use zax_app::emulation::commands::{Command, CommandArgs};
 use zax_app::emulation::emulation_state::EmulationState;
 use zax_app::input::InputAction;
@@ -23,7 +22,7 @@ fn req_pers_056_the_file_has_the_signature_and_the_four_sections() {
     harness.launch("g1");
     harness.run_frames(30);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(3));
-    let path = harness.paths.slot_state_file("3");
+    let path = harness.host.slot_state_file("3");
     assert!(path.is_file());
     let file = std::fs::read(path).unwrap();
     assert_eq!(&file[..8], SIGNATURE);
@@ -89,7 +88,7 @@ fn req_arch_013_the_file_stays_under_the_announced_bound() {
     let bound = harness.host.max_save_state_size();
     assert!(bound > 0);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(2));
-    let written = std::fs::metadata(harness.paths.slot_state_file("2"))
+    let written = std::fs::metadata(harness.host.slot_state_file("2"))
         .unwrap()
         .len();
     assert!(
@@ -105,7 +104,7 @@ fn req_loop_046_a_corrupt_savestate_is_refused() {
     harness.run_frames(30);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(4));
     // Truncate the file in place; the index still says the slot is occupied.
-    let path = harness.paths.slot_state_file("4");
+    let path = harness.host.slot_state_file("4");
     let file = std::fs::read(&path).unwrap();
     std::fs::write(&path, &file[..file.len() / 3]).unwrap();
     harness.run_with(Command::LoadSlot, CommandArgs::of_number(4));
@@ -194,7 +193,7 @@ fn req_loop_043_the_quick_slot_has_no_thumbnail() {
     let quick = harness.host.slots.find(QUICK_SLOT_ID).unwrap();
     assert!(quick.is_occupied());
     assert!(quick.thumbnail.is_none());
-    assert!(!harness.paths.slot_thumbnail_file(QUICK_SLOT_ID).exists());
+    assert!(!harness.host.slot_thumbnail_file(QUICK_SLOT_ID).exists());
     let current = harness.host.notifications.current().unwrap();
     assert_eq!("Quick Save", current.text);
     assert!((current.seconds - 4.0).abs() < f64::EPSILON);
@@ -255,12 +254,14 @@ fn req_loop_042_a_numbered_slot_carries_the_game_the_thumbnail_and_the_date() {
     let slot = harness.host.slots.find("5").unwrap();
     assert_eq!("g1", slot.game_id);
     assert_eq!(harness.now(), slot.saved_at);
-    assert_eq!(Some("5.png"), slot.thumbnail.as_deref());
-    assert!(harness.paths.slot_thumbnail_file("5").is_file());
-    // The index was written straight away, before the process could die.
-    assert!(harness.paths.save_index_file.is_file());
-    let now = OffsetDateTime::from_unix_timestamp(harness.now()).unwrap();
-    let reread = SaveSlotIndex::load(&harness.paths, now);
+    let rom = harness.host.rom_file_name("g1");
+    assert_eq!(
+        Some(format!("{rom}.ss5.png").as_str()),
+        slot.thumbnail.as_deref()
+    );
+    assert!(harness.host.slot_thumbnail_file("5").is_file());
+    // The files are the slots (owner request: named after the ROM): read again from them.
+    let reread = SaveSlotIndex::for_rom(&harness.paths, &rom);
     assert_eq!("g1", reread.find("5").unwrap().game_id);
     // Overwriting is silent.
     harness.set_now(harness.now() + 300);
@@ -294,9 +295,9 @@ fn req_pers_053_a_slot_loads_without_the_rom_file() {
     harness.launch("g1");
     harness.run_frames(120);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(7));
-    harness.run(Command::Stop);
-    assert_eq!(EmulationState::Stopped, harness.host.state());
-    // The ROM file disappears and the association is cleared.
+    harness.run_frames(30);
+    // The ROM file disappears and the association is cleared; the game stays chosen (owner
+    // request: its slots are shown only then).
     std::fs::remove_file(harness.root.path().join("g1.nes")).unwrap();
     harness.catalog().add("g1", None);
     harness.run_with(Command::LoadSlot, CommandArgs::of_number(7));
@@ -328,10 +329,10 @@ fn req_pers_054_deleting_a_slot_removes_its_file() {
     harness.launch("g1");
     harness.run_frames(30);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(8));
-    assert!(harness.paths.slot_state_file("8").is_file());
+    assert!(harness.host.slot_state_file("8").is_file());
     harness.run_with(Command::DeleteSlot, CommandArgs::of_number(8));
     assert!(!harness.host.slots.find("8").unwrap().is_occupied());
-    assert!(!harness.paths.slot_state_file("8").exists());
+    assert!(!harness.host.slot_state_file("8").exists());
 }
 
 #[test]
@@ -353,7 +354,7 @@ fn the_header_carries_the_hack_the_version_and_a_thumbnail() {
     harness.launch("g1");
     harness.run_frames(30);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(3));
-    let file = std::fs::read(harness.paths.slot_state_file("3")).unwrap();
+    let file = std::fs::read(harness.host.slot_state_file("3")).unwrap();
     let content = save_state_file::try_read(&file).expect("a readable state");
     // The test ROM has no built-in patch.
     assert_eq!(Some(false), content.header.is_hack);
@@ -388,4 +389,31 @@ fn a_wide_thumbnail_keeps_the_centre_in_4_3() {
     let width = u16::from_be_bytes([jpeg[at + 7], jpeg[at + 8]]);
     assert_eq!((320, 240), (width, height));
     assert!(save_state_file::thumbnail_jpeg(&[0; 100]).is_none());
+}
+
+#[test]
+fn owner_request_a_game_s_states_of_the_shared_slots_move_to_its_rom_s_files() {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    harness.run_frames(30);
+    harness.run_with(Command::SaveSlot, CommandArgs::of_number(4));
+    let rom = harness.host.rom_file_name("g1");
+    harness.run(Command::Stop);
+    // The state as the slots shared by every game had it: `4.state` and the index.
+    std::fs::rename(
+        harness.paths.slot_state_file(&rom, "4"),
+        harness.paths.legacy_slot_state_file("4"),
+    )
+    .unwrap();
+    let mut legacy = SaveSlotIndex::new();
+    legacy.occupy("4", "g1", harness.now(), false);
+    legacy.save(&harness.paths).unwrap();
+    harness.host.legacy_slots = legacy;
+    assert!(!harness.host.slots.find("4").unwrap().is_occupied());
+    harness.launch("g1");
+    assert!(harness.paths.slot_state_file(&rom, "4").is_file());
+    assert!(!harness.paths.legacy_slot_state_file("4").exists());
+    assert!(harness.host.slots.find("4").unwrap().is_occupied());
+    // Every state gone to its game's files, the index goes too.
+    assert!(!harness.paths.save_index_file.exists());
 }

@@ -2,7 +2,8 @@
 //! playing a recorded one back, and notes written on the frame on screen. While recording,
 //! loading a save state (or rolling back) takes the movie back to that state's frame: its inputs
 //! from there are dropped and recording goes on (see `zax_nes::movie::MovieRun`). Movies go to
-//! the `movies` folder of the user data, `<game> <date>.zmv`; the notes written while one is
+//! the `movies` folder of the user data, named after the ROM (owner request): `<rom>.mv<n>`, the
+//! next number; only the movies of the game chosen are listed. The notes written while one is
 //! played are written back to its file.
 
 use std::path::{Path, PathBuf};
@@ -187,16 +188,53 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
-    /// The movie files of the movies folder, newest first, at most [`LISTED_MOVIES`].
+    /// The movie files of the game chosen, newest first, at most [`LISTED_MOVIES`]; none
+    /// without a game (owner request).
     #[must_use]
     pub fn movie_files(&self) -> Vec<PathBuf> {
-        let Ok(entries) = std::fs::read_dir(&self.paths.movies_directory) else {
+        let Some(rom) = self.slots.rom() else {
             return Vec::new();
         };
-        let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+        let mut files: Vec<(std::time::SystemTime, PathBuf)> =
+            movies_of(&self.paths.movies_directory, rom)
+                .into_iter()
+                .map(|(_, path)| {
+                    let modified = std::fs::metadata(&path)
+                        .and_then(|metadata| metadata.modified())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    (modified, path)
+                })
+                .collect();
+        files.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+        files
+            .into_iter()
+            .take(LISTED_MOVIES)
+            .map(|(_, path)| path)
+            .collect()
+    }
+
+    /// Renames the movies of `game_id` named as they were before (`<game> <date>.zmv`, the game
+    /// named in their header) after its ROM `rom`, oldest first.
+    pub(super) fn rename_legacy_movies(&mut self, game_id: &str, rom: &str) {
+        let Some(title) = self.games.title(game_id) else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(&self.paths.movies_directory) else {
+            return;
+        };
+        let mut legacy: Vec<(std::time::SystemTime, PathBuf)> = entries
             .filter_map(Result::ok)
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|extension| extension == "zmv"))
+            .filter(|path| {
+                std::fs::read(path)
+                    .ok()
+                    .and_then(|bytes| Movie::read(&bytes))
+                    .and_then(|movie| serde_json::from_str::<serde_json::Value>(&movie.header).ok())
+                    .is_some_and(|header| {
+                        header.get("game").and_then(|game| game.as_str()) == Some(title.as_str())
+                    })
+            })
             .map(|path| {
                 let modified = std::fs::metadata(&path)
                     .and_then(|metadata| metadata.modified())
@@ -204,12 +242,16 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 (modified, path)
             })
             .collect();
-        files.sort_by_key(|entry| std::cmp::Reverse(entry.0));
-        files
-            .into_iter()
-            .take(LISTED_MOVIES)
-            .map(|(_, path)| path)
-            .collect()
+        legacy.sort_by_key(|entry| entry.0);
+        for (_, path) in legacy {
+            let target = next_movie_file(&self.paths, rom);
+            if std::fs::rename(&path, &target).is_err() {
+                self.log(&format!(
+                    "the movie {} could not be renamed after the ROM.",
+                    path.display()
+                ));
+            }
+        }
     }
 
     fn movie_header(&self) -> String {
@@ -234,24 +276,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     fn new_movie_file(&self) -> PathBuf {
-        let title: String = self
-            .current_game_title()
-            .unwrap_or("movie")
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || " -_()".contains(c) {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let stamp = save_state_file::local_date_time((self.now)().unix_timestamp())
-            .replace([':', ' '], "-");
-        unique(
-            &self.paths.movies_directory,
-            &format!("{} {stamp}", title.trim()),
-        )
+        let rom = self
+            .slots
+            .rom()
+            .map_or_else(|| "movie".to_owned(), str::to_owned);
+        next_movie_file(&self.paths, &rom)
     }
 
     fn notify(&mut self, message: &str) {
@@ -259,15 +288,31 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 }
 
-/// `<directory>/<stem>.zmv`, numbered when it exists already.
-fn unique(directory: &Path, stem: &str) -> PathBuf {
-    let mut path = directory.join(format!("{stem}.zmv"));
-    let mut number = 2;
-    while path.exists() {
-        path = directory.join(format!("{stem} ({number}).zmv"));
-        number += 1;
-    }
-    path
+/// The movies of the ROM `rom` in `directory` (`<rom>.mv<n>`), with their number.
+fn movies_of(directory: &Path, rom: &str) -> Vec<(u32, PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let prefix = format!("{rom}.mv");
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let number = name.strip_prefix(&prefix)?.parse::<u32>().ok()?;
+            Some((number, entry.path()))
+        })
+        .collect()
+}
+
+/// The file of the next movie of the ROM `rom`: `<rom>.mv<n>`, one past the highest number.
+fn next_movie_file(paths: &crate::user_data_paths::UserDataPaths, rom: &str) -> PathBuf {
+    let next = movies_of(&paths.movies_directory, rom)
+        .iter()
+        .map(|(number, _)| *number)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    paths.movie_file(rom, next)
 }
 
 /// `english`, or `french` when the interface is in French.

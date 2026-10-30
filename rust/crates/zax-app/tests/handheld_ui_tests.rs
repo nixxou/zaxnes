@@ -264,7 +264,6 @@ fn the_exit_combination_ends_with_the_settings_and_the_slot_index_written() {
     harness.host.shutdown();
     let written = std::fs::read_to_string(&harness.paths.settings_file).unwrap();
     assert!(written.contains("show_fps"), "{written}");
-    assert!(harness.paths.save_index_file.is_file());
 }
 
 #[test]

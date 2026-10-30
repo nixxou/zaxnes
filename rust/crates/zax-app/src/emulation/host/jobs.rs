@@ -204,7 +204,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             self.fail_job(GAME_MISSING_MESSAGE);
             return;
         };
-        let state = std::fs::read(self.paths.slot_state_file(slot_id))
+        let state = std::fs::read(self.slot_state_file(slot_id))
             .ok()
             .and_then(|bytes| save_state_file::try_read(&bytes));
         let Some(state) = state else {
@@ -677,7 +677,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if let Some(&status) = self.slot_patch_cache.borrow().get(&key) {
             return status;
         }
-        let status = std::fs::read(self.paths.slot_state_file(slot_id))
+        let status = std::fs::read(self.slot_state_file(slot_id))
             .ok()
             .and_then(|bytes| save_state_file::try_read(&bytes))
             .map_or(SlotPatchStatus::Fits, |state| {
@@ -691,7 +691,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// the second answer to the question [`EmulationHost::load_slot`] asks for a state made with
     /// other components.
     pub(super) fn load_slot_aligned(&mut self, slot_id: &str) {
-        let state = std::fs::read(self.paths.slot_state_file(slot_id))
+        let state = std::fs::read(self.slot_state_file(slot_id))
             .ok()
             .and_then(|bytes| save_state_file::try_read(&bytes));
         let Some((state, patch)) = state.and_then(|state| {
@@ -755,7 +755,18 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         let Some(fingerprint) = self.current_rom_fingerprint() else {
             return;
         };
-        let saved = self.battery.attach(&self.paths, &fingerprint);
+        // Owner request: the file is named after the ROM; one named after its fingerprint, as
+        // they were before, is renamed.
+        let name = self.current_game_id().map_or_else(
+            || fingerprint.clone(),
+            |game_id| self.rom_file_name(game_id),
+        );
+        let file = self.paths.battery_file(&name);
+        let before = self.paths.battery_file(&fingerprint);
+        if !file.exists() && before.is_file() && std::fs::rename(&before, &file).is_err() {
+            self.log("the battery RAM file could not be renamed after the ROM.");
+        }
+        let saved = self.battery.attach(&self.paths, &name);
         // A savestate carries its own cartridge RAM, exactly as a console would, so it must not
         // be overwritten by the file on disk (REQ-PERS-060, notes).
         if let (true, Some(saved), Some(session)) = (import_saved, saved, self.session.as_mut()) {

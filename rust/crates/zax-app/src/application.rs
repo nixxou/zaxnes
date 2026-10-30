@@ -1413,7 +1413,7 @@ fn open_audio(options: &AppOptions, sdl: &sdl2::Sdl) -> (Option<AudioOutput>, u3
 
 fn report_startup_problems(host: &mut AppHost, paths: &UserDataPaths) {
     use crate::emulation::notification_center::{NotificationSeverity, DEFAULT_SECONDS};
-    if host.slots.was_recovered {
+    if host.legacy_slots.was_recovered {
         host.notifications.show(
             "Save slots were rebuilt from the state files.",
             DEFAULT_SECONDS,

@@ -97,7 +97,7 @@ fn req_arch_013_a_public_rom_stays_under_the_announced_bound() {
     let bound = harness.host.max_save_state_size();
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(2));
 
-    let written = std::fs::metadata(harness.paths.slot_state_file("2"))
+    let written = std::fs::metadata(harness.host.slot_state_file("2"))
         .unwrap()
         .len();
     assert!(

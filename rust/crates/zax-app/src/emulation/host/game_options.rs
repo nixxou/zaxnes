@@ -63,6 +63,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .unwrap_or_default();
         self.game_options_rom = rom;
         self.settings.set_game_values(options);
+        self.choose_slots(game_id);
     }
 
     /// Writes down an option of the game in play the user changed in the options (it went to

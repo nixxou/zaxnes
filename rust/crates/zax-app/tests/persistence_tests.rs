@@ -91,7 +91,7 @@ fn amd_029_the_first_run_copies_the_root_of_the_old_name() {
     );
     assert_eq!(
         vec![1, 2, 3, 4],
-        std::fs::read(paths.slot_state_file("quick")).unwrap()
+        std::fs::read(paths.legacy_slot_state_file("quick")).unwrap()
     );
     assert_eq!(
         vec![9],
@@ -254,8 +254,8 @@ fn req_pers_055_the_slots_are_reconciled_at_start_up() {
     index.occupy("1", "alive", 10, false);
     index.occupy("2", "alive", 20, false);
     index.occupy("3", "gone", 30, false);
-    std::fs::write(paths.slot_state_file("1"), [1]).unwrap();
-    std::fs::write(paths.slot_state_file("3"), [3]).unwrap();
+    std::fs::write(paths.legacy_slot_state_file("1"), [1]).unwrap();
+    std::fs::write(paths.legacy_slot_state_file("3"), [3]).unwrap();
     index.save(&paths).unwrap();
     let mut reread = SaveSlotIndex::load(&paths, at(0));
     let cleared = reread.reconcile(&paths, |id| id == "alive");
@@ -263,7 +263,7 @@ fn req_pers_055_the_slots_are_reconciled_at_start_up() {
     assert!(reread.find("1").unwrap().is_occupied());
     assert!(!reread.find("2").unwrap().is_occupied());
     assert!(!reread.find("3").unwrap().is_occupied());
-    assert!(!paths.slot_state_file("3").exists());
+    assert!(!paths.legacy_slot_state_file("3").exists());
 }
 
 #[test]
@@ -272,7 +272,14 @@ fn req_pers_055_a_corrupt_index_is_rebuilt_from_the_files() {
     harness.launch("g1");
     harness.run_frames(30);
     harness.run_with(Command::SaveSlot, CommandArgs::of_number(9));
+    let rom = harness.host.rom_file_name("g1");
     harness.host.shutdown();
+    // The shared slots of before: a state of theirs, and their index unreadable.
+    std::fs::rename(
+        harness.paths.slot_state_file(&rom, "9"),
+        harness.paths.legacy_slot_state_file("9"),
+    )
+    .unwrap();
     std::fs::write(&harness.paths.save_index_file, "not json at all").unwrap();
     let rebuilt = SaveSlotIndex::load(&harness.paths, at(harness.now()));
     assert!(rebuilt.was_recovered);
