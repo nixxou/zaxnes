@@ -342,6 +342,58 @@ public sealed class CylinderVectorTests
     }
 
     [Fact]
+    public void REQ_E3D_450_a_segment_of_two_pixels_at_depth_three_fills_the_whole_depth()
+    {
+        // REQ-E3D-444 to 452, the ring ropes of the `punchout` profile: HCYLINDER, D = 3,
+        // solid = fullWarp = true, a rope two pixels tall. L = 1, so C = 7, A = 1, B = 1 and
+        // Cz = 2. The only region 2 point of bounds z+ != z- is (1, 0), with
+        // z+ = floor((Cz - 1) / 2) = 0 and z- = 2: its span covers the three slices (Q-015),
+        // and the section is the whole 2 x 3 box rather than a round one. D' = B + 1 = 2.
+        // Q-082: the original is reported one unit deep here.
+        EnginePattern pattern = Geo.OneTile(Geo.Tile("........", "........", "........", "1.......", "1......."));
+        PatternInstance instance = Geo.Object3D(
+            depth: 3,
+            geometry: Geo3DType.HCylinder,
+            solid: true,
+            fullWarp: true);
+        TileVoxels[] fields = Geo.Fields(pattern, instance, out int effectiveDepth);
+
+        Assert.Equal(2, effectiveDepth);
+        Assert.Equal(
+            Geo.Voxels(
+                (3, 0, 4), (3, 1, 4), (3, 2, 4),
+                (4, 0, 3), (4, 1, 3), (4, 2, 3)),
+            Geo.Section(fields[0], line: 0, vertical: false));
+
+        // The three other flag pairs keep the same six voxels — only the texels of
+        // REQ-E3D-447 move, the shape does not: the contour alone already carries the two
+        // extreme slices, since the quadrant points of (1, 0) are (u, 0) and (u, 2).
+        foreach ((bool solid, bool fullWarp) in new[] { (false, false), (false, true), (true, false) })
+        {
+            PatternInstance other = Geo.Object3D(
+                depth: 3,
+                geometry: Geo3DType.HCylinder,
+                solid: solid,
+                fullWarp: fullWarp);
+            TileVoxels[] others = Geo.Fields(pattern, other, out int otherDepth);
+            List<(int Line, int Depth, int Texel)> section =
+                Geo.Section(others[0], line: 0, vertical: false);
+
+            Assert.Equal(2, otherDepth);
+            Assert.Equal(
+                [(3, 0), (3, 1), (3, 2), (4, 0), (4, 1), (4, 2)],
+                section.ConvertAll(v => (v.Line, v.Depth)));
+        }
+
+        // A solid box of 1 x 2 x 3: six rectangles, and three units deep in the local frame
+        // of REQ-E3D-504, which keeps the construction depth D = 3.
+        TileMesh mesh = Geo.Mesh(pattern, instance);
+        Assert.Equal(6, Geo.Rectangles(mesh));
+        Assert.True(Geo.Close(new Vec3(-4f, -1f, -1.5f), mesh.BoundsMin));
+        Assert.True(Geo.Close(new Vec3(-3f, 1f, 1.5f), mesh.BoundsMax));
+    }
+
+    [Fact]
     public void REQ_E3D_452_a_cylinder_without_a_segment_has_no_depth()
     {
         EnginePattern blank = Geo.OneTile(Geo.Blank);
