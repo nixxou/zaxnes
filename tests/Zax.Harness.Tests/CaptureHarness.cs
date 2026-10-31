@@ -17,14 +17,24 @@ internal static class CaptureHarness
     /// <param name="runFrames">Real frames to run before the capture.</param>
     /// <param name="title">How the capture names the profile (REQ-PROF-022).</param>
     /// <param name="mesh">The mesh algorithm <c>--mesh</c> stands for (REQ-E3D-340).</param>
+    /// <param name="image">
+    /// The ROM image to replay; left out, the endless loop of <see cref="BlankRom"/>.
+    /// </param>
+    /// <param name="press">The <c>--press</c> script, or null for idle controllers.</param>
+    /// <param name="control">
+    /// The <c>--soft-reset-at</c>, <c>--rollback-at</c> and <c>--frame-log</c> of the run.
+    /// </param>
     public static SyntheticScene Capture(
         GameProfile profile,
         int runFrames = 4,
         string? title = null,
-        RenderAlgorithm mesh = RenderAlgorithm.Greedy)
+        RenderAlgorithm mesh = RenderAlgorithm.Greedy,
+        byte[]? image = null,
+        string? press = null,
+        RomRunControl? control = null)
     {
         string rom = Path.Combine(Path.GetTempPath(), $"zax-harness-{Guid.NewGuid():N}.nes");
-        File.WriteAllBytes(rom, BlankRom());
+        File.WriteAllBytes(rom, image ?? BlankRom());
         try
         {
             return RenderExport.FromRom(
@@ -33,12 +43,29 @@ internal static class CaptureHarness
                 profile,
                 title ?? "2D Mode",
                 mesh,
-                InputScript.Parse(null));
+                InputScript.Parse(press),
+                batteryPath: null,
+                dumpFrame: null,
+                runAhead: 0,
+                control: control);
         }
         finally
         {
             File.Delete(rom);
         }
+    }
+
+    /// <summary>
+    /// A 32 KiB PRG + 8 KiB CHR NROM image whose program is <paramref name="program"/>, loaded
+    /// at <c>$8000</c>, which the three vectors all point to.
+    /// </summary>
+    public static byte[] Rom(params byte[] program)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+
+        byte[] image = BlankRom();
+        program.CopyTo(image, 16);
+        return image;
     }
 
     /// <summary>

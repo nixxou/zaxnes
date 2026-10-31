@@ -25,6 +25,22 @@ internal sealed record SyntheticScene(
     /// difference between the two can be pinned on the conversion rather than on the renderer.
     /// </summary>
     public byte[]? NesPicture { get; init; }
+
+    /// <summary>
+    /// The 64 <c>PData</c> values of the captured frame, in the order Lua reads them as
+    /// <c>PData[1]</c> to <c>PData[64]</c> (SPEC-05 §4.6, REQ-LUA-070). Null for a synthetic
+    /// frame, which has no Lua runtime behind it.
+    /// </summary>
+    public float[]? PersistentData { get; init; }
+
+    /// <summary>
+    /// The core the ROM ran on, when the scene came from one: what a test inspects after a soft
+    /// reset or a rollback.
+    /// </summary>
+    public NesCore? Core { get; init; }
+
+    /// <summary>The per-frame log of <c>--frame-log</c>, when the run was asked for one.</summary>
+    public FrameLog? FrameLog { get; init; }
 }
 
 /// <summary>

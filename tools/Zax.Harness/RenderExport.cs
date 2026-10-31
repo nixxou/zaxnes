@@ -56,9 +56,28 @@ internal static class RenderExport
                                    file per scene, the name inserted before the extension.
           --press <spec>           Port 1 buttons to hold while replaying, as a comma
                                    separated list of <first>[-<last>]:<buttons>, the frame
-                                   numbers counting from the reset and the buttons being
-                                   a|b|select|start|up|down|left|right joined by '+'
-                                   (for example 200:start,260:start,400-700:right).
+                                   numbers counting real frames from the power-on and the
+                                   buttons being a|b|select|start|up|down|left|right joined
+                                   by '+' (for example 200:start,260:start,400-700:right).
+                                   A soft reset or a rollback does not renumber them: the
+                                   count is the harness's own, not the core's counter.
+          --soft-reset-at <n>      After real frame n, press the console's RESET button:
+                                   the soft reset of AMD-044 (REQ-CORE-122, REQ-LOOP-072) as
+                                   the application's command applies it — RAM kept, core
+                                   frame counter back to 0, rollback history emptied, the
+                                   profile not relaunched (no End, no Start, PData and the
+                                   learned conversion state untouched).
+          --rollback-at <n>        After real frame n, roll back as the application's command
+                                   does (AMD-042 REQ-LOOP-069 to 071, REQ-LOOP-030 to 032):
+                                   a snapshot at the start of every frame whose core counter
+                                   is a multiple of 60, 30 of them at most, and the
+                                   second-to-last one restored — core, the 64 PData values
+                                   and the camera.
+          --frame-log <file.jsonl> One JSON object per real frame, one per line: the real
+                                   frame number, the port 1 input word, the core's frame
+                                   counter once the frame has run, the non-empty tile count
+                                   and the FNV-1a 64 of the frame's tiles as '--dump-frame'
+                                   writes them (16 hexadecimal digits).
           --profile <title>        Built-in profile, or a profile file path.
           --assets <dir>           Folder holding profiles.json (profile lookup) and the
                                    cubemaps, meshes and textures the scene uses. Without it
@@ -113,6 +132,9 @@ internal static class RenderExport
         string? battery = null;
         string? dumpFrame = null;
         string? dumpMeshes = null;
+        int? softResetAt = null;
+        int? rollbackAt = null;
+        string? frameLog = null;
         int runFrames = 120;
         int runAhead = 0;
         int width = 640;
@@ -184,6 +206,20 @@ internal static class RenderExport
 
                 case "--dump-meshes":
                     dumpMeshes = Next(args, ref i);
+                    break;
+
+                // AMD-044 REQ-LOOP-072 and AMD-042 REQ-LOOP-070, applied after the real frame
+                // they name (see RomRunControl).
+                case "--soft-reset-at":
+                    softResetAt = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    break;
+
+                case "--rollback-at":
+                    rollbackAt = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    break;
+
+                case "--frame-log":
+                    frameLog = Next(args, ref i);
                     break;
 
                 case "--size":
@@ -298,6 +334,21 @@ internal static class RenderExport
             return 2;
         }
 
+        RomRunControl control = new()
+        {
+            SoftResetAt = softResetAt,
+            RollbackAt = rollbackAt,
+            FrameLogPath = frameLog,
+        };
+
+        if (rom is null && !control.IsEmpty)
+        {
+            Console.Error.WriteLine(
+                "render: --soft-reset-at, --rollback-at and --frame-log replay real frames and "
+                    + "therefore need --rom.");
+            return 2;
+        }
+
         Directory.CreateDirectory(output);
 
         List<SyntheticScene> scenes;
@@ -314,7 +365,8 @@ internal static class RenderExport
                     InputScript.Parse(press),
                     battery,
                     dumpFrame,
-                    runAhead)];
+                    runAhead,
+                    control)];
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or JsonException
             or InvalidOperationException or ProfileCatalogueException)
@@ -549,7 +601,8 @@ internal static class RenderExport
         InputScript input,
         string? batteryPath,
         string? dumpFrame,
-        int runAhead)
+        int runAhead,
+        RomRunControl? control)
     {
         GameProfile profile = LoadProfile(profileName, assets, out string label);
         return FromRom(
@@ -561,7 +614,8 @@ internal static class RenderExport
             input,
             batteryPath,
             dumpFrame,
-            runAhead);
+            runAhead,
+            control);
     }
 
     /// <summary>
@@ -577,9 +631,11 @@ internal static class RenderExport
         InputScript input,
         string? batteryPath = null,
         string? dumpFrame = null,
-        int runAhead = 0)
+        int runAhead = 0,
+        RomRunControl? control = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
+        control?.Validate(runFrames);
         ConversionEngine engine = new();
         engine.UseGeometry();
         engine.TwoDimensionalMode = profile.PermanentPatterns.Count == 0
@@ -636,9 +692,15 @@ internal static class RenderExport
         runtime.InvokeStart();
         ScriptBridge.Push(runtime, scene);
 
-        int counter = 0;
+        // The session's frame counter, the one GameSession keeps: it feeds the conversion and
+        // the Lua globals « frame » and « time », goes back to 0 on a soft reset (AMD-044
+        // REQ-CORE-122) and is left alone by a rollback, exactly as in the application. The real
+        // frame count below is the harness's own and never restarts.
+        int sessionFrame = 0;
         TileRecord[] lastRecords = [];
         byte[] lastPalette = new byte[32];
+        FrameLog? log = control?.FrameLogPath is not null ? new FrameLog() : null;
+        (int Tiles, ulong Hash) measured = FrameLog.Empty;
         core.VideoCallback = (in FrameBatch batch) =>
         {
             if (dumpFrame is not null)
@@ -647,7 +709,12 @@ internal static class RenderExport
                 batch.Palette.CopyTo(lastPalette);
             }
 
-            engine.Convert(batch, counter);
+            if (log is not null)
+            {
+                measured = FrameLog.Measure(batch.Records);
+            }
+
+            engine.Convert(batch, sessionFrame);
         };
         core.Reset();
 
@@ -656,15 +723,32 @@ internal static class RenderExport
         // frame with its image and its sound, then the real state back. With N = 0 this is one
         // ordinary frame, exactly as before.
         Zax.Nes.State.CoreState real = new();
-        for (; counter < Math.Max(1, runFrames); counter++)
+        HarnessRollbackHistory history = new();
+        int realFrames = Math.Max(1, runFrames);
+        int counter = 0;
+        for (; counter < realFrames; counter++)
         {
+            // REQ-LOOP-030 and AMD-042 REQ-LOOP-069: the snapshot is taken at the start of a
+            // frame whose core frame counter is a multiple of 60 — so before that frame runs,
+            // the core being in its real state — and carries the core, the 64 PData values and
+            // the camera state, read as they stand at that instant and with no script hook
+            // involved (AMD-042 §3).
+            if (control is { KeepsHistory: true }
+                && HarnessRollbackHistory.IsSnapshotFrame(core.FrameCount))
+            {
+                history.Capture(new HarnessRollbackSnapshot(
+                    core.SaveState(includeRomImage: false),
+                    runtime.CapturePersistentData(),
+                    scene.Camera.Capture()));
+            }
+
+            ushort word = input.At(counter);
             if (runAhead <= 0)
             {
-                core.RunFrame(input.At(counter), FrameOutput.All);
+                core.RunFrame(word, FrameOutput.All);
             }
             else
             {
-                ushort word = input.At(counter);
                 core.RunFrame(word, FrameOutput.None);
                 core.CaptureState(real);
                 for (int ahead = 1; ahead < runAhead; ahead++)
@@ -677,7 +761,26 @@ internal static class RenderExport
             }
 
             engine.Publish();
+            sessionFrame++;
+            log?.Add(counter, word, core.FrameCount, measured.Tiles, measured.Hash);
+
+            // The two commands of the game menu, applied between two real frames — the moment
+            // REQ-LOOP-007 reserves for them — so the --press script keeps counting real frames
+            // across them.
+            if (control?.SoftResetAt == counter)
+            {
+                SoftReset(core, engine, history, ref sessionFrame, counter);
+            }
+
+            if (control?.RollbackAt == counter)
+            {
+                Rollback(core, engine, runtime, scene, history, counter);
+            }
         }
+
+        // AMD-042 REQ-LOOP-069 reads them the way GetPData(i) does. They are taken before the
+        // End hooks run, so what the capture reports is the state of the frame it shows.
+        float[] persistentData = PersistentData.Read(runtime.CapturePersistentData());
 
         runtime.InvokeEnd();
         ScriptBridge.Report(runtime, timed);
@@ -686,6 +789,12 @@ internal static class RenderExport
         {
             File.WriteAllText(dumpFrame, FrameJson.Write(lastRecords, lastPalette, runAhead));
             Console.Out.WriteLine($"render: frame written to {dumpFrame}");
+        }
+
+        if (log is not null && control?.FrameLogPath is { } logPath)
+        {
+            log.Write(logPath);
+            Console.Out.WriteLine($"render: {log.Lines.Count} frame(s) logged to {logPath}");
         }
 
         byte[] picture = core.PixelFrame.ToArray();
@@ -708,7 +817,82 @@ internal static class RenderExport
                 + $"profile '{profileLabel}'")
         {
             NesPicture = picture,
+            PersistentData = persistentData,
+            Core = core,
+            FrameLog = log,
         };
+    }
+
+    /// <summary>
+    /// The soft reset of AMD-044 REQ-LOOP-072, as <c>EmulationHost.SoftResetGame</c> applies it:
+    /// the core imitates a press on the RESET button (REQ-CORE-122), the session's frame counter
+    /// goes back to 0, the converted frames in flight are dropped (REQ-E3D-281) and the rollback
+    /// history is emptied (REQ-LOOP-031).
+    /// </summary>
+    /// <remarks>
+    /// What it does <b>not</b> do is relaunch the profile: the ROM is not read again, no
+    /// <c>End</c> and no <c>Start</c> hook runs, <c>PData</c> is untouched and the learned
+    /// conversion state stays. The pause, the pacing clock and the fast forward the application
+    /// also resets have no counterpart in a headless replay.
+    /// </remarks>
+    private static void SoftReset(
+        NesCore core,
+        ConversionEngine engine,
+        HarnessRollbackHistory history,
+        ref int sessionFrame,
+        int realFrame)
+    {
+        core.SoftReset();
+        sessionFrame = 0;
+        engine.ClearFrames();
+        history.Clear();
+        Console.Out.WriteLine(
+            $"render: soft reset after real frame {realFrame} (AMD-044 REQ-LOOP-072); "
+                + "core frame counter back to 0, RAM kept");
+    }
+
+    /// <summary>
+    /// The rollback of REQ-LOOP-032 and AMD-042 REQ-LOOP-070, as
+    /// <c>EmulationHost.PerformRollback</c> applies it: the second-to-last snapshot is restored
+    /// — the core, then the 64 <c>PData</c> values, then the camera — and both it and the last
+    /// snapshot leave the history.
+    /// </summary>
+    /// <remarks>
+    /// The <c>Save</c> and <c>Load</c> hooks are never called: the entries go back the way
+    /// <c>SetPData</c> writes them, and the camera goes through <c>SceneCamera.Restore</c>, the
+    /// one path a savestate load also uses, so that the "shown straight at its setpoints" of
+    /// AMD-045 REQ-SCN-073 applies here too.
+    /// </remarks>
+    private static void Rollback(
+        NesCore core,
+        ConversionEngine engine,
+        ProfileScriptRuntime runtime,
+        SceneState scene,
+        HarnessRollbackHistory history,
+        int realFrame)
+    {
+        if (history.TakeRollbackTarget() is not { } snapshot)
+        {
+            // REQ-LOOP-032, notes: with an empty history nothing is restored, and the rest of
+            // step 3 has no headless counterpart.
+            Console.Out.WriteLine(
+                $"render: rollback after real frame {realFrame}: the history is empty, "
+                    + "nothing restored (REQ-LOOP-032, notes)");
+            return;
+        }
+
+        if (!core.TryLoadState(snapshot.Core, 0, out _, out _, out string? error))
+        {
+            Console.Error.WriteLine($"render: rollback snapshot refused: {error}");
+            return;
+        }
+
+        engine.ClearFrames();
+        runtime.RestorePersistentData(snapshot.PersistentData);
+        scene.Camera.Restore(snapshot.Camera);
+        Console.Out.WriteLine(
+            $"render: rollback after real frame {realFrame} (AMD-042 REQ-LOOP-070) to core "
+                + $"frame {core.FrameCount}; {history.Count} snapshot(s) left");
     }
 
     /// <summary>Writes the flat NES picture, one colour index per pixel (REQ-CORE-048).</summary>
@@ -867,7 +1051,44 @@ internal static class RenderExport
                 + $"\"requestedShadowMapSize\": {render.RequestedShadowMapSize}, "
                 + $"\"distinctColors\": {capture.DistinctColors}, "
                 + $"\"backgroundPixels\": {capture.BackgroundPixels}, "
-                + $"\"meanLuma\": {capture.MeanLuma:F4}{bench} }}");
+                + $"\"meanLuma\": {capture.MeanLuma:F4}{bench}, "
+                + $"{CameraJson(scene.Scene.Camera)}{PdataJson(scene.PersistentData)} }}");
+    }
+
+    /// <summary>
+    /// The camera of the captured frame: its mode, its field of view, the setpoint distance and
+    /// angles of that mode, and the framed distance d₀ of AMD-045 REQ-SCN-069 — the value a view
+    /// reset would write at this FOV, before the [0, 512] bound of REQ-SCN-011, which is also
+    /// what <c>Camera.ResetDistance</c> reads (REQ-LUA-113).
+    /// </summary>
+    internal static string CameraJson(SceneCamera camera)
+    {
+        ArgumentNullException.ThrowIfNull(camera);
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"\"camera\": {{ \"mode\": \"{camera.Mode}\", \"fov\": {camera.Fov:0.######}, "
+                + $"\"setpointDistance\": {camera.Current.Distance:0.######}, "
+                + $"\"framedDistance\": {camera.ResetDistance:0.######}, "
+                + $"\"angles\": [{camera.Current.Angles.X:0.######}, "
+                + $"{camera.Current.Angles.Y:0.######}, {camera.Current.Angles.Z:0.######}] }}");
+    }
+
+    /// <summary>
+    /// The 64 persistent values of the captured frame in the order Lua reads them, so that
+    /// <c>pdata[0]</c> of the export is <c>PData[1]</c> of the script (SPEC-05 §4.6). A value
+    /// Lua left non-finite is written as null, which keeps the file readable as JSON.
+    /// </summary>
+    internal static string PdataJson(float[]? values)
+    {
+        if (values is null)
+        {
+            return string.Empty;
+        }
+
+        IEnumerable<string> entries = values.Select(static value => float.IsFinite(value)
+            ? string.Create(CultureInfo.InvariantCulture, $"{value:0.######}")
+            : "null");
+        return ", \"pdata\": [" + string.Join(", ", entries) + "]";
     }
 
     private static string Next(string[] args, ref int index)

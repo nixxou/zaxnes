@@ -579,6 +579,29 @@ Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-sce
 et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
 
+Avec `--rom`, trois options rejouent ce que fait le menu du jeu et consignent la partie :
+
+```
+Zax.Harness.exe render --out captures --rom jeu.nes --run 400 ^
+  --press 100-110:start --soft-reset-at 200 --frame-log frames.jsonl
+```
+
+- `--soft-reset-at <n>` : après la frame réelle `n`, le reset doux d'`AMD-044`
+  (`REQ-CORE-122`, `REQ-LOOP-072`) — la RAM est conservée, le compteur de frames du cœur repart
+  de 0, l'historique de rollback est vidé, le profil n'est pas relancé ;
+- `--rollback-at <n>` : après la frame réelle `n`, le rollback d'`AMD-042` (`REQ-LOOP-069` à
+  071) — un snapshot au début de chaque frame dont le compteur du cœur est un multiple de 60,
+  30 au plus, et l'avant-dernier restauré : cœur, les 64 valeurs de `PData` et la caméra ;
+- `--frame-log <fichier.jsonl>` : une ligne JSON par frame réelle (numéro de frame, mot d'entrée
+  du port 1, compteur du cœur, nombre de tiles non vides, FNV-1a 64 des tiles telles que
+  `--dump-frame` les écrit).
+
+Les numéros de frame de `--press`, de `--soft-reset-at` et de `--rollback-at` comptent les frames
+réelles depuis la mise sous tension : ni le reset doux ni le rollback ne les renumérotent, alors
+qu'ils changent tous deux le compteur du cœur. `render.json` ajoute, pour la frame capturée, la
+caméra (mode, distance de consigne, distance cadrée d₀ d'`AMD-045`, angles, FOV) et les 64
+valeurs de `PData` dans l'ordre où Lua les lit.
+
 La commande `stress` rejoue en boucle le banc de mesure des jeux de référence — plusieurs jeux
 à la suite dans un seul contexte GL — pour traquer une faute intermittente (`spec/changes/Q-062.md`).
 Elle signale toute exception dès son lancer, avec la pile vue du site de lancer :
