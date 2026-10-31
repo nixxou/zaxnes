@@ -147,12 +147,18 @@ impl Stage {
 struct Tally {
     total: f64,
     max: f64,
+    /// Frames over [`SLOW_SECONDS`]: the spikes a device would show as a missed frame.
+    slow: u32,
 }
+
+/// One millisecond, a tenth of a frame on the PC, about a whole one on a handheld.
+const SLOW_SECONDS: f64 = 0.001;
 
 impl Tally {
     fn add(&mut self, seconds: f64) {
         self.total += seconds;
         self.max = self.max.max(seconds);
+        self.slow += u32::from(seconds > SLOW_SECONDS);
     }
 }
 
@@ -345,10 +351,11 @@ fn report(options: &Options, tallies: &[Tally], whole: Tally, record_count: f64)
     )];
     for (stage, tally) in Stage::ALL.iter().zip(tallies) {
         lines.push(format!(
-            "  {:<24} {:>8.4} ms/frame  max {:>8.3} ms",
+            "  {:<24} {:>8.4} ms/frame  max {:>8.3} ms  {:>5} over 1 ms",
             stage.name(),
             tally.total * 1000.0 / frames,
-            tally.max * 1000.0
+            tally.max * 1000.0,
+            tally.slow
         ));
     }
     lines.push(format!(
