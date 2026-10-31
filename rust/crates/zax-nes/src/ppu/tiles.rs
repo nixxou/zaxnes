@@ -1018,46 +1018,22 @@ impl Ppu2C02 {
                 from.map_or(SCREEN_WIDTH_I32, |&from| i32::from(from)),
             )
         };
+        // The centre's x range of every picture row, worked out once (empty off the screen's
+        // rows): a pixel in it is the PPU's own, every other one is composed from the records.
+        let centres: Vec<(i32, i32)> = (0..height)
+            .map(|row| {
+                if screen_rows.contains(&row) {
+                    centre(row)
+                } else {
+                    (0, 0)
+                }
+            })
+            .collect();
         // Palette entries of the sides (0 = nothing), composed first, then turned into colours. A
         // sprite behind is painted first so that an opaque background pixel covers it.
         out.resize(width * height, 0);
         let paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
-            for py in 0..8i32 {
-                let Ok(row) =
-                    usize::try_from(i32::from(record.y) + py + self.frame_vertical_margin)
-                else {
-                    continue;
-                };
-                if row >= height {
-                    continue;
-                }
-                for px in 0..8i32 {
-                    let x = i32::from(record.x) + px;
-                    if screen_rows.contains(&row) && (centre(row).0..centre(row).1).contains(&x) {
-                        continue;
-                    }
-                    let Ok(column) = usize::try_from(x + self.frame_margin) else {
-                        continue;
-                    };
-                    if column >= width {
-                        continue;
-                    }
-                    #[allow(clippy::cast_sign_loss)] // 0..8.
-                    let Some(pixel) = record.displayed_pixel(px as usize, py as usize) else {
-                        continue;
-                    };
-                    let slot = &mut out[(row * width) + column];
-                    if pixel != 0 {
-                        // A background tile in sub-palette 4-7 is the margin palette's: entries
-                        // MARGIN_ENTRIES up.
-                        *slot = if record.background && record.palette >= 4 {
-                            MARGIN_ENTRIES + ((record.palette - 4) * 4) + pixel
-                        } else {
-                            base + (record.palette * 4) + pixel
-                        };
-                    }
-                }
-            }
+            self.paint_side_tile(record, base, out, width, &centres);
         };
         let records = self.tiles.records();
         for record in records.iter().filter(|r| !r.background && r.hidden).rev() {
@@ -1076,26 +1052,99 @@ impl Ppu2C02 {
             paint(record, 0x10, out);
         }
 
+        let colour = |entry: u8| -> u8 {
+            match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
+                (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
+                _ => self.palette[palette_index(0x3F00 | u16::from(entry))],
+            }
+        };
         for row in 0..height {
             let line = &mut out[row * width..(row + 1) * width];
-            let (start, stop) = centre(row);
-            let first = margin + usize::try_from(start).unwrap_or(0);
-            let end = margin + usize::try_from(stop).unwrap_or(SCREEN_WIDTH);
-            for (column, slot) in line.iter_mut().enumerate() {
-                if screen_rows.contains(&row) && (first..end).contains(&column) {
-                    *slot = self.pixels[((row - margin_y) * SCREEN_WIDTH) + column - margin];
-                } else if let (Some(margin_palette), Some(entry)) =
-                    (self.margin_palette, slot.checked_sub(MARGIN_ENTRIES))
-                {
-                    *slot = margin_palette[usize::from(entry & 15)];
+            // The centre of a screen row is the PPU's picture, copied whole; the rest is turned
+            // from palette entries into colours.
+            let (first, end) = if screen_rows.contains(&row) {
+                let (start, stop) = centres[row];
+                let first = margin + usize::try_from(start).unwrap_or(0);
+                let end = margin + usize::try_from(stop).unwrap_or(SCREEN_WIDTH);
+                if first < end {
+                    (first, end.min(width))
                 } else {
-                    *slot = self.palette[palette_index(0x3F00 | u16::from(*slot))];
+                    (0, 0)
                 }
+            } else {
+                (0, 0)
+            };
+            if first < end {
+                let source = ((row - margin_y) * SCREEN_WIDTH) + first - margin;
+                line[first..end].copy_from_slice(&self.pixels[source..source + (end - first)]);
+            }
+            let (before, after) = line.split_at_mut(end);
+            for slot in before[..first].iter_mut().chain(after.iter_mut()) {
+                *slot = colour(*slot);
             }
         }
 
         self.paint_extra_sprites(out, width, &screen_rows);
         height
+    }
+
+    /// Paints the pixels of `record` that fall outside the centre (`centres`: the centre's x range
+    /// of each picture row) into the palette entries `out` of a picture `width` wide; `base` is
+    /// the first entry of its kind of palette (0x00 for the background, 0x10 for the sprites).
+    fn paint_side_tile(
+        &self,
+        record: &TileRecord,
+        base: u8,
+        out: &mut [u8],
+        width: usize,
+        centres: &[(i32, i32)],
+    ) {
+        let top = i32::from(record.y) + self.frame_vertical_margin;
+        let left = i32::from(record.x);
+        // A tile wholly in the centre (most of them) paints nothing: skipped at once.
+        let hidden = (0..8i32).all(|py| {
+            usize::try_from(top + py)
+                .ok()
+                .and_then(|row| centres.get(row))
+                .is_none_or(|&(from, to)| from <= left && left + 8 <= to)
+        });
+        if hidden {
+            return;
+        }
+        for py in 0..8i32 {
+            let Ok(row) = usize::try_from(top + py) else {
+                continue;
+            };
+            let Some(&(from, to)) = centres.get(row) else {
+                continue;
+            };
+            for px in 0..8i32 {
+                let x = left + px;
+                if (from..to).contains(&x) {
+                    continue;
+                }
+                let Ok(column) = usize::try_from(x + self.frame_margin) else {
+                    continue;
+                };
+                if column >= width {
+                    continue;
+                }
+                #[allow(clippy::cast_sign_loss)] // 0..8.
+                let Some(pixel) = record.displayed_pixel(px as usize, py as usize) else {
+                    continue;
+                };
+                let slot = &mut out[(row * width) + column];
+                if pixel != 0 {
+                    // A background tile in sub-palette 4-7 is the margin palette's: entries
+                    // MARGIN_ENTRIES up.
+                    *slot = if record.background && record.palette >= 4 {
+                        MARGIN_ENTRIES + ((record.palette - 4) * 4) + pixel
+                    } else {
+                        base + (record.palette * 4) + pixel
+                    };
+                }
+            }
+        }
     }
 
     /// Draws over the centre of a wide picture the sprites the PPU did not draw there: those of
