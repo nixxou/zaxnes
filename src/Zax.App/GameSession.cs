@@ -604,6 +604,12 @@ internal sealed class GameSession : IDisposable
     /// </summary>
     public ReadOnlySpan<byte> NesPicture => Core.PixelFrame;
 
+    /// <summary>
+    /// The opacity mask of the same frame, one bit per pixel (SPEC-02 REQ-CORE-049): the 2D
+    /// mode draws nothing where the bit is 0 (AMD-050 REQ-SCN-076).
+    /// </summary>
+    public ReadOnlySpan<byte> NesOpacityMask => Core.OpacityMask;
+
     /// <summary>The shape the subjective camera follows, or null (REQ-SCN-021).</summary>
     public FrameShape? FollowedShape => Scripts.FpvShape;
 

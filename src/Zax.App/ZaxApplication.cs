@@ -62,6 +62,7 @@ internal sealed class ZaxApplication : IDisposable
     private string? _startupError;
     private string? _startupGameId;
     private byte[]? _picture;
+    private byte[]? _pictureMask;
 
     // SPEC-08: the logical action layer (REQ-INP-120) and the desktop device layer that feeds it
     // (REQ-INP-121). The bindings are global and shared by both players (REQ-INP-048).
@@ -957,6 +958,7 @@ internal sealed class ZaxApplication : IDisposable
             _scene.DrawList = null;
             _scene.TwoDimensionalMode = false;
             _scene.NesPicture = default;
+            _scene.NesOpacityMask = default;
             _scene.FollowedShape = null;
             return;
         }
@@ -975,6 +977,13 @@ internal sealed class ZaxApplication : IDisposable
             _picture ??= new byte[256 * 240];
             session.NesPicture.CopyTo(_picture);
             _scene.NesPicture = _picture;
+
+            // AMD-050 REQ-SCN-076: the rectangle needs the opacity mask of REQ-CORE-049 as
+            // well — the image of colour indices alone cannot tell a transparent pixel from an
+            // opaque one whose palette colour is the universal background colour.
+            _pictureMask ??= new byte[256 * 240 / 8];
+            session.NesOpacityMask.CopyTo(_pictureMask);
+            _scene.NesOpacityMask = _pictureMask;
         }
 
         // REQ-SCN-022: the renderer needs the followed shape to find the occluders.

@@ -215,12 +215,14 @@ public sealed class SceneRenderer : ISceneRenderer
 
     /// <summary>
     /// The 2D-mode rectangle of AMD-046 REQ-SCN-074 (AMD-009 Q-022): the core's 256 × 240
-    /// picture mapped on the NES plane of REQ-E3D-410, shaded like any other front-facing tile.
+    /// picture mapped on the NES plane of REQ-E3D-410, lit like a tile (REQ-SCN-028, albedo =
+    /// the colour of the pixel) and with the universal-background pixels of AMD-050
+    /// REQ-SCN-076 dropped.
     /// </summary>
     private bool CollectPictureQuad(SceneState scene, in CameraView view)
     {
         ReadOnlySpan<byte> picture = scene.NesPicture.Span;
-        uint texture = _picture.Upload(picture);
+        uint texture = _picture.Upload(picture, scene.NesOpacityMask.Span);
         if (texture == 0 || _meshes.Get(NesPictureTexture.Quad) is not { } mesh)
         {
             return false;
@@ -232,6 +234,12 @@ public sealed class SceneRenderer : ISceneRenderer
             Model = Mat4.Identity,
             ColorMode = 1,
             Texture = texture,
+
+            // AMD-050 REQ-SCN-076: the pixels the core's opacity mask (REQ-CORE-049) marks as
+            // carrying no opaque pixel are rejected, here in the opaque pass — the rectangle
+            // stays out of the transparent class of REQ-SCN-040 and the result does not depend
+            // on video.anti_alias.
+            Cutout = true,
             TextureSize = new Vector2(NesPictureTexture.Width, NesPictureTexture.Height),
             TexTilting = Vector2.One,
             Alpha = 1f,
@@ -695,6 +703,7 @@ public sealed class SceneRenderer : ISceneRenderer
         SetWinding(mirrored);
 
         _scenePass.Set("uColorMode", item.ColorMode);
+        _scenePass.Set("uCutout", item.Cutout ? 1 : 0);
         _scenePass.Set("uPaletteTable", item.PaletteTable);
         _scenePass.Set("uTextureSize", item.TextureSize);
         _scenePass.Set("uTexOffset", item.TexOffset);
@@ -817,6 +826,12 @@ public sealed class SceneRenderer : ISceneRenderer
         public bool ReceiveShadow;
         public bool Clip;
         public bool Hud;
+
+        /// <summary>
+        /// Whether a texel of alpha 0 rejects the fragment instead of being blended
+        /// (REQ-SCN-076): the 2D-mode rectangle and nothing else.
+        /// </summary>
+        public bool Cutout;
 
         /// <summary>Whether the space bending of REQ-SCN-068 reaches this item.</summary>
         public bool Bend;

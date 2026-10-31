@@ -27,6 +27,12 @@ internal sealed record SyntheticScene(
     public byte[]? NesPicture { get; init; }
 
     /// <summary>
+    /// The opacity mask that goes with <see cref="NesPicture"/>, one bit per pixel
+    /// (REQ-CORE-049): what the 2D-mode rectangle rejects its pixels on (REQ-SCN-076).
+    /// </summary>
+    public byte[]? NesOpacityMask { get; init; }
+
+    /// <summary>
     /// The 64 <c>PData</c> values of the captured frame, in the order Lua reads them as
     /// <c>PData[1]</c> to <c>PData[64]</c> (SPEC-05 §4.6, REQ-LUA-070). Null for a synthetic
     /// frame, which has no Lua runtime behind it.
@@ -63,6 +69,7 @@ internal static class SyntheticScenes
         "clip",
         "backdrop",
         "heavy",
+        "picture",
     ];
 
     /// <summary>Builds the scene called <paramref name="name"/>.</summary>
@@ -89,6 +96,7 @@ internal static class SyntheticScenes
         "clip" => Clip(),
         "backdrop" => Backdrop(),
         "heavy" => Heavy(),
+        "picture" => Picture(),
         _ => throw new ArgumentException($"unknown synthetic scene '{name}'", nameof(name)),
     };
 
@@ -344,6 +352,103 @@ internal static class SyntheticScenes
 
         return builder.Finish("heavy", "full background grid and 64 sprites, one shape per tile");
     }
+
+    /// <summary>
+    /// The 2D-mode scene of AMD-050 REQ-SCN-076, first automatic criterion: a flat rectangle
+    /// showing a synthetic picture whose background tiles carry two pixels of value 0 and two of
+    /// value 3, palette entry 3 being equal to entry 0.
+    /// </summary>
+    /// <remarks>
+    /// The two pairs hold the same NES colour index — the universal background colour — and are
+    /// told apart by the opacity mask of REQ-CORE-049 alone: the pixels of value 0 show the
+    /// scene behind the rectangle, the pixels of value 3 are drawn. The criterion's conditions
+    /// are the scene's own defaults here (<c>scene.use_nes_bg_color</c> off and a magenta
+    /// <c>Setting.CustomBgColor</c>), because the default configuration makes the transparency
+    /// invisible; <c>--bg-color</c> and <c>--nes-bg-color</c> still override them.
+    /// </remarks>
+    private static SyntheticScene Picture()
+    {
+        // Entry 0 is the universal background colour; entry 3 is set to the same colour, which
+        // is the whole point of the criterion. Entry 1 is a different colour, so that the
+        // tested tiles stand out from the rest of the picture.
+        byte[] palette = new byte[32];
+        palette[0] = 0x0F;
+        palette[1] = 0x21;
+        palette[2] = 0x21;
+        palette[3] = 0x0F;
+
+        // The value of every pixel of the picture: 1 everywhere, except on the top row of each
+        // tile of an 8 × 8 tile square in the middle, which carries 0, 0, 3, 3 then 1 1 1 1.
+        byte[] values = new byte[PictureWidth * PictureHeight];
+        Array.Fill(values, (byte)1);
+        for (int row = 11; row < 19; row++)
+        {
+            for (int column = 12; column < 20; column++)
+            {
+                int x = column * 8;
+                int y = row * 8;
+                values[(y * PictureWidth) + x + 0] = 0;
+                values[(y * PictureWidth) + x + 1] = 0;
+                values[(y * PictureWidth) + x + 2] = 3;
+                values[(y * PictureWidth) + x + 3] = 3;
+            }
+        }
+
+        byte[] picture = new byte[values.Length];
+        byte[] mask = new byte[values.Length / 8];
+        for (int i = 0; i < values.Length; i++)
+        {
+            // REQ-CORE-048: the index the PPU shows — entry 0 of the palette wherever no opaque
+            // pixel is produced. REQ-CORE-049: the bit is 1 for a background pixel of value
+            // other than 0, the background being rendered and nothing masked.
+            byte value = values[i];
+            picture[i] = palette[value];
+            if (value != 0)
+            {
+                mask[i >> 3] |= (byte)(1 << (i & 7));
+            }
+        }
+
+        ConversionEngine engine = new();
+        engine.UseGeometry();
+        engine.TwoDimensionalMode = true;
+        engine.LoadProfile(GameProfile.CreateEmpty());
+        engine.Convert(new FrameBatch([], palette, 0, 0, picture, mask), frameCounter: 0);
+        engine.Publish();
+
+        SceneState scene = new();
+        scene.Camera.SnapToSetpoints();
+        scene.GameRunning = true;
+        scene.Clipping = engine.Settings.Clipping;
+        scene.DrawList = engine.BuildDrawList();
+        scene.NesBackgroundColor = engine.PublishedFrame!.Palette.Color(0);
+        scene.EmulatedTime = engine.PublishedFrame.Time;
+        scene.TwoDimensionalMode = true;
+        scene.NesPicture = picture;
+        scene.NesOpacityMask = mask;
+
+        // The conditions of the criterion: without them the scene's background colour is the
+        // NES one and the transparency cannot be seen (AMD-050 REQ-SCN-076, notes).
+        scene.UseNesBackgroundColor = false;
+        scene.Settings.CustomBackgroundColor = new Rgb24(255, 0, 255);
+
+        return new SyntheticScene(
+            "picture",
+            scene,
+            engine,
+            "2D mode: a picture whose tiles carry two pixels of value 0 and two of value 3 of "
+                + "the same colour, over a magenta scene background (REQ-SCN-076)")
+        {
+            NesPicture = picture,
+            NesOpacityMask = mask,
+        };
+    }
+
+    /// <summary>Width of the core's pixel image (REQ-CORE-048).</summary>
+    private const int PictureWidth = 256;
+
+    /// <summary>Height of the core's pixel image (REQ-CORE-048).</summary>
+    private const int PictureHeight = 240;
 
     /// <summary>A full tile of colour <paramref name="color"/> whose identity is unique.</summary>
     private static (ulong Low, ulong High) Solid(int color, int id = 0)

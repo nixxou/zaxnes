@@ -165,6 +165,65 @@ public sealed class TwoDimensionalModeTests
         Assert.False(renderer.Statistics.ShadowPass);
     }
 
+    /// <summary>
+    /// AMD-050 REQ-SCN-076: the opacity mask of the core (REQ-CORE-049) decides which pixels of
+    /// the rectangle are drawn, and the colour never does. Both halves of the picture carry the
+    /// same colour index here; only the left half has its bits clear, and only the left half
+    /// shows the scene background.
+    /// </summary>
+    [GlFact] // REQ-SCN-076, REQ-CORE-049
+    public void REQ_SCN_076_the_mask_decides_which_pixels_are_drawn_not_the_colour()
+    {
+        using GlFixture gl = GlFixture.Create(320, 300);
+        using SceneRenderer renderer = new(gl.Gl);
+
+        byte[] mask = new byte[Width * Height / 8];
+        for (int y = 0; y < Height; y++)
+        {
+            for (int x = Width / 2; x < Width; x++)
+            {
+                int at = (y * Width) + x;
+                mask[at >> 3] |= (byte)(1 << (at & 7));
+            }
+        }
+
+        SceneState scene = Scene(Picture(0x30));
+        scene.NesOpacityMask = mask;
+        Capture capture = gl.Render(renderer, scene);
+
+        // The scene background is black here (Setting.BgColor on, entry 0 of the frame palette
+        // left at its default), and the drawn colour is the lit white of §5.2.
+        (int leftR, int leftG, int leftB) = capture.At((int)(capture.Width * 0.3), capture.Height / 2);
+        Assert.Equal(0, leftR);
+        Assert.Equal(0, leftG);
+        Assert.Equal(0, leftB);
+
+        (int rightR, int rightG, int rightB) = capture.At((int)(capture.Width * 0.7), capture.Height / 2);
+        Assert.Equal(223, rightR, tolerance: 3);
+        Assert.Equal(219, rightG, tolerance: 3);
+        Assert.Equal(223, rightB, tolerance: 3);
+    }
+
+    /// <summary>
+    /// A mask of the wrong size is as good as no mask: every pixel of the rectangle is drawn,
+    /// which is what the renderer did before AMD-050 and what a host producing no mask gets.
+    /// </summary>
+    [GlFact] // REQ-SCN-076
+    public void REQ_SCN_076_a_mask_of_the_wrong_size_draws_the_whole_rectangle()
+    {
+        using GlFixture gl = GlFixture.Create(320, 300);
+        using SceneRenderer renderer = new(gl.Gl);
+
+        SceneState scene = Scene(Picture(0x30));
+        scene.NesOpacityMask = new byte[16];
+        Capture capture = gl.Render(renderer, scene);
+
+        (int r, int g, int b) = capture.At(capture.Width / 2, capture.Height / 2);
+        Assert.Equal(223, r, tolerance: 3);
+        Assert.Equal(219, g, tolerance: 3);
+        Assert.Equal(223, b, tolerance: 3);
+    }
+
     private static SceneState Scene(byte[] picture)
     {
         SceneState scene = new()

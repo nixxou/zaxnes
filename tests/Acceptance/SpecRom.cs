@@ -196,12 +196,20 @@ public static class SpecRom
 /// <summary>A copy of one frame batch, taken because the spans are only valid in the callback.</summary>
 public sealed class CapturedBatch
 {
-    private CapturedBatch(TileRecord[] records, byte[] palette, int maskX, int maskY)
+    private CapturedBatch(
+        TileRecord[] records,
+        byte[] palette,
+        int maskX,
+        int maskY,
+        byte[] picture,
+        byte[] opacityMask)
     {
         Records = records;
         Palette = palette;
         MaskX = maskX;
         MaskY = maskY;
+        Picture = picture;
+        OpacityMask = opacityMask;
     }
 
     /// <summary>All records, in the order the core emitted them.</summary>
@@ -215,6 +223,22 @@ public sealed class CapturedBatch
 
     /// <summary>Unreliable top/bottom band width.</summary>
     public int MaskY { get; }
+
+    /// <summary>The 256 × 240 pixel image of point 4 of REQ-CORE-030 (REQ-CORE-048).</summary>
+    public byte[] Picture { get; }
+
+    /// <summary>The 256 × 240 opacity mask of point 5 of REQ-CORE-030 (REQ-CORE-049).</summary>
+    public byte[] OpacityMask { get; }
+
+    /// <summary>The NES colour index the image carries at (<c>x</c>, <c>y</c>).</summary>
+    public byte PixelAt(int x, int y) => Picture[(y * 256) + x];
+
+    /// <summary>Whether the opacity bit of (<c>x</c>, <c>y</c>) is set (REQ-CORE-049).</summary>
+    public bool OpaqueAt(int x, int y)
+    {
+        int at = (y * 256) + x;
+        return (OpacityMask[at >> 3] & (1 << (at & 7))) != 0;
+    }
 
     /// <summary>Background records only.</summary>
     public TileRecord[] Background => [.. Records.Where(r => r.Background)];
@@ -231,7 +255,13 @@ public sealed class CapturedBatch
         core.VideoCallback = (in FrameBatch batch) =>
         {
             calls++;
-            captured = new CapturedBatch(batch.Records.ToArray(), batch.Palette.ToArray(), batch.MaskX, batch.MaskY);
+            captured = new CapturedBatch(
+                batch.Records.ToArray(),
+                batch.Palette.ToArray(),
+                batch.MaskX,
+                batch.MaskY,
+                batch.Picture.ToArray(),
+                batch.OpacityMask.ToArray());
         };
 
         core.RunFrame(input);

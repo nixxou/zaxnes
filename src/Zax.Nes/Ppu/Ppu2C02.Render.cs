@@ -20,7 +20,14 @@ public sealed partial class Ppu2C02
     /// <summary>Number of sprites the hardware can show on one line (nesdev).</summary>
     public const int SpritesPerLine = 8;
 
+    /// <summary>
+    /// Bytes of the opacity mask of REQ-CORE-049: 256 × 240 bits, 32 bytes per image row,
+    /// 7 680 in all.
+    /// </summary>
+    public const int OpacityMaskSize = ScreenWidth * ScreenHeight / 8;
+
     private readonly byte[] _pixels = new byte[ScreenWidth * ScreenHeight];
+    private readonly byte[] _opacity = new byte[OpacityMaskSize];
     private readonly byte[] _secondaryOam = new byte[4 * SpritesPerLine];
 
     private readonly byte[] _spritePatternLow = new byte[SpritesPerLine];
@@ -56,8 +63,22 @@ public sealed partial class Ppu2C02
     public ReadOnlySpan<byte> PixelFrame => _pixels;
 
     /// <summary>
+    /// The 256 × 240 opacity mask of the same frame, one bit per pixel, 1 where the PPU shows
+    /// at least one opaque pixel (AMD-050 REQ-CORE-049).
+    /// </summary>
+    /// <remarks>
+    /// The layout is the recommended one: 32 bytes per image row, rows top to bottom, and
+    /// inside a byte the least significant bit is the leftmost pixel. It carries exactly the
+    /// information <see cref="PixelFrame"/> cannot, since entry 0 of every palette table is the
+    /// universal background colour (REQ-E3D-561): a transparent pixel and an opaque pixel whose
+    /// palette colour <em>is</em> that colour hold the same index.
+    /// </remarks>
+    public ReadOnlySpan<byte> OpacityMask => _opacity;
+
+    /// <summary>
     /// Whether the composed colour of each visible dot is stored into
-    /// <see cref="PixelFrame"/> (<see cref="FrameOutput.Pixels"/>).
+    /// <see cref="PixelFrame"/> and its bit into <see cref="OpacityMask"/>
+    /// (<see cref="FrameOutput.Pixels"/>).
     /// <see cref="NesCore.RunFrame(ushort, FrameOutput)"/> owns it and puts it back after every
     /// frame.
     /// </summary>
@@ -577,6 +598,24 @@ public sealed partial class Ppu2C02
         if (!PixelOutputEnabled)
         {
             return;
+        }
+
+        // REQ-CORE-049: the bit is 1 as soon as one of the two layers put a pixel of value
+        // other than 0 here. Both values already answer for PPUMASK as the requirement asks —
+        // they are only sampled when the layer's enable bit (3 for the background, 4 for the
+        // sprites) is set and, for x < 8, when its left-column bit (1 and 2) is set, each read
+        // at the dot the PPU produces the pixel. A sprite pixel counts whatever its "hidden"
+        // flag says (REQ-CORE-042): the loop above keeps the first non-transparent sprite of
+        // the line whether it draws in front of the background or behind it.
+        int at = (_scanline * ScreenWidth) + x;
+        int opacityBit = 1 << (at & 7);
+        if (backgroundPixel != 0 || spritePixel != 0)
+        {
+            _opacity[at >> 3] |= (byte)opacityBit;
+        }
+        else
+        {
+            _opacity[at >> 3] &= (byte)~opacityBit;
         }
 
         int entry;

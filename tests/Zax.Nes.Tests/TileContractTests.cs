@@ -425,6 +425,131 @@ public sealed class TileContractTests
         Assert.Equal(plain.MaskY, decorated.MaskY);
     }
 
+    // ------------------------------------------------------------------ V11
+
+    /// <summary>
+    /// The set-up of V11 (AMD-050 §3 point 4): nametable <c>$2000</c> entirely filled with tile
+    /// 1, its attribute table cleared so palette table 0 is selected, the OAM at <c>$FF</c> and
+    /// the scroll at (0, 0), as §5.1 prescribes. Tile 1 of table <c>$0000</c> has
+    /// plane 0 = <c>$0101…01</c> and plane 1 = <c>$FEFE…FE</c>, so with the bit order of
+    /// REQ-CORE-034 its pixels are of value 2 in columns 0 to 6 and 1 in column 7.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="writes"/> runs with the other VRAM writes, before the scroll and PPUCTRL
+    /// writes: the <c>$2006</c> writes it makes leave the nametable bits of <c>t</c> set, and
+    /// only the <c>$2000</c> write at the end puts them back.
+    /// </remarks>
+    private static TileFixture V11Fixture(Action<TileFixture>? writes = null)
+    {
+        var fixture = new TileFixture();
+        fixture.FillVram(0x2000, 960, 0x01);
+        fixture.FillVram(0x23C0, 64, 0x00);
+        writes?.Invoke(fixture);
+        fixture.SetScroll(0, 0);
+        fixture.SetControl(0x00);
+        return fixture;
+    }
+
+    [Fact] // REQ-CORE-048, REQ-CORE-049 (V11)
+    public void REQ_CORE_049_V11_a_fully_covered_frame_has_an_opacity_mask_entirely_at_one()
+    {
+        TileFixture fixture = V11Fixture();
+        fixture.SetMask(0x0A);
+
+        BatchCopy batch = fixture.NextBatch();
+
+        // 256 × 240 / 8 = 7 680 bytes, all at 0xFF.
+        Assert.Equal(7680, batch.OpacityMask.Length);
+        Assert.All(batch.OpacityMask, static value => Assert.Equal(0xFF, value));
+
+        // The image is the indices of palette entries 1 and 2, column 7 of each tile being the
+        // pixel of value 1.
+        Assert.Equal(256 * 240, batch.Picture.Length);
+        for (int y = 0; y < 240; y++)
+        {
+            for (int x = 0; x < 256; x++)
+            {
+                Assert.Equal(batch.Palette[(x % 8) == 7 ? 1 : 2], batch.PixelAt(x, y));
+            }
+        }
+    }
+
+    [Fact] // REQ-CORE-048, REQ-CORE-049 (V11)
+    public void REQ_CORE_049_V11_a_degenerate_palette_leaves_the_mask_at_one()
+    {
+        // The three colours equal to the universal background colour: the case the image of
+        // colour indices alone cannot tell from a transparent pixel.
+        TileFixture fixture = V11Fixture(f => f.WriteVram(0x3F00, 0x0F, 0x0F, 0x0F));
+        fixture.SetMask(0x0A);
+
+        BatchCopy batch = fixture.NextBatch();
+
+        Assert.All(batch.Picture, static index => Assert.Equal(0x0F, index));
+        Assert.All(batch.OpacityMask, static value => Assert.Equal(0xFF, value));
+    }
+
+    [Fact] // REQ-CORE-049 (V11)
+    public void REQ_CORE_049_V11_masking_the_left_column_clears_the_first_eight_bits_of_a_row()
+    {
+        TileFixture fixture = V11Fixture();
+
+        // Bit 1 of PPUMASK at 0: the leftmost 8 background pixels are not shown.
+        fixture.SetMask(0x08);
+
+        BatchCopy batch = fixture.NextBatch();
+
+        for (int y = 0; y < 240; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                Assert.False(batch.OpaqueAt(x, y), $"({x}, {y}) should be transparent");
+            }
+
+            for (int x = 8; x < 256; x++)
+            {
+                Assert.True(batch.OpaqueAt(x, y), $"({x}, {y}) should be opaque");
+            }
+        }
+    }
+
+    [Fact] // REQ-CORE-048, REQ-CORE-049 (V11)
+    public void REQ_CORE_049_V11_forced_blanking_gives_a_mask_entirely_at_zero()
+    {
+        TileFixture fixture = V11Fixture();
+        fixture.SetMask(0x00);
+
+        BatchCopy batch = fixture.NextBatch();
+
+        Assert.All(batch.OpacityMask, static value => Assert.Equal(0x00, value));
+        Assert.All(batch.Picture, index => Assert.Equal(batch.Palette[0], index));
+    }
+
+    [Fact] // REQ-CORE-049 (V11)
+    public void REQ_CORE_049_V11_a_lone_sprite_marks_exactly_its_eight_by_eight_rectangle()
+    {
+        var fixture = new TileFixture();
+
+        // Nametable back to tile 0, whose pattern is all zero: the background marks nothing.
+        fixture.FillVram(0x2000, 960, 0x00);
+        fixture.FillVram(0x23C0, 64, 0x00);
+        fixture.SetSprite(0, 0x20, 0x01, 0x00, 0x10);
+        fixture.SetScroll(0, 0);
+        fixture.SetControl(0x00);
+        fixture.SetMask(0x1E);
+
+        BatchCopy batch = fixture.NextBatch();
+
+        for (int y = 0; y < 240; y++)
+        {
+            for (int x = 0; x < 256; x++)
+            {
+                // y = Y + 1 (REQ-CORE-042): the sprite covers y 33 to 40, x 16 to 23.
+                bool wanted = x is >= 16 and <= 23 && y is >= 33 and <= 40;
+                Assert.Equal(wanted, batch.OpaqueAt(x, y));
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ batch plumbing
 
     [Fact]

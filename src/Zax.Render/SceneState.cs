@@ -339,6 +339,14 @@ public sealed class SceneState
     public ReadOnlyMemory<byte> NesPicture { get; set; }
 
     /// <summary>
+    /// The opacity mask of the same frame, one bit per pixel, 32 bytes per image row, the
+    /// least significant bit of a byte being its leftmost pixel (SPEC-02 REQ-CORE-049). In 2D
+    /// mode a pixel whose bit is 0 is not drawn at all (REQ-SCN-076); left empty, every pixel
+    /// of the rectangle is drawn, which is what a host that produces no mask gets.
+    /// </summary>
+    public ReadOnlyMemory<byte> NesOpacityMask { get; set; }
+
+    /// <summary>
     /// The shape the subjective camera follows, or null (REQ-SCN-021). In FPV it decides which
     /// tiles count as occluders and are drawn at half opacity (REQ-SCN-022).
     /// </summary>

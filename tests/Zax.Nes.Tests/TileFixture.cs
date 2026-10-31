@@ -22,6 +22,22 @@ internal sealed class BatchCopy
     /// <summary>maskY of the batch.</summary>
     public int MaskY { get; init; }
 
+    /// <summary>The 256 × 240 pixel image of the batch (REQ-CORE-048).</summary>
+    public byte[] Picture { get; init; } = [];
+
+    /// <summary>The 256 × 240 opacity mask of the batch (REQ-CORE-049).</summary>
+    public byte[] OpacityMask { get; init; } = [];
+
+    /// <summary>The NES colour index the image carries at (<c>x</c>, <c>y</c>).</summary>
+    public byte PixelAt(int x, int y) => Picture[(y * 256) + x];
+
+    /// <summary>Whether the opacity bit of (<c>x</c>, <c>y</c>) is set (REQ-CORE-049).</summary>
+    public bool OpaqueAt(int x, int y)
+    {
+        int at = (y * 256) + x;
+        return (OpacityMask[at >> 3] & (1 << (at & 7))) != 0;
+    }
+
     /// <summary>The background records, in capture order.</summary>
     public TileRecord[] Background => [.. Records.Where(static record => record.Background)];
 
@@ -151,6 +167,8 @@ internal sealed class TileFixture
             Palette = batch.Palette.ToArray(),
             MaskX = batch.MaskX,
             MaskY = batch.MaskY,
+            Picture = batch.Picture.ToArray(),
+            OpacityMask = batch.OpacityMask.ToArray(),
         };
 
         core.RunFrame(input);

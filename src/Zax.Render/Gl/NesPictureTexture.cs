@@ -41,18 +41,27 @@ internal sealed class NesPictureTexture : IDisposable
     /// </summary>
     public static TileMesh Quad { get; } = BuildQuad();
 
+    /// <summary>Bytes of the opacity mask of REQ-CORE-049: 32 per row, 7 680 in all.</summary>
+    public const int MaskSize = Width * Height / 8;
+
     /// <summary>
     /// Uploads <paramref name="indices"/> and returns the texture name, or 0 when the frame has
     /// the wrong size.
     /// </summary>
     /// <param name="indices">256 × 240 NES colour indices, row 0 first.</param>
-    public unsafe uint Upload(ReadOnlySpan<byte> indices)
+    /// <param name="mask">
+    /// The 256 × 240 opacity mask of SPEC-02 REQ-CORE-049, which becomes the alpha channel:
+    /// 255 where the bit is 1, 0 where it is 0, and the fragment shader drops the latter
+    /// (REQ-SCN-076). A mask of the wrong size leaves every pixel opaque.
+    /// </param>
+    public unsafe uint Upload(ReadOnlySpan<byte> indices, ReadOnlySpan<byte> mask = default)
     {
         if (indices.Length < Width * Height)
         {
             return 0;
         }
 
+        bool masked = mask.Length >= MaskSize;
         for (int i = 0; i < Width * Height; i++)
         {
             Rgb24 color = NesPalette.Color(indices[i]);
@@ -60,7 +69,10 @@ internal sealed class NesPictureTexture : IDisposable
             _pixels[at + 0] = color.R;
             _pixels[at + 1] = color.G;
             _pixels[at + 2] = color.B;
-            _pixels[at + 3] = 255;
+
+            // AMD-050 REQ-SCN-076: the opacity bit alone decides, never the colour — an opaque
+            // pixel whose palette colour is the universal background colour stays drawn.
+            _pixels[at + 3] = !masked || (mask[i >> 3] & (1 << (i & 7))) != 0 ? (byte)255 : (byte)0;
         }
 
         if (_handle == 0)

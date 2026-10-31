@@ -1,8 +1,9 @@
 namespace Zax.Nes;
 
 /// <summary>
-/// The ordered tile records of one emulated frame, together with the frame palette and
-/// the unreliable border widths, handed to the video callback (REQ-CORE-030).
+/// The ordered tile records of one emulated frame, together with the frame palette, the
+/// unreliable border widths, the pixel image and its opacity mask, handed to the video
+/// callback (REQ-CORE-030, AMD-050).
 /// </summary>
 /// <remarks>
 /// The spans are only valid for the duration of the callback: a host that keeps the data
@@ -10,13 +11,30 @@ namespace Zax.Nes;
 /// </remarks>
 public readonly ref struct FrameBatch
 {
-    /// <summary>Creates a frame batch over borrowed storage.</summary>
+    /// <summary>
+    /// Creates a frame batch that carries no pixel image, for a synthetic frame that was not
+    /// produced by the PPU.
+    /// </summary>
     public FrameBatch(ReadOnlySpan<TileRecord> records, ReadOnlySpan<byte> palette, int maskX, int maskY)
+        : this(records, palette, maskX, maskY, default, default)
+    {
+    }
+
+    /// <summary>Creates a frame batch over borrowed storage.</summary>
+    public FrameBatch(
+        ReadOnlySpan<TileRecord> records,
+        ReadOnlySpan<byte> palette,
+        int maskX,
+        int maskY,
+        ReadOnlySpan<byte> picture,
+        ReadOnlySpan<byte> opacityMask)
     {
         Records = records;
         Palette = palette;
         MaskX = maskX;
         MaskY = maskY;
+        Picture = picture;
+        OpacityMask = opacityMask;
     }
 
     /// <summary>
@@ -42,6 +60,21 @@ public readonly ref struct FrameBatch
     /// (REQ-CORE-046).
     /// </summary>
     public int MaskY { get; }
+
+    /// <summary>
+    /// The 256 × 240 pixel image of the frame, one NES colour index per pixel, row 0 first
+    /// (point 4 of REQ-CORE-030, REQ-CORE-048 as AMD-050 amends it). Empty when the frame
+    /// produced no image (<see cref="FrameOutput.Pixels"/> clear).
+    /// </summary>
+    public ReadOnlySpan<byte> Picture { get; }
+
+    /// <summary>
+    /// The 256 × 240 opacity mask of the same frame, one bit per pixel (point 5 of
+    /// REQ-CORE-030, REQ-CORE-049): 32 bytes per image row, rows top to bottom, the least
+    /// significant bit of a byte being its leftmost pixel. Empty when
+    /// <see cref="Picture"/> is.
+    /// </summary>
+    public ReadOnlySpan<byte> OpacityMask { get; }
 }
 
 /// <summary>

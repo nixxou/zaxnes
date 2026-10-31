@@ -104,6 +104,11 @@ internal static class RenderExport
                                    the scene keeps what the profile and its scripts set.
           --bg-color <r,g,b>       The custom background colour, 0-255 (REQ-SCN-046). Left out,
                                    the scene keeps what the profile and its scripts set.
+          --no-nes-bg-color        scene.use_nes_bg_color off: the background of the scene is
+                                   the custom colour instead of the universal NES one
+                                   (REQ-SCN-046). This is what makes the transparency of the
+                                   2D-mode rectangle visible (AMD-050 REQ-SCN-076), which the
+                                   default configuration hides.
           --real-time <seconds>    Real time the star twinkle uses (REQ-SCN-050).
           --sky-bodies             Light the procedural sun, moon and clouds of the skybox,
                                    which REQ-SCN-050 leaves off by default (REQ-PUB-003, Q-064).
@@ -113,7 +118,7 @@ internal static class RenderExport
           --list-scenes            Print the built-in synthetic scene names and exit.
 
         Scenes: framing, sky, shadow, no-shadow, layer-shadow-off, nudge, alpha, hud, clip,
-                backdrop, heavy.
+                backdrop, heavy, picture.
         """;
 
     /// <summary>Runs the command.</summary>
@@ -149,6 +154,7 @@ internal static class RenderExport
         (int Lr, int Tb, int Arc, int Centre) bend = default;
         bool bend2dMode = true;
         Rgb24? customBackground = null;
+        bool? nesBackground = null;
         float realTime = 0f;
         bool skyBodies = false;
         System.Numerics.Vector3? angles = null;
@@ -295,6 +301,10 @@ internal static class RenderExport
                     customBackground = ParseColor(Next(args, ref i));
                     break;
 
+                case "--no-nes-bg-color":
+                    nesBackground = false;
+                    break;
+
                 case "--real-time":
                     realTime = float.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
                     break;
@@ -384,6 +394,7 @@ internal static class RenderExport
             Distance = distance,
             Skybox = skybox,
             CustomBackground = customBackground,
+            NesBackground = nesBackground,
             Shadows = shadows,
             Bend = bend,
             Bend2dMode = bend2dMode,
@@ -798,6 +809,7 @@ internal static class RenderExport
         }
 
         byte[] picture = core.PixelFrame.ToArray();
+        byte[] opacity = core.OpacityMask.ToArray();
         scene.Camera.SnapToSetpoints();
         scene.GameRunning = true;
         scene.Clipping = engine.Settings.Clipping;
@@ -805,9 +817,12 @@ internal static class RenderExport
         scene.NesBackgroundColor = engine.PublishedFrame!.Palette.Color(0);
         scene.EmulatedTime = engine.PublishedFrame.Time;
 
-        // AMD-009 (Q-022): without a profile the scene shows the core's pixel frame.
+        // AMD-009 (Q-022): without a profile the scene shows the core's pixel frame. AMD-050
+        // REQ-SCN-076: the opacity mask of REQ-CORE-049 goes with it, so the pixels that carry
+        // no opaque pixel are not drawn.
         scene.TwoDimensionalMode = engine.TwoDimensionalMode;
         scene.NesPicture = picture;
+        scene.NesOpacityMask = opacity;
 
         return new SyntheticScene(
             Path.GetFileNameWithoutExtension(romPath),
@@ -817,6 +832,7 @@ internal static class RenderExport
                 + $"profile '{profileLabel}'")
         {
             NesPicture = picture,
+            NesOpacityMask = opacity,
             PersistentData = persistentData,
             Core = core,
             FrameLog = log,
@@ -1192,6 +1208,12 @@ internal sealed class SceneOverrides
     /// <summary><c>--bg-color</c>, the custom background colour (REQ-SCN-046).</summary>
     public Rgb24? CustomBackground { get; init; }
 
+    /// <summary>
+    /// False for <c>--no-nes-bg-color</c>: the setting <c>scene.use_nes_bg_color</c>
+    /// (REQ-SCN-046), which AMD-050 REQ-SCN-076 needs off to show the transparency.
+    /// </summary>
+    public bool? NesBackground { get; init; }
+
     /// <summary>False for <c>--no-shadows</c>.</summary>
     public bool Shadows { get; init; } = true;
 
@@ -1249,6 +1271,11 @@ internal sealed class SceneOverrides
         if (CustomBackground is { } colour)
         {
             scene.Scene.Settings.CustomBackgroundColor = colour;
+        }
+
+        if (NesBackground is { } nesBackground)
+        {
+            scene.Scene.UseNesBackgroundColor = nesBackground;
         }
 
         scene.Scene.RealTime = RealTime;

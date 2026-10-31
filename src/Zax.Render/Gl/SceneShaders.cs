@@ -281,8 +281,9 @@ internal static class SceneShaders
 
     /// <summary>
     /// Fragment shader of the scene pass: albedo of REQ-SCN-034, visible-rectangle clipping of
-    /// REQ-SCN-036, hard shadow of REQ-SCN-030/031, the Lambert shading of REQ-SCN-028 for the
-    /// tiles and the HUD, and the Standard model of REQ-SCN-075 for the backdrop.
+    /// REQ-SCN-036, the fragment rejection of REQ-SCN-076, hard shadow of REQ-SCN-030/031, the
+    /// Lambert shading of REQ-SCN-028 for the tiles and the HUD, and the Standard model of
+    /// REQ-SCN-075 for the backdrop.
     /// </summary>
     public static string SceneFragment { get; } = $$"""
         #version 330 core
@@ -294,6 +295,10 @@ internal static class SceneShaders
 
         // 0 = indexed atlas, 1 = direct colour atlas, 2 = flat colour (backdrop).
         uniform int uColorMode;
+
+        // REQ-SCN-076: non-zero on the 2D-mode rectangle alone, where a texel of alpha 0
+        // rejects the fragment instead of being blended.
+        uniform int uCutout;
         uniform usampler2D uIndexTexture;
         uniform sampler2D uColorTexture;
         uniform sampler2D uPalette;
@@ -362,6 +367,16 @@ internal static class SceneShaders
                     albedo = direct.rgb;
                     texelAlpha = direct.a;
                 }
+            }
+
+            // AMD-050 REQ-SCN-076: a pixel of the 2D-mode rectangle whose opacity bit is 0 is
+            // not drawn at all. Rejecting the fragment — rather than blending it — keeps the
+            // rectangle in the opaque pass of REQ-SCN-058, out of the transparent class of
+            // REQ-SCN-040, and makes the result independent of video.anti_alias: the test is
+            // binary per fragment, so no sprite edge comes out partly transparent.
+            if (uCutout != 0 && texelAlpha < 0.5)
+            {
+                discard;
             }
 
             vec3 n = normalize(vNormal);

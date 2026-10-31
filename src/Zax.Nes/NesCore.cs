@@ -449,11 +449,18 @@ public sealed class NesCore
         // exactly one frame per real frame.
         if (video && VideoCallback is { } callback)
         {
+            // Points 4 and 5 of REQ-CORE-030 (AMD-050): the pixel image and its opacity mask
+            // travel with the batch and are valid for the call alone, like the records. A frame
+            // that produced no image hands out two empty spans rather than the picture of the
+            // frame before it.
+            bool pixels = _ppu.PixelOutputEnabled;
             var batch = new FrameBatch(
                 _ppu.TileRecords,
                 _ppu.SnapshotPalette(),
                 _ppu.MaskX,
-                _ppu.MaskY);
+                _ppu.MaskY,
+                pixels ? _ppu.PixelFrame : default,
+                pixels ? _ppu.OpacityMask : default);
             callback(in batch);
         }
 
@@ -461,10 +468,18 @@ public sealed class NesCore
     }
 
     /// <summary>
-    /// The optional 256 x 240 indexed image of the frame just run, one NES colour index per
-    /// pixel (REQ-CORE-048). The "2D Mode" of SPEC-06 draws from it.
+    /// The 256 x 240 indexed image of the frame just run, one NES colour index per pixel
+    /// (REQ-CORE-048). The "2D Mode" of SPEC-06 draws from it, which is why AMD-050 makes it
+    /// required rather than optional.
     /// </summary>
     public ReadOnlySpan<byte> PixelFrame => _ppu.PixelFrame;
+
+    /// <summary>
+    /// The 256 × 240 opacity mask of the frame just run, one bit per pixel (REQ-CORE-049):
+    /// 1 where the PPU shows at least one opaque pixel. The 2D mode drops the other pixels
+    /// (SPEC-06 REQ-SCN-076).
+    /// </summary>
+    public ReadOnlySpan<byte> OpacityMask => _ppu.OpacityMask;
 
     /// <summary>
     /// The tile records of the frame just run, same span the video callback received

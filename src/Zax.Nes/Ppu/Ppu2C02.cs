@@ -265,6 +265,7 @@ public sealed partial class Ppu2C02
         Array.Clear(_paletteOut);
         Array.Clear(_decayStamp);
         Array.Clear(_pixels);
+        Array.Clear(_opacity);
 
         _dot = 0;
         _dotAccumulator = 0;

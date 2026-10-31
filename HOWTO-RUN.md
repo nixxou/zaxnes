@@ -576,8 +576,18 @@ Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-sce
 `--rom jeu.nes --run 400` (exécute une vraie ROM et la capture), `--size`, `--angles`,
 `--distance`, `--mesh`, `--no-shadows`, `--shadow-map <texels>` (côté de la carte d'ombre,
 4096 par défaut depuis `AMD-034`), `--skybox`, `--sky-bodies` (allume le soleil, la lune
-et les nuages procéduraux), `--bg-color`, `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
+et les nuages procéduraux), `--bg-color`, `--no-nes-bg-color` (`scene.use_nes_bg_color` à faux :
+le fond de la scène devient la couleur personnalisée, ce qui rend visible la transparence du
+rectangle du mode 2D d'`AMD-050`), `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
+
+La scène synthétique `picture` est celle du premier critère d'`AMD-050` `REQ-SCN-076` : un
+rectangle de mode 2D dont des tuiles portent deux pixels de valeur 0 et deux de valeur 3 **de la
+même couleur**, sur un fond de scène magenta. Seul le masque d'opacité du cœur les distingue :
+
+```
+Zax.Harness.exe render --out captures --frames synthetic:picture --bend 90,0,0
+```
 
 Avec `--rom`, trois options rejouent ce que fait le menu du jeu et consignent la partie :
 
