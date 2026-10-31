@@ -616,6 +616,7 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_libretro(enabled_disabled()),
     );
     emulation_rust_only(out);
+    emulation_pause_3d(out);
     video_rust_only(out);
     video_sprite_limit(out);
     video_overscan(out);
@@ -756,6 +757,24 @@ fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
         )
         .with_domain(Domain::switch())
         .with_label("Automatic resolution"),
+    );
+}
+
+fn emulation_pause_3d(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request): while the 2D picture is shown, nothing of the 3D scene is, so
+    // the conversion and the frame hooks of profiles whose scripts leave the core alone are
+    // not run; the frame shown when the 3D comes back is converted first. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuPause3dIn2d,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Pause the 3D in 2D"),
     );
 }
 

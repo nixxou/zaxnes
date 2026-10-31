@@ -120,6 +120,7 @@ setting_ids! {
     EmuLuaOptimized => "emu.lua_optimized",
     EmuLuaExperimental => "emu.lua_experimental",
     EmuPipeline => "emu.pipeline",
+    EmuPause3dIn2d => "emu.pause_3d_in_2d",
     VideoDynamicResolution => "video.dynamic_resolution",
     VideoBackend => "video.backend",
     VideoWidescreen => "video.widescreen",

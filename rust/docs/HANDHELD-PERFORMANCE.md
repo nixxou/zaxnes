@@ -209,6 +209,14 @@ displayed frame". All values are per displayed frame.
   switches on after 3 late frames (85 % of the budget) and off after 2 s of light frames (60 %).
   The Lua runtime changes thread by a documented `unsafe impl Send` (no lock: mlua's `send`
   feature cost +16 % Lua time). Profiler: `wait` is the main thread waiting for that thread.
+- 3D paused in 2D (`emu.pause_3d_in_2d`, handheld default on): while the 2D picture is shown,
+  nothing of the 3D scene is drawn, so a profile whose scripts leave the core alone is neither
+  converted nor run through its frame hooks (its input hook still runs). The last frame is
+  converted when the 3D comes back, before it is drawn. Device run of SMB3 widescreen in 2D
+  (owner): main thread ~19.8 ms (Lua 6.3, conversion 4.0, collect 2.65) against 16.6.
+- Core, identical output (goldens of 98 ROMs, 1 800 frames): the APU skips its quiet cycles
+  while the frame loop batches the PPU (-5.5 to -8.5 % core), and CPU reads of plain PRG-ROM
+  windows skip the board's decode (-6 to -8.5 %).
 
 ## 5. Next steps (see `ROADMAP.md`)
 

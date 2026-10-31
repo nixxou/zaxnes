@@ -232,6 +232,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "Optimisation Lua expérimentale (nécessite Lua optimisé)",
     ),
     ("setting.emu.pipeline", "Scripts en parallèle du dessin"),
+    ("setting.emu.pause_3d_in_2d", "3D en pause en 2D"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
     ("setting.video.backend", "API graphique (au prochain démarrage)"),
     ("setting.video.widescreen", "Écran large (ROM prévues pour)"),

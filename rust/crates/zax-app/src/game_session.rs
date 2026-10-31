@@ -245,6 +245,11 @@ pub struct GameSession {
     events: Receiver<SessionEvent>,
     title: String,
     frame_counter: i32,
+    /// `emu.pause_3d_in_2d` while the 2D picture is shown ([`GameSession::pause_3d`]).
+    paused_3d: bool,
+    /// The last frame captured while the 3D was paused, its records in `batch_records`: the
+    /// one converted when the 3D comes back.
+    skipped_batch: Option<CapturedBatch>,
     started: bool,
     aimed: Option<ZapperPosition>,
     batch_records: Vec<TileRecord>,
@@ -386,6 +391,8 @@ impl GameSession {
             events,
             title: title.to_owned(),
             frame_counter: 0,
+            paused_3d: false,
+            skipped_batch: None,
             started: false,
             aimed: None,
             batch_records: Vec::new(),
@@ -1113,6 +1120,31 @@ impl GameSession {
         captured
     }
 
+    /// Pauses the 3D (`paused`, `emu.pause_3d_in_2d` while the 2D picture is shown) or brings it
+    /// back: while paused, the frames of a profile whose scripts leave the core alone are
+    /// neither converted nor shown to the frame hooks, since nothing of the 3D scene is drawn;
+    /// the last of them is converted when the 3D comes back, before it is drawn. The scripts'
+    /// input hook still runs: it steers the game.
+    pub fn pause_3d(
+        &mut self,
+        paused: bool,
+        model: &mut SettingsModel,
+        scene: &mut SceneState,
+        clock: &mut StageClock,
+    ) {
+        self.paused_3d = paused;
+        if paused {
+            return;
+        }
+        if let Some((palettes, mask_x, mask_y, margins)) = self.skipped_batch.take() {
+            // The kept frame already counted when it was skipped; its conversion counts it.
+            self.frame_counter -= 1;
+            self.lend(model, scene, |session, scene| {
+                session.convert_batch_lent(scene, clock, palettes, (mask_x, mask_y), margins);
+            });
+        }
+    }
+
     /// The conversion, frame hooks and camera tracking of the captured frame.
     fn convert_batch_lent(
         &mut self,
@@ -1122,6 +1154,18 @@ impl GameSession {
         (mask_x, mask_y): (i32, i32),
         (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
     ) {
+        if self.paused_3d && self.pipeline.ahead_allowed {
+            // Kept for when the 3D comes back; the scripts' clock goes on.
+            self.skipped_batch = Some((
+                (palette, margin_palette),
+                mask_x,
+                mask_y,
+                (margin, visible_rows, margin_y),
+            ));
+            self.frame_counter += 1;
+            return;
+        }
+        self.skipped_batch = None;
         let visible_rows = if self.strict_wide_edges || margin == 0 {
             visible_rows
         } else {

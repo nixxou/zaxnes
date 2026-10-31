@@ -657,6 +657,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
         self.apply_commands();
         self.check_movie_end();
+        self.follow_the_3d_pause();
         let ahead = self.runs_ahead();
         if ahead {
             // Emulation ahead: the core leaves during the frames, so what reads or changes it
@@ -704,6 +705,21 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             scene: &mut self.scene,
             view: self.view.as_ref(),
         })
+    }
+
+    /// `emu.pause_3d_in_2d` while the 2D picture is shown: the session leaves the 3D alone, and
+    /// converts the frame it kept when the 3D comes back (see [`GameSession::pause_3d`]).
+    fn follow_the_3d_pause(&mut self) {
+        let paused = self.settings.get(SettingId::EmuPause3dIn2d).as_bool()
+            && self.showing_two_dimensional();
+        if let Some(session) = self.session.as_mut() {
+            session.pause_3d(
+                paused,
+                &mut self.settings,
+                &mut self.scene,
+                &mut self.stage_clock,
+            );
+        }
     }
 
     /// Whether this tick runs its frames ahead: the core on its own thread, emulation ahead on,
