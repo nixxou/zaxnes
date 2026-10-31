@@ -1137,9 +1137,13 @@ public static class SettingsCatalogue
             SettingEffect.Immediate,
             SettingTheme.Interface)
         {
+            // AMD-053 §3 point 10: a third order, « Favorites first ». The value 2 is never
+            // written into profile field 36 — 0 goes there instead — and a 2 read from a
+            // profile is ignored like every value of user scope (REQ-PERS-005 point 2).
             Domain = SettingDomain.Choice(
                 new SettingOption(0d, "A-Z"),
-                new SettingOption(1d, "Recent")),
+                new SettingOption(1d, "Recent"),
+                new SettingOption(2d, "Favorites first")),
             LuaPath = "SortOption",
             ProfileField = "36",
             UiLabel = "Sort by",

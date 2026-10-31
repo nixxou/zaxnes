@@ -250,12 +250,36 @@ public sealed class AppSettings
         set => Model.SetBool(SettingKeys.UiShowFps, value);
     }
 
-    /// <summary><c>ui.sort_option</c>: 0 A-Z, 1 Recent (REQ-PERS-033).</summary>
+    /// <summary>
+    /// <c>ui.sort_option</c>: 0 A-Z, 1 Recent, 2 Favorites first (REQ-PERS-033 as AMD-053 §3
+    /// point 8 amends it).
+    /// </summary>
     public int SortOption
     {
         get => Model.GetInt(SettingKeys.UiSortOption);
-        set => Model.Set(SettingKeys.UiSortOption, SettingValue.OfEnum(Math.Clamp(value, 0, 1)));
+        set => Model.Set(SettingKeys.UiSortOption, SettingValue.OfEnum(Math.Clamp(value, 0, 2)));
     }
+
+    /// <summary>
+    /// The value profile field 36 would carry: « Favorites first » is never written there, 0
+    /// going in its place (AMD-053 §3 point 10, divergence <b>D</b>). The reimplementation
+    /// writes no profile from the settings, so this is the rule written down where the only
+    /// future writer would read it.
+    /// </summary>
+    public int ProfileSortOption => SortOption == 2 ? 0 : SortOption;
+
+    /// <summary>The library order in force (SPEC-09 REQ-PERS-033).</summary>
+    public Zax.Profiles.Library.LibrarySortOption LibrarySortOrder
+        => (Zax.Profiles.Library.LibrarySortOption)Math.Clamp(SortOption, 0, 2);
+
+    /// <summary>
+    /// The order the Load and Save lists follow (REQ-PERS-057): « Favorites first » is without
+    /// effect on them, so the value 2 falls back to "A-Z".
+    /// </summary>
+    public Zax.Profiles.Library.LibrarySortOption SlotSortOrder
+        => SortOption == 1
+            ? Zax.Profiles.Library.LibrarySortOption.Recent
+            : Zax.Profiles.Library.LibrarySortOption.Alphabetical;
 
     /// <summary>
     /// <c>ui.language</c>: the interface language of AMD-035, <c>en</c> or <c>fr</c>. Reading

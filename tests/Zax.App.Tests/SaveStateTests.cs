@@ -428,21 +428,27 @@ public sealed class SaveStateTests
     }
 
     /// <summary>
-    /// REQ-PERS-050 and AMD-010 REQ-UI-208: the model keeps SPEC-09's 36 numbered slots plus
-    /// the quick slot, while the menus expose the first ten.
+    /// REQ-PERS-050 as AMD-053 §3 point 4 amends it, with AMD-010 REQ-UI-208: the model keeps
+    /// SPEC-09's 36 numbered slots, the quick slot and the resume slot, while the menus expose
+    /// the first ten numbered ones.
     /// </summary>
     [Fact]
-    public void REQ_PERS_050_the_model_holds_thirty_seven_slots()
+    public void REQ_PERS_050_the_model_holds_thirty_eight_slots()
     {
         SaveSlotIndex index = new();
 
-        Assert.Equal(SaveSlotIndex.NumberedSlotCount + 1, index.Slots.Count);
+        Assert.Equal(SaveSlotIndex.NumberedSlotCount + 2, index.Slots.Count);
         Assert.NotNull(index.Find("1"));
         Assert.NotNull(index.Find("36"));
         Assert.NotNull(index.Find(SaveSlotIndex.QuickSlotId));
+        Assert.NotNull(index.Find(SaveSlotIndex.ResumeSlotId));
         Assert.Null(index.Find("37"));
         Assert.Equal(10, SaveSlotIndex.ExposedSlotCount);
         Assert.False(SaveSlotIndex.IsValidSlotId("0"));
         Assert.False(SaveSlotIndex.IsValidSlotId("37"));
+
+        // The resume slot is the model's, not the Load and Save lists' (REQ-PERS-052 extended).
+        Assert.True(SaveSlotIndex.IsValidSlotId(SaveSlotIndex.ResumeSlotId));
+        Assert.False(SaveSlotIndex.IsUserSlotId(SaveSlotIndex.ResumeSlotId));
     }
 }

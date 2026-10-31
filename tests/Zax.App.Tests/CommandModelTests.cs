@@ -39,6 +39,11 @@ public sealed class CommandModelTests
             ZaxCommands.ToggleMute, ZaxCommands.ToggleMenuMusic,
             ZaxCommands.ShowOptions, ZaxCommands.ShowKeyConfig, ZaxCommands.ShowDataFolder,
             ZaxCommands.ShowAbout,
+
+            // AMD-053 §3 point 17: the favourite mark, its filter, the title search and the
+            // resume entry (REQ-UI-210, REQ-UI-211, REQ-LOOP-076).
+            ZaxCommands.ToggleFavorite, ZaxCommands.FilterFavorites,
+            ZaxCommands.SearchLibrary, ZaxCommands.ResumeLast,
         ];
 
         foreach (string name in expected)

@@ -49,6 +49,12 @@ internal sealed partial class ZaxUi
 
             ImGui.TextDisabled(UiText.VersionLine);
             ImGui.Separator();
+
+            // AMD-053 REQ-LOOP-076: the Resume entry comes first, carrying the thumbnail of the
+            // savestate the last exit wrote. It is offered only when the slot survived the
+            // whole-file check of the start-up and -noresume was not given.
+            DrawResumeEntry();
+
             ImGui.TextUnformatted(UiText.WelcomeHint);
             ImGui.Spacing();
 
@@ -88,6 +94,39 @@ internal sealed partial class ZaxUi
         }
 
         ImGui.End();
+    }
+
+    /// <summary>
+    /// The <c>Resume</c> / « Reprendre » entry of AMD-053 REQ-LOOP-076, with the thumbnail of
+    /// the resume savestate when there is one to show. Activating it runs <c>resume.last</c>,
+    /// which loads the slot like any other (REQ-LOOP-044).
+    /// </summary>
+    private void DrawResumeEntry()
+    {
+        if (!_host.ResumeAvailable)
+        {
+            return;
+        }
+
+        if (_host.ResumeThumbnailFile is { } picture
+            && _options.LoadImage?.Invoke(picture) is { } image)
+        {
+            // Half the stored size, which keeps the 4:3 of the 256 × 192 capture of
+            // REQ-PERS-051 and leaves room for the rest of the screen.
+            ImGui.Image(image.Texture, new Vector2(image.Width * 0.5f, image.Height * 0.5f));
+        }
+
+        string label = _host.ResumeGameTitle is { Length: > 0 } title
+            ? $"{UiText.WelcomeResume} — {title}"
+            : UiText.WelcomeResume;
+
+        if (ImGui.Button(label))
+        {
+            Activate(ZaxCommands.ResumeLast, default);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
     }
 
     /// <summary>

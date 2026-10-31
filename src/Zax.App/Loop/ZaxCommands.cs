@@ -54,6 +54,29 @@ public static class ZaxCommands
     /// <summary>Cover art from an image file; argument: its path (REQ-PERS-036).</summary>
     public const string ImportCover = "file.import_cover";
 
+    // ------------------------------------------------- library (AMD-053 §3 point 17)
+
+    /// <summary>
+    /// Marks or unmarks a library entry as a favourite (AMD-053 REQ-UI-210); argument: its
+    /// profile id in <see cref="CommandArgs.Text"/>, the current game by default.
+    /// </summary>
+    public const string ToggleFavorite = "favorite.toggle";
+
+    /// <summary>The « Favorites only » filter of the game enumeration, a checked state.</summary>
+    public const string FilterFavorites = "library.filter_favorites";
+
+    /// <summary>
+    /// The title search of AMD-053 REQ-UI-211; argument: the text typed in
+    /// <see cref="CommandArgs.Text"/>, empty to clear it.
+    /// </summary>
+    public const string SearchLibrary = "library.search";
+
+    /// <summary>
+    /// Loads the resume slot of AMD-053 REQ-LOOP-076, like any slot load (REQ-LOOP-044). It is
+    /// the only way that slot is ever read.
+    /// </summary>
+    public const string ResumeLast = "resume.last";
+
     /// <summary>Quit without confirmation and without an automatic save (REQ-LOOP-052).</summary>
     public const string Quit = "app.quit";
 

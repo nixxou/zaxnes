@@ -44,6 +44,22 @@ internal sealed class EmulationHostOptions
     public Action<string>? Log { get; init; }
 
     /// <summary>
+    /// Receives one line per emulated frame when <c>-emustats</c> was given (AMD-053
+    /// REQ-UI-213). Null switches the measurement off, which is what every normal run wants.
+    /// The host writes English (AMD-035 §2) and the frontend sends it to the <b>log file</b>,
+    /// never to the parent console.
+    /// </summary>
+    public Action<string>? FrameStatsLog { get; init; }
+
+    /// <summary>
+    /// Whether <c>-noresume</c> — or <c>-slot</c>, which implies it — was given. The resume slot
+    /// of REQ-LOOP-076 is then neither read, nor written, nor erased for the whole run
+    /// (Q-088).
+    /// </summary>
+    // Q-088
+    public bool SuspendResume { get; init; }
+
+    /// <summary>
     /// Called with the absolute path of a ROM the host has just started, so that the frontend
     /// can keep the ten recent ROMs of AMD-010 REQ-UI-200.
     /// </summary>
@@ -162,7 +178,13 @@ internal sealed partial class EmulationHost : IDisposable
         Settings = options.Settings;
         Pacer = new FramePacer(RegionTiming.For(NesRegion.Ntsc).NominalFramesPerSecond, options.Clock);
         Slots = SaveSlotIndex.Load(options.Paths, _now());
-        Slots.Reconcile(options.Paths, _games.Exists);
+
+        // AMD-053 REQ-LOOP-076 rule 3 and REQ-PERS-055 as §3 point 7 extends it: what the
+        // reconciliation does to the resume slot has to be journalled, so its state before the
+        // pass is noted here. With -noresume the slot is left strictly alone (Q-088).
+        bool resumeWasOccupied = Slots.Find(SaveSlotIndex.ResumeSlotId) is { IsOccupied: true };
+        Slots.Reconcile(options.Paths, _games.Exists, skipResumeSlot: options.SuspendResume);
+        PrepareResumeSlot(resumeWasOccupied);
 
         Settings.Changed += OnSettingChanged;
 
@@ -202,8 +224,25 @@ internal sealed partial class EmulationHost : IDisposable
     /// <summary>The command model of AMD-010 REQ-UI-205.</summary>
     public CommandModel Commands { get; } = new();
 
-    /// <summary>The 36 numbered slots and the quick slot.</summary>
+    /// <summary>The 36 numbered slots, the quick slot and the resume slot.</summary>
     public SaveSlotIndex Slots { get; }
+
+    /// <summary>
+    /// Whether the <c>Resume</c> entry of AMD-053 REQ-LOOP-076 is offered this run: the resume
+    /// slot is occupied, its game is still in the library, its file passed the whole-file check
+    /// of the start-up, and <c>-noresume</c> was not given. Ignoring the entry during the
+    /// session does <b>not</b> clear it (rule 2); only the next exit does.
+    /// </summary>
+    public bool ResumeAvailable { get; private set; }
+
+    /// <summary>
+    /// Whether the « Favorites only » filter of AMD-053 REQ-UI-210 is ticked. A session state:
+    /// the amendment persists the mark, not the filter.
+    /// </summary>
+    public bool FavoritesOnly { get; private set; }
+
+    /// <summary>The title search of AMD-053 REQ-UI-211, empty when nothing is typed.</summary>
+    public string LibrarySearchText { get; private set; } = string.Empty;
 
     /// <summary>
     /// Whether « Mode 2D » is switched on by hand (AMD-010 REQ-UI-200, shortcut <c>F11</c>).
@@ -376,6 +415,12 @@ internal sealed partial class EmulationHost : IDisposable
                     _scene.Camera.Capture()));
             }
 
+            // AMD-053 REQ-UI-213: with -emustats the emulation time of each frame is measured.
+            // Without the option the sink is null and not a single timestamp is taken.
+            long startedAt = _options.FrameStatsLog is null
+                ? 0L
+                : System.Diagnostics.Stopwatch.GetTimestamp();
+
             try
             {
                 // REQ-INP-005: one emulated frame is one sample, fast forward included.
@@ -397,6 +442,15 @@ internal sealed partial class EmulationHost : IDisposable
 
             EmulatedFrames++;
 
+            if (_options.FrameStatsLog is { } stats)
+            {
+                // One line per emulated frame, in English (AMD-035 §2), for the log file.
+                stats(string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"emu frame {EmulatedFrames}: "
+                        + $"{System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds:F3} ms"));
+            }
+
             if (FastForward.IsActive)
             {
                 FastForward.OnFrameRun();
@@ -413,12 +467,20 @@ internal sealed partial class EmulationHost : IDisposable
     }
 
     /// <summary>
-    /// The exit of REQ-LOOP-052: stop the current game (End hook), write the settings and the
-    /// slot metadata, flush the battery RAM. No savestate is created.
+    /// The exit of REQ-LOOP-052 in the four steps AMD-053 REQ-LOOP-076 fixes: the <c>Save</c>
+    /// hook of every active script and the resume savestate, then the <c>End</c> hook and the
+    /// stop of the current game, then the settings and the slot metadata. No numbered slot and
+    /// no quick slot is ever written here (REQ-LOOP-052 as §3 points 1 and 2 amend it).
     /// </summary>
     public void Shutdown(SettingsStore? settings = null)
     {
+        // Steps 1 and 2: the Save hooks run inside the capture, before the state is written.
+        WriteOrClearResumeSlot();
+
+        // Step 3: the End hook of every active script, then the stop of the emulation loop.
         StopCurrentGame(clearCurrentGame: true);
+
+        // Step 4: the settings and the slot metadata, the `resume` entry among them.
         Slots.Save(_paths);
         settings?.Save(Settings);
     }

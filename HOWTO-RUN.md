@@ -106,6 +106,21 @@ archives `.7z` sont refusées faute de décodeur LZMA disponible (`spec/changes/
 | `--ui-shots <dossier>` | capture une image PNG par écran d'interface, puis quitte |
 | `--help` | aide complète |
 
+Quatre options reprises du programme d'origine s'écrivent avec **un seul tiret** ; leurs formes
+à double tiret sont acceptées comme alias (`AMD-053` REQ-UI-213).
+
+| Option | Effet |
+|---|---|
+| `-id=<identifiant>` | lance cette entrée de la bibliothèque, comme l'activation de sa tuile ; le sélecteur de ROM s'ouvre si aucune ROM n'y est associée, et un identifiant inconnu est ignoré |
+| `-slot=<n>` (`--slot=`) | charge le slot `n` (`1` à `36`, ou `quick`) une fois le jeu lancé. Un slot vide est ignoré ; un slot appartenant à un autre jeu lance **ce** jeu, et `-id` est alors sans effet. Implique `-noresume` |
+| `-noresume` (`--no-resume`) | ne propose pas l'entrée « Reprendre » ; l'emplacement de reprise n'est ni lu, ni écrit, ni effacé pendant ce lancement |
+| `-emustats` (`--emu-stats`) | écrit une ligne par image émulée, avec son temps d'émulation, dans `logs/zaxnes.log` (jamais sur la console) |
+
+**Point de reprise.** À la sortie normale pendant une partie, Zaxnes écrit une sauvegarde d'état
+dans un emplacement `resume` distinct des 36 slots numérotés et du slot rapide : au lancement
+suivant, l'écran d'accueil propose « Reprendre » avec sa vignette. Quitter sans partie en cours
+efface ce point de reprise.
+
 #### Surcharges de réglages (le temps d'un lancement)
 
 Ces options **écrasent le réglage persisté correspondant**, et seulement si vous les passez :
@@ -400,14 +415,14 @@ dans `userdata\` à côté de l'exécutable, et `--userdata <dossier>` l'emporte
 | `settings.json` | réglages : les préférences utilisateur, par clé stable (`camera.fov`, `audio.volume`, `scene.skybox`…) |
 | `games.json` | profil 3D choisi pour chaque fichier de ROM, et les dix ROMs récentes |
 | `input.json` | bindings : clavier J1/J2, un jeu par modèle de manette, dernière manette de chaque joueur |
-| `library.json` | bibliothèque : chemin de ROM, titre et date de dernière partie par jeu |
-| `saves/index.json` | métadonnées des 36 emplacements numérotés et de l'emplacement rapide |
+| `library.json` | bibliothèque : chemin de ROM, titre, date de dernière partie et marque de favori par jeu |
+| `saves/index.json` | métadonnées des 36 emplacements numérotés, de l'emplacement rapide et de l'emplacement de reprise |
 | `saves/<n>.state` | fichier de sauvegarde (signature `ZAXNESAV`, l'ancienne `SEN3DSAV` reste lisible) |
 | `saves/<n>.png` | vignette 256 × 192 de l'emplacement |
 | `battery/<sha1>.srm` | RAM sauvegardée par pile, par ROM (Zelda, Final Fantasy…) |
 | `profiles/*.3dn` | profils utilisateur importés — et, en plus, ceux du dossier `profiles` à côté de l'exécutable |
 | `covers/*.png` | jaquettes, nommées `<Titre>_3dsen_<Id>.png` |
-| `logs/` | journaux |
+| `logs/zaxnes.log` | journal du lancement en cours ; celui du lancement précédent est gardé sous `zaxnes.log.1` |
 
 Ce qu'il faut savoir :
 

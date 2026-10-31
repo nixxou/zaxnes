@@ -4,8 +4,25 @@ using Zax.App.Loop;
 using Zax.App.Persistence;
 using Zax.Profiles;
 using Zax.Render;
+using Zax.Scripting;
 
 namespace Zax.App.Tests;
+
+/// <summary>
+/// Collects what the Lua scripts print, in order, which is how a test reads the order the hooks
+/// ran in (SPEC-05 REQ-LUA-052).
+/// </summary>
+internal sealed class CollectingScriptLog(List<string> lines) : IScriptLog
+{
+    /// <inheritdoc/>
+    public void Print(string line) => lines.Add(line);
+
+    /// <inheritdoc/>
+    public void Error(string line) => lines.Add($"error: {line}");
+
+    /// <inheritdoc/>
+    public void Warning(string line) => lines.Add($"warning: {line}");
+}
 
 /// <summary>
 /// Synthetic NROM images: a program whose vectors all point at it, which is enough for the core
@@ -161,12 +178,29 @@ internal sealed class FakeCatalog : IGameCatalog
     public string? Cover(string gameId)
         => _entries.TryGetValue(gameId, out Entry? entry) ? entry.Cover : null;
 
+    /// <inheritdoc/>
+    public bool IsFavorite(string gameId)
+        => _entries.TryGetValue(gameId, out Entry? entry) && entry.Favorite;
+
+    /// <inheritdoc/>
+    public bool ToggleFavorite(string gameId)
+    {
+        if (!_entries.TryGetValue(gameId, out Entry? entry))
+        {
+            return false;
+        }
+
+        _entries[gameId] = entry with { Favorite = !entry.Favorite };
+        return true;
+    }
+
     private sealed record Entry(
         string Title,
         GameProfile Profile,
         bool Is2DMode,
         string? RomPath,
-        string? Cover = null);
+        string? Cover = null,
+        bool Favorite = false);
 }
 
 /// <summary>
@@ -179,7 +213,13 @@ internal sealed class LoopHarness : IDisposable
     private double _clock;
     private bool _disposed;
 
-    private LoopHarness(string root, FakeCatalog catalog, SceneState scene, AudioMixer mixer)
+    private LoopHarness(
+        string root,
+        FakeCatalog catalog,
+        SceneState scene,
+        AudioMixer mixer,
+        bool suspendResume,
+        bool frameStats)
     {
         Root = root;
         Catalog = catalog;
@@ -199,6 +239,9 @@ internal sealed class LoopHarness : IDisposable
             Now = () => Now,
             CaptureThumbnail = () => Thumbnail,
             Log = message => Log.Add(message),
+            ScriptLog = new CollectingScriptLog(ScriptLines),
+            SuspendResume = suspendResume,
+            FrameStatsLog = frameStats ? line => FrameStats.Add(line) : null,
         });
     }
 
@@ -226,6 +269,18 @@ internal sealed class LoopHarness : IDisposable
     /// <summary>Lines the host logged.</summary>
     public List<string> Log { get; } = [];
 
+    /// <summary>What the scripts printed, in order — the hook order the tests read.</summary>
+    public List<string> ScriptLines { get; } = [];
+
+    /// <summary>The per-frame lines of <c>-emustats</c> (AMD-053 REQ-UI-213).</summary>
+    public List<string> FrameStats { get; } = [];
+
+    /// <summary>
+    /// Whether the temporary root survives <see cref="Dispose"/>, which a test that relaunches
+    /// the program over the same user folder needs.
+    /// </summary>
+    public bool KeepRoot { get; set; }
+
     /// <summary>The wall clock the host stamps slots and launch dates with.</summary>
     public DateTimeOffset Now { get; set; } = DateTimeOffset.FromUnixTimeSeconds(1_760_950_000);
 
@@ -236,15 +291,30 @@ internal sealed class LoopHarness : IDisposable
     public double Clock => _clock;
 
     /// <summary>Creates a harness with a fresh temporary user root.</summary>
-    public static LoopHarness Create(FakeCatalog? catalog = null, AudioAssets? assets = null)
+    /// <param name="catalog">The library behind the loop.</param>
+    /// <param name="assets">The audio assets, or null for the synthesised ones.</param>
+    /// <param name="root">
+    /// An existing user root to open again, which is how a test relaunches the program over the
+    /// files a previous exit left (AMD-053 REQ-LOOP-076).
+    /// </param>
+    /// <param name="suspendResume">Whether <c>-noresume</c> was given (REQ-UI-213).</param>
+    /// <param name="frameStats">Whether <c>-emustats</c> was given.</param>
+    public static LoopHarness Create(
+        FakeCatalog? catalog = null,
+        AudioAssets? assets = null,
+        string? root = null,
+        bool suspendResume = false,
+        bool frameStats = false)
     {
-        string root = Path.Combine(Path.GetTempPath(), $"zax-loop-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
+        string directory = root ?? Path.Combine(Path.GetTempPath(), $"zax-loop-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
         return new LoopHarness(
-            root,
+            directory,
             catalog ?? new FakeCatalog(),
             new SceneState(),
-            new AudioMixer(48_000, assets, new Random(1234)));
+            new AudioMixer(48_000, assets, new Random(1234)),
+            suspendResume,
+            frameStats);
     }
 
     /// <summary>Writes a synthetic ROM into the temporary root and returns its path.</summary>
@@ -336,6 +406,11 @@ internal sealed class LoopHarness : IDisposable
 
         _disposed = true;
         Host.Dispose();
+
+        if (KeepRoot)
+        {
+            return;
+        }
 
         try
         {

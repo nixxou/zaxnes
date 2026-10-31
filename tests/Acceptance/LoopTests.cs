@@ -1206,20 +1206,20 @@ public sealed class LoopTests
     }
 
     /// <summary>
-    /// REQ-LOOP-052 — the exit runs without confirmation and without an automatic save: the
-    /// settings and the slot metadata are written and no new savestate appears.
+    /// REQ-LOOP-052 as AMD-053 §3 points 1 and 2 amend it — the exit runs without confirmation
+    /// and without an automatic save <b>in the numbered slots and in the quick slot</b>: the
+    /// settings and the slot metadata are written, and the only savestate that appears is the
+    /// resume point of REQ-LOOP-076.
     /// </summary>
     [Trait("Requires", "OriginalAssets")]
-    [HostFact] // REQ-LOOP-052
+    [HostFact] // REQ-LOOP-052, REQ-LOOP-076
     public void The_exit_writes_the_settings_and_creates_no_savestate()
     {
         using HostDriver host = HostDriver.Create();
         host.Launch2DMode();
         host.RunFrames(60);
 
-        int states = Directory.Exists(host.Paths.SavesDirectory)
-            ? Directory.GetFiles(host.Paths.SavesDirectory, "*.state").Length
-            : 0;
+        string[] states = StateFiles(host);
 
         host.Run(ZaxCommands.Quit);
         Assert.True(host.QuitRequested);
@@ -1230,10 +1230,17 @@ public sealed class LoopTests
         Assert.True(File.Exists(host.Paths.SaveIndexFile));
         Assert.True(File.Exists(host.Paths.SettingsFile));
 
-        int after = Directory.Exists(host.Paths.SavesDirectory)
-            ? Directory.GetFiles(host.Paths.SavesDirectory, "*.state").Length
-            : 0;
-        Assert.Equal(states, after);
+        // Exactly one file appeared, and it is the resume slot's.
+        string[] expected = [.. states.Append("resume.state").Order(StringComparer.Ordinal)];
+        Assert.Equal(expected, StateFiles(host));
+
+        static string[] StateFiles(HostDriver host) => Directory.Exists(host.Paths.SavesDirectory)
+            ? [.. Directory.GetFiles(host.Paths.SavesDirectory, "*.state")
+                .Select(Path.GetFileName)
+                .Where(static name => name is not null)
+                .Select(static name => name!)
+                .Order(StringComparer.Ordinal)]
+            : [];
     }
 
     /// <summary>

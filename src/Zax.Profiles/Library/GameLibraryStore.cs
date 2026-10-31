@@ -26,13 +26,23 @@ public sealed class GameLibraryRecord
     /// <summary>Cover-art file name.</summary>
     [JsonPropertyName("cover")]
     public string? Cover { get; set; }
+
+    /// <summary>
+    /// Whether the user marked the game as a favourite (AMD-053 REQ-UI-210, §3 point 11). False
+    /// by default, and false for every entry of a file migrated from schema version 1.
+    /// </summary>
+    [JsonPropertyName("favorite")]
+    public bool Favorite { get; set; }
 }
 
 /// <summary>The contents of <c>library.json</c> (SPEC-09 §4.5.2, REQ-PERS-024).</summary>
 public sealed class GameLibraryFile
 {
-    /// <summary>The schema version this implementation writes.</summary>
-    public const int CurrentSchemaVersion = 1;
+    /// <summary>
+    /// The schema version this implementation writes. Version 2 added the <c>favorite</c> field
+    /// of AMD-053 §3 point 11.
+    /// </summary>
+    public const int CurrentSchemaVersion = 2;
 
     /// <summary>The notice written beside the identifiers.</summary>
     public const string DefaultNotice = "Do not edit the id field.";
@@ -86,6 +96,14 @@ public sealed class GameLibraryStore
     private readonly IProfileFileSystem _files;
     private readonly IProfileLog _log;
 
+    /// <summary>
+    /// The schema version the last <see cref="Load"/> read when it was older than
+    /// <see cref="GameLibraryFile.CurrentSchemaVersion"/>, or null. A migrated file is written
+    /// again at the current version, a <c>.v&lt;N&gt;.bak</c> copy having been kept
+    /// (REQ-PERS-024, REQ-PERS-088).
+    /// </summary>
+    public int? MigratedFromVersion { get; private set; }
+
     /// <summary>Creates a store over a file system.</summary>
     public GameLibraryStore(IProfileFileSystem files, IProfileLog? log = null)
     {
@@ -103,6 +121,7 @@ public sealed class GameLibraryStore
     public GameLibraryFile? Load(string path, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
+        MigratedFromVersion = null;
         if (!_files.FileExists(path))
         {
             return null;
@@ -114,6 +133,23 @@ public sealed class GameLibraryStore
             if (file is null)
             {
                 throw new JsonException("the root of the file is null");
+            }
+
+            // REQ-PERS-024 with AMD-053 §3 point 11: a version-1 file carries no `favorite`
+            // field, so deserialising it already gives false everywhere; what the requirement
+            // adds is the copy kept before the migrated file is written again.
+            if (file.SchemaVersion < GameLibraryFile.CurrentSchemaVersion)
+            {
+                MigratedFromVersion = file.SchemaVersion;
+                string backup = $"{path}.v{file.SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)}.bak";
+                try
+                {
+                    _files.CopyFile(path, backup, overwrite: true);
+                }
+                catch (Exception failure) when (failure is IOException or UnauthorizedAccessException)
+                {
+                    _log.Warning($"{path}: the schema {file.SchemaVersion} copy could not be kept ({failure.Message})");
+                }
             }
 
             if (file.SchemaVersion > GameLibraryFile.CurrentSchemaVersion)

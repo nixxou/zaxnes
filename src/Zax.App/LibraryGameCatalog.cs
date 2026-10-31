@@ -123,7 +123,19 @@ internal sealed class LibraryGameCatalog : IGameCatalog
 
         GameLibrary library = GameLibrary.Build(catalogue, userProfiles, persisted);
 
-        return new LibraryGameCatalog(library, store, paths, logger, builtIns);
+        LibraryGameCatalog opened = new(library, store, paths, logger, builtIns);
+
+        // REQ-PERS-024: a migrated file is written again at the current version straight away,
+        // the <name>.v<N>.bak copy having been kept by the store (AMD-053 §3 point 11).
+        if (store.MigratedFromVersion is { } version)
+        {
+            logger(
+                $"library.json was migrated from schema {version} to "
+                + $"{GameLibraryFile.CurrentSchemaVersion}; no entry is a favourite yet.");
+            opened.Save();
+        }
+
+        return opened;
     }
 
     /// <summary>
@@ -233,6 +245,23 @@ internal sealed class LibraryGameCatalog : IGameCatalog
 
     /// <inheritdoc/>
     public string? Cover(string gameId) => _library.Find(gameId)?.Cover;
+
+    /// <inheritdoc/>
+    public bool IsFavorite(string gameId) => _library.Find(gameId) is { Favorite: true };
+
+    /// <inheritdoc/>
+    public bool ToggleFavorite(string gameId)
+    {
+        if (!_library.ToggleFavorite(gameId))
+        {
+            return false;
+        }
+
+        // REQ-UI-210: the mark survives an exit, so it is written at once like every other
+        // per-entry value of library.json (REQ-PERS-037).
+        Save();
+        return true;
+    }
 
     /// <inheritdoc/>
     public bool SetCover(string gameId, string? fileName)

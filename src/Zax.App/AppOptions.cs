@@ -33,6 +33,40 @@ public sealed record AppOptions
     public string? Profile { get; init; }
 
     /// <summary>
+    /// The profile identifier of <c>-id=</c> (SPEC-10 REQ-UI-007), or null. The game is started
+    /// as activating its tile would, and the ROM chooser opens when no ROM is associated; an
+    /// unknown identifier is ignored.
+    /// </summary>
+    public string? GameId { get; init; }
+
+    /// <summary>
+    /// The slot of <c>-slot=&lt;n&gt;</c> — <c>1</c>…<c>36</c> or <c>quick</c> — or null
+    /// (AMD-053 REQ-UI-213). A value outside the domain is ignored, and the command line is not
+    /// held to the ten slots the menus expose (AMD-010 REQ-UI-208).
+    /// </summary>
+    public string? Slot { get; init; }
+
+    /// <summary>
+    /// Whether <c>-noresume</c> was given, or implied by <c>-slot</c> (AMD-053 REQ-UI-213):
+    /// the resume slot is not offered this run, and it is neither read, written nor erased
+    /// (Q-088).
+    /// </summary>
+    public bool NoResume { get; init; }
+
+    /// <summary>
+    /// Whether <c>-emustats</c> was given: one line per emulated frame, carrying the emulation
+    /// time of that frame, goes to the <b>log file</b> (AMD-053 REQ-UI-213).
+    /// </summary>
+    public bool EmuStats { get; init; }
+
+    /// <summary>
+    /// What the parsing chose to ignore rather than refuse — an out-of-domain slot, for
+    /// instance. The host journals them once it has a log (REQ-UI-213: « une valeur invalide est
+    /// ignorée et le programme démarre normalement »).
+    /// </summary>
+    public IReadOnlyList<string> Notices { get; init; } = [];
+
+    /// <summary>
     /// A folder of user-supplied asset files (<c>--assets</c>), or null. AMD-024 REQ-PUB-001:
     /// the folder is never discovered, only named.
     /// </summary>
@@ -127,8 +161,21 @@ public sealed record AppOptions
 
         Usage:
           Zax.App --rom <path> [--profile <title-or-file>] [options]
+          Zax.App -id=<profile-id> [-slot=<n>]
           Zax.App --list-profiles
           Zax.App --import-3dsen <folder-or-bundle>
+
+        Options taken from the original program (single dash; the double-dash forms are aliases):
+          -id=<profile-id>        Start that library entry, as activating its tile would. The
+                                  ROM chooser opens when no ROM is associated with it; an
+                                  unknown identifier is ignored (SPEC-10 REQ-UI-007).
+          -slot=<n>               Load slot n (1 to 36, or quick) once the game is running.
+                                  An empty slot is ignored; a slot of another game starts that
+                                  game instead. Implies -noresume (AMD-053 REQ-UI-213).
+          -noresume               Do not offer the Resume entry, and leave the resume point
+                                  untouched for this run.
+          -emustats               Write one line per emulated frame, with its emulation time,
+                                  into the log file of the user folder.
 
         Options:
           --rom <path>            The .nes ROM to play. Without it only the empty scene shows.
@@ -190,10 +237,20 @@ public sealed record AppOptions
         ArgumentNullException.ThrowIfNull(args);
 
         AppOptions options = new();
+        List<string> notices = [];
 
         for (int i = 0; i < args.Length; i++)
         {
             string arg = args[i];
+
+            // AMD-053 REQ-UI-213: the three options taken from the original program carry their
+            // value after an « = », like the -id= of REQ-UI-007, and their double-dash spellings
+            // are accepted as aliases (D).
+            if (TryParseOriginalOption(arg, ref options, notices))
+            {
+                continue;
+            }
+
             switch (arg)
             {
                 case "-h":
@@ -324,7 +381,75 @@ public sealed record AppOptions
             }
         }
 
-        return options;
+        // REQ-UI-213: -slot implies -noresume, whatever the order the two were given in.
+        if (options.Slot is not null)
+        {
+            options = options with { NoResume = true };
+        }
+
+        return options with { Notices = notices };
+    }
+
+    /// <summary>
+    /// The four options the original program spells with a single dash: <c>-id=</c>
+    /// (REQ-UI-007), <c>-slot=</c>, <c>-noresume</c> and <c>-emustats</c> (AMD-053 REQ-UI-213).
+    /// Their double-dash forms are accepted as aliases, by consistency with the options Zaxnes
+    /// adds of its own.
+    /// </summary>
+    /// <returns>True when <paramref name="arg"/> was one of them.</returns>
+    private static bool TryParseOriginalOption(string arg, ref AppOptions options, List<string> notices)
+    {
+        if (Value(arg, "-id=", "--id=") is { } id)
+        {
+            // An unknown identifier is ignored by the host, which alone knows the library.
+            options = options with { GameId = id };
+            return true;
+        }
+
+        if (Value(arg, "-slot=", "--slot=") is { } slot)
+        {
+            if (Persistence.SaveSlotIndex.IsUserSlotId(slot))
+            {
+                options = options with { Slot = slot };
+            }
+            else
+            {
+                // « Une valeur invalide […] est ignorée et le programme démarre normalement. »
+                notices.Add($"-slot={slot} is outside 1…36 and 'quick'; the option is ignored.");
+            }
+
+            return true;
+        }
+
+        switch (arg)
+        {
+            case "-noresume":
+            case "--no-resume":
+                options = options with { NoResume = true };
+                return true;
+
+            case "-emustats":
+            case "--emu-stats":
+                options = options with { EmuStats = true };
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>The value an <c>&lt;option&gt;=&lt;value&gt;</c> argument carries, or null.</summary>
+    private static string? Value(string arg, string prefix, string alias)
+    {
+        foreach (string spelling in new[] { prefix, alias })
+        {
+            if (arg.StartsWith(spelling, StringComparison.Ordinal))
+            {
+                return arg[spelling.Length..];
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -108,6 +108,10 @@ internal static partial class UiStrings
         [UiKeys.NotifyThreeDSenSummary] =
             "3dSen : {0} profil(s) importé(s), {1} déjà présent(s), {2} en échec.",
 
+        // AMD-053 REQ-UI-212 : ce que dit un import accepté.
+        [UiKeys.NotifyProfileImported] = "Profil importé : {0}",
+        [UiKeys.NotifyProfileImportedBy] = "Profil importé : {0}, de {1}",
+
         // ------------------- confirmations de REQ-PERS-042 et REQ-PERS-054
         [UiKeys.ConfirmDeleteGame] = "Voulez-vous supprimer le jeu et ses sauvegardes d'état ?",
         [UiKeys.ConfirmDeleteSlot] = "Voulez-vous supprimer l'emplacement {0} ?",
@@ -126,6 +130,11 @@ internal static partial class UiStrings
 
         // ---------------------------------------------------- fields, columns
         [UiKeys.FieldSearch] = "Rechercher",
+
+        // AMD-053 §4.
+        [UiKeys.FieldFavorite] = "Favori",
+        [UiKeys.FieldFavoritesOnly] = "Favoris seulement",
+
         [UiKeys.ColumnAction] = "Action",
         [UiKeys.ColumnKeyboard] = "Clavier",
         [UiKeys.ColumnGamepad] = "Manette",
@@ -135,6 +144,9 @@ internal static partial class UiStrings
         [UiKeys.WelcomeHint] = "Fichier ▸ Ouvrir une ROM",
         [UiKeys.WelcomeRecent] = "ROMs récentes",
         [UiKeys.WelcomeNoRecent] = "Aucune ROM n'a encore été ouverte.",
+
+        // AMD-053 §4 : l'entrée de REQ-LOOP-076, en tête de l'énumération.
+        [UiKeys.WelcomeResume] = "Reprendre",
 
         // -------------------------------------------------------- about block
         [UiKeys.AboutLicence] = "GPL v3",
@@ -200,6 +212,12 @@ internal static partial class UiStrings
         ["cmd.file.delete_game"] = "Supprimer le jeu…",
         ["cmd.file.create_game_art"] = "Créer la jaquette",
         ["cmd.file.import_cover"] = "Importer une jaquette…",
+
+        // AMD-053 §3 point 17 : les quatre commandes ajoutées au modèle de REQ-UI-205.
+        ["cmd.favorite.toggle"] = "Favori",
+        ["cmd.library.filter_favorites"] = "Favoris seulement",
+        ["cmd.library.search"] = "Rechercher",
+        ["cmd.resume.last"] = "Reprendre",
         ["cmd.app.quit"] = "Quitter",
         ["cmd.state.save_slot"] = "Sauvegarder l'état",
         ["cmd.state.load_slot"] = "Charger un état",
@@ -311,6 +329,7 @@ internal static partial class UiStrings
         ["option.disabled"] = "désactivées",
         ["option.A-Z"] = "A-Z",
         ["option.Recent"] = "Récent",
+        ["option.Favorites first"] = "Favoris d'abord",
         ["option.en"] = "English",
         ["option.fr"] = "Français",
         ["option.Screen Center"] = "Centre de l'écran",

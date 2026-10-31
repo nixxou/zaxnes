@@ -193,10 +193,11 @@ public sealed class PersistenceStoreTests
             File.ReadAllText(root.Paths.SettingsFile),
             StringComparison.Ordinal);
 
-        // The other three persistent files carry one too.
-        Assert.Equal(1, SaveSlotIndex.SchemaVersion);
+        // The other three persistent files carry one too. AMD-053 §3 points 11 and 12 took the
+        // library and the slot index to version 2, each with its migration.
+        Assert.Equal(2, SaveSlotIndex.SchemaVersion);
         Assert.Equal(1, InputBindingStore.SchemaVersion);
-        Assert.Equal(1, GameLibraryFile.CurrentSchemaVersion);
+        Assert.Equal(2, GameLibraryFile.CurrentSchemaVersion);
     }
 
     /// <summary>
@@ -259,7 +260,8 @@ public sealed class PersistenceStoreTests
 
     /// <summary>
     /// REQ-PERS-031: a game remembers its ROM path, its title, its last-played date and its
-    /// cover — and nothing else. No camera, speed, region or Lua data is kept per game.
+    /// cover — and, since AMD-053 §3 point 11, its favourite mark. Nothing else: no camera, no
+    /// speed, no region and no Lua data is kept per game.
     /// </summary>
     [Fact]
     public void REQ_PERS_031_only_four_things_are_remembered_per_game()
@@ -269,7 +271,7 @@ public sealed class PersistenceStoreTests
             .Select(static property => property.Name)];
 
         Assert.Equal<IEnumerable<string>>(
-            ["Id", "Title", "RomPath", "LastPlayed", "Cover"],
+            ["Id", "Title", "RomPath", "LastPlayed", "Cover", "Favorite"],
             fields);
     }
 
@@ -701,8 +703,9 @@ public sealed class PersistenceStoreTests
     // -------------------------------------------------------------- §3.5 slots
 
     /// <summary>
-    /// REQ-PERS-050: 36 numbered slots and one quick slot, common to every game, each carrying
-    /// its identifier, the game it holds, a thumbnail and a date.
+    /// REQ-PERS-050 as AMD-053 §3 point 4 amends it: 36 numbered slots, one quick slot and one
+    /// resume slot, common to every game, each carrying its identifier, the game it holds, a
+    /// thumbnail and a date.
     /// </summary>
     [Fact]
     public void REQ_PERS_050_there_are_thirty_six_slots_and_a_quick_one()
@@ -710,17 +713,23 @@ public sealed class PersistenceStoreTests
         SaveSlotIndex index = new();
 
         Assert.Equal(36, SaveSlotIndex.NumberedSlotCount);
-        Assert.Equal(37, index.Slots.Count);
+        Assert.Equal(38, index.Slots.Count);
         Assert.Equal("quick", SaveSlotIndex.QuickSlotId);
+        Assert.Equal("resume", SaveSlotIndex.ResumeSlotId);
         Assert.Equal("1", index.Slots[0].Id);
         Assert.Equal("36", index.Slots[35].Id);
         Assert.Equal("quick", index.Slots[36].Id);
+        Assert.Equal("resume", index.Slots[37].Id);
 
         Assert.True(SaveSlotIndex.IsValidSlotId("1"));
         Assert.True(SaveSlotIndex.IsValidSlotId("36"));
         Assert.True(SaveSlotIndex.IsValidSlotId("quick"));
+        Assert.True(SaveSlotIndex.IsValidSlotId("resume"));
         Assert.False(SaveSlotIndex.IsValidSlotId("0"));
         Assert.False(SaveSlotIndex.IsValidSlotId("37"));
+
+        // The resume slot shows in no Load or Save list (REQ-PERS-052 as §3 point 5 extends it).
+        Assert.False(SaveSlotIndex.IsUserSlotId("resume"));
 
         index.Occupy("1", "10", 1_760_950_100L, hasThumbnail: true);
         SaveSlotRecord slot = index.Find("1")!;
@@ -755,9 +764,10 @@ public sealed class PersistenceStoreTests
         host.Run(ZaxCommands.SaveSlot, CommandArgs.Of(1));
         Assert.NotEqual(first, host.Slots.Find("1")!.SavedAt);
 
-        // The metadata on disk name the game and the date.
+        // The metadata on disk name the game and the date; the file holds the 38 entries of
+        // AMD-053 §3 point 12.
         using JsonDocument index = JsonDocument.Parse(File.ReadAllText(host.Paths.SaveIndexFile));
-        Assert.Equal(37, index.RootElement.GetProperty("slots").GetArrayLength());
+        Assert.Equal(38, index.RootElement.GetProperty("slots").GetArrayLength());
     }
 
     /// <summary>
@@ -952,12 +962,16 @@ public sealed class PersistenceStoreTests
             index.Occupy(slot, "10", 100L, hasThumbnail: true);
         }
 
-        List<SaveSlotRecord> occupied = [.. index.Slots
-            .Where(static slot => slot.IsOccupied && slot.Id != SaveSlotIndex.QuickSlotId)];
+        // The lists walk the numbered slots only: neither the quick slot nor the resume slot of
+        // AMD-053 REQ-LOOP-076 appears in them (REQ-PERS-052 as §3 point 5 extends it).
+        static bool Numbered(SaveSlotRecord slot)
+            => SaveSlotIndex.IsUserSlotId(slot.Id) && slot.Id != SaveSlotIndex.QuickSlotId;
+
+        List<SaveSlotRecord> occupied = [.. index.Slots.Where(slot => slot.IsOccupied && Numbered(slot))];
         Assert.Equal(3, occupied.Count);
 
         string? firstFree = index.Slots
-            .Where(static slot => !slot.IsOccupied && slot.Id != SaveSlotIndex.QuickSlotId)
+            .Where(slot => !slot.IsOccupied && Numbered(slot))
             .Select(static slot => slot.Id)
             .FirstOrDefault();
         Assert.Equal("3", firstFree);
@@ -968,9 +982,7 @@ public sealed class PersistenceStoreTests
             index.Occupy(SaveSlotIndex.NumberedSlotId(slot), "10", 100L, hasThumbnail: true);
         }
 
-        Assert.DoesNotContain(
-            index.Slots.Where(static slot => slot.Id != SaveSlotIndex.QuickSlotId),
-            slot => !slot.IsOccupied);
+        Assert.DoesNotContain(index.Slots.Where(Numbered), slot => !slot.IsOccupied);
     }
 
     /// <summary>

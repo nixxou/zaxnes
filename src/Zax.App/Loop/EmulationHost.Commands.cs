@@ -116,6 +116,41 @@ internal sealed partial class EmulationHost
             LabelOf(ZaxCommands.Quit),
             _ => QuitRequested = true,
             static () => "Ctrl+Q");
+
+        RegisterLibraryCommands();
+    }
+
+    /// <summary>
+    /// The four commands AMD-053 §3 point 17 adds to the model of REQ-UI-205: the favourite
+    /// mark, its filter, the title search and the resume entry. Expressing them here is what
+    /// makes REQ-UI-210 and REQ-UI-211 rest on the command model rather than on a presentation
+    /// the amendment leaves free.
+    /// </summary>
+    private void RegisterLibraryCommands()
+    {
+        Commands.Register(
+            ZaxCommands.ToggleFavorite,
+            LabelOf(ZaxCommands.ToggleFavorite),
+            args => _games.ToggleFavorite(args.Text ?? CurrentGameId ?? string.Empty),
+            canExecute: args => _games.Exists(args.Text ?? CurrentGameId ?? string.Empty),
+            isChecked: () => CurrentGameId is { } id && _games.IsFavorite(id));
+
+        Commands.Register(
+            ZaxCommands.FilterFavorites,
+            LabelOf(ZaxCommands.FilterFavorites),
+            _ => FavoritesOnly = !FavoritesOnly,
+            isChecked: () => FavoritesOnly);
+
+        Commands.Register(
+            ZaxCommands.SearchLibrary,
+            LabelOf(ZaxCommands.SearchLibrary),
+            args => LibrarySearchText = args.Text ?? string.Empty);
+
+        Commands.Register(
+            ZaxCommands.ResumeLast,
+            LabelOf(ZaxCommands.ResumeLast),
+            _ => ResumeLastGame(),
+            canExecute: _ => !IsLoading && ResumeAvailable);
     }
 
     private void RegisterStateCommands()
@@ -127,14 +162,17 @@ internal sealed partial class EmulationHost
             TextOf(UiKeys.ShortcutSaveSlots),
             args => CanSave(args.Number));
 
+        // A text argument names the slot directly, which is how the quick slot and the
+        // command line's -slot=<n> reach it (AMD-053 REQ-UI-213). The resume slot is not
+        // reachable this way: only resume.last reads it (REQ-PERS-052 as §3 point 5 extends it).
         Commands.Register(
             ZaxCommands.LoadSlot,
             LabelOf(ZaxCommands.LoadSlot),
-            args => LoadSlot(SaveSlotIndex.NumberedSlotId(args.Number)),
+            args => LoadUserSlot(args),
             TextOf(UiKeys.ShortcutLoadSlots),
             args => !IsLoading
-                && SaveSlotIndex.IsValidSlotId(SaveSlotIndex.NumberedSlotId(args.Number))
-                && Slots.Find(SaveSlotIndex.NumberedSlotId(args.Number)) is { IsOccupied: true });
+                && SaveSlotIndex.IsUserSlotId(UserSlotOf(args))
+                && Slots.Find(UserSlotOf(args)) is { IsOccupied: true });
 
         Commands.Register(
             ZaxCommands.QuickSave,
@@ -155,9 +193,27 @@ internal sealed partial class EmulationHost
         Commands.Register(
             ZaxCommands.DeleteSlot,
             LabelOf(ZaxCommands.DeleteSlot),
-            args => RequestDeleteSlot(args.Text ?? SaveSlotIndex.NumberedSlotId(args.Number)),
+            args => RequestDeleteSlot(UserSlotOf(args)),
             canExecute: args => !IsLoading
-                && Slots.Find(args.Text ?? SaveSlotIndex.NumberedSlotId(args.Number)) is { IsOccupied: true });
+                && SaveSlotIndex.IsUserSlotId(UserSlotOf(args))
+                && Slots.Find(UserSlotOf(args)) is { IsOccupied: true });
+    }
+
+    /// <summary>
+    /// The slot a save, load or delete command names: its text argument, or the numbered slot
+    /// its number designates.
+    /// </summary>
+    private static string UserSlotOf(CommandArgs args)
+        => args.Text ?? SaveSlotIndex.NumberedSlotId(args.Number);
+
+    /// <summary>Loads the slot a command names, the resume slot excepted.</summary>
+    private void LoadUserSlot(CommandArgs args)
+    {
+        string slotId = UserSlotOf(args);
+        if (SaveSlotIndex.IsUserSlotId(slotId))
+        {
+            LoadSlot(slotId);
+        }
     }
 
     private void RegisterEmulationCommands()
@@ -404,7 +460,7 @@ internal sealed partial class EmulationHost
         => !IsLoading
             && State != EmulationState.Stopped
             && _currentGame is not null
-            && SaveSlotIndex.IsValidSlotId(SaveSlotIndex.NumberedSlotId(slotNumber));
+            && SaveSlotIndex.IsUserSlotId(SaveSlotIndex.NumberedSlotId(slotNumber));
 
     /// <summary>
     /// The Menu short press of REQ-LOOP-005: it toggles between Running and Paused and is

@@ -230,6 +230,13 @@ public sealed class UserProfileFolder
     /// <param name="sourcePath">The chosen file.</param>
     /// <param name="builtInIds">Identifiers of the built-in profiles.</param>
     /// <param name="userProfiles">The user profiles already known, from <see cref="Scan"/>.</param>
+    /// <remarks>
+    /// AMD-053 REQ-UI-212: the file is read as REQ-PROF-062 reads one — the header alone, no
+    /// pattern and no script — and the message of a refusal is chosen by its <b>cause</b>. The
+    /// four rows of the table are, in the order they can be told apart: an unreadable file or a
+    /// malformed protobuf, a signature that is not <c>"3dn"</c>, an unsupported version, and a
+    /// missing identifier.
+    /// </remarks>
     public ProfileImportResult Import(
         string sourcePath,
         IReadOnlyCollection<string>? builtInIds = null,
@@ -246,16 +253,25 @@ public sealed class UserProfileFolder
             _files.ReadAllBytes(sourcePath), _log, sourcePath);
         if (header is null)
         {
+            // Row 3 of the table: a malformed protobuf, or a file that could not be read at all.
             return Reject(ProfileImportMessages.ObsoleteFormat(sourcePath));
         }
 
         if (!header.Value.HasAcceptableSignature)
         {
+            // Row 1: `Type` is present and is not "3dn" (REQ-PROF-033).
             return Reject(ProfileImportMessages.NotA3dnFile);
         }
 
-        // An absent or empty identifier is refused: there would be no way to key the library
-        // entry, the slots or the cover art on it (REQ-PROF-063).
+        if (header.Value.HasUnsupportedVersion)
+        {
+            // Row 2: `Ver` reduces to "1" (REQ-PROF-021). The message carries the version as
+            // the file spells it, not as the sanitising of REQ-PROF-021 reduces it. Q-089.
+            return Reject(ProfileImportMessages.UnsupportedVersion(header.Value.Version ?? string.Empty));
+        }
+
+        // Row 4: an absent or empty identifier is refused — there would be no way to key the
+        // library entry, the slots or the cover art on it (REQ-PROF-063, REQ-PERS-041 point 1).
         if (!header.Value.HasId)
         {
             return Reject(ProfileImportMessages.ObsoleteFormat(sourcePath));

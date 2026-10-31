@@ -38,6 +38,7 @@ public static class ProfileWireCodec
     {
         ProtoReader reader = new(bytes.ToArray());
         string? signature = null;
+        string? version = null;
         string? id = null;
         string? title = null;
         string? author = null;
@@ -49,6 +50,12 @@ public static class ProfileWireCodec
             {
                 case ProfileSchema.Root.Type:
                     signature = reader.ReadString();
+                    break;
+                case ProfileSchema.Root.Ver:
+                    // One field beyond the header of REQ-PROF-062: the import of AMD-053
+                    // REQ-UI-212 names the cause of a refusal, and one of its causes is the
+                    // version (R2 point 53-N1).
+                    version = reader.ReadString();
                     break;
                 case ProfileSchema.Root.Id:
                     id = reader.ReadString();
@@ -71,7 +78,7 @@ public static class ProfileWireCodec
             }
         }
 
-        return new ProfileHeader(signature, id, title, author, publisher, description);
+        return new ProfileHeader(signature, id, title, author, publisher, description, version);
     }
 
     private static int EstimateCapacity(GameProfile profile)

@@ -103,6 +103,15 @@ internal static class UiKeys
     /// <summary>The end-of-import summary of AMD-030 §5, translated by AMD-036 §1.</summary>
     public const string NotifyThreeDSenSummary = "notify.import_3dsen_summary";
 
+    /// <summary>
+    /// What an accepted import says (AMD-053 REQ-UI-212): the title of the profile. No
+    /// requirement fixes the wording, so it is an ordinary interface text (AMD-035).
+    /// </summary>
+    public const string NotifyProfileImported = "notify.profile_imported";
+
+    /// <summary>The same with the author of the profile, when field 9 is not empty.</summary>
+    public const string NotifyProfileImportedBy = "notify.profile_imported_by";
+
     // ------------------- confirmations of SPEC-09 REQ-PERS-042 and REQ-PERS-054 (AMD-036 §1)
 
     public const string ConfirmDeleteGame = "confirm.delete_game";
@@ -121,6 +130,13 @@ internal static class UiKeys
     // ------------------------------------------------------- fields, columns
 
     public const string FieldSearch = "field.search";
+
+    /// <summary>The favourite mark of AMD-053 §4.</summary>
+    public const string FieldFavorite = "field.favorite";
+
+    /// <summary>The « Favorites only » filter of AMD-053 §4.</summary>
+    public const string FieldFavoritesOnly = "field.favorites_only";
+
     public const string ColumnAction = "column.action";
     public const string ColumnKeyboard = "column.keyboard";
     public const string ColumnGamepad = "column.gamepad";
@@ -131,6 +147,9 @@ internal static class UiKeys
     public const string WelcomeHint = "welcome.hint";
     public const string WelcomeRecent = "welcome.recent";
     public const string WelcomeNoRecent = "welcome.no_recent";
+
+    /// <summary>The resume entry of AMD-053 REQ-LOOP-076 and §4.</summary>
+    public const string WelcomeResume = "welcome.resume";
 
     // ----------------------------------------------------------- about block
 

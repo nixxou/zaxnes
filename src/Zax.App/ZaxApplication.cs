@@ -56,6 +56,7 @@ internal sealed class ZaxApplication : IDisposable
     private GpuFrameQueue? _gpuFrames;
 
     private UserDataPaths? _paths;
+    private static RunLog? _runLog;
     private SettingsStore? _settingsStore;
     private InputBindingStore? _bindingStore;
     private LibraryGameCatalog? _catalog;
@@ -186,6 +187,16 @@ internal sealed class ZaxApplication : IDisposable
         string? assetRoot = NeutralAssets.Locate(_options.AssetRoot);
 
         _paths = UserDataPaths.Resolve(_options.UserDataRoot);
+
+        // SPEC-09 §3.8: the run log. A normal launch never borrows the parent console
+        // (AMD-032 §5), so this is where a whole session's lines — and the per-frame lines of
+        // -emustats (AMD-053 REQ-UI-213) — are kept.
+        _runLog = RunLog.Open(_paths);
+
+        foreach (string notice in _options.Notices)
+        {
+            Log(notice);
+        }
 
         // AMD-029 §2: the first run after the rename seeds the new root from the old one.
         if (_paths.MigratedFrom is { } legacyRoot)
@@ -410,7 +421,68 @@ internal sealed class ZaxApplication : IDisposable
             FramesPerSecond = () => (float)_frameRate.FramesPerSecond,
             Log = Log,
             RevealFolder = RevealFolder,
+            LoadImage = LoadImage,
         });
+    }
+
+    private readonly Dictionary<string, (nint Texture, int Width, int Height)> _images = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Uploads a PNG of the user folder as a texture Dear ImGui can draw — the resume thumbnail
+    /// of AMD-053 REQ-LOOP-076. One texture per file, kept for the session and released with the
+    /// context; an unreadable file gives null and the entry simply shows without its picture.
+    /// </summary>
+    private unsafe (nint Texture, int Width, int Height)? LoadImage(string path)
+    {
+        if (_images.TryGetValue(path, out (nint Texture, int Width, int Height) cached))
+        {
+            return cached.Texture == 0 ? null : cached;
+        }
+
+        (nint Texture, int Width, int Height) result = (0, 0, 0);
+        try
+        {
+            if (_gl is { } gl)
+            {
+                Render.Assets.ImageData image = Render.Assets.PngImage.Load(path);
+                uint texture = gl.GenTexture();
+                gl.BindTexture(Silk.NET.OpenGL.TextureTarget.Texture2D, texture);
+                fixed (byte* pixels = image.Pixels)
+                {
+                    gl.TexImage2D(
+                        Silk.NET.OpenGL.TextureTarget.Texture2D,
+                        0,
+                        Silk.NET.OpenGL.InternalFormat.Rgba8,
+                        (uint)image.Width,
+                        (uint)image.Height,
+                        0,
+                        Silk.NET.OpenGL.PixelFormat.Rgba,
+                        Silk.NET.OpenGL.PixelType.UnsignedByte,
+                        pixels);
+                }
+
+                gl.TexParameter(
+                    Silk.NET.OpenGL.TextureTarget.Texture2D,
+                    Silk.NET.OpenGL.TextureParameterName.TextureMinFilter,
+                    (int)Silk.NET.OpenGL.GLEnum.Linear);
+                gl.TexParameter(
+                    Silk.NET.OpenGL.TextureTarget.Texture2D,
+                    Silk.NET.OpenGL.TextureParameterName.TextureMagFilter,
+                    (int)Silk.NET.OpenGL.GLEnum.Linear);
+                gl.BindTexture(Silk.NET.OpenGL.TextureTarget.Texture2D, 0);
+
+                result = ((nint)texture, image.Width, image.Height);
+            }
+        }
+        catch (Exception exception) when (exception is IOException
+            or InvalidDataException
+            or NotSupportedException)
+        {
+            Log($"the thumbnail '{path}' could not be read: {exception.Message}");
+        }
+
+        _images[path] = result;
+        return result.Texture == 0 ? null : result;
     }
 
     /// <summary>
@@ -498,6 +570,13 @@ internal sealed class ZaxApplication : IDisposable
             AudioDeviceOpen = _audio is { IsOpen: true },
             Log = Log,
 
+            // AMD-053 REQ-UI-213: -emustats writes one line per emulated frame, into the log
+            // file only — never onto the console of the shell the program was started from.
+            FrameStatsLog = _options.EmuStats ? line => _runLog?.Write(line) : null,
+
+            // -noresume, which -slot implies, leaves the resume slot strictly alone (Q-088).
+            SuspendResume = _options.NoResume,
+
             // AMD-010 REQ-UI-200: the ten recent ROMs, persisted beside the library.
             RomOpened = path =>
             {
@@ -558,6 +637,20 @@ internal sealed class ZaxApplication : IDisposable
     {
         EmulationHost emulation = _emulation!;
 
+        // SPEC-10 REQ-UI-007 and AMD-053 REQ-UI-213: -id= names a library entry and -slot= a
+        // slot to load once it is running. Either may start the session on its own.
+        StartupRequest request = StartupLaunch.Decide(
+            _options.GameId,
+            _options.Slot,
+            emulation.Slots,
+            _catalog!.Exists,
+            Log);
+
+        if (StartFromLibrary(emulation, request))
+        {
+            return;
+        }
+
         if (_options.RomPath is null)
         {
             Console.Out.WriteLine(
@@ -579,6 +672,51 @@ internal sealed class ZaxApplication : IDisposable
         }
 
         emulation.Enqueue(ZaxCommands.OpenRom, CommandArgs.Of(rom));
+    }
+
+    /// <summary>
+    /// Starts what <c>-id</c> and <c>-slot</c> asked for, and says whether it took the launch
+    /// over. The slot is queued <b>behind</b> the launch, so it is read once the loading
+    /// indicator is down and the state has gone to Running — step 7 of REQ-LOOP-021, which
+    /// REQ-LOOP-007 keeps the command waiting for.
+    /// </summary>
+    private bool StartFromLibrary(EmulationHost emulation, StartupRequest request)
+    {
+        if (request.GameId is not { } gameId)
+        {
+            if (request.SlotId is not { } alone)
+            {
+                return false;
+            }
+
+            // A slot of another game starts that game by itself (REQ-PERS-052).
+            emulation.Enqueue(ZaxCommands.LoadSlot, CommandArgs.Of(alone));
+            return true;
+        }
+
+        if (_options.RomPath is { } named)
+        {
+            // Both were given: the named ROM is played on the entry -id names.
+            emulation.LaunchRomWithProfile(Path.GetFullPath(named), gameId);
+        }
+        else if (_catalog!.RomPath(gameId) is { Length: > 0 })
+        {
+            emulation.Enqueue(ZaxCommands.LaunchGame, CommandArgs.Of(gameId));
+        }
+        else
+        {
+            // REQ-UI-007: with no ROM associated, the ROM chooser opens on that entry.
+            Log($"-id={gameId} has no ROM yet; the file chooser opens for it (REQ-UI-007).");
+            _ui?.OpenRomForGame(gameId);
+            return true;
+        }
+
+        if (request.SlotId is { } slotId)
+        {
+            emulation.Enqueue(ZaxCommands.LoadSlot, CommandArgs.Of(slotId));
+        }
+
+        return true;
     }
 
     private int ReadEmulationAudio(Span<float> destination)
@@ -1120,7 +1258,11 @@ internal sealed class ZaxApplication : IDisposable
         ImGui.End();
     }
 
-    private static void Log(string message) => Console.Out.WriteLine($"Zaxnes: {message}");
+    private static void Log(string message)
+    {
+        Console.Out.WriteLine($"Zaxnes: {message}");
+        _runLog?.Write(message);
+    }
 
     private void OnClosing()
     {
@@ -1148,6 +1290,16 @@ internal sealed class ZaxApplication : IDisposable
         _pointer = null;
 
         _catalog?.Save();
+
+        foreach ((nint texture, _, _) in _images.Values)
+        {
+            if (texture != 0)
+            {
+                _gl?.DeleteTexture((uint)texture);
+            }
+        }
+
+        _images.Clear();
         _pacing?.Dispose();
         _pacing = null;
 
@@ -1174,5 +1326,7 @@ internal sealed class ZaxApplication : IDisposable
         OnClosing();
         _host?.Dispose();
         _host = null;
+        _runLog?.Dispose();
+        _runLog = null;
     }
 }

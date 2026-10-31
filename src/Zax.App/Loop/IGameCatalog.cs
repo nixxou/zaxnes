@@ -98,4 +98,16 @@ internal interface IGameCatalog
 
     /// <summary>The cover art file name recorded on the entry, or null (REQ-PERS-036).</summary>
     string? Cover(string gameId);
+
+    /// <summary>
+    /// Whether the entry is marked as a favourite (AMD-053 REQ-UI-210). False for an unknown
+    /// identifier.
+    /// </summary>
+    bool IsFavorite(string gameId);
+
+    /// <summary>
+    /// Flips the favourite mark of an entry and persists the library (REQ-UI-210, command
+    /// <c>favorite.toggle</c>). False when there is no such entry.
+    /// </summary>
+    bool ToggleFavorite(string gameId);
 }

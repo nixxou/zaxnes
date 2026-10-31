@@ -1,6 +1,7 @@
 using System.Numerics;
 using ImGuiNET;
 using Zax.App.Audio;
+using Zax.App.Loop;
 
 namespace Zax.App.Ui;
 
@@ -198,17 +199,41 @@ internal sealed partial class ZaxUi
             ImGui.TextWrapped(Path.GetFileName(rom));
         }
 
+        // The filter and the favourite marks live in the command model and in the library; the
+        // chooser follows them every frame, so a command applied between two frames shows up.
+        _chooser.FavoritesOnly = _host.FavoritesOnly;
+
+        // AMD-053 REQ-UI-211: the search filters as it is typed, and REQ-UI-210 adds the
+        // favourites filter beside it; an entry is kept when it satisfies both. Both drive the
+        // commands of REQ-UI-205, so a test reaches them without an ImGui frame.
         string search = _chooser.Search;
-        ImGui.SetNextItemWidth(-1f);
+        ImGui.SetNextItemWidth(-10f * ImGui.GetFontSize());
         if (ImGui.InputText($"##{UiText.Search}", ref search, 128))
         {
+            Activate(ZaxCommands.SearchLibrary, CommandArgs.Of(search));
             _chooser.Search = search;
+        }
+
+        ImGui.SameLine();
+        bool favoritesOnly = _chooser.FavoritesOnly;
+        if (ImGui.Checkbox(UiText.FavoritesOnly, ref favoritesOnly))
+        {
+            Activate(ZaxCommands.FilterFavorites, default);
         }
 
         ImGui.Separator();
 
         if (ImGui.BeginChild("##profiles", new Vector2(0f, -ImGui.GetFrameHeightWithSpacing())))
         {
+            // REQ-LOOP-076: the Resume entry comes first in the enumeration of the games, here
+            // as on the welcome screen.
+            if (_host.ResumeAvailable
+                && ImGui.Selectable($"{UiText.WelcomeResume} — {_host.ResumeGameTitle}"))
+            {
+                Activate(ZaxCommands.ResumeLast, default);
+                open = false;
+            }
+
             IReadOnlyList<ProfileChoice> choices = _chooser.Filtered;
             for (int index = 0; index < choices.Count; index++)
             {
@@ -218,6 +243,19 @@ internal sealed partial class ZaxUi
                 ImGui.PushID(index);
                 try
                 {
+                    // REQ-UI-210: a favourite is told apart from the others; the form of the
+                    // marker is free, and a star reads at a glance.
+                    if (ImGui.SmallButton(choice.Favorite ? "*" : " "))
+                    {
+                        Activate(ZaxCommands.ToggleFavorite, CommandArgs.Of(choice.Id));
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(UiText.Favorite);
+                    }
+
+                    ImGui.SameLine();
                     if (ImGui.Selectable($"{choice.Title}", selected))
                     {
                         if (selected)

@@ -14,13 +14,19 @@ namespace Zax.App.Ui;
 /// <param name="Origin">
 /// Which scanned folder the file came from, shown as the source of the profile (AMD-033 §2).
 /// </param>
+/// <param name="Favorite">
+/// Whether the entry is marked as a favourite (AMD-053 REQ-UI-210). It is read from the library
+/// when the chooser is built and refreshed by <see cref="ProfileChooserModel.Refresh"/>, so the
+/// mark a <c>favorite.toggle</c> sets is visible at once.
+/// </param>
 internal sealed record ProfileChoice(
     string Id,
     string Title,
     GameProfileSource Source,
     bool Is2DMode,
     bool IsDefault3D = false,
-    ProfileOrigin Origin = ProfileOrigin.User)
+    ProfileOrigin Origin = ProfileOrigin.User,
+    bool Favorite = false)
 {
     /// <summary>Whether this is one of the two generic built-in entries.</summary>
     public bool IsGeneric => Is2DMode || IsDefault3D;
@@ -52,15 +58,18 @@ internal sealed record ProfileChoice(
 /// </remarks>
 internal sealed class ProfileChooserModel
 {
+    private readonly GameLibrary _library;
     private readonly List<ProfileChoice> _all = [];
     private readonly List<ProfileChoice> _filtered = [];
 
     private string _search = string.Empty;
+    private bool _favoritesOnly;
 
     /// <summary>Builds the chooser over <paramref name="library"/>.</summary>
     public ProfileChooserModel(GameLibrary library)
     {
         ArgumentNullException.ThrowIfNull(library);
+        _library = library;
 
         foreach (GameLibraryEntry entry in library.Sorted(LibrarySortOption.Alphabetical))
         {
@@ -70,7 +79,8 @@ internal sealed class ProfileChooserModel
                 entry.Source,
                 entry.Is2DMode,
                 entry.IsDefaultThreeDimensional,
-                entry.Origin));
+                entry.Origin,
+                entry.Favorite));
         }
 
         // Q-065: « 2D Mode » first, then « 3D par défaut (sans profil) », then the titles in
@@ -101,8 +111,10 @@ internal sealed class ProfileChooserModel
     public string? SelectedId { get; set; }
 
     /// <summary>
-    /// The search text. Matching ignores case and leading and trailing spaces, the rule
-    /// SPEC-10 REQ-UI-103 sets for the file browser's search.
+    /// The search text of AMD-053 REQ-UI-211: an entry is kept when its title <b>contains</b>
+    /// it, ignoring case, diacritics and the leading and trailing spaces. The normalisation
+    /// itself is <see cref="LibrarySearch"/>, which the enumeration of the welcome screen uses
+    /// too — the amendment creates no second search.
     /// </summary>
     public string Search
     {
@@ -110,6 +122,20 @@ internal sealed class ProfileChooserModel
         set
         {
             _search = value ?? string.Empty;
+            Refresh();
+        }
+    }
+
+    /// <summary>
+    /// The « Favorites only » filter of AMD-053 REQ-UI-210. It combines with
+    /// <see cref="Search"/>: an entry is kept when it satisfies both.
+    /// </summary>
+    public bool FavoritesOnly
+    {
+        get => _favoritesOnly;
+        set
+        {
+            _favoritesOnly = value;
             Refresh();
         }
     }
@@ -122,15 +148,25 @@ internal sealed class ProfileChooserModel
         Search = string.Empty;
     }
 
-    private void Refresh()
+    /// <summary>
+    /// Rebuilds the filtered list, taking the favourite marks from the library again so that a
+    /// <c>favorite.toggle</c> shows at once.
+    /// </summary>
+    public void Refresh()
     {
-        _filtered.Clear();
-        string needle = _search.Trim();
+        for (int index = 0; index < _all.Count; index++)
+        {
+            bool favorite = _library.Find(_all[index].Id) is { Favorite: true };
+            if (favorite != _all[index].Favorite)
+            {
+                _all[index] = _all[index] with { Favorite = favorite };
+            }
+        }
 
+        _filtered.Clear();
         foreach (ProfileChoice choice in _all)
         {
-            if (needle.Length == 0
-                || choice.Title.Contains(needle, StringComparison.OrdinalIgnoreCase))
+            if ((!_favoritesOnly || choice.Favorite) && LibrarySearch.Matches(choice.Title, _search))
             {
                 _filtered.Add(choice);
             }

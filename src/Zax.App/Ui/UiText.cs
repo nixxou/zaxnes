@@ -167,6 +167,12 @@ internal static class UiText
     /// <summary>Search field hint.</summary>
     public static string Search => UiStrings.Get(UiKeys.FieldSearch);
 
+    /// <summary>The favourite mark of AMD-053 REQ-UI-210.</summary>
+    public static string Favorite => UiStrings.Get(UiKeys.FieldFavorite);
+
+    /// <summary>The « Favorites only » filter of AMD-053 REQ-UI-210.</summary>
+    public static string FavoritesOnly => UiStrings.Get(UiKeys.FieldFavoritesOnly);
+
     /// <summary>Column header of the bound action.</summary>
     public static string ActionColumn => UiStrings.Get(UiKeys.ColumnAction);
 
@@ -213,6 +219,25 @@ internal static class UiText
 
     /// <summary>Shown on the welcome screen when no ROM has ever been opened.</summary>
     public static string WelcomeNoRecent => UiStrings.Get(UiKeys.WelcomeNoRecent);
+
+    /// <summary>The resume entry of AMD-053 REQ-LOOP-076 (« Resume » / « Reprendre »).</summary>
+    public static string WelcomeResume => UiStrings.Get(UiKeys.WelcomeResume);
+
+    /// <summary>
+    /// What an accepted profile import says (AMD-053 REQ-UI-212): the title, and the author
+    /// when field 9 is not empty.
+    /// </summary>
+    public static string ProfileImported(string title, string? author)
+        => string.IsNullOrEmpty(author)
+            ? string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                UiStrings.Get(UiKeys.NotifyProfileImported),
+                title)
+            : string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                UiStrings.Get(UiKeys.NotifyProfileImportedBy),
+                title,
+                author);
 
     /// <summary>
     /// The version the about block shows. The build metadata the compiler appends to the

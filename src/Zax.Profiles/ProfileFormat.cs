@@ -43,13 +43,19 @@ public sealed class ProfileDocument
 /// <param name="Author">Field 9, author of the profile.</param>
 /// <param name="Publisher">Field 10, publisher of the game.</param>
 /// <param name="Description">Field 11.</param>
+/// <param name="Version">
+/// Field 2 (<c>Ver</c>). SPEC-03 §4.1 calls the header the subset {1, 7, 8, 9, 10, 11}; the
+/// import of AMD-053 REQ-UI-212 needs one field more, because the cause it must name for a
+/// refused file is read from the version (R2 point 53-N1).
+/// </param>
 public readonly record struct ProfileHeader(
     string? Signature,
     string? Id,
     string? Title,
     string? Author,
     string? Publisher,
-    string? Description)
+    string? Description,
+    string? Version = null)
 {
     /// <summary>
     /// True when the signature is acceptable: <c>"3dn"</c>, or absent, which is not an error
@@ -60,6 +66,18 @@ public readonly record struct ProfileHeader(
 
     /// <summary>True when the file carries a non-empty identifier, which an import requires.</summary>
     public bool HasId => !string.IsNullOrEmpty(Id);
+
+    /// <summary>
+    /// How <see cref="Version"/> classifies under the rules of REQ-PROF-021. Field 2 being
+    /// optional, an absent version is the current format.
+    /// </summary>
+    public ProfileFormatVersion FormatVersion => ProfileVersionRules.Classify(Version);
+
+    /// <summary>
+    /// True when the version is one this build refuses to load — <c>"1"</c>, and anything that
+    /// reduces to it (REQ-PROF-021).
+    /// </summary>
+    public bool HasUnsupportedVersion => FormatVersion == ProfileFormatVersion.Unsupported;
 }
 
 /// <summary>Why a profile was refused (SPEC-03 REQ-PROF-033).</summary>

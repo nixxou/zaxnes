@@ -46,6 +46,13 @@ internal sealed class ZaxUiOptions
 
     /// <summary>Opens a folder in the desktop's file manager; null disables the menu entry.</summary>
     public Action<string>? RevealFolder { get; init; }
+
+    /// <summary>
+    /// Uploads an image file and gives back the texture to draw it with, or null when it cannot
+    /// be read. It is how the resume thumbnail of AMD-053 REQ-LOOP-076 reaches the welcome
+    /// screen; a headless interface leaves it null and shows the entry without its picture.
+    /// </summary>
+    public Func<string, (nint Texture, int Width, int Height)?>? LoadImage { get; init; }
 }
 
 /// <summary>
@@ -82,6 +89,7 @@ internal sealed partial class ZaxUi
     private readonly List<(string Command, CommandArgs Args)> _shortcutHits = [];
     private ProfileChooserModel _chooser;
     private BrowserPurpose _purpose;
+    private string? _pendingGameId;
     private OptionsTab _tab = OptionsTab.Video;
     private float _fpsShown;
     private float _fpsCountdown;
@@ -342,9 +350,21 @@ internal sealed partial class ZaxUi
     private string? CurrentRomPath()
         => _host.CurrentGameId is { } id ? _catalog.RomPath(id) : null;
 
+    /// <summary>
+    /// Opens the ROM chooser for a library entry that has none yet, which is what <c>-id=</c>
+    /// does at start-up (SPEC-10 REQ-UI-007): the file chosen is started on that profile and the
+    /// pair is remembered (REQ-UI-201).
+    /// </summary>
+    public void OpenRomForGame(string gameId)
+    {
+        OpenBrowser(BrowserPurpose.Rom);
+        _pendingGameId = string.IsNullOrEmpty(gameId) ? null : gameId;
+    }
+
     private void OpenBrowser(BrowserPurpose purpose)
     {
         _purpose = purpose;
+        _pendingGameId = null;
         _browser.Open(
             purpose switch
             {
@@ -410,6 +430,15 @@ internal sealed partial class ZaxUi
         switch (_purpose)
         {
             case BrowserPurpose.Rom:
+                if (_pendingGameId is { } waiting)
+                {
+                    // REQ-UI-007 with REQ-UI-201: the entry -id named is the profile the file
+                    // starts on, and the pair is remembered for the next time.
+                    _pendingGameId = null;
+                    _host.LaunchRomWithProfile(path, waiting);
+                    break;
+                }
+
                 _host.Enqueue(ZaxCommands.OpenRom, CommandArgs.Of(path));
                 break;
 
@@ -471,6 +500,9 @@ internal sealed partial class ZaxUi
         if (result.Outcome is ProfileImportOutcome.Added or ProfileImportOutcome.Replaced
             && result.Profile is { } profile)
         {
+            // AMD-053 REQ-UI-212: an accepted profile names its title and, when field 9 is not
+            // empty, its author. An empty author is left out of the notification.
+            _host.Notifications.Show(UiText.ProfileImported(profile.Title, profile.Header.Author));
             _log($"profile '{profile.Title}' imported.");
             _options.Mixer?.PlaySound(UiSound.Confirm);
 

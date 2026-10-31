@@ -66,6 +66,21 @@ internal sealed partial class EmulationHost
     /// </param>
     /// <returns>True when the state was written.</returns>
     public bool SaveToSlot(string slotId, bool thumbnail = true)
+        => WriteSlot(slotId, thumbnail, picture: null, sound: true);
+
+    /// <summary>
+    /// The same write with the thumbnail and the sound decided by the caller, which the resume
+    /// point of AMD-053 REQ-LOOP-076 needs: it prefers the pause capture even when the exit
+    /// happens from Running, and nothing of it is a user action, so it is silent.
+    /// </summary>
+    /// <param name="slotId">A numbered slot, the quick slot or the resume slot.</param>
+    /// <param name="thumbnail">Whether a thumbnail is written.</param>
+    /// <param name="picture">
+    /// The thumbnail to write, or null to take the one <see cref="ThumbnailForSlot"/> chooses.
+    /// </param>
+    /// <param name="sound">Whether the confirmation sound is played.</param>
+    /// <returns>True when the state was written.</returns>
+    public bool WriteSlot(string slotId, bool thumbnail, byte[]? picture, bool sound)
     {
         // REQ-LOOP-041: a save only happens outside Stopped and with a current game.
         if (State == EmulationState.Stopped || _session is not { HasRom: true } || IsLoading)
@@ -85,14 +100,17 @@ internal sealed partial class EmulationHost
             return false;
         }
 
-        _mixer?.PlaySound(UiSound.Confirm);
+        if (sound)
+        {
+            _mixer?.PlaySound(UiSound.Confirm);
+        }
 
         if (CaptureSaveState(slotId) is not { } content)
         {
             return false;
         }
 
-        byte[]? picture = thumbnail ? ThumbnailForSlot() : null;
+        picture = thumbnail ? picture ?? ThumbnailForSlot() : null;
 
         try
         {

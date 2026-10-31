@@ -20,6 +20,98 @@ public enum LibrarySortOption
 
     /// <summary>By last played, most recent first, then by title.</summary>
     Recent = 1,
+
+    /// <summary>
+    /// Favourites first, then the others, each group by title ascending — the third order
+    /// AMD-053 §3 point 8 adds to REQ-PERS-033. It has no effect on the slot lists
+    /// (REQ-PERS-057), which follow "A-Z" when <c>ui.sort_option</c> is 2.
+    /// </summary>
+    FavoritesFirst = 2,
+}
+
+/// <summary>
+/// The title search of AMD-053 REQ-UI-211: an entry is kept when its title <b>contains</b> the
+/// text typed, ignoring case and diacritics.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The comparison is written out rather than left to a culture-sensitive <c>IndexOf</c> because
+/// two free implementations would disagree on « œ », « ß » or « Pokémon ». Both sides are
+/// decomposed to NFD, every mark of Unicode category <c>Mn</c> is dropped, and the result is
+/// lower-cased with the invariant culture.
+/// </para>
+/// <para>
+/// Zaxnes runs in <b>invariant globalization</b> mode (<c>Directory.Build.props</c>, which the
+/// determinism of REQ-ARCH-012 rests on), and in that mode <see cref="string.Normalize()"/> is
+/// a <b>no-op</b> on non-ASCII text: it returns the string unchanged instead of decomposing it.
+/// The call is kept — it does the right thing wherever the data is available — and
+/// <see cref="Precomposed"/> supplies the same canonical decompositions for the Latin letters,
+/// which is what a game title carries. A character NFD does <b>not</b> decompose — « ß »,
+/// « œ », « Ø », « Đ » — is left alone here too, so the two paths agree. Q-090.
+/// </para>
+/// </remarks>
+// Q-090
+public static class LibrarySearch
+{
+    /// <summary>
+    /// The Latin letters whose canonical decomposition is a base letter plus a mark of category
+    /// <c>Mn</c>: Latin-1 Supplement and Latin Extended-A. Aligned with
+    /// <see cref="BaseLetters"/>, character by character.
+    /// </summary>
+    private const string Precomposed =
+        "ÀÁÂÃÄÅÇÈÉÊËÌÍÎÏÑÒÓÔÕÖÙÚÛÜÝ"
+        + "àáâãäåçèéêëìíîïñòóôõöùúûüýÿ"
+        + "ĀāĂăĄąĆćĈĉĊċČčĎďĒēĔĕĖėĘęĚěĜĝĞğĠġĢģĤĥĨĩĪīĬĭĮįİĴĵĶķĹĺĻļĽľ"
+        + "ŃńŅņŇňŌōŎŏŐőŔŕŖŗŘřŚśŜŝŞşŠšŢţŤťŨũŪūŬŭŮůŰűŲųŴŵŶŷŸŹźŻżŽž";
+
+    /// <summary>The base letter each character of <see cref="Precomposed"/> reduces to.</summary>
+    private const string BaseLetters =
+        "AAAAAACEEEEIIIINOOOOOUUUUY"
+        + "aaaaaaceeeeiiiinooooouuuuyy"
+        + "AaAaAaCcCcCcCcDdEeEeEeEeEeGgGgGgGgHhIiIiIiIiIJjKkLlLlLl"
+        + "NnNnNnOoOoOoRrRrRrSsSsSsSsTtTtUuUuUuUuUuUuWwYyYZzZzZz";
+
+    /// <summary>
+    /// Whether the two tables line up. The tests assert it, so a letter added to one and
+    /// forgotten in the other cannot ship.
+    /// </summary>
+    public static bool TablesAreAligned => Precomposed.Length == BaseLetters.Length;
+
+    /// <summary>The comparison form of a title or of a typed text (REQ-UI-211).</summary>
+    public static string Normalize(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        string decomposed = text.Normalize(System.Text.NormalizationForm.FormD);
+        System.Text.StringBuilder kept = new(decomposed.Length);
+        foreach (char character in decomposed)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character)
+                == System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            int at = Precomposed.IndexOf(character, StringComparison.Ordinal);
+            kept.Append(at >= 0 ? BaseLetters[at] : character);
+        }
+
+        return kept.ToString().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="title"/> is kept by <paramref name="search"/>. An empty or blank
+    /// text excludes nothing.
+    /// </summary>
+    public static bool Matches(string? title, string? search)
+    {
+        string needle = Normalize(search?.Trim());
+        return needle.Length == 0
+            || Normalize(title).Contains(needle, StringComparison.Ordinal);
+    }
 }
 
 /// <summary>
@@ -108,6 +200,12 @@ public sealed class GameLibraryEntry
 
     /// <summary>Cover-art file name, or <see langword="null"/> when there is none.</summary>
     public string? Cover { get; set; }
+
+    /// <summary>
+    /// Whether the entry is marked as a favourite (AMD-053 REQ-UI-210). Persisted per entry in
+    /// <c>library.json</c>; false for every entry of a library migrated from schema version 1.
+    /// </summary>
+    public bool Favorite { get; set; }
 
     /// <summary>
     /// The name to show: always "2D Mode" for the 2D game (REQ-PROF-061), and likewise the fixed
@@ -291,11 +389,58 @@ public sealed class GameLibrary
     public IReadOnlyList<GameLibraryEntry> Sorted(LibrarySortOption option)
     {
         List<GameLibraryEntry> sorted = [.. _entries];
-        sorted.Sort((left, right) => option == LibrarySortOption.Recent
-            ? CompareByRecent(left, right)
-            : CompareByTitle(left, right));
+        sorted.Sort((left, right) => option switch
+        {
+            LibrarySortOption.Recent => CompareByRecent(left, right),
+            LibrarySortOption.FavoritesFirst => CompareByFavorite(left, right),
+            _ => CompareByTitle(left, right),
+        });
         return sorted;
     }
+
+    /// <summary>
+    /// The enumeration of the games the interface shows: the order of <paramref name="option"/>,
+    /// the favourites filter of REQ-UI-210 and the title search of REQ-UI-211, an entry being
+    /// kept when it satisfies <b>both</b>.
+    /// </summary>
+    /// <param name="option">The sort order in force (<c>ui.sort_option</c>).</param>
+    /// <param name="search">The text typed, or null; a blank text excludes nothing.</param>
+    /// <param name="favoritesOnly">Whether <c>library.filter_favorites</c> is ticked.</param>
+    public IReadOnlyList<GameLibraryEntry> Enumerate(
+        LibrarySortOption option,
+        string? search = null,
+        bool favoritesOnly = false)
+    {
+        List<GameLibraryEntry> kept = [];
+        foreach (GameLibraryEntry entry in Sorted(option))
+        {
+            if ((!favoritesOnly || entry.Favorite) && LibrarySearch.Matches(entry.DisplayTitle, search))
+            {
+                kept.Add(entry);
+            }
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Marks or unmarks an entry as a favourite (REQ-UI-210, command <c>favorite.toggle</c>).
+    /// Returns false when the identifier is unknown.
+    /// </summary>
+    public bool SetFavorite(string id, bool favorite)
+    {
+        if (Find(id) is not { } entry)
+        {
+            return false;
+        }
+
+        entry.Favorite = favorite;
+        return true;
+    }
+
+    /// <summary>Flips the favourite mark of an entry; false when the identifier is unknown.</summary>
+    public bool ToggleFavorite(string id)
+        => Find(id) is { } entry && SetFavorite(id, !entry.Favorite);
 
     /// <summary>
     /// Applies the ROM paths and dates of an original <c>rom.json</c>
@@ -339,6 +484,7 @@ public sealed class GameLibrary
                 RomPath = entry.RomPath,
                 LastPlayed = entry.LastPlayed,
                 Cover = entry.Cover,
+                Favorite = entry.Favorite,
             });
         }
 
@@ -385,7 +531,18 @@ public sealed class GameLibrary
             entry.RomPath = record.RomPath ?? string.Empty;
             entry.LastPlayed = record.LastPlayed;
             entry.Cover = record.Cover;
+            entry.Favorite = record.Favorite;
         }
+    }
+
+    /// <summary>
+    /// « Favorites first » (REQ-PERS-033 as AMD-053 §3 point 8 amends it): the favourites, then
+    /// the others, each group by the criterion of "A-Z".
+    /// </summary>
+    private static int CompareByFavorite(GameLibraryEntry left, GameLibraryEntry right)
+    {
+        int byMark = right.Favorite.CompareTo(left.Favorite);
+        return byMark != 0 ? byMark : CompareByTitle(left, right);
     }
 
     private static int CompareByTitle(GameLibraryEntry left, GameLibraryEntry right)
