@@ -745,7 +745,8 @@ impl Running {
             .display_mode()
             .map_or(60, |mode| mode.refresh_rate)
             .max(1);
-        let interval = self.host.settings().vsync().max(1);
+        // The interval in force, which `video.half_rate_3d` may double.
+        let interval = self.window.vsync_interval().max(1);
         Duration::from_secs_f64(f64::from(interval) / f64::from(refresh))
     }
 
@@ -1785,6 +1786,12 @@ fn forward_events(
     window: &mut HostWindow,
     pacing: &mut VideoPacing,
 ) {
+    // `video.half_rate_3d`: the swap interval follows the 2D / 3D view.
+    let half_rate = host.half_rate_3d();
+    if half_rate != pacing.half_rate_3d {
+        pacing.half_rate_3d = half_rate;
+        pacing.apply(window, host.settings());
+    }
     for event in host.take_events() {
         match &event {
             HostEvent::SettingChanged(id) => {

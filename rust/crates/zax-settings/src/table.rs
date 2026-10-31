@@ -791,6 +791,21 @@ fn emulation_pause_3d(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Catch-up converts the shown frame only"),
     );
+    // Rust-only (owner request, handheld options only): while the 3D is shown, the screen is
+    // refreshed every other vsync and the emulation catches up at full speed, with only the
+    // shown frame converted; the 2D picture keeps every refresh. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoHalfRate3d,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::switch())
+        .with_label("3D at half the refresh rate"),
+    );
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

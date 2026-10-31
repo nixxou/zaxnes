@@ -17,7 +17,7 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 7] {
+fn defaults() -> [(SettingId, SettingValue); 8] {
     [
         (SettingId::RenderShadow, SettingValue::Bool(false)),
         (SettingId::VideoAntiAlias, SettingValue::Enum(0)),
@@ -30,6 +30,8 @@ fn defaults() -> [(SettingId, SettingValue); 7] {
         (SettingId::EmuPause3dIn2d, SettingValue::Bool(true)),
         // Only the shown frame of a catch-up is converted (owner request).
         (SettingId::EmuCatchUpLast3d, SettingValue::Bool(true)),
+        // The 3D at 30 frames per second, the game at full speed (owner request).
+        (SettingId::VideoHalfRate3d, SettingValue::Bool(true)),
     ]
 }
 
@@ -60,6 +62,7 @@ mod tests {
         assert_eq!(PIPELINE_AUTO, model.get(SettingId::EmuPipeline).as_int());
         assert!(model.get(SettingId::EmuPause3dIn2d).as_bool());
         assert!(model.get(SettingId::EmuCatchUpLast3d).as_bool());
+        assert!(model.get(SettingId::VideoHalfRate3d).as_bool());
     }
 
     #[test]

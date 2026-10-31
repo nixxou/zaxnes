@@ -234,6 +234,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.pipeline", "Scripts en parallèle du dessin"),
     ("setting.emu.pause_3d_in_2d", "3D en pause en 2D"),
     ("setting.emu.catch_up_last_3d", "Rattrapage : 3D de l'image affichée seulement"),
+    ("setting.video.half_rate_3d", "3D à 30 i/s (jeu à pleine vitesse)"),
     ("setting.video.dynamic_resolution", "Résolution automatique"),
     ("setting.video.backend", "API graphique (au prochain démarrage)"),
     ("setting.video.widescreen", "Écran large (ROM prévues pour)"),

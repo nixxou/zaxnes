@@ -237,6 +237,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.pipeline", "Scripts in parallel with the drawing"),
     ("setting.emu.pause_3d_in_2d", "Pause the 3D in 2D"),
     ("setting.emu.catch_up_last_3d", "Catch-up: 3D of the shown frame only"),
+    ("setting.video.half_rate_3d", "3D at 30 fps (game at full speed)"),
     ("setting.video.dynamic_resolution", "Automatic resolution"),
     ("setting.video.backend", "Graphics API (at the next start)"),
     ("setting.video.widescreen", "Widescreen (ROMs made for it)"),

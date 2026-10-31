@@ -122,6 +122,7 @@ setting_ids! {
     EmuPipeline => "emu.pipeline",
     EmuPause3dIn2d => "emu.pause_3d_in_2d",
     EmuCatchUpLast3d => "emu.catch_up_last_3d",
+    VideoHalfRate3d => "video.half_rate_3d",
     VideoDynamicResolution => "video.dynamic_resolution",
     VideoBackend => "video.backend",
     VideoWidescreen => "video.widescreen",

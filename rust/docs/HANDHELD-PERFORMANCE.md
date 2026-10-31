@@ -234,6 +234,11 @@ displayed frame". All values are per displayed frame.
   where `pow` is cheap and the 128-bit fetch costs a little (MM2 +2 % at 8K); aimed at the
   Mali's slow transcendentals. `ZAXNES_SRGB_PALETTE=1` restores the per-fragment conversion,
   to compare both with the profiler on the device.
+- 3D at 30 fps (`video.half_rate_3d`, handheld only, on by default): while a running game shows
+  its 3D, the window swaps every other refresh and the emulation catches up at full speed, only
+  the shown frame being converted (as `emu.catch_up_last_3d`, so only for profiles whose
+  scripts leave the core alone); the 2D picture and the paused menus keep every refresh. Hidden
+  from the desktop options window.
 
 ## 5. Next steps (see `ROADMAP.md`)
 

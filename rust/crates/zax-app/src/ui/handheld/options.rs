@@ -53,6 +53,8 @@ pub enum OptionRow {
     Pause3dIn2d,
     /// Only the shown frame of a catch-up converted, on or off.
     CatchUpLast3d,
+    /// The 3D at half the refresh rate, the game at full speed, on or off.
+    HalfRate3d,
     /// The TV region: automatic (from the ROM header, at the next game start), NTSC or PAL.
     Region,
     /// The gamepad bindings.
@@ -62,7 +64,7 @@ pub enum OptionRow {
 }
 
 /// The rows, in order.
-pub const ROWS: [OptionRow; 19] = [
+pub const ROWS: [OptionRow; 20] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -75,6 +77,7 @@ pub const ROWS: [OptionRow; 19] = [
     OptionRow::Camera,
     OptionRow::CatchUp,
     OptionRow::CatchUpLast3d,
+    OptionRow::HalfRate3d,
     OptionRow::LuaOptimized,
     OptionRow::LuaExperimental,
     OptionRow::Pipeline,
@@ -259,6 +262,10 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let on = settings.get(SettingId::EmuCatchUpLast3d).as_bool();
             settings.set(SettingId::EmuCatchUpLast3d, SettingValue::Bool(!on));
         }
+        OptionRow::HalfRate3d => {
+            let on = settings.get(SettingId::VideoHalfRate3d).as_bool();
+            settings.set(SettingId::VideoHalfRate3d, SettingValue::Bool(!on));
+        }
         OptionRow::ShowFps => {
             let on = settings.show_fps();
             settings.set_show_fps(!on);
@@ -307,6 +314,9 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::CatchUpLast3d => {
             text::label_of(catalogue::descriptor(SettingId::EmuCatchUpLast3d))
         }
+        OptionRow::HalfRate3d => {
+            text::label_of(catalogue::descriptor(SettingId::VideoHalfRate3d))
+        }
         OptionRow::Camera => strings::get(keys::HANDHELD_OPTION_CAMERA),
         OptionRow::CatchUp => strings::get(keys::HANDHELD_OPTION_CATCH_UP),
         OptionRow::LuaOptimized => {
@@ -348,6 +358,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
         OptionRow::Profiler => switch(settings.get(SettingId::UiProfiler).as_bool()),
         OptionRow::Pause3dIn2d => switch(settings.get(SettingId::EmuPause3dIn2d).as_bool()),
         OptionRow::CatchUpLast3d => switch(settings.get(SettingId::EmuCatchUpLast3d).as_bool()),
+        OptionRow::HalfRate3d => switch(settings.get(SettingId::VideoHalfRate3d).as_bool()),
         OptionRow::Camera => camera_label(camera),
         OptionRow::CatchUp => match catch_up(settings) {
             0 => text::label_of_option("None"),

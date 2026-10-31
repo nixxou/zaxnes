@@ -35,6 +35,9 @@ pub struct VideoPacing {
     log: Option<PacingLog>,
     state: Option<DisplayPacingState>,
     applications: u32,
+    /// `video.half_rate_3d` in force (see `EmulationHost::half_rate_3d`): a swap every refresh
+    /// becomes a swap every other refresh.
+    pub half_rate_3d: bool,
 }
 
 impl VideoPacing {
@@ -53,6 +56,7 @@ impl VideoPacing {
             log,
             state: None,
             applications: 0,
+            half_rate_3d: false,
         }
     }
 
@@ -75,7 +79,12 @@ impl VideoPacing {
         model: &SettingsModel,
     ) -> DisplayPacingState {
         let request = (self.request)(model);
-        let state = pacing::apply(surface, request.vsync, request.target_frame_rate);
+        let vsync = if self.half_rate_3d && request.vsync == 1 {
+            2
+        } else {
+            request.vsync
+        };
+        let state = pacing::apply(surface, vsync, request.target_frame_rate);
         self.state = Some(state);
         self.applications += 1;
         if let Some(log) = &self.log {

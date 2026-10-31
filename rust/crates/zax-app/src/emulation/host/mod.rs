@@ -504,6 +504,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 .is_some_and(GameSession::two_dimensional_mode)
     }
 
+    /// `video.half_rate_3d` in force: a running game whose 3D is shown (a paused game's menus
+    /// keep every refresh). The window then swaps every other refresh and a catch-up converts
+    /// its shown frame only.
+    #[must_use]
+    pub fn half_rate_3d(&self) -> bool {
+        self.settings.get(SettingId::VideoHalfRate3d).as_bool()
+            && self.state == EmulationState::Running
+            && self.session.as_ref().is_some_and(GameSession::has_rom)
+            && !self.showing_two_dimensional()
+    }
+
     /// Emulated frames run since the host was created.
     #[must_use]
     pub const fn emulated_frames(&self) -> i64 {
@@ -819,7 +830,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .frames_per_display(self.pacer.effective_rate(), displayed_rate);
         let due = self.pacer.due_frames();
         let ahead = self.runs_ahead();
-        let last_3d = self.settings.get(SettingId::EmuCatchUpLast3d).as_bool();
+        let last_3d =
+            self.settings.get(SettingId::EmuCatchUpLast3d).as_bool() || self.half_rate_3d();
         for round in 0..due {
             // `emu.catch_up_last_3d`: what is finished before the last round is not shown.
             if let Some(session) = self.session.as_mut() {
