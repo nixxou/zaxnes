@@ -355,6 +355,16 @@ impl NesBus {
     }
 
     fn read_internal(&mut self, address: u16) -> u8 {
+        if address >= 0x8000 {
+            if let Some(value) = self
+                .cartridge
+                .as_ref()
+                .and_then(|cartridge| cartridge.read_rom_window(address))
+            {
+                return value;
+            }
+        }
+
         if address < 0x2000 {
             return self.ram[usize::from(address) & (RAM_SIZE - 1)];
         }

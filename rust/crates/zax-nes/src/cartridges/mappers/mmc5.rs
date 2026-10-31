@@ -218,6 +218,11 @@ impl Mmc5 {
 }
 
 impl Mapper for Mmc5 {
+    /// Its reads of $8000-$FFFF go through [`Mapper::cpu_read_override`].
+    fn rom_windows(&self, _memory: &CartridgeMemory) -> [usize; 4] {
+        [super::NO_ROM_WINDOW; 4]
+    }
+
     banked!();
 
     fn save_registers(&self, writer: &mut StateWriter) {

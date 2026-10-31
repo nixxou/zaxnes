@@ -157,6 +157,20 @@ impl BankWindows {
         Some(rom[wrap_offset(offset, rom.len())])
     }
 
+    /// The windows [`Self::read_prg`] reads from a PRG-ROM of `rom_len` bytes without
+    /// wrapping (see `Mapper::rom_windows`).
+    #[must_use]
+    pub fn rom_windows(&self, rom_len: usize) -> [usize; Self::PRG_WINDOWS] {
+        std::array::from_fn(|slot| {
+            let start = self.prg_offset[slot];
+            if self.prg_is_ram[slot] || start + Self::PRG_WINDOW_SIZE > rom_len {
+                crate::cartridges::mappers::NO_ROM_WINDOW
+            } else {
+                start
+            }
+        })
+    }
+
     /// Writes a PRG window that currently shows PRG-RAM (MMC5); `false` when the window
     /// shows ROM, which ignores writes.
     pub fn try_write_prg_window(

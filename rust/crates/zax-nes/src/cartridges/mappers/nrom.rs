@@ -19,6 +19,18 @@ impl Mapper for Nrom {
         Self::MAPPER_NUMBER
     }
 
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        let len = memory.rom().prg_rom().len();
+        std::array::from_fn(|slot| {
+            let start = wrap_offset(slot * 0x2000, len);
+            if start + 0x2000 > len {
+                super::NO_ROM_WINDOW
+            } else {
+                start
+            }
+        })
+    }
+
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         if address < 0x8000 {
             return None;

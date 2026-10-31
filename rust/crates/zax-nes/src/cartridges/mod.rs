@@ -165,6 +165,8 @@ impl CartridgeMemory {
 pub struct Cartridge {
     memory: CartridgeMemory,
     board: Board,
+    /// [`Mapper::rom_windows`], kept for [`Cartridge::read_rom_window`].
+    rom_windows: [usize; 4],
 }
 
 impl Cartridge {
@@ -211,7 +213,11 @@ impl Cartridge {
             ));
         };
 
-        let mut cartridge = Self { memory, board };
+        let mut cartridge = Self {
+            memory,
+            board,
+            rom_windows: [mappers::NO_ROM_WINDOW; 4],
+        };
         cartridge.reset();
         Ok(cartridge)
     }
@@ -318,6 +324,24 @@ impl Cartridge {
 
     /// Reads a byte the cartridge drives on the CPU bus, in $4020-$FFFF; `None` when it does
     /// not drive the bus there and the caller keeps the open-bus value (REQ-CORE-081).
+    /// A CPU read of $8000-$FFFF that is a plain PRG-ROM read, without asking the board; `None`
+    /// when the board has to decode it ([`Cartridge::try_cpu_read`]).
+    #[inline]
+    #[must_use]
+    pub fn read_rom_window(&self, address: u16) -> Option<u8> {
+        let start = self.rom_windows[usize::from(address >> 13) & 3];
+        if start == mappers::NO_ROM_WINDOW {
+            return None;
+        }
+        let value = self.memory.rom.prg_rom()[start + (usize::from(address) & 0x1FFF)];
+        debug_assert_eq!(Some(value), self.board.try_read_prg(&self.memory, address));
+        Some(value)
+    }
+
+    fn refresh_rom_windows(&mut self) {
+        self.rom_windows = self.board.rom_windows(&self.memory);
+    }
+
     pub fn try_cpu_read(&mut self, address: u16) -> Option<u8> {
         if let Some(handled) = self.board.cpu_read_override(&self.memory, address) {
             return handled;
@@ -354,6 +378,7 @@ impl Cartridge {
             .board
             .intercept_cpu_write(&mut self.memory, address, value)
         {
+            self.refresh_rom_windows();
             return;
         }
 
@@ -367,6 +392,7 @@ impl Cartridge {
         }
 
         self.board.write_register(&mut self.memory, address, value);
+        self.refresh_rom_windows();
     }
 
     /// Reads CHR at `address` ($0000-$1FFF) as the PPU would, side effects included
@@ -482,6 +508,7 @@ impl Cartridge {
         self.memory.mirroring = self.memory.rom.header().mirroring;
         self.memory.cpu_cycle = 0;
         self.board.reset(&mut self.memory);
+        self.refresh_rom_windows();
     }
 
     /// Clears PRG-RAM (when `clear_prg_ram`) and CHR-RAM (part of power-on, REQ-CORE-004).
@@ -521,6 +548,8 @@ impl Cartridge {
             ))
         })?;
         self.memory.cpu_cycle = reader.read_i64()?;
-        self.board.load_state(reader)
+        let loaded = self.board.load_state(reader);
+        self.refresh_rom_windows();
+        loaded
     }
 }

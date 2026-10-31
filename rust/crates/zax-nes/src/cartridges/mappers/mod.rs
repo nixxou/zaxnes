@@ -136,6 +136,17 @@ pub trait Mapper {
         usize::from(address - 0x6000) % memory.prg_ram().len()
     }
 
+    /// Where each 8 KiB window of $8000-$FFFF starts in PRG-ROM when a CPU read of it is a plain
+    /// ROM read, with no side effect and no wrap inside the window; [`NO_ROM_WINDOW`] for the
+    /// others. Asked again after every CPU write to the cartridge, a reset and a loaded state:
+    /// a board whose windows move at another time, or whose reads of $8000-$FFFF go through
+    /// [`Mapper::cpu_read_override`], must return `NO_ROM_WINDOW` for them.
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        let rom = memory.rom().prg_rom().len();
+        self.banks()
+            .map_or([NO_ROM_WINDOW; 4], |banks| banks.rom_windows(rom))
+    }
+
     /// Reads PRG-ROM, or a readable register, at `address`.
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         self.banks()
@@ -262,6 +273,9 @@ pub trait Mapper {
     /// One CPU cycle elapsed (`memory.cpu_cycle()` already incremented).
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {}
 }
+
+/// A window of [`Mapper::rom_windows`] that is not a plain PRG-ROM read.
+pub const NO_ROM_WINDOW: usize = usize::MAX;
 
 /// A fresh window table sized for the memories of `memory`.
 pub(crate) fn windows_for(memory: &CartridgeMemory) -> BankWindows {

@@ -147,6 +147,10 @@ impl Mapper for Board {
         dispatch!(self, b => b.prg_ram_offset(memory, address))
     }
 
+    fn rom_windows(&self, memory: &CartridgeMemory) -> [usize; 4] {
+        dispatch!(self, b => b.rom_windows(memory))
+    }
+
     fn try_read_prg(&self, memory: &CartridgeMemory, address: u16) -> Option<u8> {
         dispatch!(self, b => b.try_read_prg(memory, address))
     }
