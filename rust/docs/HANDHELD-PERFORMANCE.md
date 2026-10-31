@@ -3,7 +3,8 @@
 Target: Anbernic RG40XXV (Allwinner H700, 4x Cortex-A53 @ 1.512 GHz, Mali-G31, 1 GB RAM,
 720x480 output on the owner's unit), PortMaster port, firmware SDL2 (video driver `mali`),
 GLES 3.0 context on an OpenGL ES 3.2 driver (`v1.r20p0`). See `HANDHELD-RESEARCH.md` for the
-platform survey and `ROADMAP.md` for the ordered plan.
+platform survey and `ROADMAP.md` for the ordered plan. `PERFORMANCE-HISTORY.md` is the complete
+record of the performance work by subsystem, with the dropped attempts and a porting checklist.
 
 ## 1. What runs today
 
