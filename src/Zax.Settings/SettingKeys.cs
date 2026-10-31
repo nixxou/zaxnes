@@ -26,6 +26,11 @@ public static class SettingKeys
     /// <summary>Render rate cap when vsync is off.</summary>
     public const string VideoFrameRate = "video.frame_rate";
 
+    /// <summary>
+    /// Rendered frames the GPU may keep waiting for display, 1 or 2 (AMD-052 REQ-LOOP-077).
+    /// </summary>
+    public const string VideoMaxQueuedFrames = "video.max_queued_frames";
+
     /// <summary>Skip the render when no new frame was emulated.</summary>
     public const string VideoSkipFrame = "video.skip_frame";
 

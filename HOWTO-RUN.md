@@ -594,6 +594,17 @@ devient une dégradation (`AMD-051` §3 point 8) :
   recommande des maillages prêts au plus tard 2 frames émulées après la création d'un pattern.
   Un objet resté en attente 600 frames produit un diagnostic, une seule fois.
 
+Une troisième ralentit volontairement l'affichage, pour la file de frames GPU d'`AMD-052`
+(`REQ-LOOP-077`) :
+
+- `--slow-render <ms>` : retient chaque frame rendue du nombre de millisecondes indiqué
+  (0 par défaut), afin d'observer ce qu'un chemin d'affichage lent fait à la cadence des frames
+  émulées — qui ne doit pas bouger (`REQ-LOOP-010`). L'option est exclue de `--bench`, pour
+  qu'une campagne de mesure continue de mesurer le rendu. Voir `Q-087`.
+
+Depuis `AMD-052`, `--anti-alias` vaut **1** par défaut, comme une installation neuve
+(`REQ-PERS-089`) : un `Zax.Harness render` sans option rapporte donc « MSAA 4x ».
+
 Les lignes de diagnostic partent sur la sortie d'erreur ; la fin du rendu récapitule le nombre
 de texels logés, d'objets non logés et de lignes écrites :
 

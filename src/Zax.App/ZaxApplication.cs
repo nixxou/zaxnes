@@ -53,6 +53,7 @@ internal sealed class ZaxApplication : IDisposable
     private AudioOutput? _audio;
     private AudioMixer? _mixer;
     private VideoPacing? _pacing;
+    private GpuFrameQueue? _gpuFrames;
 
     private UserDataPaths? _paths;
     private SettingsStore? _settingsStore;
@@ -356,6 +357,10 @@ internal sealed class ZaxApplication : IDisposable
         // line — and every later change of video.vsync or video.frame_rate follows.
         _pacing = new VideoPacing(host.Display, _settings, PacingRequest, Log);
         _pacing.Apply();
+
+        // AMD-052 REQ-LOOP-077: the bound on the rendered frames the GPU may keep waiting for
+        // display, which only the desktop frontend can hold (REQ-PERS-086, REQ-SCN-057).
+        _gpuFrames = new GpuFrameQueue(_gl);
 
         _offscreen = new OffscreenFramebuffer(_gl, host.Window.FramebufferSize.X, host.Window.FramebufferSize.Y);
 
@@ -669,6 +674,14 @@ internal sealed class ZaxApplication : IDisposable
         // later, so a brutal stop does not lose it.
         _settingsStore?.Tick(_settings, TimeSpan.FromSeconds(_scene.RealTime));
 
+        // AMD-052 REQ-LOOP-077: the bound on the queued frames is held here, after the emulated
+        // frames of the tick and before the first drawing command of this one. At
+        // video.max_queued_frames = 1 this waits for the GPU to be done with the previous frame;
+        // at 2 it lets one frame run ahead. The emulated cadence is untouched either way
+        // (REQ-LOOP-010): the frame clock is absolute, so the wait only eats into the slack
+        // before the next emulated frame is due.
+        _gpuFrames?.BeginFrame(_settings.MaxQueuedFrames);
+
         // REQ-UI-200 / REQ-UI-209: the game view sits under the menu bar, and takes the whole
         // window as soon as full screen hides it.
         int windowWidth = host.Window.FramebufferSize.X;
@@ -710,6 +723,11 @@ internal sealed class ZaxApplication : IDisposable
         imgui.Render();
 
         gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+        // REQ-LOOP-077: the fence that closes this frame. Silk.NET swaps the buffers once this
+        // handler returns, so the fence covers every drawing command of the frame and the next
+        // BeginFrame is what holds the queue to its depth.
+        _gpuFrames?.EndFrame();
 
         PumpAudio(real);
 
@@ -1132,6 +1150,11 @@ internal sealed class ZaxApplication : IDisposable
         _catalog?.Save();
         _pacing?.Dispose();
         _pacing = null;
+
+        // REQ-LOOP-077: the frames still in the GPU's hands are waited for before the context
+        // and its objects go away.
+        _gpuFrames?.Dispose();
+        _gpuFrames = null;
         _audio?.Dispose();
         _audio = null;
         _mixer = null;

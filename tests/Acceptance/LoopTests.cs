@@ -355,23 +355,27 @@ public sealed class LoopTests
     }
 
     /// <summary>
-    /// REQ-LOOP-012, T5 — the backlog never exceeds five emulated frames: after a 1 s block at
-    /// NTSC at most 5 frames run in a burst and about 55 are abandoned.
+    /// REQ-LOOP-012 as AMD-052 REQ-LOOP-074 amends it, vector T5 rewritten — the backlog never
+    /// exceeds two emulated frames: after a 1 s block at NTSC at most 2 frames run in a burst
+    /// and about 58 are abandoned.
     /// </summary>
-    [Fact] // REQ-LOOP-012
-    public void The_backlog_is_capped_at_five_frames()
+    [Fact] // REQ-LOOP-012, REQ-LOOP-074
+    public void The_backlog_is_capped_at_two_frames()
     {
-        Assert.Equal(5, FramePacer.MaxBacklog);
+        Assert.Equal(2, FramePacer.MaxBacklog);
 
         double clock = 0;
         FramePacer pacer = new(60, () => clock);
 
+        // Frame 0 is due at t0 itself (REQ-LOOP-011); taking it first leaves exactly the 60
+        // frames of the second that the arithmetic of T5 counts.
+        Assert.Equal(1, pacer.DueFrames());
+
         clock += 1.0;
         int burst = pacer.DueFrames();
 
-        Assert.Equal(5, burst);
-        Assert.True(pacer.DroppedFrames >= 54, $"{pacer.DroppedFrames} frames were abandoned.");
-        Assert.True(pacer.DroppedFrames <= 56, $"{pacer.DroppedFrames} frames were abandoned.");
+        Assert.Equal(2, burst);
+        Assert.Equal(58, pacer.DroppedFrames);
 
         // Then the normal cadence resumes.
         clock += 1.0 / 60.0;

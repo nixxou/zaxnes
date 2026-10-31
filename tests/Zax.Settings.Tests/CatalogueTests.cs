@@ -54,6 +54,9 @@ public sealed class CatalogueTests
                 SettingKeys.SceneArcCenter,
                 SettingKeys.SceneBend2dMode,
                 SettingKeys.RenderVisualStyle,
+
+                // AMD-052 §3 point 7 adds this line to §4.1.1 (REQ-LOOP-077).
+                SettingKeys.VideoMaxQueuedFrames,
             }.Order(),
             model.Except(specified).Order());
     }

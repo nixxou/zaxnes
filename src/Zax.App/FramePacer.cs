@@ -4,7 +4,7 @@ namespace Zax.App;
 
 /// <summary>
 /// The emulated frame clock of SPEC-07 §3.2: frames are due at <c>t0 + n / f</c> on a monotonic
-/// clock, late frames are caught up to a limit of five, and the clock can be reset without any
+/// clock, late frames are caught up to a limit of two, and the clock can be reset without any
 /// catch-up.
 /// </summary>
 /// <remarks>
@@ -14,8 +14,17 @@ namespace Zax.App;
 /// </remarks>
 public sealed class FramePacer
 {
-    /// <summary>Highest number of emulated frames that may be late (REQ-LOOP-012).</summary>
-    public const int MaxBacklog = 5;
+    /// <summary>
+    /// Highest number of emulated frames that may be late (AMD-052 REQ-LOOP-074, which replaces
+    /// the limit of five REQ-LOOP-012 carried).
+    /// </summary>
+    /// <remarks>
+    /// The bounded quantity is the accumulated backlog — the frames due and not yet run — and
+    /// not a count of "catch-up frames in a row": the two readings differ by one frame
+    /// (REQ-LOOP-074 notes). A one-second stall in NTSC therefore runs 2 frames and abandons
+    /// about 58.
+    /// </remarks>
+    public const int MaxBacklog = 2;
 
     /// <summary>A frame may start up to 1 ms early (REQ-LOOP-011).</summary>
     public const double EarlyStartSeconds = 0.001;
@@ -39,7 +48,10 @@ public sealed class FramePacer
 
         _clock = clock;
         NominalRate = nominalRate;
-        Reset();
+
+        // Not Reset(): the counter of REQ-LOOP-013 resets counts what the running program does,
+        // and starting the clock is not one of them.
+        _nextDue = _clock();
     }
 
     /// <summary>Nominal rate of the active region, in emulated frames per second.</summary>
@@ -61,10 +73,23 @@ public sealed class FramePacer
     public long DroppedFrames { get; private set; }
 
     /// <summary>
-    /// Resets the clock, so that nothing is caught up: what a resume, a reset, the end of a
-    /// load and a rollback restore do (REQ-LOOP-013).
+    /// How many times the clock has been reset (REQ-LOOP-013). The instrument AMD-052
+    /// REQ-LOOP-075 measures: holding the fast-forward hotkey must leave it alone, while a change
+    /// of <c>emu.game_speed</c> must bump it.
     /// </summary>
-    public void Reset() => _nextDue = _clock();
+    public long ClockResets { get; private set; }
+
+    /// <summary>
+    /// Resets the clock, so that nothing is caught up: what a resume, a reset, the end of a
+    /// load, a rollback restore and a change of <c>emu.game_speed</c> do (REQ-LOOP-013 with
+    /// AMD-052 REQ-LOOP-075). Arming, expiring and re-arming a fast-forward burst
+    /// (REQ-LOOP-016) deliberately do <b>not</b>.
+    /// </summary>
+    public void Reset()
+    {
+        _nextDue = _clock();
+        ClockResets++;
+    }
 
     /// <summary>
     /// How many emulated frames are due now, at most <see cref="MaxBacklog"/>. Any further
@@ -85,7 +110,7 @@ public sealed class FramePacer
                 continue;
             }
 
-            // REQ-LOOP-012: the backlog never exceeds five frames; the rest is dropped.
+            // REQ-LOOP-074: the backlog never exceeds two frames; the rest is dropped.
             while (now + EarlyStartSeconds >= _nextDue)
             {
                 _nextDue += period;

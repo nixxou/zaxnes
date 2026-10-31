@@ -305,7 +305,12 @@ public sealed class PersistenceModelTests
         Assert.True(model.GetBool(SettingKeys.VideoSkipFrame));
         Assert.Equal(0, model.GetInt(SettingKeys.VideoRenderMethod));
         Assert.Equal(0, model.GetInt(SettingKeys.VideoResScale));
-        Assert.Equal(0, model.GetInt(SettingKeys.VideoAntiAlias));
+
+        // AMD-052 §3 point 6 rewrites the row of video.anti_alias: the default is 1, MSAA 4×
+        // (REQ-PERS-089, divergence D). AMD-052 §3 point 7 adds video.max_queued_frames with a
+        // default of 2 (REQ-LOOP-077).
+        Assert.Equal(1, model.GetInt(SettingKeys.VideoAntiAlias));
+        Assert.Equal(2, model.GetInt(SettingKeys.VideoMaxQueuedFrames));
         Assert.Equal(0, model.GetInt(SettingKeys.RenderMeshAlgo));
         Assert.False(model.GetBool(SettingKeys.UiFullscreen));
         Assert.False(model.GetBool(SettingKeys.CameraLocalCam));

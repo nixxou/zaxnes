@@ -240,6 +240,12 @@ internal static partial class UiStrings
 
         // ------------------------------------------- labels of SPEC-09 settings
         ["setting." + SettingKeys.VideoFrameRate] = "Render rate",
+
+        // AMD-052 §3 point 10, word for word.
+        ["setting." + SettingKeys.VideoMaxQueuedFrames] = "Max Queued Frames",
+        ["help." + SettingKeys.VideoMaxQueuedFrames] =
+            "Limits how many rendered frames the GPU may keep waiting for display. 1 gives the "
+            + "lowest latency; 2 is smoother.",
         ["setting." + SettingKeys.VideoSkipFrame] = "Accelerated rendering (frame skip)",
         ["setting." + SettingKeys.VideoVSync] = "Vertical synchronisation",
         ["setting." + SettingKeys.VideoRenderMethod] = "Render method",

@@ -13,6 +13,7 @@
 video.graphic_quality
 video.vsync
 video.frame_rate
+video.max_queued_frames
 video.skip_frame
 video.render_method
 video.res_scale

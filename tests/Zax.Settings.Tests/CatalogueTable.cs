@@ -76,7 +76,9 @@ public static class CatalogueTable
             new("video.skip_frame", "SkipFrame", Flag, "true", U, Imm),
             new("video.render_method", "RenderMethod", Choice, "0", U, Imm),
             new("video.res_scale", "ResScaleIndex", Choice, "0", U, Imm),
-            new("video.anti_alias", "AntiAlias", Choice, "0", U, Imm),
+            // AMD-052 §3 point 6 rewrites the row: only the "Défaut" column moves, 0 → 1
+            // (REQ-PERS-089, divergence D).
+            new("video.anti_alias", "AntiAlias", Choice, "1", U, Imm),
             new("render.mesh_algo", "RenderMode", Choice, "0", U, Imm),
             new("render.shadow", "Shadow", Flag, "true", U, Imm),
             new("ui.fullscreen", null, Flag, "false", U, Imm),

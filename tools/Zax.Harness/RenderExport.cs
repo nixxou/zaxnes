@@ -103,8 +103,14 @@ internal static class RenderExport
           --shadow-map <texels>    Side of the shadow map (default 4096, AMD-034). A size the
                                    hardware refuses is halved until it accepts one, and the
                                    granted size is reported.
-          --anti-alias <n>         video.anti_alias: 0 off (default), 1 MSAA 4x, 2 MSAA 8x
-                                   (AMD-032). The granted sample count is reported.
+          --anti-alias <n>         video.anti_alias: 0 off, 1 MSAA 4x (default), 2 MSAA 8x
+                                   (AMD-032). The granted sample count is reported. The default
+                                   is the one a fresh installation ships with (AMD-052
+                                   REQ-PERS-089), so a plain run reports 4 samples.
+          --slow-render <ms>       Q-087. Hold each rendered frame back by that many milliseconds
+                                   (0 by default), to see what a slow display path does to the
+                                   emulated cadence (AMD-052 REQ-LOOP-077): the cadence of the
+                                   emulated frames must not move (REQ-LOOP-010).
           --bend <lr,tb,arc[,c]>   Space bending in degrees, −180 to 180 by steps of 30, and
                                    the arc centre 0 (screen) or 1 (bottom edge) (AMD-043
                                    REQ-SCN-066).
@@ -157,7 +163,17 @@ internal static class RenderExport
         float? fov = null;
         bool shadows = true;
         int shadowMapSize = SceneConstants.ShadowMapSize;
-        int antiAlias = 0;
+
+        // AMD-052 REQ-PERS-089: the default of a fresh installation, read from the catalogue so
+        // the two cannot drift, so that a plain « Zax.Harness render » reports the four samples
+        // the criterion asks for. AMD-032 §2 wrote a default of 0 for the option; the criterion
+        // of REQ-PERS-089 is only true with this one.
+        // Q-087
+        int antiAlias = Zax.Settings.SettingsCatalogue
+            .Get(Zax.Settings.SettingKeys.VideoAntiAlias)
+            .DefaultValue
+            .AsInt;
+        int slowRenderMs = 0;
         bool explain = false;
         int bench = 0;
         SkyboxKind? skybox = null;
@@ -298,6 +314,15 @@ internal static class RenderExport
                     if (antiAlias is < 0 or > 2)
                     {
                         throw new ArgumentException("--anti-alias expects 0, 1 or 2.");
+                    }
+
+                    break;
+
+                case "--slow-render":
+                    slowRenderMs = int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    if (slowRenderMs < 0)
+                    {
+                        throw new ArgumentException("--slow-render expects a count of milliseconds.");
                     }
 
                     break;
@@ -453,6 +478,15 @@ internal static class RenderExport
         foreach (SyntheticScene scene in scenes)
         {
             renderer.Render(context.Target, scene.Scene);
+
+            // AMD-052 REQ-LOOP-077: the deliberately slow display path its last criterion asks
+            // for. It is a test instrument, not a behaviour to aim for, and it is kept out of
+            // --bench so that a timing campaign still measures the renderer.
+            if (slowRenderMs > 0)
+            {
+                Thread.Sleep(slowRenderMs);
+            }
+
             byte[] pixels = context.ReadPixels();
 
             string file = Path.Combine(output, $"{scene.Name}.png");

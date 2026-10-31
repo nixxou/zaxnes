@@ -77,6 +77,9 @@ public sealed class LibretroOptionTests
     [InlineData("zaxnes_render_shadow", "enabled", "enabled,disabled")]
     [InlineData("zaxnes_emu_auto_tv_mode", "disabled", "enabled,disabled")]
 
+    // AMD-052 §3 point 8 adds the row to §4.6; its default follows REQ-PERS-089, so it is FFAA.
+    [InlineData("zaxnes_video_anti_alias", "FFAA", "None,FFAA,SMAA")]
+
     // AMD-046 §3: default « enabled », the two labels REQ-PERS-083 asks for.
     [InlineData("zaxnes_scene_bend_2d_mode", "enabled", "enabled,disabled")]
     public void The_single_line_entries_match(string key, string expectedDefault, string expectedValues)
@@ -146,6 +149,10 @@ public sealed class LibretroOptionTests
     [Theory]
     [InlineData(SettingKeys.VideoVSync)]
     [InlineData(SettingKeys.VideoFrameRate)]
+
+    // AMD-052 §3 point 8 adds the key to the "Non exposés en libretro" list, beside
+    // video.vsync and video.frame_rate: the presentation belongs to the host (REQ-LOOP-077).
+    [InlineData(SettingKeys.VideoMaxQueuedFrames)]
     [InlineData(SettingKeys.VideoSkipFrame)]
     [InlineData(SettingKeys.VideoRenderMethod)]
     [InlineData(SettingKeys.VideoResScale)]

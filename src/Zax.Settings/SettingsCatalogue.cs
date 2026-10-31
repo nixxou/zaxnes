@@ -259,6 +259,25 @@ public static class SettingsCatalogue
             UiLabel = "Render Rate",
         });
 
+        // AMD-052 §3 point 7 adds this line to SPEC-09 §4.1.1, and asks for the row to sit right
+        // after « Render Rate » in the Video group (REQ-LOOP-077); the options window draws a tab
+        // in catalogue order, so the position here is the position on screen. No Lua path, no
+        // profile field and no libretro value: the presentation chain belongs to the host there
+        // (REQ-PERS-086), which is why §4.6 lists the key as not exposed.
+        list.Add(new SettingDescriptor(
+            SettingKeys.VideoMaxQueuedFrames,
+            SettingKind.Int,
+            SettingValue.OfInt(2),
+            SettingScope.User,
+            SettingEffect.Immediate,
+            SettingTheme.Video)
+        {
+            Domain = SettingDomain.Choice(
+                new SettingOption(1d, "1"),
+                new SettingOption(2d, "2")),
+            UiLabel = "Max Queued Frames",
+        });
+
         list.Add(new SettingDescriptor(
             SettingKeys.VideoSkipFrame,
             SettingKind.Bool,
@@ -313,7 +332,14 @@ public static class SettingsCatalogue
         list.Add(new SettingDescriptor(
             SettingKeys.VideoAntiAlias,
             SettingKind.Enum,
-            SettingValue.OfEnum(0),
+
+            // AMD-052 REQ-PERS-089 (divergence D): a fresh installation ships with the
+            // anti-aliasing on — MSAA 4× by AMD-032 §2. The original forces its own to
+            // « disabled » (REQ-PERS-017) and defaults to 0; multisampling only touches the
+            // geometric edges and leaves the pixel art alone, which a post-process filter would
+            // blur. An existing settings file keeps whatever it holds (REQ-PERS-020/023), and
+            // the domain, the labels, the profile field 32 and the Lua API are untouched.
+            SettingValue.OfEnum(1),
             SettingScope.User,
             SettingEffect.Immediate,
             SettingTheme.Video)

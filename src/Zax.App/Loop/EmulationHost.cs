@@ -501,6 +501,14 @@ internal sealed partial class EmulationHost : IDisposable
         {
             case "emu.game_speed":
                 ApplySpeed();
+
+                // AMD-052 REQ-LOOP-075: a change of the speed setting — the options window, a
+                // script, a libretro core option or the ±1 shortcuts — resets the cadence clock,
+                // so the frames the old period had made late are abandoned rather than run in a
+                // burst at the new one. The fast-forward cycle of REQ-LOOP-016 goes through
+                // ApplySpeed() without coming here, which is exactly what the requirement asks
+                // for: its bursts expire and re-arm about six times a second.
+                Pacer.Reset();
                 break;
 
             case "emu.tv_mode":

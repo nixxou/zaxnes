@@ -63,11 +63,11 @@ public sealed class PacingTests
     }
 
     /// <summary>
-    /// REQ-LOOP-012 and vector T5: a one-second stall catches up at most five frames and
-    /// abandons the rest, so the game slows down instead of racing.
+    /// REQ-LOOP-012 as AMD-052 REQ-LOOP-074 amends it, and vector T5: a one-second stall catches
+    /// up at most two frames and abandons the rest, so the game slows down instead of racing.
     /// </summary>
     [Fact]
-    public void REQ_LOOP_012_the_backlog_is_limited_to_five_frames()
+    public void REQ_LOOP_074_the_backlog_is_limited_to_two_frames()
     {
         double now = 0.0;
         FramePacer pacer = new(60, () => now);
@@ -77,8 +77,10 @@ public sealed class PacingTests
         now += 1.0;
         int due = pacer.DueFrames();
 
-        Assert.Equal(FramePacer.MaxBacklog, due);
-        Assert.InRange(pacer.DroppedFrames, 50, 60);
+        // T5: 60 frames fall due over the second, 2 are run and 58 are abandoned.
+        Assert.Equal(2, FramePacer.MaxBacklog);
+        Assert.Equal(2, due);
+        Assert.Equal(58, pacer.DroppedFrames);
     }
 
     /// <summary>

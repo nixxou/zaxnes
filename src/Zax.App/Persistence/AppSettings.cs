@@ -121,6 +121,16 @@ public sealed class AppSettings
         set => Model.SetInt(SettingKeys.VideoFrameRate, value);
     }
 
+    /// <summary>
+    /// <c>video.max_queued_frames</c>: rendered frames the GPU may keep waiting for display,
+    /// 1 or 2, default 2 (AMD-052 REQ-LOOP-077).
+    /// </summary>
+    public int MaxQueuedFrames
+    {
+        get => Model.GetInt(SettingKeys.VideoMaxQueuedFrames);
+        set => Model.SetInt(SettingKeys.VideoMaxQueuedFrames, value);
+    }
+
     /// <summary><c>video.vsync</c>: 0 off, 1 every refresh, 2 every other refresh.</summary>
     public int VSync
     {

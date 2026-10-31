@@ -13,15 +13,15 @@ namespace Zax.App.Tests;
 public sealed class HostLoopTests
 {
     [Fact]
-    public void REQ_LOOP_012_the_backlog_never_exceeds_five_emulated_frames()
+    public void REQ_LOOP_074_the_backlog_never_exceeds_two_emulated_frames()
     {
         FramePacer pacer = new(60);
 
         // Frame 0 is due at t0 itself (REQ-LOOP-011), so the first call hands out one frame.
         Assert.Equal(1, pacer.DueFrames());
 
-        // Block the loop for half a second: at most five frames are run in a burst and the
-        // rest of the backlog is abandoned.
+        // Block the loop for half a second: at most two frames are run in a burst and the
+        // rest of the backlog is abandoned (AMD-052 REQ-LOOP-074).
         Block(0.5);
         int due = pacer.DueFrames();
 

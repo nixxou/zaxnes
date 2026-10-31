@@ -23,6 +23,9 @@ public sealed class VideoOptionTests
     public void REQ_PERS_017_a_change_of_anti_alias_reaches_the_scene_at_once()
     {
         using LoopHarness harness = LoopHarness.Create();
+
+        // AMD-052 REQ-PERS-089: a fresh installation starts at 1, which is MSAA 4×.
+        harness.Host.Settings.AntiAlias = 0;
         Assert.Equal(1, harness.Scene.Settings.AntiAliasSamples);
 
         harness.Host.Settings.AntiAlias = 1;
@@ -40,7 +43,9 @@ public sealed class VideoOptionTests
     public void REQ_PERS_017_the_anti_alias_option_stays_in_its_domain()
     {
         AppSettings settings = new();
-        Assert.Equal(0, settings.AntiAlias);
+
+        // AMD-052 REQ-PERS-089: the default is 1 on a fresh installation.
+        Assert.Equal(1, settings.AntiAlias);
 
         settings.AntiAlias = 2;
         Assert.Equal(2, settings.AntiAlias);
