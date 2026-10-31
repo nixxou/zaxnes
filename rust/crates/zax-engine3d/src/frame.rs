@@ -813,6 +813,10 @@ impl FrameInstance {
 pub struct ConversionFrame {
     background_cells: Vec<FrameTile>,
     sprite_grid: Vec<Option<TileId>>,
+    /// The background cells and the sprite grid's cells this batch filled: the next batch empties
+    /// those alone, not the whole grid, which the widescreen margins made thirteen times larger.
+    used_background: Vec<usize>,
+    used_sprite_cells: Vec<usize>,
     sprite_pool: Vec<FrameTile>,
     sprite_count: usize,
     extra_pool: Vec<FrameTile>,
@@ -857,6 +861,8 @@ impl ConversionFrame {
         Self {
             background_cells,
             sprite_grid: vec![None; grid::CELL_COUNT],
+            used_background: Vec::new(),
+            used_sprite_cells: Vec::new(),
             sprite_pool: Vec::new(),
             sprite_count: 0,
             extra_pool: Vec::new(),
@@ -878,6 +884,11 @@ impl ConversionFrame {
             background_pixel_count: 0,
             script_error_count: 0,
         }
+    }
+
+    /// The background cells this batch filled, in the order they were first filled.
+    pub(crate) fn used_background_slots(&self) -> &[usize] {
+        &self.used_background
     }
 
     /// The background tiles kept for this frame, in grid order (REQ-E3D-005, REQ-E3D-041).
@@ -1156,7 +1167,9 @@ impl ConversionFrame {
         self.scriptable_instances.clear();
         self.pinned_rects.clear();
         self.sprite_count = 0;
-        self.sprite_grid.fill(None);
+        for slot in self.used_sprite_cells.drain(..) {
+            self.sprite_grid[slot] = None;
+        }
         self.background_shape_count = 0;
         self.background_tile_count = 0;
         self.background_pixel_count = 0;
@@ -1164,11 +1177,10 @@ impl ConversionFrame {
         self.counter = counter;
         self.mask = mask;
         self.margin = margin;
-        for tile in self
-            .background_cells
-            .iter_mut()
-            .chain(&mut self.sprite_pool)
-        {
+        for slot in self.used_background.drain(..) {
+            self.background_cells[slot].reset();
+        }
+        for tile in &mut self.sprite_pool {
             tile.reset();
         }
     }
@@ -1189,6 +1201,9 @@ impl ConversionFrame {
         hidden: bool,
     ) -> Option<TileId> {
         let slot = grid::slot(grid::index_of(grid::background_cell(x, y)))?;
+        if !self.background_cells[slot].present {
+            self.used_background.push(slot);
+        }
         let tile = &mut self.background_cells[slot];
         if tile.present {
             self.background_pixel_count -= tile.image.pixel_count();
@@ -1359,6 +1374,9 @@ impl ConversionFrame {
         let data = &mut self.shape_store[shape.0];
         if !data.background {
             if let Some(slot) = grid::slot(tile.grid_index) {
+                if self.sprite_grid[slot].is_none() {
+                    self.used_sprite_cells.push(slot);
+                }
                 self.sprite_grid[slot] = Some(tile_id);
             }
         }

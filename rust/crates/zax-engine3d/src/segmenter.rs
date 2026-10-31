@@ -281,9 +281,12 @@ impl Segmenter {
     /// `scan_direction` is 0, by x then y when it is 1.
     fn build_germination_order(&mut self, frame: &ConversionFrame, settings: &ConversionSettings) {
         self.germs.clear();
+        // The cells the batch filled, not the whole grid (its widescreen margins make it large).
         self.germs.extend(
-            (0..grid::CELL_COUNT)
-                .map(TileId::Background)
+            frame
+                .used_background_slots()
+                .iter()
+                .map(|&slot| TileId::Background(slot))
                 .filter(|&id| frame.tile(id).present()),
         );
 
