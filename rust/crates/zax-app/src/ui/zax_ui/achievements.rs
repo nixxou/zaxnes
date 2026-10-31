@@ -10,7 +10,8 @@ use crate::ui::{achievements_view, keys, strings};
 
 impl ZaxUi {
     /// The RetroAchievements menu: the account, the game's achievements and the options.
-    /// Returns whether it is open.
+    /// Returns whether it is open. An entry chosen over the console mode takes the desktop back,
+    /// where its window shows.
     pub(super) fn draw_achievements_menu(&mut self, ui: &Ui, host: &mut AppHost) -> bool {
         let Some(_menu) = ui.begin_menu(strings::get(keys::ACH_MENU)) else {
             return false;
@@ -23,10 +24,12 @@ impl ZaxUi {
             .build()
         {
             self.state.achievements = true;
+            self.menu_chosen = true;
         }
         if ui.menu_item(strings::get(keys::ACH_ACCOUNT)) {
             self.state.options = true;
             self.force_options_tab = Some(OptionsTab::Achievements);
+            self.menu_chosen = true;
         }
         true
     }
