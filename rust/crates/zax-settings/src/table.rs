@@ -776,6 +776,21 @@ fn emulation_pause_3d(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_label("Pause the 3D in 2D"),
     );
+    // Rust-only (owner request): when a displayed frame runs several emulated ones to catch up,
+    // only the last is drawn, so the others of a profile whose scripts leave the core alone are
+    // neither converted nor run through the frame hooks. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuCatchUpLast3d,
+            SettingKind::Bool,
+            SettingValue::Bool(false),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Catch-up converts the shown frame only"),
+    );
 }
 
 fn conversion(out: &mut Vec<SettingDescriptor>) {

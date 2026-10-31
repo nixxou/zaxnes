@@ -214,6 +214,11 @@ displayed frame". All values are per displayed frame.
   converted nor run through its frame hooks (its input hook still runs). The last frame is
   converted when the 3D comes back, before it is drawn. Device run of SMB3 widescreen in 2D
   (owner): main thread ~19.8 ms (Lua 6.3, conversion 4.0, collect 2.65) against 16.6.
+- Catch-up converts the shown frame only (`emu.catch_up_last_3d`, handheld default on): when
+  a displayed frame runs several emulated ones, the frames finished before its last round are
+  neither converted nor run through the frame hooks (scripts leaving the core alone only).
+  Device run of a Zelda II temple (owner): 5 emulated frames per displayed one, each ~11 ms
+  core + ~8 ms conversion + ~9 ms Lua (`pivot.UpdateS`, ~400 calls a frame), 8 fps.
 - Core, identical output (goldens of 98 ROMs, 1 800 frames): the APU skips its quiet cycles
   while the frame loop batches the PPU (-5.5 to -8.5 % core), and CPU reads of plain PRG-ROM
   windows skip the board's decode (-6 to -8.5 %).

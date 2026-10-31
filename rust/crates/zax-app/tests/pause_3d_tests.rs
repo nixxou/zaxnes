@@ -91,3 +91,35 @@ fn the_3d_comes_back_converted_and_its_scripts_go_on() {
     assert!(conversion > Duration::ZERO);
     assert_ne!(paused, fov);
 }
+
+/// The frame hooks run during one displayed frame that catches `due` emulated frames up, the
+/// core on its own thread and ahead when `ahead`.
+fn hooks_of_a_catch_up(last_3d: bool, due: u32, ahead: bool) -> u32 {
+    let mut harness = game(false);
+    harness.host.separate_core = ahead;
+    harness.host.core_ahead = ahead;
+    harness.host.update_settings(|model| {
+        model.set(SettingId::EmuCatchUpLast3d, SettingValue::Bool(last_3d));
+    });
+    let before = harness.host.settings().fov();
+    let period = 1.0 / harness.host.pacer.effective_rate().max(1.0);
+    assert_eq!(due, harness.tick(period * f64::from(due)));
+    let after = harness.host.settings().fov();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..40.
+    let hooks = (after - before).rem_euclid(40.0).round() as u32;
+    hooks
+}
+
+#[test]
+fn a_catch_up_converts_the_frame_it_shows_only() {
+    for ahead in [false, true] {
+        let all = hooks_of_a_catch_up(false, 4, ahead);
+        let shown = hooks_of_a_catch_up(true, 4, ahead);
+        // Ahead, the last frame is still in flight: it is converted at the next tick.
+        assert_eq!(if ahead { 3 } else { 4 }, all, "ahead {ahead}");
+        assert!(
+            (1..=2).contains(&shown),
+            "ahead {ahead}: {shown} frame hooks ran"
+        );
+    }
+}

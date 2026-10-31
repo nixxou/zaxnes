@@ -46,7 +46,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     assert!(specified.is_subset(&model));
     let mut additions: Vec<String> = model.difference(&specified).cloned().collect();
     additions.sort();
-    // emu.builtin_patches, emu.catch_up, emu.forced_patch, emu.hack_options, emu.lua_experimental,
+    // emu.builtin_patches, emu.catch_up, emu.catch_up_last_3d, emu.forced_patch, emu.hack_options, emu.lua_experimental,
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pause_3d_in_2d, emu.pipeline, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.widescreen, video.widescreen_advanced,
     // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
@@ -65,6 +65,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "audio.mute",
             "emu.builtin_patches",
             "emu.catch_up",
+            "emu.catch_up_last_3d",
             "emu.forced_patch",
             "emu.hack_options",
             "emu.lua_experimental",

@@ -819,7 +819,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .frames_per_display(self.pacer.effective_rate(), displayed_rate);
         let due = self.pacer.due_frames();
         let ahead = self.runs_ahead();
+        let last_3d = self.settings.get(SettingId::EmuCatchUpLast3d).as_bool();
         for round in 0..due {
+            // `emu.catch_up_last_3d`: what is finished before the last round is not shown.
+            if let Some(session) = self.session.as_mut() {
+                session.set_catching_up(last_3d && round + 1 < due);
+            }
             // The frame of the previous round comes back first.
             self.take_core_back();
             self.evaluate_achievements();
@@ -860,6 +865,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.run_session_frame(player_one, player_two);
             }
             self.count_emulated_frame();
+        }
+        if let Some(session) = self.session.as_mut() {
+            session.set_catching_up(false);
         }
         if !ahead {
             self.dispatch_setting_changes();

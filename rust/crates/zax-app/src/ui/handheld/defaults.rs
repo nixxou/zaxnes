@@ -17,7 +17,7 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 6] {
+fn defaults() -> [(SettingId, SettingValue); 7] {
     [
         (SettingId::RenderShadow, SettingValue::Bool(false)),
         (SettingId::VideoAntiAlias, SettingValue::Enum(0)),
@@ -28,6 +28,8 @@ fn defaults() -> [(SettingId, SettingValue); 6] {
         (SettingId::EmuPipeline, SettingValue::Enum(PIPELINE_AUTO)),
         // No conversion and no frame hooks while the 2D picture is shown (owner request).
         (SettingId::EmuPause3dIn2d, SettingValue::Bool(true)),
+        // Only the shown frame of a catch-up is converted (owner request).
+        (SettingId::EmuCatchUpLast3d, SettingValue::Bool(true)),
     ]
 }
 
@@ -57,6 +59,7 @@ mod tests {
         assert!(model.get(SettingId::EmuLuaOptimized).as_bool());
         assert_eq!(PIPELINE_AUTO, model.get(SettingId::EmuPipeline).as_int());
         assert!(model.get(SettingId::EmuPause3dIn2d).as_bool());
+        assert!(model.get(SettingId::EmuCatchUpLast3d).as_bool());
     }
 
     #[test]

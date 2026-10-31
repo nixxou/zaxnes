@@ -238,6 +238,7 @@ type CapturedBatch = (Palettes, i32, i32, (i32, zax_nes::VisibleRows, i32));
 type Palettes = ([u8; 32], Option<[u8; 16]>);
 
 /// One game being played.
+#[allow(clippy::struct_excessive_bools)] // Independent states of the session.
 pub struct GameSession {
     core: Box<NesCore>,
     engine: ConversionEngine,
@@ -247,6 +248,9 @@ pub struct GameSession {
     frame_counter: i32,
     /// `emu.pause_3d_in_2d` while the 2D picture is shown ([`GameSession::pause_3d`]).
     paused_3d: bool,
+    /// The frame being finished is not the one a catch-up will show
+    /// ([`GameSession::set_catching_up`]).
+    catching_up: bool,
     /// The last frame captured while the 3D was paused, its records in `batch_records`: the
     /// one converted when the 3D comes back.
     skipped_batch: Option<CapturedBatch>,
@@ -392,6 +396,7 @@ impl GameSession {
             title: title.to_owned(),
             frame_counter: 0,
             paused_3d: false,
+            catching_up: false,
             skipped_batch: None,
             started: false,
             aimed: None,
@@ -1145,6 +1150,13 @@ impl GameSession {
         }
     }
 
+    /// Whether the frames finished from now on are ones a catch-up runs before the frame it shows
+    /// (`emu.catch_up_last_3d`): those of a profile whose scripts leave the core alone are
+    /// neither converted nor shown to the frame hooks, as with [`GameSession::pause_3d`].
+    pub const fn set_catching_up(&mut self, catching_up: bool) {
+        self.catching_up = catching_up;
+    }
+
     /// The conversion, frame hooks and camera tracking of the captured frame.
     fn convert_batch_lent(
         &mut self,
@@ -1154,7 +1166,7 @@ impl GameSession {
         (mask_x, mask_y): (i32, i32),
         (margin, visible_rows, margin_y): (i32, zax_nes::VisibleRows, i32),
     ) {
-        if self.paused_3d && self.pipeline.ahead_allowed {
+        if (self.paused_3d || self.catching_up) && self.pipeline.ahead_allowed {
             // Kept for when the 3D comes back; the scripts' clock goes on.
             self.skipped_batch = Some((
                 (palette, margin_palette),

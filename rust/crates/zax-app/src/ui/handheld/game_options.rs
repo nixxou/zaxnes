@@ -16,7 +16,7 @@ use crate::ui::{keys, strings};
 
 /// The rows a game can have a value of its own for: the options, without the language, the
 /// camera and the bindings, which belong to the player rather than to the game.
-pub const GAME_ROWS: [OptionRow; 14] = [
+pub const GAME_ROWS: [OptionRow; 15] = [
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
@@ -26,6 +26,7 @@ pub const GAME_ROWS: [OptionRow; 14] = [
     OptionRow::ShowFps,
     OptionRow::Profiler,
     OptionRow::CatchUp,
+    OptionRow::CatchUpLast3d,
     OptionRow::LuaOptimized,
     OptionRow::LuaExperimental,
     OptionRow::Pipeline,
@@ -54,6 +55,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         OptionRow::LuaExperimental => &[SettingId::EmuLuaExperimental],
         OptionRow::Pipeline => &[SettingId::EmuPipeline],
         OptionRow::Pause3dIn2d => &[SettingId::EmuPause3dIn2d],
+        OptionRow::CatchUpLast3d => &[SettingId::EmuCatchUpLast3d],
         OptionRow::Region => &[SettingId::EmuAutoTvMode, SettingId::EmuTvMode],
         OptionRow::Language | OptionRow::Camera | OptionRow::Controls | OptionRow::Achievements => {
             &[]
