@@ -1,3 +1,4 @@
+using Zax.Nes.Apu;
 using Zax.Nes.Rom;
 using Zax.Nes.State;
 
@@ -24,10 +25,15 @@ namespace Zax.Nes.Cartridges.Mappers;
 /// nametable only in modes 0 and 1.
 /// </para>
 /// <para>
+/// The <strong>expansion sound</strong> ($5000-$5015) is emulated as REQ-CORE-075 requires:
+/// two square channels, a PCM channel in write mode and the $5010 / $5015 registers, all of
+/// it in <see cref="Mmc5Audio"/>. Its output is the <c>M</c> the APU's mixer adds to its own
+/// (REQ-CORE-073).
+/// </para>
+/// <para>
 /// Left out, as REQ-CORE-100 allows (P2 and P3): the extended attribute mode, which gives
-/// every background tile its own pattern bank and palette; the vertical split screen
-/// ($5200-$5202); and the expansion sound ($5000-$5015), which REQ-CORE-075 does not
-/// require.
+/// every background tile its own pattern bank and palette; and the vertical split screen
+/// ($5200-$5202).
 /// </para>
 /// <para>
 /// <strong>Two CHR register sets.</strong> With 8x16 sprites selected, background fetches
@@ -45,6 +51,7 @@ internal sealed class Mmc5 : BankedCartridge
     /// <summary>PRG-RAM the board can address: eight banks of 8 KiB.</summary>
     internal const int MaxPrgRamSize = 64 * 1024;
 
+    private readonly Mmc5Audio _audio = new();
     private readonly byte[] _exRam = new byte[ExRamSize];
     private readonly int[] _chrA = new int[8];
     private readonly int[] _chrB = new int[4];
@@ -79,7 +86,15 @@ internal sealed class Mmc5 : BankedCartridge
 
     public override int MapperNumber => 5;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The scanline IRQ only. The board's PCM IRQ flag ($5010) never pulls the line, which
+    /// REQ-CORE-075 records as an accepted divergence.
+    /// </remarks>
     public override bool IrqAsserted => _irqPending && _irqEnabled;
+
+    /// <inheritdoc />
+    public override int ExpansionAudioOutput => _audio.Output;
 
     /// <summary>Writing PRG-RAM takes the two magic values in $5102 and $5103 (nesdev).</summary>
     protected override bool PrgRamWritable => (_protect1 & 0x03) == 0x02 && (_protect2 & 0x03) == 0x01;
@@ -121,8 +136,17 @@ internal sealed class Mmc5 : BankedCartridge
         _multiplicand = 0;
         _multiplier = 0;
 
+        _audio.Reset();
+
         UpdateBanks();
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The board's sound has no equivalent of the APU's frame sequencer, so it counts CPU
+    /// cycles of its own (REQ-CORE-075).
+    /// </remarks>
+    protected override void OnCpuCycle() => _audio.StepCpuCycle();
 
     // ---------------------------------------------------------------- CPU bus
 
@@ -131,6 +155,11 @@ internal sealed class Mmc5 : BankedCartridge
     {
         switch (address)
         {
+            case 0x5010:
+            case 0x5015:
+                // Reading $5010 acknowledges the PCM IRQ flag (REQ-CORE-075).
+                return _audio.TryRead(address, out value, acknowledge: true);
+
             case 0x5204:
             {
                 value = (byte)((_irqPending ? 0x80 : 0x00) | (_inFrame ? 0x40 : 0x00));
@@ -169,18 +198,24 @@ internal sealed class Mmc5 : BankedCartridge
 
     /// <inheritdoc />
     /// <remarks>
-    /// Reading $5204 acknowledges the IRQ, so the host accessor must not take that path
-    /// (REQ-CORE-081).
+    /// Reading $5204 acknowledges the scanline IRQ and reading $5010 the PCM IRQ flag, so the
+    /// host accessor must not take either path (REQ-CORE-081).
     /// </remarks>
     public override bool TryCpuPeek(ushort address, out byte value)
     {
-        if (address == 0x5204)
+        switch (address)
         {
-            value = (byte)((_irqPending ? 0x80 : 0x00) | (_inFrame ? 0x40 : 0x00));
-            return true;
-        }
+            case 0x5010:
+            case 0x5015:
+                return _audio.TryRead(address, out value, acknowledge: false);
 
-        return TryCpuRead(address, out value);
+            case 0x5204:
+                value = (byte)((_irqPending ? 0x80 : 0x00) | (_inFrame ? 0x40 : 0x00));
+                return true;
+
+            default:
+                return TryCpuRead(address, out value);
+        }
     }
 
     /// <inheritdoc />
@@ -201,6 +236,13 @@ internal sealed class Mmc5 : BankedCartridge
                 _exRam[address - 0x5C00] = _inFrame ? value : (byte)0;
             }
 
+            return;
+        }
+
+        if (address is >= 0x5000 and <= 0x5015)
+        {
+            // The board's own sound registers (REQ-CORE-075).
+            _audio.Write(address, value);
             return;
         }
 
@@ -545,6 +587,8 @@ internal sealed class Mmc5 : BankedCartridge
         writer.WriteInt32(_scanlineCounter);
         writer.WriteByte(_multiplicand);
         writer.WriteByte(_multiplier);
+
+        _audio.SaveState(writer);
     }
 
     public override void LoadState(StateReader reader)
@@ -582,5 +626,7 @@ internal sealed class Mmc5 : BankedCartridge
         _scanlineCounter = reader.ReadInt32();
         _multiplicand = reader.ReadByte();
         _multiplier = reader.ReadByte();
+
+        _audio.LoadState(reader);
     }
 }

@@ -24,8 +24,10 @@ namespace Zax.Nes.Apu;
 /// nothing else in this class has to compensate for it.
 /// </para>
 /// <para>
-/// <strong>Expansion audio</strong> (VRC6, VRC7, MMC5, Namco 163, Sunsoft 5B, FDS) is not
-/// emulated: REQ-CORE-075 makes it optional and DEC-02-Q5 settles that it is not required.
+/// <strong>Expansion audio.</strong> REQ-CORE-075 requires the MMC5's own sound and leaves
+/// the other boards (VRC6, VRC7, Namco 163, Sunsoft 5B, FDS) optional, so only the MMC5
+/// supplies an <see cref="IExpansionAudio"/>. Its output is the <c>M</c> of REQ-CORE-073,
+/// added to the APU's own <c>A</c> before the sum is clipped.
 /// </para>
 /// </remarks>
 public sealed class Apu2A03
@@ -44,21 +46,6 @@ public sealed class Apu2A03
 
     /// <summary>Largest fine adjustment of the resampling ratio a frontend may ask for (REQ-CORE-070).</summary>
     public const double MaxRatioAdjustment = 0.005;
-
-    /// <summary>Volume one step of a pulse channel contributes (REQ-CORE-073).</summary>
-    public const double PulseStep = 0.00752;
-
-    /// <summary>Volume one step of the triangle contributes (REQ-CORE-073).</summary>
-    public const double TriangleStep = 0.00851;
-
-    /// <summary>Volume one step of the noise contributes (REQ-CORE-073).</summary>
-    public const double NoiseStep = 0.00494;
-
-    /// <summary>Volume one step of the DMC contributes (REQ-CORE-073).</summary>
-    public const double DmcStep = 0.00335;
-
-    /// <summary>Output gain applied to the mix, 50 000 / 32 768 (REQ-CORE-073).</summary>
-    public const double OutputGain = 1.526;
 
     /// <summary>
     /// Four-step frame sequencer, NTSC, in CPU cycles after the sequencer reset (nesdev,
@@ -105,6 +92,9 @@ public sealed class Apu2A03
     private int _pendingSequencerReset;
     private byte _readableStatus;
     private int _levelKey = -1;
+    private int _mixerApu;
+    private int _mixerExpansion;
+    private int _mixerOutput;
     private double _level;
 
     /// <summary>Creates an APU with the default region and sample rate.</summary>
@@ -132,8 +122,21 @@ public sealed class Apu2A03
     public bool OutputEnabled { get; set; } = true;
 
     /// <summary>
-    /// The mixed output level of the five channels on the cycle just stepped, in [−1, 1]
-    /// (REQ-CORE-073), before resampling and before the DC blocker.
+    /// The expansion audio of the cartridge attached, whose output is the <c>M</c> of
+    /// REQ-CORE-073, or <see langword="null"/> for a board without any (REQ-CORE-075).
+    /// </summary>
+    /// <remarks>
+    /// <see cref="NesBus.Attach"/> owns it. Swapping the source does not invalidate the
+    /// cached level: the cache key carries the expansion output itself, so two sources that
+    /// read the same at the same channel indices mix to the same level. Clearing the key here
+    /// would also make a savestate round trip asymmetric, since the bus re-attaches the
+    /// cartridge after the APU has read its state back (REQ-CORE-092).
+    /// </remarks>
+    public IExpansionAudio? ExpansionAudio { get; set; }
+
+    /// <summary>
+    /// The mixed output level on the cycle just stepped, in [−1, 1] (REQ-CORE-073), before
+    /// resampling and before the DC blocker: <see cref="MixerOutput"/> divided by 32 768.
     /// </summary>
     /// <remarks>
     /// This is the signal the resampler is fed. It is exposed so that the mixer can be
@@ -141,6 +144,26 @@ public sealed class Apu2A03
     /// filtered output.
     /// </remarks>
     public double MixedLevel => _level;
+
+    /// <summary>
+    /// <c>A</c> of REQ-CORE-073 on the cycle just stepped: the five APU channels mixed
+    /// through the two non-linear tables, 0 to 32 767. Part of the test point of
+    /// REQ-CORE-076.
+    /// </summary>
+    public int MixerApu => _mixerApu;
+
+    /// <summary>
+    /// <c>M</c> of REQ-CORE-073 on the cycle just stepped: the expansion audio's output, 0
+    /// without any (REQ-CORE-075). Part of the test point of REQ-CORE-076.
+    /// </summary>
+    public int MixerExpansion => _mixerExpansion;
+
+    /// <summary>
+    /// <c>S = min(A + M, 32 767)</c> of REQ-CORE-073 on the cycle just stepped, before the
+    /// conversion to floating point and before the DC blocker. Part of the test point of
+    /// REQ-CORE-076.
+    /// </summary>
+    public int MixerOutput => _mixerOutput;
 
     /// <summary>Whether the DMC's memory reader wants a byte (nesdev, "DMA").</summary>
     public bool NeedsDmcDma => _dmc.NeedsSampleFetch;
@@ -279,6 +302,9 @@ public sealed class Apu2A03
         _pendingSequencerReset = 0;
         _readableStatus = 0;
         _levelKey = -1;
+        _mixerApu = 0;
+        _mixerExpansion = 0;
+        _mixerOutput = 0;
         _level = 0.0;
 
         DiscardSamples();
@@ -655,39 +681,44 @@ public sealed class Apu2A03
     }
 
     /// <summary>
-    /// The mixed output level of the five channels, clamped to [−1, 1] (REQ-CORE-073).
+    /// The mixed output level, in [−1, 1] (REQ-CORE-073): the non-linear mix <c>A</c> of the
+    /// five channels plus the expansion audio's <c>M</c>, clipped to 32 767 and divided by
+    /// 32 768.
     /// </summary>
     /// <remarks>
-    /// The five channel outputs are small integers, so the mix is only recomputed when one of
-    /// them actually moves; most CPU cycles change nothing.
+    /// <para>
+    /// The channel outputs are small integers, so the mix is only recomputed when one of the
+    /// two table indices or the expansion output actually moves; most CPU cycles change
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// The DC blocker REQ-CORE-073 puts after this conversion runs on the output samples
+    /// rather than on this signal, inside <see cref="BandLimitedResampler"/>; the two
+    /// orderings are equivalent for a linear filter, and this one keeps the resampler's input
+    /// piecewise constant, which is what makes its step synthesis cheap. See
+    /// <c>spec/changes/Q-091.md</c>.
+    /// </para>
     /// </remarks>
+    // Q-091
     private double CurrentLevel()
     {
-        int pulse1 = _pulse1.Output;
-        int pulse2 = _pulse2.Output;
-        int triangle = _triangle.Output;
-        int noise = _noise.Output;
-        int dmc = _dmc.Output;
+        int pulseIndex = _pulse1.Output + _pulse2.Output;
+        int tndIndex = (3 * _triangle.Output) + (2 * _noise.Output) + _dmc.Output;
+        int expansion = ExpansionAudio?.ExpansionAudioOutput ?? 0;
 
-        int key = pulse1 | (pulse2 << 4) | (triangle << 8) | (noise << 12) | (dmc << 16);
+        // 5 bits of pulse index (0 to 30), 8 of triangle/noise/DMC index (0 to 202) and the
+        // expansion output (0 to 15 905 for the MMC5) above them.
+        int key = pulseIndex | (tndIndex << 5) | (expansion << 13);
         if (key == _levelKey)
         {
             return _level;
         }
 
         _levelKey = key;
-
-        // The linear approximation of nesdev's "APU Mixer", which REQ-CORE-073 prescribes.
-        // Q-084: the non-linear formula the same page gives, which the note of REQ-CORE-073
-        // calls tolerated, cannot meet that requirement's own acceptance criterion at any
-        // scaling, so it is not an option here.
-        double mix =
-            (PulseStep * (pulse1 + pulse2))
-            + (TriangleStep * triangle)
-            + (NoiseStep * noise)
-            + (DmcStep * dmc);
-
-        _level = Math.Clamp(OutputGain * mix, -1.0, 1.0);
+        _mixerApu = ApuMixer.MixIndexed(pulseIndex, tndIndex);
+        _mixerExpansion = expansion;
+        _mixerOutput = ApuMixer.Clip(_mixerApu, expansion);
+        _level = ApuMixer.ToFloat(_mixerOutput);
         return _level;
     }
 
@@ -801,6 +832,9 @@ public sealed class Apu2A03
         writer.WriteInt32(_pendingSequencerReset);
         writer.WriteByte(_readableStatus);
         writer.WriteInt32(_levelKey);
+        writer.WriteInt32(_mixerApu);
+        writer.WriteInt32(_mixerExpansion);
+        writer.WriteInt32(_mixerOutput);
         writer.WriteDouble(_level);
 
         _resampler.SaveState(writer);
@@ -841,6 +875,9 @@ public sealed class Apu2A03
         _pendingSequencerReset = reader.ReadInt32();
         _readableStatus = reader.ReadByte();
         _levelKey = reader.ReadInt32();
+        _mixerApu = reader.ReadInt32();
+        _mixerExpansion = reader.ReadInt32();
+        _mixerOutput = reader.ReadInt32();
         _level = reader.ReadDouble();
 
         _resampler.LoadState(reader);

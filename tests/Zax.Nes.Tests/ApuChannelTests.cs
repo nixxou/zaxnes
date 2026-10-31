@@ -1,3 +1,5 @@
+using Zax.Nes.Apu;
+
 namespace Zax.Nes.Tests;
 
 /// <summary>
@@ -12,8 +14,14 @@ namespace Zax.Nes.Tests;
 /// </remarks>
 public sealed class ApuChannelTests
 {
-    /// <summary>Level of one pulse step at volume 15 (REQ-CORE-073).</summary>
-    private const double PulseFull = 1.526 * 0.00752 * 15;
+    /// <summary>
+    /// Level a lone pulse at <paramref name="volume"/> mixes to (REQ-CORE-073, AMD-054). The
+    /// law is non-linear, so this is not <c>volume</c> times the level at 1.
+    /// </summary>
+    private static double PulseLevel(int volume) => ApuMixer.ToFloat(ApuMixer.Mix(volume, 0, 0, 0, 0));
+
+    /// <summary>Level a lone DMC output of <paramref name="level"/> mixes to (REQ-CORE-073).</summary>
+    private static double DmcLevel(int level) => ApuMixer.ToFloat(ApuMixer.Mix(0, 0, 0, 0, level));
 
     /// <summary>Sweep register value that never mutes: negate with a shift of 0.</summary>
     private const byte SweepNeverMutes = 0x08;
@@ -126,7 +134,7 @@ public sealed class ApuChannelTests
 
         Assert.Equal(2, levels.Count);
         Assert.Contains(0.0, levels);
-        Assert.Contains(levels, level => Math.Abs(level - PulseFull) < 1e-9);
+        Assert.Contains(levels, level => Math.Abs(level - PulseLevel(15)) < 1e-9);
     }
 
     [Theory]
@@ -156,7 +164,7 @@ public sealed class ApuChannelTests
 
         double peak = Peak(core, 200);
 
-        Assert.InRange(peak, (expectedVolume * PulseFull / 15) - 1e-9, (expectedVolume * PulseFull / 15) + 1e-9);
+        Assert.InRange(peak, PulseLevel(expectedVolume) - 1e-9, PulseLevel(expectedVolume) + 1e-9);
     }
 
     [Fact]
@@ -177,7 +185,7 @@ public sealed class ApuChannelTests
         }
 
         // Sixteen quarter frames take the decay to 0; the seventeenth wraps it back to 15.
-        Assert.InRange(Peak(core, 200), PulseFull - 1e-9, PulseFull + 1e-9);
+        Assert.InRange(Peak(core, 200), PulseLevel(15) - 1e-9, PulseLevel(15) + 1e-9);
     }
 
     [Theory]
@@ -223,7 +231,6 @@ public sealed class ApuChannelTests
     public void REQ_CORE_073_the_triangle_walks_its_staircase_in_steps_of_one()
     {
         NesCore core = Core();
-        const double step = 1.526 * 0.00851;
 
         core.WriteMemory(0x4015, 0x04);
         core.WriteMemory(0x4008, 0x7F); // Control clear, linear counter reload 127.
@@ -238,12 +245,15 @@ public sealed class ApuChannelTests
             levels.Add(core.Apu.MixedLevel);
         }
 
-        // The staircase visits all sixteen output values, one step apart.
+        // The staircase visits all sixteen output values, one channel step apart. The mixing
+        // law is non-linear (REQ-CORE-073, AMD-054), so the levels are not evenly spaced:
+        // each one is the table entry of the channel step it comes from.
         Assert.Equal(16, levels.Count);
         double[] sorted = [.. levels];
-        for (int i = 1; i < sorted.Length; i++)
+        for (int step = 0; step < sorted.Length; step++)
         {
-            Assert.InRange(sorted[i] - sorted[i - 1], step - 1e-9, step + 1e-9);
+            double expected = ApuMixer.ToFloat(ApuMixer.Mix(0, 0, step, 0, 0));
+            Assert.InRange(sorted[step], expected - 1e-9, expected + 1e-9);
         }
     }
 
@@ -386,12 +396,12 @@ public sealed class ApuChannelTests
         core.WriteMemory(0x4011, 64);
         core.Bus.Tick();
 
-        Assert.InRange(core.Apu.MixedLevel, (1.526 * 0.00335 * 64) - 1e-9, (1.526 * 0.00335 * 64) + 1e-9);
+        Assert.InRange(core.Apu.MixedLevel, DmcLevel(64) - 1e-9, DmcLevel(64) + 1e-9);
 
         core.WriteMemory(0x4011, 0xFF); // Only the low seven bits are kept.
         core.Bus.Tick();
 
-        Assert.InRange(core.Apu.MixedLevel, (1.526 * 0.00335 * 127) - 1e-9, (1.526 * 0.00335 * 127) + 1e-9);
+        Assert.InRange(core.Apu.MixedLevel, DmcLevel(127) - 1e-9, DmcLevel(127) + 1e-9);
     }
 
     /// <summary>
@@ -472,7 +482,7 @@ public sealed class ApuChannelTests
         Tick(core, 40_000);
 
         double level = core.Apu.MixedLevel;
-        Assert.Equal(1.526 * 0.00335 * expected, level, 1e-9);
+        Assert.Equal(DmcLevel(expected), level, 1e-9);
     }
 
     /// <summary>Starts a DMC sample of <c>16 x length + 1</c> bytes at <paramref name="rate"/>.</summary>

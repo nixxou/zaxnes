@@ -1,3 +1,4 @@
+using Zax.Nes.Apu;
 using Zax.Nes.Rom;
 using Zax.Nes.State;
 
@@ -24,7 +25,7 @@ namespace Zax.Nes.Cartridges;
 /// what the tile emitter and the host memory accessors call.
 /// </para>
 /// </remarks>
-public abstract class Cartridge
+public abstract class Cartridge : IExpansionAudio
 {
     /// <summary>
     /// Returned by <see cref="NametablePage"/> when the board leaves the layout to
@@ -88,6 +89,13 @@ public abstract class Cartridge
 
     /// <summary>Whether the cartridge is asserting the CPU IRQ line.</summary>
     public virtual bool IrqAsserted => false;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// 0 for every board but the MMC5, whose sound REQ-CORE-075 requires; the other expansion
+    /// audios it leaves optional are not emulated.
+    /// </remarks>
+    public virtual int ExpansionAudioOutput => 0;
 
     /// <summary>CPU cycles elapsed since power-on, as the cartridge sees them.</summary>
     /// <remarks>

@@ -36,28 +36,19 @@ internal static class Program
                 case "stress":
                     return StressRun.Run(args[1..]);
 
+                case "mixer":
+                    return MixerProbe.Run(args[1..]);
+
                 case "help":
                 case "--help":
                 case "-h":
-                    Console.Out.WriteLine(MeshExport.Usage);
-                    Console.Out.WriteLine();
-                    Console.Out.WriteLine(RenderExport.Usage);
-                    Console.Out.WriteLine();
-                    Console.Out.WriteLine(LuaApiExport.Usage);
-                    Console.Out.WriteLine();
-                    Console.Out.WriteLine(StressRun.Usage);
+                    WriteUsage(Console.Out);
                     return 0;
 
                 default:
                     Console.Error.WriteLine($"unknown command: {args[0]}");
                     Console.Error.WriteLine();
-                    Console.Error.WriteLine(MeshExport.Usage);
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine(RenderExport.Usage);
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine(LuaApiExport.Usage);
-                    Console.Error.WriteLine();
-                    Console.Error.WriteLine(StressRun.Usage);
+                    WriteUsage(Console.Error);
                     return 2;
             }
         }
@@ -76,8 +67,25 @@ internal static class Program
         }
 
         Console.Out.WriteLine();
-        Console.Out.WriteLine("commands: meshes, render, lua-api, stress, help");
+        Console.Out.WriteLine("commands: meshes, render, lua-api, stress, mixer, help");
         return 0;
+    }
+
+    /// <summary>Writes the usage text of every command to <paramref name="writer"/>.</summary>
+    private static void WriteUsage(TextWriter writer)
+    {
+        foreach (string usage in new[]
+                 {
+                     MeshExport.Usage,
+                     RenderExport.Usage,
+                     LuaApiExport.Usage,
+                     StressRun.Usage,
+                     MixerProbe.Usage,
+                 })
+        {
+            writer.WriteLine(usage);
+            writer.WriteLine();
+        }
     }
 
     /// <summary>Informational version stamped by Directory.Build.props.</summary>

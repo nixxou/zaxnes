@@ -12,7 +12,7 @@ internal sealed class PulseChannel
     /// The four duty sequences, read left to right over time (nesdev): 12.5 %, 25 %, 50 %
     /// and 25 % negated.
     /// </summary>
-    private static readonly byte[] DutySequences =
+    internal static readonly byte[] DutySequences =
     [
         0, 1, 0, 0, 0, 0, 0, 0,
         0, 1, 1, 0, 0, 0, 0, 0,

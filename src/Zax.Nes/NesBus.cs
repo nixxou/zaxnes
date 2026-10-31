@@ -91,6 +91,10 @@ public sealed class NesBus : ICpuBus
     {
         _cartridge = cartridge;
         _ppu.Attach(cartridge);
+
+        // The cartridge is the APU's expansion audio source: the M of REQ-CORE-073, which
+        // only the MMC5 ever makes non-zero (REQ-CORE-075).
+        _apu.ExpansionAudio = cartridge;
     }
 
     /// <summary>Clears work RAM and the clock (part of power-on, REQ-CORE-004).</summary>
@@ -128,8 +132,13 @@ public sealed class NesBus : ICpuBus
     {
         _cycles++;
         _ppu.StepCpuCycle();
-        _apu.StepCpuCycle();
+
+        // The cartridge goes before the APU: a board with expansion audio (REQ-CORE-075) has
+        // to have produced this cycle's M before the APU mixes it in (REQ-CORE-073). Nothing
+        // else in the tick depends on the order — both are done before the register access
+        // that follows.
         _cartridge?.StepCpuCycle();
+        _apu.StepCpuCycle();
 
         if (_apu.NeedsDmcDma && !_inDmcDma)
         {

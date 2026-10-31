@@ -345,17 +345,38 @@ public sealed class CoreZapperAudioTests
         Assert.InRange(produced, expected - 800, expected + 800);
     }
 
-    [Fact] // REQ-CORE-073
-    public void The_mixer_uses_the_linear_approximation_steps()
+    /// <summary>
+    /// REQ-CORE-073 (AMD-054), first criterion, read at the test point of REQ-CORE-076: a lone
+    /// pulse at volume 15 mixes to 4 890, the two pulses to 8 462 — a ratio of 1.73 where the
+    /// linear approximation the requirement used to prescribe would give 2 — the triangle's
+    /// staircase spans 8 363, and every channel at its maximum lands on exactly 32 767.
+    /// </summary>
+    [Fact] // REQ-CORE-073, REQ-CORE-076
+    public void The_mixer_follows_the_non_linear_law()
     {
-        Assert.Equal(0.00752, Apu2A03.PulseStep, 8);
-        Assert.Equal(0.00851, Apu2A03.TriangleStep, 8);
-        Assert.Equal(0.00494, Apu2A03.NoiseStep, 8);
-        Assert.Equal(0.00335, Apu2A03.DmcStep, 8);
-        Assert.Equal(1.526, Apu2A03.OutputGain, 6);
+        Assert.Equal(4890, ApuMixer.Mix(15, 0, 0, 0, 0));
+        Assert.Equal(8462, ApuMixer.Mix(15, 15, 0, 0, 0));
+        Assert.InRange(8462.0 / 4890.0, 1.725, 1.735);
+        Assert.Equal(8363, ApuMixer.Mix(0, 0, 15, 0, 0));
+        Assert.Equal(32_767, ApuMixer.Mix(15, 15, 15, 15, 127));
+
+        // The MMC5's companion table and PCM step (REQ-CORE-075).
+        Assert.Equal(4623, ApuMixer.Mmc5PulseTable[15]);
+        Assert.Equal(8000, ApuMixer.Mmc5PulseTable[30]);
+        Assert.Equal(3968, ApuMixer.Mmc5PcmStep * 128);
+
+        // S = min(A + M, 32 767), then S / 32 768 for the [-1, 1] of REQ-CORE-071.
+        Assert.Equal(32_767, ApuMixer.Clip(32_767, 8_000 + (31 * 255)));
+        Assert.Equal(4890 / 32_768.0, ApuMixer.ToFloat(4890), 12);
     }
 
-    [Fact] // REQ-CORE-073 (a lone pulse at volume 15, 50 % duty, peak to peak 0.172 +/- 0.02)
+    /// <summary>
+    /// REQ-CORE-073 (AMD-054), second criterion, measured at the output of REQ-CORE-071 with
+    /// the protocol of Q-039 confirmed by AMD-018: a pulse at 440 Hz (timer 253 in NTSC), 50 %
+    /// duty, volume 15, the difference of the medians of the two plateaus, the first half of
+    /// the samples discarded. The level is 13 % below the 0.172 of the linear approximation.
+    /// </summary>
+    [Fact] // REQ-CORE-073 (a lone pulse at volume 15, 50 % duty, peak to peak 0.149 +/- 0.002)
     public void A_lone_pulse_has_the_expected_peak_to_peak_level()
     {
         NesCore core = SpecRom.Warm();
@@ -387,7 +408,7 @@ public sealed class CoreZapperAudioTests
         float high = Median([.. tail.Where(v => v > mean)]);
         float low = Median([.. tail.Where(v => v <= mean)]);
 
-        Assert.InRange(high - low, 0.172f - 0.02f, 0.172f + 0.02f);
+        Assert.InRange(high - low, 0.149f - 0.002f, 0.149f + 0.002f);
     }
 
     private static float Median(float[] values)

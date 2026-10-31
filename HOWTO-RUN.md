@@ -674,6 +674,21 @@ La commande `lua-api` écrit l'API que les scripts voient réellement, une ligne
 Zax.Harness.exe lua-api --out api.txt
 ```
 
+La commande `mixer` lit le **point de test du mixeur** d'`REQ-CORE-076` (`AMD-054`) : les trois
+entiers `A` (les cinq canaux de l'APU mixés), `M` (l'audio d'extension de la cartouche) et
+`S = min(A + M, 32 767)`, avant toute conversion en flottant et avant le filtre de composante
+continue. C'est là que se mesurent les critères chiffrés d'`AMD-054`. Aucune ROM commerciale
+n'est nécessaire : sans `--rom`, la commande construit sa propre cartouche du mappeur demandé et
+les registres sont écrits par `--poke`, exactement comme le ferait une écriture du CPU.
+
+```
+Zax.Harness.exe mixer --poke 4015=01 --poke 4000=BF --poke 4002=64 --poke 4003=F8 --peak
+                                      (un pulse seul au volume 15 : A=4890 M=0 S=4890)
+Zax.Harness.exe mixer --mapper 5 --poke 5011=80 --cycles 1
+                                      (voie PCM du MMC5 à 128 : A=0 M=3968 S=3968)
+Zax.Harness.exe mixer --json          (une ligne JSON au lieu du texte)
+```
+
 Du côté de l'interface, `Zaxnes --ui-shots <dossier>` place l'interface dans chacun de ses
 écrans, relit la fenêtre et écrit un PNG par écran. C'est ce qui produit les captures de
 `verify/round1/l9/`.
