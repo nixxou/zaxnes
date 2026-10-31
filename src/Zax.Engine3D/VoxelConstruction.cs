@@ -484,14 +484,13 @@ public sealed class VoxelConstruction
 
         if (_fullWarp)
         {
-            // REQ-E3D-450: fill each column of the section over the depth span of the point,
-            // with the texel of the opposite quadrant and no zero test. The span runs between
-            // the two bounds whichever way round they are, as TV-Y4 requires (Q-015). For an
-            // odd depth the region 2 point q = 0 then straddles the whole section, so a short
-            // segment fills it entirely rather than rounding it (Q-082).
-            int from = Math.Min(zm, zp);
-            int to = Math.Max(zm, zp);
-            for (int z = from; z <= to; z++)
+            // REQ-E3D-450 (AMD-048): fill each column of the section over the depth span of
+            // the point, with the texel of the opposite quadrant and no zero test. The span is
+            // {z : z- <= z <= z+}, hence empty when the bounds of the point are the wrong way
+            // round — which happens for the first point of region 2, and for the second one too
+            // when D is even (AMD-048 replaces the answer of Q-015 and closes Q-082; the span
+            // of REQ-E3D-448 and REQ-E3D-449 is unchanged).
+            for (int z = zm; z <= zp; z++)
             {
                 if (q0 && q1)
                 {
