@@ -22,6 +22,16 @@ pub const FILE_NAME: &str = "games.json";
 /// `Flags` of an official achievement in the server's answers.
 const OFFICIAL_FLAGS: u64 = 3;
 
+/// The first id of the server's warnings dressed as achievements ("Warning: Unknown Emulator"),
+/// which rcheevos leaves out of its counts: not achievements of the game.
+pub const FIRST_WARNING_ID: u32 = 101_000_001;
+
+/// Whether `id` is an achievement of the game, not one of the server's warnings.
+#[must_use]
+pub const fn is_real_achievement(id: u32) -> bool {
+    id < FIRST_WARNING_ID
+}
+
 /// One achievement of a game, as the list knows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KnownAchievement {
@@ -140,6 +150,15 @@ impl AchievementLibrary {
             .and_then(|file| std::fs::read(file).ok())
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
+        // Kept by an earlier version with the warnings among the achievements.
+        for game in self
+            .entries
+            .values_mut()
+            .filter_map(|entry| entry.game.as_mut())
+        {
+            game.achievements
+                .retain(|achievement| is_real_achievement(achievement.id));
+        }
     }
 
     /// What the study of the ROM in `path` found for `user`, while the file is as it was then:
@@ -387,6 +406,7 @@ fn read_game(json: &Value) -> Option<KnownGame> {
         .filter(|achievement| {
             achievement.get("Flags").and_then(Value::as_u64) == Some(OFFICIAL_FLAGS)
         })
+        .filter(|achievement| is_real_achievement(number(achievement, "ID")))
         .map(|achievement| KnownAchievement {
             id: number(achievement, "ID"),
             title: text(achievement, "Title"),
@@ -423,12 +443,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_achievement_set_reads_its_official_achievements() {
+    fn an_achievement_set_reads_its_official_achievements_without_the_warning() {
         let json: Value = serde_json::from_str(
             r#"{"Success":true,"GameId":7,"Title":"Counter","ImageIconUrl":"https://media/Images/1.png",
                "Sets":[{"Type":"core","Achievements":[
                  {"ID":1,"Title":"One","Description":"d","Points":5,"Flags":3,
                   "BadgeURL":"https://media/Badge/1.png","BadgeLockedURL":"https://media/Badge/1_lock.png"},
+                 {"ID":101000001,"Title":"Warning: Unknown Emulator","Description":"d",
+                  "Points":0,"Flags":3,"BadgeURL":"","BadgeLockedURL":""},
                  {"ID":2,"Title":"Two","Description":"d","Points":5,"Flags":5,
                   "BadgeURL":"","BadgeLockedURL":""}]}]}"#,
         )
