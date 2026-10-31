@@ -199,6 +199,7 @@ pub const HANDHELD_OPTION_REGION: &str = "handheld.option.region";
 pub const HANDHELD_OPTION_OVERSCAN: &str = "handheld.option.overscan";
 pub const HANDHELD_OPTION_CATCH_UP: &str = "handheld.option.catch_up";
 pub const HANDHELD_OPTION_PIPELINE: &str = "handheld.option.pipeline";
+pub const HANDHELD_OPTION_OPTIMIZATIONS: &str = "handheld.option.optimizations";
 pub const HANDHELD_REGION_AUTO: &str = "handheld.region.auto";
 pub const HANDHELD_CAMERA_RESET: &str = "handheld.camera.reset";
 pub const HANDHELD_CAMERA_KEPT: &str = "handheld.camera.kept";
@@ -548,6 +549,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_OPTION_OVERSCAN,
     HANDHELD_OPTION_CATCH_UP,
     HANDHELD_OPTION_PIPELINE,
+    HANDHELD_OPTION_OPTIMIZATIONS,
     HANDHELD_REGION_AUTO,
     HANDHELD_CAMERA_RESET,
     HANDHELD_CAMERA_KEPT,

@@ -13,7 +13,7 @@ use super::achievements::{AchievementsRow, SpecialKey, SPECIAL_KEYS};
 use super::compat::Tone;
 use super::game_options::{GameOptionsModel, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
-use super::options::{self, ROWS};
+use super::options;
 use super::overlay::OverlayItem;
 use super::overscan;
 use super::pointer::{self, Zone, ZoneAction};
@@ -760,15 +760,22 @@ impl HandheldUi {
             return;
         };
         let painter = self.painter(ui);
-        painter.title(&text::options_title(), "");
+        let page = if self.options.in_optimizations() {
+            options::label(options::OptionRow::Optimizations)
+        } else {
+            String::new()
+        };
+        painter.title(&text::options_title(), &page);
         // The list scrolls with the selection when it is longer than the screen.
         let rows = self.metrics.visible_rows(painter.size[1]);
         let selected = self.options.selected_index();
-        let first = first_visible(selected, rows, ROWS.len());
-        for (slot, (index, row)) in ROWS.iter().enumerate().skip(first).take(rows).enumerate() {
+        let list = self.options.rows();
+        let first = first_visible(selected, rows, list.len());
+        for (slot, (index, row)) in list.iter().enumerate().skip(first).take(rows).enumerate() {
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
                 options::OptionRow::Controls => String::new(),
+                options::OptionRow::Optimizations => ">".to_owned(),
                 options::OptionRow::Overscan | options::OptionRow::Achievements => {
                     format!("{value} >")
                 }

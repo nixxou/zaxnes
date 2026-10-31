@@ -374,6 +374,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_OPTION_OVERSCAN, "Overscan"),
     (keys::HANDHELD_OPTION_CATCH_UP, "Catch-up"),
     (keys::HANDHELD_OPTION_PIPELINE, "Parallel scripts"),
+    (keys::HANDHELD_OPTION_OPTIMIZATIONS, "Optimizations"),
     (keys::HANDHELD_REGION_AUTO, "Auto (ROM)"),
     (keys::HANDHELD_CAMERA_RESET, "Default view"),
     (keys::HANDHELD_CAMERA_KEPT, "Camera kept"),

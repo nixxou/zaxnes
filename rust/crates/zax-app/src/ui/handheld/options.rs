@@ -61,30 +61,37 @@ pub enum OptionRow {
     Controls,
     /// RetroAchievements (Rust-only): opens its own screen.
     Achievements,
+    /// The performance rows (Rust-only): opens the [`OPTIMIZATION_ROWS`] page.
+    Optimizations,
 }
 
-/// The rows, in order.
-pub const ROWS: [OptionRow; 20] = [
+/// The rows of the main page, in order.
+pub const ROWS: [OptionRow; 13] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
     OptionRow::Palette,
     OptionRow::Overscan,
-    OptionRow::FrameCap,
     OptionRow::ShowFps,
-    OptionRow::Profiler,
     OptionRow::Camera,
-    OptionRow::CatchUp,
-    OptionRow::CatchUpLast3d,
-    OptionRow::HalfRate3d,
-    OptionRow::LuaOptimized,
-    OptionRow::LuaExperimental,
-    OptionRow::Pipeline,
-    OptionRow::Pause3dIn2d,
     OptionRow::Region,
+    OptionRow::Optimizations,
     OptionRow::Controls,
     OptionRow::Achievements,
+    OptionRow::Profiler,
+];
+
+/// The rows of the "Optimizations" page (owner request: the performance switches together).
+pub const OPTIMIZATION_ROWS: [OptionRow; 8] = [
+    OptionRow::FrameCap,
+    OptionRow::HalfRate3d,
+    OptionRow::CatchUp,
+    OptionRow::CatchUpLast3d,
+    OptionRow::Pause3dIn2d,
+    OptionRow::Pipeline,
+    OptionRow::LuaOptimized,
+    OptionRow::LuaExperimental,
 ];
 
 /// The values of the palette row (`video.nes_palette`): the setting's choices.
@@ -176,19 +183,40 @@ pub enum OptionsCommand {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HandheldOptionsModel {
     selected: usize,
+    /// On the "Optimizations" page: the row of the main page to come back to.
+    optimizations: Option<usize>,
 }
 
 impl HandheldOptionsModel {
     /// The options on their first row.
     #[must_use]
     pub const fn new() -> Self {
-        Self { selected: 0 }
+        Self {
+            selected: 0,
+            optimizations: None,
+        }
+    }
+
+    /// The rows of the page shown.
+    #[must_use]
+    pub const fn rows(&self) -> &'static [OptionRow] {
+        if self.optimizations.is_some() {
+            &OPTIMIZATION_ROWS
+        } else {
+            &ROWS
+        }
+    }
+
+    /// Whether the "Optimizations" page is shown.
+    #[must_use]
+    pub const fn in_optimizations(&self) -> bool {
+        self.optimizations.is_some()
     }
 
     /// The selected row.
     #[must_use]
     pub fn selected(&self) -> OptionRow {
-        ROWS[self.selected]
+        self.rows()[self.selected]
     }
 
     /// The index of the selected row.
@@ -203,9 +231,16 @@ impl HandheldOptionsModel {
         button: PadButton,
         settings: &mut SettingsModel,
     ) -> Option<OptionsCommand> {
+        let count = self.rows().len();
         match button {
-            PadButton::Up => self.selected = (self.selected + ROWS.len() - 1) % ROWS.len(),
-            PadButton::Down => self.selected = (self.selected + 1) % ROWS.len(),
+            PadButton::Up => self.selected = (self.selected + count - 1) % count,
+            PadButton::Down => self.selected = (self.selected + 1) % count,
+            PadButton::Left | PadButton::Right | PadButton::A
+                if self.selected() == OptionRow::Optimizations =>
+            {
+                self.optimizations = Some(self.selected);
+                self.selected = 0;
+            }
             PadButton::Left => return self.step(settings, -1),
             PadButton::Right => return self.step(settings, 1),
             PadButton::A => {
@@ -215,7 +250,10 @@ impl HandheldOptionsModel {
                     _ => self.step(settings, 1),
                 };
             }
-            PadButton::B => return Some(OptionsCommand::Close),
+            PadButton::B => match self.optimizations.take() {
+                Some(main) => self.selected = main,
+                None => return Some(OptionsCommand::Close),
+            },
             _ => {}
         }
         None
@@ -291,7 +329,7 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
         OptionRow::Region => {
             cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
         }
-        OptionRow::Controls => {}
+        OptionRow::Controls | OptionRow::Optimizations => {}
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
     }
     None
@@ -328,6 +366,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
+        OptionRow::Optimizations => strings::get(keys::HANDHELD_OPTION_OPTIMIZATIONS),
         OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
     }
 }
@@ -376,7 +415,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             RegionChoice::Ntsc => "NTSC".to_owned(),
             RegionChoice::Pal => "PAL".to_owned(),
         },
-        OptionRow::Controls => String::new(),
+        OptionRow::Controls | OptionRow::Optimizations => String::new(),
         OptionRow::Achievements => switch(settings.get(SettingId::AchievementsEnabled).as_bool()),
     }
 }
@@ -493,9 +532,35 @@ mod tests {
     use super::*;
 
     fn go_to(model: &mut HandheldOptionsModel, row: OptionRow, settings: &mut SettingsModel) {
+        let in_page = OPTIMIZATION_ROWS.contains(&row);
+        if model.in_optimizations() && !in_page {
+            model.handle(PadButton::B, settings);
+        } else if !model.in_optimizations() && in_page {
+            while model.selected() != OptionRow::Optimizations {
+                model.handle(PadButton::Down, settings);
+            }
+            model.handle(PadButton::A, settings);
+        }
         while model.selected() != row {
             model.handle(PadButton::Down, settings);
         }
+    }
+
+    #[test]
+    fn the_optimizations_page_opens_and_goes_back_to_its_row() {
+        let mut settings = SettingsModel::new();
+        let mut model = HandheldOptionsModel::new();
+        go_to(&mut model, OptionRow::Optimizations, &mut settings);
+        assert_eq!(None, model.handle(PadButton::A, &mut settings));
+        assert!(model.in_optimizations());
+        assert_eq!(OPTIMIZATION_ROWS[0], model.selected());
+        assert_eq!(None, model.handle(PadButton::B, &mut settings));
+        assert!(!model.in_optimizations());
+        assert_eq!(OptionRow::Optimizations, model.selected());
+        assert_eq!(
+            Some(OptionsCommand::Close),
+            model.handle(PadButton::B, &mut settings)
+        );
     }
 
     #[test]

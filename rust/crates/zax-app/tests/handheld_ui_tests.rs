@@ -312,9 +312,16 @@ fn the_options_change_the_settings_of_the_host() {
     );
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Options, handheld.screen());
-    tap(&mut harness, &mut handheld, PadButton::Down); // frame cap
+    for _ in 0..4 {
+        // show fps, camera, region, optimizations
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    // The optimizations page, on its frame cap row.
+    tap(&mut harness, &mut handheld, PadButton::A);
     tap(&mut harness, &mut handheld, PadButton::A);
     assert_eq!(2, harness.host.settings().vsync());
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Options, handheld.screen());
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Home, handheld.screen());
 }
