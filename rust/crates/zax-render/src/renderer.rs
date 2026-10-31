@@ -86,9 +86,15 @@ impl Residency for GlResidency<'_> {
 
 /// The programs and the cached GL state the draw calls go through, and what they cost.
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)] // Independent pieces of cached GL state.
 struct Passes {
     gl: Gl,
+    /// The scene program in use: [`shaders::SCENE`], or [`shaders::SCENE_SOLID`] while
+    /// `solid_in_use` (see [`Passes::use_solid`]).
     scene: ShaderProgram,
+    /// The other of the two scene programs.
+    scene_spare: ShaderProgram,
+    solid_in_use: bool,
     shadow: ShaderProgram,
     dummy_indexed: Texture,
     dummy_color: Texture,
@@ -185,6 +191,8 @@ impl SceneRenderer {
 
         let scene_program = ShaderProgram::create(&gl, &shaders::SCENE)?;
         scene_program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
+        let solid_program = ShaderProgram::create(&gl, &shaders::SCENE_SOLID)?;
+        solid_program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
         let instance_alignment =
             usize::try_from(gl.get_integer(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT))
                 .unwrap_or(256)
@@ -192,6 +200,8 @@ impl SceneRenderer {
         let passes = Passes {
             gl: gl.clone(),
             scene: scene_program,
+            scene_spare: solid_program,
+            solid_in_use: false,
             shadow: ShaderProgram::create(&gl, &shaders::SHADOW)?,
             dummy_indexed: textures.dummy_indexed(),
             dummy_color: textures.dummy_color(),
@@ -478,20 +488,28 @@ impl SceneRenderer {
             shadow_texture: self.shadow_map.depth_texture(),
         };
 
-        passes.scene.use_program();
-        common.bind(passes);
+        // Both scene programs get the frame's uniforms; the solid one is left in use, the order
+        // of the draws is kept.
+        for solid in [false, true] {
+            passes.use_solid(solid);
+            passes.scene.use_program();
+            common.bind(passes);
 
-        // Q-069: the sign lives in the program, which starts at 0 — it has to be written at
-        // least once per frame before anything is drawn.
-        passes.set_normal_sign(false, true);
+            // Q-069: the sign lives in the program, which starts at 0 — it has to be written at
+            // least once per frame before anything is drawn.
+            passes.set_normal_sign(false, true);
+            passes
+                .scene
+                .set_vec3("uLightDirection", common.constants.light_direction);
+        }
 
         // 1. Opaque objects.
-        passes
-            .scene
-            .set_vec3("uLightDirection", common.constants.light_direction);
         for run in &lists.opaque_runs {
+            let item = &lists.opaque[run.first];
+            passes.use_solid(!item.clip && item.color_mode != 1);
             passes.draw_run(&lists.opaque, run, true);
         }
+        passes.use_solid(false);
         passes.statistics.opaque_tiles = count(lists.opaque.len());
 
         // The tiles may have left the winding reversed (Q-069).
@@ -590,6 +608,20 @@ impl CommonUniforms<'_> {
 }
 
 impl Passes {
+    /// Puts [`shaders::SCENE_SOLID`] in use when `solid`, [`shaders::SCENE`] otherwise. Both
+    /// draw the same pixels where the solid one may be used: it only leaves out the `discard`s
+    /// a draw that neither clips nor reads a colour texture never reaches. The normal sign is
+    /// written again, the two programs may hold different ones.
+    fn use_solid(&mut self, solid: bool) {
+        if solid == self.solid_in_use {
+            return;
+        }
+        std::mem::swap(&mut self.scene, &mut self.scene_spare);
+        self.solid_in_use = solid;
+        self.scene.use_program();
+        self.set_normal_sign(self.mirrored_normal, true);
+    }
+
     /// Selects the winding the rasterizer takes for front faces: clockwise for an ordinary
     /// placement, counter-clockwise for a mirrored one (Q-069). `force` issues the call even
     /// when the cached state already matches, which is what the entry of a pass does: another

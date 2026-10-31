@@ -222,6 +222,11 @@ displayed frame". All values are per displayed frame.
 - Core, identical output (goldens of 98 ROMs, 1 800 frames): the APU skips its quiet cycles
   while the frame loop batches the PPU (-5.5 to -8.5 % core), and CPU reads of plain PRG-ROM
   windows skip the board's decode (-6 to -8.5 %).
+- Opaque draws without `discard` (GL renderer, identical pictures): a draw state whose tiles all
+  lie inside the clip rectangle and that reads no colour texture is drawn with a scene program
+  variant that cannot discard, which lets a tiled GPU drop hidden fragments early. The clip flag
+  no longer splits draw states (a state stays clipped when any of its tiles needs it), so the
+  grouped order is unchanged. 8K bench, RTX 3050: SMB3 2.26 -> 2.09 ms, MM2 unchanged.
 
 ## 5. Next steps (see `ROADMAP.md`)
 

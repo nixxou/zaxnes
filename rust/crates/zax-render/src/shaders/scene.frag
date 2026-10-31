@@ -32,11 +32,16 @@ uniform float uShadowStrength;
 void main()
 {
     // REQ-SCN-036: a fragment whose scene (x, y) leaves R is dropped, whatever its depth.
+    // ZAX_SOLID: the variant for the opaque draws that neither clip nor read a colour texture,
+    // the two cases that discard. A shader that may discard keeps a tiled GPU (Mali) from
+    // dropping the fragments hidden behind it early.
+#ifndef ZAX_SOLID
     if (uClip != 0 && (vScene.x < uClipRect.x || vScene.x > uClipRect.z
                     || vScene.y < uClipRect.y || vScene.y > uClipRect.w))
     {
         discard;
     }
+#endif
 
     vec3 albedo;
     float texelAlpha = 1.0;
@@ -63,10 +68,12 @@ void main()
         {
             vec4 direct = texelFetch(uColorTexture, texel, 0);
             // A pixel of the 2D picture left out (interop::HIDDEN_PIXEL) is not drawn.
+#ifndef ZAX_SOLID
             if (direct.a == 0.0)
             {
                 discard;
             }
+#endif
             albedo = direct.rgb;
             texelAlpha = direct.a;
         }

@@ -291,8 +291,9 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         if let Some(list) = frame.draw_list {
             let hud_matrix = interop::hud_matrix(view);
             let occlusion = Occlusion::for_scene(scene, view);
+            let clip_rect = scene.visible_rectangle();
             for tile in list.tiles() {
-                self.collect_tile(residency, tile, &hud_matrix, &occlusion)?;
+                self.collect_tile(residency, tile, &hud_matrix, &occlusion, &clip_rect)?;
             }
         }
 
@@ -365,6 +366,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         tile: &DrawTile,
         hud_matrix: &Mat4,
         occlusion: &Occlusion,
+        clip_rect: &geometry::VisibleRect,
     ) -> Result<(), R::Error> {
         let Some(mesh) = tile.mesh.as_ref().filter(|mesh| !mesh.is_empty()) else {
             return Ok(());
@@ -432,7 +434,10 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             // transparency — the FPV occluder of REQ-SCN-022 included — and a HUD tile receive
             // no shadow at all, whatever the flags of their motif and of their layer.
             receive_shadow: tile.receive_shadow && !hud && material != MaterialClass::Transparent,
-            clip: !hud,
+            // A tile wholly inside the clip rectangle is drawn without the clip test, which could
+            // not discard any of its fragments: the scene shader then has a variant that never
+            // discards, which a tiled GPU draws faster.
+            clip: !hud && (tile.deform.is_some() || !inside_clip(clip_rect, mesh, &model)),
             deform: tile.deform,
             instance: Some(tile.instance),
             bounds_min: mesh.bounds_min(),
@@ -525,7 +530,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
         data.clear();
 
         // Opaque: one object, the whole bucket.
-        scratch.label(&lists.opaque);
+        scratch.label(&mut lists.opaque);
         scratch.order_range(0, lists.opaque.len(), group_opaque);
         add_runs(
             &lists.opaque,
@@ -537,7 +542,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
 
         // Blended objects: the runs never cross an object; the tiles of a transparent object
         // may be grouped, the HUD's never (its tiles share one plane, an overlap is a tie).
-        scratch.label(&lists.transparent);
+        scratch.label(&mut lists.transparent);
         for group in &mut lists.transparent_objects {
             let first = lists.transparent_runs.len();
             scratch.order_range(group.start, group.end, group_opaque);
@@ -550,7 +555,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             );
             group.runs = (first, lists.transparent_runs.len());
         }
-        scratch.label(&lists.hud);
+        scratch.label(&mut lists.hud);
         for group in &mut lists.hud_objects {
             let first = lists.hud_runs.len();
             scratch.order_range(group.start, group.end, false);
@@ -564,6 +569,30 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             group.runs = (first, lists.hud_runs.len());
         }
     }
+}
+
+/// Room left between a placed mesh and the clip rectangle, in scene units, for the GPU's own
+/// rounding of the placement: far more than a float's error at these magnitudes, far less than
+/// a pixel.
+const CLIP_MARGIN: f32 = 0.01;
+
+/// Whether every point of `mesh` placed by `model` lies inside `rect` (with [`CLIP_MARGIN`]): the
+/// clip test of the scene shader cannot discard any of its fragments, which lie inside the
+/// triangles of its corners' hull.
+fn inside_clip(rect: &geometry::VisibleRect, mesh: &TileMesh, model: &Mat4) -> bool {
+    let (low, high) = (mesh.bounds_min(), mesh.bounds_max());
+    (0..8).all(|corner| {
+        let local = Vec3::new(
+            if corner & 1 == 0 { low.x } else { high.x },
+            if corner & 2 == 0 { low.y } else { high.y },
+            if corner & 4 == 0 { low.z } else { high.z },
+        );
+        let placed = model.transform_point(local);
+        placed.x >= rect.min_x + CLIP_MARGIN
+            && placed.x <= rect.max_x - CLIP_MARGIN
+            && placed.y >= rect.min_y + CLIP_MARGIN
+            && placed.y <= rect.max_y - CLIP_MARGIN
+    })
 }
 
 impl<M: Copy + Eq, T> FramePlan<M, T> {
@@ -705,8 +734,9 @@ fn group_by_object<M, T>(items: &[DrawItem<M, T>], groups: &mut Vec<DrawGroup>, 
 }
 
 /// The program state of a draw item as a hashable key: two items with equal keys can go out in
-/// one instanced call (everything but the placement and the deformation's tile position, and
-/// the same side of the mirror for Q-069's winding and normal sign).
+/// one instanced call (everything but the placement, the deformation's tile position and the
+/// clip flag, see [`OpaqueScratch::label`], and the same side of the mirror for Q-069's winding
+/// and normal sign).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct DrawStateKey<M, T> {
     mesh: M,
@@ -716,7 +746,6 @@ struct DrawStateKey<M, T> {
     /// Texture size, offset, tilting, flat colour and alpha, as bits.
     floats: [u32; 10],
     receive_shadow: bool,
-    clip: bool,
     mirrored: bool,
     /// The deformation but its tile position, which travels with the placement: amplitude,
     /// size, speed and phase, as bits.
@@ -743,7 +772,6 @@ impl<M: Copy, T: Copy> DrawStateKey<M, T> {
                 item.alpha.to_bits(),
             ],
             receive_shadow: item.receive_shadow,
-            clip: item.clip,
             mirrored: interop::normal_matrix(&item.model).1 < 0.0,
             deform: item.deform.as_ref().map(deform_bits),
         }
@@ -773,6 +801,8 @@ struct OpaqueScratch<M, T> {
     groups: FastMap<DrawStateKey<M, T>, u32>,
     /// The draw state label of each item of the bucket: equal labels, equal state.
     labels: Vec<u32>,
+    /// Whether some item of each label is clipped.
+    clipped: Vec<bool>,
     /// The bucket indices of the object being cut into runs, in drawing order.
     order: Vec<u32>,
     sort: Vec<(u32, u32)>,
@@ -785,6 +815,7 @@ impl<M, T> Default for OpaqueScratch<M, T> {
         Self {
             groups: FastMap::default(),
             labels: Vec::new(),
+            clipped: Vec::new(),
             order: Vec::new(),
             sort: Vec::new(),
             ranks: FastMap::default(),
@@ -794,13 +825,26 @@ impl<M, T> Default for OpaqueScratch<M, T> {
 
 impl<M: Copy + Eq + Hash, T: Copy + Eq + Hash> OpaqueScratch<M, T> {
     /// Labels every item of `items` with its draw state (one key per item).
-    fn label(&mut self, items: &[DrawItem<M, T>]) {
+    ///
+    /// The clip flag is not part of the state: a state is drawn clipped when any of its items
+    /// is, so that a few tiles wholly inside the clip rectangle neither cut its runs nor move
+    /// it in the grouped order (whose depth ties would come out differently); only the states
+    /// whose every tile lies inside are drawn unclipped.
+    fn label(&mut self, items: &mut [DrawItem<M, T>]) {
         self.groups.clear();
         self.labels.clear();
-        for item in items {
+        self.clipped.clear();
+        for item in items.iter() {
             let next = u32::try_from(self.groups.len()).unwrap_or(u32::MAX);
-            self.labels
-                .push(*self.groups.entry(DrawStateKey::of(item)).or_insert(next));
+            let label = *self.groups.entry(DrawStateKey::of(item)).or_insert(next);
+            if label == next {
+                self.clipped.push(false);
+            }
+            self.clipped[label as usize] |= item.clip;
+            self.labels.push(label);
+        }
+        for (item, &label) in items.iter_mut().zip(&self.labels) {
+            item.clip = self.clipped[label as usize];
         }
     }
 

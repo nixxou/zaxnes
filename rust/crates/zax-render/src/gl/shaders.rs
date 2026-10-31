@@ -64,6 +64,21 @@ pub const SCENE: ProgramSource = ProgramSource {
     },
 };
 
+/// [`SCENE`] without its `discard`s, for the opaque draws that can never take them.
+pub const SCENE_SOLID: ProgramSource = ProgramSource {
+    name: "scene_solid",
+    vertex: Stage {
+        parts: &[DEFORMATION, include_str!("../shaders/scene.vert")],
+    },
+    fragment: Stage {
+        parts: &[
+            "#define ZAX_SOLID",
+            TRANSFER,
+            include_str!("../shaders/scene.frag"),
+        ],
+    },
+};
+
 /// The shadow pass: the same placement, depth only.
 pub const SHADOW: ProgramSource = ProgramSource {
     name: "shadow",
