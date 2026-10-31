@@ -79,6 +79,45 @@ pub const SCENE_SOLID: ProgramSource = ProgramSource {
     },
 };
 
+/// [`SCENE`] linearising the palette per fragment (`ZAXNES_SRGB_PALETTE`, see
+/// [`super::linear_palette`]).
+pub const SCENE_SRGB_PALETTE: ProgramSource = ProgramSource {
+    name: "scene_srgb_palette",
+    vertex: SCENE.vertex,
+    fragment: Stage {
+        parts: &[
+            "#define ZAX_SRGB_PALETTE",
+            TRANSFER,
+            include_str!("../shaders/scene.frag"),
+        ],
+    },
+};
+
+/// [`SCENE_SOLID`] linearising the palette per fragment.
+pub const SCENE_SOLID_SRGB_PALETTE: ProgramSource = ProgramSource {
+    name: "scene_solid_srgb_palette",
+    vertex: SCENE.vertex,
+    fragment: Stage {
+        parts: &[
+            "#define ZAX_SOLID",
+            "#define ZAX_SRGB_PALETTE",
+            TRANSFER,
+            include_str!("../shaders/scene.frag"),
+        ],
+    },
+};
+
+/// The frame palette linearised entry by entry ([`super::linear_palette`]).
+pub const LINEAR_PALETTE: ProgramSource = ProgramSource {
+    name: "linear_palette",
+    vertex: Stage {
+        parts: &[include_str!("../shaders/resolve.vert")],
+    },
+    fragment: Stage {
+        parts: &[TRANSFER, include_str!("../shaders/linear_palette.frag")],
+    },
+};
+
 /// The shadow pass: the same placement, depth only.
 pub const SHADOW: ProgramSource = ProgramSource {
     name: "shadow",

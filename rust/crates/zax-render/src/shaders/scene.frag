@@ -8,6 +8,9 @@ uniform int uColorMode;
 uniform usampler2D uIndexTexture;
 uniform sampler2D uColorTexture;
 uniform sampler2D uPalette;
+// The same palette, linear (gl/linear_palette.rs); ZAX_SRGB_PALETTE linearises uPalette
+// per fragment instead.
+uniform sampler2D uLinearPalette;
 uniform int uPaletteTable;
 uniform vec2 uTextureSize;
 uniform vec2 uTexOffset;
@@ -43,11 +46,12 @@ void main()
     }
 #endif
 
-    vec3 albedo;
+    // The albedo, linear: the indexed one comes linearised from uLinearPalette.
+    vec3 albedoLinear;
     float texelAlpha = 1.0;
     if (uColorMode == 2)
     {
-        albedo = uFlatColor;
+        albedoLinear = zaxToLinear3(uFlatColor);
     }
     else
     {
@@ -62,7 +66,11 @@ void main()
             // REQ-SCN-034: the index selects 4 * P + (t mod 4) in the frame palette.
             uint value = texelFetch(uIndexTexture, texel, 0).r;
             int entry = clamp(uPaletteTable, 0, 15) * 4 + int(value & 3u);
-            albedo = texelFetch(uPalette, ivec2(entry, 0), 0).rgb;
+#ifdef ZAX_SRGB_PALETTE
+            albedoLinear = zaxToLinear3(texelFetch(uPalette, ivec2(entry, 0), 0).rgb);
+#else
+            albedoLinear = texelFetch(uLinearPalette, ivec2(entry, 0), 0).rgb;
+#endif
         }
         else
         {
@@ -74,7 +82,7 @@ void main()
                 discard;
             }
 #endif
-            albedo = direct.rgb;
+            albedoLinear = zaxToLinear3(direct.rgb);
             texelAlpha = direct.a;
         }
     }
@@ -104,6 +112,6 @@ void main()
 
     // REQ-SCN-028: albedo_lin * (ambient_lin + max(0, N.L) * light_lin * S).
     // R2-009: written linear, so that the blending of REQ-SCN-040 is linear too.
-    vec3 lit = zaxToLinear3(albedo) * (vec3(uAmbient) + ndl * uLightLinear * shadow);
+    vec3 lit = albedoLinear * (vec3(uAmbient) + ndl * uLightLinear * shadow);
     oColor = vec4(min(lit, vec3(1.0)), uAlpha * texelAlpha);
 }

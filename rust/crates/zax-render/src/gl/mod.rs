@@ -5,6 +5,7 @@ pub mod api;
 pub mod cubemap_cache;
 pub mod gpu_timer;
 pub mod linear_buffer;
+pub mod linear_palette;
 pub mod mesh_cache;
 pub mod picture;
 pub mod program;

@@ -227,6 +227,13 @@ displayed frame". All values are per displayed frame.
   variant that cannot discard, which lets a tiled GPU drop hidden fragments early. The clip flag
   no longer splits draw states (a state stays clipped when any of its tiles needs it), so the
   grouped order is unchanged. 8K bench, RTX 3050: SMB3 2.26 -> 2.09 ms, MM2 unchanged.
+- Palette linearised once per frame (GL renderer, identical pictures): the 64 palette entries
+  go through the sRGB-to-linear function in a 64 x 1 pass into an `RGBA32F` texture, which the
+  scene pass reads instead of calling `pow` three times per indexed fragment (CPU fallback when
+  the float target is incomplete, last-bit differences possible). No gain on the RTX 3050,
+  where `pow` is cheap and the 128-bit fetch costs a little (MM2 +2 % at 8K); aimed at the
+  Mali's slow transcendentals. `ZAXNES_SRGB_PALETTE=1` restores the per-fragment conversion,
+  to compare both with the profiler on the device.
 
 ## 5. Next steps (see `ROADMAP.md`)
 

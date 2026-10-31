@@ -25,6 +25,7 @@ use crate::geometry;
 use crate::gl::api::{Gl, GlError};
 use crate::gl::gpu_timer::GpuTimer;
 use crate::gl::linear_buffer::LinearColorBuffer;
+use crate::gl::linear_palette::LinearPalette;
 use crate::gl::mesh_cache::{GpuMesh, MeshCache};
 use crate::gl::picture::NesPictureTexture;
 use crate::gl::program::ShaderProgram;
@@ -130,6 +131,9 @@ pub struct SceneRenderer {
     skybox: SkyboxPass,
     picture: NesPictureTexture,
     linear: LinearColorBuffer,
+    linear_palette: LinearPalette,
+    /// Whether the scene programs read [`LinearPalette`] (else they linearise per fragment).
+    convert_palette: bool,
     unit_box: Arc<TileMesh>,
     picture_quad: Arc<TileMesh>,
     /// The quad of the last widescreen 2D-mode picture, by margin.
@@ -189,9 +193,20 @@ impl SceneRenderer {
             ..RenderStatistics::default()
         };
 
-        let scene_program = ShaderProgram::create(&gl, &shaders::SCENE)?;
+        // `ZAXNES_SRGB_PALETTE` keeps the per-fragment conversion of the palette, to compare
+        // the two on a device (same pictures).
+        let convert_palette = std::env::var_os("ZAXNES_SRGB_PALETTE").is_none();
+        let (scene_source, solid_source) = if convert_palette {
+            (&shaders::SCENE, &shaders::SCENE_SOLID)
+        } else {
+            (
+                &shaders::SCENE_SRGB_PALETTE,
+                &shaders::SCENE_SOLID_SRGB_PALETTE,
+            )
+        };
+        let scene_program = ShaderProgram::create(&gl, scene_source)?;
         scene_program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
-        let solid_program = ShaderProgram::create(&gl, &shaders::SCENE_SOLID)?;
+        let solid_program = ShaderProgram::create(&gl, solid_source)?;
         solid_program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
         let instance_alignment =
             usize::try_from(gl.get_integer(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT))
@@ -220,6 +235,8 @@ impl SceneRenderer {
             skybox: SkyboxPass::new(&gl, assets),
             picture: NesPictureTexture::new(&gl),
             linear: LinearColorBuffer::new(&gl)?,
+            linear_palette: LinearPalette::new(&gl)?,
+            convert_palette,
             unit_box: Arc::new(interop::unit_box()?),
             picture_quad: Arc::new(interop::picture_quad()?),
             wide_picture_quad: None,
@@ -420,6 +437,19 @@ impl SceneRenderer {
 
     // ----------------------------------------------------------------- scene passes
 
+    /// REQ-E3D-565: the palette of the frame, refreshed once, and linearised for the scene pass
+    /// before its target is bound (the conversion draws into its own).
+    fn refresh_palette(&mut self, frame: &SceneFrame<'_>) {
+        if let Some(list) = frame.draw_list {
+            self.gl.active_texture(0);
+            self.textures.upload_palette(list.palette());
+            if self.convert_palette {
+                self.linear_palette
+                    .convert(self.textures.palette(), list.palette());
+            }
+        }
+    }
+
     fn render_scene(
         &mut self,
         target: &RenderTarget,
@@ -428,6 +458,8 @@ impl SceneRenderer {
         view: &CameraView,
         volume: &ShadowVolume,
     ) -> Result<(), GlError> {
+        self.refresh_palette(frame);
+
         // AMD-021 R2-009: the scene is drawn into the renderer's own linear buffer, so that the
         // blending of the transparent objects and of the HUD happens on linear colours, and the
         // whole image is encoded to sRGB once, on the way into the host framebuffer.
@@ -483,8 +515,8 @@ impl SceneRenderer {
 
         let mut common = CommonUniforms {
             constants: SceneConstants::new(scene, view, volume, self.shadow_map.size()),
-            frame,
             textures: &mut self.textures,
+            linear_palette: self.linear_palette.texture(),
             shadow_texture: self.shadow_map.depth_texture(),
         };
 
@@ -566,8 +598,8 @@ impl SceneRenderer {
 /// The uniforms every scene sub-pass binds again after `use_program`.
 struct CommonUniforms<'a> {
     constants: SceneConstants,
-    frame: &'a SceneFrame<'a>,
     textures: &'a mut TextureCache,
+    linear_palette: Texture,
     shadow_texture: Texture,
 }
 
@@ -575,13 +607,6 @@ impl CommonUniforms<'_> {
     fn bind(&mut self, passes: &mut Passes) {
         let (gl, program) = (&passes.gl, &mut passes.scene);
         let constants = &self.constants;
-
-        // The palette is refreshed first: the upload binds its own texture, so it has to happen
-        // before the sampler units are set up (REQ-E3D-565).
-        gl.active_texture(0);
-        if let Some(list) = self.frame.draw_list {
-            self.textures.upload_palette(list.palette());
-        }
 
         program.set_matrix4("uViewProjection", &constants.view_projection);
         program.set_f32("uTime", constants.time);
@@ -598,11 +623,15 @@ impl CommonUniforms<'_> {
         program.set_i32("uColorTexture", 1);
         program.set_i32("uPalette", 2);
         program.set_i32("uShadowMap", 3);
+        program.set_i32("uLinearPalette", 4);
 
         gl.active_texture(2);
         gl.bind_texture(glow::TEXTURE_2D, Some(self.textures.palette()));
         gl.active_texture(3);
         gl.bind_texture(glow::TEXTURE_2D, Some(self.shadow_texture));
+        gl.active_texture(4);
+        gl.bind_texture(glow::TEXTURE_2D, Some(self.linear_palette));
+        gl.active_texture(0);
         passes.forget_bindings();
     }
 }
