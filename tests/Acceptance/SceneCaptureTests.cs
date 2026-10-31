@@ -365,10 +365,14 @@ public sealed class SceneCaptureTests
     }
 
     /// <summary>
-    /// REQ-SCN-048 — the backdrop appears behind the scene, lit diffusely, and receives the
-    /// shadows of the layers in front of it.
+    /// REQ-SCN-048 — the backdrop appears behind the scene, lit by REQ-SCN-075 (AMD-049), and
+    /// receives the shadows of the layers in front of it. The criterion's panel is no longer
+    /// black: AMD-049 §3 point 2 turns "a black panel" into "an almost black panel (sRGB ≈ 21
+    /// out of shadow, ≈ 5 in shadow, with the default light and the intensity 1)", so the second
+    /// half of the test measures those two shades on a <c>Color(0, 0, 0)</c> backdrop — which is
+    /// also what makes the shadows of the front layers visible on it at all.
     /// </summary>
-    [GlFact] // REQ-SCN-048
+    [GlFact] // REQ-SCN-048, REQ-SCN-075
     public void The_backdrop_appears_behind_the_scene_and_receives_the_shadows()
     {
         using GlTarget target = GlTarget.Create(640, 480);
@@ -405,6 +409,70 @@ public sealed class SceneCaptureTests
             "switching the shadows off must not add shades.");
 
         with.SavePng(Path.Combine(PartBCaptures.Directory, "scn-048-backdrop.png"));
+
+        // The criterion itself: Backdrop.Color = Color(0, 0, 0), OfsZ = 26, the default light
+        // (1, −1, 1) of REQ-SCN-025 and the shadows on. Under REQ-SCN-075 the panel keeps the
+        // specular term s · E · Spec · F — about 0.00754 in linear space on a face seen
+        // head-on — so its two shades are sRGB 21 and 5 (AMD-049 §3 point 2). The front face is
+        // not quite head-on away from the centre of the picture, where V tilts by up to 30°, so
+        // the lit shade is allowed to climb a little: the model gives 22 at 30° and 25 at 45°.
+        scene.Settings.Shadows = true;
+        scene.Backdrop.Color = default;
+        Shot black = target.Render(renderer, scene);
+        black.SavePng(Path.Combine(PartBCaptures.Directory, "scn-048-backdrop-black.png"));
+
+        // Only the middle of the picture, where the front face is the only face of the box in
+        // sight: the 1-unit-thick sides show as a sliver at the very edges and carry their own
+        // normals.
+        int litPixels = 0;
+        int shadowedPixels = 0;
+        for (int y = black.Height / 5; y < black.Height * 4 / 5; y++)
+        {
+            for (int x = black.Width / 5; x < black.Width * 4 / 5; x++)
+            {
+                (int r, int g, int b) = black.At(x, y);
+
+                // The panel is the only neutral grey in the picture: the background is NES 0x0F
+                // (pure black) and the tile is NES 0x30 (white, shaded well above 100).
+                if (r != g || g != b || r == 0 || r > 40)
+                {
+                    continue;
+                }
+
+                if (r is >= 19 and <= 26)
+                {
+                    litPixels++;
+                }
+                else if (r is >= 4 and <= 7)
+                {
+                    shadowedPixels++;
+                }
+                else
+                {
+                    Assert.Fail($"the panel shows sRGB {r} at ({x}, {y}): neither 21 nor 5.");
+                }
+            }
+        }
+
+        Assert.True(litPixels > 1000, $"only {litPixels} lit panel pixels.");
+        Assert.True(shadowedPixels > 100, $"only {shadowedPixels} shadowed panel pixels.");
+
+        // And the model agrees, head-on, with the two figures the amendment writes down.
+        Vector3 frontFace = new(0f, 0f, -1f);
+        Assert.Equal(
+            21,
+            SceneColor.ShadeBackdrop(
+                default, frontFace, frontFace, scene.Light.Direction, new Rgb24(255, 255, 255), 1f, 1f).R);
+        Assert.Equal(
+            5,
+            SceneColor.ShadeBackdrop(
+                default,
+                frontFace,
+                frontFace,
+                scene.Light.Direction,
+                new Rgb24(255, 255, 255),
+                1f,
+                SceneColor.ShadowFactor).R);
     }
 
     /// <summary>

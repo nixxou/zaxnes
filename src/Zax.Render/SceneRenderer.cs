@@ -629,6 +629,10 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass.Set("uAmbient", SceneColor.AmbientLinear);
         _scenePass.Set("uShadowStrength", SceneColor.ShadowFactor);
 
+        // REQ-SCN-075 (AMD-049): the backdrop's material is the only view-dependent one, so the
+        // eye is bound once per frame like the rest of the light.
+        _scenePass.Set("uEye", view.Eye);
+
         Vector3 light = SceneColor.ToLinear(scene.Light.Color)
             * SceneColor.ToLinear(scene.Settings.LightIntensity);
         _scenePass.Set("uLightLinear", light);

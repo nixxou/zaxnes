@@ -221,8 +221,68 @@ internal static class SceneShaders
         """;
 
     /// <summary>
+    /// The backdrop material of SPEC-06 REQ-SCN-075 (AMD-049): the Standard reflection model of
+    /// a non-metallic, almost matt surface, which replaces for the backdrop — and for it alone —
+    /// the diffuse term REQ-SCN-048 used to inherit from REQ-SCN-028.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The model is given in full by the requirement, which sources it on the public shader
+    /// sources of Unity; the CPU twin of this function is
+    /// <see cref="Zax.Render.SceneColor.ShadeBackdropLinear"/> and the two are checked against
+    /// the same test vectors.
+    /// </para>
+    /// <para>
+    /// There is no environment reflection: in shadow the specular part is reduced by the very
+    /// same factor <c>s</c> as the direct diffuse part, so the colour does not depend on the
+    /// Skybox setting (REQ-SCN-049).
+    /// </para>
+    /// </remarks>
+    private const string Backdrop = """
+        const float zaxBackdropRoughness = 0.99;
+        const float zaxPi = 3.14159265358979;
+
+        float zaxPow5(float x)
+        {
+            float square = x * x;
+            return square * square * x;
+        }
+
+        vec3 zaxBackdrop(vec3 albedo, vec3 n, vec3 v, vec3 l, vec3 lightLinear, float ambient, float shadow)
+        {
+            // REQ-SCN-075: H = (L + V) normalised, and H = N when L + V = 0.
+            vec3 sum = l + v;
+            vec3 h = dot(sum, sum) > 0.0 ? normalize(sum) : n;
+
+            float nl = max(dot(n, l), 0.0);
+            float nv = abs(dot(n, v));
+            float nh = max(dot(n, h), 0.0);
+            float lh = max(dot(l, h), 0.0);
+
+            float rough = zaxBackdropRoughness;
+            float alpha = rough * rough;
+            float alpha2 = alpha * alpha;
+
+            float f90 = 0.5 + 2.0 * lh * lh * rough;
+            float fd = (1.0 + (f90 - 1.0) * zaxPow5(1.0 - nl))
+                     * (1.0 + (f90 - 1.0) * zaxPow5(1.0 - nv));
+
+            float vis = 0.5 / (nl * (nv * (1.0 - alpha) + alpha)
+                             + nv * (nl * (1.0 - alpha) + alpha) + 1e-5);
+            float denominator = nh * nh * (alpha2 - 1.0) + 1.0;
+            float d = alpha2 / (zaxPi * denominator * denominator);
+            float spec = vis * d * zaxPi * nl;
+            float f = 0.04 + 0.96 * zaxPow5(1.0 - lh);
+
+            return albedo * 0.96 * (vec3(ambient) + shadow * lightLinear * fd * nl)
+                 + shadow * lightLinear * spec * f;
+        }
+        """;
+
+    /// <summary>
     /// Fragment shader of the scene pass: albedo of REQ-SCN-034, visible-rectangle clipping of
-    /// REQ-SCN-036, hard shadow of REQ-SCN-030/031 and the Lambert shading of REQ-SCN-028.
+    /// REQ-SCN-036, hard shadow of REQ-SCN-030/031, the Lambert shading of REQ-SCN-028 for the
+    /// tiles and the HUD, and the Standard model of REQ-SCN-075 for the backdrop.
     /// </summary>
     public static string SceneFragment { get; } = $$"""
         #version 330 core
@@ -251,6 +311,10 @@ internal static class SceneShaders
         uniform float uAmbient;
         uniform float uAlpha;
 
+        // REQ-SCN-075: the backdrop's model needs the eye, the only view-dependent term of the
+        // scene pass.
+        uniform vec3 uEye;
+
         uniform int uReceiveShadow;
         uniform sampler2D uShadowMap;
         uniform mat4 uLightViewProjection;
@@ -259,6 +323,8 @@ internal static class SceneShaders
         uniform float uShadowStrength;
 
         {{Transfer}}
+
+        {{Backdrop}}
 
         void main()
         {
@@ -323,9 +389,23 @@ internal static class SceneShaders
                 }
             }
 
-            // REQ-SCN-028: albedo_lin * (ambient_lin + max(0, N.L) * light_lin * S).
-            // R2-009: written linear, so that the blending of REQ-SCN-040 is linear too.
-            vec3 lit = zaxToLinear3(albedo) * (vec3(uAmbient) + ndl * uLightLinear * shadow);
+            vec3 lit;
+            if (uColorMode == 2)
+            {
+                // REQ-SCN-075 (AMD-049): the backdrop follows the Standard model, which is the
+                // only place in the scene pass where the eye matters. V points at the eye from
+                // the bent position, the one the geometry really occupies (REQ-SCN-068).
+                vec3 toEye = uEye - vBent;
+                vec3 v = dot(toEye, toEye) > 0.0 ? normalize(toEye) : n;
+                lit = zaxBackdrop(zaxToLinear3(albedo), n, v, l, uLightLinear, uAmbient, shadow);
+            }
+            else
+            {
+                // REQ-SCN-028: albedo_lin * (ambient_lin + max(0, N.L) * light_lin * S).
+                // R2-009: written linear, so that the blending of REQ-SCN-040 is linear too.
+                lit = zaxToLinear3(albedo) * (vec3(uAmbient) + ndl * uLightLinear * shadow);
+            }
+
             oColor = vec4(min(lit, vec3(1.0)), uAlpha * texelAlpha);
         }
         """;
