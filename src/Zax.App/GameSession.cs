@@ -63,6 +63,22 @@ internal sealed class GameSession : IDisposable
     /// <summary>The geometry builder of SPEC-04B.</summary>
     public GeometryBuilder Geometry { get; }
 
+    /// <summary>
+    /// Where the geometry reports a degradation: a texture that could not be allocated
+    /// (AMD-051 REQ-E3D-644) and an object left waiting for 600 emulated frames
+    /// (REQ-E3D-646). The host points it at its log file; null drops the lines.
+    /// </summary>
+    /// <remarks>
+    /// A sink attached after the profile has been loaded still receives what the load produced:
+    /// the builder holds the lines until it has somewhere to put them, under the same budget of
+    /// 100 lines per game.
+    /// </remarks>
+    public Action<string>? GeometryDiagnostics
+    {
+        get => Geometry.Diagnostics;
+        set => Geometry.Diagnostics = value;
+    }
+
     /// <summary>The Lua runtime of the profile (SPEC-05).</summary>
     public ProfileScriptRuntime Scripts { get; }
 

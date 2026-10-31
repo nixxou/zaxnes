@@ -581,6 +581,26 @@ le fond de la scène devient la couleur personnalisée, ce qui rend visible la t
 rectangle du mode 2D d'`AMD-050`), `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
 
+Deux options supplémentaires dégradent volontairement la conversion, pour vérifier qu'une panne
+devient une dégradation (`AMD-051` §3 point 8) :
+
+- `--atlas-budget <texels>` : plafonne l'occupation totale des textures d'objet
+  (`REQ-E3D-564`, exprimée en **texels**). Un objet 3D dont la texture n'entre pas voit ses
+  tuiles retirées de la frame tant qu'elle ne peut pas être allouée, une erreur est journalisée
+  par objet non logé, les autres patterns sont dessinés normalement et la frame suivante est
+  produite (`REQ-E3D-644`). Sans l'option, rien n'est plafonné ;
+- `--delay-mesh <frames>` : retarde chaque construction du nombre de frames émulées indiqué.
+  C'est un **cas de test** de `REQ-E3D-646`, pas un comportement visé — `REQ-E3D-601`
+  recommande des maillages prêts au plus tard 2 frames émulées après la création d'un pattern.
+  Un objet resté en attente 600 frames produit un diagnostic, une seule fois.
+
+Les lignes de diagnostic partent sur la sortie d'erreur ; la fin du rendu récapitule le nombre
+de texels logés, d'objets non logés et de lignes écrites :
+
+```
+Zax.Harness.exe render --out captures --frames synthetic:framing --atlas-budget 64
+```
+
 La scène synthétique `picture` est celle du premier critère d'`AMD-050` `REQ-SCN-076` : un
 rectangle de mode 2D dont des tuiles portent deux pixels de valeur 0 et deux de valeur 3 **de la
 même couleur**, sur un fond de scène magenta. Seul le masque d'opacité du cœur les distingue :

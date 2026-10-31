@@ -39,6 +39,7 @@ internal static class UiNotifications
         UiKeys.NotifyInvalidRom,
         UiKeys.NotifyGameMissing,
         UiKeys.NotifyForeignCore,
+        UiKeys.NotifyLoadingTimedOut,
         UiKeys.NotifyNotA3dnFile,
         UiKeys.NotifySettingsUnreadable,
         UiKeys.NotifySettingsNewerVersion,

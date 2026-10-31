@@ -97,6 +97,16 @@ public sealed class ObjectGeometry
     /// </summary>
     public bool Ready { get; internal set; }
 
+    /// <summary>
+    /// Whether the texture of the object has room in the texture budget of REQ-E3D-564. False
+    /// means the texture could not be allocated: the tiles of the object are not drawn until it
+    /// can be (AMD-051 REQ-E3D-644), and nothing else about the object changes.
+    /// </summary>
+    public bool TextureHoused { get; internal set; } = true;
+
+    /// <summary>Texels the object's texture occupies (REQ-E3D-564, expressed in texels).</summary>
+    public long TextureTexels => (long)Texture.Width * Texture.Height;
+
     /// <summary>The meshes, in the order of <see cref="EnginePattern.Images"/>.</summary>
     public ReadOnlySpan<TileMesh> Meshes => _meshes;
 

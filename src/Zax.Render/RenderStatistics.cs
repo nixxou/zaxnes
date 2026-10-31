@@ -66,6 +66,12 @@ public sealed class RenderStatistics
     /// </summary>
     public int Occluders { get; internal set; }
 
+    /// <summary>
+    /// Tiles left out of this frame because the driver refused the allocation of their object
+    /// texture (AMD-051 REQ-E3D-644).
+    /// </summary>
+    public int UnavailableTextures { get; internal set; }
+
     internal void BeginFrame()
     {
         DrawCalls = 0;
@@ -79,5 +85,6 @@ public sealed class RenderStatistics
         SkyboxPass = false;
         AntiAliasSamples = 1;
         Occluders = 0;
+        UnavailableTextures = 0;
     }
 }

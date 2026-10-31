@@ -135,6 +135,15 @@ internal sealed partial class EmulationHost : IDisposable
     private LoadJob? _job;
     private bool _disposed;
 
+    // AMD-051 REQ-LOOP-073: the blocked-load watchdog. One idle clock covers both halves of the
+    // condition, because a step either exposes the progress of REQ-E3D-600 or ends by moving on
+    // to the next one — see WatchLoadTimeout. The job is part of the key, so a new load always
+    // starts the clock afresh.
+    private LoadJob? _watchedJob;
+    private double _loadIdleSeconds;
+    private int _watchedStage = -1;
+    private float _watchedProgress = -1f;
+
     /// <summary>Creates a host. No game is loaded: the state is Stopped (REQ-LOOP-001).</summary>
     public EmulationHost(EmulationHostOptions options)
     {
@@ -283,6 +292,10 @@ internal sealed partial class EmulationHost : IDisposable
 
             // REQ-LOOP-021 step 6: no emulated frame runs before the loading indicator clears.
             PublishState();
+
+            // AMD-051 REQ-LOOP-073: a load that stops advancing is given up instead of freezing
+            // the program. Checked after PublishState, so the progress it reads is this frame's.
+            WatchLoadTimeout(realSeconds);
             return 0;
         }
 

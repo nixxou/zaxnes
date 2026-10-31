@@ -308,6 +308,11 @@ internal sealed partial class EmulationHost
                     // Q-065: the same empty profile plays flat as « 2D Mode » and in 3D as
                     // « 3D par défaut (sans profil) »; the entry decides, not the pattern count.
                     game.IsDefaultThreeDimensional ? false : null);
+
+                // AMD-051 REQ-E3D-644 and REQ-E3D-646: the degradations of the geometry go to
+                // the log file. Attached after the creation, which loads the profile; the
+                // builder holds back what the load reported until it has a sink.
+                _session.GeometryDiagnostics = _log;
                 _session.AttachZapper(Zapper);
                 _session.ConnectSettingsFile(
                     _options.SaveSettingsRequested,
@@ -392,6 +397,11 @@ internal sealed partial class EmulationHost
                     // Q-065: the same empty profile plays flat as « 2D Mode » and in 3D as
                     // « 3D par défaut (sans profil) »; the entry decides, not the pattern count.
                     game.IsDefaultThreeDimensional ? false : null);
+
+                // AMD-051 REQ-E3D-644 and REQ-E3D-646: the degradations of the geometry go to
+                // the log file. Attached after the creation, which loads the profile; the
+                // builder holds back what the load reported until it has a sink.
+                _session.GeometryDiagnostics = _log;
                 _session.AttachZapper(Zapper);
                 _session.ConnectSettingsFile(
                     _options.SaveSettingsRequested,
@@ -489,10 +499,78 @@ internal sealed partial class EmulationHost
         }
     }
 
+    /// <summary>
+    /// Real seconds a load may go without advancing before it is given up
+    /// (AMD-051 REQ-LOOP-073).
+    /// </summary>
+    public const double LoadTimeoutSeconds = 10.0;
+
+    /// <summary>
+    /// The message AMD-051 REQ-LOOP-073 fixes word for word, an accepted divergence <b>D</b>
+    /// (the original program has no message for a blocked load). Severity error and 4 s, like
+    /// the launch failures of REQ-LOOP-023 the requirement sends the program back to — the line
+    /// AMD-051 §3 point 5 adds to the table of SPEC-07 §4. See <c>spec/changes/Q-086.md</c>.
+    /// </summary>
+    // Q-086
+    public const string LoadingTimedOutMessage = "Loading timed out.";
+
+    /// <summary>
+    /// Holds step 6 of REQ-LOOP-021 — the wait for the meshes — for ever. A test instrument for
+    /// the criterion of AMD-051 REQ-LOOP-073, which asks for a blocked step; nothing in a normal
+    /// session sets it.
+    /// </summary>
+    public bool StallMeshWait { get; set; }
+
     private bool MeshesReady()
     {
         LoadProgress = _session?.Engine.LoadProgress ?? 1f;
-        return LoadProgress >= 1f;
+        return !StallMeshWait && LoadProgress >= 1f;
+    }
+
+    /// <summary>
+    /// AMD-051 REQ-LOOP-073. While the loading indicator is up, the load must keep advancing:
+    /// either the progress exposed to the loading indicator (REQ-E3D-600) changes, or the step
+    /// in progress ends and the next one starts. Ten real seconds with neither shows the
+    /// program the error notification and puts it back to Stopped, as REQ-LOOP-023 does for a
+    /// failed launch.
+    /// </summary>
+    /// <remarks>
+    /// Only a step that exposes <b>no</b> progress measurement is held to the ten seconds: the
+    /// mass build of step 6 has no bounded duration at all (REQ-ACC-031 excludes it from its
+    /// budget, and a big profile on a slow machine takes as long as it takes), so as long as the
+    /// progress of REQ-E3D-600 moves the load is never interrupted. The single idle clock
+    /// expresses exactly that — a stage change resets it, and so does a change of progress.
+    /// </remarks>
+    private void WatchLoadTimeout(double realSeconds)
+    {
+        if (_job is not { } job)
+        {
+            _watchedJob = null;
+            _loadIdleSeconds = 0.0;
+            return;
+        }
+
+        if (!ReferenceEquals(job, _watchedJob)
+            || job.Stage != _watchedStage
+            || LoadProgress != _watchedProgress)
+        {
+            _watchedJob = job;
+            _watchedStage = job.Stage;
+            _watchedProgress = LoadProgress;
+            _loadIdleSeconds = 0.0;
+            return;
+        }
+
+        _loadIdleSeconds += realSeconds;
+        if (_loadIdleSeconds < LoadTimeoutSeconds)
+        {
+            return;
+        }
+
+        _log(
+            $"loading gave up: step {job.Stage} of {job.Kind} made no progress for "
+            + $"{LoadTimeoutSeconds} s (REQ-LOOP-073)");
+        FailJob(LoadingTimedOutMessage);
     }
 
     private void FinishLaunch()

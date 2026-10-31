@@ -288,9 +288,23 @@ public sealed class UserDataPaths
     }
 
     /// <summary>
-    /// Writes <paramref name="contents"/> atomically: a temporary file in the same folder, then
-    /// a replace (REQ-PERS-021).
+    /// Called once half the bytes of a temporary file have been written, so that a test can
+    /// interrupt a write exactly where AMD-051 REQ-PERS-088 puts it. Null in a real session.
     /// </summary>
+    internal static Action<string>? InterruptAfterHalf { get; set; }
+
+    /// <summary>
+    /// Writes <paramref name="contents"/> atomically: a temporary file in the same folder, then
+    /// a replace (REQ-PERS-021, whose scope AMD-051 REQ-PERS-088 extends to every persistent
+    /// file and to the savestates).
+    /// </summary>
+    /// <remarks>
+    /// The temporary file is flushed to the device <b>before</b> the rename: a power cut must
+    /// leave either the old file intact or the new one complete, and a rename that reaches the
+    /// disk before the data it points at would leave a file of the right name holding nothing.
+    /// An interrupted write leaves the temporary file behind; the next write overwrites it, and
+    /// nothing ever reads a <c>.tmp</c> as the final file — every reader opens the final name.
+    /// </remarks>
     public static void WriteAtomic(string path, ReadOnlySpan<byte> contents)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
@@ -299,7 +313,15 @@ public sealed class UserDataPaths
         Directory.CreateDirectory(directory);
         string temporary = Path.Combine(directory, Path.GetFileName(path) + ".tmp");
 
-        File.WriteAllBytes(temporary, contents);
+        using (FileStream stream = new(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            int half = contents.Length / 2;
+            stream.Write(contents[..half]);
+            InterruptAfterHalf?.Invoke(temporary);
+            stream.Write(contents[half..]);
+            stream.Flush(flushToDisk: true);
+        }
+
         File.Move(temporary, path, overwrite: true);
     }
 

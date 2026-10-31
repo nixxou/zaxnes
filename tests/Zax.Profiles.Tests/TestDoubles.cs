@@ -107,9 +107,26 @@ internal sealed class FakeProfileFileSystem : IProfileFileSystem
 
     public string ReadAllText(string path) => System.Text.Encoding.UTF8.GetString(ReadAllBytes(path));
 
-    public void WriteAllBytes(string path, byte[] contents) => AddFile(path, contents);
+    /// <summary>
+    /// Paths whose next write stops after half the bytes, as a process killed in the middle of
+    /// one does. The half is stored and the call throws, so the test of AMD-051 REQ-PERS-088 can
+    /// read back what was left behind. The path is taken out of the set once it has fired.
+    /// </summary>
+    public HashSet<string> InterruptAfterHalf { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public void WriteAllText(string path, string contents) => AddText(path, contents);
+    public void WriteAllBytes(string path, byte[] contents)
+    {
+        if (InterruptAfterHalf.Remove(path))
+        {
+            AddFile(path, contents[..(contents.Length / 2)]);
+            throw new IOException($"the write of {path} was interrupted");
+        }
+
+        AddFile(path, contents);
+    }
+
+    public void WriteAllText(string path, string contents)
+        => WriteAllBytes(path, System.Text.Encoding.UTF8.GetBytes(contents));
 
     public void DeleteFile(string path) => _files.Remove(path);
 

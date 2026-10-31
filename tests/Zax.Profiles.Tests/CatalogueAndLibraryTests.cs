@@ -542,4 +542,42 @@ public sealed class CatalogueAndLibraryTests
         Assert.Empty(log.Errors);
         Assert.Single(library.Entries, entry => entry.Is2DMode);
     }
+
+    /// <summary>
+    /// AMD-051 REQ-PERS-088, acceptance criterion for the library file: a write interrupted
+    /// after half the bytes leaves the old file readable and unchanged, and the temporary file
+    /// beside it is never taken for the final one at the next start-up.
+    /// </summary>
+    [Fact] // REQ-PERS-088, REQ-PERS-021, REQ-PERS-037
+    public void REQ_PERS_088_an_interrupted_write_of_the_library_keeps_the_old_file()
+    {
+        FakeProfileFileSystem files = new();
+        UserDataLayout layout = new(Root);
+        GameLibraryStore store = new(files);
+
+        store.Save(layout.LibraryFile, new GameLibraryFile
+        {
+            Games = { new GameLibraryRecord { Id = "1", Title = "Arkanoid", RomPath = @"D:\a.nes" } },
+        });
+
+        string before = files.ReadAllText(layout.LibraryFile);
+        Assert.Contains("Arkanoid", before, StringComparison.Ordinal);
+
+        files.InterruptAfterHalf.Add(layout.LibraryFile + ".tmp");
+        Assert.Throws<IOException>(() => store.Save(layout.LibraryFile, new GameLibraryFile
+        {
+            Games = { new GameLibraryRecord { Id = "2", Title = "Balloon", RomPath = @"D:\b.nes" } },
+        }));
+
+        // The final file is byte for byte what it was, and the half-written temporary file sits
+        // beside it under its own name.
+        Assert.Equal(before, files.ReadAllText(layout.LibraryFile));
+        Assert.True(files.FileExists(layout.LibraryFile + ".tmp"));
+        Assert.NotEqual(before, files.ReadAllText(layout.LibraryFile + ".tmp"));
+
+        // Next start-up: the old library is read, and nothing of the temporary file reaches it.
+        GameLibraryFile reloaded = Assert.IsType<GameLibraryFile>(
+            store.Load(layout.LibraryFile, DateTimeOffset.UnixEpoch));
+        Assert.Equal("Arkanoid", Assert.Single(reloaded.Games).Title);
+    }
 }

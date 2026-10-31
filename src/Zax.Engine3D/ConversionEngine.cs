@@ -234,6 +234,12 @@ public sealed class ConversionEngine
     /// </param>
     public ConversionFrame Convert(in FrameBatch batch, int frameCounter)
     {
+        // The geometry side counts emulated frames here: the diagnostic of an object left
+        // waiting (SPEC-04B REQ-E3D-646), the summary of REQ-E3D-644 and the retry of a texture
+        // that had no room all come off this clock. It runs before the hooks, so a pattern
+        // created by this frame starts its wait at this frame.
+        _geometry.OnEmulatedFrame();
+
         ConversionFrame frame = AcquireFrame();
         _converting = frame;
         frame.BeginBatch(frameCounter, new Cell(batch.MaskX, batch.MaskY));

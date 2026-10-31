@@ -80,6 +80,13 @@ internal static class UiKeys
     public const string NotifyGameMissing = "notify.game_missing";
     public const string NotifyForeignCore = "notify.foreign_core";
 
+    /// <summary>
+    /// The blocked-load message of AMD-051 REQ-LOOP-073, an accepted divergence <b>D</b>: the
+    /// original program has no message for this case, so AMD-051 §3 adds it to the table of
+    /// SPEC-07 §4 and to the text table of AMD-035 with its French translation (AMD-036).
+    /// </summary>
+    public const string NotifyLoadingTimedOut = "notify.loading_timed_out";
+
     public const string NotifyNotA3dnFile = "notify.not_a_3dn_file";
     public const string NotifyUnsupported3dnVersion = "notify.unsupported_3dn_version";
     public const string NotifyObsoleteProfileFormat = "notify.obsolete_profile_format";

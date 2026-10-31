@@ -410,7 +410,7 @@ internal static class SyntheticScenes
         }
 
         ConversionEngine engine = new();
-        engine.UseGeometry();
+        GeometryLimits.Attach(engine);
         engine.TwoDimensionalMode = true;
         engine.LoadProfile(GameProfile.CreateEmpty());
         engine.Convert(new FrameBatch([], palette, 0, 0, picture, mask), frameCounter: 0);
@@ -536,7 +536,7 @@ internal static class SyntheticScenes
             Action<ConversionSettings>? configure = null)
         {
             ConversionEngine engine = new();
-            engine.UseGeometry();
+            GeometryLimits.Attach(engine);
             engine.Settings.RenderAlgorithm = Algorithm;
             engine.LoadProfile(_profile);
 

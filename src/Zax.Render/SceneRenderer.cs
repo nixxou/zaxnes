@@ -277,6 +277,20 @@ public sealed class SceneRenderer : ISceneRenderer
             return;
         }
 
+        // AMD-051 REQ-E3D-644: a texture the driver refuses to allocate leaves the tile out of
+        // the frame — never an exception, and never drawn with somebody else's texture. The
+        // other patterns of the frame are drawn normally and the next frame is produced.
+        uint handle = 0;
+        if (tile.Texture is { } tileTexture)
+        {
+            handle = _textures.Get(tileTexture);
+            if (handle == 0)
+            {
+                Statistics.UnavailableTextures++;
+                return;
+            }
+        }
+
         Mat4 model = ScenePlacement.TileModel(tile, hudMatrix, out bool hud);
 
         // REQ-SCN-022: in FPV, an opaque tile of another shape that crosses the eye-to-target
@@ -299,7 +313,7 @@ public sealed class SceneRenderer : ISceneRenderer
             Mesh = resident,
             Model = model,
             ColorMode = tile.TextureFormat == TextureFormat.Direct ? 1 : 0,
-            Texture = tile.Texture is { } texture ? _textures.Get(texture) : 0u,
+            Texture = handle,
             TextureSize = tile.Texture is { } size
                 ? new Vector2(size.Width, size.Height)
                 : Vector2.One,

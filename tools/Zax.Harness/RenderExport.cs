@@ -89,6 +89,16 @@ internal static class RenderExport
           --distance <d>           Camera setpoint distance (default 132.7964 / tan(FOV/2),
                                    AMD-045 REQ-SCN-069).
           --mesh <algorithm>       greedy (default), marching or multicolor (REQ-E3D-340).
+          --atlas-budget <texels>  Total texture occupancy allowed, in texels (REQ-E3D-564).
+                                   Unbounded by default. A 3D object whose texture does not fit
+                                   has its tiles left out of the frame until it does, one error
+                                   per object is logged and the next frame is produced; the
+                                   objects that fit are rendered (AMD-051 REQ-E3D-644).
+          --delay-mesh <frames>    Hold every construction back by that many emulated frames
+                                   (0 by default). A test case for AMD-051 REQ-E3D-646, not a
+                                   behaviour to aim for: REQ-E3D-601 recommends meshes ready at
+                                   most 2 emulated frames after a pattern is created. An object
+                                   still waiting after 600 frames is reported once.
           --no-shadows             Render with the shadows off.
           --shadow-map <texels>    Side of the shadow map (default 4096, AMD-034). A size the
                                    hardware refuses is halved until it accepts one, and the
@@ -252,6 +262,27 @@ internal static class RenderExport
                         "multicolor" or "multicolour" => RenderAlgorithm.GreedyMulticolor,
                         _ => throw new ArgumentException($"--mesh expects greedy, marching or multicolor."),
                     };
+                    break;
+
+                // AMD-051 §3 point 8: the two degradation knobs of REQ-E3D-644 and REQ-E3D-646.
+                case "--atlas-budget":
+                    GeometryLimits.AtlasBudgetTexels =
+                        long.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    if (GeometryLimits.AtlasBudgetTexels < 0)
+                    {
+                        throw new ArgumentException("--atlas-budget expects a texel count ≥ 0.");
+                    }
+
+                    break;
+
+                case "--delay-mesh":
+                    GeometryLimits.BuildDelayFrames =
+                        int.Parse(Next(args, ref i), CultureInfo.InvariantCulture);
+                    if (GeometryLimits.BuildDelayFrames < 0)
+                    {
+                        throw new ArgumentException("--delay-mesh expects a frame count ≥ 0.");
+                    }
+
                     break;
 
                 case "--no-shadows":
@@ -494,6 +525,28 @@ internal static class RenderExport
             "[\n  " + string.Join(",\n  ", report) + "\n]\n");
 
         Console.Out.WriteLine($"render: {scenes.Count} capture(s) of {width}x{height} written to {output}");
+
+        // AMD-051 REQ-E3D-644 and REQ-E3D-646: what the degradation knobs actually produced, so
+        // that the criteria can be read off the harness output.
+        if (GeometryLimits.IsActive)
+        {
+            foreach (SyntheticScene scene in scenes)
+            {
+                if (scene.Engine.Geometry is not GeometryBuilder geometry)
+                {
+                    continue;
+                }
+
+                Console.Out.WriteLine(string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"render: {scene.Name}: {geometry.ObjectCount} 3D object(s), "
+                        + $"{geometry.HousedTexels} texel(s) housed of "
+                        + $"{GeometryLimits.AtlasBudgetTexels} allowed, "
+                        + $"{geometry.UnhousedObjects} unhoused, "
+                        + $"{geometry.DiagnosticCount} diagnostic line(s)"));
+            }
+        }
+
         return 0;
     }
 
@@ -571,7 +624,7 @@ internal static class RenderExport
 
         GameProfile profile = LoadProfile(profileName, assets);
         ConversionEngine engine = new();
-        engine.UseGeometry();
+        GeometryLimits.Attach(engine);
         engine.Settings.RenderAlgorithm = mesh;
         engine.TwoDimensionalMode = profile.PermanentPatterns.Count == 0
             && profile.TemporaryPatterns.Count == 0;
@@ -648,7 +701,7 @@ internal static class RenderExport
         ArgumentNullException.ThrowIfNull(profile);
         control?.Validate(runFrames);
         ConversionEngine engine = new();
-        engine.UseGeometry();
+        GeometryLimits.Attach(engine);
         engine.TwoDimensionalMode = profile.PermanentPatterns.Count == 0
             && profile.TemporaryPatterns.Count == 0;
 

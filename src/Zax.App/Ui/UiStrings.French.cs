@@ -80,6 +80,9 @@ internal static partial class UiStrings
         [UiKeys.NotifyGameMissing] = "Le profil du jeu n'existe plus.",
         [UiKeys.NotifyForeignCore] = "La sauvegarde d'état vient d'un autre cœur.",
 
+        // AMD-051 §3 point 6 : la traduction de « Loading timed out. » (REQ-LOOP-073).
+        [UiKeys.NotifyLoadingTimedOut] = "Délai de chargement dépassé.",
+
         [UiKeys.NotifyNotA3dnFile] = "Ce fichier n'est pas un fichier 3dn",
         [UiKeys.NotifyUnsupported3dnVersion] =
             "La version {0} du format 3dn n'est pas prise en charge",

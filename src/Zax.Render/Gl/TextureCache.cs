@@ -9,10 +9,19 @@ namespace Zax.Render.Gl;
 /// REQ-E3D-561 to the GPU.
 /// </summary>
 /// <remarks>
+/// <para>
 /// An indexed texture becomes an <c>R8UI</c> texture whose texels keep their 0..7 value: the
 /// colour is resolved at render time from the palette (REQ-E3D-565, REQ-SCN-034). A direct
 /// texture becomes an <c>RGBA8</c> texture holding the sRGB colours. Sampling is nearest
 /// neighbour without mipmap in both cases (REQ-E3D-563).
+/// </para>
+/// <para>
+/// An allocation the driver refuses gives handle 0 instead of throwing (AMD-051 REQ-E3D-644):
+/// the caller leaves the tile out of the frame and the rest of the scene is drawn. The refusal
+/// is remembered so it is not retried on every frame, and the retention window of
+/// <see cref="Collect"/> drops the entry eventually, which is what makes a later attempt
+/// possible once memory has come back.
+/// </para>
 /// </remarks>
 internal sealed class TextureCache : IDisposable
 {
@@ -41,6 +50,11 @@ internal sealed class TextureCache : IDisposable
 
     /// <summary>Number of object textures resident on the GPU.</summary>
     public int Count => _entries.Count;
+
+    /// <summary>
+    /// Allocations the driver refused since the cache was created (AMD-051 REQ-E3D-644).
+    /// </summary>
+    public int Refusals { get; private set; }
 
     /// <summary>The 64 × 1 palette texture of the current frame.</summary>
     public uint Palette => _palette;
@@ -89,7 +103,10 @@ internal sealed class TextureCache : IDisposable
         _gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
-    /// <summary>The GPU texture of <paramref name="texture"/>, uploading it on first use.</summary>
+    /// <summary>
+    /// The GPU texture of <paramref name="texture"/>, uploading it on first use, and 0 when the
+    /// allocation was refused (REQ-E3D-644).
+    /// </summary>
     public uint Get(ObjectTexture texture)
     {
         ArgumentNullException.ThrowIfNull(texture);
@@ -162,6 +179,12 @@ internal sealed class TextureCache : IDisposable
 
     private unsafe Entry Upload(ObjectTexture texture)
     {
+        // REQ-E3D-644: the error state is emptied first, so that what is read back after the
+        // upload is this upload's own verdict and nothing older.
+        while (_gl.GetError() != GLEnum.NoError)
+        {
+        }
+
         uint handle = _gl.GenTexture();
         _gl.BindTexture(TextureTarget.Texture2D, handle);
 
@@ -217,6 +240,16 @@ internal sealed class TextureCache : IDisposable
 
         SetNearestClamp();
         _gl.BindTexture(TextureTarget.Texture2D, 0);
+
+        // AMD-051 REQ-E3D-644: an allocation the driver refuses is not an exception. The object
+        // keeps handle 0 and its tiles are left out of the frame until the texture can be
+        // allocated; the rest of the scene is drawn and the next frame is produced.
+        if (_gl.GetError() == GLEnum.OutOfMemory)
+        {
+            _gl.DeleteTexture(handle);
+            Refusals++;
+            return new Entry { Handle = 0, LastUsed = _frame };
+        }
 
         return new Entry { Handle = handle, LastUsed = _frame };
     }

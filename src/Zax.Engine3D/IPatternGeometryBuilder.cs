@@ -81,6 +81,16 @@ public interface IPatternGeometryBuilder
     void BeginMassBuild(int objectCount)
     {
     }
+
+    /// <summary>
+    /// One emulated frame has been converted. The builder uses it as its clock: the diagnostic
+    /// of an object left waiting for 600 emulated frames (AMD-051 REQ-E3D-646), the periodic
+    /// summary of REQ-E3D-644 and the retry of a texture that had no room are all counted in
+    /// emulated frames. A builder with nothing to time may ignore it.
+    /// </summary>
+    void OnEmulatedFrame()
+    {
+    }
 }
 
 /// <summary>

@@ -81,6 +81,9 @@ internal static partial class UiStrings
         [UiKeys.NotifyGameMissing] = "The game profile doesn't exist anymore.",
         [UiKeys.NotifyForeignCore] = "Save state used a different core.",
 
+        // AMD-051 REQ-LOOP-073, divergence D: a message the original program does not have.
+        [UiKeys.NotifyLoadingTimedOut] = "Loading timed out.",
+
         [UiKeys.NotifyNotA3dnFile] = "This file is not a 3dn file",
         [UiKeys.NotifyUnsupported3dnVersion] = "3dn format version {0}  is not supported",
         [UiKeys.NotifyObsoleteProfileFormat] =
