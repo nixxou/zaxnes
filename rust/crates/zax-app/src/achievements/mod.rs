@@ -23,7 +23,7 @@ use zax_platform::ui_image::PictureUpdate;
 use zax_platform::WaveAudio;
 
 pub use badges::{decode_png, BadgeCache, FIRST_BADGE_ID};
-pub use library::{AchievementLibrary, KnownAchievement, KnownGame};
+pub use library::{is_real_achievement, AchievementLibrary, KnownAchievement, KnownGame};
 
 use crate::audio::chip_voices;
 use crate::ui::{keys, strings};
@@ -360,10 +360,12 @@ impl AchievementSystem {
             .achievements()
             .into_iter()
             .filter(|achievement| {
-                !matches!(
-                    achievement.bucket,
-                    zax_achievements::Bucket::Unofficial | zax_achievements::Bucket::Unsupported
-                )
+                is_real_achievement(achievement.id)
+                    && !matches!(
+                        achievement.bucket,
+                        zax_achievements::Bucket::Unofficial
+                            | zax_achievements::Bucket::Unsupported
+                    )
             })
             .map(|achievement| KnownAchievement {
                 id: achievement.id,
