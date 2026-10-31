@@ -127,6 +127,7 @@ internal sealed partial class EmulationHost : IDisposable
     private readonly Queue<(string Name, CommandArgs Args)> _pending = new();
     private readonly HotkeyTracker _hotkeys = new();
     private readonly BatteryRamStore _battery;
+    private readonly AudioDriftControl _drift;
 
     private GameSession? _session;
     private ResolvedGame? _currentGame;
@@ -147,6 +148,7 @@ internal sealed partial class EmulationHost : IDisposable
         _now = options.Now ?? (static () => DateTimeOffset.UtcNow);
         _log = options.Log ?? (static _ => { });
         _battery = new BatteryRamStore(options.Paths);
+        _drift = new AudioDriftControl(_mixer?.SampleRate ?? Zax.Nes.Apu.Apu2A03.DefaultSampleRate);
 
         Settings = options.Settings;
         Pacer = new FramePacer(RegionTiming.For(NesRegion.Ntsc).NominalFramesPerSecond, options.Clock);
@@ -288,7 +290,7 @@ internal sealed partial class EmulationHost : IDisposable
 
         int frames = RunDueFrames(snapshot.PlayerOne, snapshot.PlayerTwo);
         AdvanceBattery(realSeconds);
-        CorrectAudioDrift();
+        CorrectAudioDrift(realSeconds);
         PublishState();
         return frames;
     }
@@ -730,26 +732,27 @@ internal sealed partial class EmulationHost : IDisposable
     /// The drift correction of REQ-AUD-005: the emulation clock and the device clock are never
     /// exactly equal, so the resampling ratio is nudged by at most ±0.5 % — less than nine
     /// cents of pitch — to hold the latency around two output blocks instead of letting the
-    /// core drop its oldest samples.
+    /// core run dry or drop its oldest samples. The law itself is
+    /// <see cref="AudioDriftControl"/>.
     /// </summary>
-    private void CorrectAudioDrift()
+    private void CorrectAudioDrift(double realSeconds)
     {
         if (!_options.AudioDeviceOpen
             || _session is not { HasRom: true } session
             || State != EmulationState.Running)
         {
+            // Outside Running the buffer drains or is emptied (REQ-AUD-010); the loop starts
+            // again from a settled state rather than from a measurement taken across the gap.
+            if (_drift.Adjustment != 0.0 && _session is { HasRom: true } idle)
+            {
+                idle.Core.AudioRatioAdjustment = 0.0;
+            }
+
+            _drift.Reset();
             return;
         }
 
-        const int target = 2 * Audio.AudioMixer.BlockFrames;
-        double error = (session.Core.Apu.AvailableSamples - target) / (double)target;
-
-        // A proportional correction that saturates at the cap: a full buffer slows the
-        // production down, an empty one speeds it up.
-        session.Core.AudioRatioAdjustment = Math.Clamp(
-            -error * 0.002,
-            -Zax.Nes.Apu.Apu2A03.MaxRatioAdjustment,
-            Zax.Nes.Apu.Apu2A03.MaxRatioAdjustment);
+        session.Core.AudioRatioAdjustment = _drift.Update(session.Core.Apu.AvailableSamples, realSeconds);
     }
 
     private void AdvanceBattery(double realSeconds)

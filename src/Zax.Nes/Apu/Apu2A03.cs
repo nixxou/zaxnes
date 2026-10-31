@@ -678,6 +678,9 @@ public sealed class Apu2A03
         _levelKey = key;
 
         // The linear approximation of nesdev's "APU Mixer", which REQ-CORE-073 prescribes.
+        // Q-084: the non-linear formula the same page gives, which the note of REQ-CORE-073
+        // calls tolerated, cannot meet that requirement's own acceptance criterion at any
+        // scaling, so it is not an option here.
         double mix =
             (PulseStep * (pulse1 + pulse2))
             + (TriangleStep * triangle)

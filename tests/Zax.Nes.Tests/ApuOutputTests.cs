@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using Zax.Nes.Apu;
 
 namespace Zax.Nes.Tests;
 
@@ -199,6 +200,49 @@ public sealed class ApuOutputTests
     {
         Array.Sort(values);
         return values[values.Length / 2];
+    }
+
+    /// <summary>
+    /// REQ-CORE-073 — the mixer is the <strong>linear approximation</strong> of nesdev's
+    /// "APU Mixer", and the non-linear formula the same page gives is not an option here: it
+    /// misses the acceptance criterion of REQ-CORE-073 and the ±10 % on relative levels its
+    /// own note attaches to the tolerance. The numbers are pinned here so that the choice is
+    /// not revisited by hand — see Q-084.
+    /// </summary>
+    [Fact] // Q-084
+    public void REQ_CORE_073_the_non_linear_formula_of_nesdev_misses_the_criterion()
+    {
+        // nesdev, "APU Mixer", the two documented non-linear expressions.
+        static double PulseOut(double sum) => sum <= 0.0 ? 0.0 : 95.88 / ((8128.0 / sum) + 100.0);
+        static double TndOut(double triangle, double noise, double dmc)
+        {
+            double inner = (triangle / 8227.0) + (noise / 12241.0) + (dmc / 22638.0);
+            return inner <= 0.0 ? 0.0 : 159.79 / ((1.0 / inner) + 100.0);
+        }
+
+        // A lone pulse at volume 15, 50 % duty: the criterion asks for a swing of
+        // 0.172 ± 0.02, which the linear approximation hits exactly.
+        double linear = Apu2A03.OutputGain * Apu2A03.PulseStep * 15;
+        Assert.InRange(linear, 0.172 - 0.02, 0.172 + 0.02);
+
+        // The non-linear formula swings by 0.1494 raw, or 0.2280 with the reference's gain:
+        // on either side of the window, not inside it.
+        double nonLinear = PulseOut(15);
+        Assert.InRange(nonLinear, 0.1493, 0.1495);
+        Assert.False(
+            nonLinear > 0.152 || Apu2A03.OutputGain * nonLinear < 0.192,
+            "the non-linear swing would have to be outside the criterion's window on both scalings.");
+
+        // And the relative levels move far more than the ±10 % the note of REQ-CORE-073
+        // allows: a pulse pair at volume 15 against the triangle at 15 is 1.77 times louder
+        // under the linear law and only 1.05 times under the non-linear one.
+        double linearRatio = (Apu2A03.PulseStep * 30) / (Apu2A03.TriangleStep * 15);
+        double nonLinearRatio = PulseOut(30) / TndOut(15, 0, 0);
+        Assert.InRange(linearRatio, 1.76, 1.78);
+        Assert.InRange(nonLinearRatio, 1.04, 1.06);
+        Assert.True(
+            Math.Abs((nonLinearRatio / linearRatio) - 1.0) > 0.10,
+            "the two laws cannot both be inside ±10 % of each other on relative levels.");
     }
 
     [Fact]

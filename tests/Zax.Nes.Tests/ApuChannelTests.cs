@@ -394,6 +394,87 @@ public sealed class ApuChannelTests
         Assert.InRange(core.Apu.MixedLevel, (1.526 * 0.00335 * 127) - 1e-9, (1.526 * 0.00335 * 127) + 1e-9);
     }
 
+    /// <summary>
+    /// REQ-CORE-113 — $4012 names the sample's start as <c>$C000 + 64 × value</c> and $4013
+    /// its length as <c>16 × value + 1</c> bytes, so the memory reader can walk past $FFFF;
+    /// the address then <strong>wraps to $8000</strong> rather than leaving the cartridge
+    /// (nesdev, "APU DMC").
+    /// </summary>
+    [Fact]
+    public void REQ_CORE_113_the_dmc_sample_address_wraps_from_ffff_to_8000()
+    {
+        NesCore core = Core();
+
+        // $4012 = $FF puts the sample at $C000 + 255 x 64 = $FFC0, and $4013 = 4 makes it
+        // 65 bytes long: 64 of them fit below $10000, the last one has to wrap.
+        core.WriteMemory(0x4010, 0x0F); // Fastest rate, no IRQ, no loop.
+        core.WriteMemory(0x4012, 0xFF);
+        core.WriteMemory(0x4013, 0x04);
+        core.WriteMemory(0x4015, 0x10);
+
+        Assert.Equal(0xFFC0, core.Apu.DmcDmaAddress);
+
+        var visited = new List<int>();
+        long fetches = core.Bus.DmcDmaCount;
+        for (int cycle = 0; cycle < 60_000 && visited.Count < 66; cycle++)
+        {
+            core.Bus.Tick();
+            if (core.Bus.DmcDmaCount != fetches)
+            {
+                fetches = core.Bus.DmcDmaCount;
+                visited.Add(core.Apu.DmcDmaAddress);
+            }
+        }
+
+        // After the fetch at $FFFF the reader points at $8000, not past the end of the map.
+        int last = visited.IndexOf(0xFFFF);
+        Assert.True(last >= 0, "the reader never reached $FFFF.");
+        Assert.Equal(0x8000, visited[last + 1]);
+    }
+
+    /// <summary>
+    /// REQ-CORE-113 — the output counter is seven bits and <strong>saturates</strong>: the
+    /// delta decoder leaves it alone when a step would take it past 127 or below 0, instead
+    /// of wrapping round (nesdev, "APU DMC").
+    /// </summary>
+    [Theory]
+    // A sample of $FF bytes is nothing but 1 bits, so every step is +2: from 125 the counter
+    // reaches 127 and stops there. From 126 the next step would be 128, so it stays at 126.
+    [InlineData(0xFF, 125, 127)]
+    [InlineData(0xFF, 126, 126)]
+    // A sample of $00 bytes steps down by 2 every bit: from 3 it reaches 1 and stops, from
+    // 2 it reaches 0.
+    [InlineData(0x00, 3, 1)]
+    [InlineData(0x00, 2, 0)]
+    public void REQ_CORE_113_the_dmc_output_counter_is_seven_bit_and_saturates(
+        byte sampleByte,
+        byte load,
+        int expected)
+    {
+        // 32 KiB of PRG filled with the sample byte, keeping the endless loop at $8000 so the
+        // image is still a valid ROM. $C000 onwards is the sample.
+        var program = new byte[2 * 16 * 1024];
+        Array.Fill(program, sampleByte);
+        program[0] = 0x4C;
+        program[1] = 0x00;
+        program[2] = 0x80;
+
+        var core = new NesCore();
+        Assert.True(core.LoadRom(TestRoms.Minimal(0x01, program), "Dmc.nes").Success);
+
+        core.WriteMemory(0x4011, load);
+        core.WriteMemory(0x4010, 0x4F); // Fastest rate, looping, no IRQ.
+        core.WriteMemory(0x4012, 0x00); // Sample at $C000.
+        core.WriteMemory(0x4013, 0x01);
+        core.WriteMemory(0x4015, 0x10);
+
+        // Long enough for several hundred bits: the counter has had every chance to run away.
+        Tick(core, 40_000);
+
+        double level = core.Apu.MixedLevel;
+        Assert.Equal(1.526 * 0.00335 * expected, level, 1e-9);
+    }
+
     /// <summary>Starts a DMC sample of <c>16 x length + 1</c> bytes at <paramref name="rate"/>.</summary>
     private static void StartDmc(NesCore core, int rate, byte length, bool irq, bool loop)
     {

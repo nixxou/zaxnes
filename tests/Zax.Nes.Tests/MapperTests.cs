@@ -412,6 +412,96 @@ public sealed class MapperTests
         Assert.Equal(0x02 * 0x55, core.Ppu.ReadNametableByte(0x2FC0));
     }
 
+    /// <summary>
+    /// REQ-CORE-100 — the four ExRAM modes of $5104, on the CPU's side (nesdev, "MMC5"):
+    /// modes 0 and 1 leave the data bus alone on a read, so the CPU sees its open bus, and
+    /// only latch a write while the PPU is rendering; mode 2 is plain read/write RAM; mode 3
+    /// is read-only.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void REQ_CORE_100_mmc5_exram_in_a_nametable_mode_reads_open_bus_and_writes_only_while_rendering(
+        int mode)
+    {
+        NesCore core = MapperFixture.Load(5, chrBanks1k: 32);
+
+        // Something known in ExRAM first, which mode 2 is the only way to put there.
+        core.WriteMemory(0x5104, 0x02);
+        core.WriteMemory(0x5C00, 0x6B);
+        core.WriteMemory(0x5C01, 0x6B);
+        core.WriteMemory(0x5104, (byte)mode);
+
+        // A read does not drive the bus: what comes back is the last value that travelled on
+        // it, which the write below puts there.
+        core.Bus.Write(0x0000, 0xA5);
+        Assert.Equal(0xA5, core.Bus.Read(0x5C00));
+
+        // Outside rendering the board stores 0 rather than the value.
+        Assert.True(core.Ppu.Scanline >= Ppu.Ppu2C02.ScreenHeight);
+        core.WriteMemory(0x5C00, 0x3C);
+
+        // Inside a rendered line the write lands.
+        core.WriteMemory(0x2001, 0x18); // Rendering on, so the board sees the lines.
+        int guard = 0;
+        while (core.Ppu.Scanline >= Ppu.Ppu2C02.ScreenHeight && guard++ < 400_000)
+        {
+            core.Bus.Tick();
+        }
+
+        Assert.True(core.Ppu.Scanline < Ppu.Ppu2C02.ScreenHeight);
+        core.WriteMemory(0x5C01, 0x3C);
+
+        // Read both back through mode 2, which is the only mode that shows them.
+        core.WriteMemory(0x5104, 0x02);
+        Assert.Equal(0x00, core.ReadMemory(0x5C00));
+        Assert.Equal(0x3C, core.ReadMemory(0x5C01));
+    }
+
+    /// <summary>
+    /// REQ-CORE-100 — ExRAM mode 2 is read/write and mode 3 is read-only (nesdev, "MMC5").
+    /// </summary>
+    [Fact]
+    public void REQ_CORE_100_mmc5_exram_mode_two_is_read_write_and_mode_three_is_read_only()
+    {
+        NesCore core = MapperFixture.Load(5);
+
+        core.WriteMemory(0x5104, 0x02);
+        core.WriteMemory(0x5C00, 0x6B);
+        core.WriteMemory(0x5DFF, 0x17);
+        Assert.Equal(0x6B, core.ReadMemory(0x5C00));
+        Assert.Equal(0x17, core.ReadMemory(0x5DFF));
+
+        core.WriteMemory(0x5104, 0x03);
+        Assert.Equal(0x6B, core.ReadMemory(0x5C00)); // Still readable.
+
+        core.WriteMemory(0x5C00, 0x00); // Ignored.
+        Assert.Equal(0x6B, core.ReadMemory(0x5C00));
+    }
+
+    /// <summary>
+    /// REQ-CORE-100 — the PPU only sees ExRAM as a nametable in modes 0 and 1; in the two RAM
+    /// modes a nametable mapped to ExRAM reads as 0 (nesdev, "MMC5").
+    /// </summary>
+    [Fact]
+    public void REQ_CORE_100_mmc5_exram_is_a_nametable_only_in_the_first_two_modes()
+    {
+        NesCore core = MapperFixture.Load(5);
+
+        core.WriteMemory(0x5104, 0x02);
+        core.WriteMemory(0x5C00, 0x6B);
+        core.WriteMemory(0x5105, 0xE4); // $2800 -> ExRAM.
+
+        // Mode 2: the PPU sees nothing there.
+        Assert.Equal(0x00, core.Ppu.ReadNametableByte(0x2800));
+
+        core.WriteMemory(0x5104, 0x01);
+        Assert.Equal(0x6B, core.Ppu.ReadNametableByte(0x2800));
+
+        core.WriteMemory(0x5104, 0x00);
+        Assert.Equal(0x6B, core.Ppu.ReadNametableByte(0x2800));
+    }
+
     [Fact]
     public void REQ_CORE_100_mmc5_multiplies_two_bytes()
     {

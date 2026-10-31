@@ -17,6 +17,13 @@ namespace Zax.Nes.Cartridges.Mappers;
 /// nametable ($5106/$5107) come with it, as does the 8-by-8 multiplier ($5205/$5206).
 /// </para>
 /// <para>
+/// <strong>ExRAM modes</strong> ($5104), on the CPU's side, as nesdev describes them: mode 0
+/// (extra nametable) and mode 1 (extended attributes) do not drive the data bus on a read, so
+/// the CPU sees open bus, and only latch a write while the PPU is rendering, storing 0
+/// otherwise; mode 2 is plain read/write RAM; mode 3 is read-only. The PPU sees ExRAM as a
+/// nametable only in modes 0 and 1.
+/// </para>
+/// <para>
 /// Left out, as REQ-CORE-100 allows (P2 and P3): the extended attribute mode, which gives
 /// every background tile its own pattern bank and palette; the vertical split screen
 /// ($5200-$5202); and the expansion sound ($5000-$5015), which REQ-CORE-075 does not
@@ -140,10 +147,20 @@ internal sealed class Mmc5 : BankedCartridge
                 return true;
 
             case >= 0x5C00 and <= 0x5FFF:
-                // ExRAM reads back only in the two RAM modes; the nametable modes leave the
-                // CPU side open (nesdev).
-                value = _exRamMode >= 2 ? _exRam[address - 0x5C00] : (byte)0;
+            {
+                // ExRAM reads back in the two RAM modes — mode 2 read/write, mode 3
+                // read-only. In the two nametable modes the board does not drive the data
+                // bus at all, so the CPU sees its open bus (nesdev, "MMC5"); declining the
+                // address is what makes NesBus supply it.
+                if (_exRamMode < 2)
+                {
+                    value = 0;
+                    return false;
+                }
+
+                value = _exRam[address - 0x5C00];
                 return true;
+            }
 
             default:
                 return base.TryCpuRead(address, out value);
@@ -171,9 +188,17 @@ internal sealed class Mmc5 : BankedCartridge
     {
         if (address is >= 0x5C00 and <= 0x5FFF)
         {
-            if (_exRamMode != 3)
+            // Mode 2 takes writes outright and mode 3 is read-only. In the two nametable
+            // modes the write only reaches the RAM while the PPU is rendering; outside
+            // rendering the board stores 0 (nesdev, "MMC5"), which is why a game that fills
+            // ExRAM does it in mode 2.
+            if (_exRamMode == 2)
             {
                 _exRam[address - 0x5C00] = value;
+            }
+            else if (_exRamMode < 2)
+            {
+                _exRam[address - 0x5C00] = _inFrame ? value : (byte)0;
             }
 
             return;

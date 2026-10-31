@@ -289,6 +289,54 @@ public sealed class ZapperTests
     /// The unit-test scene of REQ-CORE-062: a black backdrop ($0F) and a white-palette
     /// sprite ($30) whose top-left pixel is at (100, 100).
     /// </summary>
+    /// <summary>
+    /// REQ-CORE-062, AMD-021 R2-006 — detection covers the whole width of the picture, up to
+    /// and including x = 255: nothing is clipped away. Where the two parts of the width differ
+    /// is only in <em>what</em> colour is looked at — the records up to x = 238, the universal
+    /// backdrop from x = 239 on, which R2-006 makes mandatory (it replaced the earlier reading
+    /// of Q-005 point 3, under which x ≥ 239 could never see light at all).
+    /// </summary>
+    [Fact]
+    public void REQ_CORE_062_detection_covers_the_width_up_to_x_255_without_clipping()
+    {
+        TileFixture fixture = WhiteSpriteOnBlack();
+        fixture.WriteVram(0x3F00, 0x30); // Light backdrop, so the right-hand band is lit.
+
+        // A second white sprite spanning x = 232 to 239, straddling the column R2-006 names.
+        fixture.SetSprite(1, 99, SolidTile, 0x00, 232);
+
+        NesCore core = fixture.Core;
+        core.RunFrame(0);
+
+        // Walk into the next frame past the capture of the sprite band of line 100, which
+        // REQ-CORE-044 places on line 103.
+        int guard = 0;
+        while (core.Ppu.Scanline is < 104 or >= Ppu.Ppu2C02.ScreenHeight && guard++ < 400_000)
+        {
+            core.Cpu.Step();
+        }
+
+        Assert.True(core.Ppu.Scanline is >= 104 and < Ppu.Ppu2C02.ScreenHeight);
+
+        // No sprite is clipped before column 239: the record covering x = 232 to 238 is read
+        // there, white pixel by white pixel.
+        for (int x = 232; x <= 238; x++)
+        {
+            Assert.Equal(0x30, core.Ppu.ComposeRecordedColor(x, 100));
+            Assert.True(core.Ppu.SeesLightAt(x, 100), $"x = {x} should see the sprite.");
+        }
+
+        // From 239 to the right edge the backdrop is what counts, and it is light here, so
+        // detection keeps working all the way to x = 255.
+        for (int x = 239; x <= 255; x++)
+        {
+            Assert.True(core.Ppu.SeesLightAt(x, 100), $"x = {x} should see the backdrop.");
+        }
+
+        // One pixel further is outside the picture (condition 1 of REQ-CORE-062).
+        Assert.False(core.Ppu.SeesLightAt(256, 100));
+    }
+
     private static TileFixture WhiteSpriteOnBlack()
     {
         var fixture = new TileFixture();
