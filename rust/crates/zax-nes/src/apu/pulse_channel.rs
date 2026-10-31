@@ -99,6 +99,23 @@ impl PulseChannel {
         }
     }
 
+    /// Timer clocks from now on which the timer only counts down: [`Self::clock_timer`]
+    /// returns `false` on each of them.
+    #[allow(clippy::cast_sign_loss)] // Checked non-negative.
+    pub const fn quiet_clocks(&self) -> u32 {
+        if self.timer < 0 {
+            u32::MAX
+        } else {
+            self.timer as u32
+        }
+    }
+
+    /// Counts the timer down by `clocks`, at most [`Self::quiet_clocks`].
+    #[allow(clippy::cast_possible_wrap)] // At most a timer period.
+    pub fn skip_quiet_clocks(&mut self, clocks: u32) {
+        self.timer -= clocks as i32;
+    }
+
     /// Clocks the timer; called every other CPU cycle.
     /// Clocks the timer; `true` when the sequencer moved (the output may have changed).
     pub fn clock_timer(&mut self) -> bool {

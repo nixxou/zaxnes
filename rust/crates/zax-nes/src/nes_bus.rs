@@ -42,6 +42,11 @@ pub struct NesBus {
     /// NMI line or the cartridge's IRQ line may next change.
     ppu_deadline: i64,
     deferred_ppu: bool,
+    /// CPU cycles the APU still owes: it is batched along with the PPU, and caught up before
+    /// anything that could see or change it (see [`NesBus::catch_up_apu`]).
+    apu_lag: u32,
+    /// How far `apu_lag` may grow: the APU's quiet cycles when it was last caught up.
+    apu_quiet: u32,
     /// Whether the instruction being run was fetched from the extension's execution zone: its
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
@@ -78,6 +83,8 @@ impl NesBus {
             ppu_lag: 0,
             ppu_deadline: 0,
             deferred_ppu: false,
+            apu_lag: 0,
+            apu_quiet: 0,
             zone_instruction: false,
         }
     }
@@ -128,8 +135,9 @@ impl NesBus {
         &self.apu
     }
 
-    /// The APU, mutably.
+    /// The APU, mutably, caught up first.
     pub fn apu_mut(&mut self) -> &mut Apu2A03 {
+        self.sync_apu();
         &mut self.apu
     }
 
@@ -180,6 +188,8 @@ impl NesBus {
         self.dmc_dma_count = 0;
         self.ppu_lag = 0;
         self.ppu_deadline = 0;
+        self.apu_lag = 0;
+        self.apu_quiet = 0;
     }
 
     /// Advances the whole machine by one CPU cycle.
@@ -200,7 +210,10 @@ impl NesBus {
             self.catch_up_ppu();
         }
 
-        self.apu.step_cpu_cycle();
+        self.apu_lag += 1;
+        if self.apu_lag > self.apu_quiet {
+            self.catch_up_apu();
+        }
         if let Some(cartridge) = self.cartridge.as_mut() {
             cartridge.step_cpu_cycle();
         }
@@ -261,16 +274,48 @@ impl NesBus {
         nmi.min(irq).max(1)
     }
 
+    /// Runs the cycles the APU owes, then sets how many more it may owe.
+    ///
+    /// Batching is exact because the cycles it skips are quiet (see
+    /// [`Apu2A03::quiet_cycles`]): on them the APU's IRQ line, its DMC fetch request and
+    /// its output stay as they are, so the bus may look at those without catching it up.
+    /// Everything else waits for [`NesBus::sync_apu`]: every access to $4000-$401F but
+    /// $4014 and $4016, the DMC fetch's byte, and the end of the frame loop. Outside
+    /// [`NesBus::defer_ppu`] the APU runs on every cycle, as before.
+    fn catch_up_apu(&mut self) {
+        if self.apu_lag > 0 {
+            self.apu.run_cpu_cycles(self.apu_lag);
+            self.apu_lag = 0;
+        }
+        self.apu_quiet = if self.deferred_ppu {
+            self.apu.quiet_cycles()
+        } else {
+            0
+        };
+    }
+
+    /// Catches the APU up before an access that may see or change it; the next cycle is
+    /// run in step and recomputes how far it may lag.
+    fn sync_apu(&mut self) {
+        if self.apu_lag > 0 {
+            self.apu.run_cpu_cycles(self.apu_lag);
+            self.apu_lag = 0;
+        }
+        self.apu_quiet = 0;
+    }
+
     /// Lets the PPU run in batches until [`NesBus::end_deferred_ppu`] (the frame loop).
     pub fn defer_ppu(&mut self) {
         self.deferred_ppu = true;
         self.sync_ppu();
+        self.sync_apu();
     }
 
     /// Catches the PPU up and returns to running it on every cycle.
     pub fn end_deferred_ppu(&mut self) {
         self.deferred_ppu = false;
         self.sync_ppu();
+        self.sync_apu();
     }
 
     /// Fetches one DMC sample byte, halting the CPU for [`NesBus::DMC_DMA_CYCLES`] cycles
@@ -293,6 +338,7 @@ impl NesBus {
         self.tick();
         let value = self.read_internal(self.apu.dmc_dma_address());
         self.open_bus = value;
+        self.sync_apu();
         self.apu.supply_dmc_byte(value);
 
         self.in_dmc_dma = false;
@@ -326,7 +372,10 @@ impl NesBus {
 
         if address < 0x4020 {
             return match address {
-                0x4015 => self.apu.read_status(self.open_bus),
+                0x4015 => {
+                    self.sync_apu();
+                    self.apu.read_status(self.open_bus)
+                }
                 0x4016 => self.read_input_port(0, self.open_bus),
                 0x4017 => self.read_input_port(1, self.open_bus),
 
@@ -376,7 +425,10 @@ impl NesBus {
             match address {
                 0x4014 => self.perform_oam_dma(value),
                 0x4016 => self.input.write(value),
-                _ => self.apu.write(address, value),
+                _ => {
+                    self.sync_apu();
+                    self.apu.write(address, value);
+                }
             }
             return;
         }

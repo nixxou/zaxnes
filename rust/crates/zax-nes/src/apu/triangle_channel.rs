@@ -64,6 +64,28 @@ impl TriangleChannel {
         }
     }
 
+    /// Timer clocks from now on which the timer only counts down: [`Self::clock_timer`]
+    /// returns `false` on each of them.
+    #[allow(clippy::cast_sign_loss)] // Checked non-negative.
+    pub const fn quiet_clocks(&self) -> u32 {
+        if self.timer_period < 2 || self.linear_counter == 0 || !self.length.active() {
+            // Held: the counters only change on a frame-counter clock or a write.
+            u32::MAX
+        } else if self.timer < 0 {
+            u32::MAX
+        } else {
+            self.timer as u32
+        }
+    }
+
+    /// Counts the timer down by `clocks`, at most [`Self::quiet_clocks`].
+    #[allow(clippy::cast_possible_wrap)] // At most a timer period.
+    pub fn skip_quiet_clocks(&mut self, clocks: u32) {
+        if self.timer_period >= 2 && self.linear_counter != 0 && self.length.active() {
+            self.timer -= clocks as i32;
+        }
+    }
+
     /// Clocks the timer; called every CPU cycle. The sequencer is held while either counter
     /// is zero, and at ultrasonic periods (below 2), where it would only add a DC offset.
     /// Clocks the timer; `true` when the sequencer moved (the output may have changed).

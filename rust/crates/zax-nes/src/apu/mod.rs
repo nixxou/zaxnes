@@ -545,6 +545,92 @@ impl Apu2A03 {
             .step_cycle(level, &mut |sample| lock(ring).enqueue(sample));
     }
 
+    /// CPU cycles from now that would only count the timers and the frame counter down: no
+    /// channel moves on them, no frame-counter step falls on them, so the output, the IRQ
+    /// line, $4015 and the DMC's fetch request all stay as they are. 0 while a step of the
+    /// level, a pending IRQ flag or a sequencer reset is due.
+    #[must_use]
+    #[allow(clippy::float_cmp, clippy::cast_sign_loss)] // Exact level; positive counts.
+    pub fn quiet_cycles(&self) -> u32 {
+        if self.frame_irq_pending || self.level_dirty || self.resampler.level() != self.level {
+            return 0;
+        }
+
+        let mut quiet = u32::MAX;
+        if self.pending_sequencer_reset > 0 {
+            quiet = (self.pending_sequencer_reset - 1) as u32;
+        }
+        let next_step = self.sequence()[self.frame_step];
+        if next_step > self.frame_counter {
+            quiet = quiet.min((next_step - self.frame_counter - 1) as u32);
+        }
+
+        // A pulse timer is clocked on the cycles that turn `apu_cycle` on: the next one is
+        // the coming cycle when it is off.
+        let parity = u32::from(self.apu_cycle);
+        for pulse in [&self.pulse1, &self.pulse2] {
+            quiet = quiet.min(
+                pulse
+                    .quiet_clocks()
+                    .saturating_mul(2)
+                    .saturating_add(parity),
+            );
+        }
+
+        quiet
+            .min(self.triangle.quiet_clocks())
+            .min(self.noise.quiet_clocks())
+            .min(self.dmc.quiet_clocks())
+    }
+
+    /// Runs `count` CPU cycles, as many calls of [`Self::step_cpu_cycle`] would: the quiet
+    /// stretches are skipped in one go, and the last cycle is always stepped, so $4015 holds
+    /// the value latched at its start.
+    pub fn run_cpu_cycles(&mut self, mut count: u32) {
+        while count > 0 {
+            let skip = if count > 1 {
+                self.quiet_cycles().min(count - 1)
+            } else {
+                0
+            };
+            if skip > 0 {
+                self.skip_quiet_cycles(skip);
+                count -= skip;
+            }
+            self.step_cpu_cycle();
+            count -= 1;
+        }
+    }
+
+    /// `cycles` quiet cycles (at most [`Self::quiet_cycles`]) in one go.
+    #[allow(clippy::cast_possible_wrap)] // At most a frame's cycles.
+    fn skip_quiet_cycles(&mut self, cycles: u32) {
+        // Nothing the status depends on moves, so every skipped cycle latches this value.
+        self.readable_status = self.compose_status(0);
+        self.cycles += i64::from(cycles);
+        self.frame_counter += cycles as i32;
+        if self.pending_sequencer_reset > 0 {
+            // Still above 0: the reset itself is not quiet.
+            self.pending_sequencer_reset -= cycles as i32;
+        }
+
+        let pulse_clocks = if self.apu_cycle {
+            cycles / 2
+        } else {
+            cycles.div_ceil(2)
+        };
+        self.apu_cycle ^= (cycles & 1) != 0;
+        self.pulse1.skip_quiet_clocks(pulse_clocks);
+        self.pulse2.skip_quiet_clocks(pulse_clocks);
+        self.triangle.skip_quiet_clocks(cycles);
+        self.noise.skip_quiet_clocks(cycles);
+        self.dmc.skip_quiet_clocks(cycles);
+
+        let ring = &self.ring;
+        self.resampler
+            .skip_cycles(cycles, &mut |sample| lock(ring).enqueue(sample));
+    }
+
     // ---------------------------------------------------------------- frame counter
 
     /// Moves the frame counter on; `true` when a step fell on this cycle (a quarter or half

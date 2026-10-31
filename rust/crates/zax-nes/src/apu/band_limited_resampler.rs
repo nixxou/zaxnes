@@ -122,6 +122,24 @@ impl BandLimitedResampler {
         }
     }
 
+    /// Last level a step was emitted for.
+    pub const fn level(&self) -> f64 {
+        self.level
+    }
+
+    /// [`Self::step_cycle`] `cycles` times at an unchanged level, in one go: the same
+    /// samples, in the same order.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)] // Low half, carries.
+    pub fn skip_cycles(&mut self, cycles: u32, sink: &mut impl FnMut(f32)) {
+        let total = u64::from(self.fraction) + (u64::from(self.step) * u64::from(cycles));
+        self.fraction = total as u32;
+        let carries = (total >> 32) as i64;
+        if carries > 0 {
+            self.position += carries;
+            self.drain(sink);
+        }
+    }
+
     /// Back to silence: no pending step, no pending sample (REQ-CORE-074).
     pub fn reset(&mut self) {
         self.ring = [0.0; RING_SIZE];

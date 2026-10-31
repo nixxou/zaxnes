@@ -132,6 +132,23 @@ impl DmcChannel {
         }
     }
 
+    /// Timer clocks from now on which the timer only counts down: [`Self::clock_timer`]
+    /// returns `false` on each of them.
+    #[allow(clippy::cast_sign_loss)] // Checked non-negative.
+    pub const fn quiet_clocks(&self) -> u32 {
+        if self.timer > 0 {
+            self.timer as u32
+        } else {
+            0
+        }
+    }
+
+    /// Counts the timer down by `clocks`, at most [`Self::quiet_clocks`].
+    #[allow(clippy::cast_possible_wrap)] // At most a timer period.
+    pub fn skip_quiet_clocks(&mut self, clocks: u32) {
+        self.timer -= clocks as i32;
+    }
+
     /// Clocks the output unit's timer; called once per CPU cycle.
     /// Clocks the timer; `true` when a bit was played (the output may have changed).
     pub fn clock_timer(&mut self) -> bool {
