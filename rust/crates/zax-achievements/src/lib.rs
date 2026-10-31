@@ -251,7 +251,7 @@ pub struct Client {
 
 impl Client {
     /// A client that sends its requests through `transport`, as `product` (the `User-Agent`'s
-    /// first part, as "Zaxnes/0.3.0"). `None` when rcheevos could not allocate it.
+    /// first part, as "Zaxnes/0.4.0"). `None` when rcheevos could not allocate it.
     #[must_use]
     pub fn new(transport: Arc<dyn Transport>, product: &str) -> Option<Self> {
         let host = NonNull::from(Box::leak(Box::<Host>::default()));
@@ -368,7 +368,7 @@ impl Client {
         unsafe { ffi::zax_ra_logout(self.raw.as_ptr()) };
     }
 
-    /// The `User-Agent` of the client's requests ("Zaxnes/0.3.0 rcheevos/12.5.0"), for other
+    /// The `User-Agent` of the client's requests ("Zaxnes/0.4.0 rcheevos/12.5.0"), for other
     /// requests to the same server.
     #[must_use]
     pub fn user_agent(&self) -> String {

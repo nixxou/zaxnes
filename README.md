@@ -112,7 +112,7 @@ Everything Zaxnes shows or plays is made by its own code: the skies, the interfa
 font come from the program or from your system. [ASSETS-LICENSES.md](ASSETS-LICENSES.md) and
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) list the assets and the third-party code.
 
-> Zaxnes 0.3.0 is written in Rust. Versions 0.1.0 and 0.2.0 were written in C#; that code is kept
+> Since 0.3.0 Zaxnes is written in Rust. Versions 0.1.0 and 0.2.0 were written in C#; that code is kept
 > on the [`archive-dotnetversion`](../../tree/archive-dotnetversion) branch.
 
 ## For developers

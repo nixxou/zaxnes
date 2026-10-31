@@ -1,7 +1,7 @@
 # Zaxnes: the code
 
 The technical side of [Zaxnes](../README.md): how to build it, test it, and how the code is laid
-out. Zaxnes 0.3.0 is written in Rust; versions 0.1.0 and 0.2.0 (C# / .NET) are kept on the
+out. Since 0.3.0 Zaxnes is written in Rust; versions 0.1.0 and 0.2.0 (C# / .NET) are kept on the
 [`archive-dotnetversion`](../../../tree/archive-dotnetversion) branch.
 
 ## Building

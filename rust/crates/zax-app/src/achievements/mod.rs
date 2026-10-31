@@ -164,7 +164,7 @@ pub struct AchievementSystem {
 }
 
 impl AchievementSystem {
-    /// The system, off, reaching the server over HTTPS as `product` ("Zaxnes/0.3.0").
+    /// The system, off, reaching the server over HTTPS as `product` ("Zaxnes/0.4.0").
     #[must_use]
     pub fn new(product: &str) -> Self {
         Self::with_transport(Arc::new(UreqTransport::new()), product)
