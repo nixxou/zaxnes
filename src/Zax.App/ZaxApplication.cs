@@ -275,6 +275,9 @@ internal sealed class ZaxApplication : IDisposable
 
         // AMD-046 REQ-SCN-074: and so is « Bend 2D Mode ».
         _scene.Settings.Bend2dMode = _settings.Bend2dMode;
+
+        // AMD-055 REQ-SCN-078: and so are the style and its twelve parameters.
+        EmulationHost.PublishStyle(_scene.Settings.Style, _settings);
         _scene.Camera.SnapToSetpoints();
     }
 

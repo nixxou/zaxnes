@@ -75,6 +75,119 @@ public static class SettingsCatalogue
         new SettingOption(0d, "Screen Center"),
         new SettingOption(1d, "Screen Edge"));
 
+    /// <summary>
+    /// The identifier of the Classic style, the rendering of SPEC-06 (AMD-055 REQ-SCN-078).
+    /// </summary>
+    public const int ClassicStyle = 0;
+
+    /// <summary>
+    /// The identifier of the Enhanced style in the original program, and the one Zaxnes reads
+    /// back from <c>Setting.VisualStyle</c> (AMD-055 REQ-SCN-078).
+    /// </summary>
+    public const int EnhancedStyle = 4;
+
+    /// <summary>
+    /// The identifier of Enhanced that REQ-SCN-078 accepts in writing — as a setting and as an
+    /// argument of the style-parameter methods — and reads back as
+    /// <see cref="EnhancedStyle"/>.
+    /// </summary>
+    public const int EnhancedStyleAlias = 1;
+
+    /// <summary>
+    /// The domain of <c>render.visual_style</c> (AMD-055 §4): the two style identifiers, with 1
+    /// as an alias of 4 and the default for anything else.
+    /// </summary>
+    public static SettingDomain VisualStyleDomain { get; } = SettingDomain.AliasedChoice(
+        new Dictionary<double, double> { [EnhancedStyleAlias] = EnhancedStyle },
+        new SettingOption(ClassicStyle, "Classic"),
+        new SettingOption(EnhancedStyle, "Enhanced"));
+
+    /// <summary>The ladder 1 to 5, step 1, of the eight graded parameters of REQ-SCN-079.</summary>
+    private static SettingDomain GradeDomain { get; } = SettingDomain.Stepped(1d, 5d, 1d, "0");
+
+    /// <summary>
+    /// The two parameters REQ-SCN-079 types as whole numbers of domain « 0 à 1, pas 1 » and §4
+    /// shows as a tick box.
+    /// </summary>
+    private static SettingDomain SwitchLadder { get; } = SettingDomain.Stepped(
+        0d,
+        1d,
+        1d,
+        new SettingOption(0d, "Off"),
+        new SettingOption(1d, "On"));
+
+    /// <summary>The twelve lines of AMD-055 §4, in the order of the table of REQ-SCN-079.</summary>
+    private static (string Key, int Default, SettingDomain Domain, string Label)[] StyleLines { get; } =
+    [
+        (SettingKeys.RenderStyleAo, 0, SettingDomain.Stepped(
+            0d,
+            2d,
+            1d,
+            new SettingOption(0d, "Off"),
+            new SettingOption(1d, "MSVO"),
+            new SettingOption(2d, "Depth")), "Ambient Occlusion"),
+        (SettingKeys.RenderStyleAoStrength, 3, GradeDomain, "Strength"),
+        (SettingKeys.RenderStyleAoRadius, 3, GradeDomain, "Radius"),
+        (SettingKeys.RenderStyleAoThickness, 3, GradeDomain, "Thickness"),
+        (SettingKeys.RenderStyleAoQuality, 1, SettingDomain.Stepped(
+            0d,
+            2d,
+            1d,
+            new SettingOption(0d, "Low"),
+            new SettingOption(1d, "Medium"),
+            new SettingOption(2d, "High")), "AO Quality"),
+        (SettingKeys.RenderStylePixelShadow, 0, SwitchLadder, "Pixel Shadows"),
+        (SettingKeys.RenderStyleVoxelGrid, 0, SettingDomain.Stepped(
+            0d,
+            3d,
+            1d,
+            new SettingOption(0d, "Off"),
+            new SettingOption(1d, "Every 2 voxels"),
+            new SettingOption(2d, "Every 4 voxels"),
+            new SettingOption(3d, "Every 8 voxels")), "Voxel Grid"),
+        (SettingKeys.RenderStyleReflections, 0, SwitchLadder, "Reflections"),
+        (SettingKeys.RenderStyleSsrShine, 3, GradeDomain, "Floor Shine"),
+        (SettingKeys.RenderStyleSsrClarity, 3, GradeDomain, "Clarity"),
+        (SettingKeys.RenderStyleSsrLength, 3, GradeDomain, "Length"),
+        (SettingKeys.RenderStyleSsrQuality, 2, SettingDomain.Stepped(
+            0d,
+            3d,
+            1d,
+            new SettingOption(0d, "Low"),
+            new SettingOption(1d, "Medium"),
+            new SettingOption(2d, "High"),
+            new SettingOption(3d, "Ultra")), "Reflection Quality"),
+    ];
+
+    /// <summary>
+    /// The twelve style parameters of AMD-055 REQ-SCN-079, by Lua identifier, in the order of
+    /// the table. Public so that the options window shows them in that order.
+    /// </summary>
+    public static IReadOnlyList<(string Id, string Key)> StyleParameterOrder { get; } =
+        [.. StyleLines.Select(static line => (IdOf(line.Key), line.Key))];
+
+    /// <summary>
+    /// The Lua identifier of a <c>render.style.*</c> key: the table of REQ-SCN-079 names the
+    /// parameters <c>spl.*</c>, <c>ao.*</c> and <c>ssr.*</c> where the keys read
+    /// <c>render.style.ao_strength</c> and the like, so the mapping is spelled out once.
+    /// </summary>
+    private static string IdOf(string key) => key switch
+    {
+        SettingKeys.RenderStyleAo => "spl.ao",
+        SettingKeys.RenderStyleAoStrength => "ao.strength",
+        SettingKeys.RenderStyleAoRadius => "ao.radius",
+        SettingKeys.RenderStyleAoThickness => "ao.thickness",
+        SettingKeys.RenderStyleAoQuality => "ao.quality",
+        SettingKeys.RenderStylePixelShadow => "spl.pixel_shadow",
+        SettingKeys.RenderStyleVoxelGrid => "spl.voxel_grid",
+        SettingKeys.RenderStyleReflections => "spl.reflections",
+        SettingKeys.RenderStyleSsrShine => "ssr.shine",
+        SettingKeys.RenderStyleSsrClarity => "ssr.clarity",
+        SettingKeys.RenderStyleSsrLength => "ssr.length",
+        SettingKeys.RenderStyleSsrQuality => "ssr.quality",
+        _ => key,
+    };
+
     private static readonly SettingDescriptor[] Descriptors = Build();
 
     private static readonly Dictionary<string, SettingDescriptor> ByKeyIndex = BuildKeyIndex(Descriptors);
@@ -587,9 +700,9 @@ public static class SettingsCatalogue
     }
 
     /// <summary>
-    /// The four curvature settings of AMD-043 §6, the 2D-mode switch of AMD-046 §3 and the
-    /// visual style of AMD-040 §3. The four curvature ones have no Lua path: their SPEC-09 line
-    /// names the style-parameter methods of REQ-LUA-114, which
+    /// The four curvature settings of AMD-043 §6 and the 2D-mode switch of AMD-046 §3,
+    /// followed by the style lines of <see cref="AddStyle"/>. The four curvature ones have no
+    /// Lua path: their SPEC-09 line names the style-parameter methods of REQ-LUA-114, which
     /// <see cref="VisualStyleParameters"/> maps onto these very keys, so a script and the
     /// options window write the same value. <c>scene.bend_2d_mode</c> has none either, and for
     /// another reason: it is a setting of Zaxnes alone (AMD-046 §2, notes).
@@ -646,8 +759,24 @@ public static class SettingsCatalogue
             LibretroValues = [new SettingOption(1d, "enabled"), new SettingOption(0d, "disabled")],
         });
 
-        // AMD-040 §3: stored, immediately, with no rendering effect and no interface of its
-        // own; not exposed to libretro either.
+        AddStyle(list);
+    }
+
+    /// <summary>
+    /// The thirteen lines AMD-055 §4 adds to §4.1.1: the visual style of AMD-040 §3, which now
+    /// chooses the rendering (REQ-SCN-078), and the twelve parameters of the Enhanced style
+    /// (REQ-SCN-079). All of scope U, all immediate, none exposed in libretro.
+    /// </summary>
+    /// <remarks>
+    /// They come right after the background and skybox lines, which is where the « Style » row
+    /// and its collapsible group sit in the options window (AMD-055 §3 point 6, §4). The
+    /// original program places them elsewhere in its interface, which SPEC-10 does not
+    /// describe, so the panel position is an addition of Zaxnes <b>(D)</b>.
+    /// </remarks>
+    private static void AddStyle(List<SettingDescriptor> list)
+    {
+        // AMD-055 REQ-SCN-078: 0 is Classic and 4 is Enhanced; 1 is accepted in writing and
+        // read back as 4; anything else — from a script or from the settings file — gives 0.
         list.Add(new SettingDescriptor(
             SettingKeys.RenderVisualStyle,
             SettingKind.Int,
@@ -656,34 +785,68 @@ public static class SettingsCatalogue
             SettingEffect.Immediate,
             SettingTheme.Render)
         {
-            Domain = SettingDomain.Choice(
-                new SettingOption(0d, "Classic"),
-                new SettingOption(1d, "Enhanced")),
+            Domain = VisualStyleDomain,
+            UiLabel = "Style",
             LuaPath = "VisualStyle",
         });
+
+        foreach ((string key, int fallback, SettingDomain domain, string label) in StyleLines)
+        {
+            list.Add(new SettingDescriptor(
+                key,
+                SettingKind.Int,
+                SettingValue.OfInt(fallback),
+                SettingScope.User,
+                SettingEffect.Immediate,
+                SettingTheme.Render)
+            {
+                Domain = domain,
+                UiLabel = label,
+            });
+        }
     }
 
     /// <summary>
-    /// The parameters of the visual styles of AMD-040 §3, by style number: the identifier a
-    /// script passes to <c>Setting:Get/SetVisualStyleParameter</c> and the setting it stands
-    /// for. Style 0 (Classic) has none; style 1 (Enhanced) has the four of AMD-043.
+    /// The parameters of the visual styles of AMD-040 §3, amended by AMD-055 REQ-SCN-079, by
+    /// style number: the identifier a script passes to
+    /// <c>Setting:Get/SetVisualStyleParameter</c> and the setting it stands for. Style 0
+    /// (Classic) has none; the Enhanced style has the twelve of REQ-SCN-079 plus the four
+    /// curvature ones of AMD-043, and answers to 4 as well as to 1 (REQ-SCN-078).
     /// </summary>
     /// <remarks>
     /// Every other identifier of 3dSen 2.0 is unspecified, so for Zaxnes it is « unknown » in
     /// the sense of REQ-LUA-114: reading gives 0 and writing answers false.
     /// </remarks>
     public static IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> VisualStyleParameters { get; } =
-        new Dictionary<int, IReadOnlyDictionary<string, string>>
+        BuildVisualStyleParameters();
+
+    private static IReadOnlyDictionary<int, IReadOnlyDictionary<string, string>> BuildVisualStyleParameters()
+    {
+        Dictionary<string, string> enhanced = new(StringComparer.Ordinal)
         {
-            [0] = new Dictionary<string, string>(StringComparer.Ordinal),
-            [1] = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["spl.bend_zx"] = SettingKeys.SceneBendLeftRight,
-                ["spl.bend_zy"] = SettingKeys.SceneBendTopBottom,
-                ["spl.arc_yx"] = SettingKeys.SceneArcHorizontal,
-                ["spl.arc_center"] = SettingKeys.SceneArcCenter,
-            },
+            // AMD-043 REQ-SCN-066: the curvature is not an effect of the style, but its four
+            // settings are still reached through the style-parameter methods.
+            ["spl.bend_zx"] = SettingKeys.SceneBendLeftRight,
+            ["spl.bend_zy"] = SettingKeys.SceneBendTopBottom,
+            ["spl.arc_yx"] = SettingKeys.SceneArcHorizontal,
+            ["spl.arc_center"] = SettingKeys.SceneArcCenter,
         };
+
+        foreach ((string id, string key) in StyleParameterOrder)
+        {
+            enhanced[id] = key;
+        }
+
+        return new Dictionary<int, IReadOnlyDictionary<string, string>>
+        {
+            [ClassicStyle] = new Dictionary<string, string>(StringComparer.Ordinal),
+
+            // REQ-SCN-078: 1 is accepted as an identifier of Enhanced wherever 4 is, methods
+            // included, and the two reach the very same settings.
+            [1] = enhanced,
+            [EnhancedStyle] = enhanced,
+        };
+    }
 
     /// <summary>
     /// The setting the parameter <paramref name="id"/> of style <paramref name="style"/>

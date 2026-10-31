@@ -63,9 +63,16 @@ internal sealed partial class ZaxUi
                 }
 
                 // AMD-043 §6: the curvature settings sit in a « Geometry » group marked
-                // advanced, that is folded away until the user asks for it.
+                // advanced, that is folded away until the user asks for it. AMD-055 §4 adds a
+                // « Style » group on the same pattern, which only exists in Enhanced.
                 foreach (string group in _optionsModel.Groups(tab))
                 {
+                    IReadOnlyList<OptionsRow> rows = _optionsModel.RowsOfGroup(tab, group);
+                    if (rows.All(row => !OptionsModel.IsVisibleNow(row.Descriptor.Key, model)))
+                    {
+                        continue;
+                    }
+
                     ImGui.Separator();
                     bool opened = ImGui.CollapsingHeader(UiText.GroupTitle(group));
                     ImGui.SameLine();
@@ -75,7 +82,7 @@ internal sealed partial class ZaxUi
                         continue;
                     }
 
-                    foreach (OptionsRow row in _optionsModel.RowsOfGroup(tab, group))
+                    foreach (OptionsRow row in rows)
                     {
                         DrawRow(model, row);
                     }
@@ -94,13 +101,21 @@ internal sealed partial class ZaxUi
     private void DrawRow(SettingsModel model, OptionsRow row)
     {
         SettingDescriptor descriptor = row.Descriptor;
+
+        // AMD-055 REQ-SCN-079: the occlusion rows only show when spl.ao ≠ 0 and the reflection
+        // ones when spl.reflections = 1; the twelve of them only exist in Enhanced.
+        if (!OptionsModel.IsVisibleNow(descriptor.Key, model))
+        {
+            return;
+        }
+
         ImGui.PushID(descriptor.Key);
 
         // AMD-032 §3: the resolution scale only exists for the render-texture method; under
         // the direct method the scene is always drawn at the native resolution, so the row is
-        // shown greyed out rather than hidden, with the reason spelled out beside it.
-        bool inert = descriptor.Key == SettingKeys.VideoResScale
-            && !RenderScaling.ScaleApplies(model.GetInt(SettingKeys.VideoRenderMethod));
+        // shown greyed out rather than hidden, with the reason spelled out beside it. AMD-055
+        // REQ-SCN-079 greys « Thickness » the same way while the MSVO fallback is in force.
+        bool inert = OptionsModel.IsInert(descriptor.Key, model);
         if (inert)
         {
             ImGui.BeginDisabled();
@@ -114,7 +129,9 @@ internal sealed partial class ZaxUi
             bool enumerated = descriptor.Domain.Options is { Count: > 0 }
                 && descriptor.Kind is SettingKind.Enum or SettingKind.Int;
 
-            bool changed = descriptor.Kind == SettingKind.String
+            bool changed = OptionsModel.TickBoxKeys.Contains(descriptor.Key)
+                ? DrawTickBox(model, row)
+                : descriptor.Kind == SettingKind.String
                 ? DrawText(model, row)
                 : enumerated
                     ? DrawEnum(model, row)
@@ -149,7 +166,10 @@ internal sealed partial class ZaxUi
             {
                 ImGui.EndDisabled();
                 ImGui.SameLine();
-                ImGui.TextDisabled(UiText.ResScaleNeedsRenderTexture);
+                ImGui.TextDisabled(
+                    descriptor.Key == SettingKeys.RenderStyleAoThickness
+                        ? UiText.ThicknessNeedsMsvo
+                        : UiText.ResScaleNeedsRenderTexture);
             }
 
             ImGui.PopID();
@@ -212,6 +232,23 @@ internal sealed partial class ZaxUi
         }
 
         model.SetString(row.Descriptor.Key, options[index]);
+        return true;
+    }
+
+    /// <summary>
+    /// The tick box of a whole-number setting of domain « 0 à 1 »: AMD-055 §4 shows
+    /// « Pixel Shadows » and « Reflections » that way, and REQ-SCN-079 types them as integers,
+    /// so the widget is a check box over the stored 0 or 1.
+    /// </summary>
+    private static bool DrawTickBox(SettingsModel model, OptionsRow row)
+    {
+        bool value = model.GetInt(row.Descriptor.Key) != 0;
+        if (!ImGui.Checkbox(row.Label, ref value))
+        {
+            return false;
+        }
+
+        model.SetInt(row.Descriptor.Key, value ? 1 : 0);
         return true;
     }
 

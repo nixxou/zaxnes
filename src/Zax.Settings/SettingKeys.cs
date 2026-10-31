@@ -114,10 +114,87 @@ public static class SettingKeys
     public const string SceneBend2dMode = "scene.bend_2d_mode";
 
     /// <summary>
-    /// The visual style of AMD-040 §3: 0 Classic, 1 Enhanced. Stored and handed back; Zaxnes
-    /// has a single renderer, so it changes nothing of what is drawn (REQ-LUA-114).
+    /// The visual style of AMD-040 §3, amended by AMD-055 §4: 0 Classic, 4 Enhanced (1 accepted
+    /// in writing, read back as 4). It chooses the rendering, with immediate effect on the next
+    /// rendered frame (SPEC-06 REQ-SCN-078).
     /// </summary>
     public const string RenderVisualStyle = "render.visual_style";
+
+    // The twelve parameters of the Enhanced style (AMD-055 §4, SPEC-06 REQ-SCN-079). All of
+    // scope U, all immediate, none exposed in libretro: they are style settings, not something
+    // a libretro frontend has to drive.
+
+    /// <summary>
+    /// Screen-space ambient occlusion: 0 Off, 1 MSVO, 2 Depth (REQ-SCN-083). Lua
+    /// <c>spl.ao</c>.
+    /// </summary>
+    public const string RenderStyleAo = "render.style.ao";
+
+    /// <summary>
+    /// Darkening ceiling of the occlusion, <c>O ≤ 0.1 × value</c>, 1 to 5 (REQ-SCN-083). Lua
+    /// <c>ao.strength</c>.
+    /// </summary>
+    public const string RenderStyleAoStrength = "render.style.ao_strength";
+
+    /// <summary>
+    /// Occlusion radius <c>8 + 6 × (value − 1)</c> scene units, 1 to 5 (REQ-SCN-083). Lua
+    /// <c>ao.radius</c>.
+    /// </summary>
+    public const string RenderStyleAoRadius = "render.style.ao_radius";
+
+    /// <summary>
+    /// Assumed thickness of the occluders in MSVO mode, 1 to 5 (REQ-SCN-083). It has no effect
+    /// with the Depth occlusion, which is what the MSVO fallback renders <b>(D)</b>. Lua
+    /// <c>ao.thickness</c>.
+    /// </summary>
+    public const string RenderStyleAoThickness = "render.style.ao_thickness";
+
+    /// <summary>
+    /// Sample count and pass resolution of the occlusion, neither observable: 0 Low, 1 Medium,
+    /// 2 High (REQ-SCN-083). Lua <c>ao.quality</c>.
+    /// </summary>
+    public const string RenderStyleAoQuality = "render.style.ao_quality";
+
+    /// <summary>
+    /// Shadow evaluated at the centre of the fragment's voxel, 0 or 1 (REQ-SCN-082). Lua
+    /// <c>spl.pixel_shadow</c>.
+    /// </summary>
+    public const string RenderStylePixelShadow = "render.style.pixel_shadow";
+
+    /// <summary>
+    /// Grooves every <c>N = 2^value</c> voxels, 0 Off to 3 (REQ-SCN-081). Lua
+    /// <c>spl.voxel_grid</c>.
+    /// </summary>
+    public const string RenderStyleVoxelGrid = "render.style.voxel_grid";
+
+    /// <summary>
+    /// Screen-space floor reflections, 0 or 1 (REQ-SCN-084). Lua <c>spl.reflections</c>.
+    /// </summary>
+    public const string RenderStyleReflections = "render.style.reflections";
+
+    /// <summary>
+    /// Reflection intensity <c>0.09 × (2 × value − 1)</c>, 1 to 5 (REQ-SCN-084). Lua
+    /// <c>ssr.shine</c>.
+    /// </summary>
+    public const string RenderStyleSsrShine = "render.style.ssr_shine";
+
+    /// <summary>
+    /// Maximum blur <c>0.003 × (10 − (2 × value − 1))</c> of the screen height, 1 to 5
+    /// (REQ-SCN-084). Lua <c>ssr.clarity</c>.
+    /// </summary>
+    public const string RenderStyleSsrClarity = "render.style.ssr_clarity";
+
+    /// <summary>
+    /// Maximum ray length <c>40 × (2 × value − 1)</c> scene units, 1 to 5 (REQ-SCN-084). Lua
+    /// <c>ssr.length</c>.
+    /// </summary>
+    public const string RenderStyleSsrLength = "render.style.ssr_length";
+
+    /// <summary>
+    /// March steps, refinements and pass resolution of the reflections, none observable: 0 Low,
+    /// 1 Medium, 2 High, 3 Ultra (REQ-SCN-084). Lua <c>ssr.quality</c>.
+    /// </summary>
+    public const string RenderStyleSsrQuality = "render.style.ssr_quality";
 
     // §4.1.5 Clipping
 

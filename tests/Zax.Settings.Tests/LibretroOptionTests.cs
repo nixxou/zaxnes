@@ -66,8 +66,14 @@ public sealed class LibretroOptionTests
             ],
             LibretroCoreOptions.All.Select(static option => option.Key));
 
-        // AMD-040 §3 leaves render.visual_style out of the libretro options altogether.
+        // AMD-040 §3 leaves render.visual_style out of the libretro options altogether, and
+        // AMD-055 §3 point 7 adds « render.visual_style and render.style.* (style settings, not
+        // exposed) » to the list of §4.6: a libretro frontend has no business driving them.
         Assert.Null(LibretroCoreOptions.Find("zaxnes_render_visual_style"));
+        Assert.All(
+            SettingsCatalogue.StyleParameterOrder,
+            parameter => Assert.Null(
+                LibretroCoreOptions.Find(SettingDescriptor.BuildLibretroKey(parameter.Key))));
     }
 
     /// <summary>SPEC-09 §4.6: the values and defaults of the five single-line entries.</summary>

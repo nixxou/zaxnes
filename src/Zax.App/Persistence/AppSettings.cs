@@ -213,14 +213,26 @@ public sealed class AppSettings
     }
 
     /// <summary>
-    /// <c>render.visual_style</c>: 0 Classic, 1 Enhanced (AMD-040 §3). Stored and handed back;
-    /// Zaxnes has one renderer, so it changes nothing of what is drawn.
+    /// <c>render.visual_style</c>: 0 Classic, 4 Enhanced, 1 accepted in writing and read back
+    /// as 4 (AMD-055 REQ-SCN-078). It chooses the rendering, at the next rendered frame.
     /// </summary>
     public int VisualStyle
     {
         get => Model.GetInt(SettingKeys.RenderVisualStyle);
         set => Model.SetInt(SettingKeys.RenderVisualStyle, value);
     }
+
+    /// <summary>
+    /// Whether the Enhanced style is the one in force (AMD-055 REQ-SCN-078). Classic is the
+    /// rendering of SPEC-06, unchanged.
+    /// </summary>
+    public bool EnhancedStyle => VisualStyle == SettingsCatalogue.EnhancedStyle;
+
+    /// <summary>
+    /// The value of one of the twelve style parameters of AMD-055 REQ-SCN-079, by its stable
+    /// key. They are whole numbers, normalised by their domain.
+    /// </summary>
+    public int StyleParameter(string key) => Model.GetInt(key);
 
     /// <summary><c>camera.fov</c>: vertical field of view in degrees, default 70.</summary>
     public float Fov

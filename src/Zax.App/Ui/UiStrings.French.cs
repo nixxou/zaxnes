@@ -121,6 +121,7 @@ internal static partial class UiStrings
             "Choisissez le dossier d'installation de 3dSen (celui qui contient 3dSen.exe), "
             + "ou directement le fichier .bundle des profils.",
         [UiKeys.HintResScaleDirect] = "(sans effet en rendu direct : résolution native)",
+        [UiKeys.HintThicknessMsvoOnly] = "(sans effet avec l'occlusion Depth)",
         [UiKeys.HintPressAControl] = "Appuyez sur une touche ou un bouton…",
         [UiKeys.HintClickACell] = "Cliquez sur une case pour réassigner.",
         [UiKeys.HintAtNextStart] = "(au prochain démarrage)",
@@ -165,6 +166,7 @@ internal static partial class UiStrings
 
         // ------------------------------- groups inside a tab (AMD-043 §6)
         [UiKeys.GroupGeometry] = "Géométrie",
+        [UiKeys.GroupStyle] = "Style",
 
         // ---------------------------------------- key configuration sections
         [UiKeys.KeysPlayerOne] = "Joueur 1 — boutons NES",
@@ -301,6 +303,42 @@ internal static partial class UiStrings
             "Applique aussi la courbure à l'image plate du mode 2D. Désactivez-le pour garder "
             + "l'image plate.",
 
+        // AMD-055 §4, mot pour mot : le style visuel et ses douze paramètres.
+        ["setting." + SettingKeys.RenderVisualStyle] = "Style",
+        ["help." + SettingKeys.RenderVisualStyle] =
+            "Classic garde l'aspect d'origine. Enhanced ajoute des effets optionnels.",
+        ["setting." + SettingKeys.RenderStyleAo] = "Occlusion ambiante",
+        ["help." + SettingKeys.RenderStyleAo] = "Ombre douce dans les coins et les creux.",
+        ["setting." + SettingKeys.RenderStyleAoStrength] = "Force",
+        ["help." + SettingKeys.RenderStyleAoStrength] = "Intensité de l'assombrissement.",
+        ["setting." + SettingKeys.RenderStyleAoRadius] = "Rayon",
+        ["help." + SettingKeys.RenderStyleAoRadius] = "Portée de l'assombrissement.",
+        ["setting." + SettingKeys.RenderStyleAoThickness] = "Épaisseur",
+        ["help." + SettingKeys.RenderStyleAoThickness] =
+            "Sans effet avec l'occlusion Depth.",
+        ["setting." + SettingKeys.RenderStyleAoQuality] = "Qualité de l'occlusion",
+        ["help." + SettingKeys.RenderStyleAoQuality] =
+            "Plus d'échantillons, ombre plus lisse.",
+        ["setting." + SettingKeys.RenderStylePixelShadow] = "Ombres pixel",
+        ["help." + SettingKeys.RenderStylePixelShadow] =
+            "Des ombres qui suivent la grille de pixels du jeu.",
+        ["setting." + SettingKeys.RenderStyleVoxelGrid] = "Grille de voxels",
+        ["help." + SettingKeys.RenderStyleVoxelGrid] =
+            "Des rainures tous les 2, 4 ou 8 voxels, comme des briques de jouet.",
+        ["setting." + SettingKeys.RenderStyleReflections] = "Reflets",
+        ["help." + SettingKeys.RenderStyleReflections] =
+            "Le sol reflète la scène comme une surface polie.",
+        ["setting." + SettingKeys.RenderStyleSsrShine] = "Brillance du sol",
+        ["help." + SettingKeys.RenderStyleSsrShine] = "Intensité du reflet.",
+        ["setting." + SettingKeys.RenderStyleSsrClarity] = "Netteté",
+        ["help." + SettingKeys.RenderStyleSsrClarity] =
+            "Une valeur élevée garde le reflet net.",
+        ["setting." + SettingKeys.RenderStyleSsrLength] = "Longueur",
+        ["help." + SettingKeys.RenderStyleSsrLength] = "Portée du reflet.",
+        ["setting." + SettingKeys.RenderStyleSsrQuality] = "Qualité des reflets",
+        ["help." + SettingKeys.RenderStyleSsrQuality] =
+            "Plus de pas, moins de trous dans le reflet.",
+
         ["setting." + SettingKeys.EmuGameSpeed] = "Vitesse de jeu",
         ["setting." + SettingKeys.EmuAutoTvMode] = "Région détectée automatiquement",
         ["setting." + SettingKeys.EmuTvMode] = "Région vidéo",
@@ -334,6 +372,23 @@ internal static partial class UiStrings
         ["option.fr"] = "Français",
         ["option.Screen Center"] = "Centre de l'écran",
         ["option.Screen Edge"] = "Bord de l'écran",
+
+        // AMD-055 §4 : les valeurs des listes de style, mot pour mot. « Désactivée » est
+        // l'entrée partagée « option.Off » ci-dessus, qui convient à l'occlusion comme à la
+        // grille. Les deux listes de qualité portent des libellés distincts, parce qu'elles
+        // peuvent être visibles en même temps dans le même panneau.
+        ["option.Classic"] = "Classic",
+        ["option.Enhanced"] = "Enhanced",
+        ["option.MSVO"] = "MSVO",
+        ["option.Depth"] = "Depth",
+        ["option.On"] = "Activée",
+        ["option.Low"] = "Faible",
+        ["option.Medium"] = "Moyenne",
+        ["option.High"] = "Élevée",
+        ["option.Ultra"] = "Ultra",
+        ["option.Every 2 voxels"] = "Tous les 2 voxels",
+        ["option.Every 4 voxels"] = "Tous les 4 voxels",
+        ["option.Every 8 voxels"] = "Tous les 8 voxels",
 
         // Les quatre valeurs de Run-ahead d'AMD-041 §3.
         ["option." + SettingKeys.EmuRunAhead + ".Off"] = "Désactivé",

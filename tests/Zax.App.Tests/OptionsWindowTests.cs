@@ -274,15 +274,18 @@ public sealed class OptionsWindowTests
     /// AMD-043 §6: the four curvature settings are in the Video tab, in an advanced
     /// « Geometry » group, with the labels and the help texts of the amendment in both
     /// languages, followed by the « Bend 2D Mode » checkbox of AMD-046 §3.
-    /// <c>render.visual_style</c> has no interface at all (AMD-040 §3).
+    /// <c>render.visual_style</c> is a row of its own since AMD-055 §3 point 6, which also adds
+    /// the « Style » group next to « Geometry ».
     /// </summary>
-    [Fact] // REQ-SCN-066, REQ-SCN-074, REQ-LUA-114
+    [Fact] // REQ-SCN-066, REQ-SCN-074, REQ-LUA-114, REQ-UI-061
     public void REQ_SCN_066_the_curvature_settings_are_an_advanced_geometry_group()
     {
         using UiLanguageScope language = new();
         OptionsModel model = new();
 
-        Assert.Equal<string[]>([UiKeys.GroupGeometry], [.. model.Groups(OptionsTab.Video)]);
+        Assert.Equal<string[]>(
+            [UiKeys.GroupGeometry, UiKeys.GroupStyle],
+            [.. model.Groups(OptionsTab.Video)]);
         Assert.Equal<string[]>(
             [.. OptionsModel.GeometryKeys],
             [.. model.RowsOfGroup(OptionsTab.Video, UiKeys.GroupGeometry).Select(row => row.Descriptor.Key)]);
@@ -293,9 +296,11 @@ public sealed class OptionsWindowTests
             Assert.Empty(model.Groups(tab));
         }
 
-        Assert.DoesNotContain(
+        // AMD-055 §3 point 6: the « Style » row is an ordinary row of the Video tab, outside
+        // the group its twelve parameters fill.
+        Assert.Contains(
             SettingKeys.RenderVisualStyle,
-            model.AllRows().Select(row => row.Descriptor.Key));
+            model.RowsOfGroup(OptionsTab.Video, group: null).Select(row => row.Descriptor.Key));
 
         Assert.Equal("Geometry", UiText.GroupTitle(UiKeys.GroupGeometry));
         Assert.Equal("(advanced)", UiText.Advanced);

@@ -128,14 +128,20 @@ public sealed class Amd043Tests
     /// REQ-LUA-114: <c>Setting.VisualStyle</c> and the three style-parameter methods, with the
     /// acceptance criterion of the amendment, line by line.
     /// </summary>
-    [Fact] // REQ-LUA-114
+    /// <remarks>
+    /// AMD-055 §3 point 2 rewrites the <c>VisualStyle</c> line: the Enhanced identifier is 4,
+    /// 1 is accepted in writing and read back as 4, and the criterion
+    /// <c>Setting.VisualStyle = 5</c> → 0 stays valid. The style identifier 1 goes on reaching
+    /// the four curvature parameters, as REQ-SCN-078 requires.
+    /// </remarks>
+    [Fact] // REQ-LUA-114, REQ-SCN-078
     public void REQ_LUA_114_the_style_members_answer_the_amendment_criterion()
     {
         using LuaRun run = new LuaProfile().Script("a", string.Empty).Start();
 
         Assert.Equal(0, run.Num("Setting.VisualStyle"));
         run.Do("Setting.VisualStyle = 1");
-        Assert.Equal(1, run.Num("Setting.VisualStyle"));
+        Assert.Equal(4, run.Num("Setting.VisualStyle"));
         run.Do("Setting.VisualStyle = 5");
         Assert.Equal(0, run.Num("Setting.VisualStyle"));
 

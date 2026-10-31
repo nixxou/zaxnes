@@ -118,6 +118,7 @@ internal static partial class UiStrings
             "Choose the installation folder of 3dSen (the one holding 3dSen.exe), "
             + "or the .bundle profile file itself.",
         [UiKeys.HintResScaleDirect] = "(no effect in direct rendering: native resolution)",
+        [UiKeys.HintThicknessMsvoOnly] = "(no effect with Depth occlusion)",
         [UiKeys.HintPressAControl] = "Press a key or a button…",
         [UiKeys.HintClickACell] = "Click a cell to reassign it.",
         [UiKeys.HintAtNextStart] = "(at the next start)",
@@ -162,6 +163,7 @@ internal static partial class UiStrings
 
         // ------------------------------- groups inside a tab (AMD-043 §6)
         [UiKeys.GroupGeometry] = "Geometry",
+        [UiKeys.GroupStyle] = "Style",
 
         // ---------------------------------------- key configuration sections
         [UiKeys.KeysPlayerOne] = "Player 1 — NES buttons",
@@ -298,6 +300,40 @@ internal static partial class UiStrings
             "Also applies the bend settings to the flat picture of 2D mode. Turn it off to keep "
             + "the picture flat.",
 
+        // AMD-055 §4, word for word: the visual style and its twelve parameters.
+        ["setting." + SettingKeys.RenderVisualStyle] = "Style",
+        ["help." + SettingKeys.RenderVisualStyle] =
+            "Classic keeps the original look. Enhanced adds optional effects.",
+        ["setting." + SettingKeys.RenderStyleAo] = "Ambient Occlusion",
+        ["help." + SettingKeys.RenderStyleAo] = "Soft shade in corners and hollows.",
+        ["setting." + SettingKeys.RenderStyleAoStrength] = "Strength",
+        ["help." + SettingKeys.RenderStyleAoStrength] = "How dark the shading gets.",
+        ["setting." + SettingKeys.RenderStyleAoRadius] = "Radius",
+        ["help." + SettingKeys.RenderStyleAoRadius] = "How far the shading reaches.",
+        ["setting." + SettingKeys.RenderStyleAoThickness] = "Thickness",
+        ["help." + SettingKeys.RenderStyleAoThickness] = "No effect with Depth occlusion.",
+        ["setting." + SettingKeys.RenderStyleAoQuality] = "AO Quality",
+        ["help." + SettingKeys.RenderStyleAoQuality] = "More samples, smoother shading.",
+        ["setting." + SettingKeys.RenderStylePixelShadow] = "Pixel Shadows",
+        ["help." + SettingKeys.RenderStylePixelShadow] =
+            "Shadows that follow the game's pixel grid.",
+        ["setting." + SettingKeys.RenderStyleVoxelGrid] = "Voxel Grid",
+        ["help." + SettingKeys.RenderStyleVoxelGrid] =
+            "Grooves every 2, 4 or 8 voxels, like toy bricks.",
+        ["setting." + SettingKeys.RenderStyleReflections] = "Reflections",
+        ["help." + SettingKeys.RenderStyleReflections] =
+            "The floor reflects the scene like a polished surface.",
+        ["setting." + SettingKeys.RenderStyleSsrShine] = "Floor Shine",
+        ["help." + SettingKeys.RenderStyleSsrShine] = "How strong the reflection is.",
+        ["setting." + SettingKeys.RenderStyleSsrClarity] = "Clarity",
+        ["help." + SettingKeys.RenderStyleSsrClarity] =
+            "Higher values keep the reflection sharp.",
+        ["setting." + SettingKeys.RenderStyleSsrLength] = "Length",
+        ["help." + SettingKeys.RenderStyleSsrLength] = "How far the reflection reaches.",
+        ["setting." + SettingKeys.RenderStyleSsrQuality] = "Reflection Quality",
+        ["help." + SettingKeys.RenderStyleSsrQuality] =
+            "More steps, fewer gaps in the reflection.",
+
         ["setting." + SettingKeys.EmuGameSpeed] = "Game speed",
         ["setting." + SettingKeys.EmuAutoTvMode] = "Region detected automatically",
         ["setting." + SettingKeys.EmuTvMode] = "Video region",
@@ -331,6 +367,22 @@ internal static partial class UiStrings
         ["option.fr"] = "Français",
         ["option.Screen Center"] = "Screen Center",
         ["option.Screen Edge"] = "Screen Edge",
+
+        // AMD-055 §4: the values of the style lists, word for word. « Off » is the shared
+        // entry above. The two quality lists carry distinct labels because they may be visible
+        // at the same time in the same panel.
+        ["option.Classic"] = "Classic",
+        ["option.Enhanced"] = "Enhanced",
+        ["option.MSVO"] = "MSVO",
+        ["option.Depth"] = "Depth",
+        ["option.On"] = "On",
+        ["option.Low"] = "Low",
+        ["option.Medium"] = "Medium",
+        ["option.High"] = "High",
+        ["option.Ultra"] = "Ultra",
+        ["option.Every 2 voxels"] = "Every 2 voxels",
+        ["option.Every 4 voxels"] = "Every 4 voxels",
+        ["option.Every 8 voxels"] = "Every 8 voxels",
 
         // The four Run-ahead values of AMD-041 §3. Their keys carry the setting, because « Off »
         // is not translated the same way here as for the vertical synchronisation.

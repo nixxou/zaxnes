@@ -113,3 +113,15 @@ scene.arc_h
 scene.arc_center
 scene.bend_2d_mode
 render.visual_style
+render.style.ao
+render.style.ao_strength
+render.style.ao_radius
+render.style.ao_thickness
+render.style.ao_quality
+render.style.pixel_shadow
+render.style.voxel_grid
+render.style.reflections
+render.style.ssr_shine
+render.style.ssr_clarity
+render.style.ssr_length
+render.style.ssr_quality

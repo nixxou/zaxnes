@@ -167,9 +167,10 @@ public sealed class ScriptSettings : IDisposable
     }
 
     /// <summary>
-    /// The visual style of AMD-040 REQ-LUA-114: 0 Classic, 1 Enhanced, 0 by default. Any other
-    /// value written gives 0. Zaxnes has a single renderer, so it is stored and handed back and
-    /// changes nothing of what is drawn; the curvature of AMD-043 acts whatever it says.
+    /// The visual style of AMD-040 REQ-LUA-114, amended by AMD-055 REQ-SCN-078: 0 Classic,
+    /// 4 Enhanced, 0 by default. 1 is accepted in writing and read back as 4; any other value
+    /// written gives 0. The choice has immediate effect on the rendering, at the next rendered
+    /// frame; the curvature of AMD-043 acts in both styles <b>(D)</b>.
     /// </summary>
     public int VisualStyle
     {
@@ -214,7 +215,8 @@ public sealed class ScriptSettings : IDisposable
     /// <remarks>
     /// The defaults are written like any other script write, so they land in the session layer
     /// and the user's own preference comes back at the end of the game (REQ-PERS-010): a script
-    /// may undo a curvature for its game without erasing what the user chose.
+    /// may undo a curvature or an effect for its game without erasing what the user chose
+    /// (AMD-055 REQ-SCN-079, second criterion).
     /// </remarks>
     public void ResetVisualStyleParameters(int style)
     {

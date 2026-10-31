@@ -634,6 +634,24 @@ internal sealed partial class EmulationHost : IDisposable
                 PublishBending();
                 break;
 
+            // AMD-055 REQ-SCN-078: the style and each of its twelve parameters apply to the
+            // next rendered frame, without reloading the game.
+            case Zax.Settings.SettingKeys.RenderVisualStyle:
+            case Zax.Settings.SettingKeys.RenderStyleAo:
+            case Zax.Settings.SettingKeys.RenderStyleAoStrength:
+            case Zax.Settings.SettingKeys.RenderStyleAoRadius:
+            case Zax.Settings.SettingKeys.RenderStyleAoThickness:
+            case Zax.Settings.SettingKeys.RenderStyleAoQuality:
+            case Zax.Settings.SettingKeys.RenderStylePixelShadow:
+            case Zax.Settings.SettingKeys.RenderStyleVoxelGrid:
+            case Zax.Settings.SettingKeys.RenderStyleReflections:
+            case Zax.Settings.SettingKeys.RenderStyleSsrShine:
+            case Zax.Settings.SettingKeys.RenderStyleSsrClarity:
+            case Zax.Settings.SettingKeys.RenderStyleSsrLength:
+            case Zax.Settings.SettingKeys.RenderStyleSsrQuality:
+                PublishStyle();
+                break;
+
             case "camera.local_cam":
                 // REQ-SCN-009: the top-down camera is a profile setting the "Mode caméra"
                 // submenu also writes, so it is applied here as well as by the script bridge —
@@ -668,6 +686,40 @@ internal sealed partial class EmulationHost : IDisposable
         _scene.Settings.ArcHorizontal = Settings.ArcHorizontal;
         _scene.Settings.ArcAtEdge = Settings.ArcCenter != 0;
         _scene.Settings.Bend2dMode = Settings.Bend2dMode;
+    }
+
+    /// <summary>
+    /// Pushes the visual style of AMD-055 REQ-SCN-078 and its twelve parameters
+    /// (REQ-SCN-079) onto the scene, so that a change is in force at the next rendered frame
+    /// without the game being reloaded. The style and its parameters never come from the
+    /// profile.
+    /// </summary>
+    internal void PublishStyle() => PublishStyle(_scene.Settings.Style, Settings);
+
+    /// <summary>
+    /// The same push, for the one-off that happens before the loop exists (AMD-055
+    /// REQ-SCN-078: the persisted style is in force from the first frame).
+    /// </summary>
+    /// <param name="style">The style block of the scene.</param>
+    /// <param name="settings">The settings in force.</param>
+    internal static void PublishStyle(StyleSettings style, Persistence.AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(style);
+        ArgumentNullException.ThrowIfNull(settings);
+
+        style.Enhanced = settings.EnhancedStyle;
+        style.AmbientOcclusion = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleAo);
+        style.AoStrength = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleAoStrength);
+        style.AoRadius = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleAoRadius);
+        style.AoThickness = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleAoThickness);
+        style.AoQuality = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleAoQuality);
+        style.PixelShadow = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStylePixelShadow) != 0;
+        style.VoxelGrid = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleVoxelGrid);
+        style.Reflections = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleReflections) != 0;
+        style.SsrShine = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleSsrShine);
+        style.SsrClarity = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleSsrClarity);
+        style.SsrLength = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleSsrLength);
+        style.SsrQuality = settings.StyleParameter(Zax.Settings.SettingKeys.RenderStyleSsrQuality);
     }
 
     // ---------------------------------------------------------------- Zapper

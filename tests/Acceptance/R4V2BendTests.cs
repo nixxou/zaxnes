@@ -401,8 +401,9 @@ public sealed class R4V2BendTests
         Assert.NotEmpty(HelpOf("scene.bend_tb"));
         Assert.NotEmpty(HelpOf("scene.arc_h"));
 
-        // AMD-040 §3 gives render.visual_style no interface at all.
-        Assert.DoesNotContain(rows, static r => string.Equals(r.Key, "render.visual_style", StringComparison.Ordinal));
+        // AMD-055 §3 point 6 gives render.visual_style the « Style » row of the amended
+        // REQ-UI-061, which AMD-040 §3 had left without any interface.
+        Assert.Contains(rows, static r => string.Equals(r.Key, "render.visual_style", StringComparison.Ordinal));
     }
 
     // ===================================================================== AMD-040 REQ-LUA-114
@@ -411,15 +412,23 @@ public sealed class R4V2BendTests
     /// REQ-LUA-114, the <c>VisualStyle</c> rows, with the acceptance criterion of the amendment:
     /// the property, the three methods, the normalisation and the "unknown" answers.
     /// </summary>
-    [Fact] // REQ-LUA-114
+    /// <remarks>
+    /// AMD-055 §3 point 2: the Enhanced identifier is 4, with 1 accepted in writing and read
+    /// back as 4. Everything else on this row is unchanged, the style identifier 1 included.
+    /// </remarks>
+    [Fact] // REQ-LUA-114, REQ-SCN-078
     public void REQ_LUA_114_the_visual_style_and_its_parameters()
     {
         using LuaRun run = new LuaProfile().Script("probe", string.Empty).Start();
 
-        // 0 = Classic, 1 = Enhanced, default 0; any other value written gives 0.
+        // 0 = Classic, 4 = Enhanced (1 accepted in writing, read back 4), default 0; any other
+        // value written gives 0.
         Assert.Equal(0d, run.Num("Setting.VisualStyle"));
+        run.Do("Setting.VisualStyle = 4");
+        Assert.Equal(4d, run.Num("Setting.VisualStyle"));
+        run.Do("Setting.VisualStyle = 0");
         run.Do("Setting.VisualStyle = 1");
-        Assert.Equal(1d, run.Num("Setting.VisualStyle"));
+        Assert.Equal(4d, run.Num("Setting.VisualStyle"));
         run.Do("Setting.VisualStyle = 5");
         Assert.Equal(0d, run.Num("Setting.VisualStyle"));
         run.Do("Setting.VisualStyle = -1");
@@ -466,11 +475,12 @@ public sealed class R4V2BendTests
     }
 
     /// <summary>
-    /// REQ-LUA-114: <c>render.visual_style</c> is a persisted user preference (AMD-040 §3) whose
-    /// value has no effect on what Zaxnes draws.
+    /// REQ-LUA-114: <c>render.visual_style</c> is a persisted user preference (AMD-040 §3).
+    /// AMD-055 REQ-SCN-078 turns it into the choice of the rendering, so the renderer now reads
+    /// it; a value written as 1 survives a restart as the 4 it stands for.
     /// </summary>
-    [Fact] // REQ-LUA-114
-    public void REQ_LUA_114_the_visual_style_is_persisted_and_changes_no_drawing()
+    [Fact] // REQ-LUA-114, REQ-SCN-078
+    public void REQ_LUA_114_the_visual_style_is_persisted_and_chooses_the_rendering()
     {
         SettingDescriptor descriptor = SettingsCatalogue.Get("render.visual_style");
         Assert.Equal(SettingScope.User, descriptor.Scope);
@@ -483,19 +493,23 @@ public sealed class R4V2BendTests
         SettingsStore store = new(root.Paths);
         store.Load(settings, DateTimeOffset.UnixEpoch);
         settings.VisualStyle = 1;
+        Assert.Equal(4, settings.VisualStyle);
         store.Save(settings);
 
         AppSettings restarted = new();
         new SettingsStore(root.Paths).Load(restarted, DateTimeOffset.UnixEpoch);
-        Assert.Equal(1, restarted.VisualStyle);
+        Assert.Equal(4, restarted.VisualStyle);
+        Assert.True(restarted.EnhancedStyle);
 
         settings.VisualStyle = 5;
         Assert.Equal(0, settings.VisualStyle);
+        Assert.False(settings.EnhancedStyle);
 
-        // The scene the renderer reads carries no style at all, so no drawing can depend on it.
-        Assert.DoesNotContain(
+        // AMD-055 REQ-SCN-078: the scene the renderer reads now carries the style and its
+        // parameters, so the drawing can depend on them (REQ-SCN-080 to REQ-SCN-084).
+        Assert.Contains(
             typeof(RenderSettings).GetProperties().Select(static p => p.Name),
-            static name => name.Contains("VisualStyle", StringComparison.Ordinal));
+            static name => string.Equals(name, "Style", StringComparison.Ordinal));
     }
 
     // ===================================================================== §3 REQ-SCN-068

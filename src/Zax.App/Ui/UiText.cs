@@ -149,6 +149,12 @@ internal static class UiText
     /// </summary>
     public static string ResScaleNeedsRenderTexture => UiStrings.Get(UiKeys.HintResScaleDirect);
 
+    /// <summary>
+    /// Why « Thickness » is greyed out: it only acts in the MSVO mode, which the declared
+    /// fallback <b>(D)</b> of AMD-055 REQ-SCN-083 renders as Depth.
+    /// </summary>
+    public static string ThicknessNeedsMsvo => UiStrings.Get(UiKeys.HintThicknessMsvoOnly);
+
     /// <summary>Generic close button.</summary>
     public static string Close => UiStrings.Get(UiKeys.ButtonClose);
 

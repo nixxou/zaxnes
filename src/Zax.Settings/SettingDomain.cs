@@ -29,6 +29,12 @@ public sealed class SettingDomain
     /// <summary>The finite ordered set of admitted values, or null when there is none.</summary>
     public IReadOnlyList<SettingOption>? Options { get; private init; }
 
+    /// <summary>
+    /// Written values that stand for a listed one, or null when the domain has none. See
+    /// <see cref="AliasedChoice"/>.
+    /// </summary>
+    public IReadOnlyDictionary<double, double>? Aliases { get; private init; }
+
     /// <summary>The step a <see cref="OutOfDomainRule.Snap"/> domain lands on, or 0.</summary>
     public double Step { get; private init; }
 
@@ -156,6 +162,27 @@ public sealed class SettingDomain
             Options = options,
         };
 
+    /// <summary>
+    /// A finite set of values of which some are reached through an <b>alias</b>: a written
+    /// value the table maps onto one of the listed ones, which is then what is read back. The
+    /// visual style of AMD-055 REQ-SCN-078 is the one that has it — 0 and 4 are the style
+    /// identifiers, 1 is accepted in writing and read back as 4, anything else takes the
+    /// default.
+    /// </summary>
+    /// <param name="aliases">Written value, then the listed value it stands for.</param>
+    /// <param name="options">The listed values, each with its label.</param>
+    public static SettingDomain AliasedChoice(
+        IReadOnlyDictionary<double, double> aliases,
+        params SettingOption[] options)
+    {
+        ArgumentNullException.ThrowIfNull(aliases);
+        return new SettingDomain(OutOfDomainRule.UseDefault)
+        {
+            Options = options,
+            Aliases = aliases,
+        };
+    }
+
     /// <summary>The two booleans, labelled as libretro expects them (REQ-PERS-083).</summary>
     public static SettingDomain Switch { get; } = new(OutOfDomainRule.Unbounded)
     {
@@ -246,6 +273,14 @@ public sealed class SettingDomain
         if (Rule == OutOfDomainRule.Snap)
         {
             return Reshape(value.Kind, Snap(number));
+        }
+
+        // AMD-055 REQ-SCN-078: an alias is resolved before the list is consulted, so a written
+        // 1 becomes the 4 the setting stores and reads back, and a value that is neither listed
+        // nor aliased still takes the default below.
+        if (Aliases is not null && Aliases.TryGetValue(number, out double listed))
+        {
+            number = listed;
         }
 
         // A listed value that is not in the list takes the default, which is the rule

@@ -92,16 +92,16 @@ internal sealed class OptionsModel
     /// model so that an existing <c>settings.json</c> still reads.
     /// </remarks>
     /// <remarks>
-    /// <c>render.visual_style</c> is excluded because AMD-040 §3 gives its SPEC-09 line no
-    /// interface at all: Zaxnes has a single renderer, so the setting is stored for the scripts
-    /// that read it and nothing more.
+    /// <c>render.visual_style</c> used to be excluded, because AMD-040 §3 gave its SPEC-09 line
+    /// no interface at all. AMD-055 §3 point 6 puts it back: the amended REQ-UI-061 shows a
+    /// « Style » row after « Skybox », and the twelve parameters of REQ-SCN-079 in a collapsible
+    /// « Style » group under it.
     /// </remarks>
     public static IReadOnlyList<string> ExcludedKeys { get; } =
     [
         SettingKeys.UiLastBrowseDir,
         SettingKeys.UiWindowRect,
         SettingKeys.AudioBgMusic,
-        SettingKeys.RenderVisualStyle,
     ];
 
     /// <summary>
@@ -119,14 +119,129 @@ internal sealed class OptionsModel
     ];
 
     /// <summary>
+    /// The twelve parameters of the Enhanced style (AMD-055 REQ-SCN-079), in the order of the
+    /// amendment's table, which is the order of the collapsible « Style » group.
+    /// </summary>
+    public static IReadOnlyList<string> StyleKeys { get; } =
+        [.. SettingsCatalogue.StyleParameterOrder.Select(static parameter => parameter.Key)];
+
+    /// <summary>
+    /// The five occlusion rows of REQ-SCN-079, which are only visible when
+    /// <c>spl.ao</c> ≠ 0.
+    /// </summary>
+    private static IReadOnlyList<string> OcclusionKeys { get; } =
+    [
+        SettingKeys.RenderStyleAoStrength,
+        SettingKeys.RenderStyleAoRadius,
+        SettingKeys.RenderStyleAoThickness,
+        SettingKeys.RenderStyleAoQuality,
+    ];
+
+    /// <summary>
+    /// The four reflection rows of REQ-SCN-079, which are only visible when
+    /// <c>spl.reflections</c> = 1.
+    /// </summary>
+    private static IReadOnlyList<string> ReflectionKeys { get; } =
+    [
+        SettingKeys.RenderStyleSsrShine,
+        SettingKeys.RenderStyleSsrClarity,
+        SettingKeys.RenderStyleSsrLength,
+        SettingKeys.RenderStyleSsrQuality,
+    ];
+
+    /// <summary>
     /// The group <paramref name="descriptor"/> is shown in inside its tab, or null when it
     /// stands on its own.
     /// </summary>
     public static string? GroupOf(SettingDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        return GeometryKeys.Contains(descriptor.Key) ? UiKeys.GroupGeometry : null;
+        if (GeometryKeys.Contains(descriptor.Key))
+        {
+            return UiKeys.GroupGeometry;
+        }
+
+        // AMD-055 §4: every « Zaxnes » element is in the collapsible « Style » group, after the
+        // « Style » row, which itself stays an ordinary row of the Video tab.
+        return StyleKeys.Contains(descriptor.Key) ? UiKeys.GroupStyle : null;
     }
+
+    /// <summary>
+    /// Whether <paramref name="key"/> is shown right now, given the values in force
+    /// (AMD-055 REQ-SCN-079, visibility rules): the twelve style parameters only appear in
+    /// Enhanced, the occlusion ones only when <c>spl.ao</c> ≠ 0 and the reflection ones only
+    /// when <c>spl.reflections</c> = 1. Every other row is always visible.
+    /// </summary>
+    /// <param name="key">The stable key of the row.</param>
+    /// <param name="model">The settings in force.</param>
+    public static bool IsVisibleNow(string key, SettingsModel model)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(model);
+
+        if (!StyleKeys.Contains(key))
+        {
+            return true;
+        }
+
+        if (model.GetInt(SettingKeys.RenderVisualStyle) != SettingsCatalogue.EnhancedStyle)
+        {
+            return false;
+        }
+
+        if (OcclusionKeys.Contains(key))
+        {
+            return model.GetInt(SettingKeys.RenderStyleAo) != 0;
+        }
+
+        if (ReflectionKeys.Contains(key))
+        {
+            return model.GetInt(SettingKeys.RenderStyleReflections) != 0;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="key"/> is shown but has no effect, so the row is greyed out with
+    /// the reason beside it. <c>ao.thickness</c> is the one such row: it only acts in the MSVO
+    /// mode, which the declared fallback <b>(D)</b> of REQ-SCN-083 renders as Depth, so it has
+    /// no observable effect at all for now (REQ-SCN-079).
+    /// </summary>
+    /// <param name="key">The stable key of the row.</param>
+    /// <param name="model">The settings in force.</param>
+    public static bool IsInert(string key, SettingsModel model)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(model);
+
+        // AMD-032 §3: under the direct render method the scene is always drawn at the native
+        // resolution, so the resolution scale exists but does nothing.
+        if (string.Equals(key, SettingKeys.VideoResScale, StringComparison.Ordinal))
+        {
+            return !RenderScaling.ScaleApplies(model.GetInt(SettingKeys.VideoRenderMethod));
+        }
+
+        return string.Equals(key, SettingKeys.RenderStyleAoThickness, StringComparison.Ordinal)
+            && !MsvoPortAvailable;
+    }
+
+    /// <summary>
+    /// Whether the MSVO port of REQ-SCN-083 is available. While it is not, <c>spl.ao</c> = 1 is
+    /// rendered exactly like <c>spl.ao</c> = 2 (Depth) — declared fallback <b>(D)</b> — and
+    /// <c>ao.thickness</c> has no observable effect.
+    /// </summary>
+    public const bool MsvoPortAvailable = false;
+
+    /// <summary>
+    /// The two style parameters REQ-SCN-079 types as whole numbers of domain « 0 à 1 » and
+    /// AMD-055 §4 shows as a tick box rather than a two-entry list.
+    /// </summary>
+    public static IReadOnlyList<string> TickBoxKeys { get; } =
+    [
+        SettingKeys.RenderStylePixelShadow,
+        SettingKeys.RenderStyleReflections,
+    ];
 
     /// <summary>The groups a tab holds, in the order their first row appears.</summary>
     public IReadOnlyList<string> Groups(OptionsTab tab)

@@ -20,6 +20,168 @@ public enum SkyboxKind
     Fantasy = 2,
 }
 
+/// <summary>Ambient occlusion setting <c>spl.ao</c> (AMD-055 REQ-SCN-079).</summary>
+public enum AmbientOcclusionMode
+{
+    /// <summary>No occlusion pass at all.</summary>
+    Off = 0,
+
+    /// <summary>
+    /// The multi-scale occlusion of REQ-SCN-083, rendered exactly like <see cref="Depth"/>
+    /// while the MiniEngine port is not available — declared fallback <b>(D)</b>.
+    /// </summary>
+    Msvo = 1,
+
+    /// <summary>Screen-space occlusion reconstructed from the depth (REQ-SCN-083).</summary>
+    Depth = 2,
+}
+
+/// <summary>
+/// The twelve parameters of the Enhanced style (AMD-055 REQ-SCN-079), plus the style itself
+/// (REQ-SCN-078). They are global user settings, never taken from the profile, and a change
+/// applies to the next rendered frame without reloading the game.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Every <c>Effective*</c> member answers Classic with "off": REQ-SCN-080 has an Enhanced
+/// capture with all effects off be identical to a Classic one, so Classic is simply the whole
+/// set of effects switched off, and the renderer reads the effective members alone.
+/// </para>
+/// <para>
+/// The curvature of AMD-043 is deliberately absent: it is <b>not</b> an effect of the style and
+/// acts in Classic as in Enhanced <b>(D)</b>, which is why it stays on
+/// <see cref="RenderSettings.Bend"/> (REQ-SCN-078).
+/// </para>
+/// </remarks>
+public sealed class StyleSettings
+{
+    private int _ambientOcclusion;
+    private int _aoStrength = 3;
+    private int _aoRadius = 3;
+    private int _aoThickness = 3;
+    private int _aoQuality = 1;
+    private int _voxelGrid;
+    private int _ssrShine = 3;
+    private int _ssrClarity = 3;
+    private int _ssrLength = 3;
+    private int _ssrQuality = 2;
+
+    /// <summary>
+    /// Whether the Enhanced style is in force. Classic is the rendering of SPEC-06, unchanged
+    /// (REQ-SCN-078).
+    /// </summary>
+    public bool Enhanced { get; set; }
+
+    /// <summary><c>spl.ao</c>: 0 Off, 1 MSVO, 2 Depth.</summary>
+    public int AmbientOcclusion
+    {
+        get => _ambientOcclusion;
+        set => _ambientOcclusion = Math.Clamp(value, 0, 2);
+    }
+
+    /// <summary><c>ao.strength</c>, 1 to 5.</summary>
+    public int AoStrength
+    {
+        get => _aoStrength;
+        set => _aoStrength = Math.Clamp(value, 1, 5);
+    }
+
+    /// <summary><c>ao.radius</c>, 1 to 5.</summary>
+    public int AoRadius
+    {
+        get => _aoRadius;
+        set => _aoRadius = Math.Clamp(value, 1, 5);
+    }
+
+    /// <summary><c>ao.thickness</c>, 1 to 5; no effect outside the MSVO mode.</summary>
+    public int AoThickness
+    {
+        get => _aoThickness;
+        set => _aoThickness = Math.Clamp(value, 1, 5);
+    }
+
+    /// <summary><c>ao.quality</c>: 0 Low, 1 Medium, 2 High.</summary>
+    public int AoQuality
+    {
+        get => _aoQuality;
+        set => _aoQuality = Math.Clamp(value, 0, 2);
+    }
+
+    /// <summary><c>spl.pixel_shadow</c> (REQ-SCN-082).</summary>
+    public bool PixelShadow { get; set; }
+
+    /// <summary><c>spl.voxel_grid</c>: 0 Off, 1, 2 or 3 (REQ-SCN-081).</summary>
+    public int VoxelGrid
+    {
+        get => _voxelGrid;
+        set => _voxelGrid = Math.Clamp(value, 0, 3);
+    }
+
+    /// <summary><c>spl.reflections</c> (REQ-SCN-084).</summary>
+    public bool Reflections { get; set; }
+
+    /// <summary><c>ssr.shine</c>, 1 to 5.</summary>
+    public int SsrShine
+    {
+        get => _ssrShine;
+        set => _ssrShine = Math.Clamp(value, 1, 5);
+    }
+
+    /// <summary><c>ssr.clarity</c>, 1 to 5.</summary>
+    public int SsrClarity
+    {
+        get => _ssrClarity;
+        set => _ssrClarity = Math.Clamp(value, 1, 5);
+    }
+
+    /// <summary><c>ssr.length</c>, 1 to 5.</summary>
+    public int SsrLength
+    {
+        get => _ssrLength;
+        set => _ssrLength = Math.Clamp(value, 1, 5);
+    }
+
+    /// <summary><c>ssr.quality</c>: 0 Low, 1 Medium, 2 High, 3 Ultra.</summary>
+    public int SsrQuality
+    {
+        get => _ssrQuality;
+        set => _ssrQuality = Math.Clamp(value, 0, 3);
+    }
+
+    /// <summary>
+    /// The occlusion mode the frame really runs, <see cref="AmbientOcclusionMode.Off"/> in
+    /// Classic.
+    /// </summary>
+    public AmbientOcclusionMode EffectiveOcclusion
+        => Enhanced ? (AmbientOcclusionMode)AmbientOcclusion : AmbientOcclusionMode.Off;
+
+    /// <summary>
+    /// The cell side <c>N = 2^spl.voxel_grid</c> in voxels, and 0 when the grid is off or the
+    /// style is Classic (REQ-SCN-081).
+    /// </summary>
+    public int EffectiveGridCell
+        => Enhanced && VoxelGrid > 0 ? 1 << VoxelGrid : 0;
+
+    /// <summary>Whether the pixel shadows of REQ-SCN-082 are in force this frame.</summary>
+    public bool EffectivePixelShadow => Enhanced && PixelShadow;
+
+    /// <summary>Whether the floor reflections of REQ-SCN-084 are in force this frame.</summary>
+    public bool EffectiveReflections => Enhanced && Reflections;
+
+    /// <summary>
+    /// The occlusion radius <c>r</c> in scene units: <c>(8 + 6 × (ao.radius − 1)) × s</c>
+    /// (REQ-SCN-083).
+    /// </summary>
+    /// <param name="sceneScale">The scene scale <c>s</c> of REQ-SCN-002.</param>
+    public float OcclusionRadius(float sceneScale)
+        => (8f + (6f * (AoRadius - 1))) * sceneScale;
+
+    /// <summary>
+    /// The darkening ceiling <c>O ≤ 0.1 × ao.strength</c> of REQ-SCN-083: 0.1 to 0.5.
+    /// </summary>
+    public float OcclusionCeiling => 0.1f * AoStrength;
+}
+
 /// <summary>
 /// The user settings of SPEC-06 §4.1 the renderer reads. Their persistence belongs to SPEC-09;
 /// the bounds and defaults here are those of §4.1.
@@ -177,6 +339,12 @@ public sealed class RenderSettings
     /// next rendered one; in 3D mode nothing reads it.
     /// </summary>
     public bool Bend2dMode { get; set; } = true;
+
+    /// <summary>
+    /// The visual style of AMD-055 REQ-SCN-078 and its twelve parameters. They are global
+    /// settings, never taken from the profile, and apply to the next rendered frame.
+    /// </summary>
+    public StyleSettings Style { get; } = new();
 
     /// <summary>The scene scale <c>s</c> of REQ-SCN-002; 1 on desktop.</summary>
     public float SceneScale

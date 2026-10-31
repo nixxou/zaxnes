@@ -121,6 +121,12 @@ internal static class UiKeys
 
     public const string HintImportThreeDSen = "hint.import_3dsen";
     public const string HintResScaleDirect = "hint.res_scale_direct";
+
+    /// <summary>
+    /// Why « Thickness » is greyed out: it only acts in the MSVO mode, which the declared
+    /// fallback <b>(D)</b> of AMD-055 REQ-SCN-083 renders as Depth.
+    /// </summary>
+    public const string HintThicknessMsvoOnly = "hint.thickness_msvo_only";
     public const string HintPressAControl = "hint.press_a_control";
     public const string HintClickACell = "hint.click_a_cell";
     public const string HintAtNextStart = "hint.at_next_start";
@@ -172,6 +178,9 @@ internal static class UiKeys
 
     /// <summary>The « Geometry » group of AMD-043 §6, marked advanced.</summary>
     public const string GroupGeometry = "options.group.geometry";
+
+    /// <summary>The « Style » group of AMD-055 §4, which holds the twelve style parameters.</summary>
+    public const string GroupStyle = "options.group.style";
 
     /// <summary>What marks a group as advanced (AMD-043 §6).</summary>
     public const string HintAdvanced = "hint.advanced";

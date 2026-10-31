@@ -57,6 +57,20 @@ public sealed class CatalogueTests
 
                 // AMD-052 §3 point 7 adds this line to §4.1.1 (REQ-LOOP-077).
                 SettingKeys.VideoMaxQueuedFrames,
+
+                // AMD-055 §4 (§3 point 7) adds the twelve style parameters to §4.1.1.
+                SettingKeys.RenderStyleAo,
+                SettingKeys.RenderStyleAoStrength,
+                SettingKeys.RenderStyleAoRadius,
+                SettingKeys.RenderStyleAoThickness,
+                SettingKeys.RenderStyleAoQuality,
+                SettingKeys.RenderStylePixelShadow,
+                SettingKeys.RenderStyleVoxelGrid,
+                SettingKeys.RenderStyleReflections,
+                SettingKeys.RenderStyleSsrShine,
+                SettingKeys.RenderStyleSsrClarity,
+                SettingKeys.RenderStyleSsrLength,
+                SettingKeys.RenderStyleSsrQuality,
             }.Order(),
             model.Except(specified).Order());
     }
