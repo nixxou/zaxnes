@@ -83,6 +83,33 @@ public sealed class MeshDumpTests
         Assert.Equal(3f, max[2] - min[2], 4);
     }
 
+    [Fact] // AMD-057, REQ-E3D-501, REQ-SCN-065
+    public void Two_full_tiles_of_one_object_that_touch_each_keep_the_whole_box()
+    {
+        // AMD-057 withdraws AMD-027 §1-2: the drawn mesh is the whole mesh of REQ-E3D-501, so
+        // a full tile is a closed box of six rectangles whether or not a neighbour of the same
+        // object covers one of its walls. The walls between the two are kept and the renderer
+        // settles the depth tie they make (SPEC-06 REQ-SCN-065).
+        Fixture fixture = new();
+        fixture.Pattern(depth: 3, ProfileLayer.L1);
+
+        // Four full tiles in a square, cell against cell: the pattern is self-connected, so the
+        // four end up in one shape and the inner walls are all covered by a neighbour.
+        foreach ((int x, int y) in new[] { (96, 96), (104, 96), (96, 104), (104, 104) })
+        {
+            fixture.Tile(x, y);
+        }
+
+        JsonElement[] tiles = [.. Dump(fixture).GetProperty("tiles").EnumerateArray()];
+
+        Assert.Equal(4, tiles.Length);
+        foreach (JsonElement tile in tiles)
+        {
+            Assert.Equal(24, tile.GetProperty("vertices").GetInt32());
+            Assert.Equal(12, tile.GetProperty("triangles").GetInt32());
+        }
+    }
+
     [Fact] // REQ-E3D-642, REQ-SCN-044
     public void A_tile_of_the_interface_layer_is_marked_as_hud()
     {

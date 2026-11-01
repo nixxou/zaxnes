@@ -11,9 +11,19 @@ namespace Zax.Render.Tests;
 /// (REQ-SCN-040, Q-020 revised), nor at the joints of a plain surface (REQ-SCN-065).
 /// </summary>
 /// <remarks>
+/// <para>
 /// Both are measured by pixel statistics on an offscreen capture, as SPEC-06 §5 asks: the
 /// surface of a flat, uniformly lit plane is one single colour, so any joint that shows at all
 /// turns up as a column or a row that departs from it.
+/// </para>
+/// <para>
+/// AMD-057 withdrew the sealing variants of AMD-027: every drawn tile carries the whole mesh of
+/// REQ-E3D-501 again, walls included, and it is the depth push of
+/// <see cref="SceneConstants.WallDepthBias"/> that keeps the coincident pair at a joint from
+/// winning against the face that closes the surface. Each measure below therefore starts by
+/// checking that the walls really are there — a surface drawn without them would pass the pixel
+/// test for the wrong reason.
+/// </para>
 /// </remarks>
 [Collection(GlCollection.Name)]
 public sealed class SeamTests
@@ -30,6 +40,7 @@ public sealed class SeamTests
         using SceneRenderer renderer = new(gl.Gl);
 
         SceneState scene = Surface();
+        AssertWholeBoxes(scene, expected: 16);
 
         // The criterion is stated for the default view. The seam the users reported comes from
         // the shadow map, so the map resolution is what decides whether it shows: one texel of
@@ -58,7 +69,7 @@ public sealed class SeamTests
         // depth 24 to 56 whose walls, kept by REQ-E3D-501, used to show as a grid at every
         // joint and as dark fins sticking out of the silhouette. The surface is flat and of
         // one colour, so the drawn box has to stay a plain rectangle of that colour whatever
-        // the angle.
+        // the angle — with the walls drawn, as AMD-057 requires.
         using GlFixture gl = GlFixture.Create(800, 600);
         using SceneRenderer renderer = new(gl.Gl);
 
@@ -70,6 +81,8 @@ public sealed class SeamTests
                 .Pattern(SceneFixture.Solid(3), depth, ProfileLayer.L1, fullWarp: true)
                 .Rect(SceneFixture.Solid(3), column: 12, row: 12, columns: 6, rows: 6)
                 .Build();
+
+            AssertWholeBoxes(scene, expected: 36);
 
             // Head-on views, pitched up and down: the ones the users reported, and the ones
             // where "a line across the surface" and "the lower edge" mean one face each.
@@ -156,6 +169,7 @@ public sealed class SeamTests
         using SceneRenderer renderer = new(gl.Gl);
 
         SceneState scene = Translucent();
+        AssertWholeBoxes(scene, expected: 16);
 
         // Seen from an angle, so that the walls between the tiles have a real width on screen —
         // head-on they are edge-on and the artefact hides itself — and from the four corners,
@@ -287,6 +301,27 @@ public sealed class SeamTests
     }
 
     // ------------------------------------------------------------------ measures
+
+    /// <summary>
+    /// Checks that every tile of the surface is drawn with the whole mesh of REQ-E3D-501 — a
+    /// closed box of six rectangles, 24 vertices and 12 triangles — walls between neighbours
+    /// included (AMD-057, which withdraws the sealing variants of AMD-027 §1-2).
+    /// </summary>
+    /// <param name="scene">The scene whose draw list is read.</param>
+    /// <param name="expected">How many tiles the surface has.</param>
+    private static void AssertWholeBoxes(SceneState scene, int expected)
+    {
+        Assert.NotNull(scene.DrawList);
+        List<DrawTile> tiles = [.. scene.DrawList.Tiles];
+        Assert.Equal(expected, tiles.Count);
+
+        foreach (DrawTile tile in tiles)
+        {
+            Assert.NotNull(tile.Mesh);
+            Assert.Equal(24, tile.Mesh.VertexCount);
+            Assert.Equal(12, tile.Mesh.TriangleCount);
+        }
+    }
 
     /// <summary>
     /// The drawn box of the capture, inset by a twelfth of its side so that only the front face
