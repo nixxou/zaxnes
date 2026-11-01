@@ -98,33 +98,33 @@ public sealed class Amd053LibraryTests
     }
 
     /// <summary>
-    /// REQ-UI-212: an accepted import names the profile's title and, when it is not empty, its
-    /// author; an empty author is left out of the notification.
+    /// REQ-UI-212 as AMD-056 amends it: an accepted import no longer <b>says</b> anything — the
+    /// paragraph naming the title and the author in a notification is deleted, and REQ-UI-214
+    /// has a successful import show neither notification nor dialog. The header is still read,
+    /// and the title still falls back to the file name without its extension (REQ-PERS-034).
     /// </summary>
-    [Fact] // REQ-UI-212
-    public void REQ_UI_212_an_accepted_import_names_the_title_and_the_author()
+    [Fact] // REQ-UI-212, REQ-UI-214, REQ-PERS-034
+    public void REQ_UI_212_an_accepted_import_says_nothing()
     {
         using UiLanguageScope english = new(UiLanguage.English);
         using UiHarness harness = new("Arkanoid");
 
         string both = WriteProfile(harness, "both.3dn", "aaaaaaaaaaaa", "Foo", "Bar");
-        UserProfile imported = harness.Catalog.ImportProfile(both).Profile!;
+        ProfileImportPlan plan = harness.Catalog.InspectProfileImport(both);
+        UserProfile imported = harness.Catalog.ApplyProfileImport(plan).Profile!;
 
         Assert.Equal("Foo", imported.Title);
         Assert.Equal("Bar", imported.Header.Author);
-        Assert.Equal(
-            "Profile imported: Foo, by Bar",
-            UiText.ProfileImported(imported.Title, imported.Header.Author));
 
-        string alone = WriteProfile(harness, "alone.3dn", "bbbbbbbbbbbb", "Foo", null);
-        UserProfile second = harness.Catalog.ImportProfile(alone).Profile!;
+        // AMD-056 §2: an unknown identifier puts up no dialog at all, and the table of texts
+        // no longer carries a « Profile imported: … » entry for a notification to show.
+        Assert.False(ProfileImportDialogs.Decide(plan).IsShown);
+        Assert.DoesNotContain(
+            "Profile imported",
+            string.Join('\n', UiStrings.EnglishTable.Values),
+            StringComparison.Ordinal);
 
-        // An empty author is left out of the notification.
-        Assert.Equal(
-            "Profile imported: Foo",
-            UiText.ProfileImported(second.Title, second.Header.Author));
-
-        // And the title falls back to the file name without its extension (REQ-PERS-034).
+        // The title falls back to the file name without its extension (REQ-PERS-034).
         string plain = WriteProfile(harness, "Baz.3dn", "cccccccccccc", null, null);
         Assert.Equal("Baz", harness.Catalog.ImportProfile(plain).Profile!.Title);
     }

@@ -486,39 +486,114 @@ internal sealed partial class ZaxUi
         }
     }
 
+    /// <summary>
+    /// The import of a chosen profile, through the dialogs of AMD-056 REQ-UI-214: the file is
+    /// read first and written only once the dialog it calls for says so.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The four rows of the requirement's table are decided by
+    /// <see cref="ProfileImportDialogs.Decide"/>, which knows nothing of ImGui, so each of them
+    /// is checked without a frame. Only the replacement has anything to run behind its first
+    /// button; the other two dialogs just close, and an unknown identifier puts up nothing at
+    /// all.
+    /// </para>
+    /// <para>
+    /// REQ-PERS-041 keeps the fact logged whatever happens, the refusals and the built-in
+    /// identifier included — which the notification of REQ-UI-212 used to be the only trace of.
+    /// </para>
+    /// </remarks>
     private void ImportProfile(string path)
     {
-        ProfileImportResult result = _catalog.ImportProfile(path);
+        ProfileImportPlan plan = _catalog.InspectProfileImport(path);
+        ProfileImportDialog dialog = ProfileImportDialogs.Decide(plan);
 
-        if (result.Message.Length > 0)
+        switch (plan.Outcome)
         {
-            // REQ-UI-084: an import failure is a notification of <b>normal</b> severity.
-            _host.Notifications.Show(result.Message);
+            case ProfileImportOutcome.Rejected:
+                _log($"the profile '{path}' was refused: {plan.Message}");
+                ShowImportDialog(dialog);
+                return;
+
+            case ProfileImportOutcome.AlreadyBuiltIn:
+                _log($"the profile '{path}' carries the identifier of a built-in profile "
+                    + $"(\"{plan.Id}\"); nothing imported.");
+                ShowImportDialog(dialog);
+                return;
+
+            case ProfileImportOutcome.Replaced:
+                // REQ-UI-214: point 3 of REQ-PERS-041 runs only once « Replace » is pressed.
+                // « Cancel », or closing the box, changes nothing.
+                _log($"the profile '{path}' would replace '{plan.Replaced?.Title}'; asking.");
+                ShowImportDialog(dialog, () => ApplyImport(plan));
+                return;
+
+            default:
+                // Row 4: an unknown identifier. No notification, no dialog.
+                ApplyImport(plan);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// Writes what the plan said, and shows the refusal dialog of REQ-UI-214 when the write
+    /// fails after the confirmation. A profile that went in becomes the selected entry of the
+    /// box of REQ-UI-201.
+    /// </summary>
+    private void ApplyImport(ProfileImportPlan plan)
+    {
+        ProfileImportResult result = _catalog.ApplyProfileImport(plan);
+
+        if (result.Outcome == ProfileImportOutcome.Rejected)
+        {
+            // REQ-UI-214: the refusal dialog, with the message of the error rather than a cause
+            // of REQ-UI-084 — the file was readable and well formed.
+            ShowImportDialog(
+                ProfileImportDialogs.Refused(Path.GetFileName(plan.SourcePath), result.Message));
             return;
         }
 
-        if (result.Outcome is ProfileImportOutcome.Added or ProfileImportOutcome.Replaced
-            && result.Profile is { } profile)
+        if (result.Profile is not { } profile)
         {
-            // AMD-053 REQ-UI-212: an accepted profile names its title and, when field 9 is not
-            // empty, its author. An empty author is left out of the notification.
-            _host.Notifications.Show(UiText.ProfileImported(profile.Title, profile.Header.Author));
-            _log($"profile '{profile.Title}' imported.");
-            _options.Mixer?.PlaySound(UiSound.Confirm);
-
-            // The chooser is rebuilt from the library, so a new profile shows up at once.
-            RebuildChooser();
+            return;
         }
+
+        _log($"profile '{profile.Title}' imported.");
+        _options.Mixer?.PlaySound(UiSound.Confirm);
+
+        // The chooser is rebuilt from the library, so a new profile shows up at once, and
+        // REQ-UI-214 has the imported entry become the selected one.
+        RebuildChooser(profile.Id);
+    }
+
+    private void ShowImportDialog(ProfileImportDialog dialog, Action? confirmed = null)
+    {
+        if (!dialog.IsShown)
+        {
+            return;
+        }
+
+        _confirm.OpenImportDialog(dialog, confirmed);
+        State.Dialog = true;
     }
 
     /// <summary>
     /// Rebuilds the chooser's list from the library, which an import has just changed.
     /// </summary>
-    private void RebuildChooser()
+    /// <param name="selectedId">
+    /// The entry to select, which AMD-056 REQ-UI-214 would have be the imported one. Null
+    /// leaves the selection to <see cref="ProfileChooserModel.Reset"/>.
+    /// </param>
+    private void RebuildChooser(string? selectedId = null)
     {
         string? rom = _chooser.RomPath;
         _chooser = new ProfileChooserModel(_catalog.Library);
         _chooser.Reset(rom);
+
+        if (selectedId is { Length: > 0 })
+        {
+            _chooser.SelectedId = selectedId;
+        }
     }
 
     /// <summary>

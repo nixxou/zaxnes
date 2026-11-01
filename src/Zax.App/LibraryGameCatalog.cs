@@ -334,6 +334,20 @@ internal sealed class LibraryGameCatalog : IGameCatalog
     /// <see cref="ProfileImportMessages"/> holds.
     /// </returns>
     public ProfileImportResult ImportProfile(string path)
+        => ApplyProfileImport(InspectProfileImport(path));
+
+    /// <summary>
+    /// Reads a chosen <c>.3dn</c> file and says what importing it would do, without writing
+    /// anything (AMD-056 REQ-UI-214): the interface needs the outcome to choose its dialog, and
+    /// a replacement must not happen before the dialog is answered.
+    /// </summary>
+    /// <param name="path">The chosen file.</param>
+    /// <remarks>
+    /// A file that cannot be <b>read</b> is the third cause of REQ-UI-084, as it was before;
+    /// only a failure to <b>write</b>, which can happen after the confirmation, carries the
+    /// message of its own error (<see cref="ApplyProfileImport"/>).
+    /// </remarks>
+    public ProfileImportPlan InspectProfileImport(string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
 
@@ -343,6 +357,9 @@ internal sealed class LibraryGameCatalog : IGameCatalog
             // Only the profiles of the user folder: the import replaces the file of the entry it
             // takes over, and nothing next to the executable is ever deleted (AMD-033 §1). A
             // profile of the program folder simply loses its entry to the imported one.
+            //
+            // AMD-056 REQ-UI-214 names the entry by its *displayed* title, the one a rename
+            // changed, which is what `GameLibraryEntry.Title` holds.
             if (entry.Source == GameProfileSource.User && entry.Origin == ProfileOrigin.User)
             {
                 known.Add(new UserProfile(entry.Id, entry.Title, entry.ProfilePath, default));
@@ -358,18 +375,49 @@ internal sealed class LibraryGameCatalog : IGameCatalog
             }
         }
 
-        UserProfileFolder folder = new(PhysicalProfileFileSystem.Instance, _paths.ProfilesDirectory);
-        ProfileImportResult result;
         try
         {
-            result = folder.Import(path, builtIn, known);
+            return Folder().Inspect(path, builtIn, known);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return new ProfileImportResult(
+            return new ProfileImportPlan(
                 ProfileImportOutcome.Rejected,
+                path,
+                ProfileImportMessages.ObsoleteFormat(path),
+                string.Empty,
+                string.Empty,
+                default,
                 null,
-                ProfileImportMessages.ObsoleteFormat(path));
+                string.Empty);
+        }
+    }
+
+    /// <summary>
+    /// Carries out a plan of <see cref="InspectProfileImport"/>: the file is copied into
+    /// <c>&lt;root&gt;/profiles</c> and the library gains — or updates — its entry, without a
+    /// restart.
+    /// </summary>
+    /// <returns>
+    /// The outcome and the message to show. A write that fails carries the message of its own
+    /// error, which REQ-UI-214 shows in the refusal dialog.
+    /// </returns>
+    public ProfileImportResult ApplyProfileImport(ProfileImportPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        ProfileImportResult result;
+        try
+        {
+            result = Folder().Apply(plan);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // REQ-UI-214: « Si l'écriture échoue après la confirmation, le dialogue de refus
+            // s'affiche avec le message de l'erreur. » The third text of REQ-UI-084 would say
+            // nothing true here — the file was readable and well formed.
+            _log($"the profile import of '{plan.SourcePath}' failed: {exception.Message}");
+            return new ProfileImportResult(ProfileImportOutcome.Rejected, null, exception.Message);
         }
 
         if (result is { Outcome: ProfileImportOutcome.Added or ProfileImportOutcome.Replaced, Profile: { } imported })
@@ -383,6 +431,9 @@ internal sealed class LibraryGameCatalog : IGameCatalog
 
         return result;
     }
+
+    private UserProfileFolder Folder()
+        => new(PhysicalProfileFileSystem.Instance, _paths.ProfilesDirectory);
 
     /// <summary>
     /// Imports every profile of an installed 3dSen (AMD-030 §2, §5): the profiles are written

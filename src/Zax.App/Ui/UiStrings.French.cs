@@ -66,6 +66,11 @@ internal static partial class UiStrings
         [UiKeys.ButtonYes] = "Oui",
         [UiKeys.ButtonNo] = "Non",
 
+        // AMD-056 REQ-UI-214 : les boutons des trois dialogues d'import. « OK » ne se
+        // traduit pas ; « Replace » nomme l'action, donc « Remplacer » et non « Oui ».
+        [UiKeys.ButtonOk] = "OK",
+        [UiKeys.ButtonReplace] = "Remplacer",
+
         // ------------------------ notifications de SPEC-10 REQ-UI-082 à REQ-UI-084
         // La traduction des textes que la spec fixe mot pour mot (AMD-036 §1) : les
         // particularités de l'original appartiennent à l'entrée anglaise, pas à celle-ci.
@@ -112,13 +117,24 @@ internal static partial class UiStrings
         [UiKeys.NotifyThreeDSenSummary] =
             "3dSen : {0} profil(s) importé(s), {1} déjà présent(s), {2} en échec.",
 
-        // AMD-053 REQ-UI-212 : ce que dit un import accepté.
-        [UiKeys.NotifyProfileImported] = "Profil importé : {0}",
-        [UiKeys.NotifyProfileImportedBy] = "Profil importé : {0}, de {1}",
-
         // ------------------- confirmations de REQ-PERS-042 et REQ-PERS-054
         [UiKeys.ConfirmDeleteGame] = "Voulez-vous supprimer le jeu et ses sauvegardes d'état ?",
         [UiKeys.ConfirmDeleteSlot] = "Voulez-vous supprimer l'emplacement {0} ?",
+
+        // ------------------- les dialogues d'import d'AMD-056 REQ-UI-214. Rien pour un
+        //                     import réussi : il n'affiche ni notification ni dialogue, et
+        //                     l'entrée « Profil importé : … » de REQ-UI-212 a disparu.
+        //                     Le corps du remplacement énumère au singulier ce que la ROM,
+        //                     la jaquette et les sauvegardes d'état gardent.
+        [UiKeys.DialogImportRefusedTitle] = "Impossible d'importer ce fichier",
+        [UiKeys.DialogImportRefusedBody] = "{0} : {1}",
+        [UiKeys.DialogImportBuiltInTitle] = "Déjà dans Zaxnes",
+        [UiKeys.DialogImportBuiltInBody] =
+            "{0} est un profil embarqué ; {1} n'a pas été importé.",
+        [UiKeys.DialogImportReplaceTitle] = "Remplacer {0} ?",
+        [UiKeys.DialogImportReplaceBody] =
+            "Le profil sera remplacé par celui de {0}. "
+            + "La ROM, la jaquette et les sauvegardes d'état seront conservées.",
 
         // ------------------------------------------------------------- hints
         [UiKeys.HintImportThreeDSen] =

@@ -56,6 +56,46 @@ public enum ProfileImportOutcome
 public sealed record ProfileImportResult(ProfileImportOutcome Outcome, UserProfile? Profile, string Message);
 
 /// <summary>
+/// What an import <i>would</i> do, read from the file without writing anything
+/// (<see cref="UserProfileFolder.Inspect"/>). AMD-056 REQ-UI-214 needs this: the replacement of
+/// a user profile happens only once the confirmation dialog has been answered, so the outcome
+/// has to be known before any file moves.
+/// </summary>
+/// <param name="Outcome">
+/// What <see cref="UserProfileFolder.Apply"/> would do. Only <see cref="ProfileImportOutcome.Added"/>
+/// and <see cref="ProfileImportOutcome.Replaced"/> write anything.
+/// </param>
+/// <param name="SourcePath">The chosen file, as it was given.</param>
+/// <param name="Message">
+/// The text of REQ-UI-084 that names the cause of a refusal, empty otherwise.
+/// </param>
+/// <param name="Id">The identifier the file carries, empty when it was refused.</param>
+/// <param name="Title">
+/// The title the library entry would take: field 8, or the file name <b>without</b> its
+/// extension (REQ-PERS-034). Not the <c>&lt;titre&gt;</c> of the REQ-UI-214 dialogs, whose
+/// fallback is the file name <i>with</i> its extension.
+/// </param>
+/// <param name="Header">The header that was read; <c>default</c> for a refusal.</param>
+/// <param name="Replaced">
+/// The user profile whose identifier this file takes over, when there is one — the entry whose
+/// displayed name the confirmation of REQ-UI-214 names.
+/// </param>
+/// <param name="Destination">Where the file would be copied, empty when nothing would be.</param>
+public sealed record ProfileImportPlan(
+    ProfileImportOutcome Outcome,
+    string SourcePath,
+    string Message,
+    string Id,
+    string Title,
+    ProfileHeader Header,
+    UserProfile? Replaced,
+    string Destination)
+{
+    /// <summary>Whether <see cref="UserProfileFolder.Apply"/> would write anything.</summary>
+    public bool Writes => Outcome is ProfileImportOutcome.Added or ProfileImportOutcome.Replaced;
+}
+
+/// <summary>
 /// The texts the original shows when an import fails. SPEC-10 REQ-UI-084 is the only normative
 /// source for them, and one oddity survives its rewording by AMD-056 §2: the two spaces before
 /// "is" in the version message.
@@ -240,7 +280,27 @@ public sealed class UserProfileFolder
     }
 
     /// <summary>
-    /// Imports the file at <paramref name="sourcePath"/> into the folder.
+    /// Imports the file at <paramref name="sourcePath"/> into the folder: the reading of
+    /// <see cref="Inspect"/> followed at once by the writing of <see cref="Apply"/>.
+    /// </summary>
+    /// <param name="sourcePath">The chosen file.</param>
+    /// <param name="builtInIds">Identifiers of the built-in profiles.</param>
+    /// <param name="userProfiles">The user profiles already known, from <see cref="Scan"/>.</param>
+    /// <remarks>
+    /// This is the <b>non-interactive</b> import: it replaces an existing user profile without
+    /// asking. The interface no longer takes this path — AMD-056 REQ-UI-214 has it inspect, put
+    /// up a dialog, and apply only once the dialog says so — but everything with nowhere to show
+    /// a dialog still does, the acceptance harness included.
+    /// </remarks>
+    public ProfileImportResult Import(
+        string sourcePath,
+        IReadOnlyCollection<string>? builtInIds = null,
+        IReadOnlyList<UserProfile>? userProfiles = null)
+        => Apply(Inspect(sourcePath, builtInIds, userProfiles));
+
+    /// <summary>
+    /// Reads the file at <paramref name="sourcePath"/> and says what importing it would do,
+    /// <b>without writing anything</b> (AMD-056 REQ-UI-214).
     /// </summary>
     /// <param name="sourcePath">The chosen file.</param>
     /// <param name="builtInIds">Identifiers of the built-in profiles.</param>
@@ -252,7 +312,7 @@ public sealed class UserProfileFolder
     /// malformed protobuf, a signature that is not <c>"3dn"</c>, an unsupported version, and a
     /// missing identifier.
     /// </remarks>
-    public ProfileImportResult Import(
+    public ProfileImportPlan Inspect(
         string sourcePath,
         IReadOnlyCollection<string>? builtInIds = null,
         IReadOnlyList<UserProfile>? userProfiles = null)
@@ -261,7 +321,7 @@ public sealed class UserProfileFolder
 
         if (!_files.FileExists(sourcePath))
         {
-            return Reject(ProfileImportMessages.ObsoleteFormat(sourcePath));
+            return Refusal(sourcePath, ProfileImportMessages.ObsoleteFormat(sourcePath));
         }
 
         ProfileHeader? header = ProfileFormat.LoadHeader(
@@ -269,13 +329,13 @@ public sealed class UserProfileFolder
         if (header is null)
         {
             // Row 3 of the table: a malformed protobuf, or a file that could not be read at all.
-            return Reject(ProfileImportMessages.ObsoleteFormat(sourcePath));
+            return Refusal(sourcePath, ProfileImportMessages.ObsoleteFormat(sourcePath));
         }
 
         if (!header.Value.HasAcceptableSignature)
         {
             // Row 1: `Type` is present and is not "3dn" (REQ-PROF-033).
-            return Reject(ProfileImportMessages.NotA3dnFile);
+            return Refusal(sourcePath, ProfileImportMessages.NotA3dnFile);
         }
 
         if (header.Value.HasUnsupportedVersion)
@@ -283,48 +343,91 @@ public sealed class UserProfileFolder
             // Row 2: `Ver` reduces to "1" (REQ-PROF-021). The message carries the version as the
             // sanitising of REQ-PROF-021 reduces it, which AMD-056 §2 read in the 2.0 and which
             // supersedes the answer of Q-089 on this point.
-            return Reject(ProfileImportMessages.UnsupportedVersion(header.Value.Version ?? string.Empty));
+            return Refusal(
+                sourcePath,
+                ProfileImportMessages.UnsupportedVersion(header.Value.Version ?? string.Empty));
         }
 
         // Row 4: an absent or empty identifier is refused — there would be no way to key the
         // library entry, the slots or the cover art on it (REQ-PROF-063, REQ-PERS-041 point 1).
         if (!header.Value.HasId)
         {
-            return Reject(ProfileImportMessages.ObsoleteFormat(sourcePath));
+            return Refusal(sourcePath, ProfileImportMessages.ObsoleteFormat(sourcePath));
         }
 
         string id = header.Value.Id!;
         if (builtInIds is not null && builtInIds.Contains(id))
         {
-            _log.Information(
-                $"{sourcePath}: the identifier \"{id}\" belongs to a built-in profile; nothing imported");
-            return new ProfileImportResult(ProfileImportOutcome.AlreadyBuiltIn, null, string.Empty);
+            return new ProfileImportPlan(
+                ProfileImportOutcome.AlreadyBuiltIn,
+                sourcePath,
+                string.Empty,
+                id,
+                TitleOf(header.Value, sourcePath),
+                header.Value,
+                null,
+                string.Empty);
         }
 
         string destination = Path.Combine(Directory, Path.GetFileName(sourcePath));
         UserProfile? replaced = FindById(userProfiles, id);
-        if (replaced is not null
-            && !string.Equals(replaced.FilePath, destination, StringComparison.OrdinalIgnoreCase))
+        return new ProfileImportPlan(
+            replaced is null ? ProfileImportOutcome.Added : ProfileImportOutcome.Replaced,
+            sourcePath,
+            string.Empty,
+            id,
+            TitleOf(header.Value, destination),
+            header.Value,
+            replaced,
+            destination);
+    }
+
+    /// <summary>
+    /// Carries out what <see cref="Inspect"/> planned: the old file of a taken-over identifier
+    /// goes, and the chosen file is copied into the folder. A plan that writes nothing — a
+    /// refusal, or a built-in identifier — is only logged.
+    /// </summary>
+    /// <remarks>
+    /// REQ-PERS-041 keeps the fact logged in every case, which is why the two outcomes that do
+    /// nothing are logged here rather than in <see cref="Inspect"/>: inspecting is what the
+    /// interface does to choose a dialog, and it may do it without importing anything.
+    /// </remarks>
+    public ProfileImportResult Apply(ProfileImportPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        switch (plan.Outcome)
+        {
+            case ProfileImportOutcome.Rejected:
+                _log.Warning(plan.Message);
+                return new ProfileImportResult(ProfileImportOutcome.Rejected, null, plan.Message);
+
+            case ProfileImportOutcome.AlreadyBuiltIn:
+                _log.Information(
+                    $"{plan.SourcePath}: the identifier \"{plan.Id}\" belongs to a built-in "
+                    + "profile; nothing imported");
+                return new ProfileImportResult(
+                    ProfileImportOutcome.AlreadyBuiltIn, null, string.Empty);
+        }
+
+        if (plan.Replaced is { } replaced
+            && !string.Equals(replaced.FilePath, plan.Destination, StringComparison.OrdinalIgnoreCase))
         {
             // Same identifier under another file name: the old file goes away.
             _files.DeleteFile(replaced.FilePath);
         }
 
         _files.CreateDirectory(Directory);
-        if (!string.Equals(sourcePath, destination, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(plan.SourcePath, plan.Destination, StringComparison.OrdinalIgnoreCase))
         {
-            _files.CopyFile(sourcePath, destination, overwrite: true);
+            _files.CopyFile(plan.SourcePath, plan.Destination, overwrite: true);
         }
 
-        UserProfile imported = new(
-            id,
-            TitleOf(header.Value, destination),
-            destination,
-            header.Value);
-        return new ProfileImportResult(
-            replaced is null ? ProfileImportOutcome.Added : ProfileImportOutcome.Replaced,
-            imported,
-            string.Empty);
+        UserProfile imported = new(plan.Id, plan.Title, plan.Destination, plan.Header);
+        _log.Information(
+            $"{plan.SourcePath}: profile \"{plan.Id}\" "
+            + (plan.Outcome == ProfileImportOutcome.Replaced ? "replaced" : "imported"));
+        return new ProfileImportResult(plan.Outcome, imported, string.Empty);
     }
 
     /// <summary>Deletes the file of a user profile (REQ-PROF-065, SPEC-09 REQ-PERS-042).</summary>
@@ -421,9 +524,14 @@ public sealed class UserProfileFolder
             ? Path.GetFileNameWithoutExtension(path)
             : header.Title;
 
-    private ProfileImportResult Reject(string message)
-    {
-        _log.Warning(message);
-        return new ProfileImportResult(ProfileImportOutcome.Rejected, null, message);
-    }
+    private static ProfileImportPlan Refusal(string sourcePath, string message)
+        => new(
+            ProfileImportOutcome.Rejected,
+            sourcePath,
+            message,
+            string.Empty,
+            string.Empty,
+            default,
+            null,
+            string.Empty);
 }

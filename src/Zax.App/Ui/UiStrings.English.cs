@@ -66,6 +66,10 @@ internal static partial class UiStrings
         [UiKeys.ButtonYes] = "Yes",
         [UiKeys.ButtonNo] = "No",
 
+        // AMD-056 REQ-UI-214: the buttons of the three import dialogs.
+        [UiKeys.ButtonOk] = "OK",
+        [UiKeys.ButtonReplace] = "Replace",
+
         // ------------------------ notifications of SPEC-10 REQ-UI-082 to REQ-UI-084
         // Word for word what the requirements write, the one surviving oddity included: the
         // two spaces before « is » (REQ-UI-084), and the product name AMD-029 §3 put at the
@@ -105,15 +109,22 @@ internal static partial class UiStrings
         [UiKeys.NotifyThreeDSenSummary] =
             "3dSen: {0} profile(s) imported, {1} already present, {2} failed.",
 
-        // AMD-053 REQ-UI-212: what an accepted import says. The title is the profile's, or the
-        // file name without its extension (REQ-PERS-034); an empty author is left out.
-        [UiKeys.NotifyProfileImported] = "Profile imported: {0}",
-        [UiKeys.NotifyProfileImportedBy] = "Profile imported: {0}, by {1}",
-
         // ------------------- confirmations of REQ-PERS-042 and REQ-PERS-054, with the
         //                     space before the question mark the requirements write
         [UiKeys.ConfirmDeleteGame] = "Do you want to delete the game and its save states ?",
         [UiKeys.ConfirmDeleteSlot] = "Do you want to delete the slot {0} ?",
+
+        // ------------------- the import dialogs of AMD-056 REQ-UI-214, word for word what
+        //                     the amendment's table writes. There is nothing for a
+        //                     successful import: it shows neither notification nor dialog.
+        [UiKeys.DialogImportRefusedTitle] = "Cannot import this file",
+        [UiKeys.DialogImportRefusedBody] = "{0}: {1}",
+        [UiKeys.DialogImportBuiltInTitle] = "Already in Zaxnes",
+        [UiKeys.DialogImportBuiltInBody] = "{0} is a built-in profile, so {1} was not imported.",
+        [UiKeys.DialogImportReplaceTitle] = "Replace {0}?",
+        [UiKeys.DialogImportReplaceBody] =
+            "The profile will be replaced with the one in {0}. "
+            + "The ROM, cover and save states will be kept.",
 
         // ------------------------------------------------------------- hints
         [UiKeys.HintImportThreeDSen] =

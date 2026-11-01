@@ -66,6 +66,18 @@ internal static class UiKeys
     public const string ButtonYes = "button.yes";
     public const string ButtonNo = "button.no";
 
+    /// <summary>
+    /// The lone button of the two one-button dialogs of AMD-056 REQ-UI-214. Its English entry
+    /// is <c>OK</c>, which the amendment's table writes.
+    /// </summary>
+    public const string ButtonOk = "button.ok";
+
+    /// <summary>
+    /// The destructive button of the replacement confirmation of REQ-UI-214. The French entry
+    /// is <b>not</b> the « Oui » of REQ-PERS-042: the amendment names the action.
+    /// </summary>
+    public const string ButtonReplace = "button.replace";
+
     // ------------------- notifications of SPEC-10 §3.10, whose English text the spec fixes
     //                     word for word (REQ-UI-082 to REQ-UI-084, AMD-036 §1)
 
@@ -103,19 +115,34 @@ internal static class UiKeys
     /// <summary>The end-of-import summary of AMD-030 §5, translated by AMD-036 §1.</summary>
     public const string NotifyThreeDSenSummary = "notify.import_3dsen_summary";
 
-    /// <summary>
-    /// What an accepted import says (AMD-053 REQ-UI-212): the title of the profile. No
-    /// requirement fixes the wording, so it is an ordinary interface text (AMD-035).
-    /// </summary>
-    public const string NotifyProfileImported = "notify.profile_imported";
-
-    /// <summary>The same with the author of the profile, when field 9 is not empty.</summary>
-    public const string NotifyProfileImportedBy = "notify.profile_imported_by";
-
     // ------------------- confirmations of SPEC-09 REQ-PERS-042 and REQ-PERS-054 (AMD-036 §1)
 
     public const string ConfirmDeleteGame = "confirm.delete_game";
     public const string ConfirmDeleteSlot = "confirm.delete_slot";
+
+    // ------------------- the three import dialogs of AMD-056 REQ-UI-214, whose English
+    //                     entries the amendment's table fixes word for word. An accepted
+    //                     import has no text at all: it shows neither notification nor
+    //                     dialog, which is why the « Profile imported: … » of REQ-UI-212
+    //                     is gone from this table.
+
+    /// <summary>Title of the refusal dialog: a cause of the table of REQ-UI-212.</summary>
+    public const string DialogImportRefusedTitle = "dialog.import_refused.title";
+
+    /// <summary>Its body: the file name, a colon, and the text of the cause (REQ-UI-084).</summary>
+    public const string DialogImportRefusedBody = "dialog.import_refused.body";
+
+    /// <summary>Title of the dialog of a file carrying the identifier of a built-in profile.</summary>
+    public const string DialogImportBuiltInTitle = "dialog.import_built_in.title";
+
+    /// <summary>Its body: the title of the file, and the file name that was not imported.</summary>
+    public const string DialogImportBuiltInBody = "dialog.import_built_in.body";
+
+    /// <summary>Title of the replacement confirmation: the displayed name of the entry.</summary>
+    public const string DialogImportReplaceTitle = "dialog.import_replace.title";
+
+    /// <summary>Its body: what is replaced, and what is kept.</summary>
+    public const string DialogImportReplaceBody = "dialog.import_replace.body";
 
     // --------------------------------------------------------------- hints
 

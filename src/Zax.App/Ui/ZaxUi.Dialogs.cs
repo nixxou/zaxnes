@@ -333,6 +333,11 @@ internal sealed partial class ZaxUi
     /// row of buttons, the first of which has the focus. There is no close cross — the box is
     /// left by its buttons only — and each button runs its action and then closes.
     /// </summary>
+    /// <remarks>
+    /// The import dialogs of AMD-056 REQ-UI-214 are drawn by the same box. Two of them have a
+    /// single button, and the replacement has its destructive one coloured — the form of all
+    /// this staying free (AMD-056 §3, AMD-010 §4).
+    /// </remarks>
     private void DrawConfirmDialog()
     {
         ImGui.SetNextWindowPos(Centre(380f, 0f), ImGuiCond.Always);
@@ -354,14 +359,38 @@ internal sealed partial class ZaxUi
                 ImGui.SetKeyboardFocusHere();
             }
 
-            if (ImGui.Button(_confirm.ConfirmLabel, new Vector2(110f, 0f)))
+            bool destructive = _confirm.Destructive;
+            if (destructive)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.55f, 0.13f, 0.13f, 1f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.70f, 0.18f, 0.18f, 1f));
+                ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.80f, 0.22f, 0.22f, 1f));
+            }
+
+            bool confirmed = ImGui.Button(_confirm.ConfirmLabel, new Vector2(110f, 0f));
+
+            if (destructive)
+            {
+                ImGui.PopStyleColor(3);
+            }
+
+            bool hasCancel = _confirm.HasCancel;
+            string cancelLabel = _confirm.CancelLabel;
+            if (hasCancel)
+            {
+                ImGui.SameLine();
+            }
+
+            bool cancelled = hasCancel && ImGui.Button(cancelLabel, new Vector2(110f, 0f));
+
+            // The two calls are read before either acts, so closing the box inside one of them
+            // cannot make the other draw against a model that has already moved on.
+            if (confirmed)
             {
                 _options.Mixer?.PlaySound(UiSound.Confirm);
                 _confirm.Confirm();
             }
-
-            ImGui.SameLine();
-            if (ImGui.Button(_confirm.CancelLabel, new Vector2(110f, 0f)))
+            else if (cancelled)
             {
                 _confirm.Close();
             }

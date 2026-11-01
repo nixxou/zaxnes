@@ -230,22 +230,6 @@ internal static class UiText
     public static string WelcomeResume => UiStrings.Get(UiKeys.WelcomeResume);
 
     /// <summary>
-    /// What an accepted profile import says (AMD-053 REQ-UI-212): the title, and the author
-    /// when field 9 is not empty.
-    /// </summary>
-    public static string ProfileImported(string title, string? author)
-        => string.IsNullOrEmpty(author)
-            ? string.Format(
-                System.Globalization.CultureInfo.CurrentCulture,
-                UiStrings.Get(UiKeys.NotifyProfileImported),
-                title)
-            : string.Format(
-                System.Globalization.CultureInfo.CurrentCulture,
-                UiStrings.Get(UiKeys.NotifyProfileImportedBy),
-                title,
-                author);
-
-    /// <summary>
     /// The version the about block shows. The build metadata the compiler appends to the
     /// informational version — a plus sign and the commit hash — is left out.
     /// </summary>
