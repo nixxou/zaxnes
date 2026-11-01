@@ -114,6 +114,28 @@ internal static class RenderExport
           --bend <lr,tb,arc[,c]>   Space bending in degrees, −180 to 180 by steps of 30, and
                                    the arc centre 0 (screen) or 1 (bottom edge) (AMD-043
                                    REQ-SCN-066).
+          --style <id>             render.visual_style, the visual style of AMD-055
+                                   REQ-SCN-078: 0 or 'classic', 4 or 'enhanced', 1 being
+                                   accepted as an alias of Enhanced. Left out, the style is
+                                   the one the profile's scripts left, Classic by default.
+                                   Any other value is refused.
+          --style-param <k>=<v>    One parameter of the Enhanced style (AMD-055 REQ-SCN-079),
+                                   by the identifier its table gives it — the argument
+                                   Setting:SetVisualStyleParameter takes. Repeatable; the
+                                   stable 'render.style.*' key is accepted as well. An
+                                   unknown key, or a value its ladder does not hold, is
+                                   refused (no silent rounding):
+                                     spl.ao           0 Off, 1 MSVO, 2 Depth
+                                     ao.strength      1 to 5    ao.radius     1 to 5
+                                     ao.thickness     1 to 5    ao.quality    0 to 2
+                                     spl.pixel_shadow 0 or 1    spl.voxel_grid 0 to 3
+                                     spl.reflections  0 or 1    ssr.shine     1 to 5
+                                     ssr.clarity      1 to 5    ssr.length    1 to 5
+                                     ssr.quality      0 Low to 3 Ultra
+                                   The curvature of AMD-043 is not a style effect and acts in
+                                   both styles: it stays on '--bend'.
+          --style-params "k=v;..." The same, as one semicolon separated (or comma separated)
+                                   list.
           --flat-2d                scene.bend_2d_mode off: the 2D-mode rectangle stays at its
                                    flat position under the bending (AMD-046 REQ-SCN-074).
           --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049). Left out,
@@ -135,6 +157,12 @@ internal static class RenderExport
 
         Scenes: framing, sky, shadow, no-shadow, layer-shadow-off, nudge, alpha, hud, clip,
                 backdrop, heavy, picture.
+
+        Style precedence: what the profile and its scripts left first (REQ-LUA-114), then the
+        three '--style' options, applied before the first rendered frame — exactly as if the
+        user had set them in the options window. A parameter no option names keeps the value
+        the run left it. The style and its parameters are global settings and are never taken
+        from the profile itself (AMD-055 REQ-SCN-078).
         """;
 
     /// <summary>Runs the command.</summary>
@@ -186,6 +214,10 @@ internal static class RenderExport
         System.Numerics.Vector3? angles = null;
         float? distance = null;
         RenderAlgorithm mesh = RenderAlgorithm.Greedy;
+
+        // AMD-055 REQ-SCN-078 and REQ-SCN-079: the style and the parameters the command line
+        // really passed, applied last (see StyleOptions).
+        StyleOptions style = new();
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -341,6 +373,46 @@ internal static class RenderExport
                     bend2dMode = false;
                     break;
 
+                // AMD-055 REQ-SCN-078 and REQ-SCN-079. The three options report their own
+                // mistakes and stop the command: a style or a parameter the settings would
+                // normalise — 2 read back as Classic, a grid of 4 rounded to 3 — would give a
+                // capture that silently shows something else than what was asked for.
+                case "--style":
+                    try
+                    {
+                        style.SetStyle(Next(args, ref i));
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return Refuse(ex);
+                    }
+
+                    break;
+
+                case "--style-param":
+                    try
+                    {
+                        style.AddParameter(Next(args, ref i));
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return Refuse(ex);
+                    }
+
+                    break;
+
+                case "--style-params":
+                    try
+                    {
+                        style.AddParameters(Next(args, ref i));
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return Refuse(ex);
+                    }
+
+                    break;
+
                 case "--skybox":
                     skybox = Next(args, ref i).ToLowerInvariant() switch
                     {
@@ -458,11 +530,25 @@ internal static class RenderExport
             ShadowMapSize = shadowMapSize,
             RealTime = realTime,
             SkyBodies = skyBodies,
+            Style = style,
         };
 
         foreach (SyntheticScene scene in scenes)
         {
             overrides.ApplyTo(scene);
+        }
+
+        // AMD-055 REQ-SCN-078: the style is in force from the first rendered frame, so what it
+        // ended up being is reported before any capture is read.
+        if (!style.IsEmpty)
+        {
+            Console.Out.WriteLine($"render: style {style.Describe()}");
+            if (!scenes.TrueForAll(static scene => scene.Scene.Settings.Style.Enhanced))
+            {
+                Console.Out.WriteLine(
+                    "render: the style is Classic, so its parameters have no effect on the "
+                        + "capture (REQ-SCN-080); pass '--style 4' to turn Enhanced on.");
+            }
         }
 
         using OffscreenContext context = OffscreenContext.Create(width, height);
@@ -1155,6 +1241,11 @@ internal static class RenderExport
                 + $"\"distinctColors\": {capture.DistinctColors}, "
                 + $"\"backgroundPixels\": {capture.BackgroundPixels}, "
                 + $"\"meanLuma\": {capture.MeanLuma:F4}{bench}, "
+
+                // AMD-055 REQ-SCN-078: the style the frame was rendered with, so an Enhanced
+                // capture states what produced it and two captures are never compared across
+                // styles by mistake.
+                + $"{StyleOptions.Json(scene.Scene.Settings.Style)}, "
                 + $"{CameraJson(scene.Scene.Camera)}{PdataJson(scene.PersistentData)} }}");
     }
 
@@ -1192,6 +1283,16 @@ internal static class RenderExport
             ? string.Create(CultureInfo.InvariantCulture, $"{value:0.######}")
             : "null");
         return ", \"pdata\": [" + string.Join(", ", entries) + "]";
+    }
+
+    /// <summary>
+    /// Reports a refused option on the error stream and gives the exit code of a bad command
+    /// line, the one an unknown argument already returns.
+    /// </summary>
+    private static int Refuse(ArgumentException error)
+    {
+        Console.Error.WriteLine($"render: {error.Message}");
+        return 2;
     }
 
     private static string Next(string[] args, ref int index)
@@ -1322,6 +1423,12 @@ internal sealed class SceneOverrides
     /// <summary><c>--sky-bodies</c> (Q-064).</summary>
     public bool SkyBodies { get; init; }
 
+    /// <summary>
+    /// <c>--style</c>, <c>--style-param</c> and <c>--style-params</c> (AMD-055 REQ-SCN-078,
+    /// REQ-SCN-079). Null is the empty set of options, which leaves the style alone.
+    /// </summary>
+    public StyleOptions? Style { get; init; }
+
     /// <summary>Applies the overrides to one built scene.</summary>
     public void ApplyTo(SyntheticScene scene)
     {
@@ -1386,6 +1493,10 @@ internal sealed class SceneOverrides
         // AMD-032 §2: video.anti_alias as the application applies it.
         scene.Scene.Settings.AntiAliasSamples = SceneConstants.AntiAliasSamples(AntiAlias);
         scene.Scene.Settings.ShadowMapSize = ShadowMapSize;
+
+        // AMD-055 REQ-SCN-078: the style options come last, so they override what the profile's
+        // scripts left, and they are in force before the first frame is rendered.
+        Style?.ApplyTo(scene.Scene.Settings.Style);
     }
 }
 
