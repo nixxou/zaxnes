@@ -156,6 +156,7 @@ setting_ids! {
     AudioBgMusic => "audio.bg_music",
     InputZapperEnable => "input.zapper_enable",
     InputEmulatedMenuButton => "input.emulated_menu_button",
+    InputTouchPad => "input.touch_pad",
     UiSortOption => "ui.sort_option",
     UiLastBrowseDir => "ui.last_browse_dir",
     UiWindowRect => "ui.window_rect",

@@ -92,6 +92,10 @@ pub struct ImguiFrontend {
     roms_option: Option<String>,
     /// The ROM folder of the options the ROM list was last given.
     roms_setting: String,
+    /// The touch pad to draw over everything this frame (Rust-only).
+    touch_pad: Option<zax_platform::input::touch::TouchPadView>,
+    /// Where fingers tapped off the touch pad since the last frame (Rust-only).
+    taps: Vec<[f32; 2]>,
 }
 
 impl ImguiFrontend {
@@ -215,6 +219,8 @@ impl ImguiFrontend {
             pictures: Vec::new(),
             roms_option,
             roms_setting: roms_setting(host),
+            touch_pad: None,
+            taps: Vec::new(),
         })
     }
 
@@ -448,6 +454,16 @@ impl ImguiFrontend {
                     if !device && !self.ui.menu_engaged() {
                         handheld.update_pointer(&pointer_input(ui), frame);
                     }
+                    // A tap of a touch screen is a click (Rust-only, owner request): the rows,
+                    // and the hints of the buttons the touch pad does not have.
+                    for tap in std::mem::take(&mut self.taps).into_iter().filter(|_| device) {
+                        let input = super::handheld::pointer::PointerInput {
+                            position: tap,
+                            clicked: true,
+                            ..Default::default()
+                        };
+                        handheld.update_pointer(&input, frame);
+                    }
                 }
                 handheld.draw(ui, frame);
                 self.pictures.extend(handheld.take_picture_updates());
@@ -478,6 +494,9 @@ impl ImguiFrontend {
             .get(zax_settings::catalogue::SettingId::AchievementsChallenges)
             .as_bool();
         super::achievements_view::draw_overlay(ui, &frame.host.achievements, top, challenges);
+        if let Some(view) = &self.touch_pad {
+            super::touch_pad_view::draw(ui, view);
+        }
         self.pictures
             .extend(frame.host.achievements.take_picture_updates());
         if leave_console {
@@ -498,6 +517,17 @@ impl ImguiFrontend {
             self.console = ConsoleMode::default();
         }
         self.platform.pad_mut().end_frame();
+    }
+
+    /// The touch pad the next [`ImguiFrontend::build`] draws (none while it is hidden), and where
+    /// fingers tapped off it: on a handheld, the clicks of the console's rows and hints.
+    pub fn set_touch_pad(
+        &mut self,
+        view: Option<zax_platform::input::touch::TouchPadView>,
+        taps: Vec<[f32; 2]>,
+    ) {
+        self.touch_pad = view;
+        self.taps = taps;
     }
 
     /// Draws the interface [`ImguiFrontend::build`] built, with the GL renderer (a wgpu window

@@ -59,7 +59,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 16] = [
+pub const EXCLUDED: [SettingId; 17] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -80,6 +80,8 @@ pub const EXCLUDED: [SettingId; 16] = [
     SettingId::AchievementsToken,
     // Rust-only (owner request): a handheld option, in its own options screen only.
     SettingId::VideoHalfRate3d,
+    // Rust-only (owner request): the touch pad of Android, in the console's options only.
+    SettingId::InputTouchPad,
 ];
 
 /// The settings the window edits as a folder: a field and a button that picks it.

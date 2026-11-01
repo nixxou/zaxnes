@@ -26,4 +26,5 @@ pub mod state;
 pub mod strings;
 pub mod system_fonts;
 pub mod text;
+pub mod touch_pad_view;
 pub mod zax_ui;

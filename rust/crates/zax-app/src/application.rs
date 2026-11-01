@@ -612,6 +612,22 @@ impl Running {
             frames_per_second: debug.frames_per_second as f32,
             profile_line: self.profiler.as_ref().map_or("", FrameProfiler::summary),
         };
+        if zax_platform::input::touch::offered() {
+            let mode = zax_platform::input::touch::TouchPadMode::from_setting(
+                frame
+                    .host
+                    .settings()
+                    .get(zax_settings::catalogue::SettingId::InputTouchPad)
+                    .as_int(),
+            );
+            #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
+            let size = |(width, height): (u32, u32)| [width as f32, height as f32];
+            self.input
+                .touch
+                .update(mode, size(sizes.window), size(sizes.drawable));
+            self.ui
+                .set_touch_pad(self.input.touch.view(), self.input.touch.take_taps());
+        }
         operation(&mut self.ui, &mut frame, sizes, &debug);
     }
 

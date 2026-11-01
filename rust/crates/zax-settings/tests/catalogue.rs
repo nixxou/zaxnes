@@ -50,7 +50,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
     // emu.lua_optimized, emu.lua_smooth_gc, emu.pause_3d_in_2d, emu.pipeline, ui.profiler, ui.roms_folder,
     // video.backend, video.dynamic_resolution, video.half_rate_3d, video.widescreen, video.widescreen_advanced,
     // video.remove_sprite_limit, video.widescreen_extra, video.widescreen_strict_edges,
-    // video.overscan_*, video.nes_palette and achievements.*:
+    // video.overscan_*, video.nes_palette, input.touch_pad and achievements.*:
     // Rust-only settings (owner request).
     assert_eq!(
         additions,
@@ -73,6 +73,7 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.lua_smooth_gc",
             "emu.pause_3d_in_2d",
             "emu.pipeline",
+            "input.touch_pad",
             "ui.language",
             "ui.profiler",
             "ui.roms_folder",

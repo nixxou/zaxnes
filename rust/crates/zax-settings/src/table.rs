@@ -951,6 +951,24 @@ fn audio_input_interface(out: &mut Vec<SettingDescriptor>) {
         .with_field("27")
         .with_label("Menu = Select + Start"),
     );
+    // Rust-only (owner request, Android only): the transparent pad of a touch screen; in "Auto"
+    // it hides while a real gamepad is connected. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::InputTouchPad,
+            SettingKind::Enum,
+            SettingValue::Enum(2),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Input,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Off"),
+            opt(1, "On"),
+            opt(2, "Auto"),
+        ]))
+        .with_label("Touch pad"),
+    );
     out.push(
         SettingDescriptor::new(
             SettingId::UiSortOption,

@@ -411,6 +411,8 @@ pub struct SdlInput {
     pub pointer: SdlPointer,
     /// The gamepads.
     pub gamepads: SdlGamepadHub,
+    /// The touch pad (Rust-only): a virtual gamepad among `gamepads` while it is shown.
+    pub touch: super::touch::TouchPad,
 }
 
 impl SdlInput {
@@ -423,11 +425,15 @@ impl SdlInput {
             keyboard: SdlKeyboard::new(),
             pointer: SdlPointer::new(sdl.mouse()),
             gamepads: SdlGamepadHub::new(sdl.game_controller()?, sdl.joystick()?),
+            touch: super::touch::TouchPad::new(!cfg!(target_os = "android")),
         })
     }
 
     /// Updates the snapshots with one SDL event.
     pub fn handle_event(&mut self, event: &Event) {
+        if super::touch::offered() {
+            self.touch.handle_event(event);
+        }
         match event {
             Event::KeyDown {
                 scancode: Some(scancode),

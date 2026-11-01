@@ -63,6 +63,8 @@ pub enum OptionRow {
     Achievements,
     /// The performance rows (Rust-only): opens the [`OPTIMIZATION_ROWS`] page.
     Optimizations,
+    /// The touch pad (Rust-only, a touch screen only): no, yes or automatic.
+    TouchPad,
 }
 
 /// The rows of the main page, in order.
@@ -81,6 +83,32 @@ pub const ROWS: [OptionRow; 13] = [
     OptionRow::Achievements,
     OptionRow::Profiler,
 ];
+
+/// The rows of the main page where the touch pad is offered (Android): its row after the
+/// controls.
+pub const TOUCH_ROWS: [OptionRow; 14] = [
+    OptionRow::Language,
+    OptionRow::Volume,
+    OptionRow::RenderScale,
+    OptionRow::Shadows,
+    OptionRow::Palette,
+    OptionRow::Overscan,
+    OptionRow::ShowFps,
+    OptionRow::Camera,
+    OptionRow::Region,
+    OptionRow::Optimizations,
+    OptionRow::Controls,
+    OptionRow::TouchPad,
+    OptionRow::Achievements,
+    OptionRow::Profiler,
+];
+
+/// The values of the touch pad row (`input.touch_pad`): no, yes, automatic.
+const TOUCH_PADS: [i32; 3] = [0, 1, 2];
+
+fn touch_pad(settings: &SettingsModel) -> i32 {
+    settings.get(SettingId::InputTouchPad).as_int()
+}
 
 /// The rows of the "Optimizations" page (owner request: the performance switches together).
 pub const OPTIMIZATION_ROWS: [OptionRow; 8] = [
@@ -199,9 +227,11 @@ impl HandheldOptionsModel {
 
     /// The rows of the page shown.
     #[must_use]
-    pub const fn rows(&self) -> &'static [OptionRow] {
+    pub fn rows(&self) -> &'static [OptionRow] {
         if self.optimizations.is_some() {
             &OPTIMIZATION_ROWS
+        } else if zax_platform::input::touch::offered() {
+            &TOUCH_ROWS
         } else {
             &ROWS
         }
@@ -329,6 +359,10 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
         OptionRow::Region => {
             cycled(&RegionChoice::ALL, &RegionChoice::of(settings), step).apply(settings);
         }
+        OptionRow::TouchPad => {
+            let next = *cycled(&TOUCH_PADS, &touch_pad(settings), step);
+            settings.set(SettingId::InputTouchPad, SettingValue::Enum(next));
+        }
         OptionRow::Controls | OptionRow::Optimizations => {}
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
     }
@@ -363,6 +397,7 @@ pub fn label(row: OptionRow) -> String {
         }
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
+        OptionRow::TouchPad => strings::get(keys::HANDHELD_OPTION_TOUCH_PAD),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
         OptionRow::Optimizations => strings::get(keys::HANDHELD_OPTION_OPTIMIZATIONS),
         OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
@@ -412,6 +447,11 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             RegionChoice::Auto => strings::get(keys::HANDHELD_REGION_AUTO),
             RegionChoice::Ntsc => "NTSC".to_owned(),
             RegionChoice::Pal => "PAL".to_owned(),
+        },
+        OptionRow::TouchPad => match touch_pad(settings) {
+            0 => strings::get(keys::HANDHELD_TOUCH_PAD_OFF),
+            1 => strings::get(keys::HANDHELD_TOUCH_PAD_ON),
+            _ => text::label_of_option("Auto"),
         },
         OptionRow::Controls | OptionRow::Optimizations => String::new(),
         OptionRow::Achievements => switch(settings.get(SettingId::AchievementsEnabled).as_bool()),

@@ -201,6 +201,9 @@ pub const HANDHELD_OPTION_CATCH_UP: &str = "handheld.option.catch_up";
 pub const HANDHELD_OPTION_PIPELINE: &str = "handheld.option.pipeline";
 pub const HANDHELD_OPTION_OPTIMIZATIONS: &str = "handheld.option.optimizations";
 pub const HANDHELD_REGION_AUTO: &str = "handheld.region.auto";
+pub const HANDHELD_OPTION_TOUCH_PAD: &str = "handheld.option.touch_pad";
+pub const HANDHELD_TOUCH_PAD_ON: &str = "handheld.touch_pad.on";
+pub const HANDHELD_TOUCH_PAD_OFF: &str = "handheld.touch_pad.off";
 pub const HANDHELD_CAMERA_RESET: &str = "handheld.camera.reset";
 pub const HANDHELD_CAMERA_KEPT: &str = "handheld.camera.kept";
 pub const HANDHELD_CAMERA_RESTORED: &str = "handheld.camera.restored";
@@ -551,6 +554,9 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_OPTION_PIPELINE,
     HANDHELD_OPTION_OPTIMIZATIONS,
     HANDHELD_REGION_AUTO,
+    HANDHELD_OPTION_TOUCH_PAD,
+    HANDHELD_TOUCH_PAD_ON,
+    HANDHELD_TOUCH_PAD_OFF,
     HANDHELD_CAMERA_RESET,
     HANDHELD_CAMERA_KEPT,
     HANDHELD_CAMERA_RESTORED,
