@@ -966,21 +966,6 @@ internal static class RenderExport
         // End hooks run, so what the capture reports is the state of the frame it shows.
         float[] persistentData = PersistentData.Read(runtime.CapturePersistentData());
 
-        runtime.InvokeEnd();
-        ScriptBridge.Report(runtime, timed);
-
-        if (dumpFrame is not null)
-        {
-            File.WriteAllText(dumpFrame, FrameJson.Write(lastRecords, lastPalette, runAhead));
-            Console.Out.WriteLine($"render: frame written to {dumpFrame}");
-        }
-
-        if (log is not null && control?.FrameLogPath is { } logPath)
-        {
-            log.Write(logPath);
-            Console.Out.WriteLine($"render: {log.Lines.Count} frame(s) logged to {logPath}");
-        }
-
         byte[] picture = core.PixelFrame.ToArray();
         byte[] opacity = core.OpacityMask.ToArray();
         scene.Camera.SnapToSetpoints();
@@ -996,6 +981,31 @@ internal static class RenderExport
         scene.TwoDimensionalMode = engine.TwoDimensionalMode;
         scene.NesPicture = picture;
         scene.NesOpacityMask = opacity;
+
+        // The capture is a frame of a game that is still running (GameRunning above), and the
+        // caller renders it after this method has returned. The End hooks of REQ-LUA-021 belong
+        // to *after* that frame — in the application nothing is ever displayed between
+        // GameSession.End() and the scene reset of the next game — so they run here, once the
+        // frame is settled, and over a scene that no longer takes their writes. Without the seal
+        // a profile whose End hook restores the light it remembered in Start lit the captured
+        // frame with that remembered value: Mega Man 2's « stage » script put the profile's own
+        // green back over the white its 601 Update calls had written, and Castlevania's « ui »
+        // script put white back over its grey HUD.
+        ScriptBridge.Seal(runtime);
+        runtime.InvokeEnd();
+        ScriptBridge.Report(runtime, timed);
+
+        if (dumpFrame is not null)
+        {
+            File.WriteAllText(dumpFrame, FrameJson.Write(lastRecords, lastPalette, runAhead));
+            Console.Out.WriteLine($"render: frame written to {dumpFrame}");
+        }
+
+        if (log is not null && control?.FrameLogPath is { } logPath)
+        {
+            log.Write(logPath);
+            Console.Out.WriteLine($"render: {log.Lines.Count} frame(s) logged to {logPath}");
+        }
 
         return new SyntheticScene(
             Path.GetFileNameWithoutExtension(romPath),

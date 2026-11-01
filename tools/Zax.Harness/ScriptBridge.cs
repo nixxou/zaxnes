@@ -54,12 +54,15 @@ internal static class ScriptBridge
         Connect(settings, scene);
         settings.RenderMode = (int)mesh;
 
+        // The views that write straight into the scene share the seal of <see cref="Seal"/>, so
+        // the frame a capture shows stops taking writes all at once.
+        CaptureSeal seal = new();
         ScriptEnvironment environment = new()
         {
             Engine = engine,
             Settings = settings,
-            Camera = new HarnessCamera(scene.Camera),
-            Backdrop = new HarnessBackdrop(scene.Backdrop),
+            Camera = new HarnessCamera(scene.Camera, seal),
+            Backdrop = new HarnessBackdrop(scene.Backdrop, seal),
             Input = new CoreScriptInput(core),
             Memory = new CoreScriptMemory(core),
             Log = ConsoleLog.Instance,
@@ -91,6 +94,30 @@ internal static class ScriptBridge
         settings.ViewReset = scene.Camera.ResetView;
         settings.Changed = key => Apply(key, settings, scene);
         Push(settings, scene);
+    }
+
+    /// <summary>
+    /// Closes the scene of <paramref name="runtime"/> to the scripts: from here on a write of a
+    /// scene-owned setting, of the camera or of the backdrop stays in the model and in the
+    /// runtime, and no longer reaches the scene.
+    /// </summary>
+    /// <remarks>
+    /// This is the end of the capture. The frame a capture shows is the last one the game
+    /// displays, so the end-of-game hooks of REQ-LUA-021 — which run after it, as they do in the
+    /// application after the last displayed frame — must not be able to relight it, reframe it or
+    /// uncover its backdrop. Several built-in profiles put a remembered light back in <c>End</c>
+    /// (Mega Man 2, Castlevania), which is precisely the value the game was not lit by.
+    /// </remarks>
+    public static void Seal(ProfileScriptRuntime runtime)
+    {
+        ArgumentNullException.ThrowIfNull(runtime);
+
+        runtime.Settings.Changed = null;
+        runtime.Settings.ViewReset = null;
+        if (runtime.Environment.Camera is HarnessCamera camera)
+        {
+            camera.Seal.Closed = true;
+        }
     }
 
     /// <summary>Pushes the scene-owned settings a script may have changed (DEC-06-Q5).</summary>
@@ -277,8 +304,20 @@ internal static class ScriptBridge
         public void Warning(string line) => Console.Out.WriteLine(line);
     }
 
-    private sealed class HarnessCamera(SceneCamera camera) : ScriptCamera
+    /// <summary>
+    /// Whether the scene still takes what the scripts write, shared by the views that write into
+    /// it directly (see <see cref="Seal"/>).
+    /// </summary>
+    private sealed class CaptureSeal
     {
+        /// <summary>True once the frame the capture shows is settled.</summary>
+        public bool Closed { get; set; }
+    }
+
+    private sealed class HarnessCamera(SceneCamera camera, CaptureSeal seal) : ScriptCamera
+    {
+        public CaptureSeal Seal => seal;
+
         public override Vec3 Angles
         {
             get
@@ -287,19 +326,39 @@ internal static class ScriptBridge
                 return new Vec3(angles.X, angles.Y, angles.Z);
             }
 
-            set => camera.Current.Angles = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+            set
+            {
+                if (!seal.Closed)
+                {
+                    camera.Current.Angles = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+                }
+            }
         }
 
         public override float Distance
         {
             get => camera.Current.Distance;
-            set => camera.Current.Distance = value;
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    camera.Current.Distance = value;
+                }
+            }
         }
 
         public override int Mode
         {
             get => (int)camera.Mode;
-            set => camera.SetMode(value == 1 ? CameraMode.Fpv : CameraMode.Tpv);
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    camera.SetMode(value == 1 ? CameraMode.Fpv : CameraMode.Tpv);
+                }
+            }
         }
 
         public override Vec3 LookAt
@@ -310,47 +369,100 @@ internal static class ScriptBridge
                 return new Vec3(target.X, target.Y, target.Z);
             }
 
-            set => camera.Current.Target = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+            set
+            {
+                if (!seal.Closed)
+                {
+                    camera.Current.Target = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+                }
+            }
         }
 
-        public override void ResetView() => camera.ResetView();
+        public override void ResetView()
+        {
+            if (!seal.Closed)
+            {
+                camera.ResetView();
+            }
+        }
 
         public override float ResetDistance => camera.ResetDistance;
     }
 
-    private sealed class HarnessBackdrop(BackdropState backdrop) : ScriptBackdrop
+    private sealed class HarnessBackdrop(BackdropState backdrop, CaptureSeal seal) : ScriptBackdrop
     {
         public override bool Enabled
         {
             get => backdrop.Enabled;
-            set => backdrop.Enabled = value;
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    backdrop.Enabled = value;
+                }
+            }
         }
 
         public override LuaColor Color
         {
             get => LuaColor.FromBytes(backdrop.Color.R, backdrop.Color.G, backdrop.Color.B);
-            set => backdrop.Color = value.ToRgb24();
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    backdrop.Color = value.ToRgb24();
+                }
+            }
         }
 
         public override bool ReceiveShadow
         {
             get => backdrop.ReceiveShadow;
-            set => backdrop.ReceiveShadow = value;
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    backdrop.ReceiveShadow = value;
+                }
+            }
         }
 
         public override Vec3 Size
         {
             get => new(backdrop.Size.X, backdrop.Size.Y, backdrop.Size.Z);
-            set => backdrop.Size = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    backdrop.Size = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+                }
+            }
         }
 
         public override Vec3 Offset
         {
             get => new(backdrop.Offset.X, backdrop.Offset.Y, backdrop.Offset.Z);
-            set => backdrop.Offset = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+
+            set
+            {
+                if (!seal.Closed)
+                {
+                    backdrop.Offset = new System.Numerics.Vector3(value.X, value.Y, value.Z);
+                }
+            }
         }
 
-        public override void Reset() => backdrop.Reset();
+        public override void Reset()
+        {
+            if (!seal.Closed)
+            {
+                backdrop.Reset();
+            }
+        }
     }
 }
 

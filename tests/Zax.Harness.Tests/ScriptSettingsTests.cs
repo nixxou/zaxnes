@@ -137,6 +137,49 @@ public sealed class ScriptSettingsTests
         Assert.Equal(153, background.B);
     }
 
+    [Fact] // REQ-SCN-012, REQ-LUA-021, REQ-ARCH-031
+    public void The_end_of_game_hook_does_not_reframe_the_captured_camera()
+    {
+        // The capture shows the last frame the game displays; the End hooks run after it, as
+        // they do in the application, so neither a scene-owned setting nor the camera object
+        // itself may still move what the image shows.
+        SyntheticScene capture = Capture("""
+            function Start()
+                Setting.Fov = 90
+                Camera.LookAt = Vector3(10, 20, 30)
+            end
+
+            function End()
+                Setting.Fov = 30
+                Camera.LookAt = Vector3(0, 0, 0)
+                Camera:ResetView()
+            end
+            """);
+
+        Assert.Equal(90f, capture.Scene.Settings.Fov);
+        Assert.Equal(90f, capture.Scene.Camera.Fov);
+        Assert.Equal(new Vector3(10f, 20f, 30f), capture.Scene.Camera.Target, Approximately);
+    }
+
+    [Fact] // REQ-SCN-048, REQ-LUA-021, REQ-LUA-090
+    public void The_end_of_game_hook_does_not_take_the_captured_backdrop_away()
+    {
+        SyntheticScene capture = Capture("""
+            function Start()
+                Backdrop.Enable = true
+                Backdrop.Color = Color(0.2, 0.4, 0.6)
+            end
+
+            function End()
+                Backdrop.Enable = false
+                Backdrop.Color = Color(1, 1, 1)
+            end
+            """);
+
+        Assert.True(capture.Scene.Backdrop.Enabled);
+        Assert.Equal(new Rgb24(51, 102, 153), capture.Scene.Backdrop.Color);
+    }
+
     [Fact] // REQ-ARCH-031, REQ-PROF-022
     public void The_capture_description_names_the_profile_that_is_active()
     {
