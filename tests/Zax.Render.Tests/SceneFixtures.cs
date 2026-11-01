@@ -230,6 +230,31 @@ internal sealed class SceneFixture
         return (low, high);
     }
 
+    /// <summary>
+    /// A full tile of <paramref name="color"/> whose texel column <paramref name="column"/>
+    /// carries <paramref name="stripe"/> instead. AMD-058 needs a texture whose first column
+    /// differs from the rest: the texel read of REQ-E3D-563 takes its coordinates modulo the
+    /// texture size, so column 0 is what a read one texel past the right edge lands on.
+    /// </summary>
+    public static (ulong Low, ulong High) Striped(int color, int column, int stripe)
+    {
+        ulong low = 0UL;
+        ulong high = 0UL;
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                // SPEC-02 REQ-CORE-034 packs the pixel (x, y) at bit (y << 3) | (7 − x).
+                int value = x == column ? stripe : color;
+                int bit = (y << 3) | (7 - x);
+                low |= (ulong)(value & 1) << bit;
+                high |= (ulong)((value >> 1) & 1) << bit;
+            }
+        }
+
+        return (low, high);
+    }
+
     /// <summary>The packed RGB of a NES colour index.</summary>
     public static int NesPacked(int index) => NesPalette.Color(index).Packed;
 }
