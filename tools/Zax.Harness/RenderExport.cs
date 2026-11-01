@@ -604,7 +604,7 @@ internal static class RenderExport
                         + $"({state.Camera.Angles.X:F2}, {state.Camera.Angles.Y:F2}, {state.Camera.Angles.Z:F2})\n"
                         + $"        eye ({camera.Eye.X:F2}, {camera.Eye.Y:F2}, {camera.Eye.Z:F2})"
                         + $"  T' ({camera.Target.X:F2}, {camera.Target.Y:F2})"
-                        + $"  P* ({camera.AimPoint.X:F2}, {camera.AimPoint.Y:F2})\n"
+                        + $"  P* ({camera.AimPoint.X:F2}, {camera.AimPoint.Y:F2})  localCam {state.Camera.LocalCamera}\n"
                         + $"clipping: ({state.Clipping.X}, {state.Clipping.Y}, {state.Clipping.Z}, {state.Clipping.W})"
                         + $"  R = [{r.MinX}, {r.MaxX}] x [{r.MinY}, {r.MaxY}]"));
                 if (scene.Scene.DrawList is { } drawList)
