@@ -19,7 +19,12 @@ const WINDOWS_CANDIDATES: [(&str, &str); 4] = [
     ("verdana.ttf", "verdanab.ttf"),
 ];
 
-const UNIX_CANDIDATES: [(&str, &str); 3] = [
+const UNIX_CANDIDATES: [(&str, &str); 4] = [
+    // Android's system faces.
+    (
+        "/system/fonts/Roboto-Regular.ttf",
+        "/system/fonts/Roboto-Bold.ttf",
+    ),
     (
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",

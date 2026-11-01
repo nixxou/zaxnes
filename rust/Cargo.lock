@@ -2044,6 +2044,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zax-android"
+version = "0.4.1"
+dependencies = [
+ "zax-app",
+]
+
+[[package]]
 name = "zax-app"
 version = "0.4.1"
 dependencies = [

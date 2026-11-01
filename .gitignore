@@ -100,3 +100,6 @@ portable.txt
 # Rust port
 rust/target/
 rust/test-roms/
+
+# The Android build (build/package-android.py)
+rust/target-android/

@@ -14,6 +14,9 @@ bundled = ["sdl2/bundled", "sdl2/static-link"]
 # NEEDED libSDL2-2.0.so.0 and resolves it on the device, so the firmware's SDL2 (patched for its
 # GPU driver) is used. The built library is not shipped (handheld package).
 firmware-sdl = ["sdl2/bundled"]
+# Android: SDL2 built from source as a shared library, which the APK ships (SDL's Java activity
+# loads it before the app's library).
+android = ["sdl2/bundled"]
 # A window drawn through wgpu (Vulkan, DirectX 12) instead of GL, desktop only: the handheld
 # package never turns it on.
 wgpu = ["dep:wgpu", "dep:pollster", "sdl2/raw-window-handle"]

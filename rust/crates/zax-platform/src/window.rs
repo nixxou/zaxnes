@@ -88,13 +88,16 @@ pub enum GlFlavor {
 }
 
 impl GlFlavor {
-    /// The flavour for this machine: GLES 3.0 when `ZAXNES_GLES=1` or on aarch64 Linux,
-    /// desktop GL otherwise.
+    /// The flavour for this machine: GLES 3.0 when `ZAXNES_GLES=1`, on aarch64 Linux or on
+    /// Android, desktop GL otherwise.
     #[must_use]
     pub fn select() -> Self {
         Self::choose(
             std::env::var("ZAXNES_GLES").ok().as_deref(),
-            cfg!(all(target_arch = "aarch64", target_os = "linux")),
+            cfg!(any(
+                all(target_arch = "aarch64", target_os = "linux"),
+                target_os = "android"
+            )),
         )
     }
 

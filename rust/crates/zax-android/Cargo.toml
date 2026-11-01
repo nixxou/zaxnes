@@ -1,0 +1,19 @@
+[package]
+name = "zax-android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# The library SDL's Java activity loads on Android (`libmain.so`), its entry `SDL_main`. Empty on
+# the other platforms.
+[lib]
+name = "main"
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+zax-app = { path = "../zax-app", default-features = false, features = ["android"] }

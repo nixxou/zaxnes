@@ -24,6 +24,7 @@ pub mod persistence;
 pub mod physical_file_system;
 pub mod pipeline;
 pub mod profile_resolver;
+pub mod program;
 pub mod render_scaling;
 pub mod render_skip;
 pub mod scene_script_bridge;
