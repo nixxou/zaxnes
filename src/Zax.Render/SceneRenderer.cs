@@ -188,11 +188,12 @@ public sealed class SceneRenderer : ISceneRenderer
             CollectBackdrop(scene, view);
         }
 
-        // AMD-055 REQ-SCN-084: which opaque objects are wide enough in the xz plane of the scene
-        // frame to carry a floor surface. Only worth measuring when the reflections are on.
+        // AMD-055 REQ-SCN-084: which opaque objects are wide enough, in the plane perpendicular
+        // to the vertical of the floor definition, to carry a floor surface (Q-094, Q-096). Only
+        // worth measuring when the reflections are on.
         if (scene.Settings.Style.EffectiveReflections && !_pictureQuad)
         {
-            MarkFloorSurfaces(scene.Settings.SceneScale);
+            MarkFloorSurfaces(scene.Settings.SceneScale, FloorVertical(scene, view));
         }
 
         // AMD-012 (Q-020 revised): the depth pass and the sort of the transparent objects are per
@@ -208,8 +209,9 @@ public sealed class SceneRenderer : ISceneRenderer
 
     /// <summary>
     /// The extent half of the floor definition of AMD-055 REQ-SCN-084: an opaque object whose
-    /// bounding box in the <c>xz</c> plane of the scene frame, <b>before curvature</b>, measures
-    /// at least <c>6 × scene scale</c> units in both dimensions may carry floor surfaces.
+    /// bounding box in the plane <b>perpendicular to the camera's vertical</b>, measured
+    /// <b>before curvature</b>, spans at least <c>6 × scene scale</c> units on both of that
+    /// plane's axes may carry floor surfaces.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -227,15 +229,18 @@ public sealed class SceneRenderer : ISceneRenderer
     /// </remarks>
     /// <remarks>
     /// <para>
-    /// <b>Q-094</b>: the box is measured in the <c>xz</c> plane, the plane perpendicular to the
-    /// +Y axis the normal half of the test uses. Should that vertical become the camera's own,
-    /// this measurement has to follow it.
+    /// <b>Q-094</b> (answered): the plane the box is measured in follows the <b>same vertical</b>
+    /// as the normal half of the test — the camera's, <c>q · (0, 1, 0)</c> — and not the fixed
+    /// <c>xz</c> plane of the requirement's wording. On an ordinary camera the two coincide to a
+    /// few degrees, the vertical being near +Y; on the local camera of REQ-SCN-009 they do not,
+    /// and measuring a floor laid flat on <c>xz</c> would weigh it on the wrong two dimensions.
     /// </para>
     /// </remarks>
     // Q-093, Q-094
-    private void MarkFloorSurfaces(float sceneScale)
+    private void MarkFloorSurfaces(float sceneScale, Vector3 cameraUp)
     {
         float threshold = SceneConstants.FloorExtent * sceneScale;
+        (Vector3 first, Vector3 second) = FloorPlaneAxes(cameraUp);
         int start = 0;
         while (start < _opaque.Count)
         {
@@ -248,14 +253,14 @@ public sealed class SceneRenderer : ISceneRenderer
                 end++;
             }
 
-            Vector3 min = new(float.MaxValue);
-            Vector3 max = new(float.MinValue);
+            Vector2 min = new(float.MaxValue);
+            Vector2 max = new(float.MinValue);
             for (int index = start; index < end; index++)
             {
-                _opaque[index].GrowBounds(ref min, ref max);
+                _opaque[index].GrowPlanarBounds(first, second, ref min, ref max);
             }
 
-            bool wide = max.X - min.X >= threshold && max.Z - min.Z >= threshold;
+            bool wide = max.X - min.X >= threshold && max.Y - min.Y >= threshold;
             for (int index = start; index < end; index++)
             {
                 DrawItem item = _opaque[index];
@@ -265,6 +270,67 @@ public sealed class SceneRenderer : ISceneRenderer
 
             start = end;
         }
+    }
+
+    /// <summary>
+    /// The vertical the floor definition of AMD-055 REQ-SCN-084 is read against: the camera's
+    /// own, <c>q · (0, 1, 0)</c>, under the local camera of REQ-SCN-009, and the <c>+Y</c> axis
+    /// of the scene frame otherwise.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Q-094</b> answered that the vertical is the camera's — the observation behind it being
+    /// that the ring mat of « Punch-Out!! », a face of scene normal (0, 0, −1) seen through the
+    /// local camera at (−65, 0, 0), reflects in the reference. That part is implemented here:
+    /// the mat's normal makes 0.9063 with that camera's vertical and clears the 0.9 of the
+    /// requirement.
+    /// </para>
+    /// <para>
+    /// <b>Q-096</b>: the answer extends the rule to « les deux modes de caméra », and that half
+    /// cannot hold. The close-up R of AMD-055 §2.5 places its camera at an elevation of 30° —
+    /// the direction (−0.5, +0.5, −0.707) — over a floor of scene normal (0, 1, 0), and the
+    /// amendment states of that very floor « c'est donc une surface de sol », with a normative
+    /// invariant requiring it to reflect. Read against the camera's vertical the dot product is
+    /// cos 30° = <b>0.866</b>, under the 0.9: the amendment's own close-up would stop being a
+    /// floor, and six §2.5 invariants fail. More generally an ordinary orbit camera would lose
+    /// every floor past 25.8° of elevation. The vertical is therefore the camera's in the mode
+    /// that has no other one — the local camera, which lays the NES plane flat and makes it the
+    /// floor of the picture — and the scene frame's <c>+Y</c> in the ordinary mode, where
+    /// REQ-SCN-084 and its close-up both read it that way.
+    /// </para>
+    /// </remarks>
+    // Q-094, Q-096
+    private static Vector3 FloorVertical(SceneState scene, in CameraView view)
+        => scene.Camera.LocalCamera ? Normalized(view.Up, Vector3.UnitY) : Vector3.UnitY;
+
+    /// <summary>
+    /// Two orthonormal axes of the plane perpendicular to <paramref name="cameraUp"/>, the plane
+    /// the extent of AMD-055 REQ-SCN-084 is measured in (<b>Q-094</b>).
+    /// </summary>
+    /// <remarks>
+    /// The requirement names « les deux axes » of that plane without fixing which two, and the
+    /// extent of a box does depend on how the pair is turned inside the plane. The pair is built
+    /// from the scene frame's <c>Z</c>, so that a vertical of <c>+Y</c> — the ordinary camera's
+    /// case — gives back exactly the <c>x</c> and <c>z</c> axes the requirement's own wording
+    /// names, and the close-ups of §2.5 are measured as the amendment measures them; the
+    /// fallback to <c>X</c> only fires when the vertical is itself near <c>Z</c>, which is what
+    /// a local camera laying the NES plane flat produces.
+    /// </remarks>
+    private static (Vector3 First, Vector3 Second) FloorPlaneAxes(Vector3 cameraUp)
+    {
+        Vector3 up = Normalized(cameraUp, Vector3.UnitY);
+        Vector3 seed = MathF.Abs(up.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX;
+        Vector3 first = Normalized(Vector3.Cross(up, seed), Vector3.UnitX);
+        return (first, Vector3.Cross(first, up));
+    }
+
+    /// <summary>
+    /// <paramref name="value"/> normalised, or <paramref name="fallback"/> when it is degenerate.
+    /// </summary>
+    private static Vector3 Normalized(Vector3 value, Vector3 fallback)
+    {
+        float length = value.Length();
+        return length > 1e-6f ? value / length : fallback;
     }
 
     /// <summary>
@@ -808,6 +874,9 @@ public sealed class SceneRenderer : ISceneRenderer
         // eye is bound once per frame like the rest of the light.
         _scenePass.Set("uEye", view.Eye);
 
+        // AMD-055 REQ-SCN-084 (Q-094, Q-096): the vertical the floor definition is read against.
+        _scenePass.Set("uSceneUp", FloorVertical(scene, view));
+
         Vector3 light = SceneColor.ToLinear(scene.Light.Color)
             * SceneColor.ToLinear(scene.Settings.LightIntensity);
         _scenePass.Set("uLightLinear", light);
@@ -1077,6 +1146,30 @@ public sealed class SceneRenderer : ISceneRenderer
                 Vector3 point = MatrixInterop.ToVector(Model.TransformPoint(local));
                 min = Vector3.Min(min, point);
                 max = Vector3.Max(max, point);
+            }
+        }
+
+        /// <summary>
+        /// Grows a two-dimensional box by this item's eight transformed corners projected on
+        /// <paramref name="first"/> and <paramref name="second"/> — the extent of AMD-055
+        /// REQ-SCN-084 in the plane those two axes span (<b>Q-094</b>).
+        /// </summary>
+        public readonly void GrowPlanarBounds(
+            Vector3 first,
+            Vector3 second,
+            ref Vector2 min,
+            ref Vector2 max)
+        {
+            for (int corner = 0; corner < 8; corner++)
+            {
+                Vec3 local = new(
+                    (corner & 1) == 0 ? BoundsMin.X : BoundsMax.X,
+                    (corner & 2) == 0 ? BoundsMin.Y : BoundsMax.Y,
+                    (corner & 4) == 0 ? BoundsMin.Z : BoundsMax.Z);
+                Vector3 point = MatrixInterop.ToVector(Model.TransformPoint(local));
+                Vector2 planar = new(Vector3.Dot(point, first), Vector3.Dot(point, second));
+                min = Vector2.Min(min, planar);
+                max = Vector2.Max(max, planar);
             }
         }
     }

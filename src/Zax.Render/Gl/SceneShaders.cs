@@ -507,10 +507,14 @@ internal static class SceneShaders
         // discarded, which is why no other pass needs a second output.
         layout(location = 1) out vec4 oFloor;
 
-        // Whether the instance this fragment belongs to is wide enough in the xz plane of the
-        // scene frame, before curvature: at least 6 x scene scale in both dimensions
-        // (REQ-SCN-084). Computed once per object by the renderer.
+        // Whether the instance this fragment belongs to is wide enough in the plane
+        // perpendicular to the camera's vertical, before curvature: at least 6 x scene scale on
+        // both of its axes (REQ-SCN-084, Q-094). Computed once per object by the renderer.
         uniform int uFloorExtent;
+
+        // The camera's vertical q.(0,1,0) in the scene frame (AMD-045 REQ-SCN-072), the vertical
+        // the floor definition of REQ-SCN-084 is read against (Q-094).
+        uniform vec3 uSceneUp;
 
         uniform mat4 uModel;
 
@@ -670,16 +674,16 @@ internal static class SceneShaders
             oColor = vec4(min(lit, vec3(1.0)), uAlpha * texelAlpha);
 
             // REQ-SCN-084: a floor surface is a face whose normal in the scene frame, before
-            // curvature, has a +Y component of at least 0.9, and that belongs to a wide enough
-            // instance. The normal stored is the bent one: the ray itself is traced on the
-            // geometry as rendered (REQ-SCN-080, second bullet).
+            // curvature, points along the vertical to within the 0.9 of the requirement, and
+            // that belongs to a wide enough instance. The normal stored is the bent one: the ray
+            // itself is traced on the geometry as rendered (REQ-SCN-080, second bullet).
             //
-            // Q-094: the vertical of the test is the +Y axis of the scene frame, read literally.
-            // A profile that runs the local camera of REQ-SCN-009 lays the NES plane flat, and
-            // its floor is then perpendicular to +Y: it never reflects. The ticket asks whether
-            // the vertical should instead be the camera's own, q.(0,1,0), which AMD-045
-            // REQ-SCN-072 made the only vertical the renderer still has.
-            float floorFacing = step(0.9, normalize(vFlatNormal).y);
+            // Q-094 (answered), Q-096: uSceneUp is the camera's own vertical q.(0,1,0) under the
+            // local camera of REQ-SCN-009 — which lays the NES plane flat, so that the plane
+            // itself is the floor of the picture and has no other vertical to be read against —
+            // and the +Y axis of the scene frame under an ordinary camera, where the close-up R
+            // of §2.5 reads it that way and its invariants depend on it.
+            float floorFacing = step(0.9, dot(normalize(vFlatNormal), uSceneUp));
             oFloor = vec4(n * 0.5 + 0.5, uFloorExtent != 0 ? floorFacing : 0.0);
         }
         """;

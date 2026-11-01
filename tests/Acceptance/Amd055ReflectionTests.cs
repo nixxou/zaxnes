@@ -141,32 +141,31 @@ public sealed class Amd055ReflectionTests
     }
 
     /// <summary>
-    /// <b>Q-094</b> — the ring-mat case of lot V2-22. A profile that runs the <b>local camera</b>
-    /// of REQ-SCN-009 lays the NES plane flat and makes it the floor of the scene; the surface
-    /// the characters stand on is then a face of normal (0, 0, −1), and the vertical of the
-    /// picture is the camera's own, <c>q · (0, 1, 0)</c>. Read literally, the floor definition
-    /// of REQ-SCN-084 names the <b>+Y axis of the scene frame</b>, so such a surface is never a
-    /// floor and never reflects, which is what this test pins down.
+    /// <b>Q-094</b> (answered) — the ring-mat case of lot V2-22. A profile that runs the
+    /// <b>local camera</b> of REQ-SCN-009 lays the NES plane flat and makes it the floor of the
+    /// scene; the surface the characters stand on is then a face of normal (0, 0, −1), and the
+    /// vertical of the picture is the camera's own, <c>q · (0, 1, 0)</c>. The answer reads the
+    /// floor definition of REQ-SCN-084 against <b>that</b> vertical, so such a mat <b>is</b> a
+    /// floor surface and does reflect — which is what this test pins down.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The angles are those of the « Punch Out!! » profile, (−65, 0, 0): the camera's vertical
     /// is then (0, 0.4226, −0.9063) and its dot product with the normal of the mat is 0.9063 —
-    /// just over the 0.9 of the requirement. The configuration therefore sits exactly on the
-    /// question: under the literal reading it reflects nothing, under the camera-vertical
-    /// reading it would reflect. <b>If Q-094 is answered the other way, this is the test to
-    /// turn round.</b>
+    /// just over the 0.9 of the requirement, so the configuration sits exactly on the question
+    /// the ticket asked. Under the literal +Y reading the mat reflects nothing at all, which is
+    /// what this test asserted while Q-094 was open; this is the same fixture turned round.
     /// </para>
     /// <para>
     /// The pass is asserted to have run, so what is measured is the orientation of the mat and
     /// not an effect that was never applied. That the mat passes the <em>extent</em> half of the
-    /// definition — its instance measuring 64 × 8 units in the <c>xz</c> plane, over the 6 of
-    /// the requirement in both dimensions — is a property of the fixture, as it is of the ring
-    /// of « Punch-Out!! » (measured in Q-094).
+    /// definition — its instance measuring 64 × 8 units in the plane perpendicular to that same
+    /// vertical, over the 6 of the requirement on both axes — is a property of the fixture, as it
+    /// is of the ring of « Punch-Out!! » (measured in Q-094).
     /// </para>
     /// </remarks>
     [GlFact] // REQ-SCN-084, REQ-SCN-009
-    public void Q094_a_flat_mat_under_the_local_camera_is_not_a_floor_of_the_requirement()
+    public void Q094_a_flat_mat_under_the_local_camera_is_a_floor_of_the_requirement()
     {
         using GlTarget target = GlTarget.Create(Width, Height);
         using SceneRenderer renderer = new(target.Gl);
@@ -185,6 +184,8 @@ public sealed class Amd055ReflectionTests
         (int left, int top, int right, int bottom) = ScreenBox(view, CubeBoundsR());
 
         int measured = 0;
+        int changed = 0;
+        int reddened = 0;
         for (float x = 98f; x <= 158f; x += 2f)
         {
             for (float y = 90f; y <= 150f; y += 2f)
@@ -201,11 +202,28 @@ public sealed class Amd055ReflectionTests
                 }
 
                 measured++;
-                AssertClose(off, on, px, py, tolerance: 1);
+                if (off.Packed(px, py) == on.Packed(px, py))
+                {
+                    continue;
+                }
+
+                changed++;
+
+                // The only thing above the mat is the pure red cube, so whatever the mat picks
+                // up can only redden it: R rises while G and B fall (V2-22 measured
+                // (113, 82, 82) against a mat of (109, 109, 109)).
+                (int baseR, int baseG, int baseB) = off.At(px, py);
+                (int litR, int litG, int litB) = on.At(px, py);
+                if (litR >= baseR && litG <= baseG && litB <= baseB)
+                {
+                    reddened++;
+                }
             }
         }
 
         Assert.True(measured > 200, $"only {measured} pixels of the mat were compared.");
+        Assert.True(changed > 0, "the mat must carry the reflection of the cube on some pixel.");
+        Assert.Equal(changed, reddened);
     }
 
     /// <summary>
