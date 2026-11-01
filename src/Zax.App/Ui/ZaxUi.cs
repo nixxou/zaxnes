@@ -502,8 +502,13 @@ internal sealed partial class ZaxUi
     /// REQ-PERS-041 keeps the fact logged whatever happens, the refusals and the built-in
     /// identifier included — which the notification of REQ-UI-212 used to be the only trace of.
     /// </para>
+    /// <para>
+    /// Internal rather than private so that the criteria of REQ-UI-214 are checked on the whole
+    /// path — inspect, dialog, answer, write — exactly where the file dialog of REQ-UI-201 calls
+    /// it, and with no ImGui frame in the way.
+    /// </para>
     /// </remarks>
-    private void ImportProfile(string path)
+    internal void ImportProfile(string path)
     {
         ProfileImportPlan plan = _catalog.InspectProfileImport(path);
         ProfileImportDialog dialog = ProfileImportDialogs.Decide(plan);
