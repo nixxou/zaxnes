@@ -173,7 +173,7 @@ public static class SettingKeys
     public const string RenderStyleReflections = "render.style.reflections";
 
     /// <summary>
-    /// Reflection intensity <c>0.09 × (2 × value − 1)</c>, 1 to 5 (REQ-SCN-084). Lua
+    /// Reflection intensity <c>0.045 × (2 × value − 1)</c>, 1 to 5 (REQ-SCN-084). Lua
     /// <c>ssr.shine</c>.
     /// </summary>
     public const string RenderStyleSsrShine = "render.style.ssr_shine";

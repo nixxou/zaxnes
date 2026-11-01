@@ -15,7 +15,7 @@ namespace Zax.Acceptance.Tests;
 /// Close-up R: capture 1920 × 1080, <c>video.anti_alias</c> = 0, native resolution, scene
 /// scale 1, zero curvature, black <c>Color</c> skybox, <c>render.shadow</c> = false, every other
 /// effect of §2.3 to §2.5 off, <c>spl.reflections</c> = 1 and the four <c>ssr.*</c> at their
-/// default (shine 3 so an intensity of 0.45, clarity 3, length 3 so 200 units, quality 2);
+/// default (shine 3 so an intensity of 0.225, clarity 3, length 3 so 200 units, quality 2);
 /// white light (1, −1, 1) of intensity 1. A floor of 8 × 8 full tiles (64 × 64 units) turned by
 /// 90° about <c>x</c>, of a dark RGB (124, 124, 124) — linear albedo 0.202 — and a red cube of
 /// 8 × 8 × 8 units standing on it, footprint centred on the centre of the floor; the camera
@@ -65,6 +65,14 @@ public sealed class Amd055ReflectionTests
     /// contact of the base of the cube, the <b>linear</b> red channel grows by at least
     /// <b>10 %</b> against the same capture with <c>spl.reflections</c> = 0.
     /// </summary>
+    /// <remarks>
+    /// The margin Note of §2.5 at the v1.5 intensity <c>i</c> = 0.225: the mix
+    /// <c>(1 − i) · surface + i · reflet</c> turns « +10 % » into
+    /// <c>R_reflet ≥ 1.444 · R_sol</c>, and with the close-up's albedos the reflected red face
+    /// is a factor 4.9 above the floor, so the reported red share only has to clear <b>30 %</b>
+    /// of its full value for the invariant to hold whatever the attenuation and the blur do.
+    /// That is why this fixture's floor is dark and its cube pure red.
+    /// </remarks>
     [GlFact] // REQ-SCN-084
     public void REQ_SCN_084_the_floor_at_the_contact_takes_the_red_of_the_cube()
     {
@@ -381,6 +389,15 @@ public sealed class Amd055ReflectionTests
     /// neighbours is <c>H / W</c>, so the largest value over the largest horizontal difference is
     /// the width of the sharpest edge the reflection has.
     /// </para>
+    /// <para>
+    /// The fixture also raises <c>ssr.shine</c> to 5, which the invariant leaves free — it only
+    /// names <c>ssr.clarity</c>. Both terms of the ratio are single-pixel extrema read off an
+    /// 8-bit capture, so the estimate carries about one quantisation step of noise whatever the
+    /// amplitude; halving the intensity in AMD-055 v1.5 doubled that noise relative to the
+    /// signal and made the first two clarities tie (2.470 against 2.520, a 2 % inversion) while
+    /// the blur itself did not move at all. At shine 5 the five widths separate again, which is
+    /// the same measurement the fixture always made and not a weaker one.
+    /// </para>
     /// </remarks>
     [GlFact] // REQ-SCN-084
     public void REQ_SCN_084_the_clarity_sharpens_the_edge_of_the_reflection()
@@ -393,20 +410,24 @@ public sealed class Amd055ReflectionTests
 
         Reflect(scene);
 
-        double previous = double.MaxValue;
+        // The invariant names ssr.clarity alone; the shine only has to put the edge well clear
+        // of the 8-bit quantisation of the capture (see the remarks).
+        scene.Settings.Style.SsrShine = 5;
         List<double> widths = [];
         for (int clarity = 1; clarity <= 5; clarity++)
         {
             scene.Settings.Style.SsrClarity = clarity;
             Shot on = target.Render(renderer, scene);
+            widths.Add(TransitionWidth(off, on));
+        }
 
-            double width = TransitionWidth(off, on);
-            widths.Add(width);
+        string all = string.Join(", ", widths.Select(w => w.ToString("F3")));
+        for (int clarity = 2; clarity <= 5; clarity++)
+        {
             Assert.True(
-                width < previous,
-                $"clarity {clarity} gave a transition of {width:F3} pixels, not under "
-                + $"{previous:F3} ({string.Join(", ", widths.Select(w => w.ToString("F3")))}).");
-            previous = width;
+                widths[clarity - 1] < widths[clarity - 2],
+                $"clarity {clarity} gave a transition of {widths[clarity - 1]:F3} pixels, not "
+                + $"under the {widths[clarity - 2]:F3} of the previous one ({all}).");
         }
 
         Assert.True(widths[0] > 1.5, $"the blur was not measurable at all: {widths[0]:F3}.");

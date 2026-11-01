@@ -68,7 +68,7 @@ internal static class ReflectionShaders
         // 40 x (2 x ssr.length - 1) x scene scale units of scene (REQ-SCN-084).
         uniform float uMaxLength;
 
-        // 0.09 x (2 x ssr.shine - 1): the share of the reflected colour mixed in.
+        // 0.045 x (2 x ssr.shine - 1): the share of the reflected colour mixed in (v1.5).
         uniform float uIntensity;
 
         uniform int uSteps;
@@ -231,7 +231,8 @@ internal static class ReflectionShaders
             // normative bullet and nothing of either, since at the default ssr.length nothing
             // in a game frame travels 150 units. The shape is a free choice; a smoothstep over
             // [0, 1] keeps the contact sharp (zero slope at the origin) and the far end soft.
-            // Q-099
+            // AMD-055 v1.5 keeps this whole-ray fall-off and answers the rest of Q-099 by
+            // halving the intensity constant itself (see SceneState.ReflectionIntensity).
             float fadeLength = 1.0 - smoothstep(0.0, 1.0, hi / uMaxLength);
             vec2 border = min(hitUv, vec2(1.0) - hitUv);
             float fadeEdge = smoothstep(0.0, 0.12, min(border.x, border.y));

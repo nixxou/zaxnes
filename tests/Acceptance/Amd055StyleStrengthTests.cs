@@ -84,9 +84,9 @@ public sealed class Amd055StyleStrengthTests
     /// Measured the way the verification of V2-25 measures it: the <b>zone</b> is the set of
     /// pixels whose sum over the three channels of the absolute change in sRGB levels exceeds
     /// <b>12</b>, and the figure is the <b>mean of that sum over the zone</b> — 63 for the
-    /// reference against 122 for this reimplementation on the scene the verification used,
-    /// where the deviation was that the intensity of REQ-SCN-084 was carried at its full value
-    /// over the whole ray instead of fading with the distance travelled.
+    /// reference against 122 for this reimplementation on the scene the verification used.
+    /// Q-099 traced the factor of two to the intensity constant itself, which AMD-055 v1.5
+    /// halves to <c>0,045 × n(ssr.shine)</c>.
     /// </para>
     /// <para>
     /// The bound is set on the close-up R, whose geometry is normative and third-party
@@ -117,7 +117,7 @@ public sealed class Amd055StyleStrengthTests
         // The realised mix weight. The cube is pure red, so the reflected colour has no green at
         // all and a floor pixel's green comes out at exactly (1 − i) of what it was: the mix
         // « (1 − i) · surface + i · reflet » of REQ-SCN-084 read straight off the capture, with
-        // no need to know what the ray hit. Applied twice it would read (1 − i)², 0.30 for 0.55.
+        // no need to know what the ray hit. Applied twice it would read 1 − (1 − i)², 0.40.
         double[] realised = new double[Contact.Length];
         for (int i = 0; i < Contact.Length; i++)
         {
@@ -142,25 +142,25 @@ public sealed class Amd055StyleStrengthTests
             "the floor must still take the red of the cube at the contact.");
 
         // The intensity itself, which is the one normative figure of the three: `i` must be
-        // « 0,09 × n(ssr.shine) » = 0.45 at the default shine, and this reads it off the capture
-        // with no reference to what the ray hit. Half an sRGB level at these values is 0.004, so
-        // 0.02 is four times the quantisation and still far from any of the ways of getting it
-        // wrong — 0.70 for a double application, 0.27 for `0,09 × ssr.shine`.
+        // « 0,045 × n(ssr.shine) » = 0.225 at the default shine (AMD-055 v1.5, Q-099), and this
+        // reads it off the capture with no reference to what the ray hit. Half an sRGB level at
+        // these values is under 0.004, so 0.015 is four times the quantisation and still far
+        // from any of the ways of getting it wrong — 0.40 for a double application of the v1.4
+        // weight, 0.45 for the v1.4 constant itself, 0.135 for `0,045 × ssr.shine`.
         foreach (double weight in realised)
         {
-            Assert.InRange(weight, 0.43, 0.47);
+            Assert.InRange(weight, 0.210, 0.240);
         }
 
-        // The magnitude. V2-25 measures 116.1 in-zone on this fixture, where the reference of
-        // the verification implies about half of that: Q-099 establishes that the deviation is
-        // *not* in anything §2.5 states — the mix weight above is exact — and leaves the
-        // question open rather than retuning 0.09, so the bound here is a regression guard and
-        // not the reference's figure. 140 catches a doubling (a second application would read
-        // about 190 with the weight test above removed) and leaves a fifth of margin.
+        // The magnitude. V2-25 measured 116.1 in-zone on this fixture at the v1.4 intensity,
+        // where R5's reference implied about half of that; v1.5 halves the constant and V2-26
+        // measures 59.9 here. The bound is a regression guard, not the reference's own figure
+        // (this is a pure red cube one unit from a dark floor, not a lit ring on a grey mat):
+        // 70 catches a return to the v1.4 constant and leaves a fifth of margin.
         Assert.True(
-            mean < 140.0,
-            $"the in-zone mean change is {mean:F1} summed sRGB levels, where V2-25 measured "
-            + "116.1 — something is adding reflection beyond REQ-SCN-084's intensity (Q-099).");
+            mean < 70.0,
+            $"the in-zone mean change is {mean:F1} summed sRGB levels, where V2-26 measured "
+            + "59.9 — something is adding reflection beyond REQ-SCN-084's intensity (Q-099).");
 
         // The change is a brightening on balance. On this fixture the two halves of the mix very
         // nearly cancel in the sum — the red channel rises by what the cube reflects while the

@@ -209,10 +209,16 @@ public sealed class StyleSettings
     public float ReflectionLength(float sceneScale) => 40f * Odd(SsrLength) * sceneScale;
 
     /// <summary>
-    /// The reflection intensity <c>0.09 × n(ssr.shine)</c> of REQ-SCN-084 — the share of the
-    /// reflected colour mixed into the surface: 0.09, 0.27, 0.45, 0.63 and 0.81.
+    /// The reflection intensity <c>0.045 × n(ssr.shine)</c> of REQ-SCN-084 — the share of the
+    /// reflected colour mixed into the surface: 0.045, 0.135, 0.225, 0.315 and 0.405.
     /// </summary>
-    public float ReflectionIntensity => 0.09f * Odd(SsrShine);
+    /// <remarks>
+    /// AMD-055 v1.5 halved the constant (Q-099): measured in black box on the reference, the
+    /// floor reflection is <b>sharp</b> and <b>weak</b>, its "fragmented" look coming from the
+    /// crowd and wall patterns it reflects and not from any scattering of the ray. The whole
+    /// of the rest of §2.5 — the mix, the two attenuations, the blur — is unchanged.
+    /// </remarks>
+    public float ReflectionIntensity => 0.045f * Odd(SsrShine);
 
     /// <summary>
     /// The blur radius at the maximum ray length, as a fraction of the screen height:
