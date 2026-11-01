@@ -164,6 +164,8 @@ Zaxnes --smoke-emulated <n>                 play n emulated frames (60 = 1 s) an
 Zaxnes --ui-shots <dir>                     one PNG per interface screen, then exit
 Zaxnes --builtin-font                       force the degraded font of REQ-PUB-006
 Zax.Harness render --out <dir>              offscreen PNG captures, hidden GL context
+Zax.Harness render --out <dir> --style 4 --style-param spl.voxel_grid=2
+                                            the same, in the Enhanced style of AMD-055
 Zax.Harness meshes --profile <title> --out <dir>    export the geometry of a profile
 Zax.Harness lua-api --out api.txt           the Lua API the scripts really see
 Zax.Harness stress [--no-gl] [--threaded]   replay the REQ-ACC-030 bench in a loop (Q-062)

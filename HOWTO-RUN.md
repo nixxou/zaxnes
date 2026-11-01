@@ -620,6 +620,52 @@ Une troisième ralentit volontairement l'affichage, pour la file de frames GPU d
 Depuis `AMD-052`, `--anti-alias` vaut **1** par défaut, comme une installation neuve
 (`REQ-PERS-089`) : un `Zax.Harness render` sans option rapporte donc « MSAA 4x ».
 
+### Choisir le style de rendu (`AMD-055`)
+
+Trois options sélectionnent le style visuel d'`AMD-055` (`REQ-SCN-078`) et ses douze paramètres
+(`REQ-SCN-079`), afin de capturer une frame **Enhanced** sans ouvrir l'application :
+
+- `--style <id>` : `0` ou `classic`, `4` ou `enhanced`, `1` étant accepté comme **alias**
+  d'Enhanced et relu 4, exactement comme le réglage `render.visual_style`. Sans l'option, le
+  style est celui que les scripts du profil ont laissé, Classic par défaut. Toute autre valeur
+  est **refusée** (message clair, code de sortie 2) : le réglage, lui, ramènerait silencieusement
+  à Classic, et la capture montrerait autre chose que ce qui était demandé ;
+- `--style-param <clé>=<valeur>` : un paramètre du style, par l'identifiant que lui donne le
+  tableau de `REQ-SCN-079` — c'est l'argument que prend `Setting:SetVisualStyleParameter`. L'option
+  est **répétable** et la clé stable `render.style.*` est acceptée aussi. Une clé inconnue ou une
+  valeur hors de son échelle sont refusées, sans arrondi silencieux ;
+- `--style-params "k=v;k=v"` : la même chose en une seule liste, séparée par des points-virgules
+  ou des virgules.
+
+| Clé | Valeurs | Défaut |
+|---|---|---|
+| `spl.ao` | 0 Off, 1 MSVO, 2 Depth | 0 |
+| `ao.strength`, `ao.radius`, `ao.thickness` | 1 à 5 | 3 |
+| `ao.quality` | 0 Low, 1 Medium, 2 High | 1 |
+| `spl.pixel_shadow` | 0 ou 1 | 0 |
+| `spl.voxel_grid` | 0 Off, 1, 2, 3 (côté de cellule `N = 2^valeur`) | 0 |
+| `spl.reflections` | 0 ou 1 | 0 |
+| `ssr.shine`, `ssr.clarity`, `ssr.length` | 1 à 5 | 3 |
+| `ssr.quality` | 0 Low, 1 Medium, 2 High, 3 Ultra | 2 |
+
+**Précédence** : ce que le profil et ses scripts ont laissé d'abord (`REQ-LUA-114` écrit dans la
+couche de session, `REQ-PERS-010`), puis les options ci-dessus, appliquées **avant la première
+frame rendue**, comme si l'utilisateur les avait réglées dans la fenêtre d'options. Un paramètre
+qu'aucune option ne nomme garde la valeur que le run lui a laissée. Le style et ses paramètres ne
+viennent **jamais** du profil lui-même (`REQ-SCN-078`).
+
+La **courbure** d'`AMD-043` n'est pas un effet du style — elle agit dans les deux styles — et
+garde donc son option `--bend` ; `--style-param spl.bend_zx=30` est refusé et renvoie vers elle.
+
+```
+Zax.Harness.exe render --out captures --frames synthetic:framing ^
+  --style 4 --style-params "spl.voxel_grid=2;spl.pixel_shadow=1"
+```
+
+`render.json` porte désormais un bloc `style` : le style en vigueur et les douze paramètres, par
+leur identifiant Lua, de sorte qu'une capture dise ce qui l'a produite et que deux captures ne
+soient pas comparées à travers deux styles.
+
 Les lignes de diagnostic partent sur la sortie d'erreur ; la fin du rendu récapitule le nombre
 de texels logés, d'objets non logés et de lignes écrites :
 
