@@ -249,13 +249,14 @@ public sealed class UiLanguageTests
             "The game profile doesn't exist anymore.", UiStrings.Get(UiKeys.NotifyGameMissing));
         Assert.Equal("Save state used a different core.", UiStrings.Get(UiKeys.NotifyForeignCore));
 
-        // REQ-UI-084, AMD-029 §3: the three import failures, oddities included.
+        // REQ-UI-084, AMD-029 §3, AMD-056 §2: the three import failures, with the two spaces
+        // the third keeps and the space after the path the second gained.
         Assert.Equal("This file is not a 3dn file", UiStrings.Get(UiKeys.NotifyNotA3dnFile));
         Assert.Equal(
             "3dn format version 7  is not supported",
             UiNotifications.Translate(ProfileImportMessages.UnsupportedVersion("7")));
         Assert.Equal(
-            @"C:\x\y.3dnhas an obsolate or wrong profile format. "
+            @"C:\x\y.3dn has an obsolete or wrong profile format. "
             + "This profile is not compatible with the current version of Zaxnes.",
             UiNotifications.Translate(ProfileImportMessages.ObsoleteFormat(@"C:\x\y.3dn")));
 

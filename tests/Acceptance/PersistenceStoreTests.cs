@@ -555,13 +555,14 @@ public sealed class PersistenceStoreTests
     {
         using HostDriver host = HostDriver.Create();
 
-        // 1. An unreadable file: the exact message of REQ-UI-084, path glued to "has".
+        // 1. An unreadable file: the exact message of REQ-UI-084 as AMD-056 §2 words it — a
+        // space after the path, and « obsolete ».
         string bad = Path.Combine(host.Root, "not-a-profile.3dn");
         File.WriteAllText(bad, "this is plain text");
         (string outcome, string message) = host.ImportProfile(bad);
         Assert.Equal("Rejected", outcome);
         Assert.Equal(
-            $"{bad}has an obsolate or wrong profile format. "
+            $"{bad} has an obsolete or wrong profile format. "
             + "This profile is not compatible with the current version of Zaxnes.",
             message);
 

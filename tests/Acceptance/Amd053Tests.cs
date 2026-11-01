@@ -159,10 +159,10 @@ public sealed class Amd053Tests
 
     /// <summary>
     /// REQ-UI-212, first criterion: importing any text file gives the
-    /// <c>&lt;path&gt;has an obsolate…</c> message — the path followed directly by the text, with
-    /// no space — and nothing is added to the library.
+    /// <c>&lt;path&gt; has an obsolete…</c> message — the full path, a space, then the text
+    /// (AMD-056 §2) — and nothing is added to the library.
     /// </summary>
-    [Fact] // REQ-UI-212, REQ-PERS-041
+    [Fact] // REQ-UI-212, REQ-UI-084, REQ-PERS-041
     public void REQ_UI_212_a_text_file_names_the_obsolete_format()
     {
         using TempFolder folder = new();
@@ -173,7 +173,7 @@ public sealed class Amd053Tests
 
         Assert.Equal(ProfileImportOutcome.Rejected, result.Outcome);
         Assert.Equal(ProfileImportMessages.ObsoleteFormat(path), result.Message);
-        Assert.StartsWith($"{path}has an obsolate", result.Message, StringComparison.Ordinal);
+        Assert.StartsWith($"{path} has an obsolete", result.Message, StringComparison.Ordinal);
         Assert.Null(result.Profile);
     }
 
@@ -181,7 +181,7 @@ public sealed class Amd053Tests
     /// REQ-UI-212, second criterion: a well-formed protobuf whose <c>Type</c> is <c>"nes"</c>
     /// gives <c>This file is not a 3dn file</c>; a profile whose <c>Ver</c> is <c>"1"</c> gives
     /// <c>3dn format version 1  is not supported</c>, with its two spaces; a profile with no
-    /// <c>Id</c> gives the <c>has an obsolate…</c> text.
+    /// <c>Id</c> gives the <c>has an obsolete…</c> text.
     /// </summary>
     [Fact] // REQ-UI-212, REQ-PROF-021, REQ-PROF-033, REQ-PROF-063
     public void REQ_UI_212_the_message_follows_the_cause()

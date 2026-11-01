@@ -57,26 +57,41 @@ public sealed record ProfileImportResult(ProfileImportOutcome Outcome, UserProfi
 
 /// <summary>
 /// The texts the original shows when an import fails. SPEC-10 REQ-UI-084 is the only normative
-/// source for them, oddities included: two spaces before "is" in the version message, and no
-/// space between the path and "has" in the format message.
+/// source for them, and one oddity survives its rewording by AMD-056 §2: the two spaces before
+/// "is" in the version message.
 /// </summary>
+/// <remarks>
+/// AMD-056 §1 reads two corrections out of the reference program 2.0 that AMD-053 had missed —
+/// the version message carries the <b>sanitised</b> version and not the raw string of the file,
+/// and the format message has a space after the path and spells « obsolete ». The « obsolate »
+/// of the earlier reading was a misreading, not an oddity of the original.
+/// </remarks>
 public static class ProfileImportMessages
 {
     /// <summary>Shown for a file whose signature is not <c>"3dn"</c>.</summary>
     public const string NotA3dnFile = "This file is not a 3dn file";
 
-    /// <summary>Shown for a profile whose format version is not supported.</summary>
+    /// <summary>
+    /// Shown for a profile whose format version is not supported. The version is sanitised as
+    /// REQ-PROF-021 sanitises it — digits, <c>.</c> and <c>$</c> only — so a file writing
+    /// <c>"v1"</c> reads « 3dn format version 1 » (AMD-056 §2, which supersedes the answer of
+    /// Q-089 on the form of <c>&lt;v&gt;</c>).
+    /// </summary>
+    /// <remarks>
+    /// The sanitising happens here rather than at the call sites, so that every text carrying a
+    /// version — the import of REQ-UI-212 and the load of REQ-PERS-040 — spells it the same way.
+    /// The two spaces before "is" are the original's and stay.
+    /// </remarks>
     public static string UnsupportedVersion(string version)
-        => $"3dn format version {version}  is not supported";
+        => $"3dn format version {ProfileVersionRules.Sanitize(version)}  is not supported";
 
     /// <summary>Shown for a file without an identifier, or in a format too old to use.</summary>
     /// <remarks>
-    /// AMD-029 §3, closing Q-068: the last words name the product, « Zaxnes ». That is the one
-    /// change R0 made to the text REQ-UI-084 fixes word for word; the two oddities above are
-    /// kept.
+    /// AMD-029 §3, closing Q-068: the last words name the product, « Zaxnes ». AMD-056 §2 adds
+    /// the space after the path and the correct spelling of « obsolete ».
     /// </remarks>
     public static string ObsoleteFormat(string path)
-        => $"{path}has an obsolate or wrong profile format. "
+        => $"{path} has an obsolete or wrong profile format. "
         + "This profile is not compatible with the current version of Zaxnes.";
 
     /// <summary>Logged when a profile is skipped because its identifier is already taken.</summary>
@@ -265,8 +280,9 @@ public sealed class UserProfileFolder
 
         if (header.Value.HasUnsupportedVersion)
         {
-            // Row 2: `Ver` reduces to "1" (REQ-PROF-021). The message carries the version as
-            // the file spells it, not as the sanitising of REQ-PROF-021 reduces it. Q-089.
+            // Row 2: `Ver` reduces to "1" (REQ-PROF-021). The message carries the version as the
+            // sanitising of REQ-PROF-021 reduces it, which AMD-056 §2 read in the 2.0 and which
+            // supersedes the answer of Q-089 on this point.
             return Reject(ProfileImportMessages.UnsupportedVersion(header.Value.Version ?? string.Empty));
         }
 

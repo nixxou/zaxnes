@@ -205,7 +205,7 @@ public sealed class CatalogueAndLibraryTests
 
         Assert.Equal(ProfileImportOutcome.Rejected, result.Outcome);
         Assert.Equal(
-            $"{source}has an obsolate or wrong profile format. "
+            $"{source} has an obsolete or wrong profile format. "
             + "This profile is not compatible with the current version of Zaxnes.",
             result.Message);
         Assert.False(files.FileExists(Path.Combine(layout.ProfilesDirectory, "Broken.3dn")));

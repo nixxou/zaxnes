@@ -704,11 +704,13 @@ public sealed class UiTests
     }
 
     /// <summary>
-    /// SPEC-10 REQ-UI-084: the three profile-import failures are notified with the exact texts,
-    /// oddities included, at <b>normal</b> severity.
+    /// SPEC-10 REQ-UI-084 as AMD-056 §2 words it: the three profile-import failures carry the
+    /// exact texts — the surviving oddity being the two spaces before « is » — the version
+    /// sanitised as REQ-PROF-021 sanitises it, and the format text with a space after the path
+    /// and « obsolete ».
     /// </summary>
-    [Fact]
-    public void REQ_UI_084_the_three_import_texts_keep_their_oddities()
+    [Fact] // REQ-UI-084, REQ-PROF-021
+    public void REQ_UI_084_the_three_import_texts_are_exact()
     {
         Assert.Equal(
             "This file is not a 3dn file",
@@ -718,8 +720,14 @@ public sealed class UiTests
             "3dn format version 7  is not supported",
             Zax.Profiles.Catalogue.ProfileImportMessages.UnsupportedVersion("7"));
 
+        // AMD-056 §2: a file writing « v1 » is named « version 1 » — the sanitising of
+        // REQ-PROF-021 keeps digits, « . » and « $ » and nothing else.
         Assert.Equal(
-            @"C:\x\y.3dnhas an obsolate or wrong profile format. "
+            "3dn format version 1  is not supported",
+            Zax.Profiles.Catalogue.ProfileImportMessages.UnsupportedVersion("v1"));
+
+        Assert.Equal(
+            @"C:\x\y.3dn has an obsolete or wrong profile format. "
             + "This profile is not compatible with the current version of Zaxnes.",
             Zax.Profiles.Catalogue.ProfileImportMessages.ObsoleteFormat(@"C:\x\y.3dn"));
     }

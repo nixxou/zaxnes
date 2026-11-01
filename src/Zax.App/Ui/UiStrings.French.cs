@@ -83,6 +83,10 @@ internal static partial class UiStrings
         // AMD-051 §3 point 6 : la traduction de « Loading timed out. » (REQ-LOOP-073).
         [UiKeys.NotifyLoadingTimedOut] = "Délai de chargement dépassé.",
 
+        // AMD-056 §2 a réécrit les deux entrées anglaises suivantes ; les traductions sont
+        // refaites dessus. Celle de la version reste la même — « {0} » y recevait déjà le
+        // numéro, assaini maintenant — et celle du format gagnait déjà l'espace après le
+        // chemin que l'anglais vient de prendre, « obsolète » ayant toujours été le mot juste.
         [UiKeys.NotifyNotA3dnFile] = "Ce fichier n'est pas un fichier 3dn",
         [UiKeys.NotifyUnsupported3dnVersion] =
             "La version {0} du format 3dn n'est pas prise en charge",

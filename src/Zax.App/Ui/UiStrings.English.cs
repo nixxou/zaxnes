@@ -67,9 +67,11 @@ internal static partial class UiStrings
         [UiKeys.ButtonNo] = "No",
 
         // ------------------------ notifications of SPEC-10 REQ-UI-082 to REQ-UI-084
-        // Word for word what the requirements write, oddities included: the two spaces
-        // before « is » and the missing space after the path (REQ-UI-084), and the product
-        // name AMD-029 §3 put at the end. AMD-036 §1 makes these the English entries.
+        // Word for word what the requirements write, the one surviving oddity included: the
+        // two spaces before « is » (REQ-UI-084), and the product name AMD-029 §3 put at the
+        // end. AMD-036 §1 makes these the English entries. AMD-056 §2 corrected the format
+        // message — a space after the path, « obsolete » — and makes the version a sanitised
+        // one (REQ-PROF-021), which the producer of the text does.
         [UiKeys.NotifyRollBack] = "Roll Back",
         [UiKeys.NotifyFastForward] = "Fast Forward",
         [UiKeys.NotifyQuickSave] = "Quick Save",
@@ -87,7 +89,7 @@ internal static partial class UiStrings
         [UiKeys.NotifyNotA3dnFile] = "This file is not a 3dn file",
         [UiKeys.NotifyUnsupported3dnVersion] = "3dn format version {0}  is not supported",
         [UiKeys.NotifyObsoleteProfileFormat] =
-            "{0}has an obsolate or wrong profile format. "
+            "{0} has an obsolete or wrong profile format. "
             + "This profile is not compatible with the current version of Zaxnes.",
 
         // ------------- notifications of the persisted files (REQ-PERS-022, REQ-PERS-024)
