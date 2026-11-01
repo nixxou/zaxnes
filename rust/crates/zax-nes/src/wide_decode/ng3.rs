@@ -36,6 +36,8 @@ pub const SOURCE_CRC_JAPAN: u32 = 0x2F2E_30F7;
 const AREA: u16 = 0x005F;
 const CAMERA_LOW: u16 = 0x00DB;
 const CAMERA_HIGH: u16 = 0x00DC;
+/// This frame's scroll: the old camera x - the new, signed.
+const FRAME_SCROLL: u16 = 0x0049;
 const BLOCKS: u16 = 0x0051;
 const ATTRIBUTES: u16 = 0x0053;
 const SUB_BLOCKS: u16 = 0x0055;
@@ -177,7 +179,12 @@ impl MarginDecoder for NinjaGaiden3 {
         // margins stay the backdrop on every row, bands scrolled on their own too, cut at the same
         // column (a repeated edge or stretch reads as level that is not there, a boss room's walls
         // and floor going on).
-        let shown = |column: i32| (0..area.columns).contains(&((camera >> 3) + column));
+        // The picture is drawn with the frame's scroll, the camera of the frame before: the
+        // camera now plus this frame's move ($49, the old camera x - the new). The camera now
+        // made a column flicker at the area's start each time it crossed 8 pixels.
+        #[allow(clippy::cast_possible_wrap)] // A signed move.
+        let drawn = camera + i32::from(memory.ram(FRAME_SCROLL) as i8);
+        let shown = |column: i32| (0..area.columns).contains(&((drawn >> 3) + column));
         let matching = placements.map(|placement| centre_matches(memory, &area, *row, &placement));
         let Some(placement) = placements
             .into_iter()
