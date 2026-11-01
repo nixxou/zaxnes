@@ -1282,6 +1282,13 @@ impl GameSession {
     /// The colour of the first palette entry of the newest frame, behind the NES picture.
     #[must_use]
     pub fn nes_background_color(&self) -> Rgb24 {
+        // With the 3D paused (`emu.pause_3d_in_2d`) no frame is converted: the core's own
+        // backdrop, not the last converted frame's (grey around a game started in 2D, or after
+        // its widescreen was turned off).
+        if self.paused_3d {
+            let backdrop = self.core.ppu().snapshot_palette()[0] & 0x3F;
+            return zax_engine3d::palette::nes_color(usize::from(backdrop));
+        }
         let state = self.engine.state();
         state
             .published_frame()
