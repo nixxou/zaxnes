@@ -167,6 +167,37 @@ impl Ppu2C02 {
 
     // ---------------------------------------------------------------- background rows
 
+    /// Keeps the row of line `line` for the margin decoder: its scroll, pattern table, CHR banks
+    /// and mirroring as they are while it is drawn.
+    fn keep_captured_row(
+        &mut self,
+        line: i32,
+        y: i16,
+        pattern_table: u16,
+        cart: Option<&Cartridge>,
+    ) {
+        let layout = self.layout_of(cart);
+        let captured = CapturedRow {
+            row: BackgroundRow {
+                line,
+                v: self.v_row_start,
+                fine_x: self.fine_x,
+            },
+            y,
+            pattern_table,
+            chr: cart
+                .and_then(Cartridge::chr_peek_view)
+                .map(|view| view.offsets()),
+            layout,
+        };
+        if let Some(slot) = usize::try_from(line / 8)
+            .ok()
+            .and_then(|row| self.captured_rows.get_mut(row))
+        {
+            *slot = Some(captured);
+        }
+    }
+
     /// Emits the background row of line `line` when the fine Y scroll used to draw it is 1
     /// (REQ-CORE-037, REQ-CORE-038).
     fn capture_background_row(&mut self, line: i32, cart: Cart<'_, '_>) {
@@ -199,26 +230,7 @@ impl Ppu2C02 {
         let row_index = line / 8;
         #[allow(clippy::cast_possible_truncation)] // line is 0..240.
         let y = (line - 1) as i16;
-        let layout = self.layout_of(cart.as_deref());
-        if let Some(slot) = usize::try_from(row_index)
-            .ok()
-            .and_then(|row| self.captured_rows.get_mut(row))
-        {
-            *slot = Some(CapturedRow {
-                row: BackgroundRow {
-                    line,
-                    v: self.v_row_start,
-                    fine_x: self.fine_x,
-                },
-                y,
-                pattern_table,
-                chr: cart
-                    .as_deref()
-                    .and_then(Cartridge::chr_peek_view)
-                    .map(|view| view.offsets()),
-                layout,
-            });
-        }
+        self.keep_captured_row(line, y, pattern_table, cart.as_deref());
 
         // Widescreen extension: `extra` more columns on each side, read on through the
         // horizontally neighbouring nametables (a 512-pixel plane that wraps), and only those
