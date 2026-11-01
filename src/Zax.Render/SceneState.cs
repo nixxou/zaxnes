@@ -177,9 +177,17 @@ public sealed class StyleSettings
         => (8f + (6f * (AoRadius - 1))) * sceneScale;
 
     /// <summary>
-    /// The darkening ceiling <c>O ≤ 0.1 × ao.strength</c> of REQ-SCN-083: 0.1 to 0.5.
+    /// The darkening ceiling <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c> of REQ-SCN-083: 0.3, 0.6,
+    /// 0.9, 0.95 and 0.95 for the five settings, 0.9 by default.
     /// </summary>
-    public float OcclusionCeiling => 0.1f * AoStrength;
+    /// <remarks>
+    /// AMD-055 <b>v1.4</b> (<b>Q-097</b>) raised it from <c>0.1 × ao.strength</c>: measured in
+    /// black box, the reference darkens its contacts to a linear ratio of 0.13 at the default
+    /// settings, where the old ceiling of 0.3 would not let it past 0.70. The 0.95 term is what
+    /// keeps « ne noircit jamais complètement une surface » true at the top two settings.
+    /// </remarks>
+    // Q-097
+    public float OcclusionCeiling => MathF.Min(0.95f, 0.3f * AoStrength);
 
     /// <summary>
     /// The assumed thickness of an occluder known only by its depth, in the MSVO mode and in

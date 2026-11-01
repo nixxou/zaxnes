@@ -40,11 +40,30 @@ public sealed class Amd055OcclusionTests
 
     /// <summary>
     /// The slack a ratio measured on an 8-bit sRGB capture needs before it can be compared with
-    /// a bound stated in linear, which is what §2.4 does (<b>Q-097</b>). A pixel exactly at the
-    /// ceiling <c>O ≤ 0.1 × ao.strength</c> reads 0.69850 rather than 0.70000 at the default
-    /// strength; one sRGB level covers that and nothing wider.
+    /// a bound stated in linear, which is what §2.4 does (<b>Q-097</b>, answered: « la tolérance
+    /// d'un niveau est confirmée pour tous les invariants de §2.4 »). A pixel exactly at the
+    /// ceiling reads a shade under the bound it attains — 0.69850 against 0.70000 under the
+    /// ceiling of v1.3 — and one sRGB level covers that and nothing wider.
     /// </summary>
     private const double SrgbStep = 0.01;
+
+    /// <summary>
+    /// The darkening ceiling of REQ-SCN-083 as AMD-055 <b>v1.4</b> states it:
+    /// <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c>, so 0.3, 0.6, 0.9, 0.95 and 0.95 for the five
+    /// settings and 0.9 at the default. The least linear ratio it permits is <c>1 −</c> this.
+    /// </summary>
+    /// <remarks>
+    /// <b>Q-098</b>: the third invariant of §2.4 still restates the ceiling of v1.3 at the two
+    /// extreme settings — « `ao.strength` = 5 : le rapport est partout ≥ 0,50 ; `ao.strength` =
+    /// 1 : partout ≥ 0,90 », which is exactly <c>1 − 0.1 × ao.strength</c>. It cannot be read
+    /// that way beside the second invariant, which v1.4 *did* move and which now brings the
+    /// contact of close-up A to 0.10 at the default strength: under the proportionality of
+    /// <i>Force</i> the same contact then reads 0.70 at strength 1, under the 0.90 the third
+    /// invariant would demand. The tiret is read as what it is, the ceiling restated over the
+    /// whole capture rather than at the contact alone, and it follows the ceiling v1.4 states.
+    /// </remarks>
+    // Q-098
+    private static double Ceiling(int strength) => Math.Min(0.95, 0.3 * strength);
 
     /// <summary>The scene centre <c>C</c> of REQ-E3D-410.</summary>
     private static Vector3 Center => new(128f, 120f, 0f);
@@ -113,21 +132,20 @@ public sealed class Amd055OcclusionTests
 
     /// <summary>
     /// REQ-SCN-083, second invariant: close-up A — on the pixels of the floor at the contact of
-    /// the base of the cube the ratio is <b>strictly below 1</b> and <b>at least 0.70</b> (the
-    /// ceiling <c>O ≤ 0.1 × ao.strength</c> = 0.3); at a pixel of the floor at least
-    /// <c>2 r</c> = 40 units from the cube and visible, it is 1.00 ± 0.02.
+    /// the base of the cube the ratio is <b>strictly below 1</b> and <b>at least 0.10</b> (the
+    /// ceiling <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c> = 0.9 at the default strength); at a
+    /// pixel of the floor at least <c>2 r</c> = 40 units from the cube and visible, it is
+    /// 1.00 ± 0.02.
     /// </summary>
     /// <remarks>
-    /// <b>Q-097</b>: the floor is read with the tolerance of one sRGB level that the MSVO
-    /// invariants of this file have carried since V2-20, and for the same reason. 0.70 is
-    /// exactly the ceiling at the default <c>ao.strength</c> = 3, so a contact that <em>reaches</em>
-    /// the ceiling — which the ceiling being a ceiling must permit — measures <b>0.69850</b> once
-    /// the capture has been through the 8-bit sRGB §2.4 prescribes. Without the tolerance the
-    /// invariant forbids attaining the very bound it states; and the MSVO port the amendment
-    /// mandates saturates this contact at every gain, so the untolerant reading would condemn it
-    /// on arrival. Measured, not assumed: the Depth mode reaches 0.69850 here from a
-    /// <c>zaxCornerShare</c> of 0.10 downwards, and MSVO reads 0.69850 at every share from 0.12
-    /// to 1.00.
+    /// <b>Q-097</b> (answered, AMD-055 v1.4) moved this bound from 0.70 to <b>0.10</b>: measured
+    /// in black box, the reference darkens the darkest 1 % of its Punch-Out!! frame to a linear
+    /// ratio of 0.13 at the default settings, which the ceiling of v1.3 did not even permit. The
+    /// floor is read with the tolerance of one sRGB level, which the same answer confirms for
+    /// every invariant of §2.4: a contact that <em>reaches</em> the ceiling — which the ceiling
+    /// being a ceiling must permit — measures a shade under the bound it attains once the
+    /// capture has been through the 8-bit sRGB §2.4 itself prescribes, and without the tolerance
+    /// the invariant forbids attaining the very bound it states.
     /// </remarks>
     [GlFact] // REQ-SCN-083
     public void REQ_SCN_083_the_foot_of_the_cube_is_darkened_and_nothing_far_from_it_is()
@@ -147,7 +165,7 @@ public sealed class Amd055OcclusionTests
             (int px, int py) = Pixel(view, point);
             double ratio = Ratio(on, off, px, py);
             Assert.True(ratio < 1.0, $"the contact pixel at {point} was not darkened: {ratio:F3}.");
-            Assert.True(ratio >= 0.70 - SrgbStep, $"the contact pixel at {point} fell to {ratio:F5}.");
+            Assert.True(ratio >= 0.10 - SrgbStep, $"the contact pixel at {point} fell to {ratio:F5}.");
         }
 
         (int fx, int fy) = Pixel(view, FarFromCube);
@@ -156,11 +174,21 @@ public sealed class Amd055OcclusionTests
     }
 
     /// <summary>
-    /// REQ-SCN-083, third invariant: with <c>ao.strength</c> = 5 the ratio is everywhere ≥ 0.50
-    /// and with <c>ao.strength</c> = 1 everywhere ≥ 0.90 — the ceiling
-    /// <c>O ≤ 0.1 × ao.strength</c> — and the ratio at the contact pixel is monotone decreasing
-    /// in <c>ao.strength</c>.
+    /// REQ-SCN-083, third invariant: the ceiling <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c> holds
+    /// over the <b>whole capture</b> at every setting — so the ratio stays ≥ 0.70 at
+    /// <c>ao.strength</c> = 1 and ≥ 0.05 at 5 — and the ratio at the contact pixel is monotone
+    /// decreasing in <c>ao.strength</c>.
     /// </summary>
+    /// <remarks>
+    /// <b>Q-098</b> on both halves. The bounds follow the ceiling of v1.4, not the 0.90 and 0.50
+    /// of v1.3 that the amendment's third tiret still quotes — see <see cref="Ceiling"/>. And
+    /// « monotone décroissant » is read at large, the word « strictement » being absent, because
+    /// the new ceiling is **constant** between the settings 4 and 5 (0.95 both): under the
+    /// « plafond comme échelle » reading that the answer to Q-095 confirmed, those two settings
+    /// give identical captures and an equal contact. The strict decrease is still asserted over
+    /// the settings 1 to 4, where the ceiling does rise, so nothing of the criterion's
+    /// discriminating power is given up by the weaker reading.
+    /// </remarks>
     [GlFact] // REQ-SCN-083
     public void REQ_SCN_083_the_strength_is_a_ceiling_and_is_monotone()
     {
@@ -183,13 +211,13 @@ public sealed class Amd055OcclusionTests
             // The ceiling, over the whole capture and not only over the floor.
             double least = LeastRatio(on, off);
             Assert.True(
-                least >= (1.0 - (0.1 * strength)) - 0.01,
+                least >= 1.0 - Ceiling(strength) - SrgbStep,
                 $"strength {strength} darkened a pixel to {least:F3}.");
 
             double ratio = Ratio(on, off, cx, cy);
             Assert.True(
-                ratio < previous,
-                $"strength {strength} gave {ratio:F3} at the contact, not below {previous:F3}.");
+                strength <= 4 ? ratio < previous : ratio <= previous,
+                $"strength {strength} gave {ratio:F3} at the contact, against {previous:F3}.");
             previous = ratio;
         }
     }
@@ -250,7 +278,9 @@ public sealed class Amd055OcclusionTests
     /// <summary>
     /// REQ-SCN-083, <i>Conformité</i>: the invariants of §2.4 hold for the MSVO mode too — a
     /// lone plane is not darkened, the foot of the cube is, nothing at <c>2 r</c> from it is,
-    /// and the ceiling <c>O ≤ 0.1 × ao.strength</c> holds with its monotony.
+    /// and the ceiling <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c> holds with its monotony — read
+    /// as <see cref="REQ_SCN_083_the_strength_is_a_ceiling_and_is_monotone"/> reads it
+    /// (<b>Q-098</b>).
     /// </summary>
     [GlFact] // REQ-SCN-083
     public void REQ_SCN_083_the_msvo_mode_keeps_the_invariants_of_the_section()
@@ -299,7 +329,7 @@ public sealed class Amd055OcclusionTests
 
             double least = LeastRatio(on, off);
             Assert.True(
-                least >= (1.0 - (0.1 * strength)) - 0.01,
+                least >= 1.0 - Ceiling(strength) - SrgbStep,
                 $"strength {strength} darkened a pixel to {least:F3}.");
             Assert.InRange(Ratio(on, off, fx, fy), 0.98, 1.02);
 
@@ -308,10 +338,12 @@ public sealed class Amd055OcclusionTests
                 .Select(pixel => Ratio(on, off, pixel.X, pixel.Y))
                 .Min();
             Assert.True(contact < 1.0, $"strength {strength} darkened no contact pixel.");
-            Assert.True(contact >= 1.0 - (0.1 * strength) - 0.01, $"contact fell to {contact:F3}.");
             Assert.True(
-                contact < previous,
-                $"strength {strength} gave {contact:F3} at the contact, not below {previous:F3}.");
+                contact >= 1.0 - Ceiling(strength) - SrgbStep,
+                $"contact fell to {contact:F3}.");
+            Assert.True(
+                strength <= 4 ? contact < previous : contact <= previous,
+                $"strength {strength} gave {contact:F3} at the contact, against {previous:F3}.");
             previous = contact;
         }
     }
@@ -539,11 +571,11 @@ public sealed class Amd055OcclusionTests
         Enhance(scene, 2);
         Shot on = target.Render(renderer, scene);
 
-        // The ceiling is 0.3 at the default ao.strength = 3; at the contact the darkening must
-        // use a real share of it, not a twentieth. Since the calibration of lot V2-23 the
-        // contact reaches the ceiling, so the floor carries the sRGB slack of Q-097.
+        // The ceiling is 0.9 at the default ao.strength = 3 (Q-097, AMD-055 v1.4); at the
+        // contact the darkening must use a real share of it, not a twentieth. At V2-22's
+        // constants this pixel sat at 0.81 — a tenth of the ceiling now in force.
         double contact = Ratio(on, off, view, Contact[0]);
-        Assert.InRange(contact, 0.70 - SrgbStep, 0.90);
+        Assert.InRange(contact, 1.0 - Ceiling(3) - SrgbStep, 0.60);
 
         // And it must reach out over the radius r = 20, not die within a pixel or two of the
         // contact: at half the radius from the face of the cube the floor is still darkened,
@@ -597,11 +629,12 @@ public sealed class Amd055OcclusionTests
         int depthArea = Changed(depth, off);
         int msvoArea = Changed(msvo, off);
 
-        // Both modes now carry enough gain to bring the deepest contact of the close-up to the
-        // ceiling. That is the magnitude the reference shows and the point of the calibration:
-        // at V2-22's constants the Depth contact sat well above this, around 0.81.
-        Assert.InRange(depthContact, 0.70 - SrgbStep, 0.75);
-        Assert.InRange(msvoContact, 0.70 - SrgbStep, 0.75);
+        // Both modes darken the deepest contact of the close-up by more than half in linear —
+        // well past the 0.70 that was the whole of the ceiling until AMD-055 v1.4, and inside
+        // the 0.10 that ceiling now permits (Q-097). At V2-22's constants the Depth contact sat
+        // at 0.81, and at V2-23's it was pinned to the old ceiling at 0.6985.
+        Assert.InRange(depthContact, 1.0 - Ceiling(3) - SrgbStep, 0.50);
+        Assert.InRange(msvoContact, 1.0 - Ceiling(3) - SrgbStep, 0.50);
 
         // And both lay a band rather than an outline — the review criterion of §2.4 — over
         // comparable ground. Which of the two is the wider depends on the scene and is not
@@ -636,11 +669,17 @@ public sealed class Amd055OcclusionTests
     /// the <c>−x</c> face of the cube in scene units, and the ratio the floor must stay under
     /// there. <c>r</c> = 20 at the default <c>ao.radius</c> = 3.
     /// </summary>
+    /// <remarks>
+    /// Tightened in lot V2-24 with the ceiling of AMD-055 v1.4: measured 0.646, 0.884 and 0.961
+    /// at the three distances, against the 0.93 / 0.97 / 0.99 the bounds held while the ceiling
+    /// was 0.3. They stay a factor clear of the measurement so that the test says « a band that
+    /// reaches out over <c>r</c> » and not « this exact profile », the law being free.
+    /// </remarks>
     private static (float Distance, double Ceiling)[] Profile =>
     [
-        (4f, 0.93),
-        (10f, 0.97),
-        (16f, 0.99),
+        (4f, 0.78),
+        (10f, 0.93),
+        (16f, 0.98),
     ];
 
     /// <summary>

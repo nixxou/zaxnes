@@ -56,27 +56,29 @@ internal static class OcclusionShaders
         uniform float uRadius;
         uniform mat4 uProjection;
 
-        // Q-095: the share of the kernel this estimator has to find blocked for the darkening to
-        // reach the ceiling « O <= 0.1 x ao.strength » of REQ-SCN-083. That is the law the
-        // requirement leaves free: O is the blocked share of the hemisphere, scaled so that an
-        // ordinary deep corner approaches the ceiling. Lot V2-22 set it at the share measured at
-        // a right-angle corner, 0.35; the answer to Q-095 measured the reference and found the
-        // result still about three times too weak in mean darkening at comparable area, so the
-        // constant is calibrated on those figures instead — 0.06, which is nearly six times the
-        // gain, and brings the contact of close-up A to the ceiling.
+        // Q-095, Q-097: the share of the kernel this estimator has to find blocked for the
+        // darkening to reach the ceiling « O <= min(0,95 ; 0,3 x ao.strength) » of REQ-SCN-083.
+        // That is the law the requirement leaves free: O is the blocked share of the hemisphere,
+        // normalised by this constant and then capped by the ceiling.
         //
-        // What bounds it is the second invariant of §2.4: the contact pixel of close-up A must
-        // keep a ratio « supérieur ou égal à 0,70 » to its unoccluded value — and 0.70 *is* the
-        // ceiling at the default ao.strength = 3, so a contact that reaches the ceiling measures
-        // 0.69850 once the capture has been through the 8-bit sRGB the amendment's own method
-        // prescribes. Read without a tolerance, that invariant forbids ever reaching the ceiling.
-        // It cannot be meant that way: the MSVO mode the amendment mandates in v1.2 saturates
-        // that same contact at *every* gain, its own included, so the literal reading would make
-        // the mandated port non-conformant on arrival. The tolerance of one sRGB level — the one
-        // the MSVO invariants have carried since V2-20 — is therefore the reading taken, and it
-        // is taken in both modes alike. Q-097 asks R1 to confirm it.
+        // The value is the share measured at a right-angle corner, so that an ordinary deep
+        // corner is exactly what reaches the ceiling — and it is the value lot V2-22 derived,
+        // before two tickets' worth of compensation moved it to 0.06 and back. The compensation
+        // was never about this law: the answer to Q-095 found the reimplementation « environ
+        // trois fois » too weak in mean darkening at comparable area, V2-23 opened Q-097 because
+        // no gain could fix that without breaching the ceiling, and Q-097's answer confirmed
+        // hypothesis 1 — the reference was never under the ceiling the amendment then stated.
+        // With the ceiling of v1.4 the corner share lands the magnitude on the reference's
+        // figures by itself: the whole of the « three times too weak » was the old ceiling of
+        // 0.3 clipping a population that the reference takes down to 0.13, and V2-23's gain of
+        // nearly six times was fighting that clip rather than calibrating the estimator.
+        //
+        // Measured on this lot's two scenes against the figures of the Q-095 answer, at the
+        // default settings (zone / mean darkening; see docs/progress/V2-24.md for the sweep):
+        // Punch-Out!! 32.9 % / 6.81 against a framing-adjusted target of 28.7 % / 6.4, and the
+        // darkest 5 % of the frame at a linear ratio of 0.42 against the reference's 0.42.
         // Q-097
-        const float zaxCornerShare = 0.06;
+        const float zaxCornerShare = 0.35;
 
         // How far above the tangent plane of the point an occluder must rise before it counts at
         // all, as the sine of the angle it makes with that plane — about 6 degrees. It leaves a
@@ -235,7 +237,7 @@ internal static class OcclusionShaders
 
             // Q-095: the raw share of blocked samples, brought to the ceiling at a right-angle
             // contact. The buffer is R8, so values above 1 clamp there; the apply pass scales
-            // what is left by « 0.1 x ao.strength » (REQ-SCN-083).
+            // what is left by « min(0,95 ; 0,3 x ao.strength) » (REQ-SCN-083, Q-097).
             oColor = vec4(occlusion / (float(uSamples) * zaxCornerShare), 0.0, 0.0, 1.0);
         }
         """;
@@ -310,7 +312,8 @@ internal static class OcclusionShaders
 
         uniform sampler2D uOcclusion;
 
-        // The darkening ceiling of REQ-SCN-083: O <= 0.1 x ao.strength in every pixel.
+        // The darkening ceiling of REQ-SCN-083 (Q-097, AMD-055 v1.4):
+        // O <= min(0,95 ; 0,3 x ao.strength) in every pixel.
         uniform float uCeiling;
 
         void main()
