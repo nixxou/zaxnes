@@ -333,7 +333,19 @@ impl Ppu2C02 {
             let Some(captured) = captured else {
                 continue;
             };
-            // The decoder may read the nametables, as the PPU saw them for this row.
+            // The decoder may read the nametables, as the PPU saw them for this row: with the
+            // mirroring the row was drawn with, not the one in place now that the frame is over.
+            // Until 2026-11 the decoders read them with the frame's last mirroring. Ninja Gaiden
+            // III switches it during the frame (vertical for the playfield, horizontal from its
+            // status bar's split on): its desert's rows were checked against the wrong nametable
+            // ($2400 read as $2000), fell now and then under the layout's matching threshold and
+            // took the stale ring beside the screen, the rock platforms vanishing from the margins
+            // and the sand going out of step. If a margin shows tiles of the other nametable, or
+            // flickers between the layout and old columns, check the mirroring the game has at
+            // that row first. Measured when the fix was made, playing each game a few minutes in
+            // widescreen: only Ninja Gaiden III draws rows under another mirroring than the
+            // frame's last (Mega Man 2 one row of a transition's frame; none in Super Mario Bros.
+            // 3, Mega Man 6, Metal Force, Metroid; the NROM, UxROM and CNROM games cannot).
             let layout = captured.layout;
             let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
             let written = |address: u16| self.nametable_written_as(address, cart, layout);
