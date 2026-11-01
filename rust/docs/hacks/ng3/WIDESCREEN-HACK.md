@@ -175,12 +175,11 @@ Zaxnes writes their bits at `$500A` every frame, the hack reads them there (`WID
 | Bit | Key | Label | Default | Effect |
 |---|---|---|---|---|
 | 0 | `enemies_in_margins` | Enemies in the margins / Ennemis dans les marges | on | off, M = 0 for the objects: they appear and go at the original edges, and the second list's are not shown before (the background of the margins and the 16-bit sprites stay) |
-| 1 | `level_select` | Level select (Select: next checkpoint) / Sélecteur de niveau (Select : point de reprise suivant) | off | USA pack only, a component of its own (with or without the advanced mode): Select during play goes on from the next checkpoint |
+| 1 | `level_select` | Level select (Select: next checkpoint) / Sélecteur de niveau (Select : point de reprise suivant) | off | a component of its own (with or without the advanced mode): Select during play goes on from the next checkpoint |
 | 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock instead of 64: the game never runs late (no lag frame) |
-| 3 | `invincible` | Invincible | off | USA pack only, a component of its own: Ryu's life does not go down (pits and the timer still kill) |
+| 3 | `invincible` | Invincible | off | a component of its own: Ryu's life does not go down (pits and the timer still kill) |
 
-**Testing aids** (USA pack only: the Japanese build's damage and respawn code differ, its pack has
-neither). *Invincible*: the two damage routines of bank 5 take 0 from Ryu's life (`$A7`) instead
+**Testing aids** (both packs, each at its build's own places). *Invincible*: the two damage routines of bank 5 take 0 from Ryu's life (`$A7`) instead
 of the damage (`$A2AB` `SBC #$06` becomes `SBC #$00`, a hazard; `$A30A` `SBC $03DE,X` becomes
 `SBC #$00 / NOP`, an enemy or a shot): no hit lowers it, so none kills, Ryu is still thrown back.
 *Level select*: the main loop's call of the enemy list (`$CD83`, `JSR $826F`) becomes
@@ -189,7 +188,11 @@ area (`$5F`) to the next checkpoint, the next area the game's respawn table (ban
 adds a life (`$C4`) and stops play as the game does after a death (`$AC = 1`, `JMP $CB55`): the
 respawn takes the life back and goes on from that area. Checkpoints: areas 0, 4, 5, 10, 11, 16,
 17, 21, 24, 30, 33, 36, 37 and 41; at the last, Select does nothing. Its checks: the respawn
-(`$CB55`, `$CB8E`), the respawn table and the enemy list's start.
+(`$CB55`, `$CB8E`), the respawn table and the enemy list's start. The Japanese build: its hazard
+takes 3 (`$A29B`), its contact damage at `$A2FA`, the main loop's call at `$CD4D`; its respawn
+(`$CB9A`, the stop's dispatch at `$CB61`) has no table but goes on from Ryu's area (from the one
+before when `$64` bit 7 is set), so the next checkpoint is read from the table of stretches
+(`$A65A`, bank 6, the same 14 areas), + 1 in that case.
 
 ## 6. Building
 
@@ -354,8 +357,16 @@ LIVES           = $C4
 DYING           = $8B           ; non-zero while Ryu dies
 TRANSITION      = $AC           ; what the game does when play stops (1: Ryu goes on from the
                                 ; checkpoint of his area, a life less)
+.ifdef JAPAN
+ON_HOLD         = $CB61         ; where play stops for TRANSITION (1: Ryu goes on from his area,
+                                ; or the one before, a life less)
+STAGE_START     = $A65A         ; bank 6: the checkpoints, the first area of each stretch
+RESPAWN_BACK    = $64           ; bit 7: the respawn goes on from the area before
+CHECKPOINTS     = 14
+.else
 ON_HOLD         = $CB55         ; where play stops for TRANSITION
 CHECKPOINT      = $A330         ; bank 6: the area each area's play goes on from
+.endif
 AREA            = $5F
 AREAS           = 48
 FRAME_COUNTER   = $5E
@@ -1138,12 +1149,50 @@ wide_draw_end:
     STA      SH_N
     JMP      BANK_4_END
 
-.ifndef JAPAN
 ; ---------------------------------------------------------------------------- ;
-; Level select, a testing aid (the pack's component "level_select", USA only): the main loop's
-; call of the enemy list ($CD83, in place of JSR $826F). Select during play goes on from the next
-; checkpoint (the next area the game's respawn table, $A330, sends a death to): the respawn the game
-; does after a death, without its life lost and without the death.
+; Level select, a testing aid (the pack's component "level_select"): the main loop's call of the
+; enemy list ($CD83, Japan $CD4D, in place of JSR $826F). Select during play goes on from the next
+; checkpoint: the respawn the game does after a death, without its life lost and without the death.
+.ifdef JAPAN
+; The Japanese build's respawn goes on from Ryu's area, or from the one before when $64 bit 7 is
+; set ($CB9A): the next checkpoint of the table of stretches ($A65A, bank 6), + 1 then.
+wide_level_select:
+    LDA      PRESSED
+    AND      #$20
+    BEQ      @play
+    LDA      DYING
+    BNE      @play
+    LDA      #$06
+    JSR      SELECT_A000
+    LDX      #$00
+@next:
+    LDA      STAGE_START,x
+    CMP      AREA
+    BEQ      @later
+    BCS      @found
+@later:
+    INX
+    CPX      #CHECKPOINTS
+    BCC      @next
+    BCS      @play
+@found:
+    BIT      RESPAWN_BACK               ; the respawn takes one area off then
+    BPL      @area
+    CLC
+    ADC      #$01
+@area:
+    STA      AREA
+    INC      LIVES                      ; and one life
+    LDA      #$01
+    STA      TRANSITION
+    PLA                                 ; out of the main loop's turn, as the game's stops are
+    PLA
+    JMP      ON_HOLD
+@play:
+    JMP      $826F
+.else
+; The USA build's respawn goes on from the area its table ($A330, bank 6) gives Ryu's: the next
+; area that table sends a death to.
 wide_level_select:
     LDA      PRESSED
     AND      #$20
@@ -1356,14 +1405,21 @@ JAPAN_ORIGINAL = {0xCDB0: '20 b4 8a', 0xCDB3: '20 c7 cd', 0x99F6: '08 4c 35 9a',
 # made (bank 4).
 ENEMIES = {0x827E, 0x8293, 0x82A8, 0x82B2, 0x807B, 0x819A, 0x81BA}
 
-# The testing aids, USA only (the Japanese build's damage and respawn code differ): components of
-# their own, applied while their option is on, with or without the widescreen. Invincible: the two
-# damage routines take 0 from Ryu's life ($A7) instead of the damage (bank 5). Level select: the
-# main loop's call of the enemy list ($CD83), Select during play going on from the next
-# checkpoint; it relies on the respawn ($CB55 and the routine its table gives, $CB8E), the respawn
-# table (bank 6 $A330) and the enemy list it goes on to.
-INVINCIBLE = [(5, 0xA2AB, 'e9 06', 'e9 00'), (5, 0xA30A, 'fd de 03', 'e9 00')]
-LEVEL_SELECT_CHECKS = [(None, 0xCB55, 27), (None, 0xCB8E, 25), (6, 0xA330, 48), (4, 0x826F, 3)]
+# The testing aids: components of their own, applied while their option is on, with or without
+# the widescreen. Invincible: the two damage routines take 0 from Ryu's life ($A7) instead of the
+# damage (bank 5). Level select: the main loop's call of the enemy list, Select during play going
+# on from the next checkpoint; it relies on the respawn (the stop's dispatch and the routine it
+# gives), the table it reads (bank 6) and the enemy list it goes on to. The Japanese build's
+# damage and respawn code differ: its own places (its hazard takes 3, its respawn Ryu's area, or the one before).
+INVINCIBLE = {
+    False: [(5, 0xA2AB, 'e9 06', 'e9 00'), (5, 0xA30A, 'fd de 03', 'e9 00')],
+    True: [(5, 0xA29B, 'e9 03', 'e9 00'), (5, 0xA2FA, 'fd de 03', 'e9 00')],
+}
+LEVEL_SELECT_HOOK = {False: 0xCD83, True: 0xCD4D}
+LEVEL_SELECT_CHECKS = {
+    False: [(None, 0xCB55, 27), (None, 0xCB8E, 25), (6, 0xA330, 48), (4, 0x826F, 3)],
+    True: [(None, 0xCB61, 27), (None, 0xCB9A, 17), (6, 0xA65A, 14), (4, 0x826F, 3)],
+}
 
 # The game's code the hack's code relies on, by group: (bank, USA address, length), checked by
 # Zaxnes to be the reference ROM's bytes. Core: the behaviour and the background collision the
@@ -1413,16 +1469,19 @@ def pack(data, crc, out):
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
         group = 'enemies' if address in ENEMIES else 'core'
         groups[group].hook(*place(bank, address), bytes(original), bytes(new))
-    if not japan:
-        aid = pack.component('invincible').group('invincible', label='Invincible',
-                                                 label_fr='Invincible')
-        for bank, address, original, new in INVINCIBLE:
-            aid.hook(*place(bank, address), original, bytes.fromhex(new))
-        select = pack.component('level_select').group('level_select', label='Level select',
-                                                      label_fr='Sélecteur de niveau')
-        for bank, address, length in LEVEL_SELECT_CHECKS:
-            select.check(*place(bank, address), length)
-        select.hook(*place(None, 0xCD83), '20 6f 82', jsr(sym['wide_level_select']))
+    # The aids' places are each build's own (not moved through JAPAN_PLACES).
+    def own(bank, address):
+        return pack_place(offset_of(bank, address), address)
+
+    aid = pack.component('invincible').group('invincible', label='Invincible',
+                                             label_fr='Invincible')
+    for bank, address, original, new in INVINCIBLE[japan]:
+        aid.hook(*own(bank, address), original, bytes.fromhex(new))
+    select = pack.component('level_select').group('level_select', label='Level select',
+                                                  label_fr='Sélecteur de niveau')
+    for bank, address, length in LEVEL_SELECT_CHECKS[japan]:
+        select.check(*own(bank, address), length)
+    select.hook(*own(None, LEVEL_SELECT_HOOK[japan]), '20 6f 82', jsr(sym['wide_level_select']))
     result = pack.build(data, 0x20000)
     open(out, 'wb').write(result)
     print(f'{out}: {len(result)} bytes ({used} of code, '
