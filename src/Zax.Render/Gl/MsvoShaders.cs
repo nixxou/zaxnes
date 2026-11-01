@@ -145,6 +145,36 @@ internal static class MsvoShaders
             float pixels = uRadius * uFocal / max(center, 1e-3);
             vec2 step = (pixels * 0.2) * uTexel;
 
+            // V2-25, defect B: the pattern is turned by a per-pixel angle. The original samples
+            // a *deinterleaved* depth — sixteen sub-grids of one buffer, each gathered with the
+            // same offsets — so neighbouring output pixels probe different directions and the
+            // blur that follows averages them, which is how a seven-entry checkerboard stands in
+            // for a dense neighbourhood. A fragment pass has no deinterleaving (REQ-SCN-056), and
+            // sampling the *same* seven azimuths at every pixel left the estimate blind between
+            // them: an occluder a radius away was registered by one sub-pair or none, and the
+            // mode's mid-field came out a third of what the hemisphere estimator of the Depth
+            // mode finds at the same distance. REQ-SCN-083 allows exactly this — « Le motif
+            // d'échantillonnage PEUT varier par pixel, à condition qu'aucun motif fixe ne reste
+            // visible après lissage » — and the smoothing that makes good on the condition is
+            // the SmartBlur of the original, now run over every level. Measured, it changes the
+            // profile of the darkening by under a per cent — the mid-field of this mode is not
+            // limited by its azimuths (Q-100) — and it is kept for the fixed-pattern clause of
+            // the review criterion and for the faithfulness of the port.
+            // Q-100
+            //
+            // The angle is a hash of the pixel, so it changes from pixel to pixel but never from
+            // frame to frame: a still camera gives a still image (REQ-SCN-083, review), the same
+            // choice the Depth estimator makes for its kernel. A rotation leaves the sphere
+            // thickness of an entry — and therefore its weight and its depth window — untouched,
+            // since both depend on the length of the offset alone; a lone plane still reads
+            // exactly 1, which is the first invariant of §2.4.
+            vec2 at = floor(vUv / uTexel);
+            float hash = fract(sin(dot(at, vec2(12.9898, 78.233))) * 43758.5453);
+            float angle = hash * 6.2831853;
+            float c = cos(angle);
+            float s = sin(angle);
+            mat2 spin = mat2(c, s, -s, c);
+
             float access = 0.0;
             for (int i = 0; i < uPatternSize; i++)
             {
@@ -160,24 +190,24 @@ internal static class MsvoShaders
                 {
                     // Axial.
                     value = 0.5 * (
-                        zaxTestPair(vec2(x, 0.0), step, center, scale) +
-                        zaxTestPair(vec2(0.0, x), step, center, scale));
+                        zaxTestPair(spin * vec2(x, 0.0), step, center, scale) +
+                        zaxTestPair(spin * vec2(0.0, x), step, center, scale));
                 }
                 else if (x == y)
                 {
                     // Diagonal.
                     value = 0.5 * (
-                        zaxTestPair(vec2(x, -x), step, center, scale) +
-                        zaxTestPair(vec2(x, x), step, center, scale));
+                        zaxTestPair(spin * vec2(x, -x), step, center, scale) +
+                        zaxTestPair(spin * vec2(x, x), step, center, scale));
                 }
                 else
                 {
                     // L-shaped.
                     value = 0.25 * (
-                        zaxTestPair(vec2(x, y), step, center, scale) +
-                        zaxTestPair(vec2(x, -y), step, center, scale) +
-                        zaxTestPair(vec2(y, x), step, center, scale) +
-                        zaxTestPair(vec2(y, -x), step, center, scale));
+                        zaxTestPair(spin * vec2(x, y), step, center, scale) +
+                        zaxTestPair(spin * vec2(x, -y), step, center, scale) +
+                        zaxTestPair(spin * vec2(y, x), step, center, scale) +
+                        zaxTestPair(spin * vec2(y, -x), step, center, scale));
                 }
 
                 access += weight * value;
@@ -187,6 +217,72 @@ internal static class MsvoShaders
             // contributes 2 and a lone plane contributes 1: the original's « anything that's
             // 50 % occluded or less is fully unoccluded ».
             oColor = vec4(clamp(access, 0.0, 1.0), 0.0, 0.0, 1.0);
+        }
+        """;
+
+    /// <summary>
+    /// The <c>SmartBlur</c> of <c>AoBlurAndUpsampleCS.hlsli</c>: one separable pass of the
+    /// five-tap depth-respecting blur the original runs over <b>every</b> level of its chain
+    /// before that level is combined with the next.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>V2-25, defect B.</b> This pass is what the port was missing, and it is why its
+    /// darkening came out « concentrated in bands along edges/contacts » where the reference's
+    /// MSVO darkens broadly. In the original, every <c>BlurAndUpsample</c> step blurs its
+    /// low-resolution input over ±2 texels (<c>BlurHorizontally</c> then <c>BlurVertically</c>,
+    /// the kernel <c>((a + e) / 2 + b + c + d) / 4</c>) and the chain ends with one more step at
+    /// full resolution, so <em>no</em> level ever reaches the output unblurred. This port
+    /// multiplied each level's own occlusion in raw, which left the finest level — the one that
+    /// carries the contact — completely unsmoothed and gave the estimate a single sharp scale.
+    /// </para>
+    /// <para>
+    /// What is adapted: the original caches a tile of <c>1 / depth</c> in group-shared memory and
+    /// decides tap by tap, with <c>CompareDeltas</c>, whether two consecutive reciprocal-depth
+    /// deltas agree enough to blur across; OpenGL 3.3 has neither compute shaders nor that cache
+    /// (REQ-SCN-056), so the boolean becomes a continuous weight on the <em>relative</em> depth
+    /// difference. REQ-SCN-083 wants « un lissage qui respecte les discontinuités de profondeur »
+    /// and leaves « le rayon et le seuil du lissage » free, which is exactly what the two differ
+    /// by.
+    /// </para>
+    /// </remarks>
+    public const string BlurFragment = """
+        #version 330 core
+        in vec2 vUv;
+        out vec4 oColor;
+
+        uniform sampler2D uAo;
+        uniform sampler2D uDepth;
+
+        // One texel of this level along the axis being blurred.
+        uniform vec2 uStep;
+
+        // How fast a tap loses its weight as its depth parts from this pixel's, as a multiple of
+        // the relative difference: the « seuil du lissage » REQ-SCN-083 leaves free. At 32 a tap
+        // 3 % away in depth — a receding floor, one texel over — keeps two thirds of its weight
+        // while a silhouette step of 10 % keeps under a quarter.
+        uniform float uSharpness;
+
+        void main()
+        {
+            float center = texture(uDepth, vUv).r;
+            float scale = uSharpness / max(center, 1e-3);
+
+            float total = 0.0;
+            float weight = 0.0;
+            for (int i = -2; i <= 2; i++)
+            {
+                vec2 uv = vUv + (uStep * float(i));
+                float depth = texture(uDepth, uv).r;
+
+                // The kernel of SmartBlur: the two outer taps weigh half of the three inner.
+                float tent = abs(i) == 2 ? 0.5 : 1.0;
+                float w = tent / (1.0 + (abs(center - depth) * scale));
+                total += texture(uAo, uv).r * w;
+                weight += w;
+            }
+
+            oColor = vec4(weight > 0.0 ? total / weight : texture(uAo, vUv).r, 0.0, 0.0, 1.0);
         }
         """;
 

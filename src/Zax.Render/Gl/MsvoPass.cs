@@ -35,6 +35,7 @@ internal sealed class MsvoPass : IDisposable
 {
     /// <summary>Levels of the depth pyramid for Low, Medium and High (REQ-SCN-083).</summary>
     /// <remarks>
+    /// <para>
     /// Low had two levels until lot V2-24, and the recalibration of <b>Q-097</b> showed that it
     /// cannot. The coarsest level is what carries the wide half of a multi-scale estimate, so
     /// dropping it cost the Low quality <b>half the darkening at a contact</b>: measured on the
@@ -42,13 +43,22 @@ internal sealed class MsvoPass : IDisposable
     /// High. Under the ceiling of v1.3 that gap was a sixth of a level and passed unnoticed;
     /// under the ceiling v1.4 states it is plainly visible, and REQ-SCN-083 requires of the three
     /// qualities « le même aspect général, Low pouvant être plus bruité » — noisier, not lighter
-    /// — while declaring the number of scales and samples <em>unobservable</em>. With three
-    /// levels throughout the three agree to 0.06 (0.348 / 0.307 / 0.287), and Low stays the
+    /// — while declaring the number of scales and samples <em>unobservable</em>. Low stays the
     /// cheapest by its sample pattern: four entries of <see cref="Pattern"/> against seven, at
     /// half resolution.
+    /// </para>
+    /// <para>
+    /// <b>V2-25, defect B:</b> three levels became <b>four</b> — the depth the original's own
+    /// <c>HierarchyDepth</c> allows — because three could no longer span the range the mode
+    /// needs. With <see cref="CoarsestRadius"/> taking the coarse end out to the far field §2.4
+    /// permits, three halvings put the finest sphere at <c>0.44 r</c> and softened the contact
+    /// the mode is also meant to give; a fourth level brings it back to <c>0.22 r</c> and keeps
+    /// the wide end. The count is declared unobservable by REQ-SCN-083, and the two extra
+    /// buffers are an eighth and a sixteenth of the finest level, in <c>R8</c>.
+    /// </para>
     /// </remarks>
     // Q-097
-    private static readonly int[] LevelsByQuality = [3, 3, 3];
+    private static readonly int[] LevelsByQuality = [4, 4, 4];
 
     /// <summary>
     /// The checkerboard pattern of <c>AoRenderCS.hlsli</c>: the offsets, in fifths of the
@@ -60,22 +70,69 @@ internal sealed class MsvoPass : IDisposable
     /// <summary>Entries of <see cref="Pattern"/> the Low quality keeps.</summary>
     private static readonly int[] LowPattern = [0, 2, 3, 5];
 
+    /// <summary>
+    /// The sphere radius of the <b>coarsest</b> level, as a multiple of the radius <c>r</c> of
+    /// REQ-SCN-083.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>V2-25, defect B.</b> The coarsest level used to take <c>r</c> itself, and that is what
+    /// cost the mode its wide half. The sphere test of the original is <em>exactly</em> a sphere:
+    /// an entry of <see cref="Pattern"/> at a fraction <c>(u, v)</c> of the radius carries a
+    /// half-thickness <c>sqrt(1 − u² − v²)</c>, so a sample is taken only within <c>R</c> of the
+    /// point in all three dimensions and the farthest entry, at four fifths, has barely any
+    /// depth window at all. A coarsest sphere of <c>R = r</c> therefore reaches <b>r</b> and
+    /// measures, on the floor of close-up A, a profile <em>narrower</em> than the single-scale
+    /// Depth estimator's — the opposite of what a multi-scale estimate is for, and the
+    /// measurable form of what the verification of V2-25 reports: the reference's MSVO covers
+    /// 32 % of the frame against its Depth mode's 23 %, where the two came out level here.
+    /// </para>
+    /// <para>
+    /// §2.4 binds the far field by one figure, « <c>O</c> DOIT être nul là où aucune géométrie
+    /// occultante ne se trouve à moins de <c>2 r</c> », which is the room the coarsest scale of a
+    /// multi-scale estimate has. It is taken here less the reach of the smoothing that follows
+    /// (<see cref="Smooth"/>, about two scene units at this level), so that the effect is zero
+    /// well inside <c>2 r</c>: <c>1.75 r</c> = 35 scene units at the default <c>r</c> = 20, the
+    /// darkening dying by 37 against the 40 the invariant measures at. Each finer level still
+    /// halves the one above it, as in the original.
+    /// </para>
+    /// <para>
+    /// This widening, the fourth level, the <see cref="Smooth"/> pass and the per-pixel turn of
+    /// the pattern are the four real departures from the original that lot V2-25 found, and
+    /// together they do <em>not</em> close the gap the verification measures: the cause is the
+    /// sensitivity of the ported estimator itself, which compares a sample's depth to the centre
+    /// pixel's rather than to the tangent plane of the surface. See <b>Q-100</b>.
+    /// </para>
+    /// </remarks>
+    // Q-100
+    private const float CoarsestRadius = 1.75f;
+
+    /// <summary>
+    /// The threshold of the <c>SmartBlur</c> port, in multiples of the relative depth difference
+    /// (<see cref="MsvoShaders.BlurFragment"/>). REQ-SCN-083 leaves it free.
+    /// </summary>
+    private const float BlurSharpness = 32f;
+
     private readonly GL _gl;
 
     private ShaderProgram? _linearize;
     private ShaderProgram? _downsample;
     private ShaderProgram? _occlusion;
+    private ShaderProgram? _blur;
     private ShaderProgram? _upsample;
     private ShaderProgram? _apply;
     private uint _vertexArray;
 
-    // Per level: the linear depth, the level's own occlusion, and the combination of it with
-    // everything coarser. The coarsest level needs no combination buffer.
+    // Per level: the linear depth, the level's own occlusion, the horizontal half of the blur of
+    // that occlusion, and the combination of it with everything coarser. The coarsest level
+    // needs no combination buffer.
     private uint[] _depthTextures = [];
     private uint[] _aoTextures = [];
+    private uint[] _blurTextures = [];
     private uint[] _combinedTextures = [];
     private uint[] _depthBuffers = [];
     private uint[] _aoBuffers = [];
+    private uint[] _blurBuffers = [];
     private uint[] _combinedBuffers = [];
     private int[] _widths = [];
     private int[] _heights = [];
@@ -145,6 +202,7 @@ internal sealed class MsvoPass : IDisposable
 
         BuildPyramid(buffer, inverse);
         BuildOcclusion(style, view, sceneScale);
+        Smooth();
         Combine();
         Apply(buffer, style);
 
@@ -165,6 +223,7 @@ internal sealed class MsvoPass : IDisposable
         _linearize?.Dispose();
         _downsample?.Dispose();
         _occlusion?.Dispose();
+        _blur?.Dispose();
         _upsample?.Dispose();
         _apply?.Dispose();
         if (_vertexArray != 0)
@@ -218,13 +277,14 @@ internal sealed class MsvoPass : IDisposable
             occlusion.SetArray("uPattern", i, pattern[i]);
         }
 
-        float radius = style.OcclusionRadius(sceneScale);
+        float radius = style.OcclusionRadius(sceneScale) * CoarsestRadius;
         for (int level = 0; level < _levels; level++)
         {
             Bind(_aoBuffers[level], level);
 
-            // The coarsest level covers the whole radius r, each finer one half of the one
-            // below it: the fine contact and the wide darkening the mode is about.
+            // The coarsest level covers the whole of what the far field of §2.4 allows and each
+            // finer one half of the one above it: the fine contact and the wide darkening the
+            // mode is about.
             occlusion.Set("uRadius", radius / (1 << (_levels - 1 - level)));
 
             // The focal length in pixels of this level: half its height over tan(fov / 2),
@@ -232,6 +292,43 @@ internal sealed class MsvoPass : IDisposable
             occlusion.Set("uFocal", 0.5f * _heights[level] * view.Projection.M22);
             occlusion.Set("uTexel", new Vector2(1f / _widths[level], 1f / _heights[level]));
             Texture(0, _depthTextures[level]);
+            FullScreen();
+        }
+    }
+
+    /// <summary>
+    /// The <c>SmartBlur</c> of the original, over every level: two separable passes, horizontally
+    /// into the level's blur buffer and back vertically into its own occlusion buffer, so that
+    /// <see cref="Combine"/> reads a smoothed level whichever end of the chain it is at.
+    /// </summary>
+    /// <remarks>
+    /// <b>V2-25, defect B.</b> The original blurs its low-resolution input at every step of the
+    /// blur-and-upsample chain and ends with one more step at full resolution, so no level ever
+    /// reaches the output unblurred; this port multiplied each level's own occlusion in raw. See
+    /// <see cref="MsvoShaders.BlurFragment"/>.
+    /// </remarks>
+    private void Smooth()
+    {
+        ShaderProgram blur = _blur ??= ShaderProgram.Create(
+            _gl, "msvo-blur", SceneShaders.ResolveVertex, MsvoShaders.BlurFragment);
+        blur.Use();
+        blur.Set("uAo", 0);
+        blur.Set("uDepth", 1);
+        blur.Set("uSharpness", BlurSharpness);
+
+        for (int level = 0; level < _levels; level++)
+        {
+            Vector2 texel = new(1f / _widths[level], 1f / _heights[level]);
+            Texture(1, _depthTextures[level]);
+
+            Bind(_blurBuffers[level], level);
+            blur.Set("uStep", new Vector2(texel.X, 0f));
+            Texture(0, _aoTextures[level]);
+            FullScreen();
+
+            Bind(_aoBuffers[level], level);
+            blur.Set("uStep", new Vector2(0f, texel.Y));
+            Texture(0, _blurTextures[level]);
             FullScreen();
         }
     }
@@ -373,9 +470,11 @@ internal sealed class MsvoPass : IDisposable
         _heights = new int[levels];
         _depthTextures = new uint[levels];
         _aoTextures = new uint[levels];
+        _blurTextures = new uint[levels];
         _combinedTextures = new uint[levels];
         _depthBuffers = new uint[levels];
         _aoBuffers = new uint[levels];
+        _blurBuffers = new uint[levels];
         _combinedBuffers = new uint[levels];
 
         for (int level = 0; level < levels; level++)
@@ -388,6 +487,9 @@ internal sealed class MsvoPass : IDisposable
                     InternalFormat.R16f, PixelFormat.Red, PixelType.Float)
                 || !Attach(
                     ref _aoBuffers[level], ref _aoTextures[level], level,
+                    InternalFormat.R8, PixelFormat.Red, PixelType.UnsignedByte)
+                || !Attach(
+                    ref _blurBuffers[level], ref _blurTextures[level], level,
                     InternalFormat.R8, PixelFormat.Red, PixelType.UnsignedByte))
             {
                 Release();
@@ -442,7 +544,8 @@ internal sealed class MsvoPass : IDisposable
 
     private void Release()
     {
-        foreach (uint[] textures in (uint[][])[_depthTextures, _aoTextures, _combinedTextures])
+        foreach (uint[] textures in
+                 (uint[][])[_depthTextures, _aoTextures, _blurTextures, _combinedTextures])
         {
             foreach (uint texture in textures)
             {
@@ -453,7 +556,8 @@ internal sealed class MsvoPass : IDisposable
             }
         }
 
-        foreach (uint[] buffers in (uint[][])[_depthBuffers, _aoBuffers, _combinedBuffers])
+        foreach (uint[] buffers in
+                 (uint[][])[_depthBuffers, _aoBuffers, _blurBuffers, _combinedBuffers])
         {
             foreach (uint framebuffer in buffers)
             {
@@ -466,9 +570,11 @@ internal sealed class MsvoPass : IDisposable
 
         _depthTextures = [];
         _aoTextures = [];
+        _blurTextures = [];
         _combinedTextures = [];
         _depthBuffers = [];
         _aoBuffers = [];
+        _blurBuffers = [];
         _combinedBuffers = [];
         _widths = [];
         _heights = [];
