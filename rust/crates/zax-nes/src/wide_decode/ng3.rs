@@ -18,8 +18,9 @@
 //! [`MATCHING`]) is decoded; a margin column the nametables still hold for that place is taken
 //! from them, with what the game drew over the layout since. A row of the area the layout does not
 //! explain (the desert's animated dunes, the upper layer of 3-1A) takes its margins from the ring
-//! of nametables beside the screen. Past the ends of the area the margins repeat its first or last
-//! 32 pixels. Vertical areas and rows 24 and past (the status bar) are left to the nametables.
+//! of nametables beside the screen. Past the ends of the area, where the game has nothing, a row at
+//! the camera's scroll shows the backdrop (a band scrolled on its own goes on, its layout repeating
+//! itself). Vertical areas and rows 24 and past (the status bar) are left to the nametables.
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -192,8 +193,15 @@ impl MarginDecoder for NinjaGaiden3 {
             return true;
         };
 
+        // A row at the camera's very scroll, not a band of its own (whose layout repeats itself).
+        let at_camera = placement.ring_near.is_none() && (row.ring_x() - camera).rem_euclid(512) == 0;
         for column in columns {
-            let world = area.within(placement.world(column));
+            let world = placement.world(column);
+            // Past the ends of the area the game has nothing: the backdrop, not a repeated edge.
+            if at_camera && !(0..area.columns).contains(&world) {
+                continue;
+            }
+            let world = area.within(world);
             // A column the nametables hold for this very place shows what the game drew there.
             let decoded = if column_is_current(memory, &area, *row, column, world) {
                 Some(nametable_tile(memory, *row, column))
