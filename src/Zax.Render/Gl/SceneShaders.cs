@@ -340,6 +340,10 @@ internal static class SceneShaders
         centroid out vec2 vUv;
         centroid out vec3 vLocal;
 
+        // The same texture coordinate at the pixel centre, which the 2D-mode rectangle of
+        // REQ-SCN-076 uses instead (AMD-058). See the same remark.
+        out vec2 vUvCentre;
+
         void main()
         {
             vec3 local = aPosition;
@@ -389,6 +393,7 @@ internal static class SceneShaders
 
             vBent = placed;
             vUv = aUv;
+            vUvCentre = aUv;
 
             // AMD-057: the walls between two neighbouring tiles of the same object are drawn
             // again, so the tie they make with the face that closes the surface is settled
@@ -568,6 +573,17 @@ internal static class SceneShaders
     /// accurate for nothing — the grid's own <c>floor</c> only ever enters a continuous
     /// distance. <c>vScene</c>, <c>vBent</c> and the normals enter continuous expressions.
     /// </para>
+    /// <para>
+    /// What centroid sampling costs is the agreement of two triangles that share an interior
+    /// edge: the diagonal of a quad is covered in part by each of them, and each then samples
+    /// at a centroid of its own. On a tile face the two centroids are a hundredth of a texel
+    /// apart and land on the same texel; on the <b>2D-mode rectangle</b> of REQ-SCN-076 — one
+    /// quad the size of the picture, whose diagonal runs across the whole NES image, and whose
+    /// texel decides a binary cutout — they do not, and the two halves of a diagonal pixel
+    /// would disagree on whether to be drawn at all. That rectangle has no joint to protect,
+    /// being a single quad, so it reads <c>vUvCentre</c> instead and the drawn set stays
+    /// independent of <c>video.anti_alias</c> as AMD-050 requires.
+    /// </para>
     /// </remarks>
     public static string SceneFragment { get; } = $$"""
         #version 330 core
@@ -582,6 +598,7 @@ internal static class SceneShaders
         // AMD-058 REQ-SCN-065: the interpolation qualifiers must match the vertex shader's.
         centroid in vec2 vUv;
         centroid in vec3 vLocal;
+        in vec2 vUvCentre;
         layout(location = 0) out vec4 oColor;
 
         // AMD-055 REQ-SCN-084: the floor mask — the bent scene normal, and the flag that says
@@ -666,10 +683,14 @@ internal static class SceneShaders
             else
             {
                 // REQ-E3D-563: nearest neighbour, no mipmap, texel coordinates taken modulo
-                // the texture size.
+                // the texture size. AMD-058: the centroid coordinate everywhere a joint can
+                // exist, the pixel centre on the single quad of the 2D-mode rectangle, where
+                // REQ-SCN-076 wants the two triangles to agree. Both branches of the choice
+                // are uniform over the draw call.
+                vec2 source = uCutout != 0 ? vUvCentre : vUv;
                 vec2 uv = vec2(
-                    vUv.x * uTexTilting.x + uTexOffset.x * uTextureSize.x,
-                    vUv.y * uTexTilting.y + uTexOffset.y * uTextureSize.y);
+                    source.x * uTexTilting.x + uTexOffset.x * uTextureSize.x,
+                    source.y * uTexTilting.y + uTexOffset.y * uTextureSize.y);
                 ivec2 texel = ivec2(mod(floor(uv), uTextureSize));
                 if (uColorMode == 0)
                 {
