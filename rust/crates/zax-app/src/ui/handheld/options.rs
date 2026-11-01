@@ -352,9 +352,7 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::CatchUpLast3d => {
             text::label_of(catalogue::descriptor(SettingId::EmuCatchUpLast3d))
         }
-        OptionRow::HalfRate3d => {
-            text::label_of(catalogue::descriptor(SettingId::VideoHalfRate3d))
-        }
+        OptionRow::HalfRate3d => text::label_of(catalogue::descriptor(SettingId::VideoHalfRate3d)),
         OptionRow::Camera => strings::get(keys::HANDHELD_OPTION_CAMERA),
         OptionRow::CatchUp => strings::get(keys::HANDHELD_OPTION_CATCH_UP),
         OptionRow::LuaOptimized => {

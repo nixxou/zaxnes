@@ -1699,6 +1699,14 @@ fn update_scene(host: &mut AppHost, state: &mut RunState) {
         // view frames the rest. The picture's own size tells its margins: one 256 wide has none,
         // whatever margin the 3D conversion was asked for.
         let width = state.picture.len() / state.picture_height.max(1);
+        // The picture's margins, not the conversion's: with `emu.pause_3d_in_2d` no frame is
+        // converted in 2D, and the margin of the last one (none, in a game started in 2D) cut
+        // the sides off, grey bands where the widescreen picture is.
+        #[allow(clippy::cast_precision_loss)] // 0..=512.
+        {
+            scene.margin = (width.saturating_sub(256) / 2) as f32;
+            scene.margin_y = (state.picture_height.saturating_sub(240) / 2) as f32;
+        }
         let in_force = overscan.in_force(i32::try_from(width).map_or(0, |width| (width - 256) / 2));
         in_force.leave_out(&mut state.picture, state.picture_height);
         scene.picture_crop = zax_profiles::values::Vec4F::new(

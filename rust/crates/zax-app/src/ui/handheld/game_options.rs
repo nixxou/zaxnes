@@ -63,9 +63,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         | OptionRow::Camera
         | OptionRow::Controls
         | OptionRow::Achievements
-        | OptionRow::Optimizations => {
-            &[]
-        }
+        | OptionRow::Optimizations => &[],
     }
 }
 
