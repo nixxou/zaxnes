@@ -223,7 +223,16 @@ internal static class ReflectionShaders
             // REQ-SCN-084: the intensity falls continuously to 0 as the ray approaches its
             // maximum length and as its projection approaches the edge of the screen. Neither
             // width nor shape is fixed; what is forbidden is a hard edge.
-            float fadeLength = 1.0 - smoothstep(0.75, 1.0, hi / uMaxLength);
+            //
+            // The fall-off spans the *whole* ray, not its last quarter. The Intention of
+            // REQ-SCN-084 says the reflection « s'estompe avec la distance parcourue » and its
+            // review criterion « se brouille et s'efface avec la distance »: a factor that stays
+            // at 1 until three quarters of the maximum length honours the letter of the
+            // normative bullet and nothing of either, since at the default ssr.length nothing
+            // in a game frame travels 150 units. The shape is a free choice; a smoothstep over
+            // [0, 1] keeps the contact sharp (zero slope at the origin) and the far end soft.
+            // Q-099
+            float fadeLength = 1.0 - smoothstep(0.0, 1.0, hi / uMaxLength);
             vec2 border = min(hitUv, vec2(1.0) - hitUv);
             float fadeEdge = smoothstep(0.0, 0.12, min(border.x, border.y));
 
