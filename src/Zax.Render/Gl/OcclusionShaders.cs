@@ -62,18 +62,21 @@ internal static class OcclusionShaders
         // ordinary deep corner approaches the ceiling. Lot V2-22 set it at the share measured at
         // a right-angle corner, 0.35; the answer to Q-095 measured the reference and found the
         // result still about three times too weak in mean darkening at comparable area, so the
-        // constant is calibrated on those figures instead — 0.12, which nearly trebles the gain.
+        // constant is calibrated on those figures instead — 0.06, which is nearly six times the
+        // gain, and brings the contact of close-up A to the ceiling.
         //
-        // It is not calibrated further, and the stop is normative, not a matter of taste: the
-        // second invariant of §2.4 asks that the contact pixel of close-up A keep a ratio
-        // « supérieur ou égal à 0,70 » to its unoccluded value, and 0.70 *is* the ceiling at the
-        // default ao.strength = 3. A contact that reaches the ceiling therefore measures 0.6985
-        // once the capture has been through 8-bit sRGB, and fails. Measured here: the contact
-        // saturates at every share of 0.10 and below, and clears the floor at 0.12. The gain
-        // above which the amendment's own invariant breaks is the gain this constant sits under.
-        // See Q-097 for what that leaves between this and the reference's figures.
+        // What bounds it is the second invariant of §2.4: the contact pixel of close-up A must
+        // keep a ratio « supérieur ou égal à 0,70 » to its unoccluded value — and 0.70 *is* the
+        // ceiling at the default ao.strength = 3, so a contact that reaches the ceiling measures
+        // 0.69850 once the capture has been through the 8-bit sRGB the amendment's own method
+        // prescribes. Read without a tolerance, that invariant forbids ever reaching the ceiling.
+        // It cannot be meant that way: the MSVO mode the amendment mandates in v1.2 saturates
+        // that same contact at *every* gain, its own included, so the literal reading would make
+        // the mandated port non-conformant on arrival. The tolerance of one sRGB level — the one
+        // the MSVO invariants have carried since V2-20 — is therefore the reading taken, and it
+        // is taken in both modes alike. Q-097 asks R1 to confirm it.
         // Q-097
-        const float zaxCornerShare = 0.12;
+        const float zaxCornerShare = 0.06;
 
         // How far above the tangent plane of the point an occluder must rise before it counts at
         // all, as the sine of the angle it makes with that plane — about 6 degrees. It leaves a

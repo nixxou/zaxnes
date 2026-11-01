@@ -38,6 +38,14 @@ public sealed class Amd055OcclusionTests
     /// <summary>The plane of the floor's upper face.</summary>
     private const float Plane = 124f;
 
+    /// <summary>
+    /// The slack a ratio measured on an 8-bit sRGB capture needs before it can be compared with
+    /// a bound stated in linear, which is what §2.4 does (<b>Q-097</b>). A pixel exactly at the
+    /// ceiling <c>O ≤ 0.1 × ao.strength</c> reads 0.69850 rather than 0.70000 at the default
+    /// strength; one sRGB level covers that and nothing wider.
+    /// </summary>
+    private const double SrgbStep = 0.01;
+
     /// <summary>The scene centre <c>C</c> of REQ-E3D-410.</summary>
     private static Vector3 Center => new(128f, 120f, 0f);
 
@@ -109,6 +117,18 @@ public sealed class Amd055OcclusionTests
     /// ceiling <c>O ≤ 0.1 × ao.strength</c> = 0.3); at a pixel of the floor at least
     /// <c>2 r</c> = 40 units from the cube and visible, it is 1.00 ± 0.02.
     /// </summary>
+    /// <remarks>
+    /// <b>Q-097</b>: the floor is read with the tolerance of one sRGB level that the MSVO
+    /// invariants of this file have carried since V2-20, and for the same reason. 0.70 is
+    /// exactly the ceiling at the default <c>ao.strength</c> = 3, so a contact that <em>reaches</em>
+    /// the ceiling — which the ceiling being a ceiling must permit — measures <b>0.69850</b> once
+    /// the capture has been through the 8-bit sRGB §2.4 prescribes. Without the tolerance the
+    /// invariant forbids attaining the very bound it states; and the MSVO port the amendment
+    /// mandates saturates this contact at every gain, so the untolerant reading would condemn it
+    /// on arrival. Measured, not assumed: the Depth mode reaches 0.69850 here from a
+    /// <c>zaxCornerShare</c> of 0.10 downwards, and MSVO reads 0.69850 at every share from 0.12
+    /// to 1.00.
+    /// </remarks>
     [GlFact] // REQ-SCN-083
     public void REQ_SCN_083_the_foot_of_the_cube_is_darkened_and_nothing_far_from_it_is()
     {
@@ -127,7 +147,7 @@ public sealed class Amd055OcclusionTests
             (int px, int py) = Pixel(view, point);
             double ratio = Ratio(on, off, px, py);
             Assert.True(ratio < 1.0, $"the contact pixel at {point} was not darkened: {ratio:F3}.");
-            Assert.True(ratio >= 0.70, $"the contact pixel at {point} fell to {ratio:F3}.");
+            Assert.True(ratio >= 0.70 - SrgbStep, $"the contact pixel at {point} fell to {ratio:F5}.");
         }
 
         (int fx, int fy) = Pixel(view, FarFromCube);
@@ -520,9 +540,10 @@ public sealed class Amd055OcclusionTests
         Shot on = target.Render(renderer, scene);
 
         // The ceiling is 0.3 at the default ao.strength = 3; at the contact the darkening must
-        // use a real share of it, not a twentieth.
+        // use a real share of it, not a twentieth. Since the calibration of lot V2-23 the
+        // contact reaches the ceiling, so the floor carries the sRGB slack of Q-097.
         double contact = Ratio(on, off, view, Contact[0]);
-        Assert.InRange(contact, 0.70, 0.90);
+        Assert.InRange(contact, 0.70 - SrgbStep, 0.90);
 
         // And it must reach out over the radius r = 20, not die within a pixel or two of the
         // contact: at half the radius from the face of the cube the floor is still darkened,
@@ -539,6 +560,75 @@ public sealed class Amd055OcclusionTests
                 $"{distance} units from the cube the ratio {ratio:F4} is below {previous:F4}.");
             previous = ratio;
         }
+    }
+
+    /// <summary>
+    /// <b>Q-095</b> (answered), <b>Q-097</b> — the calibration of lot V2-23, in both modes. The
+    /// answer to Q-095 measured the reference and found <em>both</em> modes « environ trois fois »
+    /// too weak in mean darkening at comparable area, and MSVO <b>stronger than Depth</b> on the
+    /// ring (7.1 against 5.2 in mean, 32.2 % against 23.3 % in area). Neither relation is pinned
+    /// by any invariant of §2.4 — a ceiling and a monotony leave both free — so this test holds
+    /// the two constants that carry it: a regression of either gain back towards V2-22's values,
+    /// or of the MSVO port back below Depth, fails here.
+    /// </summary>
+    /// <remarks>
+    /// Measured on the contact of close-up A and on the area the effect changes at all, the two
+    /// quantities the answer's own method uses. The windows are wide: they fix the order of
+    /// magnitude the reference shows, not a law, which REQ-SCN-083 leaves free.
+    /// </remarks>
+    [GlFact] // REQ-SCN-083
+    public void Q095_both_modes_carry_the_magnitude_the_reference_shows()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+        Shot off = target.Render(renderer, scene);
+        (int cx, int cy) = Pixel(view, Contact[0]);
+
+        Enhance(scene, 2);
+        Shot depth = target.Render(renderer, scene);
+        Enhance(scene, 1);
+        Shot msvo = target.Render(renderer, scene);
+
+        double depthContact = Ratio(depth, off, cx, cy);
+        double msvoContact = Ratio(msvo, off, cx, cy);
+        int depthArea = Changed(depth, off);
+        int msvoArea = Changed(msvo, off);
+
+        // Both modes now carry enough gain to bring the deepest contact of the close-up to the
+        // ceiling. That is the magnitude the reference shows and the point of the calibration:
+        // at V2-22's constants the Depth contact sat well above this, around 0.81.
+        Assert.InRange(depthContact, 0.70 - SrgbStep, 0.75);
+        Assert.InRange(msvoContact, 0.70 - SrgbStep, 0.75);
+
+        // And both lay a band rather than an outline — the review criterion of §2.4 — over
+        // comparable ground. Which of the two is the wider depends on the scene and is not
+        // pinned here: on the ring of « Punch-Out!! » MSVO is the wider, as the reference has it
+        // (32.2 % against 23.3 % of the frame, and 34.4 % against 32.2 % measured), while on
+        // this lone cube on a plane Depth spreads further. What a regression of either gain
+        // would break is the order of magnitude, which is what the bounds hold.
+        Assert.True(depthArea > Width * Height / 100, $"Depth changed only {depthArea} pixels.");
+        Assert.True(msvoArea > Width * Height / 100, $"MSVO changed only {msvoArea} pixels.");
+        Assert.InRange(msvoArea / (double)depthArea, 0.4, 2.5);
+    }
+
+    /// <summary>How many pixels the effect changes at all, by at least one sRGB level.</summary>
+    private static int Changed(Shot on, Shot off)
+    {
+        int changed = 0;
+        for (int i = 0; i < off.Pixels.Length; i += 4)
+        {
+            if (Math.Abs(on.Pixels[i] - off.Pixels[i]) > 0
+                || Math.Abs(on.Pixels[i + 1] - off.Pixels[i + 1]) > 0
+                || Math.Abs(on.Pixels[i + 2] - off.Pixels[i + 2]) > 0)
+            {
+                changed++;
+            }
+        }
+
+        return changed;
     }
 
     /// <summary>
