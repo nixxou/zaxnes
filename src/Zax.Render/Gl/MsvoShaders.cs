@@ -226,21 +226,26 @@ internal static class MsvoShaders
 
         // Q-095, Q-097: the port's equivalent of the Depth mode's zaxCornerShare — the share of
         // the hemisphere the MiniEngine estimator has to find blocked for the darkening to reach
-        // the ceiling « O <= 0.1 x ao.strength » of REQ-SCN-083. The original writes an
-        // accessibility it is free to scale, the amendment binds only the ceiling and the
-        // proportionality to ao.strength, and the answer to Q-095 measured this mode too weak by
-        // the same factor as Depth — « MSVO est trop faible lui aussi », the reference being
-        // *stronger* in MSVO than in Depth on the ring. The ceiling itself is enforced by the
-        // shared apply pass.
+        // the ceiling « O <= min(0,95 ; 0,3 x ao.strength) » of REQ-SCN-083. The original writes
+        // an accessibility it is free to scale, the amendment binds only the ceiling and the
+        // proportionality to ao.strength, and the ceiling itself is enforced by the shared apply
+        // pass.
         //
-        // Unlike the Depth mode's constant this one is not bounded by the contact invariant: the
-        // sphere test stays well clear of the ceiling at the contact of close-up A, and every
-        // §2.4 invariant still passes down to 0.08. It is calibrated instead on the ratio the
-        // reference shows between the two modes — MSVO wider and stronger than Depth on the
-        // ring, 32.2 / 23.3 in area and 7.1 / 5.2 in mean darkening. At 0.12 this mode measures
-        // 1.40 times the Depth mode's mean darkening on « Punch-Out!! », against the
-        // reference's 1.37, and an area of 34.4 % against the reference's 32.2 %.
-        const float zaxMsvoShare = 0.12;
+        // Calibrated, like the Depth constant, on the figures of the Q-095 answer under the
+        // ceiling of AMD-055 v1.4 (Q-097). The anchor is the ratio the reference shows *between
+        // the two modes*, which no framing factor can disturb: MSVO stronger than Depth on the
+        // ring, 7.1 against 5.2 in mean darkening, a factor of 1.37. Swept over 0.12 to 1.00
+        // (see docs/progress/V2-24.md), this value measures **1.355** times the Depth mode's
+        // mean darkening on « Punch-Out!! » — 9.22 against 6.81 — and overshoots the
+        // framing-adjusted absolute target by the same 6 % the Depth mode does, so the two modes
+        // are calibrated consistently rather than each to its own best fit. The darkest 1 % of
+        // the frame reads 0.11 against the reference's 0.16.
+        //
+        // Note that this is near the accessibility the port writes unscaled: V2-23 had to divide
+        // by 0.12 to get any magnitude at all under the old ceiling of 0.3, and under the ceiling
+        // v1.4 states the MiniEngine estimator very nearly carries the reference's magnitude on
+        // its own. What that lot read as a missing gain was the ceiling clipping the port.
+        const float zaxMsvoShare = 0.75;
 
         void main()
         {

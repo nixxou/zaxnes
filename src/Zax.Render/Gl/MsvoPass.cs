@@ -21,8 +21,8 @@ namespace Zax.Render.Gl;
 /// The pass sits exactly where the Depth occlusion of <see cref="OcclusionPass"/> does — after
 /// the opaque objects and the reflections, before the sorted transparent ones (REQ-SCN-058
 /// amended) — and writes the same thing: an occlusion <c>O</c> that the apply pass multiplies by
-/// the ceiling <c>0.1 × ao.strength</c> and applies to the scene's linear colour before the sRGB
-/// encode.
+/// the ceiling <c>min(0.95 ; 0.3 × ao.strength)</c> and applies to the scene's linear colour
+/// before the sRGB encode.
 /// </para>
 /// <para>
 /// <c>ao.thickness</c> acts here and only here (REQ-SCN-079): it is the rejection fall-off of
@@ -34,7 +34,21 @@ namespace Zax.Render.Gl;
 internal sealed class MsvoPass : IDisposable
 {
     /// <summary>Levels of the depth pyramid for Low, Medium and High (REQ-SCN-083).</summary>
-    private static readonly int[] LevelsByQuality = [2, 3, 3];
+    /// <remarks>
+    /// Low had two levels until lot V2-24, and the recalibration of <b>Q-097</b> showed that it
+    /// cannot. The coarsest level is what carries the wide half of a multi-scale estimate, so
+    /// dropping it cost the Low quality <b>half the darkening at a contact</b>: measured on the
+    /// contact of close-up A, a linear ratio of 0.615 against 0.307 and 0.287 for Medium and
+    /// High. Under the ceiling of v1.3 that gap was a sixth of a level and passed unnoticed;
+    /// under the ceiling v1.4 states it is plainly visible, and REQ-SCN-083 requires of the three
+    /// qualities « le même aspect général, Low pouvant être plus bruité » — noisier, not lighter
+    /// — while declaring the number of scales and samples <em>unobservable</em>. With three
+    /// levels throughout the three agree to 0.06 (0.348 / 0.307 / 0.287), and Low stays the
+    /// cheapest by its sample pattern: four entries of <see cref="Pattern"/> against seven, at
+    /// half resolution.
+    /// </remarks>
+    // Q-097
+    private static readonly int[] LevelsByQuality = [3, 3, 3];
 
     /// <summary>
     /// The checkerboard pattern of <c>AoRenderCS.hlsli</c>: the offsets, in fifths of the
@@ -257,7 +271,7 @@ internal sealed class MsvoPass : IDisposable
 
     /// <summary>
     /// The multiply into the scene, in linear space and before the sRGB encode: the same pass
-    /// the Depth occlusion uses, so the ceiling <c>O ≤ 0.1 × ao.strength</c> is enforced in one
+    /// the Depth occlusion uses, so the ceiling <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c> is enforced in one
     /// place (REQ-SCN-083).
     /// </summary>
     private void Apply(LinearColorBuffer buffer, StyleSettings style)
