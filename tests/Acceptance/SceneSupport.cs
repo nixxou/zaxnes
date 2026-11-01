@@ -90,6 +90,63 @@ public sealed class SceneFixture
     }
 
     /// <summary>
+    /// Adds a one-row pattern whose cells carry <paramref name="cells"/> left to right, so that
+    /// the object's texture is not of one single tile image (AMD-058).
+    /// </summary>
+    public SceneFixture PatternRow(
+        int depth,
+        ProfileLayer layer,
+        params (ulong Low, ulong High)[] cells)
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        ProfilePattern pattern = new()
+        {
+            Grid = new PatternGrid(
+                cells.Length,
+                1,
+                [.. cells.Select(static cell => new ProfileTile(cell.Low, cell.High, TileFlip.None))]),
+            TileSize = new Vec2I(cells.Length, 1),
+            Permanent = true,
+            SelfConnected = true,
+            ConstraintSize = Vec2I.Unconstrained,
+        };
+        pattern.Variants.Add(new PatternVariant
+        {
+            Depth = depth,
+            Layer = layer,
+            Alpha = 1f,
+            RenderStyle = VariantRenderStyle.Normal,
+        });
+        _profile.PermanentPatterns.Add(pattern);
+        return this;
+    }
+
+    /// <summary>
+    /// A full tile of <paramref name="color"/> whose texel column <paramref name="column"/>
+    /// carries <paramref name="stripe"/> instead. AMD-058 needs a texture whose first or last
+    /// column differs from the rest: the texel read of REQ-E3D-563 takes its coordinates modulo
+    /// the texture size, so those two are what a read one texel past an edge lands on.
+    /// </summary>
+    public static (ulong Low, ulong High) Striped(int color, int column, int stripe)
+    {
+        ulong low = 0UL;
+        ulong high = 0UL;
+        for (int y = 0; y < 8; y++)
+        {
+            for (int x = 0; x < 8; x++)
+            {
+                // SPEC-02 REQ-CORE-034 packs the pixel (x, y) at bit (y << 3) | (7 − x).
+                int value = x == column ? stripe : color;
+                int bit = (y << 3) | (7 - x);
+                low |= (ulong)(value & 1) << bit;
+                high |= (ulong)((value >> 1) & 1) << bit;
+            }
+        }
+
+        return (low, high);
+    }
+
+    /// <summary>
     /// A texture in the <b>direct</b> format of REQ-E3D-562, every texel of the same colour:
     /// the custom texture the close-ups of AMD-055 §2.3 to §2.5 ask for, whose albedo is read
     /// straight off the colour.
