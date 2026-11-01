@@ -42,6 +42,39 @@ internal static class SceneShaders
         """;
 
     /// <summary>
+    /// Reconstruction of the view-space geometry of a pixel from the scene's depth texture,
+    /// shared by the two screen passes of the Enhanced style (AMD-055 REQ-SCN-083 and
+    /// REQ-SCN-084). Both work on the <b>resolved</b> depth (REQ-SCN-080, fourth bullet).
+    /// </summary>
+    public const string ScreenDepth = """
+        uniform sampler2D uDepth;
+        uniform mat4 uInverseProjection;
+        uniform vec2 uDepthTexel;
+
+        // The view-space position of the pixel at uv, from its window-space depth.
+        vec3 zaxViewPosition(vec2 uv, out float raw)
+        {
+            raw = texture(uDepth, uv).r;
+            vec4 clip = vec4((uv * 2.0 - 1.0), raw * 2.0 - 1.0, 1.0);
+            vec4 view = uInverseProjection * clip;
+            return view.xyz / view.w;
+        }
+
+        vec3 zaxViewPosition(vec2 uv)
+        {
+            float raw;
+            return zaxViewPosition(uv, raw);
+        }
+
+        // Whether the pixel holds no geometry at all: the far plane, which the clear and the
+        // skybox leave behind (REQ-SCN-049).
+        bool zaxIsEmpty(float raw)
+        {
+            return raw >= 0.999999;
+        }
+        """;
+
+    /// <summary>
     /// The animated deformation of SPEC-04B REQ-E3D-568, applied in the object's local frame
     /// before the scale and the rotation (DEC-04B-Q2, REQ-SCN-043).
     /// </summary>
@@ -267,6 +300,7 @@ internal static class SceneShaders
         out vec3 vGridNormal;
         out vec3 vLocal;
         out vec3 vLocalNormal;
+        out vec3 vFlatNormal;
 
         void main()
         {
@@ -287,6 +321,11 @@ internal static class SceneShaders
             // normal inwards (Q-069).
             vec3 sceneNormal = uNormalSign * (uNormalMatrix * aNormal);
             vNormal = sceneNormal;
+
+            // AMD-055 REQ-SCN-084: the floor test is evaluated on the normal in the scene frame
+            // **before** the curvature, so that a strong bend does not cut a reflection off in
+            // the middle of a surface (REQ-SCN-080, second bullet).
+            vFlatNormal = sceneNormal;
 
             // AMD-055 REQ-SCN-081 and REQ-SCN-082: the raw mesh position and normal, before
             // the animated deformation, before the object transform and before the curvature.
@@ -459,7 +498,19 @@ internal static class SceneShaders
         in vec3 vGridNormal;
         in vec3 vLocal;
         in vec3 vLocalNormal;
-        out vec4 oColor;
+        in vec3 vFlatNormal;
+        layout(location = 0) out vec4 oColor;
+
+        // AMD-055 REQ-SCN-084: the floor mask — the bent scene normal, and the flag that says
+        // this fragment belongs to a « surface de sol ». Its draw buffer is only on for the
+        // opaque pass of a frame whose reflections are on; everywhere else the write is
+        // discarded, which is why no other pass needs a second output.
+        layout(location = 1) out vec4 oFloor;
+
+        // Whether the instance this fragment belongs to is wide enough in the xz plane of the
+        // scene frame, before curvature: at least 6 x scene scale in both dimensions
+        // (REQ-SCN-084). Computed once per object by the renderer.
+        uniform int uFloorExtent;
 
         uniform mat4 uModel;
 
@@ -617,6 +668,13 @@ internal static class SceneShaders
             }
 
             oColor = vec4(min(lit, vec3(1.0)), uAlpha * texelAlpha);
+
+            // REQ-SCN-084: a floor surface is a face whose normal in the scene frame, before
+            // curvature, has a +Y component of at least 0.9, and that belongs to a wide enough
+            // instance. The normal stored is the bent one: the ray itself is traced on the
+            // geometry as rendered (REQ-SCN-080, second bullet).
+            float floorFacing = step(0.9, normalize(vFlatNormal).y);
+            oFloor = vec4(n * 0.5 + 0.5, uFloorExtent != 0 ? floorFacing : 0.0);
         }
         """;
 

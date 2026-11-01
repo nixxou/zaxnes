@@ -78,6 +78,12 @@ public sealed class RenderStatistics
     /// </summary>
     public bool OcclusionPass { get; internal set; }
 
+    /// <summary>
+    /// Whether the floor-reflection pass of the Enhanced style ran for this frame
+    /// (AMD-055 REQ-SCN-084).
+    /// </summary>
+    public bool ReflectionPass { get; internal set; }
+
     internal void BeginFrame()
     {
         DrawCalls = 0;
@@ -93,5 +99,6 @@ public sealed class RenderStatistics
         Occluders = 0;
         UnavailableTextures = 0;
         OcclusionPass = false;
+        ReflectionPass = false;
     }
 }

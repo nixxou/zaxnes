@@ -227,6 +227,13 @@ public static class SceneConstants
     public const float OccluderAlpha = 0.5f;
 
     /// <summary>
+    /// The least extent, in scene units before the scene scale, an object's bounding box must
+    /// have in <b>both</b> dimensions of the <c>xz</c> plane for its upward faces to be floor
+    /// surfaces (AMD-055 REQ-SCN-084).
+    /// </summary>
+    public const float FloorExtent = 6f;
+
+    /// <summary>
     /// Half-height the view reset frames, 132.7964 scene units (AMD-045 REQ-SCN-069): at
     /// <see cref="ResetDistance"/> it fills exactly half the vertical field of view.
     /// </summary>

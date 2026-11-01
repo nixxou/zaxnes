@@ -180,6 +180,31 @@ public sealed class StyleSettings
     /// The darkening ceiling <c>O ≤ 0.1 × ao.strength</c> of REQ-SCN-083: 0.1 to 0.5.
     /// </summary>
     public float OcclusionCeiling => 0.1f * AoStrength;
+
+    /// <summary>
+    /// The maximum ray length <c>40 × n(ssr.length) × s</c> in scene units (REQ-SCN-084): 40,
+    /// 120, 200, 280 and 360 for the settings 1 to 5.
+    /// </summary>
+    /// <param name="sceneScale">The scene scale <c>s</c> of REQ-SCN-002.</param>
+    public float ReflectionLength(float sceneScale) => 40f * Odd(SsrLength) * sceneScale;
+
+    /// <summary>
+    /// The reflection intensity <c>0.09 × n(ssr.shine)</c> of REQ-SCN-084 — the share of the
+    /// reflected colour mixed into the surface: 0.09, 0.27, 0.45, 0.63 and 0.81.
+    /// </summary>
+    public float ReflectionIntensity => 0.09f * Odd(SsrShine);
+
+    /// <summary>
+    /// The blur radius at the maximum ray length, as a fraction of the screen height:
+    /// <c>0.003 × (10 − n(ssr.clarity))</c> (REQ-SCN-084), so 0.027 down to 0.003.
+    /// </summary>
+    public float ReflectionBlur => 0.003f * (10 - Odd(SsrClarity));
+
+    /// <summary>
+    /// <c>n(niveau) = 2 × niveau − 1</c> of REQ-SCN-084: the odd numbers 1 to 9 for the levels
+    /// 1 to 5.
+    /// </summary>
+    private static int Odd(int level) => (2 * level) - 1;
 }
 
 /// <summary>

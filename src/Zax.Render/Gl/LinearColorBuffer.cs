@@ -35,6 +35,13 @@ namespace Zax.Render.Gl;
 /// and <see cref="ResolveDepth"/> flattens the multisampled copy of it on demand, in the middle
 /// of the frame, while the scene target stays bound for what is left to draw.
 /// </para>
+/// <para>
+/// AMD-055 REQ-SCN-084: the floor reflections also need to know, per pixel, whether the surface
+/// there is a <em>floor surface</em> and which way it faces. That is a second colour attachment,
+/// allocated only for the frames where the reflections are on and written by the opaque pass
+/// alone — <see cref="SetFloorMaskTarget"/> turns its draw buffer on and off, so no other pass
+/// has to write an output for it.
+/// </para>
 /// </remarks>
 internal sealed class LinearColorBuffer : IDisposable
 {
@@ -43,9 +50,12 @@ internal sealed class LinearColorBuffer : IDisposable
     private uint _framebuffer;
     private uint _colorTexture;
     private uint _depthTexture;
+    private uint _maskTexture;
     private uint _sampleFramebuffer;
     private uint _sampleColorBuffer;
     private uint _sampleDepthBuffer;
+    private uint _sampleMaskBuffer;
+    private bool _floorMask;
     private uint _vertexArray;
     private int _maxSamples = -1;
     private bool _disposed;
@@ -80,6 +90,20 @@ internal sealed class LinearColorBuffer : IDisposable
     /// </summary>
     public uint DepthTexture => _depthTexture;
 
+    /// <summary>
+    /// The single-sample floor mask of AMD-055 REQ-SCN-084 — the bent scene normal in
+    /// <c>rgb</c>, the floor flag in <c>a</c> — or 0 when this frame has none. With
+    /// anti-aliasing on it only holds the scene once <see cref="ResolveForScreenPass"/> has run.
+    /// </summary>
+    public uint FloorMaskTexture => _maskTexture;
+
+    /// <summary>
+    /// The single-sample linear colour of the scene. The reflections of REQ-SCN-084 read it, so
+    /// with anti-aliasing on it only holds the scene once <see cref="ResolveForScreenPass"/> has
+    /// run.
+    /// </summary>
+    public uint ColorTexture => _colorTexture;
+
     /// <summary>The name of the framebuffer the scene is being drawn into this frame.</summary>
     public uint SceneFramebuffer => Samples > 1 ? _sampleFramebuffer : _framebuffer;
 
@@ -113,8 +137,82 @@ internal sealed class LinearColorBuffer : IDisposable
     }
 
     /// <summary>
+    /// Flattens the depth, the colour and — when this frame has one — the floor mask into their
+    /// single-sample textures, then binds the scene target again. This is what REQ-SCN-080's
+    /// fourth bullet asks of the reflections, which read the colour as well as the depth.
+    /// </summary>
+    public void ResolveForScreenPass()
+    {
+        if (Samples <= 1 || _sampleFramebuffer == 0)
+        {
+            return;
+        }
+
+        ResolveDepth();
+
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _sampleFramebuffer);
+        _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _framebuffer);
+        _gl.Disable(EnableCap.ScissorTest);
+
+        BlitAttachment(0);
+        if (_maskTexture != 0)
+        {
+            BlitAttachment(1);
+        }
+
+        // The read and draw buffers go back to the colour attachment the rest of the frame
+        // expects (the mask's own draw buffer is turned on by SetFloorMaskTarget alone).
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _sampleFramebuffer);
+        _gl.ReadBuffer(ReadBufferMode.ColorAttachment0);
+        _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _framebuffer);
+        DrawBuffers(false);
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _sampleFramebuffer);
+        _gl.Viewport(0, 0, (uint)Width, (uint)Height);
+    }
+
+    /// <summary>
+    /// Turns the draw buffer of the floor mask on or off on the scene target. Only the opaque
+    /// pass writes the mask (REQ-SCN-084: the transparent objects and the HUD are drawn after
+    /// the reflections and carry none), so every other pass runs with it off and needs no
+    /// second fragment output.
+    /// </summary>
+    /// <param name="on">True to write both attachments, false for the colour alone.</param>
+    public void SetFloorMaskTarget(bool on)
+    {
+        if (_maskTexture == 0)
+        {
+            return;
+        }
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, SceneFramebuffer);
+        DrawBuffers(on);
+    }
+
+    /// <summary>
+    /// Clears the floor mask to zero — « no floor here » everywhere — without disturbing the
+    /// background colour the scene target was just cleared with (REQ-SCN-046).
+    /// </summary>
+    public void ClearFloorMask()
+    {
+        if (_maskTexture == 0)
+        {
+            return;
+        }
+
+        // The mask alone: its draw buffer is turned on, the colour attachment is masked out of
+        // the clear, and the colour the caller already wrote stays.
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, SceneFramebuffer);
+        SelectDrawBuffers(GLEnum.None, GLEnum.ColorAttachment1);
+        _gl.ClearColor(0f, 0f, 0f, 0f);
+        _gl.Clear(ClearBufferMask.ColorBufferBit);
+        DrawBuffers(false);
+    }
+
+    /// <summary>
     /// Binds the buffer as the draw target at <paramref name="width"/> ×
-    /// <paramref name="height"/>, reallocating it when the size or the sample count changed.
+    /// <paramref name="height"/>, reallocating it when the size, the sample count or the need
+    /// for a floor mask changed.
     /// </summary>
     /// <param name="width">Width in pixels.</param>
     /// <param name="height">Height in pixels.</param>
@@ -123,14 +221,20 @@ internal sealed class LinearColorBuffer : IDisposable
     /// <c>GL_MAX_SAMPLES</c> allows, then lowered one step at a time until the multisampled
     /// framebuffer is complete (AMD-032 §2).
     /// </param>
-    public void BeginPass(int width, int height, int samples = 1)
+    /// <param name="floorMask">
+    /// Whether this frame needs the floor mask of REQ-SCN-084. It costs an attachment, so it is
+    /// only allocated for the frames whose reflections are on.
+    /// </param>
+    public void BeginPass(int width, int height, int samples = 1, bool floorMask = false)
     {
         int w = Math.Max(1, width);
         int h = Math.Max(1, height);
         int wanted = SceneConstants.ClampAntiAliasSamples(samples, MaxSamples());
-        if (_framebuffer == 0 || w != Width || h != Height || wanted != Samples)
+        if (_framebuffer == 0 || w != Width || h != Height || wanted != Samples
+            || floorMask != _floorMask)
         {
             Release();
+            _floorMask = floorMask;
             Allocate(w, h);
             AllocateSamples(w, h, wanted);
         }
@@ -214,12 +318,47 @@ internal sealed class LinearColorBuffer : IDisposable
         _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _sampleFramebuffer);
         _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _framebuffer);
         _gl.Disable(EnableCap.ScissorTest);
+        BlitAttachment(0);
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
+
+    /// <summary>
+    /// Resolves one colour attachment of the multisampled target into the matching attachment of
+    /// the single-sample one. The read and the draw buffer are both selected, because a colour
+    /// blit copies <c>READ_BUFFER</c> into every draw buffer of the draw framebuffer.
+    /// </summary>
+    private void BlitAttachment(int index)
+    {
+        if (index == 0)
+        {
+            _gl.ReadBuffer(ReadBufferMode.ColorAttachment0);
+            SelectDrawBuffers(GLEnum.ColorAttachment0, GLEnum.None);
+        }
+        else
+        {
+            _gl.ReadBuffer(ReadBufferMode.ColorAttachment1);
+            SelectDrawBuffers(GLEnum.None, GLEnum.ColorAttachment1);
+        }
+
         _gl.BlitFramebuffer(
             0, 0, Width, Height,
             0, 0, Width, Height,
             (uint)ClearBufferMask.ColorBufferBit,
             BlitFramebufferFilter.Nearest);
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+    }
+
+    /// <summary>
+    /// Selects the draw buffers of the bound draw framebuffer: the colour alone, or the colour
+    /// and the floor mask of REQ-SCN-084.
+    /// </summary>
+    private void DrawBuffers(bool withMask)
+        => SelectDrawBuffers(
+            GLEnum.ColorAttachment0, withMask ? GLEnum.ColorAttachment1 : GLEnum.None);
+
+    private void SelectDrawBuffers(GLEnum first, GLEnum second)
+    {
+        Span<GLEnum> buffers = [first, second];
+        _gl.DrawBuffers(second == GLEnum.None && first != GLEnum.None ? 1u : 2u, buffers);
     }
 
     /// <summary>
@@ -273,6 +412,20 @@ internal sealed class LinearColorBuffer : IDisposable
             FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
             RenderbufferTarget.Renderbuffer, _sampleColorBuffer);
 
+        if (_floorMask)
+        {
+            // REQ-SCN-084: the floor mask of a multisampled frame is multisampled too, and
+            // resolved with the colour and the depth before the reflections read it.
+            _sampleMaskBuffer = _gl.GenRenderbuffer();
+            _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sampleMaskBuffer);
+            _gl.RenderbufferStorageMultisample(
+                RenderbufferTarget.Renderbuffer, (uint)samples, InternalFormat.Rgba8,
+                (uint)width, (uint)height);
+            _gl.FramebufferRenderbuffer(
+                FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment1,
+                RenderbufferTarget.Renderbuffer, _sampleMaskBuffer);
+        }
+
         _sampleDepthBuffer = _gl.GenRenderbuffer();
         _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sampleDepthBuffer);
         _gl.RenderbufferStorageMultisample(
@@ -283,6 +436,7 @@ internal sealed class LinearColorBuffer : IDisposable
             RenderbufferTarget.Renderbuffer, _sampleDepthBuffer);
         _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
 
+        DrawBuffers(false);
         GLEnum status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         return status == GLEnum.FramebufferComplete;
@@ -290,6 +444,12 @@ internal sealed class LinearColorBuffer : IDisposable
 
     private void ReleaseSamples()
     {
+        if (_sampleMaskBuffer != 0)
+        {
+            _gl.DeleteRenderbuffer(_sampleMaskBuffer);
+            _sampleMaskBuffer = 0;
+        }
+
         if (_sampleDepthBuffer != 0)
         {
             _gl.DeleteRenderbuffer(_sampleDepthBuffer);
@@ -346,6 +506,27 @@ internal sealed class LinearColorBuffer : IDisposable
             TextureTarget.Texture2D, _colorTexture, 0);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
 
+        if (_floorMask)
+        {
+            // AMD-055 REQ-SCN-084: the floor mask — the bent scene normal in rgb, the floor flag
+            // of the requirement's « surface de sol » in a. Eight bits per channel are enough:
+            // the flag is binary and the normal only steers a screen-space ray.
+            _maskTexture = _gl.GenTexture();
+            _gl.BindTexture(TextureTarget.Texture2D, _maskTexture);
+            _gl.TexImage2D(
+                TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+                (uint)width, (uint)height, 0,
+                PixelFormat.Rgba, PixelType.UnsignedByte, null);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+            _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+            _gl.FramebufferTexture2D(
+                FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment1,
+                TextureTarget.Texture2D, _maskTexture, 0);
+            _gl.BindTexture(TextureTarget.Texture2D, 0);
+        }
+
         // A depth *texture* rather than a renderbuffer: the screen passes of AMD-055 sample it
         // (REQ-SCN-083). DepthComponent24 is required of every GL 3.0 implementation, so no
         // extension is needed (REQ-SCN-056).
@@ -364,6 +545,10 @@ internal sealed class LinearColorBuffer : IDisposable
             TextureTarget.Texture2D, _depthTexture, 0);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
 
+        // Only the colour attachment is written by default; the mask's own draw buffer is turned
+        // on by SetFloorMaskTarget around the opaque pass alone (REQ-SCN-084).
+        DrawBuffers(false);
+
         GLEnum status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
         if (status != GLEnum.FramebufferComplete)
         {
@@ -377,6 +562,12 @@ internal sealed class LinearColorBuffer : IDisposable
     {
         ReleaseSamples();
         Samples = 1;
+
+        if (_maskTexture != 0)
+        {
+            _gl.DeleteTexture(_maskTexture);
+            _maskTexture = 0;
+        }
 
         if (_depthTexture != 0)
         {

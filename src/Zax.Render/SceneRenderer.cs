@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Zax.Engine3D;
 using Zax.Profiles;
 using Zax.Render.Assets;
@@ -30,6 +30,7 @@ public sealed class SceneRenderer : ISceneRenderer
     private readonly ShaderProgram _shadowPass;
     private readonly LinearColorBuffer _linear;
     private readonly OcclusionPass _occlusion;
+    private readonly ReflectionPass _reflections;
 
     private readonly List<DrawItem> _opaque = [];
     private readonly List<DrawItem> _transparent = [];
@@ -71,6 +72,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _shadowPass = ShaderProgram.Create(gl, "shadow", SceneShaders.ShadowVertex, SceneShaders.ShadowFragment);
         _linear = new LinearColorBuffer(gl);
         _occlusion = new OcclusionPass(gl);
+        _reflections = new ReflectionPass(gl);
 
         // AMD-034 §2: the size the hardware granted is known from here on, whether or not a
         // shadow pass ever runs, so the host can report a fallback once.
@@ -132,6 +134,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _picture.Dispose();
         _linear.Dispose();
         _occlusion.Dispose();
+        _reflections.Dispose();
         _skybox.Dispose();
         _shadowMap.Dispose();
         _textures.Dispose();
@@ -182,6 +185,13 @@ public sealed class SceneRenderer : ISceneRenderer
             CollectBackdrop(scene, view);
         }
 
+        // AMD-055 REQ-SCN-084: which opaque objects are wide enough in the xz plane of the scene
+        // frame to carry a floor surface. Only worth measuring when the reflections are on.
+        if (scene.Settings.Style.EffectiveReflections && !_pictureQuad)
+        {
+            MarkFloorSurfaces(scene.Settings.SceneScale);
+        }
+
         // AMD-012 (Q-020 revised): the depth pass and the sort of the transparent objects are per
         // whole object, so the faces between the tiles of one translucent object stay invisible.
         // REQ-SCN-040: they are drawn after the opaque ones, farthest first.
@@ -191,6 +201,60 @@ public sealed class SceneRenderer : ISceneRenderer
         // REQ-SCN-044 blends the HUD "as in REQ-SCN-040", so its objects get the same treatment;
         // their order stays the list order, since the HUD is not sorted by distance.
         GroupByObject(_hud, _hudObjects, view.Eye);
+    }
+
+    /// <summary>
+    /// The extent half of the floor definition of AMD-055 REQ-SCN-084: an opaque object whose
+    /// bounding box in the <c>xz</c> plane of the scene frame, <b>before curvature</b>, measures
+    /// at least <c>6 × scene scale</c> units in both dimensions may carry floor surfaces.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The objects are the instances of AMD-012 — the runs of tiles that share one shape
+    /// instance, which SPEC-04B REQ-E3D-641 delivers consecutively. The backdrop has no
+    /// instance, so it stands as an object of its own and is measured on its own box
+    /// (<b>Q-093</b>): REQ-SCN-084 names « une instance », and the backdrop is none, but the
+    /// scope bullet of the requirement lists what is never a floor surface and leaves it out.
+    /// With its default size the question is moot, its box measuring 256 × 1 units in <c>xz</c>.
+    /// </para>
+    /// <para>
+    /// <see cref="DrawItem.GrowBounds"/> transforms the local box by the placement matrix alone,
+    /// which is exactly the « avant courbure » the requirement asks for.
+    /// </para>
+    /// </remarks>
+    // Q-093
+    private void MarkFloorSurfaces(float sceneScale)
+    {
+        float threshold = SceneConstants.FloorExtent * sceneScale;
+        int start = 0;
+        while (start < _opaque.Count)
+        {
+            object? instance = _opaque[start].Instance;
+            int end = start + 1;
+            while (end < _opaque.Count
+                && instance is not null
+                && ReferenceEquals(_opaque[end].Instance, instance))
+            {
+                end++;
+            }
+
+            Vector3 min = new(float.MaxValue);
+            Vector3 max = new(float.MinValue);
+            for (int index = start; index < end; index++)
+            {
+                _opaque[index].GrowBounds(ref min, ref max);
+            }
+
+            bool wide = max.X - min.X >= threshold && max.Z - min.Z >= threshold;
+            for (int index = start; index < end; index++)
+            {
+                DrawItem item = _opaque[index];
+                item.FloorExtent = wide;
+                _opaque[index] = item;
+            }
+
+            start = end;
+        }
     }
 
     /// <summary>
@@ -515,7 +579,12 @@ public sealed class SceneRenderer : ISceneRenderer
         // whole image is encoded to sRGB once, on the way into the host framebuffer.
         // AMD-032 §2: that buffer is multisampled when anti-aliasing is on, and resolved before
         // the sRGB pass reads it. The shadow map keeps its own single-sample target.
-        _linear.BeginPass(target.Width, target.Height, scene.Settings.AntiAliasSamples);
+        // AMD-055 REQ-SCN-084: the floor mask is an extra attachment, so it is only asked for
+        // on the frames whose reflections are on. In 2D mode the rectangle of AMD-046 §2 is the
+        // whole scene and is never a floor surface, so the frame needs none.
+        bool floorMask = scene.Settings.Style.EffectiveReflections && !_pictureQuad;
+        _linear.BeginPass(
+            target.Width, target.Height, scene.Settings.AntiAliasSamples, floorMask);
         Statistics.AntiAliasSamples = _linear.Samples;
         _gl.Disable(EnableCap.ScissorTest);
         _gl.Disable(EnableCap.Blend);
@@ -529,6 +598,9 @@ public sealed class SceneRenderer : ISceneRenderer
         _gl.ClearColor(background.X, background.Y, background.Z, 1f);
         _gl.ClearDepth(1.0);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+
+        // REQ-SCN-084: « no floor here » everywhere the opaque pass does not say otherwise.
+        _linear.ClearFloorMask();
 
         // REQ-SCN-058: the skybox replaces the clear, behind everything else. It is drawn even
         // when the game is not running, because only the 3D scene is hidden then
@@ -550,13 +622,16 @@ public sealed class SceneRenderer : ISceneRenderer
         // least once per frame before anything is drawn.
         SetNormalSign(false, force: true);
 
-        // 1. Opaque objects.
+        // 1. Opaque objects. They are the only pass that writes the floor mask of REQ-SCN-084:
+        // the transparent objects and the HUD are drawn after the reflections and carry none.
+        _linear.SetFloorMaskTarget(true);
         _scenePass.Set("uLightDirection", scene.Light.Direction);
         foreach (DrawItem item in _opaque)
         {
             DrawItemWithMaterial(item, opaque: true);
         }
 
+        _linear.SetFloorMaskTarget(false);
         Statistics.OpaqueTiles = _opaque.Count;
 
         // The tiles may have left the winding reversed (Q-069).
@@ -571,12 +646,17 @@ public sealed class SceneRenderer : ISceneRenderer
         // (REQ-SCN-083, scope), and in 2D mode it is the whole scene, so the pass is skipped.
         if (!_pictureQuad)
         {
+            // REQ-SCN-058 amended: the floor reflections come first, then the occlusion — so
+            // the occlusion darkens a reflection that has already been laid down, and never the
+            // other way round.
+            Statistics.ReflectionPass = _reflections.Draw(
+                _linear, scene.Settings.Style, view, scene.Settings.SceneScale);
             Statistics.OcclusionPass = _occlusion.Draw(
                 _linear, scene.Settings.Style, view.Projection, scene.Settings.SceneScale);
-            if (Statistics.OcclusionPass)
+            if (Statistics.ReflectionPass || Statistics.OcclusionPass)
             {
-                // The pass left the cull state and the program of its own full-screen triangles
-                // behind; the passes that follow rebind their program themselves.
+                // The passes left the cull state and the program of their own full-screen
+                // triangles behind; the passes that follow rebind their program themselves.
                 RestoreCulling(scene);
                 _scenePass.Use();
                 BindCommonUniforms(scene, view, volume);
@@ -799,6 +879,10 @@ public sealed class SceneRenderer : ISceneRenderer
         // centre of their voxel.
         _scenePass.Set("uPixelShadow", _pixelShadow && item.PixelShadow ? 1 : 0);
         _scenePass.Set("uBuildDepth", (float)item.BuildDepth);
+
+        // AMD-055 REQ-SCN-084: the extent half of the floor test. Only the opaque pass writes
+        // the mask attachment at all, so this is the only place the flag can reach it.
+        _scenePass.Set("uFloorExtent", opaque && item.FloorExtent ? 1 : 0);
         SetDeformation(_scenePass, item.Deform);
 
         _gl.ActiveTexture(TextureUnit.Texture0);
@@ -945,6 +1029,12 @@ public sealed class SceneRenderer : ISceneRenderer
         /// voxel-centre snap of REQ-SCN-082 offsets the <c>z</c> boundaries by.
         /// </summary>
         public int BuildDepth;
+
+        /// <summary>
+        /// Whether the object this item belongs to is wide enough in the <c>xz</c> plane of the
+        /// scene frame for its upward faces to be floor surfaces (AMD-055 REQ-SCN-084).
+        /// </summary>
+        public bool FloorExtent;
 
         public DeformParameters? Deform;
 

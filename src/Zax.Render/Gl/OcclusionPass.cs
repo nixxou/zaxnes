@@ -58,7 +58,7 @@ internal sealed class OcclusionPass : IDisposable
     public int Height => _height;
 
     /// <summary>
-    /// Runs the three sub-passes and leaves <paramref name="scene"/>'s framebuffer bound at its
+    /// Runs the three sub-passes and leaves <paramref name="buffer"/>'s framebuffer bound at its
     /// own size, ready for what the frame still has to draw.
     /// </summary>
     /// <param name="buffer">The scene's linear buffer, whose depth is read.</param>

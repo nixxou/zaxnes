@@ -28,36 +28,11 @@ internal static class OcclusionShaders
     public const int MaxSamples = 16;
 
     /// <summary>
-    /// Reconstruction of the view-space geometry from the depth texture, shared by the
-    /// occlusion and the blur.
+    /// Reconstruction of the view-space geometry from the depth texture, shared with the
+    /// reflections of REQ-SCN-084. The pixels <c>zaxIsEmpty</c> rejects — the far plane the
+    /// clear and the skybox leave behind — are never occluded.
     /// </summary>
-    private const string Reconstruct = """
-        uniform sampler2D uDepth;
-        uniform mat4 uInverseProjection;
-        uniform vec2 uDepthTexel;
-
-        // The view-space position of the pixel at uv, from its window-space depth.
-        vec3 zaxViewPosition(vec2 uv, out float raw)
-        {
-            raw = texture(uDepth, uv).r;
-            vec4 clip = vec4((uv * 2.0 - 1.0), raw * 2.0 - 1.0, 1.0);
-            vec4 view = uInverseProjection * clip;
-            return view.xyz / view.w;
-        }
-
-        vec3 zaxViewPosition(vec2 uv)
-        {
-            float raw;
-            return zaxViewPosition(uv, raw);
-        }
-
-        // Whether the pixel holds no geometry at all: the far plane, which the clear and the
-        // skybox leave behind (REQ-SCN-049). Those pixels are never occluded.
-        bool zaxIsEmpty(float raw)
-        {
-            return raw >= 0.999999;
-        }
-        """;
+    private const string Reconstruct = SceneShaders.ScreenDepth;
 
     /// <summary>
     /// The occlusion pass: <c>O</c> of REQ-SCN-083, written to the red channel of a buffer that
