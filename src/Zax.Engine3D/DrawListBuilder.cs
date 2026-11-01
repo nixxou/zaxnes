@@ -176,6 +176,10 @@ public sealed class DrawListBuilder
                 ReceiveShadow = receiveShadow,
                 Sprite = !shape.Background,
                 BehindBackground = !shape.Background && tile.Hidden,
+
+                // AMD-057 amends REQ-SCN-037: the renderer's depth nudge follows the sprite
+                // index of REQ-CORE-043, so the draw list hands it over (REQ-E3D-641).
+                SpriteIndex = shape.Background ? -1 : tile.Ord,
                 Deform = deform,
                 BuildDepth = buildDepth,
             });

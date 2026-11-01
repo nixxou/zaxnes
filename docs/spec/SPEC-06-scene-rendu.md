@@ -181,8 +181,9 @@ L'effet recherché : l'écran NES reste centré dans l'image, corrigé de la per
 **REQ-SCN-036** (P1) — Tout fragment de tile (opaque ou transparente, hors HUD) dont la position scène (x, y) sort du rectangle visible R DOIT être éliminé, quelle que soit sa profondeur. Les objets 3D sont donc découpés nettement aux bords de R, comme par un emporte-pièce prolongé en Z.
 - Critère d'acceptation : en vue orbitale à 45°, un objet à cheval sur le bord gauche de R apparaît tranché net dans le plan x = c0 ; les ombres qu'il projette ne sont pas découpées.
 
-**REQ-SCN-037** (P2) — Les tiles de sprite (shapes non-fond) DOIVENT être décalées en profondeur, après placement : de +0,1 unité (vers le fond) pour les sprites « derrière le fond » (priorité NES) et de −0,1 unité (vers la caméra) pour les autres. Les tiles de fond ne sont pas décalées. Le rendu est **seul propriétaire** de ce décalage (DEC-06-Q4, DEC-R2-T4) : les transformations livrées par SPEC-04B ne l'incluent pas (REQ-E3D-405, 641) ; il est appliqué dans le repère local de la shape, avant son échelle et sa rotation, une seule fois.
-- Critère d'acceptation : un sprite plat posé sur une tile de fond plate de même profondeur reste visible devant elle, sans scintillement ; TV-W2 de SPEC-04B : face avant d'un sprite en L1 FRONT affichée à z = −0,1 (et non −0,2 ni 0).
+**REQ-SCN-037** (P2, amendée par AMD-057) — Les tiles de sprite (shapes non-fond) DOIVENT être décalées en profondeur, après placement, **par tuile**, de `n = 0,001 × (i mod 64) − 0,1` pour un sprite devant le fond et de `n = 0,001 × (i mod 64) + 0,1` pour un sprite « derrière le fond » (priorité NES), où `i` est l'**indice du sprite** de REQ-CORE-043 (0 à 63, ou 64 + n pour la moitié basse d'un 8×16). Les tiles de fond ne sont pas décalées. Le rendu est **seul propriétaire** de ce décalage (DEC-06-Q4, DEC-R2-T4) : les transformations livrées par SPEC-04B ne l'incluent pas (REQ-E3D-405, 641) ; il est appliqué dans le repère local de la shape, avant son échelle et sa rotation, une seule fois. Conséquence : à recouvrement égal, le sprite d'indice le plus faible — le plus prioritaire sur la NES — est devant.
+- Critère d'acceptation : un sprite plat posé sur une tile de fond plate de même profondeur reste visible devant elle, sans scintillement ; TV-W2 de SPEC-04B : face avant d'un sprite d'indice 0 en L1 FRONT affichée à z = −0,1 ; d'indice 5, à −0,095 ; moitié basse d'indice 69, à −0,095.
+- Critère d'acceptation : deux sprites plats qui se recouvrent, indices 3 et 10 → le sprite 3 est dessiné devant, sans scintillement.
 
 **REQ-SCN-038** (P2) — Le rendu DOIT appliquer à chaque shape la position, l'échelle et la rotation livrées par le moteur (SPEC-04B), et ne rendre que les shapes actives dont le mesh est prêt.
 - Critère d'acceptation : couverture par les vecteurs de SPEC-04B.
@@ -374,7 +375,7 @@ Valeurs propres à la session, non persistées : temps de lissage (`Setting.Smoo
 | Distance d'ombre | 512 | |
 | Carte d'ombre | 1024 texels par défaut | DEC-R2-D4 |
 | Distance du plan HUD | 60 / atan(FOV_rad / 2) ; échelle 0,5 | |
-| Décalage des sprites | ±0,1 | appliqué par le rendu (REQ-SCN-037, DEC-R2-T4) |
+| Décalage des sprites | `0,001 × (i mod 64) ∓ 0,1` | par tuile, appliqué par le rendu (REQ-SCN-037 amendée par AMD-057, DEC-R2-T4) |
 
 ## 5. Vecteurs de test
 

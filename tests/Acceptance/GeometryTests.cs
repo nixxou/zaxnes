@@ -1106,11 +1106,15 @@ public sealed class GeometryTests
         engine.Publish();
         DrawTile spriteTile = Assert.Single(engine.BuildDrawList(sprite).Tiles);
 
-        // The transform handed over is the same; the renderer applies the +/-0.1 offset.
+        // The transform handed over is the same; the renderer applies the offset, which
+        // AMD-057 makes 0.001 x (i mod 64) -/+ 0.1 on the sprite index of REQ-CORE-043. The
+        // draw list therefore hands the index over too (REQ-E3D-641).
         Assert.Equal(backgroundTile.Transform, spriteTile.Transform);
         Assert.False(backgroundTile.Sprite);
+        Assert.Equal(-1, backgroundTile.SpriteIndex);
         Assert.True(spriteTile.Sprite);
         Assert.False(spriteTile.BehindBackground);
+        Assert.Equal(0, spriteTile.SpriteIndex);
 
         Assert.Equal(SceneContainer.Game, backgroundTile.Container);
         Assert.NotNull(backgroundTile.Texture);

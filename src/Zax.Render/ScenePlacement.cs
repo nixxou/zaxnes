@@ -20,11 +20,7 @@ internal static class ScenePlacement
     /// <param name="hud">True when the tile belongs to the interface container.</param>
     public static Mat4 TileModel(in DrawTile tile, Mat4 hudMatrix, out bool hud)
     {
-        // REQ-SCN-037: the renderer is the sole owner of the ±0.1 sprite depth nudge, applied
-        // in the object's local frame, before the scale and the rotation, exactly once.
-        float nudge = tile.Sprite
-            ? tile.BehindBackground ? SceneConstants.SpriteNudge : -SceneConstants.SpriteNudge
-            : 0f;
+        float nudge = SpriteNudge(tile);
         Mat4 model = tile.Transform;
         if (nudge != 0f)
         {
@@ -39,5 +35,36 @@ internal static class ScenePlacement
         }
 
         return model;
+    }
+
+    /// <summary>
+    /// The depth nudge <c>n</c> of SPEC-06 REQ-SCN-037, as AMD-057 amends it:
+    /// <c>0.001 × (i mod 64) − 0.1</c> for a sprite tile in front of the background and
+    /// <c>0.001 × (i mod 64) + 0.1</c> for one behind it, where <c>i</c> is the sprite index
+    /// of REQ-CORE-043. A background tile is not nudged.
+    /// </summary>
+    /// <remarks>
+    /// The renderer is the sole owner of the nudge (DEC-06-Q4, DEC-R2-T4): it is applied in
+    /// the object's local frame, before the scale and the rotation, exactly once. Since the
+    /// camera looks down +z, a smaller index gives a smaller <c>z</c> and therefore wins the
+    /// depth test: at equal overlap the sprite the NES gives priority to is the one that
+    /// shows, and two overlapping sprites no longer flicker. The two halves of an 8 × 16
+    /// share one nudge because REQ-CORE-043 numbers the lower half <c>64 + n</c>.
+    /// </remarks>
+    /// <param name="tile">The tile record of REQ-E3D-641.</param>
+    public static float SpriteNudge(in DrawTile tile)
+    {
+        if (!tile.Sprite)
+        {
+            return 0f;
+        }
+
+        // A sprite shape only ever holds sprite tiles, so the index is the core's; the guard
+        // is there for a draw list built by hand with no index at all.
+        int index = tile.SpriteIndex < 0 ? 0 : tile.SpriteIndex % 64;
+        float step = SceneConstants.SpriteIndexNudge * index;
+        return tile.BehindBackground
+            ? step + SceneConstants.SpriteNudge
+            : step - SceneConstants.SpriteNudge;
     }
 }

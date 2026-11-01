@@ -134,11 +134,26 @@ public sealed class SceneFixture
     }
 
     /// <summary>Adds a sprite tile record.</summary>
+    /// <param name="tile">The tile image.</param>
+    /// <param name="x">Screen x of the top-left pixel.</param>
+    /// <param name="y">Screen y of the top-left pixel.</param>
+    /// <param name="palette">Sprite sub-palette, 0 to 3.</param>
+    /// <param name="behindBackground">The "behind the background" priority bit.</param>
+    /// <param name="index">
+    /// The sprite index of REQ-CORE-043 — 0 to 63, or 64 + n for the lower half of an 8 × 16.
+    /// Left out, the sprites are numbered in the order they are added, which is what the core
+    /// does for a batch of 8 × 8 sprites.
+    /// </param>
     public SceneFixture Sprite(
-        (ulong Low, ulong High) tile, int x, int y, int palette = 0, bool behindBackground = false)
+        (ulong Low, ulong High) tile,
+        int x,
+        int y,
+        int palette = 0,
+        bool behindBackground = false,
+        int? index = null)
     {
         _records.Add(new TileRecord(
-            tile.Low, tile.High, (short)x, (short)y, _spriteOrder++,
+            tile.Low, tile.High, (short)x, (short)y, index ?? _spriteOrder++,
             mirrorH: false, mirrorV: false, hidden: behindBackground, (byte)palette, background: false));
         return this;
     }

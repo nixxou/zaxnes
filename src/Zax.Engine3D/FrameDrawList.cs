@@ -143,13 +143,21 @@ public readonly record struct DrawTile
     public required bool ReceiveShadow { get; init; }
 
     /// <summary>
-    /// True for a tile of a sprite shape. With <see cref="BehindBackground"/> it lets the
-    /// renderer pick the depth nudge <c>n</c> (SPEC-04B REQ-E3D-405).
+    /// True for a tile of a sprite shape. With <see cref="BehindBackground"/> and
+    /// <see cref="SpriteIndex"/> it lets the renderer pick the depth nudge <c>n</c>
+    /// (SPEC-04B REQ-E3D-405, SPEC-06 REQ-SCN-037 as AMD-057 amends it).
     /// </summary>
     public required bool Sprite { get; init; }
 
     /// <summary>True for a sprite tile whose priority bit puts it behind the background.</summary>
     public required bool BehindBackground { get; init; }
+
+    /// <summary>
+    /// The sprite index of REQ-CORE-043 — 0 to 63 for an 8 × 8 sprite or the upper half of an
+    /// 8 × 16, 64 + n for the lower half — and −1 for a background tile. AMD-057 makes the
+    /// renderer's depth nudge depend on it (REQ-SCN-037).
+    /// </summary>
+    public required int SpriteIndex { get; init; }
 
     /// <summary>The deformation parameters, or null when no deformation is active.</summary>
     public DeformParameters? Deform { get; init; }

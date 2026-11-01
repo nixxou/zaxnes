@@ -458,14 +458,16 @@ public sealed class SceneRenderTests
     }
 
     /// <summary>
-    /// REQ-SCN-037 — the renderer alone owns the ±0.1 depth nudge of the sprite tiles: the
-    /// transform the engine delivers does not include it, and the engine only reports the sprite
-    /// and priority flags (DEC-R2-T4).
+    /// REQ-SCN-037 — the renderer alone owns the depth nudge of the sprite tiles,
+    /// <c>0.001 × (i mod 64) ∓ 0.1</c> since AMD-057: the transform the engine delivers does
+    /// not include it, and the engine only reports the sprite flag, the priority flag and the
+    /// index (DEC-R2-T4). The values the nudge takes are measured in <c>Amd057Tests</c>.
     /// </summary>
     [Fact] // REQ-SCN-037
     public void The_sprite_depth_nudge_is_not_in_the_delivered_transform()
     {
         Assert.Equal(0.1f, SceneConstants.SpriteNudge);
+        Assert.Equal(0.001f, SceneConstants.SpriteIndexNudge);
 
         SceneFixture fixture = new();
         fixture
