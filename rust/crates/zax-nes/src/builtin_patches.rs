@@ -479,7 +479,7 @@ pub const PATCHES: [BuiltinPatch; 55] = [
         // and applied by the core in two groups (the objects in the margins, the enemy list's);
         // the ROM keeps its size (`ng3wide`, `tools/build.py --pack`).
         bps: include_bytes!("../patches/ng3-usa-widescreen.zxpk"),
-        options: NG3_OPTIONS,
+        options: NG3_USA_OPTIONS,
         after_other_way_state: None,
         // The margin decoder alone widens the game; the patch adds the objects.
         advanced: true,
@@ -1648,6 +1648,42 @@ const EXCITEBIKE_OPTIONS: &[HackOption] = &[
         label_fr: "Sans ralentissements",
         bit: 2,
         default: true,
+    },
+];
+
+/// The options of the Ninja Gaiden III (USA) pack: those of both packs, and two testing aids, off
+/// by default, components of their own (the Japanese build's damage and respawn code differ).
+const NG3_USA_OPTIONS: &[HackOption] = &[
+    HackOption {
+        key: "enemies_in_margins",
+        label: "Enemies in the margins",
+        label_fr: "Ennemis dans les marges",
+        bit: 0,
+        default: true,
+    },
+    // Select during play goes on from the next checkpoint, as after a death but without it.
+    HackOption {
+        key: "level_select",
+        label: "Level select (Select: next checkpoint)",
+        label_fr: "Sélecteur de niveau (Select : point de reprise suivant)",
+        bit: 1,
+        default: false,
+    },
+    // Nearly a frame more of CPU time ($5006 = 255): no lag frames.
+    HackOption {
+        key: "no_slowdown",
+        label: "No slowdown",
+        label_fr: "Sans ralentissements",
+        bit: 2,
+        default: true,
+    },
+    // No damage (Ryu's life stays; pits and the timer still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 3,
+        default: false,
     },
 ];
 

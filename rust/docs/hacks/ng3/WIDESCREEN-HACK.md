@@ -19,7 +19,7 @@ show in the margins.
 |---|---|
 | Source ROM | *Ninja Gaiden III - The Ancient Ship of Doom (USA)*, MMC3, 128 KiB PRG (16 banks of 8 KiB, banks 14 and 15 fixed at `$C000`-`$FFFF`), 128 KiB CHR-ROM |
 | Source data (iNES header excluded) | CRC-32 `902E3168` (the whole file with its header: CRC-32 `BABD39FA`) |
-| Target data | CRC-32 `40A6BF8D` (the hack's version in savestate headers; `tools/build.py` prints it) |
+| Target data | CRC-32 `FF5824BD` (the hack's version in savestate headers; `tools/build.py` prints it) |
 | Changes | new code at `$E700` of bank 15 (in the `$FF` fill `$E6F2`-`$F001`), hooks in banks 14, 15, 4 and 5 |
 | Patch | `rust/crates/zax-nes/patches/ng3-usa-widescreen.bps`, made against the data without header |
 
@@ -175,7 +175,21 @@ Zaxnes writes their bits at `$500A` every frame, the hack reads them there (`WID
 | Bit | Key | Label | Default | Effect |
 |---|---|---|---|---|
 | 0 | `enemies_in_margins` | Enemies in the margins / Ennemis dans les marges | on | off, M = 0 for the objects: they appear and go at the original edges, and the second list's are not shown before (the background of the margins and the 16-bit sprites stay) |
+| 1 | `level_select` | Level select (Select: next checkpoint) / Sélecteur de niveau (Select : point de reprise suivant) | off | USA pack only, a component of its own (with or without the advanced mode): Select during play goes on from the next checkpoint |
 | 2 | `no_slowdown` | No slowdown / Sans ralentissements | on | 255 lines of overclock instead of 64: the game never runs late (no lag frame) |
+| 3 | `invincible` | Invincible | off | USA pack only, a component of its own: Ryu's life does not go down (pits and the timer still kill) |
+
+**Testing aids** (USA pack only: the Japanese build's damage and respawn code differ, its pack has
+neither). *Invincible*: the two damage routines of bank 5 take 0 from Ryu's life (`$A7`) instead
+of the damage (`$A2AB` `SBC #$06` becomes `SBC #$00`, a hazard; `$A30A` `SBC $03DE,X` becomes
+`SBC #$00 / NOP`, an enemy or a shot): no hit lowers it, so none kills, Ryu is still thrown back.
+*Level select*: the main loop's call of the enemy list (`$CD83`, `JSR $826F`) becomes
+`JSR wide_level_select`, which, when Select was just pressed and Ryu is not dying (`$8B`), sets the
+area (`$5F`) to the next checkpoint, the next area the game's respawn table (bank 6 `$A330`) gives,
+adds a life (`$C4`) and stops play as the game does after a death (`$AC = 1`, `JMP $CB55`): the
+respawn takes the life back and goes on from that area. Checkpoints: areas 0, 4, 5, 10, 11, 16,
+17, 21, 24, 30, 33, 36, 37 and 41; at the last, Select does nothing. Its checks: the respawn
+(`$CB55`, `$CB8E`), the respawn table and the enemy list's start.
 
 ## 6. Building
 
@@ -335,6 +349,15 @@ LIST2_COLUMNS   = $92           ; pointers (bank 6 at $A000): each entry's colum
 LIST2_PLACES    = $94           ; its place on the screen (y in the high nibble, x / 16 low),
 LIST2_KINDS     = $96           ; and its kind
 LIST2_MADE      = $D7           ; a bit per entry made
+PRESSED         = $13           ; buttons pressed this frame: A B Select Start Up Down Left Right
+LIVES           = $C4
+DYING           = $8B           ; non-zero while Ryu dies
+TRANSITION      = $AC           ; what the game does when play stops (1: Ryu goes on from the
+                                ; checkpoint of his area, a life less)
+ON_HOLD         = $CB55         ; where play stops for TRANSITION
+CHECKPOINT      = $A330         ; bank 6: the area each area's play goes on from
+AREA            = $5F
+AREAS           = 48
 FRAME_COUNTER   = $5E
 BANK_SELECT     = $25           ; the last MMC3 bank select, written back to $8000 by the NMI
 AREA_FLAGS      = $6C           ; bit 7: a vertical area
@@ -1115,6 +1138,41 @@ wide_draw_end:
     STA      SH_N
     JMP      BANK_4_END
 
+.ifndef JAPAN
+; ---------------------------------------------------------------------------- ;
+; Level select, a testing aid (the pack's component "level_select", USA only): the main loop's
+; call of the enemy list ($CD83, in place of JSR $826F). Select during play goes on from the next
+; checkpoint (the next area the game's respawn table, $A330, sends a death to): the respawn the game
+; does after a death, without its life lost and without the death.
+wide_level_select:
+    LDA      PRESSED
+    AND      #$20
+    BEQ      @play
+    LDA      DYING
+    BNE      @play
+    LDA      #$06
+    JSR      SELECT_A000
+    LDX      AREA
+    LDA      CHECKPOINT,x
+    STA      WV_T0
+@next:
+    INX
+    CPX      #AREAS
+    BCS      @play
+    LDA      CHECKPOINT,x
+    CMP      WV_T0
+    BEQ      @next
+    STA      AREA
+    INC      LIVES                      ; the respawn takes one
+    LDA      #$01
+    STA      TRANSITION
+    PLA                                 ; out of the main loop's turn, as the game's stops are
+    PLA
+    JMP      ON_HOLD
+@play:
+    JMP      $826F
+.endif
+
 wide_end:
 .ifdef PACK
 .assert wide_end <= $3000, error, "widescreen code past the zone's code half"
@@ -1298,6 +1356,15 @@ JAPAN_ORIGINAL = {0xCDB0: '20 b4 8a', 0xCDB3: '20 c7 cd', 0x99F6: '08 4c 35 9a',
 # made (bank 4).
 ENEMIES = {0x827E, 0x8293, 0x82A8, 0x82B2, 0x807B, 0x819A, 0x81BA}
 
+# The testing aids, USA only (the Japanese build's damage and respawn code differ): components of
+# their own, applied while their option is on, with or without the widescreen. Invincible: the two
+# damage routines take 0 from Ryu's life ($A7) instead of the damage (bank 5). Level select: the
+# main loop's call of the enemy list ($CD83), Select during play going on from the next
+# checkpoint; it relies on the respawn ($CB55 and the routine its table gives, $CB8E), the respawn
+# table (bank 6 $A330) and the enemy list it goes on to.
+INVINCIBLE = [(5, 0xA2AB, 'e9 06', 'e9 00'), (5, 0xA30A, 'fd de 03', 'e9 00')]
+LEVEL_SELECT_CHECKS = [(None, 0xCB55, 27), (None, 0xCB8E, 25), (6, 0xA330, 48), (4, 0x826F, 3)]
+
 # The game's code the hack's code relies on, by group: (bank, USA address, length), checked by
 # Zaxnes to be the reference ROM's bytes. Core: the behaviour and the background collision the
 # dormant objects skip, where the sprite builder goes on after an object's origin and where a
@@ -1346,6 +1413,16 @@ def pack(data, crc, out):
         assert data[at:at + len(original)] == original, f'${address:04X}: not the expected bytes'
         group = 'enemies' if address in ENEMIES else 'core'
         groups[group].hook(*place(bank, address), bytes(original), bytes(new))
+    if not japan:
+        aid = pack.component('invincible').group('invincible', label='Invincible',
+                                                 label_fr='Invincible')
+        for bank, address, original, new in INVINCIBLE:
+            aid.hook(*place(bank, address), original, bytes.fromhex(new))
+        select = pack.component('level_select').group('level_select', label='Level select',
+                                                      label_fr='Sélecteur de niveau')
+        for bank, address, length in LEVEL_SELECT_CHECKS:
+            select.check(*place(bank, address), length)
+        select.hook(*place(None, 0xCD83), '20 6f 82', jsr(sym['wide_level_select']))
     result = pack.build(data, 0x20000)
     open(out, 'wb').write(result)
     print(f'{out}: {len(result)} bytes ({used} of code, '
