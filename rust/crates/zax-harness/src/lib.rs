@@ -10,6 +10,7 @@ mod json_text;
 pub mod lua_api;
 pub mod meshes;
 pub mod packs;
+pub mod profile_tool;
 pub mod render;
 
 pub use error::HarnessError;

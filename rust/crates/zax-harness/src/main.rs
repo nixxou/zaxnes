@@ -5,7 +5,9 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use zax_harness::{bench_core, compare, golden_core, lua_api, meshes, packs, render, HarnessError};
+use zax_harness::{
+    bench_core, compare, golden_core, lua_api, meshes, packs, profile_tool, render, HarnessError,
+};
 
 const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [frames]
        zax-harness meshes --profile <file|name> [options] (zax-harness help for the options)
@@ -13,7 +15,9 @@ const USAGE: &str = "usage: zax-harness golden-core <roms dir> <out.jsonl> [fram
        zax-harness render --out <dir> [--frames synthetic[:<scene>]] [options]
        zax-harness bench-core <rom.nes> [options] (ms per frame of each stage)
        zax-harness compare <reference> <capture> [--tolerance <levels>] [--min <percent>]
-       zax-harness packs <roms dir> (how the built-in hack packs apply to each ROM)";
+       zax-harness packs <roms dir> (how the built-in hack packs apply to each ROM)
+       zax-harness profile-dump <file.3dn> [--tiles] (the patterns and their 3D looks)
+       zax-harness profile-build <description.json> <out.3dn> (a profile from JSON)";
 
 fn run(args: &[String]) -> Result<(), HarnessError> {
     match args {
@@ -35,6 +39,18 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         }
         [command, dir] if command == "packs" => {
             print!("{}", packs::run(Path::new(dir))?);
+            Ok(())
+        }
+        [command, file, rest @ ..] if command == "profile-dump" => {
+            let tiles = rest.iter().any(|flag| flag == "--tiles");
+            print!("{}", profile_tool::dump(Path::new(file), tiles)?);
+            Ok(())
+        }
+        [command, description, out] if command == "profile-build" => {
+            println!(
+                "{}",
+                profile_tool::build(Path::new(description), Path::new(out))?
+            );
             Ok(())
         }
         [command, rest @ ..] if command == "meshes" => {
@@ -65,12 +81,13 @@ fn run(args: &[String]) -> Result<(), HarnessError> {
         }
         [command] if matches!(command.as_str(), "help" | "--help" | "-h") => {
             println!(
-                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
+                "{USAGE}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}\n\n{}",
                 meshes::USAGE,
                 lua_api::USAGE,
                 render::USAGE,
                 compare::USAGE,
-                bench_core::USAGE
+                bench_core::USAGE,
+                profile_tool::USAGE
             );
             Ok(())
         }

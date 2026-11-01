@@ -125,6 +125,8 @@ pub const SMB1_EUROPE_NTSC: &str = "Super Mario Bros. (Europe) (NTSC) widescreen
 pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 /// Name of the Ninja Ryuuken Den III (Japan) widescreen patch (advanced mode).
 pub const NG3_JAPAN: &str = "Ninja Ryuuken Den III (Japan) widescreen";
+/// Name of the Nova the Squirrel pack (testing aids only, no widescreen yet).
+pub const NOVA_THE_SQUIRREL: &str = "Nova the Squirrel";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
 pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
 /// Name of the Super Mario Bros. 3 (Japan) (Rev 1) widescreen patch (advanced mode).
@@ -211,7 +213,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 55] = [
+pub const PATCHES: [BuiltinPatch; 56] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1433,6 +1435,45 @@ pub const PATCHES: [BuiltinPatch; 55] = [
         // The same wait, at the same place.
         idle_loop: Some((0xC581, 0xC584)),
     },
+    BuiltinPatch {
+        name: NOVA_THE_SQUIRREL,
+        game: "Nova the Squirrel",
+        rom_name: "Nova the Squirrel",
+        source_crc: 0xFB5F_3C36,
+        // An open game (NovaSquirrel, GPL-3.0): a hack pack of testing aids only, two components
+        // of hooks without code (the `nova` hack folder, `build_pack.py`): "Invincible" (HurtPlayer
+        // returns at once; the pits still kill) and the level select (its two tests of
+        // LevelAvailable made NOPs: every level of every world, the save untouched).
+        bps: include_bytes!("../patches/nova-the-squirrel.zxpk"),
+        options: NOVA_OPTIONS,
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: false,
+        zone_data: false,
+        // WaitVblank: LDA retraces / CMP retraces / BEQ, until the NMI counts a frame.
+        idle_loop: Some((0xDA59, 0xDA5B)),
+    },
+];
+
+/// The options of the Nova the Squirrel pack: its two testing aids.
+const NOVA_OPTIONS: &[HackOption] = &[
+    HackOption {
+        key: "level_select",
+        label: "Level select (every level open)",
+        label_fr: "Sélection de niveau (tous les niveaux ouverts)",
+        bit: 0,
+        default: false,
+    },
+    // No damage (the pits still kill).
+    HackOption {
+        key: "invincible",
+        label: "Invincible",
+        label_fr: "Invincible",
+        bit: 1,
+        default: false,
+    },
 ];
 
 /// The options of the Mega Man 3 packs.
@@ -2471,11 +2512,15 @@ mod tests {
     #[test]
     fn the_built_in_patches_are_well_formed() {
         for patch in PATCHES {
-            // A hack pack: it reads, and its widescreen is one of its components.
+            // A hack pack: it reads, and its widescreen is one of its components, unless it is
+            // a pack of aids alone (Nova the Squirrel).
             if crate::hack_pack::is_pack(patch.bps) {
                 let pack = crate::hack_pack::HackPack::read(patch.bps);
                 assert!(
-                    pack.is_some_and(|pack| pack.component(crate::hack_pack::WIDESCREEN).is_some()),
+                    pack.is_some_and(|pack| {
+                        pack.component(crate::hack_pack::WIDESCREEN).is_some()
+                            || (!pack.components.is_empty() && pack.code.is_empty())
+                    }),
                     "{}",
                     patch.name
                 );
