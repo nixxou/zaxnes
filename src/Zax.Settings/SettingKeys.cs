@@ -131,8 +131,8 @@ public static class SettingKeys
     public const string RenderStyleAo = "render.style.ao";
 
     /// <summary>
-    /// Darkening ceiling of the occlusion, <c>O ≤ 0.1 × value</c>, 1 to 5 (REQ-SCN-083). Lua
-    /// <c>ao.strength</c>.
+    /// Darkening ceiling of the occlusion, <c>O ≤ min(0.95 ; 0.3 × value)</c>, 1 to 5
+    /// (REQ-SCN-083, AMD-055 v1.4). Lua <c>ao.strength</c>.
     /// </summary>
     public const string RenderStyleAoStrength = "render.style.ao_strength";
 

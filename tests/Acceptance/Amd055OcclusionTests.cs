@@ -546,17 +546,19 @@ public sealed class Amd055OcclusionTests
     }
 
     /// <summary>
-    /// <b>Q-095</b> — the magnitude of the darkening at the default settings. REQ-SCN-083 binds
-    /// a ceiling and a proportionality, not a law, so none of the invariants above catches an
-    /// occlusion that is merely far too weak: a thin outline satisfies every one of them. This
-    /// is the regression test of lot V2-22, where the darkening was found four times weaker than
-    /// the reference — the kernel covering only <c>0.45 r</c> of the normative radius, and the
-    /// provisional law of Q-095 not yet in place.
+    /// <b>Q-095</b>, <b>Q-097</b> — the magnitude of the darkening at the default settings.
+    /// REQ-SCN-083 binds a ceiling and a proportionality, not a law, so none of the invariants
+    /// above catches an occlusion that is merely far too weak: a thin outline satisfies every one
+    /// of them. This is the regression test of lot V2-22, where the darkening was found four
+    /// times weaker than the reference.
     /// </summary>
     /// <remarks>
     /// Measured on the floor of close-up A, away from the cube along <c>−x</c>, the side the
     /// camera is on. The bounds are deliberately loose — they say « a band, not an outline »,
-    /// which is the review criterion of §2.4, and leave the law itself free.
+    /// which is the review criterion of §2.4, and leave the law itself free. Lot V2-24 moved them
+    /// down with the ceiling of AMD-055 v1.4: this contact reads 0.441 at the calibration of that
+    /// lot, against 0.6985 while the ceiling was 0.3 (where it was pinned to the ceiling itself)
+    /// and 0.81 at V2-22's constants.
     /// </remarks>
     [GlFact] // REQ-SCN-083
     public void Q095_the_darkening_at_the_default_settings_is_a_band_and_not_an_outline()
@@ -595,18 +597,31 @@ public sealed class Amd055OcclusionTests
     }
 
     /// <summary>
-    /// <b>Q-095</b> (answered), <b>Q-097</b> — the calibration of lot V2-23, in both modes. The
-    /// answer to Q-095 measured the reference and found <em>both</em> modes « environ trois fois »
-    /// too weak in mean darkening at comparable area, and MSVO <b>stronger than Depth</b> on the
-    /// ring (7.1 against 5.2 in mean, 32.2 % against 23.3 % in area). Neither relation is pinned
-    /// by any invariant of §2.4 — a ceiling and a monotony leave both free — so this test holds
-    /// the two constants that carry it: a regression of either gain back towards V2-22's values,
-    /// or of the MSVO port back below Depth, fails here.
+    /// <b>Q-095</b> and <b>Q-097</b> (both answered) — the calibration of lot V2-24, in both
+    /// modes. The answer to Q-095 measured the reference and found <em>both</em> modes « environ
+    /// trois fois » too weak in mean darkening at comparable area; the answer to Q-097 found the
+    /// cause — the reference was never under the ceiling the amendment then stated — and v1.4
+    /// raised that ceiling from <c>0.1 × ao.strength</c> to
+    /// <c>min(0.95 ; 0.3 × ao.strength)</c>. Neither the resulting magnitude nor the relation
+    /// between the two modes is pinned by any invariant of §2.4 — a ceiling and a monotony leave
+    /// both free — so this test holds the two constants that carry them.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Measured on the contact of close-up A and on the area the effect changes at all, the two
     /// quantities the answer's own method uses. The windows are wide: they fix the order of
     /// magnitude the reference shows, not a law, which REQ-SCN-083 leaves free.
+    /// </para>
+    /// <para>
+    /// What fails here is a regression to either of the two calibrations this pair of tickets
+    /// passed through: V2-22's constants left the Depth contact at 0.81, and V2-23's pinned both
+    /// modes to the old ceiling at 0.6985 — both above the 0.50 asserted below. The *ratio*
+    /// between the two modes' magnitudes, which is what `zaxMsvoShare` was finally calibrated on
+    /// (1.355 against the reference's 1.37 in mean darkening), belongs to the ring of
+    /// « Punch-Out!! » and is recorded in docs/progress/V2-24.md: this lone cube on a plane
+    /// cannot carry it, and the area assertion below deliberately does not state which mode is
+    /// the wider.
+    /// </para>
     /// </remarks>
     [GlFact] // REQ-SCN-083
     public void Q095_both_modes_carry_the_magnitude_the_reference_shows()
@@ -637,11 +652,11 @@ public sealed class Amd055OcclusionTests
         Assert.InRange(msvoContact, 1.0 - Ceiling(3) - SrgbStep, 0.50);
 
         // And both lay a band rather than an outline — the review criterion of §2.4 — over
-        // comparable ground. Which of the two is the wider depends on the scene and is not
-        // pinned here: on the ring of « Punch-Out!! » MSVO is the wider, as the reference has it
-        // (32.2 % against 23.3 % of the frame, and 34.4 % against 32.2 % measured), while on
-        // this lone cube on a plane Depth spreads further. What a regression of either gain
-        // would break is the order of magnitude, which is what the bounds hold.
+        // comparable ground. Which of the two is the wider is not pinned here: the reference has
+        // MSVO the wider on the ring (32.2 % against 23.3 % of the frame), where the port
+        // measures the two level (32.20 % against 32.86 %), and on this lone cube on a plane it
+        // is Depth that spreads further. What a regression of either gain would break is the
+        // order of magnitude, which is what the bounds hold.
         Assert.True(depthArea > Width * Height / 100, $"Depth changed only {depthArea} pixels.");
         Assert.True(msvoArea > Width * Height / 100, $"MSVO changed only {msvoArea} pixels.");
         Assert.InRange(msvoArea / (double)depthArea, 0.4, 2.5);

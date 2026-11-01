@@ -1,7 +1,7 @@
 # AMD-055 — Style visuel « Enhanced »
 
-Version : 1.3 | 2026-10-31 | **Normatif** (R1, choix du propriétaire du 2026-10-31 : reprise des pistes §3.1, 3.2 et 3.3 du rapport de comparaison avec 3dSen 2.0). **Amende AMD-040** (§2 : ligne `VisualStyle` de REQ-LUA-114 et note sur les défauts ; §3 : paramètres du style Enhanced, identifiant du style, ligne SPEC-09 de `render.visual_style`), **AMD-043** (§2 REQ-SCN-066 et colonne Lua du §6 : les réglages de courbure agissent dans les deux styles), **AMD-049** (REQ-SCN-075 : phrase sur la grille de voxels), **SPEC-06 REQ-SCN-058** (ordre de rendu d'une frame) et **SPEC-10 REQ-UI-061** (liste des paramètres visibles sur desktop). Complète SPEC-06 et SPEC-09.
-Historique : 1.0 (rédaction) ; 1.1 (relecture R2-review-AMD-055 : 55-1 à 55-24 ; décisions du propriétaire du 2026-10-31 : la grille de voxels s'applique au backdrop et se calcule dans le repère local du maillage avant transformation d'objet et avant courbure ; REQ-SCN-083 et REQ-SCN-084 ramenées à une intention paramétrée, en P3, avec des critères de revue ; clés de réglages `render.style.*`, non exposées en libretro ; lecture A pour la courbure en Classic) ; 1.2 (seconde relecture R2-review-AMD-055-v1.1 : N-1 à N-8 ; décisions du propriétaire du 2026-10-31 : **références publiques orientantes** pour REQ-SCN-083 — occlusion ambiante d'écran par hémisphère — et pour REQ-SCN-084 — tracé de rayon dans l'espace écran par marche puis dichotomie ; **mode MSVO** porté de l'implémentation publique sous licence MIT du MiniEngine de Microsoft, avec repli déclaré sur Depth ; N-1 traité par la mesure sur la face avant du backdrop, position fixée ; N-2 aligné sur la lecture de REQ-SCN-084 ; N-3 à N-8 retenus). ; 1.3 (R2-review-AMD-055-v1.2 : N2-1, plaque de `sizeZ` = 1 dans le critère de REQ-SCN-082 ; N2-2, normales plates en MARCHING, REQ-E3D-522).
+Version : 1.4 | 2026-11-01 | **Normatif** (R1, choix du propriétaire du 2026-10-31 : reprise des pistes §3.1, 3.2 et 3.3 du rapport de comparaison avec 3dSen 2.0). **Amende AMD-040** (§2 : ligne `VisualStyle` de REQ-LUA-114 et note sur les défauts ; §3 : paramètres du style Enhanced, identifiant du style, ligne SPEC-09 de `render.visual_style`), **AMD-043** (§2 REQ-SCN-066 et colonne Lua du §6 : les réglages de courbure agissent dans les deux styles), **AMD-049** (REQ-SCN-075 : phrase sur la grille de voxels), **SPEC-06 REQ-SCN-058** (ordre de rendu d'une frame) et **SPEC-10 REQ-UI-061** (liste des paramètres visibles sur desktop). Complète SPEC-06 et SPEC-09.
+Historique : 1.0 (rédaction) ; 1.1 (relecture R2-review-AMD-055 : 55-1 à 55-24 ; décisions du propriétaire du 2026-10-31 : la grille de voxels s'applique au backdrop et se calcule dans le repère local du maillage avant transformation d'objet et avant courbure ; REQ-SCN-083 et REQ-SCN-084 ramenées à une intention paramétrée, en P3, avec des critères de revue ; clés de réglages `render.style.*`, non exposées en libretro ; lecture A pour la courbure en Classic) ; 1.2 (seconde relecture R2-review-AMD-055-v1.1 : N-1 à N-8 ; décisions du propriétaire du 2026-10-31 : **références publiques orientantes** pour REQ-SCN-083 — occlusion ambiante d'écran par hémisphère — et pour REQ-SCN-084 — tracé de rayon dans l'espace écran par marche puis dichotomie ; **mode MSVO** porté de l'implémentation publique sous licence MIT du MiniEngine de Microsoft, avec repli déclaré sur Depth ; N-1 traité par la mesure sur la face avant du backdrop, position fixée ; N-2 aligné sur la lecture de REQ-SCN-084 ; N-3 à N-8 retenus). ; 1.3 (R2-review-AMD-055-v1.2 : N2-1, plaque de `sizeZ` = 1 dans le critère de REQ-SCN-082 ; N2-2, normales plates en MARCHING, REQ-E3D-522) ; 1.4 (vérification R5 du 2026-11-01, Q-094, Q-096, Q-097 : plafond d'assombrissement de REQ-SCN-083 relevé à `min(0,95 ; 0,3 × ao.strength)` d'après la mesure de 3dSen 2.0, invariant de contact ajusté ; verticale de la définition du sol de REQ-SCN-084 en mode caméra locale : normale du plan image).
 Priorités : REQ-SCN-078 à REQ-SCN-082 sont **P2**, REQ-SCN-083 et REQ-SCN-084 sont **P3**. Si REQ-SCN-078 n'est pas retenue, le style reste sans effet de rendu (AMD-040 REQ-LUA-114 inchangée) et rien de cet amendement ne s'applique. Si une exigence de §2.3 à §2.5 n'est pas retenue, l'effet correspondant n'existe pas, son réglage reste persisté et exposé sans effet (cas analogue à SPEC-09 REQ-PERS-017, §3 point 7) et les autres effets sont inchangés. Si REQ-SCN-081 n'est pas retenue, la phrase d'AMD-049 REQ-SCN-075 sur la grille de voxels reste valable (T-1). Si REQ-SCN-083 et REQ-SCN-084 ne sont retenues ni l'une ni l'autre, l'ordre de frame de REQ-SCN-058 reste celui de SPEC-06, sans les deux passes d'écran (T-1). Le **portage MSVO** de REQ-SCN-083 est lui aussi **P3** : s'il n'est pas retenu, ou tant qu'il n'est pas disponible, `spl.ao` = 1 est rendu comme Depth **(D)** et le reste de REQ-SCN-083 est inchangé (T-1).
 
 ## 1. Besoin
@@ -366,9 +366,10 @@ varier par pixel, à condition qu'aucun motif fixe ne reste visible après lissa
   **en espace linéaire, avant l'encodage sRGB de REQ-SCN-028**.
 - **Rayon** d'influence : `r = (8 + 6 × (ao.radius − 1)) × échelle de scène` unités de scène, soit
   8, 14, 20, 26 et 32 pour les réglages 1 à 5 (20 par défaut).
-- **Force** : `O` est proportionnel à `ao.strength`, avec un **plafond d'assombrissement de 50 % au
-  réglage maximal** : `O ≤ 0,1 × ao.strength` en tout pixel, soit 0,1 / 0,2 / 0,3 / 0,4 / 0,5 pour
-  les réglages 1 à 5 (0,3 par défaut). `O` DOIT être nul là où aucune géométrie occultante ne se
+- **Force** : `O` est proportionnel à `ao.strength` sous un **plafond d'assombrissement**
+  `O ≤ min(0,95 ; 0,3 × ao.strength)` en tout pixel, soit 0,3 / 0,6 / 0,9 / 0,95 / 0,95 pour les
+  réglages 1 à 5 (0,9 par défaut). (v1.4 : mesuré sur 3dSen 2.0, l'occlusion par défaut assombrit
+  au contact jusqu'à plus de 85 % en linéaire ; voir Q-097.) `O` DOIT être nul là où aucune géométrie occultante ne se
   trouve à moins de `2 r`.
 - `ao.thickness` n'a aucun effet hors du mode MSVO (REQ-SCN-079).
 - L'implémentation DEVRAIT prendre de l'ordre de **6, 10 et 16 échantillons** par pixel pour
@@ -399,7 +400,7 @@ avec la GPL-3.0 sous laquelle la réimplémentation est distribuée.
 - **Repli (D).** Tant que ce portage n'est pas disponible, `spl.ao` = 1 DOIT être rendu exactement
   comme `spl.ao` = 2 (Depth) : repli déclaré **(D)**, le libellé `MSVO` restant exposé et relu.
 - **Paramètres.** `ao.radius` et `ao.strength` gardent la signification et les valeurs normatives
-  ci-dessus (rayon 8 / 14 / 20 / 26 / 32 ; plafond `O ≤ 0,1 × ao.strength`). `ao.thickness` **agit**
+  ci-dessus (rayon 8 / 14 / 20 / 26 / 32 ; plafond `O ≤ min(0,95 ; 0,3 × ao.strength)`). `ao.thickness` **agit**
   dans ce mode, et dans celui-là seulement : il règle l'**épaisseur supposée** des occulteurs
   connus seulement par leur profondeur. Qualitativement, à `ao.thickness` = 1 un échantillon plus
   proche que le point considéré est traité comme un **écran mince**, qui n'occulte que son voisinage
@@ -435,7 +436,8 @@ plan A qui ne diffèrent que par le réglage indiqué.
 - Gros plan A **sans le cube** (un plan seul, sans autre géométrie) : le rapport
   (occlusion On / Off) vaut 1,00 ± 0,02 en tout pixel du sol.
 - Gros plan A : sur les pixels du sol au contact de la base du cube, le rapport est **strictement
-  inférieur à 1** et **supérieur ou égal à 0,70** (plafond `O ≤ 0,1 × ao.strength` = 0,3) ; en un
+  inférieur à 1** et **supérieur ou égal à 0,10**, à un niveau sRGB 8 bits près (plafond
+  `O ≤ min(0,95 ; 0,3 × ao.strength)` = 0,9) ; en un
   pixel du sol situé à au moins `2 r` = 40 unités du cube et visible dans la capture (par exemple à
   40 unités du cube, du côté opposé à la caméra), il vaut 1,00 ± 0,02.
 - `ao.strength` = 5 : le rapport est partout ≥ 0,50 ; `ao.strength` = 1 : partout ≥ 0,90. Le rapport
@@ -482,6 +484,14 @@ l'échelle) réfléchit donc. En revanche la dimension en `z` est la **profondeu
 même shape avec `D` = 3, ou avec `scale = (1 ; 1 ; 0,5)`, mesure 3 ou 4 unités en `z` et ne
 réfléchit pas. Un sol de jeu, qui s'étend sur de nombreuses tiles, dépasse le seuil dans les deux
 dimensions dès que sa profondeur atteint 6 unités.
+*Caméra locale* (REQ-SCN-009, v1.4). Quand le profil active la caméra locale, le plan de l'image
+NES est posé à plat et tient lieu de sol : la verticale de cette définition est alors la **normale
+du plan image tournée vers la caméra**, `(0 ; 0 ; −1)` dans le repère de scène avant courbure, à
+la place de `+Y`, **quelle que soit l'inclinaison de la caméra** ; l'emprise se mesure de même
+dans le plan `xy`. En caméra ordinaire, la définition ci-dessus s'applique sans changement (le gros
+plan R et ses invariants sont inchangés). Mesure qui fonde cette règle : sur « Punch-Out!! »,
+profil à caméra locale inclinée de −60°, la référence fait réfléchir le tapis du ring (normale de
+scène (0 ; 0 ; −1)), environ 10,5 % de la frame changeant à `spl.reflections` = 1.
 
 *Paramètres normatifs*, avec `n(niveau) = 2 · niveau − 1` (niveaux 1 à 5 → `n` de 1 à 9) :
 - **longueur maximale** du rayon : `40 × n(ssr.length) × échelle de scène` unités de scène, soit
@@ -671,7 +681,7 @@ ligne `Style`, elle-même après la ligne `Skybox`.
 |---|---|---|---|---|---|---|---|---|---|---|
 | `render.visual_style` | `VisualStyle` | — | entier | 0 | 0 Classic, 4 Enhanced (1 accepté en écriture, relu 4) ; autre → 0 | U | imm. | — / Zaxnes : liste « Style » | — | choix du rendu, SPEC-06 REQ-SCN-078 |
 | `render.style.ao` | `GetVisualStyleParameter(4, "spl.ao")` | — | entier | 0 | 0 à 2, pas 1 | U | imm. | — / Zaxnes : liste « Ambient Occlusion » | — | occlusion ambiante d'écran, REQ-SCN-083 ; 1 (MSVO) rendu comme 2 tant que son portage n'est pas disponible **(D)** |
-| `render.style.ao_strength` | `… "ao.strength"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Strength » | — | plafond d'assombrissement `O ≤ 0,1 × valeur`, REQ-SCN-083 |
+| `render.style.ao_strength` | `… "ao.strength"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Strength » | — | plafond d'assombrissement `O ≤ min(0,95 ; 0,3 × valeur)`, REQ-SCN-083 |
 | `render.style.ao_radius` | `… "ao.radius"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Radius » | — | rayon `8 + 6 × (valeur − 1)` unités de scène, REQ-SCN-083 |
 | `render.style.ao_thickness` | `… "ao.thickness"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. (sans effet hors du mode MSVO) | — / Zaxnes : curseur « Thickness », grisé sauf en mode MSVO effectif | — | épaisseur supposée des occulteurs en mode MSVO ; aucun effet avec l'occlusion Depth, REQ-SCN-083 |
 | `render.style.ao_quality` | `… "ao.quality"` | — | entier | 1 | 0 à 2, pas 1 | U | imm. | — / Zaxnes : liste « AO Quality » | — | nombre d'échantillons et résolution de la passe (non observables), REQ-SCN-083 |
