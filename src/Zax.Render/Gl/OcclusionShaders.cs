@@ -56,21 +56,59 @@ internal static class OcclusionShaders
         uniform float uRadius;
         uniform mat4 uProjection;
 
-        // Q-095: the share of the kernel this estimator finds blocked at a right-angle corner,
-        // where three faces meet — measured at 0.35 on close-up A of §2.4. It is the point at
-        // which the darkening reaches the ceiling « O <= 0.1 x ao.strength » of REQ-SCN-083,
-        // and the law the requirement leaves free: O is the blocked share of the hemisphere,
-        // scaled so that the deepest ordinary corner reaches the ceiling. A simple edge — a
-        // floor pixel at the foot of a wall, half the hemisphere behind it — then reaches about
-        // two thirds of it. Without this normalisation the ceiling is never approached and the
-        // band is some four times weaker than the reference (lot V2-22).
-        const float zaxCornerShare = 0.35;
+        // Q-095: the share of the kernel this estimator has to find blocked for the darkening to
+        // reach the ceiling « O <= 0.1 x ao.strength » of REQ-SCN-083. That is the law the
+        // requirement leaves free: O is the blocked share of the hemisphere, scaled so that an
+        // ordinary deep corner approaches the ceiling. Lot V2-22 set it at the share measured at
+        // a right-angle corner, 0.35; the answer to Q-095 measured the reference and found the
+        // result still about three times too weak in mean darkening at comparable area, so the
+        // constant is calibrated on those figures instead — 0.12, which nearly trebles the gain.
+        //
+        // It is not calibrated further, and the stop is normative, not a matter of taste: the
+        // second invariant of §2.4 asks that the contact pixel of close-up A keep a ratio
+        // « supérieur ou égal à 0,70 » to its unoccluded value, and 0.70 *is* the ceiling at the
+        // default ao.strength = 3. A contact that reaches the ceiling therefore measures 0.6985
+        // once the capture has been through 8-bit sRGB, and fails. Measured here: the contact
+        // saturates at every share of 0.10 and below, and clears the floor at 0.12. The gain
+        // above which the amendment's own invariant breaks is the gain this constant sits under.
+        // See Q-097 for what that leaves between this and the reference's figures.
+        // Q-097
+        const float zaxCornerShare = 0.12;
 
-        // How far above the tangent plane of the point an occluder must rise to count, as the
-        // sine of the angle it makes with that plane — about 12 degrees. It leaves a surface
-        // unable to darken itself whatever the distance to the occluder, and it absorbs what
-        // is left of the tilt of the normal rebuilt from the depth.
+        // How far above the tangent plane of the point an occluder must rise before it counts at
+        // all, as the sine of the angle it makes with that plane — about 6 degrees. It leaves a
+        // surface unable to darken itself whatever the distance to the occluder.
         const float zaxTangentSine = 0.1;
+
+        // ... and how much further it must rise to count in full. Q-095: a *hard* threshold on
+        // that sine is what turned the residual error of the rebuilt normal into the regular
+        // horizontal bands lot V2-23 measured on the ring mat. The normal of a flat surface is
+        // not exact — rebuilt from a depth texture it scatters by a couple of degrees — so a
+        // point of that very surface clears a 0.1 threshold here and not there, and a hard step
+        // prints that as an edge. Over a ramp the same scatter costs a few thousandths of
+        // occlusion instead of all or nothing, while a true corner or edge, whose occluders rise
+        // at sines approaching 1, still counts in full. REQ-SCN-083 leaves « la loi de
+        // pondération et d'atténuation de l'occultation » free; this is part of that choice.
+        const float zaxRiseRamp = 0.25;
+
+        // One step of the window-space depth, the depth texture being 24 bits. The view position
+        // rebuilt from it is a staircase, and the normal rebuilt from two such positions carries
+        // a tilt of about one step over the baseline: the test above has to leave room for it,
+        // or a flat surface darkens itself wherever that tilt crosses zaxTangentSine — the
+        // regular horizontal bands lot V2-23 measured on the ring mat (Q-095).
+        const float zaxDepthStep = 1.0 / 16777216.0;
+
+        // How many of those tilts to allow for: one for the point's own position and one for the
+        // neighbour's, the difference of the two carrying both.
+        const float zaxTiltSlack = 2.0;
+
+        // The view-space position the depth texture would give at uv for a window depth of raw.
+        vec3 zaxViewAt(vec2 uv, float raw)
+        {
+            vec4 clip = vec4((uv * 2.0 - 1.0), raw * 2.0 - 1.0, 1.0);
+            vec4 view = uInverseProjection * clip;
+            return view.xyz / view.w;
+        }
 
         void main()
         {
@@ -109,6 +147,19 @@ internal static class OcclusionShaders
 
             // The camera looks down −z in view space, so a face turned towards it has n·p < 0.
             n = dot(n, p) > 0.0 ? -n : n;
+
+            // Q-095: how far this normal can be tilted by the quantisation of the depth texture.
+            // One step of window depth moves the rebuilt position by « quantum » view units
+            // along the view ray; a difference taken over a baseline of length L therefore
+            // carries a tilt of up to zaxTiltSlack × quantum / L, and a point of the very same
+            // surface then appears to rise above the tangent plane by that much. Adding it to
+            // the threshold makes the test scale-free: it costs nothing where the baseline is
+            // long compared with the quantum — which is everywhere the surface is resolved —
+            // and it is exactly what stops a flat surface from banding where it is not.
+            float quantum = length(zaxViewAt(vUv, raw + zaxDepthStep) - p);
+            float baseline3d = min(length(dx), length(dy));
+            float slack = baseline3d > 1e-6 ? (zaxTiltSlack * quantum) / baseline3d : 1.0;
+            float riseSine = min(zaxTangentSine + slack, 0.95);
 
             // The per-pixel rotation of the kernel: a direction of the tangent plane taken from
             // a hash of the pixel, so the pattern changes from pixel to pixel but never from
@@ -163,18 +214,18 @@ internal static class OcclusionShaders
                 // camera, so "in front" is a larger z.
                 float inFront = step(at.z, occluder.z);
 
-                // ... and it rises above the tangent plane of the point. Another point of the
-                // same surface lies *in* that plane and so never darkens it, however grazing
-                // the view of that surface is: this is what keeps a lone plane untouched, the
-                // first invariant of §2.4, without a depth bias that would also eat the
-                // darkening at a contact.
-                float above = step(zaxTangentSine, dot(toOccluder, n) / span);
+                // ... and it rises above the tangent plane of the point, by more than that plane
+                // is itself uncertain. Another point of the same surface lies *in* that plane
+                // and so never darkens it, however grazing the view of that surface is: this is
+                // what keeps a lone plane untouched, the first invariant of §2.4, without a
+                // depth bias that would also eat the darkening at a contact.
+                float above = smoothstep(riseSine, riseSine + zaxRiseRamp, dot(toOccluder, n) / span);
 
                 // The range check of Chapman 2013, measured on the distance rather than on the
                 // depth alone: an occluder farther than the radius is not part of this point's
                 // neighbourhood, and past 2 r it weighs nothing at all, which is what makes O
-                // nil wherever no occluding geometry is within 2 r (REQ-SCN-083). The
-                // transition is smooth, the effect having no sharp outline.
+                // nil wherever no occluding geometry is within 2 r (REQ-SCN-083). The transition
+                // is smooth, the effect having no sharp outline.
                 float range = 1.0 - smoothstep(uRadius, 2.0 * uRadius, span);
                 occlusion += inFront * above * range;
             }
