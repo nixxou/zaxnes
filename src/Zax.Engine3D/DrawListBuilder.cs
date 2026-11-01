@@ -22,7 +22,6 @@ namespace Zax.Engine3D;
 public sealed class DrawListBuilder
 {
     private readonly FrameDrawList _list = new();
-    private readonly Dictionary<(int X, int Y), FrameTile?> _neighbours = [];
 
     /// <summary>Builds the draw list of <paramref name="frame"/>.</summary>
     /// <param name="frame">The frame to draw.</param>
@@ -117,20 +116,6 @@ public sealed class DrawListBuilder
         // whole 3D object, so it is read once per instance.
         int buildDepth = geometry.MeshDepthOf(instance.Reference);
 
-        // Q-067: the walls that close each tile against a neighbour of the same object show at
-        // the joints of a flat surface (REQ-SCN-065). The neighbours are looked up here, once
-        // per instance, so that the draw list can ask for the mesh variant without them.
-        _neighbours.Clear();
-        foreach (FrameTile tile in shape.Tiles)
-        {
-            if (!shape.RestoredFromPinnedFrame || frame.TileOverlapsPinnedRects(tile))
-            {
-                // A sprite shape may hold two tiles on one cell (REQ-E3D-043): which of them
-                // covers the joint is then undecided, so the cell seals nothing.
-                _neighbours[(tile.X, tile.Y)] = _neighbours.ContainsKey((tile.X, tile.Y)) ? null : tile;
-            }
-        }
-
         foreach (FrameTile tile in shape.Tiles)
         {
             if (shape.RestoredFromPinnedFrame && !frame.TileOverlapsPinnedRects(tile))
@@ -172,7 +157,10 @@ public sealed class DrawListBuilder
             {
                 Instance = instance,
                 Tile = tile,
-                Mesh = geometry.MeshOf(instance.Reference, tile.Image, SealedSides(instance, tile, geometry)),
+                // AMD-057: the drawn mesh of a tile is its whole REQ-E3D-501 mesh again — the
+                // sealing variants of AMD-027 are gone, and the inner walls are kept from
+                // showing at the joints by the renderer (SPEC-06 REQ-SCN-065).
+                Mesh = geometry.MeshOf(instance.Reference, tile.Image),
                 Transform = transform,
                 Anchor = anchor,
                 TileCenter = tileCenter,
@@ -192,54 +180,6 @@ public sealed class DrawListBuilder
                 BuildDepth = buildDepth,
             });
         }
-    }
-
-    /// <summary>
-    /// The lateral sides of <paramref name="tile"/> a neighbouring tile of the same object
-    /// covers entirely, so that the wall between the two can be left out of the drawn mesh
-    /// (Q-067, SPEC-06 REQ-SCN-065).
-    /// </summary>
-    /// <remarks>
-    /// Both planes have to be full: the wall is then strictly inside the solid the two tiles
-    /// form, and dropping it cannot open a hole. Tiles of two different objects are never
-    /// sealed against each other, since nothing says their depths or their z agree.
-    /// </remarks>
-    private int SealedSides(FrameInstance instance, FrameTile tile, IPatternGeometryBuilder geometry)
-    {
-        int full = geometry.FullSidesOf(instance.Reference, tile.Image);
-        if (full == 0)
-        {
-            return 0;
-        }
-
-        int sealedSides = 0;
-        sealedSides |= Seal(instance, geometry, full, TileSides.MinusX, tile.X - 8, tile.Y);
-        sealedSides |= Seal(instance, geometry, full, TileSides.PlusX, tile.X + 8, tile.Y);
-
-        // Scene y runs the other way than the screen row (REQ-E3D-404): the neighbour below
-        // the tile in the scene is the one on the row underneath on screen.
-        sealedSides |= Seal(instance, geometry, full, TileSides.MinusY, tile.X, tile.Y + 8);
-        sealedSides |= Seal(instance, geometry, full, TileSides.PlusY, tile.X, tile.Y - 8);
-        return sealedSides;
-    }
-
-    private int Seal(
-        FrameInstance instance,
-        IPatternGeometryBuilder geometry,
-        int full,
-        int side,
-        int x,
-        int y)
-    {
-        if ((full & side) == 0
-            || !_neighbours.TryGetValue((x, y), out FrameTile? neighbour)
-            || neighbour is null)
-        {
-            return 0;
-        }
-
-        int facing = geometry.FullSidesOf(instance.Reference, neighbour.Image);
-        return (facing & TileSides.Opposite(side)) != 0 ? side : 0;
     }
 
     /// <summary>

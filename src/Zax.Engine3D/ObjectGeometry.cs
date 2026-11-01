@@ -15,9 +15,6 @@ public sealed class ObjectGeometry
 {
     private readonly TileMesh[] _meshes;
     private readonly int[] _meshOfImage;
-    private readonly TileVoxels[] _fields;
-    private readonly int[] _fullSides;
-    private readonly Dictionary<(int Mesh, int Sealed), TileMesh> _variants = [];
 
     internal ObjectGeometry(
         EnginePattern pattern,
@@ -27,7 +24,6 @@ public sealed class ObjectGeometry
         int buildDepth,
         int effectiveDepth,
         TileMesh[] meshes,
-        TileVoxels[] fields,
         bool multicolor)
     {
         Pattern = pattern;
@@ -37,18 +33,7 @@ public sealed class ObjectGeometry
         BuildDepth = buildDepth;
         EffectiveDepth = effectiveDepth;
         _meshes = meshes;
-        _fields = fields;
         Multicolor = multicolor;
-
-        // Q-067: only a side whose whole plane is occupied can be sealed by a neighbour.
-        _fullSides = new int[fields.Length];
-        if (algorithm != RenderAlgorithm.Marching)
-        {
-            for (int n = 0; n < fields.Length; n++)
-            {
-                _fullSides[n] = TileSides.FullSides(fields[n]);
-            }
-        }
 
         int highest = 0;
         foreach (TileImage image in pattern.Images)
@@ -134,51 +119,6 @@ public sealed class ObjectGeometry
         ArgumentNullException.ThrowIfNull(image);
         int index = Index(image);
         return index < 0 ? null : _meshes[index];
-    }
-
-    /// <summary>
-    /// The lateral sides of <paramref name="image"/> whose plane is entirely occupied, as a
-    /// mask of <see cref="TileSides"/>: the sides a neighbour may seal (Q-067).
-    /// </summary>
-    public int FullSides(TileImage image)
-    {
-        ArgumentNullException.ThrowIfNull(image);
-        int index = Index(image);
-        return index < 0 ? 0 : _fullSides[index];
-    }
-
-    /// <summary>
-    /// The mesh of <paramref name="image"/> with the walls of <paramref name="sealedSides"/>
-    /// left out (Q-067). A mask of 0 — or MARCHING, which has no such walls — gives
-    /// <see cref="Mesh(TileImage)"/> itself.
-    /// </summary>
-    public TileMesh? Mesh(TileImage image, int sealedSides)
-    {
-        ArgumentNullException.ThrowIfNull(image);
-        int index = Index(image);
-        if (index < 0)
-        {
-            return null;
-        }
-
-        sealedSides &= _fullSides[index];
-        if (sealedSides == 0 || Algorithm == RenderAlgorithm.Marching)
-        {
-            return _meshes[index];
-        }
-
-        if (_variants.TryGetValue((index, sealedSides), out TileMesh? variant))
-        {
-            return variant;
-        }
-
-        variant = GreedyMesher.Build(
-            _fields[index],
-            Texture,
-            Multicolor,
-            sealedSides);
-        _variants[(index, sealedSides)] = variant;
-        return variant;
     }
 
     private int Index(TileImage image)

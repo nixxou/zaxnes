@@ -872,6 +872,11 @@ public sealed class SceneRenderer : ISceneRenderer
         }
 
         _scenePass.Set("uViewProjection", view.ViewProjection);
+
+        // AMD-057 REQ-SCN-065: the walls of a tile mesh lose every depth tie against the face
+        // that closes the surface, so the joints of a flat surface stay invisible with the
+        // walls kept. The projection is the same all frame, so the coefficient is too.
+        _scenePass.Set("uWallBias", SceneConstants.WallBiasCoefficient);
         _scenePass.Set("uTime", scene.EmulatedTime);
         _scenePass.Set("uAmbient", SceneColor.AmbientLinear);
         _scenePass.Set("uShadowStrength", SceneColor.ShadowFactor);

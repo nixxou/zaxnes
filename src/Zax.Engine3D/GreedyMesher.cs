@@ -8,19 +8,11 @@ namespace Zax.Engine3D;
 /// of equal texel value.
 /// </summary>
 /// <remarks>
-/// <para>
 /// The voxels of the neighbouring tiles are never consulted: each tile mesh is closed on
 /// itself, which is why two full tiles side by side keep the wall between them
-/// (REQ-E3D-501 notes, TV-G7).
-/// </para>
-/// <para>
-/// Q-067: the <c>sealedSides</c> mask is the one exception, and it is a <b>rendering</b>
-/// variant, not a change to REQ-E3D-501. A side listed there is one the draw list has found to
-/// be entirely covered by the neighbouring tile of the same object; the wall between the two
-/// is then strictly inside the solid they form, and the mesh of that variant leaves it out so
-/// that it cannot show at the joint. The default mask of 0 gives back the mesh REQ-E3D-501
-/// and REQ-E3D-523 describe, bit for bit.
-/// </para>
+/// (REQ-E3D-501 notes, TV-G7). AMD-057 withdrew the sealing variants of AMD-027 §1-2, so the
+/// mesh built here is also the mesh that gets drawn; what keeps the coincident inner walls
+/// from showing at the joint is the depth handling of the renderer (SPEC-06 REQ-SCN-065).
 /// </remarks>
 public static class GreedyMesher
 {
@@ -30,15 +22,10 @@ public static class GreedyMesher
     /// <param name="field">The voxel field of the tile (three slots per voxel).</param>
     /// <param name="texture">The object's texture, read for the multicolour merge.</param>
     /// <param name="multicolor">True for <c>GREEDY_MULTICOLOR</c> (REQ-E3D-503).</param>
-    /// <param name="sealedSides">
-    /// Lateral sides a neighbouring tile covers entirely, as the bits of
-    /// <see cref="TileSides"/>; 0 closes the tile on itself as REQ-E3D-501 states (Q-067).
-    /// </param>
     public static TileMesh Build(
         TileVoxels field,
         ObjectTexture texture,
-        bool multicolor,
-        int sealedSides = 0)
+        bool multicolor)
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentNullException.ThrowIfNull(texture);
@@ -66,7 +53,7 @@ public static class GreedyMesher
             {
                 for (int plane = 0; plane <= sizes[axis]; plane++)
                 {
-                    if (!FillMask(field, texture, mask, axis, u, v, su, sv, plane, sign, sealedSides, sizes[axis]))
+                    if (!FillMask(field, texture, mask, axis, u, v, su, sv, plane, sign))
                     {
                         continue;
                     }
@@ -93,9 +80,7 @@ public static class GreedyMesher
         int su,
         int sv,
         int plane,
-        int sign,
-        int sealedSides,
-        int axisSize)
+        int sign)
     {
         bool any = false;
         Span<int> cell = stackalloc int[3];
@@ -120,10 +105,7 @@ public static class GreedyMesher
 
                 cell[axis] = sign > 0 ? plane : plane - 1;
 
-                // Q-067: on a sealed side the tile next door fills the whole plane, so the
-                // voxel just outside counts as occupied and no wall is emitted there.
-                bool neighbour = TileSides.IsSealed(sealedSides, axis, cell[axis], axisSize)
-                    || field.Occupied(cell[0], cell[1], cell[2], axis);
+                bool neighbour = field.Occupied(cell[0], cell[1], cell[2], axis);
 
                 if (owner && !neighbour)
                 {

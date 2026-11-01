@@ -47,24 +47,6 @@ public interface IPatternGeometryBuilder
     TileMesh? MeshOf(PatternInstance instance, TileImage image);
 
     /// <summary>
-    /// The mesh of <paramref name="image"/> for <paramref name="instance"/> with the walls of
-    /// <paramref name="sealedSides"/> left out, the rendering variant of Q-067. A mask of 0
-    /// gives the same mesh as <see cref="MeshOf(PatternInstance, TileImage)"/>.
-    /// </summary>
-    /// <param name="instance">The 3D object.</param>
-    /// <param name="image">The tile image.</param>
-    /// <param name="sealedSides">A mask of <see cref="TileSides"/>.</param>
-    TileMesh? MeshOf(PatternInstance instance, TileImage image, int sealedSides);
-
-    /// <summary>
-    /// The lateral sides of <paramref name="image"/> whose plane is entirely occupied: the
-    /// only sides a neighbouring tile may seal (Q-067).
-    /// </summary>
-    /// <param name="instance">The 3D object.</param>
-    /// <param name="image">The tile image.</param>
-    int FullSidesOf(PatternInstance instance, TileImage image);
-
-    /// <summary>
     /// The resolved texture of a pattern instance (SPEC-04B REQ-E3D-426, REQ-E3D-641), or null
     /// when its geometry has not been built.
     /// </summary>
@@ -138,12 +120,6 @@ public sealed class NullPatternGeometryBuilder : IPatternGeometryBuilder
 
     /// <inheritdoc/>
     public TileMesh? MeshOf(PatternInstance instance, TileImage image) => null;
-
-    /// <inheritdoc/>
-    public TileMesh? MeshOf(PatternInstance instance, TileImage image, int sealedSides) => null;
-
-    /// <inheritdoc/>
-    public int FullSidesOf(PatternInstance instance, TileImage image) => 0;
 
     /// <inheritdoc/>
     public ObjectTexture? TextureOf(PatternInstance instance) => null;

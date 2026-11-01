@@ -111,6 +111,37 @@ internal static class SceneShaders
         """;
 
     /// <summary>
+    /// The depth push the walls of a tile mesh get before the depth test (AMD-057, SPEC-06
+    /// REQ-SCN-065), the GLSL counterpart of <see cref="SceneConstants.WallDepthBias"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A wall is a face parallel to the extrusion axis: normal ±x or ±y in the local mesh
+    /// frame of REQ-E3D-504, whatever the object's rotation, which is why the weight is read
+    /// off the mesh normal and not off the one in the scene. Two full tiles of one object side
+    /// by side carry a coincident pair of them on the plane they share; the push settles that
+    /// tie in favour of the face that closes the surface, at every joint and from every angle.
+    /// </para>
+    /// <para>
+    /// The push is <c>δ</c> scene units along the view direction. With
+    /// <c>z_ndc(d) = (f + n)/(f − n) − 2fn/((f − n)·d)</c> and <c>d</c> the clip <c>w</c>,
+    /// moving the vertex from <c>d</c> to <c>d + δ</c> changes the clip <c>z</c> by
+    /// <c>uWallBias / w</c>, with <c>uWallBias = 2fnδ/(f − n)</c> — the <c>x</c> and <c>y</c>
+    /// of the vertex stay exactly where they were, so nothing moves on screen.
+    /// </para>
+    /// </remarks>
+    private const string WallBias = """
+        uniform float uWallBias;
+
+        vec4 zaxPushWalls(vec4 clip, vec3 meshNormal)
+        {
+            float wall = 1.0 - min(1.0, abs(meshNormal.z));
+            clip.z += uWallBias * wall / clip.w;
+            return clip;
+        }
+        """;
+
+    /// <summary>
     /// The space bending of SPEC-06 REQ-SCN-067 (AMD-043), the GLSL counterpart of
     /// <see cref="Zax.Engine3D.SpaceBend"/>. The per-axis constants <c>k</c>, <c>f</c> and
     /// <c>h</c> are computed once per frame on the CPU and handed over as uniforms, so a vertex
@@ -292,6 +323,8 @@ internal static class SceneShaders
 
         {{Bend}}
 
+        {{WallBias}}
+
         out vec3 vScene;
         out vec3 vBent;
         out vec3 vNormal;
@@ -351,7 +384,15 @@ internal static class SceneShaders
 
             vBent = placed;
             vUv = aUv;
-            gl_Position = uViewProjection * vec4(placed.x, placed.y, -placed.z, 1.0);
+
+            // AMD-057: the walls between two neighbouring tiles of the same object are drawn
+            // again, so the tie they make with the face that closes the surface is settled
+            // here, in depth alone (REQ-SCN-065). The depth-only and the colour pass of
+            // REQ-SCN-040 run this same shader, so a wall that is really the nearest surface
+            // keeps its depth in both and still blends.
+            gl_Position = zaxPushWalls(
+                uViewProjection * vec4(placed.x, placed.y, -placed.z, 1.0),
+                aNormal);
         }
         """;
 

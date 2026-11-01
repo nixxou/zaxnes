@@ -403,10 +403,6 @@ internal sealed class RecordingGeometryBuilder : IPatternGeometryBuilder
     /// <inheritdoc/>
     public TileMesh? MeshOf(PatternInstance instance, TileImage image) => Stub;
 
-    public TileMesh? MeshOf(PatternInstance instance, TileImage image, int sealedSides) => Stub;
-
-    public int FullSidesOf(PatternInstance instance, TileImage image) => 0;
-
     /// <inheritdoc/>
     public ObjectTexture? TextureOf(PatternInstance instance) => null;
 

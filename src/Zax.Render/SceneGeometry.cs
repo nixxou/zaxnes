@@ -220,8 +220,53 @@ public static class SceneConstants
     /// <summary>Scale factor of the HUD plane, 0.5 (REQ-SCN-045).</summary>
     public const float HudScale = 0.5f;
 
-    /// <summary>Depth nudge applied by the renderer to sprite tiles, ±0.1 (REQ-SCN-037).</summary>
+    /// <summary>
+    /// Depth nudge applied by the renderer to a sprite tile: <c>0.001 × (i mod 64) ∓ 0.1</c>,
+    /// of which this is the <c>0.1</c> (REQ-SCN-037, amended by AMD-057).
+    /// </summary>
     public const float SpriteNudge = 0.1f;
+
+    /// <summary>
+    /// Depth nudge applied to a sprite tile per unit of sprite index, <c>0.001</c>
+    /// (REQ-SCN-037, amended by AMD-057): the lower the index of REQ-CORE-043, the nearer the
+    /// tile, so that the sprite the NES gives priority to is the one that shows.
+    /// </summary>
+    public const float SpriteIndexNudge = 0.001f;
+
+    /// <summary>
+    /// How far, in scene units, the renderer pushes a wall of a tile mesh away from the eye
+    /// before the depth test (AMD-057, SPEC-06 REQ-SCN-065).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A "wall" is a face parallel to the extrusion axis — normal ±x or ±y in the local mesh
+    /// frame of REQ-E3D-504. Two full tiles of one object side by side carry, on the plane
+    /// they share, a pair of such walls that coincide to the last bit (REQ-E3D-501): the
+    /// renderer has to decide the tie, and left to the depth buffer it decides it the wrong
+    /// way — a wall wins over the face that closes the surface and draws its own ±x/±y shading
+    /// as a one-pixel line along every joint (Q-067). Pushing every wall back by a fraction of
+    /// a NES pixel makes the face that closes the surface win the tie everywhere, and makes a
+    /// wall that coincides with a neighbour's front face fail the equal-depth colour pass of
+    /// REQ-SCN-040 instead of blending over it.
+    /// </para>
+    /// <para>
+    /// The push is a distance along the view direction, not a constant in clip space: with a
+    /// near plane of 0.3 and a far plane of 5000 the two are nowhere near proportional, and a
+    /// clip-space constant large enough to matter close to the camera would be several tiles
+    /// deep at the back of the scene. A quarter of a NES pixel is some thirty units of a
+    /// 24-bit depth buffer at the default camera distance — far more than the tie it has to
+    /// break, far less than anything that can show.
+    /// </para>
+    /// </remarks>
+    public const float WallDepthBias = 0.25f;
+
+    /// <summary>
+    /// <see cref="WallDepthBias"/> as the clip-space coefficient the vertex shader adds:
+    /// <c>clip.z += WallBiasCoefficient / clip.w</c> moves a vertex from the distance
+    /// <c>w</c> to the distance <c>w + WallDepthBias</c> in depth and nowhere else.
+    /// </summary>
+    public const float WallBiasCoefficient =
+        2f * FarPlane * NearPlane * WallDepthBias / (FarPlane - NearPlane);
 
     /// <summary>Opacity of a tile that hides the followed shape in FPV (REQ-SCN-022).</summary>
     public const float OccluderAlpha = 0.5f;

@@ -331,26 +331,12 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
 
     /// <inheritdoc/>
     public TileMesh? MeshOf(PatternInstance instance, TileImage image)
-        => MeshOf(instance, image, sealedSides: 0);
-
-    /// <inheritdoc/>
-    public TileMesh? MeshOf(PatternInstance instance, TileImage image, int sealedSides)
     {
         ArgumentNullException.ThrowIfNull(instance);
         ArgumentNullException.ThrowIfNull(image);
         return _geometry.TryGetValue(instance, out ObjectGeometry? geometry)
-            ? geometry.Mesh(image, sealedSides)
+            ? geometry.Mesh(image)
             : null;
-    }
-
-    /// <inheritdoc/>
-    public int FullSidesOf(PatternInstance instance, TileImage image)
-    {
-        ArgumentNullException.ThrowIfNull(instance);
-        ArgumentNullException.ThrowIfNull(image);
-        return _geometry.TryGetValue(instance, out ObjectGeometry? geometry)
-            ? geometry.FullSides(image)
-            : 0;
     }
 
     /// <inheritdoc/>
@@ -432,7 +418,6 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
             requested,
             effectiveDepth,
             meshes,
-            fields,
             algorithm == RenderAlgorithm.GreedyMulticolor);
 
         _geometry[instance] = built;
