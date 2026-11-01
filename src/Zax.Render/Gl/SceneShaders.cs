@@ -328,12 +328,17 @@ internal static class SceneShaders
         out vec3 vScene;
         out vec3 vBent;
         out vec3 vNormal;
-        out vec2 vUv;
         out vec3 vGridPos;
         out vec3 vGridNormal;
-        out vec3 vLocal;
         out vec3 vLocalNormal;
         out vec3 vFlatNormal;
+
+        // AMD-058 REQ-SCN-065: the two varyings a floor() turns into an index — the texel of
+        // REQ-E3D-563 and the voxel of REQ-SCN-082 — are interpolated at the centroid of the
+        // samples this primitive covers, never at the pixel centre, which a partly covered
+        // pixel places outside the primitive. See the Centroid remark on SceneFragment.
+        centroid out vec2 vUv;
+        centroid out vec3 vLocal;
 
         void main()
         {
@@ -529,17 +534,54 @@ internal static class SceneShaders
     /// REQ-SCN-028 for the tiles and the HUD, and the Standard model of REQ-SCN-075 for the
     /// backdrop.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Centroid sampling (AMD-058, REQ-SCN-065).</b> With multisampling on, coverage and
+    /// depth are per sample but the fragment shader still runs <em>once per pixel and per
+    /// primitive</em>, its varyings interpolated at the pixel centre. Where a primitive covers
+    /// only part of a pixel — every pixel a joint between two neighbouring tiles, or between
+    /// two neighbouring objects, runs through — that centre lies <em>outside</em> the
+    /// primitive and the varyings are extrapolated.
+    /// </para>
+    /// <para>
+    /// Most of what this shader computes is continuous and survives an extrapolation of a
+    /// fraction of a pixel. Two things do not, because a <c>floor()</c> turns them into an
+    /// index: the texel of REQ-E3D-563, taken from <c>vUv</c>, and the voxel centre of the
+    /// pixel shadows of REQ-SCN-082, taken from <c>vLocal</c>. A <c>vUv</c> extrapolated by a
+    /// hundredth of a texel leaves the rectangle REQ-E3D-506 gave the face and <c>floor</c>
+    /// drops onto the <b>next texel of the object's texture</b> — another palette entry,
+    /// another colour. The resolve then averages that sample with the ones the neighbouring
+    /// primitive shaded correctly, and the joint comes out a colour that is neither tile's:
+    /// the one-pixel line of AMD-058, at the tile pitch, horizontal and vertical.
+    /// </para>
+    /// <para>
+    /// Qualifying those two varyings <c>centroid</c> moves the interpolation point to the
+    /// centroid of the samples the primitive really covers, which is inside the primitive by
+    /// construction, so the index lands in the rectangle whatever the coverage. Nothing else
+    /// changes: coverage is untouched, so the edges of the objects stay anti-aliased
+    /// (AMD-032 §2), and with one sample per pixel that sample <em>is</em> the pixel centre,
+    /// so a capture with <c>video.anti_alias</c> = 0 is unchanged to the bit.
+    /// </para>
+    /// <para>
+    /// The other varyings are deliberately left at the pixel centre. <c>vGridPos</c> feeds
+    /// <c>fwidth</c> in the voxel grid, whose derivatives centroid sampling makes less
+    /// accurate for nothing — the grid's own <c>floor</c> only ever enters a continuous
+    /// distance. <c>vScene</c>, <c>vBent</c> and the normals enter continuous expressions.
+    /// </para>
+    /// </remarks>
     public static string SceneFragment { get; } = $$"""
         #version 330 core
         in vec3 vScene;
         in vec3 vBent;
         in vec3 vNormal;
-        in vec2 vUv;
         in vec3 vGridPos;
         in vec3 vGridNormal;
-        in vec3 vLocal;
         in vec3 vLocalNormal;
         in vec3 vFlatNormal;
+
+        // AMD-058 REQ-SCN-065: the interpolation qualifiers must match the vertex shader's.
+        centroid in vec2 vUv;
+        centroid in vec3 vLocal;
         layout(location = 0) out vec4 oColor;
 
         // AMD-055 REQ-SCN-084: the floor mask — the bent scene normal, and the flag that says
