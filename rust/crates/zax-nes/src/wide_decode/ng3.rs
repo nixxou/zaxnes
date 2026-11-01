@@ -191,9 +191,14 @@ impl MarginDecoder for NinjaGaiden3 {
             .zip(matching)
             .find_map(|(placement, matching)| (matching >= MATCHING).then_some(placement))
         else {
-            // A row of the area the game drew otherwise than from the layout (the desert's dunes,
-            // which it shifts to animate them; the upper layer of 3-1A): its margins are what the
-            // ring of nametables holds beside the screen.
+            // A row of the area the game drew otherwise than from the layout (the upper layer of
+            // 3-1A): its margins are what the ring of nametables holds beside the screen, while
+            // the area is played. Over a cut scene or a transition, whose screen the layout does
+            // not explain (the area number is the last one played), the margins stay the
+            // backdrop: the ring holds the scene's other half (a portrait and its text twice).
+            if !playing(memory, &area, drawn) {
+                return true;
+            }
             for column in columns.filter(|column| (-16..=48).contains(column) && shown(*column)) {
                 let (tile, palette) = nametable_tile(memory, *row, column);
                 out.push(DecodedTile {
@@ -240,6 +245,35 @@ impl Placement {
         self.ring_near
             .map_or(world, |near| resolve_ring(world.rem_euclid(64), 64, near))
     }
+}
+
+/// Rows at the camera's scroll that show the area's layout, at least, for the screen to be the area
+/// played (a cut scene's or a transition's matches none).
+const PLAYED_ROWS: i32 = 4;
+
+/// Whether the screen is the area being played: enough of its rows, at the drawn camera's scroll,
+/// show the layout's tiles.
+fn playing(memory: &DecoderMemory<'_>, area: &Area<'_>, drawn: i32) -> bool {
+    let first = drawn >> 3;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0..64, 0..24.
+    let rows = (0..ROWS).filter(|&tile_row| {
+        let v = (((first >> 5) & 1) << 10) as u16 | ((tile_row as u16) << 5) | (first & 31) as u16;
+        let row = BackgroundRow {
+            line: 0,
+            v,
+            fine_x: 0,
+        };
+        let matching = (0..32)
+            .filter(|&column| {
+                area.tile_at(first + column, tile_row)
+                    .is_some_and(|(tile, _)| {
+                        (memory.nametable)(nametable_address(row, column)) == tile
+                    })
+            })
+            .count();
+        matching >= MATCHING
+    });
+    rows.take(PLAYED_ROWS as usize).count() == PLAYED_ROWS as usize
 }
 
 /// How many of the 32 columns of the centre of `row` show what the layout gives there, placed as
