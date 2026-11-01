@@ -673,6 +673,12 @@ internal static class SceneShaders
             // curvature, has a +Y component of at least 0.9, and that belongs to a wide enough
             // instance. The normal stored is the bent one: the ray itself is traced on the
             // geometry as rendered (REQ-SCN-080, second bullet).
+            //
+            // Q-094: the vertical of the test is the +Y axis of the scene frame, read literally.
+            // A profile that runs the local camera of REQ-SCN-009 lays the NES plane flat, and
+            // its floor is then perpendicular to +Y: it never reflects. The ticket asks whether
+            // the vertical should instead be the camera's own, q.(0,1,0), which AMD-045
+            // REQ-SCN-072 made the only vertical the renderer still has.
             float floorFacing = step(0.9, normalize(vFlatNormal).y);
             oFloor = vec4(n * 0.5 + 0.5, uFloorExtent != 0 ? floorFacing : 0.0);
         }

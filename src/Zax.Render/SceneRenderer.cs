@@ -225,7 +225,14 @@ public sealed class SceneRenderer : ISceneRenderer
     /// which is exactly the « avant courbure » the requirement asks for.
     /// </para>
     /// </remarks>
-    // Q-093
+    /// <remarks>
+    /// <para>
+    /// <b>Q-094</b>: the box is measured in the <c>xz</c> plane, the plane perpendicular to the
+    /// +Y axis the normal half of the test uses. Should that vertical become the camera's own,
+    /// this measurement has to follow it.
+    /// </para>
+    /// </remarks>
+    // Q-093, Q-094
     private void MarkFloorSurfaces(float sceneScale)
     {
         float threshold = SceneConstants.FloorExtent * sceneScale;
