@@ -424,6 +424,206 @@ public sealed class CylinderVectorTests
     }
 
     [Fact]
+    public void Q101_a_wrapped_half_section_is_filled_from_its_own_side()
+    {
+        // REQ-E3D-450 (AMD-048), 447, 423, 426 — Q-101. A HALFHCYLINDER of D = 8, solid and
+        // fullWarp, over a tile whose column 0 is opaque on its four lower rows alone: the
+        // single segment is y = 4 to 7, so L = 3, A = 6, B = min(7, 6) = 6 and Cz = 7, and
+        // without flip the centre is C = 2f = 14 with Q2 and Q3 active.
+        //
+        // The writes land at u- = 7 - floor(p/2), inside the segment. The *far* side is
+        // u+ = 7 + floor(p/2), which runs to 10 — past the bottom of an eight-row texture, so
+        // REQ-E3D-426 wraps it onto the rows 0, 1 and 2 the tile leaves empty. Reading the
+        // texel there would make REQ-E3D-423 drop every voxel but the two of p = 0 and 1, and
+        // the section would keep 6 voxels on one row instead of 20 over four. Each column
+        // therefore takes the texel of its own side, as TV-Y4 states it for the full types.
+        EnginePattern pattern = Geo.OneTile(Geo.Tile(
+            "........",
+            "........",
+            "........",
+            "........",
+            "1.......",
+            "1.......",
+            "1.......",
+            "1......."));
+        PatternInstance instance = Geo.Object3D(
+            depth: 8,
+            geometry: Geo3DType.HalfHCylinder,
+            solid: true,
+            fullWarp: true);
+        TileVoxels[] fields = Geo.Fields(pattern, instance, out int effectiveDepth);
+
+        // (j, k) -> texel row, j = 7 - y: the rows 7, 6 and 5 of the image keep k in [1, 6] and
+        // the row 4, the one farthest from the flat face, keeps k in {3, 4}.
+        List<(int Line, int Depth, int Texel)> expected = [];
+        for (int j = 0; j <= 2; j++)
+        {
+            for (int k = 1; k <= 6; k++)
+            {
+                expected.Add((j, k, 7 - j));
+            }
+        }
+
+        expected.Add((3, 3, 4));
+        expected.Add((3, 4, 4));
+        expected.Sort();
+
+        Assert.Equal(7, effectiveDepth);
+        Assert.Equal(expected, Geo.Section(fields[0], line: 0, vertical: false));
+
+        // REQ-E3D-447: antiShadow substitutes the texel of the region 2 points and « pas dans la
+        // position des voxels ». Reading the far side broke that too — there the substitution
+        // moved the read further outside the segment and deleted voxels. Read from its own side,
+        // both substitutions stay inside it and only the colours of the flanks move.
+        PatternInstance shadowed = Geo.Object3D(
+            depth: 8,
+            geometry: Geo3DType.HalfHCylinder,
+            solid: true,
+            fullWarp: true,
+            antiShadow: true);
+        TileVoxels[] shadowedFields = Geo.Fields(pattern, shadowed, out int shadowedDepth);
+
+        Assert.Equal(7, shadowedDepth);
+        Assert.Equal(
+            expected.ConvertAll(v => (v.Line, v.Depth)),
+            Geo.Section(shadowedFields[0], line: 0, vertical: false)
+                .ConvertAll(v => (v.Line, v.Depth)));
+
+        // The flipped half is the same section mirrored inside the segment: the centre moves to
+        // C = 2s = 8, Q0 and Q1 become the active pair, the writes land at u+ = 4 + floor(p/2)
+        // and the far side u- = 4 - floor(p/2) would run down to 1, onto the empty rows again.
+        // The flat face is then the image row 4 (j = 3) and the narrow end its row 7 (j = 0).
+        PatternInstance flipped = Geo.Object3D(
+            depth: 8,
+            geometry: Geo3DType.HalfHCylinder,
+            solid: true,
+            fullWarp: true,
+            flip: true);
+        TileVoxels[] flippedFields = Geo.Fields(pattern, flipped, out int flippedDepth);
+
+        List<(int Line, int Depth, int Texel)> mirrored = [];
+        for (int j = 1; j <= 3; j++)
+        {
+            for (int k = 1; k <= 6; k++)
+            {
+                mirrored.Add((j, k, 7 - j));
+            }
+        }
+
+        mirrored.Add((0, 3, 7));
+        mirrored.Add((0, 4, 7));
+        mirrored.Sort();
+
+        Assert.Equal(7, flippedDepth);
+        Assert.Equal(mirrored, Geo.Section(flippedFields[0], line: 0, vertical: false));
+    }
+
+    [Fact]
+    public void Q101_the_bush_of_super_mario_bros_closes()
+    {
+        // Q-101 — the ROM observation the reading comes from, as a vector. The right-hand bush of
+        // « Super Mario Bros. » 1-1 is one 3D object of 8 x 2 cells (64 x 16 texels),
+        // HALFHCYLINDER, sizeZ = 16, solid = fullWarp = antiShadow = true, no flip, the cells
+        // (0,0) and (7,0) empty. H types cut their segments column by column over the whole
+        // pattern, so a full column is a segment of 16 pixels: L = 15, A = 30, B = 15, D' = 16.
+        // The pixels below are the ones the engine's own texture carries (REQ-E3D-426), the two
+        // greens of the bush having collapsed onto one colour index.
+        //
+        // Reading the far side left the lower row of the bush two units tall instead of eight —
+        // the holes the sky showed through — and cut two columns off the tiles of the upper row.
+        // The five figures asserted here are the reference's.
+        EnginePattern pattern = Bush();
+        PatternInstance instance = Geo.Object3D(
+            depth: 16,
+            geometry: Geo3DType.HalfHCylinder,
+            solid: true,
+            fullWarp: true,
+            antiShadow: true);
+        Geo.Fields(pattern, instance, out int effectiveDepth);
+        Assert.Equal(16, effectiveDepth);
+
+        // The full cell (screen (182,200)): the six identical cells of the lower row share one
+        // field (REQ-E3D-425), which the columns of all of them fill, so the result is a closed
+        // block eight units tall and the whole of D deep.
+        TileMesh full = BushMesh(pattern, instance, 1, 1);
+        Assert.Equal(112, full.VertexCount);
+        Assert.Equal(56, full.TriangleCount);
+        Assert.True(Geo.Close(new Vec3(-4f, -4f, -8f), full.BoundsMin));
+        Assert.True(Geo.Close(new Vec3(4f, 4f, 8f), full.BoundsMax));
+
+        // The left and right ends of the lower row: eight units tall, not two.
+        TileMesh left = BushMesh(pattern, instance, 0, 1);
+        Assert.Equal(404, left.VertexCount);
+        Assert.True(Geo.Close(new Vec3(-4f, -4f, -7f), left.BoundsMin));
+        Assert.True(Geo.Close(new Vec3(4f, 4f, 7f), left.BoundsMax));
+
+        TileMesh right = BushMesh(pattern, instance, 7, 1);
+        Assert.Equal(720, right.VertexCount);
+        Assert.True(Geo.Close(new Vec3(-4f, -4f, -7f), right.BoundsMin));
+        Assert.True(Geo.Close(new Vec3(4f, 4f, 7f), right.BoundsMax));
+
+        // The upper row, the two images it alternates: the full eight units wide, not six.
+        TileMesh upperA = BushMesh(pattern, instance, 1, 0);
+        Assert.Equal(524, upperA.VertexCount);
+        Assert.Equal(-4f, upperA.BoundsMin.X, 3);
+
+        Assert.Equal(632, BushMesh(pattern, instance, 2, 0).VertexCount);
+
+        // REQ-E3D-447 again, on the shape that exposed it: antiShadow moves colours and not
+        // voxels, so the five meshes are the same without it.
+        PatternInstance plain = Geo.Object3D(
+            depth: 16,
+            geometry: Geo3DType.HalfHCylinder,
+            solid: true,
+            fullWarp: true);
+        foreach ((int cx, int cy, int vertices) in
+            new[] { (1, 1, 112), (0, 1, 404), (7, 1, 720), (1, 0, 524), (2, 0, 632) })
+        {
+            Assert.Equal(vertices, BushMesh(pattern, plain, cx, cy).VertexCount);
+        }
+    }
+
+    /// <summary>The 8 × 2 pattern of the right-hand bush of « Super Mario Bros. » 1-1.</summary>
+    private static EnginePattern Bush()
+    {
+        TileImageKey upperA = Geo.Tile(
+            "......11", ".....111", "...11111", "..111111",
+            "..111111", "..111111", ".1111221", "11112111");
+        TileImageKey upperB = Geo.Tile(
+            "11......", "111.....", "1111....", "1111.1..",
+            "1111111.", "12111111", "11211111", "11111111");
+        TileImageKey left = Geo.Tile(
+            ".....111", "....1111", "...11111", "...11111",
+            ".1111111", "11111111", "11111111", ".1111111");
+        TileImageKey right = Geo.Tile(
+            "1..1....", "1.111...", "11111...", "11111.1.",
+            "11111111", "11111111", "11111111", "1111111.");
+        TileImageKey filled = Geo.Rows("11111111");
+
+        return Geo.Pattern(
+            8,
+            2,
+            null, upperA, upperB, upperA, upperB, upperA, upperB, null,
+            left, filled, filled, filled, filled, filled, filled, right);
+    }
+
+    /// <summary>The mesh of the image the cell (<c>cx</c>, <c>cy</c>) of the bush carries.</summary>
+    private static TileMesh BushMesh(EnginePattern pattern, PatternInstance instance, int cx, int cy)
+    {
+        TileImage image = Geo.Present(pattern.ImageAt(cx, cy));
+        for (int n = 0; n < pattern.Images.Count; n++)
+        {
+            if (ReferenceEquals(pattern.Images[n], image))
+            {
+                return Geo.Mesh(pattern, instance, imageIndex: n);
+            }
+        }
+
+        Assert.Fail($"the cell ({cx}, {cy}) carries no image of the pattern");
+        return null!;
+    }
+
+    [Fact]
     public void Section_control_cases_of_paragraph_5_3()
     {
         // Row `111.....`, VCYLINDER, D = 8 -> six voxels, D' = 3.

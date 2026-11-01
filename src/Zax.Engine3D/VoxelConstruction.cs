@@ -484,22 +484,34 @@ public sealed class VoxelConstruction
 
         if (_fullWarp)
         {
-            // REQ-E3D-450 (AMD-048): fill each column of the section over the depth span of
-            // the point, with the texel of the opposite quadrant and no zero test. The span is
-            // {z : z- <= z <= z+}, hence empty when the bounds of the point are the wrong way
-            // round — which happens for the first point of region 2, and for the second one too
-            // when D is even (AMD-048 replaces the answer of Q-015 and closes Q-082; the span
-            // of REQ-E3D-448 and REQ-E3D-449 is unchanged).
+            // REQ-E3D-450 (AMD-048): fill each column of the section over the depth span of the
+            // point, with no zero test. The span is {z : z- <= z <= z+}, hence empty when the
+            // bounds of the point are the wrong way round — which happens for the first point of
+            // region 2, and for the second one too when D is even (AMD-048 replaces the answer
+            // of Q-015 and closes Q-082; the span of REQ-E3D-448 and REQ-E3D-449 is unchanged).
+            //
+            // Q-101: the texel of a column is the one of its *own* side — Q1 for the u+ writes,
+            // Q3 for the u- writes. For the full types that is the text verbatim, Q1's texel
+            // being Q2's and Q3's being Q0's (REQ-E3D-447), so TV-Y4, TV-Y9 and TV-Y10 do not
+            // move; it is also what TV-Y4 states in words, « chaque colonne de la section est
+            // remplie avec la couleur de son propre pixel ». For the *half* types the two
+            // namings part company, and reading the far side there is what broke the bushes of
+            // « Super Mario Bros. »: REQ-E3D-445 puts their centre C at one *end* of the
+            // segment, so the far side lies outside it by up to L pixels, REQ-E3D-426 wraps that
+            // read around the texture, and REQ-E3D-423 then turns the voxel transparent wherever
+            // it lands on an empty cell. Reading its own side keeps every read inside the
+            // segment, and leaves antiShadow moving colours alone — which is what REQ-E3D-447
+            // says it does (« pas dans la position des voxels »).
             for (int z = zm; z <= zp; z++)
             {
                 if (q0 && q1)
                 {
-                    WriteSection(line, up, z, t2);
+                    WriteSection(line, up, z, t1);
                 }
 
                 if (q2 && q3)
                 {
-                    WriteSection(line, um, z, t0);
+                    WriteSection(line, um, z, t3);
                 }
             }
 
