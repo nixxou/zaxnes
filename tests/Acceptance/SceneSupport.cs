@@ -58,7 +58,8 @@ public sealed class SceneFixture
         string? tags = null,
         VariantTexture? texture = null,
         Vec3F? scale = null,
-        Vec3F? rotation = null)
+        Vec3F? rotation = null,
+        Vec3F? offset = null)
     {
         ProfileTile[] cells = [.. Enumerable
             .Range(0, columns * rows)
@@ -82,6 +83,7 @@ public sealed class SceneFixture
             Texture = texture,
             Scale = scale,
             Rotation = rotation,
+            Offset = offset,
         });
         _profile.PermanentPatterns.Add(pattern);
         return this;

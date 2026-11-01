@@ -26,9 +26,9 @@ Out of scope: REQ-SCN-083 (V2-18) and REQ-SCN-084 (next session).
       frame) and backdrop (scene frame), before lighting; `BuildDepth` plumbed to the renderer.
       — **done**, see 6/7
 - [x] 6/7 Pixel shadows (REQ-SCN-082): shadow evaluated at the voxel centre of the fragment,
-      opaque tiles only. — **done**, 0ff9b6c
-- [ ] 7/7 Acceptance tests, AMD-055 + R2 reviews copied to `docs/spec/changes/`, journal
-      entry, lot commit.
+      opaque tiles only. — **done**, a11341e
+- [x] 7/7 Acceptance tests, AMD-055 + R2 reviews copied to `docs/spec/changes/`, journal
+      entry, lot commit. — **done**, lot commit below
 
 ## Lot V2-18 — Enhanced style: screen-space ambient occlusion
 
@@ -67,3 +67,31 @@ MSVO is rendered as Depth — declared fallback **(D)**: the MiniEngine sources 
   leaves early on it: the branch is uniform and `fwidth()` in `zaxGridAxis` stays valid.
 - The two tick-box parameters stay whole numbers (SPEC-09 type « entier », domain 0 à 1) and
   the panel draws them with `DrawTickBox`, as AMD-055 §4 asks ("case").
+
+### V2-17, step 7 (acceptance tests)
+
+- Tests: `tests/Acceptance/Amd055Tests.cs` (5, no GL: the criteria of REQ-SCN-078 and
+  REQ-SCN-079) and `tests/Acceptance/Amd055CaptureTests.cs` (9 GL captures: REQ-SCN-080,
+  REQ-SCN-081 close-up G and wide framing B, REQ-SCN-082).
+- `SceneFixture.Pattern` took three new optional arguments (`texture`, `scale`, `rotation`,
+  then `offset`) and a `FlatDirectTexture` helper: the close-ups need a custom texture in the
+  direct format and the object transform of the third criterion of REQ-SCN-081.
+- The cameras of the close-ups are placed in **FPV** (REQ-SCN-009): TPV re-centres the target
+  on the visible rectangle and aims at a point of the `z` = 0 plane (REQ-SCN-007, -008), so
+  « camera at (x, y, z), aiming at the centre » is not reachable with it. Measured points are
+  found by projecting through the view the renderer used, never by a hard-coded pixel.
+- The engine places a layer-L1 shape of depth 8 on `z` ∈ [0, 8], not [−4, 4] (front alignment,
+  REQ-E3D-205); the fixtures pass `offset.z = −4` to put the block where the close-ups say it
+  is. `Offset.X/Y` move the tile centre, `Offset.Z` the shape's own centre.
+- `SettingsModel.Set*` returns whether the value **changed**, not whether it was accepted, so
+  a test that writes an out-of-domain value must assert on the read-back alone.
+- The groove lines of the wide framing B are followed two columns at a time, with the window
+  centred on the row the previous slope predicts and the centre taken as a darkness-weighted
+  centroid: at 90° the line climbs by more than a pixel per column near the edges of the face,
+  and the criterion wants it straight to less than one pixel at zero curvature.
+- **Q-092** written: (a) the four points of the close-up G are given both as « the tile adjacent
+  to the centre of the face » and as the tile centred on (132, 132), which are two different
+  tiles; the coordinates were followed and the choice is unobservable. (b) REQ-SCN-082 says the
+  shadow edges fall « in the middle of a voxel », which holds for the two **near** edges only:
+  the plate is one voxel thick, its upper face casts 10 units instead of 29/3, so the far edges
+  land exactly on +14 — which is what the criterion's own « 6 and 14 » boundary needs.
