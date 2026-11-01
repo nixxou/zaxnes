@@ -40,14 +40,14 @@ internal sealed class OcclusionPass : IDisposable
     private uint[] _textures = [];
     private int _width;
     private int _height;
+    private int _kernelSamples;
     private bool _disposed;
 
-    /// <summary>Creates the pass; its buffers are allocated on the first use.</summary>
+    /// <summary>Creates the pass; its buffers and its kernel are built on the first use.</summary>
     public OcclusionPass(GL gl)
     {
         ArgumentNullException.ThrowIfNull(gl);
         _gl = gl;
-        BuildKernel();
     }
 
     /// <summary>Width of the occlusion buffers in pixels, 0 before the first run.</summary>
@@ -110,6 +110,11 @@ internal sealed class OcclusionPass : IDisposable
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _framebuffers[0]);
         _gl.Viewport(0, 0, (uint)_width, (uint)_height);
 
+        // REQ-SCN-083: the kernel is laid out for the number of samples this quality reads, not
+        // for the size of the array — see BuildKernel.
+        int samples = SamplesByQuality[Math.Clamp(style.AoQuality, 0, 2)];
+        BuildKernel(samples);
+
         ShaderProgram occlusion = _occlusion ??= ShaderProgram.Create(
             _gl, "occlusion", SceneShaders.ResolveVertex, OcclusionShaders.OcclusionFragment);
         occlusion.Use();
@@ -118,8 +123,8 @@ internal sealed class OcclusionPass : IDisposable
         occlusion.Set("uProjection", projection);
         occlusion.Set("uDepthTexel", sceneTexel);
         occlusion.Set("uRadius", style.OcclusionRadius(sceneScale));
-        occlusion.Set("uSamples", SamplesByQuality[Math.Clamp(style.AoQuality, 0, 2)]);
-        for (int i = 0; i < _kernel.Length; i++)
+        occlusion.Set("uSamples", samples);
+        for (int i = 0; i < samples; i++)
         {
             occlusion.SetArray("uKernel", i, _kernel[i]);
         }
@@ -202,27 +207,59 @@ internal sealed class OcclusionPass : IDisposable
     }
 
     /// <summary>
-    /// The kernel of REQ-SCN-083: directions of the hemisphere about <c>+Z</c>, packed towards
-    /// the point so that the samples near it weigh more than the ones at the rim (Chapman 2013).
+    /// The kernel of REQ-SCN-083: <paramref name="samples"/> directions of the hemisphere about
+    /// <c>+Z</c>, packed towards the point so that the samples near it weigh more than the ones
+    /// at the rim (Chapman 2013).
     /// </summary>
+    /// <param name="samples">
+    /// How many entries the shader will read. The kernel is built <b>for that count</b>: the
+    /// spiral and the packing both run from the first entry to the last, so whatever the
+    /// quality, the samples cover the whole hemisphere and reach out to the full radius
+    /// <c>r</c> of REQ-SCN-083.
+    /// </param>
     /// <remarks>
-    /// Built once, with a fixed sequence rather than a random one: the image of a still camera
-    /// must not move from frame to frame, and a test must be able to repeat a capture.
+    /// <para>
+    /// Built with a fixed sequence rather than a random one: the image of a still camera must
+    /// not move from frame to frame, and a test must be able to repeat a capture.
+    /// </para>
+    /// <para>
+    /// The count matters because the shader reads the first <c>uSamples</c> entries and no more.
+    /// A kernel laid out for <see cref="OcclusionShaders.MaxSamples"/> entries and read by its
+    /// prefix is a <em>different</em> kernel: its first ten entries of sixteen stay within
+    /// 0.45 <c>r</c> of the point and hug the pole of the hemisphere, which turns the band of
+    /// REQ-SCN-083 into a thin outline — the deviation lot V2-22 measured.
+    /// </para>
+    /// <para>
+    /// <b>Q-095</b>: the radial law is <c>0.1 + 0.9 × rank</c>. It is still « resserré près du
+    /// point » as the orienting reference of REQ-SCN-083 asks — tighter than an even spread
+    /// over the volume of the hemisphere — but a square law left only three of ten samples
+    /// past <c>0.5 r</c>.
+    /// </para>
     /// </remarks>
-    private void BuildKernel()
+    // Q-095
+    private void BuildKernel(int samples)
     {
+        if (_kernelSamples == samples)
+        {
+            return;
+        }
+
+        _kernelSamples = samples;
+
         // The golden-angle spiral: it spreads the directions evenly over the hemisphere without
         // a lattice of its own, which a fixed pattern of the kernel would show as a texture.
         const float GoldenAngle = 2.39996323f;
-        for (int i = 0; i < _kernel.Length; i++)
+        for (int i = 0; i < samples; i++)
         {
-            float cosine = 1f - ((i + 0.5f) / _kernel.Length);
+            float cosine = 1f - ((i + 0.5f) / samples);
             float sine = MathF.Sqrt(1f - (cosine * cosine));
             float angle = i * GoldenAngle;
 
             // Packed towards the origin: the scale grows as the square of the rank, so most of
-            // the samples sit close to the point and the contact darkening is the sharpest part.
-            float scale = 0.1f + (0.9f * ((i + 1f) / _kernel.Length) * ((i + 1f) / _kernel.Length));
+            // the samples sit close to the point and the contact darkening is the sharpest
+            // part, while the last of them reaches r itself.
+            float rank = (i + 1f) / samples;
+            float scale = 0.1f + (0.9f * rank);
             _kernel[i] = new Vector4(
                 MathF.Cos(angle) * sine * scale,
                 MathF.Sin(angle) * sine * scale,

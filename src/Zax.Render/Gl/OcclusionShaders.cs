@@ -56,6 +56,22 @@ internal static class OcclusionShaders
         uniform float uRadius;
         uniform mat4 uProjection;
 
+        // Q-095: the share of the kernel this estimator finds blocked at a right-angle corner,
+        // where three faces meet — measured at 0.35 on close-up A of §2.4. It is the point at
+        // which the darkening reaches the ceiling « O <= 0.1 x ao.strength » of REQ-SCN-083,
+        // and the law the requirement leaves free: O is the blocked share of the hemisphere,
+        // scaled so that the deepest ordinary corner reaches the ceiling. A simple edge — a
+        // floor pixel at the foot of a wall, half the hemisphere behind it — then reaches about
+        // two thirds of it. Without this normalisation the ceiling is never approached and the
+        // band is some four times weaker than the reference (lot V2-22).
+        const float zaxCornerShare = 0.35;
+
+        // How far above the tangent plane of the point an occluder must rise to count, as the
+        // sine of the angle it makes with that plane — about 12 degrees. It leaves a surface
+        // unable to darken itself whatever the distance to the occluder, and it absorbs what
+        // is left of the tilt of the normal rebuilt from the depth.
+        const float zaxTangentSine = 0.1;
+
         void main()
         {
             float raw;
@@ -70,10 +86,15 @@ internal static class OcclusionShaders
 
             // The flat normal of the pixel, from two neighbours of the depth texture. Taken on
             // the side where the depth is continuous, so that a silhouette does not tilt it.
-            vec3 right = zaxViewPosition(vUv + vec2(uDepthTexel.x, 0.0));
-            vec3 left = zaxViewPosition(vUv - vec2(uDepthTexel.x, 0.0));
-            vec3 up = zaxViewPosition(vUv + vec2(0.0, uDepthTexel.y));
-            vec3 down = zaxViewPosition(vUv - vec2(0.0, uDepthTexel.y));
+            // The baseline is two texels rather than one: the view position rebuilt from a
+            // 24-bit depth carries a quantisation error that does not shrink with the step, so
+            // the shorter the step the more it tilts the normal. Two texels halve that tilt and
+            // still follow the geometry closely enough at the half resolution the pass runs at.
+            vec2 baseline = uDepthTexel * 2.0;
+            vec3 right = zaxViewPosition(vUv + vec2(baseline.x, 0.0));
+            vec3 left = zaxViewPosition(vUv - vec2(baseline.x, 0.0));
+            vec3 up = zaxViewPosition(vUv + vec2(0.0, baseline.y));
+            vec3 down = zaxViewPosition(vUv - vec2(0.0, baseline.y));
             vec3 dx = abs(right.z - p.z) < abs(left.z - p.z) ? right - p : p - left;
             vec3 dy = abs(up.z - p.z) < abs(down.z - p.z) ? up - p : p - down;
 
@@ -107,10 +128,6 @@ internal static class OcclusionShaders
             tangent = normalize(tangent);
             mat3 basis = mat3(tangent, cross(n, tangent), n);
 
-            // A bias along the normal, a fraction of the radius: without it a flat surface
-            // occludes itself, and the first invariant of §2.4 wants a lone plane untouched.
-            float bias = 0.04 * uRadius;
-
             float occlusion = 0.0;
             for (int i = 0; i < uSamples; i++)
             {
@@ -129,24 +146,43 @@ internal static class OcclusionShaders
                 }
 
                 float sampleRaw;
-                float sampled = zaxViewPosition(uv, sampleRaw).z;
+                vec3 occluder = zaxViewPosition(uv, sampleRaw);
                 if (zaxIsEmpty(sampleRaw))
+                {
+                    continue;
+                }
+
+                vec3 toOccluder = occluder - p;
+                float span = length(toOccluder);
+                if (span < 1e-5)
                 {
                     continue;
                 }
 
                 // The occluder is in front of the sample: in view space z grows towards the
                 // camera, so "in front" is a larger z.
-                float inFront = step(at.z + bias, sampled);
+                float inFront = step(at.z, occluder.z);
 
-                // The range check of Chapman 2013: an occluder farther than the radius in depth
-                // is not part of this point's neighbourhood. It is what makes O nil wherever no
-                // occluding geometry is within 2 r (REQ-SCN-083).
-                float range = smoothstep(0.0, 1.0, uRadius / max(1e-4, abs(p.z - sampled)));
-                occlusion += inFront * range;
+                // ... and it rises above the tangent plane of the point. Another point of the
+                // same surface lies *in* that plane and so never darkens it, however grazing
+                // the view of that surface is: this is what keeps a lone plane untouched, the
+                // first invariant of §2.4, without a depth bias that would also eat the
+                // darkening at a contact.
+                float above = step(zaxTangentSine, dot(toOccluder, n) / span);
+
+                // The range check of Chapman 2013, measured on the distance rather than on the
+                // depth alone: an occluder farther than the radius is not part of this point's
+                // neighbourhood, and past 2 r it weighs nothing at all, which is what makes O
+                // nil wherever no occluding geometry is within 2 r (REQ-SCN-083). The
+                // transition is smooth, the effect having no sharp outline.
+                float range = 1.0 - smoothstep(uRadius, 2.0 * uRadius, span);
+                occlusion += inFront * above * range;
             }
 
-            oColor = vec4(occlusion / float(uSamples), 0.0, 0.0, 1.0);
+            // Q-095: the raw share of blocked samples, brought to the ceiling at a right-angle
+            // contact. The buffer is R8, so values above 1 clamp there; the apply pass scales
+            // what is left by « 0.1 x ao.strength » (REQ-SCN-083).
+            oColor = vec4(occlusion / (float(uSamples) * zaxCornerShare), 0.0, 0.0, 1.0);
         }
         """;
 
