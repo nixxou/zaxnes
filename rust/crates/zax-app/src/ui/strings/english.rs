@@ -377,6 +377,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_OPTION_PIPELINE, "Parallel scripts"),
     (keys::HANDHELD_OPTION_OPTIMIZATIONS, "Optimizations"),
     (keys::HANDHELD_REGION_AUTO, "Auto (ROM)"),
+    (keys::HANDHELD_OPTION_ADVANCED, "Advanced options"),
     (keys::HANDHELD_OPTION_TOUCH_PAD, "Touch pad"),
     (keys::HANDHELD_TOUCH_PAD_ON, "Yes"),
     (keys::HANDHELD_TOUCH_PAD_OFF, "No"),

@@ -30,7 +30,9 @@ pub fn offered() -> bool {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TouchPadView {
     pub layout: TouchLayout,
-    pressed: [bool; 9],
+    pressed: [bool; CONTROLS],
+    /// The camera does not follow the fingers.
+    pub camera_locked: bool,
 }
 
 impl TouchPadView {
@@ -76,11 +78,20 @@ pub enum TouchControl {
     Select,
     Start,
     Menu,
+    /// The 2D picture or the 3D (Y in game).
+    Flat,
+    /// The camera back to its default view (X in game).
+    Recenter,
+    /// Locks the camera against the fingers, or frees it; not a button of the controller.
+    Lock,
 }
+
+/// How many controls the pad has.
+const CONTROLS: usize = 12;
 
 impl TouchControl {
     /// The controls, in the order of [`TouchPad::pressed`].
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; CONTROLS] = [
         Self::Up,
         Self::Down,
         Self::Left,
@@ -90,16 +101,20 @@ impl TouchControl {
         Self::Select,
         Self::Start,
         Self::Menu,
+        Self::Flat,
+        Self::Recenter,
+        Self::Lock,
     ];
 
     const fn index(self) -> usize {
         self as usize
     }
 
-    /// The game-controller button it presses: A and B by their labels, as on a handheld.
-    const fn button(self) -> sys::SDL_GameControllerButton {
+    /// The game-controller button it presses: A and B by their labels, as on a handheld. The
+    /// lock presses none.
+    const fn button(self) -> Option<sys::SDL_GameControllerButton> {
         use sys::SDL_GameControllerButton as B;
-        match self {
+        Some(match self {
             Self::Up => B::SDL_CONTROLLER_BUTTON_DPAD_UP,
             Self::Down => B::SDL_CONTROLLER_BUTTON_DPAD_DOWN,
             Self::Left => B::SDL_CONTROLLER_BUTTON_DPAD_LEFT,
@@ -109,7 +124,10 @@ impl TouchControl {
             Self::Select => B::SDL_CONTROLLER_BUTTON_BACK,
             Self::Start => B::SDL_CONTROLLER_BUTTON_START,
             Self::Menu => B::SDL_CONTROLLER_BUTTON_GUIDE,
-        }
+            Self::Flat => B::SDL_CONTROLLER_BUTTON_Y,
+            Self::Recenter => B::SDL_CONTROLLER_BUTTON_X,
+            Self::Lock => return None,
+        })
     }
 }
 
@@ -154,6 +172,10 @@ pub struct TouchLayout {
     pub select: Rect,
     pub start: Rect,
     pub menu: Circle,
+    /// Top left: the 2D/3D switch, the camera's lock and its recentring.
+    pub flat: Circle,
+    pub lock: Circle,
+    pub recenter: Circle,
 }
 
 /// How far from its drawing a button still takes a finger, as a factor of its radius.
@@ -198,6 +220,18 @@ impl TouchLayout {
                 center: [width - unit * 0.08, unit * 0.08],
                 radius: unit * 0.045,
             },
+            flat: Circle {
+                center: [unit * 0.08, unit * 0.08],
+                radius: unit * 0.045,
+            },
+            lock: Circle {
+                center: [unit * 0.2, unit * 0.08],
+                radius: unit * 0.045,
+            },
+            recenter: Circle {
+                center: [unit * 0.32, unit * 0.08],
+                radius: unit * 0.045,
+            },
         }
     }
 
@@ -230,6 +264,12 @@ impl TouchLayout {
             Some(TouchControl::Start)
         } else if self.menu.contains(point, 1.6) {
             Some(TouchControl::Menu)
+        } else if self.flat.contains(point, 1.3) {
+            Some(TouchControl::Flat)
+        } else if self.lock.contains(point, 1.3) {
+            Some(TouchControl::Lock)
+        } else if self.recenter.contains(point, 1.3) {
+            Some(TouchControl::Recenter)
         } else {
             None
         }
@@ -308,8 +348,17 @@ impl Fingers {
             .then_some(finger.start)
     }
 
-    fn pressed(&self, layout: &TouchLayout) -> [bool; 9] {
-        let mut pressed = [false; 9];
+    /// Where the free fingers are, in the order they went down.
+    fn free_points(&self) -> Vec<[f32; 2]> {
+        self.fingers
+            .iter()
+            .filter(|finger| finger.grip == Grip::Free)
+            .map(|finger| finger.point)
+            .collect()
+    }
+
+    fn pressed(&self, layout: &TouchLayout) -> [bool; CONTROLS] {
+        let mut pressed = [false; CONTROLS];
         for finger in &self.fingers {
             match finger.grip {
                 Grip::Dpad => {
@@ -341,7 +390,16 @@ pub struct TouchPad {
     scale: [f32; 2],
     layout: TouchLayout,
     fingers: Fingers,
-    pressed: [bool; 9],
+    pressed: [bool; CONTROLS],
+    /// The camera does not follow the fingers while the pad is shown (on by default: the pad's
+    /// fingers would turn it).
+    camera_locked: bool,
+    /// One free finger turning the camera, in drawable pixels.
+    camera_finger: Option<[f32; 2]>,
+    /// The distance between two free fingers pinching, last seen.
+    pinch: Option<f32>,
+    /// The zoom asked by pinching since the last [`TouchPad::take_zoom`], in wheel notches.
+    zoom: f32,
     /// A real gamepad is connected (the automatic mode hides the pad).
     physical: bool,
     /// The virtual controller, open while the pad is shown.
@@ -369,7 +427,11 @@ impl TouchPad {
             scale: [1.0, 1.0],
             layout: TouchLayout::for_view(0.0, 0.0),
             fingers: Fingers::default(),
-            pressed: [false; 9],
+            pressed: [false; CONTROLS],
+            camera_locked: true,
+            camera_finger: None,
+            pinch: None,
+            zoom: 0.0,
             physical: physical_gamepad_connected(),
             joystick: ptr::null_mut(),
             name: CString::new(TOUCH_PAD_NAME).unwrap_or_default(),
@@ -395,7 +457,53 @@ impl TouchPad {
         (!self.joystick.is_null()).then_some(TouchPadView {
             layout: self.layout,
             pressed: self.pressed,
+            camera_locked: self.camera_locked,
         })
+    }
+
+    /// Whether this pad's fingers stand for the mouse's drag and wheel on the camera: on a touch
+    /// screen, not on a desktop trying the pad with the mouse.
+    #[must_use]
+    pub const fn drives_pointer(&self) -> bool {
+        !self.mouse_finger
+    }
+
+    /// The one free finger turning the camera, like a mouse drag; none while the camera is
+    /// locked, in a menu, or with no finger or two.
+    #[must_use]
+    pub const fn camera_finger(&self) -> Option<[f32; 2]> {
+        self.camera_finger
+    }
+
+    /// The zoom two free fingers asked by pinching since the last call, in wheel notches
+    /// (positive: closer).
+    pub fn take_zoom(&mut self) -> f32 {
+        std::mem::take(&mut self.zoom)
+    }
+
+    /// The camera follows free fingers in game, unless the shown pad locks it.
+    fn camera_free(&self) -> bool {
+        self.playing && !(self.camera_locked && !self.joystick.is_null())
+    }
+
+    /// One free finger turns the camera; two pinch its zoom.
+    fn follow_camera_fingers(&mut self) {
+        let points = if self.camera_free() {
+            self.fingers.free_points()
+        } else {
+            Vec::new()
+        };
+        self.camera_finger = (points.len() == 1).then(|| points[0]);
+        if let [first, second] = points[..] {
+            let spread = distance(first, second);
+            if let Some(last) = self.pinch {
+                // A notch per few hundredths of the view's height of spreading.
+                self.zoom += (spread - last) / (self.view[1] * 0.04).max(1.0);
+            }
+            self.pinch = Some(spread);
+        } else {
+            self.pinch = None;
+        }
     }
 
     /// Where fingers tapped outside the pad since the last call, in drawable pixels: clicks of
@@ -472,6 +580,7 @@ impl TouchPad {
             _ => return,
         }
         self.press(self.fingers.pressed(&self.layout));
+        self.follow_camera_fingers();
     }
 
     /// Attaches the virtual controller when the pad appears, detaches it when it goes.
@@ -481,27 +590,32 @@ impl TouchPad {
             self.attach();
         } else if !shown && !self.joystick.is_null() {
             self.fingers = Fingers::default();
-            self.press([false; 9]);
+            self.press([false; CONTROLS]);
             self.detach();
+        }
+        if !self.camera_free() {
+            self.camera_finger = None;
+            self.pinch = None;
         }
     }
 
-    fn press(&mut self, pressed: [bool; 9]) {
+    fn press(&mut self, pressed: [bool; CONTROLS]) {
         if self.joystick.is_null() {
-            self.pressed = [false; 9];
+            self.pressed = [false; CONTROLS];
             return;
         }
         for control in TouchControl::ALL {
             let on = pressed[control.index()];
-            if on != self.pressed[control.index()] {
+            if on == self.pressed[control.index()] {
+                continue;
+            }
+            match control.button() {
                 // SAFETY: the joystick is the open virtual controller of this pad.
-                unsafe {
-                    sys::SDL_JoystickSetVirtualButton(
-                        self.joystick,
-                        control.button() as i32,
-                        u8::from(on),
-                    );
-                }
+                Some(button) => unsafe {
+                    sys::SDL_JoystickSetVirtualButton(self.joystick, button as i32, u8::from(on));
+                },
+                None if on => self.camera_locked = !self.camera_locked,
+                None => {}
             }
         }
         self.pressed = pressed;
@@ -524,7 +638,7 @@ impl TouchPad {
             }
             self.joystick = sys::SDL_JoystickOpen(index);
         }
-        self.pressed = [false; 9];
+        self.pressed = [false; CONTROLS];
     }
 
     fn detach(&mut self) {
@@ -602,7 +716,7 @@ mod tests {
         assert!(pressed[TouchControl::B.index()] && !pressed[TouchControl::A.index()]);
         assert_eq!(None, fingers.up(1, 10.0));
         assert_eq!(None, fingers.up(2, 10.0));
-        assert_eq!([false; 9], fingers.pressed(&layout));
+        assert_eq!([false; CONTROLS], fingers.pressed(&layout));
     }
 
     #[test]
@@ -612,7 +726,7 @@ mod tests {
         fingers.down(Some(&layout), 1, [960.0, 400.0]);
         // Sliding onto A does not press it: the finger went down off the pad.
         fingers.moved(1, layout.a.center);
-        assert_eq!([false; 9], fingers.pressed(&layout));
+        assert_eq!([false; CONTROLS], fingers.pressed(&layout));
         assert_eq!(None, fingers.up(1, 10.0));
         fingers.take_scroll();
         fingers.down(Some(&layout), 2, [960.0, 400.0]);
@@ -641,6 +755,12 @@ mod tests {
         assert_eq!(Some(TouchControl::Select), layout.button_at(middle(layout.select)));
         assert_eq!(Some(TouchControl::Start), layout.button_at(middle(layout.start)));
         assert_eq!(Some(TouchControl::Menu), layout.button_at(layout.menu.center));
+        assert_eq!(Some(TouchControl::Flat), layout.button_at(layout.flat.center));
+        assert_eq!(Some(TouchControl::Lock), layout.button_at(layout.lock.center));
+        assert_eq!(
+            Some(TouchControl::Recenter),
+            layout.button_at(layout.recenter.center)
+        );
         assert_eq!(None, layout.button_at([960.0, 400.0]));
         assert!(layout.select.max[0] < layout.start.min[0]);
     }

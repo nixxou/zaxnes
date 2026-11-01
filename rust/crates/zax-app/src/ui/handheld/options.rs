@@ -65,10 +65,15 @@ pub enum OptionRow {
     Optimizations,
     /// The touch pad (Rust-only, a touch screen only): no, yes or automatic.
     TouchPad,
+    /// The settings of the desktop's options window (Rust-only): opens the
+    /// [`super::advanced`] page.
+    Advanced,
+    /// A setting of the advanced page.
+    Setting(SettingId),
 }
 
 /// The rows of the main page, in order.
-pub const ROWS: [OptionRow; 13] = [
+pub const ROWS: [OptionRow; 14] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -79,6 +84,7 @@ pub const ROWS: [OptionRow; 13] = [
     OptionRow::Camera,
     OptionRow::Region,
     OptionRow::Optimizations,
+    OptionRow::Advanced,
     OptionRow::Controls,
     OptionRow::Achievements,
     OptionRow::Profiler,
@@ -86,7 +92,7 @@ pub const ROWS: [OptionRow; 13] = [
 
 /// The rows of the main page where the touch pad is offered (Android): its row after the
 /// controls.
-pub const TOUCH_ROWS: [OptionRow; 14] = [
+pub const TOUCH_ROWS: [OptionRow; 15] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
@@ -97,6 +103,7 @@ pub const TOUCH_ROWS: [OptionRow; 14] = [
     OptionRow::Camera,
     OptionRow::Region,
     OptionRow::Optimizations,
+    OptionRow::Advanced,
     OptionRow::Controls,
     OptionRow::TouchPad,
     OptionRow::Achievements,
@@ -211,8 +218,9 @@ pub enum OptionsCommand {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct HandheldOptionsModel {
     selected: usize,
-    /// On the "Optimizations" page: the row of the main page to come back to.
-    optimizations: Option<usize>,
+    /// On a page of the main one ("Optimizations", "Advanced options"): that page's row, and the
+    /// row of the main page to come back to.
+    page: Option<(OptionRow, usize)>,
 }
 
 impl HandheldOptionsModel {
@@ -221,14 +229,16 @@ impl HandheldOptionsModel {
     pub const fn new() -> Self {
         Self {
             selected: 0,
-            optimizations: None,
+            page: None,
         }
     }
 
     /// The rows of the page shown.
     #[must_use]
     pub fn rows(&self) -> &'static [OptionRow] {
-        if self.optimizations.is_some() {
+        if let Some((OptionRow::Advanced, _)) = self.page {
+            super::advanced::rows()
+        } else if self.page.is_some() {
             &OPTIMIZATION_ROWS
         } else if zax_platform::input::touch::offered() {
             &TOUCH_ROWS
@@ -240,7 +250,13 @@ impl HandheldOptionsModel {
     /// Whether the "Optimizations" page is shown.
     #[must_use]
     pub const fn in_optimizations(&self) -> bool {
-        self.optimizations.is_some()
+        matches!(self.page, Some((OptionRow::Optimizations, _)))
+    }
+
+    /// The page of the main one shown ("Optimizations", "Advanced options"), if any.
+    #[must_use]
+    pub fn page(&self) -> Option<OptionRow> {
+        self.page.map(|(row, _)| row)
     }
 
     /// The selected row.
@@ -266,9 +282,12 @@ impl HandheldOptionsModel {
             PadButton::Up => self.selected = (self.selected + count - 1) % count,
             PadButton::Down => self.selected = (self.selected + 1) % count,
             PadButton::Left | PadButton::Right | PadButton::A
-                if self.selected() == OptionRow::Optimizations =>
+                if matches!(
+                    self.selected(),
+                    OptionRow::Optimizations | OptionRow::Advanced
+                ) =>
             {
-                self.optimizations = Some(self.selected);
+                self.page = Some((self.selected(), self.selected));
                 self.selected = 0;
             }
             PadButton::Left => return self.step(settings, -1),
@@ -280,8 +299,8 @@ impl HandheldOptionsModel {
                     _ => self.step(settings, 1),
                 };
             }
-            PadButton::B => match self.optimizations.take() {
-                Some(main) => self.selected = main,
+            PadButton::B => match self.page.take() {
+                Some((_, main)) => self.selected = main,
                 None => return Some(OptionsCommand::Close),
             },
             _ => {}
@@ -363,7 +382,8 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let next = *cycled(&TOUCH_PADS, &touch_pad(settings), step);
             settings.set(SettingId::InputTouchPad, SettingValue::Enum(next));
         }
-        OptionRow::Controls | OptionRow::Optimizations => {}
+        OptionRow::Controls | OptionRow::Optimizations | OptionRow::Advanced => {}
+        OptionRow::Setting(id) => super::advanced::step(id, settings, step),
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
     }
     None
@@ -398,6 +418,8 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::TouchPad => strings::get(keys::HANDHELD_OPTION_TOUCH_PAD),
+        OptionRow::Advanced => strings::get(keys::HANDHELD_OPTION_ADVANCED),
+        OptionRow::Setting(id) => super::advanced::label(id),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
         OptionRow::Optimizations => strings::get(keys::HANDHELD_OPTION_OPTIMIZATIONS),
         OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
@@ -453,7 +475,8 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             1 => strings::get(keys::HANDHELD_TOUCH_PAD_ON),
             _ => text::label_of_option("Auto"),
         },
-        OptionRow::Controls | OptionRow::Optimizations => String::new(),
+        OptionRow::Controls | OptionRow::Optimizations | OptionRow::Advanced => String::new(),
+        OptionRow::Setting(id) => super::advanced::value_text(id, settings),
         OptionRow::Achievements => switch(settings.get(SettingId::AchievementsEnabled).as_bool()),
     }
 }

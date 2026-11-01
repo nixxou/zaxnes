@@ -60,6 +60,7 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         OptionRow::HalfRate3d => &[SettingId::VideoHalfRate3d],
         OptionRow::Region => &[SettingId::EmuAutoTvMode, SettingId::EmuTvMode],
         OptionRow::TouchPad => &[SettingId::InputTouchPad],
+        OptionRow::Advanced | OptionRow::Setting(_) => &[],
         OptionRow::Language
         | OptionRow::Camera
         | OptionRow::Controls

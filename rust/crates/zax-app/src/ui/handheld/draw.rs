@@ -760,11 +760,7 @@ impl HandheldUi {
             return;
         };
         let painter = self.painter(ui);
-        let page = if self.options.in_optimizations() {
-            options::label(options::OptionRow::Optimizations)
-        } else {
-            String::new()
-        };
+        let page = self.options.page().map_or_else(String::new, options::label);
         painter.title(&text::options_title(), &page);
         // The list scrolls with the selection when it is longer than the screen.
         let rows = self.metrics.visible_rows(painter.size[1]);
@@ -775,7 +771,9 @@ impl HandheldUi {
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
                 options::OptionRow::Controls => String::new(),
-                options::OptionRow::Optimizations => ">".to_owned(),
+                options::OptionRow::Optimizations | options::OptionRow::Advanced => {
+                    ">".to_owned()
+                }
                 options::OptionRow::Overscan | options::OptionRow::Achievements => {
                     format!("{value} >")
                 }

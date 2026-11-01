@@ -413,6 +413,8 @@ pub struct SdlInput {
     pub gamepads: SdlGamepadHub,
     /// The touch pad (Rust-only): a virtual gamepad among `gamepads` while it is shown.
     pub touch: super::touch::TouchPad,
+    /// A finger of the touch pad holds the pointer's left button (it turns the camera).
+    touch_drag: bool,
 }
 
 impl SdlInput {
@@ -426,6 +428,7 @@ impl SdlInput {
             pointer: SdlPointer::new(sdl.mouse()),
             gamepads: SdlGamepadHub::new(sdl.game_controller()?, sdl.joystick()?),
             touch: super::touch::TouchPad::new(!cfg!(target_os = "android")),
+            touch_drag: false,
         })
     }
 
@@ -433,6 +436,7 @@ impl SdlInput {
     pub fn handle_event(&mut self, event: &Event) {
         if super::touch::offered() {
             self.touch.handle_event(event);
+            self.follow_touch_camera();
         }
         match event {
             Event::KeyDown {
@@ -462,6 +466,23 @@ impl SdlInput {
             | Event::JoyDeviceRemoved { .. } => self.gamepads.dirty = true,
             _ => {}
         }
+    }
+
+    /// The fingers turning and pinching the camera stand for the mouse's drag and wheel, so the
+    /// camera follows them as it follows the mouse, with the same smoothing (Rust-only).
+    fn follow_touch_camera(&mut self) {
+        if !self.touch.drives_pointer() {
+            return;
+        }
+        if let Some(point) = self.touch.camera_finger() {
+            self.pointer.position = point;
+            self.pointer.left = true;
+            self.touch_drag = true;
+        } else if self.touch_drag {
+            self.pointer.left = false;
+            self.touch_drag = false;
+        }
+        self.pointer.wheel += self.touch.take_zoom();
     }
 
     fn set_button(&mut self, button: MouseButton, down: bool) {

@@ -202,6 +202,7 @@ pub const HANDHELD_OPTION_PIPELINE: &str = "handheld.option.pipeline";
 pub const HANDHELD_OPTION_OPTIMIZATIONS: &str = "handheld.option.optimizations";
 pub const HANDHELD_REGION_AUTO: &str = "handheld.region.auto";
 pub const HANDHELD_OPTION_TOUCH_PAD: &str = "handheld.option.touch_pad";
+pub const HANDHELD_OPTION_ADVANCED: &str = "handheld.option.advanced";
 pub const HANDHELD_TOUCH_PAD_ON: &str = "handheld.touch_pad.on";
 pub const HANDHELD_TOUCH_PAD_OFF: &str = "handheld.touch_pad.off";
 pub const HANDHELD_CAMERA_RESET: &str = "handheld.camera.reset";
@@ -555,6 +556,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_OPTION_OPTIMIZATIONS,
     HANDHELD_REGION_AUTO,
     HANDHELD_OPTION_TOUCH_PAD,
+    HANDHELD_OPTION_ADVANCED,
     HANDHELD_TOUCH_PAD_ON,
     HANDHELD_TOUCH_PAD_OFF,
     HANDHELD_CAMERA_RESET,
