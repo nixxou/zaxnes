@@ -151,6 +151,8 @@ impl HostWindow {
         // A finger is the touch pad's, not a mouse (Rust-only, owner request).
         if cfg!(target_os = "android") {
             sdl2::hint::set("SDL_TOUCH_MOUSE_EVENTS", "0");
+            // The accelerometer is not a gamepad: it would hide the touch pad of the "Auto" mode.
+            sdl2::hint::set("SDL_ACCELEROMETER_AS_JOYSTICK", "0");
         }
 
         let sdl = sdl2::init()?;

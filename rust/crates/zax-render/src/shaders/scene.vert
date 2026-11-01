@@ -27,19 +27,22 @@ out vec2 vUv;
 
 void main()
 {
-    ZaxInstance instance = uInstances[gl_InstanceID];
+    // The fields are read from the block one by one: copying the whole instance into a local
+    // makes the Adreno 6xx compiler (Android) fail the link ("Unknown named pointer type").
+    int index = gl_InstanceID;
     vec3 local = aPosition;
     if (uDeform != 0)
     {
-        local += zaxDeformation(instance.deformTile.xyz, aPosition);
+        local += zaxDeformation(uInstances[index].deformTile.xyz, aPosition);
     }
 
-    vec4 scene = instance.model * vec4(local, 1.0);
+    vec4 scene = uInstances[index].model * vec4(local, 1.0);
     vScene = scene.xyz;
     // REQ-SCN-028: the normal is the mesh normal, unchanged by the deformation.
     // uNormalSign is -1 for a mirrored placement, whose cofactor matrix points the
     // normal inwards (Q-069).
-    mat3 normalMatrix = mat3(instance.normal[0].xyz, instance.normal[1].xyz, instance.normal[2].xyz);
+    mat3 normalMatrix = mat3(uInstances[index].normal[0].xyz, uInstances[index].normal[1].xyz,
+        uInstances[index].normal[2].xyz);
     vNormal = uNormalSign * (normalMatrix * aNormal);
     vUv = aUv;
     gl_Position = uViewProjection * vec4(scene.x, scene.y, -scene.z, 1.0);
