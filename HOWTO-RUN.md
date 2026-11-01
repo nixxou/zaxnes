@@ -593,7 +593,8 @@ Options utiles : `--frames synthetic:shadow` (une seule scène, voir `--list-sce
 4096 par défaut depuis `AMD-034`), `--skybox`, `--sky-bodies` (allume le soleil, la lune
 et les nuages procéduraux), `--bg-color`, `--no-nes-bg-color` (`scene.use_nes_bg_color` à faux :
 le fond de la scène devient la couleur personnalisée, ce qui rend visible la transparence du
-rectangle du mode 2D d'`AMD-050`), `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes) et
+rectangle du mode 2D d'`AMD-050`), `--real-time`, `--explain` (liste à dessiner groupée par objet 3D avec les couleurs NES atteintes,
+précédée de la caméra de la frame — le drapeau `localCam` de `REQ-SCN-009` y figure, cf. `Q-094`) et
 `--bench 300` (médiane et 99ᵉ centile sur 300 frames).
 
 Deux options supplémentaires dégradent volontairement la conversion, pour vérifier qu'une panne
