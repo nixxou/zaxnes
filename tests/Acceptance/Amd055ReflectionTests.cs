@@ -141,6 +141,74 @@ public sealed class Amd055ReflectionTests
     }
 
     /// <summary>
+    /// <b>Q-094</b> — the ring-mat case of lot V2-22. A profile that runs the <b>local camera</b>
+    /// of REQ-SCN-009 lays the NES plane flat and makes it the floor of the scene; the surface
+    /// the characters stand on is then a face of normal (0, 0, −1), and the vertical of the
+    /// picture is the camera's own, <c>q · (0, 1, 0)</c>. Read literally, the floor definition
+    /// of REQ-SCN-084 names the <b>+Y axis of the scene frame</b>, so such a surface is never a
+    /// floor and never reflects, which is what this test pins down.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The angles are those of the « Punch Out!! » profile, (−65, 0, 0): the camera's vertical
+    /// is then (0, 0.4226, −0.9063) and its dot product with the normal of the mat is 0.9063 —
+    /// just over the 0.9 of the requirement. The configuration therefore sits exactly on the
+    /// question: under the literal reading it reflects nothing, under the camera-vertical
+    /// reading it would reflect. <b>If Q-094 is answered the other way, this is the test to
+    /// turn round.</b>
+    /// </para>
+    /// <para>
+    /// The pass is asserted to have run, so what is measured is the orientation of the mat and
+    /// not an effect that was never applied. That the mat passes the <em>extent</em> half of the
+    /// definition — its instance measuring 64 × 8 units in the <c>xz</c> plane, over the 6 of
+    /// the requirement in both dimensions — is a property of the fixture, as it is of the ring
+    /// of « Punch-Out!! » (measured in Q-094).
+    /// </para>
+    /// </remarks>
+    [GlFact] // REQ-SCN-084, REQ-SCN-009
+    public void Q094_a_flat_mat_under_the_local_camera_is_not_a_floor_of_the_requirement()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = MatR();
+        CameraView view = View(scene);
+
+        Shot off = target.Render(renderer, scene);
+        Reflect(scene);
+        Shot on = target.Render(renderer, scene);
+
+        Assert.True(renderer.Statistics.ReflectionPass, "the reflection pass must have run.");
+
+        // The mat is the rectangle z = −4 the camera now sees as a floor receding upwards. The
+        // cube's screen footprint is left out with the same margin as the variant R-m.
+        (int left, int top, int right, int bottom) = ScreenBox(view, CubeBoundsR());
+
+        int measured = 0;
+        for (float x = 98f; x <= 158f; x += 2f)
+        {
+            for (float y = 90f; y <= 150f; y += 2f)
+            {
+                (int px, int py) = Pixel(view, new Vector3(x, y, -4f));
+                if (px < 0 || px >= Width || py < 0 || py >= Height)
+                {
+                    continue;
+                }
+
+                if (px >= left - 40 && px <= right + 40 && py >= top - 40 && py <= bottom + 40)
+                {
+                    continue;
+                }
+
+                measured++;
+                AssertClose(off, on, px, py, tolerance: 1);
+            }
+        }
+
+        Assert.True(measured > 200, $"only {measured} pixels of the mat were compared.");
+    }
+
+    /// <summary>
     /// REQ-SCN-084, third invariant — variant R-s: a lone block of 8 × 8 units in the <c>xz</c>
     /// plane <b>is</b> modified on at least one pixel of its upper face, and the same block at
     /// <c>scale = (1, 1, 0.5)</c> — 4 units in <c>z</c>, so under the <c>6 × s</c> of the
@@ -413,6 +481,27 @@ public sealed class Amd055ReflectionTests
 
     /// <summary>The variant R-m: the same shape without rotation, so a wall.</summary>
     private static SceneState WallR() => Scene(Ground.Wall, false, false, shallow: false);
+
+    /// <summary>
+    /// The ring-mat case of <b>Q-094</b>: the geometry of the variant R-m — a face of normal
+    /// (0, 0, −1) with the cube standing against it — seen through the <b>local camera</b> of
+    /// REQ-SCN-009 at the angles of the « Punch Out!! » profile, which turns that face into the
+    /// floor of the picture.
+    /// </summary>
+    // Q-094
+    private static SceneState MatR()
+    {
+        SceneState scene = Scene(Ground.Wall, false, false, shallow: false);
+
+        // REQ-SCN-009: q = R_Z(ry)·R_X(rx), the camera looks along q·(0,0,1) = (0, 0.906,
+        // 0.423) and its vertical is q·(0,1,0) = (0, 0.423, −0.906). The eye lands in front of
+        // the mat, below it in scene y, and the mat recedes upwards in the picture.
+        scene.Camera.LocalCamera = true;
+        scene.Camera.Current.Angles = new Vector3(-65f, 0f, 0f);
+        scene.Camera.Current.Distance = 60f;
+        scene.Camera.SnapToSetpoints();
+        return scene;
+    }
 
     /// <summary>
     /// The variant R-c: the close-up R with the red cube raised 12 units above the floor, so that

@@ -494,6 +494,66 @@ public sealed class Amd055OcclusionTests
     }
 
     /// <summary>
+    /// <b>Q-095</b> — the magnitude of the darkening at the default settings. REQ-SCN-083 binds
+    /// a ceiling and a proportionality, not a law, so none of the invariants above catches an
+    /// occlusion that is merely far too weak: a thin outline satisfies every one of them. This
+    /// is the regression test of lot V2-22, where the darkening was found four times weaker than
+    /// the reference — the kernel covering only <c>0.45 r</c> of the normative radius, and the
+    /// provisional law of Q-095 not yet in place.
+    /// </summary>
+    /// <remarks>
+    /// Measured on the floor of close-up A, away from the cube along <c>−x</c>, the side the
+    /// camera is on. The bounds are deliberately loose — they say « a band, not an outline »,
+    /// which is the review criterion of §2.4, and leave the law itself free.
+    /// </remarks>
+    [GlFact] // REQ-SCN-083
+    public void Q095_the_darkening_at_the_default_settings_is_a_band_and_not_an_outline()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+
+        Shot off = target.Render(renderer, scene);
+        Enhance(scene, 2);
+        Shot on = target.Render(renderer, scene);
+
+        // The ceiling is 0.3 at the default ao.strength = 3; at the contact the darkening must
+        // use a real share of it, not a twentieth.
+        double contact = Ratio(on, off, view, Contact[0]);
+        Assert.InRange(contact, 0.70, 0.90);
+
+        // And it must reach out over the radius r = 20, not die within a pixel or two of the
+        // contact: at half the radius from the face of the cube the floor is still darkened,
+        // and the profile never grows with the distance.
+        double previous = contact;
+        foreach ((float distance, double ceiling) in Profile)
+        {
+            double ratio = Ratio(on, off, view, new Vector3(124f - distance, Plane, 0f));
+            Assert.True(
+                ratio <= ceiling,
+                $"{distance} units from the cube the ratio is {ratio:F4}, over {ceiling:F2}.");
+            Assert.True(
+                ratio >= previous - 0.02,
+                $"{distance} units from the cube the ratio {ratio:F4} is below {previous:F4}.");
+            previous = ratio;
+        }
+    }
+
+    /// <summary>
+    /// How far the darkening of close-up A must still reach along <c>−x</c>: the distance from
+    /// the <c>−x</c> face of the cube in scene units, and the ratio the floor must stay under
+    /// there. <c>r</c> = 20 at the default <c>ao.radius</c> = 3.
+    /// </summary>
+    private static (float Distance, double Ceiling)[] Profile =>
+    [
+        (4f, 0.93),
+        (10f, 0.97),
+        (16f, 0.99),
+    ];
+
+    /// <summary>
     /// REQ-SCN-083, scope: the transparent objects of REQ-SCN-040, drawn after the pass, are
     /// neither darkened by the occlusion nor occluders for it (REQ-SCN-058 amended).
     /// </summary>
@@ -627,6 +687,13 @@ public sealed class Amd055OcclusionTests
         return (
             (int)Math.Round((x + 1f) * 0.5f * Width),
             (int)Math.Round((1f - y) * 0.5f * Height));
+    }
+
+    /// <summary>The ratio of the linear green values of two captures at a scene point.</summary>
+    private static double Ratio(Shot on, Shot off, in CameraView view, Vector3 point)
+    {
+        (int x, int y) = Pixel(view, point);
+        return Ratio(on, off, x, y);
     }
 
     /// <summary>The ratio of the linear green values of two captures at one pixel.</summary>
