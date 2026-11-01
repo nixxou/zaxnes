@@ -52,6 +52,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --run <n>                emulated frames to run before capturing (default 120)
   --sav <file>             battery-backed PRG-RAM to import before the run (REQ-CORE-095)
   --dump-frame <file.json> write the captured frame as a '--frames' JSON file
+  --dump-every <n>         with --dump-frame, also write every n-th frame to <file>_<frame>.json
   --widescreen <pixels>    widescreen margin the host offers on each side (default 0)
   --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
   --poke <frame>:<addr>=<value>,...  CPU writes (hex) made before those frames
@@ -130,6 +131,8 @@ pub struct Options {
     pub battery: Option<PathBuf>,
     /// Where to write the captured frame as JSON.
     pub dump_frame: Option<PathBuf>,
+    /// `--dump-every`: with `--dump-frame`, also a frame every this many frames.
+    pub dump_every: u32,
     /// Widescreen margin offered on each side, in pixels.
     pub widescreen: i32,
     /// Widescreen margin offered above and below, in pixels.
@@ -214,6 +217,7 @@ impl Options {
             pokes: Vec::new(),
             battery: None,
             dump_frame: None,
+            dump_every: 0,
             widescreen: 0,
             widescreen_y: 0,
             builtin_patches: true,
@@ -315,6 +319,10 @@ impl Options {
             }
             "--sav" => self.battery = Some(PathBuf::from(value)),
             "--dump-frame" => self.dump_frame = Some(PathBuf::from(value)),
+            "--dump-every" => {
+                self.dump_every = u32::try_from(integer(value)?)
+                    .map_err(|_| "--dump-every: a positive count".to_owned())?;
+            }
             "--widescreen" => self.widescreen = integer(value)?,
             "--widescreen-y" => self.widescreen_y = integer(value)?,
             "--png-nes" => self.png_nes = Some(PathBuf::from(value)),
@@ -603,6 +611,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             pokes: &options.pokes,
             battery: options.battery.as_deref(),
             dump_frame: options.dump_frame.as_deref(),
+            dump_every: options.dump_every,
             widescreen: options.widescreen,
             widescreen_y: options.widescreen_y,
             builtin_patches: options.builtin_patches,

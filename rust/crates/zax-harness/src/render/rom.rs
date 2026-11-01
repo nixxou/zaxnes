@@ -52,6 +52,8 @@ pub struct RomRequest<'a> {
     pub battery: Option<&'a Path>,
     /// Where to write the captured frame as a `--frames` JSON file.
     pub dump_frame: Option<&'a Path>,
+    /// With `dump_frame`, a frame is also written every this many frames, to `<dump_frame>_<frame>.json`.
+    pub dump_every: u32,
     /// Widescreen margin offered on each side, in pixels.
     pub widescreen: i32,
     /// Widescreen margin offered above and below, in pixels.
@@ -125,6 +127,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
             .and_then(|movie| movie.inputs.get(counter as usize).copied())
             .unwrap_or_else(|| request.input.at(counter));
         host.run_frame(counter, input, &mut records, &mut scene)?;
+        dump_periodic_frame(&host, request, counter + 1)?;
         if request.trace_ram.is_some() {
             trace.extend((0..0x0800u16).map(|address| host.core.read_memory(address)));
         }
@@ -192,6 +195,25 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         nes_picture: picture,
         nes_picture_height: picture_height,
     })
+}
+
+/// `--dump-every`: writes the frame just run to `<dump_frame>_<frame>.json` every n frames.
+fn dump_periodic_frame(
+    host: &Host,
+    request: &RomRequest<'_>,
+    frame: u32,
+) -> Result<(), HarnessError> {
+    let Some(path) = request.dump_frame else {
+        return Ok(());
+    };
+    if request.dump_every == 0 || frame % request.dump_every != 0 {
+        return Ok(());
+    }
+    let batch = host.core.frame_batch();
+    let mut name = path.as_os_str().to_owned();
+    name.push(format!("_{frame:05}.json"));
+    fs::write(name, frame_json::write(batch.records, &batch.palette)?)?;
+    Ok(())
 }
 
 /// The outputs of `--save-state`, `--dump-mem` and `--png-nes`, written after the run.
