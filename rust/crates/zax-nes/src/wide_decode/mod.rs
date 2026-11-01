@@ -42,7 +42,8 @@ pub struct DecoderMemory<'a> {
     pub prg_ram: &'a [u8],
     /// The whole PRG-ROM image, as the cartridge runs it (built-in patch applied).
     pub prg_rom: &'a [u8],
-    /// A nametable byte (`$2000-$2FFF`) as the PPU reads it now, mirroring and layout applied:
+    /// A nametable byte (`$2000-$2FFF`) as the PPU reads it now, layout applied with the
+    /// mirroring the row being decoded was drawn with (a game may switch it during the frame):
     /// a decoder can check what it decodes against what the PPU shows.
     pub nametable: &'a dyn Fn(u16) -> u8,
     /// When a nametable byte was last written, in rendered frames (0: not since power-on or a

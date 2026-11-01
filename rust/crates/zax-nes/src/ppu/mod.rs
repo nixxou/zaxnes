@@ -1172,6 +1172,17 @@ impl Ppu2C02 {
     }
 
     fn read_nametable_inner(&self, address: u16, cartridge: Option<&Cartridge>) -> u8 {
+        self.read_nametable_as(address, cartridge, self.layout_of(cartridge))
+    }
+
+    /// A nametable byte as the PPU reads it under `layout`, the mirroring it had when a row was
+    /// drawn (a game may switch it during the frame, a status bar's split for instance).
+    fn read_nametable_as(
+        &self,
+        address: u16,
+        cartridge: Option<&Cartridge>,
+        layout: NametableMirroring,
+    ) -> u8 {
         let page = self.nametable_page(address, cartridge);
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             if let Some(cartridge) = cartridge {
@@ -1183,18 +1194,23 @@ impl Ppu2C02 {
             return self.vram[(page << 10) | (usize::from(address) & 0x03FF)];
         }
 
-        self.vram[map_nametable(address, self.layout_of(cartridge))]
+        self.vram[map_nametable(address, layout)]
     }
 
     /// The rendered frame a nametable byte was last written in (0: not since power-on or the
-    /// last state load; always 0 for nametables the cartridge serves).
-    fn nametable_written(&self, address: u16, cartridge: Option<&Cartridge>) -> u32 {
+    /// last state load; always 0 for nametables the cartridge serves), under `layout`.
+    fn nametable_written_as(
+        &self,
+        address: u16,
+        cartridge: Option<&Cartridge>,
+        layout: NametableMirroring,
+    ) -> u32 {
         let page = self.nametable_page(address, cartridge);
         if page == Cartridge::SERVED_BY_CARTRIDGE {
             return 0;
         }
         let offset = usize::try_from(page).map_or_else(
-            |_| map_nametable(address, self.layout_of(cartridge)),
+            |_| map_nametable(address, layout),
             |page| (page << 10) | (usize::from(address) & 0x03FF),
         );
         self.vram_written.get(offset).copied().unwrap_or(0)

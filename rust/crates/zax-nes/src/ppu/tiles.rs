@@ -41,6 +41,9 @@ pub(super) struct CapturedRow {
     /// board that has a side-effect-free view: a game that switches banks during the frame (a
     /// status bar, animated tiles) has others in place once the frame is over.
     chr: Option<[usize; crate::cartridges::BankWindows::CHR_WINDOWS]>,
+    /// The nametable mirroring the row was drawn with: a game that switches it during the frame
+    /// (Ninja Gaiden III's status bar) has another in place once the frame is over.
+    layout: NametableMirroring,
 }
 
 impl Ppu2C02 {
@@ -196,6 +199,7 @@ impl Ppu2C02 {
         let row_index = line / 8;
         #[allow(clippy::cast_possible_truncation)] // line is 0..240.
         let y = (line - 1) as i16;
+        let layout = self.layout_of(cart.as_deref());
         if let Some(slot) = usize::try_from(row_index)
             .ok()
             .and_then(|row| self.captured_rows.get_mut(row))
@@ -212,6 +216,7 @@ impl Ppu2C02 {
                     .as_deref()
                     .and_then(Cartridge::chr_peek_view)
                     .map(|view| view.offsets()),
+                layout,
             });
         }
 
@@ -324,17 +329,18 @@ impl Ppu2C02 {
         self.margin_palette = decoder.margin_palette(memory);
         // Sub-palettes 4-7 are the decoder's margin palette's, when it has one.
         let palette_mask = if self.margin_palette.is_some() { 7 } else { 3 };
-        // The decoder may read the nametables, as the PPU sees them now.
-        let nametable = |address: u16| self.read_nametable_inner(address, cart);
-        let written = |address: u16| self.nametable_written(address, cart);
-        let memory = &DecoderMemory {
-            nametable: &nametable,
-            nametable_written: &written,
-            ..*memory
-        };
         for (row_index, captured) in self.captured_rows.iter().enumerate() {
             let Some(captured) = captured else {
                 continue;
+            };
+            // The decoder may read the nametables, as the PPU saw them for this row.
+            let layout = captured.layout;
+            let nametable = |address: u16| self.read_nametable_as(address, cart, layout);
+            let written = |address: u16| self.nametable_written_as(address, cart, layout);
+            let memory = &DecoderMemory {
+                nametable: &nametable,
+                nametable_written: &written,
+                ..*memory
             };
             let fine_x = i32::from(captured.row.fine_x);
             // Screen columns 0 to 31 are the centre; the right margin starts at 32, whose
