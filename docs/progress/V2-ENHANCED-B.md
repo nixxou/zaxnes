@@ -20,8 +20,11 @@ part of the amended frame order of REQ-SCN-058.
 - [x] 3/5 `ReflectionPass`: screen-space ray trace (linear march then bisection), the distance
       blur, the two attenuations and the linear blend; frame order (after the opaque objects,
       **before** the occlusion). — **done**, see commit below
-- [ ] 4/5 Acceptance tests: the close-up R invariants and the variants R-m, R-s, R-h.
-- [ ] 5/5 AMD-055 + R2 reviews in `docs/spec/changes/` (LF), journal entry, lot commit.
+- [x] 4/5 Acceptance tests: the close-up R invariants and the variants R-m, R-s, R-h.
+      — **done**, lot commit below
+- [x] 5/5 AMD-055 + R2 reviews in `docs/spec/changes/` (LF), journal entry, lot commit.
+      — **done**, lot commit below (the four files were already there and are byte-identical
+      to `spec/changes/`, LF)
 
 ### V2-19 (floor reflections)
 
@@ -65,6 +68,34 @@ part of the amended frame order of REQ-SCN-058.
   size its `xz` box is 256 x 1, so the question is moot). (b) the scope bullet says the skybox
   « est reflétée » when already drawn, but it is at infinite distance behind the whole scene, so
   a ray of finite maximum length never crosses it: in practice the sky is not reflected.
+  (c) the `ssr.clarity` invariant is not measurable in the close-up R itself — see below.
+
+#### V2-19, step 4 (acceptance tests)
+
+- `tests/Acceptance/Amd055ReflectionTests.cs`, 8 tests for the six automatic invariants of §2.5.
+- The march's **sample positions must not depend on `ssr.length`**, or the invariant « a longer
+  ray lengthens the modified zone » fails: a first attempt with a span of `L / steps` made the
+  near field coarser as the ray grew and *lost* reflections at length 2. The progression is now
+  geometric, fitted on the **longest** ray any setting can ask for (360 × s), so a longer ray
+  only adds samples at the far end.
+- « The modified zone » is measured as the pixels the reflection raises by at least **half** of
+  what it raises the most. Counting every pixel that changes at all does not move: the faint
+  fringe is already there at `ssr.length` = 1.
+- The HUD of the variant R-h is put on the **cell row 2**, not at the centre of the frame: the
+  HUD plane of REQ-SCN-045 is 109 units in front of the eye and the camera of the close-up R is
+  only 40 units from the floor, so a motif at the centre lands behind the floor and is hidden.
+- The block of the variant R-s is identified in the capture by its **grey** pixels (the rest of
+  that variant is a pure red cube and a black skybox), which avoids depending on how a scale of
+  0.5 on `z` moves the shape's own centre.
+- `ssr.clarity` is measured on a declared variant **R-c** (the cube raised 12 units), see
+  **Q-093** (c): in the close-up R the cube sits *on* the floor, so every ray that reaches it has
+  travelled some 5 units out of 200 and the blur radius — proportional to that travel — stays
+  under a third of a pixel, and is exactly zero where the reflection is strongest. Measured
+  widths on R-c: 2.482 / 2.460 / 2.340 / 2.145 / 2.048 pixels for clarity 1 to 5.
+- Test results: `Zax.Render.Tests` 162/162; `Zax.Acceptance.Tests` filtered to
+  render/scene/settings 296 passed, 1 skipped (the Q-062 stress test, skipped as usual).
+- One visual check: the reflection of a floating red cube is recognisable on the floor, with no
+  hard edge at the end of the ray or at the edge of the screen.
 
 ## Lot V2-20 — Enhanced style: multi-scale ambient occlusion (MSVO)
 

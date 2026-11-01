@@ -74,6 +74,12 @@ internal static class ReflectionShaders
         uniform int uSteps;
         uniform int uRefinements;
 
+        // The progression of the march: the first span, in scene units, and the factor the span
+        // grows by at every step. Both depend on the quality and the scene scale alone, never on
+        // ssr.length — see the note in ReflectionPass.
+        uniform float uStepBase;
+        uniform float uStepRatio;
+
         // Projects a view-space point; returns false when it falls behind the eye or off screen.
         bool zaxProject(vec3 at, out vec2 uv)
         {
@@ -121,24 +127,39 @@ internal static class ReflectionShaders
 
             d = normalize(d);
 
-            float stepLength = uMaxLength / float(uSteps);
-
             // The ray starts just off the surface, so the first step does not read the floor
             // it leaves.
-            vec3 origin = p + n * (0.05 * stepLength);
-
-            // How far behind a drawn surface the ray has to be to count as having crossed it,
-            // and how far behind it may be and still be taken as touching the same surface: the
-            // free « épaisseur » of a screen-space trace, which only the step length can scale.
-            float bias = 0.02 * stepLength;
-            float thickness = (2.0 * stepLength) + 1.0;
+            vec3 origin = p + n * (0.05 * uStepBase);
 
             bool hit = false;
             float lo = 0.0;
             float hi = 0.0;
-            for (int i = 1; i <= uSteps; i++)
+            float bias = 0.02;
+            float previous = 0.0;
+            float span = uStepBase;
+            float t = 0.0;
+            for (int i = 0; i < uSteps; i++)
             {
-                float t = float(i) * stepLength;
+                t += span;
+                span *= uStepRatio;
+
+                // REQ-SCN-084: the ray is at most uMaxLength long. The sample positions
+                // themselves do not depend on that length, so lengthening the ray can only add
+                // samples at the far end and can never move the ones already taken: a longer
+                // ray therefore only ever *extends* the reflected zone.
+                if (t > uMaxLength)
+                {
+                    break;
+                }
+
+                // How far behind a drawn surface the ray has to be to count as having crossed
+                // it, and how far behind it may be and still be taken as touching the same
+                // surface: the free « épaisseur » of a screen-space trace, scaled by the span
+                // of the step that crossed, since that is the resolution the march has there.
+                float stepSpan = t - previous;
+                float stepBias = max(0.02 * stepSpan, 0.02);
+                float thickness = (2.0 * stepSpan) + 1.0;
+
                 vec2 uv;
                 if (!zaxProject(origin + d * t, uv))
                 {
@@ -152,14 +173,17 @@ internal static class ReflectionShaders
                     // In view space z grows towards the camera, so a positive difference means
                     // the ray has passed *behind* the surface drawn at that pixel.
                     float delta = surface - (origin + d * t).z;
-                    if (delta > bias && delta < thickness)
+                    if (delta > stepBias && delta < thickness)
                     {
                         hit = true;
-                        lo = t - stepLength;
+                        bias = stepBias;
+                        lo = previous;
                         hi = t;
                         break;
                     }
                 }
+
+                previous = t;
             }
 
             if (!hit)

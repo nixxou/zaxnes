@@ -33,6 +33,20 @@ internal sealed class ReflectionPass : IDisposable
     /// <summary>Bisection refinements for the four qualities: « 2, 3, 5 et 5 ».</summary>
     private static readonly int[] RefinementsByQuality = [2, 3, 5, 5];
 
+    /// <summary>
+    /// Span of the first step of the march, in scene units before the scene scale. It is fixed,
+    /// so a contact reflection is resolved to half a unit whatever <c>ssr.length</c> allows.
+    /// </summary>
+    private const float FirstStep = 0.5f;
+
+    /// <summary>
+    /// The longest ray any setting can ask for, in scene units before the scene scale:
+    /// <c>40 × n(5)</c> (REQ-SCN-084). The geometric progression of the march is fitted on
+    /// <em>this</em> length rather than on the current one, so that the sample positions do not
+    /// depend on <c>ssr.length</c> at all.
+    /// </summary>
+    private const float LongestRay = 360f;
+
     private readonly GL _gl;
 
     private ShaderProgram? _trace;
@@ -125,6 +139,8 @@ internal sealed class ReflectionPass : IDisposable
         trace.Set("uIntensity", style.ReflectionIntensity);
         trace.Set("uSteps", StepsByQuality[quality]);
         trace.Set("uRefinements", RefinementsByQuality[quality]);
+        trace.Set("uStepBase", FirstStep * sceneScale);
+        trace.Set("uStepRatio", StepRatio(StepsByQuality[quality], sceneScale));
 
         Span<float> normal = stackalloc float[9];
         SceneToView(view.View, normal);
@@ -193,6 +209,62 @@ internal sealed class ReflectionPass : IDisposable
         }
 
         Release();
+    }
+
+    /// <summary>
+    /// The factor the span of the march grows by at each step, so that
+    /// <paramref name="steps"/> steps of a geometric progression starting at
+    /// <see cref="FirstStep"/> add up to <see cref="LongestRay"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The progression law of the march is a free choice of REQ-SCN-084; a geometric one is
+    /// taken because a <em>uniform</em> one would tie the near-field resolution to
+    /// <c>ssr.length</c> — 15 units per step at <c>ssr.length</c> = 5 — and step straight over
+    /// a contact reflection. Fitting it on the <b>longest</b> ray any setting can ask for, and
+    /// not on the current one, keeps the sample positions independent of <c>ssr.length</c>: a
+    /// longer ray then only ever adds samples at the far end, which is what the invariant
+    /// « <c>ssr.length</c> croissant allonge la zone modifiée » asks for.
+    /// </para>
+    /// <para>
+    /// The sum of the progression grows strictly with the ratio, so ten bisections on
+    /// <c>[0.01, 4]</c> place it to within a thousandth — far finer than anything observable.
+    /// </para>
+    /// </remarks>
+    private static float StepRatio(int steps, float sceneScale)
+    {
+        float target = LongestRay * sceneScale;
+        float first = FirstStep * sceneScale;
+        float low = 0.01f;
+        float high = 4f;
+        for (int iteration = 0; iteration < 32; iteration++)
+        {
+            float middle = 0.5f * (low + high);
+            if (Reach(first, middle, steps) < target)
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+
+        return 0.5f * (low + high);
+    }
+
+    /// <summary>How far <paramref name="steps"/> steps of the progression reach.</summary>
+    private static float Reach(float first, float ratio, int steps)
+    {
+        float total = 0f;
+        float span = first;
+        for (int step = 0; step < steps; step++)
+        {
+            total += span;
+            span *= ratio;
+        }
+
+        return total;
     }
 
     /// <summary>
