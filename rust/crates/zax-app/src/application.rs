@@ -622,11 +622,12 @@ impl Running {
             );
             #[allow(clippy::cast_precision_loss)] // window sizes are far below 2^24
             let size = |(width, height): (u32, u32)| [width as f32, height as f32];
+            let playing = self.ui.game_on_screen();
             self.input
                 .touch
-                .update(mode, size(sizes.window), size(sizes.drawable));
-            self.ui
-                .set_touch_pad(self.input.touch.view(), self.input.touch.take_taps());
+                .update(mode, playing, size(sizes.window), size(sizes.drawable));
+            let (taps, swipe) = (self.input.touch.take_taps(), self.input.touch.take_scroll());
+            self.ui.set_touch_pad(self.input.touch.view(), taps, swipe);
         }
         operation(&mut self.ui, &mut frame, sizes, &debug);
     }

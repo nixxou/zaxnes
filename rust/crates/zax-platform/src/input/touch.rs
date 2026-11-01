@@ -265,6 +265,8 @@ struct Finger {
 #[derive(Debug, Default)]
 struct Fingers {
     fingers: Vec<Finger>,
+    /// How far free fingers moved down since the last [`Fingers::take_scroll`], in pixels.
+    scroll: f32,
 }
 
 impl Fingers {
@@ -286,12 +288,19 @@ impl Fingers {
 
     fn moved(&mut self, id: i64, point: [f32; 2]) {
         if let Some(finger) = self.fingers.iter_mut().find(|finger| finger.id == id) {
+            if finger.grip == Grip::Free {
+                self.scroll += point[1] - finger.point[1];
+            }
             finger.point = point;
         }
     }
 
+    fn take_scroll(&mut self) -> f32 {
+        std::mem::take(&mut self.scroll)
+    }
+
     /// Lifts a finger: where it tapped, when it was free and stayed within `slop` pixels of
-    /// where it went down.
+    /// where it went down (farther, it swiped).
     fn up(&mut self, id: i64, slop: f32) -> Option<[f32; 2]> {
         let index = self.fingers.iter().position(|finger| finger.id == id)?;
         let finger = self.fingers.remove(index);
@@ -325,6 +334,8 @@ impl Fingers {
 #[derive(Debug)]
 pub struct TouchPad {
     mode: TouchPadMode,
+    /// A game is on the screen: the pad is shown only then, a menu takes taps and swipes.
+    playing: bool,
     view: [f32; 2],
     /// Drawable pixels per window coordinate, for the mouse.
     scale: [f32; 2],
@@ -353,6 +364,7 @@ impl TouchPad {
     pub fn new(mouse_finger: bool) -> Self {
         Self {
             mode: TouchPadMode::Off,
+            playing: false,
             view: [0.0, 0.0],
             scale: [1.0, 1.0],
             layout: TouchLayout::for_view(0.0, 0.0),
@@ -369,11 +381,12 @@ impl TouchPad {
     /// Whether the pad is on the screen now.
     #[must_use]
     pub fn shown(&self) -> bool {
-        match self.mode {
-            TouchPadMode::Off => false,
-            TouchPadMode::On => true,
-            TouchPadMode::Auto => !self.physical,
-        }
+        self.playing
+            && match self.mode {
+                TouchPadMode::Off => false,
+                TouchPadMode::On => true,
+                TouchPadMode::Auto => !self.physical,
+            }
     }
 
     /// What to draw of the pad; none while it is hidden.
@@ -391,10 +404,24 @@ impl TouchPad {
         std::mem::take(&mut self.taps)
     }
 
-    /// Takes the mode of the setting and the sizes of the window and of its drawable, for this
-    /// frame; the pad is laid out and drawn in drawable pixels.
-    pub fn update(&mut self, mode: TouchPadMode, window: [f32; 2], drawable: [f32; 2]) {
+    /// How far fingers off the pad slid down since the last call, in drawable pixels (up is
+    /// negative): the scroll of a menu.
+    pub fn take_scroll(&mut self) -> f32 {
+        self.fingers.take_scroll()
+    }
+
+    /// Takes the mode of the setting, whether a game is on the screen, and the sizes of the
+    /// window and of its drawable, for this frame; the pad is laid out and drawn in drawable
+    /// pixels.
+    pub fn update(
+        &mut self,
+        mode: TouchPadMode,
+        playing: bool,
+        window: [f32; 2],
+        drawable: [f32; 2],
+    ) {
         self.mode = mode;
+        self.playing = playing;
         let [width, height] = drawable;
         if window[0] > 0.0 && window[1] > 0.0 {
             self.scale = [width / window[0], height / window[1]];
@@ -587,9 +614,16 @@ mod tests {
         fingers.moved(1, layout.a.center);
         assert_eq!([false; 9], fingers.pressed(&layout));
         assert_eq!(None, fingers.up(1, 10.0));
+        fingers.take_scroll();
         fingers.down(Some(&layout), 2, [960.0, 400.0]);
         fingers.moved(2, [964.0, 403.0]);
         assert_eq!(Some([960.0, 400.0]), fingers.up(2, 10.0));
+        // The free fingers' slides are the menu's scroll; a long one is no tap.
+        assert!((fingers.take_scroll() - 3.0).abs() < 1e-3);
+        fingers.down(None, 4, [960.0, 400.0]);
+        fingers.moved(4, [960.0, 250.0]);
+        assert_eq!(None, fingers.up(4, 10.0));
+        assert!((fingers.take_scroll() + 150.0).abs() < 1e-3);
         // With the pad hidden, a finger on A's place is a tap too.
         fingers.down(None, 3, layout.a.center);
         assert_eq!(Some(layout.a.center), fingers.up(3, 10.0));

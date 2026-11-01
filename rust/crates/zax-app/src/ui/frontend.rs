@@ -97,6 +97,8 @@ pub struct ImguiFrontend {
     touch_pad: Option<zax_platform::input::touch::TouchPadView>,
     /// Where fingers tapped off the touch pad since the last frame (Rust-only).
     taps: Vec<[f32; 2]>,
+    /// How far fingers slid down off the pad, in pixels, not yet turned into rows (Rust-only).
+    swipe: f32,
     /// The system's keyboard is up for the console's keyboard screen (Android, Rust-only).
     system_typing: bool,
 }
@@ -224,6 +226,7 @@ impl ImguiFrontend {
             roms_setting: roms_setting(host),
             touch_pad: None,
             taps: Vec::new(),
+            swipe: 0.0,
             system_typing: false,
         })
     }
@@ -503,6 +506,20 @@ impl ImguiFrontend {
                     if self.system_typing && !taps.is_empty() {
                         zax_platform::input::text::show_system_keyboard(true);
                     }
+                    // A finger sliding over a menu scrolls it: a row per row's height, the list
+                    // following the finger (Rust-only, owner request).
+                    if device {
+                        let row = handheld.row_height().max(1.0);
+                        let rows = (self.swipe / row).trunc();
+                        self.swipe -= rows * row;
+                        if rows != 0.0 {
+                            let input = super::handheld::pointer::PointerInput {
+                                wheel: rows,
+                                ..Default::default()
+                            };
+                            handheld.update_pointer(&input, frame);
+                        }
+                    }
                     for tap in taps.into_iter().filter(|_| device) {
                         let input = super::handheld::pointer::PointerInput {
                             position: tap,
@@ -567,15 +584,29 @@ impl ImguiFrontend {
         self.platform.pad_mut().end_frame();
     }
 
-    /// The touch pad the next [`ImguiFrontend::build`] draws (none while it is hidden), and where
-    /// fingers tapped off it: on a handheld, the clicks of the console's rows and hints.
+    /// The touch pad the next [`ImguiFrontend::build`] draws (none while it is hidden), where
+    /// fingers tapped off it and how far they slid down: on a handheld, the clicks of the
+    /// console's rows and hints, and the scroll of its lists.
     pub fn set_touch_pad(
         &mut self,
         view: Option<zax_platform::input::touch::TouchPadView>,
         taps: Vec<[f32; 2]>,
+        swipe: f32,
     ) {
         self.touch_pad = view;
         self.taps = taps;
+        self.swipe += swipe;
+    }
+
+    /// Whether a game is on the screen, not a menu: the touch pad is shown only then.
+    #[must_use]
+    pub fn game_on_screen(&self) -> bool {
+        if !self.console_shown() {
+            return true;
+        }
+        self.handheld
+            .as_ref()
+            .is_some_and(|handheld| handheld.screen() == HandheldScreen::InGame)
     }
 
     /// Draws the interface [`ImguiFrontend::build`] built, with the GL renderer (a wgpu window

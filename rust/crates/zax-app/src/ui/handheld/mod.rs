@@ -1170,6 +1170,12 @@ impl HandheldUi {
         }
     }
 
+    /// The height of a row of the lists, in pixels.
+    #[must_use]
+    pub const fn row_height(&self) -> f32 {
+        self.metrics.row
+    }
+
     /// Whether the keyboard of the RetroAchievements screen is typing: the system's keyboard
     /// types with it on Android (Rust-only, owner request).
     #[must_use]
