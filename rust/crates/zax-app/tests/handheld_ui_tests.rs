@@ -147,7 +147,11 @@ fn x_chooses_the_profile_and_a_plays_with_it() {
     let (mut harness, mut handheld) = start(&["Castle Quest"], &["Castle Quest.nes"]);
     tap(&mut harness, &mut handheld, PadButton::X);
     assert_eq!(Screen::Profiles, handheld.screen());
-    // The matching profile comes first.
+    // The matching profile comes first: choosing it goes back to the list without playing
+    // (owner request), and A plays with it from there.
+    tap(&mut harness, &mut handheld, PadButton::A);
+    assert_eq!(Screen::Home, handheld.screen());
+    assert_eq!(None, harness.host.current_game_id());
     tap(&mut harness, &mut handheld, PadButton::A);
     assert_eq!(Some("g0"), harness.host.current_game_id());
     press(&mut harness, &mut handheld, &[]);

@@ -304,7 +304,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_TAG_2D, "2D"),
     (keys::HANDHELD_PROFILE_FOR, "Profil pour {0}"),
     (keys::HANDHELD_HINT_PLAY, "Jouer"),
-    (keys::HANDHELD_HINT_PROFILE, "Profil"),
+    (keys::HANDHELD_HINT_PROFILE, "Profil 3D"),
     (keys::HANDHELD_HINT_OPTIONS, "Options"),
     (keys::HANDHELD_HINT_BACK, "Retour"),
     (keys::HANDHELD_HINT_JUMP, "A-Z"),

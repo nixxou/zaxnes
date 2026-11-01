@@ -302,7 +302,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_TAG_2D, "2D"),
     (keys::HANDHELD_PROFILE_FOR, "Profile for {0}"),
     (keys::HANDHELD_HINT_PLAY, "Play"),
-    (keys::HANDHELD_HINT_PROFILE, "Profile"),
+    (keys::HANDHELD_HINT_PROFILE, "3D Profile"),
     (keys::HANDHELD_HINT_OPTIONS, "Options"),
     (keys::HANDHELD_HINT_BACK, "Back"),
     (keys::HANDHELD_HINT_JUMP, "A-Z"),

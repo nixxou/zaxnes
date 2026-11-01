@@ -1080,7 +1080,8 @@ impl HandheldUi {
     fn carry_out_profiles(&mut self, command: ProfileListCommand, host: &mut AppHost) {
         self.screen = Screen::Home;
         if let ProfileListCommand::Choose { rom, id } = command {
-            host.launch_rom_with_profile(&rom.to_string_lossy(), &id);
+            // The choice is kept for the ROM; the list plays it as usual (owner request).
+            host.choose_profile_for_rom(&rom.to_string_lossy(), &id);
             self.refresh_roms(host);
             self.roms.select_path(&rom);
         }

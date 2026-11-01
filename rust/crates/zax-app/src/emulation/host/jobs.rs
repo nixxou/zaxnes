@@ -160,8 +160,16 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// Launches `rom_path` on the library entry `game_id`.
     pub fn launch_rom_with_profile(&mut self, rom_path: &str, game_id: &str) {
-        if self.loading || rom_path.is_empty() || !self.games.exists(game_id) {
-            return;
+        if !self.loading && self.choose_profile_for_rom(rom_path, game_id) {
+            self.launch_game(game_id);
+        }
+    }
+
+    /// Records `game_id` as the profile of the ROM at `rom_path`, without starting it (the
+    /// console's profile list, owner request); false when the ROM or the profile is unknown.
+    pub fn choose_profile_for_rom(&mut self, rom_path: &str, game_id: &str) -> bool {
+        if rom_path.is_empty() || !self.games.exists(game_id) {
+            return false;
         }
         // REQ-PERS-032: the ROM path of the entry, and the per-file choice of Q-036.
         let full = std::path::absolute(rom_path).map_or_else(
@@ -173,7 +181,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             store.games_mut().set_profile_for(&full, game_id);
             store.schedule_write(self.elapsed);
         }
-        self.launch_game(game_id);
+        true
     }
 
     /// Loads a slot: checks the game and the file, then starts the job (REQ-LOOP-044 to 046).
