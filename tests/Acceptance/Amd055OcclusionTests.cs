@@ -53,14 +53,13 @@ public sealed class Amd055OcclusionTests
     /// settings and 0.9 at the default. The least linear ratio it permits is <c>1 −</c> this.
     /// </summary>
     /// <remarks>
-    /// <b>Q-098</b>: the third invariant of §2.4 still restates the ceiling of v1.3 at the two
-    /// extreme settings — « `ao.strength` = 5 : le rapport est partout ≥ 0,50 ; `ao.strength` =
-    /// 1 : partout ≥ 0,90 », which is exactly <c>1 − 0.1 × ao.strength</c>. It cannot be read
-    /// that way beside the second invariant, which v1.4 *did* move and which now brings the
-    /// contact of close-up A to 0.10 at the default strength: under the proportionality of
-    /// <i>Force</i> the same contact then reads 0.70 at strength 1, under the 0.90 the third
-    /// invariant would demand. The tiret is read as what it is, the ceiling restated over the
-    /// whole capture rather than at the contact alone, and it follows the ceiling v1.4 states.
+    /// <b>Q-098</b> (answered, 2026-11-01): the third invariant of §2.4 used to restate the
+    /// ceiling of v1.3 at the two extreme settings — « `ao.strength` = 5 : le rapport est partout
+    /// ≥ 0,50 ; `ao.strength` = 1 : partout ≥ 0,90 », exactly <c>1 − 0.1 × ao.strength</c> —
+    /// which could not be read beside the second invariant that v1.4 *did* move. The answer keeps
+    /// the reading taken here and <b>AMD-055 v1.5 aligns the text on it</b>: the tiret is the
+    /// ceiling restated over the whole capture rather than at the contact alone, and it follows
+    /// the ceiling of v1.4, « soit <c>1 − min(0,95 ; 0,3 × ao.strength)</c> ».
     /// </remarks>
     // Q-098
     private static double Ceiling(int strength) => Math.Min(0.95, 0.3 * strength);
@@ -180,14 +179,17 @@ public sealed class Amd055OcclusionTests
     /// decreasing in <c>ao.strength</c>.
     /// </summary>
     /// <remarks>
-    /// <b>Q-098</b> on both halves. The bounds follow the ceiling of v1.4, not the 0.90 and 0.50
-    /// of v1.3 that the amendment's third tiret still quotes — see <see cref="Ceiling"/>. And
-    /// « monotone décroissant » is read at large, the word « strictement » being absent, because
-    /// the new ceiling is **constant** between the settings 4 and 5 (0.95 both): under the
-    /// « plafond comme échelle » reading that the answer to Q-095 confirmed, those two settings
-    /// give identical captures and an equal contact. The strict decrease is still asserted over
-    /// the settings 1 to 4, where the ceiling does rise, so nothing of the criterion's
-    /// discriminating power is given up by the weaker reading.
+    /// <b>Q-098</b> is answered on both halves and <b>AMD-055 v1.5</b> now states this tiret in
+    /// the terms asserted here: « `ao.strength` = 5 : le rapport est partout ≥ 0,05 ;
+    /// `ao.strength` = 1 : partout ≥ 0,70, soit <c>1 − min(0,95 ; 0,3 × ao.strength)</c>, à un
+    /// niveau sRGB 8 bits près. Le rapport est non croissant en `ao.strength` au pixel de
+    /// contact, et strictement décroissant de 1 à 4. » The bounds are the ceiling of v1.4 (see
+    /// <see cref="Ceiling"/>), not the 0.90 and 0.50 of v1.3. The monotony is non-increasing
+    /// rather than strict at the top because the ceiling is <b>constant</b> between the settings
+    /// 4 and 5 (0.95 both): under the « plafond comme échelle » reading the answer to Q-095
+    /// confirmed, those two settings give identical captures and an equal contact. The strict
+    /// decrease is asserted over the settings 1 to 4, where the ceiling does rise — which is
+    /// exactly the split the v1.5 text draws.
     /// </remarks>
     [GlFact] // REQ-SCN-083
     public void REQ_SCN_083_the_strength_is_a_ceiling_and_is_monotone()
@@ -278,9 +280,9 @@ public sealed class Amd055OcclusionTests
     /// <summary>
     /// REQ-SCN-083, <i>Conformité</i>: the invariants of §2.4 hold for the MSVO mode too — a
     /// lone plane is not darkened, the foot of the cube is, nothing at <c>2 r</c> from it is,
-    /// and the ceiling <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c> holds with its monotony — read
-    /// as <see cref="REQ_SCN_083_the_strength_is_a_ceiling_and_is_monotone"/> reads it
-    /// (<b>Q-098</b>).
+    /// and the ceiling <c>O ≤ min(0.95 ; 0.3 × ao.strength)</c> holds with its monotony — as
+    /// <see cref="REQ_SCN_083_the_strength_is_a_ceiling_and_is_monotone"/> states it, on the
+    /// wording AMD-055 v1.5 settled (<b>Q-098</b>).
     /// </summary>
     [GlFact] // REQ-SCN-083
     public void REQ_SCN_083_the_msvo_mode_keeps_the_invariants_of_the_section()
