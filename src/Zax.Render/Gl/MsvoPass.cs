@@ -233,6 +233,11 @@ internal sealed class MsvoPass : IDisposable
         upsample.Set("uCoarseAo", 2);
         upsample.Set("uFineAo", 3);
 
+        // REQ-SCN-083, scope: a pixel that holds no geometry is never darkened. The linearised
+        // depth of such a pixel is the far plane itself; a hair under it is the test, so that
+        // the interpolation of the pyramid cannot drag a background pixel back in.
+        upsample.Set("uFarDistance", SceneConstants.FarPlane * 0.999f);
+
         for (int level = _levels - 2; level >= 0; level--)
         {
             int coarse = level + 1;

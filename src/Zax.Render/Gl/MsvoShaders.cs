@@ -214,6 +214,34 @@ internal static class MsvoShaders
         // pass expects rather than the access the intermediate steps carry.
         uniform int uFinal;
 
+        // The distance a pixel with no geometry carries — the far plane, which the clear and the
+        // skybox leave behind. REQ-SCN-083's scope bullet keeps the skybox and the cleared
+        // background out of the effect, and the Depth estimator honours it by dropping those
+        // pixels outright (zaxIsEmpty). This port had no such test: its sphere penetrates the
+        // silhouette of a nearby object, so an empty pixel beside one came out darkened. Under
+        // the gain of V2-22 that leak stayed inside the ±1 sRGB level the scope invariant
+        // tolerates; calibrating the magnitude brought it into view, and it is a scope breach
+        // either way.
+        uniform float uFarDistance;
+
+        // Q-095, Q-097: the port's equivalent of the Depth mode's zaxCornerShare — the share of
+        // the hemisphere the MiniEngine estimator has to find blocked for the darkening to reach
+        // the ceiling « O <= 0.1 x ao.strength » of REQ-SCN-083. The original writes an
+        // accessibility it is free to scale, the amendment binds only the ceiling and the
+        // proportionality to ao.strength, and the answer to Q-095 measured this mode too weak by
+        // the same factor as Depth — « MSVO est trop faible lui aussi », the reference being
+        // *stronger* in MSVO than in Depth on the ring. The ceiling itself is enforced by the
+        // shared apply pass.
+        //
+        // Unlike the Depth mode's constant this one is not bounded by the contact invariant: the
+        // sphere test stays well clear of the ceiling at the contact of close-up A, and every
+        // §2.4 invariant still passes down to 0.08. It is calibrated instead on the ratio the
+        // reference shows between the two modes — MSVO wider and stronger than Depth on the
+        // ring, 32.2 / 23.3 in area and 7.1 / 5.2 in mean darkening. At 0.12 this mode measures
+        // 1.40 times the Depth mode's mean darkening on « Punch-Out!! », against the
+        // reference's 1.37, and an area of 34.4 % against the reference's 32.2 %.
+        const float zaxMsvoShare = 0.12;
+
         void main()
         {
             float fine = texture(uFineDepth, vUv).r;
@@ -241,7 +269,12 @@ internal static class MsvoShaders
             float own = uHasFineAo != 0 ? texture(uFineAo, vUv).r : 1.0;
             float access = clamp(own * coarse, 0.0, 1.0);
 
-            oColor = vec4(uFinal != 0 ? 1.0 - access : access, 0.0, 0.0, 1.0);
+            // The intermediate steps carry the accessibility the next one multiplies into; only
+            // the last one turns it into the occlusion the apply pass reads, and that is where
+            // the gain belongs — scaling an intermediate level would compound across levels.
+            // The buffer is R8, so anything over 1 clamps at the ceiling.
+            float occlusion = fine >= uFarDistance ? 0.0 : (1.0 - access) / zaxMsvoShare;
+            oColor = vec4(uFinal != 0 ? occlusion : access, 0.0, 0.0, 1.0);
         }
         """;
 }
