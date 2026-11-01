@@ -18,9 +18,10 @@
 //! [`MATCHING`]) is decoded; a margin column the nametables still hold for that place is taken
 //! from them, with what the game drew over the layout since. A row of the area the layout does not
 //! explain (the desert's animated dunes, the upper layer of 3-1A) takes its margins from the ring
-//! of nametables beside the screen. Past the ends of the area, where the game has nothing, a row at
-//! the camera's scroll shows the backdrop (a band scrolled on its own goes on, its layout repeating
-//! itself). Vertical areas and rows 24 and past (the status bar) are left to the nametables.
+//! of nametables beside the screen. Past the ends of the area, where the game has nothing, a row
+//! goes on with the last stretch of it that repeats itself (the sand, the rocks of a band, their
+//! period found in the layout), not with its very edge again (a rock three times over). Vertical
+//! areas and rows 24 and past (the status bar) are left to the nametables.
 
 use super::{resolve_ring, BackgroundRow, DecodedTile, DecoderMemory, MarginDecoder};
 
@@ -193,15 +194,18 @@ impl MarginDecoder for NinjaGaiden3 {
             return true;
         };
 
-        // A row at the camera's very scroll, not a band of its own (whose layout repeats itself).
-        let at_camera = placement.ring_near.is_none() && (row.ring_x() - camera).rem_euclid(512) == 0;
+        let mut tails = [None, None];
         for column in columns {
             let world = placement.world(column);
-            // Past the ends of the area the game has nothing: the backdrop, not a repeated edge.
-            if at_camera && !(0..area.columns).contains(&world) {
-                continue;
-            }
-            let world = area.within(world);
+            // Past the ends of the area the game has nothing: the row goes on with a stretch that
+            // repeats itself, found once per row and side.
+            let world = if placement.ring_near.is_none() && !(0..area.columns).contains(&world) {
+                let side = usize::from(world >= area.columns);
+                let tail = *tails[side].get_or_insert_with(|| area.tail(tile_row, side == 1));
+                area.beyond(world, tail)
+            } else {
+                area.within(world)
+            };
             // A column the nametables hold for this very place shows what the game drew there.
             let decoded = if column_is_current(memory, &area, *row, column, world) {
                 Some(nametable_tile(memory, *row, column))
@@ -217,6 +221,51 @@ impl MarginDecoder for NinjaGaiden3 {
             }
         }
         true
+    }
+}
+
+/// The longest period, in tile columns, of a stretch past the ends of an area.
+const LONGEST_PERIOD: i32 = 16;
+/// How far into the area, in tile columns, such a stretch is looked for.
+const PERIOD_REACH: i32 = 64;
+
+impl Area<'_> {
+    /// Row `tile_row`'s stretch to go on with past the end of the area (`right`) or before its
+    /// start: `(first column, period)`, the nearest stretch of 2 periods that repeats itself, the
+    /// shortest period first; `None` when the row has none within reach.
+    fn tail(&self, tile_row: i32, right: bool) -> Option<(i32, i32)> {
+        for offset in 0..PERIOD_REACH {
+            for period in 1..=LONGEST_PERIOD {
+                let first = if right {
+                    self.columns - offset - 2 * period
+                } else {
+                    offset
+                };
+                if first < 0 || first + 2 * period > self.columns {
+                    continue;
+                }
+                let repeats = (0..period).all(|column| {
+                    self.tile_at(first + column, tile_row)
+                        == self.tile_at(first + period + column, tile_row)
+                });
+                if repeats {
+                    // The stretch at the side of the end: the later period going right.
+                    return Some((if right { first + period } else { first }, period));
+                }
+            }
+        }
+        None
+    }
+
+    /// World column `world` of row `tile_row` past the ends of the area, from its stretch.
+    fn beyond(&self, world: i32, tail: Option<(i32, i32)>) -> i32 {
+        match tail {
+            Some((first, period)) if world >= self.columns => {
+                first + (world - self.columns).rem_euclid(period)
+            }
+            Some((first, period)) => first + (world + period * PERIOD_REACH).rem_euclid(period),
+            None => self.within(world),
+        }
     }
 }
 
