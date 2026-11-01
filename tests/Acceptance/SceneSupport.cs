@@ -55,7 +55,10 @@ public sealed class SceneFixture
         VariantRenderStyle style = VariantRenderStyle.Normal,
         int columns = 1,
         int rows = 1,
-        string? tags = null)
+        string? tags = null,
+        VariantTexture? texture = null,
+        Vec3F? scale = null,
+        Vec3F? rotation = null)
     {
         ProfileTile[] cells = [.. Enumerable
             .Range(0, columns * rows)
@@ -76,9 +79,32 @@ public sealed class SceneFixture
             Alpha = alpha,
             RenderStyle = style,
             TagString = tags,
+            Texture = texture,
+            Scale = scale,
+            Rotation = rotation,
         });
         _profile.PermanentPatterns.Add(pattern);
         return this;
+    }
+
+    /// <summary>
+    /// A texture in the <b>direct</b> format of REQ-E3D-562, every texel of the same colour:
+    /// the custom texture the close-ups of AMD-055 §2.3 to §2.5 ask for, whose albedo is read
+    /// straight off the colour.
+    /// </summary>
+    /// <param name="color">The colour of every texel.</param>
+    /// <param name="columns">Pattern width in cells, 8 texels each.</param>
+    /// <param name="rows">Pattern height in cells, 8 texels each.</param>
+    public static VariantTexture FlatDirectTexture(Rgb24 color, int columns = 1, int rows = 1)
+    {
+        int width = columns * 8;
+        int height = rows * 8;
+        int[] pixels = new int[width * height];
+
+        // A direct texel is 0x00RRGGBB; 0 would be the universal background colour instead
+        // (REQ-E3D-562), so a black texture is never built this way.
+        Array.Fill(pixels, color.Packed);
+        return new VariantTexture(width, height, new TexturePixels(TextureFormat.Direct, pixels));
     }
 
     /// <summary>Adds a background tile record at the screen position (x, y).</summary>

@@ -162,6 +162,81 @@ internal static class SceneShaders
         """;
 
     /// <summary>
+    /// The voxel grid of SPEC-06 REQ-SCN-081 (AMD-055): grooves on the cell edges of the frame
+    /// the grid is evaluated in, which modulate the <b>albedo</b> before any lighting.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The frame is the one REQ-SCN-081 names, and it is the <see cref="SceneVertex"/> that
+    /// chooses it: the local mesh frame of the tile (REQ-E3D-504, REQ-E3D-522) for a tile, the
+    /// scene frame for the backdrop, both taken <b>before</b> the object transform and before
+    /// the curvature, so the grooves are painted on the geometry and follow it.
+    /// </para>
+    /// <para>
+    /// <c>uGridCell</c> is the cell side: <c>N = 2^spl.voxel_grid</c> voxels for a tile, and
+    /// the same <c>N</c> in scene units for the backdrop. The amendment writes the backdrop
+    /// edges at multiples of <c>N × scene scale</c> for a position in units of
+    /// <c>scene × scale</c>; the renderer keeps positions in unscaled scene units, so the
+    /// scale cancels out and the cell is <c>N</c> either way.
+    /// </para>
+    /// </remarks>
+    private const string VoxelGrid = """
+        uniform float uGridCell;
+
+        // REQ-SCN-081: the groove covers 3.5 % of the cell on each side of an edge, the bright
+        // edge runs from there to 16 %, and the factors of the three axes multiply.
+        const float zaxGrooveHalfWidth = 0.035;
+        const float zaxBrightEdge = 0.16;
+
+        float zaxGridAxis(float p, float n, float k, float e)
+        {
+            // Distance to the nearest edge, as a fraction of the cell: d in [0, 0.5]. It is
+            // computed before any test, so that fwidth() stays in uniform control flow.
+            float cells = p / uGridCell;
+            float d = abs(cells - floor(cells + 0.5));
+            float pixel = max(fwidth(d) * 0.5, 1e-6);
+
+            // An axis perpendicular to the face has a zero weight and makes no groove — both
+            // factors below are then 1 — and the axes of the plane of the face have a weight
+            // of 1.
+            float w = clamp(4.0 * (1.0 - abs(n)), 0.0, 1.0);
+
+            float groove = 1.0 - w * (1.0 - k);
+            float outer = d <= zaxBrightEdge
+                ? 1.0 + w * e * (zaxBrightEdge - d) / (zaxBrightEdge - zaxGrooveHalfWidth)
+                : 1.0;
+
+            // The step from the groove to the bright edge is smoothed over about one screen
+            // pixel, as the requirement asks; at d = 0.16 the factor is already 1, so that
+            // transition is continuous on its own.
+            float t = smoothstep(zaxGrooveHalfWidth - pixel, zaxGrooveHalfWidth + pixel, d);
+            return mix(groove, outer, t);
+        }
+
+        float zaxVoxelGrid(vec3 p, vec3 n)
+        {
+            // uGridCell is 0 wherever the grid does not apply, and the whole draw call shares
+            // that value: the branch is uniform, so leaving early does not disturb fwidth().
+            if (uGridCell <= 0.0)
+            {
+                return 1.0;
+            }
+
+            // Alignment on an axis: m >= 0.9 gives t = 1 — every GREEDY face (REQ-E3D-505) —
+            // and m <= 0.8 gives t = 0, a face at 45° or more oblique.
+            vec3 a = abs(n);
+            float m = max(a.x, max(a.y, a.z));
+            float t = clamp((m - 0.8) / 0.1, 0.0, 1.0);
+            float k = 0.38 + 0.24 * t;
+            float e = 0.20 - 0.10 * t;
+
+            return zaxGridAxis(p.x, n.x, k, e)
+                 * zaxGridAxis(p.y, n.y, k, e)
+                 * zaxGridAxis(p.z, n.z, k, e);
+        }
+        """;
+
+    /// <summary>
     /// Vertex shader of the scene pass. The scene frame is left-handed (REQ-E3D-400), so the
     /// clip position is built from <c>(x, y, −z)</c> (REQ-SCN-001).
     /// </summary>
@@ -176,6 +251,10 @@ internal static class SceneShaders
         uniform float uNormalSign;
         uniform mat4 uViewProjection;
 
+        // AMD-055 REQ-SCN-081: 0 to take the grid frame from the local mesh frame of the tile
+        // (REQ-E3D-504), 1 to take it from the scene frame, which is what the backdrop uses.
+        uniform int uGridScene;
+
         {{Deformation}}
 
         {{Bend}}
@@ -184,6 +263,10 @@ internal static class SceneShaders
         out vec3 vBent;
         out vec3 vNormal;
         out vec2 vUv;
+        out vec3 vGridPos;
+        out vec3 vGridNormal;
+        out vec3 vLocal;
+        out vec3 vLocalNormal;
 
         void main()
         {
@@ -202,7 +285,20 @@ internal static class SceneShaders
             // REQ-SCN-028: the normal is the mesh normal, unchanged by the deformation.
             // uNormalSign is −1 for a mirrored placement, whose cofactor matrix points the
             // normal inwards (Q-069).
-            vNormal = uNormalSign * (uNormalMatrix * aNormal);
+            vec3 sceneNormal = uNormalSign * (uNormalMatrix * aNormal);
+            vNormal = sceneNormal;
+
+            // AMD-055 REQ-SCN-081 and REQ-SCN-082: the raw mesh position and normal, before
+            // the animated deformation, before the object transform and before the curvature.
+            // In MARCHING the attribute already carries the flat normal of the triangle
+            // (REQ-E3D-522), so one varying covers both algorithms.
+            vLocal = aPosition;
+            vLocalNormal = aNormal;
+
+            // REQ-SCN-081: the grid of a tile lives in that local frame, the grid of the
+            // backdrop in the scene frame — in both cases before the curvature.
+            vGridPos = uGridScene != 0 ? scene.xyz : aPosition;
+            vGridNormal = uGridScene != 0 ? sceneNormal : aNormal;
 
             vec3 placed = scene.xyz;
             if (uBend != 0)
@@ -280,10 +376,78 @@ internal static class SceneShaders
         """;
 
     /// <summary>
+    /// The pixel shadows of SPEC-06 REQ-SCN-082 (AMD-055): the shadow is read not at the
+    /// fragment but at the centre of the fragment's voxel, so it changes by squares of one
+    /// voxel, like the pixel grid of the game.
+    /// </summary>
+    /// <remarks>
+    /// The point is moved in the local mesh frame, then transported <b>as a vertex</b> — the
+    /// animated deformation, then the object's scale, rotation and position in the order of
+    /// REQ-E3D-406, then the curvature — which is why the fragment shader carries the
+    /// deformation and bending code the vertex shader uses.
+    /// </remarks>
+    private const string PixelShadow = """
+        uniform int uPixelShadow;
+        uniform float uBuildDepth;
+
+        vec3 zaxVoxelCentre(vec3 p, vec3 n)
+        {
+            // REQ-SCN-082 step 2: the two axes of the plane of the face are the two of
+            // smallest |n_a|, ties going to the smallest index in the order x, y, z — so the
+            // axis left alone is the one of largest |n_a|, ties going to the largest index.
+            vec3 a = abs(n);
+
+            // "half" is a reserved word in GLSL, hence the name.
+            float halfDepth = uBuildDepth * 0.5;
+            vec3 centre = vec3(
+                floor(p.x) + 0.5,
+                floor(p.y) + 0.5,
+
+                // On z the voxel boundaries are offset by D/2 (REQ-E3D-504).
+                floor(p.z + halfDepth) + 0.5 - halfDepth);
+
+            if (a.z >= a.x && a.z >= a.y)
+            {
+                centre.z = p.z;
+            }
+            else if (a.y >= a.x)
+            {
+                centre.y = p.y;
+            }
+            else
+            {
+                centre.x = p.x;
+            }
+
+            return centre;
+        }
+
+        // REQ-SCN-082 step 3: the displaced point, carried to the scene like a vertex.
+        vec3 zaxPlaceLikeVertex(vec3 local)
+        {
+            vec3 v = local;
+            if (uDeform != 0)
+            {
+                v += zaxDeformation(local);
+            }
+
+            vec3 scene = (uModel * vec4(v, 1.0)).xyz;
+            if (uBend != 0)
+            {
+                mat3 jacobian;
+                scene = zaxBend(scene, jacobian);
+            }
+
+            return scene;
+        }
+        """;
+
+    /// <summary>
     /// Fragment shader of the scene pass: albedo of REQ-SCN-034, visible-rectangle clipping of
     /// REQ-SCN-036, the fragment rejection of REQ-SCN-076, hard shadow of REQ-SCN-030/031, the
-    /// Lambert shading of REQ-SCN-028 for the tiles and the HUD, and the Standard model of
-    /// REQ-SCN-075 for the backdrop.
+    /// pixel shadows of REQ-SCN-082 and the voxel grid of REQ-SCN-081, the Lambert shading of
+    /// REQ-SCN-028 for the tiles and the HUD, and the Standard model of REQ-SCN-075 for the
+    /// backdrop.
     /// </summary>
     public static string SceneFragment { get; } = $$"""
         #version 330 core
@@ -291,7 +455,13 @@ internal static class SceneShaders
         in vec3 vBent;
         in vec3 vNormal;
         in vec2 vUv;
+        in vec3 vGridPos;
+        in vec3 vGridNormal;
+        in vec3 vLocal;
+        in vec3 vLocalNormal;
         out vec4 oColor;
+
+        uniform mat4 uModel;
 
         // 0 = indexed atlas, 1 = direct colour atlas, 2 = flat colour (backdrop).
         uniform int uColorMode;
@@ -330,6 +500,14 @@ internal static class SceneShaders
         {{Transfer}}
 
         {{Backdrop}}
+
+        {{Deformation}}
+
+        {{Bend}}
+
+        {{VoxelGrid}}
+
+        {{PixelShadow}}
 
         void main()
         {
@@ -383,13 +561,30 @@ internal static class SceneShaders
             vec3 l = normalize(-uLightDirection);
             float ndl = max(0.0, dot(n, l));
 
+            // AMD-055 REQ-SCN-081: the grid modulates the albedo before any lighting — the
+            // term c of REQ-SCN-075 for the backdrop, so a groove never darkens the specular
+            // part. It multiplies the *linear* albedo, which is what REQ-SCN-028 calls
+            // albedo_lin and what the acceptance ratios of the amendment are read on.
+            // uGridCell is 0 wherever the grid does not apply: the HUD, the skybox and the
+            // 2D-mode rectangle (and in Classic, where no effect of the style exists).
+            vec3 albedoLinear = zaxToLinear3(albedo)
+                * zaxVoxelGrid(vGridPos, normalize(vGridNormal));
+
             float shadow = 1.0;
             if (uReceiveShadow != 0)
             {
+                // AMD-055 REQ-SCN-082: with the pixel shadows on, the lookup point is the
+                // centre of the fragment's voxel, carried to the scene like a vertex, so the
+                // shadow changes by squares of one voxel. The bias below is applied to that
+                // displaced point and not to the fragment, which keeps shadow acne away.
+                vec3 lookup = uPixelShadow != 0
+                    ? zaxPlaceLikeVertex(zaxVoxelCentre(vLocal, vLocalNormal))
+                    : vBent;
+
                 // REQ-SCN-031: a normal offset and a depth bias of about 0.02 unit. The
                 // shadow map holds the bent geometry (REQ-SCN-068), so the lookup uses the
                 // bent position.
-                vec3 biased = vBent + n * uNormalOffset;
+                vec3 biased = lookup + n * uNormalOffset;
                 vec4 light = uLightViewProjection * vec4(biased.x, biased.y, -biased.z, 1.0);
                 vec3 projected = light.xyz / light.w * 0.5 + 0.5;
                 if (projected.x >= 0.0 && projected.x <= 1.0
@@ -412,13 +607,13 @@ internal static class SceneShaders
                 // the bent position, the one the geometry really occupies (REQ-SCN-068).
                 vec3 toEye = uEye - vBent;
                 vec3 v = dot(toEye, toEye) > 0.0 ? normalize(toEye) : n;
-                lit = zaxBackdrop(zaxToLinear3(albedo), n, v, l, uLightLinear, uAmbient, shadow);
+                lit = zaxBackdrop(albedoLinear, n, v, l, uLightLinear, uAmbient, shadow);
             }
             else
             {
                 // REQ-SCN-028: albedo_lin * (ambient_lin + max(0, N.L) * light_lin * S).
                 // R2-009: written linear, so that the blending of REQ-SCN-040 is linear too.
-                lit = zaxToLinear3(albedo) * (vec3(uAmbient) + ndl * uLightLinear * shadow);
+                lit = albedoLinear * (vec3(uAmbient) + ndl * uLightLinear * shadow);
             }
 
             oColor = vec4(min(lit, vec3(1.0)), uAlpha * texelAlpha);

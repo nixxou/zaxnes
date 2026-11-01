@@ -14,18 +14,19 @@ Out of scope: REQ-SCN-083 (V2-18) and REQ-SCN-084 (next session).
 - [x] 1/7 Settings: the 13 SPEC-09 lines of AMD-055 §4 — `render.visual_style` domain
       (0 Classic, 4 Enhanced, 1 accepted and read back 4, anything else 0) and the twelve
       `render.style.*` keys; `VisualStyleParameters` for style 4 (12 + 4 curvature ids) with
-      1 accepted; not exposed in libretro. Tests in `Zax.Settings.Tests`. — **done**, 3d81b8f
+      1 accepted; not exposed in libretro. Tests in `Zax.Settings.Tests`. — **done**, 7f38c22
 - [x] 2/7 Lua and app settings: `Setting.VisualStyle` reads back 4, `Get/Set/Reset` accept 4
-      and 1, `AppSettings` accessors for the twelve parameters. — **done**, 3d81b8f
+      and 1, `AppSettings` accessors for the twelve parameters. — **done**, 7f38c22
 - [x] 3/7 UI (amended REQ-UI-061): the `Style` row after `Skybox`, the collapsible « Style »
       group with the twelve parameters, visibility rules (`spl.ao` ≠ 0, `spl.reflections` = 1),
-      `ao.thickness` greyed under the Depth fallback, EN/FR texts of §4. — **done**, 3d81b8f
+      `ao.thickness` greyed under the Depth fallback, EN/FR texts of §4. — **done**, 7f38c22
 - [x] 4/7 Renderer settings and host wiring: `RenderSettings.Style`, hot apply at the next
-      rendered frame, Enhanced with every effect off = Classic. — **done**, 3d81b8f
-- [ ] 5/7 Voxel grid (REQ-SCN-081): shader modulation of the albedo for tiles (local mesh
+      rendered frame, Enhanced with every effect off = Classic. — **done**, 7f38c22
+- [x] 5/7 Voxel grid (REQ-SCN-081): shader modulation of the albedo for tiles (local mesh
       frame) and backdrop (scene frame), before lighting; `BuildDepth` plumbed to the renderer.
-- [ ] 6/7 Pixel shadows (REQ-SCN-082): shadow evaluated at the voxel centre of the fragment,
-      opaque tiles only.
+      — **done**, see 6/7
+- [x] 6/7 Pixel shadows (REQ-SCN-082): shadow evaluated at the voxel centre of the fragment,
+      opaque tiles only. — **done**, 0ff9b6c
 - [ ] 7/7 Acceptance tests, AMD-055 + R2 reviews copied to `docs/spec/changes/`, journal
       entry, lot commit.
 
@@ -60,5 +61,9 @@ MSVO is rendered as Depth — declared fallback **(D)**: the MiniEngine sources 
   time, so there was no green intermediate state between them.
 - `SettingDomain.AliasedChoice` is new: it resolves a written alias before the list is
   consulted, which is what REQ-SCN-078 asks of 1 → 4.
+- Steps 5 and 6 share one commit: both effects need the same two new varyings (the raw mesh
+  position and normal), so splitting them would have left the shader half-wired.
+- `uGridCell` = 0 is the "grid off" signal and is read by every draw call, so `zaxVoxelGrid`
+  leaves early on it: the branch is uniform and `fwidth()` in `zaxGridAxis` stays valid.
 - The two tick-box parameters stay whole numbers (SPEC-09 type « entier », domain 0 à 1) and
   the panel draws them with `DrawTickBox`, as AMD-055 §4 asks ("case").

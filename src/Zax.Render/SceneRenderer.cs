@@ -39,6 +39,7 @@ public sealed class SceneRenderer : ISceneRenderer
 
     private bool _disposed;
     private bool _shadowEnabled;
+    private bool _pixelShadow;
     private bool _mirroredWinding;
     private bool _mirroredNormal;
     private SpaceBend _bend = SpaceBend.None;
@@ -332,6 +333,17 @@ public sealed class SceneRenderer : ISceneRenderer
             // REQ-SCN-068: the converted tiles and sprites bend, the HUD stays flat.
             Bend = !hud,
             Deform = tile.Deform,
+
+            // AMD-055 REQ-SCN-081: the grid reaches the opaque and the transparent tiles, in
+            // the local mesh frame of each tile, but never the HUD (REQ-SCN-044, -045).
+            GridCell = hud ? 0f : scene.Settings.Style.EffectiveGridCell,
+            GridInSceneFrame = false,
+
+            // REQ-SCN-082: the pixel shadows are for the faces of opaque tile meshes only.
+            // A transparent tile receives no shadow at all (REQ-SCN-032), so the material of
+            // this frame is what decides, the FPV occluder of REQ-SCN-022 included.
+            PixelShadow = !hud && material == MaterialClass.Opaque,
+            BuildDepth = tile.BuildDepth,
         };
 
         // A tile only casts while it is rendered opaque (REQ-SCN-032, REQ-SCN-040).
@@ -390,6 +402,11 @@ public sealed class SceneRenderer : ISceneRenderer
             Clip = false,
             // REQ-SCN-068: the backdrop bends with the scene it stands behind.
             Bend = true,
+
+            // AMD-055 REQ-SCN-081 (amending AMD-049 REQ-SCN-075): the grid reaches the faces
+            // of the box, in the scene frame, modulating the albedo c before the lighting.
+            GridCell = scene.Settings.Style.EffectiveGridCell,
+            GridInSceneFrame = true,
             BoundsMin = BoxMesh.Subdivided.BoundsMin,
             BoundsMax = BoxMesh.Subdivided.BoundsMax,
         });
@@ -669,6 +686,9 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass.Set("uNormalOffset", SceneConstants.ShadowNormalOffset);
         _shadowEnabled = volume.HasContent;
 
+        // AMD-055 REQ-SCN-082: the setting is read once per frame, like the curvature.
+        _pixelShadow = scene.Settings.Style.EffectivePixelShadow;
+
         // REQ-SCN-067: the per-axis constants are the same for every vertex of the frame.
         _bend = scene.Settings.Bend;
         SetBendConstants(_scenePass, _bend);
@@ -727,6 +747,16 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass.Set("uClip", item.Clip ? 1 : 0);
         _scenePass.Set("uReceiveShadow", _shadowEnabled && item.ReceiveShadow ? 1 : 0);
         _scenePass.Set("uBend", item.Bend && !_bend.IsIdentity ? 1 : 0);
+
+        // AMD-055 REQ-SCN-081: the cell side, 0 where the grid does not apply, and the frame
+        // it is evaluated in — the local mesh frame of a tile, the scene frame of the backdrop.
+        _scenePass.Set("uGridCell", item.GridCell);
+        _scenePass.Set("uGridScene", item.GridInSceneFrame ? 1 : 0);
+
+        // AMD-055 REQ-SCN-082: only the faces of opaque tile meshes read the shadow at the
+        // centre of their voxel.
+        _scenePass.Set("uPixelShadow", _pixelShadow && item.PixelShadow ? 1 : 0);
+        _scenePass.Set("uBuildDepth", (float)item.BuildDepth);
         SetDeformation(_scenePass, item.Deform);
 
         _gl.ActiveTexture(TextureUnit.Texture0);
@@ -849,6 +879,30 @@ public sealed class SceneRenderer : ISceneRenderer
 
         /// <summary>Whether the space bending of REQ-SCN-068 reaches this item.</summary>
         public bool Bend;
+
+        /// <summary>
+        /// The cell side of the voxel grid for this item, 0 when the grid does not apply to it
+        /// (AMD-055 REQ-SCN-081): the HUD, the skybox and the 2D-mode rectangle never carry it.
+        /// </summary>
+        public float GridCell;
+
+        /// <summary>
+        /// Whether the grid of this item is evaluated in the scene frame — which is what the
+        /// backdrop does — rather than in the local mesh frame of a tile (REQ-SCN-081).
+        /// </summary>
+        public bool GridInSceneFrame;
+
+        /// <summary>
+        /// Whether the pixel shadows of REQ-SCN-082 may reach this item: the faces of opaque
+        /// tile meshes, and nothing else.
+        /// </summary>
+        public bool PixelShadow;
+
+        /// <summary>
+        /// The construction depth <c>D</c> of the local mesh frame (REQ-E3D-504), which the
+        /// voxel-centre snap of REQ-SCN-082 offsets the <c>z</c> boundaries by.
+        /// </summary>
+        public int BuildDepth;
 
         public DeformParameters? Deform;
 

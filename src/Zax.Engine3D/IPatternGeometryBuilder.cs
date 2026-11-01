@@ -70,6 +70,23 @@ public interface IPatternGeometryBuilder
     /// </summary>
     ObjectTexture? TextureOf(PatternInstance instance);
 
+    /// <summary>
+    /// The construction depth <c>D</c> the local mesh frame of the instance is centred on
+    /// (REQ-E3D-504, REQ-E3D-522): <c>z</c> runs over <c>[−D/2, D/2]</c>. AMD-055 REQ-SCN-082
+    /// needs it to snap a point onto the voxel grid of that frame, whose <c>z</c> boundaries
+    /// are offset by <c>D/2</c>.
+    /// </summary>
+    /// <remarks>
+    /// A builder that has no geometry answers <c>sizeZ</c>, which is what the depth was asked
+    /// for; the two differ only for the cylinders of REQ-E3D-452, whose <c>D'</c> is written
+    /// back into <c>sizeZ</c>.
+    /// </remarks>
+    int MeshDepthOf(PatternInstance instance)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        return instance.Depth;
+    }
+
     /// <summary>How far the current mass build has got (REQ-E3D-362).</summary>
     GeometryProgress Progress { get; }
 

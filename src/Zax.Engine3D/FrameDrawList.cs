@@ -153,6 +153,13 @@ public readonly record struct DrawTile
 
     /// <summary>The deformation parameters, or null when no deformation is active.</summary>
     public DeformParameters? Deform { get; init; }
+
+    /// <summary>
+    /// The construction depth <c>D</c> the local mesh frame is centred on (REQ-E3D-504,
+    /// REQ-E3D-522), which AMD-055 REQ-SCN-082 needs to find the centre of a voxel on the
+    /// <c>z</c> axis.
+    /// </summary>
+    public int BuildDepth { get; init; }
 }
 
 /// <summary>

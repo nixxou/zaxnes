@@ -112,6 +112,11 @@ public sealed class DrawListBuilder
             instance.Depth);
         Vec3 deformPivot = DeformPivot(instance, shape, size, formatVersion2);
 
+        // AMD-055 REQ-SCN-082: the voxel grid of the local mesh frame is offset by D/2 on z,
+        // so the renderer is handed the depth that frame was centred on. It belongs to the
+        // whole 3D object, so it is read once per instance.
+        int buildDepth = geometry.MeshDepthOf(instance.Reference);
+
         // Q-067: the walls that close each tile against a neighbour of the same object show at
         // the joints of a flat surface (REQ-SCN-065). The neighbours are looked up here, once
         // per instance, so that the draw list can ask for the mesh variant without them.
@@ -184,6 +189,7 @@ public sealed class DrawListBuilder
                 Sprite = !shape.Background,
                 BehindBackground = !shape.Background && tile.Hidden,
                 Deform = deform,
+                BuildDepth = buildDepth,
             });
         }
     }

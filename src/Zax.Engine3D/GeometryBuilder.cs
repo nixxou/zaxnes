@@ -360,6 +360,13 @@ public sealed class GeometryBuilder : IPatternGeometryBuilder
         return _geometry.GetValueOrDefault(instance)?.Texture;
     }
 
+    /// <inheritdoc/>
+    public int MeshDepthOf(PatternInstance instance)
+    {
+        ArgumentNullException.ThrowIfNull(instance);
+        return _geometry.GetValueOrDefault(instance)?.BuildDepth ?? instance.Depth;
+    }
+
     private void BuildObject(EnginePattern pattern, PatternInstance instance)
     {
         RenderAlgorithm algorithm = instance.EffectiveAlgorithm(GlobalAlgorithm);
