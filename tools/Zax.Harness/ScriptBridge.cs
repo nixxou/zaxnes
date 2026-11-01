@@ -5,6 +5,7 @@ using Zax.Nes;
 using Zax.Profiles;
 using Zax.Render;
 using Zax.Scripting;
+using Zax.Settings;
 
 namespace Zax.Harness;
 
@@ -115,6 +116,41 @@ internal static class ScriptBridge
         scene.UseNesBackgroundColor = settings.BgColor;
         scene.Clipping = settings.ClippingVector;
         PushLight(settings, scene);
+        PushStyle(settings, scene);
+    }
+
+    /// <summary>
+    /// The visual style of AMD-055 REQ-SCN-078 and its twelve parameters (REQ-SCN-079), pushed
+    /// onto the scene exactly as <c>EmulationHost.PublishStyle</c> does in the application, so
+    /// that a change is in force at the next rendered frame without the game being reloaded.
+    /// </summary>
+    /// <remarks>
+    /// They are <b>global user settings</b> and never come from the profile itself; what reaches
+    /// the scene through this path is what a profile's <b>scripts</b> wrote with
+    /// <c>Setting.VisualStyle</c> or <c>Setting:SetVisualStyleParameter</c> (REQ-LUA-114), which
+    /// lands in the session layer of the model (REQ-PERS-010). The <c>--style</c> options of the
+    /// command line are applied after the run and therefore override it (see
+    /// <see cref="StyleOptions"/>).
+    /// </remarks>
+    private static void PushStyle(ScriptSettings settings, SceneState scene)
+    {
+        StyleSettings style = scene.Settings.Style;
+        SettingsModel model = settings.Model;
+
+        style.Enhanced = model.GetInt(SettingKeys.RenderVisualStyle)
+            == SettingsCatalogue.EnhancedStyle;
+        style.AmbientOcclusion = model.GetInt(SettingKeys.RenderStyleAo);
+        style.AoStrength = model.GetInt(SettingKeys.RenderStyleAoStrength);
+        style.AoRadius = model.GetInt(SettingKeys.RenderStyleAoRadius);
+        style.AoThickness = model.GetInt(SettingKeys.RenderStyleAoThickness);
+        style.AoQuality = model.GetInt(SettingKeys.RenderStyleAoQuality);
+        style.PixelShadow = model.GetInt(SettingKeys.RenderStylePixelShadow) != 0;
+        style.VoxelGrid = model.GetInt(SettingKeys.RenderStyleVoxelGrid);
+        style.Reflections = model.GetInt(SettingKeys.RenderStyleReflections) != 0;
+        style.SsrShine = model.GetInt(SettingKeys.RenderStyleSsrShine);
+        style.SsrClarity = model.GetInt(SettingKeys.RenderStyleSsrClarity);
+        style.SsrLength = model.GetInt(SettingKeys.RenderStyleSsrLength);
+        style.SsrQuality = model.GetInt(SettingKeys.RenderStyleSsrQuality);
     }
 
     /// <summary>
@@ -177,6 +213,25 @@ internal static class ScriptBridge
             case "clip.right":
             case "clip.top":
                 scene.Clipping = settings.ClippingVector;
+                break;
+
+            // AMD-055 REQ-SCN-078: the style and each of its twelve parameters apply to the
+            // next rendered frame, so a write made in a chunk, in Start or in a frame hook
+            // reaches the scene at once.
+            case SettingKeys.RenderVisualStyle:
+            case SettingKeys.RenderStyleAo:
+            case SettingKeys.RenderStyleAoStrength:
+            case SettingKeys.RenderStyleAoRadius:
+            case SettingKeys.RenderStyleAoThickness:
+            case SettingKeys.RenderStyleAoQuality:
+            case SettingKeys.RenderStylePixelShadow:
+            case SettingKeys.RenderStyleVoxelGrid:
+            case SettingKeys.RenderStyleReflections:
+            case SettingKeys.RenderStyleSsrShine:
+            case SettingKeys.RenderStyleSsrClarity:
+            case SettingKeys.RenderStyleSsrLength:
+            case SettingKeys.RenderStyleSsrQuality:
+                PushStyle(settings, scene);
                 break;
             default:
                 // Every other setting is held in the session layer and read from there.
