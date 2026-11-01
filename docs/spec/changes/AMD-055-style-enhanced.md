@@ -1,7 +1,7 @@
 # AMD-055 — Style visuel « Enhanced »
 
-Version : 1.4 | 2026-11-01 | **Normatif** (R1, choix du propriétaire du 2026-10-31 : reprise des pistes §3.1, 3.2 et 3.3 du rapport de comparaison avec 3dSen 2.0). **Amende AMD-040** (§2 : ligne `VisualStyle` de REQ-LUA-114 et note sur les défauts ; §3 : paramètres du style Enhanced, identifiant du style, ligne SPEC-09 de `render.visual_style`), **AMD-043** (§2 REQ-SCN-066 et colonne Lua du §6 : les réglages de courbure agissent dans les deux styles), **AMD-049** (REQ-SCN-075 : phrase sur la grille de voxels), **SPEC-06 REQ-SCN-058** (ordre de rendu d'une frame) et **SPEC-10 REQ-UI-061** (liste des paramètres visibles sur desktop). Complète SPEC-06 et SPEC-09.
-Historique : 1.0 (rédaction) ; 1.1 (relecture R2-review-AMD-055 : 55-1 à 55-24 ; décisions du propriétaire du 2026-10-31 : la grille de voxels s'applique au backdrop et se calcule dans le repère local du maillage avant transformation d'objet et avant courbure ; REQ-SCN-083 et REQ-SCN-084 ramenées à une intention paramétrée, en P3, avec des critères de revue ; clés de réglages `render.style.*`, non exposées en libretro ; lecture A pour la courbure en Classic) ; 1.2 (seconde relecture R2-review-AMD-055-v1.1 : N-1 à N-8 ; décisions du propriétaire du 2026-10-31 : **références publiques orientantes** pour REQ-SCN-083 — occlusion ambiante d'écran par hémisphère — et pour REQ-SCN-084 — tracé de rayon dans l'espace écran par marche puis dichotomie ; **mode MSVO** porté de l'implémentation publique sous licence MIT du MiniEngine de Microsoft, avec repli déclaré sur Depth ; N-1 traité par la mesure sur la face avant du backdrop, position fixée ; N-2 aligné sur la lecture de REQ-SCN-084 ; N-3 à N-8 retenus). ; 1.3 (R2-review-AMD-055-v1.2 : N2-1, plaque de `sizeZ` = 1 dans le critère de REQ-SCN-082 ; N2-2, normales plates en MARCHING, REQ-E3D-522) ; 1.4 (vérification R5 du 2026-11-01, Q-094, Q-096, Q-097 : plafond d'assombrissement de REQ-SCN-083 relevé à `min(0,95 ; 0,3 × ao.strength)` d'après la mesure de 3dSen 2.0, invariant de contact ajusté ; verticale de la définition du sol de REQ-SCN-084 en mode caméra locale : normale du plan image).
+Version : 1.5 | 2026-11-01 | **Normatif** (R1, choix du propriétaire du 2026-10-31 : reprise des pistes §3.1, 3.2 et 3.3 du rapport de comparaison avec 3dSen 2.0). **Amende AMD-040** (§2 : ligne `VisualStyle` de REQ-LUA-114 et note sur les défauts ; §3 : paramètres du style Enhanced, identifiant du style, ligne SPEC-09 de `render.visual_style`), **AMD-043** (§2 REQ-SCN-066 et colonne Lua du §6 : les réglages de courbure agissent dans les deux styles), **AMD-049** (REQ-SCN-075 : phrase sur la grille de voxels), **SPEC-06 REQ-SCN-058** (ordre de rendu d'une frame) et **SPEC-10 REQ-UI-061** (liste des paramètres visibles sur desktop). Complète SPEC-06 et SPEC-09.
+Historique : 1.0 (rédaction) ; 1.1 (relecture R2-review-AMD-055 : 55-1 à 55-24 ; décisions du propriétaire du 2026-10-31 : la grille de voxels s'applique au backdrop et se calcule dans le repère local du maillage avant transformation d'objet et avant courbure ; REQ-SCN-083 et REQ-SCN-084 ramenées à une intention paramétrée, en P3, avec des critères de revue ; clés de réglages `render.style.*`, non exposées en libretro ; lecture A pour la courbure en Classic) ; 1.2 (seconde relecture R2-review-AMD-055-v1.1 : N-1 à N-8 ; décisions du propriétaire du 2026-10-31 : **références publiques orientantes** pour REQ-SCN-083 — occlusion ambiante d'écran par hémisphère — et pour REQ-SCN-084 — tracé de rayon dans l'espace écran par marche puis dichotomie ; **mode MSVO** porté de l'implémentation publique sous licence MIT du MiniEngine de Microsoft, avec repli déclaré sur Depth ; N-1 traité par la mesure sur la face avant du backdrop, position fixée ; N-2 aligné sur la lecture de REQ-SCN-084 ; N-3 à N-8 retenus). ; 1.3 (R2-review-AMD-055-v1.2 : N2-1, plaque de `sizeZ` = 1 dans le critère de REQ-SCN-082 ; N2-2, normales plates en MARCHING, REQ-E3D-522) ; 1.4 (vérification R5 du 2026-11-01, Q-094, Q-096, Q-097 : plafond d'assombrissement de REQ-SCN-083 relevé à `min(0,95 ; 0,3 × ao.strength)` d'après la mesure de 3dSen 2.0, invariant de contact ajusté ; verticale de la définition du sol de REQ-SCN-084 en mode caméra locale : normale du plan image) ; 1.5 (Q-099 : intensité des reflets de REQ-SCN-084 divisée par deux, `0,045 × n(ssr.shine)`, d'après la mesure de 3dSen 2.0).
 Priorités : REQ-SCN-078 à REQ-SCN-082 sont **P2**, REQ-SCN-083 et REQ-SCN-084 sont **P3**. Si REQ-SCN-078 n'est pas retenue, le style reste sans effet de rendu (AMD-040 REQ-LUA-114 inchangée) et rien de cet amendement ne s'applique. Si une exigence de §2.3 à §2.5 n'est pas retenue, l'effet correspondant n'existe pas, son réglage reste persisté et exposé sans effet (cas analogue à SPEC-09 REQ-PERS-017, §3 point 7) et les autres effets sont inchangés. Si REQ-SCN-081 n'est pas retenue, la phrase d'AMD-049 REQ-SCN-075 sur la grille de voxels reste valable (T-1). Si REQ-SCN-083 et REQ-SCN-084 ne sont retenues ni l'une ni l'autre, l'ordre de frame de REQ-SCN-058 reste celui de SPEC-06, sans les deux passes d'écran (T-1). Le **portage MSVO** de REQ-SCN-083 est lui aussi **P3** : s'il n'est pas retenu, ou tant qu'il n'est pas disponible, `spl.ao` = 1 est rendu comme Depth **(D)** et le reste de REQ-SCN-083 est inchangé (T-1).
 
 ## 1. Besoin
@@ -497,7 +497,7 @@ scène (0 ; 0 ; −1)), environ 10,5 % de la frame changeant à `spl.reflections
 - **longueur maximale** du rayon : `40 × n(ssr.length) × échelle de scène` unités de scène, soit
   40, 120, 200, 280 et 360 pour les réglages 1 à 5 (200 par défaut) ;
 - **intensité** du reflet (part de la couleur réfléchie mélangée à la couleur de la surface) :
-  `0,09 × n(ssr.shine)`, soit 0,09 / 0,27 / 0,45 / 0,63 / 0,81 (0,45 par défaut). Le mélange se
+  `0,045 × n(ssr.shine)`, soit 0,045 / 0,135 / 0,225 / 0,315 / 0,405 (0,225 par défaut ; v1.5, voir Q-099). Le mélange se
   fait **en espace linéaire, avant l'encodage sRGB de REQ-SCN-028** ;
 - **flou** : le rayon de flou croît **linéairement** avec la distance parcourue par le rayon, de 0
   au point d'origine jusqu'à `0,003 × (10 − n(ssr.clarity))` de la **hauteur d'écran** à la
@@ -523,7 +523,7 @@ mode 3D, capture **1920 × 1080**, `video.anti_alias` = 0, `video.res_scale` = 0
 scène 1, courbure nulle, TV Box = None, skybox `Color` noire, `render.shadow` = **faux**, **tous les
 autres effets de §2.3 à §2.5 à Off** (`spl.voxel_grid` = 0, `spl.pixel_shadow` = 0, `spl.ao` = 0),
 `spl.reflections` = 1 et les quatre réglages `ssr.*` à leur défaut (`ssr.shine` = 3, donc une
-intensité de 0,45 ; `ssr.clarity` = 3 ; `ssr.length` = 3, donc 200 unités ; `ssr.quality` = 2).
+intensité de 0,225 ; `ssr.clarity` = 3 ; `ssr.length` = 3, donc 200 unités ; `ssr.quality` = 2).
 Lumière blanche `Light.Direction` = (1, −1, 1), intensité 1. Valeurs lues en sRGB 8 bits puis
 converties en linéaire.
 - **Sol** : une shape de **8 × 8 tiles pleines** (64 × 64 unités), `D` = 8, avec `rot = (90, 0, 0)`,
@@ -582,11 +582,11 @@ diffèrent que par le réglage cité.
   ci-dessus les remplacent et sont simultanément satisfaisables, parce qu'ils ne contraignent plus
   qu'une **borne** et une **monotonie**, pas une valeur calculée par une loi non spécifiée.
 - Note, **marge de l'invariant du canal rouge** : le mélange valant
-  `(1 − i) · surface + i · reflet` avec `i` = 0,45, la condition « +10 % » s'écrit
-  `R_reflet ≥ 1,222 · R_sol`. Avec les albédos du gros plan R et le modèle de REQ-SCN-028, le sol
+  `(1 − i) · surface + i · reflet` avec `i` = 0,225, la condition « +10 % » s'écrit
+  `R_reflet ≥ 1,444 · R_sol`. Avec les albédos du gros plan R et le modèle de REQ-SCN-028, le sol
   donne `R_sol = 0,202 × (0,1812 + 0,577) = 0,153` et la face rouge réfléchie
   `R_reflet = 1,000 × (0,1812 + 0,577) = 0,759`, soit un facteur **4,9**. Il suffit donc que la part
-  rouge effectivement rapportée au contact dépasse **25 %** de sa valeur pleine : le seuil de 10 %
+  rouge effectivement rapportée au contact dépasse **30 %** de sa valeur pleine : le seuil de 10 %
   reste franchi malgré l'atténuation et le flou, quelle que soit leur forme. C'est pour cette marge
   que le sol du gros plan R est sombre (albédo 0,202) et le cube rouge pur.
 
@@ -688,7 +688,7 @@ ligne `Style`, elle-même après la ligne `Skybox`.
 | `render.style.pixel_shadow` | `… "spl.pixel_shadow"` | — | entier | 0 | 0 à 1, pas 1 | U | imm. | — / Zaxnes : case « Pixel Shadows » | — | ombre évaluée au centre du voxel, REQ-SCN-082 |
 | `render.style.voxel_grid` | `… "spl.voxel_grid"` | — | entier | 0 | 0 à 3, pas 1 | U | imm. | — / Zaxnes : liste « Voxel Grid » | — | rainures tous les `N = 2^valeur` voxels, REQ-SCN-081 |
 | `render.style.reflections` | `… "spl.reflections"` | — | entier | 0 | 0 à 1, pas 1 | U | imm. | — / Zaxnes : case « Reflections » | — | reflets du sol dans l'espace écran, REQ-SCN-084 |
-| `render.style.ssr_shine` | `… "ssr.shine"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Floor Shine » | — | intensité `0,09 × (2 × valeur − 1)`, REQ-SCN-084 |
+| `render.style.ssr_shine` | `… "ssr.shine"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Floor Shine » | — | intensité `0,045 × (2 × valeur − 1)`, REQ-SCN-084 |
 | `render.style.ssr_clarity` | `… "ssr.clarity"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Clarity » | — | flou maximal `0,003 × (10 − (2 × valeur − 1))` de la hauteur d'écran, REQ-SCN-084 |
 | `render.style.ssr_length` | `… "ssr.length"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Length » | — | longueur maximale `40 × (2 × valeur − 1)` unités de scène, REQ-SCN-084 |
 | `render.style.ssr_quality` | `… "ssr.quality"` | — | entier | 2 | 0 à 3, pas 1 | U | imm. | — / Zaxnes : liste « Reflection Quality » | — | pas de marche, raffinements et résolution de la passe (non observables), REQ-SCN-084 |
