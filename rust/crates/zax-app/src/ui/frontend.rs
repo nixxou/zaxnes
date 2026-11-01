@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use imgui::DrawData;
 use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
 use zax_platform::imgui_renderer::ImguiRenderer;
 use zax_platform::input::{Key, KeyboardDevice};
 use zax_platform::ui_image::PictureUpdate;
@@ -96,6 +97,8 @@ pub struct ImguiFrontend {
     touch_pad: Option<zax_platform::input::touch::TouchPadView>,
     /// Where fingers tapped off the touch pad since the last frame (Rust-only).
     taps: Vec<[f32; 2]>,
+    /// The system's keyboard is up for the console's keyboard screen (Android, Rust-only).
+    system_typing: bool,
 }
 
 impl ImguiFrontend {
@@ -221,12 +224,49 @@ impl ImguiFrontend {
             roms_setting: roms_setting(host),
             touch_pad: None,
             taps: Vec::new(),
+            system_typing: false,
         })
     }
 
     /// An SDL event, before the input layer sees it.
     pub fn handle_event(&mut self, event: &Event) {
         self.platform.handle_event(self.context.io_mut(), event);
+        if self.system_typing {
+            self.type_on_system_keyboard(event);
+        }
+    }
+
+    /// What the system's keyboard typed into the console's keyboard screen (Android): its text,
+    /// backspace and enter.
+    fn type_on_system_keyboard(&mut self, event: &Event) {
+        let Some(handheld) = &mut self.handheld else {
+            return;
+        };
+        match event {
+            Event::TextInput { text, .. } => handheld.type_text(text),
+            Event::KeyDown {
+                keycode: Some(Keycode::Backspace),
+                ..
+            } => handheld.erase_typed(),
+            Event::KeyDown {
+                keycode: Some(Keycode::Return | Keycode::KpEnter),
+                ..
+            } => handheld.finish_typing(),
+            _ => {}
+        }
+    }
+
+    /// Raises the system's keyboard while the console's keyboard screen types, and lowers it
+    /// after (Android only: a desktop types with its own keyboard).
+    fn follow_system_keyboard(&mut self) {
+        let typing = cfg!(target_os = "android")
+            && self.device
+            && self.handheld.as_ref().is_some_and(HandheldUi::typing);
+        if typing != self.system_typing {
+            self.system_typing = typing;
+            zax_platform::input::text::show_system_keyboard(typing);
+            self.keyboard_pad.release(self.platform.pad_mut());
+        }
     }
 
     /// Whether a text field of the interface owns the keyboard.
@@ -351,9 +391,10 @@ impl ImguiFrontend {
                 return;
             }
         }
-        // A handheld has no menu bar: the keys drive its pad instead of the shortcuts.
+        // A handheld has no menu bar: the keys drive its pad instead of the shortcuts; the
+        // system's keyboard types its text instead (Android).
         if self.console_shown() {
-            if binding_capture_active {
+            if binding_capture_active || self.system_typing {
                 self.keyboard_pad.release(self.platform.pad_mut());
             } else {
                 self.keyboard_pad
@@ -456,7 +497,13 @@ impl ImguiFrontend {
                     }
                     // A tap of a touch screen is a click (Rust-only, owner request): the rows,
                     // and the hints of the buttons the touch pad does not have.
-                    for tap in std::mem::take(&mut self.taps).into_iter().filter(|_| device) {
+                    let taps = std::mem::take(&mut self.taps);
+                    // A tap while the keyboard screen types raises the system's keyboard again,
+                    // in case it was put away.
+                    if self.system_typing && !taps.is_empty() {
+                        zax_platform::input::text::show_system_keyboard(true);
+                    }
+                    for tap in taps.into_iter().filter(|_| device) {
                         let input = super::handheld::pointer::PointerInput {
                             position: tap,
                             clicked: true,
@@ -497,6 +544,7 @@ impl ImguiFrontend {
         if let Some(view) = &self.touch_pad {
             super::touch_pad_view::draw(ui, view);
         }
+        self.follow_system_keyboard();
         self.pictures
             .extend(frame.host.achievements.take_picture_updates());
         if leave_console {

@@ -1170,6 +1170,39 @@ impl HandheldUi {
         }
     }
 
+    /// Whether the keyboard of the RetroAchievements screen is typing: the system's keyboard
+    /// types with it on Android (Rust-only, owner request).
+    #[must_use]
+    pub fn typing(&self) -> bool {
+        self.screen == Screen::Keyboard && self.keyboard.is_some()
+    }
+
+    /// Text typed on the system's keyboard.
+    pub fn type_text(&mut self, text: &str) {
+        if let Some(keyboard) = self.keyboard.as_mut().filter(|_| self.screen == Screen::Keyboard)
+        {
+            keyboard.type_text(text);
+        }
+    }
+
+    /// The system keyboard's backspace.
+    pub fn erase_typed(&mut self) {
+        if let Some(keyboard) = self.keyboard.as_mut().filter(|_| self.screen == Screen::Keyboard)
+        {
+            keyboard.erase();
+        }
+    }
+
+    /// The system keyboard's enter: the text goes to its field.
+    pub fn finish_typing(&mut self) {
+        let Some(keyboard) = self.keyboard.as_ref().filter(|_| self.screen == Screen::Keyboard)
+        else {
+            return;
+        };
+        let (field, command) = (keyboard.field(), keyboard.done());
+        self.follow_keyboard(field, Some(command));
+    }
+
     /// A press on the keyboard: the text goes to its field when done.
     fn press_keyboard(&mut self, button: PadButton) {
         let Some(keyboard) = self.keyboard.as_mut() else {
@@ -1177,7 +1210,12 @@ impl HandheldUi {
             return;
         };
         let field = keyboard.field();
-        match keyboard.handle(button) {
+        let command = keyboard.handle(button);
+        self.follow_keyboard(field, command);
+    }
+
+    fn follow_keyboard(&mut self, field: Field, command: Option<KeyboardCommand>) {
+        match command {
             Some(KeyboardCommand::Done(text)) => {
                 match field {
                     Field::Username => self.achievements.username = text,

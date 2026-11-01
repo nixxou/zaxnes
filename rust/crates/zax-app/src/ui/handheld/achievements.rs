@@ -305,6 +305,24 @@ impl KeyboardModel {
         None
     }
 
+    /// Text typed on the system's keyboard (Android): its printable characters.
+    pub fn type_text(&mut self, text: &str) {
+        for character in text.chars().filter(|character| !character.is_control()) {
+            self.push(character);
+        }
+    }
+
+    /// The system keyboard's backspace.
+    pub fn erase(&mut self) {
+        self.text.pop();
+    }
+
+    /// The system keyboard's enter: the text is done.
+    #[must_use]
+    pub fn done(&self) -> KeyboardCommand {
+        KeyboardCommand::Done(self.text.clone())
+    }
+
     fn next_layout(&mut self) {
         self.layout = (self.layout + 1) % LAYOUTS.len();
         self.clamp();

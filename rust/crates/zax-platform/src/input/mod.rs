@@ -6,6 +6,7 @@ pub mod devices;
 pub mod keys;
 pub mod labels;
 pub mod sdl;
+pub mod text;
 pub mod touch;
 
 pub use control::{standard_gamepad, PhysicalControl, PhysicalControlKind};
