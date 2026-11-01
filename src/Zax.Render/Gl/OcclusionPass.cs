@@ -16,10 +16,9 @@ namespace Zax.Render.Gl;
 /// drawn after, so they neither occlude nor are darkened.
 /// </para>
 /// <para>
-/// <c>spl.ao</c> = 1 (MSVO) is rendered exactly as <c>spl.ao</c> = 2 (Depth) — the declared
-/// fallback <b>(D)</b> of REQ-SCN-083, in force as long as the multi-scale port of the
-/// MiniEngine is not available. <c>ao.thickness</c> has no effect under that fallback
-/// (REQ-SCN-079).
+/// This is the <c>spl.ao</c> = 2 (Depth) mode alone. <c>spl.ao</c> = 1 (MSVO) is the multi-scale
+/// occlusion of <see cref="MsvoPass"/>, ported from the MiniEngine; <c>ao.thickness</c> acts
+/// there and has no effect here (REQ-SCN-079).
 /// </para>
 /// </remarks>
 internal sealed class OcclusionPass : IDisposable
@@ -75,7 +74,9 @@ internal sealed class OcclusionPass : IDisposable
         ArgumentNullException.ThrowIfNull(buffer);
         ArgumentNullException.ThrowIfNull(style);
 
-        if (style.EffectiveOcclusion == AmbientOcclusionMode.Off
+        // The MSVO mode of REQ-SCN-083 has its own pass (MsvoPass) since its MiniEngine port
+        // landed; this one is the Depth occlusion alone.
+        if (style.EffectiveOcclusion != AmbientOcclusionMode.Depth
             || buffer.DepthTexture == 0
             || !Matrix4x4.Invert(projection, out Matrix4x4 inverse))
         {

@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using Zax.Engine3D;
 using Zax.Profiles;
 using Zax.Render;
@@ -6,10 +6,11 @@ using Zax.Render;
 namespace Zax.Acceptance.Tests;
 
 /// <summary>
-/// AMD-055 §2.4 — the screen-space ambient occlusion of REQ-SCN-083, in the Depth mode and
-/// under the declared fallback <b>(D)</b> that renders MSVO as Depth. The automatic invariants
-/// are all ratios of linear values between two captures of the <b>close-up A</b> that differ by
-/// one setting only.
+/// AMD-055 §2.4 — the screen-space ambient occlusion of REQ-SCN-083, in both its modes: the
+/// <b>Depth</b> hemisphere occlusion and the <b>MSVO</b> multi-scale one ported from the
+/// MiniEngine, for which the <i>Conformité</i> clause makes the invariants of the section hold
+/// too. They are all ratios of linear values between two captures of the <b>close-up A</b> that
+/// differ by one setting only.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -174,34 +175,206 @@ public sealed class Amd055OcclusionTests
     }
 
     /// <summary>
-    /// REQ-SCN-083, fourth invariant, under the declared fallback <b>(D)</b>: <c>spl.ao</c> = 1
-    /// (MSVO) and <c>spl.ao</c> = 2 (Depth) give captures identical to ±2 sRGB levels, and
-    /// <c>ao.thickness</c> has no effect in either (REQ-SCN-079).
+    /// REQ-SCN-083, fourth invariant, <b>with the MSVO port available</b>: in <c>spl.ao</c> = 1,
+    /// changing <c>ao.thickness</c> from 1 to 5 changes at least one pixel by more than 2 sRGB
+    /// levels, and the ratio at the contact pixel does <b>not grow</b> — a thicker occluder can
+    /// only darken more. In <c>spl.ao</c> = 2 the thickness still changes nothing at all
+    /// (REQ-SCN-079, third criterion).
     /// </summary>
     [GlFact] // REQ-SCN-083, REQ-SCN-079
-    public void REQ_SCN_083_msvo_is_rendered_as_depth_under_the_fallback()
+    public void REQ_SCN_083_the_thickness_acts_in_msvo_and_nowhere_else()
     {
-        using GlTarget target = GlTarget.Create(640, 480);
+        using GlTarget target = GlTarget.Create(Width, Height);
         using SceneRenderer renderer = new(target.Gl);
 
         SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+        Shot off = target.Render(renderer, scene);
+        (int cx, int cy) = Pixel(view, Contact[0]);
 
-        Enhance(scene, 2);
-        Shot depth = target.Render(renderer, scene);
+        // MSVO: the thickness acts, and the darkening is monotone in it.
+        Enhance(scene, 1);
+        scene.Settings.Style.AoThickness = 1;
+        Shot thin = target.Render(renderer, scene);
+        Assert.True(renderer.Statistics.OcclusionPass, "the MSVO pass must have run.");
 
-        scene.Settings.Style.AmbientOcclusion = 1;
-        Shot msvo = target.Render(renderer, scene);
-        AssertSame(depth, msvo, tolerance: 2);
+        scene.Settings.Style.AoThickness = 5;
+        Shot thick = target.Render(renderer, scene);
 
-        // And the thickness changes nothing in either mode: the Depth occlusion does not use it.
-        foreach (int mode in (int[])[1, 2])
+        int moved = 0;
+        for (int i = 0; i < thin.Pixels.Length; i += 4)
         {
-            scene.Settings.Style.AmbientOcclusion = mode;
-            scene.Settings.Style.AoThickness = 1;
-            Shot thin = target.Render(renderer, scene);
-            scene.Settings.Style.AoThickness = 5;
-            Assert.Equal(thin.Pixels, target.Render(renderer, scene).Pixels);
+            if (Math.Abs(thin.Pixels[i] - thick.Pixels[i]) > 2)
+            {
+                moved++;
+            }
         }
+
+        Assert.True(moved > 0, "ao.thickness changed no pixel by more than 2 sRGB levels.");
+
+        double thinRatio = Ratio(thin, off, cx, cy);
+        double thickRatio = Ratio(thick, off, cx, cy);
+        Assert.True(
+            thickRatio <= thinRatio + 1e-6,
+            $"the contact pixel went from {thinRatio:F4} to {thickRatio:F4} as the thickness "
+            + "grew: the darkening must not decrease.");
+
+        // Depth: the thickness is not read at all, so the capture is identical to the pixel.
+        scene.Settings.Style.AmbientOcclusion = 2;
+        scene.Settings.Style.AoThickness = 1;
+        Shot depthThin = target.Render(renderer, scene);
+        scene.Settings.Style.AoThickness = 5;
+        Assert.Equal(depthThin.Pixels, target.Render(renderer, scene).Pixels);
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, <i>Conformité</i>: the invariants of §2.4 hold for the MSVO mode too — a
+    /// lone plane is not darkened, the foot of the cube is, nothing at <c>2 r</c> from it is,
+    /// and the ceiling <c>O ≤ 0.1 × ao.strength</c> holds with its monotony.
+    /// </summary>
+    [GlFact] // REQ-SCN-083
+    public void REQ_SCN_083_the_msvo_mode_keeps_the_invariants_of_the_section()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        // A lone plane: nothing occludes it, so the occlusion must leave it alone.
+        SceneState plane = CloseUpA(cube: false);
+        CameraView planeView = View(plane);
+        Shot planeOff = target.Render(renderer, plane);
+        Enhance(plane, 1);
+        Shot planeOn = target.Render(renderer, plane);
+
+        int sampled = 0;
+        for (float x = 84f; x <= 172f; x += 4f)
+        {
+            for (float z = -44f; z <= 44f; z += 4f)
+            {
+                (int px, int py) = Pixel(planeView, new Vector3(x, Plane, z));
+                if (px < 0 || px >= Width || py < 0 || py >= Height || planeOff.At(px, py).R == 0)
+                {
+                    continue;
+                }
+
+                sampled++;
+                Assert.InRange(Ratio(planeOn, planeOff, px, py), 0.98, 1.02);
+            }
+        }
+
+        Assert.True(sampled > 100, $"only {sampled} pixels of the lone plane were measured.");
+
+        // The cube: its foot is darkened without passing the ceiling, and the floor far from it
+        // is untouched.
+        SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+        Shot off = target.Render(renderer, scene);
+        Enhance(scene, 1);
+
+        (int fx, int fy) = Pixel(view, FarFromCube);
+        double previous = double.MaxValue;
+        for (int strength = 1; strength <= 5; strength++)
+        {
+            scene.Settings.Style.AoStrength = strength;
+            Shot on = target.Render(renderer, scene);
+
+            double least = LeastRatio(on, off);
+            Assert.True(
+                least >= (1.0 - (0.1 * strength)) - 0.01,
+                $"strength {strength} darkened a pixel to {least:F3}.");
+            Assert.InRange(Ratio(on, off, fx, fy), 0.98, 1.02);
+
+            double contact = Contact
+                .Select(point => Pixel(view, point))
+                .Select(pixel => Ratio(on, off, pixel.X, pixel.Y))
+                .Min();
+            Assert.True(contact < 1.0, $"strength {strength} darkened no contact pixel.");
+            Assert.True(contact >= 1.0 - (0.1 * strength) - 0.01, $"contact fell to {contact:F3}.");
+            Assert.True(
+                contact < previous,
+                $"strength {strength} gave {contact:F3} at the contact, not below {previous:F3}.");
+            previous = contact;
+        }
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, <i>Conformité</i>: in the MSVO mode too, <c>spl.ao</c> = 0 is a Classic
+    /// capture and neither the skybox nor the HUD is touched.
+    /// </summary>
+    [GlFact] // REQ-SCN-083, REQ-SCN-029, REQ-SCN-044, REQ-SCN-049
+    public void REQ_SCN_083_the_msvo_mode_keeps_the_scope_of_the_section()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA(hud: true, gradient: true);
+        CameraView view = View(scene);
+
+        Shot off = target.Render(renderer, scene);
+        Shot noHud = target.Render(renderer, CloseUpA(hud: false, gradient: true));
+        SceneState empty = CloseUpA(cube: false, gradient: true);
+        empty.GameRunning = false;
+        Shot skyAlone = target.Render(renderer, empty);
+
+        Enhance(scene, 1);
+        Shot on = target.Render(renderer, scene);
+
+        Assert.True(renderer.Statistics.OcclusionPass);
+        (int cx, int cy) = Pixel(view, Contact[0]);
+        Assert.True(Ratio(on, off, cx, cy) < 1.0, "the floor must still be darkened.");
+
+        int hudPixels = 0;
+        int skyPixels = 0;
+        for (int y = 0; y < Height; y++)
+        {
+            for (int x = 0; x < Width; x++)
+            {
+                if (off.Packed(x, y) != noHud.Packed(x, y))
+                {
+                    hudPixels++;
+                    AssertClose(off, on, x, y, tolerance: 1);
+                }
+                else if (off.Packed(x, y) == skyAlone.Packed(x, y))
+                {
+                    skyPixels++;
+                    AssertClose(off, on, x, y, tolerance: 1);
+                }
+            }
+        }
+
+        Assert.True(hudPixels > 200, $"only {hudPixels} HUD pixels were compared.");
+        Assert.True(skyPixels > 10000, $"only {skyPixels} skybox pixels were compared.");
+    }
+
+    /// <summary>
+    /// REQ-SCN-083: the three values of <c>ao.quality</c> give the same general aspect in the
+    /// MSVO mode too, which is what makes the number of scales and of samples unobservable.
+    /// </summary>
+    [GlFact] // REQ-SCN-083
+    public void REQ_SCN_083_the_three_qualities_agree_in_msvo()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+        Shot off = target.Render(renderer, scene);
+
+        Enhance(scene, 1);
+        (int cx, int cy) = Pixel(view, Contact[0]);
+        (int fx, int fy) = Pixel(view, FarFromCube);
+
+        List<double> contact = [];
+        for (int quality = 0; quality <= 2; quality++)
+        {
+            scene.Settings.Style.AoQuality = quality;
+            Shot on = target.Render(renderer, scene);
+
+            contact.Add(Ratio(on, off, cx, cy));
+            Assert.InRange(Ratio(on, off, fx, fy), 0.98, 1.02);
+        }
+
+        Assert.InRange(contact.Max() - contact.Min(), 0.0, 0.10);
+        Assert.All(contact, ratio => Assert.True(ratio < 1.0, $"quality gave {ratio:F3}."));
     }
 
     /// <summary>

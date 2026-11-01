@@ -31,6 +31,7 @@ public sealed class SceneRenderer : ISceneRenderer
     private readonly LinearColorBuffer _linear;
     private readonly OcclusionPass _occlusion;
     private readonly ReflectionPass _reflections;
+    private readonly MsvoPass _msvo;
 
     private readonly List<DrawItem> _opaque = [];
     private readonly List<DrawItem> _transparent = [];
@@ -73,6 +74,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _linear = new LinearColorBuffer(gl);
         _occlusion = new OcclusionPass(gl);
         _reflections = new ReflectionPass(gl);
+        _msvo = new MsvoPass(gl);
 
         // AMD-034 §2: the size the hardware granted is known from here on, whether or not a
         // shadow pass ever runs, so the host can report a fallback once.
@@ -135,6 +137,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _linear.Dispose();
         _occlusion.Dispose();
         _reflections.Dispose();
+        _msvo.Dispose();
         _skybox.Dispose();
         _shadowMap.Dispose();
         _textures.Dispose();
@@ -651,8 +654,12 @@ public sealed class SceneRenderer : ISceneRenderer
             // other way round.
             Statistics.ReflectionPass = _reflections.Draw(
                 _linear, scene.Settings.Style, view, scene.Settings.SceneScale);
-            Statistics.OcclusionPass = _occlusion.Draw(
-                _linear, scene.Settings.Style, view.Projection, scene.Settings.SceneScale);
+            // REQ-SCN-083: the MSVO mode is the multi-scale port, the Depth mode the
+            // hemisphere occlusion; each pass leaves the other's mode alone.
+            Statistics.OcclusionPass =
+                _msvo.Draw(_linear, scene.Settings.Style, view, scene.Settings.SceneScale)
+                || _occlusion.Draw(
+                    _linear, scene.Settings.Style, view.Projection, scene.Settings.SceneScale);
             if (Statistics.ReflectionPass || Statistics.OcclusionPass)
             {
                 // The passes left the cull state and the program of their own full-screen

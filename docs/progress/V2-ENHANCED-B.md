@@ -103,13 +103,50 @@ Scope: the MSVO mode of REQ-SCN-083 (`spl.ao` = 1), ported from `third_party/Min
 (MIT) and adapted to OpenGL 3.3 fragment passes, with the `ao.*` parameters and the invariants
 of the amendment; the Depth fallback **(D)** for that mode is removed.
 
-- [ ] 1/4 Port: the MiniEngine multi-scale occlusion as OpenGL 3.3 fragment passes (depth
+- [x] 1/4 Port: the MiniEngine multi-scale occlusion as OpenGL 3.3 fragment passes (depth
       pyramid, per-scale occlusion, blur and upsample), with the MIT attribution header.
-- [ ] 2/4 Wiring: `spl.ao` = 1 selects it, `ao.thickness` acts in that mode only, the greying
+      — **done**, lot commit below
+- [x] 2/4 Wiring: `spl.ao` = 1 selects it, `ao.thickness` acts in that mode only, the greying
       rule of the UI follows, `ao.radius` / `ao.strength` keep their normative meaning.
-- [ ] 3/4 Acceptance tests: the close-up A invariants in MSVO mode, including the
-      `ao.thickness` criterion that replaces the fallback identity.
-- [ ] 4/4 Journal entry, lot commit.
+      — **done**, lot commit below
+- [x] 3/4 Acceptance tests: the close-up A invariants in MSVO mode, including the
+      `ao.thickness` criterion that replaces the fallback identity. — **done**, lot commit below
+- [x] 4/4 Journal entry, lot commit. — **done**, lot commit below
+
+### V2-20 (multi-scale occlusion, MSVO)
+
+- `src/Zax.Render/Gl/MsvoShaders.cs` and `MsvoPass.cs`, both carrying the MIT attribution
+  header of `third_party/README.md`. Four fragment passes: linear-depth pyramid, per-level
+  occlusion, bilateral upsample chain, then the **same** apply pass as the Depth mode, so the
+  ceiling `O ≤ 0.1 × ao.strength` is enforced in one place.
+- Kept from the MiniEngine: the pyramid of linear depths; the sphere-penetration test
+  (`TestSamplePair` / `TestSamples`) with its thickness table, its per-offset weights and its
+  rejection fall-off; the checkerboard of offsets and the axial / diagonal / L-shaped grouping;
+  the bilateral upsample that multiplies each level into the next finer one.
+- Adapted: OpenGL 3.3 has no compute shaders and no group-shared memory (REQ-SCN-056), so each
+  pass samples the depth textures directly instead of a cached tile; the original's sphere has a
+  fixed radius of five **pixels** per level while REQ-SCN-083 binds `r` in **scene units**, so
+  the offsets are scaled per pixel by `r × focal / depth` and the levels take r/4, r/2 and r;
+  the depth is kept in view units, which makes the test exactly `0.5 + Δz / (2 r T)`; the
+  accentuation is left at 0, since the first invariant wants a lone plane untouched; and the
+  upsample blur is a 3 × 3 depth-weighted tent instead of the group-shared `SmartBlur`.
+- `ao.thickness` is the rejection fall-off, 1 to 10 (`StyleSettings.OcclusionThickness`): a
+  greater value rejects fewer near samples, so the darkening can only grow with it — the
+  monotony REQ-SCN-083 requires holds by construction.
+- `OcclusionPass` now answers the **Depth** mode alone; `MsvoPass` answers MSVO. The renderer
+  tries the MSVO pass first and falls through to the Depth one.
+- `OptionsModel.MsvoPortAvailable` is now true and `IsInert` greys `ao.thickness` exactly when
+  `spl.ao` is not MSVO, which is what AMD-055 §4 asks ("grisé sauf en mode MSVO effectif"). The
+  EN/FR hint texts are unchanged and still read true.
+- Tests: the fallback-identity test of V2-18 is replaced by the MSVO form of the fourth
+  invariant (`ao.thickness` moves at least one pixel by more than 2 sRGB levels, and the contact
+  ratio does not grow), plus three tests for the *Conformité* clause — the invariants of §2.4,
+  the scope (skybox and HUD), and the three qualities — in MSVO mode. 11 tests in
+  `Amd055OcclusionTests`.
+- Test results: `Zax.Render.Tests` 162/162; `Zax.App.Tests` 488/488; `Zax.Acceptance.Tests`
+  filtered to render/scene/settings 305 passed, 1 skipped.
+- One visual check: at `ao.strength` = 5 the darkening around the foot of the cube is wide and
+  progressive, with no hard contour, no band and no fixed noise pattern.
 
 ## Notes
 

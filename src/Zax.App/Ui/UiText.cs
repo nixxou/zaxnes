@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Reflection;
 using Zax.Settings;
 
@@ -150,8 +150,8 @@ internal static class UiText
     public static string ResScaleNeedsRenderTexture => UiStrings.Get(UiKeys.HintResScaleDirect);
 
     /// <summary>
-    /// Why « Thickness » is greyed out: it only acts in the MSVO mode, which the declared
-    /// fallback <b>(D)</b> of AMD-055 REQ-SCN-083 renders as Depth.
+    /// Why « Thickness » is greyed out: it only acts in the MSVO mode of AMD-055
+    /// REQ-SCN-083, so it does nothing to the Depth occlusion.
     /// </summary>
     public static string ThicknessNeedsMsvo => UiStrings.Get(UiKeys.HintThicknessMsvoOnly);
 

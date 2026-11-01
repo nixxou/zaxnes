@@ -27,8 +27,8 @@ public enum AmbientOcclusionMode
     Off = 0,
 
     /// <summary>
-    /// The multi-scale occlusion of REQ-SCN-083, rendered exactly like <see cref="Depth"/>
-    /// while the MiniEngine port is not available — declared fallback <b>(D)</b>.
+    /// The multi-scale occlusion of REQ-SCN-083, ported from the MIT-licensed effect of
+    /// Microsoft's MiniEngine. It is the one mode <c>ao.thickness</c> acts in.
     /// </summary>
     Msvo = 1,
 
@@ -180,6 +180,18 @@ public sealed class StyleSettings
     /// The darkening ceiling <c>O ≤ 0.1 × ao.strength</c> of REQ-SCN-083: 0.1 to 0.5.
     /// </summary>
     public float OcclusionCeiling => 0.1f * AoStrength;
+
+    /// <summary>
+    /// The assumed thickness of an occluder known only by its depth, in the MSVO mode and in
+    /// that mode alone (REQ-SCN-083): 1 for a thin screen, which only occludes its immediate
+    /// neighbourhood in depth, up to 10 for a solid volume extending towards the background.
+    /// </summary>
+    /// <remarks>
+    /// It is the rejection fall-off of the MiniEngine port, whose own range is 1 to 10, and it
+    /// is monotone: a greater thickness rejects fewer near samples and can therefore only
+    /// darken more, which is what REQ-SCN-083 requires of it.
+    /// </remarks>
+    public float OcclusionThickness => 1f + (2.25f * (AoThickness - 1));
 
     /// <summary>
     /// The maximum ray length <c>40 × n(ssr.length) × s</c> in scene units (REQ-SCN-084): 40,

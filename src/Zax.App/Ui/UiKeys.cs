@@ -1,4 +1,4 @@
-namespace Zax.App.Ui;
+﻿namespace Zax.App.Ui;
 
 /// <summary>
 /// The key of every interface text of AMD-035. Both tables of <see cref="UiStrings"/> hold
@@ -123,8 +123,8 @@ internal static class UiKeys
     public const string HintResScaleDirect = "hint.res_scale_direct";
 
     /// <summary>
-    /// Why « Thickness » is greyed out: it only acts in the MSVO mode, which the declared
-    /// fallback <b>(D)</b> of AMD-055 REQ-SCN-083 renders as Depth.
+    /// Why « Thickness » is greyed out: it only acts in the MSVO mode of AMD-055
+    /// REQ-SCN-083, so it does nothing to the Depth occlusion.
     /// </summary>
     public const string HintThicknessMsvoOnly = "hint.thickness_msvo_only";
     public const string HintPressAControl = "hint.press_a_control";

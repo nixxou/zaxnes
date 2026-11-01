@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
 using Zax.App.Audio;
@@ -114,7 +114,8 @@ internal sealed partial class ZaxUi
         // AMD-032 §3: the resolution scale only exists for the render-texture method; under
         // the direct method the scene is always drawn at the native resolution, so the row is
         // shown greyed out rather than hidden, with the reason spelled out beside it. AMD-055
-        // REQ-SCN-079 greys « Thickness » the same way while the MSVO fallback is in force.
+        // REQ-SCN-079 greys « Thickness » the same way outside the MSVO mode, the only one it
+        // acts in.
         bool inert = OptionsModel.IsInert(descriptor.Key, model);
         if (inert)
         {

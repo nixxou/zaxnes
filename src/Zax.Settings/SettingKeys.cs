@@ -144,7 +144,7 @@ public static class SettingKeys
 
     /// <summary>
     /// Assumed thickness of the occluders in MSVO mode, 1 to 5 (REQ-SCN-083). It has no effect
-    /// with the Depth occlusion, which is what the MSVO fallback renders <b>(D)</b>. Lua
+    /// with the Depth occlusion, the MSVO mode being the only one that reads it. Lua
     /// <c>ao.thickness</c>.
     /// </summary>
     public const string RenderStyleAoThickness = "render.style.ao_thickness";

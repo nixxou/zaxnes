@@ -204,9 +204,9 @@ internal sealed class OptionsModel
 
     /// <summary>
     /// Whether <paramref name="key"/> is shown but has no effect, so the row is greyed out with
-    /// the reason beside it. <c>ao.thickness</c> is the one such row: it only acts in the MSVO
-    /// mode, which the declared fallback <b>(D)</b> of REQ-SCN-083 renders as Depth, so it has
-    /// no observable effect at all for now (REQ-SCN-079).
+    /// the reason beside it. <c>ao.thickness</c> is the one such row: since the MiniEngine port
+    /// of REQ-SCN-083 landed it <b>acts</b> in the MSVO mode, and there alone, so it is greyed
+    /// out exactly when <c>spl.ao</c> is not MSVO (REQ-SCN-079, AMD-055 §4).
     /// </summary>
     /// <param name="key">The stable key of the row.</param>
     /// <param name="model">The settings in force.</param>
@@ -222,16 +222,24 @@ internal sealed class OptionsModel
             return !RenderScaling.ScaleApplies(model.GetInt(SettingKeys.VideoRenderMethod));
         }
 
-        return string.Equals(key, SettingKeys.RenderStyleAoThickness, StringComparison.Ordinal)
-            && !MsvoPortAvailable;
+        if (!string.Equals(key, SettingKeys.RenderStyleAoThickness, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return !MsvoPortAvailable || model.GetInt(SettingKeys.RenderStyleAo) != MsvoMode;
     }
 
     /// <summary>
-    /// Whether the MSVO port of REQ-SCN-083 is available. While it is not, <c>spl.ao</c> = 1 is
-    /// rendered exactly like <c>spl.ao</c> = 2 (Depth) — declared fallback <b>(D)</b> — and
-    /// <c>ao.thickness</c> has no observable effect.
+    /// Whether the MSVO port of REQ-SCN-083 is available. It is: the multi-scale occlusion was
+    /// ported from the MIT-licensed effect of Microsoft's MiniEngine, so the declared fallback
+    /// <b>(D)</b> that rendered <c>spl.ao</c> = 1 as Depth no longer applies and
+    /// <c>ao.thickness</c> acts in that mode.
     /// </summary>
-    public const bool MsvoPortAvailable = false;
+    public const bool MsvoPortAvailable = true;
+
+    /// <summary>The value of <c>spl.ao</c> that selects the MSVO mode (REQ-SCN-079).</summary>
+    private const int MsvoMode = 1;
 
     /// <summary>
     /// The two style parameters REQ-SCN-079 types as whole numbers of domain « 0 à 1 » and
