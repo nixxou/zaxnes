@@ -29,6 +29,12 @@ namespace Zax.Render.Gl;
 /// the blending of R2-009 has to keep happening on the linear buffer, and because the renderer
 /// does not own the host's format (REQ-SCN-057).
 /// </para>
+/// <para>
+/// AMD-055 REQ-SCN-080, fourth bullet: the screen passes of the Enhanced style read the colour
+/// and the depth <b>resolved</b>, so the depth is a sampleable texture — not a renderbuffer —
+/// and <see cref="ResolveDepth"/> flattens the multisampled copy of it on demand, in the middle
+/// of the frame, while the scene target stays bound for what is left to draw.
+/// </para>
 /// </remarks>
 internal sealed class LinearColorBuffer : IDisposable
 {
@@ -36,7 +42,7 @@ internal sealed class LinearColorBuffer : IDisposable
     private ShaderProgram? _resolve;
     private uint _framebuffer;
     private uint _colorTexture;
-    private uint _depthBuffer;
+    private uint _depthTexture;
     private uint _sampleFramebuffer;
     private uint _sampleColorBuffer;
     private uint _sampleDepthBuffer;
@@ -66,6 +72,45 @@ internal sealed class LinearColorBuffer : IDisposable
 
     /// <summary>Name of the framebuffer object, 0 before the first <see cref="BeginPass"/>.</summary>
     public uint Framebuffer => _framebuffer;
+
+    /// <summary>
+    /// The single-sample depth texture of the scene, holding window-space depth. It is the one
+    /// the screen passes of AMD-055 read; with anti-aliasing on it only holds the scene once
+    /// <see cref="ResolveDepth"/> has run.
+    /// </summary>
+    public uint DepthTexture => _depthTexture;
+
+    /// <summary>The name of the framebuffer the scene is being drawn into this frame.</summary>
+    public uint SceneFramebuffer => Samples > 1 ? _sampleFramebuffer : _framebuffer;
+
+    /// <summary>
+    /// Flattens the multisampled depth into <see cref="DepthTexture"/> and binds the scene
+    /// target again, so that a screen pass can read the resolved depth and go on drawing into
+    /// the target (AMD-055 REQ-SCN-080). A no-op when anti-aliasing is off: the scene is then
+    /// drawn into the depth texture itself.
+    /// </summary>
+    public void ResolveDepth()
+    {
+        if (Samples <= 1 || _sampleFramebuffer == 0)
+        {
+            return;
+        }
+
+        _gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _sampleFramebuffer);
+        _gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, _framebuffer);
+        _gl.Disable(EnableCap.ScissorTest);
+
+        // A depth blit between two framebuffers of the same size and format is the resolve
+        // OpenGL 3.3 offers; the filter has to be Nearest for a depth buffer.
+        _gl.BlitFramebuffer(
+            0, 0, Width, Height,
+            0, 0, Width, Height,
+            (uint)ClearBufferMask.DepthBufferBit,
+            BlitFramebufferFilter.Nearest);
+
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, _sampleFramebuffer);
+        _gl.Viewport(0, 0, (uint)Width, (uint)Height);
+    }
 
     /// <summary>
     /// Binds the buffer as the draw target at <paramref name="width"/> ×
@@ -301,14 +346,23 @@ internal sealed class LinearColorBuffer : IDisposable
             TextureTarget.Texture2D, _colorTexture, 0);
         _gl.BindTexture(TextureTarget.Texture2D, 0);
 
-        _depthBuffer = _gl.GenRenderbuffer();
-        _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _depthBuffer);
-        _gl.RenderbufferStorage(
-            RenderbufferTarget.Renderbuffer, InternalFormat.DepthComponent24, (uint)width, (uint)height);
-        _gl.FramebufferRenderbuffer(
+        // A depth *texture* rather than a renderbuffer: the screen passes of AMD-055 sample it
+        // (REQ-SCN-083). DepthComponent24 is required of every GL 3.0 implementation, so no
+        // extension is needed (REQ-SCN-056).
+        _depthTexture = _gl.GenTexture();
+        _gl.BindTexture(TextureTarget.Texture2D, _depthTexture);
+        _gl.TexImage2D(
+            TextureTarget.Texture2D, 0, InternalFormat.DepthComponent24,
+            (uint)width, (uint)height, 0,
+            PixelFormat.DepthComponent, PixelType.Float, null);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)GLEnum.Nearest);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)GLEnum.Nearest);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)GLEnum.ClampToEdge);
+        _gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)GLEnum.ClampToEdge);
+        _gl.FramebufferTexture2D(
             FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
-            RenderbufferTarget.Renderbuffer, _depthBuffer);
-        _gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+            TextureTarget.Texture2D, _depthTexture, 0);
+        _gl.BindTexture(TextureTarget.Texture2D, 0);
 
         GLEnum status = _gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
         if (status != GLEnum.FramebufferComplete)
@@ -324,10 +378,10 @@ internal sealed class LinearColorBuffer : IDisposable
         ReleaseSamples();
         Samples = 1;
 
-        if (_depthBuffer != 0)
+        if (_depthTexture != 0)
         {
-            _gl.DeleteRenderbuffer(_depthBuffer);
-            _depthBuffer = 0;
+            _gl.DeleteTexture(_depthTexture);
+            _depthTexture = 0;
         }
 
         if (_colorTexture != 0)

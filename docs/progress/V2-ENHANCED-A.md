@@ -36,7 +36,8 @@ Scope: REQ-SCN-083 in Depth mode, the screen-pass part of the amended frame orde
 MSVO is rendered as Depth — declared fallback **(D)**: the MiniEngine sources are in
 `third_party/MiniEngine-SSAO`, but the OpenGL 3.3 port itself is a later lot.
 
-- [ ] 1/5 `LinearColorBuffer`: depth as a sampleable texture, with the MSAA depth resolve.
+- [x] 1/5 `LinearColorBuffer`: depth as a sampleable texture, with the MSAA depth resolve.
+      — **done**, 1c0mmit
 - [ ] 2/5 AO pass: hemisphere SSAO from depth (Chapman 2013 as the orienting reference),
       per-pixel kernel rotation, range check, depth-aware blur; radius, strength ceiling and
       quality of REQ-SCN-083; applied as a linear multiply before the sRGB encode.
