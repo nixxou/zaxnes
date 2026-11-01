@@ -788,14 +788,19 @@ fn push_scripted_light(model: &SettingsModel, scene: &mut SceneState) {
 
 /// The tile records of `batch` composed flat as the NES would show them, `margin` pixels wider
 /// on each side: the backdrop, the sprites behind the background, the background, then the
-/// sprites in front, a lower sprite index winning. Returns the width and the RGBA pixels.
+/// sprites in front, a lower sprite index winning; a sprite in front does not show where a sprite
+/// behind the background of a lower index has a pixel (the NES picks the sprite first: Super
+/// Mario Bros. 3 hides its piranha plants in their pipes so). Returns the width and the RGBA
+/// pixels.
 fn compose_records(batch: &FrameBatch<'_>) -> (usize, usize, Vec<u8>) {
     let margin = usize::try_from(batch.margin.max(0)).unwrap_or(0);
     let margin_y = usize::try_from(batch.margin_y.max(0)).unwrap_or(0);
     let width = 256 + (2 * margin);
     let height = 240 + (2 * margin_y);
     let mut entries = vec![0u8; width * height];
+    let mut behind = vec![i32::MAX; width * height];
     let mut paint = |record: &TileRecord, base: u8| {
+        let priority = record.index % 64;
         for py in 0..8 {
             for px in 0..8 {
                 let Some(pixel) = record.displayed_pixel(px, py) else {
@@ -813,7 +818,15 @@ fn compose_records(batch: &FrameBatch<'_>) -> (usize, usize, Vec<u8>) {
                     continue;
                 };
                 if x < width && y < height {
-                    entries[(y * width) + x] = base + (record.palette * 4) + pixel;
+                    let at = (y * width) + x;
+                    if !record.background {
+                        if record.hidden {
+                            behind[at] = behind[at].min(priority);
+                        } else if behind[at] < priority {
+                            continue;
+                        }
+                    }
+                    entries[at] = base + (record.palette * 4) + pixel;
                 }
             }
         }

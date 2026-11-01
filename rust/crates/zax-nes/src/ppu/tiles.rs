@@ -1062,8 +1062,12 @@ impl Ppu2C02 {
         // Palette entries of the sides (0 = nothing), composed first, then turned into colours. A
         // sprite behind is painted first so that an opaque background pixel covers it.
         out.resize(width * height, 0);
-        let paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
-            self.paint_side_tile(record, base, out, width, &centres);
+        // The best priority of the sprites behind the background at each pixel: a sprite in front
+        // of a lower priority does not show there (the NES picks the sprite first, then puts it
+        // behind the background; Super Mario Bros. 3 hides its piranha plants in their pipes so).
+        let mut behind = vec![i32::MAX; width * height];
+        let mut paint = |record: &TileRecord, base: u8, out: &mut Vec<u8>| {
+            self.paint_side_tile(record, base, out, width, &centres, &mut behind);
         };
         let records = self.tiles.records();
         for record in records.iter().filter(|r| !r.background && r.hidden).rev() {
@@ -1121,6 +1125,9 @@ impl Ppu2C02 {
     /// Paints the pixels of `record` that fall outside the centre (`centres`: the centre's x range
     /// of each picture row) into the palette entries `out` of a picture `width` wide; `base` is
     /// the first entry of its kind of palette (0x00 for the background, 0x10 for the sprites).
+    /// `behind` keeps, per pixel, the best priority of the sprites behind the background painted
+    /// there: a sprite in front of a lower priority is left out where one is.
+    #[allow(clippy::too_many_arguments)] // The picture and the state of its composition.
     fn paint_side_tile(
         &self,
         record: &TileRecord,
@@ -1128,7 +1135,9 @@ impl Ppu2C02 {
         out: &mut [u8],
         width: usize,
         centres: &[(i32, i32)],
+        behind: &mut [i32],
     ) {
+        let priority = sprite_priority(record.index);
         let top = i32::from(record.y) + self.frame_vertical_margin;
         let left = i32::from(record.x);
         // A tile wholly in the centre (most of them) paints nothing: skipped at once.
@@ -1163,7 +1172,15 @@ impl Ppu2C02 {
                 let Some(pixel) = record.displayed_pixel(px as usize, py as usize) else {
                     continue;
                 };
-                let slot = &mut out[(row * width) + column];
+                let at = (row * width) + column;
+                if pixel != 0 && !record.background {
+                    if record.hidden {
+                        behind[at] = behind[at].min(priority);
+                    } else if behind[at] < priority {
+                        continue;
+                    }
+                }
+                let slot = &mut out[at];
                 if pixel != 0 {
                     // A background tile in sub-palette 4-7 is the margin palette's: entries
                     // MARGIN_ENTRIES up.
