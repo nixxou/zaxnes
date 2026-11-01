@@ -1,0 +1,520 @@
+using System.Numerics;
+using Zax.Engine3D;
+using Zax.Profiles;
+using Zax.Render;
+
+namespace Zax.Acceptance.Tests;
+
+/// <summary>
+/// AMD-055 §2.4 — the screen-space ambient occlusion of REQ-SCN-083, in the Depth mode and
+/// under the declared fallback <b>(D)</b> that renders MSVO as Depth. The automatic invariants
+/// are all ratios of linear values between two captures of the <b>close-up A</b> that differ by
+/// one setting only.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Close-up A: capture 1920 × 1080, <c>video.anti_alias</c> = 0, native resolution, scene
+/// scale 1, zero curvature, black <c>Color</c> skybox, <c>render.shadow</c> = false, every other
+/// effect of §2.3 to §2.5 off, <c>spl.ao</c> = 2 and the four <c>ao.*</c> at their default
+/// (strength 3, radius 3 so <c>r</c> = 20, thickness 3, quality 1); white light (1, −1, 1) of
+/// intensity 1. A floor of 12 × 12 full tiles (96 × 96 units) turned by 90° about <c>x</c> and a
+/// cube of 8 × 8 × 8 units standing on it, footprint centred on the centre of the floor; the
+/// camera 80 units from that centre in the direction (−0.5, +0.5, −0.707), FOV 70°.
+/// </para>
+/// <para>
+/// The engine's layer alignment puts an L1 shape of depth 8 on <c>z</c> ∈ [0, 8]
+/// (REQ-E3D-205), so the fixtures pass <c>offset.z</c> = −4 to centre it on <c>C</c> as the
+/// close-up describes; the floor's upper face is then the plane <c>y</c> = 124 of normal
+/// (0, 1, 0), spanning <c>x</c> ∈ [80, 176] and <c>z</c> ∈ [−48, 48] about (128, 0).
+/// </para>
+/// </remarks>
+[Collection("opengl-acceptance")]
+public sealed class Amd055OcclusionTests
+{
+    private const int Width = 1920;
+    private const int Height = 1080;
+
+    /// <summary>The plane of the floor's upper face.</summary>
+    private const float Plane = 124f;
+
+    /// <summary>The scene centre <c>C</c> of REQ-E3D-410.</summary>
+    private static Vector3 Center => new(128f, 120f, 0f);
+
+    /// <summary>The albedo colour of the close-ups: linear 0.503 ± 0.002.</summary>
+    private static Rgb24 Grey => new(188, 188, 188);
+
+    /// <summary>
+    /// Two pixels of the floor at the contact of the base of the cube, on the two faces of it
+    /// the camera sees: just outside the footprint on the <c>−x</c> side and just in front of it.
+    /// </summary>
+    private static Vector3[] Contact =>
+    [
+        new(123.4f, Plane, 0f),
+        new(128f, Plane, -4.6f),
+    ];
+
+    /// <summary>
+    /// A pixel of the floor more than <c>2 r</c> = 40 units from the cube, on the side away from
+    /// the camera, and visible in the capture.
+    /// </summary>
+    private static Vector3 FarFromCube => new(174f, Plane, 0f);
+
+    // =========================================================== the invariants of §2.4 (auto)
+
+    /// <summary>
+    /// REQ-SCN-083, first invariant: close-up A <b>without the cube</b> — a lone plane, with no
+    /// other geometry — gives a ratio (occlusion On / Off) of 1.00 ± 0.02 at every pixel of the
+    /// floor. Nothing occludes a flat surface, and the effect must not darken it by itself.
+    /// </summary>
+    [GlFact] // REQ-SCN-083
+    public void REQ_SCN_083_a_lone_plane_is_not_darkened()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA(cube: false);
+        CameraView view = View(scene);
+
+        Shot off = target.Render(renderer, scene);
+        Enhance(scene, 2);
+        Shot on = target.Render(renderer, scene);
+
+        Assert.True(renderer.Statistics.OcclusionPass, "the occlusion pass must have run.");
+
+        // Every pixel of the floor, sampled on a grid of its plane that stays inside the shape.
+        int sampled = 0;
+        for (float x = 84f; x <= 172f; x += 4f)
+        {
+            for (float z = -44f; z <= 44f; z += 4f)
+            {
+                (int px, int py) = Pixel(view, new Vector3(x, Plane, z));
+                if (px < 0 || px >= Width || py < 0 || py >= Height || off.At(px, py).R == 0)
+                {
+                    continue;
+                }
+
+                sampled++;
+                double ratio = Ratio(on, off, px, py);
+                Assert.InRange(ratio, 0.98, 1.02);
+            }
+        }
+
+        Assert.True(sampled > 100, $"only {sampled} pixels of the lone plane were measured.");
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, second invariant: close-up A — on the pixels of the floor at the contact of
+    /// the base of the cube the ratio is <b>strictly below 1</b> and <b>at least 0.70</b> (the
+    /// ceiling <c>O ≤ 0.1 × ao.strength</c> = 0.3); at a pixel of the floor at least
+    /// <c>2 r</c> = 40 units from the cube and visible, it is 1.00 ± 0.02.
+    /// </summary>
+    [GlFact] // REQ-SCN-083
+    public void REQ_SCN_083_the_foot_of_the_cube_is_darkened_and_nothing_far_from_it_is()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+
+        Shot off = target.Render(renderer, scene);
+        Enhance(scene, 2);
+        Shot on = target.Render(renderer, scene);
+
+        foreach (Vector3 point in Contact)
+        {
+            (int px, int py) = Pixel(view, point);
+            double ratio = Ratio(on, off, px, py);
+            Assert.True(ratio < 1.0, $"the contact pixel at {point} was not darkened: {ratio:F3}.");
+            Assert.True(ratio >= 0.70, $"the contact pixel at {point} fell to {ratio:F3}.");
+        }
+
+        (int fx, int fy) = Pixel(view, FarFromCube);
+        Assert.True(off.At(fx, fy).R > 0, "the far pixel of the floor must be visible.");
+        Assert.InRange(Ratio(on, off, fx, fy), 0.98, 1.02);
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, third invariant: with <c>ao.strength</c> = 5 the ratio is everywhere ≥ 0.50
+    /// and with <c>ao.strength</c> = 1 everywhere ≥ 0.90 — the ceiling
+    /// <c>O ≤ 0.1 × ao.strength</c> — and the ratio at the contact pixel is monotone decreasing
+    /// in <c>ao.strength</c>.
+    /// </summary>
+    [GlFact] // REQ-SCN-083
+    public void REQ_SCN_083_the_strength_is_a_ceiling_and_is_monotone()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+        Shot off = target.Render(renderer, scene);
+
+        Enhance(scene, 2);
+        (int cx, int cy) = Pixel(view, Contact[0]);
+
+        double previous = double.MaxValue;
+        for (int strength = 1; strength <= 5; strength++)
+        {
+            scene.Settings.Style.AoStrength = strength;
+            Shot on = target.Render(renderer, scene);
+
+            // The ceiling, over the whole capture and not only over the floor.
+            double least = LeastRatio(on, off);
+            Assert.True(
+                least >= (1.0 - (0.1 * strength)) - 0.01,
+                $"strength {strength} darkened a pixel to {least:F3}.");
+
+            double ratio = Ratio(on, off, cx, cy);
+            Assert.True(
+                ratio < previous,
+                $"strength {strength} gave {ratio:F3} at the contact, not below {previous:F3}.");
+            previous = ratio;
+        }
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, fourth invariant, under the declared fallback <b>(D)</b>: <c>spl.ao</c> = 1
+    /// (MSVO) and <c>spl.ao</c> = 2 (Depth) give captures identical to ±2 sRGB levels, and
+    /// <c>ao.thickness</c> has no effect in either (REQ-SCN-079).
+    /// </summary>
+    [GlFact] // REQ-SCN-083, REQ-SCN-079
+    public void REQ_SCN_083_msvo_is_rendered_as_depth_under_the_fallback()
+    {
+        using GlTarget target = GlTarget.Create(640, 480);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+
+        Enhance(scene, 2);
+        Shot depth = target.Render(renderer, scene);
+
+        scene.Settings.Style.AmbientOcclusion = 1;
+        Shot msvo = target.Render(renderer, scene);
+        AssertSame(depth, msvo, tolerance: 2);
+
+        // And the thickness changes nothing in either mode: the Depth occlusion does not use it.
+        foreach (int mode in (int[])[1, 2])
+        {
+            scene.Settings.Style.AmbientOcclusion = mode;
+            scene.Settings.Style.AoThickness = 1;
+            Shot thin = target.Render(renderer, scene);
+            scene.Settings.Style.AoThickness = 5;
+            Assert.Equal(thin.Pixels, target.Render(renderer, scene).Pixels);
+        }
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, fifth invariant: <c>spl.ao</c> = 0 gives a capture identical to a Classic
+    /// capture of the same scene, to ±2 sRGB levels (REQ-SCN-080; every other effect is off in
+    /// the close-up A).
+    /// </summary>
+    [GlFact] // REQ-SCN-083, REQ-SCN-080
+    public void REQ_SCN_083_the_occlusion_off_is_classic()
+    {
+        using GlTarget target = GlTarget.Create(640, 480);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+        Assert.False(scene.Settings.Style.Enhanced);
+        Shot classic = target.Render(renderer, scene);
+
+        scene.Settings.Style.Enhanced = true;
+        scene.Settings.Style.AmbientOcclusion = 0;
+        Shot enhanced = target.Render(renderer, scene);
+        Assert.False(renderer.Statistics.OcclusionPass, "spl.ao = 0 must not run the pass.");
+
+        AssertSame(classic, enhanced, tolerance: 2);
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, sixth invariant — variant A-h: the pixels of the skybox and of the HUD are
+    /// identical to ±1 sRGB level between <c>spl.ao</c> = 0 and <c>spl.ao</c> = 2. The skybox is
+    /// drawn before the pass and is at infinity, the HUD after it (REQ-SCN-058 amended).
+    /// </summary>
+    [GlFact] // REQ-SCN-083, REQ-SCN-029, REQ-SCN-044, REQ-SCN-049
+    public void REQ_SCN_083_the_skybox_and_the_hud_are_untouched()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA(hud: true);
+        scene.Settings.Skybox = SkyboxKind.Gradient;
+        CameraView view = View(scene);
+
+        Shot off = target.Render(renderer, scene);
+
+        // Which pixels are the HUD's: the ones the same scene without the HUD tile does not
+        // have. Which are the skybox's: the ones a capture of the skybox alone shares with the
+        // full one — REQ-SCN-047 hides the 3D scene outside a game but keeps the skybox.
+        Shot noHud = target.Render(renderer, CloseUpA(hud: false, gradient: true));
+        SceneState empty = CloseUpA(cube: false, gradient: true);
+        empty.GameRunning = false;
+        Shot skyAlone = target.Render(renderer, empty);
+
+        Enhance(scene, 2);
+        Shot on = target.Render(renderer, scene);
+
+        // The pass did run, and it did change the scene: the test is not vacuous.
+        Assert.True(renderer.Statistics.OcclusionPass);
+        (int cx, int cy) = Pixel(view, Contact[0]);
+        Assert.True(Ratio(on, off, cx, cy) < 1.0, "the floor must still be darkened.");
+
+        int hudPixels = 0;
+        int skyPixels = 0;
+        for (int y = 0; y < Height; y++)
+        {
+            for (int x = 0; x < Width; x++)
+            {
+                if (off.Packed(x, y) != noHud.Packed(x, y))
+                {
+                    hudPixels++;
+                    AssertClose(off, on, x, y, tolerance: 1);
+                }
+                else if (off.Packed(x, y) == skyAlone.Packed(x, y))
+                {
+                    skyPixels++;
+                    AssertClose(off, on, x, y, tolerance: 1);
+                }
+            }
+        }
+
+        Assert.True(hudPixels > 200, $"only {hudPixels} HUD pixels were compared.");
+        Assert.True(skyPixels > 10000, $"only {skyPixels} skybox pixels were compared.");
+    }
+
+    /// <summary>
+    /// REQ-SCN-083: the three values of <c>ao.quality</c> give the same general aspect — the
+    /// contact of the cube darkened in the same proportion — which is what makes their sample
+    /// count and pass resolution unobservable.
+    /// </summary>
+    [GlFact] // REQ-SCN-083
+    public void REQ_SCN_083_the_three_qualities_give_the_same_aspect()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        SceneState scene = CloseUpA();
+        CameraView view = View(scene);
+        Shot off = target.Render(renderer, scene);
+
+        Enhance(scene, 2);
+        (int cx, int cy) = Pixel(view, Contact[0]);
+        (int fx, int fy) = Pixel(view, FarFromCube);
+
+        List<double> contact = [];
+        for (int quality = 0; quality <= 2; quality++)
+        {
+            scene.Settings.Style.AoQuality = quality;
+            Shot on = target.Render(renderer, scene);
+
+            contact.Add(Ratio(on, off, cx, cy));
+
+            // Far from any occluder the three qualities agree on « nothing ».
+            Assert.InRange(Ratio(on, off, fx, fy), 0.98, 1.02);
+        }
+
+        // The same aspect: the darkening at the contact is within a tenth from one quality to
+        // the next. Low may be noisier, which is why the window is not tighter.
+        Assert.InRange(contact.Max() - contact.Min(), 0.0, 0.10);
+        Assert.All(contact, ratio => Assert.True(ratio < 1.0, $"quality gave {ratio:F3}."));
+    }
+
+    /// <summary>
+    /// REQ-SCN-083, scope: the transparent objects of REQ-SCN-040, drawn after the pass, are
+    /// neither darkened by the occlusion nor occluders for it (REQ-SCN-058 amended).
+    /// </summary>
+    [GlFact] // REQ-SCN-083, REQ-SCN-040, REQ-SCN-058
+    public void REQ_SCN_083_a_transparent_object_neither_occludes_nor_is_darkened()
+    {
+        using GlTarget target = GlTarget.Create(Width, Height);
+        using SceneRenderer renderer = new(target.Gl);
+
+        // The same close-up with the cube made translucent: it is drawn after the pass, so it
+        // writes no depth the occlusion can see and the floor under it stays untouched.
+        SceneState opaque = CloseUpA();
+        CameraView view = View(opaque);
+        (int cx, int cy) = Pixel(view, Contact[0]);
+
+        SceneState scene = CloseUpA(cubeAlpha: 0.5f);
+        Shot off = target.Render(renderer, scene);
+        Enhance(scene, 2);
+        Shot on = target.Render(renderer, scene);
+
+        Assert.True(renderer.Statistics.OcclusionPass);
+        Assert.InRange(Ratio(on, off, cx, cy), 0.98, 1.02);
+    }
+
+    // ================================================================================= fixtures
+
+    /// <summary>
+    /// The close-up A: the floor of 12 × 12 full tiles, the cube of 8 × 8 × 8 units standing on
+    /// it, and the camera the amendment places.
+    /// </summary>
+    /// <param name="cube">Whether the cube is in the scene (the first invariant drops it).</param>
+    /// <param name="hud">Whether a HUD tile is drawn at the centre (variant A-h).</param>
+    /// <param name="cubeAlpha">Opacity of the cube, 1 by default.</param>
+    /// <param name="gradient">Whether the Gradient skybox of the variant A-h is drawn.</param>
+    private static SceneState CloseUpA(
+        bool cube = true,
+        bool hud = false,
+        float cubeAlpha = 1f,
+        bool gradient = false)
+    {
+        SceneFixture fixture = new();
+        fixture
+            .Background(0x0F)
+
+            // The floor: 12 × 12 full tiles, turned by 90° about x, centred on C.
+            .Pattern(
+                SceneFixture.Solid(1),
+                depth: 8,
+                ProfileLayer.L1,
+                columns: 12,
+                rows: 12,
+                texture: SceneFixture.FlatDirectTexture(Grey, 12, 12),
+                rotation: new Vec3F(90f, 0f, 0f),
+                offset: new Vec3F(0f, 0f, -4f))
+            .Palette(1, 0x30)
+            .Rect(SceneFixture.Solid(1), 10, 10, 12, 12, palette: 1);
+
+        if (cube)
+        {
+            // The cube: one full tile of sizeZ = 8, its tile record placed clear of the floor
+            // block so that the segmentation keeps two shapes, then brought by its offset onto
+            // the centre of the floor with its lower face on the plane y = 124.
+            fixture
+                .Pattern(
+                    SceneFixture.Solid(1, 1),
+                    depth: 8,
+                    ProfileLayer.L1,
+                    alpha: cubeAlpha,
+                    texture: SceneFixture.FlatDirectTexture(Grey),
+                    offset: new Vec3F(-68f, 4f, -4f))
+                .Palette(5, 0x30)
+                .Tile(SceneFixture.Solid(1, 1), 192, 120, palette: 1);
+        }
+
+        if (hud)
+        {
+            // A HUD motif of the variant A-h, on the cell row 8 — above the floor block, whose
+            // cells are the rows 10 to 21, so that no cell carries two tile records.
+            fixture
+                .Pattern(SceneFixture.Solid(1, 2), depth: 1, ProfileLayer.Ui, columns: 2, rows: 2)
+                .Rect(SceneFixture.Solid(1, 2), 15, 8, 2, 2, palette: 1);
+        }
+
+        SceneState scene = fixture.Build();
+        scene.Palette(fixture);
+
+        scene.Settings.AntiAliasSamples = 1;
+        scene.Settings.Shadows = false;
+        scene.Settings.Skybox = gradient ? SkyboxKind.Gradient : SkyboxKind.Color;
+        scene.Settings.CustomBackgroundColor = default;
+        scene.Settings.SceneScale = 1f;
+        scene.Settings.Fov = 70f;
+        scene.Camera.Fov = 70f;
+        scene.Light.Direction = new Vector3(1f, -1f, 1f);
+        scene.Light.Color = new Rgb24(255, 255, 255);
+        scene.Settings.LightIntensity = 1f;
+
+        // The camera 80 units from the centre of the floor in the direction
+        // (−0.5, +0.5, −0.707): elevation 30°, azimuth 35.264°, so that
+        // q·(0, 0, 1) = (0.5, −0.5, 0.707).
+        scene.Camera.SetMode(CameraMode.Fpv);
+        scene.Camera.Current.Target = Center;
+        scene.Camera.Current.Distance = 80f;
+        scene.Camera.Current.Angles = new Vector3(30f, 35.26439f, 0f);
+        scene.Camera.SnapToSetpoints();
+        return scene;
+    }
+
+    // ================================================================================== measures
+
+    /// <summary>
+    /// Turns the Enhanced style on with the occlusion mode given. The reference capture of every
+    /// invariant is taken in Classic, which REQ-SCN-080 makes identical to Enhanced with every
+    /// effect off.
+    /// </summary>
+    private static void Enhance(SceneState scene, int mode)
+    {
+        scene.Settings.Style.Enhanced = true;
+        scene.Settings.Style.AmbientOcclusion = mode;
+    }
+
+    private static CameraView View(SceneState scene)
+        => scene.Camera.BuildView(scene.Clipping, (float)Width / Height);
+
+    private static (int X, int Y) Pixel(in CameraView view, Vector3 point)
+    {
+        Vector4 clip = Vector4.Transform(
+            new Vector3(point.X, point.Y, -point.Z), view.ViewProjection);
+        float x = clip.X / clip.W;
+        float y = clip.Y / clip.W;
+        return (
+            (int)Math.Round((x + 1f) * 0.5f * Width),
+            (int)Math.Round((1f - y) * 0.5f * Height));
+    }
+
+    /// <summary>The ratio of the linear green values of two captures at one pixel.</summary>
+    private static double Ratio(Shot on, Shot off, int x, int y)
+    {
+        Assert.InRange(x, 0, Width - 1);
+        Assert.InRange(y, 0, Height - 1);
+
+        double below = Linear(off.At(x, y).G);
+        Assert.True(below > 0, $"({x}, {y}) is black without the occlusion.");
+        return Linear(on.At(x, y).G) / below;
+    }
+
+    /// <summary>The smallest ratio of linear values over the whole capture.</summary>
+    private static double LeastRatio(Shot on, Shot off)
+    {
+        double least = double.MaxValue;
+        for (int i = 0; i < off.Pixels.Length; i += 4)
+        {
+            int below = off.Pixels[i + 1];
+            if (below < 8)
+            {
+                // A pixel that is black or nearly black carries no measurable ratio.
+                continue;
+            }
+
+            least = Math.Min(least, Linear(on.Pixels[i + 1]) / Linear(below));
+        }
+
+        return least == double.MaxValue ? 1.0 : least;
+    }
+
+    /// <summary>The linear value of an sRGB 8-bit level (SPEC-06 §2).</summary>
+    private static double Linear(int level)
+    {
+        double c = level / 255.0;
+        return c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+    }
+
+    private static void AssertClose(Shot one, Shot two, int x, int y, int tolerance)
+    {
+        (int r1, int g1, int b1) = one.At(x, y);
+        (int r2, int g2, int b2) = two.At(x, y);
+        if (Math.Abs(r1 - r2) > tolerance
+            || Math.Abs(g1 - g2) > tolerance
+            || Math.Abs(b1 - b2) > tolerance)
+        {
+            Assert.Fail(
+                $"({x}, {y}): ({r1}, {g1}, {b1}) against ({r2}, {g2}, {b2}), "
+                + $"more than {tolerance} levels apart.");
+        }
+    }
+
+    private static void AssertSame(Shot one, Shot two, int tolerance)
+    {
+        for (int y = 0; y < one.Height; y++)
+        {
+            for (int x = 0; x < one.Width; x++)
+            {
+                AssertClose(one, two, x, y, tolerance);
+            }
+        }
+    }
+}

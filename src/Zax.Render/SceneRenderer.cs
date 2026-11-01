@@ -29,6 +29,7 @@ public sealed class SceneRenderer : ISceneRenderer
     private readonly ShaderProgram _scenePass;
     private readonly ShaderProgram _shadowPass;
     private readonly LinearColorBuffer _linear;
+    private readonly OcclusionPass _occlusion;
 
     private readonly List<DrawItem> _opaque = [];
     private readonly List<DrawItem> _transparent = [];
@@ -40,6 +41,12 @@ public sealed class SceneRenderer : ISceneRenderer
     private bool _disposed;
     private bool _shadowEnabled;
     private bool _pixelShadow;
+
+    /// <summary>
+    /// Whether this frame is the 2D-mode rectangle of AMD-046 §2 rather than a 3D scene. The
+    /// screen passes of AMD-055 never touch it (REQ-SCN-083, scope).
+    /// </summary>
+    private bool _pictureQuad;
     private bool _mirroredWinding;
     private bool _mirroredNormal;
     private SpaceBend _bend = SpaceBend.None;
@@ -63,6 +70,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass = ShaderProgram.Create(gl, "scene", SceneShaders.SceneVertex, SceneShaders.SceneFragment);
         _shadowPass = ShaderProgram.Create(gl, "shadow", SceneShaders.ShadowVertex, SceneShaders.ShadowFragment);
         _linear = new LinearColorBuffer(gl);
+        _occlusion = new OcclusionPass(gl);
 
         // AMD-034 §2: the size the hardware granted is known from here on, whether or not a
         // shadow pass ever runs, so the host can report a fallback once.
@@ -123,6 +131,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass.Dispose();
         _picture.Dispose();
         _linear.Dispose();
+        _occlusion.Dispose();
         _skybox.Dispose();
         _shadowMap.Dispose();
         _textures.Dispose();
@@ -141,6 +150,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _transparent.Clear();
         _hud.Clear();
         _casters.Clear();
+        _pictureQuad = false;
 
         // REQ-SCN-047: outside a running game the 3D scene is not displayed at all.
         if (!scene.GameRunning)
@@ -152,6 +162,7 @@ public sealed class SceneRenderer : ISceneRenderer
         // of a recomposition of the tile records.
         if (scene.TwoDimensionalMode && CollectPictureQuad(scene, view))
         {
+            _pictureQuad = true;
             return;
         }
 
@@ -530,18 +541,7 @@ public sealed class SceneRenderer : ISceneRenderer
             return;
         }
 
-        if (scene.Settings.CullBackFaces)
-        {
-            // The scene frame is left-handed and the clip position mirrors z, so the faces the
-            // engine winds per REQ-E3D-505 come out clockwise (REQ-SCN-001 notes).
-            _gl.Enable(EnableCap.CullFace);
-            _gl.CullFace(TriangleFace.Back);
-            SetWinding(false, force: true);
-        }
-        else
-        {
-            _gl.Disable(EnableCap.CullFace);
-        }
+        RestoreCulling(scene);
 
         _scenePass.Use();
         BindCommonUniforms(scene, view, volume);
@@ -562,7 +562,29 @@ public sealed class SceneRenderer : ISceneRenderer
         // The tiles may have left the winding reversed (Q-069).
         SetWinding(false);
 
-        // 2. Transparent objects, farthest first, each with a depth-only pass first
+        // 2. AMD-055 REQ-SCN-058 amended: in the Enhanced style, the screen passes come here —
+        // after the opaque objects, before the sorted transparent ones. What occludes and what
+        // is darkened follows from that order and from it alone (REQ-SCN-080): the skybox is
+        // behind everything and never occludes, the transparent objects and the HUD are drawn
+        // after and are neither occluders nor occluded.
+        // The 2D-mode rectangle of AMD-046 §2 must not be modified by the effect
+        // (REQ-SCN-083, scope), and in 2D mode it is the whole scene, so the pass is skipped.
+        if (!_pictureQuad)
+        {
+            Statistics.OcclusionPass = _occlusion.Draw(
+                _linear, scene.Settings.Style, view.Projection, scene.Settings.SceneScale);
+            if (Statistics.OcclusionPass)
+            {
+                // The pass left the cull state and the program of its own full-screen triangles
+                // behind; the passes that follow rebind their program themselves.
+                RestoreCulling(scene);
+                _scenePass.Use();
+                BindCommonUniforms(scene, view, volume);
+                SetNormalSign(false, force: true);
+            }
+        }
+
+        // 3. Transparent objects, farthest first, each with a depth-only pass first
         // (REQ-SCN-040, AMD-012).
         if (_transparent.Count > 0)
         {
@@ -581,7 +603,7 @@ public sealed class SceneRenderer : ISceneRenderer
             Statistics.TransparentObjects = _transparentObjects.Count;
         }
 
-        // 3. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
+        // 4. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
         // REQ-SCN-044).
         if (_hud.Count > 0)
         {
@@ -603,6 +625,26 @@ public sealed class SceneRenderer : ISceneRenderer
         _gl.DepthFunc(DepthFunction.Less);
         SetWinding(false);
         _linear.ResolveTo(target);
+    }
+
+    /// <summary>
+    /// Puts back the face culling the frame is drawn with. The screen pass of AMD-055 draws a
+    /// full-screen triangle with culling off, so this runs again after it.
+    /// </summary>
+    private void RestoreCulling(SceneState scene)
+    {
+        if (scene.Settings.CullBackFaces)
+        {
+            // The scene frame is left-handed and the clip position mirrors z, so the faces the
+            // engine winds per REQ-E3D-505 come out clockwise (REQ-SCN-001 notes).
+            _gl.Enable(EnableCap.CullFace);
+            _gl.CullFace(TriangleFace.Back);
+            SetWinding(false, force: true);
+        }
+        else
+        {
+            _gl.Disable(EnableCap.CullFace);
+        }
     }
 
     /// <summary>

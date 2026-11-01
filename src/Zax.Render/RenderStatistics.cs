@@ -72,6 +72,12 @@ public sealed class RenderStatistics
     /// </summary>
     public int UnavailableTextures { get; internal set; }
 
+    /// <summary>
+    /// Whether the ambient-occlusion pass of the Enhanced style ran for this frame
+    /// (AMD-055 REQ-SCN-083).
+    /// </summary>
+    public bool OcclusionPass { get; internal set; }
+
     internal void BeginFrame()
     {
         DrawCalls = 0;
@@ -86,5 +92,6 @@ public sealed class RenderStatistics
         AntiAliasSamples = 1;
         Occluders = 0;
         UnavailableTextures = 0;
+        OcclusionPass = false;
     }
 }

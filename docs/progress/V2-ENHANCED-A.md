@@ -37,14 +37,16 @@ MSVO is rendered as Depth — declared fallback **(D)**: the MiniEngine sources 
 `third_party/MiniEngine-SSAO`, but the OpenGL 3.3 port itself is a later lot.
 
 - [x] 1/5 `LinearColorBuffer`: depth as a sampleable texture, with the MSAA depth resolve.
-      — **done**, 1c0mmit
-- [ ] 2/5 AO pass: hemisphere SSAO from depth (Chapman 2013 as the orienting reference),
+      — **done**, e17ce87
+- [x] 2/5 AO pass: hemisphere SSAO from depth (Chapman 2013 as the orienting reference),
       per-pixel kernel rotation, range check, depth-aware blur; radius, strength ceiling and
       quality of REQ-SCN-083; applied as a linear multiply before the sRGB encode.
-- [ ] 3/5 Frame order (amended REQ-SCN-058): after the opaque objects, before the sorted
+      — **done**, with 3/5
+- [x] 3/5 Frame order (amended REQ-SCN-058): after the opaque objects, before the sorted
       transparent ones; scope rules (no skybox, no HUD, no transparent objects).
-- [ ] 4/5 Acceptance tests: the close-up A invariants.
-- [ ] 5/5 Journal entry, lot commit.
+      — **done**, with 4/5
+- [x] 4/5 Acceptance tests: the close-up A invariants. — **done**, lot commit below
+- [x] 5/5 Journal entry, lot commit. — **done**, lot commit below
 
 ## Notes
 
@@ -96,3 +98,39 @@ MSVO is rendered as Depth — declared fallback **(D)**: the MiniEngine sources 
   shadow edges fall « in the middle of a voxel », which holds for the two **near** edges only:
   the plate is one voxel thick, its upper face casts 10 units instead of 29/3, so the far edges
   land exactly on +14 — which is what the criterion's own « 6 and 14 » boundary needs.
+
+### V2-18 (screen-space ambient occlusion)
+
+- `src/Zax.Render/Gl/OcclusionPass.cs` and `OcclusionShaders.cs`: three fragment passes —
+  occlusion, depth-aware blur, linear multiply — since OpenGL 3.3 has no compute shaders.
+  The orienting reference of REQ-SCN-083 (Chapman 2013) is followed in shape: a kernel in the
+  hemisphere of the normal, packed towards the point, rotated per pixel, with a range check,
+  then a blur. The weighting law and the blur radius are the free choices the requirement
+  leaves.
+- No normal buffer: the normal is reconstructed from the depth, taking on each axis the
+  neighbour whose depth is the closer, so a silhouette does not tilt it.
+- The multiply is a full-screen triangle blended `GL_DST_COLOR, GL_ZERO` **into the scene
+  target**, not a read-back: the target may be multisampled, and multiplying every sample by
+  one factor per pixel is the same as multiplying the resolved colour, the resolve being an
+  average. That is how the pass can work on resolved values (REQ-SCN-080) and still leave the
+  depth test the transparent objects need.
+- The per-pixel rotation is a hash of the **pixel coordinate**, not of time: a still camera
+  gives a still image, which the review criterion asks for and a test needs.
+- `O ≤ 0.1 × ao.strength` is enforced by construction — the pass writes the raw occlusion and
+  the apply pass multiplies it by the ceiling — so the ceiling and the monotony invariants hold
+  whatever the weighting law.
+- The bias along the normal is `0.04 × r`: below that a lone plane occludes itself and the
+  first invariant of §2.4 fails.
+- Scope: the order of REQ-SCN-058 does the work on its own (skybox before, transparent objects
+  and HUD after). The only explicit exclusion is 2D mode, where the rectangle of AMD-046 §2 is
+  the whole scene; `_pictureQuad` carries it.
+- MSVO (`spl.ao` = 1) is rendered as Depth: the declared fallback **(D)**. The MiniEngine
+  sources are vendored under `third_party/MiniEngine-SSAO` with their README entry, but the
+  OpenGL 3.3 port itself is not written, and it is the *port* the fallback clause depends on.
+- Tests: `tests/Acceptance/Amd055OcclusionTests.cs`, the eight close-up A invariants. Note two
+  facts of that close-up: under its light (1, −1, 1) every visible face of the cube has
+  `N·L` = 0.577, the same as the floor, so the cube is only told from the floor by the
+  occlusion; and the HUD motif of the variant A-h is put on the cell row 8, clear of the floor
+  block, because two tile records cannot share a cell.
+- Visual review (one capture): the darkening at the foot of the cube is progressive, with no
+  hard edge, no band and no fixed noise; Low and Medium agree with High on the general aspect.
