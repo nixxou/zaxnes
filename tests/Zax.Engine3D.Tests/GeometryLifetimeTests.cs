@@ -25,13 +25,16 @@ public sealed class GeometryLifetimeTests
 
         Assert.Equal(4, list.Tiles.Count);
 
-        // REQ-E3D-540: one mesh per distinct 2D tile. Q-067 adds that what is *drawn* is the
-        // variant of that mesh without the walls the neighbours cover, so the criterion is
-        // read on the mesh of the image, which is the one the object owns.
+        // REQ-E3D-540: one mesh per distinct 2D tile, and since AMD-057 withdrew the sealing
+        // variants of AMD-027, the mesh the object owns is also the one that gets drawn — a
+        // tile repeated in the shape is drawn with the very same mesh instance.
         HashSet<TileMesh> meshes = [];
         foreach (DrawTile tile in list.Tiles)
         {
-            meshes.Add(Geo.Present(geometry.MeshOf(tile.Instance.Reference, tile.Tile.Image)));
+            Assert.Same(
+                geometry.MeshOf(tile.Instance.Reference, tile.Tile.Image),
+                tile.Mesh);
+            meshes.Add(Geo.Present(tile.Mesh));
         }
 
         Assert.Equal(2, meshes.Count);
