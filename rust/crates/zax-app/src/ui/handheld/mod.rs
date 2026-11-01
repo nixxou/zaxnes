@@ -7,13 +7,13 @@
 
 pub mod achievement_grid;
 pub mod achievements;
+pub mod advanced;
 pub mod compat;
 pub mod defaults;
 mod draw;
 pub mod exit_combo;
 pub mod game_options;
 pub mod hacks;
-pub mod advanced;
 pub mod keyboard;
 pub mod layout;
 pub mod options;
@@ -1187,7 +1187,10 @@ impl HandheldUi {
 
     /// Text typed on the system's keyboard.
     pub fn type_text(&mut self, text: &str) {
-        if let Some(keyboard) = self.keyboard.as_mut().filter(|_| self.screen == Screen::Keyboard)
+        if let Some(keyboard) = self
+            .keyboard
+            .as_mut()
+            .filter(|_| self.screen == Screen::Keyboard)
         {
             keyboard.type_text(text);
         }
@@ -1195,7 +1198,10 @@ impl HandheldUi {
 
     /// The system keyboard's backspace.
     pub fn erase_typed(&mut self) {
-        if let Some(keyboard) = self.keyboard.as_mut().filter(|_| self.screen == Screen::Keyboard)
+        if let Some(keyboard) = self
+            .keyboard
+            .as_mut()
+            .filter(|_| self.screen == Screen::Keyboard)
         {
             keyboard.erase();
         }
@@ -1203,7 +1209,10 @@ impl HandheldUi {
 
     /// The system keyboard's enter: the text goes to its field.
     pub fn finish_typing(&mut self) {
-        let Some(keyboard) = self.keyboard.as_ref().filter(|_| self.screen == Screen::Keyboard)
+        let Some(keyboard) = self
+            .keyboard
+            .as_ref()
+            .filter(|_| self.screen == Screen::Keyboard)
         else {
             return;
         };

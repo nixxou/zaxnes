@@ -46,6 +46,7 @@ pub(crate) fn build() -> Vec<SettingDescriptor> {
     emulation(&mut all);
     conversion(&mut all);
     audio_input_interface(&mut all);
+    touch(&mut all);
     vr_editor_movie_derived(&mut all);
     reimplementation_extras(&mut all);
     achievements(&mut all);
@@ -878,6 +879,27 @@ fn conversion(out: &mut Vec<SettingDescriptor>) {
     );
 }
 
+fn touch(out: &mut Vec<SettingDescriptor>) {
+    // Rust-only (owner request, Android only): the transparent pad of a touch screen; in "Auto"
+    // it hides while a real gamepad is connected. Not exposed to Lua.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::InputTouchPad,
+            SettingKind::Enum,
+            SettingValue::Enum(2),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Input,
+        )
+        .with_domain(Domain::choice(vec![
+            opt(0, "Off"),
+            opt(1, "On"),
+            opt(2, "Auto"),
+        ]))
+        .with_label("Touch pad"),
+    );
+}
+
 fn audio_input_interface(out: &mut Vec<SettingDescriptor>) {
     out.push(
         SettingDescriptor::new(
@@ -950,24 +972,6 @@ fn audio_input_interface(out: &mut Vec<SettingDescriptor>) {
         .with_lua("EmulatedMenuButton")
         .with_field("27")
         .with_label("Menu = Select + Start"),
-    );
-    // Rust-only (owner request, Android only): the transparent pad of a touch screen; in "Auto"
-    // it hides while a real gamepad is connected. Not exposed to Lua.
-    out.push(
-        SettingDescriptor::new(
-            SettingId::InputTouchPad,
-            SettingKind::Enum,
-            SettingValue::Enum(2),
-            SettingScope::User,
-            SettingEffect::Immediate,
-            SettingTheme::Input,
-        )
-        .with_domain(Domain::choice(vec![
-            opt(0, "Off"),
-            opt(1, "On"),
-            opt(2, "Auto"),
-        ]))
-        .with_label("Touch pad"),
     );
     out.push(
         SettingDescriptor::new(

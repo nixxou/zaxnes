@@ -17,7 +17,13 @@ pub fn draw(ui: &Ui, view: &TouchPadView) {
     draw_dpad(&list, layout.dpad, view);
     circle_button(ui, &list, layout.a, "A", view.is_pressed(TouchControl::A));
     circle_button(ui, &list, layout.b, "B", view.is_pressed(TouchControl::B));
-    circle_button(ui, &list, layout.menu, "", view.is_pressed(TouchControl::Menu));
+    circle_button(
+        ui,
+        &list,
+        layout.menu,
+        "",
+        view.is_pressed(TouchControl::Menu),
+    );
     // The menu's three bars.
     let [x, y] = layout.menu.center;
     let width = layout.menu.radius * 0.5;
@@ -27,29 +33,79 @@ pub fn draw(ui: &Ui, view: &TouchPadView) {
             .thickness(2.0)
             .build();
     }
-    circle_button(ui, &list, layout.flat, "3D", view.is_pressed(TouchControl::Flat));
-    circle_button(ui, &list, layout.lock, "", view.is_pressed(TouchControl::Lock));
+    circle_button(
+        ui,
+        &list,
+        layout.flat,
+        "3D",
+        view.is_pressed(TouchControl::Flat),
+    );
+    circle_button(
+        ui,
+        &list,
+        layout.lock,
+        "",
+        view.is_pressed(TouchControl::Lock),
+    );
     draw_padlock(&list, layout.lock, view.camera_locked);
-    circle_button(ui, &list, layout.recenter, "", view.is_pressed(TouchControl::Recenter));
+    circle_button(
+        ui,
+        &list,
+        layout.recenter,
+        "",
+        view.is_pressed(TouchControl::Recenter),
+    );
     draw_target(&list, layout.recenter);
-    pill(ui, &list, layout.select, "SELECT", view.is_pressed(TouchControl::Select));
-    pill(ui, &list, layout.start, "START", view.is_pressed(TouchControl::Start));
+    pill(
+        ui,
+        &list,
+        layout.select,
+        "SELECT",
+        view.is_pressed(TouchControl::Select),
+    );
+    pill(
+        ui,
+        &list,
+        layout.start,
+        "START",
+        view.is_pressed(TouchControl::Start),
+    );
 }
 
 fn draw_dpad(list: &DrawListMut<'_>, dpad: Circle, view: &TouchPadView) {
     let [cx, cy] = dpad.center;
     let (reach, half) = (dpad.radius, dpad.radius * 0.34);
     let arms = [
-        (TouchControl::Up, [cx - half, cy - reach], [cx + half, cy - half]),
-        (TouchControl::Down, [cx - half, cy + half], [cx + half, cy + reach]),
-        (TouchControl::Left, [cx - reach, cy - half], [cx - half, cy + half]),
-        (TouchControl::Right, [cx + half, cy - half], [cx + reach, cy + half]),
+        (
+            TouchControl::Up,
+            [cx - half, cy - reach],
+            [cx + half, cy - half],
+        ),
+        (
+            TouchControl::Down,
+            [cx - half, cy + half],
+            [cx + half, cy + reach],
+        ),
+        (
+            TouchControl::Left,
+            [cx - reach, cy - half],
+            [cx - half, cy + half],
+        ),
+        (
+            TouchControl::Right,
+            [cx + half, cy - half],
+            [cx + reach, cy + half],
+        ),
     ];
     list.add_rect([cx - half, cy - half], [cx + half, cy + half], FILL)
         .filled(true)
         .build();
     for (control, min, max) in arms {
-        let color = if view.is_pressed(control) { PRESSED } else { FILL };
+        let color = if view.is_pressed(control) {
+            PRESSED
+        } else {
+            FILL
+        };
         list.add_rect(min, max, color)
             .filled(true)
             .rounding(half * 0.3)
@@ -82,9 +138,9 @@ fn draw_padlock(list: &DrawListMut<'_>, circle: Circle, locked: bool) {
         .rounding(r * 0.08)
         .build();
     // The shackle: two posts and a bar, raised and opened on its right post when free.
-    let lift = if locked { 0.0 } else { r * 0.2 };
+    let raised = if locked { 0.0 } else { r * 0.2 };
     let (left, right) = (x - r * 0.25, x + r * 0.25);
-    let (top, bottom) = (y - r * 0.5 - lift, y - r * 0.05);
+    let (top, bottom) = (y - r * 0.5 - raised, y - r * 0.05);
     list.add_line([left, bottom], [left, top], LABEL)
         .thickness(r * 0.12)
         .build();
@@ -127,8 +183,8 @@ fn pill(ui: &Ui, list: &DrawListMut<'_>, rect: Rect, label: &str, pressed: bool)
         .thickness(2.0)
         .build();
     let center = [
-        (rect.min[0] + rect.max[0]) * 0.5,
-        (rect.min[1] + rect.max[1]) * 0.5,
+        f32::midpoint(rect.min[0], rect.max[0]),
+        f32::midpoint(rect.min[1], rect.max[1]),
     ];
     centered_text(ui, list, center, label);
 }

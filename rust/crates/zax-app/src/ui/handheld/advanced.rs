@@ -82,23 +82,25 @@ fn choices(id: SettingId) -> Vec<(i32, String)> {
 pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
     let value = settings.get(id);
     match catalogue::descriptor(id).kind() {
-        SettingKind::Bool => {
-            text::label_of_option(if value.as_bool() { "enabled" } else { "disabled" })
-        }
+        SettingKind::Bool => text::label_of_option(if value.as_bool() {
+            "enabled"
+        } else {
+            "disabled"
+        }),
         SettingKind::Enum => {
             let current = value.as_int();
             choices(id)
                 .into_iter()
                 .find(|(value, _)| *value == current)
-                .map_or_else(|| current.to_string(), |(_, label)| text::label_of_option(&label))
+                .map_or_else(
+                    || current.to_string(),
+                    |(_, label)| text::label_of_option(&label),
+                )
         }
         SettingKind::Int => value.as_int().to_string(),
         _ => {
             let shown = format!("{:.2}", value.as_double());
-            shown
-                .trim_end_matches('0')
-                .trim_end_matches('.')
-                .to_owned()
+            shown.trim_end_matches('0').trim_end_matches('.').to_owned()
         }
     }
 }

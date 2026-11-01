@@ -771,9 +771,7 @@ impl HandheldUi {
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
                 options::OptionRow::Controls => String::new(),
-                options::OptionRow::Optimizations | options::OptionRow::Advanced => {
-                    ">".to_owned()
-                }
+                options::OptionRow::Optimizations | options::OptionRow::Advanced => ">".to_owned(),
                 options::OptionRow::Overscan | options::OptionRow::Achievements => {
                     format!("{value} >")
                 }

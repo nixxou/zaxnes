@@ -203,7 +203,10 @@ impl TouchLayout {
         };
         Self {
             dpad: Circle {
-                center: [unit * 0.07 + dpad_radius, height - unit * 0.08 - dpad_radius],
+                center: [
+                    unit * 0.07 + dpad_radius,
+                    height - unit * 0.08 - dpad_radius,
+                ],
                 radius: dpad_radius,
             },
             a: Circle {
@@ -242,7 +245,10 @@ impl TouchLayout {
 
     /// The directions a finger of the cross at `point` presses: up, down, left, right.
     fn directions(&self, point: [f32; 2]) -> [bool; 4] {
-        let offset = [point[0] - self.dpad.center[0], point[1] - self.dpad.center[1]];
+        let offset = [
+            point[0] - self.dpad.center[0],
+            point[1] - self.dpad.center[1],
+        ];
         let length = (offset[0] * offset[0] + offset[1] * offset[1]).sqrt();
         if length < self.dpad.radius * DPAD_DEAD_ZONE {
             return [false; 4];
@@ -380,6 +386,8 @@ impl Fingers {
 }
 
 /// The pad: its fingers, and the virtual controller they press while it is shown.
+// Four independent facts of the frame (in game, locked, a real gamepad, the mouse as a finger).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 pub struct TouchPad {
     mode: TouchPadMode,
@@ -483,7 +491,7 @@ impl TouchPad {
 
     /// The camera follows free fingers in game, unless the shown pad locks it.
     fn camera_free(&self) -> bool {
-        self.playing && !(self.camera_locked && !self.joystick.is_null())
+        self.playing && (self.joystick.is_null() || !self.camera_locked)
     }
 
     /// One free finger turns the camera; two pinch its zoom.
@@ -534,7 +542,10 @@ impl TouchPad {
         if window[0] > 0.0 && window[1] > 0.0 {
             self.scale = [width / window[0], height / window[1]];
         }
-        if self.view != [width, height] {
+        // The window's own sizes, compared exactly: a new size lays the pad out again.
+        #[allow(clippy::float_cmp)]
+        let resized = self.view != [width, height];
+        if resized {
             self.view = [width, height];
             self.layout = TouchLayout::for_view(width, height);
         }
@@ -632,7 +643,7 @@ impl TouchPad {
             description.type_ = sys::SDL_JoystickType::SDL_JOYSTICK_TYPE_GAMECONTROLLER as u16;
             description.nbuttons = sys::SDL_GameControllerButton::SDL_CONTROLLER_BUTTON_MAX as u16;
             description.name = self.name.as_ptr();
-            let index = sys::SDL_JoystickAttachVirtualEx(&description);
+            let index = sys::SDL_JoystickAttachVirtualEx(&raw const description);
             if index < 0 {
                 return;
             }
@@ -748,15 +759,30 @@ mod tests {
         let layout = layout();
         let middle = |rect: Rect| {
             [
-                (rect.min[0] + rect.max[0]) * 0.5,
-                (rect.min[1] + rect.max[1]) * 0.5,
+                f32::midpoint(rect.min[0], rect.max[0]),
+                f32::midpoint(rect.min[1], rect.max[1]),
             ]
         };
-        assert_eq!(Some(TouchControl::Select), layout.button_at(middle(layout.select)));
-        assert_eq!(Some(TouchControl::Start), layout.button_at(middle(layout.start)));
-        assert_eq!(Some(TouchControl::Menu), layout.button_at(layout.menu.center));
-        assert_eq!(Some(TouchControl::Flat), layout.button_at(layout.flat.center));
-        assert_eq!(Some(TouchControl::Lock), layout.button_at(layout.lock.center));
+        assert_eq!(
+            Some(TouchControl::Select),
+            layout.button_at(middle(layout.select))
+        );
+        assert_eq!(
+            Some(TouchControl::Start),
+            layout.button_at(middle(layout.start))
+        );
+        assert_eq!(
+            Some(TouchControl::Menu),
+            layout.button_at(layout.menu.center)
+        );
+        assert_eq!(
+            Some(TouchControl::Flat),
+            layout.button_at(layout.flat.center)
+        );
+        assert_eq!(
+            Some(TouchControl::Lock),
+            layout.button_at(layout.lock.center)
+        );
         assert_eq!(
             Some(TouchControl::Recenter),
             layout.button_at(layout.recenter.center)
