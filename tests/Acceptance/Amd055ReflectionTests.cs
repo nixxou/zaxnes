@@ -141,89 +141,96 @@ public sealed class Amd055ReflectionTests
     }
 
     /// <summary>
-    /// <b>Q-094</b> (answered) — the ring-mat case of lot V2-22. A profile that runs the
-    /// <b>local camera</b> of REQ-SCN-009 lays the NES plane flat and makes it the floor of the
-    /// scene; the surface the characters stand on is then a face of normal (0, 0, −1), and the
-    /// vertical of the picture is the camera's own, <c>q · (0, 1, 0)</c>. The answer reads the
-    /// floor definition of REQ-SCN-084 against <b>that</b> vertical, so such a mat <b>is</b> a
-    /// floor surface and does reflect — which is what this test pins down.
+    /// <b>Q-096</b> (answered, AMD-055 v1.4) — the ring-mat case that lot V2-22 opened and that
+    /// Q-094 and Q-096 between them settled. A profile that runs the <b>local camera</b> of
+    /// REQ-SCN-009 lays the NES plane flat and makes it the floor of the scene; the surface the
+    /// characters stand on is then a face of normal (0, 0, −1). v1.4 reads the floor definition
+    /// of REQ-SCN-084 against that plane's own normal turned towards the camera — (0, 0, −1) in
+    /// the scene frame — so such a mat <b>is</b> a floor surface and reflects <b>whatever the
+    /// camera's tilt</b>, which is what this test pins down.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The angles are those of the « Punch Out!! » profile, (−65, 0, 0): the camera's vertical
-    /// is then (0, 0.4226, −0.9063) and its dot product with the normal of the mat is 0.9063 —
-    /// just over the 0.9 of the requirement, so the configuration sits exactly on the question
-    /// the ticket asked. Under the literal +Y reading the mat reflects nothing at all, which is
-    /// what this test asserted while Q-094 was open; this is the same fixture turned round.
+    /// Two tilts are measured, and the pair is the whole point of the fixture.
+    /// <b>−65°</b> is this repository's own « Punch Out!! » profile; <b>−60°</b> is the tilt the
+    /// answer to Q-096 reports for the profile of 3dSen 2.0, where the reference still reflects
+    /// the mat. Under the literal <c>+Y</c> reading the mat reflects nothing at either tilt (what
+    /// this test asserted while Q-094 was open); under V2-23's provisional <c>q · (0, 1, 0)</c>
+    /// it reflects at −65°, where the dot product is 0.9063, and stops at −60°, where it is
+    /// 0.866 — measured in this lot, 0.00 % of the Punch-Out!! frame. Under the vertical of v1.4
+    /// the dot product is 1.000 at both, and the test is insensitive to the tilt by construction.
     /// </para>
     /// <para>
     /// The pass is asserted to have run, so what is measured is the orientation of the mat and
     /// not an effect that was never applied. That the mat passes the <em>extent</em> half of the
-    /// definition — its instance measuring 64 × 8 units in the plane perpendicular to that same
-    /// vertical, over the 6 of the requirement on both axes — is a property of the fixture, as it
-    /// is of the ring of « Punch-Out!! » (measured in Q-094).
+    /// definition — its instance measuring 64 × 64 units in the <c>xy</c> plane v1.4 names for
+    /// this mode, over the 6 of the requirement on both axes — is a property of the fixture, as
+    /// it is of the ring of « Punch-Out!! ».
     /// </para>
     /// </remarks>
     [GlFact] // REQ-SCN-084, REQ-SCN-009
-    public void Q094_a_flat_mat_under_the_local_camera_is_a_floor_of_the_requirement()
+    public void Q096_a_flat_mat_under_the_local_camera_is_a_floor_at_any_tilt()
     {
         using GlTarget target = GlTarget.Create(Width, Height);
         using SceneRenderer renderer = new(target.Gl);
 
-        SceneState scene = MatR();
-        CameraView view = View(scene);
-
-        Shot off = target.Render(renderer, scene);
-        Reflect(scene);
-        Shot on = target.Render(renderer, scene);
-
-        Assert.True(renderer.Statistics.ReflectionPass, "the reflection pass must have run.");
-
-        // The mat is the rectangle z = −4 the camera now sees as a floor receding upwards. The
-        // cube's screen footprint is left out with the same margin as the variant R-m.
-        (int left, int top, int right, int bottom) = ScreenBox(view, CubeBoundsR());
-
-        int measured = 0;
-        int changed = 0;
-        int reddened = 0;
-        for (float x = 98f; x <= 158f; x += 2f)
+        foreach (float tilt in (float[])[-65f, -60f])
         {
-            for (float y = 90f; y <= 150f; y += 2f)
+            SceneState scene = MatR(tilt);
+            CameraView view = View(scene);
+
+            Shot off = target.Render(renderer, scene);
+            Reflect(scene);
+            Shot on = target.Render(renderer, scene);
+
+            Assert.True(renderer.Statistics.ReflectionPass, "the reflection pass must have run.");
+
+            // The mat is the rectangle z = −4 the camera now sees as a floor receding upwards.
+            // The cube's screen footprint is left out with the same margin as the variant R-m.
+            (int left, int top, int right, int bottom) = ScreenBox(view, CubeBoundsR());
+
+            int measured = 0;
+            int changed = 0;
+            int reddened = 0;
+            for (float x = 98f; x <= 158f; x += 2f)
             {
-                (int px, int py) = Pixel(view, new Vector3(x, y, -4f));
-                if (px < 0 || px >= Width || py < 0 || py >= Height)
+                for (float y = 90f; y <= 150f; y += 2f)
                 {
-                    continue;
-                }
+                    (int px, int py) = Pixel(view, new Vector3(x, y, -4f));
+                    if (px < 0 || px >= Width || py < 0 || py >= Height)
+                    {
+                        continue;
+                    }
 
-                if (px >= left - 40 && px <= right + 40 && py >= top - 40 && py <= bottom + 40)
-                {
-                    continue;
-                }
+                    if (px >= left - 40 && px <= right + 40 && py >= top - 40 && py <= bottom + 40)
+                    {
+                        continue;
+                    }
 
-                measured++;
-                if (off.Packed(px, py) == on.Packed(px, py))
-                {
-                    continue;
-                }
+                    measured++;
+                    if (off.Packed(px, py) == on.Packed(px, py))
+                    {
+                        continue;
+                    }
 
-                changed++;
+                    changed++;
 
-                // The only thing above the mat is the pure red cube, so whatever the mat picks
-                // up can only redden it: R rises while G and B fall (V2-22 measured
-                // (113, 82, 82) against a mat of (109, 109, 109)).
-                (int baseR, int baseG, int baseB) = off.At(px, py);
-                (int litR, int litG, int litB) = on.At(px, py);
-                if (litR >= baseR && litG <= baseG && litB <= baseB)
-                {
-                    reddened++;
+                    // The only thing above the mat is the pure red cube, so whatever the mat
+                    // picks up can only redden it: R rises while G and B fall (V2-22 measured
+                    // (113, 82, 82) against a mat of (109, 109, 109)).
+                    (int baseR, int baseG, int baseB) = off.At(px, py);
+                    (int litR, int litG, int litB) = on.At(px, py);
+                    if (litR >= baseR && litG <= baseG && litB <= baseB)
+                    {
+                        reddened++;
+                    }
                 }
             }
-        }
 
-        Assert.True(measured > 200, $"only {measured} pixels of the mat were compared.");
-        Assert.True(changed > 0, "the mat must carry the reflection of the cube on some pixel.");
-        Assert.Equal(changed, reddened);
+            Assert.True(measured > 200, $"at {tilt}°, only {measured} pixels of the mat were compared.");
+            Assert.True(changed > 0, $"at {tilt}°, the mat must carry the reflection of the cube.");
+            Assert.Equal(changed, reddened);
+        }
     }
 
     /// <summary>
@@ -501,21 +508,26 @@ public sealed class Amd055ReflectionTests
     private static SceneState WallR() => Scene(Ground.Wall, false, false, shallow: false);
 
     /// <summary>
-    /// The ring-mat case of <b>Q-094</b>: the geometry of the variant R-m — a face of normal
-    /// (0, 0, −1) with the cube standing against it — seen through the <b>local camera</b> of
-    /// REQ-SCN-009 at the angles of the « Punch Out!! » profile, which turns that face into the
-    /// floor of the picture.
+    /// The ring-mat case of <b>Q-094</b> and <b>Q-096</b>: the geometry of the variant R-m — a
+    /// face of normal (0, 0, −1) with the cube standing against it — seen through the
+    /// <b>local camera</b> of REQ-SCN-009, which turns that face into the floor of the picture.
     /// </summary>
-    // Q-094
-    private static SceneState MatR()
+    /// <param name="tilt">
+    /// The camera's <c>rx</c>: −65° is this repository's « Punch Out!! » profile, −60° the one
+    /// the answer to Q-096 reports for 3dSen 2.0. Under the vertical of AMD-055 v1.4 the mat is
+    /// a floor at either, which is what the fixture is now parameterised to show.
+    /// </param>
+    // Q-094, Q-096
+    private static SceneState MatR(float tilt)
     {
         SceneState scene = Scene(Ground.Wall, false, false, shallow: false);
 
-        // REQ-SCN-009: q = R_Z(ry)·R_X(rx), the camera looks along q·(0,0,1) = (0, 0.906,
-        // 0.423) and its vertical is q·(0,1,0) = (0, 0.423, −0.906). The eye lands in front of
-        // the mat, below it in scene y, and the mat recedes upwards in the picture.
+        // REQ-SCN-009: q = R_Z(ry)·R_X(rx), so the camera looks along q·(0,0,1) and its own
+        // vertical is q·(0,1,0) — (0, 0.423, −0.906) at −65°, (0, 0.5, −0.866) at −60°. The eye
+        // lands in front of the mat, below it in scene y, and the mat recedes upwards in the
+        // picture. The floor vertical of v1.4 is the mat's own normal and ignores both.
         scene.Camera.LocalCamera = true;
-        scene.Camera.Current.Angles = new Vector3(-65f, 0f, 0f);
+        scene.Camera.Current.Angles = new Vector3(tilt, 0f, 0f);
         scene.Camera.Current.Distance = 60f;
         scene.Camera.SnapToSetpoints();
         return scene;

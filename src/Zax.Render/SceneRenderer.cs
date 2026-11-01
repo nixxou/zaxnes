@@ -193,7 +193,7 @@ public sealed class SceneRenderer : ISceneRenderer
         // worth measuring when the reflections are on.
         if (scene.Settings.Style.EffectiveReflections && !_pictureQuad)
         {
-            MarkFloorSurfaces(scene.Settings.SceneScale, FloorVertical(scene, view));
+            MarkFloorSurfaces(scene.Settings.SceneScale, FloorVertical(scene));
         }
 
         // AMD-012 (Q-020 revised): the depth pass and the sort of the transparent objects are per
@@ -209,7 +209,7 @@ public sealed class SceneRenderer : ISceneRenderer
 
     /// <summary>
     /// The extent half of the floor definition of AMD-055 REQ-SCN-084: an opaque object whose
-    /// bounding box in the plane <b>perpendicular to the camera's vertical</b>, measured
+    /// bounding box in the plane <b>perpendicular to the floor vertical</b>, measured
     /// <b>before curvature</b>, spans at least <c>6 × scene scale</c> units on both of that
     /// plane's axes may carry floor surfaces.
     /// </summary>
@@ -229,18 +229,21 @@ public sealed class SceneRenderer : ISceneRenderer
     /// </remarks>
     /// <remarks>
     /// <para>
-    /// <b>Q-094</b> (answered): the plane the box is measured in follows the <b>same vertical</b>
-    /// as the normal half of the test — the camera's, <c>q · (0, 1, 0)</c> — and not the fixed
-    /// <c>xz</c> plane of the requirement's wording. On an ordinary camera the two coincide to a
-    /// few degrees, the vertical being near +Y; on the local camera of REQ-SCN-009 they do not,
-    /// and measuring a floor laid flat on <c>xz</c> would weigh it on the wrong two dimensions.
+    /// <b>Q-096</b> (answered, AMD-055 v1.4): the plane the box is measured in follows the
+    /// <b>same vertical</b> as the normal half of the test — see <see cref="FloorVertical"/> —
+    /// and not the fixed <c>xz</c> plane of the requirement's wording. Under an ordinary camera
+    /// the vertical is <c>+Y</c> and the plane is exactly the <c>xz</c> the amendment names;
+    /// under the local camera of REQ-SCN-009 the vertical is the picture plane's own normal and
+    /// the plane is <c>xy</c>, « l'emprise se mesure de même dans le plan <c>xy</c> », because
+    /// measuring a floor laid flat on <c>xz</c> would weigh it on the wrong two dimensions —
+    /// one of them being its single unit of depth.
     /// </para>
     /// </remarks>
-    // Q-093, Q-094
-    private void MarkFloorSurfaces(float sceneScale, Vector3 cameraUp)
+    // Q-093, Q-094, Q-096
+    private void MarkFloorSurfaces(float sceneScale, Vector3 floorUp)
     {
         float threshold = SceneConstants.FloorExtent * sceneScale;
-        (Vector3 first, Vector3 second) = FloorPlaneAxes(cameraUp);
+        (Vector3 first, Vector3 second) = FloorPlaneAxes(floorUp);
         int start = 0;
         while (start < _opaque.Count)
         {
@@ -273,52 +276,55 @@ public sealed class SceneRenderer : ISceneRenderer
     }
 
     /// <summary>
-    /// The vertical the floor definition of AMD-055 REQ-SCN-084 is read against: the camera's
-    /// own, <c>q · (0, 1, 0)</c>, under the local camera of REQ-SCN-009, and the <c>+Y</c> axis
-    /// of the scene frame otherwise.
+    /// The vertical the floor definition of AMD-055 REQ-SCN-084 is read against: the
+    /// <b>normal of the NES image plane turned towards the camera</b>, <c>(0, 0, −1)</c> in the
+    /// scene frame before curvature, under the local camera of REQ-SCN-009, and the <c>+Y</c>
+    /// axis of the scene frame otherwise.
     /// </summary>
     /// <remarks>
     /// <para>
     /// <b>Q-094</b> answered that the vertical is the camera's — the observation behind it being
     /// that the ring mat of « Punch-Out!! », a face of scene normal (0, 0, −1) seen through the
-    /// local camera at (−65, 0, 0), reflects in the reference. That part is implemented here:
-    /// the mat's normal makes 0.9063 with that camera's vertical and clears the 0.9 of the
-    /// requirement.
+    /// local camera, reflects in the reference. <b>Q-096</b> showed that neither half of that
+    /// answer survives. In the <b>ordinary</b> mode the camera's vertical takes the floors away:
+    /// the close-up R of §2.5 places its camera at an elevation of 30° over a floor of scene
+    /// normal (0, 1, 0) and states of that very floor « c'est donc une surface de sol », with a
+    /// normative invariant requiring it to reflect, yet <c>dot((0,1,0), up)</c> = cos 30° =
+    /// 0.866 there, under the 0.9 — and more generally any orbit camera would lose every floor
+    /// past 25.8° of elevation. In the <b>local-camera</b> mode it does not reach far enough: the
+    /// built-in « Punch Out!! » profile of 3dSen 2.0 tilts its local camera by −60°, where
+    /// <c>dot((0,0,−1), q · (0,1,0))</c> = 0.866 &lt; 0.9, and the reference reflects the mat all
+    /// the same.
     /// </para>
     /// <para>
-    /// <b>Q-096</b>: the answer extends the rule to « les deux modes de caméra », and that half
-    /// cannot hold. The close-up R of AMD-055 §2.5 places its camera at an elevation of 30° —
-    /// the direction (−0.5, +0.5, −0.707) — over a floor of scene normal (0, 1, 0), and the
-    /// amendment states of that very floor « c'est donc une surface de sol », with a normative
-    /// invariant requiring it to reflect. Read against the camera's vertical the dot product is
-    /// cos 30° = <b>0.866</b>, under the 0.9: the amendment's own close-up would stop being a
-    /// floor, and six §2.5 invariants fail. More generally an ordinary orbit camera would lose
-    /// every floor past 25.8° of elevation. The vertical is therefore the camera's in the mode
-    /// that has no other one — the local camera, which lays the NES plane flat and makes it the
-    /// floor of the picture — and the scene frame's <c>+Y</c> in the ordinary mode, where
-    /// REQ-SCN-084 and its close-up both read it that way.
+    /// AMD-055 <b>v1.4</b> settles both halves, and the rule no longer depends on the camera's
+    /// attitude at all: under the local camera the NES picture plane is laid flat and *is* the
+    /// floor, so the vertical is that plane's own normal turned towards the camera —
+    /// <c>(0, 0, −1)</c> in the scene frame before curvature — whatever the tilt; under an
+    /// ordinary camera it is <c>+Y</c>, as REQ-SCN-084 and its close-up both read it. The mat's
+    /// normal is exactly (0, 0, −1), so it scores 1.000 at any tilt, where V2-23's provisional
+    /// <c>q · (0, 1, 0)</c> scored 0.9063 at −65° and failed at −60°.
     /// </para>
     /// </remarks>
     // Q-094, Q-096
-    private static Vector3 FloorVertical(SceneState scene, in CameraView view)
-        => scene.Camera.LocalCamera ? Normalized(view.Up, Vector3.UnitY) : Vector3.UnitY;
+    private static Vector3 FloorVertical(SceneState scene)
+        => scene.Camera.LocalCamera ? -Vector3.UnitZ : Vector3.UnitY;
 
     /// <summary>
-    /// Two orthonormal axes of the plane perpendicular to <paramref name="cameraUp"/>, the plane
-    /// the extent of AMD-055 REQ-SCN-084 is measured in (<b>Q-094</b>).
+    /// Two orthonormal axes of the plane perpendicular to <paramref name="floorUp"/>, the plane
+    /// the extent of AMD-055 REQ-SCN-084 is measured in (<b>Q-096</b>).
     /// </summary>
     /// <remarks>
-    /// The requirement names « les deux axes » of that plane without fixing which two, and the
-    /// extent of a box does depend on how the pair is turned inside the plane. The pair is built
-    /// from the scene frame's <c>Z</c>, so that a vertical of <c>+Y</c> — the ordinary camera's
-    /// case — gives back exactly the <c>x</c> and <c>z</c> axes the requirement's own wording
-    /// names, and the close-ups of §2.5 are measured as the amendment measures them; the
-    /// fallback to <c>X</c> only fires when the vertical is itself near <c>Z</c>, which is what
-    /// a local camera laying the NES plane flat produces.
+    /// The requirement names two planes by name, and this builds both from the one vertical. The
+    /// pair is seeded from the scene frame's <c>Z</c>, so that a vertical of <c>+Y</c> — the
+    /// ordinary camera's — gives back exactly the <c>x</c> and <c>z</c> axes the requirement's
+    /// own wording names, and the close-ups of §2.5 are measured as the amendment measures them;
+    /// the fallback to <c>X</c> fires when the vertical is itself near <c>Z</c>, which is the
+    /// local camera's <c>(0, 0, −1)</c>, and yields the <c>xy</c> plane v1.4 names there.
     /// </remarks>
-    private static (Vector3 First, Vector3 Second) FloorPlaneAxes(Vector3 cameraUp)
+    private static (Vector3 First, Vector3 Second) FloorPlaneAxes(Vector3 floorUp)
     {
-        Vector3 up = Normalized(cameraUp, Vector3.UnitY);
+        Vector3 up = Normalized(floorUp, Vector3.UnitY);
         Vector3 seed = MathF.Abs(up.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX;
         Vector3 first = Normalized(Vector3.Cross(up, seed), Vector3.UnitX);
         return (first, Vector3.Cross(first, up));
@@ -875,7 +881,7 @@ public sealed class SceneRenderer : ISceneRenderer
         _scenePass.Set("uEye", view.Eye);
 
         // AMD-055 REQ-SCN-084 (Q-094, Q-096): the vertical the floor definition is read against.
-        _scenePass.Set("uSceneUp", FloorVertical(scene, view));
+        _scenePass.Set("uSceneUp", FloorVertical(scene));
 
         Vector3 light = SceneColor.ToLinear(scene.Light.Color)
             * SceneColor.ToLinear(scene.Settings.LightIntensity);

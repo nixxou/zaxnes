@@ -508,12 +508,13 @@ internal static class SceneShaders
         layout(location = 1) out vec4 oFloor;
 
         // Whether the instance this fragment belongs to is wide enough in the plane
-        // perpendicular to the camera's vertical, before curvature: at least 6 x scene scale on
-        // both of its axes (REQ-SCN-084, Q-094). Computed once per object by the renderer.
+        // perpendicular to the floor vertical, before curvature: at least 6 x scene scale on
+        // both of its axes (REQ-SCN-084, Q-096). Computed once per object by the renderer.
         uniform int uFloorExtent;
 
-        // The camera's vertical q.(0,1,0) in the scene frame (AMD-045 REQ-SCN-072), the vertical
-        // the floor definition of REQ-SCN-084 is read against (Q-094).
+        // The vertical the floor definition of REQ-SCN-084 is read against (Q-096, AMD-055
+        // v1.4): +Y of the scene frame under an ordinary camera, and the normal of the NES
+        // picture plane turned towards the camera, (0, 0, -1), under the local camera.
         uniform vec3 uSceneUp;
 
         uniform mat4 uModel;
@@ -678,11 +679,11 @@ internal static class SceneShaders
             // that belongs to a wide enough instance. The normal stored is the bent one: the ray
             // itself is traced on the geometry as rendered (REQ-SCN-080, second bullet).
             //
-            // Q-094 (answered), Q-096: uSceneUp is the camera's own vertical q.(0,1,0) under the
-            // local camera of REQ-SCN-009 — which lays the NES plane flat, so that the plane
-            // itself is the floor of the picture and has no other vertical to be read against —
-            // and the +Y axis of the scene frame under an ordinary camera, where the close-up R
-            // of §2.5 reads it that way and its invariants depend on it.
+            // Q-096 (answered, AMD-055 v1.4): uSceneUp is the normal of the NES picture plane
+            // turned towards the camera, (0, 0, -1), under the local camera of REQ-SCN-009 —
+            // which lays that plane flat so that the plane itself IS the floor, whatever the
+            // tilt — and the +Y axis of the scene frame under an ordinary camera, where the
+            // close-up R of §2.5 reads it that way and its invariants depend on it.
             float floorFacing = step(0.9, dot(normalize(vFlatNormal), uSceneUp));
             oFloor = vec4(n * 0.5 + 0.5, uFloorExtent != 0 ? floorFacing : 0.0);
         }
