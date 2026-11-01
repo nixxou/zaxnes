@@ -34,7 +34,7 @@ use zax_profiles::layout::FieldPresence;
 use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::tile::{PatternGrid, ProfileTile};
-use zax_profiles::values::{Vec2I, Vec3F};
+use zax_profiles::values::{Mat4F, Vec2I, Vec3F};
 use zax_profiles::variant::PatternVariant;
 
 use crate::HarnessError;
@@ -138,6 +138,19 @@ pub fn dump(path: &Path, tiles: bool) -> Result<String, HarnessError> {
                 vec3(variant.pivot),
                 variant.tag_string.as_deref().unwrap_or("")
             );
+            if let Some(amplitude) = variant.deform_amplitude {
+                let matrix = |m: Option<Mat4F>| {
+                    m.map_or_else(|| "-".to_owned(), |m| format!("{:?}", m.cells()))
+                };
+                let _ = writeln!(
+                    out,
+                    "   deform amp {} pivot {} speed {} offset {}",
+                    vec3(Some(amplitude)),
+                    vec3(variant.deform_pivot),
+                    matrix(variant.deform_speed),
+                    matrix(variant.deform_offset)
+                );
+            }
         }
         if tiles {
             if let Some(grid) = &pattern.grid {
@@ -154,6 +167,21 @@ pub fn dump(path: &Path, tiles: bool) -> Result<String, HarnessError> {
         }
     }
     Ok(out)
+}
+
+fn matrix16(value: Option<&Value>) -> Option<Mat4F> {
+    let cells = value?.as_array()?;
+    let mut out = [0.0f32; Mat4F::CELL_COUNT];
+    if cells.len() != out.len() {
+        return None;
+    }
+    for (cell, value) in out.iter_mut().zip(cells) {
+        #[allow(clippy::cast_possible_truncation)] // profile floats are f32
+        {
+            *cell = value.as_f64()? as f32;
+        }
+    }
+    Some(Mat4F::new(out))
 }
 
 fn hex64(value: &Value, what: &str) -> Result<u64, HarnessError> {
@@ -365,7 +393,7 @@ fn build_pattern(
         i32::try_from(width).unwrap_or(0),
         i32::try_from(height).unwrap_or(0),
     );
-    let variant = PatternVariant {
+    let mut variant = PatternVariant {
         depth: int(entry.get("depth"), 8),
         geometry: VariantGeometry::from_raw(int(entry.get("geometry"), 0)),
         solid: flag(entry.get("solid"), false),
@@ -377,8 +405,18 @@ fn build_pattern(
         alpha: 1.0,
         render_style: VariantRenderStyle::Normal,
         tag_string: entry.get("tags").and_then(Value::as_str).map(str::to_owned),
+        // "empty": a palette colour (1 to 3) left out of the volume, 0 for none
+        stored_empty_color: int(entry.get("empty"), 0),
         ..PatternVariant::default()
     };
+    // "deform": {"amplitude": [x, y, z], "pivot": [x, y, z], "speed": [16 cells, row by row],
+    // "offset": [16 cells]}: the animated deformation (REQ-E3D-568).
+    if let Some(deform) = entry.get("deform") {
+        variant.deform_amplitude = float3(deform.get("amplitude"));
+        variant.deform_pivot = float3(deform.get("pivot"));
+        variant.deform_speed = matrix16(deform.get("speed"));
+        variant.deform_offset = matrix16(deform.get("offset"));
+    }
     Ok(ProfilePattern {
         grid: Some(PatternGrid::new(width, height, cells)),
         constraint_size: Vec2I::UNCONSTRAINED,
