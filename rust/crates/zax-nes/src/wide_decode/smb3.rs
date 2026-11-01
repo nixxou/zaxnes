@@ -22,7 +22,10 @@
 //! empty.
 //!
 //! A world map is in the same tile map (rows 16-26, up to four screens, those past it filled with
-//! tile `$02`), with the layout of tileset 0, in bank 12. A vertical level is not decoded.
+//! tile `$02`), with the layout of tileset 0, in bank 12; its frame is not. The map's margins stay
+//! the backdrop and its centre is the PPU's, frame included: the tile map redrawn over the last
+//! columns put trees in place of the frame's right side, and its rows in the margins drew the map
+//! past its frame. A vertical level is not decoded.
 //!
 //! The decoder checks itself against the PPU: a row whose centre does not show what the tile map
 //! gives (the title, a transition) is left to the nametables. Column 0, which the game hides
@@ -87,6 +90,8 @@ const MAP_SCREENS: usize = 4;
 const MAP_FIRST_ROW: usize = 17 * 16;
 const MAP_FILL: u8 = 0x02;
 const MAP_LAYOUT_BANK: usize = 12;
+/// The tileset of a world map.
+const WORLD_MAP: u8 = 0;
 
 /// Lines of the screen.
 const SCREEN_LINES: i32 = 240;
@@ -229,6 +234,18 @@ impl MarginDecoder for SuperMarioBros3 {
         if !(0..LEVEL_ROWS).contains(&tile_row) {
             return false;
         }
+        if memory.ram(LEVEL_TILESET) == WORLD_MAP {
+            // The world map: the centre's redrawn columns as the PPU shows them, no margins.
+            for column in columns.filter(|column| (32 - RIGHT_COLUMNS..32).contains(column)) {
+                let (tile, palette) = nametable_tile(memory, *row, column);
+                out.push(DecodedTile {
+                    column,
+                    tile,
+                    palette,
+                });
+            }
+            return true;
+        }
         let first = first_column(memory, *row);
 
         if !level.shows(memory, *row, first, tile_row) {
@@ -274,6 +291,10 @@ impl MarginDecoder for SuperMarioBros3 {
         let Some(level) = Level::of(self, memory) else {
             return false;
         };
+        // Nor around a world map.
+        if memory.ram(LEVEL_TILESET) == WORLD_MAP {
+            return true;
+        }
         // The PPU did not draw this row: the screen must show the level, checked on a row it
         // did draw, halfway down the playfield.
         let middle_row = (i32::from(memory.ram(VERT_SCROLL)) + MIDDLE_LINE) >> 3;
@@ -300,6 +321,19 @@ impl MarginDecoder for SuperMarioBros3 {
         }
         true
     }
+}
+
+/// The tile and sub-palette the nametables hold at screen column `column` of `row`.
+fn nametable_tile(memory: &DecoderMemory<'_>, row: BackgroundRow, column: i32) -> (u8, u8) {
+    let address = nametable_address(row, column);
+    let tile = (memory.nametable)(address);
+    let table = address & 0x2C00;
+    let tile_column = address & 0x1F;
+    let tile_row = (address >> 5) & 0x1F;
+    let attribute =
+        (memory.nametable)(table | 0x03C0 | ((tile_row >> 2) << 3) | (tile_column >> 2));
+    let shift = ((tile_row & 2) << 1) | (tile_column & 2);
+    (tile, (attribute >> shift) & 3)
 }
 
 /// The nametable address of screen column `column` (0 = the left edge) of `row`, on the plane

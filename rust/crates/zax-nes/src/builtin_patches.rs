@@ -1687,7 +1687,6 @@ const NG3_OPTIONS: &[HackOption] = &[
     },
 ];
 
-
 /// The options of the Super Mario Bros. packs: testing aids, off by default, and the overclock.
 const SMB1_OPTIONS: &[HackOption] = &[
     // Testing aids: B on the title screen goes through every level; Mario never hurt (falls and
