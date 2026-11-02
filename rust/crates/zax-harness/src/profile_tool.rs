@@ -13,7 +13,8 @@
 //!     { "grid": [["brick", "brick"], ["brick", null]],   // rows of tile names, null empty
 //!       "depth": 8, "geometry": 0, "layer": 2,           // the main variant
 //!       "solid": false, "permanent": true, "self_connected": true,
-//!       "scale": [1,1,1], "offset": [0,0,0], "tags": "" } ] }
+//!       "scale": [1,1,1], "offset": [0,0,0], "tags": "" } ],
+//!   "scripts": [{ "name": "main", "file": "main.lua" }] }  // optional: Lua, files beside it
 //! ```
 //!
 //! A tile's planes are written as in a frame dump (`--dump-frame`): bit `y * 8 + (7 - x)` is
@@ -289,6 +290,28 @@ pub fn build(description: &Path, out: &Path) -> Result<String, HarnessError> {
         profile
             .permanent_patterns
             .push(Arc::new(build_pattern(index, entry, &tiles)?));
+    }
+    for entry in spec
+        .get("scripts")
+        .and_then(Value::as_array)
+        .map_or(&[][..], Vec::as_slice)
+    {
+        let file = entry
+            .get("file")
+            .and_then(Value::as_str)
+            .ok_or_else(|| error("a script needs a \"file\""))?;
+        let path = description.parent().unwrap_or(Path::new(".")).join(file);
+        let source = std::fs::read_to_string(&path)
+            .map_err(|e| error(format!("{}: {e}", path.display())))?;
+        let name = entry.get("name").and_then(Value::as_str).unwrap_or(file);
+        profile
+            .scripts
+            .push(zax_profiles::script::ProfileScript::new(
+                Some(name),
+                true,
+                Some(&source),
+                Some("*"),
+            ));
     }
     zax_profiles::export::normalize(&mut profile, None).map_err(|e| error(e.to_string()))?;
     let bytes = format::save(&profile, FieldPresence::All);
