@@ -8,6 +8,7 @@ use crate::catalogue::{
 use crate::domain::{Domain, SettingOption};
 use crate::meta::{SettingDescriptor, SettingEffect, SettingKind, SettingScope, SettingTheme};
 use crate::num;
+use crate::styles;
 use crate::values::{Color, Rect, SettingValue, Vector3};
 
 /// Default depth offset of each layer (§4.1.6).
@@ -88,6 +89,91 @@ fn background_presets() -> Vec<SettingOption> {
 fn video(out: &mut Vec<SettingDescriptor>) {
     video_output(out);
     video_scaling(out);
+    render_style(out);
+}
+
+/// The visual style of AMD-040 §3, amended by AMD-055 REQ-SCN-078, and the twelve parameters of
+/// the Enhanced style (AMD-055 REQ-SCN-079, keys of its §4). All of scope U, immediate effect,
+/// never taken from a profile and never exposed in libretro.
+///
+/// They are persisted and reachable from Lua (`Setting.VisualStyle`,
+/// `Setting:Get/SetVisualStyleParameter`) from this lot on; the rendering they ask for is the
+/// Enhanced lot's. Until then they are left out of the options window
+/// (`zax_app::ui::options::EXCLUDED`): an option that moves and changes nothing would be worse
+/// than no option.
+fn render_style(out: &mut Vec<SettingDescriptor>) {
+    out.push(
+        SettingDescriptor::new(
+            SettingId::RenderVisualStyle,
+            SettingKind::Int,
+            SettingValue::Int(styles::CLASSIC_STYLE),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Render,
+        )
+        // 1 is written for Enhanced and read back as 4; any other value takes the default, 0,
+        // wherever it comes from — a script or the settings file (REQ-SCN-078).
+        .with_domain(Domain::aliased_choice(
+            vec![(
+                f64::from(styles::ENHANCED_STYLE_ALIAS),
+                f64::from(styles::ENHANCED_STYLE),
+            )],
+            vec![
+                opt(styles::CLASSIC_STYLE, "Classic"),
+                opt(styles::ENHANCED_STYLE, "Enhanced"),
+            ],
+        ))
+        .with_lua("VisualStyle")
+        .with_label("Style"),
+    );
+
+    // The graded parameters of REQ-SCN-079: eight ladders of 1 to 5 and four lists. The step is
+    // what carries the rounding of AMD-040 §3 (`Domain::snap`).
+    for (id, default, minimum, maximum, label) in [
+        (SettingId::RenderStyleAo, 0, 0.0, 2.0, "Ambient Occlusion"),
+        (SettingId::RenderStyleAoStrength, 3, 1.0, 5.0, "Strength"),
+        (SettingId::RenderStyleAoRadius, 3, 1.0, 5.0, "Radius"),
+        (SettingId::RenderStyleAoThickness, 3, 1.0, 5.0, "Thickness"),
+        (SettingId::RenderStyleAoQuality, 1, 0.0, 2.0, "AO Quality"),
+        (
+            SettingId::RenderStylePixelShadow,
+            0,
+            0.0,
+            1.0,
+            "Pixel Shadows",
+        ),
+        (SettingId::RenderStyleVoxelGrid, 0, 0.0, 3.0, "Voxel Grid"),
+        (
+            SettingId::RenderStyleReflections,
+            0,
+            0.0,
+            1.0,
+            "Reflections",
+        ),
+        (SettingId::RenderStyleSsrShine, 3, 1.0, 5.0, "Floor Shine"),
+        (SettingId::RenderStyleSsrClarity, 3, 1.0, 5.0, "Clarity"),
+        (SettingId::RenderStyleSsrLength, 3, 1.0, 5.0, "Length"),
+        (
+            SettingId::RenderStyleSsrQuality,
+            2,
+            0.0,
+            3.0,
+            "Reflection Quality",
+        ),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Int,
+                SettingValue::Int(default),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Render,
+            )
+            .with_domain(Domain::stepped(minimum, maximum, 1.0, 0))
+            .with_label(label),
+        );
+    }
 }
 
 fn video_output(out: &mut Vec<SettingDescriptor>) {
@@ -172,6 +258,45 @@ fn video_output(out: &mut Vec<SettingDescriptor>) {
         .with_lua("RenderMethod")
         .with_field("28")
         .with_label("Direct / Render Tex"),
+    );
+    video_queue_and_msaa(out);
+}
+
+/// The two rows of §4.1.1 the 2.0 update adds: the GPU frame queue of AMD-052 and the
+/// multisampling count of AMD-059.
+fn video_queue_and_msaa(out: &mut Vec<SettingDescriptor>) {
+    // The GPU frame queue of AMD-052 REQ-LOOP-077, which AMD-059 REQ-LUA-116 opens to the
+    // scripts as `Setting.MaxQueuedFrames`: the same value and the same effect, not a second
+    // key. Not exposed in libretro (AMD-052 §3 point 8). The bound the loop reads is RU-3's.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoMaxQueuedFrames,
+            SettingKind::Int,
+            SettingValue::Int(2),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Video,
+        )
+        .with_domain(Domain::stepped(1.0, 2.0, 1.0, 0))
+        .with_lua("MaxQueuedFrames")
+        .with_label("Max Queued Frames"),
+    );
+    // AMD-059 REQ-LUA-116: kept and handed back, with no effect of any kind — the
+    // anti-aliasing of Zaxnes stays `video.anti_alias` (AMD-032) **(D)**. No interface, not
+    // exposed in libretro.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VideoMsaa20,
+            SettingKind::Int,
+            SettingValue::Int(2),
+            SettingScope::User,
+            SettingEffect::NoEffect,
+            SettingTheme::Video,
+        )
+        // 0, 2 or 4; the Lua write has its own rounding (v ≤ 1 → 0, 2 or 3 → 2, ≥ 4 → 4), so
+        // the only values that ever reach the model are these three.
+        .with_domain(Domain::choice(vec![opt(0, "0"), opt(2, "2"), opt(4, "4")]))
+        .with_lua("Msaa"),
     );
 }
 
@@ -424,6 +549,41 @@ fn scene(out: &mut Vec<SettingDescriptor>) {
         .with_lua("MapEnable")
         .with_field("5"),
     );
+    // The four curvature settings of AMD-043 REQ-SCN-066. They are the style parameters
+    // `spl.bend_zx`, `spl.bend_zy`, `spl.arc_yx` and `spl.arc_center` of REQ-LUA-114, so they
+    // carry the step the rounding of AMD-040 §3 uses. The curving of the scene itself is the
+    // AMD-043 lot's; until then they are left out of the options window.
+    for (id, minimum, maximum, step, label) in [
+        (
+            SettingId::SceneBendLr,
+            -180.0,
+            180.0,
+            30.0,
+            "Bend Left-Right",
+        ),
+        (
+            SettingId::SceneBendTb,
+            -180.0,
+            180.0,
+            30.0,
+            "Bend Top-Bottom",
+        ),
+        (SettingId::SceneArcH, -180.0, 180.0, 30.0, "Arc Horizontal"),
+        (SettingId::SceneArcCenter, 0.0, 1.0, 1.0, "Arc Center"),
+    ] {
+        out.push(
+            SettingDescriptor::new(
+                id,
+                SettingKind::Int,
+                SettingValue::Int(0),
+                SettingScope::User,
+                SettingEffect::Immediate,
+                SettingTheme::Scene,
+            )
+            .with_domain(Domain::stepped(minimum, maximum, step, 0))
+            .with_label(label),
+        );
+    }
 }
 
 fn clipping(out: &mut Vec<SettingDescriptor>) {
@@ -615,6 +775,23 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
         .with_lua("AutoTVMode")
         .with_field("33")
         .with_libretro(enabled_disabled()),
+    );
+    // The run-ahead of AMD-041 REQ-LOOP-064, which AMD-040 REQ-LUA-114 exposes as
+    // `RunAheadFrames`: 0 to 3, a write outside brought back to the nearest bound. Not exposed
+    // in libretro (AMD-041 §4). The frames it asks the loop to run ahead are RU-3's; until then
+    // it is left out of the options window.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::EmuRunAhead,
+            SettingKind::Int,
+            SettingValue::Int(1),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Emulation,
+        )
+        .with_domain(Domain::stepped(0.0, 3.0, 1.0, 0))
+        .with_lua("RunAheadFrames")
+        .with_label("Run-ahead"),
     );
     emulation_rust_only(out);
     emulation_pause_3d(out);
@@ -1010,6 +1187,20 @@ fn interface(out: &mut Vec<SettingDescriptor>) {
         SettingEffect::Immediate,
         SettingTheme::Interface,
     ));
+    // AMD-059 REQ-LUA-116: `Setting.LibraryView` is kept exactly as written and read back as it
+    // was — no domain at all. Zaxnes has one library layout, so nothing reads it; no interface,
+    // not exposed in libretro.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::UiLibraryView,
+            SettingKind::Int,
+            SettingValue::Int(0),
+            SettingScope::User,
+            SettingEffect::NoEffect,
+            SettingTheme::Interface,
+        )
+        .with_lua("LibraryView"),
+    );
     // The default size is the one of SPEC-10; -1 for the position means "let the platform place the
     // window" (REQ-PERS-067).
     out.push(SettingDescriptor::new(
@@ -1066,6 +1257,26 @@ fn vr_scene_and_editor(out: &mut Vec<SettingDescriptor>) {
         .with_domain(Domain::switch())
         .with_lua("Mirroring")
         .with_field("23"),
+    );
+    // AMD-059 REQ-LUA-116: the refresh rate of a virtual-reality headset — {72, 90, 120}, the
+    // Lua write taking the nearest rung and the smaller one at equal distance. Without virtual
+    // reality it has no effect here **(D)**; the `Vr` theme leaves it out of every tab on its
+    // own, so it needs no exclusion line.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::VrRefreshRate,
+            SettingKind::Int,
+            SettingValue::Int(90),
+            SettingScope::User,
+            SettingEffect::NoEffect,
+            SettingTheme::Vr,
+        )
+        .with_domain(Domain::choice(vec![
+            SettingOption::new(72.0, "72"),
+            SettingOption::new(90.0, "90"),
+            SettingOption::new(120.0, "120"),
+        ]))
+        .with_lua("RefreshRate"),
     );
     out.push(
         SettingDescriptor::new(

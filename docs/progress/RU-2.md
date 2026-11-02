@@ -8,8 +8,8 @@ AMD-059) of `dotnetupdated` are read as a reference only.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | in progress |
-| 2 | The persisted settings the 2.0 `Setting` members stand for, handheld defaults, `EXCLUDED` | todo |
+| 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `55b6723` |
+| 2 | The persisted settings the 2.0 `Setting` members stand for, handheld defaults, `EXCLUDED` | done |
 | 3 | AMD-040: the `CS` table and `Camera.ResetDistance` | todo |
 | 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | todo |
 | 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | todo |
@@ -148,3 +148,42 @@ numeric write raises — but nothing of the program reads these settings yet:
 Every one of them is in `ui/options.rs` `EXCLUDED` until the lot that gives it an effect takes
 it out: an option the user can move and that changes nothing would be worse than no option.
 `vr.refresh_rate` needs no line, the `Vr` theme having no tab.
+
+### Step 2 — the settings the 2.0 members stand for
+
+Twenty-two keys, none of which has any effect in this lot. They are the *values* the Lua members
+of AMD-040 and AMD-059 read and write; each one's effect is its own lot's (table above).
+
+- `zax-settings/src/catalogue.rs`: the identifiers, each in the section of SPEC-09 §4.1 its
+  amendment puts it in. `zax-settings/src/table.rs`: the rows, with the default, the scope U, the
+  effect and the domain the amendment gives.
+- `zax-settings/src/domain.rs` gained what the amendments need and nothing more:
+  - `Domain::stepped(min, max, step, decimals)` — the rungs, published as the finite ordered list
+    REQ-PERS-081 asks for, **and** the rule `Snap`: `coerce` brings a value into the bounds and
+    then onto the nearest rung, ties going to the even one. That is the normalisation of AMD-040
+    §3 word for word, and putting it in the domain is what makes « écrire par Lua ou par
+    l'interface revient au même » (REQ-LUA-114) true by construction rather than by two copies of
+    the same arithmetic. A value between two rungs is snapped, not sent to the default: the
+    general rule of REQ-PERS-003 is explicitly replaced here (AMD-055 REQ-SCN-079 header).
+  - `Domain::aliased_choice` — `render.visual_style` accepts 1 for Enhanced and reads back 4
+    (AMD-055 REQ-SCN-078), wherever the 1 comes from, a script or the settings file.
+  - `Domain::snap` is public: the Lua path calls it on the number the script passed, **before**
+    the value is truncated to an integer, so `SetVisualStyleParameter(4, "spl.bend_zx", 45)` sees
+    45 and not something already rounded.
+- `zax-settings/src/styles.rs` (new) is the only place that knows which parameter identifier
+  names which setting: the four of AMD-043 REQ-SCN-066 and the twelve of AMD-055 REQ-SCN-079,
+  sixteen in all, under the style 4 and its alias 1. Every other identifier, and every other
+  style, is "unknown" in the sense of REQ-LUA-114.
+- `zax-app/src/ui/options.rs` `EXCLUDED` grew by 21 lines, and `ui/handheld/defaults.rs` by one:
+  `emu.run_ahead` is 0 on a handheld (it costs a whole extra emulated frame per shown frame) and
+  1 on the desktop, as AMD-041 §3 has it. The other twenty-one cost nothing — they do nothing —
+  so they keep the default of their amendment on every platform.
+- `docs/spec/SPEC-09-persistance.md`: the rows of §4.1.1, §4.1.4, §4.1.7, §4.1.9 and §4.1.10 and
+  the libretro exclusions of §4.6, as the .NET lot V2-31 did for the three keys it added.
+
+Tests: `zax-settings/tests/two_zero_settings.rs` (35 cases) — the rounding of AMD-040 §3 on the
+eight values the amendments name, the same rounding reached through the model, the ladders of
+AMD-055, the style identifiers 1/4/0/other, the defaults of the twenty-two keys, the library
+view that keeps anything, and the published value lists. The transcription of SPEC-09 §4.1
+(`tests/common/catalogue_table.rs`) gained the twenty-two rows, so the catalogue is still
+checked against a table written out from the specification rather than from the code.

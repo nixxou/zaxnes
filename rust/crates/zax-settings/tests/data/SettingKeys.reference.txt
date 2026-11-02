@@ -17,8 +17,25 @@ video.skip_frame
 video.render_method
 video.res_scale
 video.anti_alias
+# AMD-052 REQ-LOOP-077 and AMD-059 REQ-LUA-116.
+video.max_queued_frames
+video.msaa_2_0
 render.mesh_algo
 render.shadow
+# AMD-040 REQ-LUA-114, AMD-055 REQ-SCN-078 and REQ-SCN-079.
+render.visual_style
+render.style.ao
+render.style.ao_strength
+render.style.ao_radius
+render.style.ao_thickness
+render.style.ao_quality
+render.style.pixel_shadow
+render.style.voxel_grid
+render.style.reflections
+render.style.ssr_shine
+render.style.ssr_clarity
+render.style.ssr_length
+render.style.ssr_quality
 ui.fullscreen
 camera.fov
 camera.local_cam
@@ -32,6 +49,11 @@ scene.use_nes_bg_color
 # retired by AMD-031 (the decorative TV box was removed from the product)
 # scene.tv_box
 scene.map_enable
+# AMD-043 REQ-SCN-066.
+scene.bend_lr
+scene.bend_tb
+scene.arc_h
+scene.arc_center
 clip.left
 clip.bottom
 clip.right
@@ -72,6 +94,8 @@ emu.game_speed
 emu.tv_mode
 emu.auto_tv_mode
 emu.core
+# AMD-041 REQ-LOOP-064.
+emu.run_ahead
 conv.same_bg_palette
 conv.same_sp_palette
 conv.sprite_tolerance
@@ -85,10 +109,14 @@ input.zapper_enable
 input.emulated_menu_button
 ui.sort_option
 ui.last_browse_dir
+# AMD-059 REQ-LUA-116.
+ui.library_view
 ui.window_rect
 vr.runtime
 vr.scene_ratio
 vr.mirroring
+# AMD-059 REQ-LUA-116.
+vr.refresh_rate
 vr.control_method
 editor.selection_mode
 editor.saved_patterns

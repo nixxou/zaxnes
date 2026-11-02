@@ -92,8 +92,14 @@ setting_ids! {
     VideoRenderMethod => "video.render_method",
     VideoResScale => "video.res_scale",
     VideoAntiAlias => "video.anti_alias",
+    // AMD-052 REQ-LOOP-077; its Lua path is `MaxQueuedFrames` (AMD-059 REQ-LUA-116).
+    VideoMaxQueuedFrames => "video.max_queued_frames",
+    // AMD-059 REQ-LUA-116: kept and handed back, the anti-aliasing staying `video.anti_alias`.
+    VideoMsaa20 => "video.msaa_2_0",
     RenderMeshAlgo => "render.mesh_algo",
     RenderShadow => "render.shadow",
+    // AMD-040 §3, amended by AMD-055 REQ-SCN-078: 0 Classic, 4 Enhanced (1 written reads 4).
+    RenderVisualStyle => "render.visual_style",
     UiFullscreen => "ui.fullscreen",
     CameraFov => "camera.fov",
     CameraLocalCam => "camera.local_cam",
@@ -105,6 +111,12 @@ setting_ids! {
     SceneCustomBgColor => "scene.custom_bg_color",
     SceneUseNesBgColor => "scene.use_nes_bg_color",
     SceneMapEnable => "scene.map_enable",
+    // The four curvature settings of AMD-043 REQ-SCN-066, which the style parameters
+    // `spl.bend_zx`, `spl.bend_zy`, `spl.arc_yx` and `spl.arc_center` stand for (REQ-LUA-114).
+    SceneBendLr => "scene.bend_lr",
+    SceneBendTb => "scene.bend_tb",
+    SceneArcH => "scene.arc_h",
+    SceneArcCenter => "scene.arc_center",
     ClipLeft => "clip.left",
     ClipBottom => "clip.bottom",
     ClipRight => "clip.right",
@@ -116,6 +128,8 @@ setting_ids! {
     EmuAutoTvMode => "emu.auto_tv_mode",
     EmuCore => "emu.core",
     EmuCatchUp => "emu.catch_up",
+    // AMD-041 REQ-LOOP-064, exposed as `RunAheadFrames` (AMD-040 REQ-LUA-114).
+    EmuRunAhead => "emu.run_ahead",
     EmuLuaSmoothGc => "emu.lua_smooth_gc",
     EmuLuaOptimized => "emu.lua_optimized",
     EmuLuaExperimental => "emu.lua_experimental",
@@ -160,7 +174,11 @@ setting_ids! {
     UiSortOption => "ui.sort_option",
     UiLastBrowseDir => "ui.last_browse_dir",
     UiWindowRect => "ui.window_rect",
+    // AMD-059 REQ-LUA-116: kept exactly as written; Zaxnes has one library layout.
+    UiLibraryView => "ui.library_view",
     VrRuntime => "vr.runtime",
+    // AMD-059 REQ-LUA-116: the refresh rate of a headset, without effect here.
+    VrRefreshRate => "vr.refresh_rate",
     VrSceneRatio => "vr.scene_ratio",
     VrMirroring => "vr.mirroring",
     VrControlMethod => "vr.control_method",
@@ -181,6 +199,20 @@ setting_ids! {
     UiProfiler => "ui.profiler",
     UiLanguage => "ui.language",
     UiRomsFolder => "ui.roms_folder",
+    // The twelve parameters of the Enhanced style (AMD-055 REQ-SCN-079, keys of its §4). They
+    // are persisted and reachable from Lua here; the rendering is lot RU-5.
+    RenderStyleAo => "render.style.ao",
+    RenderStyleAoStrength => "render.style.ao_strength",
+    RenderStyleAoRadius => "render.style.ao_radius",
+    RenderStyleAoThickness => "render.style.ao_thickness",
+    RenderStyleAoQuality => "render.style.ao_quality",
+    RenderStylePixelShadow => "render.style.pixel_shadow",
+    RenderStyleVoxelGrid => "render.style.voxel_grid",
+    RenderStyleReflections => "render.style.reflections",
+    RenderStyleSsrShine => "render.style.ssr_shine",
+    RenderStyleSsrClarity => "render.style.ssr_clarity",
+    RenderStyleSsrLength => "render.style.ssr_length",
+    RenderStyleSsrQuality => "render.style.ssr_quality",
     AchievementsEnabled => "achievements.enabled",
     AchievementsEncore => "achievements.encore",
     AchievementsUnofficial => "achievements.unofficial",

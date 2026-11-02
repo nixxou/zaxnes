@@ -320,8 +320,23 @@ Légende des colonnes :
 | `video.render_method` | `RenderMethod` | 28 | entier | 0 | 0 Direct, 1 Render Tex | U | imm. | « Direct / Render Tex » (masqué sous Windows) | — | 0 : rendu direct ; 1 : rendu hors écran mis à l'échelle `ResScale` puis affiché, SPEC-06 |
 | `video.res_scale` | `ResScaleIndex` | 29 | entier | 0 | 0 Native, 1 2/3, 2 1/2, 3 1/3, 4 1/4 | U | imm. (si `render_method` = 1) | aucun sur desktop (« Tex Scale » de l'original non exposé, SPEC-10 REQ-UI-062, DEC-10-Q2) | Native…1/4 | facteur de résolution du rendu hors écran, conservé dans le modèle ; application facultative (SPEC-06 REQ-SCN-063) |
 | `video.anti_alias` | `AntiAlias` | 32 | entier | 0 | 0 None, 1 FFAA, 2 SMAA | U | imm. | « Anti Alias » : None/FFAA/SMAA | None/FFAA/SMAA | sans effet dans l'original (REQ-PERS-017), SPEC-06 |
+| `video.max_queued_frames` | `MaxQueuedFrames` | — | entier | 2 | 1 ou 2 ; écriture Lua : v ≤ 1 → 1, sinon 2 | U | imm. | liste « Max Queued Frames » / « Frames en file GPU », groupe **Vidéo**, après « Render Rate » | non exposé | borne les frames rendues en attente d'affichage (AMD-052 REQ-LOOP-077) ; `Setting.MaxQueuedFrames` est son chemin Lua, la **même** valeur et le **même** effet (AMD-059 REQ-LUA-116) |
+| `video.msaa_2_0` | `Msaa` | — | entier | 2 | 0, 2 ou 4 ; écriture Lua : v ≤ 1 → 0, 2 ≤ v ≤ 3 → 2, v ≥ 4 → 4 | U | aucun | aucune | non exposé | conservé et rendu tel quel : l'anticrénelage reste `video.anti_alias` (AMD-059 REQ-LUA-116) **(D)** |
 | `render.mesh_algo` | `RenderMode` | 13 | énum | 0 | 0 GREEDY, 1 MARCHING, 2 GREEDY_MULTICOLOR | U | imm. (régénération, SPEC-07 REQ-LOOP-024) | liste déroulante « Render » | les 3 valeurs | algorithme de mesh par défaut ; un pattern peut imposer le sien, SPEC-04 |
 | `render.shadow` | `Shadow` | 17 | booléen | vrai | — | U | imm. | case « Shadow » | on/off | interrupteur global des ombres ; ombre effective = `Shadow` ∧ drapeau du pattern ∧ drapeau du calque ; jamais pour les éléments d'UI du jeu, SPEC-06 |
+| `render.visual_style` | `VisualStyle` | — | entier | 0 | 0 Classic, 4 Enhanced (1 accepté en écriture, relu 4) ; autre → 0 | U | imm. | — / Zaxnes : liste « Style » | non exposé | choix du rendu (AMD-040 §3, SPEC-06 REQ-SCN-078) ; l'effet de rendu est du lot Enhanced |
+| `render.style.ao` | `GetVisualStyleParameter(4, "spl.ao")` | — | entier | 0 | 0 à 2, pas 1 | U | imm. | — / Zaxnes : liste « Ambient Occlusion » | non exposé | occlusion ambiante d'écran, AMD-055 REQ-SCN-083 |
+| `render.style.ao_strength` | `… "ao.strength"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Strength » | non exposé | plafond d'assombrissement, AMD-055 REQ-SCN-083 |
+| `render.style.ao_radius` | `… "ao.radius"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Radius » | non exposé | rayon de l'occlusion, AMD-055 REQ-SCN-083 |
+| `render.style.ao_thickness` | `… "ao.thickness"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. (sans effet hors du mode MSVO) | — / Zaxnes : curseur « Thickness » | non exposé | épaisseur supposée des occulteurs, AMD-055 REQ-SCN-083 |
+| `render.style.ao_quality` | `… "ao.quality"` | — | entier | 1 | 0 à 2, pas 1 | U | imm. | — / Zaxnes : liste « AO Quality » | non exposé | échantillons et résolution de la passe, AMD-055 REQ-SCN-083 |
+| `render.style.pixel_shadow` | `… "spl.pixel_shadow"` | — | entier | 0 | 0 à 1, pas 1 | U | imm. | — / Zaxnes : case « Pixel Shadows » | non exposé | ombre évaluée au centre du voxel, AMD-055 REQ-SCN-082 |
+| `render.style.voxel_grid` | `… "spl.voxel_grid"` | — | entier | 0 | 0 à 3, pas 1 | U | imm. | — / Zaxnes : liste « Voxel Grid » | non exposé | rainures tous les N = 2^valeur voxels, AMD-055 REQ-SCN-081 |
+| `render.style.reflections` | `… "spl.reflections"` | — | entier | 0 | 0 à 1, pas 1 | U | imm. | — / Zaxnes : case « Reflections » | non exposé | reflets du sol, AMD-055 REQ-SCN-084 |
+| `render.style.ssr_shine` | `… "ssr.shine"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Floor Shine » | non exposé | intensité des reflets, AMD-055 REQ-SCN-084 |
+| `render.style.ssr_clarity` | `… "ssr.clarity"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Clarity » | non exposé | netteté des reflets, AMD-055 REQ-SCN-084 |
+| `render.style.ssr_length` | `… "ssr.length"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Length » | non exposé | longueur des reflets, AMD-055 REQ-SCN-084 |
+| `render.style.ssr_quality` | `… "ssr.quality"` | — | entier | 2 | 0 à 3, pas 1 | U | imm. | — / Zaxnes : liste « Reflection Quality » | non exposé | pas de marche et résolution de la passe, AMD-055 REQ-SCN-084 |
 | `ui.fullscreen` | — | — | booléen | faux | — | U | imm. | case « Full Screen » | — | plein écran (REQ-PERS-067) |
 
 #### 4.1.2 Caméra
@@ -351,6 +366,10 @@ Légende des colonnes :
 | `scene.use_nes_bg_color` | `BgColor` | 2 | booléen | vrai | — | P (forcé vrai au chargement, REQ-PERS-005) | imm. | — | — | vrai et `Skybox` = −1 → fond = couleur universelle de la palette NES ; sinon `CustomBgColor`, SPEC-06 |
 | `scene.tv_box` | `TVBox` | 35 | entier | 0 | 0 None, 1 TV 1, 2 TV 2, 3 TV 3 | U | imm. | liste « TV Box » | les 4 valeurs | modèle de téléviseur 3D autour de l'image, affiché seulement pendant le jeu, SPEC-06 |
 | `scene.map_enable` | `MapEnable` | 5 | booléen | faux | — | P | — | — | — | sans effet observable (REQ-PERS-017) |
+| `scene.bend_lr` | `GetVisualStyleParameter(4, "spl.bend_zx")` | — | entier (degrés) | 0 | −180 à 180, pas 30 | U | imm. | liste « Bend Left-Right » / « Courbure gauche-droite » | option, 13 valeurs | courbure gauche-droite de la scène (AMD-043 REQ-SCN-066) ; la courbure elle-même est du lot AMD-043 |
+| `scene.bend_tb` | `… "spl.bend_zy"` | — | entier (degrés) | 0 | idem | U | imm. | liste « Bend Top-Bottom » / « Courbure haut-bas » | option, 13 valeurs | courbure haut-bas (AMD-043 REQ-SCN-066) |
+| `scene.arc_h` | `… "spl.arc_yx"` | — | entier (degrés) | 0 | idem | U | imm. | liste « Arc Horizontal » | option, 13 valeurs | arc horizontal (AMD-043 REQ-SCN-066) |
+| `scene.arc_center` | `… "spl.arc_center"` | — | entier | 0 | 0 ou 1 | U | imm. | liste « Arc Center » | option, 2 valeurs | centre de l'arc : 0 milieu de l'écran, 1 bord bas du cadre (AMD-043 REQ-SCN-066) |
 
 #### 4.1.5 Découpe de l'image (Clipping)
 
@@ -391,6 +410,7 @@ Les calques ne sont pas affichés dans l'UI desktop et ne sont pas exposés en l
 | `emu.tv_mode` | `TVMode` | 34 | énum | 0 (NTSC) | 0 NTSC, 1 PAL, 2 MULTI (non proposé par l'UI), 3 DENDY | **P** (Q-1) | imm. (cœur et cadence) | « TV Region » : NTSC/PAL/DENDY (positions 0, 1, 2 → valeurs 0, 1, 3) | NTSC/PAL/DENDY | région du cœur, SPEC-02/SPEC-07 REQ-LOOP-017 |
 | `emu.auto_tv_mode` | `AutoTVMode` | 33 | booléen | faux | — | U | ROM | — | on/off | au chargement d'une ROM, `TVMode` prend la région de l'en-tête, SPEC-07 REQ-LOOP-017 ; voir Q-1 pour l'ordre avec le profil |
 | `emu.core` | `Core` | 22 | entier | 0 | indice de cœur ; modulo le nombre de cœurs | U | imm. (réinitialise l'historique de rollback, recharge) | — | — | choix du cœur NES (un seul en desktop), SPEC-02 |
+| `emu.run_ahead` | `RunAheadFrames` | — | entier | 1 (0 sur console portable) | 0 à 3 | U | à la frame réelle suivante | liste « Run-ahead » | non exposé | frames exécutées d'avance (AMD-041 REQ-LOOP-064, exposé par AMD-040 REQ-LUA-114) ; les frames d'avance sont du lot RU-3 |
 
 #### 4.1.8 Paramètres de conversion 2D→3D
 
@@ -415,6 +435,7 @@ Tous de portée P, non affichés dans l'UI desktop, non exposés en libretro ; c
 | `input.emulated_menu_button` | `EmulatedMenuButton` | 27 | booléen | faux | — | U | imm. | case « Menu = Select + Start » | — | REQ-PERS-017, SPEC-08 |
 | `ui.sort_option` | `SortOption` | 36 | entier | 0 | 0 A-Z, 1 Recent, **2 Favorites first** | U | imm. | liste « Sort by » de la bibliothèque | — | tri de la bibliothèque et des slots, SPEC-10, REQ-PERS-033/057 ; la valeur **2 n'est jamais écrite dans le champ de profil 36** (0 est écrit à sa place) et une valeur 2 lue dans un profil est ignorée comme toute valeur de portée U (REQ-PERS-005 point 2) **(D)** |
 | `ui.last_browse_dir` | — | — | chaîne | dossier personnel | chemin | U | imm. | — | — | REQ-PERS-066 |
+| `ui.library_view` | `LibraryView` | — | entier | 0 | aucun : v est mémorisé tel quel | U | aucun | aucune | non exposé | conservé et rendu tel quel ; Zaxnes n'a qu'une disposition de bibliothèque (AMD-059 REQ-LUA-116) |
 | `ui.window_rect` | — | — | 4 entiers | taille par défaut SPEC-10 | — | U | redém. | — | — | REQ-PERS-067 |
 
 #### 4.1.10 VR, éditeur, film, valeurs internes et dérivées
@@ -424,6 +445,7 @@ Tous de portée P, non affichés dans l'UI desktop, non exposés en libretro ; c
 | `vr.runtime` | `VrRuntime` | 8 | entier | 0 | lecture toujours 0 | U (figé) | REQ-PERS-011 |
 | `vr.scene_ratio` | `SceneRatio` | 26 | réel | 1 | lecture 1 en desktop | U | REQ-PERS-011 |
 | `vr.mirroring` | `Mirroring` | 23 | booléen | vrai | — | U | stocké, sans effet |
+| `vr.refresh_rate` | `RefreshRate` | — | entier | 90 | {72, 90, 120} ; écriture Lua : la plus proche, à égalité la plus petite (81 → 72, 105 → 90) | U | conservé et rendu tel quel, sans effet — fréquence d'un casque de réalité virtuelle ; aucune interface, non exposé en libretro (AMD-059 REQ-LUA-116) |
 | `vr.control_method` | `ControlMethod` | 16 | entier | 0 | — | U | stocké, sans effet |
 | `editor.selection_mode` | `SelectionMode` | — | énum | 0 (Shape3D) | 0 Shape3D, 1 Tile | S | sans effet (REQ-PERS-016) |
 | `editor.saved_patterns` | `SavedPattern3D` | 14 | liste d'enregistrements (SPEC-03) | 5 entrées « Config1 »…« Config5 » | — | P | conservé, sans effet |
@@ -578,7 +600,7 @@ Les réglages U marqués d'une discrétisation dans §4.1 sont exposés. Exemple
 | `3dsen_emu_auto_tv_mode` | enabled, disabled | disabled | Émulation |
 | `3dsen_emu_game_speed` | −8 … 8 | 0 | Émulation |
 
-Non exposés en libretro (gérés par l'hôte ou sans objet) : `video.vsync`, `video.frame_rate`, `video.skip_frame`, `video.render_method`, `video.res_scale` (la résolution est celle de l'hôte), `ui.*`, `audio.bg_music`, `input.emulated_menu_button`, `emu.core`, tous les réglages P, S, D, VR, éditeur et film. `audio.volume` PEUT être exposé (l'hôte a son propre volume).
+Non exposés en libretro (gérés par l'hôte ou sans objet) : `video.vsync`, `video.frame_rate`, `video.max_queued_frames` (AMD-052 §3 point 8), `video.msaa_2_0` (AMD-059 REQ-LUA-116), `render.visual_style` et `render.style.*` (AMD-055 §4), `emu.run_ahead` (AMD-041 §4), `video.skip_frame`, `video.render_method`, `video.res_scale` (la résolution est celle de l'hôte), `ui.*`, `audio.bg_music`, `input.emulated_menu_button`, `emu.core`, tous les réglages P, S, D, VR, éditeur et film. `audio.volume` PEUT être exposé (l'hôte a son propre volume). `vr.refresh_rate` d'AMD-059 est couvert par la clause VR, `ui.library_view` par `ui.*` ; les quatre réglages de courbure d'AMD-043 §6 sont exposés, eux, avec leurs 13 et 2 valeurs.
 
 ## 5. Vecteurs de test
 
@@ -646,3 +668,4 @@ Profil A embarqué : intensité 1,0, direction (−1, −1, 1), `EmptyTile` faux
 - 1.1-draft (AMD-001, relecture R2) : sens des marges de Clipping corrigé (indice 1 = bas, 3 = haut, DEC-R2-T1) et domaine [0 ; 248] ; savestate avec état appris de la conversion (REQ-PERS-056, DEC-R2-T5) ; onglet Save aligné sur REQ-UI-051 ; REQ-PERS-066 en P2 ; « bouton Menu émulé » sans effet (DEC-R2-D7) ; types de ports au changement de jeu (DEC-09-Q6) ; renvoi normatif vers REQ-PROF-041 ; défauts d'ombre de premier lancement non reproduits ; GraphicQuality et res_scale absents de l'UI ; texte d'import renvoyé à SPEC-10 ; forme de §4.4 ; questions closes.
 - 1.1 (R2-review-v1.1 N-2, N-3) : `retro_serialize` inclut l'état appris de la conversion (parties 3 à 6, section « conversion ») ; `video.graphic_quality` et `emu.tv_mode` (portée P) retirés des core options (REQ-PERS-085).
 - Copie de travail du côté propre, 2026-11-02 (lot RU-1) : la ligne `ui.sort_option` de §4.1.9 est réécrite comme AMD-053 §3 point 10 la réécrit — troisième valeur « Favorites first », jamais écrite dans le champ de profil 36. Le champ `favorite` de §4.5.2 et l'emplacement `resume` de §4.5.3 ne sont pas reportés ici : `library.json` suit le point 11 de l'amendement, et `saves/index.json` n'est plus le magasin des emplacements dans l'application Rust (Q-102). Le texte normatif reste celui de `changes/AMD-053-reprise-favoris-ligne-de-commande.md`.
+- Copie de travail du côté propre, 2026-11-02 (lot RU-2) : les lignes des amendements que la surface Lua de 3dSen 2.0 implique sont reportées dans ce fichier — `video.max_queued_frames` (AMD-052) et `video.msaa_2_0`, `render.visual_style` et les douze `render.style.*` (AMD-055) en §4.1.1, les quatre réglages de courbure d'AMD-043 en §4.1.4, `emu.run_ahead` (AMD-041) en §4.1.7, `ui.library_view` en §4.1.9, `vr.refresh_rate` en §4.1.10, et les exclusions libretro en §4.6. Dans ce lot, ces réglages sont persistés et atteignables par Lua, et rien de plus : l'effet de chacun est celui de son propre lot. Le texte normatif reste celui de `changes/`.

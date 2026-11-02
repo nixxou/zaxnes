@@ -59,7 +59,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 17] = [
+pub const EXCLUDED: [SettingId; 38] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -82,6 +82,34 @@ pub const EXCLUDED: [SettingId; 17] = [
     SettingId::VideoHalfRate3d,
     // Rust-only (owner request): the touch pad of Android, in the console's options only.
     SettingId::InputTouchPad,
+    // AMD-059 REQ-LUA-116: no interface at all — they are read and written by a 2.0 script and
+    // by nothing else. `vr.refresh_rate` needs no line, the Vr theme having no tab.
+    SettingId::UiLibraryView,
+    SettingId::VideoMsaa20,
+    // The settings the Lua members of 3dSen 2.0 stand for whose effect belongs to a later lot
+    // (RU-2: Lua surface only). Each one leaves this list in the lot that makes it act, which
+    // is also the lot that writes its row of the options window: `emu.run_ahead` and
+    // `video.max_queued_frames` in RU-3, `render.visual_style` and the twelve `render.style.*`
+    // in the Enhanced lot, the four curvature keys in the AMD-043 lot.
+    SettingId::EmuRunAhead,
+    SettingId::VideoMaxQueuedFrames,
+    SettingId::RenderVisualStyle,
+    SettingId::SceneBendLr,
+    SettingId::SceneBendTb,
+    SettingId::SceneArcH,
+    SettingId::SceneArcCenter,
+    SettingId::RenderStyleAo,
+    SettingId::RenderStyleAoStrength,
+    SettingId::RenderStyleAoRadius,
+    SettingId::RenderStyleAoThickness,
+    SettingId::RenderStyleAoQuality,
+    SettingId::RenderStylePixelShadow,
+    SettingId::RenderStyleVoxelGrid,
+    SettingId::RenderStyleReflections,
+    SettingId::RenderStyleSsrShine,
+    SettingId::RenderStyleSsrClarity,
+    SettingId::RenderStyleSsrLength,
+    SettingId::RenderStyleSsrQuality,
 ];
 
 /// The settings the window edits as a folder: a field and a button that picks it.

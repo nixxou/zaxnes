@@ -17,8 +17,14 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 8] {
+fn defaults() -> [(SettingId, SettingValue); 9] {
     [
+        // Run-ahead (AMD-041, exposed as `Setting.RunAheadFrames` by AMD-040 REQ-LUA-114) costs
+        // a whole extra emulated frame, plus a state saved and loaded, for every frame shown:
+        // off on a handheld, whose budget is the frame itself. The desktop keeps the 1 of
+        // AMD-041 §3. Nothing reads the setting until RU-3 makes it act, but the default is set
+        // here so that the lot that does inherits the right one.
+        (SettingId::EmuRunAhead, SettingValue::Int(0)),
         (SettingId::RenderShadow, SettingValue::Bool(false)),
         (SettingId::VideoAntiAlias, SettingValue::Enum(0)),
         // Swap every refresh: 60 frames per second on the 60 Hz screens of the handhelds.
@@ -65,6 +71,18 @@ mod tests {
         assert!(model.get(SettingId::EmuCatchUpLast3d).as_bool());
         // Offered in the options, off by default (owner decision).
         assert!(!model.get(SettingId::VideoHalfRate3d).as_bool());
+        // The run-ahead of AMD-041 is off on a handheld and 1 on the desktop.
+        assert_eq!(0, model.get(SettingId::EmuRunAhead).as_int());
+        assert_eq!(1, SettingsModel::new().get(SettingId::EmuRunAhead).as_int());
+        // The settings of the other 2.0 members cost nothing — they have no effect at all — so
+        // they keep the default of their amendment here (AMD-059 REQ-LUA-116, AMD-055 §4).
+        assert_eq!(2, model.get(SettingId::VideoMaxQueuedFrames).as_int());
+        assert_eq!(2, model.get(SettingId::VideoMsaa20).as_int());
+        assert_eq!(90, model.get(SettingId::VrRefreshRate).as_int());
+        assert_eq!(0, model.get(SettingId::UiLibraryView).as_int());
+        assert_eq!(0, model.get(SettingId::RenderVisualStyle).as_int());
+        assert_eq!(0, model.get(SettingId::SceneBendLr).as_int());
+        assert_eq!(3, model.get(SettingId::RenderStyleAoStrength).as_int());
     }
 
     #[test]

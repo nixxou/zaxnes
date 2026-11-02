@@ -57,6 +57,13 @@ pub fn rows() -> Vec<CatalogueRow> {
 
 /// §4.1.1 to §4.1.6, up to the layer table.
 fn first_sections() -> Vec<CatalogueRow> {
+    let mut rows = video_and_render_rows();
+    rows.extend(camera_to_layer_rows());
+    rows
+}
+
+/// §4.1.1, video and rendering, with the rows the amendments of the 2.0 update add.
+fn video_and_render_rows() -> Vec<CatalogueRow> {
     vec![
         // §4.1.1 Video and rendering
         row(
@@ -87,9 +94,48 @@ fn first_sections() -> Vec<CatalogueRow> {
             Imm,
         ),
         row("video.anti_alias", Some("AntiAlias"), Choice, "0", U, Imm),
+        // AMD-052 §3 point 7 (REQ-LOOP-077); its Lua path is AMD-059's (REQ-LUA-116).
+        row(
+            "video.max_queued_frames",
+            Some("MaxQueuedFrames"),
+            Whole,
+            "2",
+            U,
+            Imm,
+        ),
+        // AMD-059 REQ-LUA-116, the line of its §2 reported into §4.1.1.
+        row("video.msaa_2_0", Some("Msaa"), Whole, "2", U, No),
         row("render.mesh_algo", Some("RenderMode"), Choice, "0", U, Imm),
         row("render.shadow", Some("Shadow"), Flag, "true", U, Imm),
+        // AMD-040 §3, amended by AMD-055 §4 (REQ-SCN-078), and the twelve parameters of the
+        // Enhanced style (AMD-055 REQ-SCN-079, keys of its §4).
+        row(
+            "render.visual_style",
+            Some("VisualStyle"),
+            Whole,
+            "0",
+            U,
+            Imm,
+        ),
+        row("render.style.ao", None, Whole, "0", U, Imm),
+        row("render.style.ao_strength", None, Whole, "3", U, Imm),
+        row("render.style.ao_radius", None, Whole, "3", U, Imm),
+        row("render.style.ao_thickness", None, Whole, "3", U, Imm),
+        row("render.style.ao_quality", None, Whole, "1", U, Imm),
+        row("render.style.pixel_shadow", None, Whole, "0", U, Imm),
+        row("render.style.voxel_grid", None, Whole, "0", U, Imm),
+        row("render.style.reflections", None, Whole, "0", U, Imm),
+        row("render.style.ssr_shine", None, Whole, "3", U, Imm),
+        row("render.style.ssr_clarity", None, Whole, "3", U, Imm),
+        row("render.style.ssr_length", None, Whole, "3", U, Imm),
+        row("render.style.ssr_quality", None, Whole, "2", U, Imm),
         row("ui.fullscreen", None, Flag, "false", U, Imm),
+    ]
+}
+
+/// §4.1.2 to §4.1.6, up to the layer table.
+fn camera_to_layer_rows() -> Vec<CatalogueRow> {
+    vec![
         // §4.1.2 Camera
         row("camera.fov", Some("Fov"), Real, "70", U, Imm),
         row("camera.local_cam", Some("LocalCam"), Flag, "false", P, Imm),
@@ -145,6 +191,12 @@ fn first_sections() -> Vec<CatalogueRow> {
             Imm,
         ),
         row("scene.map_enable", Some("MapEnable"), Flag, "false", P, No),
+        // The four curvature settings of AMD-043 §6 (REQ-SCN-066). No Lua name of their own:
+        // they are reached by `Setting:Get/SetVisualStyleParameter` (REQ-LUA-114).
+        row("scene.bend_lr", None, Whole, "0", U, Imm),
+        row("scene.bend_tb", None, Whole, "0", U, Imm),
+        row("scene.arc_h", None, Whole, "0", U, Imm),
+        row("scene.arc_center", None, Whole, "0", U, Imm),
         // §4.1.5 Clipping: index 0 left, 1 bottom, 2 right, 3 top (DEC-R2-T1)
         row("clip.left", Some("Clipping[0]"), Real, "0.1", P, Imm),
         row("clip.bottom", Some("Clipping[1]"), Real, "8.1", P, Imm),
@@ -234,6 +286,8 @@ fn last_sections() -> Vec<CatalogueRow> {
             Rom,
         ),
         row("emu.core", Some("Core"), Whole, "0", U, Imm),
+        // AMD-041 §3 (REQ-LOOP-064), exposed by AMD-040 REQ-LUA-114.
+        row("emu.run_ahead", Some("RunAheadFrames"), Whole, "1", U, Imm),
         // §4.1.8 Conversion, all profile-scoped
         row(
             "conv.same_bg_palette",
@@ -297,6 +351,8 @@ fn tail_sections() -> Vec<CatalogueRow> {
         ),
         row("ui.sort_option", Some("SortOption"), Choice, "0", U, Imm),
         row("ui.last_browse_dir", None, Text, "", U, Imm),
+        // AMD-059 REQ-LUA-116, the line of its §2 reported into §4.1.9.
+        row("ui.library_view", Some("LibraryView"), Whole, "0", U, No),
         row(
             "ui.window_rect",
             None,
@@ -309,6 +365,8 @@ fn tail_sections() -> Vec<CatalogueRow> {
         row("vr.runtime", Some("VrRuntime"), Whole, "0", U, No),
         row("vr.scene_ratio", Some("SceneRatio"), Real, "1", U, No),
         row("vr.mirroring", Some("Mirroring"), Flag, "true", U, No),
+        // AMD-059 REQ-LUA-116, the line of its §2 reported into §4.1.10.
+        row("vr.refresh_rate", Some("RefreshRate"), Whole, "90", U, No),
         row(
             "vr.control_method",
             Some("ControlMethod"),

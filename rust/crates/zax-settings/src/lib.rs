@@ -13,6 +13,7 @@ pub mod meta;
 pub mod model;
 pub mod persistence;
 pub mod store;
+pub mod styles;
 pub mod values;
 
 mod json;
