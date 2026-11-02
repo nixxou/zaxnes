@@ -9,7 +9,7 @@ audio pays nothing for it. No audio digest may move relative to `4fa0277`.
 | # | Step | Status |
 |---|---|---|
 | 1 | `NesBus::tick`: the MMC5 push out of the inlined per-cycle body | done |
-| 2 | `Apu2A03::current_level`: `M` folded into the single cache key | todo |
+| 2 | `Apu2A03::current_level`: `M` folded into the single cache key | done |
 | 3 | Closing: fmt, clippy, crate tests, PPU goldens, after measurements | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -158,3 +158,91 @@ evidence.
 
 Behaviour: `cargo test --release -p zax-nes` 482 passed, and the full goldens report
 **`291 of 291 rows matched, 0 ROMs missing`** — no audio digest moved.
+
+### Step 2 — the level cache key
+
+`M` is folded into the one key the cache already compares, exactly as the lot asks:
+`set_expansion_level` stores `NO_LEVEL_KEY` (`-1`, a value the five packed nibbles can never
+produce) when the value moves, and the hot test is back to `key == self.level_key` alone. The
+invalidation runs only for the MMC5 and only on a real change; the comparison runs on every cycle
+that reaches the mixer. `level_expansion` stays, but only as the record of the `M` the cached level
+was mixed with — which is what `mixer_expansion()` reports for REQ-CORE-076.
+
+Every mutation of `expansion_level` is now paired with an invalidation (`new`, `reset`,
+`set_expansion_level`, `load_state`), which is what makes the single comparison sound.
+
+What the assembly says, inside `Apu2A03::run_cpu_cycles` where the mixer is inlined — the cached
+path, the one taken when nothing moved:
+
+| build | the cache test |
+|---|---|
+| RU-3a | `movl 920(%rdi),%ecx` … `cmpl 916(%rdi),%r9d` / `jne` / `cmpl 924(%rdi),%ecx` / `je` — **5** |
+| after step 2 | `cmpl 916(%rdi),%r10d` / `je` — **2** |
+
+Three instructions saved on a path `nestest` reaches about 15 000 times per frame: 3 × 15 000 × 300
+frames = 13.5 M, against the **+13.9 M** R0 measured. The regression is accounted for to within
+3 %, which is as close as a static reading gets to a callgrind count.
+
+The `movl 920(%rdi)` (the load of `expansion_level`) did not disappear, it moved to the *recompute*
+branch, where RU-2 had its own work; `run_cpu_cycles` comes out at 855 instructions against RU-2's
+856 and RU-3a's 857.
+
+**Two traps on the way, both recorded because they would be easy to fall into again.**
+
+1. **`current_level` must keep a single call site.** The first version of the savestate rebuild
+   called `current_level` from `load_state`. That second call site — cold, run once — was enough for
+   the inliner to leave the whole function **out of line**: `run_cpu_cycles` dropped to 730
+   instructions and a separate `current_level` of 132 appeared, which would have cost a call and a
+   prologue on each of those ~15 000 cycles per frame (worse than the bug being fixed). `#[inline]`
+   was not enough to undo it. `load_state` therefore writes the four `mixer::` lines out itself,
+   and the note above `current_level` says why it must stay alone.
+2. **The rebuild cannot touch `level_key`.** Step 2 removes the field RU-3a parked at an impossible
+   value (`level_expansion = -1`) to force the first cycle after a load to rebuild the test point,
+   so the rebuild now happens *in* `load_state` — from the channel outputs just read back, with
+   `level_key` left exactly as the block gave it. Setting `level_key` to `NO_LEVEL_KEY` there would
+   break the save → load → save byte comparison of REQ-CORE-092, which is the same trap RU-3a
+   reports hitting from the other side. The test point is now right immediately after a load rather
+   than one cycle later, which is strictly what RU-3a intended.
+
+New test, `req_core_076_a_move_of_m_alone_reaches_the_mixer` in `apu_output_tests.rs`: with every
+channel silent — so the packed key is 0 on every pass and the cache would hold — five successive
+values of `M` each reach `mixer_expansion`, `mixer_output` and `mixed_level`. It fails if the
+invalidation is dropped, which is what pins the mechanism this step relies on.
+
+### The MMC5 board, and what it costs
+
+The cost does not vanish, it moves onto the board that gained the feature. Three shapes were
+measured, interleaved run by run with the RU-2 and RU-3a binaries so that machine drift cancels
+(`bench-core`, core `run_frame`, 1200 frames after 120 of warm-up, three runs each):
+
+| shape | `tick` static | `nestest` | `mmc5test` |
+|---|---|---|---|
+| RU-2 `30dc744` | 104 / 3 push | 0.870 / 0.883 / 0.894 | 1.832 / 1.832 / 1.838 |
+| RU-3a `4fa0277` | 140 / 4 push | 0.861 / 0.863 / 0.866 | 1.795 / 1.809 / 1.825 |
+| `sync_apu` out of line too | 101 / 3 push | 0.849 / 0.868 / 0.863 | 1.904 / 1.908 / 1.916 |
+| **kept: only the push out of line** | 119 / 3 push | 0.868 / 0.874 / 0.875 | 1.868 / 1.871 / 1.874 |
+
+The third row is the tempting one — the smallest `tick` of the four — and it is the wrong choice: a
+board with expansion audio runs `sync_apu` on **every** cycle, so out-lining it too costs the MMC5 a
+second call per cycle for nothing. The kept shape out-lines the push alone, which is the part whose
+register pressure reaches `tick`, and `sync_apu` stays inlined where it is reached.
+
+So the MMC5 pays one out-of-line call per cycle, about **+2 % against RU-2** on `mmc5test` and
+`exram` (and about +3 % against RU-3a, which was itself *below* RU-2 on those ROMs because
+AMD-054's table lookups are cheaper than the float mixing they replaced). That is the price of
+every other board paying nothing, and AMD-054's own note already puts it where it belongs: no
+built-in profile targets a game with MMC5 audio.
+
+Two ways to take it back were examined and rejected:
+- inlining the push after all, by making `Mmc5::expansion_audio_output` inlinable — its
+  `Mmc5Audio::output()` is two channel outputs, a table index and an addition, not a field read, so
+  inlining it puts the register pressure straight back on every board;
+- caching `M` in a plain field the MMC5's `on_cpu_cycle` writes, so the push needs neither the
+  cartridge `Option` nor the dispatch — this would work, but it is a new path from the board to the
+  bus and a new field, which is more than this lot is allowed to change.
+
+Both are noted here for whoever measures next; neither is needed to meet the lot's target.
+
+Behaviour after step 2: `cargo test --release -p zax-nes` **483 passed** (the 482 of RU-3a plus the
+new one), and the full goldens again report **`291 of 291 rows matched, 0 ROMs missing`** — no audio
+digest moved.

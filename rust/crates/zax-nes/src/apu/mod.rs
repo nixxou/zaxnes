@@ -89,6 +89,10 @@ const PAL_FOUR_STEP: [i32; 6] = [8313, 16627, 24939, 33250, 33251, 33252];
 /// Five-step frame sequencer, PAL CPU cycles.
 const PAL_FIVE_STEP: [i32; 6] = [8313, 16627, 24939, 33253, 41565, 41566];
 
+/// A value [`Apu2A03::level_key`] can never hold for real channel outputs — the five fields it
+/// packs are all non-negative — so storing it means "the mixed level has to be recomputed".
+const NO_LEVEL_KEY: i32 = -1;
+
 /// The output ring buffer, shared with [`AudioReader`]s on other threads.
 #[derive(Debug, Clone)]
 struct SampleRing {
@@ -220,6 +224,10 @@ pub struct Apu2A03 {
     frame_irq_pending: bool,
     pending_sequencer_reset: i32,
     readable_status: u8,
+    /// The five channel outputs the cached [`Self::level`] was mixed from, packed one per
+    /// nibble, or [`NO_LEVEL_KEY`] when the level has to be recomputed whatever they read.
+    /// Comparing it is the whole of the mixer's cache test, which is why a move of `M`
+    /// invalidates it rather than adding a second comparison (see [`Self::current_level`]).
     level_key: i32,
     level: f64,
     /// Whether something the mixed level depends on may have changed since it was computed
@@ -230,8 +238,8 @@ pub struct Apu2A03 {
     /// the MMC5. The bus pushes it in before the cycles it belongs to are run; it is not part
     /// of the savestate, the board owning its own state and the bus pushing it again at once.
     expansion_level: i32,
-    /// The expansion level the cached [`Self::level`] was computed with, so that a move of `M`
-    /// alone is noticed even when no channel index changed.
+    /// The expansion level the cached [`Self::level`] was computed with: the `M` of the cycle
+    /// just mixed, which is the test point [`Self::mixer_expansion`] reports.
     level_expansion: i32,
     /// `A` of REQ-CORE-073 on the cycle just mixed (the test point of REQ-CORE-076).
     mixer_apu: i32,
@@ -321,7 +329,7 @@ impl Apu2A03 {
             frame_irq_pending: false,
             pending_sequencer_reset: 0,
             readable_status: 0,
-            level_key: -1,
+            level_key: NO_LEVEL_KEY,
             level: 0.0,
             level_dirty: true,
             expansion_level: 0,
@@ -373,10 +381,15 @@ impl Apu2A03 {
     /// (REQ-CORE-075). Called by the bus for a board that has one, before the cycles that `M`
     /// belongs to are run; a board without expansion audio never calls it and the level stays
     /// 0, which is what makes the mixing cost nothing for every other cartridge.
+    ///
+    /// A move of `M` invalidates the mixer's cache key rather than joining the comparison the
+    /// cache makes: this runs only for the MMC5 and only when the value actually changes, while
+    /// the comparison is on a per-cycle path (see [`Self::current_level`]).
     pub fn set_expansion_level(&mut self, level: i32) {
         if level != self.expansion_level {
             self.expansion_level = level;
             self.level_dirty = true;
+            self.level_key = NO_LEVEL_KEY;
         }
     }
 
@@ -527,7 +540,7 @@ impl Apu2A03 {
         self.frame_irq_pending = false;
         self.pending_sequencer_reset = 0;
         self.readable_status = 0;
-        self.level_key = -1;
+        self.level_key = NO_LEVEL_KEY;
         self.level = 0.0;
         self.level_dirty = true;
         // The board is reset with the rest of the machine, so its `M` goes back to 0 too; the
@@ -571,7 +584,7 @@ impl Apu2A03 {
         // Every channel output may have moved, and the status byte a read would see with it.
         // The level is recomputed on the next cycle, test point included.
         self.level_dirty = true;
-        self.level_key = -1;
+        self.level_key = NO_LEVEL_KEY;
         self.readable_status = self.compose_status(0);
     }
 
@@ -940,6 +953,11 @@ impl Apu2A03 {
     /// for a linear filter, and this one keeps the resampler's input piecewise constant, which
     /// is what makes its step synthesis cheap. See `docs/spec/changes/Q-091.md`.
     // Q-091
+    //
+    // It has exactly **one** caller, the per-cycle step, which is what lets the inliner put it
+    // there. A second call site is enough to make it leave the function out of line, and the
+    // call plus its prologue would then cost every one of the ~15 000 cycles per frame that
+    // reach it; `load_state` therefore writes the same four lines out rather than calling here.
     fn current_level(&mut self) -> f64 {
         let pulse1 = self.pulse1.output();
         let pulse2 = self.pulse2.output();
@@ -947,8 +965,12 @@ impl Apu2A03 {
         let noise = self.noise.output();
         let dmc = self.dmc.output();
 
+        // One comparison, as before AMD-054: a move of `M` invalidates `level_key` itself (see
+        // [`Self::set_expansion_level`]) instead of being compared here. This is a per-cycle
+        // path — `nestest` reaches it about 15 000 times per emulated frame — so the second
+        // comparison RU-3a added cost about 1 % of the APU's instructions for every board.
         let key = pulse1 | (pulse2 << 4) | (triangle << 8) | (noise << 12) | (dmc << 16);
-        if key == self.level_key && self.expansion_level == self.level_expansion {
+        if key == self.level_key {
             return self.level;
         }
 
@@ -1025,18 +1047,29 @@ impl Apu2A03 {
         self.level = reader.read_f64()?;
         self.level_dirty = true;
         // `M` and the two integers of the test point are not in the block: the board restores
-        // its own sound state, the bus pushes `M` again before the next cycle, and
-        // `current_level` recomputes all three from the channel outputs that were just read
-        // back. Keeping them out is what lets a block written before AMD-054 still load
-        // (REQ-CORE-091): the layout is unchanged.
+        // its own sound state and the bus pushes `M` again before the next cycle. Keeping them
+        // out is what lets a block written before AMD-054 still load (REQ-CORE-091): the layout
+        // is unchanged.
         self.expansion_level = 0;
-        self.mixer_apu = 0;
-        self.mixer_output = 0;
-        // A value no real expansion output can take, so that the first mix after the load
-        // recomputes all three from the channel outputs just read back rather than handing
-        // the restored `level` over with the test point still reading 0. `level_key` itself is
-        // left as the block gave it, so saving again writes the same bytes (REQ-CORE-092).
-        self.level_expansion = -1;
+        self.level_expansion = 0;
+        // The three derived fields are rebuilt here and now, from the channel outputs just read
+        // back, so that the test point of REQ-CORE-076 agrees with the restored level instead of
+        // reading 0 until a channel next moves. `level_key` is left exactly as the block gave
+        // it, so saving again writes the same bytes (REQ-CORE-092); whether it matches the key
+        // these outputs pack or not, the next cycle is right either way — it either keeps the
+        // level computed here or recomputes the same one.
+        //
+        // The mix is written out rather than calling `current_level`, which must keep its single
+        // call site to stay inlined in the per-cycle step (see the note there).
+        self.mixer_apu = mixer::mix(
+            self.pulse1.output(),
+            self.pulse2.output(),
+            self.triangle.output(),
+            self.noise.output(),
+            self.dmc.output(),
+        );
+        self.mixer_output = mixer::clip(self.mixer_apu, 0);
+        self.level = mixer::to_float(self.mixer_output);
 
         self.resampler.load_state(reader)?;
 

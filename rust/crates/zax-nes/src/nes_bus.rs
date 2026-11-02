@@ -320,7 +320,8 @@ impl NesBus {
     fn catch_up_apu(&mut self) {
         if !self.apu_batching {
             // Either the board has expansion audio, or the PPU is not being batched at all.
-            self.catch_up_apu_in_step();
+            // Both mean the APU may not lag past this cycle, which is what `sync_apu` does.
+            self.sync_apu();
             return;
         }
 
@@ -331,28 +332,15 @@ impl NesBus {
         self.apu_quiet = self.apu.quiet_cycles();
     }
 
-    /// The catch-up of a cycle the APU may not lag past: it runs the cycles owed and leaves
-    /// `apu_quiet` at 0, so the next cycle catches up again.
-    ///
-    /// Two cases reach it, neither of them the frame loop of a board without expansion audio:
-    /// outside [`NesBus::defer_ppu`] the APU runs on every cycle as it always has, and a board
-    /// with expansion audio keeps the APU in step so that the `M` just pushed is the one of the
-    /// cycle about to run (REQ-CORE-073, REQ-CORE-075). It is kept out of line on purpose: its
-    /// body is what [`NesBus::tick`]'s prologue paid for in RU-3a.
-    #[inline(never)]
-    fn catch_up_apu_in_step(&mut self) {
-        if self.apu_lag > 0 {
-            if self.expansion_audio {
-                self.push_expansion_audio();
-            }
-            self.apu.run_cpu_cycles(self.apu_lag);
-            self.apu_lag = 0;
-        }
-        self.apu_quiet = 0;
-    }
-
     /// Catches the APU up before an access that may see or change it; the next cycle is
-    /// run in step and recomputes how far it may lag.
+    /// run in step and recomputes how far it may lag. It is also the whole of the catch-up of a
+    /// cycle the APU may not lag past, which is where [`NesBus::catch_up_apu`] sends a board
+    /// with expansion audio and any board the PPU is not being batched for.
+    ///
+    /// It is inlined into [`NesBus::tick`] by two chains — through [`NesBus::catch_up_apu`] and
+    /// through [`NesBus::perform_dmc_dma`] — which is why the `M` push below is the part kept out
+    /// of line and not this one: a board with expansion audio runs this on every cycle and must
+    /// not pay a call for it.
     fn sync_apu(&mut self) {
         if self.apu_lag > 0 {
             if self.expansion_audio {
@@ -365,15 +353,14 @@ impl NesBus {
     }
 
     /// Hands the APU the board's `M` for the cycles it is about to run (REQ-CORE-073,
-    /// REQ-CORE-075). The callers test `expansion_audio` themselves, so this body only ever
-    /// runs for the MMC5.
+    /// REQ-CORE-075). The caller tests `expansion_audio` itself, so this body only ever runs
+    /// for the MMC5.
     ///
-    /// It is kept **out of line** because [`NesBus::sync_apu`] is inlined into
-    /// [`NesBus::perform_dmc_dma`], which is inlined into [`NesBus::tick`]: inlined here too,
-    /// its cartridge `Option`, its devirtualised `expansion_audio_output` and its
-    /// `set_expansion_level` raise the register pressure of the whole of `tick` and cost every
-    /// CPU cycle of every board one more saved register (what RU-3a measured as +15.7 % on
-    /// `tick`). Out of line it costs the boards that are not an MMC5 nothing at all.
+    /// Kept **out of line**, which is what makes RU-3a's expansion audio free for every other
+    /// board: inlined, its cartridge `Option`, its devirtualised `expansion_audio_output` and
+    /// its `set_expansion_level` reach [`NesBus::tick`] through the two chains above, raise the
+    /// register pressure of the whole function and cost every CPU cycle of every board one more
+    /// saved register — RU-3a's +15.7 % on `tick`.
     #[inline(never)]
     fn push_expansion_audio(&mut self) {
         if let Some(level) = self

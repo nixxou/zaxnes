@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::f64::consts::PI;
 
 use common::minimal;
-use zax_nes::apu::mixer;
+use zax_nes::apu::{mixer, Apu2A03};
 use zax_nes::{NesCore, RegionTiming};
 
 fn core_at(sample_rate: i32) -> NesCore {
@@ -200,6 +200,31 @@ fn req_core_076_silence_reads_zero_at_the_test_point() {
         assert_eq!(0, apu.mixer_expansion());
         assert_eq!(0, apu.mixer_output());
         assert_eq!(0.0, apu.mixed_level());
+    }
+}
+
+/// REQ-CORE-073, REQ-CORE-076 — a move of `M` on its own reaches the mixer, even though no
+/// channel output moved with it and the mixer's cache is keyed on the channel outputs alone.
+///
+/// The mechanism is that [`Apu2A03::set_expansion_level`] invalidates that key, rather than the
+/// cache making a second comparison: the comparison sits on a per-cycle path and the
+/// invalidation runs only for the MMC5 and only when `M` actually changes (RU-3a-fix). With the
+/// invalidation missing, the second and third blocks below would keep reading the first `M`,
+/// silence packing the same key every time.
+#[test]
+fn req_core_076_a_move_of_m_alone_reaches_the_mixer() {
+    let mut apu = Apu2A03::new();
+
+    for level in [1_000, 2_000, 1_000, 0, 32_767] {
+        apu.set_expansion_level(level);
+        apu.run_cpu_cycles(1);
+
+        // Every channel is silent, so `A` is 0, the key is 0 on each of the five passes, and
+        // `S = min(0 + M, 32 767)` is `M` itself.
+        assert_eq!(0, apu.mixer_apu());
+        assert_eq!(level, apu.mixer_expansion());
+        assert_eq!(level, apu.mixer_output());
+        assert_eq!(f64::from(level) / 32_768.0, apu.mixed_level());
     }
 }
 
