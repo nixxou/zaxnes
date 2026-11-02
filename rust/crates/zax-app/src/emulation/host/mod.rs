@@ -15,6 +15,7 @@ mod jobs;
 mod movies;
 mod resume;
 mod save_states;
+mod script_reload;
 
 use std::collections::VecDeque;
 

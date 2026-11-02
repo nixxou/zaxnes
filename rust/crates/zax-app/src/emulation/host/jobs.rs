@@ -338,7 +338,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     /// Makes the session of the job's game, unless the previous one is kept.
-    fn ensure_session(&mut self, game: &ResolvedGame, reload_profile: bool) -> Result<(), String> {
+    pub(super) fn ensure_session(
+        &mut self,
+        game: &ResolvedGame,
+        reload_profile: bool,
+    ) -> Result<(), String> {
         if self.session.is_some() {
             return Ok(());
         }
@@ -650,7 +654,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// Resets the light and the backdrop and pushes the profile's settings into the scene
     /// (REQ-SCN-009, SPEC-09 REQ-PERS-005).
-    fn apply_profile_scene(&mut self) {
+    pub(super) fn apply_profile_scene(&mut self) {
         let scene = &mut self.scene;
         scene.light.reset();
         scene.backdrop.reset();

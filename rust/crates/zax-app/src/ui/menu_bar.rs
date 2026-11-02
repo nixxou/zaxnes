@@ -431,6 +431,7 @@ fn build_menus() -> Vec<Menu> {
             item(Command::ToggleMovieRecording),
             MenuItem::sub(text::movies(), Submenu::Movies),
             item(Command::OpenMovie),
+            item(Command::ReloadScript),
             item(Command::AnnotateMovie),
             item(Command::StopMovie),
         ],

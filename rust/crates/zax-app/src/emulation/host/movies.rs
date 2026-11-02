@@ -217,7 +217,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
 
     /// Starts the thread that runs the whole movie ahead and finds its checkpoints, when the
     /// scripts leave the core alone (the explorer runs none of them).
-    fn start_movie_explorer(&mut self) {
+    pub(super) fn start_movie_explorer(&mut self) {
         let Some(session) = self.session.as_ref() else {
             return;
         };
@@ -380,7 +380,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     }
                 }
             }
-            if timeline.core_only_allowed() && frame_count < target - WARM_FRAMES {
+            if timeline.core_only_allowed()
+                && !timeline.seek_is_exact()
+                && frame_count < target - WARM_FRAMES
+            {
                 if !session.run_movie_frame_core_only() {
                     break;
                 }
@@ -611,7 +614,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         next_movie_file(&self.paths, &rom)
     }
 
-    fn notify(&mut self, message: &str) {
+    pub(super) fn notify(&mut self, message: &str) {
         self.notifications.show_normal(message);
     }
 }

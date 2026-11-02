@@ -158,6 +158,7 @@ commands! {
     OpenMovie => "tools.open_movie", Shortcut::None, false;
     StopMovie => "tools.stop_movie", Shortcut::None, false;
     SeekMovie => "tools.seek_movie", Shortcut::None, false;
+    ReloadScript => "tools.reload_script", Shortcut::Fixed("F5"), false;
     AnnotateMovie => "tools.annotate_movie", Shortcut::Fixed("Ctrl+M"), false;
     CancelModal => "ui.cancel_modal", Shortcut::None, false;
 }

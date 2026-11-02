@@ -10,12 +10,12 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 | 2 | `.fm2` reader and its tests | done (`zax-nes/src/movie/fm2.rs`) |
 | 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | done |
 | 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | done (owner's visual check pending) |
-| 5 | Script reload, fast and exact, with the core-changing guard | to do |
+| 5 | Script reload, fast and exact, with the core-changing guard | done |
 | 6 | MCP server (Cargo feature, off by default) and its commands; end-to-end test | to do |
 | 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
 | L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
-Next step: 5, script reload (fast / exact); then 6, the MCP server (`--mcp`).
+Next step: 6, the MCP server (`--mcp`).
 
 ## What exists already (and changes the plan)
 
@@ -152,6 +152,16 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
 4. Seek levels and checkpoint memory (whole movie, ~12 MiB for 10 minutes): agreed?
 
 ## Notes
+
+* 5: `host/script_reload.rs`, `tools.reload_script` (F5; number 1 = exact), Tools menu. The
+  catalogue forgets the cached profile (`GameCatalog::forget_profile`) and the session is made
+  again from the file; the core state (with ROM), the movie run, the ports and the margin move to
+  it, `Start` runs. Exact = an exact seek of the timeline: back to the movie's start once, every
+  frame with the scripts up to the frame on screen. Old or new scripts that drive or change the
+  core force exact (with a movie) and forget the checkpoints and the explorer. Tests
+  `script_reload_tests.rs`: fast keeps the RAM and starts the new count there; exact lands on the
+  same RAM with the new script's count as if it had always run; a `WriteMem` script asked fast is
+  replayed; no movie = fast.
 
 * 4: `ui/zax_ui/movie_bar.rs`: bar over the bottom of the view (shown near the bottom edge, when
   paused, while seeking or dragging): |< < Play/Pause > >|, slider, `frame / length m:ss.cc`,

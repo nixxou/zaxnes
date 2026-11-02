@@ -61,6 +61,12 @@ pub struct MovieTimeline {
     core_only_allowed: bool,
     /// The core frame count a seek is heading for.
     seek_target: Option<i64>,
+    /// Whether the seek under way is exact: from the movie's start, every frame with the
+    /// scripts (a script reload whose new script must accumulate its own past).
+    seek_exact: bool,
+    /// Whether the exact seek under way went back to the start already: it then goes on from
+    /// where it stands.
+    seek_restarted: bool,
 }
 
 impl MovieTimeline {
@@ -85,6 +91,8 @@ impl MovieTimeline {
             explored_trust: None,
             core_only_allowed,
             seek_target: None,
+            seek_exact: false,
+            seek_restarted: false,
         }
     }
 
@@ -233,6 +241,36 @@ impl MovieTimeline {
     /// Starts a seek to the movie frame `frame`.
     pub fn seek(&mut self, frame: u32) {
         self.seek_target = Some(self.core_frame(frame));
+        self.seek_exact = false;
+        self.seek_restarted = false;
+    }
+
+    /// Starts an exact seek to the core frame count `frame_count`: from the movie's start,
+    /// every frame with the scripts.
+    pub fn seek_exactly(&mut self, frame_count: i64) {
+        self.seek_target = Some(frame_count.clamp(self.start_frame, self.end_frame()));
+        self.seek_exact = true;
+        self.seek_restarted = false;
+    }
+
+    /// Whether the seek under way is exact.
+    #[must_use]
+    pub const fn seek_is_exact(&self) -> bool {
+        self.seek_exact
+    }
+
+    /// Forgets every checkpoint but the start state: they were taken with scripts that changed
+    /// the core, which the next ones may change otherwise.
+    pub fn forget_checkpoints(&mut self) {
+        let start = self.checkpoints.remove(&self.start_frame);
+        self.checkpoints.clear();
+        self.played_digests.clear();
+        self.explored.clear();
+        self.explored_digests.clear();
+        self.explored_trust = None;
+        if let Some(start) = start {
+            self.checkpoints.insert(self.start_frame, start);
+        }
     }
 
     /// The core frame count the seek under way is heading for.
@@ -244,13 +282,22 @@ impl MovieTimeline {
     /// The seek has arrived (or was given up).
     pub fn end_seek(&mut self) {
         self.seek_target = None;
+        self.seek_exact = false;
+        self.seek_restarted = false;
     }
 
     /// Where a seek to `target` starts from when the core stands at `current`: `None` to go on
     /// from there (it is on the way, and early enough to warm the scripts up, or the target is
     /// within the warm frames ahead), else the checkpoint to restore.
     #[must_use]
-    pub fn seek_origin(&self, current: i64, target: i64) -> Option<(i64, &[u8])> {
+    pub fn seek_origin(&mut self, current: i64, target: i64) -> Option<(i64, &[u8])> {
+        if self.seek_exact {
+            if self.seek_restarted {
+                return None;
+            }
+            self.seek_restarted = true;
+            return self.checkpoint_before(self.start_frame);
+        }
         let wanted = (target - WARM_FRAMES).max(self.start_frame);
         let (frame, state) = self.checkpoint_before(wanted)?;
         // Going on from the current frame is as good as the checkpoint when it is between the
@@ -326,6 +373,22 @@ mod tests {
             2,
             "nothing explored is kept after a mismatch"
         );
+    }
+
+    #[test]
+    fn an_exact_seek_starts_from_the_movie_s_start() {
+        let mut timeline = timeline();
+        timeline.record(60, vec![1], 1);
+        timeline.record(120, vec![2], 2);
+        timeline.seek_exactly(150);
+        assert!(timeline.seek_is_exact());
+        assert_eq!(timeline.seek_origin(140, 150).map(|(f, _)| f), Some(3));
+        assert_eq!(timeline.seek_origin(20, 150), None, "it goes on from there");
+        timeline.end_seek();
+        assert!(!timeline.seek_is_exact());
+        timeline.forget_checkpoints();
+        assert_eq!(timeline.footprint().0, 1);
+        assert_eq!(timeline.furthest_checkpoint(), 3);
     }
 
     #[test]

@@ -70,6 +70,11 @@ pub trait GameCatalog {
     /// The cover file of the game.
     fn cover(&self, game_id: &str) -> Option<String>;
 
+    /// Forgets the profile of `game_id` read so far, so that the next [`GameCatalog::resolve`]
+    /// reads its file again (the script reload of EDITOR-1). A catalogue that reads nothing
+    /// has nothing to forget.
+    fn forget_profile(&mut self, _game_id: &str) {}
+
     /// Whether the game is marked as a favourite (AMD-053 REQ-UI-210). False for a catalogue that
     /// has no library behind it.
     fn is_favorite(&self, _game_id: &str) -> bool {

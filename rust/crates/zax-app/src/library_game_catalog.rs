@@ -381,6 +381,10 @@ impl GameCatalog for LibraryGameCatalog {
         self.library.find(game_id).is_some()
     }
 
+    fn forget_profile(&mut self, game_id: &str) {
+        self.profiles.remove(game_id);
+    }
+
     fn rom_path(&self, game_id: &str) -> Option<String> {
         self.library
             .find(game_id)

@@ -1010,6 +1010,25 @@ impl GameSession {
         true
     }
 
+    /// The movie run, taken out of the session (a script reload moves it to the next session).
+    pub fn take_movie_run(&mut self) -> Option<MovieRun> {
+        let run = self.movie.take();
+        self.hold_run_ahead_for_the_movie();
+        run
+    }
+
+    /// Puts back a movie run taken from another session of the same game.
+    pub fn put_movie_run(&mut self, run: Option<MovieRun>) {
+        self.movie = run;
+        self.hold_run_ahead_for_the_movie();
+    }
+
+    /// Whether a script of this profile changes the core from a frame hook (Q-103).
+    #[must_use]
+    pub const fn scripts_change_the_core(&self) -> bool {
+        self.run_ahead_forced_to_zero
+    }
+
     /// A seek took the movie being played back inside its frames.
     pub fn rewind_movie(&mut self) {
         if let Some(movie) = self.movie.as_mut() {
