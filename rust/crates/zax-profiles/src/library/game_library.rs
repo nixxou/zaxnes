@@ -4,6 +4,7 @@
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 
+use super::search;
 use super::store::{GameLibraryFile, GameLibraryRecord, RomPathRecord};
 use crate::catalogue::{
     shown_title, ProfileCatalogue, ProfileOrigin, UserProfile, DEFAULT_THREE_DIMENSIONAL_TITLE,
@@ -30,13 +31,38 @@ impl std::fmt::Display for GameProfileSource {
     }
 }
 
-/// How the library is ordered.
+/// How the library is ordered (SPEC-09 REQ-PERS-033, as AMD-053 §3 point 8 amends it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LibrarySortOption {
     /// By title.
     Alphabetical,
     /// By last time played, most recent first.
     Recent,
+    /// Favourites first, then the others, each group by title (AMD-053 REQ-UI-210).
+    FavoritesFirst,
+}
+
+impl LibrarySortOption {
+    /// The order the value of `ui.sort_option` names: 0 A-Z, 1 Recent, 2 Favorites first;
+    /// anything else is A-Z.
+    #[must_use]
+    pub const fn of_setting(value: i32) -> Self {
+        match value {
+            1 => Self::Recent,
+            2 => Self::FavoritesFirst,
+            _ => Self::Alphabetical,
+        }
+    }
+
+    /// The order the Load and Save lists follow (REQ-PERS-057): « Favorites first » is without
+    /// effect on them, so the value 2 falls back to A-Z.
+    #[must_use]
+    pub const fn of_setting_for_slots(value: i32) -> Self {
+        match value {
+            1 => Self::Recent,
+            _ => Self::Alphabetical,
+        }
+    }
 }
 
 /// One game of the library.
@@ -56,6 +82,9 @@ pub struct GameLibraryEntry {
     pub last_played: i64,
     /// Cover art file, when there is one.
     pub cover: Option<String>,
+    /// Whether the user marked the game as a favourite (AMD-053 REQ-UI-210, §3 point 11). False
+    /// by default, and false for every entry of a file migrated from schema version 1.
+    pub favorite: bool,
 }
 
 impl GameLibraryEntry {
@@ -88,6 +117,7 @@ impl GameLibraryEntry {
             rom_path: String::new(),
             last_played: 0,
             cover: None,
+            favorite: false,
         }
     }
 
@@ -285,15 +315,55 @@ impl GameLibrary {
         true
     }
 
-    /// The games in the order of `option`.
+    /// The games in the order of `option` (SPEC-09 REQ-PERS-033).
     #[must_use]
     pub fn sorted(&self, option: LibrarySortOption) -> Vec<&GameLibraryEntry> {
         let mut sorted: Vec<&GameLibraryEntry> = self.entries.iter().collect();
         sorted.sort_by(|left, right| match option {
             LibrarySortOption::Recent => compare_by_recent(left, right),
+            LibrarySortOption::FavoritesFirst => compare_by_favorite(left, right),
             LibrarySortOption::Alphabetical => compare_by_title(left, right),
         });
         sorted
+    }
+
+    /// The enumeration of the games the interface shows: the order of `option`, the favourites
+    /// filter of REQ-UI-210 and the title search of REQ-UI-211, an entry being kept when it
+    /// satisfies **both**.
+    ///
+    /// `search` is the text typed; a blank text excludes nothing. `favorites_only` is whether
+    /// `library.filter_favorites` is ticked.
+    #[must_use]
+    pub fn enumerate(
+        &self,
+        option: LibrarySortOption,
+        search: &str,
+        favorites_only: bool,
+    ) -> Vec<&GameLibraryEntry> {
+        self.sorted(option)
+            .into_iter()
+            .filter(|entry| {
+                (!favorites_only || entry.favorite)
+                    && search::matches(entry.display_title(), search)
+            })
+            .collect()
+    }
+
+    /// Marks or unmarks an entry as a favourite (REQ-UI-210, command `favorite.toggle`). Returns
+    /// false when the identifier is unknown.
+    pub fn set_favorite(&mut self, id: &str, favorite: bool) -> bool {
+        self.find_mut(id).is_some_and(|entry| {
+            entry.favorite = favorite;
+            true
+        })
+    }
+
+    /// Flips the favourite mark of `id` and returns its new value; none when the identifier is
+    /// unknown.
+    pub fn toggle_favorite(&mut self, id: &str) -> Option<bool> {
+        let entry = self.find_mut(id)?;
+        entry.favorite = !entry.favorite;
+        Some(entry.favorite)
     }
 
     /// Applies the ROM paths of the original's `rom.json` (REQ-PERS-025); returns how many
@@ -327,6 +397,7 @@ impl GameLibrary {
                     rom_path: Some(entry.rom_path.clone()),
                     last_played: entry.last_played,
                     cover: entry.cover.clone(),
+                    favorite: entry.favorite,
                 })
                 .collect(),
             ..GameLibraryFile::default()
@@ -364,6 +435,7 @@ impl GameLibrary {
             entry.rom_path = record.rom_path.clone().unwrap_or_default();
             entry.last_played = record.last_played;
             entry.cover.clone_from(&record.cover);
+            entry.favorite = record.favorite;
         }
     }
 }
@@ -382,6 +454,14 @@ fn compare_by_title(left: &GameLibraryEntry, right: &GameLibraryEntry) -> Orderi
     text::ordinal_ignore_case(left.display_title(), right.display_title())
         .then_with(|| right.last_played.cmp(&left.last_played))
         .then_with(|| text::ordinal(&left.id, &right.id))
+}
+
+/// « Favorites first »: the favourites, then the others, each group by title (AMD-053 §3 point 8).
+fn compare_by_favorite(left: &GameLibraryEntry, right: &GameLibraryEntry) -> Ordering {
+    right
+        .favorite
+        .cmp(&left.favorite)
+        .then_with(|| compare_by_title(left, right))
 }
 
 fn compare_by_recent(left: &GameLibraryEntry, right: &GameLibraryEntry) -> Ordering {

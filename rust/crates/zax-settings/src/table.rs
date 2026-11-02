@@ -973,6 +973,11 @@ fn audio_input_interface(out: &mut Vec<SettingDescriptor>) {
         .with_field("27")
         .with_label("Menu = Select + Start"),
     );
+    interface(out);
+}
+
+/// The interface settings of §4.1.9.
+fn interface(out: &mut Vec<SettingDescriptor>) {
     out.push(
         SettingDescriptor::new(
             SettingId::UiSortOption,
@@ -982,7 +987,14 @@ fn audio_input_interface(out: &mut Vec<SettingDescriptor>) {
             SettingEffect::Immediate,
             SettingTheme::Interface,
         )
-        .with_domain(Domain::choice(vec![opt(0, "A-Z"), opt(1, "Recent")]))
+        // AMD-053 §3 point 10: a third order, « Favorites first ». The value 2 is never written
+        // into profile field 36 — 0 goes there instead — and a 2 read from a profile is ignored
+        // like every value of user scope (REQ-PERS-005 point 2).
+        .with_domain(Domain::choice(vec![
+            opt(0, "A-Z"),
+            opt(1, "Recent"),
+            opt(2, "Favorites first"),
+        ]))
         .with_lua("SortOption")
         .with_field("36")
         .with_label("Sort by"),

@@ -9,8 +9,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 |---|---|---|
 | 1 | Setup: sources read, requirement map, amendments copied | done — `f2a05fe` |
 | 2 | AMD-039: UnityFS header flag 0x200, synthetic format-8 bundle tests | done — `837918c` |
-| 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | done |
-| 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | todo |
+| 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | done — `5030db6` |
+| 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | done |
 | 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | todo |
 | 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | todo |
 | 7 | AMD-056 import dialogs, desktop frontend, both languages | todo |
@@ -184,7 +184,34 @@ Tests: the version cause with its sanitised text, the inspect/apply split (nothi
 `apply`), a replacement plan naming the profile it takes over, a built-in-identifier plan carrying
 the file's title, and the two language tests for the corrected texts.
 
+### Step 4 — favourites, search, "Favorites first"
+
+- `GameLibraryEntry.favorite`, `GameLibrary::set_favorite` / `toggle_favorite`, and
+  `LibrarySortOption::FavoritesFirst` with `compare_by_favorite` (favourites first, each group by
+  title — the criterion of A-Z).
+- `GameLibrary::enumerate(option, search, favorites_only)` is the one place the two filters meet:
+  an entry is kept when it satisfies **both** (REQ-UI-211). Nothing in it runs per frame; the
+  interface calls it when the list is rebuilt.
+- `library/search.rs` holds the normalisation. Rust's standard library has neither Unicode
+  normalisation nor general categories, and the workspace adds no crate, so the Latin table R1
+  confirmed for the .NET build (Q-090) is the whole mechanism here, with combining marks dropped
+  by their Unicode blocks. A letter NFD does not decompose — ß, œ, Ø, Đ — is left alone, which is
+  what NFD would do; a unit test asserts the two tables line up.
+- `library.json` is at `schemaVersion` 2 with the `favorite` field. A version-1 file reads with
+  `favorite` false everywhere (serde default), and what the requirement adds is the
+  `library.json.v1.bak` copy kept before the migrated file is written again
+  (`GameLibraryStore::migrated_from_version`, a `Cell` because `load` takes `&self`).
+- `ui.sort_option` gained the domain value 2 ("Favorites first") in the settings table, and
+  `AppSettings` gained `library_sort_order`, `slot_sort_order` (which brings 2 back to A-Z for the
+  slot lists, REQ-PERS-057) and `profile_sort_option` (which writes 0 in place of 2 into profile
+  field 36, AMD-053 §3 point 10). `set_sort_option` clamps to 0–2.
+- `audio_input_interface` in the settings table was over the 100-line clippy limit once the third
+  option went in, so the interface settings of §4.1.9 moved into their own `interface` function.
+  No descriptor changed in that move.
+
+Handheld: nothing to add to `ui/handheld/defaults.rs`. The favourites filter and the search text
+are interface state, not settings, and `ui.sort_option` keeps its default of 0 everywhere.
+
 ### Next step
 
-Step 4: favourites, search and the "Favorites first" order in `zax-profiles`, with `library.json`
-at schema 2.
+Step 5: the resume point — the single-file store, the write at exit, the offer at the next launch.

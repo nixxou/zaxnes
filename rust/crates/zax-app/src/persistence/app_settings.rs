@@ -2,6 +2,7 @@
 //! (SPEC-09 §4). The model itself is the single source of truth (REQ-PERS-007).
 
 use zax_nes::NesRegion;
+use zax_profiles::library::LibrarySortOption;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
@@ -108,8 +109,29 @@ pub trait AppSettings {
     fn fullscreen(&self) -> bool;
     /// `ui.show_fps`.
     fn show_fps(&self) -> bool;
-    /// `ui.sort_option`.
+    /// `ui.sort_option`: 0 A-Z, 1 Recent, 2 Favorites first (REQ-PERS-033 as AMD-053 §3 point 8
+    /// amends it).
     fn sort_option(&self) -> i32;
+    /// The library order in force (SPEC-09 REQ-PERS-033).
+    fn library_sort_order(&self) -> LibrarySortOption {
+        LibrarySortOption::of_setting(self.sort_option())
+    }
+    /// The order the Load and Save lists follow (REQ-PERS-057): « Favorites first » is without
+    /// effect on them, so the value 2 falls back to A-Z.
+    fn slot_sort_order(&self) -> LibrarySortOption {
+        LibrarySortOption::of_setting_for_slots(self.sort_option())
+    }
+    /// The value profile field 36 would carry: « Favorites first » is never written there, 0
+    /// going in its place (AMD-053 §3 point 10, divergence **D**). The reimplementation writes no
+    /// profile from the settings, so this is the rule written down where the only future writer
+    /// would read it.
+    fn profile_sort_option(&self) -> i32 {
+        if self.sort_option() == 2 {
+            0
+        } else {
+            self.sort_option()
+        }
+    }
     /// `ui.language`, one of the codes the catalogue offers.
     fn language(&self) -> String;
     /// `ui.last_browse_dir`.
@@ -265,7 +287,7 @@ pub trait AppSettingsMut {
     fn set_fullscreen(&mut self, value: bool);
     /// Sets `ui.show_fps`.
     fn set_show_fps(&mut self, value: bool);
-    /// Sets `ui.sort_option`, brought into 0 to 1.
+    /// Sets `ui.sort_option`, brought into 0 to 2.
     fn set_sort_option(&mut self, value: i32);
     /// Sets `ui.language`.
     fn set_language(&mut self, value: &str);
@@ -355,7 +377,7 @@ impl AppSettingsMut for SettingsModel {
     fn set_sort_option(&mut self, value: i32) {
         self.set(
             SettingId::UiSortOption,
-            SettingValue::Enum(value.clamp(0, 1)),
+            SettingValue::Enum(value.clamp(0, 2)),
         );
     }
 

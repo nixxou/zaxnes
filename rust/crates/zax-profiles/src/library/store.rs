@@ -1,6 +1,7 @@
 //! The library file `library.json` (SPEC-09 REQ-PERS-035, REQ-PERS-037) and the import of the
 //! original's `rom.json` (REQ-PERS-025).
 
+use std::cell::Cell;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,9 @@ pub struct GameLibraryRecord {
     /// Cover art file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover: Option<String>,
+    /// Whether the user marked the game as a favourite (AMD-053 REQ-UI-210, §3 point 11). False
+    /// by default, and false for every entry of a file migrated from schema version 1.
+    pub favorite: bool,
 }
 
 /// The library file.
@@ -46,8 +50,9 @@ pub struct GameLibraryFile {
 }
 
 impl GameLibraryFile {
-    /// The schema version this program writes.
-    pub const CURRENT_SCHEMA_VERSION: i32 = 1;
+    /// The schema version this program writes. Version 2 added the `favorite` field of AMD-053
+    /// §3 point 11.
+    pub const CURRENT_SCHEMA_VERSION: i32 = 2;
 
     /// The notice written in the file.
     pub const DEFAULT_NOTICE: &'static str = "Do not edit the id field.";
@@ -80,6 +85,7 @@ pub struct RomPathRecord {
 pub struct GameLibraryStore<'a> {
     files: &'a dyn ProfileFileSystem,
     log: &'a dyn ProfileLog,
+    migrated_from_version: Cell<Option<i32>>,
 }
 
 impl<'a> GameLibraryStore<'a> {
@@ -89,7 +95,16 @@ impl<'a> GameLibraryStore<'a> {
         Self {
             files,
             log: log.unwrap_or(&NULL_PROFILE_LOG),
+            migrated_from_version: Cell::new(None),
         }
+    }
+
+    /// The schema version the last [`Self::load`] read, when it was older than
+    /// [`GameLibraryFile::CURRENT_SCHEMA_VERSION`], else none. A migrated file is written again at
+    /// the current version, a `.v<N>.bak` copy having been kept (REQ-PERS-024, REQ-PERS-088).
+    #[must_use]
+    pub fn migrated_from_version(&self) -> Option<i32> {
+        self.migrated_from_version.get()
     }
 
     /// Reads the library file; none when it does not exist or is unreadable. An unreadable file
@@ -97,12 +112,28 @@ impl<'a> GameLibraryStore<'a> {
     /// a file written by a newer schema is read as far as it is known and left alone.
     #[must_use]
     pub fn load(&self, path: &Path, now: OffsetDateTime) -> Option<GameLibraryFile> {
+        self.migrated_from_version.set(None);
         if !self.files.file_exists(path) {
             return None;
         }
 
         match self.read(path) {
             Ok(file) => {
+                // REQ-PERS-024 with AMD-053 §3 point 11: a version-1 file carries no `favorite`
+                // field, so reading it already gives false everywhere; what the requirement adds
+                // is the copy kept before the migrated file is written again.
+                if file.schema_version < GameLibraryFile::CURRENT_SCHEMA_VERSION {
+                    self.migrated_from_version.set(Some(file.schema_version));
+                    let backup = backup_path(path, file.schema_version);
+                    if let Err(failure) = self.files.copy_file(path, &backup, true) {
+                        self.log.warning(&format!(
+                            "{}: the schema {} copy could not be kept ({failure})",
+                            path.display(),
+                            file.schema_version
+                        ));
+                    }
+                }
+
                 if file.schema_version > GameLibraryFile::CURRENT_SCHEMA_VERSION {
                     self.log.warning(&format!(
                         "{}: written by a newer version (schema {}); \
@@ -208,6 +239,14 @@ fn read_string(item: &Value, name: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned()
+}
+
+/// The `<path>.v<N>.bak` copy kept before a migrated file is written again (REQ-PERS-024,
+/// REQ-PERS-088).
+fn backup_path(path: &Path, schema_version: i32) -> PathBuf {
+    let mut backup = path.as_os_str().to_owned();
+    backup.push(format!(".v{schema_version}.bak"));
+    PathBuf::from(backup)
 }
 
 fn corrupt_path(path: &Path, now: OffsetDateTime) -> PathBuf {

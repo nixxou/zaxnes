@@ -75,6 +75,11 @@ fn titles(entries: &[&zax_profiles::library::GameLibraryEntry]) -> Vec<String> {
         .collect()
 }
 
+/// The titles the enumeration of REQ-UI-210 and REQ-UI-211 keeps, in alphabetical order.
+fn kept(library: &GameLibrary, search: &str, favorites_only: bool) -> Vec<String> {
+    titles(&library.enumerate(LibrarySortOption::Alphabetical, search, favorites_only))
+}
+
 #[test]
 #[ignore = "needs ZAXNES_PROFILES (the built-in profiles)"]
 fn req_prof_060_the_full_edition_of_the_catalogue_holds_the_101_built_in_games() {
@@ -662,6 +667,7 @@ fn req_pers_035_the_library_file_is_reconciled_with_the_available_profiles() {
                 rom_path: Some("/a.nes".to_owned()),
                 last_played: 7,
                 cover: None,
+                favorite: false,
             },
             GameLibraryRecord {
                 id: Some("ghost".to_owned()),
@@ -709,6 +715,79 @@ fn req_prof_064_the_rom_association_survives_a_save_and_a_reload() {
 
     assert_eq!("/roms/nestest.nes", reloaded.find("1").unwrap().rom_path);
     assert_eq!(1_760_950_000, reloaded.find("1").unwrap().last_played);
+    assert_eq!(
+        GameLibraryFile::CURRENT_SCHEMA_VERSION,
+        store
+            .load(layout.library_file(), OffsetDateTime::UNIX_EPOCH)
+            .unwrap()
+            .schema_version
+    );
+}
+
+/// AMD-053 REQ-UI-210 and §3 point 11: a favourite mark survives a save and a reload, only its
+/// own entry carries `"favorite": true`, and the file is written at schema 2.
+#[test]
+fn req_ui_210_a_favorite_mark_survives_a_save_and_a_reload() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let catalogue = catalogue_of(
+        &files,
+        &[
+            ("1", "Arkanoid", "profiles/ark.bytes"),
+            ("2", "Balloon", "profiles/bf.bytes"),
+        ],
+    );
+
+    let store = GameLibraryStore::new(&files, None);
+    let mut library = GameLibrary::build(&catalogue, &[], None, None);
+    library.set_favorite("1", true);
+    store
+        .save(layout.library_file(), &mut library.to_file())
+        .unwrap();
+
+    let text = files.read_all_text(layout.library_file()).unwrap();
+    assert!(text.contains("\"schemaVersion\": 2"), "{text}");
+    assert_eq!(1, text.matches("\"favorite\": true").count(), "{text}");
+
+    let loaded = store.load(layout.library_file(), OffsetDateTime::UNIX_EPOCH);
+    assert_eq!(None, store.migrated_from_version());
+    let reloaded = GameLibrary::build(&catalogue, &[], loaded.as_ref(), None);
+
+    assert!(reloaded.find("1").unwrap().favorite);
+    assert!(!reloaded.find("2").unwrap().favorite);
+}
+
+/// AMD-053 §3 point 11 with REQ-PERS-024 and REQ-PERS-088: a schema-1 file is read with
+/// `favorite` false everywhere, a `library.json.v1.bak` copy is kept, and the next write is at
+/// schema 2.
+#[test]
+fn req_pers_024_a_schema_1_library_is_migrated_and_its_copy_is_kept() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let catalogue = catalogue_of(&files, &[("1", "Arkanoid", "profiles/ark.bytes")]);
+    let version_1 = r#"{
+ "schemaVersion": 1,
+ "notice": "Do not edit the id field.",
+ "games": [
+  { "id": "1", "title": "Arkanoid", "romPath": "/a.nes", "lastPlayed": 7 }
+ ]
+}"#;
+    files.add_text(layout.library_file(), version_1);
+
+    let store = GameLibraryStore::new(&files, None);
+    let loaded = store.load(layout.library_file(), OffsetDateTime::UNIX_EPOCH);
+
+    assert_eq!(Some(1), store.migrated_from_version());
+    let backup = PathBuf::from(format!("{}.v1.bak", layout.library_file().display()));
+    assert_eq!(version_1, files.read_all_text(&backup).unwrap());
+
+    let library = GameLibrary::build(&catalogue, &[], loaded.as_ref(), None);
+    assert!(!library.find("1").unwrap().favorite);
+    assert_eq!("/a.nes", library.find("1").unwrap().rom_path);
+
+    store
+        .save(layout.library_file(), &mut library.to_file())
+        .unwrap();
     assert_eq!(
         GameLibraryFile::CURRENT_SCHEMA_VERSION,
         store
@@ -786,6 +865,117 @@ fn req_pers_033_the_library_sorts_by_title_or_by_last_played() {
         ["Metroid", "Zelda", "Arkanoid"],
         titles(&library.sorted(LibrarySortOption::Recent)).as_slice()
     );
+}
+
+/// AMD-053 §3 point 8, REQ-PERS-033 amended: « Favorites first » puts the favourites first, then
+/// the others, each group by title.
+#[test]
+fn req_pers_033_favorites_first_orders_each_group_by_title() {
+    let files = FakeProfileFileSystem::new();
+    let catalogue = catalogue_of(
+        &files,
+        &[
+            ("1", "Zelda", "profiles/z.bytes"),
+            ("2", "Arkanoid", "profiles/a.bytes"),
+            ("3", "Metroid", "profiles/m.bytes"),
+            ("4", "Balloon", "profiles/b.bytes"),
+        ],
+    );
+
+    let mut library = GameLibrary::build(&catalogue, &[], None, None);
+    assert!(library.set_favorite("1", true));
+    assert!(library.set_favorite("3", true));
+    assert!(!library.set_favorite("nope", true));
+
+    assert_eq!(
+        ["Metroid", "Zelda", "Arkanoid", "Balloon"],
+        titles(&library.sorted(LibrarySortOption::FavoritesFirst)).as_slice()
+    );
+    // The value of ui.sort_option: 0 A-Z, 1 Recent, 2 Favorites first; the slot lists ignore 2.
+    assert_eq!(
+        LibrarySortOption::FavoritesFirst,
+        LibrarySortOption::of_setting(2)
+    );
+    assert_eq!(
+        LibrarySortOption::Alphabetical,
+        LibrarySortOption::of_setting_for_slots(2)
+    );
+}
+
+/// AMD-053 REQ-UI-210: two favourites out of ten, the filter ticked gives exactly the two and
+/// unticked gives the ten.
+#[test]
+fn req_ui_210_the_favorites_filter_keeps_exactly_the_favorites() {
+    let files = FakeProfileFileSystem::new();
+    let entries: Vec<(String, String, String)> = (0..10)
+        .map(|index| {
+            (
+                index.to_string(),
+                format!("Game {index}"),
+                format!("profiles/g{index}.bytes"),
+            )
+        })
+        .collect();
+    let borrowed: Vec<(&str, &str, &str)> = entries
+        .iter()
+        .map(|(id, title, file)| (id.as_str(), title.as_str(), file.as_str()))
+        .collect();
+    let catalogue = catalogue_of(&files, &borrowed);
+
+    let mut library = GameLibrary::build(&catalogue, &[], None, None);
+    library.set_favorite("3", true);
+    library.set_favorite("7", true);
+
+    assert_eq!(
+        ["Game 3", "Game 7"],
+        titles(&library.enumerate(LibrarySortOption::Alphabetical, "", true)).as_slice()
+    );
+    assert_eq!(
+        10,
+        library
+            .enumerate(LibrarySortOption::Alphabetical, "", false)
+            .len()
+    );
+
+    // `favorite.toggle` flips the mark and reports the new value.
+    assert_eq!(Some(false), library.toggle_favorite("3"));
+    assert_eq!(Some(true), library.toggle_favorite("3"));
+    assert_eq!(None, library.toggle_favorite("nope"));
+}
+
+/// AMD-053 REQ-UI-211: the search keeps the titles that contain the typed text, case and accents
+/// ignored, and combines with the favourites filter — an entry is kept when it satisfies both.
+#[test]
+fn req_ui_211_the_search_ignores_case_and_accents_and_combines_with_the_filter() {
+    let files = FakeProfileFileSystem::new();
+    let catalogue = catalogue_of(
+        &files,
+        &[
+            ("1", "Super Mario Bros.", "profiles/smb.bytes"),
+            ("2", "MARIO Kart", "profiles/mk.bytes"),
+            ("3", "Pokémon", "profiles/pk.bytes"),
+            ("4", "Metroid", "profiles/mt.bytes"),
+        ],
+    );
+
+    let mut library = GameLibrary::build(&catalogue, &[], None, None);
+
+    assert_eq!(
+        ["MARIO Kart", "Super Mario Bros."],
+        kept(&library, "mario", false).as_slice()
+    );
+    assert_eq!(["Pokémon"], kept(&library, "pokemon", false).as_slice());
+    assert_eq!(
+        ["Super Mario Bros."],
+        kept(&library, "bros", false).as_slice()
+    );
+    // A blank text excludes nothing.
+    assert_eq!(4, kept(&library, "", false).len());
+    assert_eq!(4, kept(&library, "   ", false).len());
+
+    library.set_favorite("2", true);
+    library.set_favorite("4", true);
+    assert_eq!(["MARIO Kart"], kept(&library, "mario", true).as_slice());
 }
 
 #[test]
