@@ -13,7 +13,8 @@
 //!     { "grid": [["brick", "brick"], ["brick", null]],   // rows of tile names, null empty
 //!       "depth": 8, "geometry": 0, "layer": 2,           // the main variant
 //!       "solid": false, "permanent": true, "self_connected": true,
-//!       "scale": [1,1,1], "offset": [0,0,0], "tags": "" } ],
+//!       "scale": [1,1,1], "offset": [0,0,0], "tags": "",
+//!       "texture": "face.png" } ],                      // optional: explicit texture
 //!   "scripts": [{ "name": "main", "file": "main.lua" }] }  // optional: Lua, files beside it
 //! ```
 //!
@@ -27,8 +28,8 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use zax_profiles::enums::{
-    LayerAlignment, PatternColorFlags, PatternDensity, ProfileLayer, TileFlip, VariantGeometry,
-    VariantRenderStyle,
+    LayerAlignment, PatternColorFlags, PatternDensity, ProfileLayer, TextureFormat, TileFlip,
+    VariantGeometry, VariantRenderStyle,
 };
 use zax_profiles::format;
 use zax_profiles::layout::FieldPresence;
@@ -36,7 +37,7 @@ use zax_profiles::pattern::ProfilePattern;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::tile::{PatternGrid, ProfileTile};
 use zax_profiles::values::{Mat4F, Vec2I, Vec3F};
-use zax_profiles::variant::PatternVariant;
+use zax_profiles::variant::{PatternVariant, TexturePixels, VariantTexture};
 
 use crate::HarnessError;
 
@@ -282,6 +283,7 @@ pub fn build(description: &Path, out: &Path) -> Result<String, HarnessError> {
         apply_layers(&mut profile, overrides)?;
     }
     let tiles = read_tiles(&spec)?;
+    let base = description.parent().unwrap_or(Path::new("."));
     let patterns = spec
         .get("patterns")
         .and_then(Value::as_array)
@@ -289,7 +291,7 @@ pub fn build(description: &Path, out: &Path) -> Result<String, HarnessError> {
     for (index, entry) in patterns.iter().enumerate() {
         profile
             .permanent_patterns
-            .push(Arc::new(build_pattern(index, entry, &tiles)?));
+            .push(Arc::new(build_pattern(index, entry, &tiles, base)?));
     }
     for entry in spec
         .get("scripts")
@@ -384,6 +386,7 @@ fn build_pattern(
     index: usize,
     entry: &Value,
     tiles: &HashMap<String, Arc<ProfileTile>>,
+    base: &Path,
 ) -> Result<ProfilePattern, HarnessError> {
     let rows = entry
         .get("grid")
@@ -432,6 +435,12 @@ fn build_pattern(
         stored_empty_color: int(entry.get("empty"), 0),
         ..PatternVariant::default()
     };
+    // "texture": "<file.png>" beside the description: the variant's explicit texture
+    // (REQ-PROF-035), drawn and given volume in place of the tiles' own pixels; a pixel whose
+    // alpha is 0 is empty.
+    if let Some(file) = entry.get("texture").and_then(Value::as_str) {
+        variant.texture = Some(png_texture(&base.join(file))?);
+    }
     // "deform": {"amplitude": [x, y, z], "pivot": [x, y, z], "speed": [16 cells, row by row],
     // "offset": [16 cells]}: the animated deformation (REQ-E3D-568).
     if let Some(deform) = entry.get("deform") {
@@ -454,4 +463,27 @@ fn build_pattern(
         skip_geometry: false,
         recorded_fields: None,
     })
+}
+
+/// A PNG as a direct variant texture: packed RGB, 0 for a transparent pixel (an opaque pure
+/// black is written 1 so that it stays solid).
+fn png_texture(path: &Path) -> Result<VariantTexture, HarnessError> {
+    let image = zax_render::assets::png_image::load(path)
+        .map_err(|e| error(format!("{}: {e}", path.display())))?;
+    let data = (0..image.height)
+        .flat_map(|y| (0..image.width).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            let (r, g, b, a) = image.pixel(x, y);
+            if a == 0 {
+                0
+            } else {
+                (i32::from(r) << 16 | i32::from(g) << 8 | i32::from(b)).max(1)
+            }
+        })
+        .collect();
+    Ok(VariantTexture::new(
+        i32::try_from(image.width).unwrap_or(0),
+        i32::try_from(image.height).unwrap_or(0),
+        Some(TexturePixels::new(TextureFormat::Direct, data, Vec::new())),
+    ))
 }
