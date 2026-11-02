@@ -1645,8 +1645,10 @@ fn handle_camera_input(
     real: f32,
     state: &mut RunState,
 ) {
-    // REQ-SCN-018 / REQ-INP-083: the camera controls only act while the game is running.
-    if host.state() != EmulationState::Running {
+    // REQ-SCN-018 / REQ-INP-083: the camera controls only act while the game is running —
+    // and, for the editor (EDITOR-1), while a movie is paused, to look around a frame.
+    let paused_movie = host.state() == EmulationState::Paused && host.movie_position().is_some();
+    if host.state() != EmulationState::Running && !paused_movie {
         state.drag_origin = None;
         return;
     }
