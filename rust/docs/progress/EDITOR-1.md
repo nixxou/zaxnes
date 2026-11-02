@@ -9,10 +9,11 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 | 1 | Exploration and design note (this file); owner's approval | **waiting for the owner** |
 | 2 | `.fm2` reader and its tests | to do |
 | 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | to do |
-| 4 | Script reload, fast and exact, with the core-changing guard | to do |
-| 5 | MCP server (Cargo feature, off by default) and its commands; end-to-end test | to do |
-| 6 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
-| L2 | Film strip on screen (lot 2) | to do |
+| 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | to do |
+| 5 | Script reload, fast and exact, with the core-changing guard | to do |
+| 6 | MCP server (Cargo feature, off by default) and its commands; end-to-end test | to do |
+| 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
+| L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
 Next step: the owner answers the questions at the end, then step 2.
 
@@ -64,6 +65,17 @@ Next step: the owner answers the questions at the end, then step 2.
 * Playback forces run-ahead 0 (`set_run_ahead(0)`, the raw setter; the user's setting is kept
   for after) and the existing per-tick loop does the rest: play, pause, step use the existing
   pause and frame-step machinery.
+
+### The seek bar (owner's priority)
+
+In the windowed (desktop) UI, while a movie plays, a bar along the bottom of the window: a
+slider over the movie's frames that the owner drags to any point, with play/pause, step back and
+forward, the current frame / total and time. Dragging scrubs at the **instant** level (core only,
+from the nearest checkpoint, so the picture follows the mouse); releasing settles at the **warm**
+level so the scripts' state is right where the bar stops. Seeking forward past the frames already
+played runs the core ahead to build the missing checkpoints (with a progress fill on the bar).
+It is drawn by the existing ImGui UI, only while a movie is loaded in the editor. It works for
+Zaxnes's own movies (`.mv<n>`) as well as imported `.fm2`.
 
 ### Seeking and reloading: three levels of exactness
 
