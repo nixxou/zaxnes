@@ -842,6 +842,12 @@ impl WgpuSceneRenderer {
         }
         #[allow(clippy::cast_possible_wrap)] // The side is at most the device limit.
         let constants = SceneConstants::new(scene, view, volume, self.shadow_map_size as i32);
+        // Q-104: `constants.bend` is **not** read here. The curvature of AMD-043 REQ-SCN-067
+        // landed in the OpenGL backend only (the one SPEC-06 REQ-SCN-056 requires, the one of the
+        // default build and of R0's captures); this backend keeps drawing the scene flat, as it
+        // did before the amendment. `frame_bytes` carries no per-axis constant, so a game played
+        // on Vulkan or DirectX 12 with a curvature set shows a flat scene. The ticket asks
+        // whether to port it, and whether to say so in the interface meanwhile.
         self.queue
             .write_buffer(&self.frame_buffer, 0, &frame_bytes(&constants));
 

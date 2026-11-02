@@ -12,8 +12,8 @@ are a reading reference only.
 |---|---|---|
 | 1 | Map: what exists, where each requirement goes, the spec copies | done — `dffafa3` |
 | 2 | AMD-047: the four margins accept any finite real (REQ-PERS-087), Q-080's grid guard | done — `5703fed` |
-| 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | done — `<pending>` |
-| 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | todo |
+| 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | done — `c17dfb5` |
+| 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | done — `<pending>` |
 | 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | todo |
 | 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | todo |
 | 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | todo |
@@ -238,6 +238,96 @@ recording because the direction is easy to get backwards:
 `many_single_char_names` allows, the idiom `geometry.rs` already uses for the named quantities of
 a specification formula).
 
+### Step 4 — the shader variants and the renderer
+
+**The curvature is a `#define`, not a uniform.** `gl/shaders.rs` was reshaped so a variant
+composes in a `const fn`: `Stage` holds its chunks in **fixed slots**, empty ones skipped, and
+`scene(solid, srgb_palette, bend)` and `shadow(bend)` replace the four `SCENE*` constants and
+`SHADOW`. Eight scene variants and two shadow ones, ten distinct names so the on-disk program
+cache files them apart.
+
+`assemble` skips an empty slot **without even a blank line**, which is what keeps the assembled
+source of a variant that leaves a define out byte-identical to the shape it had before the slots
+existed.
+
+| Piece | Where |
+|---|---|
+| the GLSL mirror of `SpaceBend` | `shaders/bend.glsl` (new), compiled only into the `ZAX_BEND` variants |
+| B applied last, the normal transported, `vBent` emitted | `shaders/scene.vert`, under `#ifdef ZAX_BEND` |
+| the shadow lookup at the bent position, the clipping still at the flat one | `shaders/scene.frag`, under the same guard |
+| the shadow pass bent | `shaders/shadow.vert` |
+| the variant in use, built lazily | `renderer.rs` `ScenePrograms`, `select_bend_variant` |
+| the five per-axis uniforms | `renderer.rs` `bind_bend`, from `SceneConstants::bend` |
+| the HUD kept flat (REQ-SCN-068) | `render_scene`: the HUD pass switches to the **flat** pair and switches back |
+| the backdrop at 32 × 32 per face | `interop::unit_box_subdivided`, `subdivision_for` |
+
+**The curvature costs nothing at 0, and that is checked rather than claimed:**
+
+- `select_bend_variant` is one `is_identity()` test per frame when nothing bends. No program is
+  compiled (the curvature pair is built the first time a setting is not 0 — on a handheld that is
+  seconds of shader compile a player who never bends anything never pays), no program is swapped,
+  no uniform is uploaded, and the backdrop keeps its six quads;
+- `req_scn_067_the_flat_variant_carries_nothing_of_the_curvature` preprocesses the assembled
+  source the way the GLSL compiler would — `#ifdef ZAX_BEND` branches dropped, `#else` kept, line
+  comments removed — and asserts that **none** of the nine identifiers the curvature brings in
+  reaches the compiler, over all eight flat variants (solid × sRGB palette × desktop/GLES) and
+  both flat shadow ones. The first two drafts of that test failed on the guard text and on my own
+  comments, which is the whole reason it preprocesses rather than greps;
+- `req_scn_067_a_bent_scene_is_a_different_picture_with_the_same_draws` renders the same scene
+  flat and at 90° on the GPU: the draw-call and triangle counts are **equal** and over 1 % of the
+  pixels moved. The curvature is a variant, not extra geometry;
+- the eleven synthetic render goldens still match exactly (`zax-harness` 18 of 18 render tests).
+
+**A per-axis `uBendOn` is kept inside the variant.** One to three axes may bend; the test is
+uniform over a whole draw, so an idle axis costs a comparison instead of a `sin` and a `cos`.
+That is not the forbidden "uniform tested per vertex" of the brief — the forbidden one is the
+switch between bending and not bending, which is the `#define`.
+
+#### `scene_export`, the harness the criteria ask for
+
+`zax-render/src/scene_export.rs` (new): the scene-space vertices the renderer would place, on the
+CPU, without a GL context — what the acceptance criteria of REQ-SCN-068 and REQ-SCN-074 are
+written against ("harnais, les sommets exportés…"). It walks the frame plan with a residency that
+keeps the meshes themselves, then applies the placement and the curvature in the shader's order.
+It is a verification aid: nothing in the renderer calls it.
+
+The subdivision rule lives in **one** place, `interop::subdivision_for(bend_active)`, which both
+the renderer and the export read, so the exported geometry cannot drift from the drawn one.
+
+#### Tests (10 in `zax-render/tests/bend_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| the flat variant carries nothing of the curvature | `req_scn_067_the_flat_variant_carries_nothing_of_the_curvature` |
+| the curvature variant carries it, and the `#define` brings it | `req_scn_067_the_curvature_variant_compiles_the_wrapping_in` |
+| ten distinct program names | `req_scn_067_each_variant_has_its_own_name` |
+| REQ-SCN-068: a tile's exported vertices are at `B(P)` | `req_scn_068_the_exported_vertices_of_a_tile_are_at_their_bent_position` |
+| REQ-SCN-068: the exported HUD is unchanged | `req_scn_068_the_hud_is_not_bent` |
+| REQ-SCN-068: the clipping is judged before the curvature, and the corner tile at (0, 8, 0) is kept although `B(P)` leaves R | `req_scn_068_the_clipping_is_judged_before_the_curvature` |
+| REQ-SCN-068: 32 × 32 per face, and only while something bends | `req_scn_068_the_backdrop_is_subdivided_only_while_something_bends` |
+| REQ-SCN-074: ≥ 33 × 33 vertices, and the single quad at 0 | `req_scn_074_the_two_dimensional_rectangle_is_subdivided_only_while_something_bends` |
+| the picture moves, the draws do not | `req_scn_067_a_bent_scene_is_a_different_picture_with_the_same_draws` |
+| REQ-SCN-068: the shadow pass takes the curvature | `req_scn_068_the_shadow_pass_takes_the_curvature` |
+
+`zax-render` 148 → **158 passed**, `zax-harness` 44 passed, fmt and workspace clippy clean.
+
+#### The second render backend: Q-104
+
+The Rust application has a **second** renderer behind the `wgpu` feature (Vulkan, DirectX 12),
+absent from the default build, which today holds feature parity with the OpenGL one — the
+animated deformation of REQ-SCN-043 included. The curvature landed in the **OpenGL backend only**:
+the one SPEC-06 REQ-SCN-056 requires, the one of the default build, of R0's captures and of both
+handheld targets. The WGSL port is not hard but **cannot be run once on this machine** (naga
+validates at module creation, and `render_wgpu_tests.rs` skips without a Vulkan driver), and
+shipping WGSL that was never executed would be worse than shipping the gap described.
+
+`spec/changes/Q-104.md` asks the three questions that follow (port it, and in which lot; say so in
+the interface meanwhile or hide the settings; is backend parity a per-lot duty). The gap is made
+non-silent three ways: a `// Q-104` note at the exact line of `wgpu_backend/renderer.rs` where
+`constants.bend` is not read, a test that **asserts the known gap** so a half-done parity fails
+loudly (`q_104_the_wgpu_backend_carries_nothing_of_the_curvature_yet`, under the `wgpu` feature),
+and this entry.
+
 ### Open questions
 
-None yet. Next free Q number is **Q-104**.
+**Q-104** — the curvature in the `wgpu` backend (see step 4). Next free Q number is **Q-105**.

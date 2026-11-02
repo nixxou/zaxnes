@@ -12,6 +12,7 @@ use thiserror::Error;
 use zax_engine3d::draw_list::DeformParameters;
 use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::geometry::tile_mesh::{TileMesh, TriangleCountError};
+use zax_engine3d::space_bend::SpaceBend;
 use zax_engine3d::vectors::Mat4;
 
 use crate::assets::SceneAssets;
@@ -85,18 +86,46 @@ impl Residency for GlResidency<'_> {
     }
 }
 
+/// The scene programs of [`shaders::scene`] and which one is in use.
+///
+/// Two of the three variant axes are chosen per draw or per frame and so need their programs
+/// side by side: `solid` changes within the opaque bucket (several times a frame) and `bend`
+/// changes when a curvature setting changes and when the HUD is drawn (REQ-SCN-068 keeps it
+/// flat). The third, the per-fragment palette, is fixed when the renderer is created.
+#[derive(Debug)]
+struct ScenePrograms {
+    /// `[plain, solid]` without the curvature.
+    flat: [ShaderProgram; 2],
+    /// `[plain, solid]` with the curvature of REQ-SCN-067 compiled in, built the first time a
+    /// curvature setting is not 0. All four settings default to 0 (REQ-SCN-066), so a player who
+    /// never bends anything never compiles these — which on a handheld is seconds of start-up.
+    bent: Option<[ShaderProgram; 2]>,
+    solid: bool,
+    bend: bool,
+}
+
+impl ScenePrograms {
+    /// The program in use, for a uniform or a draw.
+    fn current(&mut self) -> &mut ShaderProgram {
+        let pair = match (self.bend, &mut self.bent) {
+            (true, Some(bent)) => bent,
+            _ => &mut self.flat,
+        };
+        &mut pair[usize::from(self.solid)]
+    }
+}
+
 /// The programs and the cached GL state the draw calls go through, and what they cost.
 #[derive(Debug)]
 #[allow(clippy::struct_excessive_bools)] // Independent pieces of cached GL state.
 struct Passes {
     gl: Gl,
-    /// The scene program in use: [`shaders::SCENE`], or [`shaders::SCENE_SOLID`] while
-    /// `solid_in_use` (see [`Passes::use_solid`]).
-    scene: ShaderProgram,
-    /// The other of the two scene programs.
-    scene_spare: ShaderProgram,
-    solid_in_use: bool,
+    /// The four scene programs and the one in use.
+    scene: ScenePrograms,
     shadow: ShaderProgram,
+    /// The shadow program with the curvature compiled in (REQ-SCN-068: the shadow pass bends
+    /// too), built beside the scene pair the first time a curvature is asked for.
+    shadow_bent: Option<ShaderProgram>,
     dummy_indexed: Texture,
     dummy_color: Texture,
     shadow_enabled: bool,
@@ -135,6 +164,10 @@ pub struct SceneRenderer {
     /// Whether the scene programs read [`LinearPalette`] (else they linearise per fragment).
     convert_palette: bool,
     unit_box: Arc<TileMesh>,
+    /// The backdrop box with each face cut into 32 × 32 cells (REQ-SCN-068), built the first
+    /// time a curvature is active and used only then: at curvature 0 the box stays the six quads
+    /// of `interop::unit_box`, so the vertex count of the default settings is unchanged.
+    unit_box_bent: Option<Arc<TileMesh>>,
     picture_quad: Arc<TileMesh>,
     /// The quad of the last widescreen 2D-mode picture, by margin.
     wide_picture_quad: Option<interop::WidePictureQuad>,
@@ -196,28 +229,21 @@ impl SceneRenderer {
         // `ZAXNES_SRGB_PALETTE` keeps the per-fragment conversion of the palette, to compare
         // the two on a device (same pictures).
         let convert_palette = std::env::var_os("ZAXNES_SRGB_PALETTE").is_none();
-        let (scene_source, solid_source) = if convert_palette {
-            (&shaders::SCENE, &shaders::SCENE_SOLID)
-        } else {
-            (
-                &shaders::SCENE_SRGB_PALETTE,
-                &shaders::SCENE_SOLID_SRGB_PALETTE,
-            )
-        };
-        let scene_program = ShaderProgram::create(&gl, scene_source)?;
-        scene_program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
-        let solid_program = ShaderProgram::create(&gl, solid_source)?;
-        solid_program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
+        let flat = scene_pair(&gl, !convert_palette, false)?;
         let instance_alignment =
             usize::try_from(gl.get_integer(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT))
                 .unwrap_or(256)
                 .max(1);
         let passes = Passes {
             gl: gl.clone(),
-            scene: scene_program,
-            scene_spare: solid_program,
-            solid_in_use: false,
-            shadow: ShaderProgram::create(&gl, &shaders::SHADOW)?,
+            scene: ScenePrograms {
+                flat,
+                bent: None,
+                solid: false,
+                bend: false,
+            },
+            shadow: ShaderProgram::create(&gl, &shaders::shadow(false))?,
+            shadow_bent: None,
             dummy_indexed: textures.dummy_indexed(),
             dummy_color: textures.dummy_color(),
             shadow_enabled: false,
@@ -238,6 +264,7 @@ impl SceneRenderer {
             linear_palette: LinearPalette::new(&gl)?,
             convert_palette,
             unit_box: Arc::new(interop::unit_box()?),
+            unit_box_bent: None,
             picture_quad: Arc::new(interop::picture_quad()?),
             wide_picture_quad: None,
             plan: FramePlan::default(),
@@ -307,6 +334,11 @@ impl SceneRenderer {
     ) -> Result<(), RenderError> {
         target.validate()?;
 
+        // REQ-SCN-067: the curvature decides which shader variant draws the frame, once here,
+        // never per vertex. At the default settings this is one `is_identity` test and nothing
+        // else: no program is compiled, none is swapped, and no uniform is uploaded.
+        self.select_bend_variant(scene)?;
+
         self.passes.statistics.begin_frame();
         self.meshes.begin_frame();
         self.textures.begin_frame();
@@ -336,7 +368,11 @@ impl SceneRenderer {
             self.wide_picture_quad.take(),
         )?;
         let fixed = FixedMeshes {
-            unit_box: &self.unit_box,
+            // REQ-SCN-068: the subdivided box only while something bends.
+            unit_box: match &self.unit_box_bent {
+                Some(subdivided) if self.passes.scene.bend => subdivided,
+                _ => &self.unit_box,
+            },
             picture_quad: &self.picture_quad,
             wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
         };
@@ -362,6 +398,39 @@ impl SceneRenderer {
         statistics.resident_textures = count(self.textures.count());
         self.meshes.collect();
         self.textures.collect();
+        Ok(())
+    }
+
+    /// Picks the shader variant the frame's curvature asks for (REQ-SCN-067), building the
+    /// curvature programs the first time one is needed.
+    ///
+    /// At curvature 0 — the default of all four settings of REQ-SCN-066 — this leaves the
+    /// renderer exactly as AMD-043 found it: the flat pair stays in use and the curvature
+    /// programs are never compiled.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderError::Gl`] when a curvature program does not compile or link. The flat programs
+    /// stay in use, so the frame is drawn without the curvature rather than not at all.
+    fn select_bend_variant(&mut self, scene: &SceneState) -> Result<(), RenderError> {
+        if scene.bend.is_identity() {
+            self.passes.scene.bend = false;
+            return Ok(());
+        }
+
+        if self.passes.scene.bent.is_none() {
+            self.passes.scene.bent = Some(scene_pair(&self.gl, !self.convert_palette, true)?);
+            self.passes.shadow_bent =
+                Some(ShaderProgram::create(&self.gl, &shaders::shadow(true))?);
+        }
+        if self.unit_box_bent.is_none() {
+            // REQ-SCN-068: a plane large enough to curve visibly is subdivided, the backdrop
+            // into at least 32 × 32 cells per face.
+            self.unit_box_bent = Some(Arc::new(interop::unit_box_subdivided(
+                interop::subdivision_for(true),
+            )?));
+        }
+        self.passes.scene.bend = true;
         Ok(())
     }
 
@@ -411,21 +480,28 @@ impl SceneRenderer {
         gl.cull_face(glow::FRONT);
         passes.set_winding(false, true);
 
-        passes.shadow.use_program();
+        // REQ-SCN-068: the shadow pass takes the same curvature as the scene, so the shadows
+        // follow the curved surface.
+        passes.shadow_program().use_program();
         passes.forget_bindings();
         passes
-            .shadow
+            .shadow_program()
             .set_matrix4("uLightViewProjection", &volume.view_projection);
-        passes.shadow.set_f32("uTime", scene.emulated_time);
+        passes
+            .shadow_program()
+            .set_f32("uTime", scene.emulated_time);
+        if !scene.bend.is_identity() {
+            bind_bend(passes.shadow_program(), scene.bend);
+        }
 
         for caster in casters {
             // Q-069: a mirrored caster winds the other way round, so the far side of the solid
             // is only selected once the winding is corrected.
             passes.set_winding(interop::determinant(&caster.model) < 0.0, false);
             passes
-                .shadow
+                .shadow_program()
                 .set_matrix4("uModel", &interop::to_numerics(&caster.model));
-            set_deformation(&mut passes.shadow, caster.deform.as_ref());
+            set_deformation(passes.shadow_program(), caster.deform.as_ref());
             passes.draw(caster.mesh);
         }
 
@@ -524,15 +600,14 @@ impl SceneRenderer {
         // of the draws is kept.
         for solid in [false, true] {
             passes.use_solid(solid);
-            passes.scene.use_program();
+            passes.scene.current().use_program();
             common.bind(passes);
 
             // Q-069: the sign lives in the program, which starts at 0 — it has to be written at
             // least once per frame before anything is drawn.
             passes.set_normal_sign(false, true);
-            passes
-                .scene
-                .set_vec3("uLightDirection", common.constants.light_direction);
+            let light = common.constants.light_direction;
+            passes.scene.current().set_vec3("uLightDirection", light);
         }
 
         // 1. Opaque objects.
@@ -550,11 +625,10 @@ impl SceneRenderer {
         // 2. Transparent objects, farthest first, each with a depth-only pass first
         // (REQ-SCN-040, AMD-012).
         if !lists.transparent.is_empty() {
-            passes.scene.use_program();
+            passes.scene.current().use_program();
             common.bind(passes);
-            passes
-                .scene
-                .set_vec3("uLightDirection", common.constants.light_direction);
+            let light = common.constants.light_direction;
+            passes.scene.current().set_vec3("uLightDirection", light);
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             for group in &lists.transparent_objects {
@@ -572,11 +646,16 @@ impl SceneRenderer {
         // 3. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
         // REQ-SCN-044).
         if !lists.hud.is_empty() {
-            passes.scene.use_program();
+            // REQ-SCN-068: the HUD is the plane attached to the camera (REQ-SCN-045) and stays
+            // **flat**, whatever the curvature. It therefore draws with the flat variant, which
+            // also means the score of a bent game stays readable (REQ-SCN-044).
+            let bent = passes.scene.bend;
+            passes.scene.bend = false;
+            passes.scene.current().use_program();
             common.bind(passes);
-            passes
-                .scene
-                .set_vec3("uLightDirection", common.constants.hud_light_direction);
+            let light = common.constants.hud_light_direction;
+            passes.scene.current().set_vec3("uLightDirection", light);
+            passes.set_normal_sign(passes.mirrored_normal, true);
             gl.enable(glow::BLEND);
             gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             for group in &lists.hud_objects {
@@ -585,6 +664,7 @@ impl SceneRenderer {
 
             gl.disable(glow::BLEND);
             passes.statistics.hud_tiles = count(lists.hud.len());
+            passes.scene.bend = bent;
         }
 
         gl.depth_mask(true);
@@ -605,8 +685,15 @@ struct CommonUniforms<'a> {
 
 impl CommonUniforms<'_> {
     fn bind(&mut self, passes: &mut Passes) {
-        let (gl, program) = (&passes.gl, &mut passes.scene);
+        let (gl, program) = (&passes.gl, passes.scene.current());
         let constants = &self.constants;
+
+        // REQ-SCN-067: the per-axis constants, which the CPU computed when the setting changed.
+        // The flat variant has no such uniform, so on a program that does not bend these are
+        // five lookups that find nothing — and they only run at all when a curvature is set.
+        if !constants.bend.is_identity() {
+            bind_bend(program, constants.bend);
+        }
 
         program.set_matrix4("uViewProjection", &constants.view_projection);
         program.set_f32("uTime", constants.time);
@@ -637,18 +724,25 @@ impl CommonUniforms<'_> {
 }
 
 impl Passes {
-    /// Puts [`shaders::SCENE_SOLID`] in use when `solid`, [`shaders::SCENE`] otherwise. Both
-    /// draw the same pixels where the solid one may be used: it only leaves out the `discard`s
-    /// a draw that neither clips nor reads a colour texture never reaches. The normal sign is
-    /// written again, the two programs may hold different ones.
+    /// Puts the solid variant of [`shaders::scene`] in use when `solid`, the plain one
+    /// otherwise. Both draw the same pixels where the solid one may be used: it only leaves out
+    /// the `discard`s a draw that neither clips nor reads a colour texture never reaches. The
+    /// normal sign is written again, the two programs may hold different ones.
     fn use_solid(&mut self, solid: bool) {
-        if solid == self.solid_in_use {
+        if solid == self.scene.solid {
             return;
         }
-        std::mem::swap(&mut self.scene, &mut self.scene_spare);
-        self.solid_in_use = solid;
-        self.scene.use_program();
+        self.scene.solid = solid;
+        self.scene.current().use_program();
         self.set_normal_sign(self.mirrored_normal, true);
+    }
+
+    /// The shadow program of the curvature in use (REQ-SCN-068).
+    fn shadow_program(&mut self) -> &mut ShaderProgram {
+        match (self.scene.bend, &mut self.shadow_bent) {
+            (true, Some(bent)) => bent,
+            _ => &mut self.shadow,
+        }
     }
 
     /// Selects the winding the rasterizer takes for front faces: clockwise for an ordinary
@@ -678,6 +772,7 @@ impl Passes {
         }
 
         self.scene
+            .current()
             .set_f32("uNormalSign", if mirrored { -1.0 } else { 1.0 });
         self.mirrored_normal = mirrored;
     }
@@ -705,7 +800,7 @@ impl Passes {
         self.set_normal_sign(mirrored, false);
         self.set_winding(mirrored, false);
 
-        let program = &mut self.scene;
+        let program = self.scene.current();
         program.set_i32("uColorMode", item.color_mode);
         program.set_i32("uPaletteTable", item.palette_table);
         program.set_vec2("uTextureSize", item.texture_size);
@@ -798,6 +893,31 @@ impl Passes {
         self.statistics.draw_calls += 1;
         self.statistics.triangles += u64::from(mesh.index_count.unsigned_abs() / 3);
     }
+}
+
+/// Uploads the five per-axis constants of the curvature (REQ-SCN-067 step 1) to `program`.
+///
+/// They are computed on the CPU when a setting changes — `SpaceBend::new` — so a vertex pays
+/// only for the wrapping itself. On a program without the curvature compiled in the five
+/// uniforms are not active and the writes find nothing; the caller only runs this when the
+/// curvature bends something at all.
+fn bind_bend(program: &mut ShaderProgram, bend: SpaceBend) {
+    program.set_vec3("uBendK", bend.curvature().into());
+    program.set_vec3("uBendF", bend.recentring().into());
+    program.set_vec3("uBendH", bend.offset().into());
+    program.set_vec3("uBendOn", bend.active().into());
+    program.set_f32("uBendPivot", bend.arc_pivot());
+}
+
+/// The `[plain, solid]` pair of scene programs of one variant, each with its instance block
+/// bound (the block is the placements of a batched draw, SPEC-06 §3.9).
+fn scene_pair(gl: &Gl, srgb_palette: bool, bend: bool) -> Result<[ShaderProgram; 2], RenderError> {
+    let one = |solid: bool| -> Result<ShaderProgram, RenderError> {
+        let program = ShaderProgram::create(gl, &shaders::scene(solid, srgb_palette, bend))?;
+        program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
+        Ok(program)
+    };
+    Ok([one(false)?, one(true)?])
 }
 
 fn set_deformation(program: &mut ShaderProgram, deform: Option<&DeformParameters>) {

@@ -13,6 +13,7 @@ use zax_engine3d::frame::FrameInstanceId;
 use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::geometry::tile_mesh::TileMesh;
 use zax_engine3d::hashing::FastMap;
+use zax_engine3d::space_bend::SpaceBend;
 use zax_engine3d::vectors::{Mat4, Vec3};
 use zax_profiles::enums::TextureFormat;
 
@@ -659,6 +660,9 @@ pub struct SceneConstants {
     /// frame (REQ-SCN-029, REQ-SCN-044).
     pub light_direction: Vector3,
     pub hud_light_direction: Vector3,
+    /// The curvature of REQ-SCN-067, the identity by default. The renderer reads it to pick the
+    /// shader variant and, when it bends anything, to upload the five per-axis uniforms.
+    pub bend: SpaceBend,
 }
 
 impl SceneConstants {
@@ -695,6 +699,7 @@ impl SceneConstants {
             shadow_bias,
             normal_offset: geometry::SHADOW_NORMAL_OFFSET,
             shadow_enabled: volume.has_content,
+            bend: scene.bend,
             light_direction: scene.light.direction,
             hud_light_direction: view.hud_light_direction(scene.light.direction),
         }

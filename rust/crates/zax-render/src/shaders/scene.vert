@@ -25,6 +25,13 @@ out vec3 vScene;
 out vec3 vNormal;
 out vec2 vUv;
 
+// ZAX_BEND: the position the curvature of REQ-SCN-067 placed this vertex at, which the shadow
+// lookup reads (the shadow map holds the bent geometry, REQ-SCN-068). Without the variant the
+// fragment shader reads vScene, exactly as before the amendment.
+#ifdef ZAX_BEND
+out vec3 vBent;
+#endif
+
 void main()
 {
     // The fields are read from the block one by one: copying the whole instance into a local
@@ -37,6 +44,8 @@ void main()
     }
 
     vec4 scene = uInstances[index].model * vec4(local, 1.0);
+    // REQ-SCN-068: the clipping of REQ-SCN-036 is evaluated on the position *before* the
+    // curvature, so a tile the margins keep stays visible wherever its bent image lands.
     vScene = scene.xyz;
     // REQ-SCN-028: the normal is the mesh normal, unchanged by the deformation.
     // uNormalSign is -1 for a mirrored placement, whose cofactor matrix points the
@@ -45,5 +54,17 @@ void main()
         uInstances[index].normal[2].xyz);
     vNormal = uNormalSign * (normalMatrix * aNormal);
     vUv = aUv;
+
+#ifdef ZAX_BEND
+    // REQ-SCN-067, applied last: after the animated deformation and after the object's own
+    // transform, so on the final position in the scene (REQ-SCN-068). REQ-SCN-068 transports
+    // the normal with it.
+    mat3 bendJacobian;
+    vec3 placed = zaxBend(scene.xyz, bendJacobian);
+    vNormal = zaxBendNormal(bendJacobian, vNormal);
+    vBent = placed;
+    gl_Position = uViewProjection * vec4(placed.x, placed.y, -placed.z, 1.0);
+#else
     gl_Position = uViewProjection * vec4(scene.x, scene.y, -scene.z, 1.0);
+#endif
 }

@@ -3,6 +3,13 @@ in vec3 vNormal;
 in vec2 vUv;
 out vec4 oColor;
 
+// ZAX_BEND: the bent position of the vertex (REQ-SCN-067). The shadow map holds the bent
+// geometry (REQ-SCN-068), so the lookup has to be made at the bent position; the clipping of
+// REQ-SCN-036 keeps reading vScene, the position before the curvature.
+#ifdef ZAX_BEND
+in vec3 vBent;
+#endif
+
 // 0 = indexed atlas, 1 = direct colour atlas, 2 = flat colour (backdrop).
 uniform int uColorMode;
 uniform usampler2D uIndexTexture;
@@ -95,7 +102,11 @@ void main()
     if (uReceiveShadow != 0)
     {
         // REQ-SCN-031: a normal offset and a depth bias of about 0.02 unit.
+#ifdef ZAX_BEND
+        vec3 biased = vBent + n * uNormalOffset;
+#else
         vec3 biased = vScene + n * uNormalOffset;
+#endif
         vec4 light = uLightViewProjection * vec4(biased.x, biased.y, -biased.z, 1.0);
         vec3 projected = light.xyz / light.w * 0.5 + 0.5;
         if (projected.x >= 0.0 && projected.x <= 1.0

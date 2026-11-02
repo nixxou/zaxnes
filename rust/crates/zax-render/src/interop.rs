@@ -86,6 +86,28 @@ pub fn hud_matrix(view: &CameraView) -> Mat4 {
     m
 }
 
+/// How many cells a side of each face of the backdrop is cut into while a curvature is active
+/// (AMD-043 REQ-SCN-068: "le fond DEVRAIT l'être en au moins 32 × 32 cellules par face").
+///
+/// At curvature 0 the box stays the six quads of [`unit_box`]: the subdivision exists only while
+/// something bends, so the draw-call and vertex counts of the default settings are unchanged.
+pub const BACKDROP_CELLS: u16 = 32;
+
+/// How many cells a side of a surface the curvature bends is cut into: one — no subdivision at
+/// all — when nothing bends, [`BACKDROP_CELLS`] when something does.
+///
+/// The single place that rule is written: the renderer reads it to pick the mesh it hands the
+/// frame plan, and [`crate::scene_export`] reads it to place the same vertices on the CPU, so a
+/// test of the exported geometry cannot drift from what is drawn.
+#[must_use]
+pub const fn subdivision_for(bend_active: bool) -> u16 {
+    if bend_active {
+        BACKDROP_CELLS
+    } else {
+        1
+    }
+}
+
 /// The unit box the backdrop of SPEC-06 REQ-SCN-048 is drawn with: the box `[−0.5, 0.5]³` in
 /// the scene frame, six quads with outward normals, wound as REQ-E3D-505 requires. It is a
 /// [`TileMesh`] so that it goes through the same upload path and the same shaders as the tiles.
@@ -94,6 +116,19 @@ pub fn hud_matrix(view: &CameraView) -> Mat4 {
 ///
 /// [`TriangleCountError`] never in practice: every face adds two whole triangles.
 pub fn unit_box() -> Result<TileMesh, TriangleCountError> {
+    unit_box_subdivided(1)
+}
+
+/// [`unit_box`] with each face cut into `cells` × `cells` quads, so that the curvature of
+/// REQ-SCN-067 — which moves each vertex on its own — bends the backdrop smoothly instead of
+/// tilting six flat quads (REQ-SCN-068).
+///
+/// `cells` is read as at least 1, which is [`unit_box`] itself.
+///
+/// # Errors
+///
+/// [`TriangleCountError`] never in practice: every cell adds two whole triangles.
+pub fn unit_box_subdivided(cells: u16) -> Result<TileMesh, TriangleCountError> {
     type Corner = (i8, i8, i8);
     // Faces given as (normal, bottom-left, top-left, top-right, bottom-right) with
     // cross(TL − BL, TR − BL) along the normal.
@@ -114,12 +149,6 @@ pub fn unit_box() -> Result<TileMesh, TriangleCountError> {
             [(-1, -1, 1), (-1, -1, -1), (1, -1, -1), (1, -1, 1)],
         ),
     ];
-    const UVS: [Vec2; 4] = [
-        Vec2::new(0.0, 0.0),
-        Vec2::new(0.0, 1.0),
-        Vec2::new(1.0, 1.0),
-        Vec2::new(1.0, 0.0),
-    ];
     let vector = |(x, y, z): Corner, scale: f32| {
         Vec3::new(
             f32::from(x) * scale,
@@ -128,22 +157,67 @@ pub fn unit_box() -> Result<TileMesh, TriangleCountError> {
         )
     };
 
-    let mut vertices = Vec::with_capacity(24);
-    let mut triangles = Vec::with_capacity(36);
+    // The four corners are (bottom-left, top-left, top-right, bottom-right), so the grid runs
+    // along BL → BR for `column` and BL → TL for `row`; the texture coordinates of the whole
+    // face stay `[0, 1]²` whatever the subdivision.
+    let cells = usize::from(cells.max(1));
+    let side = cells + 1;
+    let mut vertices = Vec::with_capacity(6 * side * side);
+    let mut triangles = Vec::with_capacity(6 * cells * cells * 6);
     for (normal, corners) in FACES {
-        #[allow(clippy::cast_possible_truncation)] // 24 vertices at most.
+        #[allow(clippy::cast_possible_truncation)] // 6 × 33 × 33 vertices at most.
         let first = vertices.len() as u32;
-        for (corner, uv) in corners.into_iter().zip(UVS) {
-            vertices.push(MeshVertex::new(
-                vector(corner, 0.5),
-                vector(normal, 1.0),
-                uv,
-            ));
+        let [bottom_left, top_left, top_right, bottom_right] =
+            corners.map(|corner| vector(corner, 0.5));
+        let outward = vector(normal, 1.0);
+        #[allow(clippy::cast_precision_loss)] // `cells` is 1 to 32.
+        let step = 1.0 / cells as f32;
+        for row in 0..side {
+            #[allow(clippy::cast_precision_loss)] // 0 to 32.
+            let v = row as f32 * step;
+            // The bottom and top edges of this row, so that a cell's corners sit exactly on the
+            // bilinear patch of the face and two neighbouring faces share their boundary.
+            let left = lerp(bottom_left, top_left, v);
+            let right = lerp(bottom_right, top_right, v);
+            for column in 0..side {
+                #[allow(clippy::cast_precision_loss)] // 0 to 32.
+                let u = column as f32 * step;
+                vertices.push(MeshVertex::new(
+                    lerp(left, right, u),
+                    outward,
+                    Vec2::new(u, v),
+                ));
+            }
         }
-        triangles.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
+        for row in 0..cells {
+            for column in 0..cells {
+                #[allow(clippy::cast_possible_truncation)] // 6 × 33 × 33 at most.
+                let corner = first + (row * side + column) as u32;
+                #[allow(clippy::cast_possible_truncation)] // 33 at most.
+                let up = side as u32;
+                // The same winding as the undivided face: BL, TL, TR then BL, TR, BR.
+                triangles.extend([
+                    corner,
+                    corner + up,
+                    corner + up + 1,
+                    corner,
+                    corner + up + 1,
+                    corner + 1,
+                ]);
+            }
+        }
     }
 
     TileMesh::new(vertices, triangles)
+}
+
+/// `a + (b − a) · t`, component by component.
+fn lerp(a: Vec3, b: Vec3, t: f32) -> Vec3 {
+    Vec3::new(
+        a.x + (b.x - a.x) * t,
+        a.y + (b.y - a.y) * t,
+        a.z + (b.z - a.z) * t,
+    )
 }
 
 /// The quad of the NES plane for the 2D mode (AMD-009): `x ∈ [0, 256]`, `y ∈ [8, 248]`,
@@ -181,14 +255,43 @@ pub const fn picture_size(len: usize, height: usize) -> Option<(usize, usize)> {
 pub type WidePictureQuad = ((u16, u16), Arc<TileMesh>);
 
 /// The quad for the widescreen 2D-mode picture `picture`, reusing `cached` when it was made for
-/// the same margin; `None` for a 256-pixel picture.
+/// the same margin and the same subdivision; `None` for a 256-pixel picture at subdivision 1.
 ///
 /// # Errors
 ///
-/// [`TriangleCountError`] never in practice: the quad is two whole triangles.
+/// [`TriangleCountError`] never in practice: every cell is two whole triangles.
 pub fn wide_quad_for(
     picture: &[u8],
     height: usize,
+    cached: Option<WidePictureQuad>,
+) -> Result<Option<WidePictureQuad>, TriangleCountError> {
+    wide_quad_for_subdivided_cached(picture, height, 1, cached)
+}
+
+/// [`wide_quad_for`] with the cells of AMD-046 REQ-SCN-074, without a cache.
+///
+/// # Errors
+///
+/// As [`wide_quad_for`].
+pub fn wide_quad_for_subdivided(
+    picture: &[u8],
+    height: usize,
+    cells: u16,
+) -> Result<Option<WidePictureQuad>, TriangleCountError> {
+    wide_quad_for_subdivided_cached(picture, height, cells, None)
+}
+
+/// [`wide_quad_for`] with the cells of AMD-046 REQ-SCN-074: a quad of `cells` × `cells` cells,
+/// so that the curvature bends the picture smoothly. A subdivision above 1 is a quad of its own
+/// even at margin 0, which is why the 256-pixel shortcut only applies at 1.
+///
+/// # Errors
+///
+/// As [`wide_quad_for`].
+pub fn wide_quad_for_subdivided_cached(
+    picture: &[u8],
+    height: usize,
+    cells: u16,
     cached: Option<WidePictureQuad>,
 ) -> Result<Option<WidePictureQuad>, TriangleCountError> {
     let Some((width, height)) = picture_size(picture.len(), height) else {
@@ -209,7 +312,7 @@ pub fn wide_quad_for(
     }
     Ok(Some((
         margins,
-        Arc::new(picture_quad_wide(margin, margin_y)?),
+        Arc::new(picture_quad_subdivided(margin, margin_y, cells)?),
     )))
 }
 
@@ -221,25 +324,72 @@ pub fn wide_quad_for(
 ///
 /// [`TriangleCountError`] never in practice: the quad is two whole triangles.
 pub fn picture_quad_wide(margin: u16, margin_y: u16) -> Result<TileMesh, TriangleCountError> {
+    picture_quad_subdivided(margin, margin_y, 1)
+}
+
+/// [`picture_quad_wide`] cut into `cells` × `cells` cells (AMD-046 REQ-SCN-074: the rectangle of
+/// the 2D mode is subdivided into at least 32 × 32 so that the curvature bends it smoothly).
+///
+/// `cells` is read as at least 1, which is the single quad of [`picture_quad_wide`] — the shape
+/// the rectangle keeps whenever no curvature is active, so that the draw-call and vertex counts
+/// of the default settings are untouched.
+///
+/// # Errors
+///
+/// [`TriangleCountError`] never in practice: every cell is two whole triangles.
+pub fn picture_quad_subdivided(
+    margin: u16,
+    margin_y: u16,
+    cells: u16,
+) -> Result<TileMesh, TriangleCountError> {
     let left = -f32::from(margin);
     let width = 256.0 + (2.0 * f32::from(margin));
     let height = 240.0 + (2.0 * f32::from(margin_y));
     let top = geometry::SCENE_HEIGHT + f32::from(margin_y);
     let bottom = top - height;
     let normal = Vec3::new(0.0, 0.0, -1.0);
+    let right = left + width;
 
     // Same winding as the −Z face of the unit box (REQ-E3D-505): bottom-left, top-left,
-    // top-right, bottom-right.
-    let right = left + width;
-    let vertices = vec![
-        MeshVertex::new(Vec3::new(left, bottom, 0.0), normal, Vec2::new(0.0, height)),
-        MeshVertex::new(Vec3::new(left, top, 0.0), normal, Vec2::new(0.0, 0.0)),
-        MeshVertex::new(Vec3::new(right, top, 0.0), normal, Vec2::new(width, 0.0)),
-        MeshVertex::new(
-            Vec3::new(right, bottom, 0.0),
-            normal,
-            Vec2::new(width, height),
-        ),
-    ];
-    TileMesh::new(vertices, vec![0, 1, 2, 0, 2, 3])
+    // top-right, bottom-right. The texture coordinates are in **texels** of the picture
+    // (REQ-E3D-410), with v counted downwards from the top row.
+    let cells = usize::from(cells.max(1));
+    let side = cells + 1;
+    #[allow(clippy::cast_precision_loss)] // `cells` is 1 to 32.
+    let step = 1.0 / cells as f32;
+    let mut vertices = Vec::with_capacity(side * side);
+    let mut triangles = Vec::with_capacity(cells * cells * 6);
+    for row in 0..side {
+        #[allow(clippy::cast_precision_loss)] // 0 to 32.
+        let up = row as f32 * step;
+        let scene_y = bottom + (top - bottom) * up;
+        let texel_v = height * (1.0 - up);
+        for column in 0..side {
+            #[allow(clippy::cast_precision_loss)] // 0 to 32.
+            let across = column as f32 * step;
+            let scene_x = left + (right - left) * across;
+            vertices.push(MeshVertex::new(
+                Vec3::new(scene_x, scene_y, 0.0),
+                normal,
+                Vec2::new(width * across, texel_v),
+            ));
+        }
+    }
+    for row in 0..cells {
+        for column in 0..cells {
+            #[allow(clippy::cast_possible_truncation)] // 33 × 33 at most.
+            let corner = (row * side + column) as u32;
+            #[allow(clippy::cast_possible_truncation)] // 33 at most.
+            let up = side as u32;
+            triangles.extend([
+                corner,
+                corner + up,
+                corner + up + 1,
+                corner,
+                corner + up + 1,
+                corner + 1,
+            ]);
+        }
+    }
+    TileMesh::new(vertices, triangles)
 }

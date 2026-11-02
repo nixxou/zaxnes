@@ -5,6 +5,7 @@ use zax_engine3d::draw_list::FrameDrawList;
 use zax_engine3d::frame::ShapeId;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::ConversionSettings;
+use zax_engine3d::space_bend::SpaceBend;
 use zax_profiles::values::Vec4F;
 
 use crate::camera::SceneCamera;
@@ -227,6 +228,14 @@ pub struct SceneState {
     pub backdrop: BackdropState,
     /// The camera.
     pub camera: SceneCamera,
+    /// The curvature of the scene (AMD-043 REQ-SCN-067), built from the four settings of
+    /// REQ-SCN-066 when one of them changes. The identity by default, and the renderer tests
+    /// `is_identity` once per frame: at the default settings the curvature costs the CPU one
+    /// comparison and the GPU nothing at all, the flat shader variants staying in use.
+    pub bend: SpaceBend,
+    /// Whether the flat rectangle of the 2D mode bends with the scene (AMD-046 REQ-SCN-074).
+    /// True by default; in 3D mode it has no effect.
+    pub bend_two_dimensional_mode: bool,
     /// The four clip margins `(c0, c1, c2, c3)` in scene units (REQ-SCN-003, DEC-R2-T1). They
     /// come from the profile at game load and Lua can change them during the game.
     pub clipping: Vec4F,
@@ -279,6 +288,8 @@ impl Default for SceneState {
             light: LightState::default(),
             backdrop: BackdropState::default(),
             camera: SceneCamera::new(),
+            bend: SpaceBend::NONE,
+            bend_two_dimensional_mode: true,
             clipping: ConversionSettings::DEFAULT_CLIPPING,
             margin: 0.0,
             margin_y: 0.0,

@@ -14,5 +14,14 @@ void main()
     }
 
     vec4 scene = uModel * vec4(local, 1.0);
+
+#ifdef ZAX_BEND
+    // REQ-SCN-068: the shadow pass is bent too, so the shadows follow the curved surface
+    // instead of sliding off it.
+    mat3 bendJacobian;
+    vec3 placed = zaxBend(scene.xyz, bendJacobian);
+    gl_Position = uLightViewProjection * vec4(placed.x, placed.y, -placed.z, 1.0);
+#else
     gl_Position = uLightViewProjection * vec4(scene.x, scene.y, -scene.z, 1.0);
+#endif
 }

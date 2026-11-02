@@ -21,6 +21,7 @@ pub mod occlusion;
 pub mod offscreen;
 mod renderer;
 pub mod scene;
+pub mod scene_export;
 pub mod shadow_volume;
 pub mod sky;
 pub mod smoothing;
@@ -32,6 +33,18 @@ pub mod wgpu_backend;
 
 pub use gl::api::GlError;
 pub use renderer::{RenderError, SceneRenderer};
+
+/// The GLSL sources and how the variants of each pass are put together.
+///
+/// Public so that the variant selection of AMD-043 REQ-SCN-067 can be checked without a GL
+/// context: the curvature is a `#define` compiled into its own programs, never a uniform tested
+/// per vertex, and what the flat variant does **not** carry is as much the requirement as what
+/// the curvature variant does.
+pub mod shaders {
+    pub use crate::gl::shaders::{
+        assemble, fantasy, gradient, scene, shadow, ProgramSource, Stage,
+    };
+}
 
 /// Stable identifier of this module.
 pub const NAME: &str = "Zax.Render";
