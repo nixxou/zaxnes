@@ -50,10 +50,15 @@ pub struct NesBus {
     apu_quiet: u32,
     /// Whether the cartridge has expansion audio, asked once in [`NesBus::attach`]. For such a
     /// board the APU is never let lag (`apu_quiet` stays 0) and its `M` is pushed in before the
-    /// cycle it belongs to is run (REQ-CORE-073, REQ-CORE-075). Only the MMC5 sets it, and the
-    /// flag is read in [`NesBus::catch_up_apu`], which the frame loop reaches rarely for every
-    /// other board, so nothing of this costs anything for them.
+    /// cycle it belongs to is run (REQ-CORE-073, REQ-CORE-075). Only the MMC5 sets it; it is
+    /// never read on the per-cycle path, `apu_batching` standing in for it there.
     expansion_audio: bool,
+    /// `deferred_ppu && !expansion_audio`: whether the APU may lag at all, kept as one flag so
+    /// that the per-cycle catch-up tests it **instead of** `deferred_ppu` rather than on top of
+    /// it. Everything the MMC5's audio needs sits on the other side of that single test, out of
+    /// line, so a board without expansion audio pays exactly what it paid before AMD-054
+    /// (see [`NesBus::catch_up_apu`]).
+    apu_batching: bool,
     /// Whether the instruction being run was fetched from the extension's execution zone: its
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
@@ -92,6 +97,7 @@ impl NesBus {
             deferred_ppu: false,
             apu_lag: 0,
             expansion_audio: false,
+            apu_batching: false,
             apu_quiet: 0,
             zone_instruction: false,
         }
@@ -181,6 +187,7 @@ impl NesBus {
         self.expansion_audio = cartridge
             .as_ref()
             .is_some_and(Cartridge::has_expansion_audio);
+        self.apu_batching = self.deferred_ppu && !self.expansion_audio;
         if !self.expansion_audio {
             // A board with no expansion audio leaves the APU's `M` at 0 for good.
             self.apu.set_expansion_level(0);
@@ -302,26 +309,55 @@ impl NesBus {
     /// Everything else waits for [`NesBus::sync_apu`]: every access to $4000-$401F but
     /// $4014 and $4016, the DMC fetch's byte, and the end of the frame loop. Outside
     /// [`NesBus::defer_ppu`] the APU runs on every cycle, as before.
+    ///
+    /// This is a per-cycle path: it is inlined into [`NesBus::tick`] and runs on about half the
+    /// CPU cycles of a frame (14 894 of 29 780, measured on `nestest`), so one instruction here
+    /// is about 15 000 per emulated frame. Everything the MMC5's expansion audio needs therefore
+    /// sits behind the **single** `apu_batching` test, which replaces the `deferred_ppu` test
+    /// this function had before AMD-054 rather than adding to it, in a function of its own that
+    /// is never inlined — so neither the test nor the register pressure of that code reaches
+    /// `tick` for a board without expansion audio (REQ-CORE-075's "no cost for other boards").
     fn catch_up_apu(&mut self) {
+        if !self.apu_batching {
+            // Either the board has expansion audio, or the PPU is not being batched at all.
+            self.catch_up_apu_in_step();
+            return;
+        }
+
         if self.apu_lag > 0 {
-            self.push_expansion_audio();
             self.apu.run_cpu_cycles(self.apu_lag);
             self.apu_lag = 0;
         }
-        self.apu_quiet = if self.deferred_ppu && !self.expansion_audio {
-            self.apu.quiet_cycles()
-        } else {
-            // A board with expansion audio keeps the APU in step, so that the `M` just pushed
-            // is the one of the cycle about to run (REQ-CORE-075).
-            0
-        };
+        self.apu_quiet = self.apu.quiet_cycles();
+    }
+
+    /// The catch-up of a cycle the APU may not lag past: it runs the cycles owed and leaves
+    /// `apu_quiet` at 0, so the next cycle catches up again.
+    ///
+    /// Two cases reach it, neither of them the frame loop of a board without expansion audio:
+    /// outside [`NesBus::defer_ppu`] the APU runs on every cycle as it always has, and a board
+    /// with expansion audio keeps the APU in step so that the `M` just pushed is the one of the
+    /// cycle about to run (REQ-CORE-073, REQ-CORE-075). It is kept out of line on purpose: its
+    /// body is what [`NesBus::tick`]'s prologue paid for in RU-3a.
+    #[inline(never)]
+    fn catch_up_apu_in_step(&mut self) {
+        if self.apu_lag > 0 {
+            if self.expansion_audio {
+                self.push_expansion_audio();
+            }
+            self.apu.run_cpu_cycles(self.apu_lag);
+            self.apu_lag = 0;
+        }
+        self.apu_quiet = 0;
     }
 
     /// Catches the APU up before an access that may see or change it; the next cycle is
     /// run in step and recomputes how far it may lag.
     fn sync_apu(&mut self) {
         if self.apu_lag > 0 {
-            self.push_expansion_audio();
+            if self.expansion_audio {
+                self.push_expansion_audio();
+            }
             self.apu.run_cpu_cycles(self.apu_lag);
             self.apu_lag = 0;
         }
@@ -329,23 +365,30 @@ impl NesBus {
     }
 
     /// Hands the APU the board's `M` for the cycles it is about to run (REQ-CORE-073,
-    /// REQ-CORE-075). Costs one test of a `bool` for a cartridge without expansion audio, and
-    /// is not on the per-cycle path at all while the frame loop batches the APU.
+    /// REQ-CORE-075). The callers test `expansion_audio` themselves, so this body only ever
+    /// runs for the MMC5.
+    ///
+    /// It is kept **out of line** because [`NesBus::sync_apu`] is inlined into
+    /// [`NesBus::perform_dmc_dma`], which is inlined into [`NesBus::tick`]: inlined here too,
+    /// its cartridge `Option`, its devirtualised `expansion_audio_output` and its
+    /// `set_expansion_level` raise the register pressure of the whole of `tick` and cost every
+    /// CPU cycle of every board one more saved register (what RU-3a measured as +15.7 % on
+    /// `tick`). Out of line it costs the boards that are not an MMC5 nothing at all.
+    #[inline(never)]
     fn push_expansion_audio(&mut self) {
-        if self.expansion_audio {
-            if let Some(level) = self
-                .cartridge
-                .as_ref()
-                .and_then(Cartridge::expansion_audio_output)
-            {
-                self.apu.set_expansion_level(level);
-            }
+        if let Some(level) = self
+            .cartridge
+            .as_ref()
+            .and_then(Cartridge::expansion_audio_output)
+        {
+            self.apu.set_expansion_level(level);
         }
     }
 
     /// Lets the PPU run in batches until [`NesBus::end_deferred_ppu`] (the frame loop).
     pub fn defer_ppu(&mut self) {
         self.deferred_ppu = true;
+        self.apu_batching = !self.expansion_audio;
         self.sync_ppu();
         self.sync_apu();
     }
@@ -353,6 +396,7 @@ impl NesBus {
     /// Catches the PPU up and returns to running it on every cycle.
     pub fn end_deferred_ppu(&mut self) {
         self.deferred_ppu = false;
+        self.apu_batching = false;
         self.sync_ppu();
         self.sync_apu();
     }
