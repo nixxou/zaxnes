@@ -25,6 +25,7 @@ pub mod shadow_volume;
 pub mod sky;
 pub mod smoothing;
 pub mod statistics;
+pub mod sync;
 pub mod target;
 #[cfg(feature = "wgpu")]
 pub mod wgpu_backend;

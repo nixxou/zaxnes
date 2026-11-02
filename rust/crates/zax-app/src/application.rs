@@ -22,6 +22,7 @@ use zax_profiles::format;
 use zax_render::assets::{NeutralSceneAssets, SceneAssets};
 use zax_render::controls;
 use zax_render::scene::{SceneFrame, SceneState};
+use zax_render::sync::GpuFrameQueue;
 use zax_render::SceneRenderer;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -192,6 +193,10 @@ struct Running {
     // Field order is drop order: the renderer and the host (whose view is the scene picture)
     // go before the window, whose GL context or wgpu device they were made on.
     graphics: Graphics,
+    /// Bounds the rendered frames the GPU keeps waiting for display (AMD-052 REQ-LOOP-077),
+    /// `None` outside the OpenGL renderer and on a handheld at the default depth (see
+    /// [`Running::bound_gpu_queue`]).
+    gpu_queue: Option<GpuFrameQueue>,
     input: SdlInput,
     source: DesktopInputSource,
     audio: Option<AudioOutput>,
@@ -354,10 +359,17 @@ impl Running {
         };
         let mut ui = ImguiFrontend::new(ui_graphics, &host, options, height)?;
         ui.set_clipboard(window.clipboard());
+        // REQ-LOOP-077 is presentation, so it only exists for the renderer that presents here.
+        let gpu_queue = match &graphics {
+            Graphics::Gl { gl, .. } => Some(GpuFrameQueue::new(Rc::clone(gl))),
+            #[cfg(feature = "wgpu")]
+            Graphics::Wgpu(_) => None,
+        };
         Ok(Self {
             options: options.clone(),
             ui,
             graphics,
+            gpu_queue,
             input,
             source,
             audio,
@@ -435,12 +447,14 @@ impl Running {
             &mut self.window,
             &mut self.pacing,
         );
+        let bounded = self.wait_for_the_gpu_queue();
         let overlap = if pipelined {
             self.draw_pipelined(emulated, width, height, real_f)?
         } else {
             self.draw(emulated, width, height, real_f)?;
             Duration::ZERO
         };
+        self.close_the_gpu_queue(bounded);
         self.carry_out_ui_effects();
         let mark = self.clock.start();
         pump_audio(&mut self.host, self.audio.as_mut(), real);
@@ -702,6 +716,53 @@ impl Running {
         } else {
             "frame profiler off"
         });
+    }
+
+    /// AMD-052 REQ-LOOP-077: waits until the GPU holds fewer rendered frames than the depth in
+    /// force. It runs after the emulated frames of the tick and before the first drawing
+    /// command, so that it cannot shift the cadence of the emulated frames (REQ-LOOP-010).
+    /// Returns whether this frame is bounded at all, for [`Self::close_the_gpu_queue`].
+    fn wait_for_the_gpu_queue(&mut self) -> bool {
+        let Some(depth) = self.bound_gpu_queue() else {
+            return false;
+        };
+        if let Some(queue) = self.gpu_queue.as_mut() {
+            let mark = self.clock.start();
+            queue.begin_frame(depth);
+            self.clock.stop(Stage::Wait, mark);
+            return true;
+        }
+        false
+    }
+
+    /// Places the fence the next [`Self::wait_for_the_gpu_queue`] waits on, after the frame's
+    /// last drawing command (AMD-052 REQ-LOOP-077).
+    fn close_the_gpu_queue(&mut self, bounded: bool) {
+        if bounded {
+            if let Some(queue) = self.gpu_queue.as_mut() {
+                queue.end_frame();
+            }
+        }
+    }
+
+    /// The depth the GPU frame queue of AMD-052 REQ-LOOP-077 is to be bounded at this frame, or
+    /// `None` when no fence is to be issued at all.
+    ///
+    /// **Handheld (D).** On `PortMaster` and Android the default depth of 2 issues **no fence
+    /// call at all** and keeps the behaviour the device has today (owner decision): that depth
+    /// is the driver's own queue, and the Mali keeps three frames of its own, so bounding it
+    /// could cost frames rather than latency. The depth of 1 — the one a player picks to lower
+    /// the latency — works on every build, there as on the desktop.
+    fn bound_gpu_queue(&self) -> Option<i32> {
+        let depth = self
+            .host
+            .settings()
+            .max_queued_frames()
+            .clamp(zax_render::sync::MIN_DEPTH, zax_render::sync::MAX_DEPTH);
+        if self.options.handheld && depth >= zax_render::sync::MAX_DEPTH {
+            return None;
+        }
+        Some(depth)
     }
 
     /// Whether the next frame is pipelined: `emu.pipeline`, for a game running in 3D whose

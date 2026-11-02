@@ -41,7 +41,15 @@ fn counts(scene: &RenderScene) -> [u32; 13] {
 #[test]
 fn synthetic_captures_match_the_csharp_goldens() {
     let output = std::env::temp_dir().join(format!("zax-harness-render-{}", std::process::id()));
-    let arguments = ["--out".to_owned(), output.display().to_string()];
+    // The goldens were captured with the anti-aliasing off, which was the default of both the
+    // setting and the option before AMD-052 REQ-PERS-089 took the setting's — and with it the
+    // option's (Q-087 point 1) — to 1. The comparison asks for the state they were made in.
+    let arguments = [
+        "--out".to_owned(),
+        output.display().to_string(),
+        "--anti-alias".to_owned(),
+        "0".to_owned(),
+    ];
     let options = Options::parse(&arguments).unwrap();
     render::run(&options).unwrap();
 

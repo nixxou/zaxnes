@@ -231,6 +231,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.ui.load_states", "Charger un état…"),
     // ------------------------------------------- labels of SPEC-09 settings
     ("setting.video.frame_rate", "Fréquence de rendu"),
+    // AMD-052 §3 point 10 : juste après « Fréquence de rendu », dans le groupe Vidéo.
+    ("setting.video.max_queued_frames", "Frames en file GPU"),
     ("setting.video.skip_frame", "Rendu accéléré (saut d'images)"),
     ("setting.video.vsync", "Synchronisation verticale"),
     ("setting.video.render_method", "Méthode de rendu"),

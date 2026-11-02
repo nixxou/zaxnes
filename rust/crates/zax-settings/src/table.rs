@@ -323,11 +323,14 @@ fn video_scaling(out: &mut Vec<SettingDescriptor>) {
         .with_field("29"),
     );
     let anti_alias_labels = vec![opt(0, "None"), opt(1, "FFAA"), opt(2, "SMAA")];
+    // AMD-052 REQ-PERS-089: shipped **on**, which is MSAA 4x by AMD-032 §2 — a divergence
+    // **(D)** from the original, whose own default is 0 and which has no effect at all
+    // (REQ-PERS-017). The handheld keeps 0 (`ui/handheld/defaults.rs`).
     out.push(
         SettingDescriptor::new(
             SettingId::VideoAntiAlias,
             SettingKind::Enum,
-            SettingValue::Enum(0),
+            SettingValue::Enum(1),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Video,

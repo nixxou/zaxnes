@@ -19,6 +19,15 @@ use zax_settings::values::SettingValue;
 #[test]
 fn req_pers_017_a_change_of_anti_alias_reaches_the_scene_at_once() {
     let mut harness = LoopHarness::create();
+    // The harness builds the host without the one-off mirror the application runs at start-up
+    // (`publish_settings_to_scene`), so its scene begins at one sample whatever the setting's
+    // default is; what this test measures is that a *change* reaches the scene at once. The
+    // setting now starts at 1 (AMD-052 REQ-PERS-089), so the first change made here is to 0 —
+    // writing the value a setting already holds is not a change and dispatches nothing.
+    assert_eq!(1, harness.host.scene().settings.anti_alias_samples());
+    harness
+        .host
+        .update_settings(|model| model.set_anti_alias(0));
     assert_eq!(1, harness.host.scene().settings.anti_alias_samples());
     harness
         .host
@@ -40,6 +49,9 @@ fn req_pers_017_a_change_of_anti_alias_reaches_the_scene_at_once() {
 #[test]
 fn req_pers_017_the_anti_alias_option_stays_in_its_domain() {
     let mut settings = SettingsModel::new();
+    // The default is 1 since AMD-052 REQ-PERS-089.
+    assert_eq!(1, settings.anti_alias());
+    settings.set_anti_alias(0);
     assert_eq!(0, settings.anti_alias());
     settings.set_anti_alias(2);
     assert_eq!(2, settings.anti_alias());

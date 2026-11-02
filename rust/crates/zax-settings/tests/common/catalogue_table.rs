@@ -93,7 +93,8 @@ fn video_and_render_rows() -> Vec<CatalogueRow> {
             U,
             Imm,
         ),
-        row("video.anti_alias", Some("AntiAlias"), Choice, "0", U, Imm),
+        // AMD-052 REQ-PERS-089: the "Défaut" column of SPEC-09 §4.1.1 becomes 1 **(D)**.
+        row("video.anti_alias", Some("AntiAlias"), Choice, "1", U, Imm),
         // AMD-052 §3 point 7 (REQ-LOOP-077); its Lua path is AMD-059's (REQ-LUA-116).
         row(
             "video.max_queued_frames",

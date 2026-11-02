@@ -279,3 +279,68 @@ fn assert_intervals_near(gaps: &[f64], period: f64) {
         period * 1000.0
     );
 }
+
+/// REQ-PERS-089 (AMD-052), a divergence **(D)**: on a fresh user root `video.anti_alias` is 1,
+/// which is MSAA 4x by AMD-032 §2, and a settings file that holds 0 keeps 0 (REQ-PERS-020).
+#[test]
+fn req_pers_089_the_anti_aliasing_is_on_in_a_fresh_root() {
+    let descriptor = catalogue::descriptor(SettingId::VideoAntiAlias);
+    assert_eq!(&SettingValue::Enum(1), descriptor.default_value());
+
+    let model = zax_settings::model::SettingsModel::new();
+    assert_eq!(1, model.anti_alias());
+    assert_eq!(
+        4,
+        zax_render::geometry::anti_alias_samples(model.anti_alias()),
+        "AMD-032 §2: the value 1 is MSAA 4x"
+    );
+
+    // A value the user saved wins over the new default, whichever way round.
+    let mut saved = zax_settings::model::SettingsModel::new();
+    saved.set_anti_alias(0);
+    assert_eq!(0, saved.anti_alias());
+    assert_eq!(
+        1,
+        zax_render::geometry::anti_alias_samples(saved.anti_alias())
+    );
+
+    // The handheld keeps the anti-aliasing off, where the multi-sampling costs fill rate.
+    let mut handheld = zax_settings::model::SettingsModel::new();
+    zax_app::ui::handheld::defaults::apply(&mut handheld);
+    assert_eq!(0, handheld.anti_alias());
+}
+
+/// AMD-052 REQ-LOOP-074 and the owner's decision on the handheld default of `emu.catch_up`: the
+/// desktop takes the 2 of the amendment, the handheld keeps 5.
+#[test]
+fn req_loop_074_the_catch_up_default_is_two_on_the_desktop_and_five_on_a_handheld() {
+    let desktop = zax_settings::model::SettingsModel::new();
+    assert_eq!(2, desktop.get(SettingId::EmuCatchUp).as_int());
+
+    let mut handheld = zax_settings::model::SettingsModel::new();
+    zax_app::ui::handheld::defaults::apply(&mut handheld);
+    assert_eq!(5, handheld.get(SettingId::EmuCatchUp).as_int());
+}
+
+/// REQ-LOOP-077: the setting leaves the list of the ones the desktop options window hides, which
+/// is what RU-2 left for this lot, and it carries its label in both languages (AMD-052 §3
+/// point 10).
+#[test]
+fn req_loop_077_the_setting_is_offered_in_the_options_window() {
+    assert!(
+        !zax_app::ui::options::EXCLUDED.contains(&SettingId::VideoMaxQueuedFrames),
+        "the setting is no longer hidden from the options window"
+    );
+    let descriptor = catalogue::descriptor(SettingId::VideoMaxQueuedFrames);
+    assert!(zax_app::ui::options::is_shown(descriptor));
+
+    for language in [
+        zax_app::ui::strings::UiLanguage::English,
+        zax_app::ui::strings::UiLanguage::French,
+    ] {
+        assert!(
+            zax_app::ui::strings::lookup(language, "setting.video.max_queued_frames").is_some(),
+            "{language:?} has no label for the setting"
+        );
+    }
+}

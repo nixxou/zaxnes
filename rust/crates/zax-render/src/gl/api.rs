@@ -11,8 +11,8 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use glow::{
-    Buffer, Framebuffer, HasContext, PixelUnpackData, Program, ProgramBinary, Query, Renderbuffer,
-    Shader, Texture, UniformLocation, VertexArray,
+    Buffer, Fence, Framebuffer, HasContext, PixelUnpackData, Program, ProgramBinary, Query,
+    Renderbuffer, Shader, Texture, UniformLocation, VertexArray,
 };
 use thiserror::Error;
 
@@ -724,5 +724,41 @@ impl Gl {
     pub fn delete_renderbuffer(&self, renderbuffer: Renderbuffer) {
         // SAFETY: renderer contract; the renderbuffer is live.
         unsafe { self.context.delete_renderbuffer(renderbuffer) }
+    }
+
+    // ---------------------------------------------------------------- synchronisation
+
+    /// Places a synchronisation object after the commands issued so far (`glFenceSync` with
+    /// `GL_SYNC_GPU_COMMANDS_COMPLETE`), which is signalled once the GPU has finished them.
+    /// `None` when the driver refuses one.
+    ///
+    /// Core since GL 3.2 and GLES 3.0, so it needs no extension (REQ-SCN-056). The frontend
+    /// bounds the queue of rendered frames with it (AMD-052 REQ-LOOP-077).
+    #[must_use]
+    pub fn fence_sync(&self) -> Option<Fence> {
+        // SAFETY: renderer contract; a plain creation call.
+        unsafe { self.context.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) }.ok()
+    }
+
+    /// Waits at most `timeout_nanoseconds` for `fence` (`glClientWaitSync`, with
+    /// `GL_SYNC_FLUSH_COMMANDS_BIT` so that the fence cannot wait on an unflushed queue), and
+    /// says whether it is signalled. A driver that fails the wait reports `true`, so that a
+    /// caller cannot loop on it for ever.
+    pub fn wait_for_fence(&self, fence: Fence, timeout_nanoseconds: i32) -> bool {
+        // SAFETY: renderer contract; the fence was made by this context and is not deleted.
+        let result = unsafe {
+            self.context
+                .client_wait_sync(fence, glow::SYNC_FLUSH_COMMANDS_BIT, timeout_nanoseconds)
+        };
+        matches!(
+            result,
+            glow::ALREADY_SIGNALED | glow::CONDITION_SATISFIED | glow::WAIT_FAILED
+        )
+    }
+
+    /// Drops a synchronisation object (`glDeleteSync`).
+    pub fn delete_fence(&self, fence: Fence) {
+        // SAFETY: renderer contract; the fence was made by this context and is not deleted.
+        unsafe { self.context.delete_sync(fence) }
     }
 }

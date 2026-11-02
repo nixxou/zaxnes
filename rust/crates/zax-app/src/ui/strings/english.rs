@@ -231,6 +231,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.ui.load_states", "Load a state…"),
     // ------------------------------------------- labels of SPEC-09 settings
     ("setting.video.frame_rate", "Render rate"),
+    // AMD-052 §3 point 10: right after "Render Rate", in the Video group.
+    ("setting.video.max_queued_frames", "Max Queued Frames"),
     ("setting.video.skip_frame", "Accelerated rendering (frame skip)"),
     ("setting.video.vsync", "Vertical synchronisation"),
     ("setting.video.render_method", "Render method"),

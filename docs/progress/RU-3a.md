@@ -12,8 +12,8 @@ Branch `rustupdated`. The application is the Rust workspace `rust/`; the .NET lo
 | 2 | AMD-044: the soft reset of the core, the command, the input action and the menu | done — `cf75778` |
 | 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | done — `a2d6d47` |
 | 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | done — `a4b4b34` |
-| 5 | AMD-052: the catch-up limit and the clock reset on a speed change | done |
-| 6 | AMD-052: the GPU frame queue and the anti-aliasing default | todo |
+| 5 | AMD-052: the catch-up limit and the clock reset on a speed change | done — `db9cac8` |
+| 6 | AMD-052: the GPU frame queue and the anti-aliasing default | done |
 | 7 | Closing: fmt, clippy, crate tests, full PPU goldens, after benchmarks, journal | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -369,3 +369,63 @@ SPEC copies: SPEC-07 §3.2 — REQ-LOOP-012's statement and criterion amended, t
 line added to REQ-LOOP-013, REQ-LOOP-074 and REQ-LOOP-075 added, and the T5 row of §5 rewritten.
 SPEC-09 — the `video.anti_alias` row takes default **1**, REQ-PERS-089 is added after
 REQ-PERS-024, and §4.6 gains the `zaxnes_video_anti_alias` line.
+
+### Step 6 — AMD-052, the GPU frame queue and the anti-aliasing default
+
+**Where the GL calls live.** `zax-app` holds **no `unsafe` at all**, and the workspace's rule is
+that GL calls are confined to `zax-render/src/gl/api.rs` (its module header says so). The three
+fence calls went there as safe methods with the module's `SAFETY:` contract — `fence_sync`,
+`wait_for_fence`, `delete_fence` — and the queue itself is a new `zax_render::sync::GpuFrameQueue`
+over them. So the app gained a type, not an `unsafe` block, and the lot's "safe Rust" rule holds
+without an option or a second path.
+
+`GpuFrameQueue` is the .NET `GpuFrameQueue` of V2-14: at most two outstanding fences, oldest
+first; `begin_frame(depth)` retires until fewer than `depth` are left; `end_frame` places the
+fence; a driver that refuses one leaves the queue unbounded, which is depth 2's behaviour anyway.
+The wait is sliced at 100 ms, 20 times, so a lost fence cannot hang the program, and
+`WAIT_FAILED` counts as signalled for the same reason. `Drop` flushes. `glClientWaitSync` is
+called with `GL_SYNC_FLUSH_COMMANDS_BIT`, so the fence can never wait on an unflushed queue.
+
+In the loop (`application.rs`): `wait_for_the_gpu_queue` runs **after** the emulated frames of
+the tick and before the first drawing command, `close_the_gpu_queue` after the last one. That
+placement is the requirement's: the frame clock is absolute, so the wait cannot shift the
+emulated cadence (REQ-LOOP-010) and is not a delay in the sense of REQ-LOOP-074 — it only eats
+slack. The wait is counted under the profiler's `Wait` stage. The queue exists only for the
+OpenGL renderer; the wgpu backend presents through its own swap chain.
+
+**Handheld (D), owner decision.** `bound_gpu_queue` returns `None` — **no fence call at all** —
+on a handheld at the default depth of 2, so those builds keep exactly today's behaviour: that
+depth is the driver's own queue, and the Mali keeps three frames of its own, so bounding it could
+cost frames rather than latency. The depth of 1, which is what a player picks to lower the
+latency, works on every build. Recorded here and in the notes of the spec copy.
+
+**The anti-aliasing default** (REQ-PERS-089, a divergence **(D)**): `video.anti_alias` goes from
+0 to **1**, which is MSAA 4× by AMD-032 §2. The handheld override to 0 was already in
+`ui/handheld/defaults.rs` from an earlier lot, so handhelds are unaffected. Q-087 point 1 is
+followed: the harness's `--anti-alias` default now **reads the setting's own default from the
+catalogue**, so the two cannot diverge and a plain `zax-harness render` reports MSAA 4×. The
+synthetic-capture golden test passes `--anti-alias 0` explicitly, since the C# goldens it
+compares against were captured with the anti-aliasing off — without that it would be comparing
+multi-sampled captures with single-sampled references.
+
+`video.max_queued_frames` leaves `EXCLUDED` (37 entries now) and gets its options-window label in
+both languages, `Max Queued Frames` / `Frames en file GPU`, placed after "Render rate" as
+AMD-052 §3 point 10 asks.
+
+Three tests joined `amd052_cadence_tests.rs` (9 in all): REQ-PERS-089 (the default is 1, 1 means
+4 samples, a saved 0 wins over it, the handheld stays at 0), the two catch-up defaults (2 desktop
+/ 5 handheld), and REQ-LOOP-077's interface (out of `EXCLUDED`, shown by `is_shown`, labelled in
+both languages).
+
+Four existing tests had to follow the new default: the two `video_option_tests` anti-aliasing
+ones (writing the value a setting already holds is not a change and dispatches nothing, so the
+first write is now to 0), the catalogue reference table of SPEC-09 §4.1.1, and the
+synthetic-render golden test above.
+
+**Not done here, and why.** The fence criterion of REQ-LOOP-077 (a fence of frame *n* signalled
+before the first command of frame *n + 1* at depth 1) and its latency bench need a live GL
+context; Q-087 point 2 settles how the latency is to be measured — the bench has to be GPU-bound
+or the comparison inverts — and the .NET lot put both in its acceptance suite rather than its
+unit tests. They belong to R0's run on real hardware, as the `ZAXNES_3DSEN_INSTALL`-gated tests
+do. The queue's own logic (depth, retire order, outstanding count, latency clock) is exercised by
+the loop every frame of a desktop run.

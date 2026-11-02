@@ -59,7 +59,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 38] = [
+pub const EXCLUDED: [SettingId; 37] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -88,11 +88,11 @@ pub const EXCLUDED: [SettingId; 38] = [
     SettingId::VideoMsaa20,
     // The settings the Lua members of 3dSen 2.0 stand for whose effect belongs to a later lot
     // (RU-2: Lua surface only). Each one leaves this list in the lot that makes it act, which
-    // is also the lot that writes its row of the options window: `emu.run_ahead` and
-    // `video.max_queued_frames` in RU-3, `render.visual_style` and the twelve `render.style.*`
-    // in the Enhanced lot, the four curvature keys in the AMD-043 lot.
+    // is also the lot that writes its row of the options window: `emu.run_ahead` in RU-3b,
+    // `render.visual_style` and the twelve `render.style.*` in the Enhanced lot, the four
+    // curvature keys in the AMD-043 lot. `video.max_queued_frames` left it in RU-3a, which
+    // gave it the GPU frame queue of AMD-052 REQ-LOOP-077.
     SettingId::EmuRunAhead,
-    SettingId::VideoMaxQueuedFrames,
     SettingId::RenderVisualStyle,
     SettingId::SceneBendLr,
     SettingId::SceneBendTb,

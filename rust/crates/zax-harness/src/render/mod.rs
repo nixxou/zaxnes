@@ -87,7 +87,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --no-shadows             render with the shadows off
   --group-draws            reorder the opaque tiles by draw state (the handheld setting)
   --shadow-map <texels>    side of the shadow map (default 4096, AMD-034)
-  --anti-alias <n>         video.anti_alias: 0 off (default), 1 MSAA 4x, 2 MSAA 8x (AMD-032)
+  --anti-alias <n>         video.anti_alias: 0 off, 1 MSAA 4x (default), 2 MSAA 8x (AMD-032)
   --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049)
   --bg-color <r,g,b>       the custom background colour, 0-255 (REQ-SCN-046)
   --real-time <seconds>    real time the star twinkle uses (REQ-SCN-050)
@@ -241,7 +241,13 @@ impl Options {
             shadows: true,
             group_draws: false,
             shadow_map_size: geometry::SHADOW_MAP_SIZE,
-            anti_alias: 0,
+            // Q-087 point 1: the default follows the setting's own, so the two cannot diverge
+            // and a plain `render` reports the 4 samples REQ-PERS-089's criterion names.
+            anti_alias: zax_settings::catalogue::descriptor(
+                zax_settings::catalogue::SettingId::VideoAntiAlias,
+            )
+            .default_value()
+            .as_int(),
             skybox: SkyboxKind::Default,
             background: Rgb24::default(),
             real_time: 0.0,
