@@ -43,7 +43,7 @@ pub use renderer::{RenderError, SceneRenderer};
 /// the curvature variant does.
 pub mod shaders {
     pub use crate::gl::shaders::{
-        assemble, fantasy, gradient, scene, shadow, ProgramSource, Stage,
+        assemble, backdrop, fantasy, gradient, scene, shadow, ProgramSource, Stage,
     };
 }
 

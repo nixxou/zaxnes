@@ -31,6 +31,9 @@ const BEND: &str = include_str!("../shaders/bend.glsl");
 const SCENE_VERT: &str = include_str!("../shaders/scene.vert");
 const SCENE_FRAG: &str = include_str!("../shaders/scene.frag");
 
+/// The backdrop lighting of AMD-049 REQ-SCN-075, the fragment body of [`backdrop`].
+const BACKDROP_FRAG: &str = include_str!("../shaders/backdrop.frag");
+
 /// The body of the shadow pass.
 const SHADOW_VERT: &str = include_str!("../shaders/shadow.vert");
 const SHADOW_FRAG: &str = include_str!("../shaders/shadow.frag");
@@ -158,6 +161,35 @@ pub const fn scene(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) 
             TRANSFER,
             SCENE_FRAG,
         ]),
+    }
+}
+
+/// The backdrop pass of AMD-049 REQ-SCN-075: the same vertex stage as [`scene`] — the backdrop
+/// is placed like any other box, and bends with the scene (REQ-SCN-068) — with a fragment stage
+/// of its own that carries the almost-matt reflection model.
+///
+/// It is a **separate program**, not a fifth axis of [`scene`], for three reasons: the backdrop
+/// is one opaque run a frame, so the choice is made once and never per fragment; it carries a
+/// flat colour, so it needs neither the palette axis nor the atlas lookups nor the `discard`s;
+/// and `vUv` is unread here, so the interpolation axis of AMD-058 does not apply either. Only
+/// the curvature axis is left.
+///
+/// The program is built the first time a frame asks for it, so a player with
+/// `render.backdrop_lighting` off — or with no backdrop at all, which is every profile that does
+/// not enable it in Lua — never compiles it.
+#[must_use]
+pub const fn backdrop(bend: bool) -> ProgramSource {
+    ProgramSource {
+        name: if bend { "backdrop_bend" } else { "backdrop" },
+        vertex: Stage::of([
+            when(bend, BEND_DEFINE),
+            DEFORMATION,
+            when(bend, BEND),
+            SCENE_VERT,
+            "",
+            "",
+        ]),
+        fragment: Stage::of([when(bend, BEND_DEFINE), TRANSFER, BACKDROP_FRAG, "", "", ""]),
     }
 }
 

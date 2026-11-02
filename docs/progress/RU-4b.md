@@ -18,7 +18,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | done |
 | 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | done |
 | 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | done |
-| 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | todo |
+| 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | done |
 | 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | todo |
 | 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | todo |
 
@@ -796,3 +796,165 @@ Deleting the `.pdb` and re-running was enough.)*
   acceptance criteria and the notes of AMD-058 §1 and §3.
 - `SPEC-v1.2-INDEX`: the REQ-SCN-065 row.
 - `impl/docs/spec/changes/`: `AMD-058-jointures-avec-anticrenelage.md` copied.
+
+### Step 8 — AMD-049: the backdrop lighting
+
+REQ-SCN-075 replaces the diffuse term of REQ-SCN-048 on the backdrop alone. The brief's point 2
+asks for a **shader variant** chosen when the setting or the style changes, never a per-fragment
+branch on a uniform — and the .NET lot's `uColorMode == 2` test per fragment is exactly what it
+forbids.
+
+| Piece | What landed |
+|---|---|
+| `color.rs` | `backdrop_linear`, the platform-free CPU twin of the model, plus `BACKDROP_ROUGHNESS` and `BACKDROP_REFLECTANCE` |
+| `shaders/backdrop.frag` (new) | the model on the GPU, a fragment body of its own |
+| `gl/shaders.rs` | `shaders::backdrop(bend)`, a **separate program**, not a fifth axis of `scene` |
+| `renderer.rs` | a third axis of the slot table; `select_backdrop_variant`; `bind_frame_uniforms` |
+| `frame_plan.rs` | `SceneConstants::eye`, read by the backdrop program alone |
+| `scene.rs` | `RenderSettings::backdrop_lighting`, true (the spec default) |
+| `zax-harness render` | `--no-backdrop-lighting`, the flag that reproduces the look of before |
+
+#### Why a separate program and not a fifth variant axis
+
+Three reasons, and they also make it the cheapest shape:
+
+1. the backdrop is **one opaque run a frame**, so the choice is made once per run and never per
+   fragment;
+2. it carries a flat colour, so it needs **neither the palette axis nor the atlas lookups nor the
+   fragment rejections** — `backdrop.frag` holds no `uColorMode`, no `uIndexTexture`, no
+   `uPaletteTable`, which a test asserts;
+3. it does not read the texel coordinate at all, so the interpolation axis of AMD-058 does not
+   apply to it either.
+
+Only the curvature axis is left (REQ-SCN-068: the backdrop bends with the scene), so the
+amendment costs **at most two programs**, built lazily. A fifth axis on `scene` would have cost
+32 names and put the model's identifiers into every tile shader's source.
+
+#### Where the per-frame cost went, and what it is
+
+`ScenePrograms` gained a third key bit and, with it, a different pair lookup: `built` is now a
+flat `Vec<ShaderProgram>` and `slots[key]` holds **two** indices, the plain and the solid one.
+A backdrop key points **both** at one program — the backdrop never clips and never reads a colour
+texture, so only the solid form is ever asked for, and compiling the same source twice to fill a
+pair would be a program for nothing. `current()` is still two indexings and no branch.
+
+On the per-frame path, exactly two things are new:
+
+- `select_backdrop_variant`, once a frame: one `&&` of two booleans, and a return. Nothing else
+  unless both the setting and `Backdrop.Enable` are on.
+- in the opaque loop, `set_backdrop(item.color_mode == 2)` per **run**. The `color_mode` is the
+  field the next line already reads for `use_solid`, and `set_backdrop` returns whether the
+  program actually changed — which it does not when the variant was not built. So with the
+  setting off the whole frame costs one comparison per run against a `false`, and no GL call.
+
+**The setting is honoured per frame, not per program.** A first version read "is the backdrop
+program built?" as "is the setting on", and a test caught it: a program built for one frame
+outlives the setting that asked for it, so turning the setting off again kept drawing the model.
+`backdrop_wanted` is now set every frame and `set_backdrop` ands with it — turning the setting off
+goes back to REQ-SCN-048's diffuse term without throwing the program away.
+
+#### The model, and every published figure
+
+The CPU twin was written first and checked against the amendment before any GPU code existed.
+**Every figure AMD-049 publishes reproduces, first run**, including the two R2 recomputed:
+
+| Vector | Published | Found |
+|---|---|---|
+| head on, albedo c | `c · 0,96 · 1,1812 + 0,01041` | exact, for c = 0, 0.2, 0.5, 1 |
+| head on, c = 0.2, out of shadow | 0,2372 | ✓ |
+| head on, c = 0.2, in shadow | 0,0753 | ✓ |
+| albedo 0, out of shadow | 0,01041 → sRGB 26 | ✓ |
+| albedo 0, in shadow | 0,00208 → sRGB 7 | ✓ |
+| the black panel of REQ-SCN-048, default light (R2 §1.4) | 0,007534 → sRGB ≈ 21 / ≈ 5 | ✓ |
+| **Punch-Out!! front face** (`[ROM]`) | sRGB (26 ; 100 ; 209) ±3 | ✓ **at 0°, 15°, 30° and 45°** |
+
+The `[ROM]` one is the interesting one: R2's point 49-2 says the published figure cannot be
+recovered from the amendment's wording alone, because the eye position is missing. It can be
+recovered from the *pitch sweep* the criterion itself names — the value holds across 0° to 45°,
+which is why the criterion is stated that way, and the test pins the whole range rather than one
+angle. R0 still runs the capture; this says the model is the right one.
+
+Two things the model does that are easy to get wrong and are pinned in place:
+
+- the **specular term is not tinted by the albedo** (it is outside the `c · 0,96 · (…)`
+  parenthesis), so a zero-albedo backdrop takes the light's own colour — which is the dominant
+  visible change, not the 4 % darkening (R2's point 49-7);
+- `H = N` when `L + V = 0` (R2's point 49-8), the one real hole in the formula; without it the
+  model is `NaN` for an eye exactly opposite the light.
+
+#### The image change, and how to get the old look back
+
+Measured over the eleven synthetic scenes, `--anti-alias 0`, default settings:
+
+| Scene | step 7 vs step 8, tolerance 2 |
+|---|---|
+| framing, sky, shadow, no-shadow, layer-shadow-off, nudge, alpha, hud, clip, heavy | **100.000 %** |
+| **backdrop** | **58.931 %** — the black box becomes sRGB 26, over 41 % of the picture |
+
+One scene, and it is the only synthetic scene with `Backdrop.Enable` set. Its distinct colour
+count goes 6 → 10.
+
+**`--no-backdrop-lighting` reproduces the old look exactly**: all eleven scenes compare
+**100.000 % at tolerance 0** against the step-7 captures.
+
+**The render goldens were not touched**, and `backdrop.png` is still the C# reference it has
+always been. `render_tests.rs` now passes `--no-backdrop-lighting` beside the `--anti-alias 0` it
+already passed, with the same reasoning written out: the comparison asks for the state the goldens
+were made in. Overwriting a C# reference capture with our own output would have cost the only
+independent reference this scene has; the new model is covered by `amd049_backdrop_tests.rs`
+instead.
+
+#### What is left for step 9
+
+This step wired the **renderer** setting (`RenderSettings::backdrop_lighting`, the spec default on
+desktop) and the harness flag, because the goldens could not be kept verifiable without them.
+Still to do in step 9, and listed here in case the session is cut:
+
+- `zax-settings`: the persisted `render.backdrop_lighting`, its catalogue descriptor and its
+  libretro option;
+- `publish_settings_to_scene` in `zax-app/src/application.rs`, so the setting reaches the scene;
+- `ui/handheld/defaults.rs`: **off**, with the advanced option on the handheld page;
+- the desktop options window and the `EXCLUDED` list;
+- `ui/keys.rs` and the English and French strings.
+
+#### Tests (13 in `zax-render/tests/amd049_backdrop_tests.rs`, 1 in `zax-harness`)
+
+| Criterion | Test |
+|---|---|
+| AMD-049 first automatic criterion, the whole chain of products | `req_scn_075_the_head_on_vector_of_amd_049` |
+| second automatic criterion: a zero albedo is no longer black, and is black under the diffuse model | `req_scn_075_a_zero_albedo_is_no_longer_black` |
+| the amended criterion of REQ-SCN-048: sRGB ≈ 21 / ≈ 5, and the shadow becomes observable | `req_scn_048_the_black_panel_of_the_amended_criterion` |
+| R2's point 49-8: `H = N` when `L + V = 0` | `req_scn_075_the_half_vector_falls_back_to_the_normal` |
+| R2's point 49-7: the specular term carries the light's colour, not the albedo | `req_scn_075_the_specular_term_carries_the_light_colour_not_the_albedo` |
+| the `[ROM]` criterion over the pitch sweep it names | `req_scn_075_the_punch_out_review_vector_over_the_pitch_sweep` |
+| **the GPU draws what the twin says**, four albedos | `req_scn_075_the_gpu_draws_what_the_cpu_twin_says` |
+| on the GPU: sRGB 26 with the setting, black without it | `req_scn_075_a_black_backdrop_is_drawn_srgb_twenty_six_and_not_black` |
+| the scope: the setting changes the backdrop and no other pixel | `req_scn_075_the_setting_changes_the_backdrop_and_nothing_else` |
+| **the brief's point 2**: no tile fragment carries the model, and the backdrop fragment carries no atlas lookup | `req_scn_075_no_tile_fragment_carries_the_model` |
+| the program names are all distinct (the cache key) | `req_scn_075_the_backdrop_variants_have_names_of_their_own` |
+| REQ-SCN-068: the model bends with the scene | `req_scn_075_the_backdrop_model_bends_with_the_scene` |
+| what the head-on fixture is worth, stated rather than assumed | `the_head_on_fixture_really_looks_down_the_axis` |
+| the harness flag, and that it reaches the picture | `zax-harness` `backdrop_lighting_is_on_unless_the_flag_turns_it_off` |
+
+One fixture assertion was wrong and is now right rather than loosened: the head-on camera is
+**not** on the axis through `C = (128, 120, 0)` but through the centre of the *visible rectangle*,
+which the default clip margins put at (124, 124) — 1.2° off at 190 units. That is why the GPU
+comparison is to ±2 sRGB levels and not exact, and the test now says so with the angle.
+
+`cargo test --release -p zax-render` and `-p zax-harness`: all suites pass. fmt and workspace
+clippy clean. Two pre-existing clippy ceilings were hit by the additions and are worth recording:
+`ScenePrograms` passed the four-bool limit (the same `allow` `Passes` already carries, each bool
+being an independent variant axis), and `render_scene` passed the 100-line ceiling, so the
+frame-uniform binding moved out into `bind_frame_uniforms`.
+
+#### SPEC chapter edits
+
+- `SPEC-06` REQ-SCN-048: lit according to REQ-SCN-075 (AMD-049 §3 point 1), and the acceptance
+  criterion's "panneau noir" becomes "presque noir (sRGB ≈ 21 hors ombre, ≈ 5 dans l'ombre)"
+  (§3 point 2).
+- `SPEC-06`: **REQ-SCN-075 written out** after REQ-SCN-048, with the model, the priority clause
+  T-1, the three acceptance criteria and the notes of R2's points 49-7 and 49-8.
+- `SPEC-v1.2-INDEX` (§3 point 3): REQ-SCN-075 added, and the REQ-SCN-065 row of the same table
+  corrected — step 7 wrote that requirement into SPEC-06, so it is no longer one of the
+  requirements that "appear in no SPEC file".
+- `impl/docs/spec/changes/`: `AMD-049-eclairage-backdrop.md` and `R2-review-AMD-049.md` copied.

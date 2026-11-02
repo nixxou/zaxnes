@@ -44,11 +44,18 @@ fn synthetic_captures_match_the_csharp_goldens() {
     // The goldens were captured with the anti-aliasing off, which was the default of both the
     // setting and the option before AMD-052 REQ-PERS-089 took the setting's — and with it the
     // option's (Q-087 point 1) — to 1. The comparison asks for the state they were made in.
+    //
+    // Same for the backdrop lighting: they were captured with the diffuse term of REQ-SCN-028,
+    // before AMD-049 REQ-SCN-075 took the desktop default to the almost-matt model. The new
+    // model is the subject of `zax-render/tests/amd049_backdrop_tests.rs`; here the C# reference
+    // capture is kept as what it is — an independent reference of the state it was made in —
+    // rather than overwritten with our own output.
     let arguments = [
         "--out".to_owned(),
         output.display().to_string(),
         "--anti-alias".to_owned(),
         "0".to_owned(),
+        "--no-backdrop-lighting".to_owned(),
     ];
     let options = Options::parse(&arguments).unwrap();
     render::run(&options).unwrap();

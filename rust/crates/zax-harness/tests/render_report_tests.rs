@@ -110,3 +110,46 @@ fn bench_takes_a_count() {
     assert!(Options::parse(&arguments(&["--bench", "many"])).is_err());
     assert!(Options::parse(&arguments(&["--explain"])).unwrap().explain);
 }
+
+/// AMD-049 REQ-SCN-075: `--no-backdrop-lighting` is the flag that reproduces the look of before
+/// the amendment, which is what the goldens were captured in and what R0 compares against. It is
+/// on by default, as the desktop setting is.
+#[test]
+fn backdrop_lighting_is_on_unless_the_flag_turns_it_off() {
+    let arguments = |values: &[&str]| -> Vec<String> {
+        ["--out", "x"]
+            .iter()
+            .chain(values)
+            .map(|&v| v.to_owned())
+            .collect()
+    };
+    assert!(
+        Options::parse(&arguments(&[])).unwrap().backdrop_lighting,
+        "on by default"
+    );
+    assert!(
+        !Options::parse(&arguments(&["--no-backdrop-lighting"]))
+            .unwrap()
+            .backdrop_lighting
+    );
+
+    // And it reaches the picture: the backdrop scene of REQ-SCN-048 has a black box, which the
+    // diffuse model of REQ-SCN-028 draws black and the model of REQ-SCN-075 draws sRGB 26. The
+    // colour count of that scene is the cheapest way to see the difference in the report.
+    let (_, lit) = run("backdrop-lit", &["--frames", "synthetic:backdrop"]);
+    let (_, plain) = run(
+        "backdrop-plain",
+        &["--frames", "synthetic:backdrop", "--no-backdrop-lighting"],
+    );
+    let colours = |scenes: &[Value]| -> u64 {
+        scenes[0]["distinctColors"]
+            .as_u64()
+            .expect("a colour count")
+    };
+    assert!(
+        colours(&lit) > colours(&plain),
+        "the model adds colours to the backdrop scene: {} against {}",
+        colours(&lit),
+        colours(&plain)
+    );
+}

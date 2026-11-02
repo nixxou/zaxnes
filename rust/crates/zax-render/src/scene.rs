@@ -55,6 +55,13 @@ pub struct RenderSettings {
     /// Whether back faces are culled. Kept as a switch so that a capture can show the raw
     /// meshes; it has no effect on closed geometry (REQ-E3D-505).
     pub cull_back_faces: bool,
+    /// Whether the backdrop of REQ-SCN-048 takes the almost-matt reflection model of AMD-049
+    /// REQ-SCN-075 instead of the plain diffuse term of REQ-SCN-028 (`render.backdrop_lighting`).
+    ///
+    /// The spec default on desktop; off on handhelds, where it is a fragment cost on what can be
+    /// the largest surface of the scene, and where REQ-SCN-048's own diffuse term — the priority
+    /// clause T-1 of AMD-049 keeps it valid — costs nothing.
+    pub backdrop_lighting: bool,
 }
 
 impl Default for RenderSettings {
@@ -72,6 +79,7 @@ impl Default for RenderSettings {
             sky_bodies: SkyBodySettings::default(),
             skip_render: true,
             cull_back_faces: true,
+            backdrop_lighting: true,
         }
     }
 }

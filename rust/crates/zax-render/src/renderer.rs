@@ -95,46 +95,79 @@ impl Residency for GlResidency<'_> {
 /// `centroid` changes when `video.anti_alias` changes (AMD-058). The fourth, the per-fragment
 /// palette, is fixed when the renderer is created.
 ///
-/// Only the flat, pixel-centre pair is built when the renderer is created. The other three are
-/// built the first time they are asked for, and a key that has none falls back to it: at
-/// curvature 0 (REQ-SCN-066's default) with anti-aliasing off (the handheld default) **no second
-/// program is ever compiled**, which on a handheld is seconds of start-up.
+/// The backdrop lighting of AMD-049 is a third such axis, chosen for the one opaque run that
+/// draws the backdrop (REQ-SCN-075).
+///
+/// Only the flat, pixel-centre scene pair is built when the renderer is created. Every other key
+/// is built the first time it is asked for, and a key that has none falls back to that pair: at
+/// curvature 0 (REQ-SCN-066's default), with anti-aliasing off and the backdrop lighting off (the
+/// handheld defaults) **no second program is ever compiled**, which on a handheld is seconds of
+/// start-up. The fallback is also what a failed compile leaves behind — the frame is then drawn
+/// with the model of before the amendment rather than not at all.
 #[derive(Debug)]
+// Each bool is one independent variant axis the specification names, plus the frame's answer for
+// the backdrop; an enum per axis would say less, not more.
+#[allow(clippy::struct_excessive_bools)]
 struct ScenePrograms {
-    /// The `[plain, solid]` pairs built so far; `built[0]` is the flat, pixel-centre one.
-    built: Vec<[ShaderProgram; 2]>,
-    /// For each of the four `(bend, centroid)` keys, the slot of `built` serving it — 0, the flat
-    /// pair, until that variant has been built.
-    slots: [usize; 4],
-    /// `slots[key(bend, centroid)]`, kept in step by [`Self::set_bend`], [`Self::set_centroid`]
-    /// and [`Self::install`], so that [`Self::current`] — which every draw run calls — is two
+    /// Every program built so far; `built[0]` and `built[1]` are the flat, pixel-centre
+    /// `[plain, solid]` pair the renderer is created with.
+    built: Vec<ShaderProgram>,
+    /// For each `(bend, centroid, backdrop)` key, the indices in `built` of its plain and solid
+    /// programs — `[0, 1]`, the flat scene pair, until that variant has been built. A backdrop
+    /// key points **both** entries at one program: the backdrop never clips and never reads a
+    /// colour texture, so only the solid form is ever asked for, and compiling the same source
+    /// twice to fill a pair would be a program for nothing.
+    slots: [[usize; 2]; Self::KEYS],
+    /// `slots[key(bend, centroid, backdrop)]`, kept in step by the setters and by
+    /// [`Self::install`], so that [`Self::current`] — which every draw run calls — is two
     /// indexings and no branch.
-    slot: usize,
+    slot: [usize; 2],
     solid: bool,
     bend: bool,
     centroid: bool,
+    backdrop: bool,
+    /// Whether this frame wants the backdrop model at all (`render.backdrop_lighting` and a
+    /// backdrop to draw), decided once a frame by [`SceneRenderer::select_backdrop_variant`].
+    ///
+    /// Kept apart from whether the program *exists*: a program built for one frame outlives the
+    /// setting that asked for it, and turning the setting off again has to go back to the diffuse
+    /// model of REQ-SCN-048 without throwing the program away.
+    backdrop_wanted: bool,
 }
 
 impl ScenePrograms {
-    /// The slot of `slots` a `(bend, centroid)` pair is kept at.
-    const fn key(bend: bool, centroid: bool) -> usize {
-        (bend as usize) * 2 + centroid as usize
+    /// `bend` × `centroid` × `backdrop`.
+    const KEYS: usize = 8;
+
+    /// The slot of `slots` a variant is kept at.
+    const fn key(bend: bool, centroid: bool, backdrop: bool) -> usize {
+        (bend as usize) * 4 + (centroid as usize) * 2 + backdrop as usize
     }
 
     /// The program in use, for a uniform or a draw.
     fn current(&mut self) -> &mut ShaderProgram {
-        &mut self.built[self.slot][usize::from(self.solid)]
+        &mut self.built[self.slot[usize::from(self.solid)]]
     }
 
-    /// Whether the pair of this key has been built (the flat one always has).
-    const fn has(&self, bend: bool, centroid: bool) -> bool {
-        Self::key(bend, centroid) == 0 || self.slots[Self::key(bend, centroid)] != 0
+    /// Whether this key has a program of its own (the flat scene pair always has).
+    const fn has(&self, bend: bool, centroid: bool, backdrop: bool) -> bool {
+        let key = Self::key(bend, centroid, backdrop);
+        key == 0 || self.slots[key][1] != 1
     }
 
-    /// Takes a freshly built pair into service for its key.
+    /// Takes a freshly built `[plain, solid]` pair into service for its key.
     fn install(&mut self, bend: bool, centroid: bool, pair: [ShaderProgram; 2]) {
-        self.built.push(pair);
-        self.slots[Self::key(bend, centroid)] = self.built.len() - 1;
+        let first = self.built.len();
+        self.built.extend(pair);
+        self.slots[Self::key(bend, centroid, false)] = [first, first + 1];
+        self.refresh();
+    }
+
+    /// Takes a freshly built backdrop program into service: one program for both forms.
+    fn install_backdrop(&mut self, bend: bool, centroid: bool, program: ShaderProgram) {
+        self.built.push(program);
+        let only = self.built.len() - 1;
+        self.slots[Self::key(bend, centroid, true)] = [only, only];
         self.refresh();
     }
 
@@ -148,8 +181,22 @@ impl ScenePrograms {
         self.refresh();
     }
 
+    /// Puts the backdrop variant of AMD-049 in use, and says whether that changed the program —
+    /// it does not when this frame does not want the model, nor when the variant has not been
+    /// built, which are both the case whenever `render.backdrop_lighting` is off.
+    fn set_backdrop(&mut self, backdrop: bool) -> bool {
+        let backdrop = backdrop && self.backdrop_wanted;
+        if backdrop == self.backdrop {
+            return false;
+        }
+        let before = self.slot;
+        self.backdrop = backdrop;
+        self.refresh();
+        before != self.slot
+    }
+
     fn refresh(&mut self) {
-        self.slot = self.slots[Self::key(self.bend, self.centroid)];
+        self.slot = self.slots[Self::key(self.bend, self.centroid, self.backdrop)];
     }
 }
 
@@ -286,12 +333,14 @@ impl SceneRenderer {
         let passes = Passes {
             gl: gl.clone(),
             scene: ScenePrograms {
-                built: vec![flat],
-                slots: [0; 4],
-                slot: 0,
+                built: flat.into(),
+                slots: [[0, 1]; ScenePrograms::KEYS],
+                slot: [0, 1],
                 solid: false,
                 bend: false,
                 centroid: false,
+                backdrop: false,
+                backdrop_wanted: false,
             },
             shadow: ShaderProgram::create(&gl, &shaders::shadow(false))?,
             shadow_bent: None,
@@ -398,6 +447,9 @@ impl SceneRenderer {
         // never per vertex. At the default settings this is one `is_identity` test and nothing
         // else: no program is compiled, none is swapped, and no uniform is uploaded.
         self.select_bend_variant(scene)?;
+        // AMD-049 REQ-SCN-075: and which key the backdrop program belongs to, once the two
+        // above have settled. One boolean test when the setting is off.
+        self.select_backdrop_variant(scene)?;
 
         self.passes.statistics.begin_frame();
         self.meshes.begin_frame();
@@ -502,7 +554,7 @@ impl SceneRenderer {
         }
 
         let centroid = self.passes.scene.centroid;
-        if !self.passes.scene.has(true, centroid) {
+        if !self.passes.scene.has(true, centroid, false) {
             let pair = scene_pair(&self.gl, !self.convert_palette, true, centroid)?;
             self.passes.scene.install(true, centroid, pair);
         }
@@ -545,11 +597,40 @@ impl SceneRenderer {
         }
 
         let bend = self.passes.scene.bend;
-        if !self.passes.scene.has(bend, true) {
+        if !self.passes.scene.has(bend, true, false) {
             let pair = scene_pair(&self.gl, !self.convert_palette, bend, true)?;
             self.passes.scene.install(bend, true, pair);
         }
         self.passes.scene.set_centroid(true);
+        Ok(())
+    }
+
+    /// Builds the backdrop program of AMD-049 REQ-SCN-075 when the frame needs it, which is when
+    /// `render.backdrop_lighting` is on **and** the profile's Lua enabled the backdrop
+    /// (REQ-SCN-048). Both are false by default on a handheld, and the second is false for every
+    /// profile that does not ask for a backdrop, so the usual frame compiles nothing here.
+    ///
+    /// Called once a frame, after the two variant choices above, because the curvature and the
+    /// interpolation decide which key the backdrop program belongs to.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderError::Gl`] when the program does not compile or link. The scene programs stay in
+    /// use for the backdrop run, so it is drawn with the diffuse model of REQ-SCN-028 — the
+    /// behaviour of before the amendment — rather than not at all.
+    fn select_backdrop_variant(&mut self, scene: &SceneState) -> Result<(), RenderError> {
+        let wanted = scene.settings.backdrop_lighting && scene.backdrop.enabled;
+        self.passes.scene.backdrop_wanted = wanted;
+        if !wanted {
+            return Ok(());
+        }
+
+        let (bend, centroid) = (self.passes.scene.bend, self.passes.scene.centroid);
+        if !self.passes.scene.has(bend, centroid, true) {
+            let program = ShaderProgram::create(&self.gl, &shaders::backdrop(bend))?;
+            program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
+            self.passes.scene.install_backdrop(bend, centroid, program);
+        }
         Ok(())
     }
 
@@ -757,25 +838,24 @@ impl SceneRenderer {
             shadow_texture: self.shadow_map.depth_texture(),
         };
 
-        // Both scene programs get the frame's uniforms; the solid one is left in use, the order
-        // of the draws is kept.
-        for solid in [false, true] {
-            passes.use_solid(solid);
-            passes.scene.current().use_program();
-            common.bind(passes);
-
-            // Q-069: the sign lives in the program, which starts at 0 — it has to be written at
-            // least once per frame before anything is drawn.
-            passes.set_normal_sign(false, true);
-            let light = common.constants.light_direction;
-            passes.scene.current().set_vec3("uLightDirection", light);
-        }
+        bind_frame_uniforms(passes, &mut common);
 
         // 1. Opaque objects.
         for run in &lists.opaque_runs {
             let item = &lists.opaque[run.first];
+            // REQ-SCN-075: the backdrop is colour mode 2, and the only run that is. The test
+            // rides on the `color_mode` this line already reads for `use_solid`, and
+            // `set_backdrop` reports that nothing changed — so costs nothing at all — whenever
+            // the variant was not built.
+            if passes.scene.set_backdrop(item.color_mode == 2) {
+                passes.scene.current().use_program();
+                passes.set_normal_sign(passes.mirrored_normal, true);
+            }
             passes.use_solid(!item.clip && item.color_mode != 1);
             passes.draw_run(&lists.opaque, run, true);
+        }
+        if passes.scene.set_backdrop(false) {
+            passes.scene.current().use_program();
         }
         passes.use_solid(false);
         passes.statistics.opaque_tiles = count(lists.opaque.len());
@@ -837,6 +917,47 @@ impl SceneRenderer {
 }
 
 /// The uniforms every scene sub-pass binds again after `use_program`.
+/// Gives every program that will draw this frame its frame uniforms, before any draw.
+///
+/// Both scene programs get them — the solid one is left in use, so the order of the draws is
+/// kept — and so does the backdrop program of AMD-049 REQ-SCN-075 when this frame has one, which
+/// additionally reads the eye. On a frame without a backdrop the second half is one boolean test.
+fn bind_frame_uniforms(passes: &mut Passes, common: &mut CommonUniforms<'_>) {
+    for solid in [false, true] {
+        passes.use_solid(solid);
+        passes.scene.current().use_program();
+        common.bind(passes);
+
+        // Q-069: the sign lives in the program, which starts at 0 — it has to be written at
+        // least once per frame before anything is drawn.
+        passes.set_normal_sign(false, true);
+        let light = common.constants.light_direction;
+        passes.scene.current().set_vec3("uLightDirection", light);
+    }
+
+    let backdrop_program = passes.scene.backdrop_wanted
+        && passes
+            .scene
+            .has(passes.scene.bend, passes.scene.centroid, true);
+    if !backdrop_program {
+        return;
+    }
+
+    passes.scene.set_backdrop(true);
+    passes.scene.current().use_program();
+    common.bind(passes);
+    passes.set_normal_sign(false, true);
+    let light = common.constants.light_direction;
+    let eye = common.constants.eye;
+    let program = passes.scene.current();
+    program.set_vec3("uLightDirection", light);
+    program.set_vec3("uEye", eye);
+
+    // Back to the scene programs, so the opaque loop starts where it always did.
+    passes.scene.set_backdrop(false);
+    passes.scene.current().use_program();
+}
+
 struct CommonUniforms<'a> {
     constants: SceneConstants,
     textures: &'a mut TextureCache,

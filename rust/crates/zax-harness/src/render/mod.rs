@@ -103,6 +103,8 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
                            centre is 0 for the screen centre (default) or 1 for its bottom edge.
                            All 0 by default, which is the capture of before the amendment
   --no-bend-2d             keep the 2D-mode rectangle flat whatever --bend says (REQ-SCN-074)
+  --no-backdrop-lighting   light the backdrop with the diffuse term of REQ-SCN-028 instead of
+                           the model of AMD-049 REQ-SCN-075 — the look of before the amendment
   --real-time <seconds>    real time the star twinkle uses (REQ-SCN-050)
   --sky-bodies             light the procedural sun, moon and clouds (REQ-PUB-003, Q-064)
   --backend <name>         gl (default), or vulkan or dx12 with a harness built with the
@@ -217,6 +219,11 @@ pub struct Options {
     /// shows behind the scene. The conditioning AMD-050 REQ-SCN-076's criteria need — with the
     /// default settings the transparency of the 2D rectangle is not observable at all.
     pub use_nes_background_color: bool,
+    /// `--no-backdrop-lighting`: `render.backdrop_lighting` false, so the backdrop of REQ-SCN-048
+    /// is lit with the plain diffuse term of REQ-SCN-028 instead of the almost-matt model of
+    /// AMD-049 REQ-SCN-075. On by default, as the desktop setting is; this is the flag that
+    /// reproduces the look of before the amendment, which the goldens were captured in.
+    pub backdrop_lighting: bool,
     /// `--atlas-budget <texels>`: the ceiling AMD-051 REQ-E3D-644 is verified against, over and
     /// above whatever the driver refuses. `None` — the default — leaves the driver as the only
     /// limit, so a capture taken without it is the capture of before the amendment.
@@ -296,6 +303,7 @@ impl Options {
             bend: SpaceBend::NONE,
             bend_two_dimensional_mode: true,
             use_nes_background_color: true,
+            backdrop_lighting: true,
             // AMD-051: both default to the application's own behaviour — no budget of our own
             // and no delay — so a capture taken without them is the capture of before the
             // amendment.
@@ -313,6 +321,7 @@ impl Options {
                 "--no-shadows" => options.shadows = false,
                 "--no-bend-2d" => options.bend_two_dimensional_mode = false,
                 "--no-nes-bg-color" => options.use_nes_background_color = false,
+                "--no-backdrop-lighting" => options.backdrop_lighting = false,
                 "--no-builtin-patches" => options.builtin_patches = false,
                 "--advanced" => options.advanced = true,
                 "--group-draws" => options.group_draws = true,
@@ -817,6 +826,8 @@ fn apply(options: &Options, scene: &mut SyntheticScene) {
     state.bend = options.bend;
     state.bend_two_dimensional_mode = options.bend_two_dimensional_mode;
     state.use_nes_background_color = options.use_nes_background_color;
+    // AMD-049 REQ-SCN-075, same rule: on unless `--no-backdrop-lighting` says otherwise.
+    state.settings.backdrop_lighting = options.backdrop_lighting;
 
     // AMD-032 §2: video.anti_alias as the application applies it.
     state

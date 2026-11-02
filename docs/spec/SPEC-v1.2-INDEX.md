@@ -239,6 +239,7 @@ divergence volontaire assumée ; `→` marque un remplacement (voir §4).
 | REQ-SCN-063 | AMD-001 06-10 (v1.1 : réglage conservé dans le modèle, absent de l'UI desktop) |
 | REQ-SCN-064 | DEC-R2-T8 ; **AMD-019 Q-047** : étiquette **[ROM]** pour la mesure sur les jeux ; **AMD-023 Q-062** : le banc de mesure doit tourner sans exception |
 | REQ-SCN-065 | **exigence créée par AMD-012** (P2 : aucune ligne visible à la jointure de deux tiles) ; **AMD-014 Q-032** : résidu de 1 à 2 px sur translucides obliques accepté (P3) ; **AMD-058** : tient pour `video.anti_alias` = 0, 1 et 2, et pour deux objets voisins |
+| REQ-SCN-048 | **AMD-049** : éclairé selon REQ-SCN-075 et non plus de façon diffuse ; le panneau noir du critère devient presque noir (sRGB ≈ 21 / ≈ 5) |
 | cubemaps | DEC-06-Q1 : 6 faces réextraites, conventions dans `cubemaps.json` |
 | écritures Lua sur réglages | DEC-06-Q5 **(D)** et DEC-09-Q3 : couche de session non persistée |
 | glisser à la souris | DEC-06-Q6 : SPEC-08 fixe le bouton ; le clic Zapper prime sur la caméra ; AMD-001 08-7 |
@@ -408,7 +409,8 @@ Elles n'apparaissent dans aucun fichier `SPEC-*.md` : on les lit dans leur amend
 |---|---|---|---|
 | REQ-LOOP-018 | P2 | `AMD-002` (Q-002) | valider une ROM avant d'interrompre la partie en cours |
 | REQ-E3D-410 | P1 | `AMD-001` T-2, sous DEC-R2-T2 — **écrite dans SPEC-04B v1.1** | repère de scène unique |
-| REQ-SCN-065 | P2 | `AMD-012` | aucune ligne visible à la jointure de deux tiles |
+| REQ-SCN-065 | P2 | `AMD-012`, complétée par `AMD-058` — **écrite dans SPEC-06 §3.11** | aucune ligne visible à la jointure de deux tiles, pour les trois valeurs de `video.anti_alias` |
+| REQ-SCN-075 | P2 | `AMD-049` — **écrite dans SPEC-06 §3.13** | éclairage du backdrop (réflexion presque mate, remplace le diffus de REQ-SCN-048) |
 | REQ-UI-200 … REQ-UI-209 | P1 sauf -207 et -208 (P2) | `AMD-010` | interface d'émulateur classique |
 
 **Référence morte.** `SPEC-04B` REQ-E3D-406 cite « REQ-E3D-504, REQ-E3D-512 » ; **REQ-E3D-512

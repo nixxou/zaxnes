@@ -690,6 +690,10 @@ pub struct SceneConstants {
     /// frame (REQ-SCN-029, REQ-SCN-044).
     pub light_direction: Vector3,
     pub hud_light_direction: Vector3,
+    /// The eye, in the scene frame: the backdrop program of AMD-049 REQ-SCN-075 needs the view
+    /// vector `V`. Uploaded to that program only — a tile needs no eye vector, and none was
+    /// added to the tile shaders.
+    pub eye: Vector3,
     /// The curvature of REQ-SCN-067, the identity by default. The renderer reads it to pick the
     /// shader variant and, when it bends anything, to upload the five per-axis uniforms.
     pub bend: SpaceBend,
@@ -732,6 +736,7 @@ impl SceneConstants {
             bend: scene.bend,
             light_direction: scene.light.direction,
             hud_light_direction: view.hud_light_direction(scene.light.direction),
+            eye: view.eye,
         }
     }
 }
