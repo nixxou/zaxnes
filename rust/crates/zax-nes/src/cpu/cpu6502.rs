@@ -206,6 +206,40 @@ impl Cpu6502 {
         self.poll_irq = false;
     }
 
+    /// Runs the **soft** reset sequence of the RESET button (AMD-044 REQ-CORE-122): the same
+    /// seven cycles and three stack pointer decrements, but A, X, Y and every flag but `I` are
+    /// kept (nesdev, "CPU power up state", section *after reset*).
+    ///
+    /// Nothing is written to the stack: the three accesses are reads, exactly as in
+    /// [`Self::reset`]. The internal memory is untouched, which is the whole point of the soft
+    /// reset — `cpu_reset/ram_after_reset` checks precisely that.
+    pub fn soft_reset<B: CpuBus + ?Sized>(&mut self, bus: &mut B) {
+        self.jammed = false;
+        self.p |= Self::FLAG_I;
+        self.nmi_pending = false;
+        self.irq_sample = false;
+        self.poll_nmi = false;
+        self.poll_irq = false;
+
+        self.read_code(bus, self.pc);
+        self.read_code(bus, self.pc);
+        for _ in 0..3 {
+            self.read(bus, 0x0100 | u16::from(self.s));
+            self.s = self.s.wrapping_sub(1);
+        }
+
+        let lo = self.read(bus, Self::RESET_VECTOR);
+        let hi = self.read(bus, Self::RESET_VECTOR + 1);
+        self.pc = word(lo, hi);
+
+        // Same edge-detection reference as a power-on reset: an NMI asserted before the button
+        // was pressed is not replayed.
+        self.nmi_line = bus.nmi_asserted();
+        self.nmi_pending = false;
+        self.poll_nmi = false;
+        self.poll_irq = false;
+    }
+
     /// Executes one instruction, or services a pending interrupt, and returns the number
     /// of CPU cycles it took.
     pub fn step<B: CpuBus + ?Sized>(&mut self, bus: &mut B) -> u32 {

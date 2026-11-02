@@ -50,6 +50,8 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         Pause,
         Resume,
         Reset,
+        // AMD-044 REQ-LOOP-072: the soft reset, next to the hard one.
+        SoftReset,
         Stop,
         FastForward,
         Rollback,

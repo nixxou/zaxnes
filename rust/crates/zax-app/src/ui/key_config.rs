@@ -69,13 +69,15 @@ pub const CAMERA_ACTIONS: [InputAction; 6] = [
     InputAction::ZOOM_OUT,
 ];
 
-/// The five hotkeys.
-pub const HOTKEYS: [InputAction; 5] = [
+/// The six hotkeys: the five of SPEC-08 §3.11 and the soft reset AMD-044 REQ-INP-125 adds,
+/// which is bindable here and bound to nothing by default.
+pub const HOTKEYS: [InputAction; 6] = [
     InputAction::MENU,
     InputAction::ROLL_BACK,
     InputAction::FAST_FORWARD,
     InputAction::QUICK_SAVE,
     InputAction::QUICK_LOAD,
+    InputAction::SOFT_RESET,
 ];
 
 /// The sections of the window, rebuilt when the language changes.

@@ -123,6 +123,7 @@ commands! {
     Pause => "emulation.pause", Shortcut::None, false;
     Resume => "emulation.resume", Shortcut::None, false;
     Reset => "emulation.reset", Shortcut::Fixed("Ctrl+R"), false;
+    SoftReset => "emulation.soft_reset", Shortcut::None, false;
     Stop => "emulation.stop", Shortcut::None, false;
     FastForward => "emulation.fast_forward", Shortcut::Key("shortcut.fast_forward"), true;
     Rollback => "emulation.rollback", Shortcut::Key("shortcut.rollback"), false;

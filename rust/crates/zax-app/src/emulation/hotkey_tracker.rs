@@ -15,6 +15,8 @@ flag_set! {
         const FAST_FORWARD = 1 << 3;
         const QUICK_SAVE = 1 << 4;
         const QUICK_LOAD = 1 << 5;
+        /// AMD-044 REQ-INP-125: the soft reset, bindable but bound to nothing by default.
+        const SOFT_RESET = 1 << 6;
     }
 }
 
@@ -30,6 +32,7 @@ pub struct HotkeyTracker {
     rollback: EdgeDetector,
     quick_save: EdgeDetector,
     quick_load: EdgeDetector,
+    soft_reset: EdgeDetector,
 }
 
 impl HotkeyTracker {
@@ -80,6 +83,13 @@ impl HotkeyTracker {
             .rising(mask.contains(InputAction::QUICK_LOAD))
         {
             events |= HotkeyEvents::QUICK_LOAD;
+        }
+        // AMD-044 REQ-INP-125: on the press, like the other one-shot hotkeys.
+        if self
+            .soft_reset
+            .rising(mask.contains(InputAction::SOFT_RESET))
+        {
+            events |= HotkeyEvents::SOFT_RESET;
         }
         events |= self.combinations[0].update(player_one, real_seconds);
         events |= self.combinations[1].update(player_two, real_seconds);

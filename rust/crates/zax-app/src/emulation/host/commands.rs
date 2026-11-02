@@ -41,6 +41,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ImportCover
             | Command::Reset
             | Command::ToggleTwoDimensional => !loading && self.current_game.is_some(),
+            // AMD-044 REQ-LOOP-072: next to the hard reset, but it needs a running session.
+            Command::SoftReset => self.can_soft_reset(),
             // AMD-053 REQ-LOOP-076: offered only while the resume point stands.
             Command::ResumeLast => !loading && self.resume_available(),
             // REQ-UI-210: the entry named, or the one being played.
@@ -173,6 +175,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::Pause
             | Command::Resume
             | Command::Reset
+            | Command::SoftReset
             | Command::Stop
             | Command::FastForward
             | Command::Rollback
@@ -277,6 +280,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::Pause => self.pause(),
             Command::Resume => self.resume(),
             Command::Reset => self.reset_game(),
+            Command::SoftReset => self.soft_reset_game(),
             Command::Stop => self.stop_current_game(true, true),
             Command::FastForward => self.request_fast_forward(),
             Command::Rollback => self.perform_rollback(),
@@ -437,6 +441,40 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         if let Some(id) = self.current_game_id().map(str::to_owned) {
             self.launch_game(&id);
         }
+    }
+
+    /// The soft reset of AMD-044 REQ-LOOP-072: the core imitates a press on the RESET button
+    /// and the rest of the program behaves as it does after the hard reset of REQ-LOOP-050 —
+    /// the pause is lifted, the pacing clock is reset, the rollback history is emptied
+    /// (REQ-LOOP-031). What it does **not** do is relaunch the profile: the ROM is not read
+    /// again, no `End` or `Start` hook runs, and the learned conversion state stays.
+    fn soft_reset_game(&mut self) {
+        if !self.can_soft_reset() {
+            return;
+        }
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        session.soft_reset();
+
+        // REQ-AUD-010 as on a relaunch: the samples of before the press are not replayed.
+        self.rollback.clear();
+        self.frame_steps.clear();
+        self.fast_forward.clear();
+        self.apply_speed();
+        self.set_state(EmulationState::Running);
+        self.pacer.reset();
+    }
+
+    /// Whether the soft reset of AMD-044 REQ-LOOP-072 can run: it needs a running session, not
+    /// just a current game — there is nothing to reset in a core that holds no ROM.
+    pub(super) fn can_soft_reset(&self) -> bool {
+        !self.loading
+            && self.state != EmulationState::Stopped
+            && self
+                .session
+                .as_ref()
+                .is_some_and(crate::game_session::GameSession::has_rom)
     }
 
     fn request_fast_forward(&mut self) {

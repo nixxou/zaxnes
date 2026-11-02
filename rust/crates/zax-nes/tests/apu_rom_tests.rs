@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{run_legacy_rom, run_shell_rom, run_shell_rom_with, test_rom};
+use common::{run_legacy_rom, run_shell_rom, run_shell_rom_soft, run_shell_rom_with, test_rom};
 
 /// Result variable of the 2005-era `blargg_apu` runtime.
 const BLARGG_APU_RESULT: u16 = 0x00F0;
@@ -132,6 +132,45 @@ fn req_core_004_the_power_on_half_of_the_apu_reset_tests_passes() {
     }
 }
 
+/// AMD-044 REQ-CORE-122: the **reset** half of the same six ROMs passes under the soft reset,
+/// which keeps the RAM their reset counter lives in and leaves the `$4017` mode alone. That is
+/// the documented *after reset* state of the APU the requirement asks for, measured rather than
+/// asserted: `4015_cleared`, `irq_flag_cleared` and `len_ctrs_enabled` check the silencing,
+/// `4017_written` checks that the mode survives, and `4017_timing` checks that the frame
+/// sequencer restarts with the same 9-to-12-cycle delay as at power-on (Q-078 point 2).
+///
+/// These six are not on the list SPEC-02 §3.12 as amended by AMD-044 makes mandatory — that
+/// list names the two `cpu_reset` ROMs, which `cpu_reset_rom_tests` covers — but they pass, so
+/// they are kept as a gate on the APU's own after-reset state.
+#[test]
+fn req_core_122_the_apu_reset_tests_pass_under_a_soft_reset() {
+    let mut failures = Vec::new();
+    for rom in [
+        "4015_cleared.nes",
+        "4017_timing.nes",
+        "4017_written.nes",
+        "irq_flag_cleared.nes",
+        "len_ctrs_enabled.nes",
+        "works_immediately.nes",
+    ] {
+        let path = format!("apu_reset/{rom}");
+        let Some(image) = test_rom(&path) else {
+            continue;
+        };
+        let result = run_shell_rom_soft(&image, 20_000);
+        if !result.passed {
+            failures.push(format!(
+                "{path}: code {}{} after {} frames, output: {}",
+                result.code,
+                if result.timed_out { " (timed out)" } else { "" },
+                result.frames,
+                result.text.replace('\n', "|")
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn req_core_004_the_frame_sequencer_starts_nine_to_twelve_cycles_before_the_first_instruction() {
     // blargg: "After reset or power-up, APU acts as if $4017 were written with $00 from 9 to
@@ -153,9 +192,11 @@ fn req_core_004_the_frame_sequencer_starts_nine_to_twelve_cycles_before_the_firs
 // ---------------------------------------------------------------- pending (C# ApuRomPendingTests)
 
 #[test]
-#[ignore = "Reset is a power cycle here (REQ-CORE-004, DEC-02-Q3), so it clears work RAM and \
-            rewrites $4017 with $00; the apu_reset ROMs keep their reset counter in RAM across \
-            the reset, so their reset half cannot run. The power-on half is checked above."]
+#[ignore = "The *hard* reset is a power cycle (REQ-CORE-004, DEC-02-Q3), so it clears work RAM \
+            and rewrites $4017 with $00; the apu_reset ROMs keep their reset counter in RAM \
+            across the reset, so their reset half cannot run under it. Since AMD-044 the soft \
+            reset of REQ-CORE-122 does keep both, and all six pass under it \
+            (req_core_122_the_apu_reset_tests_pass_under_a_soft_reset)."]
 fn req_core_004_apu_reset_needs_a_reset_that_keeps_ram() {}
 
 #[test]

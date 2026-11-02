@@ -1,0 +1,258 @@
+//! The soft reset of AMD-044 REQ-CORE-122: the RESET button of the console, as opposed to the
+//! power cycle REQ-CORE-004 keeps calling a reset (DEC-02-Q3, unchanged).
+#![allow(clippy::cast_possible_truncation)] // test code: the addresses are literals
+
+mod common;
+
+use common::{machine_with, minimal, minimal_rom};
+use zax_nes::{ControllerPortType, NesCore};
+
+/// Writes one PPU-bus byte through $2006 / $2007, as a game would.
+fn write_vram(core: &mut NesCore, address: u16, value: u8) {
+    core.write_memory(0x2006, (address >> 8) as u8);
+    core.write_memory(0x2006, address as u8);
+    core.write_memory(0x2007, value);
+}
+
+/// Reads one PPU-bus byte through $2006 / $2007. The first $2007 read returns the stale buffer
+/// and loads the byte at the address; the second one hands that byte over.
+fn read_vram(core: &mut NesCore, address: u16) -> u8 {
+    core.write_memory(0x2006, (address >> 8) as u8);
+    core.write_memory(0x2006, address as u8);
+    core.ppu_read(7);
+    core.ppu_read(7)
+}
+
+/// An NROM image declaring **no** CHR bank, which gives the cartridge CHR RAM. The three
+/// vectors point at an endless loop.
+fn chr_ram_image() -> Vec<u8> {
+    const PRG_SIZE: usize = 2 * 16 * 1024;
+    let mut image = vec![0u8; 16 + PRG_SIZE];
+    image[..4].copy_from_slice(b"NES\x1A");
+    image[4] = 0x02;
+    image[5] = 0x00;
+    image[6] = 0x01;
+
+    image[16..19].copy_from_slice(&[0x4C, 0x00, 0x80]);
+    let vectors = 16 + PRG_SIZE - 6;
+    for i in 0..3 {
+        image[vectors + 2 * i] = 0x00;
+        image[vectors + 2 * i + 1] = 0x80;
+    }
+    image
+}
+
+/// REQ-CORE-122: the internal RAM, the save RAM and the nametable RAM survive a soft reset,
+/// where the hard one clears all three (REQ-CORE-004, DEC-02-Q3).
+#[test]
+fn req_core_122_a_soft_reset_keeps_the_ram_and_the_save_ram() {
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+
+    core.write_memory(0x0300, 0x55);
+    core.write_memory(0x6000, 0x66);
+    write_vram(&mut core, 0x2010, 0x77);
+
+    core.run_frame(0);
+    core.soft_reset();
+
+    assert_eq!(0x55, core.read_memory(0x0300));
+    assert_eq!(0x66, core.read_memory(0x6000));
+    assert_eq!(0x77, read_vram(&mut core, 0x2010));
+    assert_eq!(Some("Minimal.nes"), core.rom_name());
+
+    // The hard reset still clears all three: DEC-02-Q3 is untouched.
+    core.reset();
+    assert_eq!(0x00, core.read_memory(0x0300));
+    assert_eq!(0x00, core.read_memory(0x6000));
+    assert_eq!(0x00, read_vram(&mut core, 0x2010));
+}
+
+/// REQ-CORE-122: the CHR RAM of a cartridge that has one survives a soft reset. The ROM
+/// declares no CHR bank, so the mapper gives the PPU 8 KiB of writable pattern memory.
+#[test]
+fn req_core_122_a_soft_reset_keeps_the_chr_ram() {
+    let mut core = machine_with(&chr_ram_image(), "ChrRam.nes");
+
+    write_vram(&mut core, 0x0000, 0x5A);
+    assert_eq!(0x5A, read_vram(&mut core, 0x0000));
+
+    core.soft_reset();
+    assert_eq!(0x5A, read_vram(&mut core, 0x0000));
+
+    core.reset();
+    assert_eq!(0x00, read_vram(&mut core, 0x0000));
+}
+
+/// REQ-CORE-122: A, X, Y and every flag but `I` are kept, S drops by 3 without anything being
+/// written to the stack, and PC comes from the reset vector (nesdev, "CPU power up state",
+/// *after reset*).
+#[test]
+fn req_core_122_the_cpu_keeps_its_registers_and_sets_i() {
+    use zax_nes::cpu::Cpu6502;
+
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+    {
+        let (cpu, _) = core.cpu_and_bus_mut();
+        cpu.a = 0x12;
+        cpu.x = 0x34;
+        cpu.y = 0x56;
+        cpu.s = 0x80;
+        cpu.set_flag(Cpu6502::FLAG_C | Cpu6502::FLAG_N, true);
+        cpu.set_flag(Cpu6502::FLAG_I, false);
+    }
+
+    // Three bytes of the stack page, to show that the three decrements write nothing.
+    core.write_memory(0x0180, 0xAA);
+    core.write_memory(0x017F, 0xBB);
+    core.write_memory(0x017E, 0xCC);
+
+    core.soft_reset();
+
+    let cpu = core.cpu();
+    assert_eq!(0x12, cpu.a);
+    assert_eq!(0x34, cpu.x);
+    assert_eq!(0x56, cpu.y);
+    assert_eq!(0x80 - 3, cpu.s);
+    assert_eq!(0x8000, cpu.pc);
+    assert!(cpu.get_flag(Cpu6502::FLAG_I));
+    assert!(cpu.get_flag(Cpu6502::FLAG_C));
+    assert!(cpu.get_flag(Cpu6502::FLAG_N));
+    // No interrupt is left waiting.
+    assert!(!cpu.nmi_pending());
+
+    assert_eq!(0xAA, core.read_memory(0x0180));
+    assert_eq!(0xBB, core.read_memory(0x017F));
+    assert_eq!(0xCC, core.read_memory(0x017E));
+}
+
+/// REQ-CORE-122: the PPU follows its documented *after reset* state — PPUCTRL and PPUMASK at 0,
+/// the write latch cleared, the `$2007` read buffer at 0 — while OAMADDR, the nametable RAM and
+/// the OAM stay as they were.
+#[test]
+fn req_core_122_the_ppu_follows_its_after_reset_state() {
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+
+    write_vram(&mut core, 0x2010, 0x77);
+    core.write_memory(0x2000, 0x9E);
+    core.write_memory(0x2001, 0x1E);
+    core.write_memory(0x2003, 0x40);
+    // One half of a $2006 pair leaves the write latch set.
+    core.write_memory(0x2006, 0x21);
+
+    core.soft_reset();
+
+    let ppu = core.bus().ppu();
+    assert_eq!(0, ppu.control());
+    assert_eq!(0, ppu.mask());
+    assert_eq!(0x40, ppu.oam_address());
+
+    // The latch is cleared, so the next two writes form a complete address again and the read
+    // lands on $2010 rather than on $2110.
+    assert_eq!(0x77, read_vram(&mut core, 0x2010));
+}
+
+/// REQ-CORE-122: the APU goes silent as a `$4015 = 0` write would, and the frame IRQ flag goes
+/// away. The `$4017` mode is unchanged.
+#[test]
+fn req_core_122_the_apu_is_silenced_and_4015_reads_zero() {
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+
+    // Arm the two pulse channels and let their length counters load.
+    core.write_memory(0x4015, 0x0F);
+    core.write_memory(0x4000, 0x30);
+    core.write_memory(0x4003, 0x08);
+    core.write_memory(0x4004, 0x30);
+    core.write_memory(0x4007, 0x08);
+    core.run_frame(0);
+    assert_ne!(0, core.bus().apu().peek_status() & 0x03);
+
+    core.soft_reset();
+
+    assert_eq!(0, core.bus().apu().peek_status());
+    assert!(!core.bus().apu().irq_asserted());
+}
+
+/// REQ-CORE-006 as amended by AMD-044: the core frame counter restarts from 0 on a soft reset,
+/// as it does when a ROM is loaded and on a hard reset.
+#[test]
+fn req_core_006_the_frame_counter_restarts_from_zero() {
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+    for _ in 0..5 {
+        core.run_frame(0);
+    }
+    assert_eq!(5, core.frame_count());
+
+    core.soft_reset();
+    assert_eq!(0, core.frame_count());
+
+    core.run_frame(0);
+    assert_eq!(1, core.frame_count());
+}
+
+/// REQ-CORE-122: the latch and the shift registers of the controller ports go to zero. The
+/// buttons the player is holding are read again on the next frame, so a held A still reaches
+/// the game.
+#[test]
+fn req_core_122_the_port_latch_and_shift_registers_are_cleared() {
+    // The ports are driven directly: a host peek of $4016 reads back as 0 by REQ-CORE-081, so
+    // it cannot show what the shift registers hold.
+    fn strobe_and_read(core: &mut NesCore) -> u8 {
+        let input = core.bus_mut().input_mut();
+        input.write(0x01);
+        input.write(0x00);
+        input.read(0, 0, |_| false) & 0x01
+    }
+
+    let mut core = machine_with(&minimal(), "Minimal.nes");
+    core.set_port_type(1, ControllerPortType::Zapper).unwrap();
+
+    // The player holds A: the strobe latches it and the first read hands it over.
+    core.run_frame(0x0001);
+    assert_eq!(1, strobe_and_read(&mut core));
+
+    core.soft_reset();
+
+    // The latch is down and the shift registers are empty, so a read with no strobe returns 0
+    // even though the button is still held.
+    assert_eq!(0, core.bus_mut().input_mut().read(0, 0, |_| false) & 0x01);
+
+    // The port types survive, exactly as they do across a hard reset (REQ-CORE-004).
+    assert_eq!(Ok(ControllerPortType::Zapper), core.port_type(1));
+
+    // The next frame reads the held buttons again (AMD-044 §2).
+    core.run_frame(0x0001);
+    assert_eq!(1, strobe_and_read(&mut core));
+}
+
+/// REQ-CORE-122 complement: a home-made ROM that counts its resets in RAM shows 3 after three
+/// soft resets. `INC $10` at $8000, then `JMP $8002` — the jump to itself: exactly one
+/// increment per trip through the reset vector.
+#[test]
+fn req_core_122_a_rom_that_counts_its_resets_in_ram_shows_three() {
+    let image = minimal_rom(0x01, Some(&[0xE6, 0x10, 0x4C, 0x02, 0x80]), None);
+    let mut core = machine_with(&image, "Counter.nes");
+
+    core.run_frame(0);
+    assert_eq!(1, core.read_memory(0x0010));
+
+    for _ in 0..2 {
+        core.soft_reset();
+        core.run_frame(0);
+    }
+    assert_eq!(3, core.read_memory(0x0010));
+
+    // The hard reset, being a power cycle, loses the count (REQ-CORE-004, DEC-02-Q3).
+    core.reset();
+    core.run_frame(0);
+    assert_eq!(1, core.read_memory(0x0010));
+}
+
+/// A soft reset with no ROM loaded does nothing at all (REQ-CORE-005).
+#[test]
+fn req_core_122_a_soft_reset_without_a_rom_does_nothing() {
+    let mut core = NesCore::new();
+    core.soft_reset();
+
+    assert_eq!(None, core.rom_name());
+    assert_eq!(0, core.frame_count());
+}

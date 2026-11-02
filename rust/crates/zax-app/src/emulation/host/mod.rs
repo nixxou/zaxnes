@@ -1315,6 +1315,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             (HotkeyEvents::FAST_FORWARD, Command::FastForward),
             (HotkeyEvents::QUICK_SAVE, Command::QuickSave),
             (HotkeyEvents::QUICK_LOAD, Command::QuickLoad),
+            (HotkeyEvents::SOFT_RESET, Command::SoftReset),
         ] {
             if events.contains(flag) {
                 self.enqueue(command, CommandArgs::default());

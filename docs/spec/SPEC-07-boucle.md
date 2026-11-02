@@ -203,9 +203,13 @@ Le chargement de slot DOIT être ignoré si Chargement est déjà vrai.
 
 ### 3.6 Reset, arrêt, sortie, focus
 
-**REQ-LOOP-050** (P1) — Reset : dans le frontend desktop, le reset DOIT être une relance complète du jeu courant (REQ-LOOP-020 cas 2, bouton « Reset ») : relecture de la ROM, démarrage à froid du cœur (mémoire réinitialisée), hook de fin puis hook de démarrage, historique vidé, sans rechargement du profil 3D. Il n'existe pas de reset « doux » (équivalent du bouton RESET de la console) dans l'interface livrée.
+**REQ-LOOP-050** (P1) — Reset : dans le frontend desktop, le reset DOIT être une relance complète du jeu courant (REQ-LOOP-020 cas 2, bouton « Reset ») : relecture de la ROM, démarrage à froid du cœur (mémoire réinitialisée), hook de fin puis hook de démarrage, historique vidé, sans rechargement du profil 3D. Un reset « doux » (équivalent du bouton RESET de la console) existe à côté de lui : voir REQ-LOOP-072 (dernière phrase remplacée par AMD-044).
 - Critère d'acceptation : en cours de partie, sélectionner le jeu courant puis « Reset » → le jeu redémarre à son écran titre, état En cours, compteur de frames du cœur reparti de 0.
-- Notes : le frontend libretro DEVRAIT associer `retro_reset` au même démarrage à froid du cœur, sans recharger le profil ni passer par l'état Arrêté ; un reset doux PEUT être ajouté comme option.
+- Notes : le frontend libretro DEVRAIT associer `retro_reset` au même démarrage à froid du cœur, sans recharger le profil ni passer par l'état Arrêté.
+
+**REQ-LOOP-072** (P2) [ROM] — **Reset doux** (ajoutée par AMD-044) : le frontend DOIT proposer le reset doux à côté du reset dur (menu de jeu, et l'action d'entrée de REQ-INP-125). Le reset doux se comporte comme le reset dur de REQ-LOOP-050 pour le reste du programme (pause levée, horloge de cadence réinitialisée, historique de rollback vidé, REQ-LOOP-031), mais NE DOIT PAS relancer le profil : pas de relecture de la ROM, pas d'appel `End`/`Start` des scripts Lua, état appris de la conversion conservé. Libellés : `Soft Reset` / `Reset doux`, le reset dur devenant `Hard Reset` / `Reset complet`.
+- Critère d'acceptation (auto, harnais) : en jeu, reset doux → l'historique compte 0 snapshot ; les données `PData` ne sont pas remises à zéro ; aucun hook `End` ni `Start` n'est appelé.
+- Critère d'acceptation [ROM] : « Super Mario Bros. » en cours de partie, reset doux → retour à l'écran titre sans écran de chargement.
 
 **REQ-LOOP-051** (P1) — Arrêt : l'arrêt d'un jeu (suppression du jeu courant de la bibliothèque, ou étape interne d'un lancement/chargement) DOIT exécuter le hook Lua de fin, fermer la ROM dans le cœur, vider la scène 3D et passer à Arrêté. Seule la suppression du jeu courant efface le jeu courant ; l'arrêt interne d'un lancement ne l'efface pas avant l'issue du lancement.
 - Critère d'acceptation : supprimer le jeu courant → menu sans vignette « jeu courant », état Arrêté, musique de menu.

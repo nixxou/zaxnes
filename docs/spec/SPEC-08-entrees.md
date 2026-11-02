@@ -307,6 +307,7 @@ L'ordre des lignes est l'ordre d'affichage dans l'écran de configuration. Les n
 | 17 | `FastForward` | Avance rapide | 0x10000 | 65536 |
 | 18 | `QuickSave` | Sauvegarde rapide | 0x20000 | 131072 |
 | 19 | `QuickLoad` | Chargement rapide | 0x40000 | 262144 |
+| 20 | `SoftReset` | Reset doux, bouton RESET de la console (AMD-044 REQ-INP-125 ; sans binding par défaut, clavier comme manette) | 0x80000 | 524288 |
 
 Octet de manette NES (bits 0 à 7) : A, B, Select, Start, Haut, Bas, Gauche, Droite, du bit 0 au bit 7. Type de port : `Manette` = 0, `Zapper` = 1.
 

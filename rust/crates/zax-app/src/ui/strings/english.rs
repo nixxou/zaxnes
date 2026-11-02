@@ -187,7 +187,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.emulation.pause_resume", "Pause / Resume"),
     ("cmd.emulation.pause", "Pause"),
     ("cmd.emulation.resume", "Resume"),
-    ("cmd.emulation.reset", "Reset"),
+    // AMD-044 §3: the two resets now sit side by side, so the hard one is named as such.
+    ("cmd.emulation.reset", "Hard Reset"),
+    ("cmd.emulation.soft_reset", "Soft Reset"),
     ("cmd.emulation.stop", "Stop"),
     ("cmd.emulation.fast_forward", "Fast forward"),
     ("cmd.emulation.rollback", "Rollback"),

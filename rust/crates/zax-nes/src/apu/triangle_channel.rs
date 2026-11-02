@@ -121,6 +121,13 @@ impl TriangleChannel {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+
+    /// Puts the sequencer back on its first step, which a RESET press does (nesdev, "CPU power
+    /// up state", *after reset*: "APU triangle phase is reset to 0", so the channel puts out 15
+    /// again). AMD-044 REQ-CORE-122.
+    pub fn reset_phase(&mut self) {
+        self.sequence_position = 0;
+    }
 }
 
 impl TriangleChannel {

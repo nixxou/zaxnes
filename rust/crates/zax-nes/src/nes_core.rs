@@ -339,6 +339,43 @@ impl NesCore {
         }
     }
 
+    /// The **soft** reset of AMD-044 REQ-CORE-122, which imitates a press on the console's
+    /// RESET button: the internal RAM, the save RAM and the CHR RAM are **kept**, the CPU keeps
+    /// A, X, Y and every flag but `I` while S drops by 3 and PC comes from the reset vector,
+    /// and the PPU, the APU, the mapper and the controller ports go to their documented
+    /// *after reset* state. The frame counter restarts from 0 (REQ-CORE-006 amended).
+    ///
+    /// The hard reset of [`Self::reset`] is unchanged: it stays a power cycle (DEC-02-Q3),
+    /// which is why `cpu_reset/ram_after_reset` fails under it on purpose (REQ-CORE-004) and
+    /// passes under this one.
+    pub fn soft_reset(&mut self) {
+        if self.bus.cartridge().is_none() {
+            return;
+        }
+
+        // The order of `power_on`, minus everything that clears memory: the PPU, the APU and
+        // the mapper are put back first, so that the CPU's own seven reset cycles — real bus
+        // accesses — already run against the after-reset machine.
+        self.bus.ppu_mut().soft_reset();
+        self.bus.apu_mut().soft_reset();
+
+        // The latch and the shift registers of the ports go to zero. This is a choice of the
+        // reimplementation and has no effect on the buttons the player is holding, which are
+        // read again on the next frame (AMD-044 §2).
+        self.bus.input_mut().reset();
+
+        // The mapper follows its documented after-reset state; the volatile RAM it owns —
+        // PRG-RAM and CHR-RAM — is deliberately not cleared.
+        // `Cartridge::reset` refreshes the fast ROM windows the bus reads through itself
+        // (performance history §5.1, "plain PRG-ROM windows").
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.reset();
+        }
+
+        self.cpu.soft_reset(&mut self.bus);
+        self.frame_count = 0;
+    }
+
     /// Battery-backed PRG-RAM, for a host that wants to persist it (REQ-CORE-095). Empty
     /// when no ROM is loaded or the ROM has no battery.
     #[must_use]

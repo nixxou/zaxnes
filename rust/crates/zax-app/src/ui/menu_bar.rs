@@ -377,6 +377,8 @@ fn build_menus() -> Vec<Menu> {
         items: vec![
             item(Command::PauseResume),
             item(Command::Reset),
+            // AMD-044 REQ-LOOP-072: the soft reset sits right next to the hard one.
+            item(Command::SoftReset),
             item(Command::Stop),
             MenuItem::rule(),
             item(Command::FastForward),

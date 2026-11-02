@@ -187,7 +187,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.emulation.pause_resume", "Pause / Reprise"),
     ("cmd.emulation.pause", "Pause"),
     ("cmd.emulation.resume", "Reprise"),
-    ("cmd.emulation.reset", "Reset"),
+    // AMD-044 §3 : les deux resets voisinent, le dur reçoit donc son nom.
+    ("cmd.emulation.reset", "Reset complet"),
+    ("cmd.emulation.soft_reset", "Reset doux"),
     ("cmd.emulation.stop", "Arrêter"),
     ("cmd.emulation.fast_forward", "Avance rapide"),
     ("cmd.emulation.rollback", "Rollback"),

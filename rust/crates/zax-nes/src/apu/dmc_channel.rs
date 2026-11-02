@@ -222,6 +222,15 @@ impl DmcChannel {
         *self = Self::default();
         self.rates = rates;
     }
+
+    /// The documented *after reset* state of the DMC (AMD-044 REQ-CORE-122): the output level
+    /// is `AND`ed with 1 — the upper six bits are cleared — and the IRQ flag goes away. The
+    /// sample address, the length and the rate are kept, as nesdev describes; the channel's own
+    /// "playing" state is stopped by the `$4015 = 0` the APU applies.
+    pub fn soft_reset(&mut self) {
+        self.output &= 1;
+        self.irq_flag = false;
+    }
 }
 
 impl DmcChannel {

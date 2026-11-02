@@ -753,6 +753,20 @@ impl GameSession {
         self.frame_counter = 0;
     }
 
+    /// The soft reset of AMD-044 REQ-CORE-122 and REQ-LOOP-072: the core imitates a press on
+    /// the RESET button and the frame counter goes back to 0, but the profile is **not**
+    /// relaunched — no `End`, no `Start`, the Lua state and `PData` untouched.
+    ///
+    /// The converted frames in flight belong to before the reset and are dropped, as they are
+    /// on a relaunch and on a savestate restore (REQ-E3D-281); the learned conversion state is
+    /// kept, which is what distinguishes this from a relaunch. Called with the core home, like
+    /// every other command of the tick.
+    pub fn soft_reset(&mut self) {
+        self.core.soft_reset();
+        self.frame_counter = 0;
+        self.engine.clear_frames();
+    }
+
     /// Restores a core state block, clearing the engine's frames (they described the old
     /// state).
     ///

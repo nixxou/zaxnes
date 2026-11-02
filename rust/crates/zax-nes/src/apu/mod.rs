@@ -484,6 +484,39 @@ impl Apu2A03 {
         self.discard_samples();
     }
 
+    /// The documented *after reset* state of the APU (AMD-044 REQ-CORE-122): the five channels
+    /// are silenced as a `$4015 = 0` write would, the frame IRQ flag goes away, the triangle
+    /// phase goes back to 0 and the DMC output is `AND`ed with 1. The `$4017` mode — five-step
+    /// and IRQ inhibit — is **unchanged** (nesdev, "CPU power up state").
+    ///
+    /// The frame sequencer is put back where [`Self::reset`] leaves it, which is the 2A03G
+    /// behaviour and keeps the two resets consistent; the letterless revision leaves it
+    /// running. The choice is recorded in `docs/spec/changes/Q-078.md`. The pending samples and
+    /// the resampler's history are **kept**: a RESET press does not interrupt the session, the
+    /// channels simply fall silent (SPEC-11 REQ-AUD-012).
+    // Q-078
+    pub fn soft_reset(&mut self) {
+        // $4015 = 0.
+        self.pulse1.length.set_enabled(false);
+        self.pulse2.length.set_enabled(false);
+        self.triangle.length.set_enabled(false);
+        self.noise.length.set_enabled(false);
+        self.dmc.set_enabled(false);
+
+        self.triangle.reset_phase();
+        self.dmc.soft_reset();
+
+        self.frame_irq_flag = false;
+        self.frame_irq_pending = false;
+        self.frame_counter = 0;
+        self.frame_step = 0;
+        self.pending_sequencer_reset = 0;
+
+        // Every channel output may have moved, and the status byte a read would see with it.
+        self.level_dirty = true;
+        self.readable_status = self.compose_status(0);
+    }
+
     /// Drops every pending sample and the resampler's history, so that the audio restarts
     /// from silence (REQ-CORE-074). Reset and closing the ROM do this.
     pub fn discard_samples(&mut self) {

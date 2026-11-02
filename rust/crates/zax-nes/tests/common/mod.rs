@@ -359,14 +359,33 @@ pub fn run_shell_rom(image: &[u8], max_frames: i64) -> RomRun {
     run_shell_rom_with(image, max_frames, true)
 }
 
+/// [`run_shell_rom`] where the press is the **soft** reset of AMD-044 REQ-CORE-122 — the RESET
+/// button — rather than the power cycle of REQ-CORE-004. SPEC-02 §3.12 as amended by AMD-044
+/// requires `cpu_reset/ram_after_reset` and `cpu_reset/registers` to pass this way.
+pub fn run_shell_rom_soft(image: &[u8], max_frames: i64) -> RomRun {
+    run_shell_rom_kind(image, max_frames, true, true)
+}
+
 /// [`run_shell_rom`] with the choice of pressing reset when the ROM asks for it ($6000 =
 /// $81). `false` stops the run there and reports $81, which is how the power-on half of a
 /// reset test is read on a core whose reset is a power cycle (REQ-CORE-004).
 pub fn run_shell_rom_with(image: &[u8], max_frames: i64, press_reset: bool) -> RomRun {
+    run_shell_rom_kind(image, max_frames, press_reset, false)
+}
+
+/// [`run_shell_rom_with`] with the kind of press: `soft_reset` makes it the RESET button of
+/// AMD-044 REQ-CORE-122 instead of the power cycle of REQ-CORE-004.
+pub fn run_shell_rom_kind(
+    image: &[u8],
+    max_frames: i64,
+    press_reset: bool,
+    soft_reset: bool,
+) -> RomRun {
     let mut core = machine_with(image, "shell");
     let mut frames = 0;
     let mut started = false;
     let mut reset_delay = 0;
+    let mut pressed = false;
     while frames < max_frames {
         core.run_frame(0);
         frames += 1;
@@ -374,7 +393,12 @@ pub fn run_shell_rom_with(image: &[u8], max_frames: i64, press_reset: bool) -> R
         if reset_delay > 0 {
             reset_delay -= 1;
             if reset_delay == 0 {
-                core.reset();
+                if soft_reset {
+                    core.soft_reset();
+                } else {
+                    core.reset();
+                }
+                pressed = true;
                 continue;
             }
         }
@@ -402,20 +426,29 @@ pub fn run_shell_rom_with(image: &[u8], max_frames: i64, press_reset: bool) -> R
                 };
             }
 
-            // "Emulator should wait a couple of frames after seeing $81."
-            reset_delay = 3;
+            // The readme asks for at least 100 ms after $81 appears, which is six NTSC frames.
+            // The countdown is armed once per request: a soft reset keeps the RAM, so $6000
+            // still reads $81 for a few frames after the press, and re-arming on every such
+            // frame would push the press back for ever.
+            if reset_delay == 0 && !pressed {
+                reset_delay = if soft_reset { 12 } else { 3 };
+            }
             continue;
         }
 
-        if status != 0x80 {
-            return RomRun {
-                code: status,
-                passed: status == 0,
-                text: shell_text(&core),
-                frames,
-                timed_out: false,
-            };
+        if status == 0x80 {
+            // The ROM is running again, so a later $81 is a genuine second request.
+            pressed = false;
+            continue;
         }
+
+        return RomRun {
+            code: status,
+            passed: status == 0,
+            text: shell_text(&core),
+            frames,
+            timed_out: false,
+        };
     }
 
     RomRun {

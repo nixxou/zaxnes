@@ -8,8 +8,8 @@ Branch `rustupdated`. The application is the Rust workspace `rust/`; the .NET lo
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done |
-| 2 | AMD-044: the soft reset of the core, the command, the input action and the menu | todo |
+| 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `831d43f` |
+| 2 | AMD-044: the soft reset of the core, the command, the input action and the menu | done |
 | 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | todo |
 | 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | todo |
 | 5 | AMD-052: the catch-up limit and the clock reset on a speed change | todo |
@@ -106,3 +106,61 @@ setting's domain stays 1 to 5.
 **(D)**: on PortMaster and Android the value 2 issues **no fence call at all** and keeps today's
 behaviour, because the Mali driver keeps three frames of its own and bounding that queue could
 cost frames. The value 1 works on every build.
+
+### Test environment
+
+The notes of RU-1 and RU-2 still apply: CMake on `PATH` and `--features zax-app/bundled` for
+every `zax-app` or workspace command (SDL2 is linked statically), and the two demo binaries are
+local stand-ins. One addition of this lot: **`rust/test-roms/` was empty but for `nestest.nes`**
+in this checkout, while the 291-ROM corpus the goldens and the ROM-gated tests read lives in
+`tests/roms/` (untracked, left by the .NET layout). It was copied over — `rust/test-roms/` is in
+`rust/.gitignore`, so nothing of it is committed — and the goldens then report
+`291 of 291 rows matched, 0 ROMs missing`.
+
+### Step 2 — AMD-044, soft reset
+
+Ported from V2-5 with no departure. Core: `NesCore::soft_reset` runs the order of `power_on`
+minus everything that clears memory (PPU, APU, input ports, then the mapper, then the CPU's own
+seven reset cycles against the already-reset machine), `Cpu6502::soft_reset`,
+`Ppu2C02::soft_reset`, `Apu2A03::soft_reset`, `TriangleChannel::reset_phase`,
+`DmcChannel::soft_reset`. The two question tickets the .NET lot wrote are reused as they stand
+and referenced by `// Q-078` in the PPU's and the APU's methods: the PPU write-inhibit window is
+not modelled, and the APU frame sequencer is reset (2A03G).
+
+Two Rust-only points:
+- `Ppu2C02::soft_reset` leaves `v_row_start` and `v_row_next` alone. They are the Rust port's
+  own caches of `v` (performance history §5.1, the fast span), and `v` is not touched by a soft
+  reset; only `t` and `fine_x` are.
+- `Cartridge::reset` refreshes the fast ROM windows itself, so the board's after-reset banks
+  reach the bus's `read_rom_window` path with nothing extra to do here.
+
+Frontend: `Command::SoftReset` (`emulation.soft_reset`, no default shortcut), the menu entry next
+to the hard one, `InputAction::SOFT_RESET` = `0x80000` with no default binding on keyboard or pad,
+the `HotkeyEvents::SOFT_RESET` edge, the row in the controls screen among the hotkeys, and the
+labels of AMD-044 §3 in both languages (the hard reset becomes `Hard Reset` / `Reset complet`).
+`EmulationHost::soft_reset_game` empties the rollback history, the frame steps and the
+fast-forward, re-applies the speed, forces the state back to Running and resets the pacing clock,
+without ever going through `launch_game`.
+
+Tests: `zax-nes/tests/soft_reset_tests.rs` (9), `zax-nes/tests/cpu_reset_rom_tests.rs` (2),
+`req_core_122_the_apu_reset_tests_pass_under_a_soft_reset` in `apu_rom_tests.rs`,
+`zax-app/tests/soft_reset_loop_tests.rs` (8). The shell-ROM runner of the test harness gained the
+kind of press (`run_shell_rom_soft`): with a soft reset the RAM keeps `$6000 = $81` for a few
+frames after the press, so the countdown is armed once per request and the delay is 12 frames
+(the readme asks for 100 ms), exactly as the .NET runner does.
+
+Measured, not asserted:
+- `cpu_reset/ram_after_reset` and `cpu_reset/registers` **pass** under the soft reset — the
+  acceptance criterion of REQ-CORE-122 — and `ram_after_reset` still fails under the hard one,
+  so the note of REQ-CORE-004 stays true.
+- The six public `apu_reset` ROMs also pass under it, which is what verifies Q-078 point 2.
+- PPU goldens: `291 of 291 rows matched` (pixels, tiles, cycles, audio, blargg), unchanged.
+
+Three app tests of the existing suites had to follow the new counts: the command enumeration
+(57 → 58), the action table (19 → 20) and the controls screen's hotkey list (5 → 6). The stale
+`#[ignore]` note of `req_core_004_apu_reset_needs_a_reset_that_keeps_ram` now points at the soft
+reset that does keep both.
+
+SPEC copies: REQ-CORE-006 amended and REQ-CORE-122 added in SPEC-02 §3.12, the last phrase of
+REQ-LOOP-050 replaced and REQ-LOOP-072 added in SPEC-07 §3.6, the twentieth row added to the
+action table of SPEC-08 §4.1.

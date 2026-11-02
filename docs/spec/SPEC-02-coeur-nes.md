@@ -73,7 +73,7 @@ La ROM et le type des ports sont conservés.
 **REQ-CORE-005** (P1) — Après « fermer la ROM », ou tant qu'aucune ROM n'est chargée, « exécuter une frame » NE DOIT RIEN faire : pas de rappel vidéo, pas d'audio produit, compteur de frames inchangé. Un nouveau chargement de ROM ou de savestate réactive l'émulation.
 - Critère d'acceptation : fermer la ROM puis appeler 10 fois « exécuter une frame » → 0 rappel vidéo, compteur inchangé, lecture audio = 0 échantillon après vidage.
 
-**REQ-CORE-006** (P1) — Le compteur de frames DOIT augmenter de 1 à chaque frame émulée. Il DOIT être remis à 0 par le chargement d'une ROM et par la réinitialisation, et DOIT être inclus dans le savestate. L'hôte PEUT le modifier.
+**REQ-CORE-006** (P1) — Le compteur de frames DOIT augmenter de 1 à chaque frame émulée. Il DOIT être remis à 0 par le chargement d'une ROM, par la réinitialisation **et par le reset doux** (amendée par AMD-044 REQ-CORE-122), et DOIT être inclus dans le savestate. L'hôte PEUT le modifier.
 - Critère d'acceptation : charger, exécuter 100 frames → 100 ; sauvegarder, exécuter 50 frames, restaurer → 100.
 
 ### 3.2 Chargement de ROM
@@ -445,6 +445,9 @@ Le bloc commence par un numéro de version du format.
 
 **REQ-CORE-113** (P2) — APU : `apu_test` (tests 1 à 8) et `blargg_apu_2005.07.30` DOIVENT passer. `dmc_dma_during_read4` : P3.
 - Critère d'acceptation : chaque ROM affiche « Passed ».
+
+**REQ-CORE-122** (P2) — **Reset doux** (ajoutée par AMD-044) : le cœur DOIT offrir un reset doux conforme au comportement documenté de la console (nesdev, « CPU power up state » et « PPU power up state », section *after reset*) — RAM interne, RAM de sauvegarde et RAM de CHR conservées, drapeau I mis à 1, S diminué de 3, PC chargé depuis `$FFFC`/`$FFFD`, PPU, APU et mapper dans leur état *after reset*, verrou et registres à décalage des ports remis à zéro, compteur de frames reparti de 0 (REQ-CORE-006 amendée). Les ROM de test publiques `cpu_reset/ram_after_reset` et `cpu_reset/registers` (blargg) s'ajoutent à la liste exigée de ce §3.12, **sous reset doux** ; la note de REQ-CORE-004 (`ram_after_reset` échoue volontairement) reste vraie pour le reset dur.
+- Critère d'acceptation : les deux ROM `cpu_reset` passent sous reset doux ; une ROM maison qui compte ses resets en RAM affiche 3 après trois resets doux.
 
 **REQ-CORE-114** (P1) [ROM] — Mappers : `mmc3_test_2` tests 1 à 5 DOIVENT passer (le test 6, « MMC3 alt », peut échouer). Le comportement des IRQ MMC3 DOIT être exact à la ligne près pour les barres de statut (Super Mario Bros. 3, Mega Man 3, Ninja Gaiden III).
 - Critère d'acceptation : chaque ROM affiche « Passed » ; [ROM] la barre de statut de SMB3 ne tremble pas en jeu (inspection sur 60 s).

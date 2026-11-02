@@ -49,11 +49,12 @@ fn req_inp_003_the_action_bits_are_those_of_the_table(
     assert_eq!(action.bits(), bit);
 }
 
-/// REQ-INP-001 and REQ-INP-040: exactly 19 actions, in the display order of the table of §4.1,
-/// and exactly two players.
+/// REQ-INP-001 and REQ-INP-040: exactly 20 actions — the 19 of the table of §4.1 in its
+/// display order, then the soft reset AMD-044 REQ-INP-125 adds to the extended actions — and
+/// exactly two players.
 #[test]
-fn req_inp_001_there_are_nineteen_actions_in_the_order_of_the_table() {
-    assert_eq!(input_action::COUNT, 19);
+fn req_inp_001_there_are_twenty_actions_in_the_order_of_the_table() {
+    assert_eq!(input_action::COUNT, 20);
     assert_eq!(input_action::ALL.len(), input_action::COUNT);
     assert_eq!(input_action::PLAYER_COUNT, 2);
     let distinct: std::collections::BTreeSet<u32> = input_action::ALL
@@ -88,6 +89,7 @@ fn req_inp_001_there_are_nineteen_actions_in_the_order_of_the_table() {
             "FastForward",
             "QuickSave",
             "QuickLoad",
+            "SoftReset",
         ]
     );
 

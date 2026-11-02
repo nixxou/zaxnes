@@ -580,6 +580,28 @@ impl Ppu2C02 {
         self.dot = 1;
     }
 
+    /// The documented *after reset* state of the PPU (AMD-044 REQ-CORE-122): PPUCTRL and
+    /// PPUMASK go to 0, the `$2005`/`$2006` write latch is cleared, the scroll register `t`
+    /// and the `$2007` read buffer go to 0, and the odd-frame flag goes back to "even"
+    /// (nesdev, "PPU power up state").
+    ///
+    /// Nothing else moves: PPUSTATUS, OAMADDR, the current address `v`, the nametable RAM, the
+    /// OAM, the palette RAM and the CHR RAM are all unchanged, and the PPU keeps clocking from
+    /// where it was — a RESET press does not restart the frame. `v_row_start` and `v_row_next`
+    /// follow `v`, not `t`, so they stay as they are too. The ~29 658-cycle window during which
+    /// the hardware ignores writes to PPUCTRL, PPUMASK, PPUSCROLL and PPUADDR is not modelled,
+    /// no more than it is for the power-on reset (Q-078).
+    // Q-078
+    pub fn soft_reset(&mut self) {
+        self.control = 0;
+        self.mask = 0;
+        self.write_toggle = false;
+        self.t = 0;
+        self.fine_x = 0;
+        self.read_buffer = 0;
+        self.odd_frame = false;
+    }
+
     /// Advances the PPU by the dots of one CPU cycle of the current region.
     pub fn step_cpu_cycle(&mut self, mut cartridge: Option<&mut Cartridge>) {
         // accumulator / denominator by repeated subtraction: three or four rounds (3 or 3.2
