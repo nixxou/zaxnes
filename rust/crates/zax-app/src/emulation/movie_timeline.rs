@@ -11,12 +11,32 @@
 //! ten minutes. Nothing here runs unless a movie plays.
 
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
+
+use zax_nes::NesCore;
 
 /// A checkpoint is taken on every core frame count that is a multiple of this.
 pub const CHECKPOINT_INTERVAL: i64 = 60;
 /// The frames before a seek's target that run with the scripts (and the conversion), so that
 /// what they smooth or accumulate over a second or so is right where the seek stops.
 pub const WARM_FRAMES: i64 = 60;
+
+/// What two cores at the same frame of a movie must agree on to be the same machine as far as
+/// the game is concerned: the frame and cycle counts, the work RAM and the last picture. The
+/// state blocks themselves are not compared: they also hold the audio resampler's position and
+/// filter history (REQ-CORE-090), which follow the host's drift correction and differ between
+/// two runs of the same frames while nothing the emulation reads depends on them.
+#[must_use]
+pub fn machine_digest(core: &NesCore) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    core.frame_count().hash(&mut hasher);
+    core.cycle_count().hash(&mut hasher);
+    for address in 0..0x0800u16 {
+        core.read_memory(address).hash(&mut hasher);
+    }
+    core.pixel_frame().hash(&mut hasher);
+    hasher.finish()
+}
 
 /// The checkpoints of the movie being played, and the seek under way.
 #[derive(Debug, Clone)]
@@ -25,8 +45,17 @@ pub struct MovieTimeline {
     start_frame: i64,
     /// The movie's frames.
     length: u32,
-    /// Core states (no ROM image) by core frame count; the start state is one of them.
+    /// Core states (no ROM image) by core frame count, taken by the session; the start state
+    /// is one of them.
     checkpoints: BTreeMap<i64, Vec<u8>>,
+    /// Core states found by the explorer (`movie_explorer`), used once trusted.
+    explored: BTreeMap<i64, Vec<u8>>,
+    /// The [`machine_digest`] of each explored state, and of each checkpoint the session took.
+    explored_digests: BTreeMap<i64, u64>,
+    played_digests: BTreeMap<i64, u64>,
+    /// Whether the explored states are trusted: unknown until one of them meets the session's
+    /// own checkpoint of the same frame, then whether the two were equal.
+    explored_trust: Option<bool>,
     /// Whether the frames before the warm ones may run with the core alone: not when a script
     /// changes the core or the inputs, since the core's past then depends on the scripts.
     core_only_allowed: bool,
@@ -50,6 +79,10 @@ impl MovieTimeline {
             start_frame,
             length,
             checkpoints,
+            explored: BTreeMap::new(),
+            explored_digests: BTreeMap::new(),
+            played_digests: BTreeMap::new(),
+            explored_trust: None,
             core_only_allowed,
             seek_target: None,
         }
@@ -96,37 +129,99 @@ impl MovieTimeline {
             && !self.checkpoints.contains_key(&frame_count)
     }
 
-    /// Keeps `state` as the checkpoint of `frame_count`.
-    pub fn record(&mut self, frame_count: i64, state: Vec<u8>) {
+    /// Keeps `state`, taken by the session, as the checkpoint of `frame_count`, `digest` being
+    /// its [`machine_digest`]. When the explored states are not judged yet and the explorer found
+    /// the same frame, the two digests are compared: returns the verdict then (`Some(false)`
+    /// drops every explored state).
+    pub fn record(&mut self, frame_count: i64, state: Vec<u8>, digest: u64) -> Option<bool> {
+        self.played_digests.insert(frame_count, digest);
         self.checkpoints.insert(frame_count, state);
+        let explored = self.explored_digests.get(&frame_count).copied();
+        self.judge(explored, Some(digest))
     }
 
-    /// The furthest core frame count that has a checkpoint.
+    /// Keeps `state`, found by the explorer, for the frame `frame_count`, `digest` being its
+    /// [`machine_digest`] (nothing once the explored states were found wrong). When the session
+    /// already took that frame and the explored states are not judged yet, the two digests are
+    /// compared: returns the verdict then.
+    pub fn add_explored(&mut self, frame_count: i64, state: Vec<u8>, digest: u64) -> Option<bool> {
+        if self.explored_trust == Some(false)
+            || frame_count <= self.start_frame
+            || frame_count >= self.end_frame()
+        {
+            return None;
+        }
+        self.explored.insert(frame_count, state);
+        self.explored_digests.insert(frame_count, digest);
+        let played = self.played_digests.get(&frame_count).copied();
+        self.judge(Some(digest), played)
+    }
+
+    /// The verdict on the explored states when both digests of a frame are known and none was
+    /// given yet.
+    fn judge(&mut self, explored: Option<u64>, played: Option<u64>) -> Option<bool> {
+        if self.explored_trust.is_some() {
+            return None;
+        }
+        let trusted = explored? == played?;
+        self.explored_trust = Some(trusted);
+        if !trusted {
+            self.explored.clear();
+            self.explored_digests.clear();
+        }
+        Some(trusted)
+    }
+
+    /// Whether the explored states are trusted (`None`: not judged yet).
+    #[must_use]
+    pub const fn explored_trust(&self) -> Option<bool> {
+        self.explored_trust
+    }
+
+    /// The explored states, when they may be used.
+    fn usable_explored(&self) -> Option<&BTreeMap<i64, Vec<u8>>> {
+        (self.explored_trust == Some(true)).then_some(&self.explored)
+    }
+
+    /// The furthest core frame count that has a usable checkpoint.
     #[must_use]
     pub fn furthest_checkpoint(&self) -> i64 {
-        self.checkpoints
-            .keys()
-            .next_back()
-            .copied()
-            .unwrap_or(self.start_frame)
+        let played = self.checkpoints.keys().next_back().copied();
+        let explored = self
+            .usable_explored()
+            .and_then(|explored| explored.keys().next_back().copied());
+        played.max(explored).unwrap_or(self.start_frame)
     }
 
-    /// The number of checkpoints, and the bytes they hold.
+    /// The number of checkpoints, and the bytes they hold, explored ones included.
     #[must_use]
     pub fn footprint(&self) -> (usize, usize) {
         (
-            self.checkpoints.len(),
-            self.checkpoints.values().map(Vec::len).sum(),
+            self.checkpoints.len() + self.explored.len(),
+            self.checkpoints
+                .values()
+                .chain(self.explored.values())
+                .map(Vec::len)
+                .sum(),
         )
     }
 
-    /// The checkpoint at or before the core frame count `frame_count`.
+    /// The usable checkpoint at or before the core frame count `frame_count`.
     #[must_use]
     pub fn checkpoint_before(&self, frame_count: i64) -> Option<(i64, &[u8])> {
-        self.checkpoints
-            .range(..=frame_count)
-            .next_back()
-            .map(|(&frame, state)| (frame, state.as_slice()))
+        let played = self.checkpoints.range(..=frame_count).next_back();
+        let explored = self
+            .usable_explored()
+            .and_then(|explored| explored.range(..=frame_count).next_back());
+        let best = match (played, explored) {
+            (Some(played), Some(explored)) => Some(if explored.0 > played.0 {
+                explored
+            } else {
+                played
+            }),
+            (played, explored) => played.or(explored),
+        };
+        best.map(|(&frame, state)| (frame, state.as_slice()))
     }
 
     /// Whether the frames before the warm ones may run with the core alone.
@@ -192,7 +287,7 @@ mod tests {
         assert!(!timeline.wants(0), "before the movie");
         assert!(!timeline.wants(61));
         assert!(timeline.wants(60));
-        timeline.record(60, vec![1]);
+        timeline.record(60, vec![1], 1);
         assert!(!timeline.wants(60), "already there");
         assert!(!timeline.wants(1020), "after the movie");
         assert_eq!(timeline.furthest_checkpoint(), 60);
@@ -200,11 +295,45 @@ mod tests {
     }
 
     #[test]
+    fn explored_states_count_once_one_meets_the_session_s_own() {
+        let mut timeline = timeline();
+        assert_eq!(timeline.add_explored(60, vec![1], 1), None);
+        assert_eq!(timeline.add_explored(600, vec![6], 6), None);
+        assert_eq!(
+            timeline.checkpoint_before(700).map(|(f, _)| f),
+            Some(3),
+            "not judged yet"
+        );
+        assert_eq!(timeline.record(60, vec![1], 1), Some(true));
+        assert_eq!(timeline.checkpoint_before(700).map(|(f, _)| f), Some(600));
+        assert_eq!(timeline.furthest_checkpoint(), 600);
+        assert_eq!(timeline.record(120, vec![2], 2), None, "judged once");
+
+        // The other way round: the session took the frame before the explorer found it.
+        let mut late = MovieTimeline::new(3, 1000, vec![0], true);
+        late.record(60, vec![1], 1);
+        assert_eq!(late.add_explored(60, vec![1], 1), Some(true));
+        assert_eq!(late.explored_trust(), Some(true));
+
+        let mut wrong = MovieTimeline::new(3, 1000, vec![0], true);
+        assert_eq!(wrong.add_explored(60, vec![9], 9), None);
+        assert_eq!(wrong.add_explored(600, vec![6], 6), None);
+        assert_eq!(wrong.record(60, vec![1], 1), Some(false));
+        assert_eq!(wrong.checkpoint_before(700).map(|(f, _)| f), Some(60));
+        assert_eq!(wrong.add_explored(660, vec![7], 7), None);
+        assert_eq!(
+            wrong.footprint().0,
+            2,
+            "nothing explored is kept after a mismatch"
+        );
+    }
+
+    #[test]
     fn a_seek_starts_from_the_checkpoint_warm_frames_before_or_goes_on() {
         let mut timeline = timeline();
-        timeline.record(60, vec![1]);
-        timeline.record(120, vec![2]);
-        timeline.record(180, vec![3]);
+        timeline.record(60, vec![1], 1);
+        timeline.record(120, vec![2], 2);
+        timeline.record(180, vec![3], 3);
         // Target 200: wanted 140, so the checkpoint of 120.
         assert_eq!(timeline.seek_origin(500, 200).map(|(f, _)| f), Some(120));
         // Already between 120 and 200: go on.

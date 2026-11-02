@@ -8,6 +8,7 @@ pub mod frame_steps;
 pub mod game_catalog;
 pub mod host;
 pub mod hotkey_tracker;
+pub mod movie_explorer;
 pub mod movie_timeline;
 pub mod notification_center;
 pub mod rollback_history;

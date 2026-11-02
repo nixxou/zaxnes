@@ -9,13 +9,13 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 | 1 | Exploration and design note (this file); owner's approval | done |
 | 2 | `.fm2` reader and its tests | done (`zax-nes/src/movie/fm2.rs`) |
 | 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | done |
-| 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | to do |
+| 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | done (owner's visual check pending) |
 | 5 | Script reload, fast and exact, with the core-changing guard | to do |
 | 6 | MCP server (Cargo feature, off by default) and its commands; end-to-end test | to do |
 | 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
 | L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
-Next step: 4, the seek bar in the window (ImGui, desktop).
+Next step: 5, script reload (fast / exact); then 6, the MCP server (`--mcp`).
 
 ## What exists already (and changes the plan)
 
@@ -152,6 +152,17 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
 4. Seek levels and checkpoint memory (whole movie, ~12 MiB for 10 minutes): agreed?
 
 ## Notes
+
+* 4: `ui/zax_ui/movie_bar.rs`: bar over the bottom of the view (shown near the bottom edge, when
+  paused, while seeking or dragging): |< < Play/Pause > >|, slider, `frame / length m:ss.cc`,
+  `[n%]` while the explorer runs. Tools > "Open a movie file..." (`tools.open_movie`, `.fm2` or
+  `.mv<n>`), `--movie <path>` on the command line.
+* Explorer (`emulation/movie_explorer.rs`): a thread runs the whole movie with its own core
+  (no scripts, no sound) and hands a checkpoint every 60 frames; trusted once one of them has the
+  same `machine_digest` (frame and cycle counts, work RAM, picture) as the session's own on the
+  same frame. Byte equality of the state blocks fails on Metal Force: 6 bytes of the APU
+  resampler follow the host's audio drift correction. Metal Force: 47 454 frames explored in
+  40 s; a seek to the end is then instant. Only when no script reads or drives the core.
 
 * 3b: `emulation/movie_timeline.rs` + `host/movies.rs`. A checkpoint (core state, no ROM) on every
   core frame count multiple of 60 while a movie plays, kept for the whole movie; taken in the

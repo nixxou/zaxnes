@@ -192,6 +192,15 @@ fn a_seek_lands_on_the_same_state_as_playing_there() {
     for _ in 0..300 {
         harness.tick_frame();
     }
+    // The explorer ran the movie ahead on its thread; its checkpoints met the session's own.
+    for _ in 0..200 {
+        if harness.host.movie_explorer_trusted().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        harness.tick_frame();
+    }
+    assert_eq!(harness.host.movie_explorer_trusted(), Some(true));
     let (position, _) = harness.host.movie_position().expect("a timeline");
     let start = harness
         .host

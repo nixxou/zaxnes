@@ -194,6 +194,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     movie_timeline: Option<super::movie_timeline::MovieTimeline>,
     /// The movie to play once the next game has started (`--movie`).
     movie_after_launch: Option<String>,
+    /// The thread exploring the movie being played, while it runs (EDITOR-1).
+    movie_explorer: Option<super::movie_explorer::MovieExplorer>,
     job: Option<jobs::LoadJob>,
     loading: bool,
     confirmation: Option<ConfirmationRequest>,
@@ -360,6 +362,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             movie_file: None,
             movie_timeline: None,
             movie_after_launch: None,
+            movie_explorer: None,
             job: None,
             loading: false,
             confirmation: None,
@@ -920,7 +923,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     let frame_count = session.core().frame_count();
                     if timeline.wants(frame_count) {
                         if let Ok(state) = session.core().save_state(false) {
-                            timeline.record(frame_count, state);
+                            let digest = super::movie_timeline::machine_digest(session.core());
+                            let verdict = timeline.record(frame_count, state, digest);
+                            if movies::explorer_verdict(verdict) {
+                                self.movie_explorer = None;
+                            }
                         }
                     }
                 }

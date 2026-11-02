@@ -12,7 +12,8 @@ use zax_nes::movie::fm2::Fm2Movie;
 use zax_nes::movie::{Movie, MovieMode};
 use zax_nes::NesRegion;
 
-use crate::emulation::movie_timeline::{MovieTimeline, WARM_FRAMES};
+use crate::emulation::movie_explorer::{ExplorerSetup, MovieExplorer};
+use crate::emulation::movie_timeline::{machine_digest, MovieTimeline, WARM_FRAMES};
 use crate::input::InputAction;
 
 use super::{EmulationHost, GameView};
@@ -198,6 +199,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// The timeline of the movie that has just started playing: its start state is the first
     /// checkpoint (EDITOR-1).
     fn start_movie_timeline(&mut self) {
+        self.movie_explorer = None;
         self.movie_timeline = self.session.as_ref().and_then(|session| {
             let movie = session.movie()?;
             let core = session.core();
@@ -210,10 +212,75 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 session.core_follows_the_inputs(),
             ))
         });
+        self.start_movie_explorer();
+    }
+
+    /// Starts the thread that runs the whole movie ahead and finds its checkpoints, when the
+    /// scripts leave the core alone (the explorer runs none of them).
+    fn start_movie_explorer(&mut self) {
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let Some(movie) = session.movie() else {
+            return;
+        };
+        if !session.core_follows_the_inputs() {
+            return;
+        }
+        let core = session.core();
+        let setup = ExplorerSetup {
+            start_state: movie.movie().start_state.clone(),
+            inputs: movie.movie().inputs.clone(),
+            ports: [
+                core.port_type(0).unwrap_or_default(),
+                core.port_type(1).unwrap_or_default(),
+            ],
+            widescreen_margin: core.widescreen_margin(),
+            audio: (
+                core.sample_rate(),
+                core.speed(),
+                core.audio_ratio_adjustment(),
+            ),
+        };
+        match MovieExplorer::start(setup) {
+            Ok(explorer) => self.movie_explorer = Some(explorer),
+            Err(error) => self.log(&format!("movie explorer not started: {error}")),
+        }
+    }
+
+    /// Hands what the explorer found to the timeline, once a tick while it runs.
+    fn drain_movie_explorer(&mut self) {
+        let (Some(explorer), Some(timeline)) =
+            (self.movie_explorer.as_ref(), self.movie_timeline.as_mut())
+        else {
+            return;
+        };
+        let verdicts: Vec<bool> = explorer
+            .take_found()
+            .into_iter()
+            .filter_map(|(frame_count, state, digest)| {
+                timeline.add_explored(frame_count, state, digest)
+            })
+            .collect();
+        if verdicts
+            .into_iter()
+            .any(|trusted| explorer_verdict(Some(trusted)))
+        {
+            self.movie_explorer = None;
+        }
+    }
+
+    /// Whether the explorer's checkpoints are trusted (`None`: not judged yet, or no timeline).
+    #[must_use]
+    pub fn movie_explorer_trusted(&self) -> Option<bool> {
+        self.movie_timeline
+            .as_ref()
+            .and_then(MovieTimeline::explored_trust)
     }
 
     /// Drops the timeline, the seek under way with it (the sound given back).
     fn end_movie_timeline(&mut self) {
+        self.movie_explorer = None;
         let seeking = self
             .movie_timeline
             .take()
@@ -264,6 +331,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// target when the scripts leave the core alone, then whole frames (input hook, conversion,
     /// frame hooks). The sound is off meanwhile. Returns whether a seek took the tick.
     pub(super) fn advance_movie_seek(&mut self) -> bool {
+        if self.movie_explorer.is_some() {
+            self.drain_movie_explorer();
+        }
         let Some(target) = self
             .movie_timeline
             .as_ref()
@@ -304,7 +374,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             }
             if timeline.wants(frame_count) {
                 if let Ok(state) = session.core().save_state(false) {
-                    timeline.record(frame_count, state);
+                    let digest = machine_digest(session.core());
+                    if explorer_verdict(timeline.record(frame_count, state, digest)) {
+                        self.movie_explorer = None;
+                    }
                 }
             }
             if timeline.core_only_allowed() && frame_count < target - WARM_FRAMES {
@@ -576,6 +649,26 @@ fn text(english: &str, french: &str) -> String {
         french.to_owned()
     } else {
         english.to_owned()
+    }
+}
+
+/// The log line when the explorer's checkpoints are not the session's: they are dropped.
+const EXPLORER_REFUSED: &str =
+    "Zaxnes: movie explorer: its checkpoint differs from the session's own on the same frame; \n     explored checkpoints dropped, seeks run from the played ones.";
+
+/// Logs the timeline's verdict on the explored checkpoints, when it gives one; returns whether
+/// they were refused (the explorer is then stopped).
+pub(super) fn explorer_verdict(verdict: Option<bool>) -> bool {
+    match verdict {
+        Some(true) => {
+            crate::app_log::line("Zaxnes: movie explorer: its checkpoints match the session's.");
+            false
+        }
+        Some(false) => {
+            crate::app_log::line(EXPLORER_REFUSED);
+            true
+        }
+        None => false,
     }
 }
 

@@ -7,6 +7,8 @@
 //! slider is held. Dragging the slider asks for a seek at every change; the host runs it over the
 //! next ticks from the nearest checkpoint (see `emulation::movie_timeline`).
 
+use std::fmt::Write as _;
+
 use imgui::{Condition, Ui, WindowFlags};
 
 use super::ZaxUi;
@@ -104,7 +106,11 @@ impl ZaxUi {
         }
         ui.same_line();
 
-        let label = position_label(shown, length, rate, seeking.is_some());
+        // While the explorer still runs the movie ahead: how far a seek is quick.
+        let explored = host
+            .movie_explored()
+            .filter(|&explored| explored + 60 < length);
+        let label = position_label(shown, length, rate, seeking.is_some(), explored);
         let label_width = ui.calc_text_size(&label)[0];
         let slider_width = (ui.content_region_avail()[0] - label_width - 12.0).max(80.0);
         ui.set_next_item_width(slider_width);
@@ -134,8 +140,15 @@ impl ZaxUi {
     }
 }
 
-/// `frame / length  m:ss.cc`, and the frame heading for while a seek runs.
-fn position_label(frame: u32, length: u32, rate: i32, seeking: bool) -> String {
+/// `frame / length  m:ss.cc`, the frame heading for while a seek runs, and the share of the
+/// movie explored while the explorer runs.
+fn position_label(
+    frame: u32,
+    length: u32,
+    rate: i32,
+    seeking: bool,
+    explored: Option<u32>,
+) -> String {
     let rate = u32::try_from(rate).unwrap_or(60).max(1);
     let seconds = frame / rate;
     let hundredths = (frame % rate) * 100 / rate;
@@ -144,11 +157,16 @@ fn position_label(frame: u32, length: u32, rate: i32, seeking: bool) -> String {
     } else {
         String::new()
     };
-    format!(
+    let mut label = format!(
         "{arrow}{frame} / {length}  {}:{:02}.{hundredths:02}",
         seconds / 60,
         seconds % 60
-    )
+    );
+    if let Some(explored) = explored {
+        let percent = u64::from(explored) * 100 / u64::from(length.max(1));
+        let _ = write!(label, "  [{percent}%]");
+    }
+    label
 }
 
 #[cfg(test)]
@@ -157,11 +175,18 @@ mod tests {
 
     #[test]
     fn the_label_gives_the_frame_and_the_time() {
-        assert_eq!(position_label(0, 100, 60, false), "0 / 100  0:00.00");
+        assert_eq!(position_label(0, 100, 60, false, None), "0 / 100  0:00.00");
         assert_eq!(
-            position_label(3690, 47454, 60, false),
+            position_label(3690, 47454, 60, false, None),
             "3690 / 47454  1:01.50"
         );
-        assert_eq!(position_label(125, 1000, 50, false), "125 / 1000  0:02.50");
+        assert_eq!(
+            position_label(125, 1000, 50, false, None),
+            "125 / 1000  0:02.50"
+        );
+        assert_eq!(
+            position_label(0, 1000, 60, false, Some(250)),
+            "0 / 1000  0:00.00  [25%]"
+        );
     }
 }
