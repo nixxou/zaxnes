@@ -1461,7 +1461,7 @@ pub const PATCHES: [BuiltinPatch; 57] = [
         name: FLAPPYZAXNES,
         game: "FlappyZaxNes",
         rom_name: "FlappyZaxNes",
-        source_crc: 0x3704_3776,
+        source_crc: 0x4D0F_FCA8,
         // Zaxnes' demo game (after Flappy NES by filipemd, GPL-3.0): a hack pack, the game left as
         // it is; the code in the zone fantôme (widescreen MMC5), two hooks in two groups (the
         // margin set at the NMI's sprite DMA, the clouds shown in the margins). The game keeps its
