@@ -10,8 +10,8 @@ setting kept; the user is told in both interfaces and in the log.
 | # | Step | Status |
 |---|---|---|
 | 1 | The guard: detection at profile load, the effective N, the log line, the tests | done — `8ee28a1` |
-| 2 | The note beside the setting in both interfaces, both languages, and its tests | done |
-| 3 | Closing: full tests, fmt, clippy, `PERFORMANCE-HISTORY.md` §5.5, the `// Q-103` comments | todo |
+| 2 | The note beside the setting in both interfaces, both languages, and its tests | done — `e3e15ec` |
+| 3 | Closing: full tests, fmt, clippy, `PERFORMANCE-HISTORY.md` §5.5, the `// Q-103` comments | done |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -146,15 +146,50 @@ workspace clippy clean.
 
 | Check | Result |
 |---|---|
-| `cargo fmt --check` | (step 3) |
-| `cargo clippy --workspace --all-targets --release --features zax-app/bundled -- -D warnings` | (step 3) |
-| `cargo test --release -p zax-app --features bundled` | (step 3) |
-| `cargo test --release --workspace --features zax-app/bundled` | (step 3) |
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --release --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release -p zax-app --features bundled` | 649 passed |
+| `cargo test --release --workspace --features zax-app/bundled` | **2138 passed, 0 failed** |
 
-Nothing new runs in the per-frame paths: the detection is one text scan at profile load, the
-guard one `bool` test where the setting was already read, and the two notes are built only while
-an options page is open. `PERFORMANCE-HISTORY.md` §5.5 loses its "**that guard-rail is not in
-yet**" line and says what landed instead.
+2138 against RU-3b's 2131: **7 new tests** — 6 in `zax-app/tests/run_ahead_tests.rs` (14 → 20)
+and 1 unit test in `game_session.rs`. No test moved, which includes the 20 of
+`run_ahead_tests.rs` and the 5 of `separate_core_tests.rs`: every loop test runs on a profile
+with no script at all or a script that names nothing, so the guard-rail never fires on them.
+
+`zax-nes`, `zax-settings` and `zax-harness` are untouched by this lot, so the PPU goldens cannot
+have moved; they were last reported at 291 of 291 in RU-3b.
+
+**No performance regression, by construction.** Nothing new runs in a per-frame path: the
+detection is one text scan of the profile's sources at load, the guard one `bool` test at the site
+that already read the setting once per emulated frame, and the two notes are built only while an
+options page is drawing. The core, the conversion, the Lua hooks, the draw list and the render are
+not touched at all — `git diff` of this lot reaches `zax-app` only, and inside it
+`game_session.rs`, `emulation/host/mod.rs`, its run-ahead tests and eight UI files (the keys, the
+two string tables, `text.rs`, the two options models and the two drawing sites).
+`PERFORMANCE-HISTORY.md` §5.5 loses
+its "**that guard-rail is not in yet**" line and says what landed instead.
+
+### The `// Q-103` comments as they now read
+
+| Site | What it says |
+|---|---|
+| `CORE_CHANGING_MEMBERS`, `scripts_change_the_core` | the member list and why each of the six is in or out |
+| `GameSession::create` | the verdict is reached here, once |
+| `GameSession::set_run_ahead` | this is the raw setter; the guard is in the method beside it |
+| `GameSession::apply_run_ahead_setting`, `forces_run_ahead_to_zero` | the guard itself and what the interfaces read |
+| `GameSession::put_the_real_frame_back` | the write is still not replayed, and the restore now only loses the writes of a profile the text test did not see |
+| `EmulationHost::run_due_frames` | why the guard is applied there and not in the setter |
+| `ui::options::forced_run_ahead_note`, `ui::handheld::options::forced_run_ahead_note`, `text::run_ahead_forced_to_zero`, the two keys, the two drawing sites | the note, and that the row stays live |
+
+### What a later lot must not undo
+
+1. **`set_run_ahead` is the raw setter and `apply_run_ahead_setting` is the guarded one.** A new
+   site that pushes the user's setting onto the session must call the second, or the guard-rail
+   stops holding for that path.
+2. **The detection stays at profile load.** Moving it into the frame loop would put a text scan,
+   or a per-frame test of the scripts, in a per-frame path.
+3. **The member list is `CORE_MEMBERS`'s change-the-core subset.** A new script member that writes
+   the core from a frame hook belongs in `CORE_CHANGING_MEMBERS` as well as in `CORE_MEMBERS`.
 
 ### Spec copies
 

@@ -491,11 +491,15 @@ to 068; RU-3b)
 - The harness runs at **N = 0** unless `--run-ahead` says otherwise (`render`, `bench-core`), and
   `golden-core` has no option at all: the digests and captures are only comparable at N equal
   (REQ-ARCH-012 amended). `bench-core` reports N in its header and the restore as its own stage.
-- Q-103, answered by R0 after this lot: a frame hook's `Script:WriteMem` writes into the displayed
-  state and is lost. The write is not to be replayed, but a profile whose scripts name such a
-  member must have its **effective** N forced to 0 (detected once at profile load, as
-  `scripts_leave_the_core_alone` is, with a note beside the setting). **That guard-rail is not in
-  yet** — it is the lot after RU-3b.
+- Q-103, answered by R0 after this lot and implemented in RU-3b-fix: a frame hook's
+  `Script:WriteMem` writes into the displayed state and is lost, and the write is not replayed, so
+  a profile whose scripts name a member that **changes** the core (`WriteMem`, `SetInputType`; the
+  read-only ones and `InputProcess`, which runs before the real frame, are not concerned) runs at
+  an **effective** N of 0, the user's setting kept for the next game. One text scan of the sources
+  at profile load (`scripts_change_the_core`, beside `scripts_leave_the_core_alone`) and one
+  `bool` test in `GameSession::apply_run_ahead_setting`, where the loop already read the setting:
+  nothing in the core, the conversion, the draw list or the frame hooks. `set_run_ahead` stays the
+  raw setter, so the frame steps and the harness are untouched.
 
 **Pipelined frames** (setting `emu.pipeline`: Off / Auto / Always; desktop Off, handheld Auto;
 `ZAXNES_PIPELINE`; `8bc7374`)
