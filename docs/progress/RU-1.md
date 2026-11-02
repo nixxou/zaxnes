@@ -14,8 +14,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 | 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | done — `032638a` |
 | 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | done — `b789322` |
 | 7 | AMD-056 import dialogs, desktop frontend, both languages | done — `a3c68b3` |
-| 8 | UI wiring: commands, chooser, console/handheld screens, options | done |
-| 9 | Closing: fmt, clippy, release tests, Lua API dump, journal | todo |
+| 8 | UI wiring: commands, chooser, console/handheld screens, options | done — `6e23a52` |
+| 9 | Closing: fmt, clippy, release tests, Lua API dump, journal | done |
 
 ## Requirement map
 
@@ -319,7 +319,47 @@ Handheld (gamepad only, no keyboard):
 Tests: the chooser's marker, filter, search and « Favorites first » order; the handheld's resume
 row and its L2.
 
-### Next step
+### Step 9 — closing
 
-Step 9: closing — fmt, clippy and the release tests of every crate touched, the Lua API dump, the
-journal entry.
+All run in release, in the foreground, one suite at a time, with CMake on `PATH` and
+`--features zax-app/bundled` (see the note above):
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --release -p zax-profiles` | 178 passed, 56 ignored (the `ZAXNES_*` ones) |
+| `cargo test --release -p zax-settings` | 9 binaries, all green |
+| `cargo test --release -p zax-app --features bundled` | 603 passed |
+| `cargo test --release -p zax-harness --test lua_api_tests` | 2 passed; `goldens/lua-api.txt` byte-identical, and `git status` shows it untouched — this lot adds no Lua member |
+| `cargo test --release --workspace --features zax-app/bundled` | **1957 passed**, 2 failed |
+
+The two failures are `zax-harness --test bench_core_tests`
+(`the_report_has_one_line_per_stage_and_the_total`, `the_3d_segmentation_can_be_forced`): both ask
+for `rust/test-roms/nestest.nes`, which `.gitignore` excludes (`*.nes`) and which was never
+tracked — `NotFound` on the path, nothing to do with this lot. It is the same gap as the two demo
+binaries described above.
+
+### Requirements covered
+
+| Requirement | Where |
+|---|---|
+| AMD-039 §2, §4 | `zax-profiles/src/import/bundle.rs`; `unity_bundle_reader_tests.rs`, `three_d_sen_import_tests.rs`, `three_d_sen_real_install_tests.rs` |
+| REQ-UI-084 (AMD-056 §2) | `catalogue/user_folder.rs` `import_messages`; `ui_language_tests.rs` |
+| REQ-UI-212 | `catalogue/user_folder.rs` `inspect`; `catalogue_and_library_tests.rs` |
+| REQ-UI-214 | `ui/profile_import.rs`, `ui/zax_ui/mod.rs`, `ui/zax_ui/dialogs.rs`; `profile_import_dialog_tests.rs` |
+| REQ-LOOP-076 | `persistence/resume_point.rs`, `emulation/host/resume.rs`, `host/jobs.rs`, `host/mod.rs` `shutdown`; `resume_point_tests.rs` |
+| REQ-UI-210 | `library/game_library.rs`, `library/store.rs`, `host/resume.rs`, `ui/profile_chooser.rs`, `ui/handheld/rom_list.rs`; `catalogue_and_library_tests.rs`, `resume_point_tests.rs`, `rom_list.rs` unit tests |
+| REQ-UI-211 | `library/search.rs`, `GameLibrary::enumerate`, `ui/profile_chooser.rs`; `catalogue_and_library_tests.rs`, `resume_point_tests.rs` |
+| REQ-UI-213 | `app_options.rs`, `application.rs`, `host/mod.rs` `count_emulated_frame`, `app_log.rs`; `app_options_tests.rs`, `resume_point_tests.rs` |
+| REQ-PERS-033 (AMD-053 §3 point 8) | `library/game_library.rs`, `zax-settings/src/table.rs`, `persistence/app_settings.rs` |
+| REQ-PERS-024 / §3 point 11 | `library/store.rs` (schema 2, `.v1.bak`) |
+| AMD-053 §3 point 17 | `emulation/commands.rs`, `host/commands.rs`; `command_model_tests.rs` |
+| AMD-035 / AMD-036 | `ui/keys.rs`, `ui/strings/english.rs`, `ui/strings/french.rs`; `ui_language_tests.rs`, `profile_import_dialog_tests.rs` |
+
+### Open
+
+**Q-102**, two questions, waiting on R1: whether the `resume` point may be a single-file store
+(AMD-053 §3 point 12 having no target in the Rust application), and whether `-slot=<n>` may mean
+"the slot of the game this run starts", the "slot of another game" clause of REQ-UI-213 having no
+referent without a common slot index and without `-id=`.
