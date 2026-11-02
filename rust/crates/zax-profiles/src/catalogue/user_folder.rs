@@ -60,25 +60,76 @@ pub struct ProfileImportResult {
     pub message: String,
 }
 
-/// The messages of a refused or ignored profile file. The wording, misspelling included, is the
-/// original's (REQ-PROF-063).
+/// What importing a chosen file would do, read without writing anything (AMD-056 REQ-UI-214):
+/// the dialogue the interface puts up is chosen from this, and only then is [`UserProfileFolder::apply`]
+/// called.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileImportPlan {
+    /// What applying the plan would do.
+    pub outcome: ProfileImportOutcome,
+    /// The file the user chose.
+    pub source_path: PathBuf,
+    /// The reason of a refusal, empty otherwise.
+    pub message: String,
+    /// The identifier the file carries, empty for a refusal.
+    pub id: String,
+    /// The title of the file: its `Title`, else its file name without extension.
+    pub title: String,
+    /// The identity fields read from the file.
+    pub header: ProfileHeader,
+    /// The user profile the identifier would take over, and whose displayed name the
+    /// confirmation of REQ-UI-214 names.
+    pub replaced: Option<UserProfile>,
+    /// Where the file would be copied, empty when nothing would be.
+    pub destination: PathBuf,
+}
+
+impl ProfileImportPlan {
+    /// Whether [`UserProfileFolder::apply`] would write anything.
+    #[must_use]
+    pub fn writes(&self) -> bool {
+        matches!(
+            self.outcome,
+            ProfileImportOutcome::Added | ProfileImportOutcome::Replaced
+        )
+    }
+}
+
+/// The texts the original shows when an import fails. SPEC-10 REQ-UI-084 is the only normative
+/// source for them, and one oddity survives their rewording by AMD-056 §2: the two spaces before
+/// "is" in the version message.
+///
+/// AMD-056 §1 reads two corrections out of the reference program 2.0 that AMD-053 had missed —
+/// the version message carries the **sanitised** version and not the raw string of the file, and
+/// the format message has a space after the path and spells « obsolete ». The « obsolate » of
+/// the earlier reading was a misreading, not an oddity of the original.
 pub mod import_messages {
     use std::path::Path;
 
     /// The file is not a `3dn` file.
     pub const NOT_A_3DN_FILE: &str = "This file is not a 3dn file";
 
-    /// The format version is not supported.
+    /// The format version is not supported. The version is sanitised as REQ-PROF-021 sanitises
+    /// it — digits, `.` and `$` only — so a file writing `"v1"` reads « 3dn format version 1 »
+    /// (AMD-056 §2, which supersedes the answer of Q-089 on the form of `<v>`). The sanitising
+    /// happens here rather than at the call sites, so that every text carrying a version — the
+    /// import of REQ-UI-212 and the load of REQ-PERS-040 — spells it the same way. The two
+    /// spaces before "is" are the original's and stay.
     #[must_use]
     pub fn unsupported_version(version: &str) -> String {
-        format!("3dn format version {version}  is not supported")
+        format!(
+            "3dn format version {}  is not supported",
+            crate::profile::version_rules::sanitize(Some(version))
+        )
     }
 
-    /// The file is unreadable or has no identifier.
+    /// The file is unreadable or has no identifier. AMD-029 §3, closing Q-068: the last words
+    /// name the product, « Zaxnes ». AMD-056 §2 adds the space after the path and the correct
+    /// spelling of « obsolete ».
     #[must_use]
     pub fn obsolete_format(path: &Path) -> String {
         format!(
-            "{}has an obsolate or wrong profile format. \
+            "{} has an obsolete or wrong profile format. \
              This profile is not compatible with the current version of Zaxnes.",
             path.display()
         )
@@ -179,10 +230,14 @@ impl<'a> UserProfileFolder<'a> {
         Ok(profiles)
     }
 
-    /// Imports `source_path` into this folder (REQ-PROF-063): the file is copied under its own
-    /// name, replacing the profile of the same identifier in `user_profiles` if there is one. A
-    /// file that is not an acceptable profile is a [`ProfileImportOutcome::Rejected`] result,
-    /// not an error.
+    /// Imports `source_path` into this folder (REQ-PROF-063): the reading of [`Self::inspect`]
+    /// followed at once by the writing of [`Self::apply`]. A file that is not an acceptable
+    /// profile is a [`ProfileImportOutcome::Rejected`] result, not an error.
+    ///
+    /// This is the **non-interactive** import: it replaces an existing user profile without
+    /// asking. The desktop interface no longer takes this path — AMD-056 REQ-UI-214 has it
+    /// inspect, put up a dialogue, and apply only once the dialogue says so — but everything
+    /// with nowhere to show a dialogue still does.
     ///
     /// # Errors
     ///
@@ -194,8 +249,33 @@ impl<'a> UserProfileFolder<'a> {
         built_in_ids: &[&str],
         user_profiles: &[UserProfile],
     ) -> io::Result<ProfileImportResult> {
+        let plan = self.inspect(source_path, built_in_ids, user_profiles)?;
+        self.apply(&plan)
+    }
+
+    /// Reads `source_path` and says what importing it would do, **without writing anything**
+    /// (AMD-056 REQ-UI-214).
+    ///
+    /// AMD-053 REQ-UI-212: the file is read as REQ-PROF-062 reads one — the header alone, no
+    /// pattern and no script — and the message of a refusal is chosen by its **cause**. The four
+    /// rows of the table are, in the order they can be told apart: an unreadable file or a
+    /// malformed protobuf, a signature that is not `"3dn"`, an unsupported version, and a missing
+    /// identifier.
+    ///
+    /// # Errors
+    ///
+    /// The source exists but could not be read.
+    pub fn inspect(
+        &self,
+        source_path: &Path,
+        built_in_ids: &[&str],
+        user_profiles: &[UserProfile],
+    ) -> io::Result<ProfileImportPlan> {
         if !self.files.file_exists(source_path) {
-            return Ok(self.reject(import_messages::obsolete_format(source_path)));
+            return Ok(refusal(
+                source_path,
+                import_messages::obsolete_format(source_path),
+            ));
         }
 
         let header = format::load_header(
@@ -203,61 +283,130 @@ impl<'a> UserProfileFolder<'a> {
             Some(self.log),
             Some(&source_path.to_string_lossy()),
         );
+        // Row 3 of the table: a malformed protobuf, or a file that could not be read at all.
         let Some(header) = header else {
-            return Ok(self.reject(import_messages::obsolete_format(source_path)));
+            return Ok(refusal(
+                source_path,
+                import_messages::obsolete_format(source_path),
+            ));
         };
+        // Row 1: `Type` is present and is not "3dn" (REQ-PROF-033).
         if !header.has_acceptable_signature() {
-            return Ok(self.reject(import_messages::NOT_A_3DN_FILE.to_owned()));
+            return Ok(refusal(
+                source_path,
+                import_messages::NOT_A_3DN_FILE.to_owned(),
+            ));
         }
-        // An absent or empty identifier is refused: there would be no way to key the library
-        // entry, the slots or the cover art on it (REQ-PROF-063).
+        // Row 2: `Ver` reduces to "1" (REQ-PROF-021).
+        if header.has_unsupported_version() {
+            let message =
+                import_messages::unsupported_version(header.version.as_deref().unwrap_or_default());
+            return Ok(refusal(source_path, message));
+        }
+        // Row 4: an absent or empty identifier is refused — there would be no way to key the
+        // library entry, the slots or the cover art on it (REQ-PROF-063, REQ-PERS-041 point 1).
         if !header.has_id() {
-            return Ok(self.reject(import_messages::obsolete_format(source_path)));
+            return Ok(refusal(
+                source_path,
+                import_messages::obsolete_format(source_path),
+            ));
         }
 
         let id = header.id.clone().unwrap_or_default();
         if built_in_ids.contains(&id.as_str()) {
-            self.log.information(&format!(
-                "{}: the identifier \"{id}\" belongs to a built-in profile; nothing imported",
-                source_path.display()
-            ));
-            return Ok(ProfileImportResult {
+            return Ok(ProfileImportPlan {
                 outcome: ProfileImportOutcome::AlreadyBuiltIn,
-                profile: None,
+                source_path: source_path.to_path_buf(),
                 message: String::new(),
+                title: title_of(&header, source_path),
+                id,
+                header,
+                replaced: None,
+                destination: PathBuf::new(),
             });
         }
 
         let destination = self
             .directory
             .join(source_path.file_name().unwrap_or_default());
-        let replaced = user_profiles.iter().find(|profile| profile.id == id);
-        if let Some(replaced) = replaced {
-            if !same_path(&replaced.file_path, &destination) {
+        let replaced = user_profiles
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned();
+        Ok(ProfileImportPlan {
+            outcome: if replaced.is_none() {
+                ProfileImportOutcome::Added
+            } else {
+                ProfileImportOutcome::Replaced
+            },
+            source_path: source_path.to_path_buf(),
+            message: String::new(),
+            title: title_of(&header, &destination),
+            id,
+            header,
+            replaced,
+            destination,
+        })
+    }
+
+    /// Carries out what [`Self::inspect`] planned: the old file of a taken-over identifier goes,
+    /// and the chosen file is copied into the folder. A plan that writes nothing — a refusal, or
+    /// a built-in identifier — is only logged.
+    ///
+    /// REQ-PERS-041 keeps the fact logged in every case, which is why the two outcomes that do
+    /// nothing are logged here rather than in [`Self::inspect`]: inspecting is what the interface
+    /// does to choose a dialogue, and it may do it without importing anything.
+    ///
+    /// # Errors
+    ///
+    /// The old file could not be deleted or the new one copied.
+    pub fn apply(&self, plan: &ProfileImportPlan) -> io::Result<ProfileImportResult> {
+        match plan.outcome {
+            ProfileImportOutcome::Rejected => {
+                self.log.warning(&plan.message);
+                return Ok(ProfileImportResult {
+                    outcome: ProfileImportOutcome::Rejected,
+                    profile: None,
+                    message: plan.message.clone(),
+                });
+            }
+            ProfileImportOutcome::AlreadyBuiltIn => {
+                self.log.information(&format!(
+                    "{}: the identifier \"{}\" belongs to a built-in profile; nothing imported",
+                    plan.source_path.display(),
+                    plan.id
+                ));
+                return Ok(ProfileImportResult {
+                    outcome: ProfileImportOutcome::AlreadyBuiltIn,
+                    profile: None,
+                    message: String::new(),
+                });
+            }
+            ProfileImportOutcome::Added | ProfileImportOutcome::Replaced => {}
+        }
+
+        if let Some(replaced) = &plan.replaced {
+            if !same_path(&replaced.file_path, &plan.destination) {
                 // Same identifier under another file name: the old file goes away.
                 self.files.delete_file(&replaced.file_path)?;
             }
         }
 
         self.files.create_directory(&self.directory)?;
-        if !same_path(source_path, &destination) {
-            self.files.copy_file(source_path, &destination, true)?;
+        if !same_path(&plan.source_path, &plan.destination) {
+            self.files
+                .copy_file(&plan.source_path, &plan.destination, true)?;
         }
 
-        let imported = UserProfile {
-            title: title_of(&header, &destination),
-            id,
-            file_path: destination,
-            header,
-            origin: ProfileOrigin::User,
-        };
         Ok(ProfileImportResult {
-            outcome: if replaced.is_none() {
-                ProfileImportOutcome::Added
-            } else {
-                ProfileImportOutcome::Replaced
-            },
-            profile: Some(imported),
+            outcome: plan.outcome,
+            profile: Some(UserProfile {
+                id: plan.id.clone(),
+                title: plan.title.clone(),
+                file_path: plan.destination.clone(),
+                header: plan.header.clone(),
+                origin: ProfileOrigin::User,
+            }),
             message: String::new(),
         })
     }
@@ -336,14 +485,21 @@ impl<'a> UserProfileFolder<'a> {
         }
         copy
     }
+}
 
-    fn reject(&self, message: String) -> ProfileImportResult {
-        self.log.warning(&message);
-        ProfileImportResult {
-            outcome: ProfileImportOutcome::Rejected,
-            profile: None,
-            message,
-        }
+/// A plan that writes nothing and carries the reason (AMD-053 REQ-UI-212). It is not logged here:
+/// [`UserProfileFolder::apply`] logs it, so that an inspection the interface makes to choose a
+/// dialogue does not log a refusal twice.
+fn refusal(source_path: &Path, message: String) -> ProfileImportPlan {
+    ProfileImportPlan {
+        outcome: ProfileImportOutcome::Rejected,
+        source_path: source_path.to_path_buf(),
+        message,
+        id: String::new(),
+        title: String::new(),
+        header: ProfileHeader::default(),
+        replaced: None,
+        destination: PathBuf::new(),
     }
 }
 

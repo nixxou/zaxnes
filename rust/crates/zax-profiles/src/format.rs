@@ -30,6 +30,10 @@ impl ProfileDocument {
 pub struct ProfileHeader {
     /// Signature.
     pub signature: Option<String>,
+    /// Field 2, `Ver`. SPEC-03 §4.1 calls the header the subset {1, 7, 8, 9, 10, 11}; the import
+    /// of AMD-053 REQ-UI-212 needs one field more, because the cause it must name for a refused
+    /// file is read from the version.
+    pub version: Option<String>,
     /// Identifier.
     pub id: Option<String>,
     /// Title.
@@ -55,6 +59,20 @@ impl ProfileHeader {
     #[must_use]
     pub fn has_id(&self) -> bool {
         self.id.as_deref().is_some_and(|id| !id.is_empty())
+    }
+
+    /// How [`Self::version`] classifies under the rules of REQ-PROF-021. Field 2 being optional,
+    /// an absent version is the current format.
+    #[must_use]
+    pub fn format_version(&self) -> ProfileFormatVersion {
+        crate::profile::version_rules::classify(self.version.as_deref())
+    }
+
+    /// True when the version is one this build refuses to load — `"1"`, and anything that
+    /// reduces to it (REQ-PROF-021).
+    #[must_use]
+    pub fn has_unsupported_version(&self) -> bool {
+        self.format_version() == ProfileFormatVersion::Unsupported
     }
 }
 

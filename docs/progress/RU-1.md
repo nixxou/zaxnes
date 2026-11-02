@@ -8,8 +8,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 | # | Step | Status |
 |---|---|---|
 | 1 | Setup: sources read, requirement map, amendments copied | done — `f2a05fe` |
-| 2 | AMD-039: UnityFS header flag 0x200, synthetic format-8 bundle tests | done |
-| 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | todo |
+| 2 | AMD-039: UnityFS header flag 0x200, synthetic format-8 bundle tests | done — `837918c` |
+| 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | done |
 | 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | todo |
 | 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | todo |
 | 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | todo |
@@ -88,6 +88,33 @@ Handheld defaults: the resume point is on (it costs nothing during play), favour
 
 ## Notes
 
+### Building `zax-app` in this working copy (read this first if the build fails)
+
+Two things stood in the way of compiling `zax-app`, neither of them caused by this lot. Both are
+worked around locally, outside the repository:
+
+1. **The two demo-game binaries are not in this checkout.** `src/demo_game.rs` does
+   `include_bytes!("../demo/FlappyZaxNes.nes")` and `include_bytes!("../demo/flappyzaxnes.3dn")`,
+   and `.gitignore` excludes `*.nes` and `*.3dn`, so they are never committed: a fresh checkout
+   cannot build the crate. Stand-ins were made here so the lot could be compiled and tested:
+   the `.3dn` by `zax-harness profile-build` from `demo/source/profile/flappyzaxnes.json` with its
+   `"template": "empty.3dn"` line removed (that template is not in the tree either), and the
+   `.nes` by hand (a minimal iNES image). **Neither is the shipped FlappyZaxNes**, both are
+   untracked and ignored, and no test reads their content — `asset_free_startup_tests` only
+   counts files by extension. Rebuilding the real ROM needs cc65 (`ca65`/`ld65`), which is not
+   installed here.
+2. **`SDL2.lib` is not on the linker path.** `cargo test -p zax-app` fails with `LNK1181` unless
+   SDL2 is linked statically. `--features bundled` does that, but it needs CMake, which is not on
+   `PATH` — it does ship with Visual Studio. Every `zax-app` and workspace command of this lot was
+   therefore run as:
+
+   ```sh
+   export PATH="/c/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin:$PATH"
+   cargo test --release -p zax-app --features bundled
+   ```
+
+### Other notes
+
 - `tests/` in the working tree at the start of the lot is untracked .NET build output
   (`bin/`, `obj/`, `TestResults/`, 0 `.cs` files) left over from the `src/`+`tests/` layout that
   commit `d3680e4` removed. Nothing of it is kept and nothing of it is committed.
@@ -129,7 +156,35 @@ reports and returns on a 2.0, the inventory describing the 1.1.2 (AMD-039 §4, �
 the other 97 recognised identical, one library entry per identifier — which is Q-076, copied
 alongside.
 
+### Step 3 — the profiles layer of AMD-053 REQ-UI-212 and AMD-056
+
+- `ProfileHeader` gained field 2 `Ver` and, with it, `format_version()` and
+  `has_unsupported_version()`. SPEC-03 §4.1 calls the header the subset {1, 7, 8, 9, 10, 11};
+  REQ-UI-212 needs one field more, because the cause it must name is read from the version. The
+  decoder's `read_header` reads it; nothing else changed in the wire format.
+- `import_messages::unsupported_version` sanitises through `version_rules::sanitize`, so `"v1"`
+  reads « 3dn format version 1 » (AMD-056 §2, superseding Q-089 on the form of `<v>`). The two
+  spaces before "is" stay — they are the original's. The sanitising sits in the message rather
+  than at the call sites, so the import of REQ-UI-212 and the load of REQ-PERS-040 spell a version
+  the same way.
+- `import_messages::obsolete_format` gained the space after the path and spells `obsolete`; the
+  English string table followed (`notify.obsolete_profile_format`). The French entry already had
+  the space and the right word, so it is unchanged, and `notifications::translate` still matches
+  the pattern.
+- `UserProfileFolder::import` split into `inspect` → `ProfileImportPlan` → `apply`. `inspect`
+  writes nothing and tells the four rows of the table of causes apart in the order they can be
+  told apart (unreadable or malformed, wrong signature, unsupported version, missing identifier);
+  it also carries the title an « Already in Zaxnes » dialogue names and the user profile a
+  replacement would take over. `apply` is what writes, and what logs — including the two outcomes
+  that write nothing, so that an inspection made only to choose a dialogue does not log a refusal
+  twice. `import` is `inspect` then `apply`, unchanged in meaning for every caller with nowhere to
+  show a dialogue.
+
+Tests: the version cause with its sanitised text, the inspect/apply split (nothing on disk until
+`apply`), a replacement plan naming the profile it takes over, a built-in-identifier plan carrying
+the file's title, and the two language tests for the corrected texts.
+
 ### Next step
 
-Step 3: the profiles layer of AMD-053 and AMD-056 — field 2 `Ver` in the header, the sanitised
-version text, `obsolete`, and the inspect/apply split the dialogs need.
+Step 4: favourites, search and the "Favorites first" order in `zax-profiles`, with `library.json`
+at schema 2.

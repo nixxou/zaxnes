@@ -354,9 +354,10 @@ fn req_prof_063_importing_a_profile_without_an_identifier_is_refused() {
     let result = folder.import(source, &[], &[]).unwrap();
 
     assert_eq!(ProfileImportOutcome::Rejected, result.outcome);
+    // AMD-056 §2: a space after the path, and « obsolete ».
     assert_eq!(
         format!(
-            "{}has an obsolate or wrong profile format. This profile is not compatible with the current version of Zaxnes.",
+            "{} has an obsolete or wrong profile format. This profile is not compatible with the current version of Zaxnes.",
             source.display()
         ),
         result.message
@@ -438,6 +439,117 @@ fn req_prof_063_importing_a_file_that_is_not_a_profile_is_refused() {
 
     assert_eq!(ProfileImportOutcome::Rejected, result.outcome);
     assert_eq!(import_messages::NOT_A_3DN_FILE, result.message);
+}
+
+/// AMD-053 REQ-UI-212, second row of the table of causes, with the form AMD-056 §2 gives `<v>`:
+/// a profile whose `Ver` reduces to "1" is refused, and the version shown is the sanitised one.
+#[test]
+fn req_ui_212_a_profile_of_an_unsupported_version_names_its_sanitised_version() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let mut profile = GameProfile::create_empty();
+    profile.id = Some("ABCDEFGHIJKL".to_owned());
+    profile.title = Some("Old".to_owned());
+    profile.version_text = Some("v1".to_owned());
+    let source = Path::new("/downloads/Old.3dn");
+    files.add_file(source, &format::save(&profile, FieldPresence::All));
+
+    let folder = user_folder(&files, layout.profiles_directory(), None);
+    let result = folder.import(source, &[], &[]).unwrap();
+
+    assert_eq!(ProfileImportOutcome::Rejected, result.outcome);
+    assert_eq!("3dn format version 1  is not supported", result.message);
+    assert!(!files.file_exists(&layout.profiles_directory().join("Old.3dn")));
+}
+
+/// AMD-056 REQ-UI-214: inspecting reads the file and says what an import would do without
+/// writing anything; applying the plan is what writes.
+#[test]
+fn req_ui_214_inspecting_an_import_writes_nothing_and_applying_it_does() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let source = Path::new("/downloads/Mine.3dn");
+    files.add_file(source, &make_profile(Some("ABCDEFGHIJKL"), Some("Mine")));
+    let destination = layout.profiles_directory().join("Mine.3dn");
+
+    let folder = user_folder(&files, layout.profiles_directory(), None);
+    let plan = folder.inspect(source, &[], &[]).unwrap();
+
+    assert_eq!(ProfileImportOutcome::Added, plan.outcome);
+    assert!(plan.writes());
+    assert_eq!("ABCDEFGHIJKL", plan.id);
+    assert_eq!("Mine", plan.title);
+    assert_eq!(destination, plan.destination);
+    assert!(plan.replaced.is_none());
+    assert!(!files.file_exists(&destination), "inspecting wrote a file");
+
+    let result = folder.apply(&plan).unwrap();
+
+    assert_eq!(ProfileImportOutcome::Added, result.outcome);
+    assert!(files.file_exists(&destination));
+}
+
+/// AMD-056 REQ-UI-214: the plan of a replacement names the profile it would take over, which is
+/// what the confirmation dialogue needs; a plan that is only inspected replaces nothing.
+#[test]
+fn req_ui_214_a_replacement_plan_names_the_profile_it_would_take_over() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let existing = layout.profiles_directory().join("Theirs.3dn");
+    files.add_file(
+        &existing,
+        &make_profile(Some("ABCDEFGHIJKL"), Some("Theirs")),
+    );
+    let source = Path::new("/downloads/Mine.3dn");
+    files.add_file(source, &make_profile(Some("ABCDEFGHIJKL"), Some("Mine")));
+
+    let folder = user_folder(&files, layout.profiles_directory(), None);
+    let known = folder.scan(&[]).unwrap();
+    let plan = folder.inspect(source, &[], &known).unwrap();
+
+    assert_eq!(ProfileImportOutcome::Replaced, plan.outcome);
+    assert_eq!(
+        Some(existing.clone()),
+        plan.replaced.as_ref().map(|p| p.file_path.clone())
+    );
+    assert_eq!(
+        Some("Theirs"),
+        plan.replaced.as_ref().map(|p| p.title.as_str())
+    );
+    // Nothing happened yet: the old file is there and the new one is not.
+    assert!(files.file_exists(&existing));
+    assert!(!files.file_exists(&layout.profiles_directory().join("Mine.3dn")));
+
+    folder.apply(&plan).unwrap();
+
+    assert!(!files.file_exists(&existing));
+    assert!(files.file_exists(&layout.profiles_directory().join("Mine.3dn")));
+}
+
+/// AMD-056 REQ-UI-214: the plan of a built-in identifier carries the title the « Already in
+/// Zaxnes » dialogue names, and applying it writes nothing.
+#[test]
+fn req_ui_214_a_built_in_identifier_plan_carries_the_title_of_the_file() {
+    let files = FakeProfileFileSystem::new();
+    let layout = UserDataLayout::with_default_names(Path::new(ROOT));
+    let source = Path::new("/downloads/x.3dn");
+    files.add_file(source, &make_profile(Some("10"), Some("Foo")));
+
+    let folder = user_folder(&files, layout.profiles_directory(), None);
+    let plan = folder.inspect(source, &["10"], &[]).unwrap();
+
+    assert_eq!(ProfileImportOutcome::AlreadyBuiltIn, plan.outcome);
+    assert!(!plan.writes());
+    assert_eq!("Foo", plan.title);
+
+    folder.apply(&plan).unwrap();
+
+    assert_eq!(
+        files
+            .list_files(layout.profiles_directory(), UserProfileFolder::EXTENSION)
+            .unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 #[test]

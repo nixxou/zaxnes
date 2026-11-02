@@ -108,6 +108,9 @@ pub(super) fn read_header(bytes: &[u8]) -> Result<ProfileHeader> {
     while let Some((field, wire_type)) = reader.try_read_tag(reader.end())? {
         match field {
             schema::root::TYPE => header.signature = Some(reader.read_string()?),
+            // One field beyond the header of REQ-PROF-062: the import of AMD-053 REQ-UI-212
+            // names the cause of a refusal, and one of its causes is the version.
+            schema::root::VER => header.version = Some(reader.read_string()?),
             schema::root::ID => header.id = Some(reader.read_string()?),
             schema::root::TITLE => header.title = Some(reader.read_string()?),
             schema::root::MAKER => header.author = Some(reader.read_string()?),

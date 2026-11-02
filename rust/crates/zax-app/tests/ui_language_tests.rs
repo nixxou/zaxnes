@@ -293,12 +293,18 @@ fn req_ui_082_in_english_the_fixed_texts_are_the_texts_of_the_spec() {
         "3dn format version 7  is not supported",
         notifications::translate(&import_messages::unsupported_version("7"))
     );
+    // AMD-056 §2: a space after the path, and « obsolete ».
     assert_eq!(
-        "C:\\x\\y.3dnhas an obsolate or wrong profile format. \
+        "C:\\x\\y.3dn has an obsolete or wrong profile format. \
          This profile is not compatible with the current version of Zaxnes.",
         notifications::translate(&import_messages::obsolete_format(std::path::Path::new(
             "C:\\x\\y.3dn"
         )))
+    );
+    // AMD-056 §2: the version is sanitised as REQ-PROF-021 sanitises it, so « v1 » reads « 1 ».
+    assert_eq!(
+        "3dn format version 1  is not supported",
+        notifications::translate(&import_messages::unsupported_version("v1"))
     );
 
     // REQ-PERS-022 and REQ-PERS-024: the messages of the persisted files.

@@ -76,7 +76,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::NOTIFY_FOREIGN_CORE, "Save state used a different core."),
     (keys::NOTIFY_NOT_A3DN_FILE, "This file is not a 3dn file"),
     (keys::NOTIFY_UNSUPPORTED3DN_VERSION, "3dn format version {0}  is not supported"),
-    (keys::NOTIFY_OBSOLETE_PROFILE_FORMAT, "{0}has an obsolate or wrong profile format. This profile is not compatible with the current version of Zaxnes."),
+    (keys::NOTIFY_OBSOLETE_PROFILE_FORMAT, "{0} has an obsolete or wrong profile format. This profile is not compatible with the current version of Zaxnes."),
     // ------------- notifications of the persisted files (REQ-PERS-022, REQ-PERS-024)
     (keys::NOTIFY_SETTINGS_UNREADABLE, "Settings file was unreadable and has been reset."),
     (keys::NOTIFY_SETTINGS_NEWER_VERSION, "Settings were created by a newer version."),
