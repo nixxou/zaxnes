@@ -10,8 +10,8 @@ reference.
 | # | Step | Status |
 |---|---|---|
 | 1 | Setup: sources read, requirement map, design decisions, before benchmarks, spec copies | done — `0d312e2` |
-| 2 | REQ-CORE-121: the in-memory state of the core, and its tests | done |
-| 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | todo |
+| 2 | REQ-CORE-121: the in-memory state of the core, and its tests | done — `08ebd15` |
+| 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | done |
 | 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | todo |
 | 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | todo |
 | 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | todo |
@@ -208,3 +208,112 @@ states does not depend on N") over 120 frames; and the two refusals.
 what the `save_state` = `save_machine_state` + `save_frame_records` split was for.
 
 SPEC copy: REQ-CORE-121 added to SPEC-02 §3.12, after REQ-CORE-122.
+
+### Step 3 — REQ-LOOP-065, the frame sequence
+
+`NesCore::run_frame_ahead(word, n)` and `NesCore::restore_real_frame()` are the pair, with
+`NesCore::MAX_RUN_AHEAD` = 3 and `holds_a_real_frame()` for a host that wants to know. Two new
+fields on the core: `real_frame: CoreState` (a plain field, not a `Box` — `CoreState::default()`
+allocates nothing, so a core that never runs ahead carries three null words) and
+`real_frame_held: bool`.
+
+**Why the sequence is in the core and not in the session.** "Emulation on a separate core" *moves*
+the core to the `zaxnes-emulation` thread for the duration of one frame (`core_worker.rs`), so a
+sequence driven from `GameSession` could not reach it. Putting it in the core makes run-ahead and
+emulation ahead orthogonal: the thread runs one real frame of the sequence exactly as it ran one
+ordinary frame.
+
+**The N = 0 path.** `run_frame_ahead` is `if ahead == 0 { return self.run_frame(word); }` and the
+sequence is `#[inline(never)]` behind it, so nothing of run-ahead reaches `run_frame`. The host
+side costs one `bool` test per real frame (`restore_real_frame` returning false at once).
+
+**Step 5 is deferred**, which REQ-LOOP-067 spells out as allowed. `run_frame_ahead` leaves the
+core in the **displayed** frame's state; the host calls `restore_real_frame` once it has finished
+reading that frame. A host that forgets is made good: the next sequence restores first, so the
+real frames stay contiguous whatever the host does (a test holds that).
+
+**What the hidden frames do not do.** The video callback is taken out for steps 1 and 3 and put
+back for step 4, so REQ-CORE-020's "once per emulated frame" becomes "once per **real** frame"
+exactly as REQ-LOOP-067 asks — and the batch the callback carries is the displayed frame's.
+`Apu2A03::set_output_enabled(false)` silences them; the switch is owned by the sequence and put
+back before step 4, so a host that never asks for run-ahead never sees it move.
+
+**Lifecycle (REQ-LOOP-066).** `power_on`, `soft_reset`, `close_rom` and the savestate restore all
+call `forget_real_frame`: the state of a machine that is gone is dropped, never put back, and the
+next real frame starts a sequence of its own with the same N. `close_rom` also puts the audio
+switch back on.
+
+#### The measurement that gates the lot: N = 0 costs nothing
+
+Wall-clock `bench-core` cannot resolve 1 %, so the instrument is RU-3a-fix's: the **post-LTO
+assembly** of the hot functions (`cargo rustc -p zax-harness --release --bin zax-harness --
+--emit=asm`), compared against a throwaway worktree of `ce78abd` built with `CARGO_TARGET_DIR`
+outside the repository.
+
+| function | RU-3a-fix `ce78abd` | after step 3 |
+|---|---|---|
+| `NesBus::tick` | 119 instr / 3 `pushq` / 32 B frame | **119 / 3 / 32 — identical** |
+| `NesCore::run_frame` | 2 096 instr / 8 `pushq` / 904 B | **2 096 / 8 / 904 — identical** |
+| `Apu2A03::run_cpu_cycles` | 855 instr / 8 `pushq` / 184 B | 873 / 8 / 184 (**+18**) |
+
+The +18 are three inlined copies of the mute test, and the diff of the two function bodies shows
+**where** each one sits: right after the `lock cmpxchgb` that takes the ring's mutex, i.e. inside
+the enqueue, which runs once per **output sample** and not once per CPU cycle.
+
+    movq  GLOBAL_PANIC_COUNT(%rip), %rax     ; the lock is already taken here
+    ...
+    cmpb  $0, 72(%r14)                       ; <- SampleRing::muted
+    jne   .LBB1318_30
+
+So the dynamic cost at N = 0 is about 735 samples × 3 instructions = **~2 200 instructions per
+emulated frame** against a core of roughly 27 M: **0.008 %**, well inside R0's ±0.1 % gate. The
+per-cycle path of `tick` and the body of `run_frame` are byte-identical.
+
+Interleaved wall clock, the two binaries alternated run by run so that machine drift cancels
+(`bench-core`, `nestest`, 1200 frames after 120 of warm-up, core `run_frame`):
+
+| round | `ce78abd` | after step 3 |
+|---|---|---|
+| 1 | 0.8406 ms | 0.8515 ms |
+| 2 | 0.8586 ms | 0.8516 ms |
+| 3 | 0.8586 ms | 0.8653 ms |
+| 4 | 0.8482 ms | 0.8510 ms |
+
+The baseline's own four readings span 0.841 to 0.859 (2.1 %), which is why the assembly above is
+the evidence and this table is only a sanity check.
+
+#### The test vector ROM
+
+`zax-nes/tests/common/run_ahead_rom.rs`, built in source from the amendment's text: NROM, the CHR
+of SPEC-02 §5.1 (tile *n* = eight bytes of *n* and eight of 255 − *n*), an NMI handler that prints
+the counter it had **on entry** as the tile index of the top-left cell and the A bit it read as
+the second cell, then increments. `displayed()` reads the eight pixels of the top-left tile back
+out of the picture; `shows_button_a()` reads the second cell's last pixel. The module is shared
+with the `zax-app` tests by `#[path]`, as `ui_harness/bundle_support.rs` already shares the
+`zax-profiles` fixtures, so there is one definition of the vector.
+
+One departure from the .NET vector, found by a failing test and worth recording: the .NET handler
+resets the scroll with `$2006 = $20, $00`, which leaves **fine Y = 2** (bits 14-12 of `t`), so the
+picture is two rows up and the top-left cell is not captured as a tile record at all. The handler
+here writes `$2006 = $00, $00` (`v` = `t` = `$0000`: nametable 0, no scroll), which is what "scroll
+back to the top left" was meant to do. `displayed()` worked either way — the pixels were right —
+but the batch did not carry the cell.
+
+Tests: `zax-nes/tests/run_ahead_tests.rs`, 12 of them. The acceptance criterion of REQ-LOOP-065
+word for word (N = 2, counter k, A pressed, picture k + 2 with A, counter k + 1 after step 5); the
+picture at every N, including N = 0 where the displayed frame **is** the real one; N = 0 identical
+to `run_frame` over 30 frames (counter, RAM and pixels); one core frame counted per real frame at
+every N; only the displayed frame heard (four emulated frames queue one frame's samples, ±12 %)
+and the restore keeping them; the video callback firing once per real frame and carrying the
+displayed frame's records; the RAM read before the restore being the displayed frame's; the real
+frames being those of a run without run-ahead over 60 frames at N = 1, 2 and 3; a forgotten
+restore made good; the four lifecycle events dropping the held frame; a caller's out-of-range N
+clamped to 3; and a stopped core running nothing.
+
+`cargo test --release -p zax-nes` **506 passed**, goldens **`291 of 291 rows matched`** — the mute
+flag is off by default, so no audio digest moved.
+
+SPEC copies: SPEC-07 §3.7 — REQ-LOOP-060 replaced by its amended form and REQ-LOOP-064 to 068
+added after it. SPEC-01 — REQ-ARCH-012 amended (N is part of the determinism contract) and
+REQ-ARCH-013 precised (the in-memory state has its own bound). SPEC-12 — REQ-ACC-030 precised
+(the measure is taken at Run-ahead = 1).

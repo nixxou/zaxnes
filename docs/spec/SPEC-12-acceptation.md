@@ -37,7 +37,7 @@ Une exigence porte l'étiquette [ROM] ou [R2] dans son titre quand au moins une 
 - Critère d'acceptation : rapport de round 2 avec les scores.
 
 ### 3.4 Performances
-**REQ-ACC-030** (P1) — Sur la machine de référence, l'application DOIT maintenir 60 images/s en 1080p sur les jeux de référence, dans la vue par défaut.
+**REQ-ACC-030** (P1, précisée par AMD-041) — Sur la machine de référence, l'application DOIT maintenir 60 images/s en 1080p sur les jeux de référence, dans la vue par défaut. La mesure se fait au réglage par défaut, donc avec Run-ahead = 1 (deux frames émulées par frame réelle).
 - Critère d'acceptation : moins de 1 % de frames au-delà de 16,7 ms sur une séquence de 5 minutes.
 
 **REQ-ACC-031** (P2) [ROM] — La conversion d'une frame (SPEC-04 et SPEC-04B, hors construction initiale des meshes) DEVRAIT tenir en 4 ms en moyenne et en 8 ms au 99ᵉ centile sur la machine de référence (DEC-R2-12-2, même cible que SPEC-04 REQ-E3D-360).

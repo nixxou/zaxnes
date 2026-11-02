@@ -10,6 +10,7 @@
 )]
 
 pub mod mapper_fixture;
+pub mod run_ahead_rom;
 
 use std::ops::{Index, IndexMut};
 

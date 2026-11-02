@@ -43,6 +43,7 @@ impl std::error::Error for NoRomLoaded {}
 /// Everything an instance needs lives in the instance, so two cores in one process are
 /// independent (REQ-ARCH-011, REQ-CORE-001). Nothing advances unless the host calls
 /// [`NesCore::run_frame`]: the core owns no clock and no thread (REQ-ARCH-010).
+#[allow(clippy::struct_excessive_bools)] // Independent switches of the machine and of the host.
 pub struct NesCore {
     cpu: Cpu6502,
     bus: NesBus,
@@ -74,6 +75,12 @@ pub struct NesCore {
     aids_on: u8,
     /// The options the host set last.
     host_options: u8,
+    /// The state of the real frame of a run-ahead sequence (AMD-041 REQ-LOOP-065 step 2), kept
+    /// from one real frame to the next so that nothing is allocated per frame. Empty, and never
+    /// touched, while run-ahead is off.
+    real_frame: CoreState,
+    /// Whether `real_frame` holds a state [`NesCore::restore_real_frame`] still owes a restore.
+    real_frame_held: bool,
 }
 
 impl Default for NesCore {
@@ -103,6 +110,8 @@ impl NesCore {
             pack: None,
             aids_on: 0,
             host_options: 0,
+            real_frame: CoreState::default(),
+            real_frame_held: false,
         }
     }
 
@@ -347,6 +356,9 @@ impl NesCore {
         self.rom_crc = None;
         self.bus.attach(None);
         self.bus.apu_mut().discard_samples();
+        // A stopped machine makes no sound, whatever a run-ahead sequence had asked for.
+        self.bus.apu_mut().set_output_enabled(true);
+        self.forget_real_frame(); // REQ-LOOP-066, as in `power_on`.
     }
 
     /// Whether a ROM is loaded.
@@ -403,6 +415,7 @@ impl NesCore {
 
         self.cpu.soft_reset(&mut self.bus);
         self.frame_count = 0;
+        self.forget_real_frame(); // REQ-LOOP-066, as in `power_on`.
     }
 
     /// Battery-backed PRG-RAM, for a host that wants to persist it (REQ-CORE-095). Empty
@@ -448,6 +461,9 @@ impl NesCore {
 
         self.cpu.reset(&mut self.bus);
         self.frame_count = 0;
+        // REQ-LOOP-066: a reset or a change of game starts the next real frame afresh, with the
+        // same N; the state of the machine that is gone is never put back.
+        self.forget_real_frame();
     }
 
     /// TV region in force (REQ-CORE-016).
@@ -595,6 +611,109 @@ impl NesCore {
         }
 
         self.bus.cycle_count() - start_cycle
+    }
+
+    // ----------------------------------------------------------------- run-ahead
+
+    /// Largest run-ahead the core accepts (AMD-041 REQ-LOOP-064).
+    pub const MAX_RUN_AHEAD: u8 = 3;
+
+    /// Runs the frames one **real** frame of run-ahead is made of (AMD-041 REQ-LOOP-065) and
+    /// leaves the core in the state of the **displayed** frame, the last one in advance.
+    ///
+    /// With `ahead` = 0 this is [`NesCore::run_frame`] and nothing else: the same call, the same
+    /// frame, no state copied, no flag moved. That is the whole of the N = 0 path, so a host that
+    /// never asks for run-ahead pays nothing for it.
+    ///
+    /// With `ahead` ≥ 1, and the input word `input_word` read once by the host (step (a) of
+    /// REQ-LOOP-060) and used by every frame of the sequence:
+    /// 1. the real frame runs, **without sound** and without being handed to the host;
+    /// 2. its complete state is kept in memory (REQ-CORE-121);
+    /// 3. `ahead − 1` more frames in advance run, still silent and unhanded;
+    /// 4. one last frame in advance runs **with** its sound and its picture: the displayed frame,
+    ///    whose video callback fires and whose batch and pixels the host then reads;
+    /// 5. the real state goes back — but from [`NesCore::restore_real_frame`], which the host
+    ///    calls once it has finished reading the displayed frame. REQ-LOOP-067 allows exactly
+    ///    that ("retarde la restauration après (d)"), and it is what lets the conversion, the
+    ///    2D picture and `Script:ReadMem` see the displayed frame with nothing copied.
+    ///
+    /// Returns the CPU cycles the **displayed** frame took, 0 when no ROM is loaded.
+    ///
+    /// # Panics
+    /// Never: the capture can only fail with no ROM loaded, which is checked first.
+    pub fn run_frame_ahead(&mut self, input_word: u16, ahead: u8) -> i64 {
+        if ahead == 0 {
+            return self.run_frame(input_word);
+        }
+
+        self.run_ahead_sequence(input_word, ahead)
+    }
+
+    /// Steps 1 to 4 of REQ-LOOP-065, out of line so that nothing of them reaches the N = 0 path.
+    #[inline(never)]
+    fn run_ahead_sequence(&mut self, input_word: u16, ahead: u8) -> i64 {
+        if self.bus.cartridge().is_none() {
+            return 0;
+        }
+        // A host that forgot its restore: the real state is put back first, so that it can never
+        // be lost by a displayed frame the host dropped.
+        self.restore_real_frame();
+
+        // Steps 1 and 3: the real frame and the frames between, silent and unhanded.
+        let callback = self.video_callback.take();
+        self.bus.apu_mut().set_output_enabled(false);
+
+        self.run_frame(input_word);
+
+        // Step 2: the complete state of the real frame, in memory. The buffer is lent out and
+        // put back, which moves three words and allocates nothing.
+        let mut state = std::mem::take(&mut self.real_frame);
+        let captured = self.capture_core_state(&mut state).is_ok();
+        self.real_frame = state;
+        self.real_frame_held = captured;
+        debug_assert!(captured, "a ROM is loaded, so the capture cannot fail");
+
+        for _ in 1..ahead.min(Self::MAX_RUN_AHEAD) {
+            self.run_frame(input_word);
+        }
+
+        // Step 4: the displayed frame, with its sound and its picture.
+        self.bus.apu_mut().set_output_enabled(true);
+        self.video_callback = callback;
+        self.run_frame(input_word)
+    }
+
+    /// Step 5 of REQ-LOOP-065: puts the state of the real frame back, the sound the displayed
+    /// frame produced left untouched (REQ-CORE-121).
+    ///
+    /// Returns whether a state was held — false, and nothing done at all, when the frame before
+    /// was an ordinary one. The host calls it once it has finished reading the displayed frame;
+    /// with run-ahead off it is one `bool` test per real frame and nothing more.
+    pub fn restore_real_frame(&mut self) -> bool {
+        if !self.real_frame_held {
+            return false;
+        }
+
+        self.real_frame_held = false;
+        let state = std::mem::take(&mut self.real_frame);
+        let restored = self.restore_core_state(&state).is_ok();
+        self.real_frame = state;
+        debug_assert!(restored, "the state was captured from this very core");
+        restored
+    }
+
+    /// Whether a run-ahead sequence still owes its restore (the core is in the displayed frame's
+    /// state, not the real one).
+    #[must_use]
+    pub const fn holds_a_real_frame(&self) -> bool {
+        self.real_frame_held
+    }
+
+    /// Forgets the state of a real frame without restoring it: the machine the state belonged to
+    /// is gone. Loading a savestate, resetting and changing game all go through here, and the
+    /// next real frame then starts a sequence of its own (REQ-LOOP-066).
+    fn forget_real_frame(&mut self) {
+        self.real_frame_held = false;
     }
 
     /// Has `decoder` fill the margins of the frame just run from the game's memory.
@@ -1356,6 +1475,9 @@ impl NesCore {
         self.apply_region();
         self.frame_count = frame_count;
         self.bus.apu_mut().drop_pending_samples(); // REQ-CORE-074, Q-006.
+                                                   // REQ-LOOP-066: loading a state resumes at the next real frame with the same N. The
+                                                   // state of a real frame of the machine that was replaced is dropped, not put back.
+        self.forget_real_frame();
 
         Ok(StateLoaded {
             consumed: reader.consumed(),

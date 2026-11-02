@@ -100,6 +100,16 @@ struct SampleRing {
     read_index: usize,
     write_index: usize,
     available: usize,
+    /// Whether the samples reaching [`SampleRing::enqueue`] are dropped instead of queued
+    /// ([`Apu2A03::set_output_enabled`]): a frame of run-ahead that is not the displayed one
+    /// (AMD-041 REQ-LOOP-065, steps 1 and 3).
+    ///
+    /// The test lives here, behind the mutex the enqueue takes anyway, because the enqueue runs
+    /// once per **output sample** — about 735 per emulated frame at 44.1 kHz — while the closure
+    /// `|sample| lock(ring).enqueue(sample)` that calls it is built once per **CPU cycle**.
+    /// Carrying the flag in that closure instead would widen the hottest loop of the APU for
+    /// nothing.
+    muted: bool,
 }
 
 impl SampleRing {
@@ -109,6 +119,7 @@ impl SampleRing {
             read_index: 0,
             write_index: 0,
             available: 0,
+            muted: false,
         }
     }
 
@@ -119,6 +130,12 @@ impl SampleRing {
     }
 
     fn enqueue(&mut self, sample: f32) {
+        if self.muted {
+            // The resampler has already advanced, so the machine is in the very same state
+            // either way: only the queueing is skipped (REQ-LOOP-065).
+            return;
+        }
+
         let capacity = self.buffer.len();
         if self.available == capacity {
             // On overflow the oldest samples are dropped (REQ-CORE-071,
@@ -453,7 +470,9 @@ impl Apu2A03 {
         {
             let mut ring = lock(&self.ring);
             if capacity != ring.buffer.len() {
+                let muted = ring.muted;
                 *ring = SampleRing::new(capacity);
+                ring.muted = muted;
             }
         }
 
@@ -599,6 +618,27 @@ impl Apu2A03 {
     /// history alone (REQ-CORE-074; Q-006). Restoring a savestate does this.
     pub fn drop_pending_samples(&mut self) {
         lock(&self.ring).clear();
+    }
+
+    /// Whether the samples the resampler produces reach the output queue; true by default
+    /// (AMD-041 REQ-LOOP-065).
+    ///
+    /// A frame of run-ahead that is neither the displayed one nor heard clears it.
+    /// [`NesCore::run_frame_ahead`] owns it and puts it back before the frame that *is* heard, so
+    /// a host that never asks for run-ahead never sees it move. The resampler keeps running
+    /// either way — its filter history and its fractional position are part of the machine
+    /// (REQ-CORE-090) and must advance exactly as they would otherwise — so only the queueing is
+    /// skipped and nothing the emulation reads back depends on it.
+    ///
+    /// [`NesCore::run_frame_ahead`]: crate::NesCore::run_frame_ahead
+    pub fn set_output_enabled(&mut self, enabled: bool) {
+        lock(&self.ring).muted = !enabled;
+    }
+
+    /// Whether [`Apu2A03::set_output_enabled`] is on.
+    #[must_use]
+    pub fn output_enabled(&self) -> bool {
+        !lock(&self.ring).muted
     }
 
     /// Advances the APU by one CPU cycle.
