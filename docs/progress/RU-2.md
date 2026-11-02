@@ -14,8 +14,8 @@ AMD-059) of `dotnetupdated` are read as a reference only.
 | 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | done — `7121e78` |
 | 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | done — `01cf39b` |
 | 6 | AMD-042: a rollback snapshot carries `PData` and the camera (with REQ-SCN-073) | done — `49aec68` |
-| 7 | AMD-045: the zoom floor, the angles in one turn, the vertical in TPV | done |
-| 8 | Closing: fmt, clippy, tests in both binding modes, after benchmarks, API dump, journal | todo |
+| 7 | AMD-045: the zoom floor, the angles in one turn, the vertical in TPV | done — `4fe5286` |
+| 8 | Closing: fmt, clippy, tests in both binding modes, after benchmarks, API dump, journal | done |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -484,3 +484,113 @@ them and were written down: `framing` publishes a fourth colour and `heavy`'s me
 
 **A capture at a field of view other than 70°, or with rz ≠ 0, changes by much more**, and that is
 the amendment's intent: 320.60 instead of 277.93 at 45°, and a roll where there was none.
+
+### Step 8 — closing
+
+#### After benchmarks (the binding micro-benchmarks)
+
+Same command, same machine, both binding modes. Each figure is the median of three full runs of
+the suite (`perf` filters the five benchmarks and they run in one process, in order).
+
+| Measurement | safe before | safe after | fast before | fast after |
+|---|---|---|---|---|
+| empty loop | 3 ns | 5 ns | 3 ns | 5 ns |
+| `Camera.Distance` read | 279 ns | 267 ns | 205 ns | 207 ns |
+| `Camera.Distance` write | 187 ns | 177 ns | 121 ns | 116 ns |
+| `Setting.SceneRatio` read | 165 ns | 160 ns | 79 ns | 81 ns |
+| `Script:ReadMem` | 493 ns | 486 ns | 327 ns | 331 ns |
+| unknown member read | 115 ns | 108 ns | 130 ns | 124 ns |
+| `Vector3(1, 2, 3)` | 391 ns | 384 ns | 469 ns | 469 ns |
+| vector component read | 110 ns | 104 ns | 55 ns | 55 ns |
+| vector component write | 131 ns | 130 ns | 63 ns | 65 ns |
+| `BuildPattern`, 50 instances | 1.72 µs | 1.78 µs | 1.59 µs | 1.63 µs |
+| `BuildPattern`, 500 instances | 1.59 µs | 1.63 µs | 1.49 µs | 1.45 µs |
+| `Update` per hook call | 46.48 µs | 28.90 µs | 19.06 µs | 17.75 µs |
+| `LateUpdate` per hook call | 46.52 µs | 29.07 µs | 19.00 µs | 17.82 µs |
+| empty `UpdateS` | 0.83 µs | 0.85 µs | 0.83 µs | 0.85 µs |
+| frame with `Update` + `LateUpdate` | 71.8 µs | 67.5 µs | 46.0 µs | 45.9 µs |
+| … with 60 `UpdateS` on top | 219.7 µs | 215.4 µs | 151.8 µs | 150.1 µs |
+| 60 shapes walking 60 shapes | 6914.8 µs | 6662.9 µs | 3051.3 µs | 3019.1 µs |
+
+**No member that existed before got slower.** The per-access figures — the ones that measure the
+dispatch this lot could have slowed — are equal or lower in both modes, within a few nanosecond
+of noise, which is what the `HashMap` member lookup predicts: nine members more on `SettingAPI`
+(95 → 104) change nothing for the others.
+
+The one row to distrust is `Update` / `LateUpdate` in **safe** mode, 46.5 → 28.9 µs. That is not
+a gain of this lot: run on its own, the same benchmark gives 44.1 and 44.8 µs on this machine,
+and inside a full suite run it gives 28.4 to 29.3 µs three times out of three. The row measures
+the state the allocator and the collector are in when it starts, not the binding, and the before
+figure was taken from a full run as well — so the two are not comparable at better than ±40 %
+here. The `frame with Update and LateUpdate` row, which does the same work through the frame
+path, moved by 6 % the other way and is the one to read.
+
+#### API dump
+
+`goldens/lua-api.txt`: 44 → **46** types, 429 → **446** members, 495 → **513** lines. The delta
+is exactly the new members and nothing else:
+
+| Line added | Requirement |
+|---|---|
+| `CameraAPI.ResetDistance prop L` | REQ-LUA-113 |
+| `Instance.BuildExportMeshes appel`, `Instance.ReleaseExportMeshes appel` | REQ-LUA-115 |
+| `SettingAPI.RunAheadFrames prop LE`, `SettingAPI.VisualStyle prop LE` | REQ-LUA-114 |
+| `SettingAPI.GetVisualStyleParameter`, `SetVisualStyleParameter`, `ResetVisualStyleParameters` | REQ-LUA-114 |
+| `SettingAPI.LibraryView`, `MaxQueuedFrames`, `RefreshRate`, `Msaa` (prop LE) | REQ-LUA-116 |
+| `SettingAPI.VisualStyleParameters prop LE Liste<ParamStyle>` | REQ-LUA-116 |
+| `type Liste<ParamStyle>` with `Count` and `[i]` | REQ-LUA-116 |
+| `type ParamStyle` with `Style`, `ParameterId`, `Value` | REQ-LUA-116 |
+
+Seventeen members and two types, the very figures the .NET lot V2-31 reported (46 types, 446
+members). `CS` is **not** in the dump: it is made of plain Lua tables, not of host types, as it
+was in the .NET build after V2-2. Three line counts asserted in tests followed:
+`zax-harness/tests/lua_api_tests.rs` (513) and `zax-goldens/src/lib.rs` (512 parsed lines).
+
+#### Checks
+
+All in release, in the foreground, one suite at a time, with CMake on `PATH` and
+`--features zax-app/bundled` (the note of RU-1 still applies: SDL2 is linked statically and the
+two demo binaries are local stand-ins).
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --release --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release -p zax-settings` | 221 passed |
+| `cargo test --release -p zax-render` | 148 passed |
+| `cargo test --release -p zax-scripting` | 155 passed |
+| `cargo test --release -p zax-scripting` with `ZAXNES_FAST_LUA=1` | 155 passed |
+| `cargo test --release -p zax-app --features bundled` | 611 passed |
+| `cargo test --release -p zax-harness` | 40 passed |
+| `cargo test --release -p zax-goldens` | 3 passed |
+| `cargo test --release --workspace --features zax-app/bundled` | **2043 passed, 0 failed** |
+
+`separate_core_tests` (5) and `pause_3d_tests` (3) are inside the `zax-app` figure and pass: the
+rollback capture reads a core that is home, and no new member of this lot touches the core.
+
+The two `bench_core_tests` failures RU-1 reported are gone: they wanted `rust/test-roms/nestest.nes`,
+which is present in this working copy now.
+
+#### Disk
+
+The debug profile of `target/` was removed mid-lot: the drive filled at 420 GB and the debug
+artifacts were 12 GB of it. Everything after that was built and run in release, which is what the
+lot asks for anyway. Nothing of the repository was touched.
+
+#### Open
+
+No Q ticket. The four amendments left no ambiguity that a choice had to paper over, and the two
+places where a reading had to be settled are settled **by a later amendment**, not by me:
+
+- the Enhanced style is 1 in AMD-040 §3 and 4 in AMD-055 REQ-SCN-078, which accepts 1 in writing
+  and reads back 4. AMD-059 §3 confirms Zaxnes keeps the alias, so 4 is what `Setting.VisualStyle`
+  gives and the parameter methods answer to both;
+- a style parameter's domain **snaps** rather than falling back on its default, which replaces the
+  general rule of REQ-PERS-003 for these sixteen keys. AMD-043 REQ-SCN-066 ("écrire 45 donne 60")
+  and AMD-055 REQ-SCN-079 ("`ao.strength` écrit à 9 → 5", from the interface or the settings
+  model) both ask for it in so many words.
+
+One statement of the lot's own brief turned out not to hold, and it is recorded above rather than
+worked around: **AMD-042 adds no Lua member**, so there are no "rollback members" to weigh against
+`CORE_MEMBERS`. The amendment is about what a snapshot carries and when the history is emptied,
+both of which happen in the host between two emulated frames.
