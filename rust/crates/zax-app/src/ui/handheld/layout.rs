@@ -92,6 +92,8 @@ const HOME_HINTS: &[Hint] = &[
     hint("X", keys::HANDHELD_HINT_PROFILE),
     hint("Y", keys::HANDHELD_HINT_OPTIONS),
     hint("Select", keys::HANDHELD_HINT_GAME_OPTIONS),
+    // AMD-053 REQ-UI-210: the one free button of the home screen marks a favourite.
+    hint("L2", keys::HANDHELD_HINT_FAVORITE),
 ];
 const HACKS_HINTS: &[Hint] = &[
     hint("</>", keys::HANDHELD_HINT_CHANGE),

@@ -338,8 +338,15 @@ fn build_menus() -> Vec<Menu> {
         items: vec![
             item(Command::OpenRom),
             MenuItem::sub(text::recent_roms(), Submenu::RecentRoms),
+            // AMD-053 REQ-LOOP-076: the Resume entry, which is greyed out when the resume point
+            // does not stand (`can_execute`).
+            item(Command::ResumeLast),
             MenuItem::rule(),
             item(Command::ChooseProfile),
+            // AMD-053 REQ-UI-210: the favourite mark of the game being played, and the filter the
+            // enumeration of the games reads.
+            item(Command::ToggleFavorite),
+            item(Command::FilterFavorites),
             item(Command::ImportProfile),
             // AMD-030 §2: "Fichier → Importer depuis 3dSen…", right after the single-file import
             // it extends.

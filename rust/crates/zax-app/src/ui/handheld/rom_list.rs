@@ -43,6 +43,13 @@ pub struct RomEntry {
     /// started): `widescreen_other` is the patch its profile or its name says, which may fit it
     /// or not ([W] in dark grey).
     pub widescreen_unstudied: bool,
+    /// Whether the library entry the game plays with is marked as a favourite (AMD-053
+    /// REQ-UI-210). The handheld list shows the marker and L2 toggles it: no text is typed, so
+    /// the function fits a gamepad-only screen.
+    pub favorite: bool,
+    /// Whether this row is the `Resume` entry of AMD-053 REQ-LOOP-076 rather than a ROM file: it
+    /// heads the list while the resume point stands, and its `name` is the title of its game.
+    pub resume: bool,
 }
 
 impl RomEntry {
@@ -62,6 +69,18 @@ impl RomEntry {
             widescreen_other: None,
             widescreen_forced: false,
             widescreen_unstudied: false,
+            favorite: false,
+            resume: false,
+        }
+    }
+
+    /// The `Resume` row of AMD-053 REQ-LOOP-076, carrying the title of its game.
+    #[must_use]
+    pub fn resume_row(game: &str) -> Self {
+        Self {
+            name: game.to_owned(),
+            resume: true,
+            ..Self::new(PathBuf::new())
         }
     }
 
@@ -103,6 +122,10 @@ pub enum RomListCommand {
     Hacks(PathBuf),
     /// Open the achievements of the selected game (R2, while RetroAchievements is on).
     Achievements(PathBuf),
+    /// Load the resume point (AMD-053 REQ-LOOP-076): the `Resume` row at the head of the list.
+    ResumeLast,
+    /// Mark or unmark the selected game as a favourite (AMD-053 REQ-UI-210, L2).
+    ToggleFavorite(PathBuf),
 }
 
 /// The ROM files of `directory`, sorted by name without regard to case. A folder that cannot be
@@ -242,40 +265,62 @@ impl RomListModel {
             PadButton::Left => self.move_by(-PAGE),
             PadButton::Right => self.move_by(PAGE),
             PadButton::A => {
-                return self
-                    .selected_entry()
-                    .map(|entry| RomListCommand::Play(entry.path.clone()));
+                return self.selected_entry().map(|entry| {
+                    // REQ-LOOP-076: the Resume row loads the resume point, as a slot load does.
+                    if entry.resume {
+                        RomListCommand::ResumeLast
+                    } else {
+                        RomListCommand::Play(entry.path.clone())
+                    }
+                });
             }
             PadButton::X => {
                 return self
                     .selected_entry()
+                    .filter(|entry| !entry.resume)
                     .map(|entry| RomListCommand::ChooseProfile(entry.path.clone()));
+            }
+            // REQ-UI-210: the one free button of the home screen marks a favourite — no text is
+            // typed, so the function fits a gamepad-only screen.
+            PadButton::L2 => {
+                return self
+                    .selected_entry()
+                    .filter(|entry| !entry.resume && entry.profile.is_some())
+                    .map(|entry| RomListCommand::ToggleFavorite(entry.path.clone()));
             }
             PadButton::Y => return Some(RomListCommand::Options),
             // L1 the widescreen, R1 the hacks; Start plays, as A does (owner request).
             PadButton::L1 => {
                 return self
                     .selected_entry()
+                    .filter(|entry| !entry.resume)
                     .map(|entry| RomListCommand::Widescreen(entry.path.clone()));
             }
             PadButton::R1 => {
                 return self
                     .selected_entry()
+                    .filter(|entry| !entry.resume)
                     .map(|entry| RomListCommand::Hacks(entry.path.clone()));
             }
             PadButton::R2 => {
                 return self
                     .selected_entry()
+                    .filter(|entry| !entry.resume)
                     .map(|entry| RomListCommand::Achievements(entry.path.clone()));
             }
             PadButton::Start => {
-                return self
-                    .selected_entry()
-                    .map(|entry| RomListCommand::Play(entry.path.clone()));
+                return self.selected_entry().map(|entry| {
+                    if entry.resume {
+                        RomListCommand::ResumeLast
+                    } else {
+                        RomListCommand::Play(entry.path.clone())
+                    }
+                });
             }
             PadButton::Select => {
                 return self
                     .selected_entry()
+                    .filter(|entry| !entry.resume)
                     .map(|entry| RomListCommand::GameOptions(entry.path.clone()));
             }
             _ => {}
@@ -325,6 +370,7 @@ mod tests {
             is_two_dimensional: generic,
             is_default_three_d: false,
             origin: ProfileOrigin::User,
+            favorite: false,
         }
     }
 
@@ -341,6 +387,54 @@ mod tests {
         assert_eq!(
             Vec::<RomEntry>::new(),
             scan(Path::new("/this/folder/does/not/exist"))
+        );
+    }
+
+    /// AMD-053 REQ-LOOP-076: the Resume row heads the list, A and Start load the resume point,
+    /// and the buttons that act on a ROM file do nothing on it.
+    #[test]
+    fn req_loop_076_the_resume_row_heads_the_list_and_loads_the_resume_point() {
+        let mut entries = list(&["a", "b"]).entries().to_vec();
+        entries.insert(0, RomEntry::resume_row("Zelda II"));
+        let mut model = RomListModel::new(entries);
+
+        assert_eq!(0, model.selected());
+        assert_eq!("Zelda II", model.selected_entry().unwrap().name);
+        assert_eq!(Some(RomListCommand::ResumeLast), model.handle(PadButton::A));
+        assert_eq!(
+            Some(RomListCommand::ResumeLast),
+            model.handle(PadButton::Start)
+        );
+        // Nothing of a ROM file applies to it.
+        assert_eq!(None, model.handle(PadButton::X));
+        assert_eq!(None, model.handle(PadButton::Select));
+        assert_eq!(None, model.handle(PadButton::L1));
+        assert_eq!(None, model.handle(PadButton::R1));
+        assert_eq!(None, model.handle(PadButton::L2));
+
+        // The rows below it are the ROM files, untouched.
+        model.handle(PadButton::Down);
+        assert_eq!(
+            Some(RomListCommand::Play(PathBuf::from("/roms/a.nes"))),
+            model.handle(PadButton::A)
+        );
+    }
+
+    /// AMD-053 REQ-UI-210: L2 marks the selected game, and only one that has a profile — the mark
+    /// belongs to the library entry.
+    #[test]
+    fn req_ui_210_l2_marks_the_selected_game_as_a_favourite() {
+        let mut model = list(&["a", "b"]);
+        assert_eq!(None, model.handle(PadButton::L2), "no profile, no mark");
+
+        model.entries_mut()[0].profile = Some(ProfileMatch {
+            id: "g1".to_owned(),
+            title: "A".to_owned(),
+            two_dimensional: false,
+        });
+        assert_eq!(
+            Some(RomListCommand::ToggleFavorite(PathBuf::from("/roms/a.nes"))),
+            model.handle(PadButton::L2)
         );
     }
 

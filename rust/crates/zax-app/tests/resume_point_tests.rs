@@ -277,3 +277,66 @@ fn req_ui_213_without_emustats_nothing_is_written() {
         .skip(before)
         .any(|line| line.contains("emustats")));
 }
+
+/// REQ-UI-210 and REQ-UI-211 in the chooser of REQ-UI-201: the marker, the filter, and the search
+/// that ignores case and accents — an entry kept only when it satisfies both.
+#[test]
+fn req_ui_210_211_the_chooser_marks_filters_and_searches() {
+    use zax_app::ui::profile_chooser::ProfileChooserModel;
+    use zax_profiles::library::{GameLibrary, LibrarySortOption};
+
+    let library = common::library_of(&[
+        ("1", "Super Mario Bros."),
+        ("2", "MARIO Kart"),
+        ("3", "Pokémon"),
+        ("4", "Metroid"),
+    ]);
+    let mut model = ProfileChooserModel::with_order(&library, LibrarySortOption::Alphabetical);
+    let titles = |model: &ProfileChooserModel| -> Vec<String> {
+        model
+            .filtered()
+            .map(|choice| choice.title.clone())
+            .collect()
+    };
+
+    assert_eq!(4, titles(&model).len());
+    model.set_search("mario");
+    assert_eq!(
+        vec!["MARIO Kart".to_owned(), "Super Mario Bros.".to_owned()],
+        titles(&model)
+    );
+    model.set_search("pokemon");
+    assert_eq!(vec!["Pokémon".to_owned()], titles(&model));
+
+    // The marker follows the toggle, and the filter combines with the search.
+    model.set_search("");
+    model.set_favorite("2", true);
+    model.set_favorite("4", true);
+    assert!(model
+        .all()
+        .iter()
+        .filter(|choice| choice.favorite)
+        .map(|choice| choice.title.as_str())
+        .eq(["MARIO Kart", "Metroid"]));
+    model.set_favorites_only(true);
+    assert_eq!(
+        vec!["MARIO Kart".to_owned(), "Metroid".to_owned()],
+        titles(&model)
+    );
+    model.set_search("mario");
+    assert_eq!(vec!["MARIO Kart".to_owned()], titles(&model));
+
+    // « Favorites first » reaches the chooser through ui.sort_option.
+    let mut library = library;
+    library.set_favorite("4", true);
+    let favorites_first =
+        ProfileChooserModel::with_order(&library, LibrarySortOption::FavoritesFirst);
+    assert_eq!(
+        Some("Metroid"),
+        favorites_first
+            .all()
+            .first()
+            .map(|choice| choice.title.as_str())
+    );
+    let _ = GameLibrary::default();
+}

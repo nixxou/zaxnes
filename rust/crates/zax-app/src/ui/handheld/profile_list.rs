@@ -180,6 +180,7 @@ mod tests {
             is_two_dimensional: generic,
             is_default_three_d: false,
             origin: ProfileOrigin::User,
+            favorite: false,
         }
     }
 

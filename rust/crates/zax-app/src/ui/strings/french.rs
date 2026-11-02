@@ -343,6 +343,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_GAME_OPTIONS_RESET, "Tout remettre en global"),
     (keys::HANDHELD_USE_GLOBAL, "Use Global : {0}"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Options du jeu"),
+    (keys::HANDHELD_HINT_FAVORITE, "Favori"),
     (keys::HANDHELD_HINT_RESET_ALL, "Tout remettre"),
     (keys::HACKS_TITLE, "Hacks — {0}"),
     (keys::HACKS_NONE, "Aucun hack n'est fait pour ce jeu."),

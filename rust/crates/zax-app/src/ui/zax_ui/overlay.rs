@@ -60,6 +60,17 @@ impl ZaxUi {
         ui.separator();
         ui.text(text::welcome_hint());
         ui.spacing();
+        // AMD-053 REQ-LOOP-076: the Resume entry heads what the welcome screen offers, with the
+        // title of its game, while the resume point stands.
+        if let Some(game) = host.resume_game_title() {
+            if ui.button(format!(
+                "{} — {game}",
+                strings::get(&Command::ResumeLast.label_key())
+            )) {
+                Self::activate(host, Command::ResumeLast, CommandArgs::default());
+            }
+            ui.same_line();
+        }
         if ui.button(strings::get(&Command::OpenRom.label_key())) {
             Self::activate(host, Command::OpenRom, CommandArgs::default());
         }

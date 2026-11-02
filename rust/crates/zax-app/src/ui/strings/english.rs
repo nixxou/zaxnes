@@ -340,6 +340,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_GAME_OPTIONS_RESET, "Put everything back to global"),
     (keys::HANDHELD_USE_GLOBAL, "Use Global : {0}"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Game options"),
+    (keys::HANDHELD_HINT_FAVORITE, "Favorite"),
     (keys::HANDHELD_HINT_RESET_ALL, "Reset all"),
     (keys::HACKS_TITLE, "Hacks — {0}"),
     (keys::HACKS_NONE, "No hack is made for this game."),

@@ -28,6 +28,21 @@ pub const START_UNIX_SECONDS: i64 = 1_760_950_000;
 /// The host options the harness builds, for a test that adjusts them.
 pub type HostOptions = EmulationHostOptions<FakeCatalog, StubView>;
 
+/// A library of the given `(identifier, title)` pairs, built from a catalogue in memory: what the
+/// models of the interface read.
+pub fn library_of(entries: &[(&str, &str)]) -> zax_profiles::library::GameLibrary {
+    let rows: Vec<String> = entries
+        .iter()
+        .map(|(id, title)| {
+            format!(r#"{{"id":"{id}","title":"{title}","file":"profiles/{id}.bytes"}}"#)
+        })
+        .collect();
+    let json = format!(r#"{{"editions":{{"full":[{}]}}}}"#, rows.join(","));
+    let catalogue = zax_profiles::catalogue::ProfileCatalogue::parse(&json, Path::new("."), "full")
+        .expect("a valid catalogue");
+    zax_profiles::library::GameLibrary::build(&catalogue, &[], None, None)
+}
+
 /// A folder that is removed when it goes out of scope.
 pub struct TemporaryRoot {
     path: PathBuf,

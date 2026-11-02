@@ -13,8 +13,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 | 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | done — `bc46821` |
 | 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | done — `032638a` |
 | 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | done — `b789322` |
-| 7 | AMD-056 import dialogs, desktop frontend, both languages | done |
-| 8 | UI wiring: commands, chooser, console/handheld screens, options | todo |
+| 7 | AMD-056 import dialogs, desktop frontend, both languages | done — `a3c68b3` |
+| 8 | UI wiring: commands, chooser, console/handheld screens, options | done |
 | 9 | Closing: fmt, clippy, release tests, Lua API dump, journal | todo |
 
 ## Requirement map
@@ -292,7 +292,34 @@ start-up check reads one file.
 Nothing of this is in a per-frame path: the plan is read when a file is chosen, and the dialogue
 is a value the drawing reads.
 
+### Step 8 — the UI wiring of AMD-053
+
+Desktop (AMD-010 REQ-UI-201, REQ-UI-207):
+
+- the chooser's search is now the one of REQ-UI-211 — `library::search::matches`, case and accents
+  ignored — and the favourites filter sits beside the field; an entry is kept when it satisfies
+  both;
+- a star before the title marks a favourite (the form is free), and a `Favorite` button beside
+  `Launch` toggles the selected entry, the marker following at once without the list being rebuilt;
+- `ProfileChooserModel::with_order` lets `ui.sort_option` reach the chooser, « Favorites first »
+  included, while the two generic entries of Q-065 keep their places at the head;
+- the `Resume` entry, with the title of its game, heads the chooser and the welcome screen;
+- the File menu gained `Resume`, `Favorite` and `Favorites only`; the first is greyed out when the
+  resume point does not stand, which `can_execute` already decides.
+
+Handheld (gamepad only, no keyboard):
+
+- the resume point is on, as the lot asks: the `Resume` row heads the home list, A or Start loads
+  it, and the buttons that act on a ROM file do nothing on it;
+- favourites are offered, since the list can show them without text input: a star on the row and
+  **L2** — the one free button of the home screen — to toggle the library entry the game plays
+  with. The hint bar names it, in both languages;
+- no search: there is no keyboard, and nothing was added for one.
+
+Tests: the chooser's marker, filter, search and « Favorites first » order; the handheld's resume
+row and its L2.
+
 ### Next step
 
-Step 8: the UI wiring of AMD-053 — the resume entry, the favourites marker and filter, the search
-field, in the desktop chooser and the console/handheld screens.
+Step 9: closing — fmt, clippy and the release tests of every crate touched, the Lua API dump, the
+journal entry.

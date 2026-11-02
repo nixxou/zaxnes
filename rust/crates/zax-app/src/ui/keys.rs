@@ -242,6 +242,8 @@ pub const HANDHELD_GAME_OPTIONS_TITLE: &str = "handheld.game_options.title";
 pub const HANDHELD_GAME_OPTIONS_RESET: &str = "handheld.game_options.reset";
 pub const HANDHELD_USE_GLOBAL: &str = "handheld.game_options.use_global";
 pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
+/// L2 on the home screen: the favourite mark of the selected game (AMD-053 REQ-UI-210).
+pub const HANDHELD_HINT_FAVORITE: &str = "handheld.hint.favorite";
 pub const HANDHELD_HINT_RESET_ALL: &str = "handheld.hint.reset_all";
 pub const SHORTCUT_HOME: &str = "shortcut.home";
 pub const HACKS_TITLE: &str = "hacks.title";
@@ -604,6 +606,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_GAME_OPTIONS_RESET,
     HANDHELD_USE_GLOBAL,
     HANDHELD_HINT_GAME_OPTIONS,
+    HANDHELD_HINT_FAVORITE,
     HANDHELD_HINT_RESET_ALL,
     SHORTCUT_HOME,
     HACKS_TITLE,

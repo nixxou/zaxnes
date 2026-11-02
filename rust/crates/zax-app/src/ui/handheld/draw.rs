@@ -21,6 +21,7 @@ use super::rom_list::{first_visible, ProfileMatch, RomEntry, RomListModel};
 use super::states::{SlotState, StatesMode};
 use super::{slot_state, HandheldUi, Screen, STATE_PICTURE_ID};
 use crate::achievements::KnownGame;
+use crate::emulation::commands::Command;
 use crate::input::BindingDeviceKind;
 use crate::persistence::save_slots::numbered_slot_id;
 use crate::ui::confirm_dialog::ConfirmationView;
@@ -40,6 +41,8 @@ const BAR: [f32; 4] = [0.1, 0.1, 0.16, 1.0];
 const WARNING: [f32; 4] = [1.0, 0.45, 0.35, 1.0];
 /// The [W] of a game whose ROM was not studied yet: its profile or its name says a hack.
 const UNSTUDIED: [f32; 4] = [0.42, 0.44, 0.5, 1.0];
+/// What marks a favourite game in the home list (AMD-053 REQ-UI-210; the form is free).
+const FAVORITE_MARKER: &str = "*";
 /// A value a game has of its own, and the hint of the list when the game has some.
 const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
 const GAME_OWN_ON_FOCUS: [f32; 4] = [0.0, 0.3, 0.4, 1.0];
@@ -542,10 +545,11 @@ impl HandheldUi {
             if let Some(percent) = &percent {
                 badges.push((percent, FOCUS));
             }
+            let label = home_row_label(entry);
             if badges.is_empty() {
-                painter.row(slot, selected, &entry.name, (&tag.0, colour));
+                painter.row(slot, selected, &label, (&tag.0, colour));
             } else {
-                painter.row_badged(slot, selected, &entry.name, &badges, (&tag.0, colour));
+                painter.row_badged(slot, selected, &label, &badges, (&tag.0, colour));
             }
         }
         // "Game options" in cyan when the selected game has some (owner request).
@@ -1209,6 +1213,23 @@ impl HandheldUi {
         let message = strings::get(keys::HANDHELD_EXIT_HOLD);
         let x = (size[0] - ui.calc_text_size(&message)[0]) * 0.5;
         list.add_text([x, top + (metrics.row - metrics.font) * 0.5], TEXT, message);
+    }
+}
+
+/// The name a row of the home list shows. AMD-053 REQ-UI-210: a favourite entry is distinguished;
+/// the form is free, and this one is a star before the name. REQ-LOOP-076: the Resume row says
+/// what it is, with the title of its game.
+fn home_row_label(entry: &RomEntry) -> String {
+    if entry.resume {
+        format!(
+            "{} — {}",
+            strings::get(&Command::ResumeLast.label_key()),
+            entry.name
+        )
+    } else if entry.favorite {
+        format!("{FAVORITE_MARKER} {}", entry.name)
+    } else {
+        entry.name.clone()
     }
 }
 

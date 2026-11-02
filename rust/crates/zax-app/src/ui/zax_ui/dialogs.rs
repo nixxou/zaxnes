@@ -9,10 +9,13 @@ use crate::audio::UiSound;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::ui::file_browser::{FileEntry, FileEntryKind};
 use crate::ui::profile_chooser::ProfileChoice;
-use crate::ui::text;
+use crate::ui::{strings, text};
 
 /// The colour of a destructive first button (AMD-056 §3 leaves it free, AMD-010 §4).
 const DESTRUCTIVE_BUTTON: [f32; 4] = [0.60, 0.16, 0.16, 1.0];
+
+/// What marks a favourite entry in the list (AMD-053 REQ-UI-210; the form is free).
+const FAVORITE_MARKER: &str = "*";
 
 impl ZaxUi {
     pub(super) fn draw_file_browser(&mut self, ui: &Ui, host: &mut AppHost) {
@@ -161,14 +164,28 @@ impl ZaxUi {
                     .map_or_else(|| rom.clone(), |name| name.to_string_lossy().into_owned());
                 ui.text_wrapped(name);
             }
+            // AMD-053 REQ-UI-211: the search of REQ-UI-201, now ignoring case and accents, and
+            // the favourites filter of REQ-UI-210 beside it.
             let mut search = self.chooser.search().to_owned();
-            ui.set_next_item_width(-1.0);
+            ui.set_next_item_width(-160.0);
             if ui
                 .input_text(format!("##{}", text::search()), &mut search)
                 .build()
             {
                 self.chooser.set_search(&search);
             }
+            ui.same_line();
+            let mut favorites_only = self.chooser.favorites_only();
+            if ui.checkbox(
+                strings::get(&Command::FilterFavorites.label_key()),
+                &mut favorites_only,
+            ) {
+                self.chooser.set_favorites_only(favorites_only);
+                host.set_favorites_only(favorites_only);
+            }
+            // REQ-LOOP-076: the Resume entry heads the enumeration of the games, and no filter
+            // reaches it.
+            Self::draw_resume_entry(ui, host, &mut open);
             ui.separator();
             let height = -ui.frame_height_with_spacing();
             let mut picked: Option<ProfileChoice> = None;
@@ -177,11 +194,14 @@ impl ZaxUi {
                 for (index, choice) in self.chooser.filtered().enumerate() {
                     let selected = self.chooser.selected_id.as_deref() == Some(choice.id.as_str());
                     let _id = ui.push_id_usize(index);
-                    if ui
-                        .selectable_config(&choice.title)
-                        .selected(selected)
-                        .build()
-                    {
+                    // REQ-UI-210: a favourite entry is distinguished; the form of the marker is
+                    // free, and this one is a star before the title.
+                    let label = if choice.favorite {
+                        format!("{FAVORITE_MARKER} {}", choice.title)
+                    } else {
+                        choice.title.clone()
+                    };
+                    if ui.selectable_config(&label).selected(selected).build() {
                         if selected {
                             picked = Some(choice.clone());
                         } else {
@@ -198,7 +218,12 @@ impl ZaxUi {
             }
             let disabled = ui.begin_disabled(self.chooser.selected_id.is_none());
             let launch = ui.button(text::launch());
+            ui.same_line();
+            let toggle_favorite = ui.button(strings::get(&Command::ToggleFavorite.label_key()));
             drop(disabled);
+            if toggle_favorite {
+                self.toggle_selected_favorite(host);
+            }
             if launch {
                 picked = self
                     .chooser
@@ -217,6 +242,33 @@ impl ZaxUi {
             }
         }
         self.state.profile_chooser = open;
+    }
+
+    /// `favorite.toggle` on the selected entry, with the list's marker following it (REQ-UI-210).
+    fn toggle_selected_favorite(&mut self, host: &mut AppHost) {
+        let Some(id) = self.chooser.selected_id.clone() else {
+            return;
+        };
+        if let Some(favorite) = host.toggle_favorite(&id) {
+            self.chooser.set_favorite(&id, favorite);
+            play(host, UiSound::Confirm);
+        }
+    }
+
+    /// The `Resume` entry of AMD-053 REQ-LOOP-076, with the title of its game: shown only while
+    /// the resume point stands, and above the list, which is the head of the enumeration.
+    fn draw_resume_entry(ui: &Ui, host: &mut AppHost, open: &mut bool) {
+        let Some(game) = host.resume_game_title() else {
+            return;
+        };
+        if ui.button(format!(
+            "{} — {game}",
+            strings::get(&Command::ResumeLast.label_key())
+        )) {
+            play(host, UiSound::Confirm);
+            host.enqueue(Command::ResumeLast, CommandArgs::default());
+            *open = false;
+        }
     }
 
     fn choose(&self, host: &mut AppHost, choice: &ProfileChoice) {
