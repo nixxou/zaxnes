@@ -33,8 +33,26 @@ fn layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
         stored_layouts(),
         compressed_layouts(),
         serialized_file_layouts(),
+        three_d_sen_2_layouts(),
     ]
     .concat()
+}
+
+/// The two layouts AMD-039 §4 asks for that must read like any other.
+fn three_d_sen_2_layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
+    vec![
+        (
+            "3dSen 2.0: format 8, flag 0x200",
+            SyntheticBundleOptions::three_d_sen_2(),
+        ),
+        (
+            "3dSen 2.0 flags with the info block at the end",
+            SyntheticBundleOptions {
+                info_at_end: true,
+                ..SyntheticBundleOptions::three_d_sen_2()
+            },
+        ),
+    ]
 }
 
 fn stored_layouts() -> Vec<(&'static str, SyntheticBundleOptions)> {
@@ -178,16 +196,95 @@ fn every_layout_yields_the_same_text_assets() {
     for (layout, options) in layouts() {
         let bundle = synthetic::build(&expected, &options);
 
-        let read = read_text_assets(&bundle).unwrap();
+        assert_assets_read(layout, &expected, &bundle);
+    }
+}
 
-        assert_eq!(expected.len(), read.len(), "{layout}");
-        for ((name, script), asset) in expected.iter().zip(&read) {
-            assert_eq!(*name, asset.name, "{layout}");
-            assert!(
-                *script == asset.script,
-                "{layout}: the payload of \"{name}\" came back changed."
-            );
-        }
+/// AMD-039 §4, first bullet: a format 8 bundle with flags 0x243 whose compressed information
+/// block does not end on a multiple of 16 gives the expected `TextAsset`s — the data blocks are
+/// found at the next 16-byte boundary and not right after the block.
+#[test]
+fn the_data_blocks_of_a_bundle_with_flag_0x200_start_on_a_multiple_of_16() {
+    let expected = assets();
+    let layout = synthetic::build_with_layout(&expected, &SyntheticBundleOptions::three_d_sen_2());
+
+    // The flags of the measured 2.0 header: LZ4HC (3), file list (0x40), alignment (0x200).
+    assert_eq!(0x243, layout.flags);
+
+    // The case that matters: like the measured 1429-byte block ending at 1493, this one does not
+    // end on a boundary, so the padding is what the reader must skip.
+    assert_ne!(0, layout.info_end % 16);
+    assert_eq!(layout.info_end.div_ceil(16) * 16, layout.data_start);
+    assert_eq!(
+        vec![0_u8; layout.data_start - layout.info_end],
+        layout.bytes[layout.info_end..layout.data_start]
+    );
+
+    assert_assets_read("flag 0x200", &expected, &layout.bytes);
+}
+
+/// AMD-039 §4, second bullet: the very same bytes with bit 0x200 taken out of the header — the
+/// padding still in front of the data — import no profile at all and do not crash (AMD-030 §5).
+#[test]
+fn the_same_bundle_without_flag_0x200_is_refused_rather_than_misread() {
+    let expected = assets();
+    let aligned = synthetic::build_with_layout(&expected, &SyntheticBundleOptions::three_d_sen_2());
+    let same = synthetic::build_with_layout(
+        &expected,
+        &SyntheticBundleOptions {
+            align_data_flag: Some(false),
+            ..SyntheticBundleOptions::three_d_sen_2()
+        },
+    );
+
+    // Only the flag word differs: the bundle still carries its padding bytes.
+    assert_eq!(0x43, same.flags);
+    assert_eq!(aligned.data_start, same.data_start);
+    assert_eq!(aligned.bytes.len(), same.bytes.len());
+
+    // A message, which is how AMD-030 §5 asks a bundle that cannot be read to come out: an
+    // error, not a panic, and no asset.
+    let refusal = read_text_assets(&same.bytes);
+    assert!(
+        refusal.is_err(),
+        "the padded bundle without flag 0x200 must be refused, not misread"
+    );
+}
+
+/// AMD-039 §4, third bullet: with bits 0x80 and 0x200 both set, the data blocks follow the
+/// aligned header and bit 0x200 adds nothing.
+#[test]
+fn flag_0x200_has_no_effect_when_the_information_block_is_at_the_end() {
+    let expected = assets();
+    let layout = synthetic::build_with_layout(
+        &expected,
+        &SyntheticBundleOptions {
+            info_at_end: true,
+            ..SyntheticBundleOptions::three_d_sen_2()
+        },
+    );
+
+    assert_eq!(0x2C3, layout.flags);
+
+    // The header of this bundle ends at 50 and its data start at 64, the aligned position of
+    // AMD-030 §4.2: no further padding was inserted.
+    assert_eq!(64, layout.data_start);
+
+    assert_assets_read("flags 0x80 and 0x200", &expected, &layout.bytes);
+}
+
+/// Checks that `bundle` holds `expected`, name for name and byte for byte; `what` names the
+/// layout in the failure message.
+fn assert_assets_read(what: &str, expected: &[(&str, Vec<u8>)], bundle: &[u8]) {
+    let read = read_text_assets(bundle).unwrap();
+
+    assert_eq!(expected.len(), read.len(), "{what}");
+    for ((name, script), asset) in expected.iter().zip(&read) {
+        assert_eq!(*name, asset.name, "{what}");
+        assert!(
+            *script == asset.script,
+            "{what}: the payload of \"{name}\" came back changed."
+        );
     }
 }
 

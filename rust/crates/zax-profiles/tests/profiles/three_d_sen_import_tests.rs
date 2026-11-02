@@ -484,3 +484,64 @@ fn the_installation_is_left_untouched_by_an_import() {
     assert_eq!(vec![bundle], in_installation);
     assert!(before.iter().all(|path| files.paths().contains(path)));
 }
+
+/// AMD-039 §4, first bullet, at the level of the import: an installation of 3dSen 2.0 — the path
+/// of §2, a bundle in format 8 with flags 0x243 — hands its profiles over like a 1.1.2 one.
+#[test]
+fn a_3dsen_2_installation_is_imported_like_a_1_1_2_one() {
+    let files = FakeProfileFileSystem::new();
+    // AMD-039 §2, last bullet: the path pattern is the one of AMD-030 §3, under
+    // StandaloneWindows64.
+    let bundle = layout(
+        &files,
+        Path::new("/install"),
+        "3dSen_Data",
+        "StandaloneWindows64",
+        "0f1e2d3c",
+        &synthetic_bundle::build(
+            &[
+                ("Pinball", profile("ABCDEFGHIJKL", "Pinball")),
+                ("Tetris", profile("MNOPQRSTUVWX", "Tetris")),
+            ],
+            &SyntheticBundleOptions::three_d_sen_2(),
+        ),
+    );
+
+    let summary = ThreeDSenImporter::new(&files, Path::new(DESTINATION), None)
+        .import_from(Path::new("/install"))
+        .unwrap();
+
+    assert_eq!(2, summary.imported);
+    assert_eq!(0, summary.failed);
+    assert_eq!(bundle, summary.bundle_path);
+    assert!(files.file_exists(&destination("Pinball.3dn")));
+    assert!(files.file_exists(&destination("Tetris.3dn")));
+}
+
+/// AMD-039 §4, second bullet: the same bundle with bit 0x200 cleared and its padding bytes left
+/// in place imports no profile and does not crash (AMD-030 §5).
+#[test]
+fn a_bundle_padded_without_flag_0x200_imports_nothing_and_writes_nothing() {
+    let files = FakeProfileFileSystem::new();
+    layout(
+        &files,
+        Path::new("/install"),
+        "3dSen_Data",
+        "StandaloneWindows64",
+        "0f1e2d3c",
+        &synthetic_bundle::build(
+            &[("Pinball", profile("ABCDEFGHIJKL", "Pinball"))],
+            &SyntheticBundleOptions {
+                align_data_flag: Some(false),
+                ..SyntheticBundleOptions::three_d_sen_2()
+            },
+        ),
+    );
+    let before = files.paths().len();
+
+    // A message, not a crash: the import stops on the bundle and nothing is written.
+    assert!(ThreeDSenImporter::new(&files, Path::new(DESTINATION), None)
+        .import_from(Path::new("/install"))
+        .is_err());
+    assert_eq!(before, files.paths().len());
+}

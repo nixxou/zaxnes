@@ -1,5 +1,6 @@
 //! The `UnityFS` bundle container (AMD-030 §4.1, §4.2): header, information block, data blocks
-//! and the table of the files they hold.
+//! and the table of the files they hold. Format versions 6 to 8 are read, the header flag 0x200
+//! of 3dSen 2.0 included (AMD-039 §2).
 
 use super::asset_reader::AssetReader;
 use super::lz4;
@@ -68,6 +69,11 @@ pub const MAXIMUM_FORMAT_VERSION: u32 = 8;
 const COMPRESSION_MASK: u32 = 0x3F;
 const FILE_LIST_FLAG: u32 = 0x40;
 const INFO_AT_END_FLAG: u32 = 0x80;
+/// Bit 0x200 (AMD-039 §2): the data blocks start on the next 16-byte boundary after the
+/// information block. It only matters when the information block comes first (bit 0x80 clear);
+/// with bit 0x80 the data already follow the aligned header, at a position that is a multiple
+/// of 16 anyway.
+const DATA_ALIGNED_FLAG: u32 = 0x200;
 const MAXIMUM_INFO_SIZE: u32 = 64 * 1024 * 1024;
 const MAXIMUM_STREAM_SIZE: u64 = 1024 * 1024 * 1024;
 const MAXIMUM_TABLE_LENGTH: i32 = 1 << 20;
@@ -151,6 +157,13 @@ impl UnityBundle {
         let compressed_info_size = to_usize(compressed_info_size)?;
         let (compressed_info, data_start, data_end) = if flags & INFO_AT_END_FLAG == 0 {
             let info = reader.read_bytes(compressed_info_size)?;
+            // AMD-039 §2: with bit 0x200, the data blocks start on the next multiple of 16 after
+            // the information block's *compressed* bytes — the 2.0 bundle ends its 1429-byte
+            // information block at 1493 and starts its data at 1504. Without the bit the blocks
+            // follow immediately, as AMD-030 §4.2 has it.
+            if flags & DATA_ALIGNED_FLAG != 0 {
+                reader.align(16)?;
+            }
             (info, reader.position(), bytes.len())
         } else {
             // The data blocks start right after the aligned header; the information block is

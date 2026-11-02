@@ -1,5 +1,5 @@
-//! A builder of `UnityFS` bundles in every layout the reader supports (AMD-030 §4), so the
-//! reader is tested without a 3dSen installation.
+//! A builder of `UnityFS` bundles in every layout the reader supports (AMD-030 §4, AMD-039 §2),
+//! so the reader is tested without a 3dSen installation.
 
 use zax_profiles::import::{UnityCompression, BUNDLE_SIGNATURE, TEXT_ASSET_CLASS_ID};
 
@@ -28,6 +28,15 @@ pub struct SyntheticBundleOptions {
     pub block_uncompressed_size_code: Option<u32>,
     pub node_offset_delta: i64,
     pub node_size_delta: i64,
+    /// Whether the bundle is laid out the way 3dSen 2.0 lays it out (AMD-039 §2, flag 0x200):
+    /// bit 0x200 in the header and, when the information block comes first, padding up to the
+    /// next multiple of 16 before the data blocks. With `info_at_end` only the bit is written,
+    /// the data already following the aligned header.
+    pub align_data: bool,
+    /// Whether bit 0x200 is written, when that is to differ from `align_data`. `align_data` with
+    /// this set to `Some(false)` forges the bundle of AMD-039 §4, second bullet: the padding
+    /// bytes are there and the flag is not.
+    pub align_data_flag: Option<bool>,
 }
 
 impl Default for SyntheticBundleOptions {
@@ -48,8 +57,40 @@ impl Default for SyntheticBundleOptions {
             block_uncompressed_size_code: None,
             node_offset_delta: 0,
             node_size_delta: 0,
+            align_data: false,
+            align_data_flag: None,
         }
     }
+}
+
+impl SyntheticBundleOptions {
+    /// The header of 3dSen 2.0 as AMD-039 §2 measures it: format version 8, flags 0x243 — LZ4HC,
+    /// file list, and bit 0x200, which starts the data blocks on the next 16-byte boundary after
+    /// the compressed information block — and a serialized file in version 22.
+    pub fn three_d_sen_2() -> Self {
+        Self {
+            format_version: 8,
+            info_compression: UnityCompression::Lz4Hc,
+            block_compression: UnityCompression::Lz4Hc,
+            block_size: 128 * 1024,
+            serialized_version: 22,
+            align_data: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// Where the pieces of a synthetic bundle ended up, so that a test can state the offsets
+/// AMD-039 §2 talks about instead of recomputing them from the header.
+pub struct SyntheticBundleLayout {
+    /// The bundle, whole.
+    pub bytes: Vec<u8>,
+    /// The flag word written in the header.
+    pub flags: u32,
+    /// Where the information block's compressed bytes end, when it comes first; 0 with flag 0x80.
+    pub info_end: usize,
+    /// Where the first data block starts.
+    pub data_start: usize,
 }
 
 /// The numeric code of a compression, as the flags store it.
@@ -64,7 +105,15 @@ pub fn compression_code(compression: UnityCompression) -> u32 {
 }
 
 pub fn build(assets: &[(&str, Vec<u8>)], options: &SyntheticBundleOptions) -> Vec<u8> {
-    wrap(&build_serialized_file(assets, options), options)
+    build_with_layout(assets, options).bytes
+}
+
+/// [`build`], reporting where the pieces landed.
+pub fn build_with_layout(
+    assets: &[(&str, Vec<u8>)],
+    options: &SyntheticBundleOptions,
+) -> SyntheticBundleLayout {
+    wrap_with_layout(&build_serialized_file(assets, options), options)
 }
 
 pub fn build_serialized_file(
@@ -161,7 +210,11 @@ pub fn build_serialized_file(
     file.into_bytes()
 }
 
-pub fn wrap(serialized: &[u8], options: &SyntheticBundleOptions) -> Vec<u8> {
+/// Wraps a serialized file into a bundle (AMD-030 §4.1, §4.2; AMD-039 §2), reporting the offsets.
+pub fn wrap_with_layout(
+    serialized: &[u8],
+    options: &SyntheticBundleOptions,
+) -> SyntheticBundleLayout {
     // The data blocks: the stream is the single file node, cut into blocks.
     let block_size = options.block_size.min(serialized.len().max(1));
     let mut blocks: Vec<(usize, Vec<u8>)> = serialized
@@ -206,6 +259,9 @@ pub fn wrap(serialized: &[u8], options: &SyntheticBundleOptions) -> Vec<u8> {
     if options.info_at_end {
         flags |= 0x80;
     }
+    if options.align_data_flag.unwrap_or(options.align_data) {
+        flags |= 0x200;
+    }
 
     let mut header = ByteWriter::new(true);
     header.c_string(BUNDLE_SIGNATURE);
@@ -222,9 +278,20 @@ pub fn wrap(serialized: &[u8], options: &SyntheticBundleOptions) -> Vec<u8> {
         header.align_to(16, 0);
     }
 
+    let mut info_end = 0;
     if !options.info_at_end {
         header.bytes(&stored_info);
+        info_end = header.len();
+
+        // AMD-039 §2: 3dSen 2.0 pads to the next multiple of 16 after the compressed information
+        // block. The padding is written whatever the flag says, so that the same bytes can be
+        // presented with bit 0x200 clear (AMD-039 §4, second bullet).
+        if options.align_data {
+            header.align_to(16, 0);
+        }
     }
+
+    let data_start = header.len();
     for (_, stored) in &blocks {
         header.bytes(stored);
     }
@@ -235,7 +302,12 @@ pub fn wrap(serialized: &[u8], options: &SyntheticBundleOptions) -> Vec<u8> {
     let mut bundle = header.into_bytes();
     let length = i64::try_from(bundle.len()).unwrap();
     bundle[size_field..size_field + 8].copy_from_slice(&length.to_be_bytes());
-    bundle
+    SyntheticBundleLayout {
+        bytes: bundle,
+        flags,
+        info_end,
+        data_start,
+    }
 }
 
 fn store(plain: &[u8], compression: UnityCompression) -> Vec<u8> {

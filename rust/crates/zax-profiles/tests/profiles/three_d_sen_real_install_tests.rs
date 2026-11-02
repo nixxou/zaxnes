@@ -24,12 +24,46 @@ use super::common::recording_log::RecordingProfileLog;
 
 const PROFILE_COUNT: usize = 101;
 
+/// The four profiles of a 2.0 installation that are not byte-for-byte those of the 1.1.2: they
+/// differ by their Lua scripts alone (AMD-039 §5), in the order their file names sort in.
+const LUA_DIFFERING_PROFILES: [&str; 4] = [
+    "DQ3_DW3",
+    "Final_Fantasy_USA",
+    "Super Mario Bros",
+    "punchout",
+];
+
 fn install_root() -> PathBuf {
     PathBuf::from(env::var_os("ZAXNES_3DSEN_INSTALL").unwrap_or_else(|| {
         panic!(
             "ZAXNES_3DSEN_INSTALL is not set: it names a 3dSen installation (or a stand-in) folder"
         )
     }))
+}
+
+/// The format version of the installation's profile bundle. AMD-039 §2 measures 7 on the 1.1.2
+/// and 8 on the 2.0, which is what tells the two apart without opening anything else of the
+/// installation: `"UnityFS\0"` then a big-endian `u32` (AMD-030 §4.1), so only twelve bytes of a
+/// 43 MB bundle are read.
+fn bundle_format_version() -> u32 {
+    let bundle = find_bundle(&PhysicalProfileFileSystem, &install_root()).unwrap();
+    let head = fs::read(bundle).unwrap();
+    u32::from_be_bytes(head[8..12].try_into().unwrap())
+}
+
+/// True when the installation is a 3dSen 2.0 (AMD-039 §2).
+fn is_version_2() -> bool {
+    bundle_format_version() >= 8
+}
+
+/// The version of the serialized file the bundle holds: 21 on the 1.1.2 and 22 on the 2.0
+/// (AMD-039 §2, table).
+fn expected_serialized_version() -> u32 {
+    if is_version_2() {
+        22
+    } else {
+        21
+    }
 }
 
 fn reference_hashes() -> HashSet<String> {
@@ -50,7 +84,7 @@ fn hash_of(path: &Path) -> String {
     format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
 }
 
-/// AMD-030 §3
+/// AMD-030 §3, AMD-039 §2 last bullet
 #[test]
 #[ignore = "needs ZAXNES_PROFILES and ZAXNES_3DSEN_INSTALL (a 3dSen installation)"]
 fn the_bundle_is_found_from_the_installation_folder() {
@@ -59,10 +93,12 @@ fn the_bundle_is_found_from_the_installation_folder() {
     assert!(is_bundle_name(
         &bundle.file_name().unwrap().to_string_lossy()
     ));
+    // The path pattern does not change in 2.0, only the platform folder, which is
+    // StandaloneWindows64 there and StandaloneWindows in 1.1.2.
     assert!(bundle.to_string_lossy().contains("StandaloneWindows"));
 }
 
-/// AMD-030 §4
+/// AMD-030 §4, AMD-039 §2
 #[test]
 #[ignore = "needs ZAXNES_PROFILES and ZAXNES_3DSEN_INSTALL (a 3dSen installation)"]
 fn the_bundle_holds_the_101_profiles_and_the_asset_bundle_object() {
@@ -70,15 +106,17 @@ fn the_bundle_holds_the_101_profiles_and_the_asset_bundle_object() {
     let bytes = fs::read(bundle).unwrap();
     let container = UnityBundle::read(&bytes).unwrap();
 
-    // §4.1 and §4.2: version 7, one CAB- node, blocks of 128 KiB.
-    assert_eq!(7, container.format_version);
+    // §4.1 and §4.2: format version 7 on the 1.1.2 and 8 on the 2.0 (AMD-039 §2), one CAB- node,
+    // blocks of 128 KiB.
+    assert_eq!(bundle_format_version(), container.format_version);
+    assert!((7..=8).contains(&container.format_version));
     assert_eq!(1, container.files.len());
     let node = &container.files[0];
     assert!(node.path.starts_with("CAB-"));
 
-    // §4.3: version 21, little-endian, 102 objects.
+    // §4.3: version 21 in 1.1.2 and 22 in 2.0 (AMD-039 §2), little-endian, 102 objects.
     let serialized = UnitySerializedFile::read(&node.data).unwrap();
-    assert_eq!(21, serialized.version);
+    assert_eq!(expected_serialized_version(), serialized.version);
     assert!(!serialized.is_big_endian);
     assert_eq!(PROFILE_COUNT + 1, serialized.objects.len());
 
@@ -100,13 +138,13 @@ fn every_payload_decodes_with_the_spec_03_decoder() {
     }
 }
 
-/// AMD-030 §6, first and second bullets
+/// AMD-030 §6, second bullet, and AMD-039 §4, second part: whichever version the installation
+/// is, the import writes the 101 profiles with no failure, and a second import finds them all
+/// already present. The fingerprints are not looked at here, since the reference inventory
+/// describes the 1.1.2 only (AMD-039 §4, §5).
 #[test]
 #[ignore = "needs ZAXNES_PROFILES and ZAXNES_3DSEN_INSTALL (a 3dSen installation)"]
-fn the_import_writes_101_profiles_of_the_inventory_and_the_second_one_adds_nothing() {
-    let reference = reference_hashes();
-    assert_eq!(PROFILE_COUNT, reference.len());
-
+fn the_import_writes_the_101_profiles_and_the_second_one_adds_nothing() {
     // Outside the repository on purpose: no file of 3dSen ever lands in the tree.
     let scratch = env::temp_dir().join(format!("zax-p8-{}", std::process::id()));
     let destination = scratch.join("profiles");
@@ -128,12 +166,7 @@ fn the_import_writes_101_profiles_of_the_inventory_and_the_second_one_adds_nothi
             .to_string_lossy()
             .ends_with(UserProfileFolder::EXTENSION)));
 
-        // Each produced file is, byte for byte, a profile of the reference inventory.
-        for path in &written {
-            assert!(reference.contains(&hash_of(path)), "{}", path.display());
-        }
-
-        // One profile per inventory entry: no duplicate, nothing missing.
+        // 101 distinct files: no profile was written twice under two names.
         let distinct: HashSet<String> = written.iter().map(|path| hash_of(path)).collect();
         assert_eq!(PROFILE_COUNT, distinct.len());
 
@@ -150,8 +183,56 @@ fn the_import_writes_101_profiles_of_the_inventory_and_the_second_one_adds_nothi
     }
 }
 
+/// AMD-030 §6, first bullet, kept unchanged by AMD-039 §4, third bullet: on a 1.1.2, every
+/// imported file is byte for byte a profile of the reference inventory. On a 2.0 the comparison
+/// is not made — four of the 101 differ by their Lua scripts (AMD-039 §5, AMD-040 §1) — and the
+/// test reports that it did nothing rather than failing.
+#[test]
+#[ignore = "needs ZAXNES_PROFILES and ZAXNES_3DSEN_INSTALL (a 3dSen 1.1.2 installation)"]
+fn the_imported_profiles_are_those_of_the_reference_inventory() {
+    if is_version_2() {
+        println!(
+            "skipped: ZAXNES_3DSEN_INSTALL names a 2.0 (bundle format 8); the reference \
+             inventory describes the 1.1.2, so its fingerprints are not compared \
+             (AMD-039 §4, §5)."
+        );
+        return;
+    }
+
+    let reference = reference_hashes();
+    assert_eq!(PROFILE_COUNT, reference.len());
+
+    let scratch = env::temp_dir().join(format!("zax-p8-ref-{}", std::process::id()));
+    let destination = scratch.join("profiles");
+    let outcome = std::panic::catch_unwind(|| {
+        let summary = ThreeDSenImporter::new(&PhysicalProfileFileSystem, &destination, None)
+            .import_from(&install_root())
+            .unwrap();
+        assert_eq!(PROFILE_COUNT, summary.imported);
+
+        let written: Vec<PathBuf> = fs::read_dir(&destination)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(PROFILE_COUNT, written.len());
+        for path in &written {
+            assert!(reference.contains(&hash_of(path)), "{}", path.display());
+        }
+    });
+    fs::remove_dir_all(&scratch).unwrap();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
 /// AMD-037: after the import, every one of the 101 profiles is a game (45 of them carry no
 /// identifier and get a derived one) without assets, and no game appears twice with them.
+///
+/// On a 2.0 installation four of the 101 are not byte-for-byte the catalogue's own, their Lua
+/// scripts differing (AMD-039 §5): those four stay user profiles, the other 97 are reported
+/// identical, and each of the four adds a library entry, its identifier not being one of the
+/// catalogue's. What the interface is to show then is Q-076.
+// Q-076
 #[test]
 #[ignore = "needs ZAXNES_PROFILES and ZAXNES_3DSEN_INSTALL (a 3dSen installation)"]
 fn amd_037_the_imported_profiles_are_101_games_with_no_ignored_file_and_no_game_twice() {
@@ -194,17 +275,36 @@ fn amd_037_the_imported_profiles_are_101_games_with_no_ignored_file_and_no_game_
             .count();
         assert_eq!(PROFILE_COUNT, user_games);
 
-        // With assets: the profiles are the built-in ones, so no game appears twice.
+        // With assets: each file is one of the catalogue's own profiles and adds no game — but
+        // for the four of AMD-039 §5 on a 2.0, which differ by their Lua scripts (Q-076).
         let catalogue =
             ProfileCatalogue::load(&files, &neutral_assets::catalogue_file(), FULL_EDITION)
                 .unwrap();
         let profiles = folder
             .scan_excluding(&catalogue.ids(), &catalogue.built_in_contents(&files))
             .unwrap();
+        let mut kept: Vec<String> = profiles
+            .iter()
+            .filter_map(|profile| profile.file_path.file_stem())
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .collect();
+        kept.sort();
+        let expected_kept: Vec<String> = if is_version_2() {
+            LUA_DIFFERING_PROFILES
+                .iter()
+                .map(|&n| n.to_owned())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        assert_eq!(expected_kept, kept);
         let library = GameLibrary::build(&catalogue, &profiles, None, Some(&log));
+
+        // Whichever version: one entry per identifier, nothing hidden by a clash.
         let ids: Vec<&str> = library.entries().iter().map(GameLibraryEntry::id).collect();
         let distinct: HashSet<&str> = ids.iter().copied().collect();
         assert_eq!(ids.len(), distinct.len());
+        assert_eq!(catalogue.entries().len() + kept.len(), ids.len());
 
         // The import left the files byte-identical (AMD-030): scanning rewrote nothing.
         let after: Vec<Vec<u8>> = fs::read_dir(&destination)

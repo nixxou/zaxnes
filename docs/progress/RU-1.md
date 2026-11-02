@@ -7,8 +7,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Setup: sources read, requirement map, amendments copied | done |
-| 2 | AMD-039: UnityFS header flag 0x200, synthetic format-8 bundle tests | todo |
+| 1 | Setup: sources read, requirement map, amendments copied | done — `f2a05fe` |
+| 2 | AMD-039: UnityFS header flag 0x200, synthetic format-8 bundle tests | done |
 | 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | todo |
 | 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | todo |
 | 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | todo |
@@ -101,6 +101,35 @@ Handheld defaults: the resume point is on (it costs nothing during play), favour
   must stay offline, so no crate can be added. The Latin table R1 confirmed for the .NET build is
   the whole mechanism here; combining marks are dropped by their Unicode blocks.
 
+### Step 2 — AMD-039
+
+The whole fix is one flag and one alignment in `import/bundle.rs`: with bit 0x200 set and the
+information block first, the reader aligns on 16 after the block's *compressed* bytes before
+taking `data_start`. With bit 0x80 the bit is ignored, the data already following the aligned
+header. Everything AMD-030 asks for is unchanged: formats 6 to 8, LZ4 and LZ4HC, a refusal with a
+message rather than a panic for anything that does not read.
+
+Tests, all three criteria of AMD-039 §4 plus the import level:
+
+- `SyntheticBundleOptions::three_d_sen_2()` — format 8, LZ4HC, 128 KiB blocks, serialized file 22,
+  flags 0x243 — and `build_with_layout`, which reports `info_end` and `data_start` so a test can
+  state the offsets §2 measures instead of recomputing them;
+- `align_data_flag: Some(false)` forges the second criterion: the same bytes, padding included,
+  with bit 0x200 out of the header;
+- the two 2.0 layouts also joined the `every_layout_yields_the_same_text_assets` table;
+- measured on the synthetic bundle: the compressed information block ends at a position that is
+  not a multiple of 16, so the padding is really what the reader skips (the test asserts that
+  before reading).
+
+The optional real-install tests are now version-aware: the bundle's format version (7 or 8, read
+from twelve bytes of its header) tells 1.1.2 and 2.0 apart, and the serialized-file version
+follows (21 or 22). The inventory fingerprint comparison moved into a test of its own that
+reports and returns on a 2.0, the inventory describing the 1.1.2 (AMD-039 §4, §5). The AMD-037
+"no game twice" test now states what a 2.0 gives — the four profiles of §5 kept as user profiles,
+the other 97 recognised identical, one library entry per identifier — which is Q-076, copied
+alongside.
+
 ### Next step
 
-Step 2: AMD-039.
+Step 3: the profiles layer of AMD-053 and AMD-056 — field 2 `Ver` in the header, the sanitised
+version text, `obsolete`, and the inspect/apply split the dialogs need.
