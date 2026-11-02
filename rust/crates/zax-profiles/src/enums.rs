@@ -153,6 +153,8 @@ open_enum! {
         HalfHorizontalCylinder = 4,
         /// Half vertical cylinder.
         HalfVerticalCylinder = 5,
+        /// Rust-only (EDITOR-1): spikes, rows of pyramids (see `zax_engine3d::settings::Geo3DType`).
+        Spikes = 6,
     }
 }
 

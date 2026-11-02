@@ -134,6 +134,7 @@ impl Construction<'_> {
             | Geo3DType::HCylinder
             | Geo3DType::HalfVCylinder
             | Geo3DType::HalfHCylinder => self.build_cylinder(),
+            Geo3DType::Spikes => self.build_spikes(),
             Geo3DType::Default => self.build_default(),
         }
     }
@@ -204,6 +205,50 @@ impl Construction<'_> {
                         self.write(x, y, k, Some(AXIS_X), self.depth - 1 - k, y);
                         self.write(x, y, k, Some(AXIS_Z), x, y);
                     }
+                }
+            }
+        }
+    }
+
+    // SPIKES (Rust-only, EDITOR-1)
+
+    /// Each run of opaque pixels of a row, `[first, last]`, is the section of a spike at that
+    /// height: in depth the section is made square, `last - first + 1` wide, and repeated every
+    /// `period` slices, `period` being the widest run of the image (the spikes' base). A row of
+    /// drawn spikes becomes rows of pyramids; a run as wide as the base (a plate under the spikes)
+    /// fills the whole depth. The texel of every voxel is the drawn pixel, as in an extrusion.
+    fn build_spikes(&mut self) {
+        let mut runs = Vec::new();
+        for y in 0..self.pattern_height {
+            let mut x = 0;
+            while x < self.pattern_width {
+                if self.is_transparent(x, y) {
+                    x += 1;
+                    continue;
+                }
+                let first = x;
+                while x < self.pattern_width && !self.is_transparent(x, y) {
+                    x += 1;
+                }
+                runs.push((y, first, x - 1));
+            }
+        }
+        let period = runs
+            .iter()
+            .map(|&(_, first, last)| last - first + 1)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        for (y, first, last) in runs {
+            // Doubled coordinates keep the centres exact for odd and even widths.
+            let width = last - first + 1;
+            for k in 0..self.depth {
+                let slice = 2 * (k % period) + 1;
+                if (slice - period).abs() >= width {
+                    continue;
+                }
+                for x in first..=last {
+                    self.write_all(x, y, k, x, y);
                 }
             }
         }
