@@ -31,7 +31,9 @@ pub const COUNTER_ADDRESS: u16 = 0x0011;
 pub const BUTTON_ADDRESS: u16 = 0x0012;
 
 /// Where the light the Zapper saw is recorded, one byte per emulated frame: `$08` when port 2
-/// reported light at least once during the frame, 0 when it never did (REQ-LOOP-068).
+/// reported light at least once during the frame, 0 when it never did (REQ-LOOP-068). Bit 3 of a
+/// Zapper port read is 0 *when* light is seen (REQ-CORE-061), so the main loop inverts it before
+/// accumulating — without that the log would read `$08` on every frame, aim or no aim.
 pub const PROBE_LOG: u16 = 0x0200;
 
 /// Zero-page index of the next entry of [`PROBE_LOG`].
@@ -46,7 +48,7 @@ const ONE_COLOUR: u8 = 0x21;
 /// Reset handler, at `$8000`: the two-vblank warm-up of SPEC-02 §5.1, the palette, the picture
 /// and the NMI on, then the main loop, which keeps reading port 2 so that the light the Zapper
 /// sees is sampled on the visible lines and not only during the vblank (AMD-021 R2-006).
-const RESET: [u8; 84] = [
+const RESET: [u8; 86] = [
     0x78, // $8000 SEI
     0xA2, 0xFF, //       LDX #$FF
     0x9A, //             TXS
@@ -79,14 +81,15 @@ const RESET: [u8; 84] = [
     0xA9, 0x0A, //       LDA #$0A
     0x8D, 0x01, 0x20, // STA $2001      background on, leftmost column shown
     0xAD, 0x17, 0x40, // $8048 LDA $4017   port 2, the Zapper's byte
-    0x29, 0x08, //       AND #$08       the light bit
+    0x29, 0x08, //       AND #$08       bit 3: 0 when light is seen (REQ-CORE-061)
+    0x49, 0x08, //       EOR #$08       so $08 means "light seen on this read"
     0x05, 0x14, //       ORA $14
     0x85, 0x14, //       STA $14        light seen at any point this frame
     0x4C, 0x48, 0x80, // JMP $8048
 ];
 
 /// NMI handler, at `$9000`: print the counter, print the A bit the controller reports for this
-/// frame, increment the counter, put the scroll back, and log the light of the frame that ends.
+/// frame, increment the counter, reset the scroll, and log the light of the frame that ends.
 const NMI: [u8; 76] = [
     0xA9, 0x20, //       LDA #$20
     0x8D, 0x06, 0x20, // STA $2006

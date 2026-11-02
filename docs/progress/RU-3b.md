@@ -11,8 +11,8 @@ reference.
 |---|---|---|
 | 1 | Setup: sources read, requirement map, design decisions, before benchmarks, spec copies | done — `0d312e2` |
 | 2 | REQ-CORE-121: the in-memory state of the core, and its tests | done — `08ebd15` |
-| 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | done |
-| 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | todo |
+| 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | done — `c49033b` |
+| 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | done |
 | 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | todo |
 | 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | todo |
 | 7 | Closing: benches, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, goldens | todo |
@@ -317,3 +317,62 @@ SPEC copies: SPEC-07 §3.7 — REQ-LOOP-060 replaced by its amended form and REQ
 added after it. SPEC-01 — REQ-ARCH-012 amended (N is part of the determinism contract) and
 REQ-ARCH-013 precised (the in-memory state has its own bound). SPEC-12 — REQ-ACC-030 precised
 (the measure is taken at Run-ahead = 1).
+
+### Step 4 — REQ-LOOP-068, the frames that are not displayed
+
+The "no sound" half went in with step 3 (the sequence owns the switch). This step is the pixels,
+and the answer is **the pixels of every emulated frame are rendered** — the optimisation
+REQ-LOOP-068 permits is declined, measured rather than guessed, as the lot's rule 3 allows
+("otherwise render the pixels and say so").
+
+**What it would buy.** Upper bound, measured by building a throwaway binary from the `ce78abd`
+worktree with the palette read, the greyscale mask and the pixel store removed from
+`span_pixel`, `render_pixel` and the two span loops — everything the emulation reads back kept
+(`bench-core`, 1200 frames after 120 of warm-up, core `run_frame`, interleaved run by run):
+
+| round | `nestest`, pixels | `nestest`, none | `spritecans`, pixels | `spritecans`, none |
+|---|---|---|---|---|
+| 1 | 0.8477 ms | 0.8298 ms | 0.8541 ms | 0.8451 ms |
+| 2 | 0.8622 ms | 0.7933 ms | 0.8636 ms | 0.8123 ms |
+| 3 | 0.8421 ms | 0.8056 ms | 0.8623 ms | 0.8224 ms |
+
+So about **4.8 %** of one emulated frame on `nestest` and **3.9 %** on `spritecans` — which at the
+default N = 1 is 2.4 % of a real frame, and at N = 3 about 3.6 %.
+
+**Why it is not taken.** The only way to get it at zero cost when unused is a `const` generic over
+`run_visible_span`, `run_visible_span_through_bus`, `span_pixel`, `render_pixel` and the backdrop
+fill — the five hottest pieces of the PPU, monomorphised twice. Against that:
+1. It is zero *instruction* cost at N = 0 but not zero *layout* cost: doubling those loops moves
+   inlining decisions and the instruction cache, and R0's gate is ±0.1 % on a profile that uses
+   nothing new. The rule that N = 0 costs nothing outranks a 2.4 % gain at N = 1.
+2. Handhelds default to N = 0, so a Cortex-A53 (32 KiB of instruction cache) would pay the
+   duplication and get none of the benefit.
+3. The desktop, where N = 1 is the default, is not where the frame budget is tight
+   (`PERFORMANCE-HISTORY.md` §4).
+
+**Nothing of accuracy is given up either way**, and in Zaxnes the Zapper is unaffected by the
+choice: `Ppu2C02::sees_light_at` composes the colour from the **tile records** of the frame being
+drawn (REQ-CORE-062, AMD-021 R2-006), not from the pixel buffer, and every emulated frame emits
+its records unconditionally. So REQ-LOOP-068's "each emulated frame detects the light on its own
+pixels" holds by construction, with no `has_zapper` test anywhere — one branch the .NET
+implementation needs and this one does not.
+
+The normative half of REQ-LOOP-065 is still met: no hidden frame's image ever reaches the
+display, because the host reads the picture only after step 4 and the displayed frame has
+overwritten every visible dot by then.
+
+Tests, two more in `run_ahead_tests.rs` (14 in all):
+- REQ-LOOP-068's acceptance criterion: port 2 is a Zapper, the aim alternates every 7 real frames
+  between a lit target (the top-left cell, whose every pixel is sub-palette colour 1 or 2 — `$21`
+  and `$11`, both light) and a dark one (a pattern-0 cell, where the `$0F` backdrop shows), and the
+  ROM's per-frame light log over 40 real frames is **byte-identical at N = 1, 2 and 3 to N = 0**.
+  The log is asserted to hold both values first, so the comparison cannot pass vacuously.
+- The mechanism: a hidden real frame's own log entry records the light its own frame showed.
+
+One fault in the .NET vector, found by that non-vacuity assertion and fixed here: bit 3 of a
+Zapper port read is **0 when light is seen** (REQ-CORE-061, active-low as on the hardware), so
+`LDA $4017 / AND #$08 / ORA $14` accumulates "no light", which reads `$08` on every frame whatever
+the aim — the log is a constant and the comparison proves nothing. The main loop here inverts the
+bit (`EOR #$08`) before accumulating.
+
+`cargo test --release -p zax-nes` **508 passed**.

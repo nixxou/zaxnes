@@ -359,6 +359,104 @@ fn req_loop_064_the_core_never_runs_more_than_three_frames_ahead() {
     assert_eq!(k + 1, counter(&core));
 }
 
+/// REQ-LOOP-068, the acceptance criterion: with a Zapper on a port, the home-made ROM that shows
+/// a target and reads the light gives **the same results** at Run-ahead = 1, 2 and 3 as at 0.
+///
+/// The vector ROM's main loop reads port 2 on the visible lines and its NMI handler writes one
+/// byte per emulated frame into `$0200`. That log is work RAM, so step 5 puts it back: it ends up
+/// holding exactly one entry per **real** frame, which is the detection whose effect persists.
+#[test]
+fn req_loop_068_the_zapper_reads_the_same_light_whatever_n_is() {
+    use zax_nes::input::ControllerPortType;
+    use zax_nes::ZapperPosition;
+
+    // Every pixel of the top-left cell is drawn with sub-palette colour 1 or 2 ($21, $11), both
+    // light; every other cell is pattern 0, transparent, so the backdrop $0F shows through and is
+    // dark. The aim therefore alternates between a lit target and a dark one, which makes the log
+    // a sequence of both values rather than a constant.
+    const TARGET: ZapperPosition = ZapperPosition::new(4, 4);
+    const DARK: ZapperPosition = ZapperPosition::new(4, 120);
+
+    let mut reference = Vec::new();
+    for ahead in 0..=3_u8 {
+        let mut core = machine_with(&rom::build(), "RunAhead.nes");
+        core.set_port_type(1, ControllerPortType::Zapper).unwrap();
+        for _ in 0..4 {
+            core.run_frame(0);
+        }
+        // The log starts from the index the fixture reached, so only the frames below count.
+        let first = u32::from(core.read_memory(rom::PROBE_INDEX_ADDRESS));
+        for frame in 0..40 {
+            // One aim per real frame, as a host sets it (REQ-CORE-060): every frame of the
+            // sequence sees the same one.
+            let aim = if (frame / 7) % 3 == 0 { TARGET } else { DARK };
+            core.set_zapper_position_source(Some(Box::new(move |_| aim)));
+            core.run_frame_ahead(0, ahead);
+            core.restore_real_frame();
+        }
+        let last = u32::from(core.read_memory(rom::PROBE_INDEX_ADDRESS));
+        assert_eq!(
+            first + 40,
+            last,
+            "N = {ahead}: the log holds {} entries for 40 real frames",
+            last - first
+        );
+
+        let log: Vec<u8> = (first..last)
+            .map(|i| {
+                #[allow(clippy::cast_possible_truncation)] // Below 256.
+                core.read_memory(rom::PROBE_LOG + i as u16)
+            })
+            .collect();
+        if ahead == 0 {
+            // The vector has to see light on some frames and none on others, or it proves
+            // nothing.
+            assert!(
+                log.contains(&0x08) && log.contains(&0x00),
+                "the vector never alternated: {log:?}"
+            );
+            reference = log;
+        } else {
+            assert_eq!(
+                reference, log,
+                "N = {ahead}: the Zapper saw something else than at N = 0"
+            );
+        }
+    }
+    assert_eq!(40, reference.len());
+}
+
+/// REQ-LOOP-068, the mechanism behind the test above: in Zaxnes the Zapper's light detection
+/// reads the **tile records** of the frame being drawn (REQ-CORE-062, AMD-021 R2-006), not the
+/// pixel buffer, and every emulated frame emits its records unconditionally
+/// (`Ppu2C02::begin_rendered_frame`). So a frame in advance detects the light on its own frame
+/// whatever the host does with the picture.
+#[test]
+fn req_loop_068_a_hidden_frame_detects_the_light_on_its_own_frame() {
+    use zax_nes::input::ControllerPortType;
+    use zax_nes::ZapperPosition;
+
+    let mut core = machine_with(&rom::build(), "RunAhead.nes");
+    core.set_port_type(1, ControllerPortType::Zapper).unwrap();
+    core.set_zapper_position_source(Some(Box::new(|_| ZapperPosition::new(4, 4))));
+    for _ in 0..6 {
+        core.run_frame(0);
+    }
+    let lit = core.read_memory(rom::PROBE_ACCUMULATOR_ADDRESS);
+    assert_eq!(0x08, lit, "the aim is not on a lit pixel");
+
+    // The real frame is one of the hidden ones, and its own log entry still records the light.
+    let first = u32::from(core.read_memory(rom::PROBE_INDEX_ADDRESS));
+    core.run_frame_ahead(0, 3);
+    core.restore_real_frame();
+    #[allow(clippy::cast_possible_truncation)] // Below 256.
+    let entry = core.read_memory(rom::PROBE_LOG + first as u16);
+    assert_eq!(
+        lit, entry,
+        "the hidden real frame did not record the light its own frame showed"
+    );
+}
+
 /// With no ROM loaded the sequence does nothing at all, like [`NesCore::run_frame`]
 /// (REQ-CORE-005).
 #[test]
