@@ -52,11 +52,16 @@ impl ZaxUi {
                     {
                         play(host, UiSound::Confirm);
                     }
+                    // Q-103: whether the game being played holds Run-ahead at 0, read once for
+                    // the whole tab rather than per row.
+                    let forced = host
+                        .session()
+                        .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
                     for row in self.options.rows(tab).to_vec() {
                         if options::is_folder(&row) {
                             self.draw_folder_row(ui, host, &row);
                         } else {
-                            draw_row(ui, host, &row);
+                            draw_row(ui, host, &row, forced);
                         }
                     }
                 }
@@ -97,7 +102,9 @@ impl ZaxUi {
     }
 }
 
-fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow) {
+/// One row of a tab. `run_ahead_forced` is Q-103's verdict on the running game, which only the
+/// Run-ahead row shows.
+fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: bool) {
     let descriptor = row.descriptor;
     let id = descriptor.id();
     let _id = ui.push_id(descriptor.key());
@@ -142,6 +149,12 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow) {
     if inert {
         ui.same_line();
         ui.text_disabled(text::res_scale_needs_render_texture());
+    }
+    // Q-103: the Run-ahead row says so while the running game holds it at 0. The row stays live —
+    // the setting is kept and applies again to the next game.
+    if let Some(note) = options::forced_run_ahead_note(id, run_ahead_forced) {
+        ui.same_line();
+        ui.text_disabled(note);
     }
 }
 

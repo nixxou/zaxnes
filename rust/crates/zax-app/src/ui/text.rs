@@ -279,6 +279,15 @@ pub fn res_scale_needs_render_texture() -> String {
     strings::get(keys::HINT_RES_SCALE_DIRECT)
 }
 
+/// Why Run-ahead has no effect while this game is playing: its scripts change the core from a
+/// frame hook, so the guard-rail of Q-103 holds the effective value at 0. The setting itself is
+/// untouched and applies again to the next game.
+// Q-103
+#[must_use]
+pub fn run_ahead_forced_to_zero() -> String {
+    strings::get(keys::HINT_RUN_AHEAD_FORCED)
+}
+
 /// Generic close button.
 #[must_use]
 pub fn close() -> String {

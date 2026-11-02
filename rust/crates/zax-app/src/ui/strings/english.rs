@@ -103,6 +103,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     // ------------------------------------------------------------- hints
     (keys::HINT_IMPORT_THREE_DSEN, "Choose the installation folder of 3dSen (the one holding 3dSen.exe), or the .bundle profile file itself."),
     (keys::HINT_RES_SCALE_DIRECT, "(no effect in direct rendering: native resolution)"),
+    (keys::HINT_RUN_AHEAD_FORCED, "(forced to 0: this game's scripts write the core)"),
     (keys::HINT_PRESS_ACONTROL, "Press a key or a button…"),
     (keys::HINT_CLICK_ACELL, "Click a cell to reassign it."),
     (keys::HINT_AT_NEXT_START, "(at the next start)"),
@@ -349,6 +350,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_GAME_OPTIONS_TITLE, "Game options — {0}"),
     (keys::HANDHELD_GAME_OPTIONS_RESET, "Put everything back to global"),
     (keys::HANDHELD_USE_GLOBAL, "Use Global : {0}"),
+    (keys::HANDHELD_RUN_AHEAD_FORCED, "(forced to 0: scripts)"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Game options"),
     (keys::HANDHELD_HINT_FAVORITE, "Favorite"),
     (keys::HANDHELD_HINT_RESET_ALL, "Reset all"),

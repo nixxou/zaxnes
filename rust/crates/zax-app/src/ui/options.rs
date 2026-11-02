@@ -252,6 +252,18 @@ pub fn is_folder(row: &OptionsRow) -> bool {
     FOLDERS.contains(&row.descriptor.id())
 }
 
+/// Q-103: the note the window shows beside the Run-ahead row while the game being played forces
+/// its **effective** value to 0 — `None` for every other row, and for that row when nothing
+/// forces it. `forced` is `GameSession::forces_run_ahead_to_zero` of the running game.
+///
+/// The row itself stays live: the setting is kept and applies again to the next game, so there is
+/// nothing to grey out, only something to say.
+// Q-103
+#[must_use]
+pub fn forced_run_ahead_note(id: SettingId, forced: bool) -> Option<String> {
+    (forced && id == SettingId::EmuRunAhead).then(text::run_ahead_forced_to_zero)
+}
+
 fn is_editable(descriptor: &SettingDescriptor) -> bool {
     if FOLDERS.contains(&descriptor.id()) {
         return true;

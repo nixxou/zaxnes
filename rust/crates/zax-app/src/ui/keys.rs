@@ -123,6 +123,8 @@ pub const CONFIRM_DELETE_SLOT: &str = "confirm.delete_slot";
 // --------------------------------------------------------------- hints
 pub const HINT_IMPORT_THREE_DSEN: &str = "hint.import_3dsen";
 pub const HINT_RES_SCALE_DIRECT: &str = "hint.res_scale_direct";
+/// Q-103: why Run-ahead is held at 0 while this game is playing.
+pub const HINT_RUN_AHEAD_FORCED: &str = "hint.run_ahead_forced";
 pub const HINT_PRESS_ACONTROL: &str = "hint.press_a_control";
 pub const HINT_CLICK_ACELL: &str = "hint.click_a_cell";
 pub const HINT_AT_NEXT_START: &str = "hint.at_next_start";
@@ -241,6 +243,8 @@ pub const HANDHELD_HINT_PAGE: &str = "handheld.hint.page";
 pub const HANDHELD_GAME_OPTIONS_TITLE: &str = "handheld.game_options.title";
 pub const HANDHELD_GAME_OPTIONS_RESET: &str = "handheld.game_options.reset";
 pub const HANDHELD_USE_GLOBAL: &str = "handheld.game_options.use_global";
+/// Q-103, the console's own, shorter note: Run-ahead is held at 0 by this game's scripts.
+pub const HANDHELD_RUN_AHEAD_FORCED: &str = "handheld.options.run_ahead_forced";
 pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
 /// L2 on the home screen: the favourite mark of the selected game (AMD-053 REQ-UI-210).
 pub const HANDHELD_HINT_FAVORITE: &str = "handheld.hint.favorite";
@@ -505,6 +509,7 @@ pub const PUBLISHED: &[&str] = &[
     CONFIRM_DELETE_SLOT,
     HINT_IMPORT_THREE_DSEN,
     HINT_RES_SCALE_DIRECT,
+    HINT_RUN_AHEAD_FORCED,
     HINT_PRESS_ACONTROL,
     HINT_CLICK_ACELL,
     HINT_AT_NEXT_START,
@@ -605,6 +610,7 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_GAME_OPTIONS_TITLE,
     HANDHELD_GAME_OPTIONS_RESET,
     HANDHELD_USE_GLOBAL,
+    HANDHELD_RUN_AHEAD_FORCED,
     HANDHELD_HINT_GAME_OPTIONS,
     HANDHELD_HINT_FAVORITE,
     HANDHELD_HINT_RESET_ALL,

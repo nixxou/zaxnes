@@ -103,6 +103,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     // ------------------------------------------------------------- hints
     (keys::HINT_IMPORT_THREE_DSEN, "Choisissez le dossier d'installation de 3dSen (celui qui contient 3dSen.exe), ou directement le fichier .bundle des profils."),
     (keys::HINT_RES_SCALE_DIRECT, "(sans effet en rendu direct : résolution native)"),
+    (keys::HINT_RUN_AHEAD_FORCED, "(forcé à 0 : les scripts de ce jeu écrivent dans le cœur)"),
     (keys::HINT_PRESS_ACONTROL, "Appuyez sur une touche ou un bouton…"),
     (keys::HINT_CLICK_ACELL, "Cliquez sur une case pour réassigner."),
     (keys::HINT_AT_NEXT_START, "(au prochain démarrage)"),
@@ -352,6 +353,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_GAME_OPTIONS_TITLE, "Options du jeu — {0}"),
     (keys::HANDHELD_GAME_OPTIONS_RESET, "Tout remettre en global"),
     (keys::HANDHELD_USE_GLOBAL, "Use Global : {0}"),
+    (keys::HANDHELD_RUN_AHEAD_FORCED, "(forcé à 0 : scripts)"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Options du jeu"),
     (keys::HANDHELD_HINT_FAVORITE, "Favori"),
     (keys::HANDHELD_HINT_RESET_ALL, "Tout remettre"),

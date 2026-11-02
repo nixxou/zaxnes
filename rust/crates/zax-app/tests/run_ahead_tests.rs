@@ -655,6 +655,94 @@ fn q_103_the_guard_is_decided_when_the_profile_loads() {
     assert_eq!(0, quiet.run_ahead());
 }
 
+/// Q-103, point 4 of the answer: the **desktop options window** says so beside the Run-ahead row
+/// while the running game forces the value to 0 — in both languages, on that row only, and never
+/// when nothing forces it. The verdict comes from the session that is playing.
+#[test]
+fn q_103_the_options_window_notes_the_forced_run_ahead() {
+    use zax_app::ui::options::forced_run_ahead_note;
+
+    let mut harness = LoopHarness::create();
+    harness.launch_rom_with_script("writer", &rom::build(), Some(WRITES_THE_CORE));
+    let forced = harness
+        .host
+        .session()
+        .expect("a session")
+        .forces_run_ahead_to_zero();
+    assert!(forced);
+
+    assert!(
+        forced_run_ahead_note(SettingId::EmuRunAhead, forced).is_some(),
+        "the window says nothing while the game holds run-ahead at 0"
+    );
+    // No other row carries it, and a game that is not concerned carries none at all.
+    assert!(forced_run_ahead_note(SettingId::EmuGameSpeed, forced).is_none());
+    assert!(forced_run_ahead_note(SettingId::EmuRunAhead, false).is_none());
+
+    for (language, expected) in [
+        (
+            zax_app::ui::strings::UiLanguage::English,
+            "(forced to 0: this game's scripts write the core)",
+        ),
+        (
+            zax_app::ui::strings::UiLanguage::French,
+            "(forcé à 0 : les scripts de ce jeu écrivent dans le cœur)",
+        ),
+    ] {
+        assert_eq!(
+            Some(expected),
+            zax_app::ui::strings::lookup(language, "hint.run_ahead_forced"),
+            "{language:?}"
+        );
+    }
+}
+
+/// Q-103, point 4: the **console's** options page too, on the Run-ahead row of its advanced
+/// options, with its own shorter note — a handheld row has no room beside it.
+#[test]
+fn q_103_the_handheld_page_notes_the_forced_run_ahead() {
+    use zax_app::ui::handheld::options::{forced_run_ahead_note, OptionRow};
+
+    let mut harness = LoopHarness::create();
+    harness.launch_rom_with_script("writer", &rom::build(), Some(WRITES_THE_CORE));
+    let forced = harness
+        .host
+        .session()
+        .expect("a session")
+        .forces_run_ahead_to_zero();
+    assert!(forced);
+
+    let row = OptionRow::Setting(SettingId::EmuRunAhead);
+    assert!(
+        zax_app::ui::handheld::advanced::rows().contains(&row),
+        "the row the note hangs on is not on the page"
+    );
+    assert!(forced_run_ahead_note(row, forced).is_some());
+    assert!(
+        forced_run_ahead_note(OptionRow::Setting(SettingId::EmuCatchUp), forced).is_none(),
+        "another advanced row carries the note"
+    );
+    assert!(forced_run_ahead_note(OptionRow::CatchUp, forced).is_none());
+    assert!(forced_run_ahead_note(row, false).is_none());
+
+    for (language, expected) in [
+        (
+            zax_app::ui::strings::UiLanguage::English,
+            "(forced to 0: scripts)",
+        ),
+        (
+            zax_app::ui::strings::UiLanguage::French,
+            "(forcé à 0 : scripts)",
+        ),
+    ] {
+        assert_eq!(
+            Some(expected),
+            zax_app::ui::strings::lookup(language, "handheld.options.run_ahead_forced"),
+            "{language:?}"
+        );
+    }
+}
+
 // ------------------------------------------- run-ahead beside "emulation ahead"
 
 /// Run-ahead and the Rust-only "emulation ahead" are orthogonal: with the core on its own thread

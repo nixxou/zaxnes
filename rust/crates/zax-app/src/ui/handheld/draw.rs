@@ -771,6 +771,11 @@ impl HandheldUi {
         let selected = self.options.selected_index();
         let list = self.options.rows();
         let first = first_visible(selected, rows, list.len());
+        // Q-103: whether the game being played holds Run-ahead at 0, read once for the page.
+        let run_ahead_forced = frame
+            .host
+            .session()
+            .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
         for (slot, (index, row)) in list.iter().enumerate().skip(first).take(rows).enumerate() {
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
@@ -780,6 +785,12 @@ impl HandheldUi {
                     format!("{value} >")
                 }
                 _ => format!("< {value} >"),
+            };
+            // The setting is kept, so the row still steps; what it says is that this game runs
+            // at 0 all the same.
+            let shown = match options::forced_run_ahead_note(*row, run_ahead_forced) {
+                Some(note) => format!("{shown} {note}"),
+                None => shown,
             };
             painter.row(
                 slot,

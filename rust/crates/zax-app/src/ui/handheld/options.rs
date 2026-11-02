@@ -481,6 +481,20 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
     }
 }
 
+/// Q-103: the note the page shows after the value of the Run-ahead row — one of the advanced
+/// options — while the game being played forces its **effective** value to 0. `None` for every
+/// other row, and for that row when nothing forces it. `forced` is
+/// `GameSession::forces_run_ahead_to_zero` of the running game.
+///
+/// Shorter than the window's note of the same thing (`ui::options::forced_run_ahead_note`), a
+/// console row having one line and no room beside it.
+// Q-103
+#[must_use]
+pub fn forced_run_ahead_note(row: OptionRow, forced: bool) -> Option<String> {
+    (forced && row == OptionRow::Setting(SettingId::EmuRunAhead))
+        .then(|| strings::get(keys::HANDHELD_RUN_AHEAD_FORCED))
+}
+
 /// The name of a camera preset, in the language in force.
 #[must_use]
 pub fn camera_label(camera: CameraPreset) -> String {

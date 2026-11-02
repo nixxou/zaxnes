@@ -9,8 +9,8 @@ setting kept; the user is told in both interfaces and in the log.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | The guard: detection at profile load, the effective N, the log line, the tests | done |
-| 2 | The note beside the setting in both interfaces, both languages, and its tests | todo |
+| 1 | The guard: detection at profile load, the effective N, the log line, the tests | done — `8ee28a1` |
+| 2 | The note beside the setting in both interfaces, both languages, and its tests | done |
 | 3 | Closing: full tests, fmt, clippy, `PERFORMANCE-HISTORY.md` §5.5, the `// Q-103` comments | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -125,10 +125,22 @@ advanced options page, short enough for a handheld row:
 Both come from one pure function per interface, so the visibility is tested without a window:
 `ui::options::forced_run_ahead_note(id, forced)` and
 `ui::handheld::options::forced_run_ahead_note(row, forced)`, each `None` for any other row and
-when nothing forces the value. The drawing sites pass
-`host.session().is_some_and(GameSession::forces_run_ahead_to_zero)`.
+when nothing forces the value. The two drawing sites read the verdict **once per page** —
+`host.session().is_some_and(GameSession::forces_run_ahead_to_zero)` — and not once per row; the
+desktop note sits where `hint.res_scale_direct` already sits (`same_line` + `text_disabled`), the
+console one after the value of the row.
 
-Tests: four more (two in `run_ahead_tests.rs`, two unit tests beside the two functions).
+Neither row is greyed out: the setting is kept and applies again to the next game, so there is
+something to say and nothing to disable.
+
+Tests: two more in `run_ahead_tests.rs` (20 in all there), each over a **running** forced game, so
+the wiring from the session to the note is covered and not only the strings:
+`q_103_the_options_window_notes_the_forced_run_ahead` and
+`q_103_the_handheld_page_notes_the_forced_run_ahead` — the note on that row, on no other row, on
+neither when nothing forces it, and its text in both languages.
+
+`cargo test --release -p zax-app --features bundled` **649 passed**, `cargo fmt --check` and
+workspace clippy clean.
 
 ### Step 3 — closing
 
