@@ -77,6 +77,30 @@ public sealed class Amd059SettingsTests
     }
 
     /// <summary>
+    /// REQ-LUA-116: being of scope U, the three are written to and read back from the settings
+    /// file — « persisté » — even though no screen shows them.
+    /// </summary>
+    [Fact] // REQ-LUA-116, REQ-PERS-020
+    public void The_three_survive_a_save_and_a_reload()
+    {
+        MemorySettingsStorage storage = new();
+        SettingsModel written = new();
+        written.SetInt(SettingKeys.UiLibraryView, 7);
+        written.SetInt(SettingKeys.VrRefreshRate, 120);
+        written.SetInt(SettingKeys.VideoMsaa20, 4);
+        Assert.True(new SettingsFile(storage).Save(written));
+
+        SettingsModel read = new();
+        Assert.Equal(
+            SettingsLoadStatus.Loaded,
+            new SettingsFile(storage).Load(read, DateTimeOffset.UnixEpoch).Status);
+
+        Assert.Equal(7, read.GetInt(SettingKeys.UiLibraryView));
+        Assert.Equal(120, read.GetInt(SettingKeys.VrRefreshRate));
+        Assert.Equal(4, read.GetInt(SettingKeys.VideoMsaa20));
+    }
+
+    /// <summary>
     /// <c>ui.library_view</c> keeps whatever number it is given: REQ-LUA-116 says « v est
     /// mémorisé tel quel », so the domain bounds nothing.
     /// </summary>

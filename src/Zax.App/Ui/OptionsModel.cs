@@ -102,6 +102,14 @@ internal sealed class OptionsModel
         SettingKeys.UiLastBrowseDir,
         SettingKeys.UiWindowRect,
         SettingKeys.AudioBgMusic,
+
+        // AMD-059 REQ-LUA-116: the two settings a 2.0 script writes that have no interface
+        // (« UI : aucune »). They exist only to hand back what a script wrote: the library view
+        // has no second layout to choose from, and the multisampling count is not the
+        // anti-aliasing of AMD-032, which keeps its own « Anti Alias » row. vr.refresh_rate
+        // needs no line here — its theme is Vr, which TabOf leaves out already.
+        SettingKeys.UiLibraryView,
+        SettingKeys.VideoMsaa20,
     ];
 
     /// <summary>
