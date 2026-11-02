@@ -17,8 +17,13 @@ mod run_ahead_rom;
 use common::LoopHarness;
 use zax_app::emulation::commands::Command;
 use zax_app::emulation::rollback_history::RollbackHistory;
+use zax_app::game_session::{GameSession, SessionRequest};
 use zax_app::input::InputAction;
 use zax_app::persistence::app_settings::AppSettings as _;
+use zax_profiles::profile::GameProfile;
+use zax_profiles::script::ProfileScript;
+use zax_render::scene::SceneState;
+use zax_scripting::NullScriptLog;
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
@@ -432,11 +437,11 @@ fn req_loop_067_read_mem_in_a_frame_hook_reads_the_displayed_frame() {
 /// core follow the real frame. At Run-ahead = 0 the same write persists, which is what makes the
 /// loss a consequence of the amendment and not of the write itself.
 ///
-/// R0's answer keeps that (the write is not replayed) and adds a guard-rail for the lot after this
-/// one: a profile whose scripts name `WriteMem` has its **effective** run-ahead forced to 0, the
-/// user's setting kept. **When that lands this test has to drive the session's run-ahead
-/// directly** (`GameSession::set_run_ahead`) or use a profile that writes without naming the
-/// member, because the profile below names it and will then run at N = 0.
+/// R0's answer keeps that (the write is not replayed) and adds the guard-rail of the section
+/// below, which runs this very profile at N = 0 through the loop. So the behaviour the answer
+/// keeps is pinned here by **driving the session's run-ahead directly**
+/// (`GameSession::set_run_ahead`, the raw setter) and running frames straight on the session,
+/// which is the path the guard-rail deliberately leaves alone.
 #[test]
 fn req_loop_067_a_frame_hook_write_does_not_reach_the_real_state() {
     const SOURCE: &str = r"
@@ -448,14 +453,21 @@ fn req_loop_067_a_frame_hook_write_does_not_reach_the_real_state() {
 
     for (ahead, expected) in [(0, 0x5A_u8), (1, 0x00), (2, 0x00), (3, 0x00)] {
         let mut harness = LoopHarness::create();
-        harness.host.update_settings(|model| {
-            model.set(SettingId::EmuRunAhead, SettingValue::Int(ahead));
-        });
         harness.launch_rom_with_script("writer", &rom::build(), Some(SOURCE));
+        // Q-103's guard-rail holds this profile at 0 whatever the setting says, which is what the
+        // next section tests; the run-ahead itself is therefore set on the session.
+        assert!(harness
+            .host
+            .session()
+            .expect("a session")
+            .forces_run_ahead_to_zero());
+        harness
+            .host
+            .session_mut()
+            .expect("a session")
+            .set_run_ahead(ahead);
         harness.clear_script_lines();
-        for _ in 0..12 {
-            harness.tick_frame();
-        }
+        harness.run_exact_frames(12, &[]);
 
         // The write did happen: the hook read its own byte back from the frame it ran on.
         assert!(
@@ -472,6 +484,175 @@ fn req_loop_067_a_frame_hook_write_does_not_reach_the_real_state() {
             "N = {ahead}: Q-103 — the real state does not hold what this lot says it should"
         );
     }
+}
+
+// ------------------------------------------------------------ Q-103, the guard-rail
+
+/// A frame hook that writes the core — the case Q-103's answer protects.
+const WRITES_THE_CORE: &str = r"
+    function Update()
+        Script:WriteMem(0x0040, 0x5A)
+    end
+";
+
+/// A frame hook that only reads it, which is not concerned.
+const ONLY_READS_THE_CORE: &str = r"
+    function Update()
+        local seen = Script:ReadMem(0x0040)
+    end
+";
+
+/// The run-ahead the loop really applied, read out of the vector ROM rather than asked of the
+/// session: a real frame leaves the counter at k + 1 and the picture showing what the **displayed**
+/// frame drew, k + N (the acceptance criterion of REQ-LOOP-065).
+fn effective_run_ahead(harness: &LoopHarness) -> i64 {
+    let session = harness.host.session().expect("a session");
+    i64::from(rom::displayed(session.core())) + 1 - i64::from(counter(harness))
+}
+
+/// Q-103, point 2 of the answer: a profile whose scripts change the core from a frame hook runs
+/// at an **effective** run-ahead of 0 while the setting says 1 — the core emulates one frame per
+/// real frame and nothing of the hook's write is thrown away.
+#[test]
+fn q_103_a_profile_that_writes_the_core_runs_at_zero() {
+    let mut harness = LoopHarness::create();
+    harness
+        .host
+        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(1)));
+    harness.launch_rom_with_script("writer", &rom::build(), Some(WRITES_THE_CORE));
+    for _ in 0..8 {
+        harness.tick_frame();
+    }
+
+    let session = harness.host.session().expect("a session");
+    assert!(
+        session.forces_run_ahead_to_zero(),
+        "the guard-rail did not see the write"
+    );
+    assert_eq!(0, session.run_ahead(), "the effective run-ahead is not 0");
+    assert_eq!(
+        0,
+        effective_run_ahead(&harness),
+        "the picture still comes from a frame in advance"
+    );
+
+    // And the write reaches the real state, which is the whole point of the guard-rail.
+    assert_eq!(
+        0x5A,
+        harness
+            .host
+            .session()
+            .expect("a session")
+            .core()
+            .read_memory(0x0040)
+    );
+}
+
+/// Q-103: `ReadMem` alone is not concerned — the members that force the run-ahead to 0 are those
+/// that **change** the core. The profile runs at the setting.
+#[test]
+fn q_103_a_profile_that_only_reads_the_core_runs_at_the_setting() {
+    let mut harness = LoopHarness::create();
+    harness
+        .host
+        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(1)));
+    harness.launch_rom_with_script("reader", &rom::build(), Some(ONLY_READS_THE_CORE));
+    for _ in 0..8 {
+        harness.tick_frame();
+    }
+
+    assert!(!harness
+        .host
+        .session()
+        .expect("a session")
+        .forces_run_ahead_to_zero());
+    assert_eq!(1, harness.host.session().expect("a session").run_ahead());
+    assert_eq!(
+        1,
+        effective_run_ahead(&harness),
+        "the picture is not one frame in advance"
+    );
+}
+
+/// Q-103, point 2 again: the user's setting is **kept untouched** — not written, not persisted —
+/// so the next game gets it back.
+#[test]
+fn q_103_the_guard_leaves_the_user_setting_alone() {
+    let mut harness = LoopHarness::create();
+    harness
+        .host
+        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(2)));
+    harness.launch_rom_with_script("writer", &rom::build(), Some(WRITES_THE_CORE));
+    for _ in 0..8 {
+        harness.tick_frame();
+    }
+    assert_eq!(0, harness.host.session().expect("a session").run_ahead());
+    assert_eq!(0, effective_run_ahead(&harness));
+    assert_eq!(
+        2,
+        harness.host.settings().run_ahead(),
+        "the forced game changed the setting"
+    );
+
+    // The next game is not concerned, so it runs at the value the player chose.
+    harness.launch_rom_with_script("quiet", &rom::build(), Some(ONLY_READS_THE_CORE));
+    for _ in 0..8 {
+        harness.tick_frame();
+    }
+    let session = harness.host.session().expect("a session");
+    assert!(!session.forces_run_ahead_to_zero());
+    assert_eq!(2, session.run_ahead(), "the next game lost the setting");
+    assert_eq!(2, effective_run_ahead(&harness));
+    assert_eq!(2, harness.host.settings().run_ahead());
+}
+
+/// A session over `source`, with no ROM: all the guard-rail needs is the profile.
+fn session_of(source: &str) -> GameSession {
+    let mut profile = GameProfile::create_empty();
+    profile.scripts.push(ProfileScript::new(
+        Some("aid"),
+        true,
+        Some(source),
+        Some("*"),
+    ));
+    let mut scene = SceneState::default();
+    let mut model = SettingsModel::new();
+    GameSession::create(
+        SessionRequest {
+            profile: &profile,
+            title: "Test",
+            scene: &mut scene,
+            log: Box::new(NullScriptLog),
+            different_game: true,
+            two_dimensional_mode: None,
+        },
+        &mut model,
+    )
+    .expect("a session")
+}
+
+/// Q-103, point 3 of the answer: the verdict is reached **when the profile loads**, before a
+/// single frame has run, and nothing of it is in the frame loop. What the loop then calls
+/// (`apply_run_ahead_setting`) honours it; the raw setter the frame steps and the tests use does
+/// not, which is where the two differ.
+#[test]
+fn q_103_the_guard_is_decided_when_the_profile_loads() {
+    let mut forced = session_of(WRITES_THE_CORE);
+    assert!(forced.forces_run_ahead_to_zero());
+    forced.apply_run_ahead_setting(3);
+    assert_eq!(0, forced.run_ahead(), "the setting reached a forced game");
+    forced.set_run_ahead(3);
+    assert_eq!(3, forced.run_ahead(), "the raw setter is not the guard");
+
+    let mut quiet = session_of(ONLY_READS_THE_CORE);
+    assert!(!quiet.forces_run_ahead_to_zero());
+    quiet.apply_run_ahead_setting(3);
+    assert_eq!(3, quiet.run_ahead());
+    // The bounds of REQ-LOOP-064 still hold through the guarded path.
+    quiet.apply_run_ahead_setting(7);
+    assert_eq!(3, quiet.run_ahead());
+    quiet.apply_run_ahead_setting(-1);
+    assert_eq!(0, quiet.run_ahead());
 }
 
 // ------------------------------------------- run-ahead beside "emulation ahead"

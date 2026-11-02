@@ -890,7 +890,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             let Some(session) = self.session.as_mut() else {
                 break;
             };
-            session.set_run_ahead(run_ahead);
+            // Q-103: and the guard-rail is applied here rather than in the setter — a profile
+            // whose scripts change the core from a frame hook runs at 0, the setting untouched
+            // for the next game. One `bool` test, the detection having been done at load.
+            session.apply_run_ahead_setting(run_ahead);
             // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
             // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
             // it carries the 64 `PData` values and the camera state as well, read as they stand

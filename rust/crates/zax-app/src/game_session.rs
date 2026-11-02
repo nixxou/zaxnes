@@ -272,6 +272,11 @@ pub struct GameSession {
     /// REQ-LOOP-060 unchanged, so a host that drives the session itself gets no run-ahead unless
     /// it asks for one (AMD-041 §4, the libretro frontend).
     run_ahead: u8,
+    /// Q-103: whether a script of this profile names a member that changes the core from a frame
+    /// hook, in which case the **effective** run-ahead of this game is 0 whatever the setting
+    /// says. Decided once at profile load ([`scripts_change_the_core`]) and read by
+    /// [`GameSession::apply_run_ahead_setting`] and by the two interfaces.
+    run_ahead_forced_to_zero: bool,
 }
 
 /// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
@@ -321,6 +326,36 @@ fn scripts_leave_the_core_alone(profile: &GameProfile) -> bool {
             .source
             .as_deref()
             .is_none_or(|source| CORE_MEMBERS.iter().all(|member| !source.contains(member)))
+    })
+}
+
+/// The members of [`CORE_MEMBERS`] through which a **frame** hook can change the core, so that
+/// what it writes would be thrown away by step 5 of REQ-LOOP-065 — the guard-rail Q-103's answer
+/// asks for. A documented subset, kept here beside the whole list so the two are read together:
+///
+/// - `WriteMem` writes the bus (`ctx.machine.write`), which the in-memory state of REQ-CORE-121
+///   holds and the restore puts back;
+/// - `SetInputType` writes the core's controller ports (`ctx.machine.set_port_types`), also in
+///   that state, and its other half — the setting — would persist, leaving the two disagreeing;
+/// - `GetInput`, `GetInputType` and `ZapperEnable` only read, so they are not concerned;
+/// - `InputProcess` runs at step (a), **before** the real frame, so what it writes is part of the
+///   real state, as the answer of Q-103 says itself.
+///
+/// The Zapper aim a script writes is not concerned either: it lives in `ScriptInputState`, on this
+/// side of the core.
+// Q-103
+const CORE_CHANGING_MEMBERS: [&str; 2] = ["WriteMem", "SetInputType"];
+
+/// Whether a script of `profile` names a member of [`CORE_CHANGING_MEMBERS`] (Q-103). The same
+/// kind of text test as [`scripts_leave_the_core_alone`], with the same accepted false positive —
+/// the name in a comment counts — because the result stays safe: run-ahead off.
+fn scripts_change_the_core(profile: &GameProfile) -> bool {
+    profile.scripts.iter().any(|script| {
+        script.source.as_deref().is_some_and(|source| {
+            CORE_CHANGING_MEMBERS
+                .iter()
+                .any(|member| source.contains(member))
+        })
     })
 }
 
@@ -411,9 +446,19 @@ impl GameSession {
             overscan: crate::overscan::Overscan::default(),
             movie: None,
             run_ahead: 0,
+            run_ahead_forced_to_zero: false,
             pipeline: FramePipeline::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
+        // Q-103: the guard-rail is decided here, once, and nothing of it reaches the frame loop.
+        session.run_ahead_forced_to_zero = scripts_change_the_core(profile);
+        if session.run_ahead_forced_to_zero {
+            crate::app_log::line(
+                "Zaxnes: run-ahead: the scripts of this profile change the core from a frame \
+                 hook, so the game runs at run-ahead 0 (Q-103); the setting is kept for the next \
+                 game.",
+            );
+        }
         // The runtime holds the model from here until the last line of this function.
         let loaded = session.load_profile(profile, different_game, scene);
         session.exchange_model(model);
@@ -655,6 +700,10 @@ impl GameSession {
     /// The loop writes it before every real frame, which is how "applied at the next real frame"
     /// is honoured: the value is a property of the session rather than an argument of
     /// [`GameSession::run_frame`], so a frame already under way is never cut in half.
+    ///
+    /// This is the **raw** setter — the guard-rail of Q-103 lives in
+    /// [`GameSession::apply_run_ahead_setting`], which is what the loop calls. A host that drives
+    /// the session itself (the frame steps, the tests, a frontend) gets exactly the N it asks for.
     pub fn set_run_ahead(&mut self, frames: i32) {
         #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // Clamped to 0..=3.
         {
@@ -662,7 +711,32 @@ impl GameSession {
         }
     }
 
-    /// The run-ahead in force (AMD-041 REQ-LOOP-064).
+    /// The run-ahead the user's setting asks for, with the guard-rail of Q-103 applied: a profile
+    /// whose scripts change the core from a frame hook runs at **0** whatever the setting says,
+    /// because step 5 of REQ-LOOP-065 would throw that change away (REQ-LOOP-066).
+    ///
+    /// The setting itself is left alone — nothing is written and nothing is persisted — so the
+    /// next game gets the user's value back. This is the one site the loop calls, where it already
+    /// reads the setting once per emulated frame; the guard costs one `bool` test there and
+    /// nothing anywhere else.
+    // Q-103
+    pub fn apply_run_ahead_setting(&mut self, frames: i32) {
+        self.set_run_ahead(if self.run_ahead_forced_to_zero {
+            0
+        } else {
+            frames
+        });
+    }
+
+    /// Q-103: whether this game's run-ahead is forced to 0 by its own scripts, which is what the
+    /// two interfaces show beside the Run-ahead setting while it is playing.
+    #[must_use]
+    pub const fn forces_run_ahead_to_zero(&self) -> bool {
+        self.run_ahead_forced_to_zero
+    }
+
+    /// The run-ahead in force (AMD-041 REQ-LOOP-064) — the **effective** one, so 0 for a game the
+    /// guard-rail of Q-103 holds back.
     #[must_use]
     pub const fn run_ahead(&self) -> u8 {
         self.run_ahead
@@ -681,12 +755,13 @@ impl GameSession {
     /// what the .NET implementation of AMD-041 does too. The input hook `InputProcess` runs at
     /// step (a), before the real frame, so it is not concerned.
     ///
-    /// R0 answered the ticket while this lot was being written: the write is **not** to be
-    /// replayed (so what happens here is right), but a profile whose scripts name a member that
-    /// changes the core from a frame hook must have its **effective** run-ahead forced to 0, the
-    /// user's setting kept, detected once at profile load as `scripts_leave_the_core_alone` is,
-    /// with a note beside the setting and a line in the log. That guard-rail is the lot after
-    /// this one, as the answer assigns it.
+    /// R0's answer keeps that — the write is **not** replayed, so what happens here is right —
+    /// and adds the guard-rail that stops a profile from losing its writes silently: a profile
+    /// whose scripts name a member of [`CORE_CHANGING_MEMBERS`] runs at an **effective** run-ahead
+    /// of 0, the user's setting kept ([`GameSession::apply_run_ahead_setting`], decided once at
+    /// profile load by [`scripts_change_the_core`], with a note beside the setting in both
+    /// interfaces and a line in the log). So this restore only ever loses the writes of a profile
+    /// the text test did not see — one that reaches the member without naming it.
     ///
     /// REQ-LOOP-067 allows the restore to be delayed past step (d), and in this application that
     /// is the placement that needs no copy at all: the conversion pulls `core.frame_batch()`
@@ -1516,5 +1591,26 @@ mod tests {
                 "{member}"
             );
         }
+    }
+
+    /// Q-103: of the six members of the "emulation ahead" rule, the two that **change** the core
+    /// force the run-ahead to 0; the three read-only ones and the input hook do not.
+    #[test]
+    fn only_the_members_that_change_the_core_force_the_run_ahead_to_zero() {
+        assert!(!scripts_change_the_core(&GameProfile::default()));
+        assert!(!scripts_change_the_core(&profile(&[
+            "function Update() local lane = Script:ReadMem(0x70) end"
+        ])));
+        for member in CORE_MEMBERS {
+            let source = format!("function Update() local v = Script.{member} end");
+            let changes = scripts_change_the_core(&profile(&["function Start() end", &source]));
+            assert_eq!(CORE_CHANGING_MEMBERS.contains(&member), changes, "{member}");
+        }
+        // One script of the profile is enough, and `WriteMem` from a frame hook is the case the
+        // ticket is about.
+        assert!(scripts_change_the_core(&profile(&[
+            "function UpdateS() shape.Offset.z = 2 end",
+            "function Update() Script:WriteMem(0x75A, 5) end",
+        ])));
     }
 }
