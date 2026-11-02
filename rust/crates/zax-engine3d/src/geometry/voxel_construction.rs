@@ -412,10 +412,21 @@ impl Construction<'_> {
         }
 
         if self.full_warp {
-            // REQ-E3D-450: fill each column of the section over the depth span of the point,
-            // with the texel of the opposite quadrant and no zero test. The span runs between
-            // the two bounds whichever way round they are, as TV-Y4 requires (Q-015).
-            for z in zm.min(zp)..=zm.max(zp) {
+            // REQ-E3D-450 as AMD-048 amends it: fill each column of the section over the depth
+            // interval of the point, with the texel of the opposite quadrant and no zero test.
+            // The interval is `{z : zm <= z <= zp}` and is **empty when zm > zp** — which
+            // replaces the reading of Q-015 (AMD-008) that took the two bounds whichever way
+            // round they were.
+            //
+            // The points this changes are those of region 2 whose bounds are inverted: `q = 0`
+            // when D is odd, `q = 0` and `q = 1` when D is even. Their columns are only written
+            // by another point if region 2 keeps `(A, 2)` (`2A <= B^2`) or if region 1 reaches
+            // `u+ = f`; otherwise the section loses its outermost columns. TV-Y4 is in the first
+            // case, the control case at D = 2 in the second, a full row of 8 pixels at D = 4 in
+            // neither (TV-Y10). REQ-E3D-448 and REQ-E3D-449 are **unchanged**: an inverted point
+            // still lays its voxels there, so the four flag pairs no longer agree — the
+            // asymmetry of the original program (AMD-048 Notes).
+            for z in zm..=zp {
                 if quadrants.active[0] && quadrants.active[1] {
                     self.write_section(line, up, z, texel[2]);
                 }

@@ -14,7 +14,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `12561b1` |
 | 2 | AMD-051 part 1: REQ-E3D-644, REQ-E3D-646, REQ-E3D-524, REQ-PERS-088 | done |
 | 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | done |
-| 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | todo |
+| 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | done |
 | 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | todo |
 | 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | todo |
 | 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | todo |
@@ -306,7 +306,12 @@ exactly this as **51-N2** and recommended "erreur"; v1.2 fixed 51-N1 and left 51
 Provisional choice: **erreur**, through `fail_job` → `show_error`, the path REQ-LOOP-023 and
 REQ-LOOP-046 already take, which is also the state this requirement goes to. `// Q-105` at the
 line, and `req_loop_073_the_notification_is_an_error_so_it_is_never_dropped` says which assertion
-to invert if R0 answers otherwise. Next free Q number is **Q-106**.
+to invert if R0 answers otherwise.
+
+**Answered by R0 the same day (2026-11-02): the provisional choice is kept** — gravity *erreur*,
+4 s, through `fail_job`; the "gravité normale" of REQ-LOOP-073 point 1 is an inadvertence, and
+correcting the amendment's text is R1's to do. No code moved. Q-105 is closed; the next free Q
+number is **Q-106**.
 
 #### Tests (5 in `zax-app/tests/amd051_loading_timeout_tests.rs`)
 
@@ -328,3 +333,75 @@ ignored. fmt and workspace clippy clean.
 - `SPEC-04B` §3.6 / §3.7: REQ-E3D-644 after REQ-E3D-564, REQ-E3D-646 after REQ-E3D-601,
   REQ-E3D-645 as **retired**.
 - `SPEC-09` §3.2: REQ-PERS-088 after REQ-PERS-024.
+
+### Step 4 — AMD-048: the empty depth interval
+
+**One expression**, and the comment that says what it costs the rest of the spec:
+
+```rust
+for z in zm.min(zp)..=zm.max(zp)   // Q-015 (AMD-008)
+for z in zm..=zp                   // AMD-048: empty when zm > zp
+```
+
+`Construction::segment` already held the loop; a Rust inclusive range is empty when its start
+exceeds its end, so the amended rule *is* the natural expression and the one the old reading had
+to work around. Nothing new runs anywhere: the two `min`/`max` calls are gone.
+
+**TV-Y4 is unchanged, both cases, and that was not a hope.** The existing vector test passed on
+the first run after the change, which is the fourth independent confirmation of R2's §1.1 and
+§1.2 (R1 wrote the vector, R2 recomputed it by hand, V2-8 implemented it, this lot runs it): the
+region-2 points whose bounds are inverted are followed by a point of the **same `u` and the same
+interval** — `(3, 2)` at D = 4, `(7, 2)` and `(7, 3)` at D = 8 — which writes the very same
+voxels. Q-015 and Q-082 §4.1 both left that point out of their own tables; the test now says so
+in place, so the decision cannot quietly reopen.
+
+#### The two new vectors
+
+| Vector | What it pins | Result |
+|---|---|---|
+| **TV-Y9** (odd depth, the ring ropes) | `HCYLINDER`, `D = 3`, a 2-pixel segment at image rows 3 and 4 **in two colours**: exactly two voxels on the middle slice, `(4, 1)` with the texel of row 3 and `(3, 1)` with that of row 4, `D' = 2`, 6 rectangles, local box `x ∈ [−4, −3]`, `y ∈ [−1, 1]`, `z ∈ [−0.5, 0.5]`; a whole tile of such columns gives the `8 × 2 × 1` AMD-048 publishes | **right first run** |
+| **TV-Y10** (even depth, R2's point 48-1) | a full row at `D = 4`: 20 voxels, `i = 2…5` over `k ∈ [0,3]`, `i = 1` and `i = 6` over `k ∈ {1,2}`, **none at `i = 0` or `i = 7`**, 18 rectangles, box `x ∈ [−3, 3]` — 6 units wide instead of 8 | voxels and rectangles right first run; **my two box assertions were wrong** |
+
+The two mistakes were mine and the code was right, which is worth recording because the
+convention is easy to get backwards: the mesh's `y` is `j − 4`, the tile height centred like its
+width, so a row at image `y = 0` (hence `j = 7`) gives `y ∈ [3, 4]`, not `[7, 8]`. TV-Y5 already
+said so and I had not read it closely enough.
+
+TV-Y9 also pins the asymmetry AMD-048 assumes (its Notes, R2's point 48-5): with the three other
+`(solid, fullWarp)` pairs the **same** two-pixel segment still fills all three slices, through
+REQ-E3D-448 or REQ-E3D-449, which the amendment does not touch. Q-082 §2 had observed the four
+pairs agreeing; after AMD-048 they do not, and that is intended.
+
+Two cases AMD-048's own Notes leave unlocked (R2's point 48-10) are reachable from here but have
+no published vector, so nothing was invented for them: `solid + fullWarp + antiShadow`, and the
+half types in wrapped solid mode. The amended rule applies to them as written (the code has one
+loop for all of them) and R0's differential is what would pin them.
+
+#### The vertex counts of the affected profiles (the brief's point 5)
+
+Re-run of the same `zax-harness meshes` sweep as step 1. **Four of the ten profiles move, and in
+both directions** — losing the outermost voxels of a section changes how the greedy mesher merges
+what is left, so a thinner object is not always a smaller mesh:
+
+| Profile | vertices before | after | faces before | after |
+|---|---|---|---|---|
+| Super Mario Bros 3 (U) (PRG1) | 85 208 | **85 728** | 42 604 | **42 864** |
+| Contra | 61 604 | **61 716** | 30 802 | **30 858** |
+| Zelda II | 92 812 | **92 512** | 46 406 | **46 256** |
+| Blaster Master (U) | 249 050 | **249 222** | 118 404 | **118 490** |
+| Legend Of Zelda, Castlevania, Mega Man 2, Metroid, Excitebike, Ninja Gaiden III | — | unchanged | — | unchanged |
+
+The largest move is +0.6 % (SMB3) and −0.3 % (Zelda II). Both are **mesh generation**, cached per
+tile image like any other, so nothing of this is a per-frame cost.
+
+`zax-engine3d` 229 → **231 passed**; the whole workspace **2262 passed, 0 failed**. fmt and
+workspace clippy clean.
+
+#### SPEC chapter edits
+
+- `SPEC-04B` REQ-E3D-450: the amended text, the five Notes AMD-048 §2 and R2's points 48-3 to
+  48-7 ask for, and TV-Y9 / TV-Y10 as acceptance criteria.
+- `SPEC-04B` §5.3: TV-Y9 and TV-Y10 written out, in §5.3's own `(j, k)` / `(i, k)` convention
+  (R2's point 48-2) and with the local boxes and rectangle counts §5.3 gives everywhere else
+  (48-6).
+- `AMD-008`, the Q-015 row: the answer replaced, with the reason the old one was wrong.

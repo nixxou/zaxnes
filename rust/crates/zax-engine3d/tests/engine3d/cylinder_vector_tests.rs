@@ -187,8 +187,15 @@ fn tv_y3_horizontal_cylinders_mirror_the_vertical_ones() {
 
 #[test]
 fn tv_y4_solid_full_warp_fills_each_column_with_its_own_colour() {
-    // REQ-E3D-450.
-    // Q-015: the depth span of a point runs between its two bounds either way round.
+    // REQ-E3D-450 as AMD-048 amends it: the depth interval of a point is `{z : zm <= z <= zp}`,
+    // **empty** when the bounds are inverted — which replaces the reading of Q-015 (AMD-008).
+    //
+    // **Both cases of TV-Y4 are unchanged by that**, and the reason is worth saying in place,
+    // because Q-015 and Q-082 §4.1 both claimed the contrary: the region-2 points whose bounds
+    // are inverted are followed by a point of the **same `u` and the same interval** — `(3, 2)`
+    // at D = 4, `(7, 2)` and `(7, 3)` at D = 8 — which writes the very same voxels. Those two
+    // tickets left that point out of their own tables. A full row at D = 4 has no such point,
+    // which is TV-Y10 below.
     let warped = |depth| {
         object_with(
             depth,
@@ -436,6 +443,172 @@ fn section_control_cases_of_paragraph_5_3() {
         assert_eq!(i, texel_at(&section, i, 0));
         assert_eq!(7 - i, texel_at(&section, i, 1));
     }
+}
+
+/// TV-Y9 (AMD-048 §3): the ring ropes of "Punch-Out!!". A wrapped solid `HCYLINDER` at `D = 3`
+/// whose segment is two pixels long keeps **one** slice of depth, not three, because the
+/// region-2 point at `q = 0` has `z+ = 0` and `z- = 2` — inverted bounds, so an empty interval.
+///
+/// The segment is fixed at image rows 3 and 4 with **two different colours**, which is what
+/// makes "le texel de sa propre rangée" verifiable (R2 48-2, 48-6: the vector of v1.0 was
+/// written in a convention that made it false anywhere but `r = 3`).
+#[test]
+fn tv_y9_a_wrapped_solid_rope_of_two_pixels_keeps_one_slice_of_depth() {
+    let warped = |depth, geometry| {
+        object_with(
+            depth,
+            Object {
+                geometry,
+                solid: true,
+                full_warp: true,
+                ..Object::default()
+            },
+        )
+    };
+    // Column 0 only, rows 3 and 4, colours 1 and 2.
+    let rope = geo::one_tile(geo::tile(&[
+        "........", "........", "........", "1.......", "2.......",
+    ]));
+    let instance = warped(3, Geo3DType::HCylinder);
+    let (fields, depth) = geo::fields(&rope, &instance, GREEDY);
+
+    // Exactly two voxels, on the middle slice, each with the texel of its own image row
+    // (REQ-E3D-421: j = 7 - y, so rows 3 and 4 are j = 4 and j = 3).
+    assert_eq!(
+        voxels(&[(4, 1, 3), (3, 1, 4)]),
+        section(&fields[0], 0, false)
+    );
+    // D' = B + 1 = 2 (REQ-E3D-452), deduced from the rule and not from the box: REQ-E3D-504
+    // keeps the local centring of the **construction** depth D = 3 (R2 48-7).
+    assert_eq!(2, depth);
+
+    let mesh = geo::mesh(&rope, &instance, GREEDY, 0);
+    assert_eq!(6, rectangles(&mesh));
+    assert!(
+        close(Vec3::new(-4.0, -1.0, -0.5), mesh.bounds_min()),
+        "{}",
+        mesh.bounds_min()
+    );
+    assert!(
+        close(Vec3::new(-3.0, 1.0, 0.5), mesh.bounds_max()),
+        "{}",
+        mesh.bounds_max()
+    );
+
+    // A whole tile of such columns: 8 x 2 x 1 units, the figure AMD-048 §3 publishes.
+    let tile = geo::one_tile(geo::tile(&[
+        "........", "........", "........", "11111111", "22222222",
+    ]));
+    let (tile_fields, tile_depth) = geo::fields(&tile, &instance, GREEDY);
+    assert_eq!(2, tile_depth);
+    assert_eq!(16, voxels(&all_voxels(&tile_fields[0])).len());
+    let tile_mesh = geo::mesh(&tile, &instance, GREEDY, 0);
+    assert_eq!(6, rectangles(&tile_mesh));
+    assert!(
+        close(Vec3::new(-4.0, -1.0, -0.5), tile_mesh.bounds_min()),
+        "{}",
+        tile_mesh.bounds_min()
+    );
+    assert!(
+        close(Vec3::new(4.0, 1.0, 0.5), tile_mesh.bounds_max()),
+        "{}",
+        tile_mesh.bounds_max()
+    );
+
+    // The asymmetry AMD-048 assumes: the three other flag pairs are **unchanged**, and the same
+    // two-pixel segment still occupies all three slices there (REQ-E3D-448, REQ-E3D-449).
+    for (solid, full_warp) in [(false, false), (false, true), (true, false)] {
+        let other = object_with(
+            3,
+            Object {
+                geometry: Geo3DType::HCylinder,
+                solid,
+                full_warp,
+                ..Object::default()
+            },
+        );
+        let (other_fields, _) = geo::fields(&rope, &other, GREEDY);
+        let slices: std::collections::BTreeSet<i32> = section(&other_fields[0], 0, false)
+            .iter()
+            .map(|&(_, k, _)| k)
+            .collect();
+        assert_eq!(
+            vec![0, 1, 2],
+            slices.into_iter().collect::<Vec<_>>(),
+            "solid {solid}, full_warp {full_warp} still fills three slices"
+        );
+    }
+}
+
+/// TV-Y10 (AMD-048 §3, after R2 48-1): the case the amendment's own evidence did not cover —
+/// an **even** depth. A full row of 8 pixels at `D = 4`, wrapped and solid, loses its two
+/// outermost columns and is 6 units wide instead of 8, because region 1 stops at `u+ = 6` and
+/// region 2 holds only its two inverted points (`2A = 14 > B^2 = 9`).
+///
+/// The rectangle count does **not** discriminate — it is 18 under either reading — so the voxels
+/// and the local box are what this vector asserts.
+#[test]
+fn tv_y10_an_even_depth_loses_the_outermost_columns_of_a_full_row() {
+    let row = geo::one_tile(geo::tile(&["11111111"]));
+    let instance = object_with(
+        4,
+        Object {
+            geometry: Geo3DType::VCylinder,
+            solid: true,
+            full_warp: true,
+            ..Object::default()
+        },
+    );
+    let (fields, depth) = geo::fields(&row, &instance, GREEDY);
+    let found = section(&fields[0], 0, true);
+
+    let mut expected = Vec::new();
+    for i in 2..=5 {
+        for k in 0..=3 {
+            expected.push((i, k, i));
+        }
+    }
+    for i in [1, 6] {
+        for k in [1, 2] {
+            expected.push((i, k, i));
+        }
+    }
+    assert_eq!(20, expected.len());
+    assert_eq!(voxels(&expected), found);
+    assert!(
+        !found.iter().any(|&(i, _, _)| i == 0 || i == 7),
+        "no voxel in the outermost columns"
+    );
+    assert_eq!(4, depth);
+
+    let mesh = geo::mesh(&row, &instance, GREEDY, 0);
+    assert_eq!(18, rectangles(&mesh));
+    assert!(
+        close(Vec3::new(-3.0, 3.0, -2.0), mesh.bounds_min()),
+        "{}",
+        mesh.bounds_min()
+    );
+    assert!(
+        close(Vec3::new(3.0, 4.0, 2.0), mesh.bounds_max()),
+        "{}",
+        mesh.bounds_max()
+    );
+}
+
+/// Every voxel of a field, whatever its line: what a tile of identical cylinder segments needs.
+fn all_voxels(field: &zax_engine3d::geometry::tile_voxels::TileVoxels) -> Vec<(i32, i32, i32)> {
+    use zax_engine3d::geometry::tile_voxels::{AXIS_X, SIZE_X, SIZE_Y};
+    let mut found = Vec::new();
+    for i in 0..SIZE_X {
+        for j in 0..SIZE_Y {
+            for k in 0..field.depth() {
+                if field.texel(i, j, k, AXIS_X).is_some() {
+                    found.push((i, j, k));
+                }
+            }
+        }
+    }
+    found
 }
 
 #[test]
