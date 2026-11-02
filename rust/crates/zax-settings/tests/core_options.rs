@@ -36,8 +36,10 @@ fn the_field_of_view_option_is_generated_from_the_model() {
 
 /// SPEC-09 §4.6: the normative extract, entry by entry. Ten entries of the original table, with
 /// `video.graphic_quality` and `emu.tv_mode` withdrawn by v1.1 and `scene.tv_box` by AMD-031,
-/// plus the five the curvature adds: the four of AMD-043 §6 ("option, 13 valeurs" and "option,
-/// 2 valeurs") and `scene.bend_2d_mode` of AMD-046 §3.
+/// plus the five the curvature adds — the four of AMD-043 §6 ("option, 13 valeurs" and "option,
+/// 2 valeurs") and `scene.bend_2d_mode` of AMD-046 §3 — and `render.backdrop_lighting`, the
+/// switch AMD-049 REQ-SCN-075 needs on a small machine (a setting of Zaxnes's own, so it is an
+/// addition to the extract and not part of it).
 #[test]
 fn the_table_is_the_normative_extract_of_the_specification() {
     let keys: Vec<&str> = core_options::all()
@@ -50,6 +52,7 @@ fn the_table_is_the_normative_extract_of_the_specification() {
             "zaxnes_video_anti_alias",
             "zaxnes_render_mesh_algo",
             "zaxnes_render_shadow",
+            "zaxnes_render_backdrop_lighting",
             "zaxnes_camera_fov",
             "zaxnes_light_intensity",
             "zaxnes_scene_skybox",

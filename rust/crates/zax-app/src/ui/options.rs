@@ -142,6 +142,10 @@ pub fn help_of(id: SettingId) -> Option<String> {
         SettingId::SceneArcH => keys::HELP_ARC_H,
         SettingId::SceneArcCenter => keys::HELP_ARC_CENTER,
         SettingId::SceneBend2dMode => keys::HELP_BEND_2D_MODE,
+        // AMD-049 gives no UI wording, the original having no such setting; the sentence is
+        // Zaxnes's own, and worth having because the switch shows nothing on a profile without a
+        // backdrop (REQ-SCN-048: it is Lua-driven and off by default).
+        SettingId::RenderBackdropLighting => keys::HELP_BACKDROP_LIGHTING,
         _ => return None,
     };
     Some(strings::get(key))
@@ -255,8 +259,13 @@ pub fn is_shown(descriptor: &SettingDescriptor) -> bool {
 #[must_use]
 pub fn tab_of(descriptor: &SettingDescriptor) -> Option<OptionsTab> {
     // The global shadow switch belongs with the light, which is what the tab "Lumière et ombres"
-    // of REQ-UI-202 is for; the rest of the Render theme is video.
-    if descriptor.id() == SettingId::RenderShadow {
+    // of REQ-UI-202 is for; the rest of the Render theme is video. AMD-049 REQ-SCN-075 goes with
+    // it: it chooses the lighting model of one surface, so it belongs beside the light it uses
+    // and not among the video settings.
+    if matches!(
+        descriptor.id(),
+        SettingId::RenderShadow | SettingId::RenderBackdropLighting
+    ) {
         return Some(OptionsTab::Light);
     }
     match descriptor.theme() {

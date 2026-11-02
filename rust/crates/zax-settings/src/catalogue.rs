@@ -120,6 +120,12 @@ setting_ids! {
     // AMD-046 REQ-SCN-074, a setting of Zaxnes's own (divergence D): no Lua access, the
     // original program has none.
     SceneBend2dMode => "scene.bend_2d_mode",
+    // AMD-049 REQ-SCN-075, also a setting of Zaxnes's own (divergence D): the original always
+    // lights the backdrop with the almost-matt model, so it has no such setting and no Lua
+    // access to it. Zaxnes keeps the diffuse term of REQ-SCN-048 reachable because the model is
+    // a fragment cost on what can be the largest surface of the scene, and the priority clause
+    // T-1 of AMD-049 keeps that term valid.
+    RenderBackdropLighting => "render.backdrop_lighting",
     ClipLeft => "clip.left",
     ClipBottom => "clip.bottom",
     ClipRight => "clip.right",

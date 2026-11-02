@@ -242,6 +242,15 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.video.anti_alias", "Anti-aliasing"),
     ("setting.render.mesh_algo", "Mesh algorithm"),
     ("setting.render.shadow", "Shadows"),
+    // AMD-049 REQ-SCN-075, a setting of Zaxnes's own: the backdrop a profile's script puts behind
+    // the scene is lit with the almost-matt model of the original unless this is turned off.
+    ("setting.render.backdrop_lighting", "Backdrop lighting"),
+    (
+        "help.render.backdrop_lighting",
+        "Lights the backdrop behind the scene with a faint sheen, as 3dSen does. Turn it off for \
+         plain diffuse lighting, which costs a little less on a small machine. Only some profiles \
+         show a backdrop at all.",
+    ),
     ("setting.camera.fov", "Field of view (degrees)"),
     ("setting.light.intensity", "Light intensity"),
     ("setting.scene.skybox", "Background (skybox)"),

@@ -242,6 +242,16 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.video.anti_alias", "Anticrénelage"),
     ("setting.render.mesh_algo", "Algorithme de maillage"),
     ("setting.render.shadow", "Ombres"),
+    // AMD-049 REQ-SCN-075, un réglage propre à Zaxnes : le backdrop que le script d'un profil
+    // place derrière la scène est éclairé avec le modèle presque mat de l'original, sauf si ce
+    // réglage est désactivé.
+    ("setting.render.backdrop_lighting", "Éclairage du backdrop"),
+    (
+        "help.render.backdrop_lighting",
+        "Éclaire le fond placé derrière la scène avec un léger reflet, comme 3dSen. Désactivez-le \
+         pour un éclairage diffus simple, un peu moins coûteux sur une petite machine. Seuls \
+         certains profils affichent un fond.",
+    ),
     ("setting.camera.fov", "Champ de vision (degrés)"),
     ("setting.light.intensity", "Intensité lumineuse"),
     ("setting.scene.skybox", "Fond (skybox)"),

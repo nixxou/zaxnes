@@ -332,6 +332,7 @@ Légende des colonnes :
 | `video.msaa_2_0` | `Msaa` | — | entier | 2 | 0, 2 ou 4 ; écriture Lua : v ≤ 1 → 0, 2 ≤ v ≤ 3 → 2, v ≥ 4 → 4 | U | aucun | aucune | non exposé | conservé et rendu tel quel : l'anticrénelage reste `video.anti_alias` (AMD-059 REQ-LUA-116) **(D)** |
 | `render.mesh_algo` | `RenderMode` | 13 | énum | 0 | 0 GREEDY, 1 MARCHING, 2 GREEDY_MULTICOLOR | U | imm. (régénération, SPEC-07 REQ-LOOP-024) | liste déroulante « Render » | les 3 valeurs | algorithme de mesh par défaut ; un pattern peut imposer le sien, SPEC-04 |
 | `render.shadow` | `Shadow` | 17 | booléen | vrai | — | U | imm. | case « Shadow » | on/off | interrupteur global des ombres ; ombre effective = `Shadow` ∧ drapeau du pattern ∧ drapeau du calque ; jamais pour les éléments d'UI du jeu, SPEC-06 |
+| `render.backdrop_lighting` | — | — | booléen | vrai | — | U | imm. | case « Backdrop Lighting » / « Éclairage du backdrop », onglet « Lumière et ombres » | on/off | éclaire le backdrop selon SPEC-06 REQ-SCN-075 (AMD-049) ; désactivé, le terme diffus de REQ-SCN-048 s'applique (clause de priorité T-1) ; sans effet sur une scène sans backdrop ; pas d'accès Lua (réglage propre à Zaxnes, **(D)**) ; **défaut console : faux** (coût par fragment sur une grande surface) |
 | `render.visual_style` | `VisualStyle` | — | entier | 0 | 0 Classic, 4 Enhanced (1 accepté en écriture, relu 4) ; autre → 0 | U | imm. | — / Zaxnes : liste « Style » | non exposé | choix du rendu (AMD-040 §3, SPEC-06 REQ-SCN-078) ; l'effet de rendu est du lot Enhanced |
 | `render.style.ao` | `GetVisualStyleParameter(4, "spl.ao")` | — | entier | 0 | 0 à 2, pas 1 | U | imm. | — / Zaxnes : liste « Ambient Occlusion » | non exposé | occlusion ambiante d'écran, AMD-055 REQ-SCN-083 |
 | `render.style.ao_strength` | `… "ao.strength"` | — | entier | 3 | 1 à 5, pas 1 | U | imm. | — / Zaxnes : curseur « Strength » | non exposé | plafond d'assombrissement, AMD-055 REQ-SCN-083 |
@@ -611,7 +612,7 @@ Les réglages U marqués d'une discrétisation dans §4.1 sont exposés. Exemple
 | `3dsen_emu_auto_tv_mode` | enabled, disabled | disabled | Émulation |
 | `3dsen_emu_game_speed` | −8 … 8 | 0 | Émulation |
 
-La table §4.6 reçoit la ligne `zaxnes_video_anti_alias | None, FFAA, SMAA | **FFAA** | Rendu` (AMD-052 §3 point 8, préfixe `zaxnes_` d'AMD-029 §3).
+La table §4.6 reçoit la ligne `zaxnes_video_anti_alias | None, FFAA, SMAA | **FFAA** | Rendu` (AMD-052 §3 point 8, préfixe `zaxnes_` d'AMD-029 §3), et la ligne `zaxnes_render_backdrop_lighting | enabled, disabled | **enabled** | Rendu` (AMD-049 REQ-SCN-075, réglage propre à Zaxnes).
 
 Non exposés en libretro (gérés par l'hôte ou sans objet) : `video.vsync`, `video.frame_rate`, `video.max_queued_frames` (AMD-052 §3 point 8), `video.msaa_2_0` (AMD-059 REQ-LUA-116), `render.visual_style` et `render.style.*` (AMD-055 §4), `emu.run_ahead` (AMD-041 §4), `video.skip_frame`, `video.render_method`, `video.res_scale` (la résolution est celle de l'hôte), `ui.*`, `audio.bg_music`, `input.emulated_menu_button`, `emu.core`, tous les réglages P, S, D, VR, éditeur et film. `audio.volume` PEUT être exposé (l'hôte a son propre volume). `vr.refresh_rate` d'AMD-059 est couvert par la clause VR, `ui.library_view` par `ui.*` ; les quatre réglages de courbure d'AMD-043 §6 sont exposés, eux, avec leurs 13 et 2 valeurs.
 

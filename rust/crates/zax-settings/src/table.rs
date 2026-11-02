@@ -376,6 +376,27 @@ fn video_scaling(out: &mut Vec<SettingDescriptor>) {
         .with_label("Shadow")
         .with_libretro(enabled_disabled()),
     );
+    // AMD-049 REQ-SCN-075: the backdrop of REQ-SCN-048 lit with the almost-matt reflection model
+    // of the original instead of the plain diffuse term. On by default, which is what the
+    // original does and what the amendment asks for; Zaxnes keeps the switch because the model is
+    // a fragment cost on a surface that can fill the picture, and the priority clause T-1 of
+    // AMD-049 keeps the diffuse term valid. A setting of Zaxnes's own (divergence **(D)**): no
+    // Lua access and no `Setting` field, the original program has neither.
+    out.push(
+        SettingDescriptor::new(
+            SettingId::RenderBackdropLighting,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Render,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Backdrop Lighting")
+        // The libretro option `zaxnes_render_backdrop_lighting`, values `enabled, disabled`,
+        // default `enabled` — the shape AMD-043 §6 and AMD-046 §3 set for a boolean.
+        .with_libretro(enabled_disabled()),
+    );
     out.push(
         SettingDescriptor::new(
             SettingId::UiFullscreen,

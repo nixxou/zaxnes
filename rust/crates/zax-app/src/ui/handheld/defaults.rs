@@ -17,8 +17,20 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 10] {
+fn defaults() -> [(SettingId, SettingValue); 11] {
     [
+        // AMD-049 REQ-SCN-075 is a fragment cost on a surface that can fill the picture, so the
+        // handheld keeps the diffuse term of REQ-SCN-048, which the amendment's priority clause
+        // T-1 leaves valid and which costs nothing. The desktop follows the spec and has it on.
+        //
+        // Measured on this machine (a desktop GPU), `zax-harness render --frames
+        // synthetic:backdrop --bench 60`: 0.19 / 0.20 / 0.19 ms median with the model and 0.20 /
+        // 0.19 / 0.18 without it at 640 x 480, and 0.22 / 0.23 against 0.24 / 0.26 at
+        // 1280 x 720 — free, within the noise, on *that* GPU. It is not free "as measured" on a
+        // handheld, which no measurement on this side can show, so the economical default
+        // stands; the figures are in `docs/PERFORMANCE-HISTORY.md` for the owner to revisit on a
+        // real device.
+        (SettingId::RenderBackdropLighting, SettingValue::Bool(false)),
         // Run-ahead (AMD-041, exposed as `Setting.RunAheadFrames` by AMD-040 REQ-LUA-114) costs
         // a whole extra emulated frame, plus a state saved and loaded, for every frame shown:
         // off on a handheld, whose budget is the frame itself. The desktop keeps the 1 of
@@ -105,6 +117,12 @@ mod tests {
         assert!(model.get(SettingId::SceneBend2dMode).as_bool());
         assert!(SettingsModel::new()
             .get(SettingId::SceneBend2dMode)
+            .as_bool());
+        // AMD-049 REQ-SCN-075: off on a handheld — a fragment cost on a surface that can fill
+        // the picture — and on the desktop, which follows the spec.
+        assert!(!model.get(SettingId::RenderBackdropLighting).as_bool());
+        assert!(SettingsModel::new()
+            .get(SettingId::RenderBackdropLighting)
             .as_bool());
     }
 

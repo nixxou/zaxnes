@@ -74,6 +74,9 @@ fn the_enumeration_covers_the_tables_and_names_its_additions() {
             "emu.pause_3d_in_2d",
             "emu.pipeline",
             "input.touch_pad",
+            // AMD-049 REQ-SCN-075: a setting of Zaxnes's own (divergence D) — the original
+            // always lights the backdrop with the almost-matt model, so it has no such key.
+            "render.backdrop_lighting",
             "ui.language",
             "ui.profiler",
             "ui.roms_folder",

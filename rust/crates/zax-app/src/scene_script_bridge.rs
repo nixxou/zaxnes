@@ -216,6 +216,7 @@ pub fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
     scene.clipping = clipping_of(model);
     scene.bend = bend_of(model);
     scene.bend_two_dimensional_mode = model.get(SettingId::SceneBend2dMode).as_bool();
+    scene.settings.backdrop_lighting = model.get(SettingId::RenderBackdropLighting).as_bool();
     push_light(model, scene);
 }
 
@@ -255,6 +256,12 @@ pub fn apply_setting(id: SettingId, model: &SettingsModel, scene: &mut SceneStat
         // AMD-046 REQ-SCN-074: likewise, and without effect in 3D mode.
         SettingId::SceneBend2dMode => {
             scene.bend_two_dimensional_mode = model.get(id).as_bool();
+        }
+        // AMD-049 REQ-SCN-075: likewise, and without effect on a scene with no backdrop. The
+        // renderer compiles the backdrop program on the first frame that wants it and keeps it
+        // afterwards, so turning this off and on again costs one boolean either way.
+        SettingId::RenderBackdropLighting => {
+            scene.settings.backdrop_lighting = model.get(id).as_bool();
         }
         // Every other setting is held in the session layer and read from there.
         _ => {}

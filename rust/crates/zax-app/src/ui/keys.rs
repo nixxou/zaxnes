@@ -144,6 +144,10 @@ pub const HELP_ARC_H: &str = "help.scene.arc_h";
 pub const HELP_ARC_CENTER: &str = "help.scene.arc_center";
 pub const HELP_BEND_2D_MODE: &str = "help.scene.bend_2d_mode";
 
+/// The help sentence of the backdrop lighting of AMD-049 REQ-SCN-075. The amendment gives no UI
+/// wording — the original has no such setting — so this is Zaxnes's own, like the setting.
+pub const HELP_BACKDROP_LIGHTING: &str = "help.render.backdrop_lighting";
+
 // ------------------------------------------------------- fields, columns
 pub const FIELD_SEARCH: &str = "field.search";
 pub const COLUMN_ACTION: &str = "column.action";

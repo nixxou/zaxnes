@@ -19,7 +19,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | done |
 | 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | done |
 | 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | done |
-| 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | todo |
+| 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | done |
 | 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | todo |
 
 **The checklist went from 9 steps to 10 after step 1** (so the commit of step 1 says "1/9"):
@@ -958,3 +958,97 @@ frame-uniform binding moved out into `bind_frame_uniforms`.
   corrected — step 7 wrote that requirement into SPEC-06, so it is no longer one of the
   requirements that "appear in no SPEC file".
 - `impl/docs/spec/changes/`: `AMD-049-eclairage-backdrop.md` and `R2-review-AMD-049.md` copied.
+
+### Step 9 — the settings
+
+**One setting, and that is the finding.** Of the five amendments of this lot, four need no setting
+at all:
+
+| Amendment | Setting? |
+|---|---|
+| AMD-048 (the empty depth interval) | **no** — a rule of mesh generation, not a choice |
+| AMD-051 (robustness) | **no** — degradations, not options; the seams are harness flags and a test harness (step 3) |
+| AMD-057 walls | **no** — the measurement of step 5 settled it, the spec path everywhere |
+| AMD-057 sprite depth | **no** — the formula replaces a constant |
+| AMD-058 (the centroid) | **no** — it rides on `video.anti_alias`, which already exists |
+| **AMD-049** (the backdrop lighting) | **yes**: `render.backdrop_lighting` |
+
+#### `render.backdrop_lighting`, end to end
+
+AMD-049 defines **no setting** — it amends REQ-SCN-048 and leaves the model always on, as the
+original has it. The switch is Zaxnes's own (divergence **(D)**, like `scene.bend_2d_mode` of
+AMD-046), and it exists because the brief requires a handheld default: the model is a fragment
+cost on a surface that can fill the picture. The amendment's own priority clause **T-1** is what
+makes the other position legitimate — "si REQ-SCN-075 n'est pas retenue, l'éclairage diffus
+d'origine de REQ-SCN-048 (P1) reste valable".
+
+| Piece | What landed |
+|---|---|
+| `zax-settings/catalogue.rs` | `RenderBackdropLighting => "render.backdrop_lighting"` |
+| `zax-settings/table.rs` | a `Bool` descriptor, default **true**, `User` / `Immediate` / theme `Render`, `Domain::switch()`, label "Backdrop Lighting", **no Lua path and no `Setting` field** |
+| libretro | `zaxnes_render_backdrop_lighting`, `enabled, disabled`, default `enabled` — generated from the descriptor, so no second table to keep in step |
+| `scene_script_bridge.rs` | in `push_settings` and in `apply_setting`, so it reaches the scene **when it changes** and never per frame |
+| `ui/options.rs` | the **Light** tab, beside the global shadow switch, with a help sentence |
+| `ui/keys.rs`, `strings/english.rs`, `strings/french.rs` | the label and the help sentence, in both languages (AMD-035, AMD-036) |
+| `ui/handheld/defaults.rs` | **false**, the eleventh handheld default |
+| `zax-harness render` | `--no-backdrop-lighting` (landed in step 8) |
+
+**Why the Light tab and not Video.** Its `Render` theme would have put it among the video
+settings; `tab_of` already makes one exception, for the global shadow switch, on the grounds that
+REQ-UI-202's "Lumière et ombres" tab is where lighting belongs. This setting chooses the lighting
+*model* of one surface, so it takes the same exception — and ends up next to the shadow switch a
+player looking for it would look near.
+
+**The handheld page needed no code.** `ui/handheld/advanced.rs` collects every steppable setting
+of the Video, Camera, Light and Emulation tabs, so a `Bool` in the Light tab appears on the
+advanced page by construction. That is exactly the "advanced option if useful" the brief asks for,
+and a test pins it rather than trusting it.
+
+**Nothing was added to `EXCLUDED`**, and that is deliberate: the setting is meant to be reachable
+on both platforms. The list is unchanged at 32 entries.
+
+#### The handheld default, and the measurement behind it
+
+The brief's rule: the handheld keeps the diffuse term of REQ-SCN-048 "unless the new lighting is
+measured as free". Measured here, `zax-harness render --frames synthetic:backdrop --bench 60`,
+median frame time:
+
+| | with the model | without it |
+|---|---|---|
+| 640 × 480 | 0.19 / 0.20 / 0.19 ms | 0.20 / 0.19 / 0.18 ms |
+| 1280 × 720 | 0.22 / 0.23 ms | 0.24 / 0.26 ms |
+
+**Free on this machine, within the noise, at both resolutions** — the lit runs are even marginally
+faster at 1280 × 720, which is how much of this is noise. But this machine has a desktop GPU, and
+the cost is per fragment: a Mali-G31 at 1280 × 720 with a backdrop filling the screen is a
+different regime, and no measurement available on this side reaches it.
+
+**Decision: off on handhelds, on on the desktop.** The brief's condition is "measured as free",
+and a desktop measurement does not measure a handheld; the economical default therefore stands, as
+it does for every other setting that costs anything there. It is offered as an advanced option,
+one pad step away, and the figures above are in `PERFORMANCE-HISTORY.md` for the owner to revisit
+on a real device. R0 has the numbers either way.
+
+#### Tests (7 in `zax-app/tests/amd049_backdrop_setting_tests.rs`, plus 2 extended)
+
+| Criterion | Test |
+|---|---|
+| the desktop default is the model of the amendment, in the model and in the renderer | `req_scn_075_the_desktop_default_is_the_model_of_the_amendment` |
+| it reaches the scene when it changes, and on the wholesale push | `req_scn_075_the_setting_reaches_the_scene_when_it_changes` |
+| it is persisted across a restart | `req_scn_075_the_setting_survives_a_restart` |
+| the descriptor's shape, and that it has **no** Lua access, no `Setting` field and no style parameter | `req_scn_075_the_setting_has_no_lua_access` |
+| the desktop window shows it, in the Light tab, with a help sentence | `req_scn_075_the_options_window_shows_it_with_the_light` |
+| the handheld offers it as an advanced option | `req_scn_075_the_handheld_offers_it_as_an_advanced_option` |
+| the libretro option, its values and its default | `req_scn_075_the_libretro_option_is_generated` |
+| the handheld default is false and the desktop one true | `ui/handheld/defaults.rs` `a_fresh_model_gets_the_handheld_render_defaults` (extended) |
+| the new key is named as an addition to SPEC-09 §4.1, and the libretro table's order | `zax-settings` `the_enumeration_covers_the_tables_and_names_its_additions`, `the_table_is_the_normative_extract_of_the_specification` (both extended) |
+
+`cargo test --release --workspace --features zax-app/bundled`: **2297 passed, 0 failed**, 83
+ignored. fmt and workspace clippy clean.
+
+#### SPEC chapter edits
+
+- `SPEC-09` §4.1.3, after `render.shadow`: the `render.backdrop_lighting` row, with its default,
+  its scope, where it is shown, the T-1 clause and the **console default false**.
+- `SPEC-09` §4.6, the libretro paragraph: the `zaxnes_render_backdrop_lighting` line, beside the
+  `zaxnes_video_anti_alias` one AMD-052 added.
