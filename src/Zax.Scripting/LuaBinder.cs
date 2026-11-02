@@ -38,6 +38,8 @@ internal enum HostTypeId
     Slot,
     InstanceList,
     ShapeList,
+    VisualStyleParameterList,
+    VisualStyleParameter,
     Vec3Ref,
     Vec2Ref,
     Mat4Ref,

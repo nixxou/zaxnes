@@ -869,6 +869,18 @@ public static class SettingsCatalogue
     }
 
     /// <summary>
+    /// The identifier <paramref name="style"/> is read back as: <see cref="EnhancedStyle"/> for
+    /// <see cref="EnhancedStyleAlias"/>, and the number itself otherwise (REQ-SCN-078).
+    /// </summary>
+    /// <remarks>
+    /// AMD-059 REQ-LUA-116 needs it: the <c>Style</c> of an element of
+    /// <c>Setting.VisualStyleParameters</c> is « l'identifiant du style tel que relu par
+    /// REQ-SCN-078 », so a parameter written with 1 shows up under 4.
+    /// </remarks>
+    public static int CanonicalVisualStyle(int style)
+        => style == EnhancedStyleAlias ? EnhancedStyle : style;
+
+    /// <summary>
     /// The setting the parameter <paramref name="id"/> of style <paramref name="style"/>
     /// designates, or null when either is unknown (REQ-LUA-114).
     /// </summary>

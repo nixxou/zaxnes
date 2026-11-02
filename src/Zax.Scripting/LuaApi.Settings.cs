@@ -197,6 +197,42 @@ internal static partial class LuaApi
             return 0;
         });
 
+        // AMD-059 REQ-LUA-116: the list of the style parameters written since their last reset.
+        // Reading gives a snapshot; writing nil puts every parameter of every style back to its
+        // default and empties the list; writing a list a read handed out puts exactly its
+        // elements back. Anything else raises, which is the one write of the requirement that
+        // may — it is not a numeric value.
+        type.Property(
+            "VisualStyleParameters",
+            (b, l) =>
+            {
+                b.PushObject(
+                    l,
+                    HostTypeId.VisualStyleParameterList,
+                    settings.WrittenVisualStyleParameters);
+                return 1;
+            },
+            (b, l) =>
+            {
+                if (l.IsNoneOrNil(3))
+                {
+                    settings.ResetAllVisualStyleParameters();
+                    return;
+                }
+
+                if (b.ObjectAt(l, 3, HostTypeId.VisualStyleParameterList)
+                    is IReadOnlyList<VisualStyleParameter> entries)
+                {
+                    settings.RestoreVisualStyleParameters(entries);
+                    return;
+                }
+
+                b.InvalidArguments(l, "VisualStyleParameters");
+            },
+            HostTypeId.VisualStyleParameterList);
+
+        RegisterVisualStyleParameters(binder);
+
         type.Function("SetRuntime", (b, l) =>
         {
             Require(b, l, "SetRuntime");
@@ -258,6 +294,57 @@ internal static partial class LuaApi
             {
                 binder.InvalidArguments(state, member);
             }
+        }
+    }
+
+    /// <summary>
+    /// The list <c>Setting.VisualStyleParameters</c> reads and one of its elements
+    /// (AMD-059 REQ-LUA-116), indexed from 0 to <c>Count − 1</c> like every other list of
+    /// SPEC-05 §4.2.
+    /// </summary>
+    /// <remarks>
+    /// The list userdata names the snapshot <see cref="ScriptSettings.WrittenVisualStyleParameters"/>
+    /// published, and an element names that same snapshot with its index as the member selector.
+    /// An element a script keeps therefore goes on reading the snapshot it came from, whatever
+    /// the log does afterwards.
+    /// </remarks>
+    private static void RegisterVisualStyleParameters(LuaBinder binder)
+    {
+        const string ListName = "Liste<ParamStyle>";
+
+        HostType list = binder.DeclareType(HostTypeId.VisualStyleParameterList, ListName);
+        list.Property("Count", (b, l) => Number(l, ListOf(b, l).Count));
+        list.ElementType = HostTypeId.VisualStyleParameter;
+        list.Indexer = (b, l) =>
+        {
+            int index = b.CheckInteger(l, 2, ListName);
+            IReadOnlyList<VisualStyleParameter> entries = ListOf(b, l);
+            b.CheckBounds(l, index, entries.Count, ListName);
+            b.PushDescriptor(l, HostTypeId.VisualStyleParameter, entries, index);
+            return 1;
+        };
+
+        HostType element = binder.DeclareType(HostTypeId.VisualStyleParameter, "ParamStyle");
+        element.Property("Style", (b, l) => Number(l, EntryOf(b, l).Style));
+        element.Property("ParameterId", (b, l) => Text(l, EntryOf(b, l).ParameterId));
+        element.Property("Value", (b, l) => Number(l, EntryOf(b, l).Value));
+        return;
+
+        static IReadOnlyList<VisualStyleParameter> ListOf(LuaBinder binder, Lua state)
+            => binder.Resolve(binder.HandleAt(state, 1)) as IReadOnlyList<VisualStyleParameter> ?? [];
+
+        static VisualStyleParameter EntryOf(LuaBinder binder, Lua state)
+        {
+            if (binder.Resolve(binder.HandleAt(state, 1))
+                is not IReadOnlyList<VisualStyleParameter> entries)
+            {
+                return new VisualStyleParameter(0, string.Empty, 0d);
+            }
+
+            int index = binder.MemberAt(state, 1);
+            return (uint)index < (uint)entries.Count
+                ? entries[index]
+                : new VisualStyleParameter(0, string.Empty, 0d);
         }
     }
 

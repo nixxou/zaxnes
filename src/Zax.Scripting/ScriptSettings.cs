@@ -33,6 +33,20 @@ public sealed class ScriptSettings : IDisposable
 {
     private readonly SettingsModel _model;
     private readonly ConversionSettings? _conversion;
+
+    /// <summary>
+    /// The style parameters a script has written since their last reset, in the order of their
+    /// first write (AMD-059 REQ-LUA-116). It is what
+    /// <see cref="WrittenVisualStyleParameters"/> publishes.
+    /// </summary>
+    private readonly List<VisualStyleParameter> _written = [];
+
+    /// <summary>
+    /// The snapshot of <see cref="_written"/> the last read handed out, or null when the log
+    /// has changed since. See <see cref="WrittenVisualStyleParameters"/>.
+    /// </summary>
+    private IReadOnlyList<VisualStyleParameter>? _snapshot;
+
     private bool _disposed;
 
     /// <summary>Creates the view over <paramref name="model"/>.</summary>
@@ -254,7 +268,13 @@ public sealed class ScriptSettings : IDisposable
 
         // The model's domain carries the normalisation, so the rounding happens in exactly one
         // place whoever writes.
-        Write(key, (int)SettingsCatalogue.Get(key).Domain.Snap(value));
+        double normalised = SettingsCatalogue.Get(key).Domain.Snap(value);
+        Write(key, (int)normalised);
+
+        // AMD-059 REQ-LUA-116: a call that answers true adds the parameter to the list, or
+        // updates its value when it is already there. The style recorded is the one REQ-SCN-078
+        // reads back, so a write through the alias 1 shows up under 4.
+        Record(SettingsCatalogue.CanonicalVisualStyle(style), id!, normalised);
         return true;
     }
 
@@ -280,6 +300,95 @@ public sealed class ScriptSettings : IDisposable
         foreach (string key in parameters.Values)
         {
             Write(key, SettingsCatalogue.Get(key).DefaultValue.AsInt);
+        }
+
+        // AMD-059 REQ-LUA-116: the reset takes the style's parameters out of the list.
+        Forget(SettingsCatalogue.CanonicalVisualStyle(style));
+    }
+
+    /// <summary>
+    /// The style parameters a script has written since their last reset, in the order of their
+    /// first write — what <c>Setting.VisualStyleParameters</c> reads (AMD-059 REQ-LUA-116).
+    /// </summary>
+    /// <remarks>
+    /// The returned list is a <b>snapshot</b>: it does not follow a later write. That is what
+    /// makes « une liste précédemment lue rétablit exactement ses éléments » mean something —
+    /// a live view would, by the time it is written back, already be the current state and the
+    /// write would do nothing. The same snapshot object is handed out until the log changes, so
+    /// two reads with nothing in between give the very same Lua value (REQ-LUA-043).
+    /// </remarks>
+    public IReadOnlyList<VisualStyleParameter> WrittenVisualStyleParameters
+        => _snapshot ??= [.. _written];
+
+    /// <summary>
+    /// Every parameter of <b>every</b> style back to its default, and the list emptied: what
+    /// <c>Setting.VisualStyleParameters = nil</c> does (AMD-059 REQ-LUA-116).
+    /// </summary>
+    public void ResetAllVisualStyleParameters()
+    {
+        foreach (int style in SettingsCatalogue.VisualStyleParameters.Keys)
+        {
+            ResetVisualStyleParameters(style);
+        }
+
+        // Style 0 has no parameter, and the two identifiers of Enhanced share one dictionary,
+        // so the loop above may leave nothing to do here; it is still cleared explicitly,
+        // because a style whose parameters are all at their default must not keep entries.
+        if (_written.Count > 0)
+        {
+            _written.Clear();
+            _snapshot = null;
+        }
+    }
+
+    /// <summary>
+    /// Puts the parameters of <paramref name="entries"/> back, exactly: every other parameter
+    /// returns to its default first, then each entry is written again
+    /// (AMD-059 REQ-LUA-116, <c>Setting.VisualStyleParameters = &lt;liste&gt;</c>).
+    /// </summary>
+    /// <param name="entries">A list a previous read handed out.</param>
+    public void RestoreVisualStyleParameters(IReadOnlyList<VisualStyleParameter> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        // The entries may be the very snapshot the log publishes, which the reset would empty;
+        // copying first keeps the restore independent of that.
+        VisualStyleParameter[] wanted = [.. entries];
+        ResetAllVisualStyleParameters();
+        foreach (VisualStyleParameter entry in wanted)
+        {
+            SetVisualStyleParameter(entry.Style, entry.ParameterId, entry.Value);
+        }
+    }
+
+    /// <summary>Adds the parameter to the log, or updates the value it already holds.</summary>
+    private void Record(int style, string id, double value)
+    {
+        for (int i = 0; i < _written.Count; i++)
+        {
+            if (_written[i].Style == style && string.Equals(_written[i].ParameterId, id, StringComparison.Ordinal))
+            {
+                if (_written[i].Value.Equals(value))
+                {
+                    return;
+                }
+
+                _written[i] = new VisualStyleParameter(style, id, value);
+                _snapshot = null;
+                return;
+            }
+        }
+
+        _written.Add(new VisualStyleParameter(style, id, value));
+        _snapshot = null;
+    }
+
+    /// <summary>Takes every parameter of <paramref name="style"/> out of the log.</summary>
+    private void Forget(int style)
+    {
+        if (_written.RemoveAll(entry => entry.Style == style) > 0)
+        {
+            _snapshot = null;
         }
     }
 
