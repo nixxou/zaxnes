@@ -166,10 +166,21 @@ C# counterpart: `src/Zax.Nes/Ppu`, `Apu`, `Cartridges`, `Cpu` (the bus).
 - Identical output, audio included. SMB3 x86 core 1.24 -> 1.13 ms/frame.
 - **Kept by RU-3a** (AMD-054, non-linear mixing): the two table lookups of the new law went into
   this same lazy path, where they replace four multiply-adds, an addition chain and a clamp. The
-  mixing therefore costs *less* than it did; `nestest` did not move. The cache key gained the
-  expansion level, so a move of the MMC5's `M` alone is noticed.
-- Invariant: the mixing stays in `current_level`, never per CPU cycle. Anything that can change
-  `A`, `M` or the five channel outputs must set `level_dirty` or be in the cache key.
+  mixing therefore costs *less* than it did; `nestest` did not move.
+- **RU-3a-fix**: RU-3a had added the expansion level to the cache *test*
+  (`key == level_key && expansion_level == level_expansion`). That is **not** a cold path — it runs
+  about 15 000 times per emulated frame — and the second load, compare and branch measured +13.9 M
+  instructions per 300 frames (+1.1 % of the APU) on a board with no expansion audio. `M` is folded
+  into the one key instead: `set_expansion_level` stores `NO_LEVEL_KEY` when the value moves, which
+  happens only for the MMC5 and only on a real change. The hot test is one comparison again.
+- Invariant: **the cache test stays a single comparison of `level_key`.** Anything that can change
+  `A`, `M` or the five channel outputs must either be packed into the key or invalidate it
+  (`level_key = NO_LEVEL_KEY`) *and* set `level_dirty`; never add a second comparison here.
+- Invariant: the mixing stays in `current_level`, never per CPU cycle, and `current_level` keeps
+  **one** call site — the per-cycle step. A second one (a cold savestate rebuild was enough) makes
+  the inliner leave the function out of line, which costs a call and a prologue on all ~15 000 of
+  those cycles; `#[inline]` does not undo it. `Apu2A03::load_state` writes its mix out for that
+  reason.
 
 **APU quiet cycles skipped while the frame loop batches** (`0cf347d`)
 - During the frame loop the bus lets the APU lag like the PPU and catches it up on $4000-$401F
@@ -186,13 +197,35 @@ C# counterpart: `src/Zax.Nes/Ppu`, `Apu`, `Cartridges`, `Cpu` (the bus).
   advanced in the skip.
 - **RU-3a** (AMD-054, MMC5 audio): a cartridge with expansion audio keeps `apu_quiet = 0`, so the
   APU runs cycle by cycle on it and the `M` the bus pushes is never stale. **Only the MMC5 is
-  concerned** — `NesBus::expansion_audio`, a `bool` set once in `attach` and read in
-  `catch_up_apu` / `sync_apu`, which the frame loop reaches rarely for every other board. Nothing
-  was added to `NesBus::tick`: a `bool` test there would cost about 90 k instructions per emulated
-  frame. `tick` does now step the cartridge *before* the APU catch-up instead of after (a move,
-  not a branch); the 291-ROM goldens are identical across that reorder.
-- Measured: `mmc5test` 1.79 -> 1.80-1.85 ms/frame (the per-cycle sound step plus the lost skip),
-  `nestest` unchanged. No built-in profile targets an MMC5-audio game.
+  concerned.** `tick` does now step the cartridge *before* the APU catch-up instead of after (a
+  move, not a branch); the 291-ROM goldens are identical across that reorder.
+- **Measured, and wrong: `catch_up_apu` does not run "rarely".** RU-3a assumed it did and put the
+  `expansion_audio` test and the `M` push inside it. It runs on **14 894 of the 29 780 cycles of a
+  frame** (nestest, counted) — one cycle in two, because a pulse timer is clocked on alternate
+  cycles — so it is a per-cycle path, and one instruction in it is ~15 000 per frame against a
+  ±0.1 % gate of ~27 000. RU-3a cost `NesBus::tick` two extra callee-saved registers and +15.7 %
+  of its instructions, on every board.
+- **RU-3a-fix**, how it is free now. Three things, all of them structure rather than less work:
+  - `NesBus::apu_batching` = `deferred_ppu && !expansion_audio`, one field maintained in `attach`,
+    `defer_ppu` and `end_deferred_ppu`. `catch_up_apu` tests it **instead of** `deferred_ppu`, not
+    on top of it, so the fast path costs exactly what it cost before AMD-054 (12 instructions
+    either way, read off the post-LTO assembly).
+  - `!apu_batching` — a board with expansion audio, or any board outside the frame loop — falls
+    through to `sync_apu`, which turned out to be the same function; there is one, not two.
+  - `NesBus::push_expansion_audio` is `#[inline(never)]`. That is the one thing that must stay out
+    of line: `sync_apu` is inlined into `tick` twice over (through `catch_up_apu` and through
+    `perform_dmc_dma`), and the push's cartridge `Option`, devirtualised `expansion_audio_output`
+    and `set_expansion_level` are what raise the register pressure of the whole function.
+- Invariant: **nothing MMC5-specific may be inlined into `NesBus::tick`.** Check it by reading
+  `tick` in the post-LTO assembly (`cargo rustc -p zax-harness --release --bin zax-harness --
+  --emit=asm`, then the prologue between the label and `.seh_endproc`): three `pushq` and a 32-byte
+  frame is right, four is the regression. Out-lining `sync_apu` as well was measured and is
+  *worse*: a board with expansion audio runs it every cycle, so it pays a second call for nothing
+  (`mmc5test` 1.87 -> 1.91 ms/frame).
+- Measured, interleaved with the RU-2 and RU-3a binaries: `nestest` 0.87 ms/frame, within the
+  machine's spread of both. `mmc5test` 1.83 (RU-2) -> 1.87, `exram` 2.09 -> 2.09: the MMC5 pays one
+  out-of-line call per cycle, about +2 %, which is the price of every other board paying nothing.
+  No built-in profile targets an MMC5-audio game.
 
 **Plain PRG-ROM windows read without the board's decode** (`6a53e71`)
 - The cartridge keeps, for each 8 KiB window of $8000-$FFFF, where it starts in PRG-ROM when a
@@ -613,9 +646,9 @@ Measurement pitfall:
 | C# area changed by the update | Rust items to re-check | Checks to run |
 |---|---|---|
 | `Zax.Nes/Ppu` (rendering, registers, timing) | 5.1 batched PPU sync points, fast span (`run_visible_span*`), per-line sprite buffer, sprite limit | PPU goldens, golden-core |
-| `Zax.Nes/Apu` | 5.1 lazy level mixing (the non-linear tables of AMD-054 live there), quiet-cycle skipping (`quiet_cycles` must account for any new timed state; a board with expansion audio keeps it off) | golden-core with audio digests |
+| `Zax.Nes/Apu` | 5.1 lazy level mixing (the non-linear tables of AMD-054 live there; the cache test stays **one** comparison of `level_key` and `current_level` keeps **one** call site), quiet-cycle skipping (`quiet_cycles` must account for any new timed state; a board with expansion audio keeps it off) | golden-core with audio digests |
 | `Zax.Nes/Cartridges` (new or changed mapper) | 5.1 IRQ horizon or per-cycle stepping; `chr_view` (only for pure fetches); `rom_windows` (`NO_ROM_WINDOW` when reads have side effects); debug assert in debug build | golden-core, a debug run of the mapper's games |
-| `Zax.Nes` bus / CPU | 5.1 sync points ($2000-$3FFF, $4014, $4016/7, cartridge writes), APU catch-up on $4000-$401F | goldens |
+| `Zax.Nes` bus / CPU | 5.1 sync points ($2000-$3FFF, $4014, $4016/7, cartridge writes), APU catch-up on $4000-$401F, and **`NesBus::tick`'s prologue in the post-LTO assembly** (3 `pushq`, 32-byte frame: nothing board-specific may be inlined into it) | goldens |
 | `Zax.Engine3D` segmentation / frames | 5.2 filled-cell lists and germ order; `FastMap` iteration order never reaching output | render captures (identical) |
 | `Zax.Engine3D` draw list / `DrawTile` fields | 5.2 placement matrix order; 5.4 `DrawStateKey` must include any new per-draw input; renderer `DrawItem` | captures in both draw modes |
 | `Zax.Scripting` new API members | 5.3 both binding paths (safe and `raw.rs`), API dump; 5.5 **`CORE_MEMBERS`** if the member touches the core; `light_shapes` analysis if it touches `shape` | scripting tests with and without `ZAXNES_FAST_LUA=1`, API dump, `separate_core_tests` |

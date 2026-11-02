@@ -10,7 +10,7 @@ audio pays nothing for it. No audio digest may move relative to `4fa0277`.
 |---|---|---|
 | 1 | `NesBus::tick`: the MMC5 push out of the inlined per-cycle body | done |
 | 2 | `Apu2A03::current_level`: `M` folded into the single cache key | done |
-| 3 | Closing: fmt, clippy, crate tests, PPU goldens, after measurements | todo |
+| 3 | Closing: fmt, clippy, crate tests, PPU goldens, after measurements | done |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -159,6 +159,10 @@ evidence.
 Behaviour: `cargo test --release -p zax-nes` 482 passed, and the full goldens report
 **`291 of 291 rows matched, 0 ROMs missing`** — no audio digest moved.
 
+(`catch_up_apu_in_step`, the function this step introduced, is `sync_apu` to the line; step 2
+collapses the two and moves the `#[inline(never)]` to the push alone, which is where it belongs.
+The shape described above is kept for the record of what each measurement was taken on.)
+
 ### Step 2 — the level cache key
 
 `M` is folded into the one key the cache already compares, exactly as the lot asks:
@@ -246,3 +250,60 @@ Both are noted here for whoever measures next; neither is needed to meet the lot
 Behaviour after step 2: `cargo test --release -p zax-nes` **483 passed** (the 482 of RU-3a plus the
 new one), and the full goldens again report **`291 of 291 rows matched, 0 ROMs missing`** — no audio
 digest moved.
+
+### Step 3 — closing
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --release --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release -p zax-nes` | 483 passed |
+| `cargo test --release -p zax-app --features bundled` | 628 passed |
+| `cargo test --release -p zax-settings` | 221 passed |
+| `cargo test --release -p zax-render` | 148 passed |
+| `cargo test --release -p zax-scripting` | 155 passed |
+| `cargo test --release -p zax-engine3d` | 194 passed |
+| `cargo test --release -p zax-profiles` | 178 passed |
+| `cargo test --release -p zax-platform --features bundled` | 35 passed |
+| `cargo test --release -p zax-harness` | 40 passed |
+| `cargo test --release -p zax-goldens` | 3 passed |
+| `cargo test --release -p zax-achievements` | 3 passed |
+| **total** | **2088 passed, 0 failed** (RU-3a's 2087 plus the new mixer test) |
+| `cargo test -p zax-nes --release --test ppu_golden_tests -- --ignored` | **291 of 291 rows matched**, 0 missing |
+
+#### The final state of the per-cycle path
+
+`NesBus::tick`, post-LTO, against the two references:
+
+| build | instructions | `pushq` | stack | hot-path APU block |
+|---|---|---|---|---|
+| RU-2 `30dc744` | 104 | **3** | **32** | 12 instructions |
+| RU-3a `4fa0277` | 140 | 4 | 40 | 14, plus the prologue on every cycle |
+| **RU-3a-fix** | 119 | **3** | **32** | **12 instructions** |
+
+Read instruction by instruction, the catch-up block is the same length as RU-2's — RU-2 spent
+`xorl %eax,%eax` / `cmpb deferred_ppu` / `jne`, this spends `cmpb apu_batching` / `je` and the `jmp`
+out of the branch. The cartridge block is byte-identical and only moved earlier in the function.
+The 15 static instructions above RU-2 are the `!apu_batching` branch and the DMC-DMA block, neither
+on the per-cycle path of a board without expansion audio.
+
+`Apu2A03::run_cpu_cycles`: **855** instructions against RU-2's 856 and RU-3a's 857, same prologue
+(8 saved registers), stack 184 against RU-2's 232.
+
+#### What this lot did *not* change
+
+No requirement, no amendment, no setting, no savestate format, no spec copy, no Q ticket: the
+behaviour of the three amendments of RU-3a is identical, which is what the 291 unchanged golden rows
+(audio digests included) and the 2 088 passing tests say. `STATE_VERSION` stays 8 / 9, the APU block
+keeps its layout, and `rust/docs/PERFORMANCE-HISTORY.md` §5.1 was corrected rather than left to
+drift — RU-3a's entry there claimed `catch_up_apu` "runs rarely", which the counting in these notes
+disproves, and the two new invariants (a single comparison in the mixer's cache, nothing
+board-specific inlined into `tick`) are written down with the way to check them.
+
+#### Left to R0
+
+The callgrind re-run that is the real gate, on Mega Man 2 and Zelda II. The expectation this side's
+evidence supports: `NesBus::tick` back to its RU-2 exclusive count (same prologue, same per-cycle
+instructions) and `Apu2A03::run_cpu_cycles` three instructions per mixer call lighter than RU-3a,
+which is the 13.9 M R0 measured. The MMC5 is about 2 % above RU-2 on `mmc5test` and `exram`; the two
+ways to take that back are listed above and both are outside this lot's scope.
