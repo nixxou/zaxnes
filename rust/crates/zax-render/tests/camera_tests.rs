@@ -595,11 +595,71 @@ fn req_scn_024_restoring_brings_back_fpv_with_the_distance_of_the_save() {
     assert_eq!(CameraMode::Fpv, camera.mode());
     close(40.0, camera.current().distance(), 5e-4);
 
-    // The displayed values are not snapped: they join the setpoint by the smoothing of
-    // REQ-SCN-019.
-    close(300.0, camera.distance(), 5e-4);
+    // AMD-045 REQ-SCN-073 replaces « the displayed camera joins them through the smoothing »:
+    // the displayed values are the restored ones at once, so the first picture after the load
+    // already shows the saved view.
+    close(40.0, camera.distance(), 5e-4);
     advance(&mut camera, 3.0);
     close(40.0, camera.distance(), 0.05);
+}
+
+/// AMD-045 REQ-SCN-073, first criterion: save in the default view, turn by 90° and zoom, then
+/// reload — the **first** picture after the load already shows the saved view, with no frame of
+/// smoothing from the view before.
+#[test]
+fn req_scn_073_a_reloaded_camera_does_not_slide_from_the_view_before() {
+    let mut camera = SceneCamera::new();
+    camera.snap_to_setpoints();
+    let saved = camera.capture();
+
+    camera.current_mut().angles = Vector3::new(0.81, 90.81, 0.0);
+    camera.current_mut().set_distance(40.0);
+    advance(&mut camera, 3.0);
+    assert!((camera.angles().y - 90.81).abs() < 0.05);
+
+    camera.restore(&saved);
+
+    // Already there, before any `advance`.
+    close(saved.tpv.angles.y, camera.angles().y, 5e-4);
+    close(saved.tpv.distance, camera.distance(), 5e-4);
+    // And the smoothing carries on from there rather than pulling back.
+    advance(&mut camera, 0.1);
+    close(saved.tpv.distance, camera.distance(), 5e-4);
+}
+
+/// AMD-045 REQ-SCN-073, second criterion: the window of REQ-SCN-006 comes back with its
+/// **remaining** time. Saved 1 s after a switch to FPV, it has 2 s left; the target is then
+/// reached by the smoothing for those 2 s and followed in the same frame afterwards
+/// (REQ-SCN-020).
+#[test]
+fn req_scn_073_the_transition_window_comes_back_with_its_remaining_time() {
+    let mut camera = SceneCamera::new();
+    camera.set_mode(CameraMode::Fpv);
+    advance(&mut camera, 1.0);
+    let saved = camera.capture();
+    close(2.0, saved.transition_remaining, 5e-3);
+
+    let mut reloaded = SceneCamera::new();
+    reloaded.restore(&saved);
+    close(2.0, reloaded.transition_remaining(), 5e-3);
+
+    // The target moves by 100 units: inside the window it is reached by the smoothing.
+    let target = reloaded.current().target;
+    reloaded.current_mut().target = target + Vector3::new(100.0, 0.0, 0.0);
+    advance(&mut reloaded, 0.4);
+    let reached = reloaded.target().x - target.x;
+    assert!(
+        (20.0..=60.0).contains(&reached),
+        "after one smoothing time the gap left is about 40, not {}",
+        100.0 - reached
+    );
+
+    // Once the window is over, the target is followed in the very same frame.
+    advance(&mut reloaded, 2.0);
+    let followed = reloaded.current().target;
+    reloaded.current_mut().target = followed + Vector3::new(100.0, 0.0, 0.0);
+    reloaded.advance(1.0 / 60.0);
+    close(followed.x + 100.0, reloaded.target().x, 5e-4);
 }
 
 #[test]

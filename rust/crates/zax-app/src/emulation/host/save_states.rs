@@ -9,6 +9,7 @@ use crate::audio::UiSound;
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::game_catalog::GameCatalog;
 use crate::emulation::notification_center::{NotificationSeverity, DEFAULT_SECONDS, SHORT_SECONDS};
+use crate::emulation::rollback_history::RollbackSnapshot;
 use crate::persistence::save_slots::{self, is_valid_slot_id, SaveSlotIndex, QUICK_SLOT_ID};
 use crate::persistence::save_state_file::{self, SaveStateContent, SaveStateHeader};
 use crate::user_data_paths::{remove_file_if_present, rom_file_stem, write_atomic};
@@ -318,16 +319,36 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.notifications
             .show("Roll Back", SHORT_SECONDS, NotificationSeverity::Normal);
         if let Some(snapshot) = self.rollback.take_rollback_target() {
-            // DEC-07-Q3: the core alone. Neither the camera nor the scripts' persistent data
-            // are restored, and no Save or Load hook runs (REQ-LUA-074).
-            if let Some(session) = self.session.as_mut() {
-                if let Err(error) = session.restore_core(&snapshot) {
-                    self.log(&format!("rollback snapshot refused: {error}"));
-                }
-            }
+            self.restore_snapshot(&snapshot);
         }
         // Step 3 applies even when nothing was restored (REQ-LOOP-032, notes).
         self.set_state(EmulationState::Running);
         self.pacer.reset();
+    }
+
+    /// Restores one snapshot of the history: the core, then the 64 `PData` values, then the
+    /// camera (AMD-042 REQ-LOOP-070).
+    ///
+    /// The `Save` and `Load` hooks of the scripts are never called by a rollback: the entries are
+    /// written back the way `SetPData` writes them, and the hooks stay reserved for savestates
+    /// and for serialisation (REQ-LOOP-070, REQ-LUA-074, REQ-LUA-075). The camera goes back
+    /// through `SceneCamera::restore`, the one path a savestate load also takes, so that the
+    /// "shown straight at its setpoints" of REQ-SCN-073 holds for both at once.
+    fn restore_snapshot(&mut self, snapshot: &RollbackSnapshot) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        if let Err(error) = session.restore_core(&snapshot.core) {
+            self.log(&format!("rollback snapshot refused: {error}"));
+            return;
+        }
+
+        if let Some(block) = snapshot.extras.persistent_data.as_ref() {
+            session.restore_rollback_data(block);
+        }
+
+        if let Some(camera) = snapshot.extras.camera.as_ref() {
+            self.scene.camera.restore(camera);
+        }
     }
 }

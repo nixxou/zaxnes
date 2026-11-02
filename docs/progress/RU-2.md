@@ -12,8 +12,8 @@ AMD-059) of `dotnetupdated` are read as a reference only.
 | 2 | The persisted settings the 2.0 `Setting` members stand for, handheld defaults, `EXCLUDED` | done — `1204603` |
 | 3 | AMD-040: the `CS` table and `Camera.ResetDistance` (with the two formulas of AMD-045) | done — `644bf51` |
 | 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | done — `7121e78` |
-| 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | done |
-| 6 | AMD-042: a rollback snapshot carries `PData` and the camera; the history is emptied at the end of a game | todo |
+| 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | done — `01cf39b` |
+| 6 | AMD-042: a rollback snapshot carries `PData` and the camera (with REQ-SCN-073) | done |
 | 7 | AMD-045: the camera of 3dSen 2.0 | todo |
 | 8 | Closing: fmt, clippy, tests in both binding modes, after benchmarks, API dump, journal | todo |
 
@@ -349,3 +349,56 @@ anything of this step: `goldens/render-synthetic/render.json`, scene `hud`, `bac
 and 6.9 · 10⁻⁵ unit on the camera distance (2.6 · 10⁻⁷ and 3.6 · 10⁻⁷ relative), which is enough
 to flip a pixel that sat exactly on an edge. The capture is still **100.000 %** of its pixels
 within 2 levels of the C# golden, so the PNG is unchanged and only the exact count follows.
+
+### Step 6 — AMD-042: the rollback carries `PData` and the camera
+
+**REQ-LOOP-069.** `RollbackHistory` now holds `RollbackSnapshot { core: Vec<u8>, extras }`, with
+`SnapshotExtras { persistent_data: Option<[u8; 256]>, camera: Option<CameraStateData> }`. Both
+extras are fixed-size and `Copy`, so the allocation-free steady state of the Rust history
+survives: `capture_with` still lends the oldest snapshot's **core buffer** to the next capture
+when the history is full, and only replaces its extras. 30 × (core + 256 bytes + a camera state)
+is what REQ-LOOP-069 asks for.
+
+The capture site (`emulation/host/mod.rs`, in the frame loop, once every 60 emulated frames)
+reads the `PData` block and the camera before taking the core buffer. Neither read runs a script
+or lends anything to the Lua state: `GameSession::capture_rollback_data` goes straight to the
+runtime through `engine.with_script_host`, which is the path `exchange_model` already used, and
+reads 64 table entries. It is inside the `stage_clock` span the profiler already had for the
+rollback, so the cost shows up where it belongs.
+
+**REQ-LOOP-070.** `perform_rollback` now calls one `restore_snapshot`: the core, then the 64
+`PData` values (`restore_rollback_data`, which writes them the way `SetPData` does), then the
+camera through `SceneCamera::restore`. If the core refuses the state, nothing else is restored —
+putting a script's data back beside a core that did not move would be worse than not moving at
+all. No `Save` and no `Load` hook is called anywhere on this path, which a test checks by
+reading what the hooks print.
+
+**REQ-SCN-073 came in with it** rather than waiting for step 7: REQ-LOOP-070 requires the
+restored camera to be shown **directly** at its setpoints, so `SceneCamera::restore` now snaps
+the displayed values and resets the smoothing velocities, and the transition window comes back as
+a remaining time clamped to `[0, 3]` s — which is how AMD-042 amends REQ-SCN-024, it spoke of a
+deadline. `restore` is the single path a savestate load, a quick load and a rollback all take, so
+the three snap the same way.
+
+**REQ-LOOP-071 already held.** The Rust `stop_current_game(clear_current_game = true)` clears the
+history, and that is what the end of a game — the return to the library — goes through. Nothing
+was added for it; the acceptance criterion is now a test, which is what the .NET lot did too.
+
+**AMD-042 adds no Lua member**, so `CORE_MEMBERS` is untouched (see the table above).
+`separate_core_tests` (5) and `pause_3d_tests` (3) pass: the capture is a read of the core that
+is **home** — it sits after `take_core_back()` in the tick, where the frame counter is read
+anyway — so emulation-ahead and pipelining see no change.
+
+What DEC-07-Q3 said is now the amendment's: the test
+`dec_07_q3_a_rollback_leaves_the_camera_alone` is gone, replaced by
+`req_loop_070_a_rollback_puts_the_camera_back_where_it_was`.
+
+Tests: `rollback_tests.rs` 20 (5 new or replaced) — the camera put back and shown straight away,
+the `PData` criterion of REQ-LOOP-070 (a profile writing `frame` into `PData[0]`, 10.5 s of play,
+rollback, the entry back at 539 and no longer 629 — 539 because the snapshot is taken at the
+**start** of the frame 540, before it runs), no `Save` or `Load` hook, the end of a game emptying
+the history, and the extras travelling with the recycled core buffer.
+`zax-render/tests/camera_tests.rs`: the two criteria of REQ-SCN-073 (a reloaded camera that does
+not slide, and the window restored with its remaining time, reached by the smoothing for 2 s and
+followed in the same frame afterwards); the REQ-SCN-024 test that asserted the **old** behaviour
+("not snapped") now asserts the new one, naming the amendment.

@@ -29,8 +29,9 @@ use zax_profiles::profile::GameProfile;
 use zax_profiles::setting_application;
 use zax_render::scene::SceneState;
 use zax_scripting::{
-    lend_context, LuaScriptError, ProfileScriptRuntime, ScriptContext, ScriptEnvironment,
-    ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptProfileInfo, ScriptSettings,
+    lend_context, persistent, LuaScriptError, ProfileScriptRuntime, ScriptContext,
+    ScriptEnvironment, ScriptInput, ScriptLight, ScriptLog, ScriptMemory, ScriptProfileInfo,
+    ScriptSettings,
 };
 use zax_settings::catalogue::{Port, SettingId};
 use zax_settings::model::SettingsModel;
@@ -860,6 +861,39 @@ impl GameSession {
                 })
                 .unwrap_or_else(|| Ok(Vec::new()))
         })
+    }
+
+    /// The 64 `PData` values a rollback snapshot carries (AMD-042 REQ-LOOP-069), read the way
+    /// `GetPData(i)` reads them. The `Save` hook is **not** called: it stays reserved for
+    /// savestates and for serialisation (REQ-LOOP-070, REQ-LUA-075).
+    ///
+    /// Nothing is lent to the Lua state and no script runs, so this is a read of 64 table
+    /// entries and nothing more — it sits in the frame loop, once every 60 frames.
+    pub fn capture_rollback_data(&mut self) -> Option<[u8; persistent::BLOCK_SIZE]> {
+        self.engine
+            .with_script_host::<ProfileScriptRuntime, _>(|runtime, _| {
+                runtime.capture_persistent_data().ok()
+            })
+            .flatten()
+    }
+
+    /// The value of `PData[index]`, as `GetPData(index - 1)` reads it, or `None` without a Lua
+    /// runtime. No script runs and nothing is lent.
+    pub fn read_persistent_data(&mut self, index: i64) -> Option<f64> {
+        self.engine
+            .with_script_host::<ProfileScriptRuntime, _>(|runtime, _| {
+                runtime.read_persistent_data(index).ok()
+            })
+            .flatten()
+    }
+
+    /// Writes the 64 `PData` values of a rollback snapshot back, exactly as `SetPData` would
+    /// (AMD-042 REQ-LOOP-070). The `Load` hook is **not** called.
+    pub fn restore_rollback_data(&mut self, block: &[u8]) {
+        self.engine
+            .with_script_host::<ProfileScriptRuntime, _>(|runtime, _| {
+                let _ = runtime.restore_persistent_data(block);
+            });
     }
 
     /// Puts the scripts' state back and runs `Start` then `Load` (REQ-LUA-072, DEC-R2-T6).

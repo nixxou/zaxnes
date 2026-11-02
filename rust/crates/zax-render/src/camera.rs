@@ -63,11 +63,14 @@ pub struct CameraModeState {
 }
 
 /// The camera state a savestate holds (SPEC-06 REQ-SCN-024): the current mode, the setpoints of
-/// **both** modes and the deadline of the mode transition window.
+/// **both** modes and what is left of the mode transition window.
 ///
 /// This is data only: writing it to a savestate file is SPEC-07's business. On restore the
-/// setpoints go back as they are and the displayed camera joins them through the smoothing of
-/// REQ-SCN-019 — it is not snapped.
+/// setpoints go back as they are and the displayed camera takes them immediately, with its
+/// smoothing velocities reset (AMD-045 REQ-SCN-073); the window comes back as a remaining time
+/// bounded to `[0, 3]` s, which is how AMD-042 amends REQ-SCN-024 — it spoke of a deadline. It
+/// is also the single reference for what a rollback snapshot carries of the camera
+/// (REQ-LOOP-069).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraStateData {
     /// The current mode.
@@ -383,13 +386,24 @@ impl SceneCamera {
     }
 
     /// Puts back a state [`capture`](Self::capture) produced (REQ-SCN-024). The displayed values
-    /// are **not** snapped: they join the restored setpoints through the smoothing of
-    /// REQ-SCN-019.
+    /// are snapped onto the restored setpoints at once and the smoothing velocities go back to
+    /// zero, so the first picture after the load already shows the saved view (AMD-045
+    /// REQ-SCN-073, which replaces « the displayed camera joins them through the smoothing »).
+    /// What is left of the transition window is restored as a remaining time bounded to
+    /// `[0, 3]` s (AMD-042, which amends REQ-SCN-024 — it spoke of a deadline).
+    ///
+    /// This is the single entry point for every reload of the camera — a savestate, a quick save
+    /// and a rollback snapshot (AMD-042 REQ-LOOP-070) — so they all snap the same way. A file
+    /// written by another build, or one predating the amendment, can therefore never leave the
+    /// window stuck open either.
     pub fn restore(&mut self, state: &CameraStateData) {
         self.apply(CameraMode::Tpv, &state.tpv);
         self.apply(CameraMode::Fpv, &state.fpv);
         self.mode = state.mode;
-        self.transition_remaining = state.transition_remaining.max(0.0);
+        self.transition_remaining = state
+            .transition_remaining
+            .clamp(0.0, geometry::MODE_TRANSITION_SECONDS);
+        self.snap_to_setpoints();
     }
 
     /// Puts the displayed values on the setpoints at once, without smoothing.
