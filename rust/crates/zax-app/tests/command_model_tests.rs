@@ -84,6 +84,8 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         ToggleMovieRecording,
         PlayMovie,
         StopMovie,
+        // Rust-only (EDITOR-1): going to a frame of the movie being played.
+        SeekMovie,
         AnnotateMovie,
         // Rust-only (owner request): stepping frame by frame.
         FrameBack,

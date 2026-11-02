@@ -189,6 +189,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     pause_thumbnail: Option<Vec<u8>>,
     /// The file of the movie being played, where the notes written on it go.
     movie_file: Option<std::path::PathBuf>,
+    /// The checkpoints of the movie being played and the seek under way (EDITOR-1); `None`
+    /// unless a movie plays.
+    movie_timeline: Option<super::movie_timeline::MovieTimeline>,
     job: Option<jobs::LoadJob>,
     loading: bool,
     confirmation: Option<ConfirmationRequest>,
@@ -353,6 +356,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             game_options_rom: None,
             pause_thumbnail: None,
             movie_file: None,
+            movie_timeline: None,
             job: None,
             loading: false,
             confirmation: None,
@@ -709,6 +713,12 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return 0;
         }
         self.apply_commands();
+        if self.advance_movie_seek() {
+            // A seek takes the tick: its frames are the movie's, not the pacer's.
+            self.dispatch_setting_changes();
+            self.publish_state();
+            return 0;
+        }
         self.check_movie_end();
         self.follow_the_3d_pause();
         let ahead = self.runs_ahead();
@@ -898,20 +908,32 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
             // it carries the 64 `PData` values and the camera state as well, read as they stand
             // at that instant and with no script hook involved.
-            if self.rollback_enabled
+            // EDITOR-1: a movie being played keeps a checkpoint on those frames as well: one more
+            // `bool` read beside `rollback_enabled`, and nothing more unless the frame is one.
+            if (self.rollback_enabled || self.movie_timeline.is_some())
                 && RollbackHistory::is_snapshot_frame(session.core().frame_count())
             {
-                let started = self.stage_clock.start();
-                let extras = SnapshotExtras {
-                    persistent_data: session.capture_rollback_data(),
-                    camera: Some(self.scene.camera.capture()),
-                };
-                let core = session.core();
-                // A failure (no ROM) leaves the history as it was, as before.
-                let _ = self
-                    .rollback
-                    .capture_with(extras, |buffer| core.save_state_to(false, buffer));
-                self.stage_clock.stop(Stage::Rollback, started);
+                if let Some(timeline) = self.movie_timeline.as_mut() {
+                    let frame_count = session.core().frame_count();
+                    if timeline.wants(frame_count) {
+                        if let Ok(state) = session.core().save_state(false) {
+                            timeline.record(frame_count, state);
+                        }
+                    }
+                }
+                if self.rollback_enabled {
+                    let started = self.stage_clock.start();
+                    let extras = SnapshotExtras {
+                        persistent_data: session.capture_rollback_data(),
+                        camera: Some(self.scene.camera.capture()),
+                    };
+                    let core = session.core();
+                    // A failure (no ROM) leaves the history as it was, as before.
+                    let _ = self
+                        .rollback
+                        .capture_with(extras, |buffer| core.save_state_to(false, buffer));
+                    self.stage_clock.stop(Stage::Rollback, started);
+                }
             }
             let core = session.core();
             // Every frame, for stepping back one at a time (J).

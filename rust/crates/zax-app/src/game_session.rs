@@ -281,6 +281,10 @@ pub struct GameSession {
     /// played (its frames are shown as they are, not one ahead computed with the movie's last
     /// word). Recomputed when either changes, so the loop still tests one `bool`.
     run_ahead_held_at_zero: bool,
+    /// Whether no script names a member that reads or drives the core ([`CORE_MEMBERS`]), so
+    /// that the core's frames follow from the inputs alone: a movie's frames may then run without
+    /// the scripts (the timeline of a seek). Decided once at profile load.
+    core_follows_the_inputs: bool,
 }
 
 /// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
@@ -452,9 +456,11 @@ impl GameSession {
             run_ahead: 0,
             run_ahead_forced_to_zero: false,
             run_ahead_held_at_zero: false,
+            core_follows_the_inputs: false,
             pipeline: FramePipeline::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
+        session.core_follows_the_inputs = session.pipeline.ahead_allowed;
         // Q-103: the guard-rail is decided here, once, and nothing of it reaches the frame loop.
         session.run_ahead_forced_to_zero = scripts_change_the_core(profile);
         session.run_ahead_held_at_zero = session.run_ahead_forced_to_zero;
@@ -979,6 +985,36 @@ impl GameSession {
             .as_ref()
             .is_some_and(|movie| movie.mode() == zax_nes::movie::MovieMode::Playing);
         self.run_ahead_held_at_zero = self.run_ahead_forced_to_zero || playing;
+    }
+
+    /// Whether no script reads or drives the core, so that the core's frames follow from the
+    /// inputs alone.
+    #[must_use]
+    pub const fn core_follows_the_inputs(&self) -> bool {
+        self.core_follows_the_inputs
+    }
+
+    /// Runs the frame of the movie being played with the core alone: no input hook, no capture,
+    /// no conversion, no frame hook (a seek, when [`GameSession::core_follows_the_inputs`]).
+    /// Returns `false`, running nothing, outside the movie.
+    pub fn run_movie_frame_core_only(&mut self) -> bool {
+        let frame_count = self.core.frame_count();
+        let Some(word) = self
+            .movie
+            .as_ref()
+            .and_then(|movie| movie.word_at(frame_count))
+        else {
+            return false;
+        };
+        self.core.run_frame(word);
+        true
+    }
+
+    /// A seek took the movie being played back inside its frames.
+    pub fn rewind_movie(&mut self) {
+        if let Some(movie) = self.movie.as_mut() {
+            movie.rewind();
+        }
     }
 
     /// The movie being recorded or played.

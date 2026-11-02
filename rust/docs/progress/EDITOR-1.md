@@ -8,14 +8,14 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 |---|---|---|
 | 1 | Exploration and design note (this file); owner's approval | done |
 | 2 | `.fm2` reader and its tests | done (`zax-nes/src/movie/fm2.rs`) |
-| 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | 3a done (`.fm2` plays through `tools.play_movie`, run-ahead held at 0); 3b checkpoints + seek to do |
+| 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | done |
 | 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | to do |
 | 5 | Script reload, fast and exact, with the core-changing guard | to do |
 | 6 | MCP server (Cargo feature, off by default) and its commands; end-to-end test | to do |
 | 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
 | L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
-Next step: 3b, the timeline: checkpoints every 60 frames over the whole movie, seek both ways.
+Next step: 4, the seek bar in the window (ImGui, desktop).
 
 ## What exists already (and changes the plan)
 
@@ -152,6 +152,16 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
 4. Seek levels and checkpoint memory (whole movie, ~12 MiB for 10 minutes): agreed?
 
 ## Notes
+
+* 3b: `emulation/movie_timeline.rs` + `host/movies.rs`. A checkpoint (core state, no ROM) on every
+  core frame count multiple of 60 while a movie plays, kept for the whole movie; taken in the
+  branch the rollback snapshot already uses (one more `bool` read per frame beside
+  `rollback_enabled`). `tools.seek_movie <frame>`: from the checkpoint 60 frames before the
+  target, the core alone (when no script reads or drives the core) then 60 warm frames with the
+  scripts; 12 ms of work per tick so the window stays responsive; sound off meanwhile. A movie
+  with a timeline stops paused on its last frame instead of giving the game back. Tests:
+  seeks back, forward, past what was played and to the start land on the RAM of a straight
+  playback (`fm2_movie_tests`). Whole `zax-app` suite green.
 
 * 3a: `tools.play_movie` with an `.fm2` path powers the game on (`GameSession::reset`: `End`,
   power cycle, `Start`), takes that as the start state and plays the pads; region / ROM / resets

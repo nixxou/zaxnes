@@ -12,6 +12,9 @@ use zax_nes::movie::fm2::Fm2Movie;
 use zax_nes::movie::{Movie, MovieMode};
 use zax_nes::NesRegion;
 
+use crate::emulation::movie_timeline::{MovieTimeline, WARM_FRAMES};
+use crate::input::InputAction;
+
 use super::{EmulationHost, GameView};
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::game_catalog::GameCatalog;
@@ -80,6 +83,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         match session.start_movie_playback(movie) {
             Ok(()) => {
                 self.movie_file = Some(PathBuf::from(path));
+                self.start_movie_timeline();
                 self.rollback.clear();
                 self.frame_steps.clear();
                 if wanted_options.is_some_and(|bits| bits != u64::from(self.hack_option_bits())) {
@@ -173,6 +177,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             return;
         }
         self.movie_file = Some(PathBuf::from(path));
+        self.start_movie_timeline();
         self.rollback.clear();
         self.frame_steps.clear();
         self.log(&format!("fm2 movie: {path}, {frames} frames"));
@@ -187,6 +192,144 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 DEFAULT_SECONDS,
                 NotificationSeverity::Warning,
             );
+        }
+    }
+
+    /// The timeline of the movie that has just started playing: its start state is the first
+    /// checkpoint (EDITOR-1).
+    fn start_movie_timeline(&mut self) {
+        self.movie_timeline = self.session.as_ref().and_then(|session| {
+            let movie = session.movie()?;
+            let core = session.core();
+            let start_frame = core.frame_count();
+            let state = core.save_state(false).ok()?;
+            Some(MovieTimeline::new(
+                start_frame,
+                u32::try_from(movie.movie().inputs.len()).unwrap_or(u32::MAX),
+                state,
+                session.core_follows_the_inputs(),
+            ))
+        });
+    }
+
+    /// Drops the timeline, the seek under way with it (the sound given back).
+    fn end_movie_timeline(&mut self) {
+        let seeking = self
+            .movie_timeline
+            .take()
+            .is_some_and(|timeline| timeline.seek_target().is_some());
+        if seeking {
+            self.end_seek_sound();
+        }
+    }
+
+    /// Goes to the movie frame `frame` (`tools.seek_movie`): the seek runs over the next ticks.
+    pub(super) fn seek_movie(&mut self, frame: i32) {
+        if let Some(timeline) = self.movie_timeline.as_mut() {
+            timeline.seek(u32::try_from(frame).unwrap_or(0));
+        }
+    }
+
+    /// The movie frame on screen and the movie's length, while a movie plays with a timeline.
+    #[must_use]
+    pub fn movie_position(&self) -> Option<(u32, u32)> {
+        let timeline = self.movie_timeline.as_ref()?;
+        let frame_count = self.session.as_ref()?.core().frame_count();
+        Some((timeline.movie_frame(frame_count), timeline.length()))
+    }
+
+    /// The seek under way, as the movie frame it is heading for.
+    #[must_use]
+    pub fn movie_seek_target(&self) -> Option<u32> {
+        let timeline = self.movie_timeline.as_ref()?;
+        timeline
+            .seek_target()
+            .map(|target| timeline.movie_frame(target))
+    }
+
+    /// The furthest movie frame that has a checkpoint, for the bar.
+    #[must_use]
+    pub fn movie_explored(&self) -> Option<u32> {
+        let timeline = self.movie_timeline.as_ref()?;
+        Some(timeline.movie_frame(timeline.furthest_checkpoint()))
+    }
+
+    /// Once a tick, before the frames: advances the seek under way for at most
+    /// [`SEEK_BUDGET`] — from a checkpoint, the core alone up to [`WARM_FRAMES`] before the
+    /// target when the scripts leave the core alone, then whole frames (input hook, conversion,
+    /// frame hooks). The sound is off meanwhile. Returns whether a seek took the tick.
+    pub(super) fn advance_movie_seek(&mut self) -> bool {
+        let Some(target) = self
+            .movie_timeline
+            .as_ref()
+            .and_then(MovieTimeline::seek_target)
+        else {
+            return false;
+        };
+        self.complete_frame_in_flight();
+        let (Some(session), Some(timeline)) = (self.session.as_mut(), self.movie_timeline.as_mut())
+        else {
+            return false;
+        };
+        session
+            .core_mut()
+            .bus_mut()
+            .apu_mut()
+            .set_output_enabled(false);
+        let current = session.core().frame_count();
+        if let Some((_, state)) = timeline.seek_origin(current, target) {
+            if let Err(error) = session.restore_core(state) {
+                timeline.end_seek();
+                self.end_seek_sound();
+                self.log(&format!("movie seek failed: {error}"));
+                return false;
+            }
+        }
+        session.rewind_movie();
+        let deadline = std::time::Instant::now() + SEEK_BUDGET;
+        loop {
+            let (Some(session), Some(timeline)) =
+                (self.session.as_mut(), self.movie_timeline.as_mut())
+            else {
+                return false;
+            };
+            let frame_count = session.core().frame_count();
+            if frame_count >= target {
+                break;
+            }
+            if timeline.wants(frame_count) {
+                if let Ok(state) = session.core().save_state(false) {
+                    timeline.record(frame_count, state);
+                }
+            }
+            if timeline.core_only_allowed() && frame_count < target - WARM_FRAMES {
+                if !session.run_movie_frame_core_only() {
+                    break;
+                }
+            } else {
+                self.run_session_frame(InputAction::NONE, InputAction::NONE);
+                self.complete_frame_in_flight();
+            }
+            if std::time::Instant::now() >= deadline {
+                return true;
+            }
+        }
+        if let Some(timeline) = self.movie_timeline.as_mut() {
+            timeline.end_seek();
+        }
+        self.end_seek_sound();
+        self.rollback.clear();
+        self.frame_steps.clear();
+        self.pacer.reset();
+        true
+    }
+
+    /// The sound comes back after a seek, without the samples of the frames it ran.
+    fn end_seek_sound(&mut self) {
+        if let Some(session) = self.session.as_mut() {
+            let apu = session.core_mut().bus_mut().apu_mut();
+            apu.set_output_enabled(true);
+            apu.drop_pending_samples();
         }
     }
 
@@ -229,6 +372,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             .as_ref()
             .and_then(GameSession::movie)
             .is_some_and(zax_nes::movie::MovieRun::played_out);
+        if finished && self.movie_timeline.is_some() {
+            // With a timeline (EDITOR-1) the movie stops on its last frame like a video, paused,
+            // until it is stopped; a catch-up may have run a frame past the end, the seek brings
+            // it back.
+            if let Some(timeline) = self.movie_timeline.as_mut() {
+                timeline.seek(timeline.length());
+            }
+            self.pause();
+            self.notify(&text("End of the movie", "Fin du film"));
+            return;
+        }
         if finished {
             self.finish_movie();
             self.notify(&text("Movie finished", "Film terminé"));
@@ -238,6 +392,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     /// Ends the movie being recorded or played, if any: a recording is saved to a new file, the
     /// notes written on a played one to its file.
     pub(super) fn finish_movie(&mut self) {
+        self.end_movie_timeline();
         let mode = self.movie_mode();
         let header = self.movie_header();
         let Some(run) = self.session.as_mut().and_then(|session| {
@@ -418,6 +573,10 @@ fn text(english: &str, french: &str) -> String {
         english.to_owned()
     }
 }
+
+/// The time a seek may take from one tick, so that the window stays responsive while it runs
+/// through thousands of frames.
+const SEEK_BUDGET: std::time::Duration = std::time::Duration::from_millis(12);
 
 /// Whether `path` names an `.fm2` movie (FCEUX's text format), by its extension.
 fn is_fm2(path: &Path) -> bool {

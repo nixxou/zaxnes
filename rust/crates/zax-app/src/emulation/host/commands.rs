@@ -92,6 +92,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                     && args.text.as_deref().is_some_and(|text| !text.is_empty())
             }
             Command::StopMovie | Command::AnnotateMovie => !loading && self.movie_mode().is_some(),
+            Command::SeekMovie => !loading && self.movie_timeline.is_some() && args.number >= 0,
             Command::OpenRecentRom
             | Command::Quit
             | Command::SetSpeed
@@ -209,6 +210,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Command::ToggleMovieRecording => self.toggle_movie_recording(),
             Command::PlayMovie => self.play_movie(args.text.as_deref().unwrap_or_default()),
             Command::StopMovie => self.stop_movie(),
+            Command::SeekMovie => self.seek_movie(args.number),
             Command::AnnotateMovie => self.annotate_movie(args),
         }
     }

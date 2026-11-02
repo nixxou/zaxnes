@@ -211,6 +211,22 @@ impl MovieRun {
         u32::try_from(frame_count - self.start_frame).ok()
     }
 
+    /// The movie's word for the frame about to run at the core's frame count `frame_count`, with
+    /// nothing changed: `None` outside the movie or while recording.
+    #[must_use]
+    pub fn word_at(&self, frame_count: i64) -> Option<u16> {
+        if self.mode != MovieMode::Playing {
+            return None;
+        }
+        let frame = self.frame_at(frame_count)?;
+        self.movie.inputs.get(frame as usize).copied()
+    }
+
+    /// A played movie taken back inside its frames (a seek): it is no longer played out.
+    pub fn rewind(&mut self) {
+        self.played_out = false;
+    }
+
     /// The input word of the frame about to run at the core's frame count `frame_count`, the
     /// player's being `word`: recorded, or replaced by the movie's.
     pub fn input(&mut self, frame_count: i64, word: u16) -> u16 {

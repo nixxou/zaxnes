@@ -223,6 +223,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.tools.record_movie", "Record a movie"),
     ("cmd.tools.play_movie", "Play a movie"),
     ("cmd.tools.stop_movie", "Stop the movie"),
+    ("cmd.tools.seek_movie", "Go to a frame of the movie"),
     ("cmd.tools.annotate_movie", "Note on this frame…"),
     ("cmd.ui.cancel_modal", "Close the modal window"),
     ("cmd.ui.toggle_debug_overlay", "Statistics panel"),
