@@ -11,11 +11,11 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 | 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | done |
 | 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | done (owner's visual check pending) |
 | 5 | Script reload, fast and exact, with the core-changing guard | done |
-| 6 | MCP server (Cargo feature, off by default) and its commands; end-to-end test | to do |
+| 6 | MCP server (off by default, `--mcp`) and its commands; end-to-end test | done (HTTP test; Claude Code connection by the owner) |
 | 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
 | L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
-Next step: 6, the MCP server (`--mcp`).
+Next step: 7, the end-of-lot checks (workspace tests, goldens, bench-core, portable builds).
 
 ## What exists already (and changes the plan)
 
@@ -152,6 +152,13 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
 4. Seek levels and checkpoint memory (whole movie, ~12 MiB for 10 minutes): agreed?
 
 ## Notes
+
+* 6: `zax-app/src/mcp/` (server.rs: Streamable HTTP on 127.0.0.1, Origin check, base64;
+  tools.rs: the tools, run on the main thread after the frame is drawn, seeks answered on
+  arrival). No Cargo feature: owner's choice, in every build but off without `--mcp`. Checked with
+  curl against the running window: initialize, status, seek 20 000 (3 s, explorer just there),
+  2D and 3D screenshots, read_ram, exact reload at 20 000, get_log, a foreign Origin refused
+  (403). Usage page `docs/EDITOR.md`.
 
 * 5: `host/script_reload.rs`, `tools.reload_script` (F5; number 1 = exact), Tools menu. The
   catalogue forgets the cached profile (`GameCatalog::forget_profile`) and the session is made
