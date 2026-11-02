@@ -1,5 +1,6 @@
 using KeraLua;
 using Zax.Engine3D;
+using Zax.Settings;
 
 namespace Zax.Scripting;
 
@@ -200,18 +201,34 @@ internal static partial class LuaApi
     internal const string InfoTitle = "Zaxnes";
 
     /// <summary>
-    /// Installs the global <c>CS</c> of AMD-040 REQ-LUA-112: three nested tables ending in
-    /// <c>CS.Nes3D.Info</c>, which carries <c>Version</c> and <c>Title</c>.
+    /// What <c>CS.Nes3D.CameraControl.DistanceMax</c> reads (AMD-059 REQ-LUA-117): the upper
+    /// bound the camera setpoint distance has in REQ-SCN-011. It is a constant of the table, not
+    /// the live bound — <c>Camera.MaxDistance</c> is the one that follows the scene scale.
+    /// </summary>
+    internal const double CameraDistanceMax = 512d;
+
+    /// <summary>
+    /// What <c>CS.Nes3D.SettingManager.DefaultMsaa</c> reads (REQ-LUA-117): the default of
+    /// <c>Setting.Msaa</c>, which REQ-LUA-116 fixes at 2.
+    /// </summary>
+    internal const double DefaultMsaa = 2d;
+
+    /// <summary>
+    /// Installs the global <c>CS</c> of AMD-040 REQ-LUA-112, completed by AMD-059 REQ-LUA-117:
+    /// <c>CS.Nes3D</c> carries four tables — <c>Info</c> (<c>Version</c>, <c>Title</c>),
+    /// <c>CameraControl</c> (<c>DistanceMax</c>), <c>SettingManager</c> (<c>DefaultMsaa</c>) and
+    /// <c>VisualStyle</c> (<c>Classic</c>, <c>SoftPixelLight</c>).
     /// </summary>
     /// <remarks>
     /// Each level is a shell whose fields live in a table only its metatable can reach. Reading
     /// a field the requirement does not name therefore gives nil without an error, and a write
-    /// anywhere in the three tables is dropped — it cannot reach the program, and it cannot
+    /// anywhere in these tables is dropped — it cannot reach the program, and it cannot
     /// disturb what the next script reads either. The metatable is hidden, so a script cannot
     /// take it off.
     /// </remarks>
     private static void InstallInfoTable(LuaBinder binder, Lua state)
     {
+        // The four leaves of CS.Nes3D, pushed in the order Group names them.
         Shell(binder, state, s =>
         {
             s.PushString("Version");
@@ -222,7 +239,19 @@ internal static partial class LuaApi
             s.RawSet(-3);
         });
 
-        Wrap(binder, state, "Info");
+        Shell(binder, state, static s => Field(s, "DistanceMax", CameraDistanceMax));
+        Shell(binder, state, static s => Field(s, "DefaultMsaa", DefaultMsaa));
+
+        // REQ-LUA-117: the two style identifiers as numbers, so that they compare with
+        // Setting.VisualStyle and serve as arguments of the style-parameter methods. 4 is
+        // Enhanced, which the original program calls « soft pixel light » (AMD-055 REQ-SCN-078).
+        Shell(binder, state, static s =>
+        {
+            Field(s, "Classic", SettingsCatalogue.ClassicStyle);
+            Field(s, "SoftPixelLight", SettingsCatalogue.EnhancedStyle);
+        });
+
+        Group(binder, state, ["Info", "CameraControl", "SettingManager", "VisualStyle"]);
         Wrap(binder, state, "Nes3D");
         state.SetGlobal("CS");
         return;
@@ -238,6 +267,41 @@ internal static partial class LuaApi
             fill(state);
             state.RawSet(-3);
             Seal(binder, state);
+        }
+
+        // One numeric field of the table on top of the stack.
+        static void Field(Lua state, string name, double value)
+        {
+            state.PushString(name);
+            state.PushNumber(value);
+            state.RawSet(-3);
+        }
+
+        // Replaces the 'names.Length' values on top of the stack by one sealed table whose
+        // fields name them, in order.
+        static void Group(LuaBinder binder, Lua state, string[] names)
+        {
+            int first = state.GetTop() - names.Length + 1;
+
+            state.NewTable();
+            state.NewTable();
+            state.PushString("__index");
+            state.NewTable();
+            for (int i = 0; i < names.Length; i++)
+            {
+                state.PushString(names[i]);
+                state.PushCopy(first + i);
+                state.RawSet(-3);
+            }
+
+            state.RawSet(-3);
+            Seal(binder, state);
+
+            // The shell is on top; the leaves below it have served their purpose.
+            for (int i = 0; i < names.Length; i++)
+            {
+                state.Remove(first);
+            }
         }
 
         // Replaces the value on top of the stack by a sealed table whose single field 'name'
