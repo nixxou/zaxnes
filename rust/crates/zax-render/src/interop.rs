@@ -235,6 +235,24 @@ pub fn picture_quad() -> Result<TileMesh, TriangleCountError> {
 /// the overscan's cut sides seen through the camera), transparent in the picture's texture.
 pub const HIDDEN_PIXEL: u8 = 0xFF;
 
+/// The bits of a byte of the core's picture that carry the NES colour index (SPEC-02
+/// REQ-CORE-048, 0 to 63).
+///
+/// The renderer does not depend on the core — it only reads the bytes the host lends it — so the
+/// layout of that byte is written out here beside [`HIDDEN_PIXEL`], which is the renderer's own
+/// value in the same byte. `zax_nes::ppu::PIXEL_COLOR` and `OPAQUE_PIXEL` are the same two
+/// values, and a test of this crate asserts that they agree.
+pub const PIXEL_COLOR: u8 = 0x3F;
+
+/// The bit of a byte of the core's picture that carries the opacity mask of AMD-050
+/// REQ-CORE-049: 1 where the PPU produced at least one opaque pixel there, 0 where the picture
+/// shows the universal backdrop for want of one.
+///
+/// REQ-SCN-076 makes a pixel whose bit is 0 transparent in the 2D-mode rectangle. A pixel whose
+/// bit is 1 is drawn even when its palette colour *is* the universal backdrop's, which is
+/// exactly what the index image alone cannot express.
+pub const OPAQUE_PIXEL: u8 = 0x40;
+
 /// The width and height in pixels of a 2D-mode picture of `len` colour indices in `height` rows
 /// (0 reads as 240): 256 x 240, or wider and taller by widescreen margins on each side; `None`
 /// for any other size.

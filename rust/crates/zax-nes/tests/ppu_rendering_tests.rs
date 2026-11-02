@@ -5,14 +5,16 @@
 mod common;
 
 use common::TileFixture;
-use zax_nes::ppu::{SpriteLimit, SCREEN_WIDTH};
+use zax_nes::ppu::{SpriteLimit, PIXEL_COLOR, SCREEN_WIDTH};
 use zax_nes::NesCore;
 
 /// Pattern $FF: plane 0 all ones, plane 1 all zeros, so every pixel is colour 1.
 const SOLID_TILE: u8 = 0xFF;
 
+/// The NES colour index of REQ-CORE-048 at `(x, y)`: the stored byte with the opacity bit of
+/// AMD-050 REQ-CORE-049 masked off (`PIXEL_COLOR`).
 fn pixel_at(core: &NesCore, x: usize, y: usize) -> u8 {
-    core.pixel_frame()[(y * SCREEN_WIDTH) + x]
+    core.pixel_frame_with_mask()[(y * SCREEN_WIDTH) + x] & PIXEL_COLOR
 }
 
 #[test]
@@ -22,12 +24,15 @@ fn req_core_048_a_disabled_screen_is_filled_with_the_universal_backdrop() {
     fixture.set_mask(0x00);
     fixture.next_batch();
 
-    assert_eq!(256 * 240, fixture.core.pixel_frame().len());
-    assert!(fixture
-        .core
-        .pixel_frame()
-        .iter()
-        .all(|&color| color == 0x21));
+    assert_eq!(256 * 240, fixture.core.pixel_frame_with_mask().len());
+    assert!(
+        fixture
+            .core
+            .pixel_frame_with_mask()
+            .iter()
+            .all(|&byte| byte == 0x21),
+        "rendering off: the backdrop, and the opacity bit clear"
+    );
 }
 
 #[test]

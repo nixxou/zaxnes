@@ -47,6 +47,19 @@ pub const PALETTE_SIZE: usize = 32;
 /// the host can announce a state size before serialising (REQ-ARCH-013).
 pub const MAX_TILE_RECORD_STATE_SIZE: usize = 12 + TileBuffer::CAPACITY * 26;
 
+/// The bits of a byte of the picture that carry the NES colour index of REQ-CORE-048 (0 to 63).
+pub const PIXEL_COLOR: u8 = 0x3F;
+
+/// The bit of a byte of the picture that carries the opacity mask of AMD-050 REQ-CORE-049: 1
+/// where the PPU produced at least one opaque pixel, 0 where the picture shows the universal
+/// backdrop for want of one.
+///
+/// This is the internal layout the amendment's note allows ("Cette disposition n'est pas exigée
+/// pour une interface interne"): the recommended 32-bytes-a-row bit array is for a native
+/// interface, and carrying the bit in a spare bit of the picture is what makes the mask cost the
+/// PPU nothing at all ([`Ppu2C02::palette_marked`]).
+pub const OPAQUE_PIXEL: u8 = 0x40;
+
 /// Width of the optional 2D image, in pixels (REQ-CORE-048).
 pub const SCREEN_WIDTH: usize = 256;
 
@@ -110,6 +123,18 @@ pub struct Ppu2C02 {
     vram_clock: u32,
     oam: [u8; OAM_SIZE],
     palette: [u8; PALETTE_SIZE],
+    /// `palette` with the opacity bit of AMD-050 REQ-CORE-049 already set on every entry but
+    /// entry 0: `palette[i] | 0x40` for `i ≥ 1`, `palette[0]` for entry 0.
+    ///
+    /// Derived, so it is **not** in the state blob (`ppu/state.rs` writes `palette` alone) and is
+    /// rebuilt wherever `palette` is written — the one register write, the power-up fill and the
+    /// state restore, none of them in a per-pixel path.
+    ///
+    /// It is what makes the opacity mask free. The pixel functions resolve a palette **index**
+    /// that is 0 exactly where the pixel is transparent (see `render::span_pixel`), so reading
+    /// this table instead of `palette`, with the colour mask widened to `0x7F`/`0x70`, carries
+    /// the bit with the same indexed load and the same `AND` as before the amendment.
+    palette_marked: [u8; PALETTE_SIZE],
     decay_stamp: [i64; 8],
 
     timing: RegionTiming,
@@ -259,6 +284,7 @@ impl Ppu2C02 {
             vram_clock: 0,
             oam: [0; OAM_SIZE],
             palette: [0; PALETTE_SIZE],
+            palette_marked: marked_palette(&[0; PALETTE_SIZE]),
             decay_stamp: [0; 8],
             timing: RegionTiming::default(),
             dot: 0,
@@ -524,6 +550,12 @@ impl Ppu2C02 {
         self.margin_palette
     }
 
+    /// Rebuilds [`Self::palette_marked`] from `palette`. Called wherever the whole palette is
+    /// replaced — the power-up fill and a state restore — and never per pixel.
+    pub(super) fn refresh_marked_palette(&mut self) {
+        self.palette_marked = marked_palette(&self.palette);
+    }
+
     /// Returns the 32 palette bytes of the batch, mirrors filled in (REQ-CORE-045).
     #[must_use]
     pub const fn snapshot_palette(&self) -> [u8; PALETTE_SIZE] {
@@ -544,6 +576,7 @@ impl Ppu2C02 {
         self.vram.fill(0);
         self.oam.fill(0);
         self.palette.fill(0);
+        self.refresh_marked_palette();
         self.decay_stamp.fill(0);
         self.pixels.fill(0);
 
@@ -1158,7 +1191,11 @@ impl Ppu2C02 {
         }
 
         // Palette entries are 6 bits wide.
-        self.palette[palette_index(address)] = value & 0x3F;
+        let index = palette_index(address);
+        self.palette[index] = value & 0x3F;
+        // AMD-050 REQ-CORE-049: the shadow entry follows, here and not per pixel. A game writes
+        // a handful of palette bytes a frame; the PPU reads 61 440 pixels.
+        self.palette_marked[index] = mark(index, value & 0x3F);
     }
 
     /// Tells the cartridge which address the PPU is driving, so that an MMC3-style board can
@@ -1339,4 +1376,26 @@ const fn palette_index(address: u16) -> usize {
     }
 
     index
+}
+
+/// The colour of palette entry `index` with the opacity bit of AMD-050 REQ-CORE-049 on it:
+/// entry 0 is the universal backdrop, which is what a **transparent** pixel resolves to, so it
+/// alone keeps a clear bit.
+const fn mark(index: usize, color: u8) -> u8 {
+    if index == 0 {
+        color
+    } else {
+        color | OPAQUE_PIXEL
+    }
+}
+
+/// [`Ppu2C02::palette_marked`] built from a palette.
+const fn marked_palette(palette: &[u8; PALETTE_SIZE]) -> [u8; PALETTE_SIZE] {
+    let mut marked = [0u8; PALETTE_SIZE];
+    let mut index = 0;
+    while index < PALETTE_SIZE {
+        marked[index] = mark(index, palette[index]);
+        index += 1;
+    }
+    marked
 }

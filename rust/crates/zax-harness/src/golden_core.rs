@@ -175,8 +175,14 @@ struct Checkpoints {
 impl Checkpoints {
     fn record(&mut self, frame: u32, core: &NesCore, audio: &AudioHash) {
         let key = frame.to_string();
+        // The golden is the **index image** of REQ-CORE-048, 0 to 63 per pixel. AMD-050 put the
+        // opacity bit of REQ-CORE-049 in bit 6 of the same byte, so the hash is taken on the
+        // masked copy: the 291 recorded hashes go on meaning what they meant, and a change in
+        // them is a change in the picture rather than in the layout.
+        let mut indices = Vec::new();
+        core.pixel_frame_indices_into(&mut indices);
         self.pixels
-            .insert(key.clone(), json!(hex(&Sha256::digest(core.pixel_frame()))));
+            .insert(key.clone(), json!(hex(&Sha256::digest(&indices))));
         self.tiles
             .insert(key.clone(), json!(tiles_hash(core.tile_records())));
         self.cycles.insert(key.clone(), json!(core.cycle_count()));

@@ -14,6 +14,7 @@ use zax_engine3d::space_bend::SpaceBend;
 use zax_engine3d::vectors::Vec3;
 use zax_render::camera::{CameraView, SceneCamera};
 use zax_render::geometry;
+use zax_render::interop;
 use zax_render::scene::{SceneFrame, SceneState};
 use zax_render::scene_export::{self, ExportedObject};
 
@@ -25,8 +26,11 @@ fn bend_90() -> SpaceBend {
     SpaceBend::new(90.0, 0.0, 0.0, false, 1.0)
 }
 
+/// A picture of `index` everywhere, every pixel **opaque**: AMD-050 REQ-CORE-049 puts the
+/// opacity bit in bit 6 of each byte, and REQ-SCN-076 does not draw a pixel without it. These
+/// tests are about the geometry of the rectangle, so its pixels have to be drawn at all.
 fn picture(index: u8) -> Vec<u8> {
-    vec![index; WIDTH * HEIGHT]
+    vec![(index & interop::PIXEL_COLOR) | interop::OPAQUE_PIXEL; WIDTH * HEIGHT]
 }
 
 fn view(scene: &SceneState) -> CameraView {

@@ -83,6 +83,9 @@ impl Ppu2C02 {
         reader.read_blob_into(&mut self.vram)?;
         reader.read_blob_into(&mut self.oam)?;
         reader.read_blob_into(&mut self.palette)?;
+        // AMD-050 REQ-CORE-049: the shadow palette is derived, so it is not in the blob (the
+        // state of a 1.x savestate has to keep reading) and is rebuilt here instead.
+        self.refresh_marked_palette();
         self.dot = reader.read_i32()?;
         self.scanline = reader.read_i32()?;
         self.dot_accumulator = reader.read_i32()?;

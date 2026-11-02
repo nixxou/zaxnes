@@ -47,7 +47,7 @@ fn digest(bytes: &[u8]) -> u64 {
 
 /// The picture, the tile records and the work RAM of the frame just run, as one digest.
 fn frame_digest(core: &NesCore) -> u64 {
-    let mut blob = core.pixel_frame().to_vec();
+    let mut blob = core.pixel_frame_with_mask().to_vec();
     for record in core.frame_batch().records {
         blob.extend_from_slice(&record.plane0.to_le_bytes());
         blob.extend_from_slice(&record.plane1.to_le_bytes());
@@ -275,12 +275,16 @@ fn req_core_121_the_frame_the_host_is_reading_survives_the_restore() {
     core.capture_core_state(&mut state).unwrap();
     // One more frame: its picture and records are what a host would be reading.
     core.run_frame(0);
-    let pixels = core.pixel_frame().to_vec();
+    let pixels = core.pixel_frame_with_mask().to_vec();
     let records = core.frame_batch().records.to_vec();
     assert!(!records.is_empty(), "the fixture emitted no tile record");
 
     core.restore_core_state(&state).unwrap();
-    assert_eq!(pixels, core.pixel_frame(), "the picture was overwritten");
+    assert_eq!(
+        pixels,
+        core.pixel_frame_with_mask(),
+        "the picture was overwritten"
+    );
     assert_eq!(
         records,
         core.frame_batch().records.to_vec(),

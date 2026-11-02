@@ -175,8 +175,8 @@ pub fn build() -> Vec<u8> {
 #[must_use]
 pub fn displayed(core: &NesCore) -> u32 {
     let mut value = 0_u32;
-    for (bit, pixel) in core.pixel_frame().iter().take(8).enumerate() {
-        if *pixel == ONE_COLOUR {
+    for (bit, pixel) in core.pixel_frame_with_mask().iter().take(8).enumerate() {
+        if *pixel & zax_nes::ppu::PIXEL_COLOR == ONE_COLOUR {
             value |= 0x80 >> bit;
         }
     }
@@ -189,5 +189,5 @@ pub fn displayed(core: &NesCore) -> u32 {
 /// which is the A bit the frame read.
 #[must_use]
 pub fn shows_button_a(core: &NesCore) -> bool {
-    core.pixel_frame()[15] == ONE_COLOUR
+    core.pixel_frame_with_mask()[15] & zax_nes::ppu::PIXEL_COLOR == ONE_COLOUR
 }

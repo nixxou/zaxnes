@@ -15,8 +15,8 @@ are a reading reference only.
 | 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | done — `c17dfb5` |
 | 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | done — `a697da0` |
 | 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | done — `c158272` |
-| 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | done — `<pending>` |
-| 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | todo |
+| 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | done — `33c48c1` |
+| 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | done — `<pending>` |
 | 8 | The settings: desktop options, handheld defaults and page, harness options | todo |
 | 9 | Closing: draw/vertex counts at default, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests | todo |
 
@@ -453,6 +453,107 @@ candidate really is outside the window, and says why in place.
 #### SPEC chapter edit
 
 `SPEC-08` §3.7: REQ-INP-124 written out after REQ-INP-064, with AMD-046's amendment of it.
+
+### Step 7 — AMD-050: the opacity mask is **free**, measured
+
+The risky part of the lot, and the encoding step 1 predicted holds. **REQ-CORE-049 is kept**: it
+costs the PPU nothing at all, so there was no decision to bring to the owner.
+
+#### The measurement
+
+Method of RU-3a-fix and RU-3b: the post-LTO assembly
+(`cargo rustc -p zax-harness --release --bin zax-harness -- --emit=asm`). `span_pixel` and
+`render_pixel` are both inlined into `Ppu2C02::run_dots`, which is the symbol that carries the
+whole dot pipeline and the one measured.
+
+| | instructions in `run_dots` |
+|---|---|
+| before (`33c48c1`) | **2231** |
+| after | **2231** |
+
+And not merely the same count — the same instructions. With the label numbering, the anonymous
+symbol hashes and the `(%rbx)` field displacements normalised (the struct grew by 32 bytes, so
+every field after `palette` shifted), the **entire** diff of the two instruction streams is five
+immediates:
+
+    movl $48  → movl $112      (0x30 → 0x70, the greyscale colour mask, twice)
+    movl $63  → movl $127      (0x3F → 0x7F, the plain colour mask, twice)
+    andb $48  → andb $112      (render_pixel's own greyscale mask)
+
+plus the palette load reading `palette_marked` at +32 instead of `palette` — the same
+`movzbl …(%rbx,%rax), %eax`. No instruction was added, removed or reordered.
+
+#### Why it is free
+
+`entry`, the palette index the two pixel functions resolve, is non-zero **exactly** where the
+pixel carries at least one opaque pixel:
+
+- the sprite branch yields `entry ≥ 0x10`, so non-zero;
+- the background branch yields a `background` whose low two bits are non-zero;
+- the third branch is the only one that yields 0;
+- and `background` / `sprite` are held at 0 unless their layer is on and, for `x < 8`, unmasked —
+  the four PPUMASK conditions REQ-CORE-049 names. `SPRITE_OPAQUE` is set by `paint_sprite` only
+  where the sprite's pixel value is non-zero, and `paint_sprite` reads no "hidden" flag, which is
+  the requirement's "quel que soit son drapeau « caché »".
+
+So the opacity bit is already in the index. `palette_marked` holds `palette[i] | 0x40` for every
+`i ≥ 1` and `palette[0]` for entry 0; the span's `color_mask` is widened to `0x7F` / `0x70`. The
+shadow table is maintained at the **three** sites that write the palette — one register write, the
+power-up fill, the state restore — none of them per pixel. It is derived, so it is not in the
+state blob and no savestate moved.
+
+#### What the change touches
+
+| Piece | What |
+|---|---|
+| `ppu/mod.rs` | `PIXEL_COLOR`, `OPAQUE_PIXEL`, `palette_marked`, `mark`, `marked_palette`, `refresh_marked_palette`, the register write |
+| `ppu/render.rs` | the two palette reads, the two colour masks, `fill_backdrop` left on `palette` (rendering off → bit 0, which is also the amendment's ruling on the hardware "palette background" case) |
+| `ppu/state.rs` | the shadow table rebuilt on restore |
+| `ppu/tiles.rs` | `wide_picture_into`'s margin composition: `entry == 0` is the same rule, in a loop that already matched per pixel and only runs for a widescreen frame. The 256-wide fast path copies `pixels` whole, so the bit rides along for nothing |
+| `gl/picture.rs` | the colour from bits 0-5, alpha 0 or 255 from bit 6 — in the loop that **already** resolved the picture to RGBA once per frame in 2D mode and already wrote alpha 0 for a pixel the overscan leaves out |
+| `shaders/scene.frag` | **nothing.** It already discards on `direct.a == 0.0`, in the opaque pass, with no sorting, no separate depth pass and no blending — REQ-SCN-076's "rejet du fragment" word for word |
+
+**The accessor was renamed, not redefined.** `pixel_frame()` → `pixel_frame_with_mask()`, so the
+compiler visited every one of the eleven call sites instead of letting one silently hash the wrong
+bytes. `pixel_frame_indices_into` gives the plain index image of REQ-CORE-048, and the two places
+that hash a golden (`zax-harness/src/golden_core.rs`, `zax-nes/tests/ppu_golden_tests.rs`) use it:
+**the 291 recorded PPU golden hashes are unchanged**, which is the check that matters most here.
+
+The byte layout is written out **twice** on purpose: `zax-nes::ppu` owns it, and
+`zax-render::interop` repeats it beside its own `HIDDEN_PIXEL` because the renderer does not
+depend on the core (`zax-nes` is only a dev-dependency of `zax-render`, and adding a real edge
+would invert the layering). A test asserts the two agree and that `HIDDEN_PIXEL` uses a bit the
+core never sets.
+
+#### Tests
+
+`zax-nes/tests/opacity_mask_tests.rs` (10) — the five cases of vector **V11** of SPEC-02 §5.3 one
+by one, including the one the image alone cannot express (every palette colour equal to the
+universal backdrop's: the image is uniformly `$0F`, the mask is still all 1); a sprite behind the
+background still marking its pixels; the sprite PPUMASK switches gating the bit; the greyscale bit
+leaving the mask alone; REQ-CORE-048's index image being colour indices alone; and the mask
+surviving a state restore.
+
+`zax-render/tests/two_dimensional_transparency_tests.rs` (6) — the three automatic criteria of
+REQ-SCN-076 on GPU captures, with the conditioning the amendment spells out
+(`use_nes_bg_color` false, magenta behind the rectangle) and the one Q-085 settles for the
+right-hand columns; the transparency holding bent as well as flat; and the two definitions of the
+picture byte agreeing.
+
+Two sets of **existing** tests had to change, and both for the right reason: their synthetic
+pictures were plain colour indices, which now describe a wholly transparent rectangle (a blanked
+screen). `two_dimensional_mode_tests.rs` and `bend_two_dimensional_tests.rs` now build opaque
+pixels and say why. The full-workspace run is what caught the second one.
+
+`cargo test --release --workspace --features zax-app/bundled`: **2239 passed, 0 failed**. The 18
+render goldens and the PPU goldens all hold. fmt and workspace clippy clean.
+
+#### SPEC chapter edits
+
+- `SPEC-02` REQ-CORE-030: points 4 and 5 of a frame batch.
+- `SPEC-02` §3.5.5: REQ-CORE-048 restated at P1, REQ-CORE-049 added after it.
+- `SPEC-02` §5.3: vector V11.
+- `SPEC-06` §3.16: REQ-SCN-076 before REQ-SCN-074.
 
 ### Open questions
 

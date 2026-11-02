@@ -933,10 +933,17 @@ impl NesCore {
         self.bus.ppu().wide().host_margin()
     }
 
-    /// The 256 x 240 indexed image of the frame just run (REQ-CORE-048).
+    /// The 256 x 240 image of the frame just run: the NES colour index of REQ-CORE-048 in bits
+    /// 0-5 and the opacity bit of AMD-050 REQ-CORE-049 in bit 6
+    /// (`zax_nes::ppu::PIXEL_COLOR`, `OPAQUE_PIXEL`).
     #[must_use]
-    pub fn pixel_frame(&self) -> &[u8] {
-        self.bus.ppu().pixel_frame()
+    pub fn pixel_frame_with_mask(&self) -> &[u8] {
+        self.bus.ppu().pixel_frame_with_mask()
+    }
+
+    /// The plain index image of REQ-CORE-048, 0 to 63 per pixel, copied into `out`.
+    pub fn pixel_frame_indices_into(&self, out: &mut Vec<u8>) {
+        self.bus.ppu().pixel_frame_indices_into(out);
     }
 
     /// The picture of the frame just run, widened by its widescreen margins (the sides, top and

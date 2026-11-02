@@ -11,6 +11,7 @@ use common::{solid, GlFixture, SceneFixture};
 use zax_engine3d::palette::Rgb24;
 use zax_profiles::enums::ProfileLayer;
 use zax_profiles::values::Vec4F;
+use zax_render::interop;
 use zax_render::scene::{SceneFrame, SceneState};
 
 const WIDTH: usize = 256;
@@ -87,8 +88,8 @@ fn req_e3d_410_the_picture_is_not_turned_upside_down() {
     let mut picture = picture(0x0F);
     for x in 0..WIDTH {
         for y in 0..40 {
-            picture[(y * WIDTH) + x] = 0x16;
-            picture[((HEIGHT - 1 - y) * WIDTH) + x] = 0x1A;
+            picture[(y * WIDTH) + x] = opaque(0x16);
+            picture[((HEIGHT - 1 - y) * WIDTH) + x] = opaque(0x1A);
         }
     }
 
@@ -169,8 +170,8 @@ fn the_picture_seen_head_on_fills_the_height_of_the_view() {
     let mut renderer = gl.renderer();
     // White rows at the top, hidden ones included, red ones at the bottom, black between.
     let mut picture = picture(0x0F);
-    picture[..12 * WIDTH].fill(0x30);
-    picture[(HEIGHT - 4) * WIDTH..].fill(0x16);
+    picture[..12 * WIDTH].fill(opaque(0x30));
+    picture[(HEIGHT - 4) * WIDTH..].fill(opaque(0x16));
     let white = |(r, g, b): (i32, i32, i32)| r > 150 && g > 150 && b > 150;
     let red = |(r, g, b): (i32, i32, i32)| r > 100 && g < 80 && b < 80;
 
@@ -215,6 +216,17 @@ fn frame(picture: &[u8]) -> SceneFrame<'_> {
     }
 }
 
+/// A picture of `nes_color` everywhere, every pixel **opaque**.
+///
+/// AMD-050 REQ-CORE-049 puts the opacity bit in bit 6 of each byte of the picture and
+/// REQ-SCN-076 does not draw a pixel without it, so a synthetic picture has to set it: a frame
+/// of plain colour indices would now be a wholly transparent rectangle, which is what a blanked
+/// screen looks like.
 fn picture(nes_color: u8) -> Vec<u8> {
-    vec![nes_color; WIDTH * HEIGHT]
+    vec![opaque(nes_color); WIDTH * HEIGHT]
+}
+
+/// The byte of an opaque pixel of NES colour `nes_color`.
+fn opaque(nes_color: u8) -> u8 {
+    (nes_color & interop::PIXEL_COLOR) | interop::OPAQUE_PIXEL
 }

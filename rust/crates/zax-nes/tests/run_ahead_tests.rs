@@ -110,7 +110,7 @@ fn req_loop_065_n_zero_is_the_ordinary_frame() {
         assert!(!zero.restore_real_frame());
         assert_eq!(plain.frame_count(), zero.frame_count());
         assert_eq!(plain.bus().ram(), zero.bus().ram());
-        assert_eq!(plain.pixel_frame(), zero.pixel_frame());
+        assert_eq!(plain.pixel_frame_with_mask(), zero.pixel_frame_with_mask());
     }
 }
 

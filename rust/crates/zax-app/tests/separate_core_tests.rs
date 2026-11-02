@@ -29,7 +29,7 @@ fn run_with(separate_core: bool, ahead: bool, ticks: usize) -> (i64, u8, Vec<u8>
     (
         core.frame_count(),
         core.read_memory(0x0010),
-        core.pixel_frame().to_vec(),
+        core.pixel_frame_with_mask().to_vec(),
     )
 }
 

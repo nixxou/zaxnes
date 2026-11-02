@@ -9,17 +9,34 @@
 //! fetches at dots 257 to 320 and two more tiles prefetched at dots 321 to 336.
 
 use super::{
-    map_nametable, Cart, Ppu2C02, PpuBusAccess, SCREEN_WIDTH, SPRITES_PER_LINE,
+    map_nametable, Cart, Ppu2C02, PpuBusAccess, OPAQUE_PIXEL, SCREEN_WIDTH, SPRITES_PER_LINE,
     SPRITES_PER_LINE_I32, VISIBLE_SCANLINES,
 };
 use crate::cartridges::{Cartridge, ChrFetch};
 
 impl Ppu2C02 {
-    /// The 256 x 240 indexed image of the frame just rendered: one NES colour index per
-    /// pixel, row-major (REQ-CORE-048). Needed by the 2D Mode of SPEC-06.
+    /// The 256 x 240 image of the frame just rendered, row-major: per pixel, the NES colour
+    /// index of REQ-CORE-048 in bits 0-5 ([`super::PIXEL_COLOR`]) and the opacity bit of
+    /// AMD-050 REQ-CORE-049 in bit 6 ([`super::OPAQUE_PIXEL`]). Needed by the 2D Mode of SPEC-06.
+    ///
+    /// The name says "with mask" because the two travel in one byte: that is the internal
+    /// layout REQ-CORE-049's note allows, and the only one that costs the PPU nothing. A caller
+    /// that wants the plain index image of REQ-CORE-048 masks with `PIXEL_COLOR`
+    /// ([`Ppu2C02::pixel_frame_indices_into`]).
     #[must_use]
-    pub fn pixel_frame(&self) -> &[u8] {
+    pub fn pixel_frame_with_mask(&self) -> &[u8] {
         &self.pixels
+    }
+
+    /// The plain index image of REQ-CORE-048 — one NES colour index, 0 to 63, per pixel — copied
+    /// into `out`.
+    ///
+    /// For a caller that needs the image without the opacity bit and is not already copying:
+    /// the golden hashes and the debug view. The 2D mode does **not** use this — it wants both,
+    /// and `gl/picture.rs` separates them while it resolves the picture to RGBA anyway.
+    pub fn pixel_frame_indices_into(&self, out: &mut Vec<u8>) {
+        out.clear();
+        out.extend(self.pixels.iter().map(|pixel| pixel & super::PIXEL_COLOR));
     }
 
     /// Number of sprites the evaluation of the previous line found, 0 to 8.
@@ -225,7 +242,16 @@ impl Ppu2C02 {
             0
         };
 
-        self.palette[usize::from(entry & 0x1F)] & pixels.color_mask
+        // AMD-050 REQ-CORE-049, and the reason the opacity mask is free: `entry` is non-zero
+        // **exactly** where the pixel carries at least one opaque pixel. The sprite branch
+        // yields `entry ≥ 0x10`; the background branch yields a `background` whose low two bits
+        // are non-zero; the third branch is the only one that yields 0. And `background` and
+        // `sprite` are held at 0 unless their layer is on and, for `x < 8`, unmasked, which are
+        // the four PPUMASK conditions the requirement names. So `entry & 0x1F == 0` iff the
+        // pixel is transparent, `palette_marked` carries `OPAQUE_PIXEL` on every other entry,
+        // and `color_mask` is widened to keep it: the same indexed load and the same `AND` as
+        // before the amendment, for both the colour and the mask.
+        self.palette_marked[usize::from(entry & 0x1F)] & pixels.color_mask
     }
 
     /// The work of one dot of a line that renders (a visible line when `VISIBLE`, else the
@@ -727,6 +753,10 @@ impl Ppu2C02 {
     /// Draws dots `first` to `last` (1 to 256) of a visible line with rendering off: the
     /// backdrop, as [`Ppu2C02::render_pixel`] draws it when both layers are off.
     pub(super) fn fill_backdrop(&mut self, first: i32, last: i32) {
+        // AMD-050 REQ-CORE-049: rendering is off here, so no opaque pixel is produced and the
+        // bit stays 0 — entry 0 of `palette`, not of `palette_marked`, is the right source. The
+        // amendment's note settles the hardware "palette background" case the same way (it is
+        // rendering disabled, so the bit is 0).
         let mut color = self.palette[0];
         if (self.mask & 0x01) != 0 {
             color &= 0x30;
@@ -784,12 +814,15 @@ impl Ppu2C02 {
             0
         };
 
-        let mut color = self.palette[usize::from(entry & 0x1F)];
+        // AMD-050 REQ-CORE-049: the shadow palette, as in `span_pixel` — `entry` is non-zero
+        // exactly where the pixel is opaque, so the bit comes with the colour.
+        let mut color = self.palette_marked[usize::from(entry & 0x1F)];
 
         // The greyscale bit of PPUMASK is a video effect: it changes the image but neither
-        // the tile records nor the palette handed to the engine (REQ-CORE-047).
+        // the tile records nor the palette handed to the engine (REQ-CORE-047). The mask keeps
+        // bit 6, which is not a colour.
         if (mask & 0x01) != 0 {
-            color &= 0x30;
+            color &= 0x30 | OPAQUE_PIXEL;
         }
 
         #[allow(clippy::cast_sign_loss)] // Visible line, 0..240.
@@ -807,7 +840,9 @@ struct SpanPixels {
     background_left: bool,
     sprites: bool,
     sprites_left: bool,
-    /// $30 with the greyscale bit (REQ-CORE-047), else $3F (palette entries are 6 bits).
+    /// $30 with the greyscale bit (REQ-CORE-047), else $3F (palette entries are 6 bits), in both
+    /// cases **plus** `OPAQUE_PIXEL`: the mask of AMD-050 REQ-CORE-049 rides in bit 6 of the
+    /// stored byte and the greyscale effect must not clear it.
     color_mask: u8,
     /// The background shifters' bit of the current pixel.
     shift: i32,
@@ -820,7 +855,7 @@ impl SpanPixels {
             background_left: (mask & 0x02) != 0,
             sprites: (mask & 0x10) != 0,
             sprites_left: (mask & 0x04) != 0,
-            color_mask: if (mask & 0x01) != 0 { 0x30 } else { 0x3F },
+            color_mask: OPAQUE_PIXEL | if (mask & 0x01) != 0 { 0x30 } else { 0x3F },
             shift: 15 - (fine_x & 0x07),
         }
     }

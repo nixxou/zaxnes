@@ -82,6 +82,7 @@ fn check_row(row: &CoreGolden, image: &[u8], last_frame: u32) -> Result<(), Stri
     let mut audio_hash = Sha256::new();
     let mut audio_samples: u64 = 0;
     let mut buffer = vec![0.0f32; 8192];
+    let mut indices = Vec::new();
     for frame in 1..=last_frame {
         machine.run_frame(0);
         loop {
@@ -115,7 +116,11 @@ fn check_row(row: &CoreGolden, image: &[u8], last_frame: u32) -> Result<(), Stri
             }
         }
         if let Some(expected) = row.pixel_sha256.get(&frame) {
-            let actual = hex(&Sha256::digest(machine.pixel_frame()));
+            // The golden hashes the index image of REQ-CORE-048. AMD-050 put the opacity bit
+            // of REQ-CORE-049 in bit 6 of the same byte, so it is masked off here: the 291
+            // recorded hashes keep their meaning.
+            machine.pixel_frame_indices_into(&mut indices);
+            let actual = hex(&Sha256::digest(&indices));
             if &actual != expected {
                 return Err(format!("pixels differ at frame {frame}"));
             }

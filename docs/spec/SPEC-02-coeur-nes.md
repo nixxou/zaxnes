@@ -160,7 +160,9 @@ En NTSC, une ligne fait 341 points, et le point sauté des frames impaires (rend
 **REQ-CORE-030** (P1) — Le rappel vidéo DOIT recevoir, pour chaque frame émulée :
 1. la liste ordonnée des enregistrements de tiles (§4.1) et leur nombre ;
 2. la **palette** : un tableau de 32 octets (REQ-CORE-045) ;
-3. **maskX** et **maskY** (REQ-CORE-046).
+3. **maskX** et **maskY** (REQ-CORE-046) ;
+4. l'**image de pixels** de 256 × 240 indices de couleur NES (REQ-CORE-048, AMD-050) ;
+5. le **masque d'opacité** de 256 × 240 bits (REQ-CORE-049, AMD-050).
 
 Les données ne sont valides que pendant l'appel : l'hôte doit les copier s'il les conserve.
 - Critère d'acceptation : vecteurs de test §5.3.
@@ -276,8 +278,18 @@ Ensuite, si le bit 1 **ou** le bit 2 de PPUMASK vaut 0 (masquage de la colonne d
 **REQ-CORE-047** (P2) — Les bits de **niveaux de gris** (bit 0 de PPUMASK) et d'**accentuation de couleur** (bits 5 à 7) NE DOIVENT modifier ni les enregistrements ni la palette transmise.
 - Critère d'acceptation : V10 (§5.3) : lots identiques avec PPUMASK `$1E` et `$FF`.
 
-**REQ-CORE-048** (P3) — Le cœur PEUT produire en plus une image 2D de 256 × 240 pixels (indices de couleur NES), par exemple pour un mode de débogage. Cette image n'est pas exigée.
-- Critère d'acceptation : sans objet.
+**REQ-CORE-048** (P1, énoncé et priorité remplacés par AMD-050) — **Image de pixels.** Le cœur DOIT produire, pour chaque frame émulée, une image 2D de 256 × 240 pixels portant, pour chaque pixel, l'**indice de couleur NES** affiché par le PPU (0 à 63) ; là où le PPU n'affiche aucun pixel opaque, c'est l'indice de l'entrée 0 de la palette (la couleur de fond universelle). L'image est transmise avec le lot de frame (REQ-CORE-030) et n'est valide que pendant l'appel.
+- Critère d'acceptation : vecteur V11 (§5.3) ; en mode 2D, l'image plaquée sur le rectangle (AMD-009 réponse à Q-022, AMD-046 §2) est identique, pixel pour pixel, à l'image NES de référence de la même frame.
+- Notes : la mention « Le cœur **PEUT** produire en plus […] Cette image n'est pas exigée » est retirée et la priorité passe de P3 à P1 : le mode 2D (REQ-SCN-055, lu avec Q-022 et AMD-046) repose sur cette image. Elle sert aussi au mode de débogage, usage pour lequel elle avait été introduite (AMD-009).
+
+**REQ-CORE-049** (P2, AMD-050) — **Masque d'opacité.** Le cœur DOIT produire, pour la même frame et à côté de l'image de REQ-CORE-048, un **masque d'opacité** de 256 × 240 bits, un bit par pixel. Le bit vaut **1** quand le pixel porte au moins un pixel opaque, c'est-à-dire quand au moins l'une des deux conditions suivantes est vraie :
+- un pixel de **fond** de valeur ≠ 0 y est produit, le fond étant rendu (bit 3 de PPUMASK à 1) et, pour les colonnes x < 8, non masqué (bit 1 de PPUMASK à 1) ;
+- un pixel de **sprite** de valeur ≠ 0 y est produit, quel que soit son drapeau « caché » (REQ-CORE-042), les sprites étant rendus (bit 4 de PPUMASK à 1) et, pour les colonnes x < 8, non masqués (bit 2 de PPUMASK à 1).
+
+Il vaut **0** sinon. L'état de PPUMASK retenu est celui en vigueur au moment où le PPU produit le pixel (PPUMASK peut changer en cours de frame). Le masque n'est valide que pendant l'appel du rappel vidéo (REQ-CORE-030).
+- Disposition recommandée, utile seulement pour une interface native (libretro, bibliothèque C) : 32 octets par ligne d'image, lignes de haut en bas ; dans un octet, le bit de poids faible est le pixel le plus à gauche ; 7 680 octets au total. Cette disposition n'est pas exigée pour une interface interne.
+- Critère d'acceptation : vecteur V11 (§5.3).
+- Notes : le masque porte exactement l'information que l'image d'indices ne porte pas, l'entrée 0 de toute table de palette étant la couleur de fond universelle (REQ-E3D-561). `maskX` et `maskY` (REQ-CORE-046) sont sans rapport : ils signalent des bandes de bord peu fiables à l'usage de SPEC-04 et ne rendent aucun pixel transparent. Le cas matériel du « fond de palette » (rendu désactivé avec l'adresse PPU dans `$3F00`–`$3FFF`) est traité comme tout rendu désactivé : bit à 0.
 
 ### 3.6 Zapper (pistolet optique)
 
@@ -586,6 +598,12 @@ Sauf mention contraire : PPUCTRL = `$00` (tables `$0000`, sprites 8×8), toutes 
   - quatre écrans, `$1E` → (0, 0) ;
   - quatre écrans, `$1A` (sprites masqués à gauche) → (8, 0).
 - **V10 — effets ignorés.** V2 avec PPUMASK `$FF` au lieu de `$1E` → lot identique (enregistrements, palette, marges).
+- **V11 — image de pixels et masque d'opacité** (AMD-050 ; conventions de §5.1 ; la tile 1 de la table `$0000` a tous ses pixels non nuls). Nametable `$2000` entièrement remplie de la tile 1, OAM à `$FF`.
+  - PPUMASK = `$0A` (fond rendu, colonne de gauche du fond affichée, sprites éteints) → masque entièrement à 1 ; image = indices des entrées de palette utilisées.
+  - Palette modifiée en `$3F00` ← `$0F`, `$3F01` ← `$0F`, `$3F02` ← `$0F` (les trois couleurs égales à la couleur de fond universelle) → l'**image** est uniformément `$0F`, le **masque** reste entièrement à 1. C'est le cas que l'image seule ne permet pas de distinguer.
+  - PPUMASK = `$08` (bit 1 à 0 : 8 pixels de gauche du fond masqués) → dans chaque ligne du masque, les 8 premiers bits valent 0 et les 248 autres 1.
+  - PPUMASK = `$00` → masque entièrement à 0 ; image uniformément égale à l'indice de l'entrée 0.
+  - Nametable remise à la tile 0 (motif nul), PPUMASK = `$1E`, OAM sprite 0 = (Y `$20`, T `$01`, A `$00`, X `$10`) → masque à 1 exactement sur le rectangle x ∈ [16, 23], y ∈ [33, 40], à 0 partout ailleurs.
 
 ### 5.4 Audio et Zapper
 - 600 frames NTSC à 48 kHz → 480 000 ± 800 échantillons ; avec vitesse 2 → 240 000 ± 800 (REQ-CORE-070, REQ-CORE-072).

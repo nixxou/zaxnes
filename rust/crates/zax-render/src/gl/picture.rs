@@ -54,13 +54,28 @@ impl NesPictureTexture {
         }
         self.pixels.resize(size.0 * size.1 * 4, 0);
 
-        for (pixel, &index) in self.pixels.chunks_exact_mut(4).zip(indices) {
-            if index == crate::interop::HIDDEN_PIXEL {
+        // AMD-050 REQ-SCN-076: a pixel whose opacity bit is 0 — the universal backdrop for want
+        // of an opaque pixel (REQ-CORE-049) — gets alpha 0, which `scene.frag` already rejects
+        // in the opaque pass, with no sorting, no separate depth pass and no alpha blending.
+        // An **opaque** pixel whose palette colour happens to be the universal backdrop's keeps
+        // alpha 255 and stays drawn, which is the whole point of the mask: the index image
+        // cannot tell the two apart.
+        //
+        // This loop already ran once per frame in 2D mode and already wrote alpha 0 for a pixel
+        // the overscan leaves out, so the mask costs it one `AND` and one select per pixel, in
+        // 2D mode only.
+        for (pixel, &byte) in self.pixels.chunks_exact_mut(4).zip(indices) {
+            if byte == crate::interop::HIDDEN_PIXEL {
                 pixel.copy_from_slice(&[0; 4]);
                 continue;
             }
-            let color = nes_color(usize::from(index));
-            pixel.copy_from_slice(&[color.r, color.g, color.b, 255]);
+            let color = nes_color(usize::from(byte & crate::interop::PIXEL_COLOR));
+            let alpha = if byte & crate::interop::OPAQUE_PIXEL == 0 {
+                0
+            } else {
+                255
+            };
+            pixel.copy_from_slice(&[color.r, color.g, color.b, alpha]);
         }
 
         let gl = &self.gl;

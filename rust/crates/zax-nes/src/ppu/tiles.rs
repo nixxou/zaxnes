@@ -1086,10 +1086,20 @@ impl Ppu2C02 {
             paint(record, 0x10, out);
         }
 
+        // AMD-050 REQ-CORE-049 in the widescreen margins: a composed pixel's palette entry is 0
+        // exactly where nothing was painted there — the universal backdrop for want of an opaque
+        // pixel — which is the same rule as `render::span_pixel`'s. So the opacity bit comes from
+        // the entry, in a loop that already matched on it per pixel and that only runs for a
+        // frame with a widescreen margin.
         let colour = |entry: u8| -> u8 {
-            match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
+            let color = match (self.margin_palette, entry.checked_sub(MARGIN_ENTRIES)) {
                 (Some(margin_palette), Some(entry)) => margin_palette[usize::from(entry & 15)],
                 _ => self.palette[palette_index(0x3F00 | u16::from(entry))],
+            };
+            if entry == 0 {
+                color
+            } else {
+                color | super::OPAQUE_PIXEL
             }
         };
         for row in 0..height {
