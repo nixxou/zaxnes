@@ -12,15 +12,18 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | # | Step | Status |
 |---|---|---|
 | 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `12561b1` |
-| 2 | AMD-051 part 1: REQ-E3D-644, REQ-E3D-646, REQ-E3D-524, REQ-PERS-088 | done |
-| 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | done |
-| 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | done |
-| 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | done |
-| 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | done |
-| 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | done |
-| 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | done |
-| 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | done |
-| 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | done |
+| 2 | AMD-051 part 1: REQ-E3D-644, REQ-E3D-646, REQ-E3D-524, REQ-PERS-088 | done — `cd880cf` |
+| 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | done — `4fb10c9` |
+| 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | done — `9a6eae6` |
+| 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | done — `a80861a` |
+| 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | done — `049fa52` |
+| 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | done — `4646afd` |
+| 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | done — `c0d62be` |
+| 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | done — `a6feeaa` |
+| 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | done — `a186e13` |
+
+**The lot is closed.** The hashes above were filled in after the last commit, which is why the
+convention below left them blank as the lot went along.
 
 **The checklist went from 9 steps to 10 after step 1** (so the commit of step 1 says "1/9"):
 AMD-051 holds five independent requirements across four crates, and the machine is unstable —
