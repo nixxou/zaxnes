@@ -70,6 +70,7 @@ member CameraAPI.IsFPV prop L
 member CameraAPI.IsTPV prop L 
 member CameraAPI.LookAt prop LE Vector3
 member CameraAPI.Mode prop LE 
+member CameraAPI.ResetDistance prop L 
 member CameraAPI.ResetView appel - 
 member CameraAPI.Rot prop L Vec3R
 member CameraAPI.SetFPV appel - 
@@ -492,4 +493,4 @@ member XRState.acc prop LE Vector3
 member XRState.pos prop LE Vector3
 member XRState.rot prop LE Vector3
 member XRState.vel prop LE Vector3
-# 35 globals, 44 types, 429 members
+# 35 globals, 44 types, 430 members

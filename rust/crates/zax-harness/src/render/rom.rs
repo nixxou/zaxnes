@@ -700,6 +700,18 @@ impl ScriptCamera for SceneCameraBridge<'_> {
     fn reset_view(&mut self) {
         self.0.reset_view();
     }
+
+    fn fov(&self) -> f32 {
+        self.0.fov()
+    }
+
+    fn set_fov(&mut self, fov: f32) {
+        self.0.set_fov(fov);
+    }
+
+    fn reset_distance(&self) -> f32 {
+        self.0.reset_distance()
+    }
 }
 
 /// The backdrop panel of the scene as scripts see it.

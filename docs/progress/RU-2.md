@@ -9,8 +9,8 @@ AMD-059) of `dotnetupdated` are read as a reference only.
 | # | Step | Status |
 |---|---|---|
 | 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `55b6723` |
-| 2 | The persisted settings the 2.0 `Setting` members stand for, handheld defaults, `EXCLUDED` | done |
-| 3 | AMD-040: the `CS` table and `Camera.ResetDistance` | todo |
+| 2 | The persisted settings the 2.0 `Setting` members stand for, handheld defaults, `EXCLUDED` | done — `1204603` |
+| 3 | AMD-040: the `CS` table and `Camera.ResetDistance` (with the two formulas of AMD-045) | done |
 | 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | todo |
 | 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | todo |
 | 6 | AMD-042: a rollback snapshot carries `PData` and the camera; the history is emptied at the end of a game | todo |
@@ -187,3 +187,61 @@ AMD-055, the style identifiers 1/4/0/other, the defaults of the twenty-two keys,
 view that keeps anything, and the published value lists. The transcription of SPEC-09 §4.1
 (`tests/common/catalogue_table.rs`) gained the twenty-two rows, so the catalogue is still
 checked against a table written out from the specification rather than from the code.
+
+### Step 3 — the `CS` table and the framed distance
+
+**REQ-LUA-112, REQ-LUA-117's shells** — `zax-scripting/src/runtime/cs_table.rs` (new), installed
+from `runtime/mod.rs` right after the API globals. `CS` is made of plain Lua tables, not of host
+values: nothing of it reaches the binding, which is why it does not appear in the API dump
+either (the same as the .NET build after V2-2). Each level is a shell whose fields live in a
+table only its metatable reaches:
+
+- a field the amendments do not name reads nil, with no error — the shell itself is empty and
+  `__index` is the field table;
+- a write anywhere in the tree is dropped (`__newindex` is a function that does nothing), so it
+  cannot reach the program and cannot disturb what the next script reads;
+- `__metatable` hides the metatable, so `setmetatable` on any level raises and the seal cannot
+  be taken off.
+
+**REQ-LUA-113** — `Camera.ResetDistance`, read only. `ScriptCamera` gained `fov`, `set_fov` and
+`reset_distance`, with defaults, so a host that binds a camera of its own keeps compiling;
+`SceneCameraBridge` (application) and the harness bridge forward the three to the scene camera,
+and `DetachedScriptCamera` holds a field of view of its own.
+
+The field of view reaches the camera **before** the view reset answers it, in both places a
+reset is answered (`api/settings.rs` `with_settings` and `runtime/mod.rs` `answer_view_reset`),
+which is what the .NET lot did in its test harness. Without it a script that writes `Setting.Fov`
+would read a framed distance of the previous field of view. The real camera ignores a write of
+the value it already holds, so this costs nothing on the host path; it runs on a change of field
+of view, never per frame.
+
+**REQ-SCN-069 and REQ-SCN-045 come in with it.** REQ-LUA-113 *is* the unbounded value of
+REQ-SCN-069, so the two formulas of AMD-045 landed in this step rather than in step 7:
+`geometry::reset_distance` (`d₀ = 132.7964 / tan(FOV / 2)`, replacing `104 / atan(FOV_rad / 2)`)
+and `geometry::hud_distance` (`76.6133 / tan(FOV / 2)`, replacing `60 / atan(FOV_rad / 2)`).
+`SceneCamera::reset_distance` is the unbounded value; `reset_view` writes it through the
+`[0, 512]` bound of REQ-SCN-011, as REQ-SCN-069 asks.
+
+Measured, for R0's capture comparison: at 70° the two formulas agree to 6 · 10⁻⁵ absolute
+(189.65291 against 189.65285, 3.6 · 10⁻⁷ relative) and the HUD distance is unchanged
+(109.415 both). **No capture of the campaign moves on these two formulas**, every one of them
+being taken at the default field of view. A capture at another field of view would move, and
+that is the amendment's intent.
+
+Test vector C4 of SPEC-06 §5 changes with the formulas: at 90° it read 156.21 and 90.12, and now
+reads the two half-heights themselves (132.80 and 76.61), the tangent of the half angle being 1.
+The test says so in place.
+
+Tests: `zax-scripting/tests/scripting/two_zero_api_tests.rs` (7) — the two criteria of
+REQ-LUA-112, an unnamed field, a dropped write, the hidden metatable, the criterion of
+REQ-LUA-113 at 70°, 45° and 95° with a `Camera.Distance` write in between, the read-only refusal,
+and the shape the `punchout` profile reads, run as a `Start` hook with no error.
+`zax-render/tests/camera_tests.rs`: the three values of REQ-SCN-069, the agreement with the
+former formula at 70°, and the three of REQ-SCN-045. `zax-app/tests/two_zero_camera_tests.rs`
+(4) — the two copies of the formula agree at every field of view from 10° to 150° (the crate
+`zax-scripting` carries its own, not depending on the renderer), the published `DistanceMax` is
+the bound the camera applies, and the bridge hands out the scene camera's framed distance.
+
+API dump: `goldens/lua-api.txt` gained exactly one line, `member CameraAPI.ResetDistance prop
+L`, and the count went from 429 to 430 members (495 → 496 lines of file). The two line counts
+asserted in the tests (`zax-harness/tests/lua_api_tests.rs`, `zax-goldens/src/lib.rs`) follow.

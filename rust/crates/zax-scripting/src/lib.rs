@@ -22,10 +22,11 @@ mod surface;
 mod values;
 
 pub use environment::{
-    CollectingScriptLog, DetachedScriptBackdrop, DetachedScriptCamera, DetachedScriptInput,
-    DetachedScriptMemory, NullScriptLog, ScriptBackdrop, ScriptCamera, ScriptContext,
-    ScriptEnvironment, ScriptInput, ScriptLog, ScriptMachine, ScriptMemory, ScriptNotification,
-    ScriptNotificationSeverity, ScriptProfileInfo,
+    framed_distance, CollectingScriptLog, DetachedScriptBackdrop, DetachedScriptCamera,
+    DetachedScriptInput, DetachedScriptMemory, NullScriptLog, ScriptBackdrop, ScriptCamera,
+    ScriptContext, ScriptEnvironment, ScriptInput, ScriptLog, ScriptMachine, ScriptMemory,
+    ScriptNotification, ScriptNotificationSeverity, ScriptProfileInfo, DEFAULT_FOV,
+    MAX_CAMERA_DISTANCE,
 };
 pub use error::LuaScriptError;
 pub use lua_runtime::LuaRuntime;

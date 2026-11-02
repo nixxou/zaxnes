@@ -272,15 +272,29 @@ impl SceneCamera {
 
     /// The view reset of REQ-SCN-012: the current FOV is applied, both modes get the angles
     /// `(0.81°, 0.81°, 0)` and the target `C`, and the **current** mode gets
-    /// `d₀ = 104 / atan(FOV_rad / 2)`. The other mode keeps its distance.
+    /// `d₀ = 132.7964 / tan(FOV / 2) × s` (AMD-045 REQ-SCN-069, which replaces the
+    /// `104 / atan(FOV_rad / 2)` of REQ-SCN-012). The other mode keeps its distance.
+    ///
+    /// The distance goes through the setpoint, so it is bounded to `[0, 512]` as REQ-SCN-069
+    /// asks (REQ-SCN-011). The unbounded value is [`SceneCamera::reset_distance`], what
+    /// `Camera.ResetDistance` reads (AMD-040 REQ-LUA-113).
     pub fn reset_view(&mut self) {
         for setpoint in &mut self.setpoints {
             setpoint.angles = geometry::DEFAULT_ANGLES;
             setpoint.target = geometry::CENTER;
         }
 
-        let distance = geometry::default_distance(self.fov);
+        let distance = self.reset_distance();
         self.current_mut().set_distance(distance);
+    }
+
+    /// The framed distance `d₀` a view reset would write at the current field of view,
+    /// **before** the bound of REQ-SCN-011 (AMD-045 REQ-SCN-069). It follows every change of
+    /// field of view, even without a reset, which is what `Camera.ResetDistance` exposes to Lua
+    /// (AMD-040 REQ-LUA-113).
+    #[must_use]
+    pub fn reset_distance(&self) -> f32 {
+        geometry::reset_distance(self.fov)
     }
 
     /// The head-on view of the 2D picture (Rust-only, owner request: the "2D from the front" of

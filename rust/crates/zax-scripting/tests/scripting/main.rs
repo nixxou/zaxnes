@@ -20,3 +20,4 @@ mod scaffold_tests;
 mod smoke_tests;
 mod support;
 mod test_vector_tests;
+mod two_zero_api_tests;

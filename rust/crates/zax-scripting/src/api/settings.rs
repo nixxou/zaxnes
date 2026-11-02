@@ -37,7 +37,13 @@ pub(super) fn with_settings(
         }
     })??;
     if view_reset {
-        cx.host_write(|ctx| ctx.camera.reset_view())?;
+        // The field of view reaches the camera first, so that `Camera.ResetDistance` and the
+        // distance the reset writes follow the setting (AMD-040 REQ-LUA-113).
+        let fov = read_settings(cx, |settings| settings.real(SettingId::CameraFov))?;
+        cx.host_write(move |ctx| {
+            ctx.camera.set_fov(fov);
+            ctx.camera.reset_view();
+        })?;
     }
     Ok(())
 }

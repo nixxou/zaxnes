@@ -16,6 +16,7 @@
 //! as a parameter and lends it to the Lua state for the length of the call: see
 //! [`ProfileScriptRuntime::run`].
 
+mod cs_table;
 mod globals;
 mod handoff;
 
@@ -37,6 +38,7 @@ use zax_engine3d::script::{ScriptError, ScriptHost};
 use zax_engine3d::settings::ConversionSettings;
 use zax_profiles::profile::GameProfile;
 use zax_profiles::script_order;
+use zax_settings::catalogue::SettingId;
 
 use self::globals::{install_api_globals, install_base, protected_call, text_of};
 use self::hooks::{
@@ -313,6 +315,7 @@ impl ProfileScriptRuntime {
         dispatch::install(&self.lua, self.data.env.optimized)?;
         self.lua.set_app_data(Budget::new());
         install_api_globals(&self.lua)?;
+        cs_table::install(&self.lua)?;
         PublishedGlobals::install(&self.lua)?;
 
         self.data.env.settings.mirror_all(state.settings_mut());
@@ -505,7 +508,14 @@ impl ProfileScriptRuntime {
 
     fn answer_view_reset(&mut self, requested: bool) {
         if requested {
-            self.with_context(|context| context.camera.reset_view());
+            // The field of view goes to the camera first, as the host does
+            // (`scene_script_bridge::apply_setting`): the framed distance of REQ-LUA-113 and the
+            // distance the reset writes both follow the setting.
+            let fov = self.data.env.settings.real(SettingId::CameraFov);
+            self.with_context(move |context| {
+                context.camera.set_fov(fov);
+                context.camera.reset_view();
+            });
         }
     }
 

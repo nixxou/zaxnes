@@ -209,17 +209,35 @@ pub fn clamp_anti_alias_samples(samples: i32, supported: i32) -> i32 {
     granted
 }
 
-/// The default setpoint distance `d₀ = 104 / atan(FOV_rad / 2)` (REQ-SCN-012). The arc tangent
-/// really is taken of half the field of view expressed in radians.
+/// Half-height the view reset frames, 132.7964 scene units (AMD-045 REQ-SCN-069): at
+/// [`reset_distance`] it fills exactly half the vertical field of view.
+pub const RESET_HALF_HEIGHT: f32 = 132.7964;
+
+/// Half-height the HUD plane frames, 76.6133 scene units (REQ-SCN-045 as amended by AMD-045).
+pub const HUD_HALF_HEIGHT: f32 = 76.6133;
+
+/// The reset setpoint distance `d₀ = 132.7964 / tan(FOV / 2) × s` of AMD-045 REQ-SCN-069, which
+/// replaces the `d₀ = 104 / atan(FOV_rad / 2)` of REQ-SCN-012. The scene scale s is 1 on desktop
+/// (REQ-SCN-002).
+///
+/// The value is **not** bounded here: the view reset writes it through the `[0, 512]` bound of
+/// REQ-SCN-011, while `Camera.ResetDistance` reads it raw (AMD-040 REQ-LUA-113).
+///
+/// The two formulas agree to 7 · 10⁻⁵ at the default field of view of 70° — 189.65291 against
+/// 189.65285 — and part company elsewhere: 320.60 against 277.93 at 45°, 121.69 against 150.25
+/// at 95°. The new one keeps the NES picture at the same fraction of the image whatever the
+/// field of view.
 #[must_use]
-pub fn default_distance(fov_degrees: f32) -> f32 {
-    104.0 / (fov_degrees * std::f32::consts::PI / 180.0 / 2.0).atan()
+pub fn reset_distance(fov_degrees: f32) -> f32 {
+    RESET_HALF_HEIGHT / (fov_degrees * std::f32::consts::PI / 180.0 / 2.0).tan()
 }
 
-/// The HUD plane distance `d_HUD = 60 / atan(FOV_rad / 2)` (REQ-SCN-045).
+/// The HUD plane distance `d_HUD = 76.6133 / tan(FOV / 2)` (REQ-SCN-045 as amended by AMD-045,
+/// in place of `60 / atan(FOV_rad / 2)`). It still reads 109.42 at 70°, and the HUD now keeps the
+/// same fraction of the image whatever the field of view.
 #[must_use]
 pub fn hud_distance(fov_degrees: f32) -> f32 {
-    60.0 / (fov_degrees * std::f32::consts::PI / 180.0 / 2.0).atan()
+    HUD_HALF_HEIGHT / (fov_degrees * std::f32::consts::PI / 180.0 / 2.0).tan()
 }
 
 /// The three columns of a rotation: the images of X, Y and Z.

@@ -58,6 +58,21 @@ impl ScriptCamera for SceneCameraBridge<'_> {
     fn reset_view(&mut self) {
         self.0.reset_view();
     }
+
+    fn fov(&self) -> f32 {
+        self.0.fov()
+    }
+
+    fn set_fov(&mut self, fov: f32) {
+        // The host already pushed `camera.fov` here (`apply_setting`); the camera ignores a
+        // write of the value it holds, so this costs nothing and keeps a Lua write of
+        // `Setting.Fov` from reading a stale framed distance (AMD-040 REQ-LUA-113).
+        self.0.set_fov(fov);
+    }
+
+    fn reset_distance(&self) -> f32 {
+        self.0.reset_distance()
+    }
 }
 
 /// The backdrop panel of the scene as scripts see it.

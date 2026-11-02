@@ -88,21 +88,27 @@ fn advance(camera: &mut SceneCamera, seconds: f32) {
     }
 }
 
+/// AMD-045 REQ-SCN-069, which replaces the formula of REQ-SCN-012:
+/// `d₀ = 132.7964 / tan(FOV / 2)`.
 #[test]
-fn req_scn_012_default_distance_is_104_over_atan_of_half_the_fov() {
-    for (fov, expected) in [
-        (70.0, 189.65),
-        (45.0, 277.93),
-        (95.0, 150.25),
-        (90.0, 156.21),
-    ] {
-        close(expected, geometry::default_distance(fov), 0.05);
+fn req_scn_069_the_framed_distance_is_132_7964_over_tan_of_half_the_fov() {
+    for (fov, expected) in [(70.0, 189.65), (45.0, 320.60), (95.0, 121.69)] {
+        close(expected, geometry::reset_distance(fov), 0.05);
     }
 }
 
+/// REQ-SCN-069: at the default field of view the new formula agrees with the old one to 10⁻³ —
+/// 189.65291 against 189.65285 — which is why no capture taken at 70° moves.
 #[test]
-fn req_scn_045_hud_plane_distance_is_60_over_atan_of_half_the_fov() {
-    for (fov, expected) in [(70.0, 109.42), (90.0, 90.12)] {
+fn req_scn_069_at_seventy_degrees_it_agrees_with_the_former_formula() {
+    let former = 104.0_f32 / (70.0_f32 * std::f32::consts::PI / 180.0 / 2.0).atan();
+    close(former, geometry::reset_distance(70.0), 1.0e-3);
+}
+
+/// REQ-SCN-045 as amended by AMD-045: `d_HUD = 76.6133 / tan(FOV / 2)`, still 109.42 at 70°.
+#[test]
+fn req_scn_045_hud_plane_distance_is_76_6133_over_tan_of_half_the_fov() {
+    for (fov, expected) in [(70.0, 109.42), (45.0, 184.96), (95.0, 70.20)] {
         close(expected, geometry::hud_distance(fov), 0.05);
     }
 }
@@ -197,8 +203,19 @@ fn vector_c4_a_fov_change_resets_the_view_and_the_hud_distance() {
     camera.current_mut().set_distance(42.0);
     camera.set_fov(90.0);
 
-    close(156.21, camera.current().distance(), 0.05);
-    close(90.12, geometry::hud_distance(camera.fov()), 0.05);
+    // Vector C4 of SPEC-06 §5 read 156.21 and 90.12, the values of the former formulas. AMD-045
+    // REQ-SCN-069 and REQ-SCN-045 replace them: at 90° the tangent of the half angle is 1, so
+    // the two distances are the half-heights themselves.
+    close(
+        geometry::RESET_HALF_HEIGHT,
+        camera.current().distance(),
+        0.05,
+    );
+    close(
+        geometry::HUD_HALF_HEIGHT,
+        geometry::hud_distance(camera.fov()),
+        0.05,
+    );
     assert_eq!(geometry::DEFAULT_ANGLES, camera.current().angles);
 }
 
@@ -358,7 +375,7 @@ fn req_scn_012_a_view_reset_only_changes_the_distance_of_the_current_mode() {
     camera.reset_view();
 
     close(
-        geometry::default_distance(70.0),
+        geometry::reset_distance(70.0),
         camera.setpoints(CameraMode::Tpv).distance(),
         0.05,
     );
@@ -420,7 +437,7 @@ fn req_scn_013_ending_a_game_returns_to_tpv_and_to_a_smooth_time_of_zero_point_f
         0.0,
     );
     close(
-        geometry::default_distance(70.0),
+        geometry::reset_distance(70.0),
         camera.current().distance(),
         0.05,
     );

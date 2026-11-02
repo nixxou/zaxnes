@@ -96,6 +96,13 @@ fn camera_properties(definition: &mut TypeDef) {
         },
         None,
     );
+    // The framed distance a view reset would give at the current field of view, before the
+    // [0, 512] bound; read only (AMD-040 REQ-LUA-113, AMD-045 REQ-SCN-069).
+    definition.read_only(
+        "ResetDistance",
+        |cx, _| Ok(num(cx.host(move |ctx| ctx.camera.reset_distance())?)),
+        None,
+    );
     definition.property(
         "Mode",
         |cx, _| Ok(num(cx.host(move |ctx| ctx.camera.mode())?)),

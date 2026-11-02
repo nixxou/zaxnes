@@ -132,6 +132,27 @@ impl ScriptLog for CollectingScriptLog {
     }
 }
 
+/// The upper bound of the camera's setpoint distance, `512 × SceneScale` (SPEC-06 REQ-SCN-011).
+/// `CS.Nes3D.CameraControl.DistanceMax` publishes it (AMD-059 REQ-LUA-117).
+pub const MAX_CAMERA_DISTANCE: f32 = 512.0;
+
+/// Default vertical field of view in degrees (SPEC-06 REQ-SCN-005).
+pub const DEFAULT_FOV: f32 = 70.0;
+
+/// Half-height a view reset frames, 132.7964 scene units (AMD-045 REQ-SCN-069).
+const RESET_HALF_HEIGHT: f32 = 132.7964;
+
+/// `d₀ = 132.7964 / tan(FOV / 2)`, the framed distance of SPEC-06 REQ-SCN-069 (AMD-045), before
+/// the bound of REQ-SCN-011.
+///
+/// The scene owns this formula (`zax_render::geometry::reset_distance`); this is the copy the
+/// host-free camera uses, this crate not depending on the renderer. A test of `zax-app`, which
+/// depends on both, checks that the two agree.
+#[must_use]
+pub fn framed_distance(fov_degrees: f32) -> f32 {
+    RESET_HALF_HEIGHT / (fov_degrees * std::f32::consts::PI / 180.0 / 2.0).tan()
+}
+
 /// The camera as scripts see it (SPEC-05 REQ-LUA-088, `CameraAPI`). The host binds it to the
 /// real camera of SPEC-06; [`DetachedScriptCamera`] is the headless stand-in.
 pub trait ScriptCamera: Send {
@@ -164,7 +185,26 @@ pub trait ScriptCamera: Send {
 
     /// The upper bound of the distance, `512 × SceneScale`.
     fn max_distance(&self) -> f32 {
-        512.0
+        MAX_CAMERA_DISTANCE
+    }
+
+    /// Vertical field of view in degrees, which the framed distance follows (REQ-SCN-005).
+    fn fov(&self) -> f32 {
+        DEFAULT_FOV
+    }
+
+    /// Takes the field of view the `camera.fov` setting now holds. The real camera already has
+    /// it from the host; a camera that holds its own state needs it so that
+    /// [`ScriptCamera::reset_distance`] follows the setting (AMD-040 REQ-LUA-113).
+    fn set_fov(&mut self, fov: f32) {
+        let _ = fov;
+    }
+
+    /// The framed distance `d₀` a view reset would write at the current field of view,
+    /// **before** the bound of REQ-SCN-011 (AMD-040 REQ-LUA-113, AMD-045 REQ-SCN-069). It is
+    /// read at any time and follows every change of field of view, even without a reset.
+    fn reset_distance(&self) -> f32 {
+        framed_distance(self.fov())
     }
 }
 
@@ -177,6 +217,9 @@ pub struct DetachedScriptCamera {
     mode: i32,
     look_at: Vec3,
     reset_count: u32,
+    /// Vertical field of view in degrees, which the host pushes here as it pushes it into the
+    /// real camera, so that `Camera.ResetDistance` follows it (REQ-LUA-113).
+    fov: f32,
 }
 
 impl DetachedScriptCamera {
@@ -192,6 +235,7 @@ impl DetachedScriptCamera {
             mode: 0,
             look_at: Self::DEFAULT_LOOK_AT,
             reset_count: 0,
+            fov: DEFAULT_FOV,
         }
     }
 
@@ -245,6 +289,17 @@ impl ScriptCamera for DetachedScriptCamera {
         self.reset_count += 1;
         self.angles = Self::DEFAULT_ANGLES;
         self.look_at = Self::DEFAULT_LOOK_AT;
+        // The distance is left alone: this camera stands for the real one in the headless
+        // runtime and the tests, where no setpoint of a view reset is observed. What the
+        // reset *would* write is `reset_distance`.
+    }
+
+    fn fov(&self) -> f32 {
+        self.fov
+    }
+
+    fn set_fov(&mut self, fov: f32) {
+        self.fov = fov;
     }
 }
 

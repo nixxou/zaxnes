@@ -25,7 +25,7 @@ fn the_api_dump_is_identical_to_the_golden() {
     assert_eq!(
         message
             .as_deref()
-            .map(|text| text.starts_with("wrote 495 lines")),
+            .map(|text| text.starts_with("wrote 496 lines")),
         Some(true)
     );
     assert_eq!(
