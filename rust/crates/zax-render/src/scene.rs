@@ -321,6 +321,21 @@ impl SceneState {
         )
     }
 
+    /// The curvature this frame actually applies (AMD-043 REQ-SCN-067 as AMD-046 REQ-SCN-074
+    /// amends it): [`Self::bend`], or the identity in 2D mode when "Bend 2D Mode" is off.
+    ///
+    /// The single home of that rule. The renderer reads it to pick the shader variant, and the
+    /// host reads it to aim the Zapper (REQ-INP-124, which REQ-SCN-074 switches off for a flat
+    /// 2D mode: the aim is then the one of REQ-INP-063, as at curvature 0).
+    #[must_use]
+    pub fn effective_bend(&self) -> SpaceBend {
+        if self.two_dimensional_mode && !self.bend_two_dimensional_mode {
+            SpaceBend::NONE
+        } else {
+            self.bend
+        }
+    }
+
     /// The visible rectangle of the current clip margins (REQ-SCN-039).
     #[must_use]
     pub fn visible_rectangle(&self) -> VisibleRect {

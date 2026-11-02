@@ -179,6 +179,16 @@ Le port 1 occupe l'octet de poids faible et le port 2 l'octet suivant de l'entr�
 **REQ-INP-064** (P1) [ROM] — **Tir hors écran** : si le point visé tombe hors de l'image (x hors de [0, 256[ ou y hors de [0, 240[), la position est transmise telle quelle, sans bornage ; le cœur ne détecte alors pas de lumière (SPEC-02), ce qui correspond au « tir hors écran » des jeux (par exemple le rechargement). Si le rayon n'intersecte pas le plan (rayon parallèle au plan ou dirigé à l'opposé), la dernière position valide est conservée.
 - Critère d'acceptation : en harnais, pointeur 20 pixels à gauche de l'image → position transmise (−20, y) sans bornage ; rayon parallèle au plan → dernière position valide conservée. [ROM] Duck Hunt, pointer hors de l'image NES et cliquer droit → tir manqué, aucun canard touché.
 
+**REQ-INP-124** (P2, AMD-043) [ROM] — **Zapper à la souris sur une scène courbée** (complète REQ-INP-063 et REQ-INP-064) : quand une courbure est active (SPEC-06 REQ-SCN-066, REQ-SCN-067), avec R le rayon de visée de REQ-INP-063 et z₀ le plan `z = ZapperOffset.z` :
+- les **candidats** sont les points P du plan z = z₀ tels que B(P) appartienne à R, du côté avant de la caméra ;
+- parmi les candidats qui tombent dans la **fenêtre de visée** |x − 128| ≤ 144 · s et |y − 128| ≤ 136 · s (l'image NES de REQ-SCN-001, élargie de 16 unités de scène sur ses quatre bords), le point visé est celui dont l'image B(P) est la plus proche de l'origine du rayon ; ses coordonnées NES s'obtiennent ensuite comme en REQ-INP-063 ;
+- s'il n'y a de candidat que hors de la fenêtre, le plus proche est transmis tel quel, sans bornage, comme un tir hors écran (REQ-INP-064) ;
+- s'il n'y a aucun candidat, la dernière position valide est conservée (REQ-INP-064) ;
+- la position retenue DOIT être à moins de 0,5 unité de scène du point défini ci-dessus.
+
+B est inversible là où le bornage de profondeur de REQ-SCN-067 ne s'applique pas ; au-delà, la visée n'est pas spécifiée. Sans courbure, la visée est celle de REQ-INP-063. **Amendée par AMD-046 REQ-SCN-074** : en mode 2D, quand « Courber le mode 2D » est inactif, REQ-INP-124 NE S'APPLIQUE PAS et la visée est celle de REQ-INP-063, comme à courbure nulle.
+- Critère d'acceptation (auto) : pour chacun des vecteurs de REQ-SCN-067 sans bornage, un rayon qui passe par B(P) donne un point visé à moins de 0,5 unité de P (avec z₀ = z de P).
+
 **REQ-INP-065** (P1) — Le Zapper fournit au cœur, pour le port en mode `Zapper` : l'état de la gâchette (REQ-INP-062) et, sur demande du cœur, la position visée (REQ-INP-063). La détection de lumière (comparaison avec la luminosité de l'image rendue autour de la position) relève du cœur (SPEC-02).
 - Critère d'acceptation : voir les vecteurs de test §5.3.
 

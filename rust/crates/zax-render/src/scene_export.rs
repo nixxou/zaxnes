@@ -55,11 +55,11 @@ pub fn objects(
     frame: &SceneFrame<'_>,
     view: &CameraView,
 ) -> Vec<ExportedObject> {
-    // The same rule the renderer's `select_bend_variant` applies: in 2D mode the frame holds the
+    // `SceneState::effective_bend` is the one home of the rule: in 2D mode the frame holds the
     // rectangle alone, so the setting of REQ-SCN-074 decides for the whole frame; in 3D mode it
     // has no effect and the HUD alone stays flat.
-    let bends = !scene.bend.is_identity()
-        && (!scene.two_dimensional_mode || scene.bend_two_dimensional_mode);
+    let bend = scene.effective_bend();
+    let bends = !bend.is_identity();
     let cells = crate::interop::subdivision_for(bends);
     let (Ok(unit_box), Ok(picture_quad)) = (
         crate::interop::unit_box_subdivided(cells),
@@ -102,7 +102,7 @@ pub fn objects(
             exported.push(export_one(
                 mesh,
                 item.model,
-                scene.bend,
+                bend,
                 hud,
                 bends && !hud,
                 item.clip,

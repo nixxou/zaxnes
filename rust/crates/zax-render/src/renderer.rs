@@ -442,8 +442,7 @@ impl SceneRenderer {
     /// [`RenderError::Mesh`] when a subdivided mesh is malformed. The flat programs stay in use,
     /// so the frame is drawn without the curvature rather than not at all.
     fn select_bend_variant(&mut self, scene: &SceneState) -> Result<(), RenderError> {
-        let wanted = !scene.bend.is_identity()
-            && (!scene.two_dimensional_mode || scene.bend_two_dimensional_mode);
+        let wanted = !scene.effective_bend().is_identity();
         if !wanted {
             self.passes.scene.bend = false;
             return Ok(());

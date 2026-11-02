@@ -14,8 +14,8 @@ are a reading reference only.
 | 2 | AMD-047: the four margins accept any finite real (REQ-PERS-087), Q-080's grid guard | done — `5703fed` |
 | 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | done — `c17dfb5` |
 | 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | done — `a697da0` |
-| 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | done — `<pending>` |
-| 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | todo |
+| 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | done — `c158272` |
+| 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | done — `<pending>` |
 | 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | todo |
 | 8 | The settings: desktop options, handheld defaults and page, harness options | todo |
 | 9 | Closing: draw/vertex counts at default, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests | todo |
@@ -397,6 +397,62 @@ workspace clippy clean.
 - `SPEC-06` §3.16: the definition of the 2D-mode rectangle and REQ-SCN-074.
 - `SPEC-09` §4.1.4: the `scene.bend_2d_mode` row, and the four curvature rows' effect column now
   points at REQ-SCN-067 instead of saying the effect is a later lot's.
+
+### Step 6 — REQ-INP-124, the aim through a bent scene
+
+`zax-app/src/input/zapper.rs`: `try_intersect_bent` / `try_aim_bent`, and the aiming window of
+REQ-INP-124 as `in_aiming_window`.
+
+**How the candidates are found.** `B` is invertible wherever the depth bound of REQ-SCN-067 does
+not bite, so the candidates are read off the **ray** rather than searched for on the plane: the
+ray is walked forward one scene unit at a time over the sphere of 1024 units around `C`, the
+preimage of each sample is taken, and a change of sign of `P.z − z₀` between two samples brackets
+a candidate that 32 bisections then locate to under 10⁻⁹. Walking **forward** is what makes the
+first candidate found the nearest one. Each candidate is checked against its own image (0.25
+unit), which rejects the ones an arc-tangent branch invents.
+
+#### The brief's performance point, and what the code actually does
+
+The brief asks for "the inverse transform on input events only, never per frame". REQ-INP-061
+refreshes the Zapper **once per displayed frame** and must keep doing so (the trigger follows the
+right button every frame), so "on input events" is implemented as a memo rather than by moving
+the call:
+
+- at curvature 0, `update` is the two lines it was before the amendment — `try_aim`, one
+  ray-plane intersection — and the memo is cleared, not consulted. Instruction for instruction
+  unchanged;
+- with a curvature, `AimInputs` records the pointer, the target size, the aim plane, the scene
+  scale, the curvature and the camera view. A frame on which none of them moved costs **one
+  comparison** and returns. The march only runs when the player moves the mouse or the camera,
+  which is what the brief means.
+
+`SceneState::effective_bend()` is the single home of "which curvature does this frame apply":
+`scene.bend`, or the identity in 2D mode when "Bend 2D Mode" is off. The renderer's
+`select_bend_variant`, the CPU export and the Zapper all read it, so AMD-046's amendment of
+REQ-INP-124 — a flat 2D mode aims as at curvature 0 — holds by construction rather than by three
+copies of the same condition.
+
+#### Tests (16 in `zapper_input_tests.rs`, 31 in all there)
+
+| Criterion | Test |
+|---|---|
+| REQ-INP-124's own criterion: a ray through `B(P)` aims within 0.5 unit of `P`, over the eleven unbounded vectors of REQ-SCN-067 (plus a 90° case) | `req_inp_124_a_ray_through_the_bent_image_aims_at_the_point_it_came_from` (11 cases) |
+| no curvature aims exactly as REQ-INP-063 — the same function, not a special case that agrees | `req_inp_124_no_curvature_aims_as_req_inp_063` |
+| the aiming window, its four edges and the scene scale; a candidate only outside it is passed **unbounded**; no candidate at all keeps the last position | `req_inp_124_a_candidate_outside_the_window_is_passed_unbounded` |
+| the curved aim is recomputed only on a change, and a reset forgets the memo | `req_inp_124_the_curved_aim_is_recomputed_only_on_a_change` |
+| AMD-046's amendment through `effective_bend` | `req_scn_074_a_flat_two_dimensional_mode_aims_as_at_curvature_zero` |
+
+One of my own test premises was wrong and the code was right, which is worth recording: at a
+curvature of 90° a ray aimed at a point far off to the left **also** crosses the aim plane at a
+point inside the aiming window, and REQ-INP-124 then prefers that nearer in-window candidate —
+which is the requirement, not a failure. The test now uses a gentle 30° curvature, where the only
+candidate really is outside the window, and says why in place.
+
+`zax-app` 654 → **670 passed**, fmt and workspace clippy clean.
+
+#### SPEC chapter edit
+
+`SPEC-08` §3.7: REQ-INP-124 written out after REQ-INP-064, with AMD-046's amendment of it.
 
 ### Open questions
 

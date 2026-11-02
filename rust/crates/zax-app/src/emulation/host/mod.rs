@@ -1297,6 +1297,9 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 right_button: snapshot.right_button,
                 offset,
                 scene_scale: self.scene_scale,
+                // AMD-043 REQ-INP-124, with the exception AMD-046 REQ-SCN-074 adds: a flat 2D
+                // mode aims as at curvature 0. One read of a field the renderer already keeps.
+                bend: self.scene.effective_bend(),
             },
         );
     }

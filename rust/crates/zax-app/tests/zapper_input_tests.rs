@@ -10,6 +10,7 @@ use zax_app::input::routing;
 use zax_app::input::zapper::{self, ZapperInput, ZapperState, PRESSED_BYTE, RELEASED_BYTE};
 use zax_app::input::{InputAction, InputSnapshot};
 use zax_engine3d::settings::ConversionSettings;
+use zax_engine3d::space_bend::SpaceBend;
 use zax_nes::{ControllerPortType, NesCore, ZapperPosition};
 use zax_profiles::values::Vec4F;
 use zax_render::camera::{to_gl, CameraView, SceneCamera};
@@ -56,6 +57,7 @@ fn update(
             right_button,
             offset: Vector3::ZERO,
             scene_scale: 1.0,
+            bend: SpaceBend::NONE,
         },
     );
 }
@@ -338,4 +340,198 @@ fn req_inp_004_a_zapper_port_shows_the_trigger_and_no_button_to_the_core() {
     };
     harness.tick_snapshot(1.0 / 60.0, &released);
     assert_eq!(0x10, port_byte(&harness));
+}
+
+// ------------------------------------------------- AMD-043 REQ-INP-124: aiming at a bent scene
+
+/// A curvature of 90° left-right, the one the ROM criterion of REQ-INP-124 uses.
+fn bend_90() -> SpaceBend {
+    SpaceBend::new(90.0, 0.0, 0.0, false, 1.0)
+}
+
+/// Where the pointer has to be for the ray to pass through the scene point `target`.
+fn pointer_at(view: &CameraView, target: zax_engine3d::vectors::Vec3) -> [f32; 2] {
+    project(view, Vector3::new(target.x, target.y, target.z))
+}
+
+/// REQ-INP-124, acceptance criterion: for each unbounded vector of REQ-SCN-067, a ray that
+/// passes through `B(P)` gives an aimed point within 0.5 scene unit of `P` (with z₀ = z of P).
+#[rstest]
+#[case(60.0, 0.0, 0.0, false, (256.0, 120.0, 0.0))]
+#[case(60.0, 0.0, 0.0, false, (0.0, 120.0, 0.0))]
+#[case(60.0, 0.0, 0.0, false, (128.0, 120.0, 0.0))]
+#[case(-60.0, 0.0, 0.0, false, (256.0, 120.0, 0.0))]
+#[case(0.0, 60.0, 0.0, false, (128.0, 240.0, 0.0))]
+#[case(0.0, 60.0, 0.0, false, (128.0, 0.0, 0.0))]
+#[case(0.0, 0.0, 60.0, false, (0.0, 120.0, 0.0))]
+#[case(0.0, 0.0, 60.0, false, (128.0, 240.0, 0.0))]
+#[case(0.0, 0.0, 60.0, true, (0.0, 0.0, 0.0))]
+#[case(0.0, 0.0, 60.0, true, (128.0, 240.0, 0.0))]
+#[case(90.0, 0.0, 0.0, false, (224.0, 120.0, 0.0))]
+fn req_inp_124_a_ray_through_the_bent_image_aims_at_the_point_it_came_from(
+    #[case] bend_lr: f32,
+    #[case] bend_tb: f32,
+    #[case] arc_h: f32,
+    #[case] at_edge: bool,
+    #[case] point: (f32, f32, f32),
+) {
+    let bend = SpaceBend::new(bend_lr, bend_tb, arc_h, at_edge, 1.0);
+    let point = zax_engine3d::vectors::Vec3::new(point.0, point.1, point.2);
+    let view = default_view(None);
+    // The aim plane is z₀ = z of P, which the Zapper offset carries.
+    let offset = Vector3::new(0.0, 0.0, point.z);
+    let pointer = pointer_at(&view, bend.apply(point));
+
+    let aimed = zapper::try_intersect_bent(&view, pointer, VIEWPORT, offset, 1.0, bend)
+        .expect("the ray meets a candidate");
+    let distance = ((aimed[0] - point.x).powi(2) + (aimed[1] - point.y).powi(2)).sqrt();
+    assert!(
+        distance <= 0.5,
+        "aimed at ({}, {}), expected ({}, {}): {distance} unit away",
+        aimed[0],
+        aimed[1],
+        point.x,
+        point.y
+    );
+}
+
+/// REQ-INP-124: without a curvature the aim is the one of REQ-INP-063, to the bit — the same
+/// function, not a special case that happens to agree.
+#[test]
+fn req_inp_124_no_curvature_aims_as_req_inp_063() {
+    let view = default_view(None);
+    for pointer in [[640.0, 360.0], [100.0, 100.0], [1200.0, 700.0], [0.0, 0.0]] {
+        let flat = zapper::try_intersect(&view, pointer, VIEWPORT, Vector3::ZERO);
+        let bent = zapper::try_intersect_bent(
+            &view,
+            pointer,
+            VIEWPORT,
+            Vector3::ZERO,
+            1.0,
+            SpaceBend::NONE,
+        );
+        assert_eq!(flat, bent, "pointer {pointer:?}");
+    }
+}
+
+/// REQ-INP-124: a candidate only outside the aiming window — |x − 128| ≤ 144, |y − 128| ≤ 136 —
+/// is handed over **unbounded**, as the off-screen shot of REQ-INP-064.
+#[test]
+fn req_inp_124_a_candidate_outside_the_window_is_passed_unbounded() {
+    assert!(zapper::in_aiming_window([128.0, 128.0], 1.0));
+    assert!(zapper::in_aiming_window([-16.0, -8.0], 1.0), "the corner");
+    assert!(zapper::in_aiming_window([272.0, 264.0], 1.0));
+    assert!(!zapper::in_aiming_window([-17.0, 128.0], 1.0));
+    assert!(!zapper::in_aiming_window([128.0, 265.0], 1.0));
+    // The window scales with the scene scale of REQ-SCN-002.
+    assert!(!zapper::in_aiming_window([-16.0, 128.0], 0.5));
+
+    // A point well outside the window still produces an aim, and it is **not** clamped into the
+    // window. A gentle curvature is used on purpose: at 90° the scene wraps far enough that a
+    // ray aimed at the far left also crosses the plane inside the window, and REQ-INP-124 then
+    // prefers that nearer in-window candidate — which is the requirement, not a failure.
+    let bend = SpaceBend::new(30.0, 0.0, 0.0, false, 1.0);
+    let view = default_view(None);
+    let far = zax_engine3d::vectors::Vec3::new(-220.0, 120.0, 0.0);
+    let pointer = pointer_at(&view, bend.apply(far));
+    let aimed = zapper::try_intersect_bent(&view, pointer, VIEWPORT, Vector3::ZERO, 1.0, bend)
+        .expect("the ray meets a candidate");
+    assert!(
+        !zapper::in_aiming_window(aimed, 1.0),
+        "the only candidate is outside the window and is passed as it is: {aimed:?}"
+    );
+    assert!(
+        (aimed[0] - far.x).abs() <= 1.0,
+        "and it is the point aimed at, unbounded: {aimed:?}"
+    );
+
+    // No candidate at all — a camera whose ray runs along the aim plane — keeps the last valid
+    // position (REQ-INP-064), which `update` does by leaving the state alone.
+    let parallel = CameraView {
+        forward: Vector3::new(1.0, 0.0, 0.0),
+        right: Vector3::new(0.0, 0.0, 1.0),
+        up: Vector3::new(0.0, 1.0, 0.0),
+        ..default_view(None)
+    };
+    let mut zapper = ZapperState::new();
+    let centre = [VIEWPORT[0] * 0.5, VIEWPORT[1] * 0.5];
+    zapper.update(
+        true,
+        &ZapperInput {
+            view: &parallel,
+            pointer: centre,
+            size: VIEWPORT,
+            right_button: false,
+            offset: Vector3::ZERO,
+            scene_scale: 1.0,
+            bend,
+        },
+    );
+    assert!(!zapper.has_position(), "nothing was ever aimed at");
+}
+
+/// REQ-INP-124 through the state: the curved aim is recomputed only when one of its inputs
+/// changes. REQ-INP-061 refreshes the Zapper once per displayed frame, and the march of the
+/// inverse has no business running on a frame where nothing moved.
+#[test]
+fn req_inp_124_the_curved_aim_is_recomputed_only_on_a_change() {
+    let view = default_view(None);
+    let bend = bend_90();
+    let centre = zax_engine3d::vectors::Vec3::new(128.0, 120.0, 0.0);
+    let pointer = pointer_at(&view, bend.apply(centre));
+
+    let mut zapper = ZapperState::new();
+    let aim = |pointer: [f32; 2]| ZapperInput {
+        view: &view,
+        pointer,
+        size: VIEWPORT,
+        right_button: false,
+        offset: Vector3::ZERO,
+        scene_scale: 1.0,
+        bend,
+    };
+    zapper.update(true, &aim(pointer));
+    assert!(zapper.has_position());
+    let first = zapper.position();
+
+    // The same inputs again: the position stands.
+    zapper.update(true, &aim(pointer));
+    assert_eq!(first, zapper.position());
+
+    // A pointer that moved: a new aim, and it is a different pixel.
+    let moved = pointer_at(
+        &view,
+        bend.apply(zax_engine3d::vectors::Vec3::new(64.0, 120.0, 0.0)),
+    );
+    zapper.update(true, &aim(moved));
+    assert_ne!(first, zapper.position());
+
+    // A reset forgets the memo as well as the position.
+    zapper.reset();
+    assert!(!zapper.has_position());
+    zapper.update(true, &aim(moved));
+    assert!(zapper.has_position());
+}
+
+/// AMD-046's amendment of REQ-INP-124, read through `SceneState::effective_bend`: in 2D mode
+/// with "Bend 2D Mode" off, the aim is the one of REQ-INP-063; with it on, REQ-INP-124 applies.
+#[test]
+fn req_scn_074_a_flat_two_dimensional_mode_aims_as_at_curvature_zero() {
+    let mut scene = zax_render::scene::SceneState {
+        two_dimensional_mode: true,
+        bend: bend_90(),
+        bend_two_dimensional_mode: false,
+        ..zax_render::scene::SceneState::default()
+    };
+    assert!(scene.effective_bend().is_identity(), "REQ-INP-063 applies");
+
+    scene.bend_two_dimensional_mode = true;
+    assert_eq!(bend_90(), scene.effective_bend(), "REQ-INP-124 applies");
+
+    // In 3D mode the setting changes nothing either way.
+    scene.two_dimensional_mode = false;
+    for setting in [false, true] {
+        scene.bend_two_dimensional_mode = setting;
+        assert_eq!(bend_90(), scene.effective_bend());
+    }
 }
