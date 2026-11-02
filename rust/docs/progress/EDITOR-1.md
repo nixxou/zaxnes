@@ -15,7 +15,28 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 | 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
 | L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
-Next step: 7, the end-of-lot checks (workspace tests, goldens, bench-core, portable builds).
+Next step: the owner tests the editor on a real game (2026-11-02, owner's choice); step 7 after.
+
+## Left to do (step 7 and after)
+
+Done already: `cargo fmt --check`, clippy on the whole workspace (`--features zax-app/bundled`),
+`zax-nes` tests, PPU goldens (291 of 291 rows), the whole `zax-app` suite.
+
+1. Tests of the other crates, one at a time in `--release` (`zax-engine3d`, `zax-scripting`,
+   `zax-render`, `zax-harness`, ...).
+2. Zero cost when closed: `zax-harness bench-core` before (`553af8b`) / after on SMB1, SMB3, MM2,
+   Metroid, Zelda II; post-LTO `NesBus::tick` (119 instructions) and `NesCore::run_frame`
+   (2 096) unchanged (PERFORMANCE-HISTORY §3, §5.5). Watch the extra `bool` read in
+   `run_due_frames` and the `Option` tests in the tick and the main loop.
+3. PortMaster (`build/package-linux-aarch64.sh`) and Android (`zax-android`) builds compile.
+4. One line in `PERFORMANCE-HISTORY.md` (where the editor lives, why it costs nothing closed).
+5. Harness golden renders unchanged (56 captures, both draw modes).
+6. Squirrel: ROM, profile, script from the owner; reference movie, RAM map, chapters, reference
+   captures (prompt §11).
+7. Lot 2 / later: chapters on the bar (`add_chapter`, `chapters` MCP tools), thumbnails, pad
+   shortcuts and handheld style of the bar; `.fm2` resets replayed; `watch_ram` over a frame
+   range; `set_setting` tool; menu entry for exact reload (now F5 = fast, exact through the MCP or
+   `tools.reload_script` number 1).
 
 ## What exists already (and changes the plan)
 
