@@ -9,13 +9,13 @@ reference.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Setup: sources read, requirement map, design decisions, before benchmarks, spec copies | done — `ba4bc0d` |
-| 2 | REQ-CORE-121: the in-memory state of the core, and its tests | done — `9df74b1` |
-| 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | done — `4d10a16` |
-| 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | done — `2a9c1ca` |
-| 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | done — `df14e22` |
-| 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | done — `2c3b324` |
-| 7 | Closing: benches, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, goldens | done |
+| 1 | Setup: sources read, requirement map, design decisions, before benchmarks, spec copies | done — `0d312e2` |
+| 2 | REQ-CORE-121: the in-memory state of the core, and its tests | done |
+| 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | todo |
+| 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | todo |
+| 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | todo |
+| 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | todo |
+| 7 | Closing: benches, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, goldens | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -144,3 +144,67 @@ statically), the two demo binaries are local stand-ins, and `rust/test-roms/` is
 
 The untracked `tests/` folder of this checkout (343 MB) is the .NET solution's build output left
 by the former branch layout. It is not touched by this lot.
+
+### Step 2 — REQ-CORE-121, the in-memory state
+
+`zax_nes::state::CoreState` is a reused `Vec<u8>`, with `len`, `is_empty`, `as_slice` and a
+`with_capacity` whose documented argument is `NesCore::max_core_state_size()` — the value that
+makes it grow exactly never. `NesCore::capture_core_state` / `restore_core_state` are the pair;
+both refuse a core with no ROM, and the restore also refuses a buffer nothing was captured into
+and, unlike a corrupt savestate, **leaves the machine running** (nothing was written yet when the
+header checks fail).
+
+What is in the block, in order: the frame counter, the region, then `NesBus`, `Cpu6502`,
+`Ppu2C02::save_machine_state`, `Apu2A03`, `InputPorts`, `Cartridge` and `WideExtension` — the
+savestate's own per-component code, called in the savestate's own order. What is not in it:
+
+| Left out | Why it is sound |
+|---|---|
+| the magic number, the format version, the core name | the block is read back by the instance that wrote it, in the same session |
+| the ROM image and the ROM name | the ROM never leaves; the restore reads into the **attached** cartridge instead of rebuilding one, and `Cartridge::load_state` refreshes the fast ROM windows itself |
+| the PPU's pixel buffer | it was never in the savestate either, so the displayed frame's picture survives for free |
+| the PPU's tile records and edge bands (`save_frame_records`) | `begin_rendered_frame` clears them at dot 1 of the pre-render line of **every** frame, rendering on or off, and a frame runs vblank to vblank — so the clear always precedes the next frame's first capture |
+
+Two departures from the .NET lot, both deliberate:
+1. **The widescreen block is always written**, where a savestate writes it only once a ROM has
+   unlocked the extension. Within one real frame a game may unlock it, so the in-memory state has
+   to be able to put "locked" back; writing the block unconditionally does that exactly (the
+   block carries `unlocked` itself) and needs no `reset()` branch.
+2. **The tile records are out** (above). The .NET keeps them in, and then has to say that the
+   picture survives anyway; here both the picture *and* the records survive, which is what makes
+   REQ-LOOP-067 true by construction in step 5.
+
+`Apu2A03::load_state_keeping_samples` is the restore that leaves the queue alone: one private
+`load_state_inner(reader, keep_pending_samples)` with two public wrappers, so the two paths
+cannot read a different layout. REQ-CORE-074 and Q-006 are unchanged for savestates and
+rollbacks — a test asserts both sides.
+
+#### What it costs
+
+`the_cost_of_one_capture_and_one_restore`, release, x86, 20 000 rounds each, reported by the
+`#[ignore]` measurement in `core_state_tests.rs`:
+
+| Fixture | state size | capture | restore | both, per real frame |
+|---|---|---|---|---|
+| minimal (NROM, CHR-RAM) | 19 474 B | 0.249 µs | 0.646 µs | **0.895 µs** |
+| `mmc3_test_2/1-clocking.nes` (MMC3) | 19 553 B | 0.255 µs | 0.713 µs | **0.967 µs** |
+| `spritecans.nes` (a drawn frame) | 19 474 B | 0.255 µs | 0.655 µs | **0.911 µs** |
+
+About **1 µs against a core frame of 850 µs: 0.11 %** of one emulated frame, where N = 1 doubles
+the frame. Keeping the ~1 000 tile records of a frame out of the block is most of why: the state
+is 19.5 KiB instead of about 46 KiB, and it is written and read with no per-record loop.
+
+Tests: `zax-nes/tests/core_state_tests.rs`, 11 of them plus the measurement — the acceptance
+criterion of REQ-CORE-121 (100 frames, a varying input sequence, the picture, the tile records
+and the work RAM digested per frame) on the counter ROM **and** on `spritecans.nes` so that the
+PPU pipeline, the mapper and the APU are all in the comparison; a restored state that captures to
+the same bytes; the frame counter; the three memories; an MMC3 bank window; the audio queue kept
+where a savestate drops it; the frame the host is reading surviving the restore; the bound and
+the buffer that stops growing over 60 captures; the amended REQ-ARCH-012 ("the sequence of real
+states does not depend on N") over 120 frames; and the two refusals.
+
+`cargo test --release -p zax-nes` 494 passed, and the full goldens report
+**`291 of 291 rows matched, 0 ROMs missing`** — the savestate format is byte-identical, which is
+what the `save_state` = `save_machine_state` + `save_frame_records` split was for.
+
+SPEC copy: REQ-CORE-121 added to SPEC-02 §3.12, after REQ-CORE-122.

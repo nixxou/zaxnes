@@ -1027,6 +1027,31 @@ impl Apu2A03 {
     /// # Errors
     /// [`InvalidState`] when the block is truncated or holds an impossible value.
     pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.load_state_inner(reader, false)
+    }
+
+    /// [`Apu2A03::load_state`] leaving the samples the host has not read yet where they are
+    /// (AMD-041 REQ-CORE-121).
+    ///
+    /// Step 5 of REQ-LOOP-065 undoes the frames in advance, not the sound the displayed frame
+    /// has just produced: that future *does* happen — it is the one the player is about to hear —
+    /// so the queue survives, where REQ-CORE-074 empties it for a savestate or a rollback. The
+    /// resampler's own history is restored either way, so the machine is in the very same state.
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or holds an impossible value.
+    pub fn load_state_keeping_samples(
+        &mut self,
+        reader: &mut StateReader,
+    ) -> Result<(), InvalidState> {
+        self.load_state_inner(reader, true)
+    }
+
+    fn load_state_inner(
+        &mut self,
+        reader: &mut StateReader,
+        keep_pending_samples: bool,
+    ) -> Result<(), InvalidState> {
         self.pulse1.load_state(reader)?;
         self.pulse2.load_state(reader)?;
         self.triangle.load_state(reader)?;
@@ -1074,8 +1099,11 @@ impl Apu2A03 {
         self.resampler.load_state(reader)?;
 
         // Pending audio is dropped on restore (REQ-CORE-074); the resampler's own history was
-        // restored above, so the sound picks up from the state that was saved (Q-006).
-        self.drop_pending_samples();
+        // restored above, so the sound picks up from the state that was saved (Q-006). The
+        // in-memory restore of REQ-CORE-121 is the one exception.
+        if !keep_pending_samples {
+            self.drop_pending_samples();
+        }
         Ok(())
     }
 }

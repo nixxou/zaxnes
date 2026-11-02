@@ -459,6 +459,9 @@ Le bloc commence par un numéro de version du format.
 **REQ-CORE-122** (P2) — **Reset doux** (ajoutée par AMD-044) : le cœur DOIT offrir un reset doux conforme au comportement documenté de la console (nesdev, « CPU power up state » et « PPU power up state », section *after reset*) — RAM interne, RAM de sauvegarde et RAM de CHR conservées, drapeau I mis à 1, S diminué de 3, PC chargé depuis `$FFFC`/`$FFFD`, PPU, APU et mapper dans leur état *after reset*, verrou et registres à décalage des ports remis à zéro, compteur de frames reparti de 0 (REQ-CORE-006 amendée). Les ROM de test publiques `cpu_reset/ram_after_reset` et `cpu_reset/registers` (blargg) s'ajoutent à la liste exigée de ce §3.12, **sous reset doux** ; la note de REQ-CORE-004 (`ram_after_reset` échoue volontairement) reste vraie pour le reset dur.
 - Critère d'acceptation : les deux ROM `cpu_reset` passent sous reset doux ; une ROM maison qui compte ses resets en RAM affiche 3 après trois resets doux.
 
+**REQ-CORE-121** (P2) — **État en mémoire du cœur** (ajoutée par AMD-041) : le cœur DOIT offrir une sauvegarde et une restauration de son état complet en mémoire (mémoire vive, mapper, CPU, PPU, APU, entrées, compteur de frames), restaurables à l'identique, et une restauration qui laisse intacte la sortie audio déjà produite. L'image de la ROM, qui reste chargée, n'en fait pas partie ; la taille de l'état est bornée.
+- Critère d'acceptation : sauvegarder, émuler 100 frames, restaurer, émuler les mêmes 100 frames avec les mêmes entrées → images et RAM identiques octet pour octet.
+
 **REQ-CORE-114** (P1) [ROM] — Mappers : `mmc3_test_2` tests 1 à 5 DOIVENT passer (le test 6, « MMC3 alt », peut échouer). Le comportement des IRQ MMC3 DOIT être exact à la ligne près pour les barres de statut (Super Mario Bros. 3, Mega Man 3, Ninja Gaiden III).
 - Critère d'acceptation : chaque ROM affiche « Passed » ; [ROM] la barre de statut de SMB3 ne tremble pas en jeu (inspection sur 60 s).
 

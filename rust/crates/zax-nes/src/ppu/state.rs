@@ -6,7 +6,29 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 
 impl Ppu2C02 {
     /// Appends the PPU state to `writer` (REQ-CORE-090).
+    ///
+    /// The block is the machine's half followed by the frame's half, in that order; a reader
+    /// that wants both calls [`Ppu2C02::load_state`], which reads them the same way. The split
+    /// exists for the in-memory state of AMD-041 REQ-CORE-121, which keeps the machine alone —
+    /// every field still has exactly one definition, so the two paths cannot drift apart and the
+    /// savestate format is unchanged.
     pub fn save_state(&self, writer: &mut StateWriter) {
+        self.save_machine_state(writer);
+        self.save_frame_records(writer);
+    }
+
+    /// Restores the PPU state from `reader` (REQ-CORE-091).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or inconsistent.
+    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+        self.load_machine_state(reader)?;
+        self.load_frame_records(reader)
+    }
+
+    /// The half of the PPU state the emulation reads back: the memories, the registers, the
+    /// scan position and the rendering pipeline (AMD-041 REQ-CORE-121).
+    pub fn save_machine_state(&self, writer: &mut StateWriter) {
         writer.write_blob(&self.vram);
         writer.write_blob(&self.oam);
         writer.write_blob(&self.palette);
@@ -39,17 +61,24 @@ impl Ppu2C02 {
         writer.write_bool(self.nmi_line_sample);
 
         self.save_render_state(writer);
+    }
 
+    /// The half of the PPU state that *is* the frame just run: the unreliable edge bands and the
+    /// tile records. Left out of the in-memory state of AMD-041 REQ-CORE-121 — the records of
+    /// every frame are cleared unconditionally by [`Ppu2C02::begin_rendered_frame`] at dot 1 of
+    /// its pre-render line, so the emulation never reads them back, and leaving them where they
+    /// are is what makes the displayed frame of REQ-LOOP-067 the one the host sees.
+    pub fn save_frame_records(&self, writer: &mut StateWriter) {
         writer.write_i32(self.mask_x);
         writer.write_i32(self.mask_y);
         self.tiles.save_state(writer);
     }
 
-    /// Restores the PPU state from `reader` (REQ-CORE-091).
+    /// Restores the half [`Ppu2C02::save_machine_state`] wrote.
     ///
     /// # Errors
     /// [`InvalidState`] when the block is truncated or inconsistent.
-    pub fn load_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
+    pub fn load_machine_state(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.sprite_line_stale = true;
         reader.read_blob_into(&mut self.vram)?;
         reader.read_blob_into(&mut self.oam)?;
@@ -82,8 +111,14 @@ impl Ppu2C02 {
         self.vblank_just_started = reader.read_bool()?;
         self.nmi_line_sample = reader.read_bool()?;
 
-        self.load_render_state(reader)?;
+        self.load_render_state(reader)
+    }
 
+    /// Restores the half [`Ppu2C02::save_frame_records`] wrote.
+    ///
+    /// # Errors
+    /// [`InvalidState`] when the block is truncated or inconsistent.
+    pub fn load_frame_records(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
         self.mask_x = reader.read_i32()?;
         self.mask_y = reader.read_i32()?;
         self.tiles.load_state(reader)

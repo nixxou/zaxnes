@@ -4,7 +4,7 @@ use crate::cpu::{Cpu6502, CpuBus};
 use crate::input::{ControllerPortType, InputPorts, InvalidPort, ZapperPosition};
 use crate::ppu::{Ppu2C02, MAX_TILE_RECORD_STATE_SIZE, OAM_SIZE, PALETTE_SIZE, VRAM_SIZE};
 use crate::rom::{InesHeader, RomImage, RomLoadResult};
-use crate::state::{InvalidState, StateLoadFailure, StateReader, StateWriter};
+use crate::state::{CoreState, InvalidState, StateLoadFailure, StateReader, StateWriter};
 use crate::{
     FrameBatch, NametableMirroring, NesBus, NesRegion, RegionTiming, TileRecord, VideoInfo,
 };
@@ -252,6 +252,11 @@ impl NesCore {
 
     /// The earlier widescreen block, without the PRG window registers; still read.
     pub const WIDE_STATE_VERSION_5: i32 = 5;
+
+    /// Bytes the widescreen extension's own block occupies at most, which the in-memory state
+    /// of REQ-CORE-121 always carries: its two 64-byte tables, its 3 584-byte RAM, their length
+    /// prefixes and its dozen registers.
+    const MAX_WIDE_STATE_SIZE: usize = 64 + 64 + crate::wide::RAM_SIZE + 64;
 
     /// Whether `version` is one of a block with the widescreen extension's registers.
     const fn is_wide_state_version(version: i32) -> bool {
@@ -1102,6 +1107,112 @@ impl NesCore {
             + 4096; // headers, registers, counters and the length prefixes
 
         rom_bytes + fixed_bytes + 256 + name_bytes
+    }
+
+    // ------------------------------------------------------- in-memory state
+
+    /// Upper bound on the bytes a [`CoreState`] of the ROM currently loaded occupies
+    /// (REQ-CORE-121, REQ-ARCH-013): [`NesCore::max_state_size`] without the ROM image and its
+    /// name, plus the widescreen block, which an in-memory state always carries.
+    #[must_use]
+    pub fn max_core_state_size(&self) -> usize {
+        let (rom_bytes, name_bytes) = self.bus.cartridge().map_or((0, 0), |cartridge| {
+            (
+                cartridge.rom().raw().len(),
+                cartridge.rom().name().len() * 4,
+            )
+        });
+        self.max_state_size() - rom_bytes - name_bytes + Self::MAX_WIDE_STATE_SIZE
+    }
+
+    /// Captures the complete state of the machine into `state`, the ROM image excluded
+    /// (AMD-041 REQ-CORE-121): work RAM, the mapper, the CPU, the PPU, the APU, the input ports,
+    /// the widescreen registers and the frame counter.
+    ///
+    /// The per-component code is the savestate's own, so the two can never drift apart; what is
+    /// left out is the portable wrapping — magic number, format version, core name, ROM image
+    /// and ROM name — and the half of the PPU state that *is* the frame just run (its tile
+    /// records and edge bands, which [`crate::ppu::Ppu2C02::begin_rendered_frame`] clears at the
+    /// start of every frame anyway). Nothing is allocated once `state` has grown to its size.
+    ///
+    /// # Errors
+    /// [`NoRomLoaded`] when there is nothing to capture.
+    pub fn capture_core_state(&self, state: &mut CoreState) -> Result<(), NoRomLoaded> {
+        let cartridge = self.bus.cartridge().ok_or(NoRomLoaded)?;
+
+        let mut writer = state.begin();
+        writer.write_i64(self.frame_count);
+        writer.write_u8(self.region as u8);
+
+        self.bus.save_state(&mut writer);
+        self.cpu.save_state(&mut writer);
+        self.bus.ppu().save_machine_state(&mut writer);
+        self.bus.apu().save_state(&mut writer);
+        self.bus.input().save_state(&mut writer);
+        cartridge.save_state(&mut writer);
+        self.bus.ppu().wide().save_state(&mut writer);
+
+        state.end(writer);
+        Ok(())
+    }
+
+    /// Restores a state [`NesCore::capture_core_state`] produced on this very instance, **the
+    /// audio already produced left alone** (AMD-041 REQ-CORE-121).
+    ///
+    /// Step 5 of REQ-LOOP-065 undoes the frames in advance, not the sound the displayed frame
+    /// produced, which the player is about to hear: the samples the host has not read yet stay
+    /// in the queue, unlike a savestate restore (REQ-CORE-074, Q-006). The PPU's picture and the
+    /// tile records of the displayed frame are not in the block either, so they survive the
+    /// restore and the host can still show and convert that frame (REQ-LOOP-067).
+    ///
+    /// # Errors
+    /// [`InvalidState`] when no ROM is loaded, when `state` holds nothing, or when the block
+    /// does not match the machine — which can only happen if it was captured from another core.
+    pub fn restore_core_state(&mut self, state: &CoreState) -> Result<(), InvalidState> {
+        if self.bus.cartridge().is_none() {
+            return Err(InvalidState::corrupt(
+                "No ROM is loaded: there is no state to restore.",
+            ));
+        }
+        if state.is_empty() {
+            return Err(InvalidState::corrupt(
+                "The in-memory state holds nothing to restore.",
+            ));
+        }
+
+        let mut reader = StateReader::new(state.as_slice(), 0)?;
+        reader.set_format_version(Self::STATE_VERSION);
+
+        let frame_count = reader.read_i64()?;
+        let region_byte = reader.read_u8()?;
+        let region = NesRegion::from_u8(region_byte).ok_or_else(|| {
+            InvalidState::corrupt(format!("Corrupt core state: unknown region {region_byte}."))
+        })?;
+
+        self.bus.load_state(&mut reader)?;
+        self.cpu.load_state(&mut reader)?;
+        self.bus.ppu_mut().load_machine_state(&mut reader)?;
+        self.bus.apu_mut().load_state_keeping_samples(&mut reader)?;
+        self.bus.input_mut().load_state(&mut reader)?;
+        // The cartridge is the one already attached: the ROM never left, so there is nothing to
+        // rebuild. `Cartridge::load_state` refreshes the fast ROM windows itself.
+        if let Some(cartridge) = self.bus.cartridge_mut() {
+            cartridge.load_state(&mut reader)?;
+        }
+        self.bus
+            .ppu_mut()
+            .wide_mut()
+            .load_state(&mut reader, true, true)?;
+
+        self.frame_count = frame_count;
+        if region != self.region {
+            // Unreachable inside one real frame — the region only changes between two of them —
+            // but a state is a state: it carries the region and putting it back costs nothing.
+            self.region = region;
+            self.apply_region();
+        }
+
+        Ok(())
     }
 
     /// Restores the state block that starts at `offset` in `data`, which may hold other

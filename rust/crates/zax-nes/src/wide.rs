@@ -55,7 +55,7 @@ pub const LAST_REGISTER: u16 = 0x5FFF;
 const FIRST_RAM: u16 = 0x5200;
 
 /// Bytes of RAM in the window.
-const RAM_SIZE: usize = 0x0E00;
+pub(crate) const RAM_SIZE: usize = 0x0E00;
 
 /// CPU cycles one overclock scanline stands for: 341 dots at three dots per cycle, rounded up.
 const CYCLES_PER_SCANLINE: u32 = 114;

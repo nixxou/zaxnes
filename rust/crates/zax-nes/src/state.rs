@@ -43,6 +43,68 @@ impl fmt::Display for InvalidState {
 
 impl std::error::Error for InvalidState {}
 
+/// The in-memory state of a core (AMD-041 REQ-CORE-121): the buffer
+/// [`NesCore::capture_core_state`] fills and [`NesCore::restore_core_state`] reads back.
+///
+/// This is **not** the portable savestate of REQ-CORE-090. It carries no magic number, no format
+/// version, no core name, no ROM name and no ROM image; it is never written to a file, and it is
+/// only ever read back by the very instance that wrote it, with the same ROM still loaded. That
+/// is what the notes of REQ-LOOP-065 allow, and it is what makes a capture and a restore at every
+/// real frame affordable: the buffer is reused, so run-ahead allocates nothing once it has grown
+/// to its size. It also leaves out the half of the PPU state that *is* the frame just run
+/// ([`crate::ppu::Ppu2C02::save_frame_records`]), which the emulation never reads back.
+///
+/// The size is bounded by [`NesCore::max_core_state_size`], as REQ-CORE-121 requires.
+///
+/// [`NesCore::capture_core_state`]: crate::NesCore::capture_core_state
+/// [`NesCore::restore_core_state`]: crate::NesCore::restore_core_state
+/// [`NesCore::max_core_state_size`]: crate::NesCore::max_core_state_size
+#[derive(Debug, Clone, Default)]
+pub struct CoreState {
+    bytes: Vec<u8>,
+}
+
+impl CoreState {
+    /// An empty state whose buffer holds `capacity` bytes already.
+    /// [`NesCore::max_core_state_size`] is the value that makes it grow exactly never.
+    ///
+    /// [`NesCore::max_core_state_size`]: crate::NesCore::max_core_state_size
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(capacity),
+        }
+    }
+
+    /// Bytes the captured state occupies, 0 when nothing was captured yet.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// Whether no state has been captured into this buffer.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
+    /// The captured bytes, for a test that compares two captures.
+    #[must_use]
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Empties the buffer, keeping its allocation, and hands a writer over it to the capture.
+    pub(crate) fn begin(&mut self) -> StateWriter {
+        StateWriter::reusing(std::mem::take(&mut self.bytes))
+    }
+
+    /// Takes the bytes of `writer` back after a capture.
+    pub(crate) fn end(&mut self, writer: StateWriter) {
+        self.bytes = writer.into_vec();
+    }
+}
+
 /// Append-only little-endian writer used to build a savestate block (REQ-CORE-090).
 #[derive(Debug, Clone, Default)]
 pub struct StateWriter {
