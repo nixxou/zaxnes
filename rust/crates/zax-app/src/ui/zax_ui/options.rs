@@ -58,6 +58,13 @@ impl ZaxUi {
                         .session()
                         .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
                     for row in self.options.rows(tab).to_vec() {
+                        // AMD-043 §6: the curvature settings are shown in a group of their own,
+                        // opened by a heading. One comparison per row, and only the first
+                        // setting of the group answers.
+                        if let Some(heading) = options::geometry_heading(row.descriptor.id()) {
+                            ui.separator();
+                            ui.text_disabled(heading);
+                        }
                         if options::is_folder(&row) {
                             self.draw_folder_row(ui, host, &row);
                         } else {
@@ -135,6 +142,13 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
             _ => draw_float(ui, host, row),
         }
     };
+    // AMD-043 §6 and AMD-046 §3 give a help sentence for each curvature setting; it is shown on
+    // hover, the idiom the achievements view already uses.
+    if ui.is_item_hovered() {
+        if let Some(help) = options::help_of(id) {
+            ui.tooltip_text(help);
+        }
+    }
     if let Some(value) = changed {
         host.update_settings(|model| model.set(id, value));
         if options::plays_validation_sound(id) {

@@ -87,7 +87,12 @@ pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
         } else {
             "disabled"
         }),
-        SettingKind::Enum => {
+        // A whole number whose domain publishes labelled values is a **list**, exactly as the
+        // desktop window reads it (`draw_row`'s `enumerated`): `scene.arc_center` shows
+        // "Screen Center" / "Screen Edge" (AMD-043 §6) and `emu.run_ahead` the four names of
+        // AMD-041 §3, instead of the bare rung. A rung the domain labels with its own number —
+        // the three curvature angles — falls back on that number, which is what it should show.
+        SettingKind::Enum | SettingKind::Int => {
             let current = value.as_int();
             choices(id)
                 .into_iter()
@@ -97,7 +102,6 @@ pub fn value_text(id: SettingId, settings: &SettingsModel) -> String {
                     |(_, label)| text::label_of_option(&label),
                 )
         }
-        SettingKind::Int => value.as_int().to_string(),
         _ => {
             let shown = format!("{:.2}", value.as_double());
             shown.trim_end_matches('0').trim_end_matches('.').to_owned()

@@ -577,7 +577,6 @@ fn curvature(out: &mut Vec<SettingDescriptor>) {
             "Bend Top-Bottom",
         ),
         (SettingId::SceneArcH, -180.0, 180.0, 30.0, "Arc Horizontal"),
-        (SettingId::SceneArcCenter, 0.0, 1.0, 1.0, "Arc Center"),
     ] {
         out.push(
             SettingDescriptor::new(
@@ -589,9 +588,31 @@ fn curvature(out: &mut Vec<SettingDescriptor>) {
                 SettingTheme::Scene,
             )
             .with_domain(Domain::stepped(minimum, maximum, step, 0))
-            .with_label(label),
+            .with_label(label)
+            // AMD-043 §6: "option, 13 valeurs".
+            .with_libretro(steps(minimum, maximum, step, 0)),
         );
     }
+    // The arc centre is the same stepped domain with two rungs, published as the two named
+    // values AMD-043 §6 gives ("Screen Center" / "Screen Edge"): the bounds, the step and the
+    // `Snap` rule stay the domain's, only the labels change, and the interface translates them
+    // through `option.<label>` (the idiom of `emu.run_ahead`, AMD-041 §3).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::SceneArcCenter,
+            SettingKind::Int,
+            SettingValue::Int(0),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Scene,
+        )
+        .with_domain(
+            Domain::stepped(0.0, 1.0, 1.0, 0).with_labels(&["Screen Center", "Screen Edge"]),
+        )
+        .with_label("Arc Center")
+        // AMD-043 §6: "option, 2 valeurs".
+        .with_libretro(vec![opt(0, "Screen Center"), opt(1, "Screen Edge")]),
+    );
     // AMD-046 REQ-SCN-074: the rectangle of the 2D mode bends like the game scene, which is what
     // the original program does, and this setting is how Zaxnes lets a player keep it flat — a
     // flat screen seen in 3D being a reasonable use of the 2D mode (divergence **(D)**, the
@@ -606,7 +627,10 @@ fn curvature(out: &mut Vec<SettingDescriptor>) {
             SettingTheme::Scene,
         )
         .with_domain(Domain::switch())
-        .with_label("Bend 2D Mode"),
+        .with_label("Bend 2D Mode")
+        // AMD-046 §3: the libretro option `zaxnes_scene_bend_2d_mode`, values `enabled,
+        // disabled`, default `enabled`.
+        .with_libretro(enabled_disabled()),
     );
 }
 

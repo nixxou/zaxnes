@@ -245,9 +245,42 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.light.intensity", "Light intensity"),
     ("setting.scene.skybox", "Background (skybox)"),
     ("setting.scene.custom_bg_color", "Background colour"),
+    // The "Geometry" group of AMD-043 §6 and AMD-046 §3: the labels and the help sentences, as
+    // the two amendments write them.
+    ("group.geometry", "Geometry"),
+    ("setting.scene.bend_lr", "Bend Left-Right"),
+    (
+        "help.scene.bend_lr",
+        "Bends the scene horizontally. Positive values bulge it outwards like a CRT screen; \
+         negative values curve it around the player.",
+    ),
+    ("setting.scene.bend_tb", "Bend Top-Bottom"),
+    (
+        "help.scene.bend_tb",
+        "Bends the scene vertically. Positive values bulge it outwards; negative values curve \
+         it around the player.",
+    ),
+    ("setting.scene.arc_h", "Arc Horizontal"),
+    (
+        "help.scene.arc_h",
+        "Rolls the level onto an arc, as if it stood on a tiny planet. Works best with \
+         side-scrollers.",
+    ),
+    ("setting.scene.arc_center", "Arc Center"),
+    (
+        "help.scene.arc_center",
+        "Where the arc bends around: the centre of the screen, or its bottom edge.",
+    ),
+    ("option.Screen Center", "Screen Center"),
+    ("option.Screen Edge", "Screen Edge"),
     // AMD-046 §3, a setting of Zaxnes's own: the flat picture of the 2D mode follows the
     // curvature of AMD-043 unless this is turned off.
     ("setting.scene.bend_2d_mode", "Bend 2D Mode"),
+    (
+        "help.scene.bend_2d_mode",
+        "Also applies the bend settings to the flat picture of 2D mode. Turn it off to keep the \
+         picture flat.",
+    ),
     ("setting.emu.game_speed", "Game speed"),
     ("setting.emu.auto_tv_mode", "Region detected automatically"),
     ("setting.emu.tv_mode", "Video region"),

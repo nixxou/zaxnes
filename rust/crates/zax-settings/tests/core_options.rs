@@ -34,9 +34,10 @@ fn the_field_of_view_option_is_generated_from_the_model() {
     assert_eq!(option.category, "Camera");
 }
 
-/// SPEC-09 §4.6: the normative extract, entry by entry. The ten entries are what the generator must
-/// produce, with `video.graphic_quality` and `emu.tv_mode` withdrawn by v1.1 and `scene.tv_box` by
-/// AMD-031.
+/// SPEC-09 §4.6: the normative extract, entry by entry. Ten entries of the original table, with
+/// `video.graphic_quality` and `emu.tv_mode` withdrawn by v1.1 and `scene.tv_box` by AMD-031,
+/// plus the five the curvature adds: the four of AMD-043 §6 ("option, 13 valeurs" and "option,
+/// 2 valeurs") and `scene.bend_2d_mode` of AMD-046 §3.
 #[test]
 fn the_table_is_the_normative_extract_of_the_specification() {
     let keys: Vec<&str> = core_options::all()
@@ -53,6 +54,11 @@ fn the_table_is_the_normative_extract_of_the_specification() {
             "zaxnes_light_intensity",
             "zaxnes_scene_skybox",
             "zaxnes_scene_custom_bg_color",
+            "zaxnes_scene_bend_lr",
+            "zaxnes_scene_bend_tb",
+            "zaxnes_scene_arc_h",
+            "zaxnes_scene_arc_center",
+            "zaxnes_scene_bend_2d_mode",
             // AMD-031 retired scene.tv_box, so the extract is one entry shorter.
             "zaxnes_emu_game_speed",
             "zaxnes_emu_auto_tv_mode",
@@ -230,4 +236,32 @@ fn an_unknown_option_or_label_is_refused() {
         model.get(SettingId::SceneCustomBgColor),
         SettingValue::from(Color::BLACK)
     );
+}
+
+/// AMD-043 §6 and AMD-046 §3: the five curvature options as the two amendments publish them —
+/// thirteen values for each angle, two named ones for the arc centre, and the switch of the 2D
+/// mode with `enabled` as its default.
+#[test]
+fn the_curvature_options_are_the_ones_the_amendments_publish() {
+    for key in [
+        "zaxnes_scene_bend_lr",
+        "zaxnes_scene_bend_tb",
+        "zaxnes_scene_arc_h",
+    ] {
+        let option = core_options::find(key).expect(key);
+        assert_eq!(13, option.values.len(), "{key}: 13 values");
+        assert_eq!("-180", option.values[0]);
+        assert_eq!("0", option.values[6]);
+        assert_eq!("180", option.values[12]);
+        assert_eq!("0", option.default_value, "{key}");
+        assert_eq!("Scene", option.category, "{key}");
+    }
+
+    let centre = core_options::find("zaxnes_scene_arc_center").expect("arc centre");
+    assert_eq!(["Screen Center", "Screen Edge"], centre.values.as_slice());
+    assert_eq!("Screen Center", centre.default_value);
+
+    let flat = core_options::find("zaxnes_scene_bend_2d_mode").expect("bend 2D mode");
+    assert_eq!(["enabled", "disabled"], flat.values.as_slice());
+    assert_eq!("enabled", flat.default_value);
 }

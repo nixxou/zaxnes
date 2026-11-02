@@ -131,6 +131,16 @@ pub const HINT_AT_NEXT_START: &str = "hint.at_next_start";
 pub const HINT_AT_NEXT_LOAD: &str = "hint.at_next_load";
 pub const HINT_PROFILE_SETTING: &str = "hint.profile_setting";
 
+// ------------------------------------- the Geometry group (AMD-043 §6, AMD-046 §3)
+/// The heading above the curvature settings.
+pub const GROUP_GEOMETRY: &str = "group.geometry";
+/// The help sentences the two amendments give, shown as tooltips.
+pub const HELP_BEND_LR: &str = "help.scene.bend_lr";
+pub const HELP_BEND_TB: &str = "help.scene.bend_tb";
+pub const HELP_ARC_H: &str = "help.scene.arc_h";
+pub const HELP_ARC_CENTER: &str = "help.scene.arc_center";
+pub const HELP_BEND_2D_MODE: &str = "help.scene.bend_2d_mode";
+
 // ------------------------------------------------------- fields, columns
 pub const FIELD_SEARCH: &str = "field.search";
 pub const COLUMN_ACTION: &str = "column.action";

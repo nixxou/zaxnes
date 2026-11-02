@@ -24,6 +24,7 @@ use std::time::Instant;
 
 use zax_engine3d::palette::{nes_color, Rgb24};
 use zax_engine3d::settings::RenderAlgorithm;
+use zax_engine3d::space_bend::SpaceBend;
 use zax_nes::ppu::SpriteLimit;
 use zax_render::assets::{png_image, NeutralSceneAssets, SceneAssets};
 use zax_render::camera::CameraView;
@@ -91,6 +92,12 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --anti-alias <n>         video.anti_alias: 0 off, 1 MSAA 4x (default), 2 MSAA 8x (AMD-032)
   --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049)
   --bg-color <r,g,b>       the custom background colour, 0-255 (REQ-SCN-046)
+  --no-nes-bg-color        scene.use_nes_bg_color false, so --bg-color shows behind the scene
+                           (the conditioning AMD-050 REQ-SCN-076 needs to be observable)
+  --bend <lr>,<tb>,<arc>[,<centre>]  the curvature of AMD-043 REQ-SCN-066, in degrees; the
+                           centre is 0 for the screen centre (default) or 1 for its bottom edge.
+                           All 0 by default, which is the capture of before the amendment
+  --no-bend-2d             keep the 2D-mode rectangle flat whatever --bend says (REQ-SCN-074)
   --real-time <seconds>    real time the star twinkle uses (REQ-SCN-050)
   --sky-bodies             light the procedural sun, moon and clouds (REQ-PUB-003, Q-064)
   --backend <name>         gl (default), or vulkan or dx12 with a harness built with the
@@ -194,6 +201,17 @@ pub struct Options {
     pub real_time: f32,
     /// Whether the sun, the moon and the clouds are lit.
     pub sky_bodies: bool,
+    /// The curvature of AMD-043 REQ-SCN-066: `--bend <lr>,<tb>,<arc>[,<centre>]`, in degrees,
+    /// all four 0 by default so that a capture taken without them is the one of before the
+    /// amendment.
+    pub bend: SpaceBend,
+    /// `--no-bend-2d`: AMD-046 REQ-SCN-074 turned off, so the 2D-mode rectangle stays flat
+    /// whatever `--bend` says. On by default, as the setting is.
+    pub bend_two_dimensional_mode: bool,
+    /// `--no-nes-bg-color`: `scene.use_nes_bg_color` false, so the custom background colour
+    /// shows behind the scene. The conditioning AMD-050 REQ-SCN-076's criteria need — with the
+    /// default settings the transparency of the 2D rectangle is not observable at all.
+    pub use_nes_background_color: bool,
     /// The renderer.
     pub backend: Backend,
     /// Frames to time per scene; 0 times nothing.
@@ -258,6 +276,13 @@ impl Options {
             background: Rgb24::default(),
             real_time: 0.0,
             sky_bodies: false,
+            // All three default to what the application defaults to, so that a capture taken
+            // without the new flags is the capture of before this lot (REQ-SCN-066: the four
+            // angles are 0; REQ-SCN-074: the 2D rectangle bends; REQ-PERS-005: the NES
+            // background colour is used).
+            bend: SpaceBend::NONE,
+            bend_two_dimensional_mode: true,
+            use_nes_background_color: true,
             backend: Backend::Gl,
             bench: 0,
             explain: false,
@@ -268,6 +293,8 @@ impl Options {
         while let Some(argument) = rest.next() {
             match argument.as_str() {
                 "--no-shadows" => options.shadows = false,
+                "--no-bend-2d" => options.bend_two_dimensional_mode = false,
+                "--no-nes-bg-color" => options.use_nes_background_color = false,
                 "--no-builtin-patches" => options.builtin_patches = false,
                 "--advanced" => options.advanced = true,
                 "--group-draws" => options.group_draws = true,
@@ -317,6 +344,11 @@ impl Options {
         };
         match key {
             "--frames" => self.frames = parse_frames(value),
+            // AMD-043 REQ-SCN-066: the three angles in degrees and, optionally, the arc centre
+            // (0 the screen centre, 1 its bottom edge). The values go through `SpaceBend::new`
+            // as they are, without the 30-degree snapping of the setting's domain, so that R0
+            // can capture an angle between two rungs if it wants one.
+            "--bend" => self.bend = parse_bend(value)?,
             "--rom" => self.rom = Some(PathBuf::from(value)),
             "--run" => self.run_frames = integer(value)?,
             "--press" => {
@@ -408,6 +440,36 @@ impl Options {
 /// As the C# does: any value starting with `synthetic` (case ignored) is the synthetic frames,
 /// all of them or, after a colon, the scene named; anything else is the path of a JSON frame
 /// description.
+/// `--bend <left-right>,<top-bottom>,<arc>[,<centre>]`: the curvature of AMD-043 REQ-SCN-066.
+///
+/// The angles reach `SpaceBend::new` as they are, **without** the 30-degree snapping the
+/// setting's domain applies, so that a capture can be taken at an angle between two rungs. The
+/// centre is 0 for the screen centre (the default) or 1 for the bottom edge of the frame.
+fn parse_bend(value: &str) -> Result<SpaceBend, String> {
+    let parts: Vec<&str> = value.split(',').collect();
+    if !(3..=4).contains(&parts.len()) {
+        return Err("--bend expects <left-right>,<top-bottom>,<arc>[,<centre>]".to_owned());
+    }
+    let angle = |index: usize| -> Result<f32, String> {
+        parts[index]
+            .trim()
+            .parse::<f32>()
+            .map_err(|_| format!("--bend: '{}' is not a number", parts[index]))
+    };
+    let at_edge = match parts.get(3).map(|centre| centre.trim()) {
+        None | Some("0") => false,
+        Some("1") => true,
+        Some(other) => return Err(format!("--bend centre: 0 or 1, got '{other}'")),
+    };
+    Ok(SpaceBend::new(
+        angle(0)?,
+        angle(1)?,
+        angle(2)?,
+        at_edge,
+        1.0,
+    ))
+}
+
 fn parse_frames(value: &str) -> FrameSource {
     let synthetic = value
         .get(.."synthetic".len())
@@ -694,6 +756,13 @@ fn apply(options: &Options, scene: &mut SyntheticScene) {
         state.settings.shadows = false;
         scene.engine.settings_mut().shadow = false;
     }
+
+    // AMD-043 REQ-SCN-066 and AMD-046 REQ-SCN-074, and the conditioning AMD-050 REQ-SCN-076's
+    // criteria need. All three are the application's own defaults unless a flag says otherwise,
+    // so a capture taken without them is the capture of before this lot.
+    state.bend = options.bend;
+    state.bend_two_dimensional_mode = options.bend_two_dimensional_mode;
+    state.use_nes_background_color = options.use_nes_background_color;
 
     // AMD-032 §2: video.anti_alias as the application applies it.
     state

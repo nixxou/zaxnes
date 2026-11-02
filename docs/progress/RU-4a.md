@@ -16,8 +16,8 @@ are a reading reference only.
 | 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | done — `a697da0` |
 | 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | done — `c158272` |
 | 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | done — `33c48c1` |
-| 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | done — `<pending>` |
-| 8 | The settings: desktop options, handheld defaults and page, harness options | todo |
+| 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | done — `4490d41` |
+| 8 | The settings: desktop options, handheld defaults and page, harness options | done — `<pending>` |
 | 9 | Closing: draw/vertex counts at default, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -554,6 +554,82 @@ render goldens and the PPU goldens all hold. fmt and workspace clippy clean.
 - `SPEC-02` §3.5.5: REQ-CORE-048 restated at P1, REQ-CORE-049 added after it.
 - `SPEC-02` §5.3: vector V11.
 - `SPEC-06` §3.16: REQ-SCN-076 before REQ-SCN-074.
+
+### Step 8 — the interfaces and the harness
+
+#### Desktop
+
+The four curvature keys left `EXCLUDED` (36 → 32 entries), so they are rows of the Video tab,
+where the Scene theme goes. AMD-043 §6's "groupe « Géométrie », marqué avancé" is a SHOULD and
+the options window has no advanced/basic split, so the group is marked by a **heading of its
+own** above its first row: `options::geometry_heading(id)`, a pure function that answers for
+`scene.bend_lr` and for nothing else, so a tab costs one comparison per row and the grouping is
+tested without a window.
+
+The help sentences of AMD-043 §6 and AMD-046 §3 are shown as **tooltips** on hover, the idiom the
+achievements view already uses — the window has no other help mechanism. `options::help_of(id)`
+is likewise pure.
+
+The arc centre is a **list of two named values**, not a number: `Domain::stepped(0, 1, 1)` with
+`.with_labels(["Screen Center", "Screen Edge"])`, the idiom of `emu.run_ahead` (AMD-041 §3) that
+keeps the domain's bounds, step and `Snap` rule and only names its rungs.
+
+#### Two gaps the step turned up, both pre-existing
+
+1. **`bounds()` dropped a stepped domain's step.** `ui/options.rs` read the widget step from
+   `libretro_values()` alone, so a setting with no libretro list fell back on a twentieth of its
+   range. For `scene.arc_center` that is 0.05, which rounds to 0: the row **could not be moved**.
+   The same gap had `emu.run_ahead` stuck on the handheld's advanced page since RU-3b. `bounds()`
+   now reads `domain.step()`, which fixes both.
+2. **The handheld's advanced page printed a labelled whole number as its rung.** `value_text`
+   translated the labels of an `Enum` but not of an `Int`, so `emu.run_ahead` showed "0" to "3"
+   instead of the four names of AMD-041 §3 that the desktop shows. `Int` now goes through the
+   same branch as `Enum`, exactly as `draw_row`'s `enumerated` test reads it. A rung the domain
+   labels with its own number — the three angles — still shows that number.
+
+Neither is this lot's doing and both are reported rather than left: the second changes what a
+handheld shows for `emu.run_ahead`, for the better and in the direction AMD-041 §3 asks for.
+
+#### Handheld
+
+Nothing had to be added: the advanced page picks up every steppable setting of the four desktop
+tabs, so the five arrived on their own. That is the right answer to the brief's condition —
+"offer them only if, at 0, they cost nothing" — because at 0 they cost nothing (step 4's
+measurement: no program compiled, no surface subdivided, one `is_identity` test a frame). The
+defaults are unchanged on both platforms, which step 5's assertions pin.
+
+#### libretro
+
+AMD-043 §6 and AMD-046 §3 both publish a libretro option, and neither existed: exposure follows
+`libretro_values()`, which only an explicit `.with_libretro(…)` sets. The five rows are now
+there — thirteen values per angle, two named ones for the arc centre, `enabled, disabled` for the
+2D-mode switch — and `tests/core_options.rs` grew from ten entries to fifteen. The transcription
+test is what caught the omission.
+
+#### Harness
+
+Three options, each defaulting to what the application defaults to, so **a capture taken without
+them is the capture of before this lot**:
+
+| Flag | What |
+|---|---|
+| `--bend <lr>,<tb>,<arc>[,<centre>]` | the curvature of REQ-SCN-066, in degrees. The angles reach `SpaceBend::new` **unsnapped**, so R0 can capture an angle between two rungs |
+| `--no-bend-2d` | REQ-SCN-074 off: the 2D rectangle stays flat whatever `--bend` says |
+| `--no-nes-bg-color` | `scene.use_nes_bg_color` false, so `--bg-color` shows behind the scene — the conditioning REQ-SCN-076's criteria need, without which the transparency is not observable at all |
+
+Exercised end to end on the `framing` scene:
+
+| | distinct colours | draw calls | triangles |
+|---|---|---|---|
+| default | 6 | **1798** | **7704** |
+| `--bend 90,0,0` | 416 | **1798** | **7704** |
+
+The brief's point 1, measured: **the curvature adds no draw call and no triangle**. The colours
+move because the transported normal shades each tile differently, which is the amendment's
+intent. `--bend 90,0` prints the usage line.
+
+`cargo test --release --workspace --features zax-app/bundled`: **2245 passed, 0 failed**. fmt and
+workspace clippy clean.
 
 ### Open questions
 

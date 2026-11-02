@@ -59,7 +59,7 @@ impl OptionsRow {
 /// The settings the window leaves out although they are user settings: the last browsed folder
 /// and the window rectangle are state, and the menu music no longer exists (AMD-024
 /// REQ-PUB-005).
-pub const EXCLUDED: [SettingId; 36] = [
+pub const EXCLUDED: [SettingId; 32] = [
     SettingId::UiLastBrowseDir,
     SettingId::UiWindowRect,
     SettingId::AudioBgMusic,
@@ -89,15 +89,12 @@ pub const EXCLUDED: [SettingId; 36] = [
     // The settings the Lua members of 3dSen 2.0 stand for whose effect belongs to a later lot
     // (RU-2: Lua surface only). Each one leaves this list in the lot that makes it act, which
     // is also the lot that writes its row of the options window:
-    // `render.visual_style` and the twelve `render.style.*` in the Enhanced lot, the four
-    // curvature keys in the AMD-043 lot. `video.max_queued_frames` left it in RU-3a, which
-    // gave it the GPU frame queue of AMD-052 REQ-LOOP-077, and `emu.run_ahead` in RU-3b, which
-    // gave it the run-ahead of AMD-041 REQ-LOOP-064.
+    // `render.visual_style` and the twelve `render.style.*` in the Enhanced lot.
+    // `video.max_queued_frames` left it in RU-3a, which gave it the GPU frame queue of AMD-052
+    // REQ-LOOP-077; `emu.run_ahead` in RU-3b, which gave it the run-ahead of AMD-041
+    // REQ-LOOP-064; and the four curvature keys in RU-4a, which gave them the curvature of
+    // AMD-043 REQ-SCN-067 — they are now rows of the "Geometry" group (`GEOMETRY`).
     SettingId::RenderVisualStyle,
-    SettingId::SceneBendLr,
-    SettingId::SceneBendTb,
-    SettingId::SceneArcH,
-    SettingId::SceneArcCenter,
     SettingId::RenderStyleAo,
     SettingId::RenderStyleAoStrength,
     SettingId::RenderStyleAoRadius,
@@ -111,6 +108,44 @@ pub const EXCLUDED: [SettingId; 36] = [
     SettingId::RenderStyleSsrLength,
     SettingId::RenderStyleSsrQuality,
 ];
+
+/// The "Geometry" group of AMD-043 §6 and AMD-046 §3, in the order the two amendments give it:
+/// the three angles, the arc centre, then the 2D-mode switch.
+///
+/// AMD-043 §6 asks for the group to be "marqué avancé" (SHOULD). The options window has no
+/// advanced/basic split, so the group is marked by a heading of its own above its first row,
+/// which is what [`geometry_heading`] gives the drawing site.
+pub const GEOMETRY: [SettingId; 5] = [
+    SettingId::SceneBendLr,
+    SettingId::SceneBendTb,
+    SettingId::SceneArcH,
+    SettingId::SceneArcCenter,
+    SettingId::SceneBend2dMode,
+];
+
+/// The heading to draw **before** the row of `id`, or `None` for a row that opens no group.
+///
+/// Only the first setting of [`GEOMETRY`] opens one, so a tab costs one comparison per row. A
+/// pure function, so the grouping is tested without a window.
+#[must_use]
+pub fn geometry_heading(id: SettingId) -> Option<String> {
+    (id == GEOMETRY[0]).then(|| strings::get(keys::GROUP_GEOMETRY))
+}
+
+/// The help sentence AMD-043 §6 and AMD-046 §3 give for `id`, shown as a tooltip, or `None` for
+/// a setting they give none for.
+#[must_use]
+pub fn help_of(id: SettingId) -> Option<String> {
+    let key = match id {
+        SettingId::SceneBendLr => keys::HELP_BEND_LR,
+        SettingId::SceneBendTb => keys::HELP_BEND_TB,
+        SettingId::SceneArcH => keys::HELP_ARC_H,
+        SettingId::SceneArcCenter => keys::HELP_ARC_CENTER,
+        SettingId::SceneBend2dMode => keys::HELP_BEND_2D_MODE,
+        _ => return None,
+    };
+    Some(strings::get(key))
+}
 
 /// The settings the window edits as a folder: a field and a button that picks it.
 pub const FOLDERS: [SettingId; 1] = [SettingId::UiRomsFolder];
@@ -306,7 +341,11 @@ fn bounds(descriptor: &SettingDescriptor) -> (f64, f64, f64) {
     }
     let domain = descriptor.domain();
     if let (Some(low), Some(high)) = (domain.minimum(), domain.maximum()) {
-        return (low, high, 0.0);
+        // A stepped domain publishes its own step (AMD-040 §3), which is the one the widget has
+        // to move by: without it a setting with no libretro list fell back on a twentieth of its
+        // range, and a two-rung one (`scene.arc_center`) could not be moved at all. It also
+        // un-sticks `emu.run_ahead` on the handheld's advanced page, which had the same gap.
+        return (low, high, domain.step().unwrap_or(0.0));
     }
     // No bounds at all: the widget becomes a free numeric field.
     (0.0, 0.0, 0.0)

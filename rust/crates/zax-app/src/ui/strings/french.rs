@@ -245,9 +245,42 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.light.intensity", "Intensité lumineuse"),
     ("setting.scene.skybox", "Fond (skybox)"),
     ("setting.scene.custom_bg_color", "Couleur de fond"),
+    // Le groupe « Géométrie » d'AMD-043 §6 et d'AMD-046 §3 : les libellés et les aides, tels que
+    // les deux amendements les écrivent.
+    ("group.geometry", "Géométrie"),
+    ("setting.scene.bend_lr", "Courbure gauche-droite"),
+    (
+        "help.scene.bend_lr",
+        "Courbe la scène horizontalement. Une valeur positive la bombe comme un écran \
+         cathodique ; une valeur négative l'enroule autour du joueur.",
+    ),
+    ("setting.scene.bend_tb", "Courbure haut-bas"),
+    (
+        "help.scene.bend_tb",
+        "Courbe la scène verticalement. Une valeur positive la bombe ; une valeur négative \
+         l'enroule autour du joueur.",
+    ),
+    ("setting.scene.arc_h", "Arc horizontal"),
+    (
+        "help.scene.arc_h",
+        "Pose le niveau sur un arc, comme sur une toute petite planète. Idéal pour les jeux à \
+         défilement horizontal.",
+    ),
+    ("setting.scene.arc_center", "Centre de l'arc"),
+    (
+        "help.scene.arc_center",
+        "Autour de quoi l'arc se courbe : le centre de l'écran, ou son bord bas.",
+    ),
+    ("option.Screen Center", "Centre de l'écran"),
+    ("option.Screen Edge", "Bord de l'écran"),
     // AMD-046 §3, réglage propre à Zaxnes : l'image plate du mode 2D suit la courbure
     // d'AMD-043 sauf si on le désactive.
     ("setting.scene.bend_2d_mode", "Courber le mode 2D"),
+    (
+        "help.scene.bend_2d_mode",
+        "Applique aussi la courbure à l'image plate du mode 2D. Désactivez-le pour garder \
+         l'image plate.",
+    ),
     ("setting.emu.game_speed", "Vitesse de jeu"),
     ("setting.emu.auto_tv_mode", "Région détectée automatiquement"),
     ("setting.emu.catch_up", "Rattrapage en cas de retard (frames)"),
