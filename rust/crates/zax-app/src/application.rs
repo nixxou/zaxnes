@@ -32,6 +32,7 @@ use crate::app_options::AppOptions;
 use crate::audio::audio_assets::AudioAssets;
 use crate::audio::synth_audio_library::SynthAudioLibrary;
 use crate::audio::{AudioMixer, TrackRandom, UiAudioLibrary};
+use crate::demo_game;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::emulation::emulation_state::EmulationState;
 use crate::emulation::frame_pacer::CatchUp;
@@ -245,7 +246,11 @@ impl Running {
         let asset_root = neutral_assets::locate(options.asset_root.as_deref().map(Path::new));
         let paths = resolve_user_data(options);
         let (store, model) = load_settings(options, &paths);
-        let catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
+        let demo_rom = install_demo_game(&paths, &model);
+        let mut catalog = LibraryGameCatalog::open(asset_root.as_deref(), &paths, Box::new(log));
+        if let Some(rom) = demo_rom {
+            catalog.set_rom_path(demo_game::PROFILE_ID, &rom.to_string_lossy());
+        }
         if let Some(rom) = options
             .rom_path
             .as_deref()
@@ -1023,6 +1028,33 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
 /// The user folder, and the file copy of the log opened in it. On a handheld, a root the
 /// command line names that refuses writes is replaced by the per-user folder when that one
 /// accepts them (Rust-only: the settings and the saves would otherwise be lost silently).
+/// `FlappyZaxNes` into the ROM folder of the options (or the user data's `roms`) and the user's
+/// profiles, when this version is not there yet; the path of its ROM when it was written now.
+fn install_demo_game(paths: &UserDataPaths, model: &SettingsModel) -> Option<PathBuf> {
+    let folder = model
+        .get(SettingId::UiRomsFolder)
+        .as_text()
+        .trim()
+        .to_owned();
+    let roms = if folder.is_empty() {
+        paths.root.join("roms")
+    } else {
+        PathBuf::from(folder)
+    };
+    match demo_game::install(paths, &roms) {
+        Ok(rom) => {
+            if let Some(rom) = &rom {
+                log(&format!("FlappyZaxNes installed: '{}'.", rom.display()));
+            }
+            rom
+        }
+        Err(error) => {
+            log(&format!("FlappyZaxNes could not be installed: {error}"));
+            None
+        }
+    }
+}
+
 fn resolve_user_data(options: &AppOptions) -> UserDataPaths {
     let explicit = options.user_data_root.as_deref().map(Path::new);
     let mut paths = UserDataPaths::resolve(explicit, None, None);

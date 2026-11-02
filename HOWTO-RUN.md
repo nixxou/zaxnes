@@ -3,8 +3,9 @@
 Zaxnes est un émulateur NES qui affiche les jeux **en 3D**. Ce document explique comment
 l'installer, l'utiliser et où il range ses fichiers.
 
-Zaxnes est distribué sous **GPL v3** (fichier `LICENSE`). **Aucune ROM n'est fournie** : vous devez
-utiliser une ROM dont vous disposez légalement.
+Zaxnes est distribué sous **GPL v3** (fichier `LICENSE`). **Une seule ROM est fournie**, celle de
+*FlappyZaxNes* (ci-dessous) : pour tout autre jeu, vous devez utiliser une ROM dont vous disposez
+légalement.
 
 ---
 
@@ -25,7 +26,15 @@ Les skyboxes et les sons d'interface sont **produits par le code** ; il n'y a
 (Segoe UI, sinon Arial), ouverte au lancement et jamais recopiée. Le détail et les licences sont
 dans `ASSETS-LICENSES.md`.
 
-**Aucune ROM et aucun profil de jeu ne sont fournis.** La bibliothèque démarre avec deux entrées
+**Le jeu fourni : FlappyZaxNes.** Zaxnes contient un jeu NES simple fait pour lui, *FlappyZaxNes*
+(d'après *Flappy NES* de filipemd, GPL-3.0), avec son profil 3D et son widescreen : de quoi voir
+comment fonctionne l'émulateur sans avoir à débloquer de profil dans 3dSen. Au premier lancement,
+sa ROM est écrite dans le dossier des ROM (celui des options, sinon `roms` dans le dossier des
+données) et son profil dans vos profils, et la bibliothèque les relie. Supprimés, ils ne
+reviennent qu'avec une version de Zaxnes qui change le jeu (le fichier `demo-game.txt` du dossier
+des données garde la version installée).
+
+**Aucune autre ROM et aucun autre profil ne sont fournis.** La bibliothèque démarre avec deux entrées
 génériques écrites dans le code : « 2D Mode » (l'image de la console, sans conversion 3D) et
 « 3D par défaut (sans profil) » (la géométrie 3D par défaut, pour n'importe quelle ROM). Si vous
 disposez légalement d'un profil `.3dn`, **Fichier ▸ Importer un profil…** l'ajoute (voir §9).
@@ -392,7 +401,7 @@ précédente est oubliée au démarrage).
 | **Ratio** | Auto, 3:2, 16:10, 16:9 | **Auto** suit la vue : la fenêtre, l'écran en plein écran, l'écran de la console portable (une console 4:3 n'a donc pas de marges) |
 | **Marge supplémentaire** | +0 % à +300 % (+20 % par défaut) | capture un peu plus que ce qui est montré, pour que les objets 3D au bord de la vue soient déjà entiers quand ils entrent dans le champ |
 | **Mode avancé** | activé (par défaut) / désactivé | pour un jeu dont le patch est un mode avancé (*Super Mario Bros.*, *Ninja Gaiden III*, *Super Mario Bros. 3*, *Adventure Island*, *Excitebike*, *Final Fantasy*, *Metal Force*, *Blaster Master*, *Metroid*, *Mega Man*, *Mega Man 3*, *Mega Man 4*, *Mega Man 5*, *Mega Man 6*) : activé, le patch s'applique (ennemis dans les marges, sans ralentissements) ; désactivé, seul le décor est élargi, la ROM n'est pas modifiée |
-| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island*, *Metal Force* et *Blaster Master* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements ; *Metroid* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements ; *Mega Man* et *Mega Man 3* � *6* (mode avanc�) : invincible, sans ralentissements |
+| options du patch | selon le jeu | *Mega Man 2* : ennemis dans les marges, invincible, sans ralentissements ; *Super Mario Bros. 3*, *Adventure Island*, *Metal Force* et *Blaster Master* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements ; *Metroid* (mode avancé) : sélecteur de niveau, invincible, sans ralentissements ; *Mega Man* et *Mega Man 3* à *6* (mode avancé) : invincible, sans ralentissements |
 
 Seules les valeurs changées sont gardées pour le jeu, avec ses autres options.
 

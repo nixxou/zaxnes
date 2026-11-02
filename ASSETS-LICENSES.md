@@ -54,6 +54,22 @@ la fenêtre garde l'icône par défaut de la plate-forme.
 Les SVG (`zaxnes-icon.svg`, `zaxnes-icon-small.svg`, `zaxnes-logo.svg`) ne sont ni embarqués ni
 livrés : le `README.md` affiche le logo, et les deux autres sont les sources de l'icône.
 
+## 1 ter. FlappyZaxNes — le jeu livré avec Zaxnes
+
+Zaxnes embarque un jeu NES fait pour lui, **FlappyZaxNes** (© 2026 Nixxou), d'après
+*Flappy NES* de filipemd (© 2025, GPL-3.0, <https://github.com/filipemd/flappy-nes>), et son
+profil 3D, écrit pour ce projet (aucun fichier de 3dSen) :
+
+| | |
+|---|---|
+| **ROM** | `rust/crates/zax-app/demo/FlappyZaxNes.nes`, assemblée avec cc65 depuis les sources du jeu (dépôt `flappy-src`, GPL-3.0 comme l'original) |
+| **Profil 3D** | `rust/crates/zax-app/demo/flappyzaxnes.3dn`, produit par `zax-harness profile-build` depuis la description qu'écrit `flappy-src/tools/profile3d.py` |
+
+Les deux fichiers sont **inclus dans l'exécutable** (`rust/crates/zax-app/src/demo_game.rs`) et
+n'ajoutent aucun fichier à la version publiée : au premier lancement d'une version, la ROM est
+écrite dans le dossier des ROM et le profil dans les profils de l'utilisateur, et la
+bibliothèque les relie. Supprimés, ils ne reviennent qu'avec une version qui les change.
+
 ## 2. Ce que Zaxnes lit sur votre machine, sans le redistribuer
 
 | Ressource | Comment | Licence |

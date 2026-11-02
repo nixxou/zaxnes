@@ -8,6 +8,7 @@ pub mod app_options;
 pub mod application;
 pub mod audio;
 pub mod core_worker;
+pub mod demo_game;
 pub mod emulation;
 mod flags;
 pub mod frame_profiler;

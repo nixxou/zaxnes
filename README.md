@@ -11,8 +11,9 @@ turn around the level, zoom in, or go back to plain 2D at any time.
 For a number of games, Zaxnes can also play in **widescreen**: the level is shown past the edges
 of the original screen (see [Widescreen](#widescreen-experimental)).
 
-It runs on **Windows**, **Linux** and **handheld consoles** through PortMaster (Anbernic H700
-devices such as the RG40XXV and the RG35XX family, on muOS, Knulli or ROCKNIX).
+It runs on **Windows**, **Linux**, **Android** (tablets and handhelds, with a gamepad or the
+touch pad) and **handheld consoles** through PortMaster (Anbernic H700 devices such as the RG40XXV
+and the RG35XX family, on muOS, Knulli or ROCKNIX).
 
 > **Independent project, not affiliated with Geod Studio or Nintendo. NES is a trademark of
 > Nintendo.**
@@ -43,6 +44,15 @@ itch.io. Import them with **File ▸ Import a profile…**.
 
 Without a profile, every game still plays, in **2D**, or in a **default 3D** that gives every tile
 the same depth.
+
+### Try it at once: FlappyZaxNes
+
+Zaxnes comes with one game, **FlappyZaxNes**: a simple NES game made for it (after
+[Flappy NES](https://github.com/filipemd/flappy-nes) by filipemd, GPL-3.0), with its own 3D profile
+and widescreen, so that you can see how the emulator works before unlocking any profile in 3dSen.
+At the first start its ROM is put in your ROM folder and its profile in your profiles, tied
+together: pick *FlappyZaxNes* in the ROM list and play. Delete them and they stay deleted, until a
+new version of Zaxnes brings a new version of the game.
 
 ### Making your own profiles
 
@@ -80,6 +90,7 @@ Games supported so far:
 - *Castlevania*
 - *Excitebike*
 - *Final Fantasy*
+- *FlappyZaxNes* (the game included with Zaxnes)
 - *Mega Man*, *Mega Man 2*, *3*, *4*, *5* and *6*
 - *Metal Force*
 - *Metroid*
@@ -139,5 +150,7 @@ Every [release](../../releases) has one package per platform:
 | `Zaxnes-<version>-win-x64.zip` | Windows 10/11: a single `zaxnes.exe`, nothing to install |
 | `Zaxnes-<version>-linux-x64.tar.gz` | Linux (needs SDL2, `libsdl2-2.0-0` on Debian/Ubuntu) |
 | `Zaxnes-<version>-portmaster-aarch64.zip` | PortMaster handhelds: unzip into the `ports` folder of the SD card |
+| `Zaxnes-<version>-android-arm64.apk` | Android 7.0 or later, 64-bit ARM (tablets and handhelds): install the APK |
 
-**No package contains a game or a 3D profile.** You need your own, legally owned ROMs.
+**The only game included is FlappyZaxNes**, with its 3D profile (see above). For any other game you
+need your own, legally owned ROMs.

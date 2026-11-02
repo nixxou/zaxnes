@@ -212,6 +212,7 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
 
     let mut stowaways: Vec<String> = Vec::new();
     let mut branding = 0;
+    let mut demo = 0;
     for entry in WalkDir::new(repository)
         .into_iter()
         .filter_entry(|entry| {
@@ -244,6 +245,9 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
             // ASSETS-LICENSES.md: the logo and the icon made for Zaxnes, under branding/.
             if relative.starts_with("branding") {
                 branding += 1;
+            } else if relative.starts_with("rust/crates/zax-app/demo") {
+                // and the game made for Zaxnes and its 3D profile (FlappyZaxNes)
+                demo += 1;
             } else {
                 stowaways.push(relative.display().to_string());
             }
@@ -255,6 +259,10 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
         let notices = std::fs::read_to_string(repository.join("ASSETS-LICENSES.md")).unwrap();
         assert!(notices.contains("branding/"));
         assert!(notices.contains("GPL-3.0"));
+    }
+    if demo > 0 {
+        let notices = std::fs::read_to_string(repository.join("ASSETS-LICENSES.md")).unwrap();
+        assert!(notices.contains("rust/crates/zax-app/demo/"));
     }
 }
 

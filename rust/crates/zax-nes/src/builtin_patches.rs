@@ -127,7 +127,7 @@ pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 pub const NG3_JAPAN: &str = "Ninja Ryuuken Den III (Japan) widescreen";
 /// Name of the Nova the Squirrel pack (testing aids only, no widescreen yet).
 pub const NOVA_THE_SQUIRREL: &str = "Nova the Squirrel";
-/// Name of the FlappyZaxNes widescreen patch.
+/// Name of the `FlappyZaxNes` widescreen patch.
 pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
 pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
@@ -1477,7 +1477,7 @@ pub const PATCHES: [BuiltinPatch; 57] = [
         // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
         zone_data: true,
         // MainLoop: LDA NMIReady / BEQ, until the NMI marks a frame.
-        idle_loop: Some((0x8524, 0x8527)),
+        idle_loop: Some((0x85AB, 0x85AD)),
     },
 ];
 
