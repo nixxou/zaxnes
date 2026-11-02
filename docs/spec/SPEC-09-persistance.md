@@ -323,6 +323,12 @@ Légende des colonnes :
 | `render.mesh_algo` | `RenderMode` | 13 | énum | 0 | 0 GREEDY, 1 MARCHING, 2 GREEDY_MULTICOLOR | U | imm. (régénération, SPEC-07 REQ-LOOP-024) | liste déroulante « Render » | les 3 valeurs | algorithme de mesh par défaut ; un pattern peut imposer le sien, SPEC-04 |
 | `render.shadow` | `Shadow` | 17 | booléen | vrai | — | U | imm. | case « Shadow » | on/off | interrupteur global des ombres ; ombre effective = `Shadow` ∧ drapeau du pattern ∧ drapeau du calque ; jamais pour les éléments d'UI du jeu, SPEC-06 |
 | `ui.fullscreen` | — | — | booléen | faux | — | U | imm. | case « Full Screen » | — | plein écran (REQ-PERS-067) |
+| `video.msaa_2_0` | `Msaa` | — | entier | 2 | 0, 2 ou 4 ; écriture Lua : v ≤ 1 → 0, 2 ≤ v ≤ 3 → 2, v ≥ 4 → 4 | U | aucun | aucune | non exposé | conservé et rendu tel quel : l'anticrénelage reste `video.anti_alias` (AMD-059 REQ-LUA-116) **(D)** |
+
+> **Note (AMD-059 §2, REQ-LUA-116).** Deux lignes de ce tableau viennent de l'amendement :
+> `video.msaa_2_0` ci-dessus et `video.max_queued_frames`, déjà ajoutée par AMD-052 §3 point 7
+> (REQ-LOOP-077), dont `Setting.MaxQueuedFrames` est le chemin Lua — la **même** valeur et le
+> **même** effet, l'écriture Lua ramenant v ≤ 1 à 1 et toute valeur au-dessus à 2.
 
 #### 4.1.2 Caméra
 
@@ -416,6 +422,7 @@ Tous de portée P, non affichés dans l'UI desktop, non exposés en libretro ; c
 | `ui.sort_option` | `SortOption` | 36 | entier | 0 | 0 A-Z, 1 Recent | U | imm. | liste « Sort by » de la bibliothèque | — | tri de la bibliothèque et des slots, SPEC-10, REQ-PERS-033/057 |
 | `ui.last_browse_dir` | — | — | chaîne | dossier personnel | chemin | U | imm. | — | — | REQ-PERS-066 |
 | `ui.window_rect` | — | — | 4 entiers | taille par défaut SPEC-10 | — | U | redém. | — | — | REQ-PERS-067 |
+| `ui.library_view` | `LibraryView` | — | entier | 0 | aucun : v est mémorisé tel quel | U | aucun | aucune | non exposé | conservé et rendu tel quel ; Zaxnes n'a qu'une disposition de bibliothèque (AMD-059 REQ-LUA-116) |
 
 #### 4.1.10 VR, éditeur, film, valeurs internes et dérivées
 
@@ -425,6 +432,7 @@ Tous de portée P, non affichés dans l'UI desktop, non exposés en libretro ; c
 | `vr.scene_ratio` | `SceneRatio` | 26 | réel | 1 | lecture 1 en desktop | U | REQ-PERS-011 |
 | `vr.mirroring` | `Mirroring` | 23 | booléen | vrai | — | U | stocké, sans effet |
 | `vr.control_method` | `ControlMethod` | 16 | entier | 0 | — | U | stocké, sans effet |
+| `vr.refresh_rate` | `RefreshRate` | — | entier | 90 | {72, 90, 120} ; écriture Lua : la plus proche, à égalité la plus petite (81 → 72, 105 → 90) | U | conservé et rendu tel quel, sans effet — fréquence d'un casque de réalité virtuelle ; aucune interface, non exposé en libretro (AMD-059 REQ-LUA-116) |
 | `editor.selection_mode` | `SelectionMode` | — | énum | 0 (Shape3D) | 0 Shape3D, 1 Tile | S | sans effet (REQ-PERS-016) |
 | `editor.saved_patterns` | `SavedPattern3D` | 14 | liste d'enregistrements (SPEC-03) | 5 entrées « Config1 »…« Config5 » | — | P | conservé, sans effet |
 | `editor.saved_anim_patterns` | `SaveAnimPattern3D` | 15 | liste d'enregistrements (SPEC-03) | 5 entrées « Deform1 »…« Deform5 » | — | P | conservé, sans effet |
@@ -452,6 +460,9 @@ Contrat d'interopérabilité (SPEC-05 fixe la mécanique d'accès et les erreurs
 | `Setting` | `SetInputType(t1, t2)` | méthode | fixe les types des ports 0 et 1 (SPEC-08) |
 | `Setting` | `Save()`, `Load()` | méthode | REQ-PERS-015 |
 | `Setting` | `PropertyChanged` | événement | PEUT être non supporté depuis Lua (aucun profil ne l'utilise) |
+| `Setting` | `LibraryView`, `MaxQueuedFrames`, `RefreshRate`, `Msaa` | L, É | valeur du réglage (§4.1) ; aucune écriture numérique ne lève d'erreur (AMD-059 REQ-LUA-116) |
+| `Setting` | `VisualStyleParameters` | L, É | liste des paramètres de style écrits depuis leur dernière remise à zéro (AMD-059 REQ-LUA-116) ; nil en écriture remet tout à zéro |
+| élément de `VisualStyleParameters` | `Style`, `ParameterId`, `Value` | L | identifiant du style relu (REQ-SCN-078), identifiant du paramètre, valeur normalisée |
 | `Light` | `Direction` (vecteur 3), `Color` (couleur), `Intensity` (réel) | L, É | §4.1.3 |
 | `Layer` | `DefLayer`, `Auto` | L, É | §4.1.6 |
 | `Layer` | `[i]` (i entier 0–5 ou constante `TLayer`) | L | objet calque |
@@ -578,7 +589,7 @@ Les réglages U marqués d'une discrétisation dans §4.1 sont exposés. Exemple
 | `3dsen_emu_auto_tv_mode` | enabled, disabled | disabled | Émulation |
 | `3dsen_emu_game_speed` | −8 … 8 | 0 | Émulation |
 
-Non exposés en libretro (gérés par l'hôte ou sans objet) : `video.vsync`, `video.frame_rate`, `video.skip_frame`, `video.render_method`, `video.res_scale` (la résolution est celle de l'hôte), `ui.*`, `audio.bg_music`, `input.emulated_menu_button`, `emu.core`, tous les réglages P, S, D, VR, éditeur et film. `audio.volume` PEUT être exposé (l'hôte a son propre volume).
+Non exposés en libretro (gérés par l'hôte ou sans objet) : `video.vsync`, `video.frame_rate`, `video.max_queued_frames` (AMD-052 §3 point 8), `video.msaa_2_0` (AMD-059 REQ-LUA-116), `video.skip_frame`, `video.render_method`, `video.res_scale` (la résolution est celle de l'hôte), `ui.*`, `audio.bg_music`, `input.emulated_menu_button`, `emu.core`, tous les réglages P, S, D, VR, éditeur et film. `audio.volume` PEUT être exposé (l'hôte a son propre volume). `vr.refresh_rate` d'AMD-059 est couvert par la clause VR, `ui.library_view` par `ui.*`.
 
 ## 5. Vecteurs de test
 
@@ -645,3 +656,4 @@ Profil A embarqué : intensité 1,0, direction (−1, −1, 1), `EmptyTile` faux
 
 - 1.1-draft (AMD-001, relecture R2) : sens des marges de Clipping corrigé (indice 1 = bas, 3 = haut, DEC-R2-T1) et domaine [0 ; 248] ; savestate avec état appris de la conversion (REQ-PERS-056, DEC-R2-T5) ; onglet Save aligné sur REQ-UI-051 ; REQ-PERS-066 en P2 ; « bouton Menu émulé » sans effet (DEC-R2-D7) ; types de ports au changement de jeu (DEC-09-Q6) ; renvoi normatif vers REQ-PROF-041 ; défauts d'ombre de premier lancement non reproduits ; GraphicQuality et res_scale absents de l'UI ; texte d'import renvoyé à SPEC-10 ; forme de §4.4 ; questions closes.
 - 1.1 (R2-review-v1.1 N-2, N-3) : `retro_serialize` inclut l'état appris de la conversion (parties 3 à 6, section « conversion ») ; `video.graphic_quality` et `emu.tv_mode` (portée P) retirés des core options (REQ-PERS-085).
+- Copie de travail du côté propre, 2026-11-02 (lot V2-31) : les lignes d'AMD-059 §2 (REQ-LUA-116) sont reportées dans ce fichier — `video.msaa_2_0` en §4.1.1, `ui.library_view` en §4.1.9, `vr.refresh_rate` en §4.1.10, les membres `LibraryView`, `MaxQueuedFrames`, `RefreshRate`, `Msaa` et `VisualStyleParameters` en §4.2, et les exclusions libretro en §4.6. `Setting.MaxQueuedFrames` est le chemin Lua de la ligne qu'AMD-052 avait déjà ajoutée, non une clé nouvelle. Le texte normatif reste celui de `changes/AMD-059-api-lua-2-0-complete.md`.
