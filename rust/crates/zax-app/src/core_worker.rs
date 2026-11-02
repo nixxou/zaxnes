@@ -11,10 +11,15 @@ use std::time::{Duration, Instant};
 
 use zax_nes::NesCore;
 
-/// One frame to run: the core and the input word of the frame.
+/// One frame to run: the core, the input word of the frame, and the run-ahead in force.
 struct Job {
     core: Box<NesCore>,
     word: u16,
+    /// Frames of run-ahead (AMD-041 REQ-LOOP-064), 0 for an ordinary frame. The whole sequence
+    /// of REQ-LOOP-065 runs on this thread, which is the unit the thread already was: one real
+    /// frame. The core comes back in the **displayed** frame's state, and the session puts the
+    /// real one back once it has read that frame (`GameSession::capture_in_flight`).
+    run_ahead: u8,
 }
 
 /// A frame the thread ran: the core back, and the time the frame took.
@@ -44,9 +49,14 @@ impl CoreWorker {
         let thread = thread::Builder::new()
             .name("zaxnes-emulation".to_owned())
             .spawn(move || {
-                while let Ok(Job { mut core, word }) = inbox.recv() {
+                while let Ok(Job {
+                    mut core,
+                    word,
+                    run_ahead,
+                }) = inbox.recv()
+                {
                     let started = Instant::now();
-                    core.run_frame(word);
+                    core.run_frame_ahead(word, run_ahead);
                     let frame = FinishedFrame {
                         core,
                         elapsed: started.elapsed(),
@@ -63,15 +73,22 @@ impl CoreWorker {
         })
     }
 
-    /// Hands `core` to the thread to run one frame with `word`. Gives the core back when the
+    /// Hands `core` to the thread to run one real frame with `word` and `run_ahead` frames in
+    /// advance (AMD-041 REQ-LOOP-065; 0 for an ordinary frame). Gives the core back when the
     /// thread is gone.
     ///
     /// # Errors
     ///
     /// The thread has stopped; the core is returned untouched.
-    pub fn start(&self, core: Box<NesCore>, word: u16) -> Result<(), Box<NesCore>> {
+    pub fn start(&self, core: Box<NesCore>, word: u16, run_ahead: u8) -> Result<(), Box<NesCore>> {
         match &self.jobs {
-            Some(jobs) => jobs.send(Job { core, word }).map_err(|error| error.0.core),
+            Some(jobs) => jobs
+                .send(Job {
+                    core,
+                    word,
+                    run_ahead,
+                })
+                .map_err(|error| error.0.core),
             None => Err(core),
         }
     }

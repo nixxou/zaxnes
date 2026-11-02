@@ -260,7 +260,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.frame_steps
                     .capture_with(|buffer| core.save_state_to(false, buffer), one, two);
         }
-        self.run_session_frame(one, two);
+        self.step_without_run_ahead(one, two);
         self.show_frame_number();
     }
 
@@ -282,8 +282,22 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 return;
             }
         }
-        self.run_session_frame(one, two);
+        self.step_without_run_ahead(one, two);
         self.show_frame_number();
+    }
+
+    /// One emulated frame with **no** run-ahead (AMD-041 REQ-LOOP-066): a frame step bears on the
+    /// real state, and what the player asked to see is that frame and not one a few frames on.
+    /// The loop reads the setting again at the next real frame, so nothing has to be put back.
+    fn step_without_run_ahead(
+        &mut self,
+        one: crate::input::InputAction,
+        two: crate::input::InputAction,
+    ) {
+        if let Some(session) = self.session.as_mut() {
+            session.set_run_ahead(0);
+        }
+        self.run_session_frame(one, two);
     }
 
     fn can_step(&self) -> bool {

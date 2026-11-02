@@ -267,6 +267,11 @@ pub struct GameSession {
     overscan: crate::overscan::Overscan,
     /// The movie being recorded or played (see `zax_nes::movie`).
     movie: Option<MovieRun>,
+    /// Run-ahead N, 0 to 3 (AMD-041 REQ-LOOP-064): the frames of a real frame the core runs in
+    /// advance of it. 0 — what a freshly created session carries — runs the frame of
+    /// REQ-LOOP-060 unchanged, so a host that drives the session itself gets no run-ahead unless
+    /// it asks for one (AMD-041 §4, the libretro frontend).
+    run_ahead: u8,
 }
 
 /// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
@@ -405,6 +410,7 @@ impl GameSession {
             strict_wide_edges: false,
             overscan: crate::overscan::Overscan::default(),
             movie: None,
+            run_ahead: 0,
             pipeline: FramePipeline::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
@@ -634,9 +640,60 @@ impl GameSession {
 
     /// Whether the next frame may run on the emulation thread while the scripts of the last one
     /// run here: the profile's scripts leave the core alone.
+    ///
+    /// **Not** the run-ahead of AMD-041 ([`GameSession::set_run_ahead`]): this is the Rust-only
+    /// "emulation ahead" of `docs/PERFORMANCE-HISTORY.md` §5.5, a pipelining choice with no
+    /// visible latency change. The two are orthogonal and compose.
     #[must_use]
     pub const fn can_run_ahead(&self) -> bool {
         self.pipeline.ahead_allowed
+    }
+
+    /// Sets the run-ahead of AMD-041 REQ-LOOP-064: the number of frames the core runs in advance
+    /// of the real one, brought into `[0, 3]`.
+    ///
+    /// The loop writes it before every real frame, which is how "applied at the next real frame"
+    /// is honoured: the value is a property of the session rather than an argument of
+    /// [`GameSession::run_frame`], so a frame already under way is never cut in half.
+    pub fn set_run_ahead(&mut self, frames: i32) {
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)] // Clamped to 0..=3.
+        {
+            self.run_ahead = frames.clamp(0, i32::from(NesCore::MAX_RUN_AHEAD)) as u8;
+        }
+    }
+
+    /// The run-ahead in force (AMD-041 REQ-LOOP-064).
+    #[must_use]
+    pub const fn run_ahead(&self) -> u8 {
+        self.run_ahead
+    }
+
+    /// Step 5 of REQ-LOOP-065: the real state goes back once everything that reads the displayed
+    /// frame has read it.
+    ///
+    /// **Invariant**: every public entry point of the session that runs a frame leaves the core
+    /// in the **real** state. That is what makes REQ-LOOP-066 true by construction — the rollback
+    /// snapshots, the frame steps, the savestates, the input recording and the achievements all
+    /// read `GameSession::core()` between two frames and can never see a frame in advance.
+    ///
+    /// Q-103: the same invariant means a `Script:WriteMem` called from a **frame** hook writes
+    /// into the displayed state and is lost here, which is REQ-LOOP-066 read to the letter and
+    /// what the .NET implementation of AMD-041 does too. The input hook `InputProcess` runs at
+    /// step (a), before the real frame, so it is not concerned.
+    ///
+    /// REQ-LOOP-067 allows the restore to be delayed past step (d), and in this application that
+    /// is the placement that needs no copy at all: the conversion pulls `core.frame_batch()`
+    /// after the frame rather than through the video callback, the frame hooks read the live core
+    /// through `Script:ReadMem`, and the 2D picture is composed from the core's own pixels and
+    /// records. All three therefore see the displayed frame, and this runs after them. With
+    /// run-ahead off it is one `bool` test and nothing else.
+    fn put_the_real_frame_back(&mut self, clock: &mut StageClock) {
+        if !self.core.holds_a_real_frame() {
+            return;
+        }
+        let started = clock.start();
+        self.core.restore_real_frame();
+        clock.stop(Stage::Core, started);
     }
 
     /// Takes the core back from the emulation thread, if it is away, and captures the frame it
@@ -661,6 +718,11 @@ impl GameSession {
             .ram
             .copy_from_slice(self.core.bus().ram());
         self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
+        // Step 5 of REQ-LOOP-065 on the emulation-ahead path: the three things this path reads
+        // from the displayed frame — its batch, the RAM copy the scripts' `ReadMem` will serve
+        // (REQ-LOOP-067) and its 2D picture — have just been taken, and the next frame has not
+        // been launched yet, so the real state goes back here.
+        self.put_the_real_frame_back(clock);
     }
 
     /// Starts the next frame on the emulation thread at once ("emulation ahead"): its input word
@@ -687,12 +749,18 @@ impl GameSession {
             if let Some(word) = self.pipeline.prepared.take() {
                 self.finish_captured(model, scene, clock);
                 let started = clock.start();
-                self.core.run_frame(word);
+                self.core.run_frame_ahead(word, self.run_ahead);
                 clock.stop(Stage::Core, started);
                 let captured = self.capture_batch(clock);
                 self.pipeline.pending = Some(captured);
                 self.pipeline.picture_height =
                     self.core.wide_picture_into(&mut self.pipeline.picture);
+                // Step 5 here too, so that the invariant below holds on this path as well. The
+                // frame hooks of this frame run from `finish_captured`, just after this returns,
+                // and on this path alone they read the real frame rather than the displayed one
+                // (the memory snapshot of REQ-LOOP-067 is only served while the core is away).
+                // The path is taken only when the operating system refused the emulation thread.
+                self.put_the_real_frame_back(clock);
             }
         }
     }
@@ -989,10 +1057,14 @@ impl GameSession {
         self.lend(model, scene, |session, scene| {
             let word = session.begin_frame_lent(scene, frame, clock);
             let started = clock.start();
-            session.core.run_frame(word);
+            // REQ-LOOP-065: the real frame and the frames in advance, step (b) of REQ-LOOP-060.
+            session.core.run_frame_ahead(word, session.run_ahead);
             clock.stop(Stage::Core, started);
+            // Steps (c) and (d), on the displayed frame (REQ-LOOP-067).
             session.finish_frame_lent(scene, clock);
         });
+        // Step 5, once (c) and (d) are over.
+        self.put_the_real_frame_back(clock);
     }
 
     /// Prepares the next frame for the emulation thread ("emulation on a separate core"): the
@@ -1049,7 +1121,7 @@ impl GameSession {
             self.pipeline.picture_height = self.core.wide_picture_into(&mut self.pipeline.picture);
         }
         let core = std::mem::replace(&mut self.core, spare);
-        match worker.start(core, word) {
+        match worker.start(core, word, self.run_ahead) {
             Ok(()) => self.pipeline.in_flight = true,
             Err(core) => {
                 self.pipeline.spare = Some(std::mem::replace(&mut self.core, core));
@@ -1081,7 +1153,7 @@ impl GameSession {
             // A frame captured ahead of this one is converted first: its records are pending.
             self.finish_captured(model, scene, clock);
             let started = clock.start();
-            self.core.run_frame(word);
+            self.core.run_frame_ahead(word, self.run_ahead);
             clock.stop(Stage::Core, started);
         } else {
             self.finish_captured(model, scene, clock);
@@ -1092,6 +1164,8 @@ impl GameSession {
         self.lend(model, scene, |session, scene| {
             session.finish_frame_lent(scene, clock);
         });
+        // Step 5 of REQ-LOOP-065, after the conversion and the frame hooks of this frame.
+        self.put_the_real_frame_back(clock);
     }
 
     /// The scripts' input hook and the input word of the next frame (the first half of a frame).

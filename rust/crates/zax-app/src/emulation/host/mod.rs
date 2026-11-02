@@ -882,9 +882,15 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // The frame of the previous round comes back first.
             self.take_core_back();
             self.evaluate_achievements();
+            // AMD-041 REQ-LOOP-064: the setting is read again here, so a change made during the
+            // game applies at the next real frame and never in the middle of one. One `i32` read
+            // of the model per emulated frame, which is what the catch-up limit and the speed
+            // already cost above.
+            let run_ahead = self.settings.run_ahead();
             let Some(session) = self.session.as_mut() else {
                 break;
             };
+            session.set_run_ahead(run_ahead);
             // REQ-LOOP-030: the snapshot is taken at the start of a frame whose core frame
             // counter is a multiple of 60, so before that frame executes. AMD-042 REQ-LOOP-069:
             // it carries the 64 `PData` values and the camera state as well, read as they stand

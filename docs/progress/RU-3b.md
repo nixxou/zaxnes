@@ -12,8 +12,8 @@ reference.
 | 1 | Setup: sources read, requirement map, design decisions, before benchmarks, spec copies | done — `0d312e2` |
 | 2 | REQ-CORE-121: the in-memory state of the core, and its tests | done — `08ebd15` |
 | 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | done — `c49033b` |
-| 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | done |
-| 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | todo |
+| 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | done — `2dcddc1` |
+| 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | done |
 | 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | todo |
 | 7 | Closing: benches, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, goldens | todo |
 
@@ -376,3 +376,92 @@ the aim — the log is a constant and the comparison proves nothing. The main lo
 bit (`EOR #$08`) before accumulating.
 
 `cargo test --release -p zax-nes` **508 passed**.
+
+### Step 5 — REQ-LOOP-066 and REQ-LOOP-067, the loop around the sequence
+
+`AppSettings::run_ahead()` reads `emu.run_ahead`; `EmulationHost::run_due_frames` writes it onto
+the session **once per emulated frame**, beside the catch-up limit and the speed it already reads
+there, which is how REQ-LOOP-064's "effect at the next real frame" is honoured.
+`GameSession::set_run_ahead` clamps to `[0, 3]` and `run_ahead()` reports it.
+
+**The invariant that makes REQ-LOOP-066 true by construction**: every entry point of the session
+that runs a frame leaves the core in the **real** state. `put_the_real_frame_back` is called at
+four sites, one per path the core takes, and is a single `bool` test when nothing is held:
+
+| Path | Site | Why there |
+|---|---|---|
+| single thread | `run_frame_timed`, after `finish_frame_lent` | the conversion and the frame hooks of (c) and (d) have read the displayed frame |
+| separate core, serial | `complete_frame_timed`, after `finish_frame_lent` | same |
+| separate core, emulation ahead | `capture_in_flight`, after the batch, the RAM snapshot and the 2D picture | those are the three things that path reads from the displayed frame, and the next frame is launched right after |
+| separate core, no thread available | `launch_ahead`'s fallback | the real state has to be back before the tick's next rollback capture |
+
+Nothing else had to change: the rollback snapshot, the frame steps, the savestates and quick
+saves, the input recording and the achievements all read `GameSession::core()` between two frames,
+so they see R and nothing else. The core's own `forget_real_frame` (step 3) covers "charger un
+état, faire un reset ou changer de jeu reprend la frame suivante avec le même N".
+
+`CoreWorker::start` takes the run-ahead as a third argument and the thread runs
+`run_frame_ahead`: the sequence of REQ-LOOP-065 **is** the unit that thread already ran — one real
+frame — so run-ahead and emulation ahead compose instead of conflicting. The core comes back in
+the displayed frame's state, and `capture_in_flight` takes the RAM snapshot from it, which is what
+makes `Script:ReadMem` answer for the displayed frame on that path (REQ-LOOP-067).
+
+**Frame stepping runs at N = 0** (`step_without_run_ahead`): REQ-LOOP-066 puts the step on the
+real state, and what the player asked to see is *that* frame, not one three frames on — J, which
+restores a stored state and replays its input, would otherwise show a different frame from the one
+it restored. The loop reads the setting again at the next real frame, so nothing is put back.
+
+**`CORE_MEMBERS` is untouched**, and the reasoning is worth writing down because the lot asks for
+it: run-ahead adds no Lua member, so there is nothing to weigh. The existing rule — only a profile
+whose scripts name none of `InputProcess`, `WriteMem`, `GetInput`, `GetInputType`, `SetInputType`,
+`ZapperEnable` may have its next frame started early — is unaffected: run-ahead changes *which*
+frame a hook sees, not *when* the hook runs relative to the core. A profile that does name one of
+them keeps emulation ahead off and gets run-ahead all the same, on the serial path.
+
+#### Q-103: a frame hook's `WriteMem` does not reach the real state
+
+Found here, not in the amendment: REQ-LOOP-067 puts the frame hooks on the displayed frame and
+REQ-LOOP-066 puts the core's state on the real one, so a `Script:WriteMem` called from `Update`,
+`UpdateS` or `LateUpdate` writes into a state that step 5 throws away. At the default N = 1 a
+profile that applies an aid that way stops working, silently.
+
+`AMD-041` declares no question on the point, and REQ-LOOP-067 names only `frame` and `ReadMem`.
+The ticket `Q-103` records the ambiguity, the provisional choice — **REQ-LOOP-066 to the letter,
+the write is lost**, which is also what the .NET lot V2-3 does, its hooks hanging off the video
+callback of step 4 — and the three questions the owner has to settle. Referenced by `// Q-103`
+above `put_the_real_frame_back` and pinned by a test that asserts the write *does* persist at
+N = 0 and does not at N = 1, 2 and 3.
+
+The input hook `InputProcess` is not concerned: it runs at step (a), before the real frame, so its
+writes are part of R.
+
+#### Tests
+
+`zax-app/tests/run_ahead_tests.rs`, 12 of them, over the same vector ROM as the core tests —
+included by `#[path = "../../zax-nes/tests/common/run_ahead_rom.rs"]`, the convention
+`ui_harness/bundle_support.rs` already uses for the `zax-profiles` fixtures. `LoopHarness` gained
+`launch_rom_with_script`, a `launch_with_script` that takes the image too.
+
+| Test | Requirement |
+|---|---|
+| default 1, 7 → 3, −1 → 0, and the four values | REQ-LOOP-064, its criterion |
+| a change mid-game lands at the next real frame, not on the dispatch | REQ-LOOP-064 |
+| the core counts one frame per real frame at N = 0…3 | REQ-LOOP-066 |
+| the session's counter (the Lua `frame`) is contiguous at N = 0…3 | REQ-LOOP-066 |
+| quick save at N = 3 then quick load → the real frame's counter, and the game's own counter with it | REQ-LOOP-066, its criterion |
+| the history still snapshots every multiple of 60 of the real counter | REQ-LOOP-066, its criterion |
+| a frame step runs at N = 0 and shows the frame it stepped to | REQ-LOOP-066 |
+| the real states after 80 frames of a varying input sequence are the same at N = 0…3 | REQ-ARCH-012 amended |
+| a script's `Update` counter rises by exactly 1 per real frame at N = 0…3 (30 frames, no jump) | REQ-LOOP-067, its criterion |
+| `Script:ReadMem` in `Update` reads k + 2 at N = 2, ten real frames running | REQ-LOOP-067, its criterion |
+| a frame hook's `WriteMem` persists at N = 0 and not at N ≥ 1, the hook reading its own write back | Q-103 |
+| the serial run and the emulation-ahead run give the same work RAM at N = 0, 1, 3 | the interaction of the two "aheads" |
+
+`cargo test --release -p zax-app --features bundled` **640 passed** (the 628 of RU-3a-fix plus
+these 12). Worth recording: `LoopHarness::create` uses `SettingsModel::new()`, whose
+`emu.run_ahead` default is **1**, so every one of the 628 existing loop tests now runs *with*
+run-ahead on and none of them moved — which is the strongest statement of REQ-LOOP-066 available
+here. `separate_core_tests` (5) and `pause_3d_tests` (3) are among them.
+
+SPEC copy: the `emu.run_ahead` row of SPEC-09 §4.1.7 loses its "the frames in advance belong to
+lot RU-3" note, the effect being in. `Q-103` copied into `docs/spec/changes/`.

@@ -414,7 +414,7 @@ Les calques ne sont pas affichés dans l'UI desktop et ne sont pas exposés en l
 | `emu.tv_mode` | `TVMode` | 34 | énum | 0 (NTSC) | 0 NTSC, 1 PAL, 2 MULTI (non proposé par l'UI), 3 DENDY | **P** (Q-1) | imm. (cœur et cadence) | « TV Region » : NTSC/PAL/DENDY (positions 0, 1, 2 → valeurs 0, 1, 3) | NTSC/PAL/DENDY | région du cœur, SPEC-02/SPEC-07 REQ-LOOP-017 |
 | `emu.auto_tv_mode` | `AutoTVMode` | 33 | booléen | faux | — | U | ROM | — | on/off | au chargement d'une ROM, `TVMode` prend la région de l'en-tête, SPEC-07 REQ-LOOP-017 ; voir Q-1 pour l'ordre avec le profil |
 | `emu.core` | `Core` | 22 | entier | 0 | indice de cœur ; modulo le nombre de cœurs | U | imm. (réinitialise l'historique de rollback, recharge) | — | — | choix du cœur NES (un seul en desktop), SPEC-02 |
-| `emu.run_ahead` | `RunAheadFrames` | — | entier | 1 (0 sur console portable) | 0 à 3 | U | à la frame réelle suivante | liste « Run-ahead » | non exposé | frames exécutées d'avance (AMD-041 REQ-LOOP-064, exposé par AMD-040 REQ-LUA-114) ; les frames d'avance sont du lot RU-3 |
+| `emu.run_ahead` | `RunAheadFrames` | — | entier | 1 (0 sur console portable) | 0 à 3 | U | à la frame réelle suivante | liste « Run-ahead » | non exposé | frames exécutées d'avance (AMD-041 REQ-LOOP-064, exposé par AMD-040 REQ-LUA-114) |
 
 #### 4.1.8 Paramètres de conversion 2D→3D
 

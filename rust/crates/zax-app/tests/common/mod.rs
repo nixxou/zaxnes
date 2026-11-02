@@ -400,14 +400,21 @@ impl LoopHarness {
 
     /// Launches `game_id` on a profile holding one script, `source`.
     pub fn launch_with_script(&mut self, game_id: &str, source: &str) {
+        self.launch_rom_with_script(game_id, &SyntheticRom::counter(), Some(source));
+    }
+
+    /// Launches `game_id` on `image`, with one script holding `source` when there is one.
+    pub fn launch_rom_with_script(&mut self, game_id: &str, image: &[u8], source: Option<&str>) {
         let mut profile = GameProfile::create_empty();
-        profile.scripts.push(zax_profiles::script::ProfileScript {
-            name: Some("test".to_owned()),
-            enabled: true,
-            source: Some(source.to_owned()),
-            ..zax_profiles::script::ProfileScript::default()
-        });
-        let rom = self.write_rom(&SyntheticRom::counter(), &format!("{game_id}.nes"));
+        if let Some(source) = source {
+            profile.scripts.push(zax_profiles::script::ProfileScript {
+                name: Some("test".to_owned()),
+                enabled: true,
+                source: Some(source.to_owned()),
+                ..zax_profiles::script::ProfileScript::default()
+            });
+        }
+        let rom = self.write_rom(image, &format!("{game_id}.nes"));
         self.catalog()
             .add_with(game_id, Some(&rom), Some(profile), false, None);
         self.run_with(Command::LaunchGame, CommandArgs::of_text(game_id));

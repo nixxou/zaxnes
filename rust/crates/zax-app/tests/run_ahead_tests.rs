@@ -1,0 +1,436 @@
+//! Run-ahead through the loop (AMD-041): the setting of REQ-LOOP-064, what follows the real
+//! frame (REQ-LOOP-066) and what sees the displayed one (REQ-LOOP-067).
+//!
+//! The core's own sequence is tested in `zax-nes/tests/run_ahead_tests.rs`; here the question is
+//! the loop around it — the setting read once per real frame, the rollback history, the quick
+//! saves, the frame counter the scripts read, and the interaction with the Rust-only "emulation
+//! ahead" of `docs/PERFORMANCE-HISTORY.md` §5.5.
+
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
+mod common;
+
+/// The vector ROM of REQ-LOOP-065, shared with the core tests so that there is one definition.
+#[path = "../../zax-nes/tests/common/run_ahead_rom.rs"]
+mod run_ahead_rom;
+
+use common::LoopHarness;
+use zax_app::emulation::commands::Command;
+use zax_app::emulation::rollback_history::RollbackHistory;
+use zax_app::input::InputAction;
+use zax_app::persistence::app_settings::AppSettings as _;
+use zax_settings::catalogue::SettingId;
+use zax_settings::model::SettingsModel;
+use zax_settings::values::SettingValue;
+
+use run_ahead_rom as rom;
+
+/// A harness playing the vector ROM at `run_ahead`, past the ROM's warm-up.
+fn playing(run_ahead: i32) -> LoopHarness {
+    let mut harness = LoopHarness::create();
+    harness
+        .host
+        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(run_ahead)));
+    harness.launch_rom_with_script("vector", &rom::build(), None);
+    for _ in 0..8 {
+        harness.tick_frame();
+    }
+    harness
+}
+
+fn counter(harness: &LoopHarness) -> u32 {
+    let session = harness.host.session().expect("a session");
+    u32::from(session.core().read_memory(rom::COUNTER_ADDRESS))
+}
+
+fn core_frames(harness: &LoopHarness) -> i64 {
+    harness
+        .host
+        .session()
+        .expect("a session")
+        .core()
+        .frame_count()
+}
+
+// ------------------------------------------------------------------ REQ-LOOP-064
+
+/// REQ-LOOP-064, the acceptance criterion of the setting: an empty user root gives 1, a write of
+/// 7 reads 3, a write of −1 reads 0.
+#[test]
+fn req_loop_064_the_setting_has_the_default_and_the_bounds_of_the_amendment() {
+    let model = SettingsModel::new();
+    assert_eq!(1, model.run_ahead(), "an empty user root gives 1");
+
+    let mut model = SettingsModel::new();
+    model.set(SettingId::EmuRunAhead, SettingValue::Int(7));
+    assert_eq!(3, model.run_ahead());
+    model.set(SettingId::EmuRunAhead, SettingValue::Int(-1));
+    assert_eq!(0, model.run_ahead());
+    for value in 0..=3 {
+        model.set(SettingId::EmuRunAhead, SettingValue::Int(value));
+        assert_eq!(value, model.run_ahead());
+    }
+}
+
+/// REQ-LOOP-064: the loop reads the setting again at every real frame, so a change during the
+/// game applies at the next one and never in the middle of one.
+#[test]
+fn req_loop_064_a_change_during_the_game_applies_at_the_next_real_frame() {
+    let mut harness = playing(0);
+    assert_eq!(0, harness.host.session().unwrap().run_ahead());
+
+    harness
+        .host
+        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(3)));
+    harness.host.dispatch_setting_changes();
+    // Still 0 until a real frame runs: the value is not pushed by the dispatch.
+    assert_eq!(0, harness.host.session().unwrap().run_ahead());
+
+    harness.tick_frame();
+    assert_eq!(3, harness.host.session().unwrap().run_ahead());
+
+    // And the frame that just ran was a whole real frame: the core counted exactly one.
+    let before = core_frames(&harness);
+    harness.tick_frame();
+    assert_eq!(before + 1, core_frames(&harness));
+}
+
+// ------------------------------------------------------------------ REQ-LOOP-066
+
+/// REQ-LOOP-066: the core's frame counter follows the **real** frame, whatever N says.
+#[test]
+fn req_loop_066_the_core_counts_one_frame_per_real_frame() {
+    for ahead in 0..=3 {
+        let mut harness = playing(ahead);
+        let start = core_frames(&harness);
+        for _ in 0..60 {
+            harness.tick_frame();
+        }
+        assert_eq!(
+            start + 60,
+            core_frames(&harness),
+            "N = {ahead}: the core counted frames in advance"
+        );
+    }
+}
+
+/// REQ-LOOP-066: the session's own counter — the one the conversion stamps its frames with and
+/// the Lua global `frame` reads — also advances by one per real frame.
+#[test]
+fn req_loop_066_the_displayed_frames_are_contiguous() {
+    for ahead in 0..=3 {
+        let mut harness = playing(ahead);
+        let start = harness.host.session().unwrap().frame_counter();
+        for _ in 0..40 {
+            harness.tick_frame();
+        }
+        assert_eq!(
+            start + 40,
+            harness.host.session().unwrap().frame_counter(),
+            "N = {ahead}: the displayed frames are not contiguous"
+        );
+    }
+}
+
+/// REQ-LOOP-066, the acceptance criterion: Run-ahead = 3, a quick save then a quick load → the
+/// core's frame counter is the one of the **real** frame of the save.
+#[test]
+fn req_loop_066_a_quick_save_holds_the_real_frame() {
+    let mut harness = playing(3);
+    for _ in 0..20 {
+        harness.tick_frame();
+    }
+    let saved_core = core_frames(&harness);
+    let saved_counter = counter(&harness);
+    harness.run(Command::QuickSave);
+
+    for _ in 0..30 {
+        harness.tick_frame();
+    }
+    assert!(core_frames(&harness) > saved_core);
+
+    harness.run(Command::QuickLoad);
+    assert_eq!(
+        saved_core,
+        core_frames(&harness),
+        "the quick load did not come back to the real frame of the save"
+    );
+    assert_eq!(
+        saved_counter,
+        counter(&harness),
+        "the game's own per-frame counter is not the real frame's"
+    );
+}
+
+/// REQ-LOOP-066, second half of the criterion: the rollback history still captures a snapshot at
+/// every multiple of 60 of the **real** counter.
+#[test]
+fn req_loop_066_the_history_still_snapshots_every_sixty_real_frames() {
+    for ahead in [0, 2, 3] {
+        let mut harness = playing(ahead);
+        let before = harness.host.rollback.count();
+        // Enough real frames for three multiples of 60 to go by.
+        for _ in 0..200 {
+            harness.tick_frame();
+        }
+        let taken = harness.host.rollback.count() - before;
+        assert!(
+            (3..=4).contains(&taken),
+            "N = {ahead}: {taken} snapshots over 200 real frames"
+        );
+        // And every snapshot sits on a multiple of 60 of the real counter.
+        assert!(RollbackHistory::is_snapshot_frame(0));
+        assert!(RollbackHistory::is_snapshot_frame(60));
+        assert!(!RollbackHistory::is_snapshot_frame(61));
+    }
+}
+
+/// REQ-LOOP-066: a frame step shows the frame it steps to, so it runs with no run-ahead at all,
+/// and the real state follows it.
+#[test]
+fn req_loop_066_a_frame_step_runs_without_run_ahead() {
+    let mut harness = playing(3);
+    for _ in 0..20 {
+        harness.tick_frame();
+    }
+    harness.run(Command::Pause);
+    let before = core_frames(&harness);
+    let shown = counter(&harness);
+
+    harness.run(Command::FrameAdvance);
+    assert_eq!(before + 1, core_frames(&harness), "the step ran one frame");
+    assert_eq!(
+        0,
+        harness.host.session().unwrap().run_ahead(),
+        "the step ran with run-ahead on"
+    );
+    // The picture of the step is the frame stepped to, not one three frames on.
+    let session = harness.host.session().unwrap();
+    assert_eq!(
+        shown,
+        u32::from(session.core().read_memory(rom::COUNTER_ADDRESS)) - 1
+    );
+}
+
+/// REQ-LOOP-066: the real states the loop leaves behind do not depend on N — the same run with
+/// the same inputs gives the same core frames and the same work RAM at every N.
+#[test]
+fn req_arch_012_the_real_states_do_not_depend_on_n() {
+    let inputs = [
+        InputAction::NONE,
+        InputAction::A,
+        InputAction::NONE,
+        InputAction::A | InputAction::RIGHT,
+    ];
+
+    let mut reference: Option<(i64, Vec<u8>)> = None;
+    for ahead in 0..=3 {
+        let mut harness = playing(ahead);
+        for frame in 0..80 {
+            let action = inputs[frame % inputs.len()];
+            harness.tick_actions(1.0 / 60.0, action, InputAction::NONE);
+        }
+        let session = harness.host.session().unwrap();
+        let state = (
+            session.core().frame_count(),
+            session.core().bus().ram().to_vec(),
+        );
+        match &reference {
+            None => reference = Some(state),
+            Some(expected) => assert_eq!(
+                *expected, state,
+                "N = {ahead}: the real state parted from N = 0's"
+            ),
+        }
+    }
+}
+
+// ------------------------------------------------------------------ REQ-LOOP-067
+
+/// REQ-LOOP-067, the acceptance criterion: a script that increments a counter in `Update`
+/// increases it by 1 per **real** frame, whatever N is.
+#[test]
+fn req_loop_067_a_frame_hook_runs_once_per_real_frame() {
+    for ahead in 0..=3 {
+        let mut harness = LoopHarness::create();
+        harness.host.update_settings(|model| {
+            model.set(SettingId::EmuRunAhead, SettingValue::Int(ahead));
+        });
+        harness.launch_rom_with_script(
+            "hooked",
+            &rom::build(),
+            Some(
+                r"
+                    hooks = 0
+                    function Update()
+                        hooks = hooks + 1
+                    end
+                    function LateUpdate()
+                        print('hooks ' .. hooks)
+                    end
+                ",
+            ),
+        );
+        for _ in 0..8 {
+            harness.tick_frame();
+        }
+        harness.clear_script_lines();
+        for _ in 0..30 {
+            harness.tick_frame();
+        }
+
+        let lines: Vec<String> = harness
+            .script_lines()
+            .into_iter()
+            .filter(|line| line.starts_with("hooks "))
+            .collect();
+        assert_eq!(
+            30,
+            lines.len(),
+            "N = {ahead}: {} frame hooks for 30 real frames",
+            lines.len()
+        );
+        // And the counter they print rises by exactly one between two real frames.
+        let values: Vec<i64> = lines
+            .iter()
+            .filter_map(|line| line.trim_start_matches("hooks ").trim().parse().ok())
+            .collect();
+        assert_eq!(30, values.len());
+        for pair in values.windows(2) {
+            assert_eq!(
+                pair[0] + 1,
+                pair[1],
+                "N = {ahead}: the hook counter jumped ({pair:?})"
+            );
+        }
+    }
+}
+
+/// REQ-LOOP-067, second half of the criterion: with Run-ahead = 2, `Script:ReadMem` on the
+/// counter of the vector ROM returns the **displayed** value, k + 2.
+#[test]
+fn req_loop_067_read_mem_in_a_frame_hook_reads_the_displayed_frame() {
+    let mut harness = LoopHarness::create();
+    harness
+        .host
+        .update_settings(|model| model.set(SettingId::EmuRunAhead, SettingValue::Int(2)));
+    harness.launch_rom_with_script(
+        "readmem",
+        &rom::build(),
+        Some(
+            r"
+                function Update()
+                    print('shown ' .. Script:ReadMem(0x0010))
+                end
+            ",
+        ),
+    );
+    for _ in 0..8 {
+        harness.tick_frame();
+    }
+
+    for _ in 0..10 {
+        let before = counter(&harness);
+        harness.clear_script_lines();
+        harness.tick_frame();
+        let shown: u32 = harness
+            .script_lines()
+            .iter()
+            .find_map(|line| line.strip_prefix("shown "))
+            .and_then(|value| value.trim().trim_end_matches(".0").parse().ok())
+            .expect("the hook printed what it read");
+        // `$0010` holds the value the picture of the frame that drew it shows: the displayed
+        // frame is two ahead of the real frame whose counter was `before`.
+        assert_eq!(
+            before + 2,
+            shown,
+            "the hook read the real frame instead of the displayed one"
+        );
+        // And the real frame that just ran is the one after `before`.
+        assert_eq!(before + 1, counter(&harness));
+    }
+}
+
+/// Q-103, the behaviour the question ticket fixes provisionally: a `Script:WriteMem` from a
+/// **frame** hook lands on the displayed state — the hook reads its own write straight back — and
+/// does not reach the real one, because REQ-LOOP-066 makes the core follow the real frame.
+///
+/// At Run-ahead = 0 the same write persists, which is what makes the loss a consequence of the
+/// amendment and not of the write itself.
+#[test]
+fn req_loop_067_a_frame_hook_write_does_not_reach_the_real_state() {
+    const SOURCE: &str = r"
+        function Update()
+            Script:WriteMem(0x0040, 0x5A)
+            print('in hook ' .. Script:ReadMem(0x0040))
+        end
+    ";
+
+    for (ahead, expected) in [(0, 0x5A_u8), (1, 0x00), (2, 0x00), (3, 0x00)] {
+        let mut harness = LoopHarness::create();
+        harness.host.update_settings(|model| {
+            model.set(SettingId::EmuRunAhead, SettingValue::Int(ahead));
+        });
+        harness.launch_rom_with_script("writer", &rom::build(), Some(SOURCE));
+        harness.clear_script_lines();
+        for _ in 0..12 {
+            harness.tick_frame();
+        }
+
+        // The write did happen: the hook read its own byte back from the frame it ran on.
+        assert!(
+            harness
+                .script_lines()
+                .iter()
+                .any(|line| line.starts_with("in hook 90")),
+            "N = {ahead}: the hook never wrote (lines {:?})",
+            harness.script_lines()
+        );
+        assert_eq!(
+            expected,
+            harness.host.session().unwrap().core().read_memory(0x0040),
+            "N = {ahead}: Q-103 — the real state does not hold what this lot says it should"
+        );
+    }
+}
+
+// ------------------------------------------- run-ahead beside "emulation ahead"
+
+/// Run-ahead and the Rust-only "emulation ahead" are orthogonal: with the core on its own thread
+/// and the frames pipelined, the real states are still those of a serial run at the same N
+/// (`docs/PERFORMANCE-HISTORY.md` §5.5).
+#[test]
+fn run_ahead_and_emulation_ahead_give_the_same_real_frames() {
+    for ahead in [0, 1, 3] {
+        let mut serial = LoopHarness::create();
+        serial.host.separate_core = false;
+        let mut threaded = LoopHarness::create();
+        threaded.host.separate_core = true;
+        threaded.host.core_ahead = true;
+        for harness in [&mut serial, &mut threaded] {
+            harness.host.update_settings(|model| {
+                model.set(SettingId::EmuRunAhead, SettingValue::Int(ahead));
+            });
+            harness.launch_rom_with_script("both", &rom::build(), None);
+            for _ in 0..8 {
+                harness.tick_frame();
+            }
+        }
+
+        for _ in 0..60 {
+            serial.tick_actions(1.0 / 60.0, InputAction::A, InputAction::NONE);
+            threaded.tick_actions(1.0 / 60.0, InputAction::A, InputAction::NONE);
+        }
+        // The threaded run owes one frame at any instant: it is finished before anything reads
+        // the core.
+        threaded.host.complete_frame_in_flight();
+
+        let left = serial.host.session().unwrap();
+        let right = threaded.host.session().unwrap();
+        assert_eq!(
+            left.core().bus().ram(),
+            right.core().bus().ram(),
+            "N = {ahead}: the work RAM of the two paths parted"
+        );
+    }
+}
