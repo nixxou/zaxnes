@@ -122,7 +122,10 @@ fn the_rust_only_options_parse_and_are_listed_apart_from_the_csharp_usage() {
 fn the_graphics_api_and_the_state_to_load_parse() {
     let options = parse(&["--backend", "Vulkan", "--load-state", "3"]);
     assert_eq!(Some(1), options.backend);
-    assert_eq!(Some(3), options.load_state);
+    // `--load-state` and the `-slot=` of AMD-053 REQ-UI-213 fill the same field, so it implies
+    // `-noresume` too.
+    assert_eq!(Some("3".to_owned()), options.slot);
+    assert!(options.no_resume);
     assert_eq!(Some(0), parse(&["--backend", "gl"]).backend);
     assert_eq!(Some(2), parse(&["--backend", "dx12"]).backend);
     assert!(matches!(
@@ -134,4 +137,50 @@ fn the_graphics_api_and_the_state_to_load_parse() {
         Err(OptionsError::Index { .. })
     ));
     assert!(RUST_ONLY_USAGE.contains("--backend") && RUST_ONLY_USAGE.contains("--load-state"));
+}
+
+/// AMD-053 REQ-UI-213: the three options taken from the original program, single dash, with their
+/// double-dash aliases, and `-slot` implying `-noresume`.
+#[test]
+fn req_ui_213_the_three_options_of_the_original_program_parse() {
+    let options = parse(&["-slot=7", "-emustats"]);
+    assert_eq!(Some("7".to_owned()), options.slot);
+    assert!(options.emu_stats);
+    // « -slot implique -noresume », whatever order the two came in.
+    assert!(options.no_resume);
+    assert_eq!(Vec::<String>::new(), options.notices);
+
+    assert!(parse(&["-noresume"]).no_resume);
+    assert!(parse(&["-noresume"]).slot.is_none());
+    assert!(!parse(&["-noresume"]).emu_stats);
+
+    // The double-dash forms are accepted as aliases (D).
+    assert_eq!(Some("quick".to_owned()), parse(&["--slot=quick"]).slot);
+    assert!(parse(&["--no-resume"]).no_resume);
+    assert!(parse(&["--emu-stats"]).emu_stats);
+
+    // The usage text names them.
+    assert!(USAGE.contains("-slot=<n>"));
+    assert!(USAGE.contains("-noresume"));
+    assert!(USAGE.contains("-emustats"));
+}
+
+/// REQ-UI-213: the command line accepts the 36 slots REQ-PERS-050 keeps and the quick slot — the
+/// exposure limit of AMD-010 REQ-UI-208 does not reach it — and ignores anything else with a
+/// notice, the program starting normally.
+#[test]
+fn req_ui_213_slot_accepts_1_to_36_and_quick_and_ignores_the_rest() {
+    for slot in ["1", "10", "36", "quick"] {
+        let options = parse(&[&format!("-slot={slot}")]);
+        assert_eq!(Some(slot.to_owned()), options.slot, "{slot}");
+        assert_eq!(Vec::<String>::new(), options.notices, "{slot}");
+    }
+    for slot in ["0", "37", "99", "", "first"] {
+        let options = parse(&[&format!("-slot={slot}")]);
+        assert_eq!(None, options.slot, "{slot}");
+        // The start-up carries on: no error, and the fact is there for the log.
+        assert!(!options.no_resume, "{slot}");
+        assert_eq!(1, options.notices.len(), "{slot}");
+        assert!(options.notices[0].contains("is ignored"), "{slot}");
+    }
 }

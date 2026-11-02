@@ -16,8 +16,17 @@ pub const USAGE: &str = r#"Zaxnes - NES emulator with 3D rendering
 
 Usage:
   Zax.App --rom <path> [--profile <title-or-file>] [options]
+  Zax.App --rom <path> -slot=<n>
   Zax.App --list-profiles
   Zax.App --import-3dsen <folder-or-bundle>
+
+Options taken from the original program (single dash; the double-dash forms are aliases):
+  -slot=<n>               Load slot n (1 to 36, or quick) once the game is running.
+                          An empty slot is ignored. Implies -noresume (AMD-053 REQ-UI-213).
+  -noresume               Do not offer the Resume entry, and leave the resume point
+                          untouched for this run.
+  -emustats               Write one line per emulated frame, with its emulation time,
+                          into the log file of the user folder.
 
 Options:
   --rom <path>            The .nes ROM to play. Without it only the empty scene shows.
@@ -224,8 +233,19 @@ pub struct AppOptions {
     /// The graphics API of this run, as a `video.backend` value (Rust-only); `None` for the
     /// setting.
     pub backend: Option<i32>,
-    /// The save state slot to load once the game has started (Rust-only).
-    pub load_state: Option<i32>,
+    /// The save state slot to load once the game has started (Rust-only `--load-state`, and the
+    /// `-slot=<n>` of AMD-053 REQ-UI-213, which goes through the same field): `"1"` to `"36"` or
+    /// `"quick"`.
+    pub slot: Option<String>,
+    /// `-noresume` (AMD-053 REQ-UI-213): the resume point is neither read, nor written, nor
+    /// erased this run (Q-088). `-slot` implies it.
+    pub no_resume: bool,
+    /// `-emustats` (AMD-053 REQ-UI-213): one line per emulated frame, with its emulation time,
+    /// in the log file.
+    pub emu_stats: bool,
+    /// What the command line held that was ignored, for the log: an out-of-domain `-slot`, for
+    /// instance. A value that is not accepted never refuses the start-up (REQ-UI-213).
+    pub notices: Vec<String>,
 }
 
 impl Default for AppOptions {
@@ -260,7 +280,10 @@ impl Default for AppOptions {
             roms_directory: None,
             catch_up: None,
             backend: None,
-            load_state: None,
+            slot: None,
+            no_resume: false,
+            emu_stats: false,
+            notices: Vec::new(),
         }
     }
 }
@@ -275,6 +298,13 @@ impl AppOptions {
         let mut options = Self::default();
         let mut index = 0;
         while let Some(&argument) = arguments.get(index) {
+            // AMD-053 REQ-UI-213: the three options taken from the original program carry their
+            // value after an « = », like the `-id=` of REQ-UI-007, and their double-dash
+            // spellings are accepted as aliases (D).
+            if options.parse_original_option(argument) {
+                index += 1;
+                continue;
+            }
             match argument {
                 "-h" | "--help" | "-?" | "/?" => options.show_help = true,
                 "--list-profiles" => {
@@ -366,7 +396,37 @@ impl AppOptions {
             }
             index += 1;
         }
+        // REQ-UI-213: `-slot` implies `-noresume`, whatever order the two came in. `--load-state`
+        // is the Rust-only spelling of the same thing, so it implies it too.
+        if options.slot.is_some() {
+            options.no_resume = true;
+        }
         Ok(options)
+    }
+
+    /// The three options the original program spells with a single dash: `-slot=`, `-noresume`
+    /// and `-emustats` (AMD-053 REQ-UI-213). Their double-dash forms are accepted as aliases, by
+    /// consistency with the options Zaxnes adds of its own.
+    ///
+    /// Returns whether `argument` was one of them.
+    fn parse_original_option(&mut self, argument: &str) -> bool {
+        if let Some(slot) = value_of(argument, "-slot=", "--slot=") {
+            if is_user_slot_id(slot) {
+                self.slot = Some(slot.to_owned());
+            } else {
+                // « Une valeur invalide […] est ignorée et le programme démarre normalement. »
+                self.notices.push(format!(
+                    "-slot={slot} is outside 1…36 and 'quick'; the option is ignored."
+                ));
+            }
+            return true;
+        }
+        match argument {
+            "-noresume" | "--no-resume" => self.no_resume = true,
+            "-emustats" | "--emu-stats" => self.emu_stats = true,
+            _ => return false,
+        }
+        true
     }
 
     /// The options only the Rust program has ([`RUST_ONLY_USAGE`]).
@@ -382,9 +442,12 @@ impl AppOptions {
             "--roms" => {
                 self.roms_directory = Some(next_value(arguments, index, "--roms")?.to_owned());
             }
+            // The Rust-only spelling of `-slot=<n>`: a number only, so the quick slot is out of
+            // its reach. The two fill the same field; nothing is duplicated.
             "--load-state" => {
                 let value = next_value(arguments, index, "--load-state")?;
-                self.load_state = Some(parse_index(value, "--load-state")?);
+                let number = parse_index(value, "--load-state")?;
+                self.slot = Some(number.to_string());
             }
             "--backend" => {
                 let value = next_value(arguments, index, "--backend")?;
@@ -417,6 +480,24 @@ impl AppOptions {
     pub const fn prints_and_exits(&self) -> bool {
         self.show_help || self.list_profiles || self.import_three_d_sen_path.is_some()
     }
+}
+
+/// The value an `<option>=<value>` argument carries, under either spelling; none when it is
+/// neither.
+fn value_of<'a>(argument: &'a str, option: &str, alias: &str) -> Option<&'a str> {
+    argument
+        .strip_prefix(option)
+        .or_else(|| argument.strip_prefix(alias))
+}
+
+/// Whether `slot` names a slot the command line accepts: `"1"` to `"36"`, or `"quick"`. The
+/// command line is not held by the exposure limit of AMD-010 REQ-UI-208 (10 slots in the menus)
+/// and accepts the 36 slots REQ-PERS-050 keeps.
+fn is_user_slot_id(slot: &str) -> bool {
+    slot == crate::persistence::save_slots::QUICK_SLOT_ID
+        || slot.parse::<usize>().is_ok_and(|number| {
+            (1..=crate::persistence::save_slots::NUMBERED_SLOT_COUNT).contains(&number)
+        })
 }
 
 /// The value of the option at `index`, which moves onto it.

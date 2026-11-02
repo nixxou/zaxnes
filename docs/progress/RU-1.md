@@ -11,8 +11,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 | 2 | AMD-039: UnityFS header flag 0x200, synthetic format-8 bundle tests | done — `837918c` |
 | 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | done — `5030db6` |
 | 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | done — `bc46821` |
-| 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | done |
-| 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | todo |
+| 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | done — `032638a` |
+| 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | done |
 | 7 | AMD-056 import dialogs, desktop frontend, both languages | todo |
 | 8 | UI wiring: commands, chooser, console/handheld screens, options | todo |
 | 9 | Closing: fmt, clippy, release tests, Lua API dump, journal | todo |
@@ -244,6 +244,30 @@ are interface state, not settings, and `ui.sort_option` keeps its default of 0 e
 Nothing of this runs per frame: the write happens once, after the loop has stopped, and the
 start-up check reads one file.
 
+### Step 6 — the command line
+
+- `parse_original_option` takes the three options before the general `match`, so their `=` form
+  and their double-dash aliases are read in one place. `-slot` implies `-noresume`, whatever order
+  they came in.
+- `--load-state <n>` and `-slot=<n>` fill the **same** field, now `slot: Option<String>` — nothing
+  is duplicated, and `-slot` adds the quick slot and the 36 slots REQ-PERS-050 keeps (the exposure
+  limit of REQ-UI-208 does not reach the command line). An out-of-domain value is ignored with a
+  notice, never an error, and the notices are logged at start-up.
+- `load_the_asked_state` routes `quick` to `Command::QuickLoad` and a number to
+  `Command::LoadSlot`, after step 7 of REQ-LOOP-021 (the state having gone to Running). An empty
+  slot is ignored, the game stays launched, and the fact is logged.
+- **The "slot of another game" clause of REQ-UI-213 has no referent here**, and Q-102 gained a
+  section for it: it presumes a common slot index to look the game up in, which the Rust
+  application no longer keeps, and `-id=` was never implemented. `-slot=<n>` is the slot of the
+  game this run starts. Nothing was invented to scan `saves/` for a game.
+- `-emustats` writes its line in `count_emulated_frame`, which every path runs, so the count is
+  exact (the acceptance criterion is 600 ± 1 lines for 10 s of NTSC). Off, it is one
+  `Option::is_some` per emulated frame and nothing more; the sink is absent rather than a flag, so
+  there is nothing to format and nothing to write. The line goes through `app_log::file_line`,
+  which writes to the log file only and never to the parent console, as the requirement asks. With
+  the emulation on a separate core the frame leaves for the thread, so the line says so instead of
+  reporting a span the host did not spend.
+
 ### Next step
 
-Step 6: the command line — `-slot=<n>`, `-noresume`, `-emustats` and the `--` aliases.
+Step 7: AMD-056's import dialogs in the desktop frontend, with their strings in both languages.

@@ -232,3 +232,48 @@ fn req_ui_211_library_search_keeps_the_typed_text() {
     harness.run_with(Command::SearchLibrary, CommandArgs::of_text(""));
     assert_eq!("", harness.host.library_search());
 }
+
+/// REQ-UI-213: `-emustats` writes one line per emulated frame, with its emulation time, through
+/// the sink the application points at the log file. NTSC, 10 s → 600 ± 1 lines.
+#[test]
+fn req_ui_213_emustats_writes_one_line_per_emulated_frame() {
+    let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let sink = std::sync::Arc::clone(&lines);
+    let mut harness = LoopHarness::create_with(move |options| {
+        options.emu_stats = Some(Box::new(move |line| {
+            if let Ok(mut lines) = sink.lock() {
+                lines.push(line.to_owned());
+            }
+        }));
+    });
+    harness.launch("g1");
+    lines.lock().unwrap().clear();
+
+    // Ten seconds of NTSC: 600 emulated frames, ± 1 for the frame the tick boundary rounds.
+    let frames = harness.run_frames(600);
+
+    let written = lines.lock().unwrap().clone();
+    assert!((599..=601).contains(&frames), "{frames} frames ran");
+    assert_eq!(usize::try_from(frames).unwrap(), written.len());
+    // In English (AMD-035 §2), one line per frame, with the figure.
+    assert!(written[0].starts_with("emustats frame "), "{}", written[0]);
+    assert!(written[0].ends_with(" ms"), "{}", written[0]);
+}
+
+/// With no `-emustats` the sink is absent and nothing is written: the option costs nothing when
+/// it is off, which is the default.
+#[test]
+fn req_ui_213_without_emustats_nothing_is_written() {
+    let mut harness = LoopHarness::create();
+    harness.launch("g1");
+    let before = harness.log.borrow().len();
+
+    harness.run_frames(120);
+
+    assert!(!harness
+        .log
+        .borrow()
+        .iter()
+        .skip(before)
+        .any(|line| line.contains("emustats")));
+}

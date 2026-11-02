@@ -50,6 +50,7 @@ use crate::library_game_catalog::LibraryGameCatalog;
 use crate::persistence::app_settings::AppSettings;
 use crate::persistence::command_line_settings;
 use crate::persistence::input_binding_store::FileInputBindingStore;
+use crate::persistence::save_slots;
 use crate::persistence::settings_store::SettingsStore;
 use crate::pipeline::{PipelineGovernor, PipelineMode};
 use crate::render_scaling;
@@ -209,8 +210,9 @@ struct Running {
     pipeline: Pipelined,
     /// The automatic resolution (`video.dynamic_resolution`).
     resolution: AutomaticResolution,
-    /// The save state slot `--load-state` asks for, until the game accepts the load.
-    pending_state_load: Option<i32>,
+    /// The save state slot `-slot=<n>` (AMD-053 REQ-UI-213) or `--load-state` asks for, until the
+    /// game accepts the load: `"1"` to `"36"` or `"quick"`.
+    pending_state_load: Option<String>,
 }
 
 /// The state of the automatic resolution between two displayed frames.
@@ -326,8 +328,14 @@ impl Running {
             sample_rate,
             audio_open: audio.is_some(),
             view,
+            suspend_resume: options.no_resume,
+            emu_stats: options.emu_stats,
         };
         let mut host = build_host(parts);
+        // REQ-UI-213: a value the command line could not use is logged, never refused.
+        for notice in &options.notices {
+            log(notice);
+        }
         host.set_profiling(profiling);
         configure_pacing(&mut host, options);
         // The game in 2D (the "2D Mode" profile, F11) is seen head on and fills the height of the
@@ -364,7 +372,7 @@ impl Running {
             clock: StageClock::new(profiling),
             pipeline: Pipelined::default(),
             resolution: AutomaticResolution::default(),
-            pending_state_load: options.load_state,
+            pending_state_load: options.slot.clone(),
         })
     }
 
@@ -637,19 +645,43 @@ impl Running {
         operation(&mut self.ui, &mut frame, sizes, &debug);
     }
 
-    /// `--load-state`: loads the slot once the game runs and the host accepts the load (the
-    /// game loads in the background, and a slot of another game is refused).
+    /// `-slot=<n>` (AMD-053 REQ-UI-213) and `--load-state`: loads the slot once the game runs and
+    /// the host accepts the load — after step 7 of REQ-LOOP-021, the state having gone to Running
+    /// (the game loads in the background, and a slot of another game is refused).
+    ///
+    /// The slot is dropped at the first displayed frame where the game runs, whether the load was
+    /// accepted or not: an empty slot is ignored, the game of `--rom` stays launched, and the fact
+    /// is logged.
+    ///
+    /// `-slot=<n>` names a slot **of the game this run starts**. The clause of REQ-UI-213 about a
+    /// slot belonging to another game has no referent here: there is no `-id=` option and no
+    /// common slot index to look a game up in, a game's states being the files of its ROM.
+    /// Q-102.
+    // Q-102
     fn load_the_asked_state(&mut self) {
-        let Some(slot) = self.pending_state_load else {
+        let Some(slot) = self.pending_state_load.clone() else {
             return;
         };
-        let args = CommandArgs::of_number(slot);
-        if self.host.state() == EmulationState::Running
-            && self.host.can_execute(Command::LoadSlot, &args)
-        {
-            self.host.enqueue(Command::LoadSlot, args);
-            self.pending_state_load = None;
-            log(&format!("save state slot {slot} loaded (--load-state)."));
+        if self.host.state() != EmulationState::Running {
+            return;
+        }
+        self.pending_state_load = None;
+        let (command, args) = if slot == save_slots::QUICK_SLOT_ID {
+            (Command::QuickLoad, CommandArgs::default())
+        } else {
+            let number = slot.parse::<i32>().unwrap_or(0);
+            (Command::LoadSlot, CommandArgs::of_number(number))
+        };
+        if self.host.can_execute(command, &args) {
+            self.host.enqueue(command, args);
+            log(&format!("save state slot {slot} loaded (-slot)."));
+        } else {
+            // « Si le slot est vide, il est ignoré, le jeu de -id reste lancé et le fait est
+            // journalisé. »
+            log(&format!(
+                "save state slot {slot} is empty; the option is ignored and the start-up carries \
+                 on (REQ-UI-213)."
+            ));
         }
     }
 
@@ -1003,6 +1035,10 @@ struct HostParts<'a> {
     sample_rate: u32,
     audio_open: bool,
     view: SceneView,
+    /// `-noresume` (AMD-053 REQ-UI-213).
+    suspend_resume: bool,
+    /// `-emustats` (AMD-053 REQ-UI-213).
+    emu_stats: bool,
 }
 
 fn build_host(parts: HostParts<'_>) -> AppHost {
@@ -1022,6 +1058,12 @@ fn build_host(parts: HostParts<'_>) -> AppHost {
     options.settings_store = Some(parts.store);
     options.confirm_with_interface = true;
     options.view = Some(parts.view);
+    options.suspend_resume = parts.suspend_resume;
+    // AMD-053 REQ-UI-213: the per-frame lines go to the log file only, which a normal launch
+    // does not share with a parent console. Absent, the frame loop does nothing extra.
+    options.emu_stats = parts
+        .emu_stats
+        .then(|| Box::new(app_log::file_line) as crate::emulation::host::LogFn);
     EmulationHost::new(options)
 }
 

@@ -134,6 +134,9 @@ pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     /// `-noresume` (AMD-053 REQ-UI-213): the resume point is neither read, nor written, nor
     /// erased this run (Q-088).
     pub suspend_resume: bool,
+    /// `-emustats` (AMD-053 REQ-UI-213): where the one line per emulated frame goes. `None` —
+    /// the default — means the option is off, and the frame path then does nothing extra.
+    pub emu_stats: Option<LogFn>,
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
@@ -155,6 +158,7 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
             settings_store: None,
             confirm_with_interface: false,
             suspend_resume: false,
+            emu_stats: None,
         }
     }
 }
@@ -250,6 +254,9 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     resume: Option<crate::persistence::resume_point::ResumePoint>,
     /// `-noresume`: the resume point is neither read, nor written, nor erased this run (Q-088).
     suspend_resume: bool,
+    /// `-emustats`: where the one line per emulated frame goes; none when the option is off,
+    /// which is the default (AMD-053 REQ-UI-213).
+    emu_stats: Option<LogFn>,
     /// Whether the enumeration of the games keeps only the favourites (AMD-053 REQ-UI-210,
     /// command `library.filter_favorites`). Interface state, not a setting: it is not persisted.
     favorites_only: bool,
@@ -313,6 +320,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             settings_store,
             confirm_with_interface,
             suspend_resume,
+            emu_stats,
         } = options;
         let now: Now = now.unwrap_or_else(|| Box::new(OffsetDateTime::now_utc));
         let persisted = settings_store.is_some();
@@ -378,6 +386,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             defer_conversion: false,
             resume: None,
             suspend_resume,
+            emu_stats,
             favorites_only: false,
             library_search: String::new(),
         };
@@ -896,20 +905,24 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 );
             }
             if ahead {
-                // The accounting touches the core: it comes before the frame leaves.
-                self.count_emulated_frame();
+                // The accounting touches the core: it comes before the frame leaves. The frame
+                // then runs on the emulation thread, so the host has no span to report for it.
+                self.count_emulated_frame(None);
                 // The last frame of a pipelined tick is converted by the caller.
                 let convert = round + 1 < due || !self.defers();
                 self.launch_ahead_frame(player_one, player_two, convert);
                 continue;
             }
             // REQ-INP-005: one emulated frame is one sample, fast forward included.
+            // AMD-053 REQ-UI-213: with `-emustats` the clock is read around the frame; without
+            // it this is one `Option::is_some` per emulated frame and nothing more.
+            let begin = self.emu_stats.is_some().then(std::time::Instant::now);
             if self.separate_core {
                 self.prepare_session_frame(player_one, player_two);
             } else {
                 self.run_session_frame(player_one, player_two);
             }
-            self.count_emulated_frame();
+            self.count_emulated_frame(begin);
         }
         if let Some(session) = self.session.as_mut() {
             session.set_catching_up(false);
@@ -920,9 +933,28 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         due
     }
 
-    /// The accounting of one emulated frame: the count, and the fast-forward burst.
-    fn count_emulated_frame(&mut self) {
+    /// The accounting of one emulated frame: the count, the `-emustats` line, and the
+    /// fast-forward burst. `begin` is the instant the frame began, or none when `-emustats` is
+    /// off, which is the default.
+    ///
+    /// AMD-053 REQ-UI-213: one line per emulated frame, in English (AMD-035 §2), through the sink
+    /// the application points at the log file and not at the parent console. With the emulation on
+    /// a separate core the figure is the host's share of the frame — launching it — the thread's
+    /// own busy time being what the frame profiler reports.
+    fn count_emulated_frame(&mut self, begin: Option<std::time::Instant>) {
         self.emulated_frames += 1;
+        if let Some(sink) = self.emu_stats.as_ref() {
+            let frame = self.emulated_frames;
+            match begin {
+                Some(begin) => sink(&format!(
+                    "emustats frame {frame} {:.3} ms",
+                    begin.elapsed().as_secs_f64() * 1000.0
+                )),
+                // The frame left for the emulation thread: the line is still one per emulated
+                // frame, but the host has no span of its own to report.
+                None => sink(&format!("emustats frame {frame} on the emulation thread")),
+            }
+        }
         if self.fast_forward.is_active() {
             self.fast_forward.on_frame_run();
             if !self.fast_forward.is_active() {

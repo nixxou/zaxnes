@@ -59,6 +59,13 @@ pub fn error(line: &str) {
     to_file(line);
 }
 
+/// Writes `line` to the log file **only**, never to the console. It is what `-emustats` asks for
+/// (AMD-053 REQ-UI-213): one line per emulated frame, in the log file and not on the parent
+/// console, which a normal launch does not borrow.
+pub fn file_line(line: &str) {
+    to_file(line);
+}
+
 fn to_file(line: &str) {
     if let Some(file) = FILE.get() {
         if let Ok(mut file) = file.lock() {
