@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn loads_lua_api() {
         let api = read_lua_api(&goldens_dir().join("lua-api.txt")).unwrap();
-        assert_eq!(api.lines.len(), 495);
+        assert_eq!(api.lines.len(), 502);
         assert_eq!(api.lines.iter().filter(|l| l.kind == "global").count(), 35);
     }
 }

@@ -252,6 +252,15 @@ fn setting_values(definition: &mut TypeDef) {
         |cx, _, value| cx.integer(value, "TVBox").map(|_| ()),
         None,
     );
+    // AMD-040 REQ-LUA-114: the run-ahead of AMD-041, read and written, a write brought back
+    // into [0, 3] by the setting's domain. The frames it asks the loop to run ahead are a later
+    // lot's; the value is persisted and handed back from here on.
+    whole(definition, "RunAheadFrames", SettingId::EmuRunAhead);
+
+    // AMD-040 REQ-LUA-114, amended by AMD-055 REQ-SCN-078: the visual style. Zaxnes has a
+    // single renderer in this lot, so the style is kept and handed back — 4 for Enhanced, with
+    // 1 accepted in writing, and 0 for anything else.
+    whole(definition, "VisualStyle", SettingId::RenderVisualStyle);
     whole(definition, "SortOption", SettingId::UiSortOption);
     whole(definition, "MovieMode", SettingId::MovieMode);
     whole(definition, "SelectionMode", SettingId::EditorSelectionMode);
@@ -398,6 +407,7 @@ fn setting_functions(definition: &mut TypeDef) {
         },
         None,
     );
+    style_parameter_functions(definition);
     definition.function(
         "SetRuntime",
         |call| {
@@ -427,6 +437,53 @@ fn setting_functions(definition: &mut TypeDef) {
 
             // Re-reads the file and applies only the user preferences it holds (REQ-PERS-015).
             call.cx.data(|data| data.env.settings.request_load())?;
+            Ok(None)
+        },
+        None,
+    );
+}
+
+/// The three style-parameter methods of AMD-040 REQ-LUA-114. The identifiers they take are
+/// facts of interoperability — a 2.0 script passes them as strings — and each stands for a
+/// setting of the catalogue, so a write from a script and a write from the options window reach
+/// the same value.
+fn style_parameter_functions(definition: &mut TypeDef) {
+    definition.function(
+        "GetVisualStyleParameter",
+        |call| {
+            require(call, "GetVisualStyleParameter")?;
+            let style = call.integer(2, "GetVisualStyleParameter")?;
+            let id = call.string(3, "GetVisualStyleParameter")?;
+            let value = call
+                .cx
+                .data(|data| data.env.settings.visual_style_parameter(style, &id))?;
+            Ok(Some(num(value)))
+        },
+        None,
+    );
+    definition.function(
+        "SetVisualStyleParameter",
+        |call| {
+            require(call, "SetVisualStyleParameter")?;
+            let style = call.integer(2, "SetVisualStyleParameter")?;
+            let id = call.string(3, "SetVisualStyleParameter")?;
+            let wanted = call.number(4, "SetVisualStyleParameter")?;
+            let mut written = false;
+            with_settings(call.cx, |settings| {
+                written = settings.set_visual_style_parameter(style, &id, wanted);
+            })?;
+            Ok(Some(boolean(written)))
+        },
+        None,
+    );
+    definition.function(
+        "ResetVisualStyleParameters",
+        |call| {
+            require(call, "ResetVisualStyleParameters")?;
+            let style = call.integer(2, "ResetVisualStyleParameters")?;
+            with_settings(call.cx, |settings| {
+                settings.reset_visual_style_parameters(style);
+            })?;
             Ok(None)
         },
         None,

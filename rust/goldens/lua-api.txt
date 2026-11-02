@@ -115,6 +115,7 @@ member Instance.AnimEnable prop L
 member Instance.BL prop L Vector3
 member Instance.Bg prop L 
 member Instance.BottomLeft prop L Vector3
+member Instance.BuildExportMeshes appel - 
 member Instance.CData prop L CData
 member Instance.CalculatePos appel - 
 member Instance.CastShadow prop LE 
@@ -145,6 +146,7 @@ member Instance.Pivot prop L Vec3R
 member Instance.Pos prop L Vector3
 member Instance.ReceivingShadow prop L 
 member Instance.RecvShadow prop LE 
+member Instance.ReleaseExportMeshes appel - 
 member Instance.RenderStyle prop LE 
 member Instance.Rot prop L Vec3R
 member Instance.Scale prop L Vec3R
@@ -330,6 +332,7 @@ member SettingAPI.FrameRateId prop L
 member SettingAPI.GameSpeed prop LE 
 member SettingAPI.GameSpeedId prop L 
 member SettingAPI.GetInputType appel - 
+member SettingAPI.GetVisualStyleParameter appel - 
 member SettingAPI.GraphicQuality prop LE 
 member SettingAPI.GraphicQualityId prop L 
 member SettingAPI.InputTypeId prop L 
@@ -364,7 +367,9 @@ member SettingAPI.RenderModeId prop L
 member SettingAPI.ResScale prop L 
 member SettingAPI.ResScaleId prop L 
 member SettingAPI.ResScaleIndex prop LE 
+member SettingAPI.ResetVisualStyleParameters appel - 
 member SettingAPI.RootScale prop LE 
+member SettingAPI.RunAheadFrames prop LE 
 member SettingAPI.SameBgPalette prop LE 
 member SettingAPI.SameBgPaletteId prop L 
 member SettingAPI.SamePalette prop LE 
@@ -385,6 +390,7 @@ member SettingAPI.SelectionMode prop LE
 member SettingAPI.SelectionModeId prop L 
 member SettingAPI.SetInputType appel - 
 member SettingAPI.SetRuntime appel - 
+member SettingAPI.SetVisualStyleParameter appel - 
 member SettingAPI.Shadow prop LE 
 member SettingAPI.ShadowId prop L 
 member SettingAPI.SkipFrame prop LE 
@@ -408,6 +414,7 @@ member SettingAPI.TopDownCam prop LE
 member SettingAPI.VRScale prop L 
 member SettingAPI.VSync prop LE 
 member SettingAPI.VSyncId prop L 
+member SettingAPI.VisualStyle prop LE 
 member SettingAPI.Volume prop LE 
 member SettingAPI.VolumeId prop L 
 member SettingAPI.VrRuntime prop LE 
@@ -493,4 +500,4 @@ member XRState.acc prop LE Vector3
 member XRState.pos prop LE Vector3
 member XRState.rot prop LE Vector3
 member XRState.vel prop LE Vector3
-# 35 globals, 44 types, 430 members
+# 35 globals, 44 types, 437 members

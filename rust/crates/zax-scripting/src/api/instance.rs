@@ -1028,6 +1028,12 @@ fn overlap_and_deformation_methods(definition: &mut TypeDef) {
         },
         Some(HostType::Vector3),
     );
+
+    // AMD-040 REQ-LUA-115: exporting the scene meshes is out of scope (PLAN §1), but the two
+    // methods have to exist and do nothing — a 2.0 script that called a missing one would lose
+    // every hook it registered (REQ-LUA-062). They take no argument and mean nothing.
+    definition.function("BuildExportMeshes", |_| Ok(None), None);
+    definition.function("ReleaseExportMeshes", |_| Ok(None), None);
 }
 
 /// A vector computed from the frame instance the method was called on, zero when there is none.

@@ -7,7 +7,10 @@ use zax_engine3d::vectors::Vec3;
 use zax_profiles::values::Vec4F;
 use zax_settings::catalogue::{Layer, Port, SettingId};
 use zax_settings::model::{SettingLayer, SettingsModel};
+use zax_settings::styles;
 use zax_settings::values::{Color, SettingValue, Vector3};
+
+use crate::values::number_format;
 
 use crate::values::LuaColor;
 
@@ -380,6 +383,49 @@ impl ScriptSettings {
     /// Writes whether a layer receives shadows.
     pub fn set_layer_recv_shadow(&mut self, index: usize, value: bool) {
         self.write_flag(SettingId::LayerRecvShadow(Self::layer_of(index)), value);
+    }
+
+    // the visual style and its parameters (AMD-040 REQ-LUA-114, AMD-059 REQ-LUA-116)
+
+    /// The value of the style parameter `id` of style `style`, or its default when it has never
+    /// been written (REQ-LUA-114). 0 when the style or the identifier is unknown — which is why
+    /// a script cannot tell "unknown" from "zero" by reading, as the requirement intends.
+    #[must_use]
+    pub fn visual_style_parameter(&self, style: i32, id: &str) -> f64 {
+        styles::parameter(style, id).map_or(0.0, |key| f64::from(self.int(key)))
+    }
+
+    /// Records `value`, normalised as AMD-040 §3 requires, in the setting the parameter stands
+    /// for (REQ-LUA-114). Writing from a script and writing from the options window reach the
+    /// same value, the rounding living in the setting's domain.
+    ///
+    /// Returns false, without recording anything, when the style is unknown or when the
+    /// identifier does not exist for that style.
+    pub fn set_visual_style_parameter(&mut self, style: i32, id: &str, value: f64) -> bool {
+        let Some(key) = styles::parameter(style, id) else {
+            return false;
+        };
+
+        let normalised = zax_settings::catalogue::descriptor(key)
+            .domain()
+            .snap(value);
+        self.write_int(key, number_format::to_i32(normalised));
+        true
+    }
+
+    /// Every parameter of `style` back to its default (REQ-LUA-114); nothing happens when the
+    /// style is unknown.
+    ///
+    /// The defaults are written like any other script write, so they land in the session layer
+    /// and the user's own preference comes back at the end of the game (REQ-PERS-010): a script
+    /// may undo a curvature for its game without erasing what the user chose.
+    pub fn reset_visual_style_parameters(&mut self, style: i32) {
+        for (_, key) in styles::parameters_of(style) {
+            let default = zax_settings::catalogue::descriptor(*key)
+                .default_value()
+                .as_int();
+            self.write_int(*key, default);
+        }
     }
 
     // derived (REQ-PERS-013)

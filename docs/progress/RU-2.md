@@ -10,8 +10,8 @@ AMD-059) of `dotnetupdated` are read as a reference only.
 |---|---|---|
 | 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `55b6723` |
 | 2 | The persisted settings the 2.0 `Setting` members stand for, handheld defaults, `EXCLUDED` | done — `1204603` |
-| 3 | AMD-040: the `CS` table and `Camera.ResetDistance` (with the two formulas of AMD-045) | done |
-| 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | todo |
+| 3 | AMD-040: the `CS` table and `Camera.ResetDistance` (with the two formulas of AMD-045) | done — `644bf51` |
+| 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | done |
 | 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | todo |
 | 6 | AMD-042: a rollback snapshot carries `PData` and the camera; the history is emptied at the end of a game | todo |
 | 7 | AMD-045: the camera of 3dSen 2.0 | todo |
@@ -245,3 +245,35 @@ the bound the camera applies, and the bridge hands out the scene camera's framed
 API dump: `goldens/lua-api.txt` gained exactly one line, `member CameraAPI.ResetDistance prop
 L`, and the count went from 429 to 430 members (495 → 496 lines of file). The two line counts
 asserted in the tests (`zax-harness/tests/lua_api_tests.rs`, `zax-goldens/src/lib.rs`) follow.
+
+### Step 4 — the `Setting` members of AMD-040 and the export methods
+
+**REQ-LUA-114** — four members and three methods on `SettingAPI`:
+
+- `RunAheadFrames` and `VisualStyle` are ordinary whole members over `emu.run_ahead` and
+  `render.visual_style`. Their normalisation is the setting's domain, so a write of 7 reads 3 and
+  a write of 5 reads 0 without a line of arithmetic here, and a value from the settings file
+  behaves the same (REQ-PERS-003).
+- `GetVisualStyleParameter`, `SetVisualStyleParameter` and `ResetVisualStyleParameters` go
+  through `ScriptSettings`, which asks `zax-settings::styles` which setting the identifier names
+  and then `Domain::snap` to round. `SetVisualStyleParameter` takes the **number** the script
+  passed, not a truncated integer: AMD-040 §3 rounds `(v − a) / step`, so 45 has to reach the
+  rounding as 45.
+- `ResetVisualStyleParameters` writes each default as a *script* write, so it lands in the
+  session layer and the user's own preference comes back at the end of the game (REQ-PERS-010).
+  A parameter's default is its own — `ao.strength` goes back to 3, not to 0.
+
+**REQ-LUA-115** — `Instance:BuildExportMeshes()` and `ReleaseExportMeshes()`: declared, take
+nothing, return nothing. They exist so that a 2.0 script that calls one does not lose every hook
+it registered (REQ-LUA-062).
+
+Tests, the criteria of the amendment one by one (6 more in `two_zero_api_tests.rs`, 13 in all):
+the two scalar members with their bounds and the 1 → 4 alias, the four values of the
+normalisation (500 → 180, 40 → 30, 45 → 60, 15 → 0), the four refusals of an unknown style or
+identifier with nothing recorded, the reset of a style and the no-op on an unknown one, the three
+methods called with `.` (REQ-LUA-081), and the two export methods on a pattern.
+
+API dump: 7 lines more, 430 → 437 members — `Instance.BuildExportMeshes`,
+`Instance.ReleaseExportMeshes`, `SettingAPI.GetVisualStyleParameter`,
+`SettingAPI.ResetVisualStyleParameters`, `SettingAPI.RunAheadFrames`,
+`SettingAPI.SetVisualStyleParameter`, `SettingAPI.VisualStyle`.
