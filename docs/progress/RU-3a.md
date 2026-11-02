@@ -13,8 +13,8 @@ Branch `rustupdated`. The application is the Rust workspace `rust/`; the .NET lo
 | 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | done — `a2d6d47` |
 | 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | done — `a4b4b34` |
 | 5 | AMD-052: the catch-up limit and the clock reset on a speed change | done — `db9cac8` |
-| 6 | AMD-052: the GPU frame queue and the anti-aliasing default | done |
-| 7 | Closing: fmt, clippy, crate tests, full PPU goldens, after benchmarks, journal | todo |
+| 6 | AMD-052: the GPU frame queue and the anti-aliasing default | done — `8bdc37f` |
+| 7 | Closing: fmt, clippy, crate tests, full PPU goldens, after benchmarks, journal | done |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -429,3 +429,71 @@ or the comparison inverts — and the .NET lot put both in its acceptance suite 
 unit tests. They belong to R0's run on real hardware, as the `ZAXNES_3DSEN_INSTALL`-gated tests
 do. The queue's own logic (depth, retire order, outstanding count, latency clock) is exercised by
 the loop every frame of a desktop run.
+
+### Step 7 — closing
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --release --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release -p zax-nes` | 482 passed |
+| `cargo test --release -p zax-app --features bundled` | 628 passed |
+| `cargo test --release -p zax-settings` | 221 passed |
+| `cargo test --release -p zax-render` | 148 passed |
+| `cargo test --release -p zax-scripting` | 155 passed |
+| `cargo test --release -p zax-engine3d` | 194 passed |
+| `cargo test --release -p zax-profiles` | 178 passed |
+| `cargo test --release -p zax-platform --features bundled` | 35 passed |
+| `cargo test --release -p zax-harness` | 40 passed |
+| `cargo test --release -p zax-goldens` | 3 passed |
+| `cargo test --release -p zax-achievements` | 3 passed |
+| **total** | **2087 passed, 0 failed** |
+| `cargo test -p zax-nes --release --test ppu_golden_tests -- --ignored` | **291 of 291 rows matched**, 0 missing |
+
+`zax-platform` needs `--features bundled` like `zax-app`: its test binary links SDL2 too.
+
+#### After benchmarks
+
+`bench-core`, release, x86, 1200 frames after 120 of warm-up, same protocol as step 1.
+
+| ROM | core before | core after | total before | total after |
+|---|---|---|---|---|
+| `nestest.nes` (mapper 0) | 0.8695 ms | **0.8564 ms** | 0.9371 ms | 0.9239 ms |
+| `mmc5test/mmc5test.nes` (mapper 5) | 1.7909 ms | **1.8000 ms** | 1.8442 ms | 1.8528 ms |
+| `exram/mmc5exram.nes` (mapper 5) | 2.0429 ms | **2.0582 ms** | 2.1991 ms | 2.2206 ms |
+
+`nestest` came out *below* its step-1 figure and inside the machine's own span (0.853 to 0.887 ms
+over five readings), so nothing that is not an MMC5 pays for this lot — the requirement that
+mattered. The MMC5 ROMs are 0.5 to 1 % up on these readings (1.80 to 1.88 over four), from the
+board's per-cycle sound step and from the APU's quiet-cycle skipping being off for that board so
+that `M` is never stale. R0's callgrind run on a profile that uses nothing new is the real gate.
+
+#### What the next lot must not undo
+
+`rust/docs/PERFORMANCE-HISTORY.md` was updated rather than left to drift, since its whole purpose
+is that nothing in it is silently lost: §5.1 now records that the non-linear tables live in the
+lazy mixing path and that only the MMC5 loses the quiet-cycle skipping, and §5.5 records the two
+catch-up defaults (2 desktop / 5 handheld, with the measurement behind the 5), the clock reset on
+a speed change, and the GPU frame queue with its handheld **(D)**.
+
+#### Assumed divergences (D) this lot adds
+
+1. **The GPU frame queue on handhelds** (owner decision): at the default depth of 2, a PortMaster
+   or Android build issues no fence call at all and keeps today's behaviour. Depth 1 works
+   everywhere.
+2. **`video.anti_alias` shipped at 1** (REQ-PERS-089, the amendment's own **(D)**): the original
+   forces its anti-aliasing off and defaults to 0. Handhelds keep 0.
+3. The four divergences REQ-CORE-075 declares for the MMC5's sound are implemented as the
+   requirement writes them (length counters at 120 Hz, no read mode of $5010, the PCM IRQ flag
+   does not drive /IRQ, the period cut below 8 follows the APU).
+
+#### Left to R0
+
+The fence criterion of REQ-LOOP-077 (at depth 1 the fence of frame *n* is signalled before the
+first command of frame *n + 1*) and its latency bench, which Q-087 point 2 settles must be
+GPU-bound or the comparison inverts. Both need a live context on real hardware, which is where
+the .NET lot put them too. Everything else in the three amendments is covered here.
+
+No new Q ticket: the three ambiguities in this scope were already answered by Q-078, Q-087 and
+Q-091, whose choices are taken as they stand and referenced by `// Q-078` and `// Q-091` in the
+code.

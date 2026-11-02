@@ -164,6 +164,12 @@ C# counterpart: `src/Zax.Nes/Ppu`, `Apu`, `Cartridges`, `Cpu` (the bus).
   channel timer moved its sequencer, shift register or DMC bit, a frame-counter step, a register
   write, a reset, a loaded state or a region change.
 - Identical output, audio included. SMB3 x86 core 1.24 -> 1.13 ms/frame.
+- **Kept by RU-3a** (AMD-054, non-linear mixing): the two table lookups of the new law went into
+  this same lazy path, where they replace four multiply-adds, an addition chain and a clamp. The
+  mixing therefore costs *less* than it did; `nestest` did not move. The cache key gained the
+  expansion level, so a move of the MMC5's `M` alone is noticed.
+- Invariant: the mixing stays in `current_level`, never per CPU cycle. Anything that can change
+  `A`, `M` or the five channel outputs must set `level_dirty` or be in the cache key.
 
 **APU quiet cycles skipped while the frame loop batches** (`0cf347d`)
 - During the frame loop the bus lets the APU lag like the PPU and catches it up on $4000-$401F
@@ -178,6 +184,15 @@ C# counterpart: `src/Zax.Nes/Ppu`, `Apu`, `Cartridges`, `Cpu` (the bus).
   18 ROMs until it was).
 - Invariant: any APU state that changes with time must report itself in `quiet_cycles` and be
   advanced in the skip.
+- **RU-3a** (AMD-054, MMC5 audio): a cartridge with expansion audio keeps `apu_quiet = 0`, so the
+  APU runs cycle by cycle on it and the `M` the bus pushes is never stale. **Only the MMC5 is
+  concerned** — `NesBus::expansion_audio`, a `bool` set once in `attach` and read in
+  `catch_up_apu` / `sync_apu`, which the frame loop reaches rarely for every other board. Nothing
+  was added to `NesBus::tick`: a `bool` test there would cost about 90 k instructions per emulated
+  frame. `tick` does now step the cartridge *before* the APU catch-up instead of after (a move,
+  not a branch); the 291-ROM goldens are identical across that reorder.
+- Measured: `mmc5test` 1.79 -> 1.80-1.85 ms/frame (the per-cycle sound step plus the lost skip),
+  `nestest` unchanged. No built-in profile targets an MMC5-audio game.
 
 **Plain PRG-ROM windows read without the board's decode** (`6a53e71`)
 - The cartridge keeps, for each 8 KiB window of $8000-$FFFF, where it starts in PRG-ROM when a
@@ -409,12 +424,33 @@ C# counterpart: `src/Zax.App/Loop` (frame clock, emulation host, game session).
   (`zax-scripting/src/runtime/handoff.rs`); mlua's `send` feature was measured at +16 % Lua time and
   not used. Requires `emu.lua_optimized`.
 
-**Catch-up limit** (setting `emu.catch_up`: None, 1-5; default 5 everywhere; `9fc03f5`, `893986e`;
-`--catch-up`, `ZAXNES_CATCH_UP`)
-- REQ-LOOP-012 runs up to 5 emulated frames per displayed frame. History on the handheld: None
-  (game slows instead of collapsing), then 2 (worse: the second frame waits for the emulation
-  thread in series), then back to 5 once the core was on its own thread (heavy scenes then keep
-  game speed by showing fewer frames). The owner does not want 0 as a default.
+**Catch-up limit** (setting `emu.catch_up`: None, 1-5; **default 2 on the desktop, 5 on a
+handheld** since RU-3a; `9fc03f5`, `893986e`; `--catch-up`, `ZAXNES_CATCH_UP`)
+- REQ-LOOP-012 ran up to 5 emulated frames per displayed frame; **AMD-052 REQ-LOOP-074 takes the
+  spec's limit to 2**. History on the handheld: None (game slows instead of collapsing), then 2
+  (worse: the second frame waits for the emulation thread in series), then back to 5 once the core
+  was on its own thread (heavy scenes then keep game speed by showing fewer frames). The owner
+  does not want 0 as a default.
+- **RU-3a** therefore splits the two figures: `MAX_BACKLOG` = 2 is the spec's limit and the pacer's
+  default, `MAX_CATCH_UP` = 5 is the largest the setting offers, and the handheld default stays 5
+  (`ui/handheld/defaults.rs`). A lot that touches the pacer must keep them apart: lowering the
+  handheld to 2 would undo the measurement above.
+
+**Clock reset on a speed change** (AMD-052 REQ-LOOP-075; RU-3a)
+- A change of `emu.game_speed` resets the cadence clock; arming, expiring and re-arming a
+  fast-forward burst (about six state changes a second) must **not**. `FramePacer::clock_resets`
+  counts the resets, which is what the criterion measures.
+
+**GPU frame queue** (setting `video.max_queued_frames`: 1 or 2, default 2; AMD-052 REQ-LOOP-077;
+RU-3a)
+- `zax_render::sync::GpuFrameQueue`: a `glFenceSync` after the last draw of a frame, waited on
+  before the first draw of the next, so that at depth 1 the GPU holds no finished frame.
+  `Running::wait_for_the_gpu_queue` / `close_the_gpu_queue` place it after the tick's emulated
+  frames and after the last draw, so it cannot move the emulated cadence.
+- **Handheld (D), owner decision**: at the default depth of 2 a handheld issues **no fence call at
+  all** and keeps its current behaviour — that depth is the driver's own queue, and the Mali keeps
+  three frames of its own. Depth 1 works everywhere. A lot that touches this must not start
+  fencing handheld frames at depth 2.
 
 **3D paused in 2D** (setting `emu.pause_3d_in_2d`, desktop off, handheld on; `246bab8`)
 - While the 2D picture is shown, a profile whose scripts leave the core alone is neither converted
@@ -577,7 +613,7 @@ Measurement pitfall:
 | C# area changed by the update | Rust items to re-check | Checks to run |
 |---|---|---|
 | `Zax.Nes/Ppu` (rendering, registers, timing) | 5.1 batched PPU sync points, fast span (`run_visible_span*`), per-line sprite buffer, sprite limit | PPU goldens, golden-core |
-| `Zax.Nes/Apu` | 5.1 lazy level mixing, quiet-cycle skipping (`quiet_cycles` must account for any new timed state) | golden-core with audio digests |
+| `Zax.Nes/Apu` | 5.1 lazy level mixing (the non-linear tables of AMD-054 live there), quiet-cycle skipping (`quiet_cycles` must account for any new timed state; a board with expansion audio keeps it off) | golden-core with audio digests |
 | `Zax.Nes/Cartridges` (new or changed mapper) | 5.1 IRQ horizon or per-cycle stepping; `chr_view` (only for pure fetches); `rom_windows` (`NO_ROM_WINDOW` when reads have side effects); debug assert in debug build | golden-core, a debug run of the mapper's games |
 | `Zax.Nes` bus / CPU | 5.1 sync points ($2000-$3FFF, $4014, $4016/7, cartridge writes), APU catch-up on $4000-$401F | goldens |
 | `Zax.Engine3D` segmentation / frames | 5.2 filled-cell lists and germ order; `FastMap` iteration order never reaching output | render captures (identical) |
