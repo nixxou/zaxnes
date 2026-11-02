@@ -39,6 +39,9 @@ fn ram(harness: &LoopHarness) -> (i64, Vec<u8>) {
     )
 }
 
+/// One movie file per test: the tests of this file run in parallel.
+static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// The vector ROM with `source`, playing a 600-frame `.fm2`, 300 frames in.
 fn playing(source: &str) -> (LoopHarness, std::path::PathBuf) {
     let mut harness = LoopHarness::create();
@@ -51,8 +54,6 @@ fn playing(source: &str) -> (LoopHarness, std::path::PathBuf) {
             "|0|........|||\n"
         });
     }
-    // One file per test: the tests of this file run in parallel.
-    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let path = std::env::temp_dir().join(format!(
         "zaxnes-reload-{}-{}.fm2",
         std::process::id(),
