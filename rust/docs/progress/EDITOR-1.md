@@ -6,8 +6,8 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Exploration and design note (this file); owner's approval | **waiting for the owner** |
-| 2 | `.fm2` reader and its tests | to do |
+| 1 | Exploration and design note (this file); owner's approval | done |
+| 2 | `.fm2` reader and its tests | done (`zax-nes/src/movie/fm2.rs`) |
 | 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | to do |
 | 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | to do |
 | 5 | Script reload, fast and exact, with the core-changing guard | to do |
@@ -15,7 +15,7 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 | 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
 | L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
-Next step: the owner answers the questions at the end, then step 2.
+Next step: 3, movie playback in the loop (`.fm2` imported as a `Movie` from power on).
 
 ## What exists already (and changes the plan)
 
@@ -154,3 +154,16 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
 ## Notes
 
 * 2026-11-02: worktree created, design written. Nothing compiled yet.
+
+## Owner's answers (2026-11-02)
+
+* Test movie: the Metal Force TAS `.fm2` (`<downloads>/submission4582/MetalForce-DTC5CompV8.fm2`,
+  47 454 frames, from power on, one pad, no reset), ROM `Metal Force [Korea][Unl][!].nes`; its
+  `romChecksum` is the MD5 of the data after the 16-byte header, checked (test
+  `fm2_file_tests`, run with `ZAXNES_FM2` / `ZAXNES_FM2_ROM`).
+* The editor can be in every build, but only active behind an option (`--mcp`), and must cost
+  nothing otherwise.
+* Claude must see and work on the frame on screen, whether the owner plays the game live, plays
+  a Zaxnes movie (`.mv<n>`) or an `.fm2`: the MCP server is independent of movies; the seek bar
+  needs a movie (either kind).
+* MCP implementation: as simple as possible (hand-written, no tokio).

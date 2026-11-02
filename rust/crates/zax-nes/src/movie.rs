@@ -13,6 +13,8 @@
 //! Frames are counted from the start state: frame `n` is the picture after `n` input words, and
 //! an annotation on frame `n` was written while that picture was on screen.
 
+pub mod fm2;
+
 /// The signature that opens a movie file.
 pub const SIGNATURE: &[u8; 8] = b"ZAXMOVIE";
 /// The format version this build writes and reads.
