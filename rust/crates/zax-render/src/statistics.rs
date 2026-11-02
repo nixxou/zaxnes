@@ -52,6 +52,10 @@ pub struct RenderStatistics {
     /// Samples per pixel the scene pass was granted (AMD-032 §2): 1 when anti-aliasing is off
     /// or when the implementation refused what was asked for.
     pub anti_alias_samples: i32,
+    /// Whether the scene pass drew with the centroid variant of AMD-058, which it does exactly
+    /// when `video.anti_alias` is not 0 (REQ-SCN-065). Reported so that the scope of the variant
+    /// is observable from outside the renderer, rather than inferred from the picture.
+    pub centroid_interpolation: bool,
     /// Opaque tiles turned transparent this frame because they hide the followed shape
     /// (REQ-SCN-022).
     pub occluders: u32,
@@ -84,6 +88,7 @@ impl Default for RenderStatistics {
             requested_shadow_map_size: geometry::SHADOW_MAP_SIZE,
             skybox_pass: false,
             anti_alias_samples: 1,
+            centroid_interpolation: false,
             occluders: 0,
             collect_time: Duration::ZERO,
             gpu_time: None,
@@ -105,6 +110,7 @@ impl RenderStatistics {
         self.shadow_pass = false;
         self.skybox_pass = false;
         self.anti_alias_samples = 1;
+        self.centroid_interpolation = false;
         self.occluders = 0;
         self.gpu_time = None;
         self.collect_time = Duration::ZERO;

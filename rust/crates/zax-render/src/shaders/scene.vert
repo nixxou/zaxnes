@@ -28,7 +28,20 @@ uniform float uWallClipBias;
 
 out vec3 vScene;
 out vec3 vNormal;
+// ZAX_CENTROID (AMD-058): the texel coordinate of REQ-E3D-506 is interpolated at the centroid of
+// the samples this fragment actually covers, instead of at the pixel centre. It only matters when
+// the buffer is multisampled: a fragment on the edge of a wall whose centre falls outside the
+// triangle gets an **extrapolated** vUv, floor() then lands one texel past the face, and the
+// atlas lookup of scene.frag returns a neighbour's texel — the one-pixel light line AMD-058 §1
+// measured along the joints. The centroid is always inside the covered area, so the coordinate
+// stays within the face. Without the variant this is the plain declaration, exactly as before the
+// amendment: the interpolation qualifier has to match between the two stages, so scene.frag
+// carries the same guard.
+#ifdef ZAX_CENTROID
+centroid out vec2 vUv;
+#else
 out vec2 vUv;
+#endif
 
 // ZAX_BEND: the position the curvature of REQ-SCN-067 placed this vertex at, which the shadow
 // lookup reads (the shadow map holds the bent geometry, REQ-SCN-068). Without the variant the

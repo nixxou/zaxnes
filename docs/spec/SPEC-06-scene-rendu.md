@@ -195,6 +195,16 @@ L'effet recherché : l'écran NES reste centré dans l'image, corrigé de la per
 **REQ-SCN-040** (P1) — Un motif d'opacité alpha < 1 (et de style différent de « ombre seule ») DOIT être rendu en **transparence** : d'abord un passage qui n'écrit que la profondeur, puis un passage de couleur mélangé (source × α + destination × (1 − α)), avec α = alpha du texel (canal alpha de la couleur de palette ou de la texture) × alpha du motif. Seule la surface la plus proche de chaque objet transparent est ainsi visible (pas de faces internes). Les objets transparents DOIVENT être dessinés après tous les objets opaques, triés du plus lointain au plus proche. Ils sont éclairés (REQ-SCN-028) mais ne projettent pas d'ombre.
 - Critère d'acceptation : un motif d'alpha 0,5 devant un fond rouge laisse voir le fond à environ 50 %, et on ne distingue pas ses faces arrière.
 
+**REQ-SCN-065** (P2, créée par AMD-012, complétée par AMD-058) — **Jointures** : la jointure de deux tuiles voisines d'une surface plane NE DOIT montrer ni grille sombre, ni fissure claire, ni discontinuité d'ombre, que ces tuiles appartiennent au même objet ou à deux objets différents de même profondeur et de même couche. L'exigence DOIT tenir pour **chaque** valeur de `video.anti_alias` (0, 1 et 2). Les moyens sont **libres** — traitement des échantillons, de la profondeur des parois internes, de la résolution des échantillons — à l'exclusion :
+- du retrait des parois latérales du maillage dessiné (AMD-057, SPEC-04B REQ-E3D-501) ;
+- de la désactivation de l'anticrénelage ou de la baisse du nombre d'échantillons : le réglage choisi DOIT garder son effet sur les bords des objets (AMD-032 §2).
+
+Résidu accepté (AMD-014 Q-032, P3) : 1 à 2 px sur les translucides obliques.
+- Critère d'acceptation (auto) : la surface de 4 × 4 tuiles identiques, éclairée et recevant l'ombre, passe avec `video.anti_alias` = 0, 1 et 2.
+- Critère d'acceptation (auto) : la même surface faite de tuiles appartenant à **deux objets** voisins (deux colonnes de 2 × 4 tuiles) passe aussi, pour les trois valeurs.
+- Critère d'acceptation (revue) : façade de la tour de Mega Man 2 (frame 599 de l'intro, sans entrée) et mur bleu d'Excitebike (frame 599, Start aux frames 200 et 300), rendus en 2560 × 1440 avec `video.anti_alias` = 1 : aucune ligne claire ; la capture avec anticrénelage diffère de celle sans anticrénelage seulement au bord des objets (contours adoucis).
+- Notes (AMD-058 §1 et §3) : le défaut venait du seul chemin anticrénelé — à `video.anti_alias` = 0, même binaire et même scène, aucune ligne. La cause est l'**extrapolation** de la coordonnée de texel (REQ-E3D-506) à un fragment partiellement couvert dont le centre de pixel tombe hors de la primitive : le `floor` de la recherche d'atlas (REQ-E3D-563) atteint alors un texel que la face ne porte pas. L'écart avec l'original reste une divergence D assumée (la référence rend sans anticrénelage, AMD-032 §1) ; cette exigence demande seulement qu'elle n'ajoute pas de défaut.
+
 **REQ-SCN-041** (P1) — Le style de rendu d'un motif (SPEC-03/04) DOIT être respecté : 0 = invisible (ni dessiné, ni ombre) ; 1 = normal ; 2 = **ombre seule** (non dessiné, mais projette son ombre, toujours en opaque).
 - Critère d'acceptation : un motif de style 2 n'apparaît pas à l'écran mais son ombre est visible sur le décor qui reçoit les ombres.
 

@@ -30,7 +30,9 @@ fn bend_90() -> SpaceBend {
 // specification; an enum per axis would say less, not more.
 #[allow(clippy::fn_params_excessive_bools)]
 fn scene_source(solid: bool, srgb: bool, bend: bool, embedded: bool) -> (String, String) {
-    let source = shaders::scene(solid, srgb, bend);
+    // AMD-058's interpolation axis is the subject of `amd058_centroid_tests`; the curvature is
+    // checked on the pixel-centre variant, the one the default settings use.
+    let source = shaders::scene(solid, srgb, bend, false);
     (
         shaders::assemble(&source.vertex, false, embedded),
         shaders::assemble(&source.fragment, true, embedded),
@@ -160,15 +162,18 @@ fn req_scn_067_the_curvature_variant_compiles_the_wrapping_in() {
     assert!(vertex.contains("vec3 zaxBend("));
 }
 
-/// Each of the eight scene variants and the two shadow variants is a program of its own, so the
-/// on-disk program cache files them apart and an error message names the right one.
+/// Each of the sixteen scene variants and the two shadow variants is a program of its own, so
+/// the on-disk program cache files them apart and an error message names the right one.
 #[test]
 fn req_scn_067_each_variant_has_its_own_name() {
     let mut names = Vec::new();
     for solid in [false, true] {
         for srgb in [false, true] {
             for bend in [false, true] {
-                names.push(shaders::scene(solid, srgb, bend).name);
+                // AMD-058 added the interpolation axis; the names still have to be all distinct.
+                for centroid in [false, true] {
+                    names.push(shaders::scene(solid, srgb, bend, centroid).name);
+                }
             }
         }
     }

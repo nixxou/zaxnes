@@ -238,7 +238,7 @@ divergence volontaire assumée ; `→` marque un remplacement (voir §4).
 | REQ-SCN-059 | AMD-001 06-2 (v1.1 : « continue d'être lissée ») |
 | REQ-SCN-063 | AMD-001 06-10 (v1.1 : réglage conservé dans le modèle, absent de l'UI desktop) |
 | REQ-SCN-064 | DEC-R2-T8 ; **AMD-019 Q-047** : étiquette **[ROM]** pour la mesure sur les jeux ; **AMD-023 Q-062** : le banc de mesure doit tourner sans exception |
-| REQ-SCN-065 | **exigence créée par AMD-012** (P2 : aucune ligne visible à la jointure de deux tiles) ; **AMD-014 Q-032** : résidu de 1 à 2 px sur translucides obliques accepté (P3) |
+| REQ-SCN-065 | **exigence créée par AMD-012** (P2 : aucune ligne visible à la jointure de deux tiles) ; **AMD-014 Q-032** : résidu de 1 à 2 px sur translucides obliques accepté (P3) ; **AMD-058** : tient pour `video.anti_alias` = 0, 1 et 2, et pour deux objets voisins |
 | cubemaps | DEC-06-Q1 : 6 faces réextraites, conventions dans `cubemaps.json` |
 | écritures Lua sur réglages | DEC-06-Q5 **(D)** et DEC-09-Q3 : couche de session non persistée |
 | glisser à la souris | DEC-06-Q6 : SPEC-08 fixe le bouton ; le clic Zapper prime sur la caméra ; AMD-001 08-7 |

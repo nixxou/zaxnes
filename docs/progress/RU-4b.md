@@ -17,7 +17,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | done |
 | 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | done |
 | 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | done |
-| 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | todo |
+| 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | done |
 | 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | todo |
 | 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | todo |
 | 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | todo |
@@ -654,3 +654,145 @@ both halves:
   withdraws AMD-027 §1-2, and that REQ-SCN-065 stays required by other means (the wall half).
 - `SPEC-v1.2-INDEX`: the REQ-SCN-037 row, and the REQ-E3D-450 row that step 4 left pointing at the
   superseded AMD-008 Q-015 answer.
+
+### Step 7 — AMD-058: the joints under anti-aliasing
+
+The cause AMD-058 §1 isolated is the documented one: with a multisampled buffer, a fragment that
+covers *some* samples but whose **pixel centre falls outside the primitive** gets an
+**extrapolated** `vUv`, so the `floor()` of `scene.frag` lands one texel past the face and the
+atlas lookup of REQ-E3D-563 returns a texel the face does not hold. With one sample per pixel no
+such fragment exists, which is exactly why §1 found the picture clean at `video.anti_alias` = 0 and
+cracked at 1, same binary, same scene.
+
+The fix is the standard remedy and the one the amendment's "traitement des échantillons" names
+first: `centroid` interpolation of `vUv`. The centroid is always inside the covered samples, so the
+coordinate stays within the face.
+
+| Piece | What landed |
+|---|---|
+| `shaders/scene.vert`, `scene.frag` | the `vUv` declaration under `#ifdef ZAX_CENTROID`; `centroid out` / `centroid in` with it, the plain declaration without. The qualifier must agree between the two stages, so both carry the guard |
+| `gl/shaders.rs` | `CENTROID_DEFINE`, a **fourth** variant axis on `shaders::scene(solid, srgb_palette, bend, centroid)`, and the sixteen names |
+| `renderer.rs` | `ScenePrograms` rebuilt around a slot table; `select_centroid_variant`, called once a frame **before** `select_bend_variant` |
+| `statistics.rs` | `centroid_interpolation`, so the scope of the variant is observable from outside |
+
+#### `ScenePrograms`: four pairs, and a lookup that got cheaper
+
+`current()` runs **once per draw run** (`draw_run` reads it for the per-item uniforms), so adding a
+fourth axis had to not cost anything there. The old shape was a `match` on `(bend, &mut bent)`;
+the new one is a slot table:
+
+- `built: Vec<[ShaderProgram; 2]>`, `built[0]` the flat pixel-centre pair the renderer is created
+  with;
+- `slots: [usize; 4]`, one entry per `(bend, centroid)` key, **0** until that variant is built, so
+  a key with no program falls back to the flat pair by construction and not by a branch;
+- `slot`, refreshed by `set_bend` / `set_centroid` / `install` — the only places the two switches
+  move, a few times a frame at most.
+
+`current()` is therefore `&mut self.built[self.slot][usize::from(self.solid)]`: **two indexings and
+no branch**, where it used to be a two-arm match plus an `Option` test. The HUD's flat-variant
+toggle (REQ-SCN-068) and the curvature selection now go through the two setters.
+
+**Nothing is compiled at the handheld default.** Both lazy axes stay unbuilt: curvature 0
+(REQ-SCN-066) and `video.anti_alias` = 0 mean the renderer holds exactly the one pair it always
+held. `select_centroid_variant` at that setting is one integer comparison and a store.
+
+**The trigger is the setting, not the granted sample count.** A context that refuses a
+multisampled buffer falls back to one sample, whose single sample *is* the pixel centre, so the
+centroid variant draws the same pixels there — the fallback is correct without a second decision.
+Chosen before the curvature so the pairs the curvature then builds are the ones the frame and its
+flat HUD actually use (two pairs, not three).
+
+#### Point 3 of the brief: what "byte for byte" could and could not be delivered
+
+Measured, not asserted. The 40 assembled sources (8 scene variants × 2 stages × 2 contexts, plus
+the 2 shadow ones) were dumped before the change and after it, and compared:
+
+- **the code the GLSL compiler is given is identical, line for line, for all 40.** Checked by
+  running the `ZAX_CENTROID`-undefined branch of the preprocessor over both dumps and diffing.
+- **the source text is not**, and cannot be: the `#ifdef ZAX_CENTROID` lines live in
+  `scene.vert` / `scene.frag`, and a preprocessor directive is text. This is the same situation
+  AMD-043 left for the curvature — `bend_tests::without_bend` says so in as many words ("the
+  requirement is about what the compiler is given, not about what the file says") — and the brief
+  points at that precedent for how to assert it.
+
+**The one consequence, and it is a one-time one.** `gl/program_cache.rs` keys a cached binary on a
+hash of the driver, the program name and both sources, so the eight pixel-centre programs get new
+cache keys and are compiled once more on the first start after this update. The **names** are
+unchanged (`amd_058_the_names_of_the_pixel_centre_variants_are_unchanged`), so nothing else about
+the cache moves, and no frame is affected. Reported rather than hidden: literal byte identity of
+the assembled text was not attainable without splitting the two shaders into three chunks each,
+which costs more in readability than one rebuild costs a player.
+
+#### What bites, and what does not — the honest part of this step
+
+**Both automatic criteria of AMD-058 §2 pass with *and* without the centroid variant** on this
+side, and so does the "differs only at the edges" measure. Verified by forcing
+`select_centroid_variant` to refuse, rebuilding and re-running. Two reasons, both about the
+fixtures available here rather than about the fix:
+
+1. **A plain surface cannot show it.** REQ-SCN-065's surface is 4 × 4 copies of a *uniform* tile
+   image, so a texel fetched one step outside the face is the **same colour** as the right one.
+   The two scenes AMD-058 §1 measured — the Mega Man 2 tower façade, the Excitebike blue wall —
+   are textured, which is what makes the wrong texel a *light* line.
+2. **Inside the silhouette the extrapolation stays within the face** at the magnifications a
+   synthetic scene reaches here: half a pixel of extrapolation is well under one texel when a
+   texel spans several screen pixels.
+
+What **is** proved automatically:
+
+- the variant is selected exactly when `video.anti_alias` is not 0, and never otherwise
+  (`centroid_interpolation`);
+- it is **in effect on the GPU**, not merely selected: on a striped 4 × 4 surface at four samples
+  the capture holds **12** distinct colours with the variant and **8** without it;
+- the pixel-centre programs carry nothing of it, in all 16 source combinations.
+
+The discriminating check stays AMD-058's own review criterion, which needs the ROM scenes at
+2560 × 1440: **R0 runs it.** Everything it needs is in place (`zax-harness render --rom ...
+--press 200:start,300:start --run 599 --anti-alias 1` against `--anti-alias 0`).
+
+**One measure I wrote and then corrected rather than loosened.** The "differs only at the edges"
+test first ran on a *textured* surface, and failed — 109 interior pixels on a magnified 4 × 4
+striped surface, 2100 on a minified 28 × 26 one. Both are right and the test was wrong: a textured
+tile joint carries a real colour discontinuity (one tile image's right edge against the next one's
+left edge), so multisampling blends it, and AMD-058's own exclusion *requires* it to keep doing
+that. The criterion means what it says only of a plain surface, which is how the test now reads.
+
+#### Tests (10 in `zax-render/tests/amd058_centroid_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| AMD-058 §2 first criterion: the 4 × 4 lit, shadowed surface of whole boxes at `anti_alias` 0, 1, 2 | `req_scn_065_the_surface_shows_no_seam_at_any_anti_alias_setting` |
+| second criterion: the same surface over two objects, three values | `req_scn_065_a_surface_of_two_objects_shows_no_seam_at_any_anti_alias_setting` |
+| the exclusion: the setting still softens the object edges | `amd_058_the_setting_still_softens_the_edges_of_the_objects` |
+| third criterion, automated for a plain surface | `amd_058_an_anti_aliased_capture_differs_from_a_plain_one_only_at_the_edges` |
+| the statement the light line breaks, as a regression guard | `amd_058_no_interior_pixel_takes_a_colour_the_surface_cannot_produce` |
+| **the scope** (point 3): the variant draws exactly when anti-aliasing is on, and back | `amd_058_the_centroid_variant_draws_exactly_when_anti_aliasing_is_on` |
+| **the variant is in effect on the GPU**, 12 colours against 8 | `amd_058_the_variant_changes_what_the_gpu_draws` |
+| point 3: the pixel-centre variant carries nothing of the centroid, 16 combinations × 2 contexts | `amd_058_the_pixel_centre_variant_carries_nothing_of_the_centroid` |
+| the two variants differ **only** by the qualifier on `vUv` | `amd_058_the_two_variants_differ_only_by_the_qualifier_on_v_uv` |
+| the eight pixel-centre names are unchanged (the cache key) | `amd_058_the_names_of_the_pixel_centre_variants_are_unchanged` |
+
+`bend_tests` follows the new signature: `scene_source` pins the pixel-centre variant (the one the
+default settings use), and `req_scn_067_each_variant_has_its_own_name` now walks all sixteen.
+
+#### The images
+
+All eleven synthetic captures at default settings (`--anti-alias 0`) are **identical to step 6's at
+tolerance 0**, which is the point of the whole design: with anti-aliasing off nothing of AMD-058
+runs. The render goldens did not move.
+
+`cargo test --release -p zax-render`: all suites pass (10 new). `-p zax-harness`: the render and
+core goldens pass. fmt and workspace clippy clean.
+
+*(One build hiccup worth recording for whoever resumes: a `LNK1285 fichier PDB endommagé` on
+`target/release/deps/amd057_sprite_depth_tests-*.pdb`, the machine's instability showing through.
+Deleting the `.pdb` and re-running was enough.)*
+
+#### SPEC chapter edits
+
+- `SPEC-06`: **REQ-SCN-065 written out** after REQ-SCN-040 — it had been created by AMD-012 and
+  only ever indexed, never carried into the chapter — with AMD-058's completion (the three values
+  of `video.anti_alias`, the two-object clause), its two exclusions, the Q-032 residue, the three
+  acceptance criteria and the notes of AMD-058 §1 and §3.
+- `SPEC-v1.2-INDEX`: the REQ-SCN-065 row.
+- `impl/docs/spec/changes/`: `AMD-058-jointures-avec-anticrenelage.md` copied.

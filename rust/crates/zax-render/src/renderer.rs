@@ -89,30 +89,67 @@ impl Residency for GlResidency<'_> {
 
 /// The scene programs of [`shaders::scene`] and which one is in use.
 ///
-/// Two of the three variant axes are chosen per draw or per frame and so need their programs
-/// side by side: `solid` changes within the opaque bucket (several times a frame) and `bend`
-/// changes when a curvature setting changes and when the HUD is drawn (REQ-SCN-068 keeps it
-/// flat). The third, the per-fragment palette, is fixed when the renderer is created.
+/// Three of the four variant axes are chosen per draw or per frame and so need their programs
+/// side by side: `solid` changes within the opaque bucket (several times a frame), `bend` changes
+/// when a curvature setting changes and when the HUD is drawn (REQ-SCN-068 keeps it flat), and
+/// `centroid` changes when `video.anti_alias` changes (AMD-058). The fourth, the per-fragment
+/// palette, is fixed when the renderer is created.
+///
+/// Only the flat, pixel-centre pair is built when the renderer is created. The other three are
+/// built the first time they are asked for, and a key that has none falls back to it: at
+/// curvature 0 (REQ-SCN-066's default) with anti-aliasing off (the handheld default) **no second
+/// program is ever compiled**, which on a handheld is seconds of start-up.
 #[derive(Debug)]
 struct ScenePrograms {
-    /// `[plain, solid]` without the curvature.
-    flat: [ShaderProgram; 2],
-    /// `[plain, solid]` with the curvature of REQ-SCN-067 compiled in, built the first time a
-    /// curvature setting is not 0. All four settings default to 0 (REQ-SCN-066), so a player who
-    /// never bends anything never compiles these — which on a handheld is seconds of start-up.
-    bent: Option<[ShaderProgram; 2]>,
+    /// The `[plain, solid]` pairs built so far; `built[0]` is the flat, pixel-centre one.
+    built: Vec<[ShaderProgram; 2]>,
+    /// For each of the four `(bend, centroid)` keys, the slot of `built` serving it — 0, the flat
+    /// pair, until that variant has been built.
+    slots: [usize; 4],
+    /// `slots[key(bend, centroid)]`, kept in step by [`Self::set_bend`], [`Self::set_centroid`]
+    /// and [`Self::install`], so that [`Self::current`] — which every draw run calls — is two
+    /// indexings and no branch.
+    slot: usize,
     solid: bool,
     bend: bool,
+    centroid: bool,
 }
 
 impl ScenePrograms {
+    /// The slot of `slots` a `(bend, centroid)` pair is kept at.
+    const fn key(bend: bool, centroid: bool) -> usize {
+        (bend as usize) * 2 + centroid as usize
+    }
+
     /// The program in use, for a uniform or a draw.
     fn current(&mut self) -> &mut ShaderProgram {
-        let pair = match (self.bend, &mut self.bent) {
-            (true, Some(bent)) => bent,
-            _ => &mut self.flat,
-        };
-        &mut pair[usize::from(self.solid)]
+        &mut self.built[self.slot][usize::from(self.solid)]
+    }
+
+    /// Whether the pair of this key has been built (the flat one always has).
+    const fn has(&self, bend: bool, centroid: bool) -> bool {
+        Self::key(bend, centroid) == 0 || self.slots[Self::key(bend, centroid)] != 0
+    }
+
+    /// Takes a freshly built pair into service for its key.
+    fn install(&mut self, bend: bool, centroid: bool, pair: [ShaderProgram; 2]) {
+        self.built.push(pair);
+        self.slots[Self::key(bend, centroid)] = self.built.len() - 1;
+        self.refresh();
+    }
+
+    fn set_bend(&mut self, bend: bool) {
+        self.bend = bend;
+        self.refresh();
+    }
+
+    fn set_centroid(&mut self, centroid: bool) {
+        self.centroid = centroid;
+        self.refresh();
+    }
+
+    fn refresh(&mut self) {
+        self.slot = self.slots[Self::key(self.bend, self.centroid)];
     }
 }
 
@@ -241,7 +278,7 @@ impl SceneRenderer {
         // `ZAXNES_SRGB_PALETTE` keeps the per-fragment conversion of the palette, to compare
         // the two on a device (same pictures).
         let convert_palette = std::env::var_os("ZAXNES_SRGB_PALETTE").is_none();
-        let flat = scene_pair(&gl, !convert_palette, false)?;
+        let flat = scene_pair(&gl, !convert_palette, false, false)?;
         let instance_alignment =
             usize::try_from(gl.get_integer(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT))
                 .unwrap_or(256)
@@ -249,10 +286,12 @@ impl SceneRenderer {
         let passes = Passes {
             gl: gl.clone(),
             scene: ScenePrograms {
-                flat,
-                bent: None,
+                built: vec![flat],
+                slots: [0; 4],
+                slot: 0,
                 solid: false,
                 bend: false,
+                centroid: false,
             },
             shadow: ShaderProgram::create(&gl, &shaders::shadow(false))?,
             shadow_bent: None,
@@ -349,6 +388,12 @@ impl SceneRenderer {
     ) -> Result<(), RenderError> {
         target.validate()?;
 
+        // AMD-058 REQ-SCN-065: the anti-aliasing setting decides how `vUv` is interpolated, once
+        // here, never per fragment. Chosen **before** the curvature so that the two pairs the
+        // curvature then builds are the ones the frame and its HUD actually use (the HUD draws
+        // flat, REQ-SCN-068). At the handheld default — anti-aliasing off — this is one integer
+        // comparison and nothing else.
+        self.select_centroid_variant(scene)?;
         // REQ-SCN-067: the curvature decides which shader variant draws the frame, once here,
         // never per vertex. At the default settings this is one `is_identity` test and nothing
         // else: no program is compiled, none is swapped, and no uniform is uploaded.
@@ -452,12 +497,16 @@ impl SceneRenderer {
     fn select_bend_variant(&mut self, scene: &SceneState) -> Result<(), RenderError> {
         let wanted = !scene.effective_bend().is_identity();
         if !wanted {
-            self.passes.scene.bend = false;
+            self.passes.scene.set_bend(false);
             return Ok(());
         }
 
-        if self.passes.scene.bent.is_none() {
-            self.passes.scene.bent = Some(scene_pair(&self.gl, !self.convert_palette, true)?);
+        let centroid = self.passes.scene.centroid;
+        if !self.passes.scene.has(true, centroid) {
+            let pair = scene_pair(&self.gl, !self.convert_palette, true, centroid)?;
+            self.passes.scene.install(true, centroid, pair);
+        }
+        if self.passes.shadow_bent.is_none() {
             self.passes.shadow_bent =
                 Some(ShaderProgram::create(&self.gl, &shaders::shadow(true))?);
         }
@@ -471,7 +520,36 @@ impl SceneRenderer {
             // REQ-SCN-074: at least 32 × 32 cells, so at least a 33 × 33 grid of vertices.
             self.picture_quad_bent = Some(Arc::new(interop::picture_quad_subdivided(0, 0, cells)?));
         }
-        self.passes.scene.bend = true;
+        self.passes.scene.set_bend(true);
+        Ok(())
+    }
+
+    /// Picks the interpolation variant the frame's anti-aliasing asks for (AMD-058 REQ-SCN-065),
+    /// building its pair the first time it is needed.
+    ///
+    /// The trigger is the **setting** of AMD-032 §2, not the sample count the driver granted: a
+    /// buffer that falls back to one sample interpolates a centroid at the pixel centre anyway
+    /// (the covered sample set is that one sample), so the fallback draws the same pixels. With
+    /// `video.anti_alias` = 0 nothing is built and nothing is compiled, which is what keeps the
+    /// handheld default at the programs of before this amendment.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderError::Gl`] when the variant does not compile or link. The pixel-centre programs
+    /// stay in use, so the frame is drawn with the joints of before rather than not at all.
+    fn select_centroid_variant(&mut self, scene: &SceneState) -> Result<(), RenderError> {
+        let wanted = scene.settings.anti_alias_samples() > 1;
+        if !wanted {
+            self.passes.scene.set_centroid(false);
+            return Ok(());
+        }
+
+        let bend = self.passes.scene.bend;
+        if !self.passes.scene.has(bend, true) {
+            let pair = scene_pair(&self.gl, !self.convert_palette, bend, true)?;
+            self.passes.scene.install(bend, true, pair);
+        }
+        self.passes.scene.set_centroid(true);
         Ok(())
     }
 
@@ -629,6 +707,7 @@ impl SceneRenderer {
             scene.settings.anti_alias_samples(),
         )?;
         self.passes.statistics.anti_alias_samples = self.linear.samples();
+        self.passes.statistics.centroid_interpolation = self.passes.scene.centroid;
         let gl = &self.gl;
         gl.disable(glow::SCISSOR_TEST);
         gl.disable(glow::BLEND);
@@ -732,7 +811,7 @@ impl SceneRenderer {
             // **flat**, whatever the curvature. It therefore draws with the flat variant, which
             // also means the score of a bent game stays readable (REQ-SCN-044).
             let bent = passes.scene.bend;
-            passes.scene.bend = false;
+            passes.scene.set_bend(false);
             passes.scene.current().use_program();
             common.bind(passes);
             let light = common.constants.hud_light_direction;
@@ -746,7 +825,7 @@ impl SceneRenderer {
 
             gl.disable(glow::BLEND);
             passes.statistics.hud_tiles = count(lists.hud.len());
-            passes.scene.bend = bent;
+            passes.scene.set_bend(bent);
         }
 
         gl.depth_mask(true);
@@ -1012,9 +1091,15 @@ fn bind_bend(program: &mut ShaderProgram, bend: SpaceBend) {
 
 /// The `[plain, solid]` pair of scene programs of one variant, each with its instance block
 /// bound (the block is the placements of a batched draw, SPEC-06 §3.9).
-fn scene_pair(gl: &Gl, srgb_palette: bool, bend: bool) -> Result<[ShaderProgram; 2], RenderError> {
+fn scene_pair(
+    gl: &Gl,
+    srgb_palette: bool,
+    bend: bool,
+    centroid: bool,
+) -> Result<[ShaderProgram; 2], RenderError> {
     let one = |solid: bool| -> Result<ShaderProgram, RenderError> {
-        let program = ShaderProgram::create(gl, &shaders::scene(solid, srgb_palette, bend))?;
+        let program =
+            ShaderProgram::create(gl, &shaders::scene(solid, srgb_palette, bend, centroid))?;
         program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
         Ok(program)
     };

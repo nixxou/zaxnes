@@ -58,8 +58,15 @@ const SRGB_PALETTE_DEFINE: &str = "#define ZAX_SRGB_PALETTE";
 /// no uniform tested per vertex and no varying for the bent position.
 const BEND_DEFINE: &str = "#define ZAX_BEND";
 
+/// Interpolates `vUv` at the centroid of the covered samples (AMD-058 REQ-SCN-065). **Its
+/// absence is the point too**: with `video.anti_alias` = 0 there is one sample per fragment, the
+/// centroid *is* the pixel centre, and the programs the compiler is given are the ones of before
+/// AMD-058 — byte for byte, so the on-disk program cache of a player who never turns
+/// anti-aliasing on is not rebuilt.
+const CENTROID_DEFINE: &str = "#define ZAX_CENTROID";
+
 /// How many chunks a stage may hold. The largest are the sky fragments (five) and the scene
-/// fragment with all three defines (five).
+/// fragment with all four defines (six).
 const SLOTS: usize = 6;
 
 /// One stage of a program: the chunks it is made of, in order, after the header. Empty slots are
@@ -105,34 +112,51 @@ const fn when(enabled: bool, define: &'static str) -> &'static str {
 /// may discard keeps a tiled GPU from dropping the fragments hidden behind it early).
 /// `srgb_palette` linearises the palette per fragment. `bend` compiles in the curvature of
 /// REQ-SCN-067, which also places the vertex and transports the normal (REQ-SCN-068).
+/// `centroid` interpolates `vUv` at the centroid of the covered samples (AMD-058), which is only
+/// ever asked for when the buffer is multisampled.
+///
+/// The names of the eight variants without `centroid` are **unchanged**, because the name is the
+/// key of the on-disk program cache: a player who does not use anti-aliasing keeps every binary
+/// that cache already holds.
+// The four switches are the variant axes the specification names, each independent of the others;
+// an enum per axis would say less, not more.
+#[allow(clippy::fn_params_excessive_bools)]
 #[must_use]
-pub const fn scene(solid: bool, srgb_palette: bool, bend: bool) -> ProgramSource {
+pub const fn scene(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) -> ProgramSource {
     ProgramSource {
-        name: match (solid, srgb_palette, bend) {
-            (false, false, false) => "scene",
-            (true, false, false) => "scene_solid",
-            (false, true, false) => "scene_srgb_palette",
-            (true, true, false) => "scene_solid_srgb_palette",
-            (false, false, true) => "scene_bend",
-            (true, false, true) => "scene_solid_bend",
-            (false, true, true) => "scene_srgb_palette_bend",
-            (true, true, true) => "scene_solid_srgb_palette_bend",
+        name: match (solid, srgb_palette, bend, centroid) {
+            (false, false, false, false) => "scene",
+            (true, false, false, false) => "scene_solid",
+            (false, true, false, false) => "scene_srgb_palette",
+            (true, true, false, false) => "scene_solid_srgb_palette",
+            (false, false, true, false) => "scene_bend",
+            (true, false, true, false) => "scene_solid_bend",
+            (false, true, true, false) => "scene_srgb_palette_bend",
+            (true, true, true, false) => "scene_solid_srgb_palette_bend",
+            (false, false, false, true) => "scene_centroid",
+            (true, false, false, true) => "scene_solid_centroid",
+            (false, true, false, true) => "scene_srgb_palette_centroid",
+            (true, true, false, true) => "scene_solid_srgb_palette_centroid",
+            (false, false, true, true) => "scene_bend_centroid",
+            (true, false, true, true) => "scene_solid_bend_centroid",
+            (false, true, true, true) => "scene_srgb_palette_bend_centroid",
+            (true, true, true, true) => "scene_solid_srgb_palette_bend_centroid",
         },
         vertex: Stage::of([
             when(bend, BEND_DEFINE),
+            when(centroid, CENTROID_DEFINE),
             DEFORMATION,
             when(bend, BEND),
             SCENE_VERT,
-            "",
             "",
         ]),
         fragment: Stage::of([
             when(solid, SOLID_DEFINE),
             when(srgb_palette, SRGB_PALETTE_DEFINE),
             when(bend, BEND_DEFINE),
+            when(centroid, CENTROID_DEFINE),
             TRANSFER,
             SCENE_FRAG,
-            "",
         ]),
     }
 }

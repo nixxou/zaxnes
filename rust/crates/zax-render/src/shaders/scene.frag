@@ -1,6 +1,11 @@
 in vec3 vScene;
 in vec3 vNormal;
+// ZAX_CENTROID (AMD-058): the qualifier of scene.vert, which the two stages must agree on.
+#ifdef ZAX_CENTROID
+centroid in vec2 vUv;
+#else
 in vec2 vUv;
+#endif
 out vec4 oColor;
 
 // ZAX_BEND: the bent position of the vertex (REQ-SCN-067). The shadow map holds the bent
