@@ -11,8 +11,8 @@ AMD-059) of `dotnetupdated` are read as a reference only.
 | 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `55b6723` |
 | 2 | The persisted settings the 2.0 `Setting` members stand for, handheld defaults, `EXCLUDED` | done — `1204603` |
 | 3 | AMD-040: the `CS` table and `Camera.ResetDistance` (with the two formulas of AMD-045) | done — `644bf51` |
-| 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | done |
-| 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | todo |
+| 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | done — `7121e78` |
+| 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | done |
 | 6 | AMD-042: a rollback snapshot carries `PData` and the camera; the history is emptied at the end of a game | todo |
 | 7 | AMD-045: the camera of 3dSen 2.0 | todo |
 | 8 | Closing: fmt, clippy, tests in both binding modes, after benchmarks, API dump, journal | todo |
@@ -277,3 +277,75 @@ API dump: 7 lines more, 430 → 437 members — `Instance.BuildExportMeshes`,
 `Instance.ReleaseExportMeshes`, `SettingAPI.GetVisualStyleParameter`,
 `SettingAPI.ResetVisualStyleParameters`, `SettingAPI.RunAheadFrames`,
 `SettingAPI.SetVisualStyleParameter`, `SettingAPI.VisualStyle`.
+
+### Step 5 — AMD-059: the four scalar members and the list
+
+**REQ-LUA-116, the four scalars.** `LibraryView` is an ordinary whole member (its setting has no
+domain at all, so anything written reads back). The other three carry their own mapping, applied
+on the Lua write by a new `mapped` declaration in `api/settings.rs`:
+
+| Member | Mapping | Why not the domain |
+|---|---|---|
+| `MaxQueuedFrames` | v ≤ 1 → 1, else 2 | the domain's clamp gives the same answer, and the mapping says it in one line beside the other two |
+| `RefreshRate` | v ≤ 81 → 72, v ≤ 105 → 90, else 120 | no domain can express "nearest rung, the smaller one at equal distance" |
+| `Msaa` | v ≤ 1 → 0, v ≤ 3 → 2, else 4 | the general rule of REQ-PERS-003 sends an out-of-domain value to the **default**, which would read 2 where the amendment asks for 0 or 4 |
+
+The value that reaches the model is therefore always inside its domain, which is what makes "no
+numeric write raises an error" true whatever the number — checked from −10⁹ to 10⁹ and on
+infinities.
+
+**REQ-LUA-116, `VisualStyleParameters`.** Two new host types, `Liste<ParamStyle>` and
+`ParamStyle`, and a write log in `ScriptSettings`.
+
+The design question was what a read hands out. The requirement needs a **snapshot**: "a list
+previously read puts exactly its elements back" means nothing if the list is a live view, since
+by the time it is written back it already equals the current state. The .NET build kept the
+snapshot as an object the binder held alive for as long as Lua referenced it. A Rust `Payload` is
+`Copy` and holds no pointer — that is what makes the fast binding of `binding/raw.rs` sound — so
+a handle on a host-side snapshot would need a slab that only grows, and a script reading the list
+every frame would make it grow without end.
+
+So the payload **is** the snapshot: each entry is the index of the parameter in the table of
+`zax_settings::styles` and the index of its value among the rungs of its domain, one byte each,
+sixteen entries and a count (33 bytes, under the 48 of `LuaXrState`, so `Payload` did not grow).
+A style parameter only ever holds one of its rungs, the domain snapping every write, so the
+value and the rung are a faithful round trip — asserted rung by rung for all sixteen parameters.
+Consequences, all of them wanted:
+
+- a list a script holds is frozen by construction, and nothing is kept alive on the host side;
+- two reads with nothing in between give **equal** lists (`__eq` compares the payloads), which is
+  the identity REQ-LUA-043 asks for; a write in between gives a different one;
+- the element's `Style` is always 4, the identifier REQ-SCN-078 reads back, so a parameter
+  written through the alias 1 shows up under 4;
+- a unit test of `zax-settings` keeps the table at or under 256 parameters and every domain at or
+  under 256 rungs: a lot that passes either bound has to widen the encoding, and that is where it
+  finds out.
+
+The log itself holds only **which** parameters were written and in what order (the order of the
+first write); the values are the settings' own, read when the list is read. `nil` in writing
+resets every parameter of every style and empties the log; a list puts exactly its elements back,
+every other parameter going to its default first; anything else raises, the one write of the
+requirement that may.
+
+**REQ-LUA-117** was already done in step 3: the four tables of `CS.Nes3D` went in together,
+`CameraControl`, `SettingManager` and `VisualStyle` beside `Info`. The tests of the three are
+here.
+
+Tests: 11 more in `two_zero_api_tests.rs` (24 in all) — the four criteria of the scalar members,
+the "no numeric write raises" sweep, the criterion of the list (two parameters, `Count` 2,
+element 0 with style 4, `spl.bend_zx` and 30, then `nil`), a list read before a write that puts
+exactly its elements back, the order of the first write with an update in place, the alias
+showing up under 4, the five writes that raise, the identity of REQ-LUA-043, the three tables of
+REQ-LUA-117 with their nil fields and their dropped writes, and a script that writes **every**
+member the amendment adds and still has its `Update` hook five frames later (REQ-LUA-062, the
+point of the amendment).
+
+API dump: 10 lines more, 437 → 446 members and 44 → 46 types — exactly the figures the .NET lot
+V2-31 reported. `CS` is still absent from it, being made of plain Lua tables.
+
+**One pixel of one synthetic capture moved**, and it is the two formulas of step 3 rather than
+anything of this step: `goldens/render-synthetic/render.json`, scene `hud`, `backgroundPixels`
+305787 → 305788. At 70° the new formulas differ from the old by 2.9 · 10⁻⁵ unit on the HUD plane
+and 6.9 · 10⁻⁵ unit on the camera distance (2.6 · 10⁻⁷ and 3.6 · 10⁻⁷ relative), which is enough
+to flip a pixel that sat exactly on an edge. The capture is still **100.000 %** of its pixels
+within 2 levels of the C# golden, so the PNG is unchanged and only the exact count follows.

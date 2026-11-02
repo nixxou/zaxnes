@@ -87,6 +87,63 @@ pub fn parameters_of(style: i32) -> &'static [(&'static str, SettingId)] {
 /// The styles that have parameters, for the "every parameter of every style" of REQ-LUA-116.
 pub const STYLES_WITH_PARAMETERS: [i32; 1] = [ENHANCED_STYLE];
 
+/// Every parameter of every style, in one table: the style, the identifier and the setting. This
+/// is the order the write log of `Setting.VisualStyleParameters` names a parameter by
+/// (REQ-LUA-116).
+#[must_use]
+pub fn all_parameters() -> &'static [(&'static str, SettingId)] {
+    &ENHANCED_PARAMETERS
+}
+
+/// The position of the parameter `id` in [`all_parameters`], or `None` when the style or the
+/// identifier is unknown.
+#[must_use]
+pub fn parameter_position(style: i32, id: &str) -> Option<usize> {
+    if canonical_style(style) != ENHANCED_STYLE {
+        return None;
+    }
+    ENHANCED_PARAMETERS.iter().position(|(name, _)| *name == id)
+}
+
+/// The style, the identifier and the setting of the parameter at `position`.
+#[must_use]
+pub fn parameter_of_position(position: usize) -> Option<(i32, &'static str, SettingId)> {
+    ENHANCED_PARAMETERS
+        .get(position)
+        .map(|(name, id)| (ENHANCED_STYLE, *name, *id))
+}
+
+/// The rung of `value` among the values the domain of `id` publishes, and the value of a rung.
+/// A style parameter only ever holds one of its rungs, the domain snapping every write
+/// (AMD-040 §3), so the two are a faithful round trip.
+#[must_use]
+pub fn rung_of(id: SettingId, value: f64) -> usize {
+    let domain = crate::catalogue::descriptor(id).domain();
+    let snapped = domain.snap(value);
+    domain
+        .options()
+        .and_then(|options| {
+            options
+                .iter()
+                .position(|option| (option.value - snapped).abs() < 1e-9)
+        })
+        .unwrap_or(0)
+}
+
+/// The value of rung `rung` of `id`, or its default when the rung is past the end.
+#[must_use]
+pub fn value_of_rung(id: SettingId, rung: usize) -> f64 {
+    let descriptor = crate::catalogue::descriptor(id);
+    descriptor
+        .domain()
+        .options()
+        .and_then(|options| options.get(rung))
+        .map_or_else(
+            || f64::from(descriptor.default_value().as_int()),
+            |option| option.value,
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +186,42 @@ mod tests {
                 descriptor.domain().step().is_some(),
                 "{name} needs a step for the rounding of AMD-040 §3"
             );
+        }
+    }
+
+    /// The write log of `Setting.VisualStyleParameters` names a parameter and its value by one
+    /// byte each (`zax_scripting::binding::payload::StyleParameterLog`): the table must stay at
+    /// or under 256 parameters and every domain at or under 256 rungs. A lot that passes either
+    /// bound has to widen the encoding, and this is where it finds out.
+    #[test]
+    fn a_parameter_and_a_rung_both_fit_in_a_byte() {
+        assert!(ENHANCED_PARAMETERS.len() <= 256);
+        for (name, id) in ENHANCED_PARAMETERS {
+            let rungs = catalogue::descriptor(id)
+                .domain()
+                .options()
+                .map_or(0, <[crate::domain::SettingOption]>::len);
+            assert!((1..=256).contains(&rungs), "{name} publishes {rungs} rungs");
+        }
+    }
+
+    /// A value and its rung are a faithful round trip, which is what the write log rests on.
+    #[test]
+    fn a_rung_and_its_value_round_trip() {
+        for (position, (name, id)) in ENHANCED_PARAMETERS.iter().enumerate() {
+            assert_eq!(
+                Some((ENHANCED_STYLE, *name, *id)),
+                parameter_of_position(position)
+            );
+            assert_eq!(Some(position), parameter_position(ENHANCED_STYLE, name));
+            let rungs = catalogue::descriptor(*id)
+                .domain()
+                .options()
+                .map_or(0, <[crate::domain::SettingOption]>::len);
+            for rung in 0..rungs {
+                let value = value_of_rung(*id, rung);
+                assert_eq!(rung, rung_of(*id, value), "{name} rung {rung}");
+            }
         }
     }
 }

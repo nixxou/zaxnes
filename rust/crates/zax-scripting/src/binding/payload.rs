@@ -36,6 +36,8 @@ pub(crate) enum HostType {
     Slot,
     InstanceList,
     ShapeList,
+    StyleParameterList,
+    StyleParameter,
     Vec3Ref,
     Vec2Ref,
     Mat4Ref,
@@ -58,7 +60,7 @@ pub(crate) enum HostType {
 
 impl HostType {
     /// How many host types there are.
-    pub const COUNT: usize = 44;
+    pub const COUNT: usize = 46;
 
     /// The position of the type in the tables indexed by type.
     pub const fn index(self) -> usize {
@@ -173,6 +175,62 @@ pub(crate) enum InstanceListKind {
     PatternInstances(PatternTarget),
 }
 
+/// How many style parameters a write log can hold: the sixteen of the Enhanced style (AMD-043
+/// REQ-SCN-066 and AMD-055 REQ-SCN-079). A unit test of `zax-settings` keeps the table at or
+/// under this size.
+pub(crate) const STYLE_PARAMETER_CAPACITY: usize = 16;
+
+/// The list `Setting.VisualStyleParameters` reads: the style parameters written since their last
+/// reset, in the order of their first write (AMD-059 REQ-LUA-116).
+///
+/// It is a **snapshot**, and it is the snapshot itself rather than a handle on one: each entry
+/// is the index of the parameter in the table of `zax_settings::styles` and the index of its
+/// value among the rungs of its domain, both of which fit in a byte. Reading hands out a frozen
+/// copy, which is what makes "a list previously read puts exactly its elements back" mean
+/// something — a live view would already be the current state by the time it was written back.
+/// Two reads with nothing in between give equal lists, which is the identity of REQ-LUA-043, and
+/// nothing is kept alive on the host side for a list a script holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StyleParameterLog {
+    /// `(parameter index, rung index)` per entry, in the order of the first write.
+    entries: [(u8, u8); STYLE_PARAMETER_CAPACITY],
+    count: u8,
+}
+
+impl StyleParameterLog {
+    /// The empty list.
+    pub const EMPTY: Self = Self {
+        entries: [(0, 0); STYLE_PARAMETER_CAPACITY],
+        count: 0,
+    };
+
+    /// The list of `entries`, truncated to the capacity.
+    pub fn new(entries: impl IntoIterator<Item = (u8, u8)>) -> Self {
+        let mut log = Self::EMPTY;
+        for entry in entries.into_iter().take(STYLE_PARAMETER_CAPACITY) {
+            log.entries[usize::from(log.count)] = entry;
+            log.count += 1;
+        }
+
+        log
+    }
+
+    /// How many entries the list holds (`Count`).
+    pub const fn len(&self) -> usize {
+        self.count as usize
+    }
+
+    /// The entry at `index`, or `None` when the index is past the end.
+    pub fn get(&self, index: usize) -> Option<(u8, u8)> {
+        (index < self.len()).then(|| self.entries[index])
+    }
+
+    /// The entries, in order.
+    pub fn iter(&self) -> impl Iterator<Item = (u8, u8)> + '_ {
+        self.entries[..self.len()].iter().copied()
+    }
+}
+
 /// What a Lua-visible host value holds. Reference values name the object they stand for;
 /// value types hold the value itself.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -188,6 +246,10 @@ pub(crate) enum Payload {
     Player(usize),
     InstanceList(InstanceListKind),
     ShapeList,
+    /// The list of written style parameters, snapshot and all (AMD-059 REQ-LUA-116).
+    StyleParameterList(StyleParameterLog),
+    /// One element of that list, by position.
+    StyleParameter(StyleParameterLog, u8),
     Vec3Ref(Vec3Ref),
     Vec2Ref(InstanceTarget, Vec2Kind),
     Mat4Ref(InstanceTarget, Mat4Kind),
@@ -216,6 +278,8 @@ impl Payload {
             Self::Player(_) => HostType::Player,
             Self::InstanceList(_) => HostType::InstanceList,
             Self::ShapeList => HostType::ShapeList,
+            Self::StyleParameterList(_) => HostType::StyleParameterList,
+            Self::StyleParameter(..) => HostType::StyleParameter,
             Self::Vec3Ref(_) => HostType::Vec3Ref,
             Self::Vec2Ref(..) => HostType::Vec2Ref,
             Self::Mat4Ref(..) => HostType::Mat4Ref,

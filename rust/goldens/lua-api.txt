@@ -203,6 +203,8 @@ member Liste<Instance>.[i] index L Instance
 member Liste<Instance>.Contains appel - 
 member Liste<Instance>.Count prop L 
 member Liste<Instance>.IndexOf appel - 
+member Liste<ParamStyle>.[i] index L ParamStyle
+member Liste<ParamStyle>.Count prop L 
 member Liste<Shape>.[i] index L Shape
 member Liste<Shape>.Contains appel - 
 member Liste<Shape>.Count prop L 
@@ -238,6 +240,9 @@ member PaletteAPI.FrameColorIndex appel -
 member PaletteAPI.GetColorIndex appel - 
 member PaletteAPI.SetColorIndex appel - 
 member PaletteAPI.bgColor prop L Color
+member ParamStyle.ParameterId prop L 
+member ParamStyle.Style prop L 
+member ParamStyle.Value prop L 
 member Pattern.[i] index L Instance
 member Pattern.BL prop L Vector2
 member Pattern.BottomLeft prop L Vector2
@@ -344,6 +349,7 @@ member SettingAPI.LayerAutoId prop L
 member SettingAPI.LayerDefLayerId prop L 
 member SettingAPI.LayerId prop L 
 member SettingAPI.LayerOffsetId prop L 
+member SettingAPI.LibraryView prop LE 
 member SettingAPI.Light prop L Lumiere
 member SettingAPI.LightColorId prop L 
 member SettingAPI.LightDirectionId prop L 
@@ -354,12 +360,15 @@ member SettingAPI.LocalCam prop LE
 member SettingAPI.LocalCamId prop L 
 member SettingAPI.MapEnable prop LE 
 member SettingAPI.MapEnableId prop L 
+member SettingAPI.MaxQueuedFrames prop LE 
 member SettingAPI.Mirroring prop LE 
 member SettingAPI.MirroringId prop L 
 member SettingAPI.MovieMode prop LE 
 member SettingAPI.MovieModeId prop L 
+member SettingAPI.Msaa prop LE 
 member SettingAPI.NonVRScale prop L 
 member SettingAPI.PreVrRuntimeId prop L 
+member SettingAPI.RefreshRate prop LE 
 member SettingAPI.RenderMethod prop LE 
 member SettingAPI.RenderMethodId prop L 
 member SettingAPI.RenderMode prop LE 
@@ -415,6 +424,7 @@ member SettingAPI.VRScale prop L
 member SettingAPI.VSync prop LE 
 member SettingAPI.VSyncId prop L 
 member SettingAPI.VisualStyle prop LE 
+member SettingAPI.VisualStyleParameters prop LE Liste<ParamStyle>
 member SettingAPI.Volume prop LE 
 member SettingAPI.VolumeId prop L 
 member SettingAPI.VrRuntime prop LE 
@@ -500,4 +510,4 @@ member XRState.acc prop LE Vector3
 member XRState.pos prop LE Vector3
 member XRState.rot prop LE Vector3
 member XRState.vel prop LE Vector3
-# 35 globals, 44 types, 437 members
+# 35 globals, 46 types, 446 members

@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use mlua::Value;
 use zax_settings::catalogue::SettingId;
+use zax_settings::styles;
 
 use super::{assigned_bool, boolean, num, type_def};
-use crate::binding::cx::{try_color, Call, Cx};
-use crate::binding::payload::{HostType, Payload};
+use crate::binding::cx::{host_payload, try_color, Call, Cx};
+use crate::binding::payload::{HostType, Payload, StyleParameterLog};
 use crate::binding::table::TypeDef;
 use crate::settings::{
     ScriptSettings, CLIPPING_COUNT, DEFAULT_SMOOTH_TIME, LAYER_COUNT, NON_VR_SCALE, VR_SCALE,
@@ -18,6 +19,8 @@ use crate::values::LuaColor;
 pub(super) fn declare(types: &mut Vec<TypeDef>) {
     types.push(setting());
     types.extend(layers());
+    types.push(style_parameter_list());
+    types.push(style_parameter());
 }
 
 /// Writes through the settings of the runtime, then mirrors the change into the pipeline's own
@@ -91,6 +94,23 @@ fn whole(definition: &mut TypeDef, name: &'static str, id: SettingId) {
         move |cx, _| Ok(num(cx.data(|data| data.env.settings.int(id))?)),
         move |cx, _, value| {
             let wanted = cx.integer(value, name)?;
+            with_settings(cx, |settings| settings.write_int(id, wanted))
+        },
+        None,
+    );
+}
+
+/// A whole member whose written value goes through `rule` before it reaches the model (AMD-059
+/// REQ-LUA-116). The four members of the 2.0 need it because the general rule of REQ-PERS-003
+/// sends an out-of-domain value to the **default**, where the amendment asks for a precise
+/// mapping; the value that reaches the model is therefore always inside its domain, which is
+/// what makes "no numeric write raises an error" true whatever the number.
+fn mapped(definition: &mut TypeDef, name: &'static str, id: SettingId, rule: fn(i32) -> i32) {
+    definition.property(
+        name,
+        move |cx, _| Ok(num(cx.data(|data| data.env.settings.int(id))?)),
+        move |cx, _, value| {
+            let wanted = rule(cx.integer(value, name)?);
             with_settings(cx, |settings| settings.write_int(id, wanted))
         },
         None,
@@ -261,6 +281,42 @@ fn setting_values(definition: &mut TypeDef) {
     // single renderer in this lot, so the style is kept and handed back — 4 for Enhanced, with
     // 1 accepted in writing, and 0 for anything else.
     whole(definition, "VisualStyle", SettingId::RenderVisualStyle);
+
+    // AMD-059 REQ-LUA-116: the four scalar members 3dSen 2.0 added. `MaxQueuedFrames` **is** the
+    // `video.max_queued_frames` of AMD-052, not a second key; `LibraryView` keeps whatever is
+    // written; the other two are kept and handed back with no effect **(D)**.
+    whole(definition, "LibraryView", SettingId::UiLibraryView);
+    mapped(
+        definition,
+        "MaxQueuedFrames",
+        SettingId::VideoMaxQueuedFrames,
+        |value| if value <= 1 { 1 } else { 2 },
+    );
+    mapped(
+        definition,
+        "RefreshRate",
+        SettingId::VrRefreshRate,
+        // The nearest rung of {72, 90, 120}, the smaller one at equal distance: the halfway
+        // points are 81 and 105.
+        |value| {
+            if value <= 81 {
+                72
+            } else if value <= 105 {
+                90
+            } else {
+                120
+            }
+        },
+    );
+    mapped(definition, "Msaa", SettingId::VideoMsaa20, |value| {
+        if value <= 1 {
+            0
+        } else if value <= 3 {
+            2
+        } else {
+            4
+        }
+    });
     whole(definition, "SortOption", SettingId::UiSortOption);
     whole(definition, "MovieMode", SettingId::MovieMode);
     whole(definition, "SelectionMode", SettingId::EditorSelectionMode);
@@ -408,6 +464,7 @@ fn setting_functions(definition: &mut TypeDef) {
         None,
     );
     style_parameter_functions(definition);
+    style_parameter_list_member(definition);
     definition.function(
         "SetRuntime",
         |call| {
@@ -488,6 +545,109 @@ fn style_parameter_functions(definition: &mut TypeDef) {
         },
         None,
     );
+}
+
+/// `Setting.VisualStyleParameters` (AMD-059 REQ-LUA-116). Reading hands out a snapshot of the
+/// write log; writing nil takes every parameter of every style back to its default and empties
+/// it; writing a list a read handed out puts exactly its elements back; anything else raises,
+/// which is the one write of the requirement that may — it is not a numeric value.
+fn style_parameter_list_member(definition: &mut TypeDef) {
+    definition.property(
+        "VisualStyleParameters",
+        |cx, _| {
+            let log = cx.data(|data| {
+                StyleParameterLog::new(data.env.settings.written_style_parameters())
+            })?;
+            cx.value(Payload::StyleParameterList(log))
+        },
+        |cx, _, value| {
+            if matches!(value, Value::Nil) {
+                return with_settings(cx, ScriptSettings::reset_all_visual_style_parameters);
+            }
+
+            if let Some(Payload::StyleParameterList(log)) = host_payload(value) {
+                let entries: Vec<(u8, u8)> = log.iter().collect();
+                return with_settings(cx, move |settings| {
+                    settings.restore_visual_style_parameters(&entries);
+                });
+            }
+
+            Err(cx.invalid("VisualStyleParameters"))
+        },
+        Some(HostType::StyleParameterList),
+    );
+}
+
+fn log_of(payload: &Payload) -> StyleParameterLog {
+    match payload {
+        Payload::StyleParameterList(log) | Payload::StyleParameter(log, _) => *log,
+        _ => StyleParameterLog::EMPTY,
+    }
+}
+
+/// The list `Setting.VisualStyleParameters` reads, with the `Count` and the indexer of every
+/// list of SPEC-05 §4.2 (indices 0 to `Count − 1`).
+fn style_parameter_list() -> TypeDef {
+    let mut definition = type_def(HostType::StyleParameterList, "Liste<ParamStyle>");
+    definition.read_only(
+        "Count",
+        |_, this| Ok(num(i32::try_from(log_of(this).len()).unwrap_or(i32::MAX))),
+        None,
+    );
+    definition.element = Some(HostType::StyleParameter);
+    definition.indexer = Some(Arc::new(|cx, this, key| {
+        let log = log_of(this);
+        let index = cx.integer(key, "Liste<ParamStyle>")?;
+        let index = cx.check_bounds(index, log.len(), "Liste<ParamStyle>")?;
+        cx.value(Payload::StyleParameter(
+            log,
+            u8::try_from(index).unwrap_or(u8::MAX),
+        ))
+    }));
+    // Two lists of the same elements are the same list: a read with nothing in between gives
+    // the same value (REQ-LUA-043), the snapshot being the value itself.
+    definition.equal = Some(Arc::new(|left, right| log_of(left) == log_of(right)));
+    definition
+}
+
+/// The entry of a parameter in the list: the style read back by REQ-SCN-078, the identifier and
+/// the normalised value (AMD-059 REQ-LUA-116), all three read only.
+fn style_parameter() -> TypeDef {
+    fn entry(payload: &Payload) -> Option<(i32, &'static str, f64)> {
+        let (log, index) = match payload {
+            Payload::StyleParameter(log, index) => (*log, usize::from(*index)),
+            _ => return None,
+        };
+        let (position, rung) = log.get(index)?;
+        let (style, id, key) = styles::parameter_of_position(usize::from(position))?;
+        Some((style, id, styles::value_of_rung(key, usize::from(rung))))
+    }
+
+    let mut definition = type_def(HostType::StyleParameter, "ParamStyle");
+    definition.read_only(
+        "Style",
+        |_, this| {
+            Ok(num(
+                entry(this).map_or(styles::CLASSIC_STYLE, |(style, _, _)| style)
+            ))
+        },
+        None,
+    );
+    definition.read_only(
+        "ParameterId",
+        |cx, this| cx.text(entry(this).map_or("", |(_, id, _)| id)),
+        None,
+    );
+    definition.read_only(
+        "Value",
+        |_, this| Ok(num(entry(this).map_or(0.0, |(_, _, value)| value))),
+        None,
+    );
+    definition.equal = Some(Arc::new(|left, right| match (left, right) {
+        (Payload::StyleParameter(a, i), Payload::StyleParameter(b, j)) => a == b && i == j,
+        _ => false,
+    }));
+    definition
 }
 
 fn layer_index(payload: &Payload) -> usize {

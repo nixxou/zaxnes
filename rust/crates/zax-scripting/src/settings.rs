@@ -99,6 +99,11 @@ pub struct ScriptSettings {
     resets_view: bool,
     save_requested: Option<Box<dyn FnMut() + Send>>,
     load_requested: Option<Box<dyn FnMut() + Send>>,
+    /// The style parameters written since their last reset, by their position in
+    /// `styles::all_parameters`, in the order of their first write. This is the log
+    /// `Setting.VisualStyleParameters` reads (AMD-059 REQ-LUA-116); the *values* are not kept
+    /// here, they are the settings' own.
+    written_styles: Vec<u8>,
 }
 
 impl Default for ScriptSettings {
@@ -121,6 +126,7 @@ impl ScriptSettings {
             resets_view: true,
             save_requested: None,
             load_requested: None,
+            written_styles: Vec::new(),
         }
     }
 
@@ -402,7 +408,10 @@ impl ScriptSettings {
     /// Returns false, without recording anything, when the style is unknown or when the
     /// identifier does not exist for that style.
     pub fn set_visual_style_parameter(&mut self, style: i32, id: &str, value: f64) -> bool {
-        let Some(key) = styles::parameter(style, id) else {
+        let (Some(key), Some(position)) = (
+            styles::parameter(style, id),
+            styles::parameter_position(style, id),
+        ) else {
             return false;
         };
 
@@ -410,6 +419,14 @@ impl ScriptSettings {
             .domain()
             .snap(value);
         self.write_int(key, number_format::to_i32(normalised));
+
+        // AMD-059 REQ-LUA-116: a call that answers true adds the parameter to the log, or leaves
+        // it where it is when it is already there — the order is that of the **first** write.
+        let position = u8::try_from(position).unwrap_or(u8::MAX);
+        if !self.written_styles.contains(&position) {
+            self.written_styles.push(position);
+        }
+
         true
     }
 
@@ -419,12 +436,60 @@ impl ScriptSettings {
     /// The defaults are written like any other script write, so they land in the session layer
     /// and the user's own preference comes back at the end of the game (REQ-PERS-010): a script
     /// may undo a curvature for its game without erasing what the user chose.
+    ///
+    /// AMD-059 REQ-LUA-116: the reset also takes the style's parameters out of the log.
     pub fn reset_visual_style_parameters(&mut self, style: i32) {
+        let canonical = styles::canonical_style(style);
         for (_, key) in styles::parameters_of(style) {
             let default = zax_settings::catalogue::descriptor(*key)
                 .default_value()
                 .as_int();
             self.write_int(*key, default);
+        }
+
+        self.written_styles.retain(|position| {
+            styles::parameter_of_position(usize::from(*position))
+                .is_none_or(|(owner, _, _)| owner != canonical)
+        });
+    }
+
+    /// Every parameter of **every** style back to its default, and the log emptied: what
+    /// `Setting.VisualStyleParameters = nil` does (AMD-059 REQ-LUA-116).
+    pub fn reset_all_visual_style_parameters(&mut self) {
+        for style in styles::STYLES_WITH_PARAMETERS {
+            self.reset_visual_style_parameters(style);
+        }
+
+        // A style whose parameters are all at their default must not keep entries either.
+        self.written_styles.clear();
+    }
+
+    /// The style parameters written since their last reset, with the rung each one holds now:
+    /// what `Setting.VisualStyleParameters` reads (AMD-059 REQ-LUA-116). The log keeps the order
+    /// of the first write; the values are read from the settings, so the list is the state at
+    /// the moment it is read.
+    pub fn written_style_parameters(&self) -> impl Iterator<Item = (u8, u8)> + '_ {
+        self.written_styles.iter().filter_map(|position| {
+            let (_, _, key) = styles::parameter_of_position(usize::from(*position))?;
+            let rung = styles::rung_of(key, f64::from(self.int(key)));
+            Some((*position, u8::try_from(rung).unwrap_or(u8::MAX)))
+        })
+    }
+
+    /// Puts the parameters of `entries` back, exactly: every other parameter goes to its default
+    /// first, then each entry is written again (AMD-059 REQ-LUA-116,
+    /// `Setting.VisualStyleParameters = <list>`). `entries` are the pairs
+    /// [`ScriptSettings::written_style_parameters`] gives.
+    pub fn restore_visual_style_parameters(&mut self, entries: &[(u8, u8)]) {
+        self.reset_all_visual_style_parameters();
+        for (position, rung) in entries {
+            let Some((style, id, key)) = styles::parameter_of_position(usize::from(*position))
+            else {
+                continue;
+            };
+
+            let value = styles::value_of_rung(key, usize::from(*rung));
+            self.set_visual_style_parameter(style, id, value);
         }
     }
 
