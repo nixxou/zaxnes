@@ -85,6 +85,7 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::NOTIFY_UNCOMPRESSION_FAILED, "Uncompression is not successful"),
     (keys::NOTIFY_INVALID_ROM, "Invalid rom file."),
     (keys::NOTIFY_GAME_MISSING, "The game profile doesn't exist anymore."),
+    (keys::NOTIFY_LOADING_TIMED_OUT, "Loading timed out."),
     (keys::NOTIFY_FOREIGN_CORE, "Save state used a different core."),
     (keys::NOTIFY_NOT_A3DN_FILE, "This file is not a 3dn file"),
     (keys::NOTIFY_UNSUPPORTED3DN_VERSION, "3dn format version {0}  is not supported"),

@@ -152,6 +152,13 @@ La sélection DOIT être ignorée pendant Chargement.
 **REQ-LOOP-024** (P2) — Changement d'algorithme de rendu des meshes (réglage, SPEC-04/SPEC-09) en cours de session : si des meshes 3D sont déjà générés, le frontend DOIT passer en Chargement, régénérer les meshes, attendre 100 %, réinitialiser l'horloge de cadence puis quitter Chargement, sans modifier l'état (En cours ou En pause) ni l'état du cœur.
 - Critère d'acceptation : changer l'algorithme en pause → barre de progression, puis retour à l'état En pause, partie inchangée.
 
+**REQ-LOOP-073** (P2, AMD-051) — **Chargement bloqué.** Pendant l'indicateur Chargement (REQ-LOOP-001), si l'avancement exposé à l'indicateur de chargement (SPEC-04B REQ-E3D-600) ne change pas pendant **10 s**, ou si une étape de REQ-LOOP-021 (ou de REQ-LOOP-044) **qui n'expose aucune mesure d'avancement** (donc autre que l'attente des maillages) ne se termine pas dans les 10 s, le programme DOIT :
+1. afficher la notification d'erreur `Loading timed out.` (4 s, SPEC-10 REQ-UI-080/081 ; traduction française « Délai de chargement dépassé. », AMD-035/AMD-036) **(D)** ;
+2. effacer le jeu courant, remettre l'indicateur Chargement à faux et passer à l'état **Arrêté**, comme REQ-LOOP-023 le fait pour un échec de lancement — l'écran d'accueil d'AMD-010 REQ-UI-207 est alors affiché, aucune ROM n'étant chargée.
+- Critère d'acceptation : le harnais bloque l'étape 6 de REQ-LOOP-021 (attente des maillages) → la notification apparaît au bout de 10 s ± 1 s.
+- Critère d'acceptation : après la notification, l'état est Arrêté, l'indicateur Chargement est faux, et une commande du modèle de commandes (AMD-010 REQ-UI-205) s'exécute dans la seconde qui suit.
+- Notes : la durée totale d'une construction de masse n'est pas bornée (REQ-ACC-031) : tant que l'avancement change, le chargement n'est jamais interrompu. « n'avance plus » est défini par la seule mesure d'avancement observable de la spec (REQ-E3D-600), celle que REQ-LOOP-021 point 6 impose de consulter « au moins toutes les 100 ms ». Le message est une divergence **(D)** : le programme d'origine n'a pas de message pour ce cas. La gravité est **erreur**, celle de la ligne de §4 que le même amendement fait ajouter et celle des échecs de lancement de REQ-LOOP-023 vers lesquels ce cas conduit ; le point 1 d'AMD-051 écrit « gravité normale », contradiction relevée par `R2-review-AMD-050-053-v1.1` 51-N2 et portée à Q-105.
+
 ### 3.4 Rollback (retour arrière)
 
 **REQ-LOOP-030** (P2) — Historique : pendant l'exécution, le frontend DOIT capturer un snapshot de l'état du cœur au début de chaque frame émulée dont le compteur de frames du cœur (SPEC-02) est un multiple de 60, c'est-à-dire avant l'exécution de cette frame. L'historique DOIT conserver au plus **30** snapshots ; au-delà, le plus ancien est remplacé.
@@ -272,6 +279,7 @@ Messages utilisateur de ce module (texte exact, langue anglaise comme l'original
 | quick save | `Quick Save` | normal | 4 s |
 | quick load | `Quick Load` | normal | 4 s |
 | erreurs de lancement / chargement | voir REQ-LOOP-023, 044, 046 | erreur | durée par défaut de SPEC-10 |
+| chargement bloqué (REQ-LOOP-073) | `Loading timed out.` | erreur | 4 s |
 | dialogue relance | titre = nom du jeu ; `Do you want to reset the progress?` ; boutons `Reset`, `Resume` | dialogue | — |
 
 Réglages utilisés (clés et persistance : SPEC-09) : vitesse (entier −8..+8, défaut 0), région (NTSC/PAL/Dendy, défaut NTSC), région automatique (booléen, défaut faux), saut de rendu (booléen, défaut vrai), plafond de rendu (60/90/120), synchronisation verticale, algorithme de rendu des meshes.

@@ -267,6 +267,12 @@ Les coordonnées sont ensuite interpolées linéairement sur le rectangle.
 - Critère d'acceptation : chargement des 101 profils embarqués sans erreur de capacité de texture.
 - Notes : ces capacités correspondent à celles de la référence, qui interrompt le chargement au-delà ; une texture de plus de 512 texels de côté n'y est pas acceptée.
 
+**REQ-E3D-644** (P2, AMD-051) — **Texture d'un objet non allouable.** (Précise la phrase « Le comportement au-delà n'est pas spécifié mais NE DOIT PAS interrompre l'émulation » de REQ-E3D-564, sans rouvrir REQ-E3D-603 : cette exigence n'autorise pas à plafonner le nombre d'objets ou de tuiles dessinés par frame.) Quand la texture d'un objet 3D d'un pattern ne peut pas être allouée — capacités de REQ-E3D-564 dépassées, ou échec d'allocation côté pilote —, le moteur NE DOIT PAS lever d'exception ni interrompre la frame : les tuiles de ce pattern ne sont pas dessinées tant que la texture n'est pas disponible, les autres patterns sont dessinés normalement, et la frame suivante est produite. Une erreur est journalisée au plus une fois par pattern et au plus 100 fois par partie ; au-delà, une ligne de résumé périodique (au plus une par minute de jeu) donne le nombre cumulé de patterns concernés.
+- Critère d'acceptation : avec un budget total d'atlas réduit à C texels par le harnais (`zax-harness render --atlas-budget <texels>`), le chargement d'un profil dont les objets demandent plus de C texels rend les objets logés, journalise une erreur par objet non logé, et la frame suivante est produite ; aucune exception n'est levée et l'émulation continue.
+- Notes : la capacité de l'atlas est exprimée en **texels**, parce qu'un pattern porte un nombre variable d'objets de tailles variables. Le plafond de 100 lignes par partie est nécessaire parce que les patterns sont aussi créés **pendant** le jeu (REQ-E3D-008, REQ-E3D-453) et que rien ne borne leur nombre sur une partie.
+
+**REQ-E3D-645** — **retirée** (AMD-051 v1.1 ; SPEC-GUIDE : un identifiant attribué n'est jamais réutilisé). Elle exigeait d'abandonner un maillage de tuile de plus de 65 536 sommets, ce qui contredisait REQ-E3D-524 et restait vide pour toute implémentation à indices 32 bits. Le vecteur du damier de REQ-E3D-524 reste le seul critère.
+
 **REQ-E3D-565** (P1) — La résolution des couleurs indexées DOIT se faire **au rendu**, à chaque frame affichée : un changement de palette (palette de la frame ou `customPalette`) DOIT être visible à la frame affichée suivante sans reconstruction de maillage.
 - Critère d'acceptation : un jeu qui fait clignoter sa palette (cycle de couleurs) fait changer la couleur des objets 3D à la même cadence que l'image 2D, sans indicateur de chargement.
 
@@ -297,6 +303,12 @@ Le déplacement `δ` est ajouté à `v` avant l'échelle et la rotation de l'obj
 **REQ-E3D-601** (P1) — Un objet 3D dont les maillages ne sont pas encore prêts NE DOIT PAS être dessiné (REQ-E3D-543) ; sa shape reste reconnue et les scripts la voient. Pour un pattern créé pendant le jeu, les maillages DEVRAIENT être prêts au plus tard 2 frames émulées après sa création.
 - Critère d'acceptation : une shape nouvelle apparaît en 3D dans les 2 frames suivant sa première détection.
 - Notes : dans la référence, une apparition retardée d'une ou deux frames est observable ; ce retard est toléré.
+
+**REQ-E3D-646** (P2, AMD-051) — **Objet pas encore prêt : pas oublié, et diagnostic.** Qu'un objet 3D dont les maillages ne sont pas prêts ne soit pas dessiné et que sa shape reste reconnue est déjà exigé par REQ-E3D-601 (P1), qui fait foi pour la mise en attente. S'y ajoutent deux clauses :
+- un tel objet DOIT être dessiné à la **première frame rendue** qui suit la disponibilité de ses maillages et de sa texture, **sans être oublié** ;
+- si un objet reste en attente pendant **600 frames émulées** consécutives, un diagnostic DOIT être journalisé, au plus une fois par objet (et, au-delà de 100 lignes par partie, sous la forme de résumé de REQ-E3D-644).
+- Critère d'acceptation : un objet dont la construction est retardée de 10 frames par le harnais (`zax-harness render --delay-mesh 10`) est dessiné à la première frame rendue qui suit la fin de sa construction, et aucun diagnostic n'est journalisé ; un objet dont la construction est retardée de 700 frames produit exactement une ligne de diagnostic, à la 600ᵉ frame ± 1.
+- Notes : le retard de 10 frames est un **cas de test**, pas un comportement visé. 600 frames émulées valent 10 s en NTSC (SPEC-07 §2), même ordre de grandeur que les 10 s de REQ-LOOP-073.
 
 **REQ-E3D-602** (P1) — Aucun changement de palette, de position, de transformation, d'alpha, de couche, d'étiquette d'ombre ou de déformation NE DOIT provoquer de reconstruction de maillage (REQ-E3D-542, 565).
 - Critère d'acceptation : en jeu, sans création de pattern, l'indicateur de chargement reste inactif et aucun maillage n'est reconstruit (compteur de constructions inchangé).

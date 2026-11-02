@@ -13,7 +13,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 |---|---|---|
 | 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `12561b1` |
 | 2 | AMD-051 part 1: REQ-E3D-644, REQ-E3D-646, REQ-E3D-524, REQ-PERS-088 | done |
-| 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | todo |
+| 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | done |
 | 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | todo |
 | 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | todo |
 | 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | todo |
@@ -257,3 +257,74 @@ the close of RU-4a: ten new tests). fmt and workspace clippy clean.
 One pre-existing clippy limit was hit and is worth recording: `render::Options::set` passed the
 100-line ceiling with the two new flags, so it is split in two — `set` for what is played,
 `set_scene` for how it is drawn.
+
+### Step 3 — AMD-051 REQ-LOOP-073: the loading that no longer advances
+
+**One rule covers both branches of the requirement**, which is what makes 51-N1 impossible to
+reintroduce. `LoadJob` keeps `still_seconds` and the progress the last tick saw; `load_is_still`
+resets the clock when **either** the stage changed **or** the loading progress of REQ-E3D-600
+moved, and times out at 10 s otherwise. So:
+
+- a step of REQ-LOOP-021 or REQ-LOOP-044 that exposes no measure of progress has 10 s to finish
+  (neither its stage nor the progress moves while it runs) — the second branch;
+- the wait for the meshes, which does expose one, is only interrupted when that measure stops
+  moving, **never for being long**. That is the clause 51-N1 of `R2-review-AMD-050-053-v1.1`
+  says a literal reading of v1.1 would have broken: REQ-ACC-031 excludes the initial mesh build
+  from every budget and REQ-E3D-600 builds every object of every pattern of a profile, so a
+  conformant implementation must load a 1 854-pattern profile on a slow machine.
+
+The time is the `real_seconds` the loop already hands `EmulationHost::tick`, so the measure is
+real time (REQ-UI-080's own clock) and a test controls it exactly.
+
+| Piece | What landed |
+|---|---|
+| `host/jobs.rs` | `LOADING_TIMEOUT_SECONDS = 10.0`, `LOADING_TIMED_OUT_MESSAGE`, `advance_load(real_seconds)`, `load_is_still` |
+| `host/mod.rs` | `advance_load` gets the frame's real time; `load_progress_stall` |
+| `host/jobs.rs` `meshes_ready` | reads the stall when it is set — one `Option` test, on a path a load takes once per displayed frame |
+| `ui/keys.rs`, `strings/english.rs`, `strings/french.rs`, `ui/notifications.rs` | `notify.loading_timed_out`: `Loading timed out.` / « Délai de chargement dépassé. » (AMD-035, AMD-036), in `FIXED_KEYS` so it is translated where it is shown |
+
+**The seam the criterion asks for.** AMD-051's criterion is "le harnais bloque l'étape 6 de
+REQ-LOOP-021". In the Rust the `zax-harness` CLI does **not** drive the application's load jobs
+at all (it runs the core, the engine and the renderer directly), so a `--stall-load` flag would
+have no host to stall. The seam is instead `EmulationHost::load_progress_stall`, driven by the
+`LoopHarness` of `zax-app/tests`, which already owns a controllable clock — the same shape as the
+`GeometryBuilder::defer_transfer` the codebase already publishes for REQ-E3D-600. The three
+`zax-harness` options AMD-051 §3 point 8 names therefore land as: `--atlas-budget` **in the CLI**
+(it drives the renderer), `--delay-mesh` **in the CLI** (it drives the engine), and the load stall
+**in the test harness**. Reported rather than faked.
+
+**Nothing of this is on a frame path.** `advance_load` runs only while the loading indicator is
+up, and `tick` returns before any emulated frame while it is (REQ-LOOP-021 step 6).
+
+#### Q-105 — the gravity of the notification
+
+REQ-LOOP-073 point 1 says the notification has « gravité **normale** » and §3 point 5 of the same
+amendment adds the SPEC-07 §4 row with « **erreur** ». The two are different observable
+behaviours: REQ-UI-081 **drops** a normal notification while an error is on screen. R2 raised
+exactly this as **51-N2** and recommended "erreur"; v1.2 fixed 51-N1 and left 51-N2.
+
+Provisional choice: **erreur**, through `fail_job` → `show_error`, the path REQ-LOOP-023 and
+REQ-LOOP-046 already take, which is also the state this requirement goes to. `// Q-105` at the
+line, and `req_loop_073_the_notification_is_an_error_so_it_is_never_dropped` says which assertion
+to invert if R0 answers otherwise. Next free Q number is **Q-106**.
+
+#### Tests (5 in `zax-app/tests/amd051_loading_timeout_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| the harness blocks step 6 → the notification at 10 s ± 1 s, and the state is Stopped with no current game | `req_loop_073_a_mesh_wait_that_stops_advancing_times_out_after_ten_seconds` |
+| the gravity (Q-105) | `req_loop_073_the_notification_is_an_error_so_it_is_never_dropped` |
+| the second criterion: a command of REQ-UI-205 runs within the second | `req_loop_073_a_command_runs_within_a_second_of_the_timeout` |
+| 51-N1: 30 s of a load whose measure creeps forward is never interrupted, and still finishes | `req_loop_073_a_wait_whose_progress_keeps_moving_is_never_interrupted` |
+| an ordinary launch is untouched, and shows no notification | `req_loop_073_an_ordinary_launch_is_untouched` |
+
+`cargo test --release --workspace --features zax-app/bundled`: **2260 passed, 0 failed**, 83
+ignored. fmt and workspace clippy clean.
+
+#### SPEC chapter edits
+
+- `SPEC-07` §3.3: REQ-LOOP-073 written out after REQ-LOOP-024.
+- `SPEC-07` §4, the message table: the `Loading timed out.` row.
+- `SPEC-04B` §3.6 / §3.7: REQ-E3D-644 after REQ-E3D-564, REQ-E3D-646 after REQ-E3D-601,
+  REQ-E3D-645 as **retired**.
+- `SPEC-09` §3.2: REQ-PERS-088 after REQ-PERS-024.

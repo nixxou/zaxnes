@@ -102,6 +102,9 @@ pub const BUTTON_LOAD_ALIGNED: &str = "button.load_aligned";
 pub const NOTIFY_UNCOMPRESSION_FAILED: &str = "notify.uncompression_failed";
 pub const NOTIFY_INVALID_ROM: &str = "notify.invalid_rom";
 pub const NOTIFY_GAME_MISSING: &str = "notify.game_missing";
+
+/// A load that stopped advancing (AMD-051 REQ-LOOP-073, SPEC-07 §4).
+pub const NOTIFY_LOADING_TIMED_OUT: &str = "notify.loading_timed_out";
 pub const NOTIFY_FOREIGN_CORE: &str = "notify.foreign_core";
 pub const NOTIFY_NOT_A3DN_FILE: &str = "notify.not_a_3dn_file";
 pub const NOTIFY_UNSUPPORTED3DN_VERSION: &str = "notify.unsupported_3dn_version";
@@ -504,6 +507,7 @@ pub const PUBLISHED: &[&str] = &[
     NOTIFY_UNCOMPRESSION_FAILED,
     NOTIFY_INVALID_ROM,
     NOTIFY_GAME_MISSING,
+    NOTIFY_LOADING_TIMED_OUT,
     NOTIFY_FOREIGN_CORE,
     NOTIFY_NOT_A3DN_FILE,
     NOTIFY_UNSUPPORTED3DN_VERSION,

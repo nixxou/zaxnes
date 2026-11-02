@@ -55,7 +55,7 @@ pub use games::{
     delete_slot_question, ConfirmationRequest, ConfirmedAction, DELETE_GAME_QUESTION, NO_LABEL,
     YES_LABEL,
 };
-pub use jobs::{LoadKind, SlotPatchStatus};
+pub use jobs::{LoadKind, SlotPatchStatus, LOADING_TIMED_OUT_MESSAGE, LOADING_TIMEOUT_SECONDS};
 
 /// Width of the save state and cover thumbnails.
 pub const THUMBNAIL_WIDTH: usize = 256;
@@ -195,6 +195,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     events: Vec<HostEvent>,
     state: EmulationState,
     load_progress: f32,
+    /// Holds the loading progress of REQ-E3D-600 at this value instead of reading it from the
+    /// engine: the seam the acceptance criterion of AMD-051 REQ-LOOP-073 asks for ("le harnais
+    /// bloque l'étape 6 de REQ-LOOP-021"). `None` — always, outside a test — reads the engine.
+    pub load_progress_stall: Option<f32>,
     two_dimensional_view: bool,
     emulated_frames: i64,
     quit_requested: bool,
@@ -359,6 +363,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             events: Vec::new(),
             state: EmulationState::Stopped,
             load_progress: 0.0,
+            load_progress_stall: None,
             two_dimensional_view: false,
             emulated_frames: 0,
             quit_requested: false,
@@ -702,7 +707,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.update_zapper(snapshot);
         self.read_hotkeys(snapshot, real_seconds);
         if self.loading {
-            self.advance_load();
+            self.advance_load(real_seconds);
             self.dispatch_setting_changes();
             // REQ-LOOP-021 step 6: no emulated frame runs before the loading indicator clears.
             self.publish_state();

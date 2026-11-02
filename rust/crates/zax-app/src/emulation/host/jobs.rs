@@ -36,6 +36,14 @@ pub enum LoadKind {
     Regenerate,
 }
 
+/// Real seconds a load may make no progress before AMD-051 REQ-LOOP-073 gives up on it.
+pub const LOADING_TIMEOUT_SECONDS: f64 = 10.0;
+
+/// The notification of AMD-051 REQ-LOOP-073, a divergence **(D)**: the original program has no
+/// message for a load that stops advancing. Its French translation is in `ui/strings`
+/// (AMD-035, AMD-036).
+pub const LOADING_TIMED_OUT_MESSAGE: &str = "Loading timed out.";
+
 /// A load in progress.
 pub(super) struct LoadJob {
     kind: LoadKind,
@@ -47,6 +55,12 @@ pub(super) struct LoadJob {
     stage: u32,
     reload_profile: bool,
     different_game: bool,
+    /// Real seconds since the job last moved: a stage completed, or the loading progress of
+    /// REQ-E3D-600 changed (AMD-051 REQ-LOOP-073).
+    still_seconds: f64,
+    /// The progress the last tick saw, so that a mass build that is advancing is never
+    /// interrupted however long it takes (REQ-ACC-031 excludes it from every budget).
+    seen_progress: f32,
 }
 
 impl LoadJob {
@@ -61,6 +75,8 @@ impl LoadJob {
             stage: 0,
             reload_profile: false,
             different_game: false,
+            still_seconds: 0.0,
+            seen_progress: -1.0,
         }
     }
 }
@@ -299,18 +315,32 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.loading = true;
     }
 
-    /// Advances the load job by one stage.
-    pub(super) fn advance_load(&mut self) {
+    /// Advances the load job by one stage. `real_seconds` is the real time since the last
+    /// displayed frame, which is what the watchdog of AMD-051 REQ-LOOP-073 counts.
+    pub(super) fn advance_load(&mut self, real_seconds: f64) {
         let Some(mut job) = self.job.take() else {
             return;
         };
+        let stage_before = (job.kind, job.stage);
         let step = match job.kind {
             LoadKind::Launch => self.advance_launch(&mut job),
             LoadKind::LoadSlot => self.advance_slot_load(&mut job),
             LoadKind::Regenerate => self.advance_regenerate(&mut job),
         };
         match step {
-            Step::Continue => self.job = Some(job),
+            Step::Continue => {
+                if self.load_is_still(&mut job, stage_before, real_seconds) {
+                    // REQ-LOOP-073 point 2: as REQ-LOOP-023 does for a launch that fails — the
+                    // game cleared, the loading indicator down, the state back to Stopped.
+                    // Q-105: `fail_job` shows the message at the **error** severity, which is
+                    // the gravity the amendment's own line of SPEC-07 §4 gives it; the first
+                    // point of the requirement says "normale" instead, and the two readings do
+                    // not behave alike (REQ-UI-081 drops a normal notification behind an error).
+                    self.fail_job(LOADING_TIMED_OUT_MESSAGE);
+                    return;
+                }
+                self.job = Some(job);
+            }
             Step::Finished => {
                 self.loading = false;
             }
@@ -318,6 +348,37 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.fail_job(&message);
             }
         }
+    }
+
+    /// Whether the job has made no progress at all for [`LOADING_TIMEOUT_SECONDS`]
+    /// (AMD-051 REQ-LOOP-073).
+    ///
+    /// One rule covers both branches of the requirement. A stage that completed, or a loading
+    /// progress of REQ-E3D-600 that moved, resets the clock; nothing else does. So:
+    ///
+    /// - a step of REQ-LOOP-021 or REQ-LOOP-044 that exposes **no** measure of progress has
+    ///   10 s to finish, since neither its stage nor the progress changes while it runs;
+    /// - the wait for the meshes (step 6), which does expose one, is only interrupted when that
+    ///   measure stops moving — never for being long. The total duration of a mass build is not
+    ///   bounded by anything (REQ-ACC-031 excludes it from its budget, and REQ-E3D-600 builds
+    ///   every object of every pattern of a profile), which is what point 51-N1 of
+    ///   `R2-review-AMD-050-053-v1.1` is about.
+    fn load_is_still(
+        &mut self,
+        job: &mut LoadJob,
+        stage_before: (LoadKind, u32),
+        real_seconds: f64,
+    ) -> bool {
+        let moved = stage_before != (job.kind, job.stage)
+            || (self.load_progress - job.seen_progress).abs() > f32::EPSILON;
+        job.seen_progress = self.load_progress;
+        if moved {
+            job.still_seconds = 0.0;
+            return false;
+        }
+
+        job.still_seconds += real_seconds;
+        job.still_seconds >= LOADING_TIMEOUT_SECONDS
     }
 
     fn reset_port_types_on_game_change(&mut self, job: &LoadJob) {
@@ -580,10 +641,16 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     }
 
     fn meshes_ready(&mut self) -> bool {
-        self.load_progress = self
-            .session
-            .as_ref()
-            .map_or(1.0, |session| session.engine().load_progress());
+        self.load_progress = match self.load_progress_stall {
+            // AMD-051 REQ-LOOP-073, acceptance criterion: "le harnais bloque l'étape 6". One
+            // `Option` test, on the path a load takes once per displayed frame — never on a
+            // frame path.
+            Some(held) => held,
+            None => self
+                .session
+                .as_ref()
+                .map_or(1.0, |session| session.engine().load_progress()),
+        };
         self.load_progress >= 1.0
     }
 

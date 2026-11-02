@@ -85,6 +85,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::NOTIFY_UNCOMPRESSION_FAILED, "La décompression a échoué"),
     (keys::NOTIFY_INVALID_ROM, "Fichier ROM invalide."),
     (keys::NOTIFY_GAME_MISSING, "Le profil du jeu n'existe plus."),
+    (keys::NOTIFY_LOADING_TIMED_OUT, "Délai de chargement dépassé."),
     (keys::NOTIFY_FOREIGN_CORE, "La sauvegarde d'état vient d'un autre cœur."),
     (keys::NOTIFY_NOT_A3DN_FILE, "Ce fichier n'est pas un fichier 3dn"),
     (keys::NOTIFY_UNSUPPORTED3DN_VERSION, "La version {0} du format 3dn n'est pas prise en charge"),
