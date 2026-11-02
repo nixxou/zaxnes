@@ -199,7 +199,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 picture,
             )
             .map_err(std::io::Error::other)?;
-            std::fs::write(thumbnail_file, png)?;
+            // AMD-051 REQ-PERS-088: the thumbnail travels with the savestate, so it is written
+            // the same way — an interruption leaves the old picture or the new one, never half
+            // a PNG beside a complete state.
+            write_atomic(&thumbnail_file, &png)?;
         } else {
             // A quick save has no thumbnail (REQ-LOOP-043): the previous one must not stay
             // behind and be shown for a different state.

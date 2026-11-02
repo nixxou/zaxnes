@@ -237,6 +237,7 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         mesh: RenderAlgorithm::Greedy,
         force_three_dimensional: options.three_dimensional,
         advanced: options.advanced,
+        delay_mesh: 0,
     })?;
     widen(&mut host, options)?;
     let mut records = Vec::new();

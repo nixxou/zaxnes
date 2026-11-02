@@ -211,6 +211,110 @@ fn req_e3d_543_a_hidden_or_unready_object_is_not_drawn() {
     assert!(convert_and_draw(&mut engine, &batch, 2).tiles().is_empty());
 }
 
+/// AMD-051 REQ-E3D-646, first clause: an object whose meshes arrive late is drawn on the first
+/// frame that follows, and no diagnostic is produced for a short wait.
+///
+/// The ten frames are the amendment's own test case, not a behaviour it wants: REQ-E3D-601
+/// recommends meshes ready two emulated frames after a pattern is created.
+#[test]
+fn req_e3d_646_an_object_delayed_ten_frames_is_drawn_on_the_next_frame_and_not_reported() {
+    let mut engine = geometry_engine();
+    builder_mut(&mut engine).defer_transfer = true;
+    engine
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(2))
+                .build(),
+            true,
+        )
+        .unwrap();
+
+    let mut batch = Batch::new();
+    batch.bg(img::a(), 16, 32, 0);
+    for counter in 0..10 {
+        let list = convert_and_draw(&mut engine, &batch, counter);
+        assert!(list.tiles().is_empty(), "frame {counter} draws nothing yet");
+        assert_eq!(1, engine.waiting_objects(), "the object is remembered");
+        assert_eq!(
+            Vec::<InstanceRef>::new(),
+            engine.take_late_objects(),
+            "ten frames are not a diagnostic"
+        );
+    }
+
+    // The meshes arrive. REQ-E3D-646: "dessiné à la première frame rendue qui suit", not later.
+    assert_eq!(1, builder_mut(&mut engine).commit());
+    let list = convert_and_draw(&mut engine, &batch, 10);
+    assert_eq!(1, list.tiles().len(), "drawn on the very next frame");
+    assert_eq!(0, engine.waiting_objects(), "and no longer waiting");
+    assert_eq!(Vec::<InstanceRef>::new(), engine.take_late_objects());
+}
+
+/// AMD-051 REQ-E3D-646, second clause: 600 emulated frames of waiting produce exactly one
+/// diagnostic, at the 600th frame ± 1.
+#[test]
+fn req_e3d_646_an_object_that_waits_six_hundred_frames_is_reported_exactly_once() {
+    let mut engine = geometry_engine();
+    builder_mut(&mut engine).defer_transfer = true;
+    engine
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(2))
+                .build(),
+            true,
+        )
+        .unwrap();
+
+    let mut batch = Batch::new();
+    batch.bg(img::a(), 16, 32, 0);
+    let window = zax_engine3d::draw_list::LATE_OBJECT_FRAMES;
+    let mut reported = Vec::new();
+    for counter in 0..700 {
+        convert_and_draw(&mut engine, &batch, counter);
+        for object in engine.take_late_objects() {
+            reported.push((counter, object));
+        }
+    }
+
+    assert_eq!(1, reported.len(), "exactly one line: {reported:?}");
+    let (frame, object) = reported[0];
+    assert!(
+        (frame - window).abs() <= 1,
+        "at frame {window} plus or minus one, not {frame}"
+    );
+    assert_eq!(instance_ref(&engine, 0, 0), object);
+
+    // And it stays reported: a hundred more frames of the same wait say nothing more.
+    for counter in 700..800 {
+        convert_and_draw(&mut engine, &batch, counter);
+        assert_eq!(Vec::<InstanceRef>::new(), engine.take_late_objects());
+    }
+}
+
+/// The performance clause of the lot for this requirement: an object that is ready costs the
+/// watch nothing, because nothing is remembered about it.
+#[test]
+fn req_e3d_646_a_healthy_frame_remembers_no_waiting_object() {
+    let mut engine = geometry_engine();
+    engine
+        .load_profile(
+            &ProfileBuilder::new()
+                .pattern_with(1, 1, &cells(&[img::a()]), with_depth(2))
+                .build(),
+            true,
+        )
+        .unwrap();
+
+    let mut batch = Batch::new();
+    batch.bg(img::a(), 16, 32, 0);
+    for counter in 0..5 {
+        let list = convert_and_draw(&mut engine, &batch, counter);
+        assert_eq!(1, list.tiles().len());
+        assert_eq!(0, engine.waiting_objects());
+        assert_eq!(Vec::<InstanceRef>::new(), engine.take_late_objects());
+    }
+}
+
 #[test]
 fn req_e3d_600_a_mass_build_reports_its_progress_in_two_halves() {
     let mut engine = geometry_engine();

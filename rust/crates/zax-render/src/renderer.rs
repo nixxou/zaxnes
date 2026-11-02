@@ -12,6 +12,7 @@ use thiserror::Error;
 use zax_engine3d::draw_list::DeformParameters;
 use zax_engine3d::geometry::texture::ObjectTexture;
 use zax_engine3d::geometry::tile_mesh::{TileMesh, TriangleCountError};
+use zax_engine3d::registry::PatternId;
 use zax_engine3d::space_bend::SpaceBend;
 use zax_engine3d::vectors::Mat4;
 
@@ -77,7 +78,7 @@ impl Residency for GlResidency<'_> {
         self.meshes.get(mesh)
     }
 
-    fn texture(&mut self, texture: &Arc<ObjectTexture>) -> Result<Texture, GlError> {
+    fn texture(&mut self, texture: &Arc<ObjectTexture>) -> Option<Texture> {
         self.textures.get(texture)
     }
 
@@ -418,6 +419,8 @@ impl SceneRenderer {
         statistics.resident_meshes = count(self.meshes.count());
         statistics.mesh_uploads = self.meshes.uploads();
         statistics.resident_textures = count(self.textures.count());
+        statistics.texture_texels = self.textures.texels();
+        statistics.patterns_without_texture = self.plan.diagnostics.patterns_without_texture();
         self.meshes.collect();
         self.textures.collect();
         Ok(())
@@ -472,6 +475,37 @@ impl SceneRenderer {
     pub fn invalidate_caches(&mut self) {
         self.meshes.clear();
         self.textures.clear();
+        // AMD-051 REQ-E3D-644 counts its lines "par partie": a wholesale rebuild is the start of
+        // a new one, and the patterns it reported no longer exist.
+        self.plan.diagnostics.reset();
+    }
+
+    /// Caps the texels the resident object textures may occupy (AMD-051 REQ-E3D-644,
+    /// REQ-E3D-564); `None` — the default — leaves the driver as the only limit.
+    ///
+    /// Beyond the cap an object's texture is simply not made resident: its tiles are left out of
+    /// the frame, every other pattern is drawn, the next frame is produced, and one diagnostic
+    /// per pattern reaches [`Self::take_diagnostics`]. Lowering it is how the harness
+    /// (`--atlas-budget`) and the tests reach a path a desktop GPU never takes on its own.
+    pub fn set_texture_budget(&mut self, texels: Option<u64>) {
+        self.textures.set_budget(texels);
+    }
+
+    /// The diagnostic lines AMD-051 asks for, and an empty vector on a frame where nothing went
+    /// wrong (REQ-E3D-644, REQ-E3D-646). The host logs them; the renderer writes no file.
+    pub fn take_diagnostics(&mut self) -> Vec<String> {
+        self.plan.diagnostics.take()
+    }
+
+    /// Reports that the 3D object `index` of `pattern` has been waiting for its meshes for
+    /// `frames` emulated frames (AMD-051 REQ-E3D-646). The conversion side finds them
+    /// (`DrawListBuilder::take_late_objects`); the renderer only holds the one place that bounds
+    /// how often a line is written.
+    pub fn report_late_object(&mut self, pattern: PatternId, index: usize, frames: u32) {
+        let frame = self.plan.frame_count();
+        self.plan
+            .diagnostics
+            .object_late(pattern, index, frames, frame);
     }
 
     // ----------------------------------------------------------------- shadow pass

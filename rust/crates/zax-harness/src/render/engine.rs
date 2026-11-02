@@ -165,4 +165,23 @@ impl Engine {
             Self::Wgpu(gpu) => gpu.renderer_ref().last_view(),
         }
     }
+
+    /// Caps the texels the object textures may occupy (`--atlas-budget`, AMD-051 REQ-E3D-644).
+    pub fn set_texture_budget(&mut self, texels: Option<u64>) {
+        match self {
+            Self::Gl { renderer, .. } => renderer.set_texture_budget(texels),
+            // Q-104: the wgpu backend has no budget of its own yet.
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(_) => {}
+        }
+    }
+
+    /// The diagnostic lines of AMD-051 the last frames produced, and nothing on a healthy run.
+    pub fn take_diagnostics(&mut self) -> Vec<String> {
+        match self {
+            Self::Gl { renderer, .. } => renderer.take_diagnostics(),
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(_) => Vec::new(),
+        }
+    }
 }

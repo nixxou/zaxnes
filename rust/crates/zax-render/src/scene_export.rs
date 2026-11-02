@@ -201,8 +201,8 @@ impl Residency for MeshTable {
         Ok(Some(self.meshes.len() - 1))
     }
 
-    fn texture(&mut self, _texture: &Arc<ObjectTexture>) -> Result<usize, Self::Error> {
-        Ok(0)
+    fn texture(&mut self, _texture: &Arc<ObjectTexture>) -> Option<usize> {
+        Some(0)
     }
 
     fn picture(&mut self, _picture: &[u8], _height: usize) -> Result<Option<usize>, Self::Error> {

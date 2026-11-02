@@ -34,6 +34,12 @@ pub struct RenderStatistics {
     pub mesh_uploads: u32,
     /// Object textures resident on the GPU.
     pub resident_textures: u32,
+    /// Texels the resident object textures occupy, the unit of REQ-E3D-564 and of the budget of
+    /// AMD-051 REQ-E3D-644.
+    pub texture_texels: u64,
+    /// Distinct patterns whose texture could not be allocated since the last wholesale rebuild
+    /// (AMD-051 REQ-E3D-644). 0 whenever everything fits, which is every ordinary frame.
+    pub patterns_without_texture: u64,
     /// Whether a shadow map was produced for this frame.
     pub shadow_pass: bool,
     /// Side of the shadow map in texels the hardware granted (AMD-034 §2): the requested size,
@@ -71,6 +77,8 @@ impl Default for RenderStatistics {
             resident_meshes: 0,
             mesh_uploads: 0,
             resident_textures: 0,
+            texture_texels: 0,
+            patterns_without_texture: 0,
             shadow_pass: false,
             shadow_map_size: geometry::SHADOW_MAP_SIZE,
             requested_shadow_map_size: geometry::SHADOW_MAP_SIZE,

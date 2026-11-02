@@ -7,7 +7,7 @@
 //! mipmap in both cases (REQ-E3D-563).
 
 use std::sync::Arc;
-use zax_engine3d::hashing::FastMap;
+use zax_engine3d::hashing::{FastMap, FastSet};
 
 use glow::Texture;
 use zax_engine3d::geometry::texture::ObjectTexture;
@@ -27,7 +27,15 @@ struct Entry {
     /// Held only so that the keyed address stays unique while the entry lives.
     _texture: Arc<ObjectTexture>,
     handle: Texture,
+    /// Texels it occupies, so that the collector gives the budget back (REQ-E3D-644).
+    texels: u64,
     last_used: u64,
+}
+
+/// Texels of `texture`, the unit REQ-E3D-564 and the budget of REQ-E3D-644 are expressed in.
+#[allow(clippy::cast_sign_loss)] // Texture sizes are at least 1.
+fn texel_count(texture: &ObjectTexture) -> u64 {
+    u64::from(texture.width().max(0) as u32) * u64::from(texture.height().max(0) as u32)
 }
 
 /// The resident object textures, the palette texture and the two dummies bound to the unused
@@ -41,6 +49,17 @@ pub struct TextureCache {
     dummy_indexed: Texture,
     dummy_color: Texture,
     frame: u64,
+    /// Texels the resident object textures occupy, against [`TextureCache::budget`].
+    texels: u64,
+    /// A ceiling of the total texel count, over and above whatever the driver itself refuses
+    /// (AMD-051 REQ-E3D-644, REQ-E3D-564). `None` — the default — leaves the driver as the only
+    /// limit; the harness lowers it (`--atlas-budget`) to exercise the degraded path, which is
+    /// the only way a test can reach it on a desktop GPU.
+    budget: Option<u64>,
+    /// The textures refused **this frame**, so that the other tiles of the same object cost no
+    /// second GL call. Cleared at each frame, because REQ-E3D-646 wants the object drawn on the
+    /// first frame its texture is available and the retention collector keeps freeing room.
+    refused: FastSet<*const ObjectTexture>,
 }
 
 impl TextureCache {
@@ -63,7 +82,21 @@ impl TextureCache {
             dummy_indexed,
             dummy_color,
             frame: 0,
+            texels: 0,
+            budget: None,
+            refused: FastSet::default(),
         })
+    }
+
+    /// Caps the total texel count the resident object textures may occupy (REQ-E3D-644);
+    /// `None` removes the cap. Applies from the next upload on: textures already resident stay.
+    pub fn set_budget(&mut self, texels: Option<u64>) {
+        self.budget = texels;
+    }
+
+    /// Texels the resident object textures occupy.
+    pub const fn texels(&self) -> u64 {
+        self.texels
     }
 
     /// Number of object textures resident on the GPU.
@@ -89,6 +122,8 @@ impl TextureCache {
     /// Starts a rendered frame, for the retention bookkeeping.
     pub fn begin_frame(&mut self) {
         self.frame += 1;
+        // Normally empty, and clearing an empty set is free.
+        self.refused.clear();
     }
 
     /// Uploads the 64 resolved colours of the displayed frame (REQ-E3D-641). Called once per
@@ -113,36 +148,59 @@ impl TextureCache {
         self.gl.bind_texture(glow::TEXTURE_2D, None);
     }
 
-    /// The GPU texture of `texture`, uploading it on first use.
-    pub fn get(&mut self, texture: &Arc<ObjectTexture>) -> Result<Texture, GlError> {
+    /// The GPU texture of `texture`, uploading it on first use, and `None` when it could not be
+    /// allocated — the budget is full, or the driver refused (AMD-051 REQ-E3D-644). A refusal is
+    /// **not** an error: the caller leaves the tile out of the frame and tries again next frame.
+    pub fn get(&mut self, texture: &Arc<ObjectTexture>) -> Option<Texture> {
         let key = Arc::as_ptr(texture);
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.last_used = self.frame;
-            return Ok(entry.handle);
+            return Some(entry.handle);
+        }
+        if self.refused.contains(&key) {
+            return None;
         }
 
-        let handle = self.upload(texture)?;
+        let cost = texel_count(texture);
+        let over_budget = self
+            .budget
+            .is_some_and(|budget| self.texels.saturating_add(cost) > budget);
+        let handle = if over_budget {
+            None
+        } else {
+            self.upload(texture).ok()
+        };
+        let Some(handle) = handle else {
+            self.refused.insert(key);
+            return None;
+        };
+
+        self.texels = self.texels.saturating_add(cost);
         self.entries.insert(
             key,
             Entry {
                 _texture: Arc::clone(texture),
                 handle,
+                texels: cost,
                 last_used: self.frame,
             },
         );
-        Ok(handle)
+        Some(handle)
     }
 
     /// Releases every texture whose last use is older than the retention window.
     pub fn collect(&mut self) {
         let (gl, frame) = (&self.gl, self.frame);
+        let mut freed = 0;
         self.entries.retain(|_, entry| {
             let keep = frame - entry.last_used <= RETENTION_FRAMES;
             if !keep {
                 gl.delete_texture(entry.handle);
+                freed += entry.texels;
             }
             keep
         });
+        self.texels = self.texels.saturating_sub(freed);
     }
 
     /// Releases every object texture, keeping the palette.
@@ -150,6 +208,8 @@ impl TextureCache {
         for (_, entry) in self.entries.drain() {
             self.gl.delete_texture(entry.handle);
         }
+        self.texels = 0;
+        self.refused.clear();
     }
 
     #[allow(clippy::cast_sign_loss)] // Texture sizes are at least 1.

@@ -325,8 +325,8 @@ impl Residency for WgpuResidency<'_> {
         Ok(self.meshes.get(self.device, self.queue, mesh))
     }
 
-    fn texture(&mut self, texture: &Arc<ObjectTexture>) -> Result<TextureHandle, Self::Error> {
-        Ok(self.textures.get(self.device, self.queue, texture))
+    fn texture(&mut self, texture: &Arc<ObjectTexture>) -> Option<TextureHandle> {
+        Some(self.textures.get(self.device, self.queue, texture))
     }
 
     fn picture(

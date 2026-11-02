@@ -332,6 +332,18 @@ impl ConversionEngine {
         self.draw_list_builder.exchange(list);
     }
 
+    /// The 3D objects that have been in a frame without being drawable for the whole window of
+    /// AMD-051 REQ-E3D-646, each reported once. Empty on every frame of a healthy profile.
+    pub fn take_late_objects(&mut self) -> Vec<InstanceRef> {
+        self.draw_list_builder.take_late_objects()
+    }
+
+    /// How many 3D objects are waiting for their meshes right now (REQ-E3D-601, REQ-E3D-646).
+    #[must_use]
+    pub fn waiting_objects(&self) -> usize {
+        self.draw_list_builder.waiting_objects()
+    }
+
     /// The list built by the last call of [`ConversionEngine::build_draw_list`] or
     /// [`ConversionEngine::build_draw_list_of`].
     #[must_use]

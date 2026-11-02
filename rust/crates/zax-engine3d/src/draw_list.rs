@@ -13,9 +13,9 @@ use crate::geometry::tile_mesh::TileMesh;
 use crate::geometry::tile_sides;
 use crate::grid;
 use crate::image::TileImage;
-use crate::instance::{PatternInstance, RenderStyle};
+use crate::instance::{InstanceRef, PatternInstance, RenderStyle};
 use crate::palette::{FramePalette, Rgb24};
-use crate::registry::PatternRegistry;
+use crate::registry::{PatternId, PatternRegistry};
 use crate::settings::{ConversionSettings, RenderAlgorithm, ZLayer};
 use crate::vectors::{Mat4, Vec2, Vec3};
 
@@ -98,6 +98,11 @@ impl DeformParameters {
 pub struct DrawTile {
     /// The frame instance the tile belongs to.
     pub instance: FrameInstanceId,
+    /// The pattern the tile's 3D object belongs to. AMD-051 REQ-E3D-644 bounds its diagnostic
+    /// at "at most once per pattern", and the renderer — which is where a texture allocation
+    /// fails — has no other way to name one. Taken from [`InstanceLook`], so it is read once per
+    /// instance, not once per tile.
+    pub pattern: PatternId,
     /// The tile of the shape.
     pub tile: FrameTile,
     /// The mesh of this tile image for this instance, or `None` when no geometry builder is
@@ -225,6 +230,32 @@ pub struct DrawSources<'a> {
 pub struct DrawListBuilder {
     list: FrameDrawList,
     neighbours: FastMap<(i32, i32), Option<TileImage>>,
+    /// AMD-051 REQ-E3D-646: the frame counter on which each 3D object that is in the frame but
+    /// not drawable started waiting, and the ones already reported.
+    ///
+    /// **Empty while everything works**, which is what keeps this off the cost of a healthy
+    /// frame: the only thing a frame with nothing waiting pays is the `is_empty` test of
+    /// [`Self::forget_ready_objects`], once per frame, not once per instance.
+    waiting: FastMap<InstanceRef, WaitingObject>,
+    /// Objects that have outstayed [`LATE_OBJECT_FRAMES`], newest last. Drained by the host,
+    /// which logs them; never read on the drawing path.
+    late: Vec<InstanceRef>,
+}
+
+/// Emulated frames a 3D object may stay undrawable before REQ-E3D-646 asks for a diagnostic:
+/// 600, which is 10 s at the nominal 60 frames per second of SPEC-07 §2.
+pub const LATE_OBJECT_FRAMES: i32 = 600;
+
+/// What [`DrawListBuilder::waiting`] remembers about one object that is not drawable yet.
+#[derive(Debug, Clone, Copy)]
+struct WaitingObject {
+    /// The frame counter of the first frame it was seen waiting on.
+    since: i32,
+    /// The last frame counter it was seen waiting on, so that an object which has left the
+    /// frame is forgotten instead of accumulating.
+    last_seen: i32,
+    /// Whether its diagnostic has already been produced (REQ-E3D-646: at most once per object).
+    reported: bool,
 }
 
 impl DrawListBuilder {
@@ -232,6 +263,20 @@ impl DrawListBuilder {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The 3D objects that have been waiting for their meshes for [`LATE_OBJECT_FRAMES`]
+    /// consecutive emulated frames and have not been reported yet (REQ-E3D-646). Taking them
+    /// clears the list.
+    pub fn take_late_objects(&mut self) -> Vec<InstanceRef> {
+        std::mem::take(&mut self.late)
+    }
+
+    /// How many 3D objects are waiting for their meshes right now (REQ-E3D-601): 0 on any frame
+    /// of a loaded profile, so a test can assert that nothing is forgotten.
+    #[must_use]
+    pub fn waiting_objects(&self) -> usize {
+        self.waiting.len()
     }
 
     /// The list of the last build.
@@ -253,18 +298,55 @@ impl DrawListBuilder {
         sources: &mut DrawSources<'_>,
     ) -> &FrameDrawList {
         self.list.begin(frame);
+        let counter = frame.counter();
         for &id in frame.instances() {
             let instance = frame.instance(id);
-            if instance.style == RenderStyle::Hidden
-                || !sources.geometry.is_ready(instance.reference())
-            {
+            if instance.style == RenderStyle::Hidden {
+                continue;
+            }
+            if !sources.geometry.is_ready(instance.reference()) {
+                // REQ-E3D-601 already keeps the shape in the frame and out of the drawing; the
+                // two clauses AMD-051 REQ-E3D-646 adds are watched from here, the one place
+                // that already knows an object is waiting. The healthy path does not reach it.
+                self.note_waiting(instance.reference(), counter);
                 continue;
             }
 
             self.add_instance(frame, id, sources);
         }
+        self.forget_ready_objects(counter);
 
         &self.list
+    }
+
+    /// Counts one more frame of waiting for `reference` and reports it once it has waited
+    /// [`LATE_OBJECT_FRAMES`] frames in a row (REQ-E3D-646).
+    #[cold]
+    fn note_waiting(&mut self, reference: InstanceRef, counter: i32) {
+        let entry = self.waiting.entry(reference).or_insert(WaitingObject {
+            since: counter,
+            last_seen: counter,
+            reported: false,
+        });
+        // A frame counter that went backwards — a savestate restore, a reset — restarts the
+        // window rather than reporting a wait that never happened.
+        if counter < entry.last_seen {
+            entry.since = counter;
+        }
+        entry.last_seen = counter;
+        if !entry.reported && counter - entry.since >= LATE_OBJECT_FRAMES {
+            entry.reported = true;
+            self.late.push(reference);
+        }
+    }
+
+    /// Drops the objects that did not wait on this frame: they are drawable again — the first
+    /// frame after their meshes arrived draws them (REQ-E3D-646) — or no longer in the frame.
+    fn forget_ready_objects(&mut self, counter: i32) {
+        if self.waiting.is_empty() {
+            return;
+        }
+        self.waiting.retain(|_, object| object.last_seen == counter);
     }
 
     fn add_instance(
@@ -355,6 +437,8 @@ impl DrawListBuilder {
 /// What every tile of one instance shares: material, shadows, texture and transform parts.
 struct InstanceLook {
     container: SceneContainer,
+    /// The pattern of the instance (AMD-051 REQ-E3D-644: its diagnostic is per pattern).
+    pattern: PatternId,
     material: MaterialClass,
     cast_shadow: bool,
     receive_shadow: bool,
@@ -405,6 +489,7 @@ impl InstanceLook {
             } else {
                 SceneContainer::Game
             },
+            pattern: instance.reference().pattern,
             material,
             cast_shadow: settings.shadow
                 && !ui
@@ -477,6 +562,7 @@ impl InstanceLook {
 
         DrawTile {
             instance: id,
+            pattern: self.pattern,
             tile: *tile,
             mesh,
             transform,

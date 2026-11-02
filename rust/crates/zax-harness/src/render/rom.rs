@@ -10,6 +10,7 @@ use std::fs;
 use std::path::Path;
 
 use zax_engine3d::engine::ConversionEngine;
+use zax_engine3d::geometry::builder::GeometryBuilder;
 use zax_engine3d::palette::Rgb24;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_engine3d::vectors::Vec3;
@@ -80,6 +81,8 @@ pub struct RomRequest<'a> {
     pub dump_mem: Option<&'a Path>,
     /// Where to write the CPU's 2 KiB of work RAM after every frame, one after the other.
     pub trace_ram: Option<&'a Path>,
+    /// `--delay-mesh <frames>`: emulated frames the meshes are held back (AMD-051 REQ-E3D-646).
+    pub delay_mesh: i32,
 }
 
 /// Runs the ROM and builds the scene of its last frame.
@@ -99,6 +102,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         mesh: request.mesh,
         force_three_dimensional: false,
         advanced: request.advanced,
+        delay_mesh: request.delay_mesh,
     })?;
     host.core.set_builtin_patches(request.builtin_patches);
     host.core.set_widescreen_margin(request.widescreen);
@@ -373,6 +377,9 @@ pub(crate) struct Startup<'a> {
     pub force_three_dimensional: bool,
     /// Whether the built-in patches of an advanced widescreen mode apply.
     pub advanced: bool,
+    /// `--delay-mesh <frames>`: emulated frames the meshes of every 3D object are held back
+    /// before they reach the renderer, the test case of AMD-051 REQ-E3D-646. 0 holds nothing.
+    pub delay_mesh: i32,
 }
 
 /// The machine and the engine; the scene and the machine are lent to the Lua
@@ -386,6 +393,9 @@ pub(crate) struct Host {
     /// tiles are only equal at N equal (REQ-ARCH-012 amended), so the harness does not change N
     /// unless it is asked to.
     pub(crate) run_ahead: u8,
+    /// Emulated frames left before the meshes are handed to the renderer (`--delay-mesh`); 0
+    /// means they are handed over as they are built, which is the application's own behaviour.
+    delay_mesh: i32,
 }
 
 impl Host {
@@ -413,6 +423,13 @@ impl Host {
         let mut scene = SceneState::default();
         let mut engine = ConversionEngine::new();
         engine.use_geometry();
+        // AMD-051 REQ-E3D-646, the test case: the meshes are built but not handed over, so every
+        // 3D object stays recognised and undrawn (REQ-E3D-601) for `--delay-mesh` frames.
+        if startup.delay_mesh > 0 {
+            if let Some(builder) = engine.geometry_as_mut::<GeometryBuilder>() {
+                builder.defer_transfer = true;
+            }
+        }
         engine.settings_mut().render_algorithm = startup.mesh;
         engine.two_dimensional_mode = !startup.force_three_dimensional
             && profile.permanent_patterns.is_empty()
@@ -430,6 +447,7 @@ impl Host {
             engine,
             zapper_offset: Vec3::default(),
             run_ahead: 0,
+            delay_mesh: startup.delay_mesh,
         };
         host.install_runtime(profile, model, &mut scene)?;
         host.load_profile(profile, &mut scene)?;
@@ -535,6 +553,15 @@ impl Host {
         };
         let counter = i32::try_from(counter)
             .map_err(|_| HarnessError::Usage("--run: too many frames".to_owned()))?;
+        // AMD-051 REQ-E3D-646: the delay runs out, the meshes are handed over, and the objects
+        // have to be drawn on the first frame that follows — "sans être oublié".
+        if self.delay_mesh > 0 && counter >= self.delay_mesh {
+            self.delay_mesh = 0;
+            if let Some(builder) = self.engine.geometry_as_mut::<GeometryBuilder>() {
+                builder.defer_transfer = false;
+                builder.commit();
+            }
+        }
         self.scripted(scene, |engine| {
             engine.convert(&batch, counter);
         });

@@ -19,6 +19,7 @@ use zax_profiles::enums::TextureFormat;
 
 use crate::camera::CameraView;
 use crate::color;
+use crate::diagnostics::RenderDiagnostics;
 use crate::geometry;
 use crate::interop;
 use crate::numerics::{Matrix4x4, Vector2, Vector3, Vector4};
@@ -70,12 +71,11 @@ pub trait Residency {
     /// When the GPU object cannot be created.
     fn mesh(&mut self, mesh: &Arc<TileMesh>) -> Result<Option<Self::Mesh>, Self::Error>;
 
-    /// The resident copy of `texture`.
+    /// The resident copy of `texture`, or `None` when it could not be allocated.
     ///
-    /// # Errors
-    ///
-    /// When the GPU object cannot be created.
-    fn texture(&mut self, texture: &Arc<ObjectTexture>) -> Result<Self::Texture, Self::Error>;
+    /// AMD-051 REQ-E3D-644: a texture that does not fit is **not** an error. The plan leaves the
+    /// tiles of that object out of the frame, draws everything else, and asks again next frame.
+    fn texture(&mut self, texture: &Arc<ObjectTexture>) -> Option<Self::Texture>;
 
     /// The NES picture of the 2D mode (256 × 240 colour indices) uploaded, or `None` when it has
     /// the wrong size.
@@ -227,6 +227,10 @@ pub struct FramePlan<M, T> {
     pub caster_runs: Vec<InstanceRun>,
     #[cfg_attr(not(feature = "wgpu"), allow(dead_code))]
     pub caster_data: Vec<u8>,
+    /// The bounded diagnostics of AMD-051 (REQ-E3D-644, REQ-E3D-646), which the host logs.
+    pub diagnostics: RenderDiagnostics,
+    /// Rendered frames since the plan was created, the clock the summary of REQ-E3D-644 uses.
+    frame: u64,
     scratch: OpaqueScratch<M, T>,
 }
 
@@ -238,6 +242,8 @@ impl<M, T> Default for FramePlan<M, T> {
             occluders: 0,
             caster_runs: Vec::new(),
             caster_data: Vec::new(),
+            diagnostics: RenderDiagnostics::default(),
+            frame: 0,
             scratch: OpaqueScratch::default(),
         }
     }
@@ -251,6 +257,14 @@ pub struct FixedMeshes<'a> {
     /// The quad of a widescreen 2D-mode picture, made for the margin of the displayed picture
     /// (`interop::wide_quad_for`); `None` when the picture is 256 pixels wide.
     pub wide_picture_quad: Option<&'a Arc<TileMesh>>,
+}
+
+impl<M, T> FramePlan<M, T> {
+    /// Frames the plan has collected, the clock the summary line of REQ-E3D-644 is paced by.
+    #[must_use]
+    pub const fn frame_count(&self) -> u64 {
+        self.frame
+    }
 }
 
 impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
@@ -270,6 +284,7 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
     ) -> Result<(), R::Error> {
         self.lists.clear();
         self.occluders = 0;
+        self.frame += 1;
 
         // REQ-SCN-047: outside a running game the 3D scene is not displayed at all.
         if !scene.game_running {
@@ -405,10 +420,18 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             tile.material
         };
 
-        let texture = match &tile.texture {
-            Some(texture) => Some(residency.texture(texture)?),
-            None => None,
-        };
+        // REQ-E3D-644: an object whose texture cannot be allocated contributes no tile to this
+        // frame; the rest of the scene is drawn and the next frame is produced as usual. The
+        // diagnostic is bounded at one line per pattern (`RenderDiagnostics`).
+        let mut texture = None;
+        if let Some(wanted) = &tile.texture {
+            let Some(resident) = residency.texture(wanted) else {
+                self.diagnostics
+                    .texture_unavailable(tile.pattern, self.frame);
+                return Ok(());
+            };
+            texture = Some(resident);
+        }
         #[allow(clippy::cast_precision_loss)] // Texture sizes are small.
         let texture_size = tile.texture.as_ref().map_or(Vector2::ONE, |texture| {
             Vector2::new(texture.width() as f32, texture.height() as f32)

@@ -90,6 +90,11 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --group-draws            reorder the opaque tiles by draw state (the handheld setting)
   --shadow-map <texels>    side of the shadow map (default 4096, AMD-034)
   --anti-alias <n>         video.anti_alias: 0 off, 1 MSAA 4x (default), 2 MSAA 8x (AMD-032)
+  --atlas-budget <texels>  ceiling of the texels the object textures may occupy; beyond it a
+                           pattern's tiles are not drawn and one line is logged per pattern
+                           (AMD-051 REQ-E3D-644). No ceiling by default
+  --delay-mesh <frames>    emulated frames the meshes of each 3D object are held back, the test
+                           case of AMD-051 REQ-E3D-646. 0 (default) holds nothing back
   --skybox <name>          default, color, gradient or fantasy (REQ-SCN-049)
   --bg-color <r,g,b>       the custom background colour, 0-255 (REQ-SCN-046)
   --no-nes-bg-color        scene.use_nes_bg_color false, so --bg-color shows behind the scene
@@ -212,6 +217,14 @@ pub struct Options {
     /// shows behind the scene. The conditioning AMD-050 REQ-SCN-076's criteria need — with the
     /// default settings the transparency of the 2D rectangle is not observable at all.
     pub use_nes_background_color: bool,
+    /// `--atlas-budget <texels>`: the ceiling AMD-051 REQ-E3D-644 is verified against, over and
+    /// above whatever the driver refuses. `None` — the default — leaves the driver as the only
+    /// limit, so a capture taken without it is the capture of before the amendment.
+    pub atlas_budget: Option<u64>,
+    /// `--delay-mesh <frames>`: emulated frames the meshes of every 3D object are held back,
+    /// the test case of AMD-051 REQ-E3D-646 ("un objet dont la construction est retardée de
+    /// 10 frames par le harnais"). 0 holds nothing back.
+    pub delay_mesh: i32,
     /// The renderer.
     pub backend: Backend,
     /// Frames to time per scene; 0 times nothing.
@@ -283,6 +296,11 @@ impl Options {
             bend: SpaceBend::NONE,
             bend_two_dimensional_mode: true,
             use_nes_background_color: true,
+            // AMD-051: both default to the application's own behaviour — no budget of our own
+            // and no delay — so a capture taken without them is the capture of before the
+            // amendment.
+            atlas_budget: None,
+            delay_mesh: 0,
             backend: Backend::Gl,
             bench: 0,
             explain: false,
@@ -419,6 +437,30 @@ impl Options {
             }
             "--distance" => self.distance = Some(number(value)?),
             "--mesh" => self.mesh = parse_mesh(value)?,
+            _ => return self.set_scene(key, value),
+        }
+        Ok(())
+    }
+
+    /// The options of how the scene is drawn, rather than of what is played: the second half of
+    /// [`Options::set`], split off it so that each stays readable.
+    fn set_scene(&mut self, key: &str, value: &str) -> Result<(), String> {
+        let number = |value: &str| {
+            value
+                .parse::<f32>()
+                .map_err(|_| format!("{key} expects a number, got '{value}'"))
+        };
+        let integer = |value: &str| {
+            value
+                .parse::<i32>()
+                .map_err(|_| format!("{key} expects an integer, got '{value}'"))
+        };
+        let unsigned = |value: &str| {
+            value
+                .parse::<u64>()
+                .map_err(|_| format!("{key} expects a count, got '{value}'"))
+        };
+        match key {
             "--shadow-map" => self.shadow_map_size = integer(value)?,
             "--anti-alias" => {
                 self.anti_alias = integer(value)?;
@@ -426,6 +468,10 @@ impl Options {
                     return Err("--anti-alias expects 0, 1 or 2.".to_owned());
                 }
             }
+            // AMD-051 §3 point 8: the budget is in texels, because a pattern carries a variable
+            // number of objects of variable sizes (REQ-E3D-564).
+            "--atlas-budget" => self.atlas_budget = Some(unsigned(value)?),
+            "--delay-mesh" => self.delay_mesh = integer(value)?,
             "--skybox" => self.skybox = parse_skybox(value)?,
             "--bg-color" => self.background = parse_color(value)?,
             "--real-time" => self.real_time = number(value)?,
@@ -598,6 +644,8 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         assets,
         options.group_draws,
     )?;
+    // AMD-051 REQ-E3D-644: no ceiling of our own unless `--atlas-budget` sets one.
+    engine.set_texture_budget(options.atlas_budget);
 
     let mut report = Vec::with_capacity(built.len());
     let mut text = String::new();
@@ -660,6 +708,11 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
             counts.hud_tiles,
             counts.shadow_casters
         )?;
+        // AMD-051 REQ-E3D-644 / REQ-E3D-646: what the renderer left out, and why. Nothing on a
+        // healthy capture, which is every capture taken without `--atlas-budget`.
+        for line in engine.take_diagnostics() {
+            writeln!(text, "{:<18} {line}", "")?;
+        }
     }
 
     fs::write(
@@ -708,6 +761,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
             trace_ram: options.trace_ram.as_deref(),
+            delay_mesh: options.delay_mesh,
         })?]);
     }
 

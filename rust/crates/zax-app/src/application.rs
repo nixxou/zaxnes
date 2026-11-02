@@ -72,6 +72,11 @@ pub type AppHost = EmulationHost<LibraryGameCatalog, SceneView>;
 /// The folder of the user data where the linked shader programs are kept.
 const SHADER_CACHE_FOLDER: &str = "shader-cache";
 
+/// The window of AMD-051 REQ-E3D-646, as the diagnostic line states it: a late object has not
+/// been drawable for this many emulated frames.
+#[allow(clippy::cast_sign_loss)] // A positive constant of the specification.
+const LATE_OBJECT_FRAMES_REPORTED: u32 = zax_engine3d::draw_list::LATE_OBJECT_FRAMES as u32;
+
 /// Whether the window opens in full screen: the persisted choice, or always on a handheld,
 /// except for smoke runs and screenshot runs.
 #[must_use]
@@ -1880,8 +1885,17 @@ fn render_scene(
     state: &mut RunState,
     clock: &mut StageClock,
 ) -> Result<(), String> {
-    let (session, scene, view) = host.session_scene_and_view();
+    let (mut session, scene, view) = host.session_scene_and_view();
     let view = view.ok_or("the host has no view of the game")?;
+    // AMD-051 REQ-E3D-646: the objects the last build found waiting, handed to the shared line
+    // budget before the new list is built — the list is borrowed for the whole of this frame's
+    // drawing, so a diagnostic found during a build is logged on the frame after it. An ordinary
+    // frame takes an empty vector and allocates nothing.
+    if let Some(session) = session.as_mut() {
+        for object in session.take_late_objects() {
+            graphics.report_late_object(object, LATE_OBJECT_FRAMES_REPORTED);
+        }
+    }
     let picture: &[u8] = if scene.two_dimensional_mode {
         &state.picture
     } else {
@@ -1936,6 +1950,12 @@ fn draw_scene(
             "the hardware refused a {}-texel shadow map; it is {} texels (AMD-034).",
             statistics.requested_shadow_map_size, statistics.shadow_map_size
         ));
+    }
+    // AMD-051 REQ-E3D-644 and REQ-E3D-646: the renderer degrades instead of failing, and says so
+    // here, at most 100 lines a game and then one summary a minute. An ordinary frame hands back
+    // an empty vector, which allocates nothing.
+    for line in graphics.take_render_diagnostics() {
+        log(&line);
     }
     Ok(())
 }

@@ -86,7 +86,8 @@ pub fn write(
         picture,
     )
     .map_err(std::io::Error::other)?;
-    fs::write(thumbnail, png)
+    // AMD-051 REQ-PERS-088: as for a slot, the thumbnail is replaced atomically with the state.
+    write_atomic(&thumbnail, &png)
 }
 
 /// Deletes the resume point's files. One that cannot be removed is left: the point is gone either

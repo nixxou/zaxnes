@@ -1459,6 +1459,12 @@ impl GameSession {
         self.engine.build_draw_list()
     }
 
+    /// The 3D objects that have been undrawable for the whole window of AMD-051 REQ-E3D-646,
+    /// each once. Empty on every frame of a healthy profile.
+    pub fn take_late_objects(&mut self) -> Vec<zax_engine3d::instance::InstanceRef> {
+        self.engine.take_late_objects()
+    }
+
     /// Whether the game is played flat.
     #[must_use]
     pub fn two_dimensional_mode(&self) -> bool {

@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
+use zax_engine3d::instance::InstanceRef;
 use zax_platform::framebuffer::{self, OffscreenFramebuffer};
 use zax_platform::HostWindow;
 use zax_render::scene::{SceneFrame, SceneState};
@@ -263,6 +264,39 @@ impl Graphics {
             Self::Gl { renderer, .. } => renderer.statistics(),
             #[cfg(feature = "wgpu")]
             Self::Wgpu(renderer) => renderer.statistics(),
+        }
+    }
+
+    /// The bounded diagnostic lines of AMD-051 (REQ-E3D-644, REQ-E3D-646), and nothing on a
+    /// frame where the whole scene could be drawn — which is every ordinary frame.
+    pub fn take_render_diagnostics(&mut self) -> Vec<String> {
+        match self {
+            Self::Gl { renderer, .. } => renderer.take_diagnostics(),
+            // Q-104: the wgpu backend has no diagnostics of its own yet.
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(_) => Vec::new(),
+        }
+    }
+
+    /// Hands a 3D object that outstayed the window of REQ-E3D-646 to the line budget the two
+    /// requirements of AMD-051 share.
+    pub fn report_late_object(&mut self, object: InstanceRef, frames: u32) {
+        match self {
+            Self::Gl { renderer, .. } => {
+                renderer.report_late_object(object.pattern, object.index, frames);
+            }
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(_) => {}
+        }
+    }
+
+    /// Caps the texels the resident object textures may occupy (REQ-E3D-644); `None` leaves the
+    /// driver as the only limit, which is the default.
+    pub fn set_texture_budget(&mut self, texels: Option<u64>) {
+        match self {
+            Self::Gl { renderer, .. } => renderer.set_texture_budget(texels),
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(_) => {}
         }
     }
 

@@ -180,6 +180,22 @@ fn req_e3d_524_the_mesher_accepts_more_than_sixty_five_thousand_vertices() {
     assert_eq!(18432, rectangles(&mesh));
     assert_eq!(73728, mesh.vertex_count());
     assert_eq!(36864, mesh.triangle_count());
+
+    // AMD-051 (which retired REQ-E3D-645 rather than cap the mesh): every index is present and
+    // addressable, and the largest of them is **past 65 535** — which is why the one index width
+    // Zaxnes has is 32 bits, from `TileMesh` to `glDrawElements`. A 16-bit path would have had to
+    // split this mesh; there is none to keep for the other meshes, so nothing here chooses
+    // between the two.
+    let largest = mesh.triangles().iter().copied().max().unwrap_or(0);
+    assert_eq!(73727, largest, "the last vertex is indexed");
+    assert!(
+        largest > u32::from(u16::MAX),
+        "the criterion of REQ-E3D-524 really needs more than 16 bits: {largest}"
+    );
+    assert!(
+        mesh.triangles().iter().all(|&index| index < 73728),
+        "no index points past the vertex list"
+    );
 }
 
 fn count_non_degenerate(mesh: &TileMesh) -> usize {

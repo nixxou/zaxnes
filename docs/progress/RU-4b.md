@@ -11,15 +11,20 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Map: what exists, where each requirement goes, the "before" measurements | done |
-| 2 | AMD-051: robustness (REQ-E3D-644, -646, REQ-LOOP-073, REQ-PERS-088, REQ-E3D-524) | todo |
-| 3 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | todo |
-| 4 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | todo |
-| 5 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | todo |
-| 6 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | todo |
-| 7 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | todo |
-| 8 | The settings: desktop options, handheld defaults and page, libretro, harness options | todo |
-| 9 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | todo |
+| 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `12561b1` |
+| 2 | AMD-051 part 1: REQ-E3D-644, REQ-E3D-646, REQ-E3D-524, REQ-PERS-088 | done |
+| 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | todo |
+| 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | todo |
+| 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | todo |
+| 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | todo |
+| 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | todo |
+| 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | todo |
+| 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | todo |
+| 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | todo |
+
+**The checklist went from 9 steps to 10 after step 1** (so the commit of step 1 says "1/9"):
+AMD-051 holds five independent requirements across four crates, and the machine is unstable —
+two commits for it is two chances to resume from, not one.
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -154,3 +159,101 @@ can prove byte identity of the ones they must not touch.
    flat programs stay in use, so the compiler is given today's source; from 1 upwards a variant
    whose `vUv` is interpolated at the centroid of the covered samples is selected. The 2D-mode
    rectangle, a single quad with a binary cut-out (REQ-SCN-076), keeps the pixel centre.
+
+### Step 2 — AMD-051: the degradations that cost nothing while everything works
+
+Four of the five requirements. REQ-LOOP-073 is step 3.
+
+#### REQ-E3D-644 — a texture that cannot be allocated
+
+The defect was real and the amendment names it exactly: `frame_plan::collect_tile` ended
+`residency.texture(texture)?`, a `?` that **aborted the whole frame** on an allocation failure —
+"le moteur NE DOIT PAS lever d'exception ni interrompre la frame", word for word what it did.
+
+| Piece | What landed |
+|---|---|
+| `frame_plan.rs` | `Residency::texture` returns `Option<Texture>` instead of `Result`: a refusal is not an error. `collect_tile` leaves the tile out, reports once per pattern, and goes on to the next tile |
+| `gl/texture_cache.rs` | a texel budget (`set_budget`), the texels each entry occupies so the retention collector gives them back, and a per-frame `refused` set so the other tiles of one object cost no second GL call |
+| `diagnostics.rs` (new) | the line budget both requirements of AMD-051 share: at most one line per subject, at most 100 per game, then one summary per 3600 rendered frames (one minute at the nominal 60 of SPEC-07 §2) |
+| `statistics.rs` | `texture_texels` and `patterns_without_texture` |
+| `renderer.rs` | `set_texture_budget`, `take_diagnostics`, `report_late_object`; `invalidate_caches` resets the budget of lines, because REQ-E3D-644 counts them "par partie" |
+| `application.rs` | the lines are logged in `draw_scene`, beside the shadow-map fallback of AMD-034 |
+| `zax-harness render` | `--atlas-budget <texels>`, and the lines printed under the scene's row |
+
+**The cost on a healthy frame.** `Ok(Some(t))` became `Some(t)`: the same indexed lookup and the
+same branch. `TextureCache::begin_frame` clears an empty `FastSet`, which is a length store. The
+diagnostics are touched **only** from the refusal branch; `take()` hands back a `Vec::new()`,
+which does not allocate.
+
+**The one thing this requirement cost.** REQ-E3D-644 bounds its diagnostic at "au plus une fois
+par **pattern**", and the renderer — where the allocation fails — had no way to name one:
+`ObjectTexture` carries no identity and `DrawTile` carried only its frame instance. `DrawTile`
+therefore gained `pattern: PatternId` (8 bytes), read **once per instance** from `InstanceLook`
+and copied per tile beside the `FrameTile` and the `Mat4` it already copies. The alternative —
+keying the diagnostic by texture — would log once per *3D object*, which for a pattern of eight
+objects is eight lines where the requirement allows one. The draw-list cost of the field is
+measured in step 10.
+
+#### REQ-E3D-646 — an object that is not ready
+
+The first clause (drawn on the first frame after its meshes arrive, never forgotten) was already
+true: `DrawListBuilder::build` tests `is_ready` every frame. The second — a diagnostic after 600
+consecutive emulated frames of waiting — is watched from the branch that **already exists** for
+an object that is not ready, so a healthy frame reaches none of it:
+
+- `DrawListBuilder::waiting` is a map from `InstanceRef` to (first frame, last frame, reported),
+  filled by `note_waiting`, which is `#[cold]`;
+- `forget_ready_objects` costs **one `is_empty` test per frame** when nothing waits, and nothing
+  per instance;
+- a frame counter that goes backwards (a savestate restore, a reset) restarts the window instead
+  of reporting a wait that never happened;
+- the late objects travel `ConversionEngine::take_late_objects` → `GameSession` →
+  `Graphics::report_late_object` → the shared line budget. They are taken **before** the next
+  build, because the list the renderer is drawing borrows the session for the whole frame: a
+  diagnostic found during a build is logged on the frame after it.
+
+`zax-harness render --delay-mesh <frames>` holds the meshes back through the `defer_transfer`
+the builder already published for exactly this (REQ-E3D-600's two halves).
+
+#### REQ-E3D-645 and REQ-E3D-524 — the index width
+
+**Nothing to do, and that is the finding.** `TileMesh.triangles` is a `Vec<u32>` and every draw
+is `glow::UNSIGNED_INT`: the Rust **has no 16-bit index path at all**, so REQ-E3D-524 holds as
+written and the brief's point 4 ("32-bit indices only for the meshes that exceed 65 535 vertices;
+the 16-bit path stays for every other mesh") has nothing to choose between — there is no 16-bit
+path to keep. The existing vector test of the 8 × 8 × 96 checkerboard (18 432 rectangles, 73 728
+vertices) gained the assertions that make the point: the largest index is 73 727, **past
+`u16::MAX`**, and no index points past the vertex list.
+
+#### REQ-PERS-088 — the scope of the atomic write
+
+Walked writer by writer. `user_data_paths::write_atomic` (a `<name>.tmp` beside the file, then a
+rename) was **already** used by the settings store, the games library, the slot index, the
+bindings, the savestates, the resume point, the battery RAM and the achievements library; the
+ordering clauses hold too (`persistence.rs` copies `<name>.v<N>.bak` before the first migrated
+rewrite and renames `*.corrupt-<stamp>` before any replacement).
+
+Two files were **not** covered and now are: the slot thumbnail and the resume-point thumbnail
+(`std::fs::write` → `write_atomic`). They travel with a savestate, so an interruption left a
+complete state beside half a PNG. Neither is on a frame path.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| REQ-E3D-644: the budget refuses one pattern, the other is drawn, the next frame is produced | `zax-render/tests/amd051_robustness_tests.rs` `req_e3d_644_a_texture_that_cannot_be_allocated_leaves_its_tiles_out_and_draws_the_rest` |
+| one line per pattern, nothing when all is well, nothing on the next frames | `req_e3d_644_the_diagnostic_is_one_line_per_pattern_and_nothing_when_all_is_well` |
+| a budget that fits changes the picture in no pixel | `req_e3d_644_a_budget_that_fits_everything_changes_nothing` |
+| REQ-E3D-646 through the shared line budget, once per object | `req_e3d_646_a_late_object_is_reported_once_through_the_shared_line_budget` |
+| REQ-E3D-646: 10 frames of delay, drawn on the next frame, no diagnostic | `zax-engine3d/.../geometry_lifetime_tests.rs` `req_e3d_646_an_object_delayed_ten_frames_is_drawn_on_the_next_frame_and_not_reported` |
+| REQ-E3D-646: 700 frames of waiting give exactly one line, at frame 600 ± 1 | `req_e3d_646_an_object_that_waits_six_hundred_frames_is_reported_exactly_once` |
+| the watch remembers nothing on a healthy frame | `req_e3d_646_a_healthy_frame_remembers_no_waiting_object` |
+| REQ-E3D-524: the largest index is past 16 bits | `marching_vector_tests.rs` `req_e3d_524_the_mesher_accepts_more_than_sixty_five_thousand_vertices` (extended) |
+| REQ-PERS-088: a replacement never shortens, makes its folder, leaves no temporary; the settings and the slot index | `zax-app/tests/amd051_atomic_write_tests.rs` (3) |
+
+`cargo test --release --workspace --features zax-app/bundled`: **2255 passed, 0 failed** (2245 at
+the close of RU-4a: ten new tests). fmt and workspace clippy clean.
+
+One pre-existing clippy limit was hit and is worth recording: `render::Options::set` passed the
+100-line ceiling with the two new flags, so it is split in two — `set` for what is played,
+`set_scene` for how it is drawn.
