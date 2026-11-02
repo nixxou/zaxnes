@@ -96,11 +96,6 @@ pub enum Geo3DType {
     HalfHCylinder = 4,
     /// Half cylinder with a vertical axis.
     HalfVCylinder = 5,
-    /// Rust-only (EDITOR-1, owner request): spikes. Each run of opaque pixels of a row is the
-    /// section of a spike at that height, made square in depth and repeated along it, so that a
-    /// row of drawn spikes becomes rows of pyramids. 3dSen does not know the value and builds it
-    /// as Default.
-    Spikes = 6,
 }
 
 impl Geo3DType {
@@ -114,7 +109,6 @@ impl Geo3DType {
             3 => Self::Cube,
             4 => Self::HalfHCylinder,
             5 => Self::HalfVCylinder,
-            6 => Self::Spikes,
             _ => Self::Default,
         }
     }
