@@ -322,21 +322,31 @@ Le résultat PEUT être recalculé une seule fois par groupe de 8 lignes et réu
 **REQ-CORE-072** (P2) — **Vitesse** : régler un facteur de vitesse s > 0 (s = 1,5 pendant l'avance rapide, SPEC-07 REQ-LOOP-016) modifie uniquement le calage audio : chaque frame émulée produit `fréquence / (cadence × s)` échantillons en moyenne, et le son est donc accéléré (tempo et hauteur multipliés par s, l'hôte enchaînant s fois plus de frames). L'émulation elle-même n'est pas modifiée.
 - Critère d'acceptation : s = 2, 600 frames NTSC à 48 kHz → 240 000 ± 800 échantillons ; s = 0,5 → 960 000 ± 800.
 
-**REQ-CORE-073** (P2) — **Mixage** : les cinq canaux (2 pulses, triangle, bruit, DMC) sont mixés selon l'**approximation linéaire** de nesdev (« APU Mixer », linear approximation) :
-- pulse : 0,00752 par pas et par canal ;
-- triangle : 0,00851 ;
-- bruit : 0,00494 ;
-- DMC : 0,00335.
+**REQ-CORE-073 amendée** (P2) — **Mixage non linéaire** (amendée par AMD-054). Avec `p1, p2` les sorties des deux pulses (0 à 15), `t` celle du triangle (0 à 15), `n` celle du bruit (0 à 15) et `d` celle du DMC (0 à 127), et les fonctions réelles (nulles pour `i = 0`) :
+- `P(i) = 95,88 / (8128 / i + 100)`, `i` de 0 à 30 ;
+- `T(i) = 163,67 / (24329 / i + 100)`, `i` de 0 à 202 ;
 
-La sortie vaut 1,526 × mix, bornée à [−1, 1], suivie d'un filtre passe-haut coupant la composante continue (fréquence de coupure de 10 à 40 Hz).
-- Critère d'acceptation : un pulse seul au volume 15 (rapport cyclique 50 %) produit un signal crête à crête de 0,172 ± 0,02 après stabilisation ; un silence prolongé (tous canaux à niveau constant) tend vers 0 en moins de 0,2 s.
-- Notes : 1,526 ≈ 50 000 / 32 768 est le gain de la référence. Le mixage non linéaire de nesdev est toléré si les niveaux relatifs restent à ±10 % (divergence acceptée).
+et la constante réelle `K = 32 767 / (P(30) + T(202))` (calculée sur les valeurs non arrondies, en double précision), le mixeur DOIT produire l'entier `A = r(K · P(p1 + p2)) + r(K · T(3t + 2n + d))`, où `r` arrondit à l'entier le plus proche, **au pair en cas d'égalité** ; on peut précalculer les deux tables d'entiers `r(K · P(i))` et `r(K · T(i))`. L'entier `S = min(A + M, 32 767)`, où `M` est la sortie de l'audio d'extension (REQ-CORE-075 amendée, 0 sans audio d'extension), DOIT ensuite être converti en flottant par `S / 32 768`, puis passer par un filtre passe-haut qui coupe la composante continue (fréquence de coupure de 10 à 40 Hz), avant le rééchantillonnage de REQ-CORE-070 et la sortie de REQ-CORE-071.
+- Critère d'acceptation (au point de test de REQ-CORE-076) : un pulse seul au volume 15 → `A` = 4 890 ; les deux pulses au volume 15 → 8 462 (rapport 1,73, au lieu de 2 en linéaire) ; le triangle seul à 15 → `r(K · T(45))` = 8 363 ; tous les canaux au maximum → 32 767.
+- Critère d'acceptation (sortie de REQ-CORE-071) : un pulse seul au volume 15, rapport cyclique 50 % → crête à crête 0,149 ± 0,002 ; un silence prolongé tend vers 0 en moins de 0,2 s.
+- Notes : la tolérance « mixage non linéaire toléré si les niveaux relatifs restent à ±10 % » et le critère « 0,172 ± 0,02 » de la version précédente sont retirés ; le niveau global baisse d'environ 13 % par rapport à l'approximation linéaire (gain 1,526). Le numérateur 95,88 est celui de la forme analytique de nesdev ; la table de consultation de la même page utilise 95,52 et donnerait 4 876 / 8 438 / 8 371 : elle n'est pas retenue. L'ordre « filtre avant rééchantillonnage » décrit la chaîne de référence ; les deux ordres étant équivalents pour un filtre linéaire, le bloqueur de continu reste placé après le rééchantillonneur (Q-091).
+
+**REQ-CORE-076** (P2) — **Point de test du mixeur** (ajoutée par AMD-054) : le harnais (SPEC-12 §2, catégorie « auto ») DOIT pouvoir lire, pour un instant donné de l'émulation, les entiers `A`, `M` et `S` de REQ-CORE-073 avant toute conversion ou filtrage. Les critères en unités entières de REQ-CORE-073 et de REQ-CORE-075 portent sur ce point de test.
+- Critère d'acceptation : silence (tous les canaux à 0) → `A = M = S = 0`.
 
 **REQ-CORE-074** (P2) — La restauration d'un savestate et la réinitialisation DOIVENT vider les échantillons audio en attente. L'audio repart du silence.
 - Critère d'acceptation : 10 frames produites et non lues, restaurer un état → la lecture suivante d'un tampon de 512 renvoie 0 tant qu'une nouvelle frame n'a pas été exécutée.
 
-**REQ-CORE-075** (P3) — L'audio d'extension des cartouches (VRC6, VRC7, MMC5, Namco 163, Sunsoft 5B, FDS) PEUT être émulé. Il n'est pas exigé : la référence ne l'émule pas.
-- Critère d'acceptation : sans objet.
+**REQ-CORE-075 amendée** (P2) — **Audio du MMC5** (amendée par AMD-054) : l'audio du MMC5 (mapper 5) DOIT être émulé :
+- **deux voies carrées** (`$5000`–`$5003` et `$5004`–`$5007`), reprenant la forme d'onde, le rapport cyclique, le timer, l'enveloppe, le compteur de longueur et la coupure des périodes inférieures à 8 des pulses de l'APU, **sans balayage** ; leur enveloppe est cadencée à une fréquence **fixe d'environ 240 Hz** (tous les 7 458 cycles CPU) et leur compteur de longueur à **120 Hz** (une fois sur deux), indépendamment de `$4017` **(D sur la cadence du compteur de longueur, que la documentation publique donne à 240 Hz)** ;
+- **une voie PCM** en mode écriture : une écriture non nulle en `$5011` fixe le niveau `pcm` (0 à 255) ; une écriture de 0 ne change pas le niveau et lève le drapeau d'IRQ PCM ; le mode lecture de `$5010` (bit 0 = 1) n'est pas émulé **(D)** ;
+- **`$5010`** : en écriture, bit 0 = mode (0 écriture, 1 lecture), bit 7 = autorisation de l'IRQ PCM ; en lecture, renvoie le drapeau d'IRQ PCM en bit 7 (les autres bits à 0) et **efface** le drapeau. Le drapeau **n'active pas** la ligne d'IRQ du CPU **(D)** ;
+- **`$5015`** : bits 0 et 1 activent les deux voies carrées (une voie désactivée a son compteur de longueur mis à 0) ; en lecture, bits 0 et 1 = compteurs de longueur non nuls.
+
+Sa sortie entière vaut `M = r(Kₘ · P(q1 + q2)) + 31 · pcm`, avec `q1, q2` les sorties des deux voies carrées (0 à 15), `P` la fonction de REQ-CORE-073, `Kₘ = 8 000 / P(30)` et `r` l'arrondi de REQ-CORE-073 ; elle s'ajoute à `A` et la somme est écrêtée à 32 767. Les autres audios d'extension (VRC6, VRC7, Namco 163, Sunsoft 5B, FDS) PEUVENT être émulés ; ils ne sont pas exigés.
+- Critère d'acceptation (au point de test) : une voie carrée MMC5 seule au volume 15 → `M` = 4 623 ; les deux au volume 15 → 8 000 ; `pcm` à 128 → 3 968 ; une écriture de 0 en `$5011` laisse `pcm` inchangé et une lecture de `$5010` renvoie alors `$80`, la suivante `$00`.
+- Critère d'acceptation : une voie MMC5 à enveloppe décroissante (volume de départ 15, période d'enveloppe 0) passe de 15 à 0 en 15 × 1/240 s ± 5 %, que `$4017` vaille `$00`, `$80` ou `$C0`.
+- Notes : les constantes 8 000 (plein volume des deux voies carrées) et 31 (pas de la voie PCM) sont celles de la référence ; elles placent la voie PCM sensiblement plus bas que la documentation publique. DEC-02-Q5 (« l'audio d'extension n'est pas émulé ») est dépassée pour le MMC5.
 
 ### 3.8 Accès mémoire (lecture et écriture d'octets)
 
@@ -396,7 +406,7 @@ Le bloc commence par un numéro de version du format.
 | 2 | UxROM | |
 | 3 | CNROM | |
 | 4 | MMC3 (TxROM), MMC6 | IRQ de ligne, comportement « rev B » |
-| 5 | MMC5 (ExROM) | au minimum : modes de banques PRG et CHR, PRG-RAM, IRQ de ligne. ExRAM, attributs étendus, split vertical : P2 |
+| 5 | MMC5 (ExROM) | au minimum : modes de banques PRG et CHR, PRG-RAM, IRQ de ligne, **audio émulé (REQ-CORE-075 amendée)**. ExRAM, attributs étendus, split vertical : P2 |
 | 7 | AxROM | écran unique |
 | 9 | MMC2 (PxROM) | verrous `$FD`/`$FE` |
 | 10 | MMC4 (FxROM) | verrous |
@@ -584,7 +594,7 @@ Sauf mention contraire : PPUCTRL = `$00` (tables `$0000`, sprites 8×8), toutes 
 - **Q2** — *Close par DEC-02-Q2* (règle publique, D). **Détection de région.** La règle publique (REQ-CORE-013) diffère de la référence, qui lit l'octet 10. Faut-il reproduire la règle de référence pour les ROMs iNES 1.0 dont l'octet 10 est non nul ? Proposition : non (divergence D).
 - **Q3** — *Close par DEC-02-Q3*. **Reset.** Le reset est équivalent à une mise sous tension (référence). Faut-il plutôt un reset « doux » fidèle au matériel ? Proposition : garder la référence, sauf pour la PRG-RAM à pile si REQ-CORE-095 est implémentée.
 - **Q4** — *Close par DEC-02-Q4* (tolérance d'une ligne, différentiel). **Moment de capture par rapport aux écritures en milieu de ligne.** La tolérance d'une ligne (REQ-CORE-037) suffit-elle pour les profils qui reconnaissent les barres de statut ? À vérifier au round 2 par un différentiel des lots sur SMB, SMB3 et Zelda.
-- **Q5** — *Close par DEC-02-Q5* (non requis, P3). **Audio d'extension.** Aucun titre embarqué ne semble en dépendre (titres US ou Famicom sans VRC6/VRC7/N163). À confirmer par l'inventaire des ROMs des 101 titres.
+- **Q5** — *Close par DEC-02-Q5* (non requis, P3), **dépassée par REQ-CORE-075 amendée pour le MMC5** (AMD-054). **Audio d'extension.** Aucun titre embarqué ne semble en dépendre (titres US ou Famicom sans VRC6/VRC7/N163). À confirmer par l'inventaire des ROMs des 101 titres.
 
 ## Historique
 

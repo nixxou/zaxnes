@@ -7,13 +7,16 @@
 //! that cycle's frame-counter events. That ordering is what the hardware does and what
 //! blargg's `10.len_halt_timing` and `11.len_reload_timing` measure.
 //!
-//! **Expansion audio** is not emulated: REQ-CORE-075 makes it optional and DEC-02-Q5
-//! settles that it is not required.
+//! **Expansion audio.** REQ-CORE-075 as amended by AMD-054 requires the MMC5's own sound and
+//! leaves the other boards (VRC6, VRC7, Namco 163, Sunsoft 5B, FDS) optional, so only the MMC5
+//! supplies one. Its output is the `M` of REQ-CORE-073, pushed in by the bus
+//! ([`Apu2A03::set_expansion_level`]) and added to the APU's own `A` before the sum is clipped.
 
 mod band_limited_resampler;
 mod dmc_channel;
 mod envelope;
 mod length_counter;
+pub mod mixer;
 mod noise_channel;
 mod pulse_channel;
 mod triangle_channel;
@@ -220,6 +223,17 @@ pub struct Apu2A03 {
     /// (a register write, a frame-counter clock, a reset or a loaded state); a timer that moves
     /// a channel says so itself. The level is only recomputed then: it depends on nothing else.
     level_dirty: bool,
+    /// `M` of REQ-CORE-073 (AMD-054): the cartridge's expansion audio, 0 for every board but
+    /// the MMC5. The bus pushes it in before the cycles it belongs to are run; it is not part
+    /// of the savestate, the board owning its own state and the bus pushing it again at once.
+    expansion_level: i32,
+    /// The expansion level the cached [`Self::level`] was computed with, so that a move of `M`
+    /// alone is noticed even when no channel index changed.
+    level_expansion: i32,
+    /// `A` of REQ-CORE-073 on the cycle just mixed (the test point of REQ-CORE-076).
+    mixer_apu: i32,
+    /// `S` of REQ-CORE-073 on the cycle just mixed (the test point of REQ-CORE-076).
+    mixer_output: i32,
 }
 
 impl Clone for Apu2A03 {
@@ -251,6 +265,10 @@ impl Clone for Apu2A03 {
             level_key: self.level_key,
             level: self.level,
             level_dirty: self.level_dirty,
+            expansion_level: self.expansion_level,
+            level_expansion: self.level_expansion,
+            mixer_apu: self.mixer_apu,
+            mixer_output: self.mixer_output,
         }
     }
 }
@@ -272,16 +290,8 @@ impl Apu2A03 {
     pub const MIN_BUFFER_SAMPLES: usize = 10_000;
     /// Largest fine adjustment of the resampling ratio a frontend may ask for (REQ-CORE-070).
     pub const MAX_RATIO_ADJUSTMENT: f64 = 0.005;
-    /// Volume one step of a pulse channel contributes (REQ-CORE-073).
-    pub const PULSE_STEP: f64 = 0.00752;
-    /// Volume one step of the triangle contributes (REQ-CORE-073).
-    pub const TRIANGLE_STEP: f64 = 0.00851;
-    /// Volume one step of the noise contributes (REQ-CORE-073).
-    pub const NOISE_STEP: f64 = 0.00494;
-    /// Volume one step of the DMC contributes (REQ-CORE-073).
-    pub const DMC_STEP: f64 = 0.00335;
-    /// Output gain applied to the mix, 50 000 / 32 768 (REQ-CORE-073).
-    pub const OUTPUT_GAIN: f64 = 1.526;
+    // The linear steps and the 1.526 gain of REQ-CORE-073 before AMD-054 are gone: the mixing
+    // is the non-linear form of `mixer`.
 
     /// Creates an APU with the default region and sample rate.
     #[must_use]
@@ -311,6 +321,10 @@ impl Apu2A03 {
             level_key: -1,
             level: 0.0,
             level_dirty: true,
+            expansion_level: 0,
+            level_expansion: 0,
+            mixer_apu: 0,
+            mixer_output: 0,
         };
         apu.apply_timing();
         apu.recompute_ratio();
@@ -323,11 +337,44 @@ impl Apu2A03 {
         self.frame_irq_flag || self.dmc.irq_flag()
     }
 
-    /// The mixed output level of the five channels on the cycle just stepped, in [-1, 1]
-    /// (REQ-CORE-073), before resampling and before the DC blocker.
+    /// The mixed output level on the cycle just stepped, in [-1, 1] (REQ-CORE-073), before
+    /// resampling and before the DC blocker: [`Self::mixer_output`] divided by 32 768.
     #[must_use]
     pub const fn mixed_level(&self) -> f64 {
         self.level
+    }
+
+    /// `A` of REQ-CORE-073 on the cycle just stepped: the five APU channels mixed through the
+    /// two non-linear tables, 0 to 32 767. Part of the test point of REQ-CORE-076.
+    #[must_use]
+    pub const fn mixer_apu(&self) -> i32 {
+        self.mixer_apu
+    }
+
+    /// `M` of REQ-CORE-073 on the cycle just stepped: the expansion audio's output, 0 without
+    /// any (REQ-CORE-075). Part of the test point of REQ-CORE-076.
+    #[must_use]
+    pub const fn mixer_expansion(&self) -> i32 {
+        self.level_expansion
+    }
+
+    /// `S = min(A + M, 32 767)` of REQ-CORE-073 on the cycle just stepped, before the
+    /// conversion to floating point and before the DC blocker. Part of the test point of
+    /// REQ-CORE-076.
+    #[must_use]
+    pub const fn mixer_output(&self) -> i32 {
+        self.mixer_output
+    }
+
+    /// Hands the APU the cartridge's expansion audio output, the `M` of REQ-CORE-073
+    /// (REQ-CORE-075). Called by the bus for a board that has one, before the cycles that `M`
+    /// belongs to are run; a board without expansion audio never calls it and the level stays
+    /// 0, which is what makes the mixing cost nothing for every other cartridge.
+    pub fn set_expansion_level(&mut self, level: i32) {
+        if level != self.expansion_level {
+            self.expansion_level = level;
+            self.level_dirty = true;
+        }
     }
 
     /// Whether the DMC's memory reader wants a byte (nesdev, "DMA").
@@ -480,6 +527,12 @@ impl Apu2A03 {
         self.level_key = -1;
         self.level = 0.0;
         self.level_dirty = true;
+        // The board is reset with the rest of the machine, so its `M` goes back to 0 too; the
+        // bus pushes the real value again before the next cycle runs.
+        self.expansion_level = 0;
+        self.level_expansion = 0;
+        self.mixer_apu = 0;
+        self.mixer_output = 0;
 
         self.discard_samples();
     }
@@ -513,7 +566,9 @@ impl Apu2A03 {
         self.pending_sequencer_reset = 0;
 
         // Every channel output may have moved, and the status byte a read would see with it.
+        // The level is recomputed on the next cycle, test point included.
         self.level_dirty = true;
+        self.level_key = -1;
         self.readable_status = self.compose_status(0);
     }
 
@@ -868,8 +923,20 @@ impl Apu2A03 {
             .set_ratio(samples_per_cycle, self.sample_rate);
     }
 
-    /// The mixed output level of the five channels, clamped to [-1, 1] (REQ-CORE-073). Only
-    /// recomputed when one of the channel outputs actually moves.
+    /// The mixed output level, in [-1, 1] (REQ-CORE-073): the non-linear mix `A` of the five
+    /// channels plus the expansion audio's `M`, clipped to 32 767 and divided by 32 768.
+    ///
+    /// The channel outputs are small integers, so the mix is only recomputed when one of them
+    /// or the expansion output actually moves; most CPU cycles change nothing. Where the linear
+    /// form of REQ-CORE-073 before AMD-054 did four multiply-adds and a clamp, this does two
+    /// array reads and an addition, so the non-linear mixing costs strictly less than what it
+    /// replaces and the lazy mixing stays exactly as it was.
+    ///
+    /// The DC blocker REQ-CORE-073 puts after this conversion runs on the output samples rather
+    /// than on this signal, inside [`BandLimitedResampler`]; the two orderings are equivalent
+    /// for a linear filter, and this one keeps the resampler's input piecewise constant, which
+    /// is what makes its step synthesis cheap. See `docs/spec/changes/Q-091.md`.
+    // Q-091
     fn current_level(&mut self) -> f64 {
         let pulse1 = self.pulse1.output();
         let pulse2 = self.pulse2.output();
@@ -878,19 +945,15 @@ impl Apu2A03 {
         let dmc = self.dmc.output();
 
         let key = pulse1 | (pulse2 << 4) | (triangle << 8) | (noise << 12) | (dmc << 16);
-        if key == self.level_key {
+        if key == self.level_key && self.expansion_level == self.level_expansion {
             return self.level;
         }
 
         self.level_key = key;
-
-        // The linear approximation of nesdev's "APU Mixer", which REQ-CORE-073 prescribes.
-        let mix = (Self::PULSE_STEP * f64::from(pulse1 + pulse2))
-            + (Self::TRIANGLE_STEP * f64::from(triangle))
-            + (Self::NOISE_STEP * f64::from(noise))
-            + (Self::DMC_STEP * f64::from(dmc));
-
-        self.level = (Self::OUTPUT_GAIN * mix).clamp(-1.0, 1.0);
+        self.level_expansion = self.expansion_level;
+        self.mixer_apu = mixer::mix(pulse1, pulse2, triangle, noise, dmc);
+        self.mixer_output = mixer::clip(self.mixer_apu, self.expansion_level);
+        self.level = mixer::to_float(self.mixer_output);
         self.level
     }
 
@@ -958,6 +1021,19 @@ impl Apu2A03 {
         self.level_key = reader.read_i32()?;
         self.level = reader.read_f64()?;
         self.level_dirty = true;
+        // `M` and the two integers of the test point are not in the block: the board restores
+        // its own sound state, the bus pushes `M` again before the next cycle, and
+        // `current_level` recomputes all three from the channel outputs that were just read
+        // back. Keeping them out is what lets a block written before AMD-054 still load
+        // (REQ-CORE-091): the layout is unchanged.
+        self.expansion_level = 0;
+        self.mixer_apu = 0;
+        self.mixer_output = 0;
+        // A value no real expansion output can take, so that the first mix after the load
+        // recomputes all three from the channel outputs just read back rather than handing
+        // the restored `level` over with the test point still reading 0. `level_key` itself is
+        // left as the block gave it, so saving again writes the same bytes (REQ-CORE-092).
+        self.level_expansion = -1;
 
         self.resampler.load_state(reader)?;
 

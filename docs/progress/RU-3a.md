@@ -9,8 +9,8 @@ Branch `rustupdated`. The application is the Rust workspace `rust/`; the .NET lo
 | # | Step | Status |
 |---|---|---|
 | 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `831d43f` |
-| 2 | AMD-044: the soft reset of the core, the command, the input action and the menu | done |
-| 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | todo |
+| 2 | AMD-044: the soft reset of the core, the command, the input action and the menu | done — `cf75778` |
+| 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | done |
 | 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | todo |
 | 5 | AMD-052: the catch-up limit and the clock reset on a speed change | todo |
 | 6 | AMD-052: the GPU frame queue and the anti-aliasing default | todo |
@@ -164,3 +164,80 @@ reset that does keep both.
 SPEC copies: REQ-CORE-006 amended and REQ-CORE-122 added in SPEC-02 §3.12, the last phrase of
 REQ-LOOP-050 replaced and REQ-LOOP-072 added in SPEC-07 §3.6, the twentieth row added to the
 action table of SPEC-08 §4.1.
+
+### Step 3 — AMD-054, the non-linear mixing
+
+`apu/mixer.rs` holds the two functions, `K`, `Km`, the three integer tables, the round-half-to-
+even `r`, `mix`, `clip` and `to_float`. The tables are **`const`**: `const fn` float arithmetic
+is stable on the pinned toolchain (1.99.1), so the compiler builds them from the published
+formulas. That is better than the .NET's static constructor in two ways — no initialisation
+check on the path that reads them, and no magic numbers in the source — and the test
+`req_core_073_the_tables_follow_the_documented_formulas` recomputes all 234 entries at runtime
+from `95.88 / (8128 / i + 100)` and `163.67 / (24329 / i + 100)` and compares, so the derivation
+is checked rather than trusted.
+
+Every figure of the amendment comes out exactly: 4890 for a lone pulse at volume 15, 8462 for
+both (ratio 1.7304), 8363 for the triangle alone, `8462 + 24305 = 32767` at full scale,
+`K = 32735.8776`, `T(196) = 23905` from the near-tie `23905.4997` (which is what pins the
+round-to-even rule), and the 95.52 table of the same nesdev page would have given 4876 / 8438,
+which is why the amendment sets it aside.
+
+Where it runs: inside `Apu2A03::current_level`, which was already the lazy path (§5.1, "APU
+level mixed only when an input may have changed") and is **not** per CPU cycle. The owner's
+"two lookups per sample" lands there, and the change is a net *reduction* in work — four
+multiply-adds, an addition chain and a clamp become two array reads and one addition. Q-091 is
+reused as it stands and referenced by `// Q-091`: the DC blocker stays after the resampler,
+where the Rust port has always had it, so the step synthesis of REQ-CORE-070 keeps its
+piecewise-constant input.
+
+REQ-CORE-076, the test point: `mixer_apu()`, `mixer_expansion()` and `mixer_output()` on the
+APU. `M` arrives through `set_expansion_level`, which flags the level dirty only when the value
+moves; `level_expansion` joins the cache comparison so that a move of `M` alone is noticed.
+
+**The savestate layout is unchanged.** The .NET added three integers to the APU block; here the
+three are derived instead — the board owns its own sound state, the bus pushes `M` again at
+once, and `current_level` rebuilds all three from the channel outputs just read back. A block
+written before AMD-054 therefore still loads (REQ-CORE-091) and `STATE_VERSION` stays 4. The
+first attempt dropped `level_key` on load to force that rebuild and broke the
+save → load → save byte comparison of `req_core_090_the_mapper_state_survives_a_save_and_restore`;
+the fix is to park `level_expansion` at −1, a value no real expansion output can take, which
+forces the same rebuild while leaving every saved field as the block gave it.
+
+#### Golden files: what changed and why
+
+`cargo test -p zax-nes --release --test ppu_golden_tests -- --ignored`, 291 ROMs x 1200 frames,
+before the digests were touched:
+
+- **174 rows reported `audio differs`, and the classification of every difference line in the
+  whole run is `audio differs` — nothing else.** Pixels (`pixel_sha256`), tile records
+  (`tiles_sha256`), cycle counts (`cycles`), `blargg_status`, `blargg_text`, `mapper`, `region`,
+  `load_ok` are untouched on all 291 rows.
+- The 117 rows that matched are the ROMs that stay silent over 1200 frames.
+- Cross-checked a second way: `zax-harness golden-core test-roms <out> 1200` was run into a
+  fresh file and compared field by field against `goldens/core-goldens.jsonl`. The only key that
+  differed anywhere was `audio_i16_sha256_samples`, on the same 174 rows.
+- `goldens/core-goldens.jsonl` was then rewritten **in place, one field per line**: the
+  `audio_i16_sha256_samples` object of those 174 lines was spliced in and nothing else on any
+  line was re-serialised. The goldens then report `291 of 291 rows matched`.
+- A note was added at the top of `goldens/README.md`: the audio column is no longer the C# 0.2.0
+  value, every other column still is.
+
+Tests ported from V2-16: `apu_channel_tests` and `apu_output_tests` lose the linear step
+constants (`0.00752`, `0.00851`, `0.00494`, `0.00335`, gain `1.526`) and read their expectations
+from `mixer` instead, since the law is no longer proportional — the triangle staircase, for
+instance, is now checked step by step against `T(3t)` rather than for equal spacing. Two
+criteria of the amendment replace their predecessors: the peak-to-peak of a lone pulse at the
+output of REQ-CORE-071 is **0.149 ± 0.002** (measured in band: the test passes) where it was
+0.172 ± 0.02, and the passband test's reference amplitude follows it. `REQ-CORE-076` has its own
+test: silence reads `A = M = S = 0`.
+
+`bench-core`, release, x86, same protocol as step 1 (the before figures are in the table above):
+
+| ROM | core before | core after | repeats |
+|---|---|---|---|
+| `nestest.nes` | 0.8695 ms | 0.8803 ms | 0.8601 / 0.8869 / 0.8683 |
+| `mmc5test/mmc5test.nes` | 1.7909 ms | 1.7623 ms | — |
+
+The three repeats of `nestest` span 0.860 to 0.887 ms, so the "after" figure sits inside the
+noise of the machine and `mmc5test` moved the other way. No measurable cost, which is what the
+replacement of float work by two table reads predicts. R0's callgrind run is the real gate.

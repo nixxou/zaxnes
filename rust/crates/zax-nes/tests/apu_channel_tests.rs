@@ -15,10 +15,19 @@ mod common;
 use std::collections::HashSet;
 
 use common::{machine_with, minimal};
+use zax_nes::apu::mixer;
 use zax_nes::{NesBus, NesCore, NesRegion};
 
-/// A pulse at volume 15 through the linear mixer.
-const PULSE_FULL: f64 = 1.526 * 0.00752 * 15.0;
+/// Level a lone pulse at `volume` mixes to (REQ-CORE-073, AMD-054). The law is non-linear, so
+/// this is not `volume` times the level at 1.
+fn pulse_level(volume: i32) -> f64 {
+    mixer::to_float(mixer::mix(volume, 0, 0, 0, 0))
+}
+
+/// Level a lone DMC output of `level` mixes to (REQ-CORE-073).
+fn dmc_level(level: i32) -> f64 {
+    mixer::to_float(mixer::mix(0, 0, 0, 0, level))
+}
 
 /// $4001 value that keeps the sweep from muting: negate with shift 0.
 const SWEEP_NEVER_MUTES: u8 = 0x08;
@@ -132,7 +141,7 @@ fn req_core_073_a_pulse_at_volume_fifteen_swings_between_zero_and_its_step_value
     assert!(levels.contains(&0.0f64.to_bits()));
     assert!(levels
         .iter()
-        .any(|&bits| (f64::from_bits(bits) - PULSE_FULL).abs() < 1e-9));
+        .any(|&bits| (f64::from_bits(bits) - pulse_level(15)).abs() < 1e-9));
 }
 
 #[test]
@@ -156,7 +165,7 @@ fn req_core_073_the_envelope_decays_one_step_per_quarter_frame() {
 
         let peak = peak(&mut core, 200);
 
-        assert_near(peak, f64::from(expected_volume) * PULSE_FULL / 15.0);
+        assert_near(peak, pulse_level(expected_volume));
     }
 }
 
@@ -176,7 +185,7 @@ fn req_core_073_a_looping_envelope_reloads_to_fifteen_instead_of_staying_at_zero
     }
 
     // Sixteen quarter frames take the decay to 0; the seventeenth wraps it back to 15.
-    assert_near(peak(&mut core, 200), PULSE_FULL);
+    assert_near(peak(&mut core, 200), pulse_level(15));
 }
 
 #[test]
@@ -225,7 +234,6 @@ fn req_core_073_a_negative_sweep_halves_the_period_and_doubles_the_frequency() {
 #[test]
 fn req_core_073_the_triangle_walks_its_staircase_in_steps_of_one() {
     let mut core = core();
-    let step = 1.526 * 0.00851;
 
     core.write_memory(0x4015, 0x04);
     core.write_memory(0x4008, 0x7F); // Control clear, linear counter reload 127.
@@ -241,10 +249,13 @@ fn req_core_073_the_triangle_walks_its_staircase_in_steps_of_one() {
     levels.sort_by(f64::total_cmp);
     levels.dedup();
 
-    // The staircase visits all sixteen output values, one step apart.
+    // The staircase visits all sixteen output values, one channel step apart. The mixing law
+    // is non-linear (REQ-CORE-073, AMD-054), so the levels are not evenly spaced: each one is
+    // the table entry of the channel step it comes from.
     assert_eq!(16, levels.len());
-    for pair in levels.windows(2) {
-        assert_near(pair[1] - pair[0], step);
+    for (step, level) in levels.iter().enumerate() {
+        let expected = mixer::to_float(mixer::mix(0, 0, i32::try_from(step).unwrap(), 0, 0));
+        assert_near(*level, expected);
     }
 }
 
@@ -370,12 +381,12 @@ fn req_core_073_a_write_to_4011_loads_the_dmc_output_level_directly() {
     core.write_memory(0x4011, 64);
     core.bus_mut().tick();
 
-    assert_near(level(&core), 1.526 * 0.00335 * 64.0);
+    assert_near(level(&core), dmc_level(64));
 
     core.write_memory(0x4011, 0xFF); // Only the low seven bits are kept.
     core.bus_mut().tick();
 
-    assert_near(level(&core), 1.526 * 0.00335 * 127.0);
+    assert_near(level(&core), dmc_level(127));
 }
 
 fn start_dmc(core: &mut NesCore, rate: u8, length: u8, irq: bool, looping: bool) {

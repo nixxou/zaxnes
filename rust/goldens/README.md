@@ -2,6 +2,8 @@
 
 Produced on Windows x64 from the C# implementation at tag `v0.2.0`. They contain only outputs of this project's own code, computed over **public** test ROMs and built-in synthetic scenes: no ROM, no game profile, no commercial data.
 
+**Audio digests, since AMD-054 (lot RU-3a).** The `audio_i16_sha256_samples` column of `core-goldens.jsonl` no longer holds the 0.2.0 values: REQ-CORE-073 as amended replaces the linear mix by the non-linear one, so every ROM that makes a sound hashes differently. The column was regenerated with `zax-harness golden-core`; **174 of the 291 rows changed and no other field of any row did** — pixels, tile records, cycles, blargg status and text are still the 0.2.0 values, which is what makes the change checkable. The 117 rows left alone are the ROMs that stay silent over 1200 frames.
+
 ## core-goldens.jsonl
 
 One JSON object per line, one line per `.nes` file of the public test-ROM set (`rust/test-roms/`, 291 files), sorted by path (ordinal).

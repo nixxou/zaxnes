@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::f64::consts::PI;
 
 use common::minimal;
+use zax_nes::apu::mixer;
 use zax_nes::{NesCore, RegionTiming};
 
 fn core_at(sample_rate: i32) -> NesCore {
@@ -27,10 +28,6 @@ fn core_at(sample_rate: i32) -> NesCore {
 
 fn core() -> NesCore {
     core_at(48_000)
-}
-
-fn level(core: &NesCore) -> f64 {
-    core.apu().mixed_level()
 }
 
 fn start_pulse1(core: &mut NesCore, period: i32) {
@@ -67,95 +64,143 @@ fn capture(core: &mut NesCore, count: usize, skip: usize) -> Vec<f32> {
     samples.into_iter().skip(skip).take(count).collect()
 }
 
-fn assert_near(actual: f64, expected: f64) {
-    assert!(
-        (actual - expected).abs() <= 1e-9,
-        "{actual} is not within 1e-9 of {expected}"
-    );
-}
-
-fn peak_over(core: &mut NesCore, cycles: usize) -> f64 {
-    let mut peak = f64::NEG_INFINITY;
+/// The highest `A` of REQ-CORE-073 seen over `cycles` CPU cycles, at the test point of
+/// REQ-CORE-076.
+fn peak_mixer_over(core: &mut NesCore, cycles: usize) -> i32 {
+    let mut peak = 0;
     for _ in 0..cycles {
         core.bus_mut().tick();
-        peak = peak.max(level(core));
+        peak = peak.max(core.apu().mixer_apu());
     }
     peak
 }
 
 // ---------------------------------------------------------------- REQ-CORE-073
 
+/// REQ-CORE-073 (AMD-054) — the four figures the requirement's first criterion names, read at
+/// the test point of REQ-CORE-076: a lone pulse at volume 15 gives 4 890, the two pulses
+/// 8 462 — a ratio of 1.73 rather than the 2 a linear law would give — the triangle alone
+/// 8 363, and every channel at its maximum exactly 32 767.
 #[test]
-fn req_core_073_each_channel_contributes_its_documented_step() {
-    // The linear approximation of nesdev's "APU Mixer", scaled by 50 000 / 32 768. One
-    // channel at a time, so each step value is read on its own.
-    for (control, value, enable, expected_mix) in [
-        (0x4000u16, 0x9Fu8, 0x01u8, 15.0 * 0.00752), // Pulse 1 at volume 15.
-        (0x4004, 0x9F, 0x02, 15.0 * 0.00752),        // Pulse 2 at volume 15.
-        (0x400C, 0x1F, 0x08, 15.0 * 0.00494),        // Noise at volume 15.
-    ] {
-        let mut core = core();
+fn req_core_073_the_mixer_produces_the_documented_integers() {
+    // A lone pulse at volume 15, 50 % duty.
+    let mut one = core();
+    start_pulse1(&mut one, 100);
+    assert_eq!(4890, peak_mixer_over(&mut one, 4000));
 
-        core.write_memory(0x4015, enable);
-        core.write_memory(control, value);
-        core.write_memory(control + 1, 0x08);
-        core.write_memory(control + 2, 100);
-        core.write_memory(control + 3, 0xF8);
+    // Both pulses on the same period, in phase.
+    let mut two = core();
+    start_pulse1(&mut two, 100);
+    two.write_memory(0x4015, 0x03);
+    two.write_memory(0x4004, 0xBF);
+    two.write_memory(0x4005, 0x08);
+    two.write_memory(0x4006, 100);
+    two.write_memory(0x4007, 0xF8);
+    assert_eq!(8462, peak_mixer_over(&mut two, 4000));
 
-        assert_near(peak_over(&mut core, 4000), 1.526 * expected_mix);
+    // The ratio the note of the requirement contrasts with the linear law's 2.
+    assert!((8462.0_f64 / 4890.0 - 1.73).abs() < 0.005);
+
+    // The triangle alone: its index runs 45 down to 0, so 8 363 is the top of the staircase
+    // rather than a volume setting — the channel has none.
+    let mut triangle = core();
+    triangle.write_memory(0x4015, 0x04);
+    triangle.write_memory(0x4008, 0x7F);
+    triangle.write_memory(0x400A, 50);
+    triangle.write_memory(0x400B, 0xF8);
+    triangle.write_memory(0x4017, 0x80);
+    assert_eq!(8363, peak_mixer_over(&mut triangle, 40 * 51));
+    assert_eq!(8363, mixer::TND_TABLE[45]);
+
+    // Every channel at its maximum: index 30 on one table, 3x15 + 2x15 + 127 = 202 on the
+    // other. Both roundings land so that the two terms add up to full scale exactly.
+    assert_eq!(mixer::FULL_SCALE, mixer::mix(15, 15, 15, 15, 127));
+    assert_eq!(8462, mixer::PULSE_TABLE[30]);
+    assert_eq!(24_305, mixer::TND_TABLE[202]);
+}
+
+/// REQ-CORE-073 (AMD-054) — the two tables are built from the real functions and scaled by `K`,
+/// which is computed on the unrounded values; the rounding goes to the nearest integer and to
+/// the even one on a tie, which the entry `K · T(196) = 23 905.4997` is near enough to be worth
+/// pinning. The numerator is 95.88, the analytic one, and not the 95.52 of the same page's
+/// lookup table, which would give 4 876 / 8 438.
+#[test]
+fn req_core_073_the_tables_follow_the_documented_formulas() {
+    assert_eq!(31, mixer::PULSE_TABLE.len());
+    assert_eq!(203, mixer::TND_TABLE.len());
+    assert_eq!(0, mixer::PULSE_TABLE[0]);
+    assert_eq!(0, mixer::TND_TABLE[0]);
+
+    for i in 1..=30 {
+        let expected = 95.88 / ((8128.0 / i as f64) + 100.0);
+        assert!((mixer::pulse(i) - expected).abs() < 1e-12);
+        assert_eq!(
+            mixer::round_to_even(mixer::NORMALISATION * expected),
+            mixer::PULSE_TABLE[i]
+        );
     }
+    for i in 1..=202 {
+        let expected = 163.67 / ((24329.0 / i as f64) + 100.0);
+        assert!((mixer::tnd(i) - expected).abs() < 1e-12);
+        assert_eq!(
+            mixer::round_to_even(mixer::NORMALISATION * expected),
+            mixer::TND_TABLE[i]
+        );
+    }
+
+    let k = 32_767.0 / (mixer::pulse(30) + mixer::tnd(202));
+    assert!((mixer::NORMALISATION - k).abs() < 1e-9);
+    assert!((mixer::NORMALISATION - 32_735.877_6).abs() < 1e-3);
+
+    // Round half to even, as the requirement asks.
+    assert_eq!(2, mixer::round_to_even(2.5));
+    assert_eq!(2, mixer::round_to_even(1.5));
+    assert_eq!(23_905, mixer::TND_TABLE[196]);
+    let near_tie = mixer::NORMALISATION * mixer::tnd(196);
+    assert!((23_905.499..23_905.5).contains(&near_tie), "{near_tie}");
+
+    // The lookup-table numerator the requirement's note sets aside, with the K its own table
+    // would give: 4 876 for a lone pulse instead of 4 890.
+    let lookup_pulse = |i: usize| 95.52 / ((8128.0 / i as f64) + 100.0);
+    let lookup_k = 32_767.0 / (lookup_pulse(30) + mixer::tnd(202));
+    assert_eq!(4876, mixer::round_to_even(lookup_k * lookup_pulse(15)));
+    assert_eq!(8438, mixer::round_to_even(lookup_k * lookup_pulse(30)));
 }
 
+/// REQ-CORE-073 (AMD-054) — the chain from the mixer's integer to the float the host reads:
+/// `S = min(A + M, 32 767)`, then `S / 32 768`. Without expansion audio `M = 0` and `S = A`.
 #[test]
-fn req_core_073_the_triangle_and_the_dmc_contribute_their_documented_steps() {
+fn req_core_073_the_integer_output_becomes_the_float_of_req_core_071() {
     let mut core = core();
+    start_pulse1(&mut core, 100);
 
-    // Triangle on its own, at the top of the staircase.
-    core.write_memory(0x4015, 0x04);
-    core.write_memory(0x4008, 0x7F);
-    core.write_memory(0x400A, 50);
-    core.write_memory(0x400B, 0xF8);
-    core.write_memory(0x4017, 0x80);
+    for _ in 0..4000 {
+        core.bus_mut().tick();
+        let apu = core.apu();
+        assert_eq!(0, apu.mixer_expansion());
+        assert_eq!(apu.mixer_apu(), apu.mixer_output());
+        assert!((f64::from(apu.mixer_output()) / 32_768.0 - apu.mixed_level()).abs() < 1e-12);
+    }
 
-    assert_near(peak_over(&mut core, 40 * 51), 1.526 * 15.0 * 0.00851);
-
-    // DMC on its own, level loaded straight through $4011.
-    let mut dmc = core_at(48_000);
-    dmc.write_memory(0x4011, 127);
-    dmc.bus_mut().tick();
-
-    assert_near(level(&dmc), 1.526 * 127.0 * 0.00335);
+    // The clipping of REQ-CORE-073 is a minimum, not a wrap; `A` on its own never reaches it,
+    // the two roundings being chosen so that full scale is exactly 32 767.
+    assert_eq!(mixer::FULL_SCALE, mixer::clip(mixer::FULL_SCALE, 5000));
+    assert_eq!(mixer::FULL_SCALE, mixer::clip(30_000, 5000));
+    assert_eq!(30_000, mixer::clip(30_000, 0));
 }
 
+/// REQ-CORE-076 — silence reads `A = M = S = 0` at the test point.
 #[test]
-fn req_core_073_the_mix_is_the_sum_of_the_channels_and_is_clamped_to_one() {
+fn req_core_076_silence_reads_zero_at_the_test_point() {
     let mut core = core();
-
-    // Both pulses at volume 15 plus a DMC level of 127: 0.2256 + 0.42545, under the clamp.
-    core.write_memory(0x4015, 0x03);
-    core.write_memory(0x4000, 0x9F);
-    core.write_memory(0x4001, 0x08);
-    core.write_memory(0x4002, 100);
-    core.write_memory(0x4003, 0xF8);
-    core.write_memory(0x4004, 0x9F);
-    core.write_memory(0x4005, 0x08);
-    core.write_memory(0x4006, 100);
-    core.write_memory(0x4007, 0xF8);
-    core.write_memory(0x4011, 127);
-
-    let expected = 1.526 * ((2.0 * 15.0 * 0.00752) + (127.0 * 0.00335));
-    assert_near(peak_over(&mut core, 4000), expected);
-    assert!(expected < 1.0);
-
-    // Adding the triangle at the top of its staircase pushes the sum past full scale, where
-    // REQ-CORE-073 asks for a clamp rather than a wrap.
-    core.write_memory(0x4015, 0x07);
-    core.write_memory(0x4008, 0x7F);
-    core.write_memory(0x400A, 50);
-    core.write_memory(0x400B, 0xF8);
-    core.write_memory(0x4017, 0x80);
-
-    assert_eq!(1.0, peak_over(&mut core, 40 * 51));
+    for _ in 0..200 {
+        core.bus_mut().tick();
+        let apu = core.apu();
+        assert_eq!(0, apu.mixer_apu());
+        assert_eq!(0, apu.mixer_expansion());
+        assert_eq!(0, apu.mixer_output());
+        assert_eq!(0.0, apu.mixed_level());
+    }
 }
 
 fn median(mut values: Vec<f32>) -> f64 {
@@ -164,7 +209,7 @@ fn median(mut values: Vec<f32>) -> f64 {
 }
 
 #[test]
-fn req_core_073_a_lone_pulse_at_volume_fifteen_swings_by_zero_point_one_seven_two() {
+fn req_core_073_a_lone_pulse_at_volume_fifteen_swings_by_zero_point_one_four_nine() {
     let mut core = core();
     start_pulse1(&mut core, 111); // About 1 kHz: 24 output samples per half period.
 
@@ -189,7 +234,9 @@ fn req_core_073_a_lone_pulse_at_volume_fifteen_swings_by_zero_point_one_seven_tw
             .collect(),
     );
 
-    assert!((high - low - 0.172).abs() <= 0.02, "swing {}", high - low);
+    // AMD-054: 0.149 ± 0.002 at the output of REQ-CORE-071, where the linear law of the
+    // previous version of the requirement gave 0.172 ± 0.02 (the level drops by about 13 %).
+    assert!((high - low - 0.149).abs() <= 0.002, "swing {}", high - low);
 }
 
 #[test]
@@ -274,8 +321,9 @@ fn req_core_070_resampling_a_pulse_leaves_no_aliasing_product_above_minus_sixty_
 
 #[test]
 fn req_core_070_the_passband_carries_the_fundamental_at_its_full_level() {
-    // A 50 % square of 0.172 peak to peak carries 2h/pi at its fundamental; the passband
-    // runs flat to roughly 0.31 of the output rate.
+    // A 50 % square of 0.149 peak to peak (AMD-054; 0.172 under the linear law of the
+    // previous version of REQ-CORE-073) carries 2h/pi at its fundamental; the passband runs
+    // flat to roughly 0.31 of the output rate.
     for period in [111, 27, 10] {
         let mut core = core();
         start_pulse1(&mut core, period);
@@ -283,7 +331,7 @@ fn req_core_070_the_passband_carries_the_fundamental_at_its_full_level() {
         let samples = capture(&mut core, 8192, 8192);
 
         let amplitude = amplitude_at(&samples, pulse_frequency(&core, period), 48_000);
-        let expected = 2.0 * 0.172 / PI;
+        let expected = 2.0 * 0.149 / PI;
 
         assert!(
             amplitude >= expected * 0.95 && amplitude <= expected * 1.05,
