@@ -14,8 +14,8 @@ reference.
 | 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | done — `c49033b` |
 | 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | done — `2dcddc1` |
 | 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | done — `804e935` |
-| 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | done |
-| 7 | Closing: benches, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, goldens | todo |
+| 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | done — `5ace3ed` |
+| 7 | Closing: benches, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, goldens | done |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -533,3 +533,123 @@ Tests: four more (two in `bench_core_tests.rs`, two in `render_rom_tests.rs`) an
 Checks after this step: `cargo fmt --check` clean, workspace clippy clean,
 `cargo test --release -p zax-settings` 221 passed, `cargo test --release -p zax-harness` 44
 passed, and the synthetic render goldens still match.
+
+### Step 7 — closing
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --release --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release -p zax-nes` | 508 passed |
+| `cargo test --release -p zax-app --features bundled` | 640 passed |
+| `cargo test --release -p zax-settings` | 221 passed |
+| `cargo test --release -p zax-harness` | 44 passed |
+| `cargo test --release --workspace --features zax-app/bundled` | **2131 passed, 0 failed** |
+| `cargo test -p zax-nes --release --test ppu_golden_tests -- --ignored` | **291 of 291 rows matched**, 0 missing |
+| `cargo test --release -p zax-harness --test render_tests` | the synthetic captures still match the C# goldens |
+
+2131 against RU-3a-fix's 2088: **43 new tests** — 26 in `zax-nes` (11 state + 14 sequence + 1
+ignored measurement), 14 in `zax-app`, 3 in `zax-harness` (and one more that replaced nothing).
+
+#### After benchmarks
+
+`bench-core`, release, x86, 1200 frames after 120 of warm-up, **best of three**, no profile. The
+`nestest` row is the one the lot asks for (no commercial ROM in this checkout); the two MMC5 ROMs
+are the heaviest boards available.
+
+| ROM | N = 0 | N = 1 | N = 2 | N = 3 | ratio at N = 3 |
+|---|---|---|---|---|---|
+| `nestest.nes` | **0.8430 ms** | 1.7057 ms (2.02x) | 2.5629 ms (3.04x) | 3.4254 ms (4.09x) | 4.09 against 4 frames |
+| `mmc5test/mmc5test.nes` | 1.8310 ms | 3.6409 ms (1.99x) | — | — | — |
+| `exram/mmc5exram.nes` | 2.0379 ms | 4.0920 ms (2.01x) | — | — | — |
+
+So a real frame costs **N + 1 emulated frames plus about 1 to 2 %**, which is the state copied and
+put back plus the cache it disturbs.
+
+**The save + restore cost alone**, two ways:
+
+| Instrument | Figure |
+|---|---|
+| `bench-core`'s own `run-ahead restore` stage (step 5 only) | **0.0000 ms at N = 0**, 0.0012 to 0.0031 ms from N = 1 on |
+| `the_cost_of_one_capture_and_one_restore` (20 000 rounds, three fixtures) | capture 0.25 µs, restore 0.65 to 0.71 µs, **both 0.90 to 0.97 µs per real frame** |
+
+Against a core frame of 843 µs that is **0.11 %** of one emulated frame, and the 0.0000 ms at
+N = 0 is the one `bool` test the restore costs when nothing is held.
+
+#### The N = 0 gate, restated
+
+| Instrument | RU-3a-fix `ce78abd` | RU-3b | Verdict |
+|---|---|---|---|
+| `NesBus::tick`, post-LTO | 119 instr / 3 `pushq` / 32 B | **119 / 3 / 32** | identical |
+| `NesCore::run_frame`, post-LTO | 2 096 instr / 8 `pushq` / 904 B | **2 096 / 8 / 904** | identical |
+| `Apu2A03::run_cpu_cycles`, post-LTO | 855 instr | 873 (+18) | three copies of the mute test, each behind the ring's mutex → once per output sample, ~0.008 % of a frame |
+| `bench-core` `nestest`, interleaved | 0.8512 to 0.8776 ms | 0.8493 to 0.8689 ms | indistinguishable |
+| `bench-core` `mmc5test`, interleaved | 1.8411 to 1.8646 ms | 1.8200 to 1.8915 ms | indistinguishable |
+
+R0's callgrind run is the real gate; the expectation this side's evidence supports is `tick` and
+`run_frame` unchanged and `run_cpu_cycles` about **2 200 instructions per frame** heavier, which
+is 0.008 % of a core of roughly 27 M.
+
+#### Q-103 answered during the lot
+
+R0 settled the ticket while this lot was being written, and the answer is recorded here because it
+changes what the **next** lot owes rather than this one:
+
+- point 1 keeps what is implemented: a frame hook's write is **not** replayed onto the real state;
+- points 2 to 4 add a **guard-rail**: a profile whose scripts name a member that changes the core
+  from a frame hook (`WriteMem` at least) has its **effective** run-ahead forced to 0, the user's
+  setting kept and applying again to the next game; detected **once at profile load**, as
+  `scripts_leave_the_core_alone` already is, with nothing added to the frame loop; plus a note
+  beside the Run-ahead setting in both interfaces and both languages, and a line in the log;
+- point 5: R0 measured 0 of the 101 1.x profiles and 0 of the 101 2.0 profiles using `WriteMem`,
+  so the guard-rail is for user-made profiles.
+
+The answer assigns it to "the fix that follows RU-3b", so it is **not** in this lot. What was done
+here instead: the answered ticket is copied into `docs/spec/changes/`, the `// Q-103` note above
+`put_the_real_frame_back` states the answer and who owes the guard-rail, and the test that pins the
+behaviour says in so many words that **it will have to drive `GameSession::set_run_ahead` directly
+once the guard-rail lands**, because the profile it uses names `WriteMem` and will then run at
+N = 0.
+
+#### What the next lot must not undo
+
+`rust/docs/PERFORMANCE-HISTORY.md` was updated rather than left to drift — §3 (the `--run-ahead`
+option and the new bench stage), §5.5 (a "Run-ahead" entry that opens by saying it is *not*
+"emulation ahead", with the three assembly figures, the state's size and cost, the invariant, the
+pixel decision and the open guard-rail), §6 (the setting's table row and the note that it is the
+one performance setting Lua does reach), §10 (three rows of the porting checklist). The invariants
+a later lot has to keep:
+
+1. **`run_frame_ahead` at N = 0 is `run_frame` and nothing else**, the sequence `#[inline(never)]`
+   behind it; `NesBus::tick` stays 119 / 3 / 32 and `NesCore::run_frame` stays 2 096 in the
+   post-LTO assembly.
+2. **Every session entry point that runs a frame restores the real state before returning.** A new
+   frame-running path needs `put_the_real_frame_back`, or REQ-LOOP-066 breaks for the rollback, the
+   frame steps and the savestates at once.
+3. **`Ppu2C02::save_state` = `save_machine_state` + `save_frame_records`**, in that order. A new
+   PPU field goes in exactly one of the two: the machine half if the emulation reads it back, the
+   frame half if it is the frame's own output. Putting a machine field in the frame half would
+   silently break run-ahead; putting a frame field in the machine half would overwrite the
+   displayed frame on the restore.
+4. **The harness stays at N = 0 by default**, and `golden-core` keeps no option at all.
+
+#### Assumed divergences (D) this lot adds
+
+1. **The pixels of a hidden frame are rendered** where REQ-LOOP-068 permits omitting them.
+   Measured at 4.8 % of an emulated frame; declined for the reasons in step 4. Accuracy is
+   untouched and the Zapper is unaffected.
+2. **On the "emulation ahead" path with no emulation thread** — taken only when the operating
+   system refuses one — the frame hooks read the **real** frame rather than the displayed one,
+   because the memory snapshot of REQ-LOOP-067 is only served while the core is away. The real
+   state has to be back before the tick's next rollback capture, which is the normative
+   requirement (REQ-LOOP-066), so that is the side the conflict was resolved on. Every other path
+   serves the displayed frame.
+
+#### Left to R0
+
+- The callgrind run that gates "N = 0 costs nothing", on Mega Man 2 and Zelda II (no commercial
+  ROM here).
+- The `[ROM]` criteria of REQ-LOOP-068: Duck Hunt with the mouse at Run-ahead 1, and Super Mario
+  Bros.' status bar staying still at Run-ahead 3. Both need a commercial ROM and a live window.
+- The latency criterion of REQ-ACC-030 at the default (Run-ahead 1), which needs the reference
+  machine.

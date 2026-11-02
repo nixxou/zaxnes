@@ -681,6 +681,13 @@ impl GameSession {
     /// what the .NET implementation of AMD-041 does too. The input hook `InputProcess` runs at
     /// step (a), before the real frame, so it is not concerned.
     ///
+    /// R0 answered the ticket while this lot was being written: the write is **not** to be
+    /// replayed (so what happens here is right), but a profile whose scripts name a member that
+    /// changes the core from a frame hook must have its **effective** run-ahead forced to 0, the
+    /// user's setting kept, detected once at profile load as `scripts_leave_the_core_alone` is,
+    /// with a note beside the setting and a line in the log. That guard-rail is the lot after
+    /// this one, as the answer assigns it.
+    ///
     /// REQ-LOOP-067 allows the restore to be delayed past step (d), and in this application that
     /// is the placement that needs no copy at all: the conversion pulls `core.frame_batch()`
     /// after the frame rather than through the video callback, the frame hooks read the live core

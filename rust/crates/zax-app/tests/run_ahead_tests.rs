@@ -427,12 +427,16 @@ fn req_loop_067_read_mem_in_a_frame_hook_reads_the_displayed_frame() {
     }
 }
 
-/// Q-103, the behaviour the question ticket fixes provisionally: a `Script:WriteMem` from a
-/// **frame** hook lands on the displayed state — the hook reads its own write straight back — and
-/// does not reach the real one, because REQ-LOOP-066 makes the core follow the real frame.
+/// Q-103: a `Script:WriteMem` from a **frame** hook lands on the displayed state — the hook reads
+/// its own write straight back — and does not reach the real one, because REQ-LOOP-066 makes the
+/// core follow the real frame. At Run-ahead = 0 the same write persists, which is what makes the
+/// loss a consequence of the amendment and not of the write itself.
 ///
-/// At Run-ahead = 0 the same write persists, which is what makes the loss a consequence of the
-/// amendment and not of the write itself.
+/// R0's answer keeps that (the write is not replayed) and adds a guard-rail for the lot after this
+/// one: a profile whose scripts name `WriteMem` has its **effective** run-ahead forced to 0, the
+/// user's setting kept. **When that lands this test has to drive the session's run-ahead
+/// directly** (`GameSession::set_run_ahead`) or use a profile that writes without naming the
+/// member, because the profile below names it and will then run at N = 0.
 #[test]
 fn req_loop_067_a_frame_hook_write_does_not_reach_the_real_state() {
     const SOURCE: &str = r"

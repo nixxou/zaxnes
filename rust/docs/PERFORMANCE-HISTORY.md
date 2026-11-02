@@ -83,7 +83,7 @@ they are settings that are off on the desktop (the C# behaviour) and on by defau
 | `zax-harness golden-core <roms dir> <out.jsonl> <frames>` | same digests on any ROM folder; run at two commits and compare | any core change; the reference run used 98 commercial ROMs x 1800 frames |
 | `zax-harness render --rom ... --out <dir>` with `--group-draws`, `--no-shadows`, `--size` | PNG captures; compare two builds byte for byte | any renderer or engine change |
 | `zax-harness render ... --bench <n>` | GPU/CPU time of the scene passes, "GL draws" count | renderer work |
-| `zax-harness bench-core <rom> [--profile] [--load-state] [--widescreen]` | CPU cost per emulated frame of each stage (core, capture, conversion, Lua, publish, draw list, picture), max and frames over 1 ms | CPU work; also runs under `qemu-aarch64` for relative weights |
+| `zax-harness bench-core <rom> [--profile] [--load-state] [--widescreen] [--run-ahead]` | CPU cost per emulated frame of each stage (core, run-ahead restore, capture, conversion, Lua, publish, draw list, picture), max and frames over 1 ms. **`--run-ahead` defaults to 0**, so a figure taken before AMD-041 and one taken after it measure the same work | CPU work; also runs under `qemu-aarch64` for relative weights |
 | `ZAXNES_LUA_GC=smooth` with `bench-core` | measures Lua with the collector tuning the application uses | always, for Lua numbers (without it the spikes of the original tuning show) |
 | `cargo test -p zax-scripting --release --test scripting perf -- --ignored --nocapture --test-threads=1` | Lua binding micro-benchmarks | binding work |
 | Lua API dump (`goldens/lua-api.txt`) | the script-visible API is unchanged | binding work |
@@ -445,6 +445,57 @@ C# counterpart: `src/Zax.App/Loop` (frame clock, emulation host, game session).
   new API.
 - The flag `pipeline.ahead_allowed` it sets also gates `pause_3d_in_2d`, `catch_up_last_3d` and
   `half_rate_3d` (below).
+- **Not to be confused with run-ahead** (next entry). "Emulation ahead" is pipelining and changes
+  no latency; AMD-041's run-ahead re-simulates frames to cut input latency. They compose.
+
+**Run-ahead** (setting `emu.run_ahead`: 0 to 3, **desktop 1**, handheld 0; AMD-041 REQ-LOOP-064
+to 068; RU-3b)
+- The displayed frame is N frames in the future of the **real** frame, computed with the current
+  inputs; the real state then comes back. The player sees their pad N frames earlier. A real frame
+  therefore emulates **N + 1** frames: measured 2.02x at N = 1, 3.04x at N = 2 and 4.09x at N = 3
+  of the core's time on `nestest`.
+- The sequence of REQ-LOOP-065 lives in **`NesCore::run_frame_ahead`**, not in the session,
+  because the "emulation on a separate core" thread *moves* the core for the duration of one frame
+  (`core_worker.rs`): the sequence is exactly the unit that thread already ran. `CoreWorker::start`
+  takes N as a third argument.
+- **N = 0 costs nothing, and that is a rule, not an aspiration.** `run_frame_ahead` is
+  `if ahead == 0 { return self.run_frame(word) }` with the sequence `#[inline(never)]` behind it.
+  Verified on the post-LTO assembly against RU-3a-fix (`ce78abd`): `NesBus::tick` **119
+  instructions / 3 `pushq` / 32-byte frame, identical**, and `NesCore::run_frame` **2 096,
+  identical**. The only change anywhere hot is +18 static instructions in
+  `Apu2A03::run_cpu_cycles`, three inlined copies of the mute test, each **behind the ring's
+  mutex** — so once per output sample (~735 per frame), not per CPU cycle: about 0.008 % of a
+  frame. A lot that touches this must keep those three figures.
+- The in-memory state of REQ-CORE-121 (`zax_nes::state::CoreState`) is a **reused** buffer, 19.5
+  KiB, written by the savestate's own per-component code. `Ppu2C02::save_state` is split into
+  `save_machine_state` + `save_frame_records` and the in-memory state takes the machine half only:
+  the frame's tile records are cleared by `begin_rendered_frame` at every frame's pre-render line,
+  so the emulation never reads them back. Save + restore measured at **0.9 to 1.0 µs per real
+  frame** (0.11 % of one emulated frame); keeping the records out is most of why.
+- That split is also what makes REQ-LOOP-067 free: after the restore the core still holds the
+  **displayed** frame's records, masks and pixels, so `frame_batch()`, the 2D picture and the
+  Zapper answer for the displayed frame with nothing copied. The restore (step 5) is **delayed**
+  past the conversion and the frame hooks, which REQ-LOOP-067 allows in so many words.
+- **Invariant**: every entry point of the session that runs a frame leaves the core in the
+  **real** state (`GameSession::put_the_real_frame_back`, four sites). That is what makes
+  REQ-LOOP-066 true by construction for the rollback snapshots, the frame steps, the savestates,
+  the input recording and the achievements. A lot that adds a frame-running path must add the
+  restore to it.
+- Frame stepping (J / K) forces N = 0, so it shows the frame it steps to.
+- The pixels of a hidden frame **are** rendered. Skipping them was measured at 4.8 % of an
+  emulated frame on `nestest`, and the only zero-cost way to get it duplicates the five hottest
+  PPU loops through a `const` generic — the wrong trade against the ±0.1 % gate at N = 0 and
+  against a Cortex-A53's instruction cache, on handhelds that default to N = 0 anyway.
+  REQ-LOOP-068 only permits the omission; the Zapper is unaffected either way, its light being
+  composed from the tile records (`sees_light_at`) and not from the pixel buffer.
+- The harness runs at **N = 0** unless `--run-ahead` says otherwise (`render`, `bench-core`), and
+  `golden-core` has no option at all: the digests and captures are only comparable at N equal
+  (REQ-ARCH-012 amended). `bench-core` reports N in its header and the restore as its own stage.
+- Q-103, answered by R0 after this lot: a frame hook's `Script:WriteMem` writes into the displayed
+  state and is lost. The write is not to be replayed, but a profile whose scripts name such a
+  member must have its **effective** N forced to 0 (detected once at profile load, as
+  `scripts_leave_the_core_alone` is, with a note beside the setting). **That guard-rail is not in
+  yet** — it is the lot after RU-3b.
 
 **Pipelined frames** (setting `emu.pipeline`: Off / Auto / Always; desktop Off, handheld Auto;
 `ZAXNES_PIPELINE`; `8bc7374`)
@@ -535,11 +586,14 @@ last 3D, pause 3D in 2D, parallel scripts, optimised and experimental Lua.
 
 ## 6. Settings and environment variables
 
-Rust-only performance settings (none are exposed to Lua; the Lua API dump is unchanged).
-Handheld values are environment defaults: they apply only while the user has no saved value.
+Rust-only performance settings (none are exposed to Lua; the Lua API dump is unchanged) — with
+one exception, `emu.run_ahead`, which is AMD-041's own setting and **is** exposed to Lua
+(`Setting.RunAheadFrames`). Handheld values are environment defaults: they apply only while the
+user has no saved value.
 
 | Setting | Desktop default | Handheld default | Output identical? |
 |---|---|---|---|
+| `emu.run_ahead` (AMD-041) | **1** | **0** | no, and by design: the displayed frame is N frames on. Costs N extra emulated frames per real frame |
 | `emu.catch_up` | 5 | 5 | n/a (C# behaviour is 5) |
 | `emu.lua_smooth_gc` | on | on | yes (except `collectgarbage("count")`) |
 | `emu.lua_optimized` | off | on | yes |
@@ -645,17 +699,17 @@ Measurement pitfall:
 
 | C# area changed by the update | Rust items to re-check | Checks to run |
 |---|---|---|
-| `Zax.Nes/Ppu` (rendering, registers, timing) | 5.1 batched PPU sync points, fast span (`run_visible_span*`), per-line sprite buffer, sprite limit | PPU goldens, golden-core |
+| `Zax.Nes/Ppu` (rendering, registers, timing) | 5.1 batched PPU sync points, fast span (`run_visible_span*`), per-line sprite buffer, sprite limit; the `save_machine_state` / `save_frame_records` split of the savestate (5.5 run-ahead) — a new field goes in one of the two, never in both | PPU goldens, golden-core |
 | `Zax.Nes/Apu` | 5.1 lazy level mixing (the non-linear tables of AMD-054 live there; the cache test stays **one** comparison of `level_key` and `current_level` keeps **one** call site), quiet-cycle skipping (`quiet_cycles` must account for any new timed state; a board with expansion audio keeps it off) | golden-core with audio digests |
 | `Zax.Nes/Cartridges` (new or changed mapper) | 5.1 IRQ horizon or per-cycle stepping; `chr_view` (only for pure fetches); `rom_windows` (`NO_ROM_WINDOW` when reads have side effects); debug assert in debug build | golden-core, a debug run of the mapper's games |
-| `Zax.Nes` bus / CPU | 5.1 sync points ($2000-$3FFF, $4014, $4016/7, cartridge writes), APU catch-up on $4000-$401F, and **`NesBus::tick`'s prologue in the post-LTO assembly** (3 `pushq`, 32-byte frame: nothing board-specific may be inlined into it) | goldens |
+| `Zax.Nes` bus / CPU | 5.1 sync points ($2000-$3FFF, $4014, $4016/7, cartridge writes), APU catch-up on $4000-$401F, and **`NesBus::tick`'s prologue in the post-LTO assembly** (119 instructions, 3 `pushq`, 32-byte frame: nothing board-specific and nothing of run-ahead may be inlined into it) | goldens |
 | `Zax.Engine3D` segmentation / frames | 5.2 filled-cell lists and germ order; `FastMap` iteration order never reaching output | render captures (identical) |
 | `Zax.Engine3D` draw list / `DrawTile` fields | 5.2 placement matrix order; 5.4 `DrawStateKey` must include any new per-draw input; renderer `DrawItem` | captures in both draw modes |
 | `Zax.Scripting` new API members | 5.3 both binding paths (safe and `raw.rs`), API dump; 5.5 **`CORE_MEMBERS`** if the member touches the core; `light_shapes` analysis if it touches `shape` | scripting tests with and without `ZAXNES_FAST_LUA=1`, API dump, `separate_core_tests` |
 | `Zax.Scripting` hook order or new hooks | 5.5 emulation ahead, pipelining, `pause_3d_in_2d`, `catch_up_last_3d` assumptions on when hooks run | `separate_core_tests`, `pause_3d_tests` |
 | `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), linear palette (indexed albedo path), uniform cache, instance block layout | captures, `ZAXNES_SRGB_PALETTE=1` comparison |
 | `Zax.Render` passes / new draw states | 5.4 grouping, labels and runs; clip unification; transparent object grouping | captures with and without `--group-draws` |
-| `Zax.App/Loop` (frame clock, catch-up, pacing) | 5.5 separate core order per tick, ahead, pipeline governor, catch-up limit, half-rate pacing | app tests (`catch_up_tests`, `separate_core_tests`), device profiler |
+| `Zax.App/Loop` (frame clock, catch-up, pacing) | 5.5 separate core order per tick, ahead, pipeline governor, catch-up limit, half-rate pacing, **run-ahead** (the restore must be added to any new frame-running path, and N = 0 must stay `run_frame`) | app tests (`catch_up_tests`, `separate_core_tests`, `run_ahead_tests`), device profiler |
 | `Zax.Settings` (new settings) | handheld defaults (`ui/handheld/defaults.rs`), handheld option rows, desktop `EXCLUDED` | settings catalogue test |
 | Lua runtime / GC | 5.3 smooth GC tuning, `unsafe impl Send` handoff | bench-core with `ZAXNES_LUA_GC=smooth` |
 
