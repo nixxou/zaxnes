@@ -132,14 +132,19 @@ pub struct ConsoleScriptLog;
 impl ScriptLog for ConsoleScriptLog {
     fn print(&mut self, line: &str) {
         println!("Lua: {line}");
+        if crate::app_log::keeping_recent() {
+            crate::app_log::remember(&format!("Lua: {line}"));
+        }
     }
 
     fn error(&mut self, line: &str) {
         eprintln!("{line}");
+        crate::app_log::remember(line);
     }
 
     fn warning(&mut self, line: &str) {
         println!("{line}");
+        crate::app_log::remember(line);
     }
 }
 

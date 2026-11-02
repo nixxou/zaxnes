@@ -19,6 +19,7 @@ pub mod handheld_mode;
 pub mod head_on_pull;
 pub mod input;
 pub mod library_game_catalog;
+pub mod mcp;
 pub mod neutral_assets;
 pub mod overscan;
 pub mod persistence;

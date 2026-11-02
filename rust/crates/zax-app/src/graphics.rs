@@ -123,6 +123,21 @@ impl SceneView {
     }
 }
 
+impl SceneView {
+    /// The scene picture, scaled to `width` x `height` RGB, rows top to bottom (the MCP
+    /// server's screenshot).
+    #[must_use]
+    pub fn capture_rgb(&mut self, width: u32, height: u32) -> Option<Vec<u8>> {
+        match self {
+            Self::Gl(view) => {
+                view.read_scaled_rgb(i32::try_from(width).ok()?, i32::try_from(height).ok()?)
+            }
+            #[cfg(feature = "wgpu")]
+            Self::Wgpu(view) => Some(view.read_scaled_rgb(width as usize, height as usize)),
+        }
+    }
+}
+
 impl GameView for SceneView {
     fn capture_thumbnail(&mut self) -> Option<Vec<u8>> {
         let (width, height) = THUMBNAIL_SIZE;

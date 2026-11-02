@@ -66,7 +66,47 @@ pub fn file_line(line: &str) {
     to_file(line);
 }
 
+/// The last lines of the log, kept in memory only once [`keep_recent`] was called (the MCP
+/// server's `get_log`): before that, one atomic load per line.
+static RECENT: OnceLock<Mutex<std::collections::VecDeque<String>>> = OnceLock::new();
+/// How many lines [`RECENT`] keeps.
+const RECENT_LINES: usize = 1000;
+
+/// Starts keeping the last lines of the log in memory.
+pub fn keep_recent() {
+    let _ = RECENT.set(Mutex::new(std::collections::VecDeque::new()));
+}
+
+/// Whether the last lines are kept.
+#[must_use]
+pub fn keeping_recent() -> bool {
+    RECENT.get().is_some()
+}
+
+/// Keeps `line` among the recent ones, when they are kept (the Lua log goes here too).
+pub fn remember(line: &str) {
+    if let Some(recent) = RECENT.get() {
+        if let Ok(mut recent) = recent.lock() {
+            if recent.len() == RECENT_LINES {
+                recent.pop_front();
+            }
+            recent.push_back(line.to_owned());
+        }
+    }
+}
+
+/// The last `count` lines kept, oldest first.
+#[must_use]
+pub fn recent(count: usize) -> Vec<String> {
+    RECENT
+        .get()
+        .and_then(|recent| recent.lock().ok())
+        .map(|recent| recent.iter().rev().take(count).rev().cloned().collect())
+        .unwrap_or_default()
+}
+
 fn to_file(line: &str) {
+    remember(line);
     if let Some(file) = FILE.get() {
         if let Ok(mut file) = file.lock() {
             // A full disk must not stop the program: the console still has the line.

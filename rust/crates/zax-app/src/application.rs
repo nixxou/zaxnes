@@ -218,6 +218,8 @@ struct Running {
     /// The save state slot `-slot=<n>` (AMD-053 REQ-UI-213) or `--load-state` asks for, until the
     /// game accepts the load: `"1"` to `"36"` or `"quick"`.
     pending_state_load: Option<String>,
+    /// The MCP server of the editor (`--mcp`), off by default.
+    mcp: Option<crate::mcp::McpBridge>,
 }
 
 /// The state of the automatic resolution between two displayed frames.
@@ -385,6 +387,21 @@ impl Running {
             pipeline: Pipelined::default(),
             resolution: AutomaticResolution::default(),
             pending_state_load: options.slot.clone(),
+            mcp: options
+                .mcp_port
+                .and_then(|port| match crate::mcp::McpBridge::start(port) {
+                    Ok(bridge) => {
+                        log(&format!(
+                            "MCP server: http://127.0.0.1:{}/mcp",
+                            bridge.port()
+                        ));
+                        Some(bridge)
+                    }
+                    Err(error) => {
+                        log(&format!("MCP server not started on port {port}: {error}"));
+                        None
+                    }
+                }),
         })
     }
 
@@ -455,6 +472,10 @@ impl Running {
             Duration::ZERO
         };
         self.close_the_gpu_queue(bounded);
+        // The editor's MCP server, after the frame is drawn so a screenshot is of it.
+        if let Some(mcp) = &mut self.mcp {
+            mcp.serve(&mut self.host);
+        }
         self.carry_out_ui_effects();
         let mark = self.clock.start();
         pump_audio(&mut self.host, self.audio.as_mut(), real);

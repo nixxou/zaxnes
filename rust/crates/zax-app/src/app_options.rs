@@ -87,6 +87,9 @@ pub const RUST_ONLY_USAGE: &str = "
 Rust-only options:
   --handheld              Gamepad-only interface for handheld consoles (also ZAXNES_HANDHELD=1,
                           and automatic on aarch64 Linux without an X11 or Wayland display).
+  --mcp[=<port>]          Starts the MCP server of the profile editor on 127.0.0.1 (default
+                          port 8765), for Claude Code: claude mcp add --transport http
+                          zaxnes http://127.0.0.1:8765/mcp
   --roms <dir>            Folder of .nes files the handheld ROM list shows
                           (default: the ROM folder of the options, else the roms
                           folder of the user data).
@@ -180,6 +183,8 @@ pub struct AppOptions {
     pub rom_path: Option<String>,
     /// The movie to play once the ROM has started: `.fm2` or Zaxnes's own (EDITOR-1).
     pub movie_path: Option<String>,
+    /// The port of the MCP server of the editor (`--mcp[=port]`), off without the option.
+    pub mcp_port: Option<u16>,
     /// The 3dSen installation or bundle to import profiles from.
     pub import_three_d_sen_path: Option<String>,
     /// The profile to play: a file, an identifier or a title.
@@ -259,6 +264,7 @@ impl Default for AppOptions {
             list_profiles: false,
             rom_path: None,
             movie_path: None,
+            mcp_port: None,
             import_three_d_sen_path: None,
             profile: None,
             asset_root: None,
@@ -474,6 +480,13 @@ impl AppOptions {
             }
             "--catch-up" => {
                 self.catch_up = Some(parse_catch_up(next_value(arguments, index, "--catch-up")?)?);
+            }
+            "--mcp" => self.mcp_port = Some(crate::mcp::DEFAULT_PORT),
+            mcp if mcp.starts_with("--mcp=") => {
+                let value = &mcp["--mcp=".len()..];
+                self.mcp_port = Some(value.parse().map_err(|_| OptionsError::UnknownArgument {
+                    argument: mcp.to_owned(),
+                })?);
             }
             unknown => {
                 return Err(OptionsError::UnknownArgument {
