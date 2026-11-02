@@ -64,6 +64,61 @@ fn req_e3d_002_the_clip_margins_come_from_the_settings() {
     assert_eq!(0, batch.convert(&mut engine, 0).background_tile_count());
 }
 
+/// AMD-047 REQ-PERS-087, third criterion (as Q-080 corrects it): the leftmost background record
+/// the core can emit sits at `x = −7` (a fine scroll of 7, SPEC-02 REQ-CORE-037) and occupies
+/// the scene `x ∈ [−7, 1]`. It is **kept** by the filter of REQ-E3D-002 with the default margins
+/// and with a left margin of −16 alike; what the two differ in is the visible rectangle of
+/// REQ-SCN-036, which cuts the part of it left of `x = 0.1` in the first case and nothing in the
+/// second.
+#[test]
+fn req_pers_087_the_border_tile_is_kept_and_only_the_visible_rectangle_cuts_it() {
+    const DEFAULT: Vec4F = ConversionSettings::DEFAULT_CLIPPING;
+    const WIDE_LEFT: Vec4F = Vec4F::new(-16.0, 8.1, 8.1, 0.1);
+
+    for clipping in [DEFAULT, WIDE_LEFT] {
+        let mut engine = ProfileBuilder::empty_engine();
+        engine.settings_mut().clipping = clipping;
+        let mut batch = Batch::new();
+        batch.bg(img::a(), -7, 100, 0);
+        assert_eq!(
+            1,
+            batch.convert(&mut engine, 0).background_tile_count(),
+            "REQ-E3D-002 keeps the record at x = −7 with margins {clipping:?}"
+        );
+    }
+
+    // The tile's scene footprint is x ∈ [−7, 1]; R = [c0, 256 − c2] × [c1, 240 − c3]
+    // (REQ-SCN-039) drops the fragments left of c0, so the width cut off is max(0, c0 − (−7)).
+    let cut_off = |clipping: Vec4F| (clipping.x + 7.0).max(0.0);
+    assert_eq!(
+        7.1,
+        cut_off(DEFAULT),
+        "the default R cuts all but the rightmost 0.9 unit of the tile"
+    );
+    assert_eq!(
+        0.0,
+        cut_off(WIDE_LEFT),
+        "R = [−16, 247.9] × … leaves the whole tile standing"
+    );
+}
+
+/// Q-080's own check, end to end: a negative margin uncovers a **real** border. A background
+/// record at `y = 240` is dropped by the filter with the default margins (`y ≤ 248 − 8.1`) and
+/// kept with `clip.bottom = −16`.
+#[test]
+fn req_pers_087_a_negative_bottom_margin_uncovers_the_border_row() {
+    let kept = |clipping: Vec4F| {
+        let mut engine = ProfileBuilder::empty_engine();
+        engine.settings_mut().clipping = clipping;
+        let mut batch = Batch::new();
+        batch.bg(img::a(), 100, 240, 0);
+        batch.convert(&mut engine, 0).background_tile_count()
+    };
+
+    assert_eq!(0, kept(ConversionSettings::DEFAULT_CLIPPING));
+    assert_eq!(1, kept(Vec4F::new(0.1, -16.0, 8.1, 0.1)));
+}
+
 #[test]
 fn req_e3d_003_a_sprite_at_240_or_empty_is_dropped() {
     let mut engine = ProfileBuilder::empty_engine();

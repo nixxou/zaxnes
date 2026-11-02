@@ -2,11 +2,12 @@ use std::collections::HashSet;
 
 use zax_profiles::enums::{LayerAlignment, ProfileLayer, TvRegionMode};
 use zax_profiles::setting_application::{
-    applied_keys, preserved_keys, values_to_apply, AppliedValue,
+    applied_keys, preserved_keys, to_setting_values, values_to_apply, AppliedValue,
 };
 use zax_profiles::settings::{LayerSettings, LayerSettingsSet, ProfileSettings};
-use zax_profiles::values::{ArgbColor, Vec3F};
+use zax_profiles::values::{ArgbColor, Vec3F, Vec4F};
 use zax_settings::catalogue::{Layer, SettingId};
+use zax_settings::model::SettingsModel;
 
 use super::common::neutral_assets;
 
@@ -109,6 +110,27 @@ fn req_prof_041_the_applied_keys_cover_the_whole_first_list() {
         expected.len() + LayerSettingsSet::LAYER_COUNT * 4,
         applied.len()
     );
+}
+
+/// AMD-047 REQ-PERS-087, first criterion, second half: a profile whose field 4 of the settings
+/// message (SPEC-03 §4.6, `Clipping`) is `(−128, −80, −128, 0)` — the top-down ring of
+/// "Punch-Out!!" — gives those four values after the load of REQ-PROF-041, the model keeping
+/// them as they are.
+#[test]
+fn req_pers_087_a_profile_applies_its_negative_clip_margins() {
+    let settings = ProfileSettings {
+        clipping: Some(Vec4F::new(-128.0, -80.0, -128.0, 0.0)),
+        ..ProfileSettings::default()
+    };
+
+    let values = to_setting_values(&settings);
+    let mut model = SettingsModel::new();
+    model.apply_profile(values);
+
+    assert_eq!(-128.0, model.get(SettingId::ClipLeft).as_float());
+    assert_eq!(-80.0, model.get(SettingId::ClipBottom).as_float());
+    assert_eq!(-128.0, model.get(SettingId::ClipRight).as_float());
+    assert_eq!(0.0, model.get(SettingId::ClipTop).as_float());
 }
 
 #[test]

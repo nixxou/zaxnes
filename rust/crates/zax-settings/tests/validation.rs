@@ -77,21 +77,45 @@ fn the_core_index_is_taken_modulo_the_number_of_cores() {
     assert_eq!(dual.get(SettingId::EmuCore).as_int(), 1);
 }
 
-/// §4.1.5: a clipping margin outside its interval is clamped.
+/// §4.1.5 as AMD-047 REQ-PERS-087 amends it: a clipping margin keeps any finite real it is
+/// given, negative or past the reference dimensions alike. Before the amendment this test read
+/// the opposite — −4 came back as 0 and 300 as 256 — because the column "Domaine" bounded the
+/// four margins to [0, 256] and [0, 248].
 #[rstest]
-#[case(SettingId::ClipLeft, -4.0, 0.0)]
-#[case(SettingId::ClipLeft, 300.0, 256.0)]
-#[case(SettingId::ClipBottom, 300.0, 248.0)]
-#[case(SettingId::ClipTop, 300.0, 248.0)]
-#[case(SettingId::ClipRight, 300.0, 256.0)]
-fn a_clipping_margin_is_clamped(
+#[case(SettingId::ClipLeft, -4.0)]
+#[case(SettingId::ClipLeft, -128.0)]
+#[case(SettingId::ClipLeft, 300.0)]
+#[case(SettingId::ClipBottom, -80.0)]
+#[case(SettingId::ClipBottom, 300.0)]
+#[case(SettingId::ClipTop, -0.5)]
+#[case(SettingId::ClipTop, 300.0)]
+#[case(SettingId::ClipRight, -128.0)]
+#[case(SettingId::ClipRight, 300.0)]
+fn req_pers_087_a_clipping_margin_keeps_any_finite_real(
     #[case] id: SettingId,
     #[case] written: f32,
-    #[case] expected: f32,
 ) {
     let mut model = SettingsModel::new();
     model.set(id, written);
-    assert_exact(model.get(id).as_float(), expected);
+    assert_exact(model.get(id).as_float(), written);
+}
+
+/// REQ-PERS-087: a value that is not finite is outside the domain, and the column gives no rule
+/// to bring it back, so the margin's own default applies (the general rule of REQ-PERS-003).
+#[rstest]
+#[case(SettingId::ClipLeft, 0.1)]
+#[case(SettingId::ClipBottom, 8.1)]
+#[case(SettingId::ClipRight, 8.1)]
+#[case(SettingId::ClipTop, 0.1)]
+fn req_pers_087_a_margin_that_is_not_finite_takes_its_default(
+    #[case] id: SettingId,
+    #[case] default: f32,
+) {
+    for written in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let mut model = SettingsModel::new();
+        model.set(id, written);
+        assert_exact(model.get(id).as_float(), default);
+    }
 }
 
 /// §4.1.2: a script's field of view is bounded to [10, 150].

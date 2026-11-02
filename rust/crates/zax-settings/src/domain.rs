@@ -52,6 +52,9 @@ pub struct Domain {
     options: Option<Vec<SettingOption>>,
     /// The distance between two admitted values of a stepped domain (AMD-040 §3).
     step: Option<f64>,
+    /// Whether the domain is the finite reals, so that NaN and ±∞ fall outside it and no other
+    /// bound applies ([`Domain::finite_real`], AMD-047 REQ-PERS-087).
+    finite_only: bool,
     /// Values a write may use for another: the identifier 1 of the Enhanced style stands for 4
     /// (AMD-055 REQ-SCN-078). Applied before the value is checked against the domain.
     aliases: Vec<(f64, f64)>,
@@ -71,6 +74,20 @@ impl Domain {
             minimum: Some(minimum),
             maximum: Some(maximum),
             ..Self::with_rule(OutOfDomainRule::Clamp)
+        }
+    }
+
+    /// Every finite real, negative included. Only NaN and ±∞ lie outside, and the column
+    /// "Domaine" gives no rule to bring them back, so the setting's default applies — the
+    /// general rule of REQ-PERS-003.
+    ///
+    /// The four clip margins have this domain since AMD-047 (REQ-PERS-087): 256 and 248 are no
+    /// longer bounds but the reference dimensions of the picture and of the conversion grid.
+    #[must_use]
+    pub fn finite_real() -> Self {
+        Self {
+            finite_only: true,
+            ..Self::with_rule(OutOfDomainRule::UseDefault)
         }
     }
 
@@ -287,6 +304,11 @@ impl Domain {
             return value.clone();
         }
         let mut number = self.canonical(value.as_double());
+        // AMD-047 REQ-PERS-087: NaN and ±∞ fall outside the finite reals and no rule repairs
+        // them, so the default applies (REQ-PERS-003).
+        if self.finite_only && !number.is_finite() {
+            return fallback.clone();
+        }
         // A stepped domain publishes its rungs as options for REQ-PERS-081, but a value between
         // two of them is snapped, not refused (AMD-040 §3).
         if self.options.is_some()
@@ -348,6 +370,7 @@ impl Domain {
             minimum_exclusive: false,
             options: None,
             step: None,
+            finite_only: false,
             aliases: Vec::new(),
         }
     }

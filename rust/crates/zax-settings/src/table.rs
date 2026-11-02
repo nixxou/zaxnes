@@ -592,13 +592,13 @@ fn scene(out: &mut Vec<SettingDescriptor>) {
 fn clipping(out: &mut Vec<SettingDescriptor>) {
     // Index 0 left, 1 bottom, 2 right, 3 top (DEC-R2-T1, DEC-09-Q2). The non-integer defaults are
     // wanted: they avoid equalities at the edges.
-    let margins: [(SettingId, f32, f64, &str, &str); 4] = [
-        (SettingId::ClipLeft, 0.1, 256.0, "Clipping[0]", "4.1"),
-        (SettingId::ClipBottom, 8.1, 248.0, "Clipping[1]", "4.2"),
-        (SettingId::ClipRight, 8.1, 256.0, "Clipping[2]", "4.3"),
-        (SettingId::ClipTop, 0.1, 248.0, "Clipping[3]", "4.4"),
+    let margins: [(SettingId, f32, &str, &str); 4] = [
+        (SettingId::ClipLeft, 0.1, "Clipping[0]", "4.1"),
+        (SettingId::ClipBottom, 8.1, "Clipping[1]", "4.2"),
+        (SettingId::ClipRight, 8.1, "Clipping[2]", "4.3"),
+        (SettingId::ClipTop, 0.1, "Clipping[3]", "4.4"),
     ];
-    for (id, value, maximum, lua, field) in margins {
+    for (id, value, lua, field) in margins {
         out.push(
             SettingDescriptor::new(
                 id,
@@ -608,7 +608,10 @@ fn clipping(out: &mut Vec<SettingDescriptor>) {
                 SettingEffect::Immediate,
                 SettingTheme::Clipping,
             )
-            .with_domain(Domain::range(0.0, maximum))
+            // AMD-047 REQ-PERS-087: any finite real, negative included — profiles such as the
+            // top-down ring of "Punch-Out!!" write −128 and −80. Only NaN and ±∞ fall back on
+            // the default.
+            .with_domain(Domain::finite_real())
             .with_lua(lua)
             .with_field(field),
         );

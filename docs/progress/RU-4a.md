@@ -10,8 +10,8 @@ are a reading reference only.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Map: what exists, where each requirement goes, the spec copies | done — `<pending>` |
-| 2 | AMD-047: the four margins accept any finite real (REQ-PERS-087), Q-080's grid guard | todo |
+| 1 | Map: what exists, where each requirement goes, the spec copies | done — `dffafa3` |
+| 2 | AMD-047: the four margins accept any finite real (REQ-PERS-087), Q-080's grid guard | done — `<pending>` |
 | 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | todo |
 | 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | todo |
 | 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | todo |
@@ -132,6 +132,52 @@ The .NET lot tests a `uBend` uniform per vertex. This lot's point 1 forbids that
 shaders at curvature 0 must be today's, instruction for instruction. So `bend.glsl` is guarded by
 `#define ZAX_BEND` and the renderer holds **two** scene programs and **two** shadow programs,
 picking the pair when a curvature setting changes — never per vertex, never per frame.
+
+### Step 2 — AMD-047, the domain of the four margins
+
+A **domain change and nothing else**, which is what the amendment is: no new per-tile work, and
+not a line added to any per-frame path.
+
+| Piece | What landed |
+|---|---|
+| `zax-settings/src/domain.rs` | `Domain::finite_real()` and the `finite_only` flag: every finite real is in the domain, and `coerce` sends NaN and ±∞ to the setting's default before any other rule runs — the general rule of REQ-PERS-003 |
+| `zax-settings/src/table.rs` | the four margins take that domain instead of `Domain::range(0, 256)` / `(0, 248)` |
+| `zax-engine3d/src/engine.rs` | **no code change**: `is_inside_tall_clip_area` is four comparisons that carry over to negative margins by themselves, and the grid-margin guard already drops a cell in the margin. Both got the comment Q-080's answer calls for (`// Q-080`) |
+| `zax-render` | **no code change**: `VisibleRect::from_clipping`, `geometry::effective_target` and `geometry::aim_point` clamp nothing |
+
+The whole write path was walked to be sure no second clamp hides behind the domain:
+`ScriptSettings::set_clipping` → `write_real` → the model; `setting_application::to_setting_values`
+→ `SettingsModel::apply_profile` → the model. Neither bounds anything of its own, so one domain
+is the single gate — which is what makes "a script's value and a profile's value behave alike"
+true by construction.
+
+#### The criteria, one by one
+
+| Criterion of AMD-047 §2 | Test |
+|---|---|
+| a script writes −80 and reads −80; `Clipping.x = -128` puts −128 in `Setting.Clipping[0]` | `zax-scripting/.../amd047_clipping_tests.rs` `req_pers_087_a_script_writes_a_negative_margin_and_reads_it_back` |
+| the four margins keep what is written, through both names of each | `req_pers_087_the_four_margins_keep_what_a_script_writes` |
+| a NaN write gives the margin's default | `req_pers_087_a_margin_a_script_writes_not_finite_takes_its_default`, and over the model in `zax-settings/tests/validation.rs` `req_pers_087_a_margin_that_is_not_finite_takes_its_default` |
+| a profile whose field 4 is (−128, −80, −128, 0) applies them | `zax-profiles/.../setting_application_tests.rs` `req_pers_087_a_profile_applies_its_negative_clip_margins`, through the real `to_setting_values` → `apply_profile` path |
+| T′ = (128, 80, 0), E ≈ (128.0, −149.9, −132.8), P\* ≈ (128, 41.5), R = [−128, 384] × [−80, 240] | `zax-render/tests/camera_tests.rs` `req_pers_087_the_camera_follows_its_formulas_with_negative_margins` — **the four values came out right first run**, which is the independent check the amendment's vector is for |
+| an empty R raises no error and still renders the rest | `req_pers_087_an_empty_visible_rectangle_still_builds_a_view` |
+| the tile emitted at (−7, 100) is kept by REQ-E3D-002 with both margin sets, and only R cuts it | `zax-engine3d/.../intake_and_frame_tests.rs` `req_pers_087_the_border_tile_is_kept_and_only_the_visible_rectangle_cuts_it` |
+| Q-080's own end-to-end check: a negative bottom margin uncovers a real border row | `req_pers_087_a_negative_bottom_margin_uncovers_the_border_row` |
+
+One existing test asserted the **old** behaviour and now asserts the new one, naming the
+amendment: `zax-settings/tests/validation.rs` `a_clipping_margin_is_clamped` (−4 → 0, 300 → 256)
+became `req_pers_087_a_clipping_margin_keeps_any_finite_real`.
+
+`zax-settings` 221 → 229 passed, `zax-scripting` 149 (+4), `zax-engine3d` 193 (+2),
+`zax-profiles` 176 (+1), `zax-render` unchanged counts plus 2. `cargo fmt --check` and workspace
+clippy clean.
+
+#### SPEC chapter edits
+
+- `SPEC-09` §4.1.5: the "Domaine" column of the four rows, the last sentence of the paragraph
+  after the table, and REQ-PERS-087 written out in place (the amendment's §3).
+- `SPEC-06` REQ-SCN-003: the list of typical values gained "et des valeurs négatives écrites par
+  script (−128, −80)".
 
 ### Open questions
 

@@ -536,8 +536,12 @@ fn intake(
                 || cell.y >= grid::HEIGHT + grid::WIDE_ROWS - 1
             {
                 // The grid has one cell of margin on each side precisely so that growth never
-                // needs a bounds test (SPEC-04 §2). With the clip margins of §4.2 no tile can
-                // land there; one that would is dropped.
+                // needs a bounds test (SPEC-04 §2). The core never emits a record there —
+                // a background record sits at x = 8k − fx with k ≤ 32 and fx ≤ 7, so
+                // x ∈ [−7, 255] and the cell column stays inside the useful area (SPEC-02
+                // REQ-CORE-037) — whatever the clip margins, negative ones included
+                // (AMD-047 REQ-PERS-087). A synthetic record that would land in the margin is
+                // dropped, as before the amendment. // Q-080
                 continue;
             }
 
@@ -562,6 +566,9 @@ fn intake(
 
 /// The clip test of REQ-E3D-002: kept when `x + 8 > g`, `x ≤ 256 − d`, `y + 8 > h` and
 /// `y ≤ 248 − b`.
+///
+/// The four margins are any finite reals, negative included (AMD-047 REQ-PERS-087): the
+/// comparisons carry over unchanged, a negative margin simply widening the kept area.
 #[must_use]
 #[allow(clippy::cast_precision_loss)] // C# int-to-float comparisons of screen coordinates.
 pub fn is_inside_clip_area(x: i32, y: i32, clipping: Vec4F) -> bool {

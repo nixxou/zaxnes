@@ -185,6 +185,59 @@ fn vector_c2_default_view_with_the_super_mario_bros_margins() {
     close(124.5, view.aim_point.y, 0.6);
 }
 
+/// AMD-047 REQ-PERS-087, second criterion: with the four margins negative, every formula that
+/// reads them carries over unchanged — the visible rectangle may leave the NES image, and the
+/// effective target `T′`, the eye `E` and the aimed point `P*` follow their own formulas.
+///
+/// The margins are those the "Punch-Out!!" profile writes for its top-down view of the ring,
+/// `(−128, −80, −128, 0)`.
+#[test]
+fn req_pers_087_the_camera_follows_its_formulas_with_negative_margins() {
+    const RING: Vec4F = Vec4F::new(-128.0, -80.0, -128.0, 0.0);
+
+    // R = [c0, 256 − c2] × [c1, 240 − c3], which here reaches far past the NES image.
+    let rect = VisibleRect::from_clipping(RING);
+    close(-128.0, rect.min_x, 1e-4);
+    close(384.0, rect.max_x, 1e-4);
+    close(-80.0, rect.min_y, 1e-4);
+    close(240.0, rect.max_y, 1e-4);
+
+    // T′ = C + ((c0 − c2) / 2, (c1 − c3) / 2, 0) (REQ-SCN-007 step 2): the target drops 40 units
+    // towards the front of the ring, which is the whole point of the negative bottom margin.
+    let target = geometry::effective_target(geometry::CENTER, RING);
+    close(128.0, target.x, 1e-4);
+    close(80.0, target.y, 1e-4);
+    close(0.0, target.z, 1e-4);
+
+    let mut camera = SceneCamera::new();
+    camera.current_mut().angles = Vector3::new(-60.0, 0.0, 0.0);
+    camera.current_mut().set_distance(265.51);
+    camera.snap_to_setpoints();
+    let view = camera.build_view(RING, 16.0 / 9.0);
+
+    close(128.0, view.eye.x, 0.5);
+    close(-149.9, view.eye.y, 0.5);
+    close(-132.8, view.eye.z, 0.5);
+    close(128.0, view.aim_point.x, 0.6);
+    close(41.5, view.aim_point.y, 0.6);
+}
+
+/// REQ-PERS-087 last point: an empty `R` (`c0 + c2 ≥ 256` or `c1 + c3 ≥ 240`) raises no error and
+/// still yields a view — the game scene may be empty, the rest of the picture is not.
+#[test]
+fn req_pers_087_an_empty_visible_rectangle_still_builds_a_view() {
+    for clipping in [
+        Vec4F::new(200.0, 8.1, 100.0, 0.1),
+        Vec4F::new(0.1, 200.0, 8.1, 100.0),
+    ] {
+        let rect = VisibleRect::from_clipping(clipping);
+        assert!(rect.width() <= 0.0 || rect.height() <= 0.0, "R is empty");
+        let view = steady(clipping);
+        assert!(view.eye.x.is_finite() && view.eye.y.is_finite() && view.eye.z.is_finite());
+        assert!(view.aim_point.x.is_finite() && view.aim_point.y.is_finite());
+    }
+}
+
 #[test]
 fn vector_c3_orbited_view_places_the_eye_above_and_to_the_right() {
     let mut camera = SceneCamera::new();
