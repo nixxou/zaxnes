@@ -160,6 +160,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.file.delete_game", "Supprimer le jeu…"),
     ("cmd.file.create_game_art", "Créer la jaquette"),
     ("cmd.file.import_cover", "Importer une jaquette…"),
+    // AMD-053 §4 : les quatre commandes de REQ-UI-210, REQ-UI-211 et REQ-LOOP-076.
+    ("cmd.resume.last", "Reprendre"),
+    ("cmd.favorite.toggle", "Favori"),
+    ("cmd.library.filter_favorites", "Favoris seulement"),
+    ("cmd.library.search", "Rechercher"),
     ("cmd.app.quit", "Quitter"),
     ("cmd.state.save_slot", "Sauvegarder l'état"),
     ("cmd.state.load_slot", "Charger un état"),

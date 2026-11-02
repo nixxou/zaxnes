@@ -41,6 +41,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ImportCover
             | Command::Reset
             | Command::ToggleTwoDimensional => !loading && self.current_game.is_some(),
+            // AMD-053 REQ-LOOP-076: offered only while the resume point stands.
+            Command::ResumeLast => !loading && self.resume_available(),
+            // REQ-UI-210: the entry named, or the one being played.
+            Command::ToggleFavorite => {
+                let game = args
+                    .text
+                    .as_deref()
+                    .or_else(|| self.current_game_id())
+                    .unwrap_or_default();
+                self.games.exists(game)
+            }
             Command::SaveSlot => self.can_save(args.number),
             Command::LoadSlot => {
                 let slot = numbered_slot_id(args.number);
@@ -98,6 +109,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::ShowOptions
             | Command::ShowKeyConfig
             | Command::ShowDataFolder
+            | Command::FilterFavorites
+            | Command::SearchLibrary
             | Command::ShowAbout => true,
         }
     }
@@ -119,6 +132,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.movie_mode() == Some(zax_nes::movie::MovieMode::Recording)
             }
             Command::ToggleMenuMusic => self.settings.menu_music(),
+            // REQ-UI-210: « Favorites only », a tickable command of the enumeration.
+            Command::FilterFavorites => self.favorites_only,
             _ => false,
         }
     }
@@ -144,6 +159,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             | Command::DeleteGame
             | Command::CreateGameArt
             | Command::ImportCover
+            | Command::ResumeLast
+            | Command::ToggleFavorite
+            | Command::FilterFavorites
+            | Command::SearchLibrary
             | Command::Quit => self.execute_file(command, args),
             Command::SaveSlot
             | Command::LoadSlot
@@ -213,6 +232,20 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 None => self.request_ui(command, args),
             },
             Command::Quit => self.quit_requested = true,
+            // AMD-053 REQ-LOOP-076: the only path that reads the resume point.
+            Command::ResumeLast => self.resume_last_game(),
+            Command::ToggleFavorite => {
+                let game = args
+                    .text
+                    .clone()
+                    .or_else(|| self.current_game_id().map(str::to_owned))
+                    .unwrap_or_default();
+                self.toggle_favorite(&game);
+            }
+            Command::FilterFavorites => self.set_favorites_only(!self.favorites_only),
+            Command::SearchLibrary => {
+                self.set_library_search(args.text.as_deref().unwrap_or_default());
+            }
             // The folder pickers and the imports belong to the interface, which owns the
             // library (AMD-030 §2).
             _ => self.request_ui(command, args),

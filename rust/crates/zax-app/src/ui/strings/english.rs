@@ -161,6 +161,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.file.delete_game", "Delete the game…"),
     ("cmd.file.create_game_art", "Create the cover"),
     ("cmd.file.import_cover", "Import a cover…"),
+    // AMD-053 §4: the four commands of REQ-UI-210, REQ-UI-211 and REQ-LOOP-076.
+    ("cmd.resume.last", "Resume"),
+    ("cmd.favorite.toggle", "Favorite"),
+    ("cmd.library.filter_favorites", "Favorites only"),
+    ("cmd.library.search", "Search"),
     ("cmd.app.quit", "Quit"),
     ("cmd.state.save_slot", "Save the state"),
     ("cmd.state.load_slot", "Load a state"),

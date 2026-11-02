@@ -10,8 +10,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 | 1 | Setup: sources read, requirement map, amendments copied | done — `f2a05fe` |
 | 2 | AMD-039: UnityFS header flag 0x200, synthetic format-8 bundle tests | done — `837918c` |
 | 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | done — `5030db6` |
-| 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | done |
-| 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | todo |
+| 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | done — `bc46821` |
+| 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | done |
 | 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | todo |
 | 7 | AMD-056 import dialogs, desktop frontend, both languages | todo |
 | 8 | UI wiring: commands, chooser, console/handheld screens, options | todo |
@@ -212,6 +212,38 @@ the file's title, and the two language tests for the corrected texts.
 Handheld: nothing to add to `ui/handheld/defaults.rs`. The favourites filter and the search text
 are interface state, not settings, and `ui.sort_option` keeps its default of 0 everywhere.
 
+### Step 5 — the resume point
+
+- `persistence/resume_point.rs`: the store. Two files, `saves/resume.state` and `saves/resume.png`
+  (`UserDataPaths::resume_state_file` / `resume_thumbnail_file`), whose game and instant come from
+  the savestate header. `peek` validates the file whole, so a state truncated in its body is
+  caught at start-up and not when the user activates the entry. Q-102 holds the reasoning for not
+  being an entry of `saves/index.json`.
+- `emulation/host/resume.rs`: the three erasure rules, the start-up check, the title and the
+  thumbnail the entry carries, and `resume_last_game`. `prepare_resume_point` runs once, from
+  `EmulationHost::new`, after the language event: it reads one file and no more.
+- `jobs::load_resume_point` builds the same `LoadKind::LoadSlot` job a slot load builds, so the
+  stages, the hack-version refusal and the REQ-LOOP-046 failure are the slot ones. `job.slot_id`
+  is `"resume"`, which only a log line reads.
+- `shutdown` now writes the resume point **before** stopping the game, which is the order
+  REQ-LOOP-076 prescribes: the `Save` hook of each script and the capture (both inside
+  `write_or_clear_resume_point`, through `capture_save_state`, which runs the hook), then the end
+  hook and the stop, then the settings and the slot metadata. No emulated frame runs from there,
+  so REQ-LOOP-041's "between two emulated frames" holds by construction.
+- `-noresume` suspends the point whole — neither read, nor written, nor erased (Q-088, confirmed
+  by R1). It is an option of the host (`EmulationHostOptions::suspend_resume`), not a setting.
+- The four commands of AMD-053 §3 point 17 joined the model: `resume.last`, `favorite.toggle`,
+  `library.filter_favorites` (a tickable command) and `library.search`, with their labels in both
+  languages from AMD-053 §4. The favourites filter and the search text are host state, not
+  settings: nothing of them is persisted, and the `GameCatalog` trait gained `is_favorite` and
+  `toggle_favorite` (defaulted, so a catalogue with no library behind it is unaffected).
+- Test harness: `LoopHarness::restart_with` gives the next launch over the same user data folder,
+  with the library put back **before** the host is built — the order of the real application. The
+  harness also records what the scripts `print`, which is how the hook order is checked.
+
+Nothing of this runs per frame: the write happens once, after the loop has stopped, and the
+start-up check reads one file.
+
 ### Next step
 
-Step 5: the resume point — the single-file store, the write at exit, the offer at the next launch.
+Step 6: the command line — `-slot=<n>`, `-noresume`, `-emustats` and the `--` aliases.

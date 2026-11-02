@@ -109,6 +109,10 @@ commands! {
     DeleteGame => "file.delete_game", Shortcut::None, false;
     CreateGameArt => "file.create_game_art", Shortcut::None, false;
     ImportCover => "file.import_cover", Shortcut::None, false;
+    ResumeLast => "resume.last", Shortcut::None, false;
+    ToggleFavorite => "favorite.toggle", Shortcut::None, false;
+    FilterFavorites => "library.filter_favorites", Shortcut::None, true;
+    SearchLibrary => "library.search", Shortcut::None, false;
     Quit => "app.quit", Shortcut::Fixed("Ctrl+Q"), false;
     SaveSlot => "state.save_slot", Shortcut::Key("shortcut.save_slots"), false;
     LoadSlot => "state.load_slot", Shortcut::Key("shortcut.load_slots"), false;

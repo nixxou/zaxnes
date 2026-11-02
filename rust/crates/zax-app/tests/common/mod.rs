@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use time::OffsetDateTime;
 use zax_app::audio::{AudioMixer, TrackRandom};
@@ -24,6 +24,9 @@ use zax_render::scene::SceneState;
 
 /// The instant the harness starts at, as the C# harness: 2025-10-20 08:46:40 UTC.
 pub const START_UNIX_SECONDS: i64 = 1_760_950_000;
+
+/// The host options the harness builds, for a test that adjusts them.
+pub type HostOptions = EmulationHostOptions<FakeCatalog, StubView>;
 
 /// A folder that is removed when it goes out of scope.
 pub struct TemporaryRoot {
@@ -100,6 +103,9 @@ struct Entry {
     is_2d_mode: bool,
     rom_path: Option<String>,
     cover: Option<String>,
+    /// AMD-053 REQ-UI-210. The real catalogue persists it in `library.json`; this one keeps it in
+    /// memory, which is what the host's `favorite.toggle` needs to be exercised.
+    favorite: bool,
 }
 
 /// A library of a few entries held in memory.
@@ -133,6 +139,7 @@ impl FakeCatalog {
                 is_2d_mode,
                 rom_path: rom_path.map(str::to_owned),
                 cover: None,
+                favorite: false,
             },
         );
         if is_2d_mode {
@@ -227,6 +234,18 @@ impl GameCatalog for FakeCatalog {
     fn cover(&self, game_id: &str) -> Option<String> {
         self.entries.get(game_id)?.cover.clone()
     }
+
+    fn is_favorite(&self, game_id: &str) -> bool {
+        self.entries
+            .get(game_id)
+            .is_some_and(|entry| entry.favorite)
+    }
+
+    fn toggle_favorite(&mut self, game_id: &str) -> Option<bool> {
+        let entry = self.entries.get_mut(game_id)?;
+        entry.favorite = !entry.favorite;
+        Some(entry.favorite)
+    }
 }
 
 /// The view of the game a test hands the host: the picture a thumbnail is cut from, or none.
@@ -244,8 +263,35 @@ pub struct LoopHarness {
     pub host: EmulationHost<FakeCatalog, StubView>,
     pub paths: UserDataPaths,
     pub log: Rc<RefCell<Vec<String>>>,
+    script_lines: Arc<Mutex<Vec<String>>>,
     clock: Rc<Cell<f64>>,
     now: Rc<Cell<i64>>,
+}
+
+/// A script log that keeps every line, so a test can read what the hooks printed and in which
+/// order. `ScriptLog` is `Send`, so the lines live behind a mutex.
+struct RecordingScriptLog(Arc<Mutex<Vec<String>>>);
+
+impl zax_scripting::ScriptLog for RecordingScriptLog {
+    fn print(&mut self, line: &str) {
+        self.push(line);
+    }
+
+    fn error(&mut self, line: &str) {
+        self.push(line);
+    }
+
+    fn warning(&mut self, line: &str) {
+        self.push(line);
+    }
+}
+
+impl RecordingScriptLog {
+    fn push(&self, line: &str) {
+        if let Ok(mut lines) = self.0.lock() {
+            lines.push(line.to_owned());
+        }
+    }
 }
 
 impl LoopHarness {
@@ -257,7 +303,30 @@ impl LoopHarness {
     pub fn create_with(
         adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog, StubView>),
     ) -> Self {
-        let root = TemporaryRoot::new("zax-loop-");
+        Self::create_in(TemporaryRoot::new("zax-loop-"), |options, _| {
+            adjust(options);
+        })
+    }
+
+    /// The next launch over the same user data folder: a fresh host, with everything the one
+    /// before wrote still on disk (AMD-053 REQ-LOOP-076). `adjust` sees the options and the
+    /// folder, so a test can put the library back **before** the host is built — the order of the
+    /// real application, where the library is read first and the start-up then checks that the
+    /// resume point's game is still in it.
+    pub fn restart_with(
+        self,
+        adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog, StubView>, &Path),
+    ) -> Self {
+        let Self { root, now, .. } = self;
+        let restarted = Self::create_in(root, adjust);
+        restarted.set_now(now.get());
+        restarted
+    }
+
+    fn create_in(
+        root: TemporaryRoot,
+        adjust: impl FnOnce(&mut EmulationHostOptions<FakeCatalog, StubView>, &Path),
+    ) -> Self {
         let paths = UserDataPaths::resolve(Some(root.path()), None, None);
         let clock = Rc::new(Cell::new(0.0));
         let now = Rc::new(Cell::new(START_UNIX_SECONDS));
@@ -280,15 +349,53 @@ impl LoopHarness {
         options.log = Some(Box::new(move |message| {
             lines.borrow_mut().push(message.to_owned());
         }));
-        adjust(&mut options);
+        // What the scripts `print`, so a test can read the order their hooks ran in.
+        let script_lines = Arc::new(Mutex::new(Vec::new()));
+        let for_scripts = Arc::clone(&script_lines);
+        options.script_log = Some(Box::new(move || {
+            Box::new(RecordingScriptLog(Arc::clone(&for_scripts)))
+        }));
+        adjust(&mut options, root.path());
         Self {
             host: EmulationHost::new(options),
             root,
             paths,
             log,
+            script_lines,
             clock,
             now,
         }
+    }
+
+    /// The lines the scripts of the game have printed so far.
+    pub fn script_lines(&self) -> Vec<String> {
+        self.script_lines
+            .lock()
+            .expect("the script log is not poisoned")
+            .clone()
+    }
+
+    /// Forgets the lines printed so far.
+    pub fn clear_script_lines(&self) {
+        self.script_lines
+            .lock()
+            .expect("the script log is not poisoned")
+            .clear();
+    }
+
+    /// Launches `game_id` on a profile holding one script, `source`.
+    pub fn launch_with_script(&mut self, game_id: &str, source: &str) {
+        let mut profile = GameProfile::create_empty();
+        profile.scripts.push(zax_profiles::script::ProfileScript {
+            name: Some("test".to_owned()),
+            enabled: true,
+            source: Some(source.to_owned()),
+            ..zax_profiles::script::ProfileScript::default()
+        });
+        let rom = self.write_rom(&SyntheticRom::counter(), &format!("{game_id}.nes"));
+        self.catalog()
+            .add_with(game_id, Some(&rom), Some(profile), false, None);
+        self.run_with(Command::LaunchGame, CommandArgs::of_text(game_id));
     }
 
     pub fn now(&self) -> i64 {

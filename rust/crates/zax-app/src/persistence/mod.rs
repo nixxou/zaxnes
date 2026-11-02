@@ -6,6 +6,7 @@ pub mod command_line_settings;
 pub mod game_art;
 pub mod hack_compat_cache;
 pub mod input_binding_store;
+pub mod resume_point;
 pub mod rom_crc_cache;
 pub mod save_slots;
 pub mod save_state_file;

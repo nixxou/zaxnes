@@ -252,6 +252,39 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         self.begin_job(job);
     }
 
+    /// Loads the resume point (AMD-053 REQ-LOOP-076), as a slot load loads a slot: the same job,
+    /// the same stages, the same failure (REQ-LOOP-046). Its state is not in [`EmulationHost::slots`],
+    /// which holds the slots of the game being played, so the game and the file come from the
+    /// resume store instead (Q-102).
+    pub(super) fn load_resume_point(&mut self) {
+        if self.loading {
+            return;
+        }
+        let Some(state) = crate::persistence::resume_point::read(&self.paths) else {
+            self.fail_job(CORRUPTED_MESSAGE);
+            return;
+        };
+        if let Some(mixer) = &mut self.mixer {
+            mixer.play_sound(crate::audio::UiSound::Confirm);
+        }
+        let Some(game) = self.games.resolve(&state.header.game_id) else {
+            self.fail_job(GAME_MISSING_MESSAGE);
+            return;
+        };
+        // A state made with another version of the built-in hack's code would run on this memory:
+        // refused, as for any slot.
+        if self.state_patch_status(&state) == SlotPatchStatus::OtherVersion {
+            self.notifications
+                .show_error(save_state_file::OTHER_HACK_VERSION_MESSAGE);
+            return;
+        }
+        let mut job = LoadJob::new(LoadKind::LoadSlot);
+        job.game = Some(game);
+        crate::persistence::resume_point::SLOT_ID.clone_into(&mut job.slot_id);
+        job.state = Some(state);
+        self.begin_job(job);
+    }
+
     pub(super) fn regenerate_meshes(&mut self, algorithm: RenderAlgorithm) {
         if self.loading || self.session.is_none() {
             return;

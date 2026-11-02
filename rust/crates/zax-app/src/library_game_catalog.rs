@@ -447,6 +447,18 @@ impl GameCatalog for LibraryGameCatalog {
             .find(game_id)
             .and_then(|entry| entry.cover.clone())
     }
+
+    fn is_favorite(&self, game_id: &str) -> bool {
+        self.library
+            .find(game_id)
+            .is_some_and(|entry| entry.favorite)
+    }
+
+    fn toggle_favorite(&mut self, game_id: &str) -> Option<bool> {
+        let favorite = self.library.toggle_favorite(game_id)?;
+        self.save();
+        Some(favorite)
+    }
 }
 
 fn full_path(path: &str) -> String {

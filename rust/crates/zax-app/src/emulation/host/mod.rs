@@ -13,6 +13,7 @@ mod hack_options;
 mod hacks;
 mod jobs;
 mod movies;
+mod resume;
 mod save_states;
 
 use std::collections::VecDeque;
@@ -130,6 +131,9 @@ pub struct EmulationHostOptions<C: GameCatalog, V: GameView = NoView> {
     pub settings_store: Option<SettingsStore>,
     /// Whether deletions wait for the interface's confirmation (REQ-UI-110).
     pub confirm_with_interface: bool,
+    /// `-noresume` (AMD-053 REQ-UI-213): the resume point is neither read, nor written, nor
+    /// erased this run (Q-088).
+    pub suspend_resume: bool,
 }
 
 impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
@@ -150,6 +154,7 @@ impl<C: GameCatalog, V: GameView> EmulationHostOptions<C, V> {
             audio_device_open: false,
             settings_store: None,
             confirm_with_interface: false,
+            suspend_resume: false,
         }
     }
 }
@@ -240,6 +245,43 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// while it draws the frame before: the pipelined frames of `emu.pipeline` (Rust-only). Only
     /// honoured when [`EmulationHost::can_defer_conversion`].
     pub defer_conversion: bool,
+    /// What the resume point holds at this launch, when the `Resume` entry is offered
+    /// (AMD-053 REQ-LOOP-076).
+    resume: Option<crate::persistence::resume_point::ResumePoint>,
+    /// `-noresume`: the resume point is neither read, nor written, nor erased this run (Q-088).
+    suspend_resume: bool,
+    /// Whether the enumeration of the games keeps only the favourites (AMD-053 REQ-UI-210,
+    /// command `library.filter_favorites`). Interface state, not a setting: it is not persisted.
+    favorites_only: bool,
+    /// The text typed in the search of the enumeration of the games (REQ-UI-211, command
+    /// `library.search`); blank excludes nothing.
+    library_search: String,
+}
+
+/// The three caches the host keeps beside the other files of the user data: the CRCs of the ROM
+/// files, what the study of each ROM found, and the folder of the RetroAchievements icons and
+/// lists. With nothing persisted (`persisted` false) none of them has a file.
+fn caches(
+    paths: &UserDataPaths,
+    persisted: bool,
+) -> (
+    crate::persistence::rom_crc_cache::RomCrcCache,
+    crate::persistence::hack_compat_cache::HackCompatCache,
+    Option<std::path::PathBuf>,
+) {
+    (
+        crate::persistence::rom_crc_cache::RomCrcCache::new(persisted.then(|| {
+            paths
+                .root
+                .join(crate::persistence::rom_crc_cache::FILE_NAME)
+        })),
+        crate::persistence::hack_compat_cache::HackCompatCache::new(persisted.then(|| {
+            paths
+                .root
+                .join(crate::persistence::hack_compat_cache::FILE_NAME)
+        })),
+        persisted.then(|| paths.root.join(crate::achievements::CACHE_FOLDER)),
+    )
 }
 
 /// What the conversion of a pipelined frame works on, and the view the main thread draws into
@@ -270,27 +312,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             audio_device_open,
             settings_store,
             confirm_with_interface,
+            suspend_resume,
         } = options;
         let now: Now = now.unwrap_or_else(|| Box::new(OffsetDateTime::now_utc));
-        // The cache is kept with the other files of the user data, when they are persisted.
-        let rom_crcs = crate::persistence::rom_crc_cache::RomCrcCache::new(
-            settings_store.is_some().then(|| {
-                paths
-                    .root
-                    .join(crate::persistence::rom_crc_cache::FILE_NAME)
-            }),
-        );
-        let hack_compat = crate::persistence::hack_compat_cache::HackCompatCache::new(
-            settings_store.is_some().then(|| {
-                paths
-                    .root
-                    .join(crate::persistence::hack_compat_cache::FILE_NAME)
-            }),
-        );
-        // The icons of RetroAchievements and what the list found of each game, kept with them.
-        let achievement_cache = settings_store
-            .is_some()
-            .then(|| paths.root.join(crate::achievements::CACHE_FOLDER));
+        let persisted = settings_store.is_some();
+        let (rom_crcs, hack_compat, achievement_cache) = caches(&paths, persisted);
         let mut legacy_slots = SaveSlotIndex::load(&paths, now());
         legacy_slots.reconcile(&paths, |game_id| games.exists(game_id));
         let mut host = Self {
@@ -350,12 +376,19 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 .with_cache(achievement_cache),
             catch_up: None,
             defer_conversion: false,
+            resume: None,
+            suspend_resume,
+            favorites_only: false,
+            library_search: String::new(),
         };
         // AMD-035 §1: the language in force is the setting's, read once here and kept in step
         // by `on_setting_changed` afterwards. While none is saved, the model's default is the
         // operating-system language (set at start-up), amending AMD-035 §1.
         let language = host.settings.language();
         host.events.push(HostEvent::LanguageChanged(language));
+        // AMD-053 REQ-LOOP-076: what the start-up does with the resume point, before anything can
+        // play. It reads one file and no more (Q-102).
+        host.prepare_resume_point();
         host.apply_speed();
         host.apply_achievement_settings();
         host.publish_state();
@@ -985,9 +1018,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
-    /// Stops the current game, writes the slot index and the settings (REQ-LOOP-052).
+    /// Stops the current game, writes the slot index and the settings (REQ-LOOP-052), the resume
+    /// point written first (AMD-053 REQ-LOOP-076).
+    ///
+    /// The order REQ-LOOP-076 prescribes: (1) the `Save` hook of every active script, before the
+    /// capture, and (2) the capture and the write, both inside
+    /// [`EmulationHost::write_or_clear_resume_point`]; (3) the end hook and the stop of the
+    /// current game; (4) the settings and the slot metadata. No emulated frame runs from here on,
+    /// which satisfies REQ-LOOP-041's "between two emulated frames" by construction.
     pub fn shutdown(&mut self) {
         self.complete_frame_in_flight();
+        self.write_or_clear_resume_point();
         self.stop_current_game(true, true);
         if self.legacy_slots.save(&self.paths).is_err() {
             self.log("the save slot index could not be written.");

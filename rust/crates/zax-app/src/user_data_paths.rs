@@ -125,6 +125,20 @@ impl UserDataPaths {
         self.saves_directory.join(format!("{slot_id}.png"))
     }
 
+    /// The save state of the resume point (AMD-053 REQ-LOOP-076): `resume.state`. It is a store
+    /// of its own, common to every game and distinct from the 36 numbered slots and the quick
+    /// slot, which are the files of a ROM (Q-102).
+    #[must_use]
+    pub fn resume_state_file(&self) -> PathBuf {
+        self.saves_directory.join("resume.state")
+    }
+
+    /// The thumbnail of the resume point: `resume.png`.
+    #[must_use]
+    pub fn resume_thumbnail_file(&self) -> PathBuf {
+        self.saves_directory.join("resume.png")
+    }
+
     /// The battery RAM file `<name>.srm`: the ROM's file name without its extension (owner
     /// request), or, as the files were named before, the ROM's fingerprint.
     #[must_use]

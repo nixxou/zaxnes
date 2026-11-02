@@ -69,4 +69,16 @@ pub trait GameCatalog {
 
     /// The cover file of the game.
     fn cover(&self, game_id: &str) -> Option<String>;
+
+    /// Whether the game is marked as a favourite (AMD-053 REQ-UI-210). False for a catalogue that
+    /// has no library behind it.
+    fn is_favorite(&self, _game_id: &str) -> bool {
+        false
+    }
+
+    /// Flips the favourite mark of the game and persists it (`favorite.toggle`); returns its new
+    /// value, or none when the game does not exist or the catalogue has no library.
+    fn toggle_favorite(&mut self, _game_id: &str) -> Option<bool> {
+        None
+    }
 }
