@@ -11,8 +11,8 @@ are a reading reference only.
 | # | Step | Status |
 |---|---|---|
 | 1 | Map: what exists, where each requirement goes, the spec copies | done — `dffafa3` |
-| 2 | AMD-047: the four margins accept any finite real (REQ-PERS-087), Q-080's grid guard | done — `<pending>` |
-| 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | todo |
+| 2 | AMD-047: the four margins accept any finite real (REQ-PERS-087), Q-080's grid guard | done — `5703fed` |
+| 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | done — `<pending>` |
 | 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | todo |
 | 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | todo |
 | 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | todo |
@@ -178,6 +178,65 @@ clippy clean.
   after the table, and REQ-PERS-087 written out in place (the amendment's §3).
 - `SPEC-06` REQ-SCN-003: the list of typical values gained "et des valeurs négatives écrites par
   script (−128, −80)".
+
+### Step 3 — `SpaceBend`, the transform of REQ-SCN-067
+
+`zax-engine3d/src/space_bend.rs` (new, 390 lines), in the platform-free geometry crate because
+three callers need it and none of them is the conversion: it is unit-tested without a GL context,
+`zax-render` mirrors it in GLSL and builds its uniforms from it (step 4), and `zax-app` inverts it
+for the aim (step 6). **Nothing in `zax-engine3d` calls it** — AMD-043 §1 keeps the curvature out
+of the profiles and out of the 2D → 3D conversion, so no per-tile path gained a line.
+
+What it publishes:
+
+| Item | Requirement |
+|---|---|
+| `SpaceBend::new(lr, tb, arc, at_edge, scene_scale)` | the four settings of REQ-SCN-066; `k = θ / (L · s)`, `f = φ / sin φ`, `h = 2 sin²(φ / 2) / k` with `φ = θ / 4` (step 1) |
+| `is_identity`, `NONE`, `Default` | the identity at θ = 0, which is what every caller tests before paying for anything |
+| `apply` | `B(P)`, the three wrappings of step 3 in order |
+| `invert` | `B⁻¹`, `None` where the depth bound bites (REQ-INP-124, AMD-043 §4) |
+| `jacobian`, `transform_normal` | the normal transported by the curvature (REQ-SCN-068, REQ-SCN-028 amended), as the cofactor of the Jacobian |
+| `curvature`, `recentring`, `offset`, `active`, `arc_pivot` | the per-axis constants the shader reads, computed once per change and not per vertex |
+
+An **idle axis publishes the neutral constants** (`k = 0`, `f = 1`, `h = 0`, `active = 0`), which
+is what lets the GLSL mirror of step 4 need no special case for a one-axis or two-axis curvature.
+
+#### The vectors
+
+The thirteen vectors of REQ-SCN-067 **passed on the first run**, all three components of each,
+inside the ±0.05 the table allows. That is the third independent computation of them (R1 wrote
+them, R2 recomputed them in `R2-review-AMD-039-045-v1.1`, the .NET lot V2-4 implemented them), so
+the formula is not in doubt.
+
+Eleven more tests around them, each pinning a clause the table alone does not:
+
+| Test | What it holds |
+|---|---|
+| `req_scn_067_the_thirteen_vectors_of_the_curvature` | the table, and for the eleven rows without the depth bound, that `B⁻¹` of the **rounded** image is back within 0.05 of P |
+| `req_scn_067_no_angle_at_all_is_the_identity` | θ = 0 on all three axes is the identity for `apply`, `invert` and `transform_normal` alike, bit for bit |
+| `req_scn_067_an_angle_under_the_threshold_bends_nothing` | the threshold is 10⁻⁴ rad at most (a `const` assertion), below it nothing bends, ten times above it each axis does |
+| `req_scn_067_the_curvature_is_continuous_in_the_angle` | each axis walked 0 → 180° in 0.25° steps on a far corner, no step jumping |
+| `req_scn_067_the_recentring_keeps_the_picture_about_its_size` | the amendment's own figure: at 60° the half-width is 123.6, not 128 |
+| `req_scn_067_the_depth_is_held_at_95_percent_of_the_radius` | two depths past the bound share one image, in both directions, and `invert` refuses there |
+| `req_inp_124_the_inverse_recovers_the_point_it_came_from` | eleven settings including three-axis ones, `B⁻¹(B(P))` within 0.01 — far inside the 0.5 unit REQ-INP-124 allows |
+| `req_scn_068_the_normal_is_transported_by_the_curvature` | unchanged at `C`, turned by `a = u · k = 45°` at the right edge of a 90° bend, the other way for a negative angle, exactly unchanged at θ = 0 |
+| `req_scn_067_the_scene_scale_divides_the_curvature` | `k = θ / (L · s)`, and a scale that is not positive finite reads as 1 |
+| `req_scn_066_the_arc_centre_picks_the_pivot` | 0 or `−120 · s` |
+| `req_scn_067_the_uniforms_an_idle_axis_publishes_are_the_neutral_ones` | the neutral constants, and the three of an active axis recomputed from step 1 |
+
+Two of **my own** assertions were wrong on the first run and the code was right, which is worth
+recording because the direction is easy to get backwards:
+
+1. `k = θ / (L · s)` means halving the scale **doubles** the curvature; I had asserted the
+   reverse.
+2. A positive angle pushes the edges **away** from the camera (vector 2: the right column lands
+   at z = +24.70), so the surface is convex towards the viewer and the outward normal of the
+   right edge leans **right**, not left. The test now derives the direction from the vector
+   instead of asserting a guess, and checks the turn is `sin 45°` / `−cos 45°`.
+
+`zax-engine3d` 193 → **226 passed**. `cargo fmt --check` and workspace clippy clean (three
+`many_single_char_names` allows, the idiom `geometry.rs` already uses for the named quantities of
+a specification formula).
 
 ### Open questions
 

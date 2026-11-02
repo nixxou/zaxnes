@@ -20,6 +20,7 @@ mod marching_vector_tests;
 mod registry_tests;
 mod scaffold_tests;
 mod sealed_side_tests;
+mod space_bend_tests;
 mod state_and_mode_tests;
 mod support;
 mod test_vector_tests;
