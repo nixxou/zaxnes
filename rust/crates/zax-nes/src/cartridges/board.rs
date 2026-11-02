@@ -131,6 +131,10 @@ impl Mapper for Board {
         dispatch!(self, b => b.irq_asserted())
     }
 
+    fn expansion_audio_output(&self) -> Option<i32> {
+        dispatch!(self, b => b.expansion_audio_output())
+    }
+
     fn ppu_irq_horizon(&self) -> Option<i64> {
         dispatch!(self, b => b.ppu_irq_horizon())
     }

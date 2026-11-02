@@ -272,6 +272,17 @@ pub trait Mapper {
 
     /// One CPU cycle elapsed (`memory.cpu_cycle()` already incremented).
     fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {}
+
+    /// `M` of REQ-CORE-073: the board's expansion audio in the mixer's integer units
+    /// (REQ-CORE-075, AMD-054), or `None` for a board without any — which is every board but
+    /// the MMC5, so the bus never looks at the expansion audio for them.
+    ///
+    /// Only the Famicom's cartridge connector carries an audio input pin, so no NES cartridge
+    /// can make such a channel sound. REQ-CORE-075 as amended requires the MMC5's own sound
+    /// and leaves the others (VRC6, VRC7, Namco 163, Sunsoft 5B, FDS) optional.
+    fn expansion_audio_output(&self) -> Option<i32> {
+        None
+    }
 }
 
 /// A window of [`Mapper::rom_windows`] that is not a plain PRG-ROM read.

@@ -175,6 +175,7 @@ pub struct StateReader<'a> {
     data: &'a [u8],
     origin: usize,
     position: usize,
+    format_version: i32,
 }
 
 impl<'a> StateReader<'a> {
@@ -194,7 +195,22 @@ impl<'a> StateReader<'a> {
             data,
             origin: offset,
             position: offset,
+            format_version: 0,
         })
+    }
+
+    /// Format version of the block being read, 0 until the caller that read the header hands
+    /// it over with [`Self::set_format_version`]. An object whose own layout grew with a
+    /// version of the format reads it to know which layout the bytes follow: the MMC5's sound
+    /// state (REQ-CORE-075, AMD-054) is the first such case.
+    #[must_use]
+    pub const fn format_version(&self) -> i32 {
+        self.format_version
+    }
+
+    /// Records the format version read from the block's header.
+    pub const fn set_format_version(&mut self, version: i32) {
+        self.format_version = version;
     }
 
     /// Number of bytes consumed since the start position.

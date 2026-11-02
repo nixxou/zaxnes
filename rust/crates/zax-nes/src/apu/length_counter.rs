@@ -11,7 +11,7 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 /// - **Reload.** A reload written on the clock cycle is ignored outright when the counter
 ///   was non-zero before the clock (`11.len_reload_timing`). That needs the pre-clock value
 ///   and the cycle the clock happened on, which is what [`LengthCounter::clock`] records.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LengthCounter {
     clocked_at_cycle: i64,
     value_before_clock: u8,

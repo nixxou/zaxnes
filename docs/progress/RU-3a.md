@@ -10,8 +10,8 @@ Branch `rustupdated`. The application is the Rust workspace `rust/`; the .NET lo
 |---|---|---|
 | 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `831d43f` |
 | 2 | AMD-044: the soft reset of the core, the command, the input action and the menu | done — `cf75778` |
-| 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | done |
-| 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | todo |
+| 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | done — `a2d6d47` |
+| 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | done |
 | 5 | AMD-052: the catch-up limit and the clock reset on a speed change | todo |
 | 6 | AMD-052: the GPU frame queue and the anti-aliasing default | todo |
 | 7 | Closing: fmt, clippy, crate tests, full PPU goldens, after benchmarks, journal | todo |
@@ -241,3 +241,78 @@ test: silence reads `A = M = S = 0`.
 The three repeats of `nestest` span 0.860 to 0.887 ms, so the "after" figure sits inside the
 noise of the machine and `mmc5test` moved the other way. No measurable cost, which is what the
 replacement of float work by two table reads predicts. R0's callgrind run is the real gate.
+
+### Step 4 — AMD-054, the MMC5's audio
+
+`apu/mmc5_audio.rs` and `apu/mmc5_pulse_channel.rs`, ported from V2-16 with the same reading of
+the requirement: two square channels that borrow the APU pulse's waveform, duty, timer,
+envelope, length counter and cut below period 8 but have **no sweep unit** (a separate type
+rather than a flag, since an APU pulse with a zeroed sweep register mutes itself above period
+$3FF and an MMC5 channel must not), a PCM channel in write mode, and $5010 / $5015. The board's
+own divider gives the envelopes 7 458 CPU cycles (239.98 Hz) and the length counters one clock in
+two (120 Hz), which is the **(D)** of the requirement against the 240 Hz of the public page. The
+three other declared divergences are kept as the requirement writes them: no read mode of
+$5010, the PCM IRQ flag never pulls /IRQ, and the period cut follows the APU.
+
+#### How `M` reaches the mixer at no cost for other boards
+
+The design the notes above describe, implemented:
+- `Mapper::expansion_audio_output` returns `Option<i32>`, `None` by default; only the MMC5
+  overrides it. The MMC5 also takes the `on_cpu_cycle` hook it had never used — it is one of the
+  two boards that already step every cycle, so no board that did not step gained a step.
+- `NesBus` keeps a `bool` set once in `attach` from `Cartridge::has_expansion_audio`. It is read
+  in `catch_up_apu` and `sync_apu`, never in `tick`. In the frame loop — the only path gameplay
+  takes — `catch_up_apu` runs **rarely** for a board without expansion audio, so the `bool` test
+  is not on the per-cycle path at all. A `bool` test *in* `tick` was rejected: at about 29 780
+  cycles per emulated frame it would add roughly 90 k instructions per frame, far over R0's 1 %.
+- A board with expansion audio keeps `apu_quiet = 0`, so the APU never lags on it and the `M`
+  pushed is always the current cycle's. For every other board the quiet-cycle skipping of §5.1 is
+  exactly as it was.
+- `tick` now steps the cartridge **before** the APU catch-up instead of after. That is a move of
+  an existing block, not a new branch; the .NET lot made the same swap for the same reason. The
+  two chips do not look at each other and the DMC DMA is still served after both. **The goldens
+  prove it: 291 of 291 rows still match, audio included**, so the reorder changed nothing on any
+  of the 291 ROMs.
+
+#### The savestate format
+
+The board's sound is part of the state (REQ-CORE-090), written at the end of the MMC5's own
+registers, so `STATE_VERSION` had to move: **4 → 8**, and the widescreen variant **7 → 9**.
+Versions 4, 5, 6 and 7 are still read (REQ-CORE-091) — a block of theirs simply carries no sound
+state and the board starts silent, as it does after a reset — so no savestate a user already has
+is refused. The version reaches the board through a new `StateReader::format_version`, set once
+from the header in `NesCore::restore_state`: one additive field on the reader, no signature
+change anywhere in the 26 mappers. `is_known_state_version` and
+`state_version_has_mmc5_audio` hold the two decisions; the widescreen call's third argument
+became `version >= WIDE_STATE_VERSION_7`, which keeps 7 and 9 on the same branch.
+
+#### Measurements
+
+Every acceptance figure of REQ-CORE-075 comes out exactly: one square at volume 15 → `M` = 4623,
+both → 8000, `pcm` 128 → 3968, a 0 written to $5011 leaves the level and raises the flag, the
+first read of $5010 gives $80 and the next $00, the envelope falls 15 → 0 in 15/240 s ± 5 % for
+`$4017` = $00, $80 and $C0 alike, and the length counter runs out in 10/120 s. The clipping is
+checked where it bites: `A` at 26 838 plus `M` at 7 905 is past full scale and `S` reads 32 767.
+
+`bench-core`, release, x86, against the step-1 figures:
+
+| ROM | core before | core after | repeats after |
+|---|---|---|---|
+| `mmc5test/mmc5test.nes` | 1.7909 ms | 1.8752 ms | 1.8316 / 1.8515 / 1.8215 |
+| `exram/mmc5exram.nes` | 2.0429 ms | 2.0596 ms | — |
+| `nestest.nes` (mapper 0) | 0.8695 ms | 0.8646 ms | 0.8544 / 0.8535 |
+
+`nestest` did not move (it sits under the step-1 figure, inside the 0.853 to 0.887 span the
+machine shows), which is the requirement that mattered: **no cost for a cartridge that is not an
+MMC5**. The MMC5 ROM costs about 3 % more — the per-cycle sound step, plus the APU's quiet-cycle
+skipping being off for that board so that `M` is never stale. That is the board that gained the
+feature, and no built-in profile targets an MMC5-audio game (note of AMD-054).
+
+Tests: `zax-nes/tests/mmc5_audio_tests.rs`, 14 of them, including a savestate round trip over
+256 cycles of `M` and a block whose header is patched back to version 4 to show that an older
+state still loads with the board silent. One test takes the other side: for mappers 0, 1, 4 and
+7, `expansion_audio_output` is `None` and writes in the $5000-$5015 window reach no sound unit.
+
+SPEC copies: REQ-CORE-073 replaced by its amended form and REQ-CORE-076 added in SPEC-02 §3.7,
+REQ-CORE-075 replaced by its amended form, the mapper 5 row of REQ-CORE-100 now reads "audio
+émulé", and Q5 is marked as superseded for the MMC5.

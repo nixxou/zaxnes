@@ -269,6 +269,20 @@ impl Cartridge {
         self.board.irq_asserted()
     }
 
+    /// `M` of REQ-CORE-073: the board's expansion audio in the mixer's integer units
+    /// (REQ-CORE-075), or `None` for a board without any. Only the MMC5 answers.
+    #[must_use]
+    pub fn expansion_audio_output(&self) -> Option<i32> {
+        self.board.expansion_audio_output()
+    }
+
+    /// Whether the board has expansion audio at all, asked once when the cartridge is attached
+    /// so that the bus's cycle never pays for the question (REQ-CORE-075).
+    #[must_use]
+    pub fn has_expansion_audio(&self) -> bool {
+        self.board.expansion_audio_output().is_some()
+    }
+
     /// PPU dots during which the IRQ line cannot change through the PPU's activity, `None`
     /// when the board gives no bound (see [`Mapper::ppu_irq_horizon`]).
     #[must_use]

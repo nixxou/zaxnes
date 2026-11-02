@@ -1,15 +1,22 @@
 use super::{windows_for, Mapper};
+use crate::apu::Mmc5Audio;
 use crate::cartridges::{wrap_offset, BankWindows, CartridgeMemory, ChrFetch};
 use crate::state::{InvalidState, StateReader, StateWriter};
-use crate::RegionTiming;
+use crate::{NesCore, RegionTiming};
 
 /// iNES mapper 5, MMC5 (REQ-CORE-100): four PRG modes with RAM or ROM per window, four CHR
 /// modes with two register sets (sprites and background), `ExRAM`, fill mode, a scanline
 /// IRQ and a hardware multiplier (nesdev, "MMC5"). Extended attribute mode and the split
 /// screen are not supported.
+///
+/// The **expansion sound** ($5000-$5015) is emulated as REQ-CORE-075 as amended by AMD-054
+/// requires: two square channels, a PCM channel in write mode and the $5010 / $5015 registers,
+/// all of it in [`Mmc5Audio`]. Its output is the `M` the APU's mixer adds to its own
+/// (REQ-CORE-073); the bus reads it through [`Mapper::expansion_audio_output`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mmc5 {
     banks: BankWindows,
+    audio: Mmc5Audio,
     ex_ram: [u8; Self::EX_RAM_SIZE],
     chr_a: [i32; 8],
     chr_b: [i32; 4],
@@ -44,6 +51,7 @@ impl Mmc5 {
     pub(crate) fn new(memory: &CartridgeMemory) -> Self {
         Self {
             banks: windows_for(memory),
+            audio: Mmc5Audio::new(),
             ex_ram: [0; Self::EX_RAM_SIZE],
             chr_a: [0; 8],
             chr_b: [0; 4],
@@ -253,6 +261,10 @@ impl Mapper for Mmc5 {
         writer.write_i32(self.scanline_counter);
         writer.write_u8(self.multiplicand);
         writer.write_u8(self.multiplier);
+
+        // Last, so that a block written before AMD-054 (format version 4 to 7) reads back
+        // without it (REQ-CORE-091).
+        self.audio.save_state(writer);
     }
 
     fn load_registers(&mut self, reader: &mut StateReader) -> Result<(), InvalidState> {
@@ -283,6 +295,14 @@ impl Mapper for Mmc5 {
         self.scanline_counter = reader.read_i32()?;
         self.multiplicand = reader.read_u8()?;
         self.multiplier = reader.read_u8()?;
+
+        if NesCore::state_version_has_mmc5_audio(reader.format_version()) {
+            self.audio.load_state(reader)?;
+        } else {
+            // An older block carries no sound state: the board starts silent, as it does
+            // after a reset, and the game's next write to $5000-$5015 sets it up again.
+            self.audio.reset();
+        }
         Ok(())
     }
 
@@ -306,6 +326,20 @@ impl Mapper for Mmc5 {
         None
     }
 
+    /// `M` of REQ-CORE-073: the board's two square channels and its PCM level, in the mixer's
+    /// integer units (REQ-CORE-075). Every other board leaves the trait's `None`, so nothing
+    /// of this reaches the bus's cycle for them.
+    fn expansion_audio_output(&self) -> Option<i32> {
+        Some(self.audio.output())
+    }
+
+    /// The board's sound has no equivalent of the APU's frame sequencer, so it counts CPU
+    /// cycles of its own (REQ-CORE-075). The MMC5 is one of the two boards that already step
+    /// every cycle, so this costs nothing anywhere else.
+    fn on_cpu_cycle(&mut self, _memory: &mut CartridgeMemory) {
+        self.audio.step_cpu_cycle();
+    }
+
     fn prg_ram_writable(&self) -> bool {
         (self.protect1 & 0x03) == 0x02 && (self.protect2 & 0x03) == 0x01
     }
@@ -316,6 +350,7 @@ impl Mapper for Mmc5 {
     }
 
     fn reset(&mut self, _memory: &mut CartridgeMemory) {
+        self.audio.reset();
         self.ex_ram = [0; Self::EX_RAM_SIZE];
         self.chr_a = [0; 8];
         self.chr_b = [0; 4];
@@ -345,18 +380,25 @@ impl Mapper for Mmc5 {
     }
 
     fn cpu_read_override(&mut self, memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
-        if address == 0x5204 {
-            let value = self.status();
-            self.irq_pending = false;
-            return Some(Some(value));
+        match address {
+            0x5204 => {
+                let value = self.status();
+                self.irq_pending = false;
+                Some(Some(value))
+            }
+            // Reading $5010 acknowledges the PCM IRQ flag (REQ-CORE-075), so the host
+            // accessor must not take this path (REQ-CORE-081).
+            0x5010 | 0x5015 => Some(self.audio.read(address)),
+            _ => self.cpu_peek_override(memory, address),
         }
-
-        self.cpu_peek_override(memory, address)
     }
 
     fn cpu_peek_override(&self, _memory: &CartridgeMemory, address: u16) -> Option<Option<u8>> {
         match address {
             0x5204 => Some(Some(self.status())),
+            // The side-effect-free read of the same two registers (REQ-CORE-081): the flag of
+            // $5010 is reported without being acknowledged.
+            0x5010 | 0x5015 => Some(self.audio.peek(address)),
             0x5205 => Some(Some(self.product().to_le_bytes()[0])),
             0x5206 => Some(Some(self.product().to_le_bytes()[1])),
             // ExRAM reads back only in the two RAM modes; the nametable modes leave the CPU
@@ -381,6 +423,12 @@ impl Mapper for Mmc5 {
                 self.ex_ram[usize::from(address - 0x5C00)] = value;
             }
 
+            return true;
+        }
+
+        if (0x5000..=0x5015).contains(&address) {
+            // The board's own sound registers (REQ-CORE-075).
+            self.audio.write(address, value);
             return true;
         }
 

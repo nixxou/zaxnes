@@ -24,6 +24,7 @@ const RAM_SIZE: usize = 2048;
 /// The bus owns the other chips and the cartridge; the PPU is handed the cartridge on each
 /// call that needs it.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)] // Independent flags of the chips and of the batching.
 pub struct NesBus {
     ram: [u8; RAM_SIZE],
     ppu: Ppu2C02,
@@ -47,6 +48,12 @@ pub struct NesBus {
     apu_lag: u32,
     /// How far `apu_lag` may grow: the APU's quiet cycles when it was last caught up.
     apu_quiet: u32,
+    /// Whether the cartridge has expansion audio, asked once in [`NesBus::attach`]. For such a
+    /// board the APU is never let lag (`apu_quiet` stays 0) and its `M` is pushed in before the
+    /// cycle it belongs to is run (REQ-CORE-073, REQ-CORE-075). Only the MMC5 sets it, and the
+    /// flag is read in [`NesBus::catch_up_apu`], which the frame loop reaches rarely for every
+    /// other board, so nothing of this costs anything for them.
+    expansion_audio: bool,
     /// Whether the instruction being run was fetched from the extension's execution zone: its
     /// data accesses at `$3000`-`$3FFF` reach the extension when the zone holds its data there
     /// (`WideExtension::zone_data`), the game's still reach the PPU.
@@ -84,6 +91,7 @@ impl NesBus {
             ppu_deadline: 0,
             deferred_ppu: false,
             apu_lag: 0,
+            expansion_audio: false,
             apu_quiet: 0,
             zone_instruction: false,
         }
@@ -170,6 +178,13 @@ impl NesBus {
 
     /// Attaches `cartridge`, or detaches it with `None`.
     pub fn attach(&mut self, cartridge: Option<Cartridge>) {
+        self.expansion_audio = cartridge
+            .as_ref()
+            .is_some_and(Cartridge::has_expansion_audio);
+        if !self.expansion_audio {
+            // A board with no expansion audio leaves the APU's `M` at 0 for good.
+            self.apu.set_expansion_level(0);
+        }
         self.cartridge = cartridge;
     }
 
@@ -210,12 +225,17 @@ impl NesBus {
             self.catch_up_ppu();
         }
 
+        // The cartridge goes before the APU: a board with expansion audio (REQ-CORE-075) has
+        // to have produced this cycle's `M` before the APU mixes it in (REQ-CORE-073). Nothing
+        // else in the tick depends on the order — the two chips do not look at each other, and
+        // the DMC DMA below is served after both, as before.
+        if let Some(cartridge) = self.cartridge.as_mut() {
+            cartridge.step_cpu_cycle();
+        }
+
         self.apu_lag += 1;
         if self.apu_lag > self.apu_quiet {
             self.catch_up_apu();
-        }
-        if let Some(cartridge) = self.cartridge.as_mut() {
-            cartridge.step_cpu_cycle();
         }
 
         if self.apu.needs_dmc_dma() && !self.in_dmc_dma {
@@ -284,12 +304,15 @@ impl NesBus {
     /// [`NesBus::defer_ppu`] the APU runs on every cycle, as before.
     fn catch_up_apu(&mut self) {
         if self.apu_lag > 0 {
+            self.push_expansion_audio();
             self.apu.run_cpu_cycles(self.apu_lag);
             self.apu_lag = 0;
         }
-        self.apu_quiet = if self.deferred_ppu {
+        self.apu_quiet = if self.deferred_ppu && !self.expansion_audio {
             self.apu.quiet_cycles()
         } else {
+            // A board with expansion audio keeps the APU in step, so that the `M` just pushed
+            // is the one of the cycle about to run (REQ-CORE-075).
             0
         };
     }
@@ -298,10 +321,26 @@ impl NesBus {
     /// run in step and recomputes how far it may lag.
     fn sync_apu(&mut self) {
         if self.apu_lag > 0 {
+            self.push_expansion_audio();
             self.apu.run_cpu_cycles(self.apu_lag);
             self.apu_lag = 0;
         }
         self.apu_quiet = 0;
+    }
+
+    /// Hands the APU the board's `M` for the cycles it is about to run (REQ-CORE-073,
+    /// REQ-CORE-075). Costs one test of a `bool` for a cartridge without expansion audio, and
+    /// is not on the per-cycle path at all while the frame loop batches the APU.
+    fn push_expansion_audio(&mut self) {
+        if self.expansion_audio {
+            if let Some(level) = self
+                .cartridge
+                .as_ref()
+                .and_then(Cartridge::expansion_audio_output)
+            {
+                self.apu.set_expansion_level(level);
+            }
+        }
     }
 
     /// Lets the PPU run in batches until [`NesBus::end_deferred_ppu`] (the frame loop).

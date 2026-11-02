@@ -232,13 +232,20 @@ impl NesCore {
     pub const STATE_MAGIC: u32 = 0x304E_4553;
 
     /// Version of the savestate format. Bumped whenever the block layout changes; L1c added
-    /// the APU channel, mixer and resampler state and L1d the mapper bank windows, latches
-    /// and IRQ counters (REQ-CORE-090).
-    pub const STATE_VERSION: i32 = 4;
+    /// the APU channel, mixer and resampler state, L1d the mapper bank windows, latches and
+    /// IRQ counters, and RU-3a the MMC5's sound registers (REQ-CORE-090, AMD-054
+    /// REQ-CORE-075).
+    pub const STATE_VERSION: i32 = 8;
+
+    /// The earlier block, without the MMC5's sound registers; still read (REQ-CORE-091).
+    pub const STATE_VERSION_4: i32 = 4;
 
     /// Version of a block that also carries the widescreen extension registers: written only
     /// once a ROM unlocked the extension, so every other block keeps [`Self::STATE_VERSION`].
-    pub const WIDE_STATE_VERSION: i32 = 7;
+    pub const WIDE_STATE_VERSION: i32 = 9;
+
+    /// The earlier widescreen block, without the MMC5's sound registers; still read.
+    pub const WIDE_STATE_VERSION_7: i32 = 7;
 
     /// The earlier widescreen block, without the execution zone register; still read.
     pub const WIDE_STATE_VERSION_6: i32 = 6;
@@ -250,8 +257,25 @@ impl NesCore {
     const fn is_wide_state_version(version: i32) -> bool {
         matches!(
             version,
-            Self::WIDE_STATE_VERSION | Self::WIDE_STATE_VERSION_6 | Self::WIDE_STATE_VERSION_5
+            Self::WIDE_STATE_VERSION
+                | Self::WIDE_STATE_VERSION_7
+                | Self::WIDE_STATE_VERSION_6
+                | Self::WIDE_STATE_VERSION_5
         )
+    }
+
+    /// Whether `version` is one this build reads at all.
+    const fn is_known_state_version(version: i32) -> bool {
+        version == Self::STATE_VERSION
+            || version == Self::STATE_VERSION_4
+            || Self::is_wide_state_version(version)
+    }
+
+    /// Whether a block of `version` carries the MMC5's sound registers, which RU-3a added at
+    /// the end of that board's own registers (AMD-054 REQ-CORE-075). An older block loads
+    /// with the board's sound left silent, which it also is after a reset.
+    pub(crate) const fn state_version_has_mmc5_audio(version: i32) -> bool {
+        version >= Self::STATE_VERSION
     }
 
     /// Tile grid dimensions: always (33, 31, 128) (REQ-CORE-031).
@@ -1109,12 +1133,15 @@ impl NesCore {
         }
 
         let version = reader.read_i32()?;
-        if version != Self::STATE_VERSION && !Self::is_wide_state_version(version) {
+        if !Self::is_known_state_version(version) {
             return Err(InvalidState::corrupt(format!(
                 "Corrupt savestate: format version {version} is not supported (expected {}).",
                 Self::STATE_VERSION
             )));
         }
+        // Objects whose own layout grew with a version of the format read it from here: the
+        // MMC5's sound registers are written only from `STATE_VERSION` on.
+        reader.set_format_version(version);
 
         let core_name = reader.read_string()?;
         if core_name != Self::CORE_NAME && core_name != Self::LEGACY_CORE_NAME {
@@ -1193,7 +1220,7 @@ impl NesCore {
             wide.load_state(
                 &mut reader,
                 version != Self::WIDE_STATE_VERSION_5,
-                version == Self::WIDE_STATE_VERSION,
+                version >= Self::WIDE_STATE_VERSION_7,
             )?;
         } else {
             wide.reset();

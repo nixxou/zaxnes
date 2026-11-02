@@ -2,8 +2,9 @@ use super::envelope::Envelope;
 use super::length_counter::LengthCounter;
 use crate::state::{InvalidState, StateReader, StateWriter};
 
-/// The duty sequences of nesdev, "APU Pulse", eight steps each.
-const DUTY_SEQUENCES: [u8; 32] = [
+/// The duty sequences of nesdev, "APU Pulse", eight steps each. The MMC5's square channels
+/// share them (REQ-CORE-075).
+pub(super) const DUTY_SEQUENCES: [u8; 32] = [
     0, 1, 0, 0, 0, 0, 0, 0, //
     0, 1, 1, 0, 0, 0, 0, 0, //
     0, 1, 1, 1, 1, 0, 0, 0, //

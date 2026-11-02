@@ -17,6 +17,8 @@ mod dmc_channel;
 mod envelope;
 mod length_counter;
 pub mod mixer;
+mod mmc5_audio;
+mod mmc5_pulse_channel;
 mod noise_channel;
 mod pulse_channel;
 mod triangle_channel;
@@ -32,6 +34,7 @@ use pulse_channel::PulseChannel;
 use triangle_channel::TriangleChannel;
 
 pub use band_limited_resampler::HIGH_PASS_HZ;
+pub(crate) use mmc5_audio::Mmc5Audio;
 
 /// A rejected audio setting or read (the C# throws `ArgumentException` for these).
 #[derive(Debug, Clone, Copy, PartialEq)]

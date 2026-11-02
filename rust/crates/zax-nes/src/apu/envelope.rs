@@ -4,7 +4,7 @@ use crate::state::{InvalidState, StateReader, StateWriter};
 ///
 /// The loop flag and the length counter's halt flag are the same bit of the same register;
 /// they are kept separately here because they drive two different units.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Envelope {
     start: bool,
     divider: u8,
