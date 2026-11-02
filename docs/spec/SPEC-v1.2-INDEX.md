@@ -172,7 +172,7 @@ divergence volontaire assumée ; `→` marque un remplacement (voir §4).
 | REQ-E3D-426 | DEC-R2-T8 ; AMD-001 04B-13 (v1.1 : critère propre au harnais) |
 | REQ-E3D-442, -443 | AMD-001 04B-10, 04B-11 (v1.1) |
 | REQ-E3D-446, -447, §5.3 | **AMD-008 Q-014** : les règles priment sur l'exemple, rectifié (colonnes 0 et 7) ; AMD-021 §3 : confirmé au round 2 |
-| REQ-E3D-450 | **AMD-008 Q-015** : intervalle `[min(z⁻,z⁺), max(z⁻,z⁺)]`, bornes incluses |
+| REQ-E3D-450 | **AMD-048** : intervalle `[z⁻, z⁺]`, bornes incluses, **vide si `z⁻ > z⁺`** (remplace la réponse d'AMD-008 Q-015) |
 | REQ-E3D-452 | **AMD-008 Q-013** : `D'` écrit dans `sizeZ` |
 | REQ-E3D-454 | AMD-001 04-6 (v1.1 : renvoie à SPEC-04 REQ-E3D-021) |
 | REQ-E3D-455 | AMD-001 04B-9 (v1.1 : `fillrate` fixé par le hook de construction) |
@@ -228,7 +228,7 @@ divergence volontaire assumée ; `→` marque un remplacement (voir §4).
 | REQ-SCN-032 | **AMD-021 R2-010** : le « DEVRAIT » devient **« NE DOIT PAS »** — une tile transparente et une tile de HUD ne reçoivent aucune ombre |
 | REQ-SCN-034 | AMD-001 04B-7, 06-6, D-6 (v1.1 : table `NES_RGB` = SPEC-04 §4.1) |
 | REQ-SCN-035 | **AMD-019 Q-045** : la courbe sRGB de §2 fait foi (≈ 4,672), tolérance ±2 % |
-| REQ-SCN-037 | AMD-001 T-4 (v1.1 : décalage ±0,1 appliqué ici) |
+| REQ-SCN-037 | AMD-001 T-4 (v1.1 : décalage appliqué ici) ; **AMD-057** : `0,001 × (i mod 64) ∓ 0,1` par indice de sprite |
 | REQ-SCN-040 | AMD-009 Q-020 (objet transparent = tile) → **AMD-012** : passage de profondeur et tri **par objet entier** ; **AMD-021 R2-009** : mélange en espace **linéaire** (HUD et occultation FPV compris) ; AMD-021 §2 **R2-012 (D)** : transparents derrière un transparent restent visibles |
 | REQ-SCN-043 | AMD-001 06-5 (v1.1 : renvoi normatif à REQ-E3D-568) |
 | REQ-SCN-044, -046, -050 | DEC-R2-T8 ; AMD-001 06-8 (v1.1 : critères synthétiques) |

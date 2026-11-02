@@ -391,12 +391,19 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
             return Ok(());
         };
 
-        // REQ-SCN-037: the renderer is the sole owner of the ±0.1 sprite depth nudge, applied
-        // in the object's local frame, before the scale and the rotation, exactly once.
-        let nudge = match (tile.sprite, tile.behind_background) {
-            (false, _) => 0.0,
-            (true, true) => geometry::SPRITE_NUDGE,
-            (true, false) => -geometry::SPRITE_NUDGE,
+        // REQ-SCN-037: the renderer is the sole owner of the sprite depth nudge, applied in the
+        // object's local frame, before the scale and the rotation, exactly once.
+        //
+        // AMD-057 §2 replaced the constant ±0.1 by `0.001 × (i mod 64) ∓ 0.1`, where `i` is the
+        // sprite index of REQ-CORE-043 — 0 to 63, or 64 + n for the lower half of an 8 × 16,
+        // which therefore takes the same offset as its upper half. The consequence is the point:
+        // where two sprites overlap at the same depth, the one the NES gives priority to is in
+        // front. The index was already in hand (`FrameTile::ord`), so this is the same `match`
+        // and one multiply-add — no new pass and nothing new carried per tile.
+        let nudge = if tile.sprite {
+            geometry::sprite_nudge(tile.tile.ord(), tile.behind_background)
+        } else {
+            0.0
         };
         let mut model = tile.transform;
         if nudge != 0.0 {

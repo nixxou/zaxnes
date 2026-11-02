@@ -412,19 +412,48 @@ impl SceneFixture {
     }
 
     pub fn push_sprite(&mut self, tile: Tile, x: i32, y: i32, palette: u8, behind: bool) {
+        let index = self.sprite_order;
+        self.push_sprite_at(tile, x, y, palette, behind, index);
+    }
+
+    /// Adds a sprite tile record with an explicit sprite index (REQ-CORE-043: 0 to 63, or
+    /// 64 + n for the lower half of an 8 × 16). AMD-057 §2 makes the depth nudge depend on it,
+    /// so the criteria of REQ-SCN-037 need to choose it.
+    pub fn sprite_indexed(
+        mut self,
+        tile: Tile,
+        x: i32,
+        y: i32,
+        palette: u8,
+        behind: bool,
+        index: i32,
+    ) -> Self {
+        self.push_sprite_at(tile, x, y, palette, behind, index);
+        self
+    }
+
+    pub fn push_sprite_at(
+        &mut self,
+        tile: Tile,
+        x: i32,
+        y: i32,
+        palette: u8,
+        behind: bool,
+        index: i32,
+    ) {
         self.records.push(TileRecord::new(
             tile.0,
             tile.1,
             i16::try_from(x).expect("screen x"),
             i16::try_from(y).expect("screen y"),
-            self.sprite_order,
+            index,
             false,
             false,
             behind,
             palette,
             false,
         ));
-        self.sprite_order += 1;
+        self.sprite_order = self.sprite_order.max(index) + 1;
     }
 
     /// Converts the frame and returns a scene state ready to render.

@@ -16,7 +16,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | done |
 | 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | done |
 | 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | done |
-| 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | todo |
+| 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | done |
 | 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | todo |
 | 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | todo |
 | 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | todo |
@@ -548,3 +548,109 @@ histogram, so the badly measured test was dropped rather than loosened.
 
 `cargo test --release --workspace --features zax-app/bundled`: **2263 passed, 0 failed**. fmt and
 workspace clippy clean.
+
+### Step 6 — AMD-057: the sprite depth by index
+
+**The brief's point 6 held exactly**: "the offset formula replaces a constant; computed where the
+constant was, no new per-frame pass." The index was already in hand — `DrawTile.tile` carries
+`FrameTile::ord()`, the sprite slot of REQ-CORE-043, which step 1 had already checked — so the
+`match` on `(sprite, behind_background)` in `frame_plan::collect_tile` became a call to
+`geometry::sprite_nudge(tile.tile.ord(), tile.behind_background)` and nothing else moved:
+
+```rust
+0.001 * (index.max(0) % 64) as f32  ±  0.1
+```
+
+One `imul`, one `and`, one `cvtsi2ss`, one `mulss` on a path that already did a two-armed branch
+and a float select. **Nothing was added to any per-tile record**, no setting is consulted, and the
+`if nudge != 0.0` guard that skips the matrix multiply for a background tile is untouched — a
+background tile still costs one float compare.
+
+#### Why `index.max(0)`, and not a `u8`
+
+`FrameTile::ord()` is an `i32` on this branch (the draw list carries the core's own ordinal). A
+negative value is not reachable for a sprite — REQ-CORE-043 numbers them 0..127 — but `%` in Rust
+keeps the sign of the dividend, so an unchecked `index % 64` on a hypothetical −1 would give −1 and
+a nudge of −0.101, i.e. a sprite *in front of* index 0 instead of at it. `max(0)` makes the
+degenerate case read as index 0 rather than invent a new depth; it compiles to one `cmovns`.
+
+#### The sign of the index term on the far side
+
+AMD-057 §2 writes **`+`** for both priorities: `0,001 × (i mod 64) − 0,1` in front, and
+`0,001 × (i mod 64) + 0,1` behind. So a "behind the background" sprite of a *higher* index is
+pushed *further behind*, which keeps the priority order of REQ-CORE-043 the same on both sides of
+the background. That is what the amendment says and it is also the sensible reading — the
+alternative (mirroring the term) would put the lowest-priority sprite nearest the eye among the
+"behind" ones — so no Q ticket was opened. `req_scn_037_…` asserts both sides explicitly.
+
+#### The frailty worth recording
+
+The measured span of the index term is **0.063 scene unit** over the 64 indices, i.e. 0.001 unit
+between two neighbours. At the default camera setpoint (about 148 units out, near 0.3 / far 5000
+of REQ-SCN-004) that gap is **1.6 least significant bits of a 24-bit depth buffer** — it resolves,
+but barely, and a 16-bit depth buffer would not resolve it at all. This is a property of the
+formula AMD-057 measured on the original, not of this port; it is recorded here, and the GPU half
+of the overlap test brings the camera in to 32 units so that it measures the *rule* rather than the
+depth buffer's luck. R0 should expect the overlap criterion to be resolution-dependent on a
+handheld whose depth buffer is 16 bits (none of the current targets is: `gl/context.rs` asks for
+24).
+
+#### The images
+
+Measured rather than assumed: the step-5 look was reproduced by zeroing the index term in
+`sprite_nudge` (a one-line local change, reverted), both sets captured with
+`zax-harness render --anti-alias 0`, and compared.
+
+| Scene | step-5 look vs step 6, tolerance 2 |
+|---|---|
+| framing, sky, shadow, no-shadow, layer-shadow-off, **nudge**, alpha, hud, clip, backdrop | **100.000 %** |
+| **heavy** | **99.734 %** (0.266 % of 307 200 pixels, about 820; identical at tolerance 0 too, so these pixels change colour outright rather than shade) |
+
+**One scene moves, and it is the right one.** `nudge` — the scene named after this very offset —
+does *not* move: its sprites take the index term, but they do not overlap each other, and the term
+is far too small to reorder a sprite against the background. `heavy` is the scene of REQ-SCN-064,
+**64 sprites of indices 0 to 63** laid out at `x = 3i mod 248`, `y = 8 + (5i mod 224)` so that many
+of them do overlap — and where they do, the lower index is now in front. Those ~820 pixels are
+exactly the behaviour AMD-057 §2 asks for, on exactly the scene that can show it.
+
+**No setting reproduces the old look**, because AMD-057 amends the rule rather than adding a mode;
+the method above (zero the index term) is what R0 can use to separate this change from a
+regression. The render goldens were **not** touched: `heavy` is 99.684 % against the C# goldens,
+inside the 99.5 % the golden test asks for, and no statistic of `render.json` depends on the
+offset — `synthetic_captures_match_the_csharp_goldens` passes unchanged.
+
+#### Tests (3 in `zax-render/tests/amd057_sprite_depth_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| the formula, the amended TV-W2's three cases, the eight Contra tiles of AMD-057 §1, and both priorities | `req_scn_037_the_offset_is_a_thousandth_of_the_index_either_side_of_the_tenth` |
+| the nudge reaches the drawn geometry (TV-W2 restated), and a background tile is still not nudged | `tv_w2_the_front_face_of_a_sprite_sits_at_the_offset_of_its_index` |
+| AMD-057 §2 second criterion: indices 3 and 10 overlap, 3 in front, a fixed 0.007 apart, and the overlap is 3's colour on the GPU | `amd_057_of_two_overlapping_sprites_the_lower_index_is_in_front` |
+
+`SceneFixture` gained `sprite_indexed` / `push_sprite_at` so a criterion can choose the index;
+`push_sprite` keeps its running order, and `sprite_order` now advances past an explicit index so
+the two can be mixed in one fixture.
+
+The engine-side `tv_w2_a_sprite_tile_gets_the_same_transform_and_the_nudge_flags` is **unchanged**
+and that is the check that the ownership of DEC-R2-T4 survived the amendment: the engine still
+delivers the same transform for a sprite tile as for a background tile, index or no index.
+
+`cargo test --release -p zax-render`: all suites pass, the 3 new ones included. fmt and workspace
+clippy clean.
+
+#### SPEC chapter edits
+
+Step 5 implemented the wall half of AMD-057 but recorded no chapter edit, so this step carries
+both halves:
+
+- `SPEC-06` REQ-SCN-037: the amended text, the amended acceptance criterion, the second criterion
+  of AMD-057 §2 and the note on the consequence.
+- `SPEC-06` §4.3, the constants table: the « Décalage des sprites » row becomes
+  `0,001 × (i mod 64) ∓ 0,1`.
+- `SPEC-04B` REQ-E3D-405: the formula in the renvoi, and the sprite index added to what the engine
+  delivers for the renderer to choose `n`.
+- `SPEC-04B` TV-W2: indices 0, 5 and 69 written out.
+- `SPEC-04B` REQ-E3D-501: the note that the **drawn** mesh is the whole mesh, that AMD-057 §2
+  withdraws AMD-027 §1-2, and that REQ-SCN-065 stays required by other means (the wall half).
+- `SPEC-v1.2-INDEX`: the REQ-SCN-037 row, and the REQ-E3D-450 row that step 4 left pointing at the
+  superseded AMD-008 Q-015 answer.

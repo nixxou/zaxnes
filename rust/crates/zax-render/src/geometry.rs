@@ -98,8 +98,29 @@ pub const MAX_ANTI_ALIAS_SAMPLES: i32 = 8;
 /// Scale factor of the HUD plane, 0.5 (REQ-SCN-045).
 pub const HUD_SCALE: f32 = 0.5;
 
-/// Depth nudge applied by the renderer to sprite tiles, ±0.1 (REQ-SCN-037).
+/// Base depth nudge applied by the renderer to sprite tiles, ±0.1 (REQ-SCN-037).
 pub const SPRITE_NUDGE: f32 = 0.1;
+
+/// How much of the nudge of REQ-SCN-037 one sprite index is worth (AMD-057 §2): the offset is
+/// `0.001 × (i mod 64) ∓ 0.1`, so the sprite the NES gives priority to — the lowest index — ends
+/// up in front where two sprites overlap at the same depth.
+pub const SPRITE_INDEX_NUDGE: f32 = 0.001;
+
+/// The depth nudge `n` of REQ-SCN-037 as AMD-057 amends it, for a tile of the sprite of index
+/// `index` (REQ-CORE-043: 0 to 63, or 64 + n for the lower half of an 8 × 16).
+///
+/// `behind_background` is the sprite's priority bit. A background tile is not nudged at all, so
+/// this is only called for a sprite; `index` below 0 would be one, and reads as index 0.
+#[must_use]
+pub fn sprite_nudge(index: i32, behind_background: bool) -> f32 {
+    #[allow(clippy::cast_precision_loss)] // 0 to 63.
+    let step = SPRITE_INDEX_NUDGE * (index.max(0) % 64) as f32;
+    if behind_background {
+        step + SPRITE_NUDGE
+    } else {
+        step - SPRITE_NUDGE
+    }
+}
 
 /// Scene units a wall of a tile mesh is pushed away from the eye, so that the walls AMD-057
 /// keeps cannot win the depth test against the face of the tile next door (SPEC-06
