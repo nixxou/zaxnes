@@ -13,8 +13,8 @@ AMD-059) of `dotnetupdated` are read as a reference only.
 | 3 | AMD-040: the `CS` table and `Camera.ResetDistance` (with the two formulas of AMD-045) | done — `644bf51` |
 | 4 | AMD-040: `RunAheadFrames`, `VisualStyle`, the style-parameter methods, the export methods | done — `7121e78` |
 | 5 | AMD-059: the four scalar members, `VisualStyleParameters`, the `CS.Nes3D` tables | done — `01cf39b` |
-| 6 | AMD-042: a rollback snapshot carries `PData` and the camera (with REQ-SCN-073) | done |
-| 7 | AMD-045: the camera of 3dSen 2.0 | todo |
+| 6 | AMD-042: a rollback snapshot carries `PData` and the camera (with REQ-SCN-073) | done — `49aec68` |
+| 7 | AMD-045: the zoom floor, the angles in one turn, the vertical in TPV | done |
 | 8 | Closing: fmt, clippy, tests in both binding modes, after benchmarks, API dump, journal | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -402,3 +402,85 @@ the history, and the extras travelling with the recycled core buffer.
 not slide, and the window restored with its remaining time, reached by the smoothing for 2 s and
 followed in the same frame afterwards); the REQ-SCN-024 test that asserted the **old** behaviour
 ("not snapped") now asserts the new one, naming the amendment.
+
+### Step 7 — AMD-045: the rest of the camera of 3dSen 2.0
+
+The two formulas (REQ-SCN-069, REQ-SCN-045) came in with step 3 and REQ-SCN-073 with step 6.
+What is left:
+
+**REQ-SCN-070, the zoom floor.** `geometry::zoom_in(distance, amount)` is
+`max(distance − max(amount, 0), min(distance, 16))`: a zoom in stops at 16 × s, and from a
+distance already there or below — the FPV distance of 0 at launch, or one a profile, a script or
+the view reset posted — it does nothing at all. `controls::apply` uses it for the ZoomIn action
+and `controls::apply_wheel` for a forward notch; a backward notch and the ZoomOut action keep the
+upper bound of REQ-SCN-011 for their only limit. The touch pinch REQ-SCN-070 also names reaches
+`apply_wheel` already, the touch pad of `zax-platform` giving its spread in notches, so it is
+covered by the same line. The Lua write of `Camera.Distance` keeps its own `[0, 512 × s]`
+(REQ-LUA-088) — untouched.
+
+**REQ-SCN-071, the angles in one turn.** `geometry::wrap_angle` brings an angle into
+`]−180°, 180°]` and gives back the shift it applied, a whole number of turns.
+`SceneCamera::advance` calls `wrap_setpoint_angles` first: the three angles of **each** mode are
+wrapped, and the displayed angles of the current mode take the very same shift. The orientation
+is therefore unchanged and the smoothing velocities are left alone — the gap between a displayed
+angle and its setpoint, which is what the critical filter works on, is the same number before and
+after. The user can still orbit without limit.
+
+Cost per displayed frame: two mode iterations, three `wrap_angle` each (a subtraction, a
+division, a `ceil`, a comparison) and, in the usual case where nothing is out of range, an early
+`continue`. No allocation, no setting read, no branch that depends on anything but the angles.
+
+**REQ-SCN-072, the vertical of the camera in TPV.** `basis_from_forward` takes the wanted
+vertical as an argument, and `build_view` hands it `q·(0, 1, 0)` in TPV instead of the world Y
+axis. TPV and the local camera now share one vertical; the only difference left is the aim at
+`P*`. Two consequences the amendment wants: `rz` rolls the picture in TPV as it does in FPV, and
+the basis stays continuous when the camera looks straight down (where the world vertical made it
+jump by about 180°).
+
+Tests added to `zax-render/tests/camera_tests.rs` (37 → 48): the four criteria of REQ-SCN-070
+(ZoomIn held 5 s → 16, a distance of 5 unchanged by a ZoomIn, a ZoomOut of 1 s → 75, the wheel in
+both directions, the view reset and FPV still posting what they like), the two of REQ-SCN-071
+(13 s of RotDown with the orientation checked frame by frame for a jump, and a setpoint of 270
+read back as −90), the displayed angle taking the same turn, the wrapping on eleven values
+including both bounds, and the two of REQ-SCN-072 (the orientation turning by at most 2° between
+rx = 89.5° and 90.5°, and rz = 30° rolling the picture by 30° without moving the aimed
+direction). Vector C5 of SPEC-06 §5 now bottoms out at 16 instead of 0, and says which amendment
+changed it.
+
+#### Which of R0's 56 captures move, and by how much
+
+The campaign of `LOCAL-CHECKS.md` renders twelve games at three angles — `0.81,0.81`,
+`0.4,-0.6`, `1.2,0.3` — all with rz = 0 and at the default field of view. Measured on this
+machine, with the eleven synthetic captures of `goldens/render-synthetic` standing in for them
+(same renderer, same camera, the only pictures available here):
+
+| Cause | Effect on a capture |
+|---|---|
+| REQ-SCN-069, the framed distance | none at 70°: 189.65291 against 189.65285, 3.6 · 10⁻⁷ relative |
+| REQ-SCN-045, the HUD plane | none at 70°: 109.415132 against 109.415103, 2.6 · 10⁻⁷ relative |
+| REQ-SCN-070, the zoom floor | none: no capture zooms |
+| REQ-SCN-071, the angles | none: every angle of the campaign is already inside one turn |
+| REQ-SCN-073, the reloaded camera | none: no capture loads a state |
+| **REQ-SCN-072, the vertical** | **the basis turns by 0.0027° at the default angles**, which is 0.015 pixel at the edge of a 640-wide picture |
+
+So **every capture of the campaign may move by a fraction of a pixel, and only on REQ-SCN-072**.
+Measured on the synthetic captures, before and after the change, against the same C# goldens:
+
+| Capture | before | after |
+|---|---|---|
+| `framing` | 100.000 % | 99.987 % |
+| `clip` | 100.000 % | 99.999 % |
+| `heavy` | 99.813 % | 99.752 % |
+| `hud` | 100.000 % | 100.000 % |
+| the seven others | 100.000 % | 100.000 % |
+
+(the share of pixels within 2 sRGB levels; the gate is 99.5 %). `heavy` was already at 99.813 %
+before this lot, so REQ-SCN-072 cost it 0.06 % — about 180 pixels of 307 200, all of them on an
+edge between two faces. The three counts the test compares exactly follow: `backgroundPixels`
+119576 → 119573 for `framing` and `heavy`, 297076 → 297075 for `clip` (and 305787 → 305788 for
+`hud`, which is step 3's two formulas). Two informative figures of the golden file moved with
+them and were written down: `framing` publishes a fourth colour and `heavy`'s mean luma goes from
+0.2951 to 0.2952. The PNGs are left as the C# reference, the tolerance covering the difference.
+
+**A capture at a field of view other than 70°, or with rz ≠ 0, changes by much more**, and that is
+the amendment's intent: 320.60 instead of 277.93 at 45°, and a roll where there was none.

@@ -38,6 +38,11 @@ pub const MAX_FOV: f32 = 95.0;
 /// Highest camera setpoint distance (REQ-SCN-011).
 pub const MAX_DISTANCE: f32 = 512.0;
 
+/// Lowest setpoint distance a **user** zoom may reach, 16 × s — two NES tiles (AMD-045
+/// REQ-SCN-070). The scene scale s is 1 on desktop (REQ-SCN-002), so it is left out, as it is
+/// for [`MAX_DISTANCE`].
+pub const MIN_USER_DISTANCE: f32 = 16.0;
+
 /// Rotation speed of the extended actions, 30°/s (REQ-SCN-014).
 pub const ROTATION_DEGREES_PER_SECOND: f32 = 30.0;
 
@@ -238,6 +243,34 @@ pub fn reset_distance(fov_degrees: f32) -> f32 {
 #[must_use]
 pub fn hud_distance(fov_degrees: f32) -> f32 {
     HUD_HALF_HEIGHT / (fov_degrees * std::f32::consts::PI / 180.0 / 2.0).tan()
+}
+
+/// Where a **user** zoom in of `amount` units leaves the setpoint distance `distance` (AMD-045
+/// REQ-SCN-070): it stops at [`MIN_USER_DISTANCE`], and has no effect at all from a distance
+/// already there or below — the FPV distance of 0 at launch, or one a profile, a script or the
+/// view reset posted. Zooming out is not concerned (the upper bound of REQ-SCN-011 is unchanged),
+/// and the Lua write of `Camera.Distance` keeps its own `[0, 512 × s]` (REQ-LUA-088).
+///
+/// `amount` is how many units the zoom asks for; a negative value does nothing.
+#[must_use]
+pub fn zoom_in(distance: f32, amount: f32) -> f32 {
+    (distance - amount.max(0.0)).max(distance.min(MIN_USER_DISTANCE))
+}
+
+/// A setpoint angle brought back into `]−180°, 180°]` by whole turns (AMD-045 REQ-SCN-071), with
+/// the shift that was applied — itself a multiple of 360°, which the displayed angle of the
+/// current mode takes as well so that nothing jumps.
+///
+/// Returns the wrapped angle and the shift `wrapped − degrees`.
+#[must_use]
+pub fn wrap_angle(degrees: f32) -> (f32, f32) {
+    let turns = ((degrees - 180.0) / 360.0).ceil();
+    if turns == 0.0 || !turns.is_finite() {
+        return (degrees, 0.0);
+    }
+
+    let shift = -360.0 * turns;
+    (degrees + shift, shift)
 }
 
 /// The three columns of a rotation: the images of X, Y and Z.

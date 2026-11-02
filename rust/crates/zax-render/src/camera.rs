@@ -429,6 +429,7 @@ impl SceneCamera {
     /// the target is always smoothed; in FPV it is smoothed only during the transition window,
     /// and followed instantly afterwards (REQ-SCN-020).
     pub fn advance(&mut self, real_seconds: f32) {
+        self.wrap_setpoint_angles();
         if real_seconds <= 0.0 {
             return;
         }
@@ -487,7 +488,10 @@ impl SceneCamera {
         let eye = target - (q.forward * self.distance);
 
         let (right, up, forward, aim) = if self.mode == CameraMode::Tpv && !self.local_camera {
-            // REQ-SCN-008: the camera is oriented towards P*, with world Y as the vertical.
+            // REQ-SCN-008: the camera is oriented towards P*. The vertical is the camera's own,
+            // q·(0, 1, 0), not the world's Y axis (AMD-045 REQ-SCN-072, which replaces step 4 of
+            // REQ-SCN-007): rz therefore rolls the picture in TPV as it does in FPV, and the
+            // basis stays continuous when the camera looks straight down.
             let aim = geometry::aim_point(eye, rect, target);
             let towards = aim - eye;
             let forward = if towards.length_squared() > 0.0 {
@@ -495,7 +499,7 @@ impl SceneCamera {
             } else {
                 q.forward
             };
-            let (right, up) = basis_from_forward(forward);
+            let (right, up) = basis_from_forward(forward, q.up);
             (right, up, forward, aim)
         } else {
             // REQ-SCN-009 and REQ-SCN-010: the camera looks exactly along q·(0,0,1), with the
@@ -524,6 +528,33 @@ impl SceneCamera {
         }
     }
 
+    /// Brings the three setpoint angles of **each** mode back into `]−180°, 180°]` by whole
+    /// turns, and shifts the displayed angles of the current mode by the very same turns
+    /// (AMD-045 REQ-SCN-071, which replaces the second sentence of REQ-SCN-011 and the
+    /// "without folding modulo 360°" of REQ-SCN-019).
+    ///
+    /// The orientation is therefore unchanged, and the smoothing velocities are left alone: the
+    /// gap between a displayed angle and its setpoint, which is what the filter works on, is the
+    /// same number before and after. The user can still orbit without limit.
+    fn wrap_setpoint_angles(&mut self) {
+        for mode in 0..self.setpoints.len() {
+            let angles = self.setpoints[mode].angles;
+            let (rx, shift_x) = geometry::wrap_angle(angles.x);
+            let (ry, shift_y) = geometry::wrap_angle(angles.y);
+            let (rz, shift_z) = geometry::wrap_angle(angles.z);
+            if shift_x == 0.0 && shift_y == 0.0 && shift_z == 0.0 {
+                continue;
+            }
+
+            self.setpoints[mode].angles = Vector3::new(rx, ry, rz);
+
+            // The displayed angle only exists for the current mode (REQ-SCN-019).
+            if mode == self.mode as usize {
+                self.angles += Vector3::new(shift_x, shift_y, shift_z);
+            }
+        }
+    }
+
     fn snapshot(&self, mode: CameraMode) -> CameraModeState {
         let setpoint = self.setpoints(mode);
         CameraModeState {
@@ -541,13 +572,16 @@ impl SceneCamera {
     }
 }
 
-/// The camera basis that completes `forward` with world Y as the vertical, in the left-handed
-/// scene frame (REQ-SCN-007 step 4: no roll).
+/// The camera basis that completes `forward` with `up` as the vertical, in the left-handed scene
+/// frame. In TPV the vertical handed in is the camera's own, `q·(0, 1, 0)` (AMD-045
+/// REQ-SCN-072), which replaces the world Y axis of REQ-SCN-007 step 4.
+///
+/// `forward` is the aimed direction, normalised; `up` need not be orthogonal to it.
 #[must_use]
-pub fn basis_from_forward(forward: Vector3) -> (Vector3, Vector3) {
-    let mut right = Vector3::cross(Vector3::UNIT_Y, forward);
+pub fn basis_from_forward(forward: Vector3, up: Vector3) -> (Vector3, Vector3) {
+    let mut right = Vector3::cross(up, forward);
     if right.length_squared() < 1e-8 {
-        // Looking straight up or down: any horizontal axis will do.
+        // The vertical and the direction are parallel: any axis across them will do.
         right = Vector3::cross(Vector3::UNIT_Z, forward);
         if right.length_squared() < 1e-8 {
             right = Vector3::UNIT_X;

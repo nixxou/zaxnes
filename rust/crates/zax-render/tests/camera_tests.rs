@@ -7,7 +7,9 @@ mod common;
 
 use common::assert_close;
 use zax_profiles::values::Vec4F;
-use zax_render::camera::{CameraMode, CameraModeState, CameraStateData, CameraView, SceneCamera};
+use zax_render::camera::{
+    self, CameraMode, CameraModeState, CameraStateData, CameraView, SceneCamera,
+};
 use zax_render::controls::{self, CameraAction};
 use zax_render::geometry::{self, VisibleRect};
 use zax_render::numerics::Vector3;
@@ -219,14 +221,171 @@ fn vector_c4_a_fov_change_resets_the_view_and_the_hud_distance() {
     assert_eq!(geometry::DEFAULT_ANGLES, camera.current().angles);
 }
 
+/// Vector C5 of SPEC-06 §5, as AMD-045 REQ-SCN-070 amends it: a zoom in held long enough no
+/// longer bottoms out at 0 but at `16 × s`, two NES tiles.
 #[test]
-fn vector_c5_zoom_in_held_three_seconds_bottoms_out_at_the_bound() {
+fn vector_c5_zoom_in_held_three_seconds_bottoms_out_at_the_user_bound() {
     let mut camera = SceneCamera::new();
     for _ in 0..180 {
         controls::apply(&mut camera, CameraAction::ZOOM_IN, 1.0 / 60.0);
     }
 
+    close(
+        geometry::MIN_USER_DISTANCE,
+        camera.current().distance(),
+        0.0,
+    );
+}
+
+/// The acceptance criteria of AMD-045 REQ-SCN-070: `ZoomIn` held 5 s from the default view
+/// stops at 16; from a distance of 5, posted by a script, `ZoomIn` does nothing at all; and a
+/// `ZoomOut` of 1 s from there gives 75.
+#[test]
+fn req_scn_070_a_user_zoom_in_stops_at_sixteen_and_never_climbs_back() {
+    let mut camera = SceneCamera::new();
+    for _ in 0..300 {
+        controls::apply(&mut camera, CameraAction::ZOOM_IN, 1.0 / 60.0);
+    }
+    close(
+        geometry::MIN_USER_DISTANCE,
+        camera.current().distance(),
+        0.0,
+    );
+
+    // A distance a script posted, under the bound: the zoom in leaves it alone.
+    camera.current_mut().set_distance(5.0);
+    for _ in 0..60 {
+        controls::apply(&mut camera, CameraAction::ZOOM_IN, 1.0 / 60.0);
+    }
+    close(5.0, camera.current().distance(), 0.0);
+
+    // Zooming out is not concerned: 70 units per second.
+    for _ in 0..60 {
+        controls::apply(&mut camera, CameraAction::ZOOM_OUT, 1.0 / 60.0);
+    }
+    close(75.0, camera.current().distance(), 1.5);
+}
+
+/// REQ-SCN-070: the wheel is a user zoom too — forward notches stop at 16, backward ones keep
+/// the upper bound of REQ-SCN-011 for their only limit.
+#[test]
+fn req_scn_070_the_wheel_stops_at_sixteen_as_well() {
+    let mut camera = SceneCamera::new();
+    controls::apply_wheel(&mut camera, 1000.0, CameraAction::NONE);
+    close(
+        geometry::MIN_USER_DISTANCE,
+        camera.current().distance(),
+        0.0,
+    );
+
+    camera.current_mut().set_distance(0.0);
+    controls::apply_wheel(&mut camera, 1.0, CameraAction::NONE);
     close(0.0, camera.current().distance(), 0.0);
+
+    controls::apply_wheel(&mut camera, -1000.0, CameraAction::NONE);
+    close(geometry::MAX_DISTANCE, camera.current().distance(), 0.0);
+}
+
+/// REQ-SCN-070: the view reset and a script still post what they like — the bound is the user
+/// zoom's alone. At launch the FPV distance is 0 (REQ-SCN-012) and stays there.
+#[test]
+fn req_scn_070_the_bound_is_the_user_zoom_s_alone() {
+    let mut camera = SceneCamera::new();
+    camera.set_mode(CameraMode::Fpv);
+    close(0.0, camera.current().distance(), 0.0);
+
+    camera.current_mut().set_distance(3.0);
+    close(3.0, camera.current().distance(), 0.0);
+
+    camera.set_mode(CameraMode::Tpv);
+    camera.current_mut().set_distance(1.0);
+    camera.reset_view();
+    close(camera.reset_distance(), camera.current().distance(), 5e-4);
+}
+
+/// The acceptance criteria of AMD-045 REQ-SCN-071: a rotation held 13 s (390°) leaves the
+/// angle inside `]−180, 180]` and the orientation varies continuously; a setpoint of 270° reads
+/// −90 at the next update.
+#[test]
+fn req_scn_071_the_setpoint_angles_stay_inside_one_turn() {
+    let mut camera = SceneCamera::new();
+    camera.snap_to_setpoints();
+
+    // 13 s of RotDown at 30°/s: 390° on rx.
+    let mut previous = camera.build_view(DEFAULT_CLIPPING, 16.0 / 9.0).forward;
+    for _ in 0..(13 * 60) {
+        controls::apply(&mut camera, CameraAction::ROTATE_DOWN, 1.0 / 60.0);
+        camera.advance(1.0 / 60.0);
+        let forward = camera.build_view(DEFAULT_CLIPPING, 16.0 / 9.0).forward;
+        // No jump: a frame of 30°/s turns the camera by half a degree, never by a turn.
+        assert!(
+            angle_between(previous, forward) < 5.0,
+            "the orientation jumped by {}°",
+            angle_between(previous, forward)
+        );
+        previous = forward;
+    }
+
+    let rx = camera.current().angles.x;
+    assert!(rx > -180.0 && rx <= 180.0, "rx is {rx}");
+    // The criterion of REQ-SCN-071 reads « about 30 »: 390° of rotation on top of the 0.81° of
+    // the default view give 390.81, which one turn brings back to 30.81.
+    close(30.81, rx, 0.05);
+
+    // A setpoint a script posted: brought back at the next update.
+    camera.current_mut().angles = Vector3::new(0.0, 270.0, 0.0);
+    camera.advance(1.0 / 60.0);
+    close(-90.0, camera.current().angles.y, 5e-4);
+}
+
+/// REQ-SCN-071: the shift is applied to the displayed angle of the current mode as well, so the
+/// smoothing neither jumps nor changes speed; the other mode's angles are wrapped too, and its
+/// displayed angle does not exist.
+#[test]
+fn req_scn_071_the_displayed_angle_takes_the_same_turn() {
+    let mut camera = SceneCamera::new();
+    camera.current_mut().angles = Vector3::new(0.0, 400.0, 0.0);
+    camera.snap_to_setpoints();
+    close(400.0, camera.angles().y, 5e-4);
+
+    camera.advance(1.0 / 60.0);
+
+    // Both moved by the same turn, so the gap the filter works on is unchanged — and the
+    // orientation is the one of 40°.
+    close(40.0, camera.current().angles.y, 5e-4);
+    close(40.0, camera.angles().y, 5e-4);
+
+    // The other mode is wrapped too (REQ-SCN-071: each angle of each mode).
+    camera.setpoints_mut(CameraMode::Fpv).angles = Vector3::new(-900.0, 0.0, 540.0);
+    camera.advance(1.0 / 60.0);
+    // −900 and 540 both land on 180, the bound the interval keeps.
+    close(180.0, camera.setpoints(CameraMode::Fpv).angles.x, 5e-4);
+    close(180.0, camera.setpoints(CameraMode::Fpv).angles.z, 5e-4);
+}
+
+/// REQ-SCN-071 on the wrapping itself, including the open bound at −180 and the closed one at
+/// 180.
+#[test]
+fn req_scn_071_the_wrapping_keeps_one_hundred_and_eighty_and_drops_minus_one_hundred_and_eighty() {
+    for (angle, expected) in [
+        (0.0, 0.0),
+        (180.0, 180.0),
+        (-180.0, 180.0),
+        (181.0, -179.0),
+        (360.0, 0.0),
+        (390.0, 30.0),
+        (-390.0, -30.0),
+        (270.0, -90.0),
+        (-270.0, 90.0),
+        (900.0, 180.0),
+        (-900.0, 180.0),
+    ] {
+        let (wrapped, shift) = geometry::wrap_angle(angle);
+        close(expected, wrapped, 5e-4);
+        close(expected, angle + shift, 5e-4);
+        // The shift is a whole number of turns.
+        close(0.0, shift % 360.0, 5e-4);
+    }
 }
 
 #[test]
@@ -660,6 +819,80 @@ fn req_scn_073_the_transition_window_comes_back_with_its_remaining_time() {
     reloaded.current_mut().target = followed + Vector3::new(100.0, 0.0, 0.0);
     reloaded.advance(1.0 / 60.0);
     close(followed.x + 100.0, reloaded.target().x, 5e-4);
+}
+
+/// AMD-045 REQ-SCN-072, first criterion: in TPV with rz = 0, the orientation of the camera
+/// varies by at most 2° between rx = 89.5° and rx = 90.5°, where the world vertical of
+/// REQ-SCN-007 step 4 made it jump by about 180°.
+#[test]
+fn req_scn_072_the_orientation_is_continuous_through_the_vertical() {
+    let before = oriented(89.5);
+    let after = oriented(90.5);
+
+    let turn = angle_between(before.forward, after.forward)
+        .max(angle_between(before.up, after.up))
+        .max(angle_between(before.right, after.right));
+    assert!(turn <= 2.0, "the orientation turned by {turn}°");
+}
+
+/// AMD-045 REQ-SCN-072, second criterion: rx = ry = 0 and rz = 30° turns the picture by 30°
+/// about the view axis — a roll visible in TPV, which the world vertical did not give.
+#[test]
+fn req_scn_072_rz_rolls_the_picture_in_tpv() {
+    let mut camera = SceneCamera::new();
+    camera.current_mut().angles = Vector3::ZERO;
+    camera.snap_to_setpoints();
+    let flat = camera.build_view(DEFAULT_CLIPPING, 16.0 / 9.0);
+
+    camera.current_mut().angles = Vector3::new(0.0, 0.0, 30.0);
+    camera.snap_to_setpoints();
+    let rolled = camera.build_view(DEFAULT_CLIPPING, 16.0 / 9.0);
+
+    close(30.0, angle_between(flat.up, rolled.up), 0.05);
+    close(30.0, angle_between(flat.right, rolled.right), 0.05);
+    // The aimed direction does not move: a roll is about the view axis.
+    close(0.0, angle_between(flat.forward, rolled.forward), 0.05);
+}
+
+/// REQ-SCN-072 at the default view: the vertical of the camera and the world's one give almost
+/// the same basis there, which is why the captures of the comparison campaign — all taken at
+/// `(0.81, 0.81, 0)` — move by a few pixels and no more.
+#[test]
+fn req_scn_072_at_the_default_angles_the_basis_barely_moves() {
+    let view = oriented(geometry::DEFAULT_ANGLES.x);
+    let (world_right, world_up) = camera::basis_from_forward(view.forward, Vector3::UNIT_Y);
+
+    let turn = angle_between(view.right, world_right).max(angle_between(view.up, world_up));
+    assert!(
+        turn < 0.005,
+        "the basis turned by {turn}° at the default view"
+    );
+}
+
+/// The view of the default camera pitched to `rx`, in TPV.
+fn oriented(rx: f32) -> CameraView {
+    let mut camera = SceneCamera::new();
+    camera.current_mut().angles = Vector3::new(rx, geometry::DEFAULT_ANGLES.y, 0.0);
+    camera.snap_to_setpoints();
+    camera.build_view(DEFAULT_CLIPPING, 16.0 / 9.0)
+}
+
+/// The angle between two vectors, in degrees. Computed in double precision: the angles this
+/// file measures go down to a thousandth of a degree, where the arc cosine of a single-precision
+/// dot product has no digits left.
+fn angle_between(a: Vector3, b: Vector3) -> f32 {
+    let (a, b) = (a.normalize(), b.normalize());
+    let dot = f64::from(a.x) * f64::from(b.x)
+        + f64::from(a.y) * f64::from(b.y)
+        + f64::from(a.z) * f64::from(b.z);
+    let cross = f64::from(a.y) * f64::from(b.z) - f64::from(a.z) * f64::from(b.y);
+    let cross_y = f64::from(a.z) * f64::from(b.x) - f64::from(a.x) * f64::from(b.z);
+    let cross_z = f64::from(a.x) * f64::from(b.y) - f64::from(a.y) * f64::from(b.x);
+    let sine = (cross * cross + cross_y * cross_y + cross_z * cross_z).sqrt();
+    #[allow(clippy::cast_possible_truncation)] // an angle in degrees, read by an assertion
+    {
+        (sine.atan2(dot) * 180.0 / std::f64::consts::PI) as f32
+    }
 }
 
 #[test]

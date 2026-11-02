@@ -76,7 +76,8 @@ pub fn apply(camera: &mut SceneCamera, held: CameraAction, real_seconds: f32) {
 
     let zoom = geometry::ZOOM_UNITS_PER_SECOND * real_seconds;
     if held.contains(CameraAction::ZOOM_IN) {
-        setpoint.set_distance(setpoint.distance() - zoom);
+        // A user zoom in never goes under 16 × s (AMD-045 REQ-SCN-070).
+        setpoint.set_distance(geometry::zoom_in(setpoint.distance(), zoom));
     } else if held.contains(CameraAction::ZOOM_OUT) {
         setpoint.set_distance(setpoint.distance() + zoom);
     }
@@ -84,6 +85,10 @@ pub fn apply(camera: &mut SceneCamera, held: CameraAction, real_seconds: f32) {
 
 /// Applies `notches` of mouse wheel, 5 units of distance each, positive forward (REQ-SCN-016,
 /// DEC-08-3). It only acts when no zoom action is held.
+///
+/// The wheel is a user zoom, so forward notches stop at `16 × s` (AMD-045 REQ-SCN-070); backward
+/// notches keep the upper bound of REQ-SCN-011 for their only limit. The touch pinch the
+/// requirement also names reaches this function, the touch pad giving its spread in notches.
 pub fn apply_wheel(camera: &mut SceneCamera, notches: f32, held: CameraAction) {
     if notches == 0.0
         || held.contains(CameraAction::ZOOM_IN)
@@ -93,7 +98,13 @@ pub fn apply_wheel(camera: &mut SceneCamera, notches: f32, held: CameraAction) {
     }
 
     let setpoint = camera.current_mut();
-    setpoint.set_distance(setpoint.distance() - (notches * geometry::WHEEL_UNITS_PER_NOTCH));
+    let units = notches * geometry::WHEEL_UNITS_PER_NOTCH;
+    let wanted = if units > 0.0 {
+        geometry::zoom_in(setpoint.distance(), units)
+    } else {
+        setpoint.distance() - units
+    };
+    setpoint.set_distance(wanted);
 }
 
 /// Applies a left-button drag of `pixels_right` and `pixels_up` pixels, 0.1° per pixel
