@@ -153,6 +153,10 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
 
 ## Notes
 
+* `zax-harness render --movie x.fm2`: the Metal Force TAS replays **in sync to its end**
+  (frame 48 400 shows the ending's CONGRATULATIONS); about 1 ms per frame (44 s for the whole
+  movie with conversion, harness, no Lua profile).
+
 * 2026-11-02: worktree created, design written. Nothing compiled yet.
 
 ## Owner's answers (2026-11-02)
