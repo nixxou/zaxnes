@@ -469,6 +469,82 @@ here because it is the one measurement of the lot that had to come out at zero.
   `pixel_frame_indices_into`, and the accessor was **renamed** (`pixel_frame` →
   `pixel_frame_with_mask`) so the compiler visited all eleven call sites.
 
+**The walls came back and the draw list got cheaper** (RU-4b, AMD-057)
+- AMD-057 withdraws the Q-067 seal: every tile mesh is drawn whole (REQ-E3D-501), and REQ-SCN-065
+  is held instead by a **depth bias on the inner walls**, in the scene vertex shader, from the
+  sign of the **local** normal (`abs(aNormal.z) < 0.5`). Only `gl_Position.z` moves, by
+  `uWallClipBias / gl_Position.w`, which is a fixed scene distance behind the vertex; `x`, `y` and
+  `w` are untouched, so no silhouette and no texture coordinate moves with it.
+- The per-instance neighbour map disappeared with the seal, and with it two hash operations per
+  tile. `DrawListBuilder::build` (with `add_instance` and the former `sealed_sides` inlined) goes
+  **1574 → 1095 instructions, −30 %**, and the wall clock of `bench-core … --3d` on 982 tile
+  records a frame goes **0.0370 → 0.0314 ms/frame**.
+- The GPU pays 0.76 % more vertices over the ten profiles AMD-057 §1 compares (worst case
+  Castlevania, +5.6 %), and **saves nearly half the mesh cache**: the Q-067 variants were separate
+  meshes, up to sixteen per tile image, and the resident mesh count over the eleven synthetic
+  scenes falls **176 → 81**. On a handheld both GPU memory and mesh uploads are scarcer than
+  vertices, so there is **no handheld exception** and no setting: the spec path runs everywhere.
+- Invariant: `uWallClipBias` is **0 for a mesh whose normals are not axis aligned** (MARCHING
+  merges its tiles, REQ-E3D-520, so it has no joint to hide). The flag rides on `GpuMesh`, read
+  from `TileMesh::has_axis_aligned_normals`, computed **once when the mesh is built** — the draw
+  path reads a bool off a handle it already has, and no field was added to the per-tile list.
+- The test that bites is the translucent one (REQ-SCN-040), not the joint ones: on a surface of
+  one object the coincident walls lose the fill rule anyway, but in the equal-depth colour pass of
+  a translucent object `depth_func(EQUAL)` keeps a coincident wall and blends that pixel twice.
+
+**The sprite depth by index costs one multiply-add** (RU-4b, AMD-057 REQ-SCN-037)
+- The offset becomes `0.001 × (i mod 64) ∓ 0.1`, computed in `frame_plan::collect_tile` where the
+  constant was, from the `FrameTile::ord()` the draw list already carried. **Nothing was added to
+  any per-tile record**, no setting is consulted, and the `if nudge != 0.0` guard that skips the
+  matrix multiply for a background tile is untouched.
+- Worth knowing before trusting a capture: the span of the index term is **0.063 scene unit** over
+  the 64 indices, which at the default setpoint (about 148 units, near 0.3 / far 5000) is **1.6
+  least significant bits of a 24-bit depth buffer**. It resolves, barely. A 16-bit depth buffer
+  would not resolve it at all; the context asks for 24 on every target.
+
+**The centroid variant of AMD-058 does not exist until anti-aliasing does** (RU-4b)
+- `vUv` is interpolated at the centroid of the covered samples, as a **shader variant** keyed on
+  `video.anti_alias`, so with the setting at 0 — the handheld default — the code the GLSL compiler
+  is given is the code of before the amendment, **line for line in all 40 assembled sources**
+  (measured by dumping them before and after and diffing the `ZAX_CENTROID`-undefined
+  preprocessing). No centroid program is compiled, and the eleven synthetic captures are identical
+  at tolerance 0.
+- The *source text* does change, because an `#ifdef` is text, so the eight pixel-centre programs
+  get new **program-cache keys** and are compiled once more on the first start after the update
+  (`gl/program_cache.rs` hashes the driver, the name and both sources). Their **names** are
+  unchanged, so nothing else about the cache moves. Same one-time cost AMD-043 paid.
+- `ScenePrograms` was rebuilt around a slot table for this: `built` is a flat `Vec<ShaderProgram>`
+  and `slots[key]` holds the plain and solid indices of each `(bend, centroid, backdrop)` key, so
+  `current()` — which **every draw run** calls — is two indexings and **no branch**, where it used
+  to be a two-arm match plus an `Option` test. An unbuilt key points at the flat scene pair, so a
+  failed compile degrades to the model of before rather than to no frame at all.
+- Invariant to keep: the interpolation is chosen **before** the curvature
+  (`select_centroid_variant` then `select_bend_variant`), so the two pairs the curvature builds
+  are the ones the frame and its flat HUD actually use — two programs, not three.
+
+**The backdrop lighting is a program of its own, off on handhelds** (RU-4b, AMD-049 REQ-SCN-075)
+- The almost-matt model replaces the diffuse term on the backdrop alone. It is a **separate
+  program** (`shaders/backdrop.frag`), not a fifth variant axis and not a per-fragment test on
+  `uColorMode`: the backdrop is one opaque run a frame, carries a flat colour, and reads no texel
+  coordinate — so it holds **no** atlas lookup, no palette, no `uColorMode` and no fragment
+  rejection, and no tile fragment is given any of the model's identifiers (a test asserts both
+  directions). Only the curvature axis is left, so the amendment costs at most two lazily built
+  programs.
+- Per frame, two new things and no more: `select_backdrop_variant`, one `&&` of two booleans; and
+  `set_backdrop(item.color_mode == 2)` per **run**, riding on the `color_mode` the next line
+  already reads for `use_solid`, and returning "nothing changed" — hence no GL call — whenever the
+  variant was not built.
+- Measured free on a desktop GPU: `render --frames synthetic:backdrop --bench 60` gives 0.19 /
+  0.20 / 0.19 ms median with the model against 0.20 / 0.19 / 0.18 without it at 640 × 480, and
+  0.22 / 0.23 against 0.24 / 0.26 at 1280 × 720. **The handheld default is still off**
+  (`render.backdrop_lighting`): the cost is per fragment on a surface that can fill the picture,
+  and a desktop measurement does not measure a Mali-G31. Offered as an advanced option, one pad
+  step away. The figures are here for the owner to revisit on a real device.
+- Invariant: the setting is honoured **per frame** (`backdrop_wanted`), not by whether the program
+  exists — a program built for one frame outlives the setting that asked for it, and turning the
+  setting off has to go back to REQ-SCN-048's diffuse term without throwing the program away. A
+  test caught exactly this.
+
 **The curved Zapper aim runs on a change, not per frame** (RU-4a, AMD-043 REQ-INP-124)
 - REQ-INP-061 refreshes the Zapper once per displayed frame and must keep doing so, so the march
   of the inverse is guarded by a memo of its inputs (`AimInputs`: the pointer, the target size,
@@ -677,6 +753,7 @@ user has no saved value.
 | `emu.catch_up_last_3d` | off | on | no: hooks skip caught-up frames |
 | `video.half_rate_3d` | off (hidden) | off | no: 30 fps 3D |
 | `video.dynamic_resolution` | off | off | no |
+| `render.backdrop_lighting` (AMD-049) | **on** (the spec default, REQ-SCN-075) | **off** (REQ-SCN-048's diffuse term, which the amendment's T-1 clause keeps valid) | no, on a profile whose script enables the backdrop: a zero albedo goes from black to sRGB 26 and the surface takes the light's tint. Free on a desktop GPU at 640 × 480 and 1280 × 720; a per-fragment cost on a large surface, hence the handheld default |
 | `ui.profiler` | off | off | n/a |
 
 Platform choices without a setting:
@@ -781,7 +858,9 @@ Measurement pitfall:
 | `Zax.Engine3D` draw list / `DrawTile` fields | 5.2 placement matrix order; 5.4 `DrawStateKey` must include any new per-draw input; renderer `DrawItem` | captures in both draw modes |
 | `Zax.Scripting` new API members | 5.3 both binding paths (safe and `raw.rs`), API dump; 5.5 **`CORE_MEMBERS`** if the member touches the core; `light_shapes` analysis if it touches `shape` | scripting tests with and without `ZAXNES_FAST_LUA=1`, API dump, `separate_core_tests` |
 | `Zax.Scripting` hook order or new hooks | 5.5 emulation ahead, pipelining, `pause_3d_in_2d`, `catch_up_last_3d` assumptions on when hooks run | `separate_core_tests`, `pause_3d_tests` |
-| `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), **`ZAX_BEND`** (the curvature is a variant; at curvature 0 nothing of it may reach the compiler, and nothing of it may become a per-vertex uniform), linear palette (indexed albedo path), uniform cache, instance block layout | captures, `bend_tests.rs`, `ZAXNES_SRGB_PALETTE=1` comparison |
+| `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), **`ZAX_BEND`** (the curvature is a variant; at curvature 0 nothing of it may reach the compiler, and nothing of it may become a per-vertex uniform), **`ZAX_CENTROID`** (same rule for `video.anti_alias` = 0), **the backdrop program** (the model of REQ-SCN-075 may not reach a tile fragment, and the backdrop fragment may not gain an atlas lookup), linear palette (indexed albedo path), uniform cache, instance block layout | captures, `bend_tests.rs`, `amd058_centroid_tests.rs`, `amd049_backdrop_tests.rs`, `ZAXNES_SRGB_PALETTE=1` comparison |
+| `Zax.Render` scene programs (a new variant axis) | 5.4 `ScenePrograms`: the new axis goes in the **slot table**, so `current()` stays two indexings and no branch; the axis is chosen **once a frame**, an unbuilt key falls back to the flat scene pair, and the handheld defaults must leave it unbuilt | `amd058_centroid_tests.rs`, `amd049_backdrop_setting_tests.rs`, a start-up with every default |
+| `Zax.Engine3D` tile meshes / walls | 5.4 the wall depth bias of AMD-057 (every tile mesh is drawn **whole**; REQ-SCN-065 is held by depth, and `uWallClipBias` is 0 for a mesh whose normals are not axis aligned) | `amd057_wall_tests.rs` (both crates), `seam_tests.rs`, the `--dump-meshes` counts |
 | `Zax.Nes/Ppu` pixel composition | 5.4 **the opacity mask of REQ-CORE-049 rides in bit 6 of the picture byte**: `palette_marked` is maintained only where `palette` is written, and `run_dots` must stay at 2231 instructions in the post-LTO assembly | PPU goldens, the `run_dots` instruction count |
 | `Zax.Render` passes / new draw states | 5.4 grouping, labels and runs; clip unification; transparent object grouping | captures with and without `--group-draws` |
 | `Zax.App/Loop` (frame clock, catch-up, pacing) | 5.5 separate core order per tick, ahead, pipeline governor, catch-up limit, half-rate pacing, **run-ahead** (the restore must be added to any new frame-running path, and N = 0 must stay `run_frame`) | app tests (`catch_up_tests`, `separate_core_tests`, `run_ahead_tests`), device profiler |

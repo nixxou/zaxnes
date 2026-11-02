@@ -20,7 +20,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | done |
 | 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | done |
 | 9 | The settings: desktop options, handheld defaults and page, libretro, harness options | done |
-| 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | todo |
+| 10 | Closing: measurements, intended image changes, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests, goldens | done |
 
 **The checklist went from 9 steps to 10 after step 1** (so the commit of step 1 says "1/9"):
 AMD-051 holds five independent requirements across four crates, and the machine is unstable —
@@ -1052,3 +1052,151 @@ ignored. fmt and workspace clippy clean.
   its scope, where it is shown, the T-1 clause and the **console default false**.
 - `SPEC-09` §4.6, the libretro paragraph: the `zaxnes_render_backdrop_lighting` line, beside the
   `zaxnes_video_anti_alias` one AMD-052 added.
+
+### Step 10 — closing
+
+#### The measurements, against the step-1 baseline
+
+**Post-LTO instruction counts** (`cargo rustc -p zax-harness --release --bin zax-harness --
+--emit=asm`, the method of RU-3a-fix, RU-3b and RU-4a):
+
+| Symbol | step 1 | step 5 | **close** |
+|---|---|---|---|
+| `DrawListBuilder::build` | 1574 | 1095 | **1095** |
+| `Construction::segment` (REQ-E3D-450's home) | 159 | 159 | **159** |
+| `Ppu2C02::run_dots` (the control: nothing here touches the core) | 2231 | 2231 | **2231** |
+
+So the only change in the three is AMD-057's **−479 instructions, −30 %** on the draw list, and
+steps 6 to 9 moved none of them.
+
+`SceneRenderer::render_scene` — where `FramePlan::collect` and `collect_tile` are inlined, so the
+home of the sprite nudge and the backdrop run — is **3510** instructions at the close. There is no
+step-1 figure for it, and it is deliberately **not** offered as the measure of "nothing new runs":
+a static count includes the branches a default frame never takes (the backdrop program's uniform
+block, the centroid selection), so it must grow. The measures that answer the brief's rule are the
+three above, the wall clock below, and the capture comparisons.
+
+**The draw list on the CPU**, `zax-harness bench-core test-roms/other/BladeBuster.nes --frames 600
+--warmup 120 --3d` (982 tile records a frame), best of 5:
+
+| | ms/frame |
+|---|---|
+| step 1 | 0.0370 |
+| step 5 (the walls kept) | 0.0328 |
+| **close** | **0.0314** (0.0314, 0.0318, 0.0321, 0.0323, 0.0326) |
+
+**No regression anywhere, and a 15 % gain on that stage.**
+
+**The GPU at the "nothing new" settings** (`--anti-alias 0 --no-backdrop-lighting --bench 60`),
+median frame time, for R0 to compare against a device run:
+
+| framing | sky | shadow | no-shadow | layer-shadow-off | nudge | alpha | hud | clip | backdrop | heavy |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.41 | 0.08 | 0.17 | 0.12 | 0.11 | 0.19 | 0.12 | 0.10 | 0.18 | 0.17 | **1.40** ms |
+
+**The drawn geometry**, `zax-harness meshes` over the ten profiles AMD-057 §1 compares, synthetic
+frame 0, re-run at the close:
+
+| Profile | step 1 (sealed) | after AMD-048 | **close** |
+|---|---|---|---|
+| Super Mario Bros 3 (U) (PRG1) | 85 208 | 85 728 | **86 536** |
+| Legend Of Zelda | 50 312 | 50 312 | **51 136** |
+| Castlevania (U) (PRG 1) | 19 596 | 19 596 | **20 692** |
+| Mega Man 2 | 56 240 | 56 240 | **58 096** |
+| Metroid | 680 216 | 680 216 | **681 080** |
+| Contra | 61 604 | 61 716 | **63 492** |
+| Excitebike | 32 736 | 32 736 | **33 336** |
+| Ninja Gaiden III | 103 700 | 103 700 | **104 844** |
+| Zelda II | 92 812 | 92 512 | **93 744** |
+| Blaster Master (U) | 249 050 | 249 222 | **249 918** |
+| **total** | 1 431 474 | 1 431 978 | **1 442 874** (+0.80 % over step 1) |
+
+Every one of the ten is **identical to step 5's figure**: steps 6 to 9 moved no vertex, which is
+what a reader should expect — only AMD-048 and AMD-057's walls touch mesh generation, and both are
+cached per tile image.
+
+#### The intended image changes, precisely (the brief's point 7)
+
+Every capture below is `zax-harness render --anti-alias 0`, all settings at their defaults. Three
+changes, each traced to its amendment, and each reproducible in the old state:
+
+| Scene | vs. step 1 | What changed, and why |
+|---|---|---|
+| **heavy** | 99.965 % at tolerance 2 after step 5 (108 of 307 200 px), then **99.734 %** after step 6 (about 820 px) | **AMD-057, both halves.** Step 5: the one-pixel joint lines Q-067 reported are erased by the wall depth, and the scene's distinct colour count falls 23 → 16. Step 6: `heavy` is the scene of REQ-SCN-064, **64 sprites of indices 0 to 63** laid out so that many overlap — where they do, the lower index is now in front |
+| **framing** | 100.000 %, but 4 → 3 distinct colours | **AMD-057 walls.** The joints no longer contribute shades of their own |
+| **backdrop** | **58.931 %** at tolerance 2 (41 % of the picture), 6 → 10 distinct colours | **AMD-049.** The black box of REQ-SCN-048 becomes sRGB 26 and takes the light's tint |
+| **nudge** | 100.000 % | Its sprites take the index term but do not overlap each other, and 0.063 unit cannot reorder a sprite against the background |
+| sky, shadow, no-shadow, layer-shadow-off, alpha, hud, clip | 100.000 % | nothing of this lot reaches them |
+
+**How R0 reproduces the old look**, change by change:
+
+| Change | Flag |
+|---|---|
+| AMD-049, the backdrop lighting | **`--no-backdrop-lighting`** — verified: all eleven scenes **100.000 % at tolerance 0** against the pre-amendment captures |
+| AMD-058, the centroid | **`--anti-alias 0`** (the default of the setting is 1, so this is also what the goldens ask for). With it, no centroid program exists at all |
+| AMD-057, the walls | **no flag**: the measurement of step 5 found the spec path cheaper on the CPU and in mesh memory, so there is no setting and no handheld exception |
+| AMD-057, the sprite depth | **no flag**: the amendment replaces a constant by a formula, it adds no mode. To separate it from a regression, zero the index term in `geometry::sprite_nudge` — which is how the 820 pixels of `heavy` were attributed |
+| AMD-048, the empty depth interval | **no flag**: a rule of mesh generation. Its effect is in the vertex counts above, four profiles moving and in both directions |
+
+**The goldens.**
+
+- `goldens/render-synthetic/render.json`: `triangles`, `residentMeshes` and two `distinctColors`
+  were updated **in step 5**, for AMD-057's walls. Nothing moved after that.
+- The golden **PNGs were never touched**. `render_tests.rs` renders them with
+  `--anti-alias 0 --no-backdrop-lighting`, i.e. the state the C# captures were made in — the
+  pattern that test already used for the anti-aliasing — so `backdrop.png` stays the independent
+  reference it has always been.
+- **Golden-core: passes. The 291 PPU ROMs: 291/291, passes.** Nothing in this lot touches the
+  core, and `Ppu2C02::run_dots` is unchanged at 2231 instructions, which is the structural reason.
+
+#### The close
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cargo test --release --workspace --features zax-app/bundled` | **2297 passed, 0 failed**, 83 ignored |
+| `golden_core_reproduces_the_golden_rows` | passes |
+| `golden_pixels_tiles_audio_cycles_and_blargg_match_up_to_frame_1200` (291 ROMs × 1200 frames) | passes |
+| `synthetic_captures_match_the_csharp_goldens` | passes |
+
+2245 tests at the close of RU-4a, **2297** now. The chain, step by step, as each step measured
+it: 2245 → 2255 (step 2, +10) → 2260 (step 3, +5) → 2262 (step 4, +2) → 2263 (step 5: **+8** —
+3 in `zax-engine3d/…/amd057_wall_tests.rs` and 5 in `zax-render/tests/amd057_wall_tests.rs` —
+**less the 7** of the withdrawn `sealed_side_tests.rs`, which asserted the opposite) → 2266
+(step 6, +3) → 2276 (step 7, +10) → 2290 (step 8, +14) → **2297** (step 9, +7).
+
+`docs/PERFORMANCE-HISTORY.md` §5.4 gained four entries (the walls, the sprite depth, the centroid
+variant, the backdrop program), §6 the `render.backdrop_lighting` row with both defaults and the
+measurement behind them, and §10 three rows of the porting checklist — the shader-variant rules,
+the slot table a new variant axis must use, and the wall depth that now holds REQ-SCN-065.
+
+#### What R0 should run that this side could not
+
+Reported rather than left implicit. **No commercial ROM is available on this side**
+(`ZAXNES_ROMS` is unset and the original's folders are out of bounds), so every ROM criterion of
+the five amendments is R0's:
+
+1. **AMD-057 §2, review criterion**: the Mega Man 2 tower façade (frame 599 of the intro) and the
+   Excitebike blue wall (frame 599, Start at frames 200 and 300) without a light line; the Zelda II
+   grass and the Excitebike track without a dark grid.
+2. **AMD-058 §2, review criterion** — the discriminating check of step 7, since the synthetic
+   criteria pass with and without the variant: the same two scenes at **2560 × 1440** with
+   `video.anti_alias` = 1, and the comparison with `--anti-alias 0` differing only at the object
+   edges.
+3. **AMD-049, `[ROM]` criterion**: the Punch-Out!! fight scene, the front face of the box at
+   sRGB (26; 100; 209) ±3 for every pitch from 0° to 45°. The model is already confirmed against
+   that figure on the CPU twin across the whole sweep; what is left is the capture.
+4. **AMD-048's two unlocked cases** (R2's point 48-10): `solid + fullWarp + antiShadow`, and the
+   half types in wrapped solid mode. The amended rule applies to them as written — one loop
+   serves all of them — but no vector is published, so nothing was invented; a differential
+   against 2.0 is what would pin them.
+5. **AMD-057 §3 note**: the hay-bale side faces of Excitebike, to be re-measured now that the
+   walls are kept, since the amendment names them as possibly caused by the seal.
+6. The `#[ignore]`d tests that need a real installation (`ZAXNES_3DSEN_INSTALL`): 83 ignored in
+   the run above.
+
+One open question for the owner, with the numbers already in hand: **`render.backdrop_lighting` on
+handhelds**. It measures free on this desktop GPU at both resolutions tested, and the economical
+default was kept only because a desktop measurement cannot stand in for a Mali-G31. One device run
+would settle it.
