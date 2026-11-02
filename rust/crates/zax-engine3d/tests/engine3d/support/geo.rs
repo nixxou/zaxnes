@@ -141,7 +141,6 @@ pub fn mesh(
         &built.fields[image_index],
         &texture,
         algorithm == RenderAlgorithm::GreedyMulticolor,
-        0,
     )
 }
 

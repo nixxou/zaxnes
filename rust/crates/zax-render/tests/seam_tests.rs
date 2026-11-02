@@ -34,6 +34,11 @@ fn req_scn_065_a_four_by_four_surface_shows_no_seam_at_its_joints() {
 
     let mut built = surface();
 
+    // AMD-057's second criterion: the surface the measure runs on has to be made of **whole
+    // boxes**, or it would pass for the wrong reason — which is exactly how the Q-067 seal used
+    // to make it pass.
+    assert_whole_boxes(&built);
+
     // The criterion is stated for the default view. The seam the users reported comes from the
     // shadow map, so the map resolution is what decides whether it shows: one texel of the map
     // has to stay smaller than the bias for the inner walls of the tiles not to shadow their
@@ -79,6 +84,7 @@ fn req_scn_065_a_deep_surface_shows_no_seam_and_no_fin_from_any_angle() {
             )
             .rect(solid(3, 0), 12, 12, 6, 6)
             .build();
+        assert_whole_boxes(&built);
 
         // Head-on views, pitched up and down: the ones the users reported, and the ones where
         // "a line across the surface" and "the lower edge" mean one face each.
@@ -138,6 +144,7 @@ fn req_scn_065_the_joints_stay_invisible_when_the_surface_is_in_shadow() {
     let mut built =
         fixture.build_with(|settings| settings.layer_mut(ZLayer::L2).cast_shadow = true);
     built.scene.settings.set_shadow_map_size(256);
+    assert_whole_boxes(&built);
 
     let gl = GlFixture::create(640, 480);
     let mut renderer = gl.renderer();
@@ -180,6 +187,7 @@ fn req_scn_040_a_translucent_multi_tile_object_shows_no_internal_face() {
         .pattern_block(solid(3, 0), 4, 4, 24, ProfileLayer::L1, 0.5)
         .rect(solid(3, 0), 14, 14, 4, 4)
         .build();
+    assert_whole_boxes(&built);
 
     // Seen from an angle, so that the walls between the tiles have a real width on screen —
     // head-on they are edge-on and the artefact hides itself — and from the four corners,
@@ -279,6 +287,18 @@ fn moved(
     target.center.z = centre_z;
     built.rebuild_draw_list();
     gl.render_built(renderer, built)
+}
+
+/// AMD-057 §2, first criterion: every drawn tile of a surface whose tiles touch is the complete
+/// box of REQ-E3D-501 — 24 vertices, 12 triangles. Asserted before each pixel measure below, so
+/// that none of them can pass because the walls were taken out (the means AMD-057 forbids).
+fn assert_whole_boxes(built: &Built) {
+    assert!(!built.draw_list.tiles().is_empty(), "the surface is drawn");
+    for tile in built.draw_list.tiles() {
+        let mesh = tile.mesh.as_ref().expect("a mesh");
+        assert_eq!(24, mesh.vertex_count(), "a drawn tile is the whole box");
+        assert_eq!(12, mesh.triangle_count());
+    }
 }
 
 /// The surface of AMD-012: 4 × 4 identical tiles, lit, casting and receiving shadows.

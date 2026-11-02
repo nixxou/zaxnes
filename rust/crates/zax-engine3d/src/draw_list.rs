@@ -10,9 +10,7 @@ use crate::frame::{ConversionFrame, FrameInstance, FrameInstanceId, FrameShape, 
 use crate::geometry::builder::PatternGeometryBuilder;
 use crate::geometry::texture::ObjectTexture;
 use crate::geometry::tile_mesh::TileMesh;
-use crate::geometry::tile_sides;
 use crate::grid;
-use crate::image::TileImage;
 use crate::instance::{InstanceRef, PatternInstance, RenderStyle};
 use crate::palette::{FramePalette, Rgb24};
 use crate::registry::{PatternId, PatternRegistry};
@@ -229,7 +227,6 @@ pub struct DrawSources<'a> {
 #[derive(Debug, Default)]
 pub struct DrawListBuilder {
     list: FrameDrawList,
-    neighbours: FastMap<(i32, i32), Option<TileImage>>,
     /// AMD-051 REQ-E3D-646: the frame counter on which each 3D object that is in the frame but
     /// not drawable started waiting, and the ones already reported.
     ///
@@ -359,78 +356,20 @@ impl DrawListBuilder {
         let shape = frame.shape(id.shape);
         let look = InstanceLook::of(instance, shape, sources);
 
-        // Q-067: the walls that close each tile against a neighbour of the same object show at
-        // the joints of a flat surface (REQ-SCN-065). The neighbours are looked up here, once
-        // per instance, so that the draw list can ask for the mesh variant without them.
-        self.neighbours.clear();
-        for tile in frame.shape_tiles(id.shape) {
-            if !shape.restored_from_pinned_frame() || frame.tile_overlaps_pinned_rects(tile) {
-                // A sprite shape may hold two tiles on one cell (REQ-E3D-043): which of them
-                // covers the joint is then undecided, so the cell seals nothing.
-                self.neighbours
-                    .entry((tile.x(), tile.y()))
-                    .and_modify(|neighbour| *neighbour = None)
-                    .or_insert(Some(*tile.image()));
-            }
-        }
-
         for tile in frame.shape_tiles(id.shape) {
             if shape.restored_from_pinned_frame() && !frame.tile_overlaps_pinned_rects(tile) {
                 continue;
             }
 
-            let sealed = self.sealed_sides(instance, tile, &*sources.geometry);
-            let mesh = sources
-                .geometry
-                .mesh_of(instance.reference(), tile.image(), sealed);
+            // AMD-057: the drawn mesh is the mesh of REQ-E3D-501, every wall included. The
+            // per-instance neighbour map Q-067 needed to find the covered walls — a hash insert
+            // and a hash lookup per tile — is gone with it; REQ-SCN-065 is held by the depth of
+            // the inner walls in the scene vertex shader instead.
+            let mesh = sources.geometry.mesh_of(instance.reference(), tile.image());
             self.list
                 .tiles
                 .push(look.tile(id, instance, shape, tile, mesh));
         }
-    }
-
-    /// The lateral sides of `tile` a neighbouring tile of the same object covers entirely, so
-    /// that the wall between the two can be left out of the drawn mesh (Q-067, SPEC-06
-    /// REQ-SCN-065).
-    ///
-    /// Both planes have to be full: the wall is then strictly inside the solid the two tiles
-    /// form, and dropping it cannot open a hole. Tiles of two different objects are never
-    /// sealed against each other, since nothing says their depths or their z agree.
-    fn sealed_sides(
-        &self,
-        instance: &FrameInstance,
-        tile: &FrameTile,
-        geometry: &dyn PatternGeometryBuilder,
-    ) -> u8 {
-        let full = geometry.full_sides_of(instance.reference(), tile.image());
-        if full == 0 {
-            return 0;
-        }
-
-        let seal = |side: u8, x: i32, y: i32| -> u8 {
-            if full & side == 0 {
-                return 0;
-            }
-
-            match self.neighbours.get(&(x, y)) {
-                Some(Some(neighbour)) => {
-                    let facing = geometry.full_sides_of(instance.reference(), neighbour);
-                    if facing & tile_sides::opposite(side) != 0 {
-                        side
-                    } else {
-                        0
-                    }
-                }
-                _ => 0,
-            }
-        };
-
-        // Scene y runs the other way than the screen row (REQ-E3D-404): the neighbour below
-        // the tile in the scene is the one on the row underneath on screen.
-        seal(tile_sides::MINUS_X, tile.x() - 8, tile.y())
-            | seal(tile_sides::PLUS_X, tile.x() + 8, tile.y())
-            | seal(tile_sides::MINUS_Y, tile.x(), tile.y() + 8)
-            | seal(tile_sides::PLUS_Y, tile.x(), tile.y() - 8)
     }
 }
 

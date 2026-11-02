@@ -101,6 +101,32 @@ pub const HUD_SCALE: f32 = 0.5;
 /// Depth nudge applied by the renderer to sprite tiles, ±0.1 (REQ-SCN-037).
 pub const SPRITE_NUDGE: f32 = 0.1;
 
+/// Scene units a wall of a tile mesh is pushed away from the eye, so that the walls AMD-057
+/// keeps cannot win the depth test against the face of the tile next door (SPEC-06
+/// REQ-SCN-065).
+///
+/// AMD-057 §2 withdrew the one means Q-067 used (leaving the wall out of the drawn mesh) and
+/// left every other one open, "traitement de la profondeur, de l'éclairage ou de la
+/// rastérisation des parois internes" included. This is the depth one, and it is the cheapest:
+/// a wall is recognised from the sign of its **local** normal, so no neighbour is consulted and
+/// the object's rotation does not matter.
+///
+/// A quarter of a scene unit is a thirty-second of a tile: far more than the depth resolution
+/// at any camera distance the scene allows, and far less than the thickness of anything the
+/// conversion builds, so no surface of one object can pass through another because of it.
+pub const WALL_DEPTH_BIAS: f32 = 0.25;
+
+/// [`WALL_DEPTH_BIAS`] in the clip units `scene.vert` adds to `gl_Position.z`, before the divide
+/// by `w`.
+///
+/// With the projection of REQ-SCN-004, `z_ndc(d) = (f + n)/(f − n) − 2fn/((f − n)·d)`, so moving
+/// a vertex `δ` further from the eye adds `2·f·n·δ/(f − n) / w` to the clip `z` and changes
+/// nothing else. Both planes are constants, so the whole factor is one.
+#[must_use]
+pub fn wall_clip_bias(delta: f32) -> f32 {
+    2.0 * FAR_PLANE * NEAR_PLANE * delta / (FAR_PLANE - NEAR_PLANE)
+}
+
 /// Opacity of a tile that hides the followed shape in FPV (REQ-SCN-022).
 pub const OCCLUDER_ALPHA: f32 = 0.5;
 

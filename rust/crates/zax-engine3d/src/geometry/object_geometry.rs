@@ -2,13 +2,10 @@
 
 //! The geometry of one 3D object (SPEC-04B §3.4, §3.7).
 
-use crate::hashing::FastMap;
 use std::sync::Arc;
 
-use crate::geometry::greedy;
 use crate::geometry::texture::ObjectTexture;
 use crate::geometry::tile_mesh::TileMesh;
-use crate::geometry::tile_sides;
 use crate::geometry::tile_voxels::TileVoxels;
 use crate::geometry::voxel_construction::image_index;
 use crate::image::TileImage;
@@ -46,26 +43,15 @@ pub struct ObjectGeometry {
     pattern: PatternId,
     built: BuiltObject,
     mesh_of_image: Vec<Option<usize>>,
-    full_sides: Vec<u8>,
-    variants: FastMap<(usize, u8), Arc<TileMesh>>,
     ready: bool,
 }
 
 impl ObjectGeometry {
     pub(crate) fn new(pattern_id: PatternId, pattern: &EnginePattern, built: BuiltObject) -> Self {
-        // Q-067: only a side whose whole plane is occupied can be sealed by a neighbour.
-        let full_sides = if built.algorithm == RenderAlgorithm::Marching {
-            vec![0; built.fields.len()]
-        } else {
-            built.fields.iter().map(tile_sides::full_sides).collect()
-        };
-
         Self {
             pattern: pattern_id,
             mesh_of_image: image_index(pattern),
             built,
-            full_sides,
-            variants: FastMap::default(),
             ready: false,
         }
     }
@@ -148,36 +134,12 @@ impl ObjectGeometry {
         self.index(image).map(|index| &self.built.meshes[index])
     }
 
-    /// The lateral sides of `image` whose plane is entirely occupied, as a mask of
-    /// [`tile_sides`]: the sides a neighbour may seal (Q-067).
+    /// The mesh of `image` as the draw list asks for it. AMD-057 withdrew the variants of
+    /// Q-067, so **this is [`ObjectGeometry::mesh`]**: the drawn mesh of a tile is its mesh of
+    /// REQ-E3D-501, every wall included.
     #[must_use]
-    pub fn full_sides(&self, image: &TileImage) -> u8 {
-        self.index(image).map_or(0, |index| self.full_sides[index])
-    }
-
-    /// The mesh of `image` with the walls of `sealed_sides` left out (Q-067). A mask of 0 —
-    /// or MARCHING, which has no such walls — gives [`ObjectGeometry::mesh`] itself. A variant
-    /// is built once and kept.
-    pub fn sealed_mesh(&mut self, image: &TileImage, sealed_sides: u8) -> Option<Arc<TileMesh>> {
-        let index = self.index(image)?;
-        let sealed_sides = sealed_sides & self.full_sides[index];
-        if sealed_sides == 0 || self.built.algorithm == RenderAlgorithm::Marching {
-            return Some(Arc::clone(&self.built.meshes[index]));
-        }
-
-        let built = &self.built;
-        let variant = self
-            .variants
-            .entry((index, sealed_sides))
-            .or_insert_with(|| {
-                Arc::new(greedy::build(
-                    &built.fields[index],
-                    &built.texture,
-                    built.algorithm == RenderAlgorithm::GreedyMulticolor,
-                    sealed_sides,
-                ))
-            });
-        Some(Arc::clone(variant))
+    pub fn drawn_mesh(&self, image: &TileImage) -> Option<Arc<TileMesh>> {
+        self.mesh(image).map(Arc::clone)
     }
 
     fn index(&self, image: &TileImage) -> Option<usize> {

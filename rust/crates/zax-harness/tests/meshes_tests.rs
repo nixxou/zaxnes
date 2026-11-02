@@ -100,23 +100,32 @@ fn synthetic_frames_export_the_counts_of_the_engine_tests() {
     assert_eq!(1, summary["objectsByGeometry"]["Cube"]);
     assert_eq!(Some(1), summary["loadProgress"].as_i64());
 
-    // The frame list carries one entry per drawn tile with its mesh (REQ-E3D-641). The two
-    // tiles of [A B] are drawn without the wall they share (Q-067), five rectangles each; the
-    // cube is another object and keeps all of its faces.
+    // The frame list carries one entry per drawn tile with its mesh (REQ-E3D-641).
+    //
+    // **AMD-057's first acceptance criterion**, read where the amendment asks for it: the two
+    // tiles of [A B] touch, and each is exported as the **complete box** — 24 vertices,
+    // 12 triangles, 6 rectangles. Before the amendment they were 10 triangles each, the variant
+    // of Q-067 without the wall they share. The cube of [C] is another object and was always
+    // whole.
     let frame: Value =
         serde_json::from_str(&fs::read_to_string(output.join("frame0000.json")).unwrap()).unwrap();
     assert_eq!(3, frame["tileCount"]);
-    let triangles: Vec<i64> = frame["tiles"]
-        .as_array()
-        .unwrap()
+    let tiles = frame["tiles"].as_array().unwrap();
+    let triangles: Vec<i64> = tiles
         .iter()
         .map(|tile| tile["meshTriangles"].as_i64().unwrap())
         .collect();
-    assert_eq!(vec![10, 10, 24], triangles);
+    assert_eq!(vec![12, 12, 24], triangles);
+    let vertices: Vec<i64> = tiles
+        .iter()
+        .map(|tile| tile["meshVertices"].as_i64().unwrap())
+        .collect();
+    assert_eq!(vec![24, 24, 48], vertices);
 
     // The OBJ files hold every vertex and every triangle of the drawn tiles and of the
-    // objects' own meshes.
-    for (file, vertices, faces) in [("frame0000.obj", 88, 44), ("objects.obj", 96, 48)] {
+    // objects' own meshes. The drawn frame is now the objects' own geometry exactly, because
+    // the drawn mesh of a tile *is* its mesh of REQ-E3D-501 (AMD-057).
+    for (file, vertices, faces) in [("frame0000.obj", 96, 48), ("objects.obj", 96, 48)] {
         let text = fs::read_to_string(output.join(file)).unwrap();
         assert_eq!(
             vertices,

@@ -8,16 +8,14 @@
 //! itself, which is why two full tiles side by side keep the wall between them (REQ-E3D-501
 //! notes, TV-G7).
 //!
-//! Q-067: the `sealed_sides` mask is the one exception, and it is a *rendering* variant, not
-//! a change to REQ-E3D-501. A side listed there is one the draw list has found to be entirely
-//! covered by the neighbouring tile of the same object; the wall between the two is then
-//! strictly inside the solid they form, and the mesh of that variant leaves it out so that it
-//! cannot show at the joint. The default mask of 0 gives back the mesh REQ-E3D-501 and
-//! REQ-E3D-523 describe, bit for bit.
+//! AMD-057 **withdrew** the one exception there used to be (Q-067's `sealed_sides` mask, which
+//! left out a wall a neighbour covered): the drawn mesh of a tile is now its mesh of
+//! REQ-E3D-501, every face included. REQ-SCN-065 — no dark grid, no bright crack, no shadow
+//! discontinuity at a joint — is held by the depth of the inner walls instead
+//! (`geometry::WALL_DEPTH_BIAS`, `shaders/scene.vert`).
 
 use crate::geometry::texture::ObjectTexture;
 use crate::geometry::tile_mesh::{TileMesh, TileMeshBuilder};
-use crate::geometry::tile_sides;
 use crate::geometry::tile_voxels::{pack, unpack, TileVoxels, SIZE_X, SIZE_Y};
 use crate::vectors::{Vec2, Vec3};
 
@@ -39,16 +37,10 @@ struct Plane {
 
 /// Builds the mesh of one tile. `field` is the voxel field of the tile (three slots per
 /// voxel), `texture` the object's texture, read for the multicolour merge; `multicolor` is
-/// true for `GREEDY_MULTICOLOR` (REQ-E3D-503). `sealed_sides` lists the lateral sides a
-/// neighbouring tile covers entirely, as bits of [`tile_sides`]; 0 closes the tile on itself
-/// as REQ-E3D-501 states (Q-067).
+/// true for `GREEDY_MULTICOLOR` (REQ-E3D-503). The tile is always closed on itself, as
+/// REQ-E3D-501 states and AMD-057 restored.
 #[must_use]
-pub fn build(
-    field: &TileVoxels,
-    texture: &ObjectTexture,
-    multicolor: bool,
-    sealed_sides: u8,
-) -> TileMesh {
+pub fn build(field: &TileVoxels, texture: &ObjectTexture, multicolor: bool) -> TileMesh {
     if field.is_empty() {
         return TileMesh::empty();
     }
@@ -76,7 +68,7 @@ pub fn build(
                     sign,
                     depth: field.depth(),
                 };
-                if fill_mask(field, &mut mask, plane, sealed_sides, sizes[axis]) {
+                if fill_mask(field, &mut mask, plane) {
                     partition(&mut builder, texture, &mut mask, plane, multicolor);
                 }
             }
@@ -88,13 +80,7 @@ pub fn build(
 
 /// Fills `mask` with the face cells of one plane and one direction (REQ-E3D-501), and answers
 /// whether there is at least one.
-fn fill_mask(
-    field: &TileVoxels,
-    mask: &mut [i32],
-    plane: Plane,
-    sealed_sides: u8,
-    axis_size: i32,
-) -> bool {
+fn fill_mask(field: &TileVoxels, mask: &mut [i32], plane: Plane) -> bool {
     let mut any = false;
     let mut cell = [0i32; 3];
     let mut n = 0;
@@ -117,11 +103,7 @@ fn fill_mask(
                 plane.position - 1
             };
 
-            // Q-067: on a sealed side the tile next door fills the whole plane, so the voxel
-            // just outside counts as occupied and no wall is emitted there.
-            let neighbour =
-                tile_sides::is_sealed(sealed_sides, plane.axis, cell[plane.axis], axis_size)
-                    || field.occupied(cell[0], cell[1], cell[2], plane.axis);
+            let neighbour = field.occupied(cell[0], cell[1], cell[2], plane.axis);
 
             mask[n] = match owner {
                 Some((tx, ty)) if !neighbour => {

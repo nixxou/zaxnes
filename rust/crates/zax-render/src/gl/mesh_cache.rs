@@ -34,6 +34,10 @@ pub struct GpuMesh {
     pub vertex_array: VertexArray,
     /// Number of indices, three per triangle.
     pub index_count: i32,
+    /// [`TileMesh::has_axis_aligned_normals`]: whether a normal of `|z| < 0.5` may be read as a
+    /// lateral wall of a tile box (AMD-057, REQ-SCN-065). Carried here so the draw path reads it
+    /// from the handle it already has, instead of a field per tile of the list.
+    pub axis_aligned_normals: bool,
 }
 
 #[derive(Debug)]
@@ -44,6 +48,7 @@ struct Entry {
     vertex_buffer: Buffer,
     index_buffer: Buffer,
     index_count: i32,
+    axis_aligned_normals: bool,
     last_used: u64,
 }
 
@@ -170,6 +175,7 @@ impl MeshCache {
             #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
             // A tile mesh holds far fewer than 2^31 indices.
             index_count: mesh.triangles().len() as i32,
+            axis_aligned_normals: mesh.has_axis_aligned_normals(),
             last_used: self.frame,
         })
     }
@@ -180,6 +186,7 @@ impl Entry {
         GpuMesh {
             vertex_array: self.vertex_array,
             index_count: self.index_count,
+            axis_aligned_normals: self.axis_aligned_normals,
         }
     }
 

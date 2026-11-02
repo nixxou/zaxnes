@@ -585,17 +585,8 @@ impl PatternGeometryBuilder for RecordingGeometryBuilder {
         !self.not_ready.contains(&instance)
     }
 
-    fn mesh_of(
-        &mut self,
-        _instance: InstanceRef,
-        _image: &TileImage,
-        _sealed_sides: u8,
-    ) -> Option<Arc<TileMesh>> {
+    fn mesh_of(&self, _instance: InstanceRef, _image: &TileImage) -> Option<Arc<TileMesh>> {
         Some(Arc::clone(&self.stub))
-    }
-
-    fn full_sides_of(&self, _instance: InstanceRef, _image: &TileImage) -> u8 {
-        0
     }
 
     fn texture_of(&self, _instance: InstanceRef) -> Option<Arc<ObjectTexture>> {

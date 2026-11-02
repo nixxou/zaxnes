@@ -21,6 +21,11 @@ layout(std140) uniform ZaxInstances
 uniform float uNormalSign;
 uniform mat4 uViewProjection;
 
+// AMD-057 / REQ-SCN-065: how far a lateral wall of a tile box is pushed away from the eye, in
+// clip units already scaled by the projection (`geometry::wall_clip_bias`). 0 for a draw whose
+// normals are not axis aligned (MARCHING) and for the passes that need no such nudge.
+uniform float uWallClipBias;
+
 out vec3 vScene;
 out vec3 vNormal;
 out vec2 vUv;
@@ -67,4 +72,23 @@ void main()
 #else
     gl_Position = uViewProjection * vec4(scene.x, scene.y, -scene.z, 1.0);
 #endif
+
+    // AMD-057 / REQ-SCN-065. The drawn mesh of a tile is now the whole box of REQ-E3D-501, so
+    // two tiles that touch keep a pair of coincident walls at their joint. Left alone those
+    // walls tie with the faces that close the surface and win the depth test along the shared
+    // edge — the dark grid Q-067 was about. Pushing them a quarter of a scene unit further from
+    // the eye settles the tie in favour of the surface.
+    //
+    // Only the **depth** moves: the shift is added to `gl_Position.z` and divided by `w`, which
+    // is exactly the distance `delta` behind the vertex
+    // (`z_ndc(d) = (f+n)/(f-n) - 2fn/((f-n)d)`, so `dz_clip = 2fn*delta/(f-n) / w`). `x`, `y`
+    // and `w` are untouched, so no silhouette and no texture coordinate moves with it.
+    //
+    // The face is recognised from the **local** normal, before the normal matrix: a wall of a
+    // tile box has `|z| = 0` there and a front or back face `|z| = 1`, whatever the object's
+    // rotation. `uWallClipBias` is 0 wherever that reading does not hold.
+    if (uWallClipBias != 0.0 && abs(aNormal.z) < 0.5)
+    {
+        gl_Position.z += uWallClipBias / gl_Position.w;
+    }
 }

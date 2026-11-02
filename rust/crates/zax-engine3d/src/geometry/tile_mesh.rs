@@ -46,6 +46,11 @@ pub struct TileMesh {
     triangles: Vec<u32>,
     bounds_min: Vec3,
     bounds_max: Vec3,
+    /// Whether every normal of the mesh points along one axis of the local frame: true of the
+    /// boxes `GREEDY` builds (REQ-E3D-505), false of the smoothed surfaces of `MARCHING`
+    /// (REQ-E3D-521). Computed once here, never per draw; the renderer reads it to tell a
+    /// lateral wall from a front face (AMD-057, `geometry::WALL_DEPTH_BIAS`).
+    axis_aligned_normals: bool,
 }
 
 impl TileMesh {
@@ -82,11 +87,20 @@ impl TileMesh {
             }
         };
 
+        let axis_aligned_normals = vertices.iter().all(|vertex| {
+            let n = vertex.normal;
+            // Two of the three components zero: a face normal of REQ-E3D-505. A zero-area
+            // triangle has `(0, 0, 0)` and passes, which draws nothing either way.
+            let zeros = usize::from(n.x == 0.0) + usize::from(n.y == 0.0) + usize::from(n.z == 0.0);
+            zeros >= 2
+        });
+
         Self {
             vertices,
             triangles,
             bounds_min,
             bounds_max,
+            axis_aligned_normals,
         }
     }
 
@@ -124,6 +138,18 @@ impl TileMesh {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.triangles.is_empty()
+    }
+
+    /// True when every normal of the mesh points along one axis of the local frame: the boxes
+    /// of `GREEDY` (REQ-E3D-505), not the smoothed surfaces of `MARCHING` (REQ-E3D-521).
+    ///
+    /// The renderer uses it as the licence to read a normal of `|z| < 0.5` as a **lateral wall**
+    /// of a tile box, the faces AMD-057 keeps and REQ-SCN-065 must not let show. On a smoothed
+    /// surface that reading would be wrong, and there is no joint there to hide anyway
+    /// (REQ-E3D-520 merges the tiles).
+    #[must_use]
+    pub const fn has_axis_aligned_normals(&self) -> bool {
+        self.axis_aligned_normals
     }
 
     /// Lowest corner of the local bounding box.

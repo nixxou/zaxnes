@@ -80,19 +80,10 @@ pub trait PatternGeometryBuilder: Send {
     /// Whether the meshes of a pattern instance can be drawn (REQ-E3D-361).
     fn is_ready(&self, instance: InstanceRef) -> bool;
 
-    /// The mesh of `image` for `instance` with the walls of `sealed_sides` left out, the
-    /// rendering variant of Q-067 (SPEC-04B REQ-E3D-640); a mask of 0 gives the plain mesh.
-    /// `None` when it is not available.
-    fn mesh_of(
-        &mut self,
-        instance: InstanceRef,
-        image: &TileImage,
-        sealed_sides: u8,
-    ) -> Option<Arc<TileMesh>>;
-
-    /// The lateral sides of `image` whose plane is entirely occupied: the only sides a
-    /// neighbouring tile may seal (Q-067).
-    fn full_sides_of(&self, instance: InstanceRef, image: &TileImage) -> u8;
+    /// The mesh of `image` for `instance` (SPEC-04B REQ-E3D-640), or `None` when it is not
+    /// available. AMD-057: this is the mesh of REQ-E3D-501, every wall included — the rendering
+    /// variants of Q-067 are withdrawn.
+    fn mesh_of(&self, instance: InstanceRef, image: &TileImage) -> Option<Arc<TileMesh>>;
 
     /// The resolved texture of a pattern instance (SPEC-04B REQ-E3D-426, REQ-E3D-641), or
     /// `None` when its geometry has not been built.
@@ -126,17 +117,8 @@ impl PatternGeometryBuilder for NullPatternGeometryBuilder {
         true
     }
 
-    fn mesh_of(
-        &mut self,
-        _instance: InstanceRef,
-        _image: &TileImage,
-        _sealed_sides: u8,
-    ) -> Option<Arc<TileMesh>> {
+    fn mesh_of(&self, _instance: InstanceRef, _image: &TileImage) -> Option<Arc<TileMesh>> {
         None
-    }
-
-    fn full_sides_of(&self, _instance: InstanceRef, _image: &TileImage) -> u8 {
-        0
     }
 
     fn texture_of(&self, _instance: InstanceRef) -> Option<Arc<ObjectTexture>> {
@@ -293,7 +275,7 @@ impl GeometryBuilder {
             built
                 .fields
                 .iter()
-                .map(|field| Arc::new(greedy::build(field, &texture, multicolor, 0)))
+                .map(|field| Arc::new(greedy::build(field, &texture, multicolor)))
                 .collect()
         };
 
@@ -347,21 +329,10 @@ impl PatternGeometryBuilder for GeometryBuilder {
             .is_some_and(ObjectGeometry::ready)
     }
 
-    fn mesh_of(
-        &mut self,
-        instance: InstanceRef,
-        image: &TileImage,
-        sealed_sides: u8,
-    ) -> Option<Arc<TileMesh>> {
-        self.geometry
-            .get_mut(&instance)
-            .and_then(|geometry| geometry.sealed_mesh(image, sealed_sides))
-    }
-
-    fn full_sides_of(&self, instance: InstanceRef, image: &TileImage) -> u8 {
+    fn mesh_of(&self, instance: InstanceRef, image: &TileImage) -> Option<Arc<TileMesh>> {
         self.geometry
             .get(&instance)
-            .map_or(0, |geometry| geometry.full_sides(image))
+            .and_then(|geometry| geometry.drawn_mesh(image))
     }
 
     fn texture_of(&self, instance: InstanceRef) -> Option<Arc<ObjectTexture>> {

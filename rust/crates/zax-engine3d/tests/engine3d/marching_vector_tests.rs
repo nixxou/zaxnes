@@ -175,7 +175,7 @@ fn req_e3d_524_the_mesher_accepts_more_than_sixty_five_thousand_vertices() {
     }
 
     let pattern = geo::one_tile(geo::solid(1));
-    let mesh = greedy::build(&field, &ObjectTexture::from_pattern(&pattern), false, 0);
+    let mesh = greedy::build(&field, &ObjectTexture::from_pattern(&pattern), false);
 
     assert_eq!(18432, rectangles(&mesh));
     assert_eq!(73728, mesh.vertex_count());

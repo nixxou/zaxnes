@@ -94,8 +94,8 @@ fn req_e3d_540_a_shape_draws_one_mesh_per_tile_and_shares_the_repeated_ones() {
             .converting_frame()
             .instance(tile.instance)
             .reference();
-        let mesh = builder_mut(&mut engine)
-            .mesh_of(reference, tile.tile.image(), 0)
+        let mesh = builder(&engine)
+            .mesh_of(reference, tile.tile.image())
             .unwrap();
         meshes.insert(Arc::as_ptr(&mesh));
     }
@@ -402,9 +402,7 @@ fn req_e3d_602_no_runtime_change_ever_rebuilds_a_mesh() {
     let builds = builder(&engine).build_count();
     let reference = instance_ref(&engine, 0, 0);
     let image = engine.images().by_id(0).unwrap();
-    let mesh = builder_mut(&mut engine)
-        .mesh_of(reference, &image, 0)
-        .unwrap();
+    let mesh = builder_mut(&mut engine).mesh_of(reference, &image).unwrap();
 
     for counter in 1..=3u8 {
         let mut batch = Batch::new();

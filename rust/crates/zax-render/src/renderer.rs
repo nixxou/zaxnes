@@ -141,6 +141,10 @@ struct Passes {
     instance_buffer: glow::Buffer,
     /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`: each run starts at a multiple of it.
     instance_alignment: usize,
+    /// The clip-space bias of AMD-057 the draws apply to the lateral walls of a tile box
+    /// (`geometry::wall_clip_bias(WALL_DEPTH_BIAS)`). A test lowers it to 0 to show that it is
+    /// what holds REQ-SCN-065 now that the walls are kept.
+    wall_bias: f32,
     statistics: RenderStatistics,
 }
 
@@ -261,6 +265,7 @@ impl SceneRenderer {
             bound_vertex_array: None,
             instance_buffer: gl.create_buffer()?,
             instance_alignment,
+            wall_bias: geometry::wall_clip_bias(geometry::WALL_DEPTH_BIAS),
             statistics,
         };
 
@@ -478,6 +483,16 @@ impl SceneRenderer {
         // AMD-051 REQ-E3D-644 counts its lines "par partie": a wholesale rebuild is the start of
         // a new one, and the patterns it reported no longer exist.
         self.plan.diagnostics.reset();
+    }
+
+    /// The scene distance a lateral wall of a tile box is pushed away from the eye
+    /// (AMD-057, REQ-SCN-065); [`geometry::WALL_DEPTH_BIAS`] is what every frame uses.
+    ///
+    /// Settable so that a test can put it back to 0 and show that this — and not the geometry,
+    /// which AMD-057 forbids changing — is what keeps the joints of a flat surface invisible now
+    /// that the walls are kept.
+    pub fn set_wall_depth_bias(&mut self, delta: f32) {
+        self.passes.wall_bias = geometry::wall_clip_bias(delta);
     }
 
     /// Caps the texels the resident object textures may occupy (AMD-051 REQ-E3D-644,
@@ -867,6 +882,8 @@ impl Passes {
         self.set_normal_sign(mirrored, false);
         self.set_winding(mirrored, false);
 
+        // AMD-057 / REQ-SCN-065: read before the program is borrowed.
+        let wall_bias = self.wall_clip_bias(item.mesh);
         let program = self.scene.current();
         program.set_i32("uColorMode", item.color_mode);
         program.set_i32("uPaletteTable", item.palette_table);
@@ -876,6 +893,10 @@ impl Passes {
         program.set_vec3("uFlatColor", item.flat_color);
         program.set_f32("uAlpha", if opaque { 1.0 } else { item.alpha });
         program.set_i32("uClip", i32::from(item.clip));
+        // AMD-057 / REQ-SCN-065: the inner walls of a tile box are pushed behind the faces they
+        // meet. 0 for a mesh whose normals are not axis aligned (MARCHING merges its tiles, so
+        // it has no joint to hide and the `|normal.z|` test would be meaningless there).
+        program.set_f32("uWallClipBias", wall_bias);
         program.set_i32(
             "uReceiveShadow",
             i32::from(self.shadow_enabled && item.receive_shadow),
@@ -911,6 +932,19 @@ impl Passes {
         self.statistics.draw_calls += count(instances);
         self.statistics.triangles +=
             u64::from(item.mesh.index_count.unsigned_abs() / 3) * instances as u64;
+    }
+
+    /// The clip-space wall bias a draw of `mesh` takes (AMD-057): the bias of
+    /// [`geometry::WALL_DEPTH_BIAS`] for a box of axis-aligned faces, 0 otherwise.
+    ///
+    /// `wall_bias` is the scene distance in force; a test sets it to 0 to show that the bias is
+    /// what holds REQ-SCN-065 with the walls kept.
+    fn wall_clip_bias(&self, mesh: GpuMesh) -> f32 {
+        if mesh.axis_aligned_normals {
+            self.wall_bias
+        } else {
+            0.0
+        }
     }
 
     /// Forgets which textures and vertex array the draws left bound: the next draw binds its

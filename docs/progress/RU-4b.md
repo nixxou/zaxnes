@@ -15,7 +15,7 @@ lots V2-8 (`627917b`), V2-9 (`1f0f7c6`), V2-13 (`4722940`), V2-29 (`439fd0d`) an
 | 2 | AMD-051 part 1: REQ-E3D-644, REQ-E3D-646, REQ-E3D-524, REQ-PERS-088 | done |
 | 3 | AMD-051 part 2: REQ-LOOP-073, the loading that no longer advances | done |
 | 4 | AMD-048: the empty depth interval of REQ-E3D-450, TV-Y9 and TV-Y10 | done |
-| 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | todo |
+| 5 | AMD-057 walls: the Q-067 seal removed, the wall depth, the measurement, the handheld decision | done |
 | 6 | AMD-057 sprite depth: `0.001 × (i mod 64) ∓ 0.1` | todo |
 | 7 | AMD-058: the joints under MSAA, a shader variant for `anti_alias` ≥ 1 only | todo |
 | 8 | AMD-049: REQ-SCN-075 as a shader variant, the setting, the vectors | todo |
@@ -405,3 +405,146 @@ workspace clippy clean.
   (R2's point 48-2) and with the local boxes and rectangle counts §5.3 gives everywhere else
   (48-6).
 - `AMD-008`, the Q-015 row: the answer replaced, with the reason the old one was wrong.
+
+### Step 5 — AMD-057: the walls come back, and the measurement decides the handheld
+
+#### What was removed
+
+The whole Q-067 seal, as AMD-057 §2 withdraws AMD-027 §1 and §2:
+
+| Gone | Where |
+|---|---|
+| `geometry/tile_sides.rs` | deleted (the mask, `full_sides`, `is_sealed`, `opposite`) |
+| the `sealed_sides` parameter | `greedy::build`, `fill_mask` |
+| `full_sides`, `sealed_mesh`, the variant map | `ObjectGeometry` (now `drawn_mesh`, which **is** `mesh`) |
+| `mesh_of(.., .., mask)` and `full_sides_of` | `PatternGeometryBuilder` (now `mesh_of(&self, ..)` — it no longer needs `&mut`, because there is no variant to build) |
+| the per-instance neighbour map and `sealed_sides` | `DrawListBuilder` |
+| `tests/engine3d/sealed_side_tests.rs` | replaced by `amd057_wall_tests.rs`, which asserts the opposite |
+
+#### How REQ-SCN-065 is held instead
+
+AMD-057 §2 leaves the means free except for removing the walls. The one chosen is the **depth of
+the inner walls**, in the scene vertex shader:
+
+- a wall is recognised from the sign of its **local** normal (`abs(aNormal.z) < 0.5`), before the
+  normal matrix, so no neighbour is consulted and the object's rotation does not matter;
+- it is pushed `WALL_DEPTH_BIAS = 0.25` scene units away from the eye. Only the **depth** moves:
+  the shift is `uWallClipBias / gl_Position.w` added to `gl_Position.z`, which is exactly a
+  distance δ behind the vertex (`z_ndc(d) = (f+n)/(f−n) − 2fn/((f−n)d)` gives
+  `dz_clip = 2fnδ/(f−n) / w`). `x`, `y` and `w` are untouched, so no silhouette and no texture
+  coordinate moves with it — which a constant offset in clip space could not promise (near plane
+  0.3, far plane 5000: the two scales have nothing to do with each other);
+- `uWallClipBias` is **0 for a mesh whose normals are not axis aligned**: `MARCHING` merges its
+  tiles (REQ-E3D-520) so it has no joint to hide, and `|normal.z| < 0.5` would be meaningless on
+  a smoothed surface. The flag rides on `GpuMesh`, read from `TileMesh::has_axis_aligned_normals`
+  which is computed **once when the mesh is built** — so the draw path reads a bool off a handle
+  it already has, and no field was added to the per-tile list.
+
+#### The measurement, and the handheld decision
+
+The brief asks for both sides before deciding. **No commercial ROM is available on this side**, so
+the real-profile figures come from `zax-harness meshes` over the ten profiles AMD-057 §1 compares,
+and the CPU figure from the post-LTO instruction count, which is immune to machine load.
+
+**CPU — the draw list.** `DrawListBuilder::build`, with `add_instance` and the former
+`sealed_sides` inlined:
+
+| | instructions |
+|---|---|
+| after AMD-048 (step 4) | **1574** |
+| walls kept | **1095** |
+
+**−479 instructions, −30 %.** Two hash operations per tile disappear with the neighbour map (an
+`entry` while the map is filled and a `get` while each tile is sealed), which a static count does
+not even show. Wall clock, `bench-core … --3d` (982 tile records a frame), best of 5 on a quiet
+machine: **0.0370 → 0.0328 ms/frame, −11 %** (the rest of the stage is per-tile work the change
+does not touch). `Construction::segment` 159 → 159 and `Ppu2C02::run_dots` 2231 → 2231, the two
+controls.
+
+**GPU — the vertex count**, `zax-harness meshes`, synthetic frame 0 of each profile:
+
+| Profile | vertices after AMD-048 | walls kept | |
+|---|---|---|---|
+| Super Mario Bros 3 (U) (PRG1) | 85 728 | 86 536 | +0.94 % |
+| Legend Of Zelda | 50 312 | 51 136 | +1.64 % |
+| Castlevania (U) (PRG 1) | 19 596 | 20 692 | **+5.59 %** |
+| Mega Man 2 | 56 240 | 58 096 | +3.30 % |
+| Metroid | 680 216 | 681 080 | +0.13 % |
+| Contra | 61 716 | 63 492 | +2.88 % |
+| Excitebike | 32 736 | 33 336 | +1.83 % |
+| Ninja Gaiden III | 103 700 | 104 844 | +1.10 % |
+| Zelda II | 92 512 | 93 744 | +1.33 % |
+| Blaster Master (U) | 249 222 | 249 918 | +0.28 % |
+| **total** | 1 431 978 | 1 442 874 | **+0.76 %** |
+
+The synthetic scenes are the pathological limit of the same measure, and worth printing because
+they show what the seal was really worth: a scene whose tiles tile the whole picture had **every**
+lateral wall sealed, so `framing` goes 7704 → 21 576 triangles (+180 %) while the real profiles —
+whose objects are small and whose tiles mostly have free sides — move under 1 %.
+
+**And a third quantity the brief did not ask for, which settles it.** The Q-067 variants were
+separate meshes in the GPU cache, up to sixteen per tile image. Over the eleven synthetic scenes
+the resident mesh count falls **176 → 81**: nearly half the mesh cache was seal variants. That is
+GPU memory and mesh uploads saved, on the platform where both are scarcest.
+
+**Decision: the spec path everywhere, no handheld exception.** The brief's condition for keeping
+Q-067 on handhelds — "if keeping the walls costs more in total than it saves" — is not met, in any
+of the three quantities: the CPU draw list is 30 % cheaper, the mesh cache is less than half as
+large, and the vertex count is 0.76 % higher. There is therefore **no setting** for this and no
+advanced option; the walls are simply kept, as REQ-E3D-501 and AMD-057 §2 say. R0 has the numbers
+above if the owner wants the trade-off revisited on a real device.
+
+#### The images
+
+Every synthetic capture at default settings, compared with the step-1 ones (`zax-harness compare
+--tolerance 2`):
+
+| Scene | pixels within 2 levels |
+|---|---|
+| framing, shadow, nudge, clip, backdrop, alpha, hud | **100.000 %** |
+| heavy | **99.965 %** (108 of 307 200 pixels) |
+
+So the walls came back and the picture did not move, which is the whole point of the bias. The
+108 pixels of `heavy` are the one-pixel joint lines Q-067 reported, now erased: the distinct
+colour count of that scene falls 23 → 16, and `framing`'s 4 → 3, because the joints no longer
+contribute shades of their own.
+
+**The render goldens moved on purpose and were updated.** `goldens/render-synthetic/render.json`
+is a C# capture of the 0.2.0 era, i.e. of the sealed state; `triangles` and `residentMeshes`
+changed in every scene and `distinctColors` in two. The **PNGs were not touched** and still match
+(the comparison asks for 99.5 %, the worst scene is 99.965 %), which is the check that says the
+geometry change is invisible.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| AMD-057 §2, first criterion on `--dump-meshes`: two full tiles of one object that touch each give 24 vertices | `zax-harness/tests/meshes_tests.rs` `synthetic_frames_export_the_counts_of_the_engine_tests` (was `[10, 10, 24]` triangles, now `[12, 12, 24]` and `[24, 24, 48]` vertices) |
+| the same on the draw list, and a lone tile no longer differs from one in a surface | `zax-engine3d/.../amd057_wall_tests.rs` `amd_057_two_full_tiles_of_one_object_that_touch_each_keep_the_whole_box` |
+| the mesher has no way left to leave a wall out | `req_e3d_501_a_full_tile_is_a_closed_box_whatever_its_neighbours` |
+| REQ-E3D-540: the four tiles share one mesh, no variant is built | `req_e3d_540_a_repeated_tile_draws_the_very_mesh_its_object_owns` |
+| AMD-057 §2, second criterion: REQ-SCN-065 passes with the walls kept, at three shadow-map sizes | `zax-render/tests/amd057_wall_tests.rs` `amd_057_the_surface_of_req_scn_065_passes_with_every_wall_kept` |
+| the same surface split over two objects | `amd_057_a_surface_split_over_two_objects_passes_too` |
+| the bias is not geometry: same draws, same triangles, same silhouette to the pixel | `amd_057_the_wall_depth_moves_no_vertex_and_no_silhouette` |
+| a smoothed surface takes no bias: every pixel identical with and without it | `amd_057_a_smoothed_surface_takes_no_wall_bias` |
+| **the measure that bites** | `req_scn_040_the_wall_depth_is_what_keeps_a_coincident_wall_out_of_the_blend` |
+| the five existing REQ-SCN-065 / REQ-SCN-040 measures now assert the whole boxes first | `zax-render/tests/seam_tests.rs` (`assert_whole_boxes` added to four of them) |
+
+**Which test bites, and the finding behind it.** The synthetic criterion of REQ-SCN-065 passes
+with the walls kept **and the bias at 0**: on a surface of one object the coincident walls lose
+the fill rule anyway. What does not pass is **REQ-SCN-040** — in the equal-depth colour pass of a
+translucent object, a wall coincident with its neighbour's face is kept by `depth_func(EQUAL)` and
+that pixel is blended twice. So the discriminating test is the translucent one, and that is the
+same finding the .NET lot V2-29 recorded ("avec `WallDepthBias = 0` les deux tests de jointure
+passent encore mais `REQ_SCN_040_…_shows_no_internal_face` échoue"). On real scenes, which hold
+hundreds of objects at different depths, the bias additionally erases the one-pixel dark lines
+Q-067 reported — the 108 pixels of `heavy` above are the synthetic trace of that.
+
+One test of mine was written with the wrong measure and is **not** in the list: a deep-surface
+REQ-SCN-065 check whose window (inset by a twelfth) takes in the slab's top face at a negative
+pitch, so it reported 478 "offenders" that are a legitimately different surface. `seam_tests.rs`
+already covers that case properly, with `front_face_line` and `sawtooth_jumps` rather than a
+histogram, so the badly measured test was dropped rather than loosened.
+
+`cargo test --release --workspace --features zax-app/bundled`: **2263 passed, 0 failed**. fmt and
+workspace clippy clean.
