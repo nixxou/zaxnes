@@ -56,6 +56,19 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::BUTTON_STOP_BINDING, "Arrêter la capture"),
     (keys::BUTTON_YES, "Oui"),
     (keys::BUTTON_NO, "Non"),
+    // AMD-056 REQ-UI-214 : les boutons des trois dialogues d'import. « OK » ne se traduit pas ;
+    // « Replace » nomme l'action, donc « Remplacer » et non « Oui ».
+    (keys::BUTTON_OK, "OK"),
+    (keys::BUTTON_REPLACE, "Remplacer"),
+    // ------------------- les dialogues d'import d'AMD-056 REQ-UI-214. Rien pour un import
+    //                     réussi : il n'affiche ni notification ni dialogue, et l'entrée
+    //                     « Profil importé : … » de REQ-UI-212 a disparu.
+    (keys::DIALOG_IMPORT_REFUSED_TITLE, "Impossible d'importer ce fichier"),
+    (keys::DIALOG_IMPORT_REFUSED_BODY, "{0} : {1}"),
+    (keys::DIALOG_IMPORT_BUILT_IN_TITLE, "Déjà dans Zaxnes"),
+    (keys::DIALOG_IMPORT_BUILT_IN_BODY, "{0} est un profil embarqué ; {1} n'a pas été importé."),
+    (keys::DIALOG_IMPORT_REPLACE_TITLE, "Remplacer {0} ?"),
+    (keys::DIALOG_IMPORT_REPLACE_BODY, "Le profil sera remplacé par celui de {0}. La ROM, la jaquette et les sauvegardes d'état seront conservées."),
     // ------------------------ notifications de SPEC-10 REQ-UI-082 à REQ-UI-084
     (keys::NOTIFY_ROLL_BACK, "Retour arrière"),
     (keys::NOTIFY_FAST_FORWARD, "Avance rapide"),

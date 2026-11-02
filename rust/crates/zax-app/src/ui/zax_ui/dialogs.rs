@@ -11,6 +11,9 @@ use crate::ui::file_browser::{FileEntry, FileEntryKind};
 use crate::ui::profile_chooser::ProfileChoice;
 use crate::ui::text;
 
+/// The colour of a destructive first button (AMD-056 §3 leaves it free, AMD-010 §4).
+const DESTRUCTIVE_BUTTON: [f32; 4] = [0.60, 0.16, 0.16, 1.0];
+
 impl ZaxUi {
     pub(super) fn draw_file_browser(&mut self, ui: &Ui, host: &mut AppHost) {
         let mut open = self.state.file_browser;
@@ -227,6 +230,48 @@ impl ZaxUi {
             // REQ-UI-201: the pair is remembered, so the next opening of this file is direct.
             Some(rom) => host.launch_rom_with_profile(rom, &choice.id),
             None => host.enqueue(Command::LaunchGame, CommandArgs::of_text(&choice.id)),
+        }
+    }
+
+    /// The import dialogue of AMD-056 REQ-UI-214. Its form is free (AMD-010 §4); it is drawn like
+    /// the confirmation box of REQ-UI-110, with the destructive first button in red.
+    pub(super) fn draw_import_dialog(&mut self, ui: &Ui, host: &mut AppHost) {
+        let Some(dialog) = self.import_dialog().cloned() else {
+            return;
+        };
+        let flags = WindowFlags::NO_COLLAPSE
+            | WindowFlags::NO_RESIZE
+            | WindowFlags::NO_SAVED_SETTINGS
+            | WindowFlags::ALWAYS_AUTO_RESIZE;
+        let window = ui
+            .window(format!("{}##import", dialog.title))
+            .position(centre(ui, 420.0, 0.0), Condition::Always)
+            .size([420.0, 0.0], Condition::Always)
+            .flags(flags)
+            .begin();
+        if window.is_none() {
+            return;
+        }
+        ui.text_wrapped(&dialog.body);
+        ui.separator();
+        if ui.is_window_appearing() {
+            ui.set_keyboard_focus_here();
+        }
+        let colour = dialog
+            .destructive
+            .then(|| ui.push_style_color(imgui::StyleColor::Button, DESTRUCTIVE_BUTTON));
+        let pressed = ui.button_with_size(&dialog.primary_label, [120.0, 0.0]);
+        drop(colour);
+        if pressed {
+            play(host, UiSound::Confirm);
+            self.confirm_import_dialog(host);
+            return;
+        }
+        if let Some(cancel) = &dialog.cancel_label {
+            ui.same_line();
+            if ui.button_with_size(cancel, [120.0, 0.0]) {
+                self.cancel_import_dialog();
+            }
         }
     }
 

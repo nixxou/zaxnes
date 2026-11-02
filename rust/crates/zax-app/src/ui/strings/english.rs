@@ -57,6 +57,18 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::BUTTON_STOP_BINDING, "Stop the capture"),
     (keys::BUTTON_YES, "Yes"),
     (keys::BUTTON_NO, "No"),
+    // AMD-056 REQ-UI-214: the buttons of the three import dialogues.
+    (keys::BUTTON_OK, "OK"),
+    (keys::BUTTON_REPLACE, "Replace"),
+    // ------------------- the import dialogues of AMD-056 REQ-UI-214, word for word what the
+    //                     amendment's table writes. There is nothing for a successful import:
+    //                     it shows neither notification nor dialogue.
+    (keys::DIALOG_IMPORT_REFUSED_TITLE, "Cannot import this file"),
+    (keys::DIALOG_IMPORT_REFUSED_BODY, "{0}: {1}"),
+    (keys::DIALOG_IMPORT_BUILT_IN_TITLE, "Already in Zaxnes"),
+    (keys::DIALOG_IMPORT_BUILT_IN_BODY, "{0} is a built-in profile, so {1} was not imported."),
+    (keys::DIALOG_IMPORT_REPLACE_TITLE, "Replace {0}?"),
+    (keys::DIALOG_IMPORT_REPLACE_BODY, "The profile will be replaced with the one in {0}. The ROM, cover and save states will be kept."),
     // ------------------------ notifications of SPEC-10 REQ-UI-082 to REQ-UI-084
     (keys::NOTIFY_ROLL_BACK, "Roll Back"),
     (keys::NOTIFY_FAST_FORWARD, "Fast Forward"),

@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use time::OffsetDateTime;
 use zax_profiles::catalogue::{
-    built_in, import_messages, ProfileFolders, ProfileImportOutcome, ProfileImportResult,
-    ProfileOrigin, UserProfile, UserProfileFolder,
+    built_in, import_messages, ProfileFolders, ProfileImportOutcome, ProfileImportPlan,
+    ProfileImportResult, ProfileOrigin, UserProfile, UserProfileFolder,
 };
 use zax_profiles::format::{self, ProfileLog};
 use zax_profiles::import::{ThreeDSenImportError, ThreeDSenImportSummary, ThreeDSenImporter};
@@ -126,11 +126,28 @@ impl LibraryGameCatalog {
         &mut self.library
     }
 
-    /// Imports the `.3dn` file at `path` into the user folder and the library.
+    /// Imports the `.3dn` file at `path` into the user folder and the library: the reading of
+    /// [`Self::inspect_profile_import`] followed at once by the writing of
+    /// [`Self::apply_profile_import`].
     pub fn import_profile(&mut self, path: &Path) -> ProfileImportResult {
+        let plan = self.inspect_profile_import(path);
+        self.apply_profile_import(&plan)
+    }
+
+    /// Reads a chosen `.3dn` file and says what importing it would do, **without writing
+    /// anything** (AMD-056 REQ-UI-214): the interface needs the outcome to choose its dialogue,
+    /// and a replacement must not happen before the dialogue is answered.
+    ///
+    /// A file that cannot be **read** is the third cause of REQ-UI-084, as it was before; only a
+    /// failure to **write**, which can happen after the confirmation, carries the message of its
+    /// own error ([`Self::apply_profile_import`]).
+    pub fn inspect_profile_import(&self, path: &Path) -> ProfileImportPlan {
         // Only the profiles of the user folder: the import replaces the file of the entry it
         // takes over, and nothing next to the executable is ever deleted (AMD-033 §1). A profile
         // of the program folder simply loses its entry to the imported one.
+        //
+        // AMD-056 REQ-UI-214 names the entry by its *displayed* title, the one a rename changed,
+        // which is what `GameLibraryEntry::title` holds.
         let known: Vec<UserProfile> = self
             .library
             .entries()
@@ -155,13 +172,48 @@ impl LibraryGameCatalog {
             Some(&adapter),
             ProfileOrigin::User,
         );
-        let result = match folder.import(path, &built_in, &known) {
-            Ok(result) => result,
-            Err(_) => ProfileImportResult {
+        folder
+            .inspect(path, &built_in, &known)
+            .unwrap_or_else(|_| ProfileImportPlan {
                 outcome: ProfileImportOutcome::Rejected,
-                profile: None,
+                source_path: path.to_path_buf(),
                 message: import_messages::obsolete_format(path),
-            },
+                id: String::new(),
+                title: String::new(),
+                header: format::ProfileHeader::default(),
+                replaced: None,
+                destination: std::path::PathBuf::new(),
+            })
+    }
+
+    /// Carries out a plan of [`Self::inspect_profile_import`]: the file is copied into the user's
+    /// profiles and the library gains — or updates — its entry, without a restart.
+    ///
+    /// A write that fails carries the message of its own error, which REQ-UI-214 shows in the
+    /// refusal dialogue: the third text of REQ-UI-084 would say nothing true there, the file
+    /// having been readable and well formed.
+    pub fn apply_profile_import(&mut self, plan: &ProfileImportPlan) -> ProfileImportResult {
+        let files = PhysicalProfileFileSystem;
+        let adapter = ProfileLogAdapter(&*self.log);
+        let folder = UserProfileFolder::new(
+            &files,
+            &self.paths.profiles_directory,
+            Some(&adapter),
+            ProfileOrigin::User,
+        );
+        let result = match folder.apply(plan) {
+            Ok(result) => result,
+            Err(error) => {
+                (self.log)(&format!(
+                    "the profile import of '{}' failed: {error}",
+                    plan.source_path.display()
+                ));
+                return ProfileImportResult {
+                    outcome: ProfileImportOutcome::Rejected,
+                    profile: None,
+                    message: error.to_string(),
+                };
+            }
         };
         if let (ProfileImportOutcome::Added | ProfileImportOutcome::Replaced, Some(imported)) =
             (result.outcome, &result.profile)

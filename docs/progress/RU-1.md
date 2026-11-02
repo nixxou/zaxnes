@@ -12,8 +12,8 @@ V2-27 of `dotnetupdated` are read as a reference only.
 | 3 | Profiles layer: `Ver` in the header, sanitised version text, `obsolete`, inspect/apply split | done — `5030db6` |
 | 4 | AMD-053 favourites, search, "Favorites first" order (`zax-profiles`, `library.json` v2) | done — `bc46821` |
 | 5 | AMD-053 resume point (`resume` store, exit write, start-up offer) | done — `032638a` |
-| 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | done |
-| 7 | AMD-056 import dialogs, desktop frontend, both languages | todo |
+| 6 | AMD-053 command line: `-slot=<n>`, `-noresume`, `-emustats` and `--` aliases | done — `b789322` |
+| 7 | AMD-056 import dialogs, desktop frontend, both languages | done |
 | 8 | UI wiring: commands, chooser, console/handheld screens, options | todo |
 | 9 | Closing: fmt, clippy, release tests, Lua API dump, journal | todo |
 
@@ -268,6 +268,31 @@ start-up check reads one file.
   the emulation on a separate core the frame leaves for the thread, so the line says so instead of
   reporting a span the host did not spend.
 
+### Step 7 — the import dialogues of AMD-056 REQ-UI-214
+
+- `ui/profile_import.rs` decides which dialogue a plan calls for, and with what words. It is a
+  pure function of the plan, so the four rows of the table are checked with no window open; the
+  **form** stays free (AMD-056 §3, AMD-010 §4), and only the texts and the buttons are fixed.
+- `LibraryGameCatalog` gained `inspect_profile_import` and `apply_profile_import`;
+  `import_profile` is the two in a row, which is what every non-interactive caller still uses. A
+  write that fails after the confirmation carries the message of its own error, not the third text
+  of REQ-UI-084, which would say nothing true there.
+- The desktop flow: an unknown identifier goes straight through, showing nothing, and the imported
+  entry becomes the chooser's selected one; a refusal and an « Already in Zaxnes » apply the plan
+  at once (that is what logs the fact, REQ-PERS-041) and then report it; a replacement waits for
+  `Replace` and writes nothing before. `Cancel`, or the closing of the dialogue, changes nothing.
+- The dialogue is drawn where the confirmation box of REQ-UI-110 is, last and over everything, and
+  shares `state.dialog`; it is the interface's own, so `sync_confirmation` keeps the flag up for
+  it. The destructive first button is red.
+- Six keys, with their entries in both tables: `button.ok`, `button.replace` and the three
+  title/body pairs. « Replace » names the action, so the French entry is « Remplacer », not the
+  « Oui » of REQ-PERS-042.
+- Tests: the five criteria of REQ-UI-214 one by one, plus the three dialogues in French.
+
+Nothing of this is in a per-frame path: the plan is read when a file is chosen, and the dialogue
+is a value the drawing reads.
+
 ### Next step
 
-Step 7: AMD-056's import dialogs in the desktop frontend, with their strings in both languages.
+Step 8: the UI wiring of AMD-053 — the resume entry, the favourites marker and filter, the search
+field, in the desktop chooser and the console/handheld screens.

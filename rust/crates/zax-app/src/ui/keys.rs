@@ -62,6 +62,29 @@ pub const BUTTON_RESET_BINDINGS: &str = "button.reset_bindings";
 pub const BUTTON_STOP_BINDING: &str = "button.stop_binding";
 pub const BUTTON_YES: &str = "button.yes";
 pub const BUTTON_NO: &str = "button.no";
+/// The lone button of the two one-button dialogues of AMD-056 REQ-UI-214.
+pub const BUTTON_OK: &str = "button.ok";
+/// The destructive button of the replacement confirmation of REQ-UI-214. The French entry is
+/// **not** the « Oui » of REQ-PERS-042: the amendment names the action.
+pub const BUTTON_REPLACE: &str = "button.replace";
+
+// ------------------- the three import dialogues of AMD-056 REQ-UI-214, whose English entries the
+//                     amendment's table fixes word for word. An accepted import has no text at
+//                     all: it shows neither notification nor dialogue, which is why the
+//                     « Profile imported: … » of REQ-UI-212 is not in this table.
+
+/// Title of the refusal dialogue: a cause of the table of REQ-UI-212.
+pub const DIALOG_IMPORT_REFUSED_TITLE: &str = "dialog.import_refused.title";
+/// Its body: the file name, a colon, and the text of the cause (REQ-UI-084).
+pub const DIALOG_IMPORT_REFUSED_BODY: &str = "dialog.import_refused.body";
+/// Title of the dialogue of a file carrying the identifier of a built-in profile.
+pub const DIALOG_IMPORT_BUILT_IN_TITLE: &str = "dialog.import_built_in.title";
+/// Its body: the title of the file, and the file name that was not imported.
+pub const DIALOG_IMPORT_BUILT_IN_BODY: &str = "dialog.import_built_in.body";
+/// Title of the replacement confirmation: the displayed name of the entry.
+pub const DIALOG_IMPORT_REPLACE_TITLE: &str = "dialog.import_replace.title";
+/// Its body: what is replaced, and what is kept.
+pub const DIALOG_IMPORT_REPLACE_BODY: &str = "dialog.import_replace.body";
 
 // ------------------- notifications of SPEC-10 §3.10, whose English text the spec fixes
 pub const NOTIFY_ROLL_BACK: &str = "notify.roll_back";
@@ -442,6 +465,14 @@ pub const PUBLISHED: &[&str] = &[
     BUTTON_STOP_BINDING,
     BUTTON_YES,
     BUTTON_NO,
+    BUTTON_OK,
+    BUTTON_REPLACE,
+    DIALOG_IMPORT_REFUSED_TITLE,
+    DIALOG_IMPORT_REFUSED_BODY,
+    DIALOG_IMPORT_BUILT_IN_TITLE,
+    DIALOG_IMPORT_BUILT_IN_BODY,
+    DIALOG_IMPORT_REPLACE_TITLE,
+    DIALOG_IMPORT_REPLACE_BODY,
     NOTIFY_ROLL_BACK,
     NOTIFY_FAST_FORWARD,
     NOTIFY_QUICK_SAVE,

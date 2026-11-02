@@ -17,7 +17,7 @@ mod overlay;
 use std::path::{Path, PathBuf};
 
 use zax_platform::input::{GamepadHub, Key};
-use zax_profiles::catalogue::ProfileImportOutcome;
+use zax_profiles::catalogue::{ProfileImportOutcome, ProfileImportPlan};
 
 use super::commands::UiCommand;
 use super::confirm_dialog::ConfirmationView;
@@ -29,6 +29,7 @@ use super::menu_shortcuts::{self, ShortcutCommand, ShortcutModifiers};
 use super::notifications;
 use super::options::{OptionsModel, OptionsTab};
 use super::profile_chooser::ProfileChooserModel;
+use super::profile_import::{self, ProfileImportDialog};
 use super::state::UiState;
 use super::strings;
 use super::text;
@@ -150,6 +151,9 @@ pub struct ZaxUi {
     folder_editing: bool,
     /// The RetroAchievements sign-in fields of the options.
     sign_in: super::achievements_view::SignInForm,
+    /// The import dialogue of AMD-056 REQ-UI-214 while it is up, with the plan its first button
+    /// would carry out. A refusal and an « Already in Zaxnes » carry a plan that writes nothing.
+    import_dialog: Option<(ProfileImportPlan, ProfileImportDialog)>,
 }
 
 /// The band at the top of the window that reveals the hidden menu bar before it was ever drawn.
@@ -195,6 +199,7 @@ impl ZaxUi {
             sign_in: super::achievements_view::SignInForm::default(),
             held_keys: Vec::new(),
             effects: Vec::new(),
+            import_dialog: None,
         }
     }
 
@@ -312,9 +317,15 @@ impl ZaxUi {
         if self.state.achievements {
             self.draw_achievement_list(ui, frame.host);
         }
-        // REQ-UI-110: the confirmation box is drawn last, so it sits over everything else.
+        // REQ-UI-110: the confirmation box is drawn last, so it sits over everything else. The
+        // import dialogue of AMD-056 REQ-UI-214 belongs to the interface, not to the host, and
+        // shares the same flag.
         if self.state.dialog {
-            self.draw_confirm_dialog(ui, frame.host);
+            if self.import_dialog().is_some() {
+                self.draw_import_dialog(ui, frame.host);
+            } else {
+                self.draw_confirm_dialog(ui, frame.host);
+            }
         }
         // REQ-UI-206: the OSD is the one layer full screen keeps.
         Self::draw_notification(ui, frame.host, NOTIFICATION_MARGIN);
@@ -489,9 +500,10 @@ impl ZaxUi {
         input.edit(|_, _, session| session.close());
     }
 
-    /// Keeps the dialogue flag in step with the question the host is asking.
+    /// Keeps the dialogue flag in step with the question the host is asking. The import dialogue
+    /// of AMD-056 REQ-UI-214 is the interface's own, so it keeps the flag up on its own account.
     pub fn sync_confirmation(&mut self, host: &AppHost) {
-        self.state.dialog = host.pending_confirmation().is_some();
+        self.state.dialog = host.pending_confirmation().is_some() || self.import_dialog.is_some();
     }
 
     /// Adds a line to the console log, through the effects.
@@ -654,24 +666,88 @@ impl ZaxUi {
         }
     }
 
+    /// « Importer un profil… » answered with `path` (AMD-056 REQ-UI-214): the file is read and
+    /// **nothing is written yet**. An unknown identifier goes straight through and shows nothing;
+    /// the three other outcomes put up their dialogue, and only `Replace` writes.
     fn import_profile(&mut self, host: &mut AppHost, path: &str) {
-        let result = host.games_mut().import_profile(Path::new(path));
-        if !result.message.is_empty() {
-            // REQ-UI-084: an import failure is a notification of normal severity.
-            host.notifications.show_normal(&result.message);
-            return;
-        }
-        if matches!(
-            result.outcome,
-            ProfileImportOutcome::Added | ProfileImportOutcome::Replaced
-        ) {
-            if let Some(profile) = result.profile {
-                self.log(format!("profile '{}' imported.", profile.title));
-                play(host, UiSound::Confirm);
-                // The chooser is rebuilt from the library, so a new profile shows up at once.
-                self.rebuild_chooser(host);
+        let plan = host.games().inspect_profile_import(Path::new(path));
+        match profile_import::decide(&plan) {
+            // Row 4: a new identifier. The import goes through, with neither notification nor
+            // dialogue, and the imported entry becomes the selected one.
+            None => self.apply_profile_import(host, &plan),
+            Some(dialog) if dialog.needs_confirmation() => {
+                // Row 3: nothing happens until `Replace` is pressed.
+                self.import_dialog = Some((plan, dialog));
+                self.state.dialog = true;
+            }
+            Some(dialog) => {
+                // Rows 1 and 2: the plan writes nothing, so it is applied now — which is what
+                // logs the fact (REQ-PERS-041) — and the dialogue only reports it.
+                self.apply_profile_import(host, &plan);
+                self.import_dialog = Some((plan, dialog));
+                self.state.dialog = true;
             }
         }
+    }
+
+    /// Carries the plan out and, on success, shows the imported entry (REQ-UI-214: « l'entrée
+    /// importée DEVRAIT devenir l'entrée sélectionnée de la boîte de sélection »). A write that
+    /// fails after the confirmation replaces the dialogue with the refusal one, carrying the
+    /// message of its own error.
+    fn apply_profile_import(&mut self, host: &mut AppHost, plan: &ProfileImportPlan) {
+        let result = host.games_mut().apply_profile_import(plan);
+        if result.outcome == ProfileImportOutcome::Rejected && plan.writes() {
+            let name = plan
+                .source_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            self.import_dialog = Some((
+                plan.clone(),
+                profile_import::refused(&name, &result.message),
+            ));
+            self.state.dialog = true;
+            return;
+        }
+        if let (ProfileImportOutcome::Added | ProfileImportOutcome::Replaced, Some(profile)) =
+            (result.outcome, &result.profile)
+        {
+            self.log(format!("profile '{}' imported.", profile.title));
+            play(host, UiSound::Confirm);
+            // The chooser is rebuilt from the library, so a new profile shows up at once.
+            self.rebuild_chooser(host);
+            self.chooser.selected_id = Some(profile.id.clone());
+        }
+    }
+
+    /// The import dialogue of REQ-UI-214 while it is up.
+    #[must_use]
+    pub fn import_dialog(&self) -> Option<&ProfileImportDialog> {
+        self.import_dialog.as_ref().map(|(_, dialog)| dialog)
+    }
+
+    /// The first button of the import dialogue: it carries the import out when the dialogue is
+    /// the replacement confirmation, and only acknowledges otherwise.
+    pub fn confirm_import_dialog(&mut self, host: &mut AppHost) {
+        let Some((plan, dialog)) = self.import_dialog.take() else {
+            return;
+        };
+        self.state.dialog = false;
+        if dialog.needs_confirmation() {
+            self.apply_profile_import(host, &plan);
+        }
+    }
+
+    /// `Cancel`, or the closing of the dialogue: nothing changes (REQ-UI-214).
+    pub fn cancel_import_dialog(&mut self) {
+        self.import_dialog = None;
+        self.state.dialog = false;
+    }
+
+    /// « Importer un profil… » answered with `path`, as the file browser answers it: what a test
+    /// drives to reach the dialogues of REQ-UI-214 without a window.
+    pub fn choose_profile_to_import(&mut self, host: &mut AppHost, path: &str) {
+        self.import_profile(host, path);
     }
 
     fn rebuild_chooser(&mut self, host: &AppHost) {

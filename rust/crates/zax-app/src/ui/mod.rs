@@ -21,6 +21,7 @@ pub mod notifications;
 pub mod options;
 pub mod platform;
 pub mod profile_chooser;
+pub mod profile_import;
 pub mod shots;
 pub mod state;
 pub mod strings;
