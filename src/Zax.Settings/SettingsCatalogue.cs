@@ -472,6 +472,26 @@ public static class SettingsCatalogue
             ],
         });
 
+        // AMD-059 REQ-LUA-116: the multisampling count a 2.0 script writes, right after the
+        // anti-aliasing line it does *not* replace. It has no interface and no libretro value —
+        // only a script reaches it, and only to be handed back what it wrote. The three values
+        // are the ones the normalisation of REQ-LUA-116 lands on; the Lua write normalises
+        // before it reaches the model, so the domain's own rule never has to fire.
+        list.Add(new SettingDescriptor(
+            SettingKeys.VideoMsaa20,
+            SettingKind.Int,
+            SettingValue.OfInt(2),
+            SettingScope.User,
+            SettingEffect.None,
+            SettingTheme.Video)
+        {
+            Domain = SettingDomain.Choice(
+                new SettingOption(0d, "0"),
+                new SettingOption(2d, "2"),
+                new SettingOption(4d, "4")),
+            LuaPath = "Msaa",
+        });
+
         list.Add(new SettingDescriptor(
             SettingKeys.RenderMeshAlgo,
             SettingKind.Enum,
@@ -1336,6 +1356,21 @@ public static class SettingsCatalogue
             // The default size is the one of SPEC-10; −1 for the position means "let the
             // platform place the window" (REQ-PERS-067).
         });
+
+        // AMD-059 REQ-LUA-116: the library view a 2.0 script writes. Zaxnes has a single
+        // library layout (SPEC-10), so the value is kept exactly as written — the domain
+        // accepts anything — and nothing reads it. No interface, no libretro value.
+        list.Add(new SettingDescriptor(
+            SettingKeys.UiLibraryView,
+            SettingKind.Int,
+            SettingValue.OfInt(0),
+            SettingScope.User,
+            SettingEffect.None,
+            SettingTheme.Interface)
+        {
+            Domain = SettingDomain.Unbounded,
+            LuaPath = "LibraryView",
+        });
     }
 
     /// <summary>The volume discretisation of §4.6: 0 to 100 % in steps of 5.</summary>
@@ -1405,6 +1440,27 @@ public static class SettingsCatalogue
         {
             LuaPath = "ControlMethod",
             ProfileField = "16",
+        });
+
+        // AMD-059 REQ-LUA-116: the headset refresh rate a 2.0 script writes. Without virtual
+        // reality it has no effect at all, which is why it sits among the VR lines; the rule
+        // that brings 3dSen 2.0 back to 90 when a screen effect is on is not taken over
+        // <b>(D)</b>. The nearest-rung normalisation of REQ-LUA-116 is not one the catalogue
+        // can express, so it happens on the Lua write and the model only ever sees 72, 90
+        // or 120.
+        list.Add(new SettingDescriptor(
+            SettingKeys.VrRefreshRate,
+            SettingKind.Int,
+            SettingValue.OfInt(90),
+            SettingScope.User,
+            SettingEffect.None,
+            SettingTheme.Vr)
+        {
+            Domain = SettingDomain.Choice(
+                new SettingOption(72d, "72"),
+                new SettingOption(90d, "90"),
+                new SettingOption(120d, "120")),
+            LuaPath = "RefreshRate",
         });
 
         list.Add(new SettingDescriptor(

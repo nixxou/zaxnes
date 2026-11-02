@@ -43,6 +43,14 @@ public static class SettingKeys
     /// <summary>Full-screen anti-aliasing.</summary>
     public const string VideoAntiAlias = "video.anti_alias";
 
+    /// <summary>
+    /// The multisampling count a 2.0 script writes through <c>Setting.Msaa</c>, 0, 2 or 4
+    /// (AMD-059 REQ-LUA-116). It is kept and handed back, and nothing else: the anti-aliasing
+    /// of Zaxnes stays <see cref="VideoAntiAlias"/> (AMD-032), which a script must not change
+    /// behind the user's back <b>(D)</b>.
+    /// </summary>
+    public const string VideoMsaa20 = "video.msaa_2_0";
+
     /// <summary>Default mesh algorithm.</summary>
     public const string RenderMeshAlgo = "render.mesh_algo";
 
@@ -307,6 +315,12 @@ public static class SettingKeys
     /// <summary>Window position and size in windowed mode.</summary>
     public const string UiWindowRect = "ui.window_rect";
 
+    /// <summary>
+    /// The library view a 2.0 script writes through <c>Setting.LibraryView</c>, kept exactly as
+    /// written (AMD-059 REQ-LUA-116). Zaxnes has a single library layout, so it has no effect.
+    /// </summary>
+    public const string UiLibraryView = "ui.library_view";
+
     // §4.1.10 VR, editor, movie, internal and derived
 
     /// <summary>VR runtime; always 0 on desktop.</summary>
@@ -320,6 +334,13 @@ public static class SettingKeys
 
     /// <summary>Stored, without effect.</summary>
     public const string VrControlMethod = "vr.control_method";
+
+    /// <summary>
+    /// The headset refresh rate a 2.0 script writes through <c>Setting.RefreshRate</c>, 72, 90
+    /// or 120 (AMD-059 REQ-LUA-116). Zaxnes has no virtual reality, so it is kept and handed
+    /// back without effect.
+    /// </summary>
+    public const string VrRefreshRate = "vr.refresh_rate";
 
     /// <summary>Editor selection mode; no effect.</summary>
     public const string EditorSelectionMode = "editor.selection_mode";

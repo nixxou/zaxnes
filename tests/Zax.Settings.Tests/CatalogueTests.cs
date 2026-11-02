@@ -71,6 +71,12 @@ public sealed class CatalogueTests
                 SettingKeys.RenderStyleSsrClarity,
                 SettingKeys.RenderStyleSsrLength,
                 SettingKeys.RenderStyleSsrQuality,
+
+                // AMD-059 §2 (REQ-LUA-116) adds three lines to §4.1, of scope U and without
+                // any interface: what the 2.0 members of Setting hand back.
+                SettingKeys.UiLibraryView,
+                SettingKeys.VrRefreshRate,
+                SettingKeys.VideoMsaa20,
             }.Order(),
             model.Except(specified).Order());
     }
