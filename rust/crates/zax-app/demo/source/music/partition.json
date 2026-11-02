@@ -1,0 +1,790 @@
+{
+  "title": "Saut de puce",
+  "bpm": 136,
+  "beats_per_bar": 4,
+  "steps_per_beat": 4,
+  "bars": 8,
+  "loop_steps": 128,
+  "loop_seconds": 14.117647058823529,
+  "channels": {
+    "pulse1": {
+      "duty": 0.25,
+      "role": "melodie"
+    },
+    "pulse2": {
+      "duty": 0.25,
+      "role": "accompagnement"
+    },
+    "triangle": {
+      "role": "basse"
+    },
+    "noise": {
+      "role": "percussion"
+    },
+    "dpcm": {
+      "used": false
+    }
+  },
+  "events": [
+    {
+      "channel": "pulse1",
+      "start_step": 0,
+      "duration_steps": 2.55,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 0,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 3,
+      "duration_steps": 2.55,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 4,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 4,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 6,
+      "duration_steps": 2.8,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 6,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 8,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 10,
+      "duration_steps": 1.55,
+      "midi": 72,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 12,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 12,
+      "duration_steps": 2.8,
+      "midi": 74,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 12,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 14,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 16,
+      "duration_steps": 2.55,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 16,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 19,
+      "duration_steps": 2.55,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 20,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 20,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 22,
+      "duration_steps": 2.8,
+      "midi": 84,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 22,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 24,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 26,
+      "duration_steps": 1.55,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 28,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 28,
+      "duration_steps": 2.8,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 28,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 30,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 32,
+      "duration_steps": 2.55,
+      "midi": 77,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 32,
+      "duration_steps": 2.3,
+      "midi": 41,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 35,
+      "duration_steps": 2.55,
+      "midi": 81,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 36,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 36,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 38,
+      "duration_steps": 2.8,
+      "midi": 77,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 38,
+      "duration_steps": 1.25,
+      "midi": 57,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 40,
+      "duration_steps": 2.3,
+      "midi": 41,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 42,
+      "duration_steps": 1.55,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 44,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 44,
+      "duration_steps": 2.8,
+      "midi": 72,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 44,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 46,
+      "duration_steps": 1.25,
+      "midi": 57,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 48,
+      "duration_steps": 2.55,
+      "midi": 74,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 48,
+      "duration_steps": 2.3,
+      "midi": 43,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 51,
+      "duration_steps": 2.55,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 52,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 52,
+      "duration_steps": 2.3,
+      "midi": 50,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 54,
+      "duration_steps": 2.8,
+      "midi": 77,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 54,
+      "duration_steps": 1.25,
+      "midi": 59,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 56,
+      "duration_steps": 2.3,
+      "midi": 43,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 58,
+      "duration_steps": 1.55,
+      "midi": 74,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 60,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 60,
+      "duration_steps": 2.8,
+      "midi": 71,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 60,
+      "duration_steps": 2.3,
+      "midi": 50,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 62,
+      "duration_steps": 1.25,
+      "midi": 59,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 64,
+      "duration_steps": 2.55,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 64,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 67,
+      "duration_steps": 2.55,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 68,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 68,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 70,
+      "duration_steps": 2.8,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 70,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 72,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 74,
+      "duration_steps": 1.55,
+      "midi": 72,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 76,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 76,
+      "duration_steps": 2.8,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 76,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 78,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 80,
+      "duration_steps": 2.55,
+      "midi": 84,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 80,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 83,
+      "duration_steps": 2.55,
+      "midi": 83,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 84,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 84,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 86,
+      "duration_steps": 2.8,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 86,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 88,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 90,
+      "duration_steps": 1.55,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 92,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 92,
+      "duration_steps": 2.8,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 92,
+      "duration_steps": 2.3,
+      "midi": 55,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 94,
+      "duration_steps": 1.25,
+      "midi": 64,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 96,
+      "duration_steps": 2.55,
+      "midi": 81,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 96,
+      "duration_steps": 2.3,
+      "midi": 41,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 99,
+      "duration_steps": 2.55,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 100,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 100,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 102,
+      "duration_steps": 2.8,
+      "midi": 77,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 102,
+      "duration_steps": 1.25,
+      "midi": 57,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 104,
+      "duration_steps": 2.3,
+      "midi": 41,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 106,
+      "duration_steps": 1.55,
+      "midi": 76,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 108,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 108,
+      "duration_steps": 2.8,
+      "midi": 72,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 108,
+      "duration_steps": 2.3,
+      "midi": 48,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 110,
+      "duration_steps": 1.25,
+      "midi": 57,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 112,
+      "duration_steps": 2.55,
+      "midi": 74,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 112,
+      "duration_steps": 2.3,
+      "midi": 43,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 115,
+      "duration_steps": 2.55,
+      "midi": 71,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 116,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "triangle",
+      "start_step": 116,
+      "duration_steps": 2.3,
+      "midi": 50,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 118,
+      "duration_steps": 2.8,
+      "midi": 74,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 118,
+      "duration_steps": 1.25,
+      "midi": 59,
+      "preview_gain": 0.028
+    },
+    {
+      "channel": "triangle",
+      "start_step": 120,
+      "duration_steps": 2.3,
+      "midi": 43,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 122,
+      "duration_steps": 1.55,
+      "midi": 79,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "noise",
+      "start_step": 124,
+      "duration_seconds": 0.045,
+      "preview_gain": 0.04,
+      "noise_mode": 0,
+      "preview_noise_shift_every_samples": 12,
+      "preview_sample_rate": 44100
+    },
+    {
+      "channel": "pulse1",
+      "start_step": 124,
+      "duration_steps": 2.8,
+      "midi": 71,
+      "preview_gain": 0.12
+    },
+    {
+      "channel": "triangle",
+      "start_step": 124,
+      "duration_steps": 2.3,
+      "midi": 50,
+      "preview_gain": 0.16
+    },
+    {
+      "channel": "pulse2",
+      "start_step": 126,
+      "duration_steps": 1.25,
+      "midi": 59,
+      "preview_gain": 0.028
+    }
+  ]
+}

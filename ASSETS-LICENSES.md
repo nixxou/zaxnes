@@ -62,7 +62,7 @@ profil 3D, écrit pour ce projet (aucun fichier de 3dSen) :
 
 | | |
 |---|---|
-| **ROM** | `rust/crates/zax-app/demo/FlappyZaxNes.nes`, assemblée avec cc65 depuis les sources du jeu (dépôt `flappy-src`, GPL-3.0 comme l'original) |
+| **ROM** | `rust/crates/zax-app/demo/FlappyZaxNes.nes`, assemblée avec cc65 depuis les sources du jeu, GPL-3.0 comme l'original, livrées dans `rust/crates/zax-app/demo/source/` (voir `demo/README.md`) |
 | **Profil 3D** | `rust/crates/zax-app/demo/flappyzaxnes.3dn`, produit par `zax-harness profile-build` depuis la description qu'écrit `flappy-src/tools/profile3d.py` |
 
 Les deux fichiers sont **inclus dans l'exécutable** (`rust/crates/zax-app/src/demo_game.rs`) et

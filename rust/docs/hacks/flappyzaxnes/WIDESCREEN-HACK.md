@@ -16,7 +16,7 @@ scroll, so the extension shows the margins from the nametables as they are.
 
 | | |
 |---|---|
-| Source ROM | *FlappyZaxNes*, NROM-256 (mapper 0), 32 KiB PRG, 8 KiB CHR, vertical mirroring; built with cc65 from the game's sources (`flappy-src`) |
+| Source ROM | *FlappyZaxNes*, NROM-256 (mapper 0), 32 KiB PRG, 8 KiB CHR, vertical mirroring; built with cc65 from the game's sources (`rust/crates/zax-app/demo/source`) |
 | Source data (iNES header excluded) | CRC-32 `08270EB8` |
 | Pack | `rust/crates/zax-nes/patches/flappyzaxnes-widescreen.zxpk` (438 bytes, 256 of code), format 2, NTSC, mapper 0 |
 | Zaxnes declaration | `builtin_patches.rs`: `FLAPPYZAXNES`, `advanced: false` (the simple mode applies it: the ROM is not otherwise widened), `boot_zone: true`, `zone_data: true`, `idle_loop: Some((0x85AB, 0x85AD))` (the game's wait for the NMI, `LDA NMIReady / BEQ`) |
