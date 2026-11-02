@@ -9,8 +9,8 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 
 | # | Step | Status |
 |---|---|---|
-| 1 | Map: what exists, where each requirement goes, the "before" measurements | in progress |
-| 2 | REQ-SCN-078: the style reaches the renderer, the lazy resource lifecycle, the zero assertions | todo |
+| 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `a9216ce` |
+| 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | in progress |
 | 3 | REQ-SCN-080: base lighting and the order of passes | todo |
 | 4 | REQ-SCN-081: the voxel grid | todo |
 | 5 | REQ-SCN-082: the pixel shadows | todo |
@@ -146,3 +146,86 @@ embedded)` for both stages and both contexts, and writes each result to
 is the preprocessing test of step 2, which asserts that **none** of the identifiers the Enhanced
 effects bring in reaches the compiler in any Classic variant — the shape
 `req_scn_067_the_flat_variant_carries_nothing_of_the_curvature` established.
+
+### Step 2 — the style reaches the renderer, and the three zeros
+
+**The resource lifecycle moved to step 3 and the step was renamed.** Step 2 as the brief sketched
+it bundled "the lazy resource lifecycle" with the style selection, but the only resources the
+style needs are the screen passes' targets, and *where* they are allocated is the order clause of
+REQ-SCN-080 — step 3's subject. Splitting them keeps both steps small, which is what this lot's
+protocol is for; nothing is dropped, and step 3 carries the lifecycle with the order it belongs
+to.
+
+#### `zax-render/src/style.rs` (new), the normative quantities in one place
+
+Platform-free, like `color::backdrop_linear` of AMD-049: every number AMD-055 derives from a
+parameter is written once, unit-tested without a GL context, and read where it is needed.
+
+| Item | Requirement |
+|---|---|
+| `StyleSettings`, twelve fields + `enhanced` | REQ-SCN-079's table, with its defaults |
+| `StyleSettings::style_of`, `identifier` | REQ-SCN-078: 4 and 1 in, 4 out, everything else Classic |
+| `voxel_grid_active`, `pixel_shadow_active`, `ao_active`, `reflections_active` | the four predicates the renderer tests once a frame |
+| `screen_effects_active` | the predicate the brief's point 2 rests on |
+| `voxel_cell` | `N = 2^spl.voxel_grid` (REQ-SCN-081) |
+| `ao_radius_units`, `ao_ceiling` | 8/14/20/26/32 units; `min(0,95 ; 0,3 × strength)` (REQ-SCN-083 v1.4) |
+| `ao_samples`, `ao_half_resolution` | 6/10/16; half except High |
+| `ssr_intensity`, `ssr_max_length`, `ssr_blur_fraction` | `0,045 × n`; `40 × n`; `0,003 × (10 − n)` (REQ-SCN-084 v1.5) |
+| `ssr_steps`, `ssr_refinements`, `ssr_half_resolution` | 12/24/48/48; 2/3/5/5; half except Ultra |
+
+**There is no style uniform, and that is the design.** Classic and Enhanced-with-everything-off
+have to be the same picture *and the same cost*, so the switch cannot be a uniform a fragment
+tests: the effects are shader variants (steps 4 and 5) and passes that do not run (steps 6 and
+7), and the predicates above are what decides, once a frame.
+
+Every published figure of the amendment reproduces, first run — the five radii, the five ceilings
+including the two top rungs that share 0.95, the three `ssr.*` tables and the "16 pixels at
+1080p" the amendment prints beside the default blur (0.015 × 1080 = 16.2).
+
+#### The wiring, and where the thirteen lookups are paid
+
+`RenderSettings::style` carries the value; `scene_script_bridge::style_of` builds it and
+`is_style_setting` routes a change to it. **Thirteen model lookups is more than any frame path
+should do**, so they are paid exactly where AMD-043's three sines and cosines are paid: in
+`apply_setting`, once per change, and in `push_settings` at a profile load. The renderer then
+reads the ready-made value and tests four booleans.
+
+The curvature is deliberately **not** read there: REQ-SCN-078 keeps it outside the style (reading
+A, §3 point 4), so `bend_of` stays its only home and a change of style cannot lose a curvature
+setting — which a test asserts over the styles 4, 0, 1 and 7.
+
+#### The three zeros, observable from outside
+
+`RenderStatistics` gained `style_programs`, `screen_effect_bytes` and `screen_effect_passes`.
+They are **0 in Classic and 0 in Enhanced until an effect is turned on**, which is the brief's
+points 1 and 2 stated as counters rather than as a frame time. The first two are resident counts,
+so `begin_frame` leaves them alone; the pass count is per frame.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| REQ-SCN-078 on the **setting**: 4 → 4, 1 → 4, 0/2/7/−1/5 → 0 | `zax-app/tests/amd055_style_setting_tests.rs` `req_scn_078_the_style_identifier_round_trips` |
+| the style and the twelve reach the scene on a change and on the wholesale push; Classic keeps every parameter | `req_scn_078_the_style_and_its_parameters_reach_the_scene_when_they_change` |
+| §3 point 4: a change of style keeps the curvature | `req_scn_078_a_change_of_style_keeps_the_curvature` |
+| REQ-SCN-079 first criterion: `ao.strength` 9 → 5, 1,4 → 1, 0 → 1; `spl.voxel_grid` 4 → 3; `spl.ao` 1,4 → 1; the thirteen across a restart | `req_scn_079_the_parameters_are_bounded_snapped_and_persisted` |
+| a settings **file** of 1 reads back 4, of 7 reads back 0 | `req_scn_078_a_settings_file_of_one_reads_back_four` |
+| REQ-SCN-080: Enhanced with every effect off is the Classic picture, **at tolerance 0** | `zax-render/tests/amd055_style_tests.rs` `req_scn_080_enhanced_with_every_effect_off_is_the_classic_picture` |
+| the three zeros, and the same draws, triangles, meshes and casters | `req_scn_080_enhanced_with_every_effect_off_allocates_and_submits_nothing` |
+| Classic with every parameter turned up is the Classic picture, and still zero | `req_scn_078_classic_with_every_parameter_turned_up_is_the_classic_picture` |
+| §3 point 4 on the GPU: a bent scene draws the same in both styles, and 60° does change it | `req_scn_078_the_curvature_acts_in_both_styles` |
+| the twelve defaults, the four predicates, and every derived quantity | 9 unit tests in `style.rs` |
+
+The picture test asserts **tolerance 0**, not the ±2 sRGB levels REQ-SCN-080 allows: the same
+program draws the frame with the same uniforms, so anything but an exact match would mean
+something new is running.
+
+`cargo test --release -p zax-render`: **220 passed, 0 failed**. `-p zax-app --test
+amd055_style_setting_tests`: 5 passed. fmt and workspace clippy clean.
+
+**The 80 assembled shader sources are byte identical to step 1's**, all 80, which is the belt on
+"no shader changed in this step".
+
+*(The dump helper of step 1 is recreated in `crates/zax-render/tests/dump_sources_tmp.rs` while
+the lot runs and is **not committed**; it returns immediately without `ZAX_DUMP_DIR`. Whoever
+resumes will see it as an untracked file beside the untracked `tests/` folder of the .NET tree.)*

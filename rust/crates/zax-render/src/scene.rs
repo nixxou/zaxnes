@@ -12,6 +12,7 @@ use crate::camera::SceneCamera;
 use crate::geometry::{self, VisibleRect};
 use crate::numerics::Vector3;
 use crate::sky::SkyBodySettings;
+use crate::style::StyleSettings;
 
 /// Skybox setting, stored as an integer (SPEC-06 REQ-SCN-049).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -62,6 +63,14 @@ pub struct RenderSettings {
     /// the largest surface of the scene, and where REQ-SCN-048's own diffuse term — the priority
     /// clause T-1 of AMD-049 keeps it valid — costs nothing.
     pub backdrop_lighting: bool,
+    /// The visual style of AMD-055 REQ-SCN-078 and its twelve parameters (`render.visual_style`
+    /// and the twelve `render.style.*`), as the host pushes them when one of them changes.
+    ///
+    /// Classic with every parameter at its REQ-SCN-079 default is the default on every target,
+    /// and is the state in which this amendment changes no pixel and costs nothing: the renderer
+    /// tests the four predicates of [`StyleSettings`] once a frame and compiles no variant and
+    /// allocates no target for an effect that is off.
+    pub style: StyleSettings,
 }
 
 impl Default for RenderSettings {
@@ -80,6 +89,7 @@ impl Default for RenderSettings {
             skip_render: true,
             cull_back_faces: true,
             backdrop_lighting: true,
+            style: StyleSettings::default(),
         }
     }
 }

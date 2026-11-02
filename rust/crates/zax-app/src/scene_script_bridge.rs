@@ -10,6 +10,7 @@ use zax_engine3d::vectors::Vec3;
 use zax_profiles::values::Vec4F;
 use zax_render::camera::{CameraMode, SceneCamera};
 use zax_render::scene::{BackdropState, SceneState, SkyboxKind};
+use zax_render::style::{AmbientOcclusion, StyleSettings};
 use zax_scripting::{LuaColor, ScriptBackdrop, ScriptCamera, ScriptLog};
 use zax_settings::catalogue::SettingId;
 use zax_settings::model::SettingsModel;
@@ -201,6 +202,59 @@ pub fn bend_of(model: &SettingsModel) -> SpaceBend {
     )
 }
 
+/// The visual style of AMD-055 REQ-SCN-078 and its twelve parameters of REQ-SCN-079.
+///
+/// Read **only** when the style or one of the twelve changes, never per frame, per tile or per
+/// pixel (SPEC-09 §4.1: scope U, effect immediate). Thirteen model lookups is more than a frame
+/// path should ever do, and the renderer needs none of them again: it keeps the value and tests
+/// four predicates.
+///
+/// The four curvature parameters are **not** read here. REQ-SCN-078 keeps the curvature outside
+/// the style — it acts in Classic as in Enhanced **(D)** — so they stay with `bend_of`, and a
+/// change of style cannot lose a curvature setting (AMD-055 §3 point 4).
+#[must_use]
+pub fn style_of(model: &SettingsModel) -> StyleSettings {
+    let level = |id: SettingId| model.get(id).as_int();
+    StyleSettings {
+        // REQ-SCN-078: 4 and the accepted 1 are Enhanced; 0 and every other value, including one
+        // that comes from the settings file, are Classic.
+        enhanced: StyleSettings::style_of(level(SettingId::RenderVisualStyle)),
+        ao: AmbientOcclusion::of(level(SettingId::RenderStyleAo)),
+        ao_strength: level(SettingId::RenderStyleAoStrength),
+        ao_radius: level(SettingId::RenderStyleAoRadius),
+        ao_thickness: level(SettingId::RenderStyleAoThickness),
+        ao_quality: level(SettingId::RenderStyleAoQuality),
+        pixel_shadow: level(SettingId::RenderStylePixelShadow) != 0,
+        voxel_grid: level(SettingId::RenderStyleVoxelGrid),
+        reflections: level(SettingId::RenderStyleReflections) != 0,
+        ssr_shine: level(SettingId::RenderStyleSsrShine),
+        ssr_clarity: level(SettingId::RenderStyleSsrClarity),
+        ssr_length: level(SettingId::RenderStyleSsrLength),
+        ssr_quality: level(SettingId::RenderStyleSsrQuality),
+    }
+}
+
+/// Whether `id` is the style or one of its twelve parameters, so that a write reaches the scene
+/// at the next rendered frame (REQ-SCN-078: "sans recharger le jeu").
+const fn is_style_setting(id: SettingId) -> bool {
+    matches!(
+        id,
+        SettingId::RenderVisualStyle
+            | SettingId::RenderStyleAo
+            | SettingId::RenderStyleAoStrength
+            | SettingId::RenderStyleAoRadius
+            | SettingId::RenderStyleAoThickness
+            | SettingId::RenderStyleAoQuality
+            | SettingId::RenderStylePixelShadow
+            | SettingId::RenderStyleVoxelGrid
+            | SettingId::RenderStyleReflections
+            | SettingId::RenderStyleSsrShine
+            | SettingId::RenderStyleSsrClarity
+            | SettingId::RenderStyleSsrLength
+            | SettingId::RenderStyleSsrQuality
+    )
+}
+
 /// Pushes the profile's settings into the scene: the field of view, the shadows, the skybox,
 /// the background, the clipping, the curvature and the light (SPEC-09 REQ-PERS-005).
 pub fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
@@ -217,6 +271,7 @@ pub fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
     scene.bend = bend_of(model);
     scene.bend_two_dimensional_mode = model.get(SettingId::SceneBend2dMode).as_bool();
     scene.settings.backdrop_lighting = model.get(SettingId::RenderBackdropLighting).as_bool();
+    scene.settings.style = style_of(model);
     push_light(model, scene);
 }
 
@@ -263,6 +318,10 @@ pub fn apply_setting(id: SettingId, model: &SettingsModel, scene: &mut SceneStat
         SettingId::RenderBackdropLighting => {
             scene.settings.backdrop_lighting = model.get(id).as_bool();
         }
+        // AMD-055 REQ-SCN-078: the style and its twelve parameters apply to the next rendered
+        // frame, without reloading the game. The thirteen model lookups are paid here, on a
+        // change, and never on a frame path.
+        _ if is_style_setting(id) => scene.settings.style = style_of(model),
         // Every other setting is held in the session layer and read from there.
         _ => {}
     }

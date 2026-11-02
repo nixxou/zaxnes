@@ -59,6 +59,22 @@ pub struct RenderStatistics {
     /// Opaque tiles turned transparent this frame because they hide the followed shape
     /// (REQ-SCN-022).
     pub occluders: u32,
+    /// Screen-space passes of AMD-055 REQ-SCN-080 submitted for this frame — the reflections of
+    /// REQ-SCN-084 and the occlusion of REQ-SCN-083, with their blurs.
+    ///
+    /// **0 is the requirement**: in Classic, and in Enhanced with `spl.ao` = 0 and
+    /// `spl.reflections` = 0 (the defaults of REQ-SCN-079), no pass runs at all, which is what
+    /// makes Enhanced cost what Classic costs. Reported so that it is observable from outside the
+    /// renderer rather than inferred from a frame time.
+    pub screen_effect_passes: u32,
+    /// Bytes the targets of those two passes occupy — colour, depth and the blur targets of
+    /// REQ-SCN-083 and REQ-SCN-084. **0 in Classic**, where none of them is allocated; back to 0
+    /// when the style returns to Classic and they are released.
+    pub screen_effect_bytes: u64,
+    /// Shader programs AMD-055 added to the ones the renderer was created with: the variants of
+    /// the voxel grid (REQ-SCN-081) and of the pixel shadows (REQ-SCN-082), and the programs of
+    /// the two screen passes. **0 in Classic**, and 0 in Enhanced until an effect is turned on.
+    pub style_programs: u32,
     /// CPU time of the collection of the tiles into the buckets (Rust-only, for the frame
     /// profiler).
     pub collect_time: Duration,
@@ -90,6 +106,9 @@ impl Default for RenderStatistics {
             anti_alias_samples: 1,
             centroid_interpolation: false,
             occluders: 0,
+            screen_effect_passes: 0,
+            screen_effect_bytes: 0,
+            style_programs: 0,
             collect_time: Duration::ZERO,
             gpu_time: None,
         }
@@ -112,6 +131,7 @@ impl RenderStatistics {
         self.anti_alias_samples = 1;
         self.centroid_interpolation = false;
         self.occluders = 0;
+        self.screen_effect_passes = 0;
         self.gpu_time = None;
         self.collect_time = Duration::ZERO;
     }
