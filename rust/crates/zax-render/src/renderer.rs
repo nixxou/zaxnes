@@ -169,8 +169,15 @@ pub struct SceneRenderer {
     /// of `interop::unit_box`, so the vertex count of the default settings is unchanged.
     unit_box_bent: Option<Arc<TileMesh>>,
     picture_quad: Arc<TileMesh>,
+    /// The rectangle of the 2D mode cut into 32 × 32 cells (AMD-046 REQ-SCN-074), built the
+    /// first time it has to bend. At curvature 0, or with "Bend 2D Mode" off, the rectangle
+    /// stays the single quad of `interop::picture_quad`.
+    picture_quad_bent: Option<Arc<TileMesh>>,
     /// The quad of the last widescreen 2D-mode picture, by margin.
     wide_picture_quad: Option<interop::WidePictureQuad>,
+    /// The subdivision `wide_picture_quad` was built for, so a change of the curvature rebuilds
+    /// it (the margin alone no longer tells the two apart).
+    wide_picture_cells: u16,
     plan: FramePlan<GpuMesh, Texture>,
     passes: Passes,
     last_view: CameraView,
@@ -266,7 +273,9 @@ impl SceneRenderer {
             unit_box: Arc::new(interop::unit_box()?),
             unit_box_bent: None,
             picture_quad: Arc::new(interop::picture_quad()?),
+            picture_quad_bent: None,
             wide_picture_quad: None,
+            wide_picture_cells: 1,
             plan: FramePlan::default(),
             last_view: CameraView::default(),
             group_opaque: false,
@@ -362,9 +371,19 @@ impl SceneRenderer {
             textures: &mut self.textures,
             picture: &mut self.picture,
         };
-        self.wide_picture_quad = interop::wide_quad_for(
+        // AMD-046 REQ-SCN-074: the rectangle of the 2D mode is subdivided while it bends, and
+        // only then. `select_bend_variant` has already folded the setting in, so in 2D mode this
+        // flag *is* "the rectangle bends".
+        let bend_rectangle = self.passes.scene.bend;
+        let cells = interop::subdivision_for(bend_rectangle);
+        if cells != self.wide_picture_cells {
+            self.wide_picture_quad = None;
+            self.wide_picture_cells = cells;
+        }
+        self.wide_picture_quad = interop::wide_quad_for_subdivided_cached(
             frame.nes_picture,
             frame.nes_picture_height,
+            cells,
             self.wide_picture_quad.take(),
         )?;
         let fixed = FixedMeshes {
@@ -373,7 +392,10 @@ impl SceneRenderer {
                 Some(subdivided) if self.passes.scene.bend => subdivided,
                 _ => &self.unit_box,
             },
-            picture_quad: &self.picture_quad,
+            picture_quad: match &self.picture_quad_bent {
+                Some(subdivided) if bend_rectangle => subdivided,
+                _ => &self.picture_quad,
+            },
             wide_picture_quad: self.wide_picture_quad.as_ref().map(|(_, quad)| quad),
         };
         let collected = self
@@ -402,18 +424,27 @@ impl SceneRenderer {
     }
 
     /// Picks the shader variant the frame's curvature asks for (REQ-SCN-067), building the
-    /// curvature programs the first time one is needed.
+    /// curvature programs and the subdivided meshes the first time one is needed.
     ///
     /// At curvature 0 — the default of all four settings of REQ-SCN-066 — this leaves the
-    /// renderer exactly as AMD-043 found it: the flat pair stays in use and the curvature
-    /// programs are never compiled.
+    /// renderer exactly as AMD-043 found it: the flat pair stays in use, the curvature programs
+    /// are never compiled and the two fixed meshes keep their shape.
+    ///
+    /// In **2D mode** the frame holds one object, the rectangle of AMD-046 §2 (the backdrop of
+    /// REQ-SCN-048 is not collected there), so "Bend 2D Mode" turned off is simply the flat
+    /// variant for the whole frame — which is REQ-SCN-074's "la position de chaque sommet du
+    /// rectangle DOIT être sa position plate, quels que soient les réglages de REQ-SCN-066". In
+    /// 3D mode the setting has no effect at all, as the same requirement asks.
     ///
     /// # Errors
     ///
-    /// [`RenderError::Gl`] when a curvature program does not compile or link. The flat programs
-    /// stay in use, so the frame is drawn without the curvature rather than not at all.
+    /// [`RenderError::Gl`] when a curvature program does not compile or link, or
+    /// [`RenderError::Mesh`] when a subdivided mesh is malformed. The flat programs stay in use,
+    /// so the frame is drawn without the curvature rather than not at all.
     fn select_bend_variant(&mut self, scene: &SceneState) -> Result<(), RenderError> {
-        if scene.bend.is_identity() {
+        let wanted = !scene.bend.is_identity()
+            && (!scene.two_dimensional_mode || scene.bend_two_dimensional_mode);
+        if !wanted {
             self.passes.scene.bend = false;
             return Ok(());
         }
@@ -423,12 +454,15 @@ impl SceneRenderer {
             self.passes.shadow_bent =
                 Some(ShaderProgram::create(&self.gl, &shaders::shadow(true))?);
         }
+        let cells = interop::subdivision_for(true);
         if self.unit_box_bent.is_none() {
             // REQ-SCN-068: a plane large enough to curve visibly is subdivided, the backdrop
             // into at least 32 × 32 cells per face.
-            self.unit_box_bent = Some(Arc::new(interop::unit_box_subdivided(
-                interop::subdivision_for(true),
-            )?));
+            self.unit_box_bent = Some(Arc::new(interop::unit_box_subdivided(cells)?));
+        }
+        if self.picture_quad_bent.is_none() && scene.two_dimensional_mode {
+            // REQ-SCN-074: at least 32 × 32 cells, so at least a 33 × 33 grid of vertices.
+            self.picture_quad_bent = Some(Arc::new(interop::picture_quad_subdivided(0, 0, cells)?));
         }
         self.passes.scene.bend = true;
         Ok(())

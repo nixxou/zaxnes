@@ -117,6 +117,9 @@ setting_ids! {
     SceneBendTb => "scene.bend_tb",
     SceneArcH => "scene.arc_h",
     SceneArcCenter => "scene.arc_center",
+    // AMD-046 REQ-SCN-074, a setting of Zaxnes's own (divergence D): no Lua access, the
+    // original program has none.
+    SceneBend2dMode => "scene.bend_2d_mode",
     ClipLeft => "clip.left",
     ClipBottom => "clip.bottom",
     ClipRight => "clip.right",

@@ -55,7 +55,12 @@ pub fn objects(
     frame: &SceneFrame<'_>,
     view: &CameraView,
 ) -> Vec<ExportedObject> {
-    let cells = crate::interop::subdivision_for(!scene.bend.is_identity());
+    // The same rule the renderer's `select_bend_variant` applies: in 2D mode the frame holds the
+    // rectangle alone, so the setting of REQ-SCN-074 decides for the whole frame; in 3D mode it
+    // has no effect and the HUD alone stays flat.
+    let bends = !scene.bend.is_identity()
+        && (!scene.two_dimensional_mode || scene.bend_two_dimensional_mode);
+    let cells = crate::interop::subdivision_for(bends);
     let (Ok(unit_box), Ok(picture_quad)) = (
         crate::interop::unit_box_subdivided(cells),
         crate::interop::picture_quad_subdivided(0, 0, cells),
@@ -83,10 +88,6 @@ pub fn objects(
     // does; an error would leave the lists as they are, which is an empty export.
     let _ = plan.collect(&mut residency, fixed, scene, frame, view);
 
-    // REQ-SCN-074: the rectangle of the 2D mode follows the setting, the rest of the scene
-    // always follows the curvature.
-    let bend_rectangle = scene.bend_two_dimensional_mode;
-    let two_dimensional = scene.two_dimensional_mode;
     let mut exported = Vec::new();
     for (hud, items) in [
         (false, &plan.lists.opaque),
@@ -97,12 +98,14 @@ pub fn objects(
             let Some(mesh) = residency.meshes.get(item.mesh) else {
                 continue;
             };
-            // The 2D-mode rectangle is the only item of the opaque bucket in 2D mode, and the
-            // backdrop of REQ-SCN-048 keeps bending whatever the setting says (REQ-SCN-074).
-            let rectangle = two_dimensional && !hud && item.color_mode == 1;
-            let bent = !hud && (!rectangle || bend_rectangle) && !scene.bend.is_identity();
+            // REQ-SCN-068: the HUD is the plane attached to the camera and stays flat.
             exported.push(export_one(
-                mesh, item.model, scene.bend, hud, bent, item.clip,
+                mesh,
+                item.model,
+                scene.bend,
+                hud,
+                bends && !hud,
+                item.clip,
             ));
         }
     }

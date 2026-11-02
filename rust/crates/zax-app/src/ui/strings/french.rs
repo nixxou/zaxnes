@@ -245,6 +245,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.light.intensity", "Intensité lumineuse"),
     ("setting.scene.skybox", "Fond (skybox)"),
     ("setting.scene.custom_bg_color", "Couleur de fond"),
+    // AMD-046 §3, réglage propre à Zaxnes : l'image plate du mode 2D suit la courbure
+    // d'AMD-043 sauf si on le désactive.
+    ("setting.scene.bend_2d_mode", "Courber le mode 2D"),
     ("setting.emu.game_speed", "Vitesse de jeu"),
     ("setting.emu.auto_tv_mode", "Région détectée automatiquement"),
     ("setting.emu.catch_up", "Rattrapage en cas de retard (frames)"),

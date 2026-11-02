@@ -552,10 +552,15 @@ fn scene(out: &mut Vec<SettingDescriptor>) {
         .with_lua("MapEnable")
         .with_field("5"),
     );
-    // The four curvature settings of AMD-043 REQ-SCN-066. They are the style parameters
-    // `spl.bend_zx`, `spl.bend_zy`, `spl.arc_yx` and `spl.arc_center` of REQ-LUA-114, so they
-    // carry the step the rounding of AMD-040 §3 uses. The curving of the scene itself is the
-    // AMD-043 lot's; until then they are left out of the options window.
+    curvature(out);
+}
+
+/// The five curvature settings of the "Geometry" group: the four angles of AMD-043 REQ-SCN-066
+/// and the "Bend 2D Mode" switch of AMD-046 REQ-SCN-074.
+fn curvature(out: &mut Vec<SettingDescriptor>) {
+    // The four of AMD-043 REQ-SCN-066. They are the style parameters `spl.bend_zx`,
+    // `spl.bend_zy`, `spl.arc_yx` and `spl.arc_center` of REQ-LUA-114, so they carry the step
+    // the rounding of AMD-040 §3 uses.
     for (id, minimum, maximum, step, label) in [
         (
             SettingId::SceneBendLr,
@@ -587,6 +592,22 @@ fn scene(out: &mut Vec<SettingDescriptor>) {
             .with_label(label),
         );
     }
+    // AMD-046 REQ-SCN-074: the rectangle of the 2D mode bends like the game scene, which is what
+    // the original program does, and this setting is how Zaxnes lets a player keep it flat — a
+    // flat screen seen in 3D being a reasonable use of the 2D mode (divergence **(D)**, the
+    // original has no such setting and so no Lua access to it either).
+    out.push(
+        SettingDescriptor::new(
+            SettingId::SceneBend2dMode,
+            SettingKind::Bool,
+            SettingValue::Bool(true),
+            SettingScope::User,
+            SettingEffect::Immediate,
+            SettingTheme::Scene,
+        )
+        .with_domain(Domain::switch())
+        .with_label("Bend 2D Mode"),
+    );
 }
 
 fn clipping(out: &mut Vec<SettingDescriptor>) {

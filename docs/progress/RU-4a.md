@@ -13,8 +13,8 @@ are a reading reference only.
 | 1 | Map: what exists, where each requirement goes, the spec copies | done — `dffafa3` |
 | 2 | AMD-047: the four margins accept any finite real (REQ-PERS-087), Q-080's grid guard | done — `5703fed` |
 | 3 | AMD-043 §3: `SpaceBend` — B, its inverse, its Jacobian, the 13 vectors | done — `c17dfb5` |
-| 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | done — `<pending>` |
-| 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | todo |
+| 4 | AMD-043 §3: the shader **variants**, the renderer wiring, the subdivisions | done — `a697da0` |
+| 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | done — `<pending>` |
 | 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | todo |
 | 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | todo |
 | 8 | The settings: desktop options, handheld defaults and page, harness options | todo |
@@ -327,6 +327,76 @@ non-silent three ways: a `// Q-104` note at the exact line of `wgpu_backend/rend
 `constants.bend` is not read, a test that **asserts the known gap** so a half-done parity fails
 loudly (`q_104_the_wgpu_backend_carries_nothing_of_the_curvature_yet`, under the `wgpu` feature),
 and this entry.
+
+### Step 5 — AMD-046, the 2D rectangle, and the settings reaching the scene
+
+**The finding that made this step small.** In 2D mode `FramePlan::collect` returns as soon as the
+rectangle is collected, **before** the backdrop: the rectangle is the only object of a 2D-mode
+frame. So "Bend 2D Mode" turned off needs no per-item flag at all — it is the flat variant for
+the whole frame, which is REQ-SCN-074's "la position de chaque sommet du rectangle DOIT être sa
+position plate, quels que soient les réglages de REQ-SCN-066" exactly. `select_bend_variant`
+folds the setting in:
+
+    let wanted = !scene.bend.is_identity()
+        && (!scene.two_dimensional_mode || scene.bend_two_dimensional_mode);
+
+which also gives "en mode 3D, le réglage n'a aucun effet" for free.
+
+AMD-046 §2's clause "si un backdrop est présent, il reste soumis à REQ-SCN-068, que le réglage
+soit actif ou non" is therefore **moot in Zaxnes**: the backdrop is not drawn in 2D mode at all,
+which is AMD-009's reading and predates this lot. Nothing was changed there.
+
+| Piece | Where |
+|---|---|
+| `scene.bend_2d_mode`, bool, U, immediate, default true, no Lua | `zax-settings/src/catalogue.rs`, `table.rs` (new `curvature()` builder, which also holds the four angles) |
+| the label, both languages | `ui/strings/english.rs`, `french.rs` (`setting.scene.bend_2d_mode`) |
+| the rectangle subdivided to 32 × 32 while it bends | `interop::picture_quad_subdivided`, `wide_quad_for_subdivided_cached` |
+| the five settings read **on change** | `zax-app/src/scene_script_bridge.rs` `bend_of`, `push_settings`, `apply_setting` |
+
+**Where the settings are read is the performance point.** `bend_of` evaluates three sines, three
+cosines and three divisions. It runs in `apply_setting`, the one path the host takes when a
+setting changes, and in `push_settings` at a profile load — never per frame, per tile or per
+pixel. The renderer then reads the ready-made `SpaceBend` and tests `is_identity`.
+
+The widescreen quad cache gained the subdivision in its key (`wide_picture_cells`): the margin
+alone no longer tells two quads apart now that the same margin can be a quad or a 33 × 33 grid.
+
+#### Tests
+
+`zax-render/tests/bend_two_dimensional_tests.rs` (5), the criteria of REQ-SCN-074 one by one:
+
+| Criterion | Test |
+|---|---|
+| setting on: every vertex within 0.05 of `B(P)`, at least 1089 **distinct** vertices | `req_scn_074_the_rectangle_bends_and_is_subdivided_when_the_setting_is_on` |
+| setting off: every vertex in `z = 0` at its flat position to 10⁻³, over three curvatures | `req_scn_074_the_rectangle_stays_flat_when_the_setting_is_off` |
+| the visible NES rows are the same either way (the order clause) | `req_scn_074_the_visible_rows_do_not_depend_on_the_setting` |
+| 3D mode: toggling the setting moves no vertex, with and without a curvature | `req_scn_074_the_setting_has_no_effect_in_three_dimensional_mode` |
+| on the GPU: one draw call either way, 2 triangles flat → 2048 bent → 2 again with the setting off, and the picture with the setting off is **pixel-identical** to no curvature at all | `req_scn_074_the_setting_decides_the_picture_and_the_mesh` |
+
+`zax-app/tests/bend_settings_tests.rs` (5): the default is the identity on both platforms; a
+write of 45 reads 60 **and** the scene gets the curvature of 60 (checked against vector 2 of
+REQ-SCN-067); a change of each of the five reaches the scene through `apply_setting` and back to
+the identity; the five survive a restart through the real `SettingsStore`; and the switch has no
+Lua access at all — neither a `lua_path` nor a style parameter.
+
+`ui/handheld/defaults.rs` gained the assertions the brief asks for: the four angles are 0 on a
+handheld **and** on the desktop, and `scene.bend_2d_mode` keeps the spec default on both. Nothing
+is overridden for a handheld, because at 0 nothing is compiled and nothing is subdivided.
+
+One existing test turned up the omission the moment the setting existed:
+`ui_language_tests.rs` `amd_035_every_command_and_every_shown_setting_has_a_label` failed until
+the label was in both tables — which is the check working as intended.
+
+`zax-render` 158 → **163 passed**, `zax-app` 649 → **654**, `zax-settings` 229 passed, fmt and
+workspace clippy clean.
+
+#### SPEC chapter edits
+
+- `SPEC-06` §3.15bis (new): REQ-SCN-066, REQ-SCN-067 (the four steps of B) and REQ-SCN-068
+  written out, with the amendment to REQ-SCN-028 on the transported normal.
+- `SPEC-06` §3.16: the definition of the 2D-mode rectangle and REQ-SCN-074.
+- `SPEC-09` §4.1.4: the `scene.bend_2d_mode` row, and the four curvature rows' effect column now
+  points at REQ-SCN-067 instead of saying the effect is a later lot's.
 
 ### Open questions
 

@@ -54,6 +54,8 @@ scene.bend_lr
 scene.bend_tb
 scene.arc_h
 scene.arc_center
+# AMD-046 REQ-SCN-074, a setting of Zaxnes's own (divergence D).
+scene.bend_2d_mode
 clip.left
 clip.bottom
 clip.right

@@ -5,6 +5,7 @@
 //! of one call into the scripts; see `GameSession`.
 
 use zax_engine3d::palette::Rgb24;
+use zax_engine3d::space_bend::SpaceBend;
 use zax_engine3d::vectors::Vec3;
 use zax_profiles::values::Vec4F;
 use zax_render::camera::{CameraMode, SceneCamera};
@@ -180,8 +181,28 @@ fn push_light(model: &SettingsModel, scene: &mut SceneState) {
         .set_light_intensity(model.get(SettingId::LightIntensity).as_float());
 }
 
+/// The curvature of AMD-043 REQ-SCN-067, built from the four settings of REQ-SCN-066.
+///
+/// Read **only** when one of the five curvature settings changes, never per frame, per tile or
+/// per pixel: `SpaceBend::new` evaluates three sines and three cosines, which belongs nowhere
+/// near a frame path. At the default settings every angle is 0 and the result is the identity,
+/// which the renderer recognises in one test.
+#[must_use]
+pub fn bend_of(model: &SettingsModel) -> SpaceBend {
+    #[allow(clippy::cast_precision_loss)] // Thirteen rungs from −180 to 180.
+    let degrees = |id: SettingId| model.get(id).as_int() as f32;
+    SpaceBend::new(
+        degrees(SettingId::SceneBendLr),
+        degrees(SettingId::SceneBendTb),
+        degrees(SettingId::SceneArcH),
+        model.get(SettingId::SceneArcCenter).as_int() != 0,
+        // The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of.
+        1.0,
+    )
+}
+
 /// Pushes the profile's settings into the scene: the field of view, the shadows, the skybox,
-/// the background, the clipping and the light (SPEC-09 REQ-PERS-005).
+/// the background, the clipping, the curvature and the light (SPEC-09 REQ-PERS-005).
 pub fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
     let fov = model.get(SettingId::CameraFov).as_float();
     scene.settings.fov = fov;
@@ -193,6 +214,8 @@ pub fn push_settings(model: &SettingsModel, scene: &mut SceneState) {
     scene.settings.custom_background_color = color_of(model, SettingId::SceneCustomBgColor);
     scene.use_nes_background_color = model.get(SettingId::SceneUseNesBgColor).as_bool();
     scene.clipping = clipping_of(model);
+    scene.bend = bend_of(model);
+    scene.bend_two_dimensional_mode = model.get(SettingId::SceneBend2dMode).as_bool();
     push_light(model, scene);
 }
 
@@ -221,6 +244,17 @@ pub fn apply_setting(id: SettingId, model: &SettingsModel, scene: &mut SceneStat
             // The clip margins frame the camera and cut the tiles (REQ-E3D-410), so a Lua write
             // has to reach the scene at the next frame (REQ-PERS-007).
             scene.clipping = clipping_of(model);
+        }
+        // AMD-043 REQ-SCN-066: the four curvature settings apply hot, from the next rendered
+        // frame. The three sines and cosines of `SpaceBend::new` are paid here, on a change,
+        // and never again.
+        SettingId::SceneBendLr
+        | SettingId::SceneBendTb
+        | SettingId::SceneArcH
+        | SettingId::SceneArcCenter => scene.bend = bend_of(model),
+        // AMD-046 REQ-SCN-074: likewise, and without effect in 3D mode.
+        SettingId::SceneBend2dMode => {
+            scene.bend_two_dimensional_mode = model.get(id).as_bool();
         }
         // Every other setting is held in the session layer and read from there.
         _ => {}

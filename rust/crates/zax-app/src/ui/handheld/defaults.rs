@@ -86,8 +86,26 @@ mod tests {
         assert_eq!(90, model.get(SettingId::VrRefreshRate).as_int());
         assert_eq!(0, model.get(SettingId::UiLibraryView).as_int());
         assert_eq!(0, model.get(SettingId::RenderVisualStyle).as_int());
-        assert_eq!(0, model.get(SettingId::SceneBendLr).as_int());
         assert_eq!(3, model.get(SettingId::RenderStyleAoStrength).as_int());
+        // AMD-043 REQ-SCN-066: the four curvature settings are 0 on a handheld as on the
+        // desktop, which is their own default. At 0 the curvature costs nothing anywhere — no
+        // shader variant is compiled, no surface is subdivided — so there is nothing to turn off
+        // here; the lot's own measurements are in `docs/PERFORMANCE-HISTORY.md`.
+        for id in [
+            SettingId::SceneBendLr,
+            SettingId::SceneBendTb,
+            SettingId::SceneArcH,
+            SettingId::SceneArcCenter,
+        ] {
+            assert_eq!(0, model.get(id).as_int(), "{id:?}");
+            assert_eq!(0, SettingsModel::new().get(id).as_int(), "{id:?} desktop");
+        }
+        // AMD-046 REQ-SCN-074 keeps its own default on both platforms: the rectangle of the 2D
+        // mode bends with the scene, and a handheld only pays for it while a curvature is set.
+        assert!(model.get(SettingId::SceneBend2dMode).as_bool());
+        assert!(SettingsModel::new()
+            .get(SettingId::SceneBend2dMode)
+            .as_bool());
     }
 
     #[test]

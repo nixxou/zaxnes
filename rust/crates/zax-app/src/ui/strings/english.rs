@@ -245,6 +245,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.light.intensity", "Light intensity"),
     ("setting.scene.skybox", "Background (skybox)"),
     ("setting.scene.custom_bg_color", "Background colour"),
+    // AMD-046 §3, a setting of Zaxnes's own: the flat picture of the 2D mode follows the
+    // curvature of AMD-043 unless this is turned off.
+    ("setting.scene.bend_2d_mode", "Bend 2D Mode"),
     ("setting.emu.game_speed", "Game speed"),
     ("setting.emu.auto_tv_mode", "Region detected automatically"),
     ("setting.emu.tv_mode", "Video region"),

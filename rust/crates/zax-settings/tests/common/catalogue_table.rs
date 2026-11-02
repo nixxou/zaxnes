@@ -198,6 +198,8 @@ fn camera_to_layer_rows() -> Vec<CatalogueRow> {
         row("scene.bend_tb", None, Whole, "0", U, Imm),
         row("scene.arc_h", None, Whole, "0", U, Imm),
         row("scene.arc_center", None, Whole, "0", U, Imm),
+        // AMD-046 REQ-SCN-074: no Lua access, the original program has no such setting.
+        row("scene.bend_2d_mode", None, Flag, "true", U, Imm),
         // §4.1.5 Clipping: index 0 left, 1 bottom, 2 right, 3 top (DEC-R2-T1)
         row("clip.left", Some("Clipping[0]"), Real, "0.1", P, Imm),
         row("clip.bottom", Some("Clipping[1]"), Real, "8.1", P, Imm),

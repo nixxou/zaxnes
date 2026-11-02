@@ -1,0 +1,161 @@
+//! The five curvature settings from the model to the scene: AMD-043 REQ-SCN-066 (the four
+//! angles, their rounding and their persistence) and AMD-046 REQ-SCN-074 (the "Bend 2D Mode"
+//! switch), read **when they change** and never per frame.
+#![allow(clippy::expect_used, clippy::unwrap_used)] // test code
+
+mod common;
+
+use common::TemporaryRoot;
+use time::OffsetDateTime;
+use zax_app::persistence::settings_store::SettingsStore;
+use zax_app::scene_script_bridge::{self, bend_of};
+use zax_app::user_data_paths::UserDataPaths;
+use zax_engine3d::space_bend::SpaceBend;
+use zax_engine3d::vectors::Vec3;
+use zax_render::scene::SceneState;
+use zax_settings::catalogue::SettingId;
+use zax_settings::model::SettingsModel;
+use zax_settings::values::SettingValue;
+
+fn at(seconds: i64) -> OffsetDateTime {
+    OffsetDateTime::from_unix_timestamp(seconds).unwrap()
+}
+
+/// REQ-SCN-066: the four settings default to 0, so the curvature of a fresh model is the
+/// identity — which is what makes it free (the renderer tests `is_identity` once per frame).
+#[test]
+fn req_scn_066_the_default_curvature_is_the_identity() {
+    let model = SettingsModel::new();
+    assert!(bend_of(&model).is_identity());
+    assert_eq!(SpaceBend::NONE, bend_of(&model));
+
+    let mut scene = SceneState::default();
+    assert!(
+        scene.bend.is_identity(),
+        "and so is the scene's own default"
+    );
+    assert!(
+        scene.bend_two_dimensional_mode,
+        "REQ-SCN-074 is on by default"
+    );
+    scene_script_bridge::push_settings(&model, &mut scene);
+    assert!(scene.bend.is_identity());
+    assert!(scene.bend_two_dimensional_mode);
+}
+
+/// REQ-SCN-066, acceptance criterion: writing 45 in Bend Left-Right gives 60 (the rounding of
+/// AMD-040 §3, which the setting's stepped domain applies), and the curvature the scene receives
+/// is the one of the **rounded** value.
+#[test]
+fn req_scn_066_writing_45_gives_60_and_the_scene_gets_that_curvature() {
+    let mut model = SettingsModel::new();
+    model.set(SettingId::SceneBendLr, SettingValue::Int(45));
+    assert_eq!(60, model.get(SettingId::SceneBendLr).as_int());
+
+    let mut scene = SceneState::default();
+    scene_script_bridge::push_settings(&model, &mut scene);
+    assert_eq!(SpaceBend::new(60.0, 0.0, 0.0, false, 1.0), scene.bend);
+
+    // The vector of REQ-SCN-067 for (60, 0, 0, middle) and P = (256, 120, 0).
+    let image = scene.bend.apply(Vec3::new(256.0, 120.0, 0.0));
+    assert!((image.x - 251.64).abs() <= 0.05, "x {}", image.x);
+    assert!((image.z - 24.70).abs() <= 0.05, "z {}", image.z);
+}
+
+/// REQ-SCN-066 and REQ-SCN-074: a change of any of the five settings reaches the scene through
+/// `apply_setting`, which is the one path the host takes when a setting changes — never per
+/// frame.
+#[test]
+fn req_scn_066_a_change_of_each_setting_reaches_the_scene() {
+    let mut model = SettingsModel::new();
+    let mut scene = SceneState::default();
+    scene_script_bridge::push_settings(&model, &mut scene);
+
+    for (id, value, expected) in [
+        (
+            SettingId::SceneBendLr,
+            90,
+            SpaceBend::new(90.0, 0.0, 0.0, false, 1.0),
+        ),
+        (
+            SettingId::SceneBendTb,
+            -60,
+            SpaceBend::new(90.0, -60.0, 0.0, false, 1.0),
+        ),
+        (
+            SettingId::SceneArcH,
+            30,
+            SpaceBend::new(90.0, -60.0, 30.0, false, 1.0),
+        ),
+        (
+            SettingId::SceneArcCenter,
+            1,
+            SpaceBend::new(90.0, -60.0, 30.0, true, 1.0),
+        ),
+    ] {
+        model.set(id, SettingValue::Int(value));
+        scene_script_bridge::apply_setting(id, &model, &mut scene);
+        assert_eq!(expected, scene.bend, "{id:?}");
+    }
+
+    model.set(SettingId::SceneBend2dMode, false);
+    scene_script_bridge::apply_setting(SettingId::SceneBend2dMode, &model, &mut scene);
+    assert!(!scene.bend_two_dimensional_mode);
+    model.set(SettingId::SceneBend2dMode, true);
+    scene_script_bridge::apply_setting(SettingId::SceneBend2dMode, &model, &mut scene);
+    assert!(scene.bend_two_dimensional_mode);
+
+    // Back to all zero, and the scene's curvature is the identity again (the settings apply hot,
+    // from the next rendered frame).
+    for id in [
+        SettingId::SceneBendLr,
+        SettingId::SceneBendTb,
+        SettingId::SceneArcH,
+    ] {
+        model.set(id, SettingValue::Int(0));
+        scene_script_bridge::apply_setting(id, &model, &mut scene);
+    }
+    assert!(scene.bend.is_identity());
+}
+
+/// REQ-SCN-066 and REQ-SCN-074, acceptance criterion: the values survive a restart.
+#[test]
+fn req_scn_066_the_five_settings_survive_a_restart() {
+    let folder = TemporaryRoot::new("zax-bend-settings-");
+    let paths = UserDataPaths::resolve(Some(folder.path()), None, None);
+
+    let mut model = SettingsModel::new();
+    model.set(SettingId::SceneBendLr, SettingValue::Int(45));
+    model.set(SettingId::SceneBendTb, SettingValue::Int(-180));
+    model.set(SettingId::SceneArcH, SettingValue::Int(120));
+    model.set(SettingId::SceneArcCenter, SettingValue::Int(1));
+    model.set(SettingId::SceneBend2dMode, false);
+    SettingsStore::new(&paths).save(&model);
+
+    let mut restarted = SettingsModel::new();
+    SettingsStore::new(&paths).load(&mut restarted, at(0));
+    assert_eq!(
+        60,
+        restarted.get(SettingId::SceneBendLr).as_int(),
+        "45 → 60"
+    );
+    assert_eq!(-180, restarted.get(SettingId::SceneBendTb).as_int());
+    assert_eq!(120, restarted.get(SettingId::SceneArcH).as_int());
+    assert_eq!(1, restarted.get(SettingId::SceneArcCenter).as_int());
+    assert!(!restarted.get(SettingId::SceneBend2dMode).as_bool());
+    assert_eq!(bend_of(&model), bend_of(&restarted));
+}
+
+/// REQ-SCN-074 note: the setting has **no Lua access** — the original program has none — so it
+/// is neither a style parameter of REQ-LUA-114 nor a `Setting` member.
+#[test]
+fn req_scn_074_the_setting_has_no_lua_access() {
+    let descriptor = zax_settings::catalogue::descriptor(SettingId::SceneBend2dMode);
+    assert_eq!(None, descriptor.lua_path());
+    for style in [0, 1, 4, 7] {
+        assert_eq!(
+            None,
+            zax_settings::styles::parameter(style, "spl.bend_2d_mode")
+        );
+    }
+}

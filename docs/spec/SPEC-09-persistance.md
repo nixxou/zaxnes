@@ -370,10 +370,11 @@ Légende des colonnes :
 | `scene.use_nes_bg_color` | `BgColor` | 2 | booléen | vrai | — | P (forcé vrai au chargement, REQ-PERS-005) | imm. | — | — | vrai et `Skybox` = −1 → fond = couleur universelle de la palette NES ; sinon `CustomBgColor`, SPEC-06 |
 | `scene.tv_box` | `TVBox` | 35 | entier | 0 | 0 None, 1 TV 1, 2 TV 2, 3 TV 3 | U | imm. | liste « TV Box » | les 4 valeurs | modèle de téléviseur 3D autour de l'image, affiché seulement pendant le jeu, SPEC-06 |
 | `scene.map_enable` | `MapEnable` | 5 | booléen | faux | — | P | — | — | — | sans effet observable (REQ-PERS-017) |
-| `scene.bend_lr` | `GetVisualStyleParameter(4, "spl.bend_zx")` | — | entier (degrés) | 0 | −180 à 180, pas 30 | U | imm. | liste « Bend Left-Right » / « Courbure gauche-droite » | option, 13 valeurs | courbure gauche-droite de la scène (AMD-043 REQ-SCN-066) ; la courbure elle-même est du lot AMD-043 |
+| `scene.bend_lr` | `GetVisualStyleParameter(4, "spl.bend_zx")` | — | entier (degrés) | 0 | −180 à 180, pas 30 | U | imm. | liste « Bend Left-Right » / « Courbure gauche-droite » | option, 13 valeurs | courbure gauche-droite de la scène (AMD-043 REQ-SCN-066, REQ-SCN-067) |
 | `scene.bend_tb` | `… "spl.bend_zy"` | — | entier (degrés) | 0 | idem | U | imm. | liste « Bend Top-Bottom » / « Courbure haut-bas » | option, 13 valeurs | courbure haut-bas (AMD-043 REQ-SCN-066) |
 | `scene.arc_h` | `… "spl.arc_yx"` | — | entier (degrés) | 0 | idem | U | imm. | liste « Arc Horizontal » | option, 13 valeurs | arc horizontal (AMD-043 REQ-SCN-066) |
 | `scene.arc_center` | `… "spl.arc_center"` | — | entier | 0 | 0 ou 1 | U | imm. | liste « Arc Center » | option, 2 valeurs | centre de l'arc : 0 milieu de l'écran, 1 bord bas du cadre (AMD-043 REQ-SCN-066) |
+| `scene.bend_2d_mode` | — | — | booléen | vrai | — | U | imm. | case « Bend 2D Mode » / « Courber le mode 2D », groupe « Géométrie », après « Centre de l'arc » | on/off | courbe le rectangle du mode 2D (AMD-046 REQ-SCN-074) ; sans effet en mode 3D ; pas d'accès Lua (réglage propre à Zaxnes, **(D)**) |
 
 #### 4.1.5 Découpe de l'image (Clipping)
 
