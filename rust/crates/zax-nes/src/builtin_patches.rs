@@ -127,6 +127,8 @@ pub const NG3_USA: &str = "Ninja Gaiden III (USA) widescreen";
 pub const NG3_JAPAN: &str = "Ninja Ryuuken Den III (Japan) widescreen";
 /// Name of the Nova the Squirrel pack (testing aids only, no widescreen yet).
 pub const NOVA_THE_SQUIRREL: &str = "Nova the Squirrel";
+/// Name of the FlappyZaxNes widescreen patch.
+pub const FLAPPYZAXNES: &str = "FlappyZaxNes widescreen";
 /// Name of the Super Mario Bros. 3 (USA) (Rev 1) widescreen patch (advanced mode).
 pub const SMB3_USA: &str = "Super Mario Bros. 3 (USA) (Rev 1) widescreen";
 /// Name of the Super Mario Bros. 3 (Japan) (Rev 1) widescreen patch (advanced mode).
@@ -213,7 +215,7 @@ pub const MEGAMAN6_USA: &str = "Mega Man 6 (USA) widescreen";
 pub const ROCKMAN6_JAPAN: &str = "Rockman 6 (Japan) widescreen";
 
 /// The built-in patches.
-pub const PATCHES: [BuiltinPatch; 56] = [
+pub const PATCHES: [BuiltinPatch; 57] = [
     BuiltinPatch {
         name: ZELDA2_USA,
         game: "Zelda II",
@@ -1454,6 +1456,28 @@ pub const PATCHES: [BuiltinPatch; 56] = [
         zone_data: false,
         // WaitVblank: LDA retraces / CMP retraces / BEQ, until the NMI counts a frame.
         idle_loop: Some((0xDA59, 0xDA5B)),
+    },
+    BuiltinPatch {
+        name: FLAPPYZAXNES,
+        game: "FlappyZaxNes",
+        rom_name: "FlappyZaxNes",
+        source_crc: 0x3704_3776,
+        // Zaxnes' demo game (after Flappy NES by filipemd, GPL-3.0): a hack pack, the game left as
+        // it is; the code in the zone fantôme (widescreen MMC5), two hooks in two groups (the
+        // margin set at the NMI's sprite DMA, the clouds shown in the margins). The game keeps its
+        // 512-pixel world in the nametables, which the margins show: no decoder
+        // (`flappy-src/widescreen`, `build.py`).
+        bps: include_bytes!("../patches/flappyzaxnes-widescreen.zxpk"),
+        options: &[],
+        after_other_way_state: None,
+        advanced: false,
+        boot_window: None,
+        boot_window_keeps_prg_ram: false,
+        boot_zone: true,
+        // Widescreen MMC5: the extension at $3000-$3FFF of the zone fantôme.
+        zone_data: true,
+        // MainLoop: LDA NMIReady / BEQ, until the NMI marks a frame.
+        idle_loop: Some((0x8524, 0x8527)),
     },
 ];
 
