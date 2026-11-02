@@ -11,8 +11,8 @@ Branch `rustupdated`. The application is the Rust workspace `rust/`; the .NET lo
 | 1 | Setup: sources read, requirement map, before benchmarks, amendments copied | done — `831d43f` |
 | 2 | AMD-044: the soft reset of the core, the command, the input action and the menu | done — `cf75778` |
 | 3 | AMD-054: the non-linear mixing, PPU goldens, audio digests refreshed | done — `a2d6d47` |
-| 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | done |
-| 5 | AMD-052: the catch-up limit and the clock reset on a speed change | todo |
+| 4 | AMD-054: the MMC5's two squares and its PCM channel, at no cost for other boards | done — `a4b4b34` |
+| 5 | AMD-052: the catch-up limit and the clock reset on a speed change | done |
 | 6 | AMD-052: the GPU frame queue and the anti-aliasing default | todo |
 | 7 | Closing: fmt, clippy, crate tests, full PPU goldens, after benchmarks, journal | todo |
 
@@ -316,3 +316,56 @@ state still loads with the board silent. One test takes the other side: for mapp
 SPEC copies: REQ-CORE-073 replaced by its amended form and REQ-CORE-076 added in SPEC-02 §3.7,
 REQ-CORE-075 replaced by its amended form, the mapper 5 row of REQ-CORE-100 now reads "audio
 émulé", and Q5 is marked as superseded for the MMC5.
+
+### Step 5 — AMD-052, the cadence
+
+**The two limits are split**, which is the one place this lot departs from the .NET lot. In Rust
+`MAX_BACKLOG` served both as the spec's limit and as the clamp of the Rust-only `emu.catch_up`
+setting, whose handheld default must stay 5. So:
+- `MAX_BACKLOG` = **2** (REQ-LOOP-074, replacing the 5 of REQ-LOOP-012), the pacer's default
+  `max_backlog` and the figure the vectors measure;
+- `MAX_CATCH_UP` = **5**, the largest value `emu.catch_up`, `--catch-up` and `ZAXNES_CATCH_UP`
+  accept, unchanged.
+
+Defaults: `emu.catch_up` becomes **2** on the desktop (`zax-settings/src/table.rs`) and the
+handheld overrides it back to **5** (`ui/handheld/defaults.rs`, now ten entries), as the owner
+decided. The comment there carries the reason from the performance history §5.5 and §7: a limit
+of 2 measured *worse* on the device than both None and 5 once the core had its own thread,
+because the second frame of a pair waits for the emulation thread in series.
+
+REQ-LOOP-075: `FramePacer::reset` counts its calls (`clock_resets`, the instrument Q-087 point 3
+asks for), and `on_setting_changed` resets the clock when `emu.game_speed` changes. The
+fast-forward cycle of REQ-LOOP-016 reaches `apply_speed` without going through
+`on_setting_changed`, so arming, expiring and re-arming a burst leaves the clock alone — which is
+exactly the exclusion the requirement spells out, and the reason for it: a burst of 30 emulated
+frames at x1.5 lasts about 0.33 s, so a hold produces about six state changes a second.
+
+`FramePacer::new` deliberately does **not** go through `reset`: starting the clock is not one of
+the resets REQ-LOOP-013 lists, so the counter begins at 0.
+
+Tests: `zax-app/tests/amd052_cadence_tests.rs`, 6 of them, all passing.
+- REQ-LOOP-074's amended criterion: a 500 ms block at 60 Hz runs **2** frames in a burst, no
+  second burst follows, and the run ends 28 frames short of an unblocked one (measured 28).
+- The amended vector T5: a 1 s block catches **2** frames up and drops 58.
+- REQ-LOOP-075 first criterion: normal → x2 → back, on the clock alone and through the loop
+  (options write, `SpeedDown` shortcut), each change bumping `clock_resets` by exactly one and
+  no tick afterwards running a burst.
+- REQ-LOOP-075 second criterion: the fast-forward hotkey held 5 s → `clock_resets` unchanged,
+  about 450 emulated frames ±5 %, and 95 % of the gaps between consecutive emulated frames
+  inside `1/90 ± 2 ms` during the hold and `1/60 ± 2 ms` after the release.
+- REQ-LOOP-077's setting and its last criterion (600 ± 1 emulated frames over ten seconds of
+  rendered frames at 30 Hz, at most one frame dropped — the reading Q-087 records).
+
+Three existing tests had to follow the new default, each for a reason that is not about this
+amendment: `catch_up_tests` now distinguishes the two constants, `pause_3d_tests` asks for a
+catch-up of 5 because what it measures is what a *multi-frame* catch-up converts, and the
+settings layering test writes 3 rather than 2 because 2 is now the default and writing a default
+records nothing.
+
+`AppSettings::max_queued_frames` / `set_max_queued_frames` were added here, the setting's
+accessor pair; its effect is step 6.
+
+SPEC copies: SPEC-07 §3.2 — REQ-LOOP-012's statement and criterion amended, the `emu.game_speed`
+line added to REQ-LOOP-013, REQ-LOOP-074 and REQ-LOOP-075 added, and the T5 row of §5 rewritten.
+SPEC-09 — the `video.anti_alias` row takes default **1**, REQ-PERS-089 is added after
+REQ-PERS-024, and §4.6 gains the `zaxnes_video_anti_alias` line.

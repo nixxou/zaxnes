@@ -100,6 +100,9 @@ fn hooks_of_a_catch_up(last_3d: bool, due: u32, ahead: bool) -> u32 {
     harness.host.core_ahead = ahead;
     harness.host.update_settings(|model| {
         model.set(SettingId::EmuCatchUpLast3d, SettingValue::Bool(last_3d));
+        // The catch-up of AMD-052 REQ-LOOP-074 stops at 2 frames; this test is about what a
+        // catch-up of several frames converts, so it asks for the limit the handheld uses.
+        model.set(SettingId::EmuCatchUp, SettingValue::Enum(5));
     });
     let before = harness.host.settings().fov();
     let period = 1.0 / harness.host.pacer.effective_rate().max(1.0);

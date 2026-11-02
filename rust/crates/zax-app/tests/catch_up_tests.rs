@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use common::LoopHarness;
 use zax_app::app_options::{parse_catch_up, AppOptions, OptionsError};
-use zax_app::emulation::frame_pacer::{CatchUp, Clock, FramePacer, MAX_BACKLOG};
+use zax_app::emulation::frame_pacer::{CatchUp, Clock, FramePacer, MAX_BACKLOG, MAX_CATCH_UP};
 
 fn manual() -> (Rc<Cell<f64>>, Clock) {
     let now = Rc::new(Cell::new(0.0));
@@ -25,8 +25,9 @@ fn the_setting_drives_the_catch_up_unless_it_is_forced() {
     let mut harness = LoopHarness::create();
     harness.launch("g1");
     harness.tick_frame();
-    // REQ-LOOP-012's five by default.
+    // AMD-052 REQ-LOOP-074's two by default on the desktop.
     assert_eq!(MAX_BACKLOG, harness.tick(0.5));
+    assert_eq!(2, MAX_BACKLOG);
     harness
         .host
         .update_settings(|settings| settings.set(SettingId::EmuCatchUp, SettingValue::Enum(0)));
@@ -39,14 +40,21 @@ fn the_setting_drives_the_catch_up_unless_it_is_forced() {
     harness.host.catch_up = Some(CatchUp::Limit(3));
     assert_eq!(3, harness.tick(0.5));
     assert_eq!(CatchUp::Off, CatchUp::from_setting(0));
-    assert_eq!(CatchUp::Limit(5), CatchUp::from_setting(9));
+    // The setting still reaches 5, which is the handheld default (owner decision), above the
+    // spec's own limit of 2.
+    assert_eq!(CatchUp::Limit(MAX_CATCH_UP), CatchUp::from_setting(9));
+    harness
+        .host
+        .update_settings(|settings| settings.set(SettingId::EmuCatchUp, SettingValue::Enum(5)));
+    harness.host.catch_up = None;
+    assert_eq!(MAX_CATCH_UP, harness.tick(0.5));
 }
 
 #[test]
 fn the_values_of_the_option_are_zero_to_five() {
     assert_eq!(CatchUp::Off, parse_catch_up("0").unwrap());
     assert_eq!(CatchUp::Limit(1), parse_catch_up(" 1 ").unwrap());
-    assert_eq!(CatchUp::Limit(MAX_BACKLOG), parse_catch_up("5").unwrap());
+    assert_eq!(CatchUp::Limit(MAX_CATCH_UP), parse_catch_up("5").unwrap());
     for wrong in ["6", "-1", "two", ""] {
         assert_eq!(
             Err(OptionsError::CatchUp {
@@ -69,9 +77,9 @@ fn without_catch_up_a_displayed_frame_runs_the_frames_it_stands_for() {
     // Fast forward (x1.5) and the fastest speed setting (x2) still get their frames.
     assert_eq!(2, CatchUp::Off.frames_per_display(90.0, 60.0));
     assert_eq!(4, CatchUp::Off.frames_per_display(120.0, 30.0));
-    // Never more than REQ-LOOP-012 allows, and the whole allowance when the display is unknown.
-    assert_eq!(MAX_BACKLOG, CatchUp::Off.frames_per_display(600.0, 60.0));
-    assert_eq!(MAX_BACKLOG, CatchUp::Off.frames_per_display(60.0, 0.0));
+    // Never more than the setting allows, and the whole allowance when the display is unknown.
+    assert_eq!(MAX_CATCH_UP, CatchUp::Off.frames_per_display(600.0, 60.0));
+    assert_eq!(MAX_CATCH_UP, CatchUp::Off.frames_per_display(60.0, 0.0));
     assert_eq!(3, CatchUp::Limit(3).frames_per_display(60.0, 60.0));
 }
 
@@ -97,6 +105,6 @@ fn the_host_applies_the_limit() {
     harness.tick_frame();
     harness.host.catch_up = Some(CatchUp::Off);
     assert_eq!(1, harness.tick(0.5));
-    harness.host.catch_up = Some(CatchUp::Limit(MAX_BACKLOG));
-    assert_eq!(MAX_BACKLOG, harness.tick(0.5));
+    harness.host.catch_up = Some(CatchUp::Limit(MAX_CATCH_UP));
+    assert_eq!(MAX_CATCH_UP, harness.tick(0.5));
 }

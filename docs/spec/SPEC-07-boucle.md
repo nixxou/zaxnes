@@ -87,11 +87,19 @@ Une commande Pause reçue hors de l'état En cours, ou une commande Jouer reçue
 **REQ-LOOP-011** (P1) — L'ordonnancement DOIT viser une granularité d'environ 1 ms : chaque frame est due à l'instant `t0 + n / f` (où `t0` est l'instant de la dernière réinitialisation de l'horloge) et PEUT démarrer jusqu'à 1 ms avant cet instant. L'écart entre deux frames émulées consécutives (hors rattrapage) DEVRAIT rester dans `1/f ± 2 ms`.
 - Critère d'acceptation : histogramme des intervalles entre frames à `k = 1` NTSC → 95 % des intervalles dans [14,6 ms ; 18,6 ms].
 
-**REQ-LOOP-012** (P1) — Rattrapage : si l'émulation prend du retard (frame plus longue que `1/f`, système chargé), le frontend DOIT exécuter les frames en retard à la suite, sans attente, **dans la limite de 5 frames de retard**, comptées en frames émulées : le nombre de frames dues et non encore exécutées ne dépasse jamais 5, chaque frame due correspondant à une période `1/f` calculée avec le facteur `k` courant (avance rapide comprise). Le retard au-delà de 5 frames DOIT être abandonné (le jeu ralentit au lieu d'accélérer brutalement ensuite).
-- Critère d'acceptation : bloquer la boucle 500 ms à 60 Hz → à la reprise, au plus 5 frames sont exécutées en rafale, puis la cadence normale reprend ; le compteur de frames accuse ≈ 25 frames de moins qu'une exécution sans blocage.
+**REQ-LOOP-012** (P1, énoncé et critère amendés par AMD-052 REQ-LOOP-074) — Rattrapage : si l'émulation prend du retard (frame plus longue que `1/f`, système chargé), le frontend DOIT exécuter les frames en retard à la suite, sans attente, **dans la limite de 2 frames de retard**, comptées en frames émulées : le nombre de frames dues et non encore exécutées ne dépasse jamais **2**, chaque frame due correspondant à une période `1/f` calculée avec le facteur `k` courant (avance rapide comprise). Le retard au-delà de **2** frames DOIT être abandonné (le jeu ralentit au lieu d'accélérer brutalement ensuite) et l'horloge de cadence réinitialisée (REQ-LOOP-013) à l'instant présent.
+- Critère d'acceptation : bloquer la boucle 500 ms à 60 Hz → à la reprise, **au plus 2 frames** sont exécutées en rafale, puis la cadence normale reprend ; le compteur de frames accuse **≈ 28 frames** de moins qu'une exécution sans blocage.
+- Notes : la grandeur bornée est exactement le **retard accumulé**, et non un nombre de frames « de rattrapage d'affilée » : les deux lectures diffèrent d'une frame. La réimplémentation offre par ailleurs un réglage `emu.catch_up` (Rust seulement) dont le domaine va jusqu'à 5, le défaut étant 2 sur le bureau et 5 sur les consoles portables (décision du propriétaire).
 
-**REQ-LOOP-013** (P1) — L'horloge de cadence DOIT être réinitialisée (aucun rattrapage du temps écoulé) à chaque passage En pause → En cours, à chaque reset, à la fin de chaque chargement (jeu, savestate, régénération des meshes) et à chaque restauration de rollback.
+**REQ-LOOP-013** (P1) — L'horloge de cadence DOIT être réinitialisée (aucun rattrapage du temps écoulé) à chaque passage En pause → En cours, à chaque reset, à la fin de chaque chargement (jeu, savestate, régénération des meshes), à chaque restauration de rollback et **à chaque modification du réglage `emu.game_speed`** (AMD-052 REQ-LOOP-075). L'avance rapide (REQ-LOOP-016) n'y figure pas.
 - Critère d'acceptation : pause de 10 s puis reprise → la première seconde après reprise contient 60 ± 1 frames (pas de rafale).
+
+**REQ-LOOP-074** (P1, ajoutée par AMD-052) — **Rattrapage limité à 2 frames** : l'énoncé amendé de REQ-LOOP-012 ci-dessus.
+- Critère d'acceptation (vecteur T5 amendé) : blocage de 1 s de la boucle, NTSC → au plus 2 frames rattrapées ; ≈ 58 frames perdues.
+
+**REQ-LOOP-075** (P2, ajoutée par AMD-052) — **Changement de vitesse** : une modification du réglage `emu.game_speed` (REQ-LOOP-015, y compris par les raccourcis ±1) DOIT réinitialiser l'horloge de cadence à l'instant du changement, sans rattrapage. En revanche, l'**armement, l'expiration et le réarmement** d'une avance rapide (REQ-LOOP-016) NE DOIVENT PAS la réinitialiser.
+- Critère d'acceptation : passer de la vitesse normale à ×2 puis revenir ne produit aucune rafale de frames de rattrapage.
+- Critère d'acceptation : NTSC, `s = 0`, maintenir la hotkey d'avance rapide 5 s → le compteur de réinitialisations d'horloge reste inchangé pendant le maintien ; le critère de REQ-LOOP-016 (≈ 450 frames émulées ±5 %) reste vérifié, et l'écart entre deux frames émulées consécutives reste dans `1/f ± 2 ms` avec `f = 90` pendant le maintien, puis avec `f = 60` après le relâchement.
 
 **REQ-LOOP-014** (P2) — Rendu : chaque frame de rendu DOIT afficher le résultat de la dernière frame émulée complètement convertie. Lorsque le réglage « saut de rendu » est actif (défaut : actif) et que l'état est En cours, une frame de rendu pour laquelle aucune nouvelle frame émulée n'est disponible PEUT être omise (l'image précédente reste affichée). La cadence de rendu cible est celle des réglages (synchronisation verticale ou plafond 60/90/120 images/s, SPEC-09/SPEC-10).
 - Critère d'acceptation : rendu plafonné à 120 i/s, jeu NTSC → chaque frame émulée apparaît sur une ou deux frames de rendu consécutives ; aucune frame de rendu ne montre un mélange de deux frames émulées.
@@ -261,7 +269,7 @@ Réglages utilisés (clés et persistance : SPEC-09) : vitesse (entier −8..+8,
 | T2 | s = −4, PAL, 10 s | 250 ± 1 frames |
 | T3 | s = +8, NTSC, 1 s | 180 ± 1 frames |
 | T4 | avance rapide maintenue 1 s, s = 0, NTSC, puis relâchée | ≈ 90 frames pendant la seconde (k = 1,5), puis 0 à 30 frames à ×1,5 après relâchement |
-| T5 | blocage de 1 s de la boucle, NTSC | au plus 5 frames rattrapées ; ≈ 55 frames perdues |
+| T5 | blocage de 1 s de la boucle, NTSC | au plus 2 frames rattrapées ; ≈ 58 frames perdues (AMD-052) |
 | T6 | jeu lancé, 100 frames émulées, rollback | historique {0, 60} avant ; compteur restauré = 0 ; historique après = {0} recapturé à la frame suivante |
 | T7 | pause 30 s puis reprise | aucune rafale ; cadence nominale immédiate |
 | T8 | quick load avec slot rapide vide | aucun effet, aucune notification |

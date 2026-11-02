@@ -819,12 +819,14 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
 /// The emulation settings of the Rust port alone, in their place in the catalogue.
 fn emulation_rust_only(out: &mut Vec<SettingDescriptor>) {
     // Rust-only (owner request): how many emulated frames a displayed frame may run when the
-    // game is late, 0 for none; REQ-LOOP-012's five by default. Not exposed to Lua.
+    // game is late, 0 for none. The default is the 2 of AMD-052 REQ-LOOP-074, which replaces
+    // the 5 REQ-LOOP-012 carried; the domain keeps its five values, the handheld default being
+    // 5 (owner decision, `ui/handheld/defaults.rs`). Not exposed to Lua.
     out.push(
         SettingDescriptor::new(
             SettingId::EmuCatchUp,
             SettingKind::Enum,
-            SettingValue::Enum(5),
+            SettingValue::Enum(2),
             SettingScope::User,
             SettingEffect::Immediate,
             SettingTheme::Emulation,

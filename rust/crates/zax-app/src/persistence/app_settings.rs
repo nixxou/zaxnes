@@ -93,6 +93,9 @@ pub trait AppSettings {
     fn vsync(&self) -> i32;
     /// `video.anti_alias`.
     fn anti_alias(&self) -> i32;
+    /// `video.max_queued_frames`: rendered frames the GPU may keep waiting for display, 1 or 2
+    /// (AMD-052 REQ-LOOP-077).
+    fn max_queued_frames(&self) -> i32;
     /// `video.render_method`.
     fn render_method(&self) -> i32;
     /// `video.res_scale_factor`.
@@ -193,6 +196,10 @@ impl AppSettings for SettingsModel {
         self.get(SettingId::VideoAntiAlias).as_int()
     }
 
+    fn max_queued_frames(&self) -> i32 {
+        self.get(SettingId::VideoMaxQueuedFrames).as_int()
+    }
+
     fn render_method(&self) -> i32 {
         self.get(SettingId::VideoRenderMethod).as_int()
     }
@@ -273,6 +280,8 @@ pub trait AppSettingsMut {
     fn set_vsync(&mut self, value: i32);
     /// Sets `video.anti_alias`, brought into 0 to 2.
     fn set_anti_alias(&mut self, value: i32);
+    /// Sets `video.max_queued_frames`, brought into 1 to 2 (AMD-052 REQ-LOOP-077).
+    fn set_max_queued_frames(&mut self, value: i32);
     /// Sets `video.render_method`, brought into 0 to 1.
     fn set_render_method(&mut self, value: i32);
     /// Sets `render.shadow`.
@@ -334,6 +343,13 @@ impl AppSettingsMut for SettingsModel {
 
     fn set_vsync(&mut self, value: i32) {
         self.set(SettingId::VideoVSync, SettingValue::Enum(value.clamp(0, 2)));
+    }
+
+    fn set_max_queued_frames(&mut self, value: i32) {
+        self.set(
+            SettingId::VideoMaxQueuedFrames,
+            SettingValue::Int(value.clamp(1, 2)),
+        );
     }
 
     fn set_anti_alias(&mut self, value: i32) {

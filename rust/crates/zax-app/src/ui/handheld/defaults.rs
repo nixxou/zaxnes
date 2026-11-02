@@ -17,7 +17,7 @@ use zax_settings::values::SettingValue;
 const PIPELINE_AUTO: i32 = 1;
 
 /// Every switch one handheld default sets.
-fn defaults() -> [(SettingId, SettingValue); 9] {
+fn defaults() -> [(SettingId, SettingValue); 10] {
     [
         // Run-ahead (AMD-041, exposed as `Setting.RunAheadFrames` by AMD-040 REQ-LUA-114) costs
         // a whole extra emulated frame, plus a state saved and loaded, for every frame shown:
@@ -38,6 +38,11 @@ fn defaults() -> [(SettingId, SettingValue); 9] {
         (SettingId::EmuPause3dIn2d, SettingValue::Bool(true)),
         // Only the shown frame of a catch-up is converted (owner request).
         (SettingId::EmuCatchUpLast3d, SettingValue::Bool(true)),
+        // AMD-052 REQ-LOOP-074 takes the desktop catch-up to 2; the handheld keeps 5 (owner
+        // decision). The history is in `docs/PERFORMANCE-HISTORY.md` §5.5 and §7: a limit of 2
+        // measured worse there than both None and 5 once the core had its own thread, because
+        // the second frame of a pair waits for the emulation thread in series.
+        (SettingId::EmuCatchUp, SettingValue::Enum(5)),
     ]
 }
 

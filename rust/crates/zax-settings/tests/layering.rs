@@ -466,14 +466,15 @@ fn the_options_of_a_game_sit_between_the_preferences_and_the_scripts() {
         model.game_values().get(&SettingId::RenderShadow),
         Some(&SettingValue::Bool(false))
     );
-    model.set(SettingId::EmuCatchUp, SettingValue::Enum(2));
+    // Not the 2 of AMD-052 REQ-LOOP-074, which is the default and would record nothing.
+    model.set(SettingId::EmuCatchUp, SettingValue::Enum(3));
     assert!(
         !model.take_game_edited(),
         "a setting the game has no value for"
     );
     assert_eq!(
         preference(&model, SettingId::EmuCatchUp),
-        [SettingValue::Enum(2)]
+        [SettingValue::Enum(3)]
     );
 
     model.set_game_values([(SettingId::RenderShadow, SettingValue::Bool(true))]);
