@@ -277,6 +277,10 @@ pub struct GameSession {
     /// says. Decided once at profile load ([`scripts_change_the_core`]) and read by
     /// [`GameSession::apply_run_ahead_setting`] and by the two interfaces.
     run_ahead_forced_to_zero: bool,
+    /// Whether the effective run-ahead is 0: the scripts' guard-rail above, or a movie being
+    /// played (its frames are shown as they are, not one ahead computed with the movie's last
+    /// word). Recomputed when either changes, so the loop still tests one `bool`.
+    run_ahead_held_at_zero: bool,
 }
 
 /// The state of the "emulation on a separate core" setting (Rust-only, handhelds): the next
@@ -447,11 +451,13 @@ impl GameSession {
             movie: None,
             run_ahead: 0,
             run_ahead_forced_to_zero: false,
+            run_ahead_held_at_zero: false,
             pipeline: FramePipeline::default(),
         };
         session.pipeline.ahead_allowed = scripts_leave_the_core_alone(profile);
         // Q-103: the guard-rail is decided here, once, and nothing of it reaches the frame loop.
         session.run_ahead_forced_to_zero = scripts_change_the_core(profile);
+        session.run_ahead_held_at_zero = session.run_ahead_forced_to_zero;
         if session.run_ahead_forced_to_zero {
             crate::app_log::line(
                 "Zaxnes: run-ahead: the scripts of this profile change the core from a frame \
@@ -721,7 +727,7 @@ impl GameSession {
     /// nothing anywhere else.
     // Q-103
     pub fn apply_run_ahead_setting(&mut self, frames: i32) {
-        self.set_run_ahead(if self.run_ahead_forced_to_zero {
+        self.set_run_ahead(if self.run_ahead_held_at_zero {
             0
         } else {
             frames
@@ -944,6 +950,7 @@ impl GameSession {
             .save_state(true)
             .map_err(|error| error.to_string())?;
         self.movie = Some(MovieRun::record(self.core.frame_count(), state));
+        self.hold_run_ahead_for_the_movie();
         Ok(())
     }
 
@@ -954,12 +961,24 @@ impl GameSession {
     pub fn start_movie_playback(&mut self, movie: Movie) -> Result<(), String> {
         self.restore_core(&movie.start_state)?;
         self.movie = Some(MovieRun::play(self.core.frame_count(), movie));
+        self.hold_run_ahead_for_the_movie();
         Ok(())
     }
 
     /// Ends the movie being recorded or played, and gives it.
     pub fn stop_movie(&mut self) -> Option<Movie> {
-        self.movie.take().map(MovieRun::into_movie)
+        let movie = self.movie.take().map(MovieRun::into_movie);
+        self.hold_run_ahead_for_the_movie();
+        movie
+    }
+
+    /// A played movie holds the run-ahead at 0 for as long as it plays.
+    fn hold_run_ahead_for_the_movie(&mut self) {
+        let playing = self
+            .movie
+            .as_ref()
+            .is_some_and(|movie| movie.mode() == zax_nes::movie::MovieMode::Playing);
+        self.run_ahead_held_at_zero = self.run_ahead_forced_to_zero || playing;
     }
 
     /// The movie being recorded or played.

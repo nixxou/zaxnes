@@ -193,6 +193,15 @@ impl Fm2Movie {
             .collect()
     }
 
+    /// Whether the ROM whose PRG and CHR data are `prg` and `chr` is the one the movie names (its
+    /// MD5 covers the data after the iNES header, which is those two for a ROM with no trainer).
+    /// `None` when the movie gives no checksum.
+    #[must_use]
+    pub fn rom_data_matches(&self, prg: &[u8], chr: &[u8]) -> Option<bool> {
+        let expected = self.header.rom_md5?;
+        Some(md5(&[prg, chr].concat()) == expected)
+    }
+
     /// Whether `rom` (a whole iNES file) is the ROM the movie names, by the header's MD5 (the
     /// data after the 16-byte header). `None` when the movie gives no checksum.
     #[must_use]

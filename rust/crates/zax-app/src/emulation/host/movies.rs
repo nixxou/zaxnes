@@ -8,7 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
+use zax_nes::movie::fm2::Fm2Movie;
 use zax_nes::movie::{Movie, MovieMode};
+use zax_nes::NesRegion;
 
 use super::{EmulationHost, GameView};
 use crate::emulation::commands::{Command, CommandArgs};
@@ -55,6 +57,10 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
     pub(super) fn play_movie(&mut self, path: &str) {
         self.complete_frame_in_flight();
         self.finish_movie();
+        if is_fm2(Path::new(path)) {
+            self.play_fm2(path);
+            return;
+        }
         let Some(movie) = std::fs::read(path)
             .ok()
             .and_then(|bytes| Movie::read(&bytes))
@@ -94,6 +100,93 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.notifications
                     .show_error(save_state_file::CORRUPTED_MESSAGE);
             }
+        }
+    }
+
+    /// Plays the `.fm2` movie `path` (FCEUX's text format): the game is reset as on a power
+    /// cycle (`End`, the core powered on, `Start`) and the movie plays from there. A region or
+    /// ROM that differs from the movie's is warned about, not refused: the movie may desync.
+    fn play_fm2(&mut self, path: &str) {
+        let parsed = std::fs::read(path)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| Fm2Movie::parse(&bytes).map_err(|error| error.to_string()));
+        let fm2 = match parsed {
+            Ok(fm2) => fm2,
+            Err(error) => {
+                self.log(&format!("fm2 movie refused: {error}"));
+                self.notifications.show_error(&format!(
+                    "{}: {error}",
+                    text("Movie refused", "Film refusé")
+                ));
+                return;
+            }
+        };
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let mut warnings = Vec::new();
+        let core = session.core();
+        let pal = matches!(core.region(), NesRegion::Pal | NesRegion::Dendy);
+        if fm2.header.pal != pal {
+            warnings.push(text(
+                "the movie was made for another region",
+                "le film a été fait pour une autre région",
+            ));
+        }
+        let rom = core
+            .cartridge()
+            .map(|cartridge| (cartridge.rom().prg_rom(), cartridge.rom().chr_rom()));
+        if rom.and_then(|(prg, chr)| fm2.rom_data_matches(prg, chr)) == Some(false) {
+            warnings.push(text(
+                "the movie was made with another ROM",
+                "le film a été fait avec une autre ROM",
+            ));
+        }
+        let resets = fm2.resets();
+        if let Some(&(frame, _)) = resets.first() {
+            warnings.push(format!(
+                "{} {frame}",
+                text(
+                    "the movie's resets are not replayed, the first at frame",
+                    "les resets du film ne sont pas rejoués, le premier à la frame"
+                )
+            ));
+        }
+        session.reset(&mut self.settings, &mut self.scene);
+        let Ok(start_state) = session.core().save_state(true) else {
+            return;
+        };
+        let header = serde_json::json!({
+            "fm2": Path::new(path).file_name().map(|name| name.to_string_lossy()),
+            "romFilename": fm2.header.rom_filename,
+            "rerecordCount": fm2.header.rerecord_count,
+        });
+        let movie = Movie {
+            header: header.to_string(),
+            start_state,
+            inputs: fm2.words(),
+            annotations: Vec::new(),
+        };
+        let frames = movie.inputs.len();
+        if let Err(error) = session.start_movie_playback(movie) {
+            self.log(&format!("fm2 movie refused: {error}"));
+            return;
+        }
+        self.movie_file = Some(PathBuf::from(path));
+        self.rollback.clear();
+        self.frame_steps.clear();
+        self.log(&format!("fm2 movie: {path}, {frames} frames"));
+        if warnings.is_empty() {
+            self.notify(&text("Playing a movie", "Lecture d'un film"));
+        } else {
+            for warning in &warnings {
+                self.log(&format!("fm2 movie: {warning}"));
+            }
+            self.notifications.show(
+                &warnings.join("; "),
+                DEFAULT_SECONDS,
+                NotificationSeverity::Warning,
+            );
         }
     }
 
@@ -161,6 +254,8 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
                 self.new_movie_file()
             }
             _ => match played_file {
+                // An `.fm2` is never written over: its notes go to a new Zaxnes movie.
+                Some(file) if annotated && is_fm2(&file) => self.new_movie_file(),
                 Some(file) if annotated => file,
                 _ => {
                     self.notify(&text("Movie stopped", "Film arrêté"));
@@ -322,4 +417,10 @@ fn text(english: &str, french: &str) -> String {
     } else {
         english.to_owned()
     }
+}
+
+/// Whether `path` names an `.fm2` movie (FCEUX's text format), by its extension.
+fn is_fm2(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("fm2"))
 }

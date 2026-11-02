@@ -8,14 +8,14 @@ Branch `lua-editor`, worktree from `rustupdated` at `553af8b`. No push, no merge
 |---|---|---|
 | 1 | Exploration and design note (this file); owner's approval | done |
 | 2 | `.fm2` reader and its tests | done (`zax-nes/src/movie/fm2.rs`) |
-| 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | to do |
+| 3 | Movie playback in the loop, run-ahead 0, checkpoints, seek both ways | 3a done (`.fm2` plays through `tools.play_movie`, run-ahead held at 0); 3b checkpoints + seek to do |
 | 4 | **Seek bar in the window** (owner's priority, moved up from lot 2) | to do |
 | 5 | Script reload, fast and exact, with the core-changing guard | to do |
 | 6 | MCP server (Cargo feature, off by default) and its commands; end-to-end test | to do |
 | 7 | Zero-cost-when-closed measurement; real run on Squirrel's level | to do |
 | L2 | Rest of the strip: chapters on the bar, thumbnails, pad shortcuts, handheld style | to do |
 
-Next step: 3, movie playback in the loop (`.fm2` imported as a `Movie` from power on).
+Next step: 3b, the timeline: checkpoints every 60 frames over the whole movie, seek both ways.
 
 ## What exists already (and changes the plan)
 
@@ -152,6 +152,14 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
 4. Seek levels and checkpoint memory (whole movie, ~12 MiB for 10 minutes): agreed?
 
 ## Notes
+
+* 3a: `tools.play_movie` with an `.fm2` path powers the game on (`GameSession::reset`: `End`,
+  power cycle, `Start`), takes that as the start state and plays the pads; region / ROM / resets
+  are warned about, never refused. An annotated `.fm2` is never written over (its notes go to a
+  new `.mv<n>`). Run-ahead: `run_ahead_held_at_zero` = the scripts' Q-103 guard **or** a movie
+  playing, recomputed when a movie starts or stops, so the loop still tests the same one `bool`.
+  Tests `zax-app/tests/fm2_movie_tests.rs` (needs `--features bundled` on Windows for SDL2).
+  No way to pick an `.fm2` from the menu yet (comes with the bar / the MCP).
 
 * `zax-harness render --movie x.fm2`: the Metal Force TAS replays **in sync to its end**
   (frame 48 400 shows the ending's CONGRATULATIONS); about 1 ms per frame (44 s for the whole
