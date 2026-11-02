@@ -417,6 +417,66 @@ C# counterpart: `src/Zax.Render/Gl` (scene passes, shaders, texture/mesh caches)
 - Texture arrays and multi-draw indirect where the device allows; 80-byte draw blocks and 64-byte
   placements. Not used by the handheld (GL path). `ZAXNES_WGPU_BATCHING=0` disables it.
 
+**The curvature is a shader variant, not a uniform** (RU-4a, AMD-043 REQ-SCN-067)
+- `gl/shaders.rs` composes a variant in a `const fn`: `Stage` holds its chunks in **fixed slots**,
+  empty ones skipped, and `scene(solid, srgb_palette, bend)` / `shadow(bend)` replace the four
+  `SCENE*` constants and `SHADOW`. Eight scene variants and two shadow ones, ten distinct names
+  so the on-disk program cache files them apart. `assemble` skips an empty slot without even a
+  blank line, so leaving a define out produces the source the stage had before slots existed.
+- **At curvature 0 — all four settings of REQ-SCN-066 default to 0 — nothing of the curvature is
+  compiled, swapped or uploaded.** `select_bend_variant` is one `is_identity()` test per frame;
+  the curvature pair is built the first time a setting is not 0, which on a handheld is seconds
+  of shader compile a player who never bends anything never pays.
+- Invariant, and the test that holds it:
+  `zax-render/tests/bend_tests.rs` `req_scn_067_the_flat_variant_carries_nothing_of_the_curvature`
+  preprocesses the assembled source the way the GLSL compiler would — `#ifdef ZAX_BEND` branches
+  dropped, `#else` kept, line comments removed — and asserts that none of the nine identifiers
+  the curvature brings in reaches the compiler, over all eight flat scene variants (desktop and
+  GLES) and both flat shadow ones. **A uniform tested per vertex is the regression**; a per-axis
+  `uBendOn` *inside* the variant is not, it is uniform over a whole draw and saves an idle axis a
+  `sin` and a `cos`.
+- Measured on the `framing` scene (`zax-harness render --frames synthetic:framing`): default 6
+  distinct colours, **1798 draw calls, 7704 triangles**; `--bend 90,0,0` 416 colours and the
+  **same 1798 draw calls and 7704 triangles**. The curvature adds no draw call and no triangle.
+- The subdivisions exist only while something bends (`interop::subdivision_for`, the single home
+  of the rule, read by the renderer and by `scene_export`): the backdrop box stays its six quads
+  and the 2D rectangle its single quad at curvature 0. In 2D mode the rectangle goes 2 triangles
+  → 2048 → 2 again when "Bend 2D Mode" is turned off, in one draw call throughout.
+- Q-104: the curvature landed in the **OpenGL backend only**. The `wgpu` backend keeps drawing
+  flat, as it did before the amendment, and a test asserts that known gap so a half-done parity
+  fails loudly.
+
+**The opacity mask of AMD-050 REQ-CORE-049 costs the PPU nothing** (RU-4a) — a core change, listed
+here because it is the one measurement of the lot that had to come out at zero.
+- The bit rides in **bit 6 of each byte of the picture**, beside the colour index of REQ-CORE-048
+  in bits 0-5 (`ppu::OPAQUE_PIXEL`, `PIXEL_COLOR`). That is the internal layout the requirement's
+  note allows, and the only free one: `entry`, the palette index the two pixel functions resolve,
+  is non-zero **exactly** where the pixel carries an opaque pixel, so a derived
+  `palette_marked[i] = palette[i] | 0x40` (`i ≥ 1`) and a colour mask widened to `0x7F` / `0x70`
+  carry the bit with the same indexed load and the same `AND`.
+- Measured on the post-LTO assembly, `Ppu2C02::run_dots` (both pixel functions are inlined into
+  it): **2231 instructions before, 2231 after**, and with the label numbering, the anonymous
+  symbol hashes and the `(%rbx)` displacements normalised the entire diff is five immediates
+  (`$48 → $112` three times, `$63 → $127` twice) plus the palette load reading `palette_marked`
+  at +32 instead of `palette`. No instruction added, removed or reordered.
+- Invariant: **`palette_marked` is maintained where `palette` is written and nowhere else** —
+  the one register write, the power-up fill, the state restore. A rebuild in a per-frame path, or
+  a second store per pixel, is the regression. It is derived, so it is not in the state blob.
+- On the renderer's side nothing new runs in a shader: `gl/picture.rs` already resolved the
+  picture to RGBA once per frame **in 2D mode only** and already wrote alpha 0 for a pixel the
+  overscan leaves out, and `scene.frag` already discarded on alpha 0 in the opaque pass.
+- The 291 PPU golden hashes are unchanged: the two hashers mask with `PIXEL_COLOR` through
+  `pixel_frame_indices_into`, and the accessor was **renamed** (`pixel_frame` →
+  `pixel_frame_with_mask`) so the compiler visited all eleven call sites.
+
+**The curved Zapper aim runs on a change, not per frame** (RU-4a, AMD-043 REQ-INP-124)
+- REQ-INP-061 refreshes the Zapper once per displayed frame and must keep doing so, so the march
+  of the inverse is guarded by a memo of its inputs (`AimInputs`: the pointer, the target size,
+  the aim plane, the scene scale, the curvature, the camera view). A frame on which none of them
+  moved costs **one comparison**.
+- At curvature 0 `ZapperState::update` is the two lines it was before the amendment — one
+  ray-plane intersection — and the memo is cleared rather than consulted.
+
 ### 5.5 Application loop, threads and pacing (`zax-app`)
 
 C# counterpart: `src/Zax.App/Loop` (frame clock, emulation host, game session).
@@ -562,6 +622,16 @@ on; `d9e5680`)
   (`EmulationHost::half_rate_3d`, `VideoPacing::half_rate_3d`). Hidden from the desktop options
   window (`ui/options.rs` `EXCLUDED`).
 - Owner is not convinced of its value: kept off by default.
+
+**Curvature of space** (settings `scene.bend_lr`, `scene.bend_tb`, `scene.arc_h`,
+`scene.arc_center`, `scene.bend_2d_mode`; AMD-043 REQ-SCN-066 and AMD-046 REQ-SCN-074; RU-4a)
+- The four angles are **0 on both platforms**, which is their own default, and `bend_2d_mode` is
+  on both. Nothing is overridden for a handheld, because at 0 there is nothing to turn off: no
+  program is compiled, no surface is subdivided, and the per-frame cost is one `is_identity()`
+  test (see 5.4). That is also why the five are offered among the handheld's advanced options.
+- The five are read **when they change** — `scene_script_bridge::bend_of` in `apply_setting` and
+  at a profile load — never per frame, per tile or per pixel: `SpaceBend::new` evaluates three
+  sines, three cosines and three divisions, which belongs nowhere near a frame path.
 
 **No rewind on a handheld**: `EmulationHost::rollback_enabled` false with `--handheld` (the
 snapshot every 60 frames caused a spike).
@@ -711,7 +781,8 @@ Measurement pitfall:
 | `Zax.Engine3D` draw list / `DrawTile` fields | 5.2 placement matrix order; 5.4 `DrawStateKey` must include any new per-draw input; renderer `DrawItem` | captures in both draw modes |
 | `Zax.Scripting` new API members | 5.3 both binding paths (safe and `raw.rs`), API dump; 5.5 **`CORE_MEMBERS`** if the member touches the core; `light_shapes` analysis if it touches `shape` | scripting tests with and without `ZAXNES_FAST_LUA=1`, API dump, `separate_core_tests` |
 | `Zax.Scripting` hook order or new hooks | 5.5 emulation ahead, pipelining, `pause_3d_in_2d`, `catch_up_last_3d` assumptions on when hooks run | `separate_core_tests`, `pause_3d_tests` |
-| `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), linear palette (indexed albedo path), uniform cache, instance block layout | captures, `ZAXNES_SRGB_PALETTE=1` comparison |
+| `Zax.Render` shaders | 5.4 `ZAX_SOLID` (no `discard` outside the guard), **`ZAX_BEND`** (the curvature is a variant; at curvature 0 nothing of it may reach the compiler, and nothing of it may become a per-vertex uniform), linear palette (indexed albedo path), uniform cache, instance block layout | captures, `bend_tests.rs`, `ZAXNES_SRGB_PALETTE=1` comparison |
+| `Zax.Nes/Ppu` pixel composition | 5.4 **the opacity mask of REQ-CORE-049 rides in bit 6 of the picture byte**: `palette_marked` is maintained only where `palette` is written, and `run_dots` must stay at 2231 instructions in the post-LTO assembly | PPU goldens, the `run_dots` instruction count |
 | `Zax.Render` passes / new draw states | 5.4 grouping, labels and runs; clip unification; transparent object grouping | captures with and without `--group-draws` |
 | `Zax.App/Loop` (frame clock, catch-up, pacing) | 5.5 separate core order per tick, ahead, pipeline governor, catch-up limit, half-rate pacing, **run-ahead** (the restore must be added to any new frame-running path, and N = 0 must stay `run_frame`) | app tests (`catch_up_tests`, `separate_core_tests`, `run_ahead_tests`), device profiler |
 | `Zax.Settings` (new settings) | handheld defaults (`ui/handheld/defaults.rs`), handheld option rows, desktop `EXCLUDED` | settings catalogue test |

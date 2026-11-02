@@ -17,8 +17,8 @@ are a reading reference only.
 | 5 | AMD-046: the 2D rectangle bends, 32 × 32 only when it must, `scene.bend_2d_mode` | done — `c158272` |
 | 6 | AMD-043 §4: the picking inverse (REQ-INP-124), on input events only | done — `33c48c1` |
 | 7 | AMD-050: REQ-CORE-048 checked, the opacity mask measured and decided, REQ-SCN-076 | done — `4490d41` |
-| 8 | The settings: desktop options, handheld defaults and page, harness options | done — `<pending>` |
-| 9 | Closing: draw/vertex counts at default, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests | todo |
+| 8 | The settings: desktop options, handheld defaults and page, harness options | done — `2401edb` |
+| 9 | Closing: draw/vertex counts at default, `PERFORMANCE-HISTORY.md`, fmt, clippy, tests | done |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -631,6 +631,75 @@ intent. `--bend 90,0` prints the usage line.
 `cargo test --release --workspace --features zax-app/bundled`: **2245 passed, 0 failed**. fmt and
 workspace clippy clean.
 
+### Step 9 — closing
+
+#### The three performance requirements of the brief, measured
+
+| Requirement | Result |
+|---|---|
+| 1. curvature at 0 costs nothing, CPU and GPU | the flat variants carry **nothing** of the curvature (the preprocessing test, over all eight scene variants and both shadow ones); no program compiled, none swapped, no uniform uploaded; `framing` at default **1798 draw calls, 7704 triangles**, with `--bend 90,0,0` **the same 1798 and 7704**; the 2D rectangle 2 → 2048 → 2 triangles in one draw call throughout |
+| 2. picking on input events only, nothing at curvature 0 | the memo: a frame on which no input moved costs one comparison; at curvature 0 `update` is the two lines of before the amendment |
+| 3. AMD-047 is a domain change, no new per-tile work | no code outside `zax-settings` changed; the tile filter and the grid guard already carried over |
+| 4. REQ-CORE-049 with zero measurable cost in the core | **`run_dots` 2231 → 2231 instructions**, the whole normalised diff being five immediates and one displacement. Re-measured at the end of the lot: still 2231, still the same five |
+| 5. handheld defaults stay 0; the settings offered only if free at 0 | the four angles are 0 on both platforms and `bend_2d_mode` keeps its spec default; the five are on the advanced page because at 0 they cost nothing |
+| 6. captures identical at default settings; harness options for the new looks | the 11 synthetic render goldens and **291 of 291** PPU golden rows at frame 1200 are intact; `--bend`, `--no-bend-2d`, `--no-nes-bg-color` added, each defaulting to the application's own default |
+
+#### Final checks
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --release --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release --workspace --features zax-app/bundled` | **2245 passed, 0 failed**, 83 ignored |
+| `cargo test --release -p zax-nes --test ppu_golden_tests -- --ignored` | **291 of 291 rows matched** at frame 1200, 0 missing |
+| `zax-nes` / `zax-app` / `zax-settings` / `zax-engine3d` / `zax-profiles` / `zax-render` / `zax-scripting` / `zax-harness` / `zax-goldens` | 518 / 674 / 230 / 229 / 179 / 171 / 159 / 44 / 3 |
+| `zax-scripting` with `ZAXNES_FAST_LUA=1` | 159, the same |
+
+2245 against RU-3b-fix's 2138: **107 new tests**, in seven new files (`space_bend_tests.rs`,
+`amd047_clipping_tests.rs`, `bend_tests.rs`, `bend_two_dimensional_tests.rs`,
+`two_dimensional_transparency_tests.rs`, `opacity_mask_tests.rs`, `bend_settings_tests.rs`,
+`bend_options_tests.rs`) and eight existing ones.
+
+**Four existing tests changed their assertions**, each because the amendment changed the
+behaviour they pinned, and each naming the amendment in place:
+
+| Test | Was | Is |
+|---|---|---|
+| `zax-settings` `a_clipping_margin_is_clamped` | −4 → 0, 300 → 256 | REQ-PERS-087: any finite real is kept |
+| `zax-render/tests/two_dimensional_mode_tests.rs` (5) | a picture of plain colour indices | opaque pixels, because REQ-SCN-076 does not draw a pixel without its bit |
+| `zax-render/tests/bend_two_dimensional_tests.rs` | the same | the same |
+| `zax-settings/tests/core_options.rs` | ten libretro entries | fifteen, the five of AMD-043 §6 and AMD-046 §3 |
+
+#### `PERFORMANCE-HISTORY.md`
+
+§5.4 gained three entries (the shader variant and its invariant; the opacity mask with the 2231
+figure and the invariant that `palette_marked` is maintained only where `palette` is written; the
+Zapper memo). §6 gained the five curvature settings and why they are 0 on both platforms. §10, the
+porting checklist, gained `ZAX_BEND` to the shaders row and a new row for the PPU's pixel
+composition, so a later lot re-checks the 2231 figure.
+
 ### Open questions
 
 **Q-104** — the curvature in the `wgpu` backend (see step 4). Next free Q number is **Q-105**.
+
+### What a later lot must not undo
+
+1. **The curvature is a `#define`, never a uniform.** A uniform tested per vertex to switch
+   bending on and off is the regression `req_scn_067_the_flat_variant_carries_nothing_of_the_curvature`
+   exists to catch. The per-axis `uBendOn` **inside** the variant is not that: it is uniform over
+   a whole draw.
+2. **The curvature programs and the subdivided meshes are built lazily.** Building them at
+   renderer creation would cost a handheld seconds of shader compile for a feature most players
+   never turn on.
+3. **`palette_marked` is maintained where `palette` is written and nowhere else.** A rebuild in a
+   per-frame path, or a second store per pixel, loses the 2231 figure.
+4. **`pixel_frame_with_mask` carries both fields.** A new consumer wanting the index image of
+   REQ-CORE-048 masks with `PIXEL_COLOR` or uses `pixel_frame_indices_into` — the golden hashers
+   do, and that is what keeps the 291 hashes meaningful.
+5. **`SceneState::effective_bend()` is the single home** of "which curvature does this frame
+   apply". A new reader of `scene.bend` that forgets the 2D-mode exception breaks AMD-046's
+   amendment of REQ-INP-124.
+6. **`interop::subdivision_for` is the single home** of the subdivision rule; the renderer and
+   the CPU export both read it so the exported geometry cannot drift from the drawn one.
+7. **The five settings are read on change.** `bend_of` in a frame path would put three sines and
+   three cosines there.
