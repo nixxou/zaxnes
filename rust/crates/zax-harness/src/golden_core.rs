@@ -6,6 +6,10 @@
 //! checkpoint frames the hash of the pixel frame, the hash of the tile records, the CPU
 //! cycle count and the running hash of the audio quantised to little-endian 16-bit are
 //! recorded.
+//!
+//! The command has **no run-ahead option** and never will: the 291 rows were taken at N = 0 and
+//! the suites of frames, tiles and audio are only comparable at N equal (AMD-041, REQ-ARCH-012
+//! amended). `render` and `bench-core` take `--run-ahead`; this one is the reference.
 
 use std::fs;
 use std::io::{BufWriter, Write};
@@ -122,6 +126,9 @@ pub fn golden_row(rel: &str, image: &[u8], frames: u32) -> Result<Value, Harness
     let mut recorder = Checkpoints::default();
     let mut audio = AudioHash::new();
     for frame in 1..=frames {
+        // AMD-041 REQ-ARCH-012 amended: `golden-core` runs at **N = 0** and has no option to
+        // change it. The digests of the 291 rows were taken without run-ahead and are only
+        // comparable at N equal, so this call must stay `run_frame`.
         core.run_frame(0);
         audio.drain(&core)?;
 

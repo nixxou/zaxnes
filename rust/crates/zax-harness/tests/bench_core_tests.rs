@@ -43,6 +43,60 @@ fn the_3d_segmentation_can_be_forced() {
         .contains("3D segmentation"));
 }
 
+/// AMD-041 REQ-ARCH-012 amended: `bench-core` runs at **N = 0** unless asked otherwise, so a
+/// figure taken before this lot and one taken after it measure the same work. `--run-ahead` sets
+/// it, the header reports it, and the restore of step 5 has its own line.
+#[test]
+fn req_arch_012_the_bench_runs_without_run_ahead_unless_asked() {
+    let options = Options::parse(&arguments(&["--frames", "5", "--warmup", "2"])).unwrap();
+    let report = bench_core::run(&options).unwrap();
+    assert!(report.contains("run-ahead 0"), "{report}");
+    assert!(report.contains("run-ahead restore"), "{report}");
+
+    for frames in ["1", "2", "3"] {
+        let options =
+            Options::parse(&arguments(&["--frames", "5", "--run-ahead", frames])).unwrap();
+        let report = bench_core::run(&options).unwrap();
+        assert!(
+            report.contains(&format!("run-ahead {frames}")),
+            "--run-ahead {frames}: {report}"
+        );
+    }
+
+    // Out of the domain of REQ-LOOP-064.
+    assert!(matches!(
+        Options::parse(&arguments(&["--run-ahead", "4"])),
+        Err(HarnessError::Usage(_))
+    ));
+    assert!(matches!(
+        Options::parse(&arguments(&["--run-ahead", "many"])),
+        Err(HarnessError::Usage(_))
+    ));
+}
+
+/// The emulated work really does grow with N: four frames per real frame at N = 3 take plainly
+/// longer than one at N = 0. Measured, not an equality — it is a wall clock.
+#[test]
+fn the_core_runs_n_plus_one_frames_per_real_frame() {
+    let of = |ahead: &str| -> f64 {
+        let options =
+            Options::parse(&arguments(&["--frames", "120", "--run-ahead", ahead])).unwrap();
+        let report = bench_core::run(&options).unwrap();
+        report
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("core run_frame"))
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|value| value.parse::<f64>().ok())
+            .expect("the core line carries a figure")
+    };
+    let zero = of("0");
+    let three = of("3");
+    assert!(
+        three > zero * 2.0,
+        "N = 3 took {three} ms against {zero} ms at N = 0"
+    );
+}
+
 #[test]
 fn a_bad_count_or_an_unknown_option_is_a_usage_error() {
     assert!(matches!(

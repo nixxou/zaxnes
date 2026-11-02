@@ -72,6 +72,8 @@ pub struct RomRequest<'a> {
     pub hack_options: Option<u8>,
     /// The limit of eight sprites per line of the picture.
     pub sprite_limit: SpriteLimit,
+    /// Run-ahead frames (AMD-041 REQ-LOOP-064), 0 for the campaign's own captures.
+    pub run_ahead: u8,
     /// Where to write the state block after the run.
     pub save_state: Option<&'a Path>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -115,6 +117,7 @@ pub fn capture(request: &RomRequest<'_>) -> Result<SyntheticScene, HarnessError>
         host.core.set_hack_options(options);
     }
     host.core.set_sprite_limit(request.sprite_limit);
+    host.run_ahead = request.run_ahead.min(zax_nes::NesCore::MAX_RUN_AHEAD);
     let frames = request.frames;
     let mut records = Vec::new();
     let mut trace = Vec::new();
@@ -378,6 +381,11 @@ pub(crate) struct Host {
     pub(crate) core: NesCore,
     pub(crate) engine: ConversionEngine,
     zapper_offset: Vec3,
+    /// Frames of run-ahead (AMD-041 REQ-LOOP-064), **0 by default** so that every golden, every
+    /// capture and every bench of the campaign stays comparable: the suites of frames and of
+    /// tiles are only equal at N equal (REQ-ARCH-012 amended), so the harness does not change N
+    /// unless it is asked to.
+    pub(crate) run_ahead: u8,
 }
 
 impl Host {
@@ -421,6 +429,7 @@ impl Host {
             core,
             engine,
             zapper_offset: Vec3::default(),
+            run_ahead: 0,
         };
         host.install_runtime(profile, model, &mut scene)?;
         host.load_profile(profile, &mut scene)?;
@@ -508,7 +517,9 @@ impl Host {
         records: &mut Vec<TileRecord>,
         scene: &mut SceneState,
     ) -> Result<(), HarnessError> {
-        self.core.run_frame(input);
+        // REQ-LOOP-065: the real frame and the frames in advance, then the displayed frame's
+        // batch, then the real state back — the order of the application's own loop.
+        self.core.run_frame_ahead(input, self.run_ahead);
         let batch = self.core.frame_batch();
         records.clear();
         records.extend_from_slice(batch.records);
@@ -529,6 +540,8 @@ impl Host {
         });
         self.engine.publish();
         self.sync_settings(scene);
+        // Step 5, after the conversion: with run-ahead off it is one `bool` test.
+        self.core.restore_real_frame();
         Ok(())
     }
 
@@ -550,6 +563,7 @@ impl Host {
             core,
             engine,
             zapper_offset,
+            ..
         } = self;
         with_context(scene, core, zapper_offset, |context| {
             lend_context(engine, |engine| engine, context, operation);

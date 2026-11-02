@@ -29,6 +29,7 @@ pub const USAGE: &str = "zax-harness bench-core <rom.nes> [options]
   --widescreen-y <pixels>  widescreen margin the host offers above and below (default 0)
   --load-state <file>      restore a state block (with its ROM image) before the run
   --advanced               apply the built-in patches of an advanced widescreen mode too
+  --run-ahead <n>          run-ahead frames, 0 to 3 (default 0, so benches stay comparable)
   --hack-options <bits>    the built-in patch's option bits ($500A)";
 
 /// What `bench-core` runs.
@@ -46,6 +47,9 @@ pub struct Options {
     load_state: Option<PathBuf>,
     advanced: bool,
     patch_bits: Option<u8>,
+    /// Run-ahead frames (AMD-041 REQ-LOOP-064), **0 by default** so that a bench taken before
+    /// this lot and one taken after it measure the same work (REQ-ARCH-012 amended).
+    run_ahead: u8,
 }
 
 impl Options {
@@ -71,6 +75,7 @@ impl Options {
             load_state: None,
             advanced: false,
             patch_bits: None,
+            run_ahead: 0,
         };
         while let Some((name, tail)) = rest.split_first() {
             if name == "--3d" || name == "--advanced" {
@@ -95,6 +100,12 @@ impl Options {
                 "--widescreen-y" => options.widescreen_y = i32::try_from(count()?).unwrap_or(0),
                 "--load-state" => options.load_state = Some(PathBuf::from(value)),
                 "--hack-options" => options.patch_bits = u8::try_from(count()?).ok(),
+                "--run-ahead" => {
+                    options.run_ahead = u8::try_from(count()?)
+                        .ok()
+                        .filter(|frames| *frames <= zax_nes::NesCore::MAX_RUN_AHEAD)
+                        .ok_or_else(|| HarnessError::Usage("--run-ahead: 0 to 3".to_owned()))?;
+                }
                 _ => return Err(usage()),
             }
             rest = tail;
@@ -108,6 +119,7 @@ impl Options {
 enum Stage {
     Rollback,
     Core,
+    RunAhead,
     Capture,
     Conversion,
     Lua,
@@ -117,9 +129,10 @@ enum Stage {
 }
 
 impl Stage {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Rollback,
         Self::Core,
+        Self::RunAhead,
         Self::Capture,
         Self::Conversion,
         Self::Lua,
@@ -132,6 +145,7 @@ impl Stage {
         match self {
             Self::Rollback => "rollback snapshot",
             Self::Core => "core run_frame",
+            Self::RunAhead => "run-ahead restore",
             Self::Capture => "tile-record capture",
             Self::Conversion => "conversion (no Lua)",
             Self::Lua => "Lua frame hooks",
@@ -250,7 +264,10 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
         }
         lap(Stage::Rollback, 0.0);
 
-        host.core.run_frame(options.press.at(counter));
+        // REQ-LOOP-065 steps 1 to 4: the real frame, the frames in advance and the displayed
+        // one. With `--run-ahead 0` this is `run_frame` and nothing else.
+        host.core
+            .run_frame_ahead(options.press.at(counter), options.run_ahead);
         lap(Stage::Core, 0.0);
 
         let batch = host.core.frame_batch();
@@ -290,6 +307,11 @@ pub fn run(options: &Options) -> Result<String, HarnessError> {
 
         host.core.wide_picture_into(&mut picture);
         lap(Stage::Picture, 0.0);
+
+        // Step 5, once everything has read the displayed frame: the restore alone, so that its
+        // cost per real frame is reported rather than hidden inside the core's.
+        host.core.restore_real_frame();
+        lap(Stage::RunAhead, 0.0);
 
         if timed {
             tallies[Stage::Lua as usize].add(lua);
@@ -338,10 +360,11 @@ fn widen(host: &mut Host, options: &Options) -> Result<(), HarnessError> {
 fn report(options: &Options, tallies: &[Tally], whole: Tally, record_count: f64) -> String {
     let frames = f64::from(options.frames);
     let mut lines = vec![format!(
-        "bench-core: {} ({} frames after {} of warm-up, profile {}, {} segmentation)",
+        "bench-core: {} ({} frames after {} of warm-up, run-ahead {}, profile {}, {} segmentation)",
         options.rom.display(),
         options.frames,
         options.warmup,
+        options.run_ahead,
         options.profile.as_deref().unwrap_or("none"),
         if options.three_dimensional {
             "3D"

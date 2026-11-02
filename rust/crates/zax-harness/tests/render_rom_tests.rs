@@ -595,3 +595,69 @@ fn a_script_writing_one_clip_margin_gives_the_others_of_the_settings_model() {
         full
     );
 }
+
+/// AMD-041 REQ-ARCH-012 amended: `render` runs at **N = 0** unless `--run-ahead` says otherwise,
+/// writes N down in `render.json`, and the **real** frames it leaves behind are the same at every
+/// N — `--trace-ram` records the work RAM after each real frame, once the restore of step 5 has
+/// run.
+#[test]
+fn req_arch_012_render_records_n_and_the_real_frames_do_not_depend_on_it() {
+    let Some(rom) = test_rom() else { return };
+    let root = directory("render-run-ahead");
+
+    let trace_of = |ahead: &str, name: &str| -> Vec<u8> {
+        let out = root.join(name);
+        fs::create_dir_all(&out).unwrap();
+        let trace = out.join("ram.bin");
+        let report = render(
+            &out,
+            &[
+                "--rom",
+                path_text(&rom),
+                "--run",
+                "40",
+                "--run-ahead",
+                ahead,
+                "--trace-ram",
+                path_text(&trace),
+            ],
+        );
+        assert_eq!(
+            Some(&Value::from(ahead.parse::<u32>().unwrap())),
+            report[0].get("runAhead"),
+            "render.json does not carry the run-ahead"
+        );
+        fs::read(&trace).unwrap()
+    };
+
+    let zero = trace_of("0", "n0");
+    assert_eq!(40 * 0x0800, zero.len());
+    for ahead in ["1", "2", "3"] {
+        assert_eq!(
+            zero,
+            trace_of(ahead, &format!("n{ahead}")),
+            "--run-ahead {ahead}: the real frames parted from N = 0's"
+        );
+    }
+}
+
+/// `--run-ahead` is refused outside the domain of REQ-LOOP-064.
+#[test]
+fn req_loop_064_render_refuses_a_run_ahead_outside_zero_to_three() {
+    for value in ["4", "-1", "many"] {
+        assert!(
+            Options::parse(&arguments(&["--out", "x", "--run-ahead", value])).is_err(),
+            "--run-ahead {value} was accepted"
+        );
+    }
+    let options = Options::parse(&arguments(&["--out", "x", "--run-ahead", "3"]))
+        .expect("3 is in the domain");
+    assert_eq!(3, options.run_ahead);
+    assert_eq!(
+        0,
+        Options::parse(&arguments(&["--out", "x"]))
+            .unwrap()
+            .run_ahead,
+        "the default is not 0"
+    );
+}

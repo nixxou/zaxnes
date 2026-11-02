@@ -84,6 +84,24 @@ impl Domain {
         }
     }
 
+    /// The same domain with its published values labelled: `labels[i]` names the `i`-th rung, in
+    /// order, and a rung the list does not reach keeps the label it had.
+    ///
+    /// For a stepped domain whose values the interface shows as a list rather than as numbers —
+    /// `emu.run_ahead` and the four labels of AMD-041 §3. It changes **only** what the interface
+    /// writes beside each value: the bounds, the step and the `Snap` rule of
+    /// [`Domain::stepped`] are untouched, which is what keeps a write of 7 at 3 and of −1 at 0
+    /// (REQ-LOOP-064) where [`Domain::choice`] would send both to the default.
+    #[must_use]
+    pub fn with_labels(mut self, labels: &[&str]) -> Self {
+        if let Some(options) = self.options.as_mut() {
+            for (option, label) in options.iter_mut().zip(labels) {
+                (*label).clone_into(&mut option.label);
+            }
+        }
+        self
+    }
+
     /// A finite set of values, each with its label. A value outside it takes the default.
     #[must_use]
     pub fn choice(options: Vec<SettingOption>) -> Self {

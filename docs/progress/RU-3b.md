@@ -13,8 +13,8 @@ reference.
 | 2 | REQ-CORE-121: the in-memory state of the core, and its tests | done — `08ebd15` |
 | 3 | REQ-LOOP-065: the frame sequence in the core, N = 0 untouched | done — `c49033b` |
 | 4 | REQ-LOOP-068: the frames that are not displayed (no sound, the pixels measured) | done — `2dcddc1` |
-| 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | done |
-| 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | todo |
+| 5 | REQ-LOOP-066 / 067: the session, persistence, Lua and conversion rules + tests | done — `804e935` |
+| 6 | REQ-LOOP-064: desktop options row, handheld advanced option, harness `--run-ahead` | done |
 | 7 | Closing: benches, `PERFORMANCE-HISTORY.md`, fmt, clippy, full tests, goldens | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -465,3 +465,71 @@ here. `separate_core_tests` (5) and `pause_3d_tests` (3) are among them.
 
 SPEC copy: the `emu.run_ahead` row of SPEC-09 §4.1.7 loses its "the frames in advance belong to
 lot RU-3" note, the effect being in. `Q-103` copied into `docs/spec/changes/`.
+
+### Step 6 — the setting in the interfaces, and the harness
+
+**The desktop options window.** `emu.run_ahead` leaves `EXCLUDED` (37 → 36 entries) and the row
+is a **drop-down**, not a slider: the window already draws "a setting whose domain is a finite
+list" as a combo whatever its kind (`zax_ui/options.rs`, the reading that `video.frame_rate`
+established), and a stepped domain publishes its rungs as options (REQ-PERS-081). So the only
+thing missing was the labels.
+
+**The labels without changing the setting's shape.** `Domain::with_labels(&[…])` relabels the
+published rungs and touches nothing else. That matters: the amendment's own criterion is a write
+of 7 reading **3** and one of −1 reading **0**, which is the `Snap` rule of `Domain::stepped`;
+`Domain::choice`, the obvious way to get a labelled list, sends both to the **default (1)** and
+would break REQ-LOOP-064. The setting therefore stays `SettingKind::Int` with the stepped domain
+RU-2 gave it — the "entier" of SPEC-09 §4.1.7 and the Lua member of REQ-LUA-114 are unchanged —
+and only the four strings beside the values are new. The labels are safe to change because they
+reach nothing else: an `Int` is written to the settings file as a number (`json.rs`), and
+`emu.run_ahead` is not libretro-exposed (AMD-041 §4), which is the only other consumer of an
+option's label.
+
+The four labels of AMD-041 §3, in both languages:
+
+| Value | Domain label (the lookup key) | English | French |
+|---|---|---|---|
+| — | `setting.emu.run_ahead` | `Run-ahead` | `Run-ahead` |
+| 0 | `Run-ahead off` | `Off` | `Désactivé` |
+| 1 | `1 frame (Recommended)` | `1 frame (Recommended)` | `1 frame (recommandé)` |
+| 2 | `2 frames` | `2 frames` | `2 frames` |
+| 3 | `3 frames` | `3 frames` | `3 frames` |
+
+The key for value 0 is `Run-ahead off` and not `Off` on purpose: `option.Off` already exists and
+reads `Désactivée` in French — feminine, for the settings that use it — where AMD-041 asks for
+`Désactivé`. Sharing the key would have changed those other rows' French.
+
+**The handheld page comes for free, which is the owner's decision implemented.** The console's
+"Advanced options" page builds itself from the rows of the desktop tabs
+(`ui/handheld/advanced.rs`), so taking the setting out of `EXCLUDED` offers it there as an
+advanced option, stepped with the pad. Its handheld default stays **0** (`ui/handheld/defaults.rs`,
+untouched): the owner's rule is that an advanced option is welcome on a powerful device as long as
+it costs nothing when off, and this one costs nothing at 0 (step 3's measurement).
+
+**The harness.** `--run-ahead <n>`, 0 to 3, **default 0** on both commands, refused outside the
+domain:
+
+| Command | What it does |
+|---|---|
+| `render` | `Host::run_ahead`; the frame loop runs `run_frame_ahead` and restores after the conversion. `render.json` gains `"runAhead": n` **at the end** of each scene object, so a golden captured before AMD-041 still parses — `zax_goldens::RenderScene` names the fields it compares and ignores the rest. The synthetic goldens still match. |
+| `bench-core` | the header reports `run-ahead n`, and the restore of step 5 gets its **own** reported stage, `run-ahead restore`, right after `core run_frame`, so R0 reads the cost of step 5 per real frame instead of finding it folded into the core's. |
+| `golden-core` | **no option at all**, and the module header and the call site now say why: the 291 rows were taken at N = 0 and the digests are only comparable at N equal. |
+
+Tests: four more (two in `bench_core_tests.rs`, two in `render_rom_tests.rs`) and two more in
+`zax-app/tests/run_ahead_tests.rs` (14 in all there):
+
+- `bench-core` reports `run-ahead 0` by default, carries a `run-ahead restore` line, accepts 1, 2
+  and 3, and refuses 4 and a non-number;
+- the emulated work really does grow with N (N = 3 takes more than twice N = 0's core time —
+  measured, not asserted as an equality);
+- `render` writes `runAhead` into `render.json`, and its `--trace-ram` of 40 real frames is
+  **byte-identical at N = 0, 1, 2 and 3** (REQ-ARCH-012 amended: the real states do not depend on
+  N), which is the strongest statement of the invariant available from outside the application;
+- `render` refuses 4, −1 and a non-number, and defaults to 0;
+- the desktop row is out of `EXCLUDED`, is shown, publishes the four labelled values in order, and
+  has its title and its labels in both languages;
+- the handheld advanced page offers it and the handheld default is still 0 against the desktop's 1.
+
+Checks after this step: `cargo fmt --check` clean, workspace clippy clean,
+`cargo test --release -p zax-settings` 221 passed, `cargo test --release -p zax-harness` 44
+passed, and the synthetic render goldens still match.

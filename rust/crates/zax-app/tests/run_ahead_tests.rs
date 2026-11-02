@@ -95,6 +95,82 @@ fn req_loop_064_a_change_during_the_game_applies_at_the_next_real_frame() {
     assert_eq!(before + 1, core_frames(&harness));
 }
 
+/// REQ-LOOP-064: the setting is offered in the desktop options window, as a **list** with the
+/// four labels of AMD-041 §3 in both languages, and the value 1 is marked recommended.
+#[test]
+fn req_loop_064_the_setting_is_a_labelled_list_in_the_options_window() {
+    assert!(
+        !zax_app::ui::options::EXCLUDED.contains(&SettingId::EmuRunAhead),
+        "the setting is still hidden from the options window"
+    );
+    let descriptor = zax_settings::catalogue::descriptor(SettingId::EmuRunAhead);
+    assert!(zax_app::ui::options::is_shown(descriptor));
+
+    // The domain publishes a four-entry list, so the window draws a drop-down and not a slider.
+    let options = descriptor.domain().options().expect("a published list");
+    assert_eq!(4, options.len());
+    let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
+    assert_eq!(
+        vec![
+            "Run-ahead off",
+            "1 frame (Recommended)",
+            "2 frames",
+            "3 frames"
+        ],
+        labels
+    );
+    for (index, option) in options.iter().enumerate() {
+        assert!((option.value - f64::from(u8::try_from(index).unwrap())).abs() < 1e-9);
+    }
+
+    for (language, expected) in [
+        (
+            zax_app::ui::strings::UiLanguage::English,
+            ["Run-ahead", "Off", "1 frame (Recommended)"],
+        ),
+        (
+            zax_app::ui::strings::UiLanguage::French,
+            ["Run-ahead", "Désactivé", "1 frame (recommandé)"],
+        ),
+    ] {
+        for (key, text) in [
+            "setting.emu.run_ahead",
+            "option.Run-ahead off",
+            "option.1 frame (Recommended)",
+        ]
+        .into_iter()
+        .zip(expected)
+        {
+            assert_eq!(
+                Some(text),
+                zax_app::ui::strings::lookup(language, key),
+                "{language:?} / {key}"
+            );
+        }
+    }
+}
+
+/// REQ-LOOP-064 and the owner's decision for handhelds: the setting is offered among the
+/// **advanced** options of the console's own pages, and its handheld default stays 0 — it costs a
+/// whole extra emulated frame, so it is off there unless the player asks for it.
+#[test]
+fn req_loop_064_the_handheld_offers_it_as_an_advanced_option_but_off() {
+    assert!(
+        zax_app::ui::handheld::advanced::rows().iter().any(|row| {
+            matches!(
+                row,
+                zax_app::ui::handheld::options::OptionRow::Setting(SettingId::EmuRunAhead)
+            )
+        }),
+        "the handheld's advanced options do not offer run-ahead"
+    );
+
+    let mut handheld = SettingsModel::new();
+    zax_app::ui::handheld::defaults::apply(&mut handheld);
+    assert_eq!(0, handheld.run_ahead(), "the handheld default is not 0");
+    assert_eq!(1, SettingsModel::new().run_ahead(), "the desktop default");
+}
+
 // ------------------------------------------------------------------ REQ-LOOP-066
 
 /// REQ-LOOP-066: the core's frame counter follows the **real** frame, whatever N says.

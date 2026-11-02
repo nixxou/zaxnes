@@ -60,6 +60,7 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --advanced               apply the built-in patches of an advanced widescreen mode too
   --hack-options <bits>    the built-in patch's option bits ($500A, decimal; default its own)
   --sprite-limit <mode>    kept (default), removed or smart: the 8 sprites per line of the picture
+  --run-ahead <n>          run-ahead frames, 0 to 3 (default 0, so captures stay comparable)
   --png-nes <file.png>     write the tile records of the last frame composed flat, as wide
                            (and as tall) as the widescreen margins make them
   --load-state <file>      restore a state block (written by --save-state) after the reset
@@ -151,6 +152,10 @@ pub struct Options {
     pub hack_options: Option<u8>,
     /// The limit of eight sprites per line of the picture.
     pub sprite_limit: SpriteLimit,
+    /// Run-ahead frames (AMD-041 REQ-LOOP-064), 0 by default: the suites of frames, tiles and
+    /// conversion results are only comparable at N equal (REQ-ARCH-012 amended), so a plain
+    /// `render` is the campaign's own capture whatever the application's default is.
+    pub run_ahead: u8,
     /// Where to write the state block after the run.
     pub save_state: Option<PathBuf>,
     /// Where to write the work RAM and the cartridge RAM after the run.
@@ -227,6 +232,7 @@ impl Options {
             movie: None,
             hack_options: None,
             sprite_limit: SpriteLimit::Kept,
+            run_ahead: 0,
             save_state: None,
             dump_mem: None,
             trace_ram: None,
@@ -287,6 +293,14 @@ impl Options {
             options.output = output.ok_or_else(|| usage("--out <dir> is required.".to_owned()))?;
         }
         Ok(options)
+    }
+
+    /// `frames` as a run-ahead (AMD-041 REQ-LOOP-064), or the message to print.
+    fn run_ahead_of(frames: i32) -> Result<u8, String> {
+        u8::try_from(frames)
+            .ok()
+            .filter(|frames| *frames <= zax_nes::NesCore::MAX_RUN_AHEAD)
+            .ok_or_else(|| "--run-ahead: 0 to 3".to_owned())
     }
 
     /// Applies one `key value` option; the error is the message to print.
@@ -352,6 +366,7 @@ impl Options {
                     }
                 };
             }
+            "--run-ahead" => self.run_ahead = Self::run_ahead_of(integer(value)?)?,
             "--save-state" => self.save_state = Some(PathBuf::from(value)),
             "--dump-mem" => self.dump_mem = Some(PathBuf::from(value)),
             "--trace-ram" => self.trace_ram = Some(PathBuf::from(value)),
@@ -627,6 +642,7 @@ fn build_scenes(options: &Options) -> Result<Vec<SyntheticScene>, HarnessError> 
             movie: options.movie.as_deref(),
             hack_options: options.hack_options,
             sprite_limit: options.sprite_limit,
+            run_ahead: options.run_ahead,
             save_state: options.save_state.as_deref(),
             dump_mem: options.dump_mem.as_deref(),
             trace_ram: options.trace_ram.as_deref(),
@@ -714,7 +730,8 @@ fn write_nes_picture(file: &Path, indices: &[u8], rows: usize) -> Result<(), Har
     Ok(())
 }
 
-/// One entry of `render.json`, in the format of the C# harness.
+/// One entry of `render.json`, in the format of the C# harness, with the run-ahead of AMD-041
+/// added at the end (REQ-ARCH-012 amended).
 fn describe(
     scene: &SyntheticScene,
     render: &RenderStatistics,
@@ -733,7 +750,7 @@ fn describe(
          \"opaqueTiles\": {}, \"transparentTiles\": {}, \"hudTiles\": {}, \"shadowCasters\": {}, \
          \"drawCalls\": {}, \"triangles\": {}, \"residentMeshes\": {}, \"antiAliasSamples\": {}, \
          \"shadowMapSize\": {}, \"requestedShadowMapSize\": {}, \"distinctColors\": {}, \
-         \"backgroundPixels\": {}, \"meanLuma\": {:.4}{bench} }}",
+         \"backgroundPixels\": {}, \"meanLuma\": {:.4}, \"runAhead\": {}{bench} }}",
         json_text::escape(&scene.name),
         json_text::escape(&scene.description),
         options.width,
@@ -750,7 +767,11 @@ fn describe(
         render.requested_shadow_map_size,
         capture.distinct_colors,
         capture.background_pixels,
-        capture.mean_luma
+        capture.mean_luma,
+        // REQ-ARCH-012 amended: a frame, tile or conversion sequence is only comparable with
+        // another one at **equal N**, so N goes in the export. The key is last, so a golden
+        // captured before AMD-041 still parses (`RenderScene` names the fields it compares).
+        options.run_ahead
     )
 }
 

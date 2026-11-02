@@ -792,7 +792,16 @@ fn emulation(out: &mut Vec<SettingDescriptor>) {
             SettingEffect::Immediate,
             SettingTheme::Emulation,
         )
-        .with_domain(Domain::stepped(0.0, 3.0, 1.0, 0))
+        // The bounds, the step and the `Snap` rule stay those of a stepped domain — a write of 7
+        // reads 3 and one of -1 reads 0 (REQ-LOOP-064) — and only the published labels change,
+        // which is what turns the row into the list of AMD-041 §3. The interface translates them
+        // through `option.<label>`; the value written to the settings file is the number.
+        .with_domain(Domain::stepped(0.0, 3.0, 1.0, 0).with_labels(&[
+            "Run-ahead off",
+            "1 frame (Recommended)",
+            "2 frames",
+            "3 frames",
+        ]))
         .with_lua("RunAheadFrames")
         .with_label("Run-ahead"),
     );

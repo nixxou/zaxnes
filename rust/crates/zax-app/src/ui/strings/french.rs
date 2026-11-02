@@ -247,6 +247,12 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("setting.emu.game_speed", "Vitesse de jeu"),
     ("setting.emu.auto_tv_mode", "Région détectée automatiquement"),
     ("setting.emu.catch_up", "Rattrapage en cas de retard (frames)"),
+    // AMD-041 §3 : le titre et les quatre valeurs de la liste Run-ahead.
+    ("setting.emu.run_ahead", "Run-ahead"),
+    ("option.Run-ahead off", "Désactivé"),
+    ("option.1 frame (Recommended)", "1 frame (recommandé)"),
+    ("option.2 frames", "2 frames"),
+    ("option.3 frames", "3 frames"),
     ("setting.emu.lua_smooth_gc", "Nettoyage mémoire Lua lissé"),
     ("setting.emu.lua_optimized", "Lua optimisé (unsafe)"),
     (

@@ -249,6 +249,12 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("setting.emu.tv_mode", "Video region"),
     ("setting.emu.core", "Emulation core"),
     ("setting.emu.catch_up", "Catch-up when late (frames)"),
+    // AMD-041 §3: the title and the four values of the Run-ahead list.
+    ("setting.emu.run_ahead", "Run-ahead"),
+    ("option.Run-ahead off", "Off"),
+    ("option.1 frame (Recommended)", "1 frame (Recommended)"),
+    ("option.2 frames", "2 frames"),
+    ("option.3 frames", "3 frames"),
     ("setting.emu.lua_smooth_gc", "Smooth Lua memory collection"),
     ("setting.emu.lua_optimized", "Optimized Lua (unsafe)"),
     (
