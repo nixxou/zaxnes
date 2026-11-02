@@ -87,6 +87,15 @@ internal static partial class LuaApi
         // into [0, 3] by the setting's domain.
         Whole("RunAheadFrames", () => settings.RunAheadFrames, v => settings.RunAheadFrames = v);
 
+        // AMD-059 REQ-LUA-116: the four scalar members 3dSen 2.0 added. Each normalises the
+        // written value on its way in, so no numeric write can ever raise — which matters, since
+        // a raise would cost the script all its hooks (REQ-LUA-062). MaxQueuedFrames is the very
+        // setting of AMD-052 (REQ-LOOP-077); the other three are kept and handed back.
+        Whole("LibraryView", () => settings.LibraryView, v => settings.LibraryView = v);
+        Whole("MaxQueuedFrames", () => settings.MaxQueuedFrames, v => settings.MaxQueuedFrames = v);
+        Whole("RefreshRate", () => settings.RefreshRate, v => settings.RefreshRate = v);
+        Whole("Msaa", () => settings.Msaa, v => settings.Msaa = v);
+
         // AMD-031 §3: the TV box is gone but the property stays, so a script that reads or
         // writes it runs without error. The reading is always 0 — « none ».
         Whole("TVBox", () => settings.TVBox, v => settings.TVBox = v);

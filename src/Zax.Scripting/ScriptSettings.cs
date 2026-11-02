@@ -124,6 +124,56 @@ public sealed class ScriptSettings : IDisposable
         set => Write(SettingKeys.VideoFrameRate, value);
     }
 
+    /// <summary>
+    /// The GPU frame queue depth of AMD-052 REQ-LOOP-077, which AMD-059 REQ-LUA-116 opens to the
+    /// scripts: 1 or 2, a written value of 1 or less giving 1 and anything above giving 2. Same
+    /// value and same effect as <c>video.max_queued_frames</c> — there is no second setting.
+    /// </summary>
+    public int MaxQueuedFrames
+    {
+        get => Int(SettingKeys.VideoMaxQueuedFrames);
+        set => Write(SettingKeys.VideoMaxQueuedFrames, value <= 1 ? 1 : 2);
+    }
+
+    /// <summary>
+    /// The headset refresh rate of AMD-059 REQ-LUA-116: 72, 90 or 120, a written value replaced
+    /// by the nearest of the three and, at equal distance, by the <b>smaller</b> one (81 gives
+    /// 72, 105 gives 90). Without virtual reality it has no effect in Zaxnes <b>(D)</b>.
+    /// </summary>
+    public int RefreshRate
+    {
+        get => Int(SettingKeys.VrRefreshRate);
+        set => Write(SettingKeys.VrRefreshRate, NearestRefreshRate(value));
+    }
+
+    /// <summary>
+    /// The multisampling count of AMD-059 REQ-LUA-116: 0, 2 or 4, a written value of 1 or less
+    /// giving 0, 2 or 3 giving 2 and 4 or more giving 4. It has no effect on the rendering:
+    /// the anti-aliasing of Zaxnes stays <see cref="AntiAlias"/> (AMD-032) <b>(D)</b>.
+    /// </summary>
+    public int Msaa
+    {
+        get => Int(SettingKeys.VideoMsaa20);
+        set => Write(SettingKeys.VideoMsaa20, value <= 1 ? 0 : value <= 3 ? 2 : 4);
+    }
+
+    /// <summary>
+    /// The library view of AMD-059 REQ-LUA-116, kept exactly as written and read back as it
+    /// was; Zaxnes has a single library layout, so nothing reads it.
+    /// </summary>
+    public int LibraryView
+    {
+        get => Int(SettingKeys.UiLibraryView);
+        set => Write(SettingKeys.UiLibraryView, value);
+    }
+
+    /// <summary>
+    /// The rung of {72, 90, 120} nearest <paramref name="value"/>, the smaller one when two are
+    /// equally far (REQ-LUA-116). The halfway points are 81 and 105.
+    /// </summary>
+    private static int NearestRefreshRate(int value)
+        => value <= 81 ? 72 : value <= 105 ? 90 : 120;
+
     /// <summary>Whether rendering is skipped when no new frame was emulated.</summary>
     public bool SkipFrame
     {
