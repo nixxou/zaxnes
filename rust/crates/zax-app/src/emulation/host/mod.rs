@@ -192,6 +192,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// The checkpoints of the movie being played and the seek under way (EDITOR-1); `None`
     /// unless a movie plays.
     movie_timeline: Option<super::movie_timeline::MovieTimeline>,
+    /// The movie to play once the next game has started (`--movie`).
+    movie_after_launch: Option<String>,
     job: Option<jobs::LoadJob>,
     loading: bool,
     confirmation: Option<ConfirmationRequest>,
@@ -357,6 +359,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             pause_thumbnail: None,
             movie_file: None,
             movie_timeline: None,
+            movie_after_launch: None,
             job: None,
             loading: false,
             confirmation: None,

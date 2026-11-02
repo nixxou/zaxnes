@@ -155,6 +155,7 @@ commands! {
     ShowAbout => "tools.about", Shortcut::None, false;
     ToggleMovieRecording => "tools.record_movie", Shortcut::None, true;
     PlayMovie => "tools.play_movie", Shortcut::None, false;
+    OpenMovie => "tools.open_movie", Shortcut::None, false;
     StopMovie => "tools.stop_movie", Shortcut::None, false;
     SeekMovie => "tools.seek_movie", Shortcut::None, false;
     AnnotateMovie => "tools.annotate_movie", Shortcut::Fixed("Ctrl+M"), false;

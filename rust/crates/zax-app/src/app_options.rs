@@ -30,6 +30,8 @@ Options taken from the original program (single dash; the double-dash forms are 
 
 Options:
   --rom <path>            The .nes ROM to play. Without it only the empty scene shows.
+  --movie <path>          A movie to play once the ROM has started: an FCEUX .fm2
+                          or a Zaxnes movie (.mv<n>), with its bar at the bottom.
   --profile <name>        Built-in profile title, or the path of a profile file.
                           Defaults to the "2D Mode" entry (SPEC-06 REQ-SCN-055).
   --assets <dir>          Optional folder of your own asset files (profiles.json,
@@ -176,6 +178,8 @@ pub struct AppOptions {
     pub list_profiles: bool,
     /// The ROM to start.
     pub rom_path: Option<String>,
+    /// The movie to play once the ROM has started: `.fm2` or Zaxnes's own (EDITOR-1).
+    pub movie_path: Option<String>,
     /// The 3dSen installation or bundle to import profiles from.
     pub import_three_d_sen_path: Option<String>,
     /// The profile to play: a file, an identifier or a title.
@@ -254,6 +258,7 @@ impl Default for AppOptions {
             show_help: false,
             list_profiles: false,
             rom_path: None,
+            movie_path: None,
             import_three_d_sen_path: None,
             profile: None,
             asset_root: None,
@@ -294,6 +299,7 @@ impl AppOptions {
     /// # Errors
     ///
     /// An argument is unknown or malformed, or an option is missing its value.
+    #[allow(clippy::too_many_lines)] // one arm per option
     pub fn parse(arguments: &[&str]) -> Result<Self, OptionsError> {
         let mut options = Self::default();
         let mut index = 0;
@@ -316,6 +322,10 @@ impl AppOptions {
                 }
                 "--rom" => {
                     options.rom_path = Some(next_value(arguments, &mut index, "--rom")?.to_owned());
+                }
+                "--movie" => {
+                    options.movie_path =
+                        Some(next_value(arguments, &mut index, "--movie")?.to_owned());
                 }
                 "--profile" => {
                     options.profile =

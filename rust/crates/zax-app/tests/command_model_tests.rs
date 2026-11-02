@@ -83,6 +83,8 @@ fn req_ui_205_the_model_enumerates_every_menu_command() {
         // Rust-only (owner request): the movies.
         ToggleMovieRecording,
         PlayMovie,
+        // Rust-only (EDITOR-1): an .fm2 or a Zaxnes movie from anywhere.
+        OpenMovie,
         StopMovie,
         // Rust-only (EDITOR-1): going to a frame of the movie being played.
         SeekMovie,

@@ -47,6 +47,7 @@ pub const WINDOW_KEY_CONFIG: &str = "window.key_config";
 pub const WINDOW_ABOUT: &str = "window.about";
 pub const WINDOW_PROFILE_CHOOSER: &str = "window.profile_chooser";
 pub const WINDOW_OPEN_ROM: &str = "window.open_rom";
+pub const WINDOW_OPEN_MOVIE: &str = "window.open_movie";
 pub const WINDOW_IMPORT_PROFILE: &str = "window.import_profile";
 pub const WINDOW_IMPORT_COVER: &str = "window.import_cover";
 pub const WINDOW_IMPORT_THREE_DSEN: &str = "window.import_3dsen";
@@ -173,7 +174,13 @@ pub const BROWSER_FILTER_ZIP: &str = "browser.filter.zip";
 pub const BROWSER_FILTER_PROFILES: &str = "browser.filter.profiles";
 pub const BROWSER_FILTER_BUNDLE: &str = "browser.filter.bundle";
 pub const BROWSER_FILTER_PNG: &str = "browser.filter.png";
+pub const BROWSER_FILTER_MOVIES: &str = "browser.filter.movies";
 pub const BROWSER_FILTER_ALL: &str = "browser.filter.all";
+
+// ------------------------------------------------------------- movie bar
+pub const MOVIE_BAR_PLAY: &str = "movie_bar.play";
+pub const MOVIE_BAR_PAUSE: &str = "movie_bar.pause";
+pub const MOVIE_BAR_SEEKING: &str = "movie_bar.seeking";
 
 // ------------------------------------------------------- profile chooser
 pub const PROFILE_TWO_DIMENSIONAL: &str = "profile.two_dimensional";
@@ -458,6 +465,7 @@ pub const PUBLISHED: &[&str] = &[
     WINDOW_ABOUT,
     WINDOW_PROFILE_CHOOSER,
     WINDOW_OPEN_ROM,
+    WINDOW_OPEN_MOVIE,
     WINDOW_IMPORT_PROFILE,
     WINDOW_IMPORT_COVER,
     WINDOW_IMPORT_THREE_DSEN,
@@ -546,7 +554,11 @@ pub const PUBLISHED: &[&str] = &[
     BROWSER_FILTER_PROFILES,
     BROWSER_FILTER_BUNDLE,
     BROWSER_FILTER_PNG,
+    BROWSER_FILTER_MOVIES,
     BROWSER_FILTER_ALL,
+    MOVIE_BAR_PLAY,
+    MOVIE_BAR_PAUSE,
+    MOVIE_BAR_SEEKING,
     PROFILE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_DEFAULT_THREE_D,

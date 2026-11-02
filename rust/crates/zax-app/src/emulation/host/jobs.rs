@@ -313,6 +313,13 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             Step::Continue => self.job = Some(job),
             Step::Finished => {
                 self.loading = false;
+                // `--movie` (EDITOR-1): the movie given on the command line plays once the game
+                // it is for has started.
+                if job.kind == LoadKind::Launch {
+                    if let Some(path) = self.movie_after_launch.take() {
+                        self.play_movie(&path);
+                    }
+                }
             }
             Step::Failed(message) => {
                 self.fail_job(&message);

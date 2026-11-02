@@ -1603,6 +1603,10 @@ fn start_game_from_command_line(
     };
     let full: PathBuf = std::path::absolute(rom).unwrap_or_else(|_| PathBuf::from(rom));
     let full = full.to_string_lossy().into_owned();
+    if let Some(movie) = options.movie_path.as_deref() {
+        let movie = std::path::absolute(movie).unwrap_or_else(|_| PathBuf::from(movie));
+        host.play_movie_after_launch(&movie.to_string_lossy());
+    }
     // A smoke test must never stop on a dialog, so it takes the resolved entry, "2D Mode" when
     // no profile was named, rather than the interactive flow.
     if options.profile.is_some() || options.smoke_test {

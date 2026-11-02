@@ -223,6 +223,11 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// Plays the movie `path` once the next game has started (`--movie`).
+    pub fn play_movie_after_launch(&mut self, path: &str) {
+        self.movie_after_launch = Some(path.to_owned());
+    }
+
     /// Goes to the movie frame `frame` (`tools.seek_movie`): the seek runs over the next ticks.
     pub(super) fn seek_movie(&mut self, frame: i32) {
         if let Some(timeline) = self.movie_timeline.as_mut() {
