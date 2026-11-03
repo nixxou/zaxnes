@@ -20,8 +20,8 @@ use crate::assets::SceneAssets;
 use crate::camera::CameraView;
 use crate::color;
 use crate::frame_plan::{
-    DrawItem, FixedMeshes, FramePlan, InstanceRun, Residency, SceneConstants, INSTANCE_BYTES,
-    STD140_PLACEMENT,
+    DrawItem, DrawLists, FixedMeshes, FramePlan, InstanceRun, Residency, SceneConstants,
+    INSTANCE_BYTES, STD140_PLACEMENT,
 };
 use crate::geometry;
 use crate::gl::api::{Gl, GlError};
@@ -31,7 +31,7 @@ use crate::gl::linear_palette::LinearPalette;
 use crate::gl::mesh_cache::{GpuMesh, MeshCache};
 use crate::gl::picture::NesPictureTexture;
 use crate::gl::program::ShaderProgram;
-use crate::gl::shaders;
+use crate::gl::shaders::{self, SceneVariant};
 use crate::gl::shadow_map::ShadowMap;
 use crate::gl::skybox::SkyboxPass;
 use crate::gl::texture_cache::TextureCache;
@@ -112,19 +112,24 @@ struct ScenePrograms {
     /// Every program built so far; `built[0]` and `built[1]` are the flat, pixel-centre
     /// `[plain, solid]` pair the renderer is created with.
     built: Vec<ShaderProgram>,
-    /// For each `(bend, centroid, backdrop)` key, the indices in `built` of its plain and solid
-    /// programs — `[0, 1]`, the flat scene pair, until that variant has been built. A backdrop
-    /// key points **both** entries at one program: the backdrop never clips and never reads a
-    /// colour texture, so only the solid form is ever asked for, and compiling the same source
-    /// twice to fill a pair would be a program for nothing.
+    /// For each `(bend, centroid, voxel_grid, pixel_shadow, backdrop)` key, the indices in
+    /// `built` of its plain and solid programs — `[0, 1]`, the flat scene pair, until that
+    /// variant has been built. A backdrop key points **both** entries at one program: the
+    /// backdrop never clips and never reads a colour texture, so only the solid form is ever
+    /// asked for, and compiling the same source twice to fill a pair would be a program for
+    /// nothing.
     slots: [[usize; 2]; Self::KEYS],
-    /// `slots[key(bend, centroid, backdrop)]`, kept in step by the setters and by
-    /// [`Self::install`], so that [`Self::current`] — which every draw run calls — is two
-    /// indexings and no branch.
+    /// `slots[key(...)]`, kept in step by the setters and by [`Self::install`], so that
+    /// [`Self::current`] — which every draw run calls — is two indexings and no branch.
     slot: [usize; 2],
     solid: bool,
     bend: bool,
     centroid: bool,
+    /// The voxel grid of AMD-055 REQ-SCN-081.
+    voxel_grid: bool,
+    /// The pixel shadows of AMD-055 REQ-SCN-082. Not an axis of the **backdrop** key: that
+    /// requirement is about tile meshes and is without object on the backdrop.
+    pixel_shadow: bool,
     backdrop: bool,
     /// Whether this frame wants the backdrop model at all (`render.backdrop_lighting` and a
     /// backdrop to draw), decided once a frame by [`SceneRenderer::select_backdrop_variant`].
@@ -133,15 +138,54 @@ struct ScenePrograms {
     /// setting that asked for it, and turning the setting off again has to go back to the diffuse
     /// model of REQ-SCN-048 without throwing the program away.
     backdrop_wanted: bool,
+    /// How many of `built` were compiled for AMD-055 — a key with the voxel grid or the pixel
+    /// shadows set. **0 in Classic, and 0 in Enhanced until one of the two is turned on**, which
+    /// is the brief's point 1 and point 2 as a counter (`RenderStatistics::style_programs`). The
+    /// curvature's and the centroid's own programs are not counted here: they are AMD-043's and
+    /// AMD-058's, and they exist in Classic too.
+    style_programs: u32,
+}
+
+/// One key of [`ScenePrograms::slots`]: which variant a draw of this frame asks for, less the
+/// `solid` form, which the pair itself holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// One bool per variant axis, which is what a key is. The same `allow` `ScenePrograms` carries.
+#[allow(clippy::struct_excessive_bools)]
+struct ProgramKey {
+    bend: bool,
+    centroid: bool,
+    voxel_grid: bool,
+    pixel_shadow: bool,
+    backdrop: bool,
 }
 
 impl ScenePrograms {
-    /// `bend` × `centroid` × `backdrop`.
-    const KEYS: usize = 8;
+    /// `bend` × `centroid` × `voxel_grid` × `pixel_shadow` × `backdrop`.
+    const KEYS: usize = 32;
 
     /// The slot of `slots` a variant is kept at.
-    const fn key(bend: bool, centroid: bool, backdrop: bool) -> usize {
-        (bend as usize) * 4 + (centroid as usize) * 2 + backdrop as usize
+    const fn key(key: ProgramKey) -> usize {
+        (key.bend as usize) * 16
+            + (key.centroid as usize) * 8
+            + (key.voxel_grid as usize) * 4
+            + (key.pixel_shadow as usize) * 2
+            + key.backdrop as usize
+    }
+
+    /// The key of the variant currently in use.
+    ///
+    /// The pixel-shadow bit is **cleared for a backdrop key**, because REQ-SCN-082 is without
+    /// object on the backdrop and [`shaders::backdrop`] therefore has no such axis: normalising
+    /// it here is what keeps the slot a backdrop program was installed at and the slot the
+    /// backdrop run then looks it up at the same one.
+    const fn current_key(&self) -> ProgramKey {
+        ProgramKey {
+            bend: self.bend,
+            centroid: self.centroid,
+            voxel_grid: self.voxel_grid,
+            pixel_shadow: self.pixel_shadow && !self.backdrop,
+            backdrop: self.backdrop,
+        }
     }
 
     /// The program in use, for a uniform or a draw.
@@ -150,24 +194,36 @@ impl ScenePrograms {
     }
 
     /// Whether this key has a program of its own (the flat scene pair always has).
-    const fn has(&self, bend: bool, centroid: bool, backdrop: bool) -> bool {
-        let key = Self::key(bend, centroid, backdrop);
-        key == 0 || self.slots[key][1] != 1
+    const fn has(&self, key: ProgramKey) -> bool {
+        let slot = Self::key(key);
+        slot == 0 || self.slots[slot][1] != 1
     }
 
     /// Takes a freshly built `[plain, solid]` pair into service for its key.
-    fn install(&mut self, bend: bool, centroid: bool, pair: [ShaderProgram; 2]) {
+    fn install(&mut self, key: ProgramKey, pair: [ShaderProgram; 2]) {
         let first = self.built.len();
         self.built.extend(pair);
-        self.slots[Self::key(bend, centroid, false)] = [first, first + 1];
+        self.slots[Self::key(ProgramKey {
+            backdrop: false,
+            ..key
+        })] = [first, first + 1];
+        if key.voxel_grid || key.pixel_shadow {
+            self.style_programs += 2;
+        }
         self.refresh();
     }
 
     /// Takes a freshly built backdrop program into service: one program for both forms.
-    fn install_backdrop(&mut self, bend: bool, centroid: bool, program: ShaderProgram) {
+    fn install_backdrop(&mut self, key: ProgramKey, program: ShaderProgram) {
         self.built.push(program);
         let only = self.built.len() - 1;
-        self.slots[Self::key(bend, centroid, true)] = [only, only];
+        self.slots[Self::key(ProgramKey {
+            backdrop: true,
+            ..key
+        })] = [only, only];
+        if key.voxel_grid {
+            self.style_programs += 1;
+        }
         self.refresh();
     }
 
@@ -178,6 +234,20 @@ impl ScenePrograms {
 
     fn set_centroid(&mut self, centroid: bool) {
         self.centroid = centroid;
+        self.refresh();
+    }
+
+    /// Puts the voxel-grid variant of AMD-055 REQ-SCN-081 in or out of use. The HUD pass calls it
+    /// to go back to the plain variant for its own draws (REQ-SCN-081: the grid never applies to
+    /// the HUD), exactly as it does for the curvature.
+    fn set_voxel_grid(&mut self, voxel_grid: bool) {
+        self.voxel_grid = voxel_grid;
+        self.refresh();
+    }
+
+    /// Puts the pixel-shadow variant of AMD-055 REQ-SCN-082 in or out of use.
+    fn set_pixel_shadow(&mut self, pixel_shadow: bool) {
+        self.pixel_shadow = pixel_shadow;
         self.refresh();
     }
 
@@ -196,7 +266,7 @@ impl ScenePrograms {
     }
 
     fn refresh(&mut self) {
-        self.slot = self.slots[Self::key(self.bend, self.centroid, self.backdrop)];
+        self.slot = self.slots[Self::key(self.current_key())];
     }
 }
 
@@ -325,7 +395,17 @@ impl SceneRenderer {
         // `ZAXNES_SRGB_PALETTE` keeps the per-fragment conversion of the palette, to compare
         // the two on a device (same pictures).
         let convert_palette = std::env::var_os("ZAXNES_SRGB_PALETTE").is_none();
-        let flat = scene_pair(&gl, !convert_palette, false, false)?;
+        let flat = scene_pair(
+            &gl,
+            !convert_palette,
+            ProgramKey {
+                bend: false,
+                centroid: false,
+                voxel_grid: false,
+                pixel_shadow: false,
+                backdrop: false,
+            },
+        )?;
         let instance_alignment =
             usize::try_from(gl.get_integer(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT))
                 .unwrap_or(256)
@@ -339,8 +419,11 @@ impl SceneRenderer {
                 solid: false,
                 bend: false,
                 centroid: false,
+                voxel_grid: false,
+                pixel_shadow: false,
                 backdrop: false,
                 backdrop_wanted: false,
+                style_programs: 0,
             },
             shadow: ShaderProgram::create(&gl, &shaders::shadow(false))?,
             shadow_bent: None,
@@ -447,7 +530,11 @@ impl SceneRenderer {
         // never per vertex. At the default settings this is one `is_identity` test and nothing
         // else: no program is compiled, none is swapped, and no uniform is uploaded.
         self.select_bend_variant(scene)?;
-        // AMD-049 REQ-SCN-075: and which key the backdrop program belongs to, once the two
+        // AMD-055 REQ-SCN-081 and REQ-SCN-082: the voxel grid and the pixel shadows, two
+        // independent axes of the same key. In Classic, and in Enhanced with both at their
+        // defaults, two boolean tests and two stores.
+        self.select_style_variants(scene)?;
+        // AMD-049 REQ-SCN-075: and which key the backdrop program belongs to, once the three
         // above have settled. One boolean test when the setting is off.
         self.select_backdrop_variant(scene)?;
 
@@ -518,6 +605,7 @@ impl SceneRenderer {
         }
 
         let statistics = &mut self.passes.statistics;
+        statistics.style_programs = self.passes.scene.style_programs;
         statistics.resident_meshes = count(self.meshes.count());
         statistics.mesh_uploads = self.meshes.uploads();
         statistics.resident_textures = count(self.textures.count());
@@ -553,10 +641,14 @@ impl SceneRenderer {
             return Ok(());
         }
 
-        let centroid = self.passes.scene.centroid;
-        if !self.passes.scene.has(true, centroid, false) {
-            let pair = scene_pair(&self.gl, !self.convert_palette, true, centroid)?;
-            self.passes.scene.install(true, centroid, pair);
+        let key = ProgramKey {
+            bend: true,
+            backdrop: false,
+            ..self.passes.scene.current_key()
+        };
+        if !self.passes.scene.has(key) {
+            let pair = scene_pair(&self.gl, !self.convert_palette, key)?;
+            self.passes.scene.install(key, pair);
         }
         if self.passes.shadow_bent.is_none() {
             self.passes.shadow_bent =
@@ -596,12 +688,69 @@ impl SceneRenderer {
             return Ok(());
         }
 
-        let bend = self.passes.scene.bend;
-        if !self.passes.scene.has(bend, true, false) {
-            let pair = scene_pair(&self.gl, !self.convert_palette, bend, true)?;
-            self.passes.scene.install(bend, true, pair);
+        let key = ProgramKey {
+            centroid: true,
+            backdrop: false,
+            ..self.passes.scene.current_key()
+        };
+        if !self.passes.scene.has(key) {
+            let pair = scene_pair(&self.gl, !self.convert_palette, key)?;
+            self.passes.scene.install(key, pair);
         }
         self.passes.scene.set_centroid(true);
+        Ok(())
+    }
+
+    /// Picks the voxel-grid variant of AMD-055 REQ-SCN-081 and the pixel-shadow variant of
+    /// REQ-SCN-082, building each pair the first time it is needed.
+    ///
+    /// Two **independent** axes, because REQ-SCN-079 switches `spl.voxel_grid` and
+    /// `spl.pixel_shadow` separately: a player who turns the grid on does not pay for the voxel
+    /// snapping, nor the other way round. In Classic, and in Enhanced with both at their
+    /// defaults, this is two boolean tests and two stores — no program is compiled, none is
+    /// swapped and no uniform is uploaded.
+    ///
+    /// Neither applies in **2D mode**: the frame then holds one object, the rectangle of
+    /// AMD-046 §2 (REQ-SCN-081 and REQ-SCN-082 both exclude it), so the plain variant draws the
+    /// whole frame and the exclusion costs nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderError::Gl`] when a variant does not compile or link. The plain programs stay in
+    /// use, so the frame is drawn without the effect rather than not at all.
+    fn select_style_variants(&mut self, scene: &SceneState) -> Result<(), RenderError> {
+        let style = &scene.settings.style;
+        let flat = scene.two_dimensional_mode;
+        let grid = style.voxel_grid_active() && !flat;
+        let shadow = style.pixel_shadow_active() && !flat;
+        self.passes.scene.set_voxel_grid(grid);
+        self.passes.scene.set_pixel_shadow(shadow);
+        if !grid && !shadow {
+            return Ok(());
+        }
+
+        let key = ProgramKey {
+            backdrop: false,
+            ..self.passes.scene.current_key()
+        };
+        if !self.passes.scene.has(key) {
+            let pair = scene_pair(&self.gl, !self.convert_palette, key)?;
+            self.passes.scene.install(key, pair);
+        }
+        // REQ-SCN-081: the HUD never takes the grid, and it draws with the flat variant of
+        // REQ-SCN-068 — which, now that the grid is an axis of the same key, is also the variant
+        // without the grid. The pair the HUD then asks for has to exist.
+        let hud = ProgramKey {
+            bend: false,
+            voxel_grid: false,
+            pixel_shadow: false,
+            backdrop: false,
+            ..key
+        };
+        if !self.passes.scene.has(hud) {
+            let pair = scene_pair(&self.gl, !self.convert_palette, hud)?;
+            self.passes.scene.install(hud, pair);
+        }
         Ok(())
     }
 
@@ -625,11 +774,19 @@ impl SceneRenderer {
             return Ok(());
         }
 
-        let (bend, centroid) = (self.passes.scene.bend, self.passes.scene.centroid);
-        if !self.passes.scene.has(bend, centroid, true) {
-            let program = ShaderProgram::create(&self.gl, &shaders::backdrop(bend))?;
+        // REQ-SCN-081 applies to the faces of the box (AMD-055 §3 point 5), so the grid is an
+        // axis of the backdrop program too; the pixel shadows are not (REQ-SCN-082: "sans objet
+        // sur le backdrop"), so that bit is cleared in the key.
+        let key = ProgramKey {
+            pixel_shadow: false,
+            backdrop: true,
+            ..self.passes.scene.current_key()
+        };
+        if !self.passes.scene.has(key) {
+            let program =
+                ShaderProgram::create(&self.gl, &shaders::backdrop(key.bend, key.voxel_grid))?;
             program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
-            self.passes.scene.install_backdrop(bend, centroid, program);
+            self.passes.scene.install_backdrop(key, program);
         }
         Ok(())
     }
@@ -887,25 +1044,7 @@ impl SceneRenderer {
         // 3. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
         // REQ-SCN-044).
         if !lists.hud.is_empty() {
-            // REQ-SCN-068: the HUD is the plane attached to the camera (REQ-SCN-045) and stays
-            // **flat**, whatever the curvature. It therefore draws with the flat variant, which
-            // also means the score of a bent game stays readable (REQ-SCN-044).
-            let bent = passes.scene.bend;
-            passes.scene.set_bend(false);
-            passes.scene.current().use_program();
-            common.bind(passes);
-            let light = common.constants.hud_light_direction;
-            passes.scene.current().set_vec3("uLightDirection", light);
-            passes.set_normal_sign(passes.mirrored_normal, true);
-            gl.enable(glow::BLEND);
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            for group in &lists.hud_objects {
-                passes.draw_blended(&lists.hud, &lists.hud_runs[group.runs.0..group.runs.1]);
-            }
-
-            gl.disable(glow::BLEND);
-            passes.statistics.hud_tiles = count(lists.hud.len());
-            passes.scene.set_bend(bent);
+            draw_hud(passes, &mut common, lists);
         }
 
         gl.depth_mask(true);
@@ -914,6 +1053,47 @@ impl SceneRenderer {
         self.linear.resolve_to(target);
         Ok(())
     }
+}
+
+/// The HUD pass of REQ-SCN-044, after the transparent objects and lit in the camera frame
+/// (REQ-SCN-029).
+///
+/// It draws with the **plain** variant whatever the frame holds: the HUD is the plane attached to
+/// the camera (REQ-SCN-045), so it stays flat under the curvature of REQ-SCN-068 — which is also
+/// what keeps the score of a bent game readable — and AMD-055 excludes it from the voxel grid of
+/// REQ-SCN-081 and from the pixel shadows of REQ-SCN-082. One switch therefore drops all three,
+/// and `select_style_variants` has already built the pair this asks for.
+fn draw_hud(
+    passes: &mut Passes,
+    common: &mut CommonUniforms<'_>,
+    lists: &DrawLists<GpuMesh, Texture>,
+) {
+    let (bent, gridded, snapped) = (
+        passes.scene.bend,
+        passes.scene.voxel_grid,
+        passes.scene.pixel_shadow,
+    );
+    passes.scene.set_bend(false);
+    passes.scene.set_voxel_grid(false);
+    passes.scene.set_pixel_shadow(false);
+    passes.scene.current().use_program();
+    common.bind(passes);
+    let light = common.constants.hud_light_direction;
+    passes.scene.current().set_vec3("uLightDirection", light);
+    passes.set_normal_sign(passes.mirrored_normal, true);
+    passes.gl.enable(glow::BLEND);
+    passes
+        .gl
+        .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+    for group in &lists.hud_objects {
+        passes.draw_blended(&lists.hud, &lists.hud_runs[group.runs.0..group.runs.1]);
+    }
+
+    passes.gl.disable(glow::BLEND);
+    passes.statistics.hud_tiles = count(lists.hud.len());
+    passes.scene.set_bend(bent);
+    passes.scene.set_voxel_grid(gridded);
+    passes.scene.set_pixel_shadow(snapped);
 }
 
 /// The uniforms every scene sub-pass binds again after `use_program`.
@@ -935,10 +1115,12 @@ fn bind_frame_uniforms(passes: &mut Passes, common: &mut CommonUniforms<'_>) {
         passes.scene.current().set_vec3("uLightDirection", light);
     }
 
-    let backdrop_program = passes.scene.backdrop_wanted
-        && passes
-            .scene
-            .has(passes.scene.bend, passes.scene.centroid, true);
+    let backdrop_key = ProgramKey {
+        pixel_shadow: false,
+        backdrop: true,
+        ..passes.scene.current_key()
+    };
+    let backdrop_program = passes.scene.backdrop_wanted && passes.scene.has(backdrop_key);
     if !backdrop_program {
         return;
     }
@@ -967,6 +1149,7 @@ struct CommonUniforms<'a> {
 
 impl CommonUniforms<'_> {
     fn bind(&mut self, passes: &mut Passes) {
+        let gridded = passes.scene.voxel_grid;
         let (gl, program) = (&passes.gl, passes.scene.current());
         let constants = &self.constants;
 
@@ -975,6 +1158,13 @@ impl CommonUniforms<'_> {
         // five lookups that find nothing — and they only run at all when a curvature is set.
         if !constants.bend.is_identity() {
             bind_bend(program, constants.bend);
+        }
+
+        // AMD-055 REQ-SCN-081: the cell side, uploaded only while the grid variant is in use —
+        // the programs without it have no such uniform, and a frame at `spl.voxel_grid` = 0
+        // never reaches this line.
+        if gridded {
+            program.set_f32("uVoxelCell", constants.voxel_cell);
         }
 
         program.set_matrix4("uViewProjection", &constants.view_projection);
@@ -1215,12 +1405,18 @@ fn bind_bend(program: &mut ShaderProgram, bend: SpaceBend) {
 fn scene_pair(
     gl: &Gl,
     srgb_palette: bool,
-    bend: bool,
-    centroid: bool,
+    key: ProgramKey,
 ) -> Result<[ShaderProgram; 2], RenderError> {
+    let variant = SceneVariant {
+        solid: false,
+        srgb_palette,
+        bend: key.bend,
+        centroid: key.centroid,
+        voxel_grid: key.voxel_grid,
+        pixel_shadow: key.pixel_shadow,
+    };
     let one = |solid: bool| -> Result<ShaderProgram, RenderError> {
-        let program =
-            ShaderProgram::create(gl, &shaders::scene(solid, srgb_palette, bend, centroid))?;
+        let program = ShaderProgram::create(gl, &shaders::scene(variant.with_solid(solid)))?;
         program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
         Ok(program)
     };

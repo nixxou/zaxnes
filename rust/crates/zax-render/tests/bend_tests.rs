@@ -20,6 +20,20 @@ use zax_render::scene::{SceneFrame, SceneState};
 use zax_render::scene_export;
 use zax_render::shaders;
 
+/// The four axes these tests vary, as the named-field variant of `shaders::scene`. AMD-055 added
+/// two more axes (the voxel grid of REQ-SCN-081 and the pixel shadows of REQ-SCN-082); both are
+/// off here, which is what every assertion of this file is about.
+#[allow(clippy::fn_params_excessive_bools)] // The four axes, as `shaders::scene` had them.
+fn variant(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) -> shaders::SceneVariant {
+    shaders::SceneVariant {
+        solid,
+        srgb_palette,
+        bend,
+        centroid,
+        ..shaders::SceneVariant::FLAT
+    }
+}
+
 /// A curvature of 90° left-right, the setting the criteria of REQ-SCN-068 and REQ-SCN-074 use.
 fn bend_90() -> SpaceBend {
     SpaceBend::new(90.0, 0.0, 0.0, false, 1.0)
@@ -32,7 +46,7 @@ fn bend_90() -> SpaceBend {
 fn scene_source(solid: bool, srgb: bool, bend: bool, embedded: bool) -> (String, String) {
     // AMD-058's interpolation axis is the subject of `amd058_centroid_tests`; the curvature is
     // checked on the pixel-centre variant, the one the default settings use.
-    let source = shaders::scene(solid, srgb, bend, false);
+    let source = shaders::scene(variant(solid, srgb, bend, false));
     (
         shaders::assemble(&source.vertex, false, embedded),
         shaders::assemble(&source.fragment, true, embedded),
@@ -172,7 +186,7 @@ fn req_scn_067_each_variant_has_its_own_name() {
             for bend in [false, true] {
                 // AMD-058 added the interpolation axis; the names still have to be all distinct.
                 for centroid in [false, true] {
-                    names.push(shaders::scene(solid, srgb, bend, centroid).name);
+                    names.push(shaders::scene(variant(solid, srgb, bend, centroid)).name);
                 }
             }
         }

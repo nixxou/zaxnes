@@ -28,6 +28,19 @@ use zax_render::offscreen::{ContextApi, OffscreenContext};
 use zax_render::scene::{SceneFrame, SceneState};
 use zax_render::SceneRenderer;
 
+/// Whether `source` mentions the identifier `name` as a **whole token**.
+///
+/// `str::contains` is not enough and the reason is worth keeping: AMD-055 added the define
+/// `ZAX_PIXEL_SHADOW`, which has `ZAX_PI` — a constant of the backdrop model — as a substring, so
+/// a substring check made `req_scn_075_no_tile_fragment_carries_the_model` report a leak that was
+/// not one. GLSL identifiers are `[A-Za-z0-9_]`, so splitting on anything else and comparing
+/// whole tokens says what these tests mean.
+pub fn mentions(source: &str, name: &str) -> bool {
+    source
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+        .any(|token| token == name)
+}
+
 /// Asserts that `actual` is within `tolerance` of `expected`.
 #[track_caller]
 pub fn assert_close(expected: f64, actual: f64, tolerance: f64) {

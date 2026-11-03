@@ -68,9 +68,26 @@ const BEND_DEFINE: &str = "#define ZAX_BEND";
 /// anti-aliasing on is not rebuilt.
 const CENTROID_DEFINE: &str = "#define ZAX_CENTROID";
 
-/// How many chunks a stage may hold. The largest are the sky fragments (five) and the scene
-/// fragment with all four defines (six).
-const SLOTS: usize = 6;
+/// Modulates the albedo with the voxel grid of AMD-055 REQ-SCN-081. **Its absence is the point**,
+/// as for the two above: with `spl.voxel_grid` = 0, which is the default of REQ-SCN-079 and the
+/// only value Classic can have, the programs the compiler is given carry no grooves and no
+/// `fwidth`.
+const VOXEL_GRID_DEFINE: &str = "#define ZAX_VOXEL_GRID";
+
+/// Evaluates the shadow of an opaque tile at the centre of the fragment's voxel (AMD-055
+/// REQ-SCN-082). Independent of the grid above: REQ-SCN-079 switches the two separately, so a
+/// player who turns the grid on must not pay for the snapping, and the other way round.
+const PIXEL_SHADOW_DEFINE: &str = "#define ZAX_PIXEL_SHADOW";
+
+/// The voxel grid of REQ-SCN-081 (AMD-055).
+const VOXEL_GRID: &str = include_str!("../shaders/voxel_grid.glsl");
+
+/// How many chunks a stage may hold. The largest is the scene fragment with all six defines
+/// (six defines, the transfer functions, the grid and the body: nine).
+///
+/// Raising it costs nothing and changes no assembled source: [`assemble`] skips an empty slot
+/// without even a blank line.
+const SLOTS: usize = 10;
 
 /// One stage of a program: the chunks it is made of, in order, after the header. Empty slots are
 /// skipped, so a variant can leave a define out without changing the shape of the array.
@@ -107,50 +124,176 @@ const fn when(enabled: bool, define: &'static str) -> &'static str {
     }
 }
 
-/// The scene pass: albedo of REQ-SCN-034, visible-rectangle clipping of REQ-SCN-036, hard
-/// shadow of REQ-SCN-030/031 and the Lambert shading of REQ-SCN-028. The scene frame is
-/// left-handed (REQ-E3D-400), so the clip position is built from `(x, y, −z)` (REQ-SCN-001).
+/// Which variant of the scene pass a draw asks for. One named field per axis the specification
+/// names, each independent of the others.
 ///
 /// `solid` leaves out the `discard`s for the opaque draws that can never take them (a shader that
 /// may discard keeps a tiled GPU from dropping the fragments hidden behind it early).
 /// `srgb_palette` linearises the palette per fragment. `bend` compiles in the curvature of
-/// REQ-SCN-067, which also places the vertex and transports the normal (REQ-SCN-068).
-/// `centroid` interpolates `vUv` at the centroid of the covered samples (AMD-058), which is only
-/// ever asked for when the buffer is multisampled.
+/// REQ-SCN-067, which also places the vertex and transports the normal (REQ-SCN-068). `centroid`
+/// interpolates `vUv` at the centroid of the covered samples (AMD-058), which is only ever asked
+/// for when the buffer is multisampled. `voxel_grid` modulates the albedo with the grooves of
+/// AMD-055 REQ-SCN-081 and `pixel_shadow` evaluates the shadow at the voxel centre of
+/// REQ-SCN-082; both are off in Classic and off by default in Enhanced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+// Each field is one independent variant axis the specification names; an enum per axis would say
+// less, not more. The same `allow` `Passes` and `ScenePrograms` already carry.
+#[allow(clippy::struct_excessive_bools)]
+pub struct SceneVariant {
+    /// No `discard`: the opaque draws that neither clip nor read a colour texture.
+    pub solid: bool,
+    /// The palette linearised per fragment instead of read from the linear copy.
+    pub srgb_palette: bool,
+    /// The curvature of AMD-043 REQ-SCN-067.
+    pub bend: bool,
+    /// `vUv` at the centroid of the covered samples (AMD-058 REQ-SCN-065).
+    pub centroid: bool,
+    /// The voxel grid of AMD-055 REQ-SCN-081.
+    pub voxel_grid: bool,
+    /// The pixel shadows of AMD-055 REQ-SCN-082.
+    pub pixel_shadow: bool,
+}
+
+impl SceneVariant {
+    /// The variant with every axis off: the pair the renderer is created with.
+    pub const FLAT: Self = Self {
+        solid: false,
+        srgb_palette: false,
+        bend: false,
+        centroid: false,
+        voxel_grid: false,
+        pixel_shadow: false,
+    };
+
+    /// The same variant in its `solid` form, or its plain one.
+    #[must_use]
+    pub const fn with_solid(self, solid: bool) -> Self {
+        Self { solid, ..self }
+    }
+}
+
+/// The scene pass: albedo of REQ-SCN-034, visible-rectangle clipping of REQ-SCN-036, hard
+/// shadow of REQ-SCN-030/031 and the Lambert shading of REQ-SCN-028. The scene frame is
+/// left-handed (REQ-E3D-400), so the clip position is built from `(x, y, -z)` (REQ-SCN-001).
 ///
-/// The names of the eight variants without `centroid` are **unchanged**, because the name is the
-/// key of the on-disk program cache: a player who does not use anti-aliasing keeps every binary
-/// that cache already holds.
-// The four switches are the variant axes the specification names, each independent of the others;
-// an enum per axis would say less, not more.
-#[allow(clippy::fn_params_excessive_bools)]
+/// The names of the sixteen variants without `voxel_grid` and without `pixel_shadow` are
+/// **unchanged**, because the name goes into the key of the on-disk program cache: a player who
+/// uses neither effect keeps every binary that cache already holds, as AMD-058 kept them for a
+/// player who uses no anti-aliasing.
 #[must_use]
-pub const fn scene(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) -> ProgramSource {
+// The body is a table: sixty-four names, which have to be written out because they are the keys
+// of the on-disk program cache and a `const fn` cannot build a string, plus the two stage
+// arrays. There is no logic to split out of it.
+#[allow(clippy::too_many_lines)]
+pub const fn scene(variant: SceneVariant) -> ProgramSource {
+    let SceneVariant {
+        solid,
+        srgb_palette,
+        bend,
+        centroid,
+        voxel_grid,
+        pixel_shadow,
+    } = variant;
     ProgramSource {
-        name: match (solid, srgb_palette, bend, centroid) {
-            (false, false, false, false) => "scene",
-            (true, false, false, false) => "scene_solid",
-            (false, true, false, false) => "scene_srgb_palette",
-            (true, true, false, false) => "scene_solid_srgb_palette",
-            (false, false, true, false) => "scene_bend",
-            (true, false, true, false) => "scene_solid_bend",
-            (false, true, true, false) => "scene_srgb_palette_bend",
-            (true, true, true, false) => "scene_solid_srgb_palette_bend",
-            (false, false, false, true) => "scene_centroid",
-            (true, false, false, true) => "scene_solid_centroid",
-            (false, true, false, true) => "scene_srgb_palette_centroid",
-            (true, true, false, true) => "scene_solid_srgb_palette_centroid",
-            (false, false, true, true) => "scene_bend_centroid",
-            (true, false, true, true) => "scene_solid_bend_centroid",
-            (false, true, true, true) => "scene_srgb_palette_bend_centroid",
-            (true, true, true, true) => "scene_solid_srgb_palette_bend_centroid",
+        name: match (
+            solid,
+            srgb_palette,
+            bend,
+            centroid,
+            voxel_grid,
+            pixel_shadow,
+        ) {
+            (false, false, false, false, false, false) => "scene",
+            (false, false, false, false, false, true) => "scene_pixel_shadow",
+            (false, false, false, false, true, false) => "scene_grid",
+            (false, false, false, false, true, true) => "scene_grid_pixel_shadow",
+            (false, false, false, true, false, false) => "scene_centroid",
+            (false, false, false, true, false, true) => "scene_centroid_pixel_shadow",
+            (false, false, false, true, true, false) => "scene_centroid_grid",
+            (false, false, false, true, true, true) => "scene_centroid_grid_pixel_shadow",
+            (false, false, true, false, false, false) => "scene_bend",
+            (false, false, true, false, false, true) => "scene_bend_pixel_shadow",
+            (false, false, true, false, true, false) => "scene_bend_grid",
+            (false, false, true, false, true, true) => "scene_bend_grid_pixel_shadow",
+            (false, false, true, true, false, false) => "scene_bend_centroid",
+            (false, false, true, true, false, true) => "scene_bend_centroid_pixel_shadow",
+            (false, false, true, true, true, false) => "scene_bend_centroid_grid",
+            (false, false, true, true, true, true) => "scene_bend_centroid_grid_pixel_shadow",
+            (false, true, false, false, false, false) => "scene_srgb_palette",
+            (false, true, false, false, false, true) => "scene_srgb_palette_pixel_shadow",
+            (false, true, false, false, true, false) => "scene_srgb_palette_grid",
+            (false, true, false, false, true, true) => "scene_srgb_palette_grid_pixel_shadow",
+            (false, true, false, true, false, false) => "scene_srgb_palette_centroid",
+            (false, true, false, true, false, true) => "scene_srgb_palette_centroid_pixel_shadow",
+            (false, true, false, true, true, false) => "scene_srgb_palette_centroid_grid",
+            (false, true, false, true, true, true) => {
+                "scene_srgb_palette_centroid_grid_pixel_shadow"
+            }
+            (false, true, true, false, false, false) => "scene_srgb_palette_bend",
+            (false, true, true, false, false, true) => "scene_srgb_palette_bend_pixel_shadow",
+            (false, true, true, false, true, false) => "scene_srgb_palette_bend_grid",
+            (false, true, true, false, true, true) => "scene_srgb_palette_bend_grid_pixel_shadow",
+            (false, true, true, true, false, false) => "scene_srgb_palette_bend_centroid",
+            (false, true, true, true, false, true) => {
+                "scene_srgb_palette_bend_centroid_pixel_shadow"
+            }
+            (false, true, true, true, true, false) => "scene_srgb_palette_bend_centroid_grid",
+            (false, true, true, true, true, true) => {
+                "scene_srgb_palette_bend_centroid_grid_pixel_shadow"
+            }
+            (true, false, false, false, false, false) => "scene_solid",
+            (true, false, false, false, false, true) => "scene_solid_pixel_shadow",
+            (true, false, false, false, true, false) => "scene_solid_grid",
+            (true, false, false, false, true, true) => "scene_solid_grid_pixel_shadow",
+            (true, false, false, true, false, false) => "scene_solid_centroid",
+            (true, false, false, true, false, true) => "scene_solid_centroid_pixel_shadow",
+            (true, false, false, true, true, false) => "scene_solid_centroid_grid",
+            (true, false, false, true, true, true) => "scene_solid_centroid_grid_pixel_shadow",
+            (true, false, true, false, false, false) => "scene_solid_bend",
+            (true, false, true, false, false, true) => "scene_solid_bend_pixel_shadow",
+            (true, false, true, false, true, false) => "scene_solid_bend_grid",
+            (true, false, true, false, true, true) => "scene_solid_bend_grid_pixel_shadow",
+            (true, false, true, true, false, false) => "scene_solid_bend_centroid",
+            (true, false, true, true, false, true) => "scene_solid_bend_centroid_pixel_shadow",
+            (true, false, true, true, true, false) => "scene_solid_bend_centroid_grid",
+            (true, false, true, true, true, true) => "scene_solid_bend_centroid_grid_pixel_shadow",
+            (true, true, false, false, false, false) => "scene_solid_srgb_palette",
+            (true, true, false, false, false, true) => "scene_solid_srgb_palette_pixel_shadow",
+            (true, true, false, false, true, false) => "scene_solid_srgb_palette_grid",
+            (true, true, false, false, true, true) => "scene_solid_srgb_palette_grid_pixel_shadow",
+            (true, true, false, true, false, false) => "scene_solid_srgb_palette_centroid",
+            (true, true, false, true, false, true) => {
+                "scene_solid_srgb_palette_centroid_pixel_shadow"
+            }
+            (true, true, false, true, true, false) => "scene_solid_srgb_palette_centroid_grid",
+            (true, true, false, true, true, true) => {
+                "scene_solid_srgb_palette_centroid_grid_pixel_shadow"
+            }
+            (true, true, true, false, false, false) => "scene_solid_srgb_palette_bend",
+            (true, true, true, false, false, true) => "scene_solid_srgb_palette_bend_pixel_shadow",
+            (true, true, true, false, true, false) => "scene_solid_srgb_palette_bend_grid",
+            (true, true, true, false, true, true) => {
+                "scene_solid_srgb_palette_bend_grid_pixel_shadow"
+            }
+            (true, true, true, true, false, false) => "scene_solid_srgb_palette_bend_centroid",
+            (true, true, true, true, false, true) => {
+                "scene_solid_srgb_palette_bend_centroid_pixel_shadow"
+            }
+            (true, true, true, true, true, false) => "scene_solid_srgb_palette_bend_centroid_grid",
+            (true, true, true, true, true, true) => {
+                "scene_solid_srgb_palette_bend_centroid_grid_pixel_shadow"
+            }
         },
         vertex: Stage::of([
             when(bend, BEND_DEFINE),
             when(centroid, CENTROID_DEFINE),
+            when(voxel_grid, VOXEL_GRID_DEFINE),
+            when(pixel_shadow, PIXEL_SHADOW_DEFINE),
             DEFORMATION,
             when(bend, BEND),
             SCENE_VERT,
+            "",
+            "",
             "",
         ]),
         fragment: Stage::of([
@@ -158,8 +301,12 @@ pub const fn scene(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) 
             when(srgb_palette, SRGB_PALETTE_DEFINE),
             when(bend, BEND_DEFINE),
             when(centroid, CENTROID_DEFINE),
+            when(voxel_grid, VOXEL_GRID_DEFINE),
+            when(pixel_shadow, PIXEL_SHADOW_DEFINE),
             TRANSFER,
+            when(voxel_grid, VOXEL_GRID),
             SCENE_FRAG,
+            "",
         ]),
     }
 }
@@ -168,28 +315,53 @@ pub const fn scene(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) 
 /// is placed like any other box, and bends with the scene (REQ-SCN-068) — with a fragment stage
 /// of its own that carries the almost-matt reflection model.
 ///
-/// It is a **separate program**, not a fifth axis of [`scene`], for three reasons: the backdrop
-/// is one opaque run a frame, so the choice is made once and never per fragment; it carries a
-/// flat colour, so it needs neither the palette axis nor the atlas lookups nor the `discard`s;
-/// and `vUv` is unread here, so the interpolation axis of AMD-058 does not apply either. Only
-/// the curvature axis is left.
+/// It is a **separate program**, not an axis of [`scene`], for three reasons: the backdrop is one
+/// opaque run a frame, so the choice is made once and never per fragment; it carries a flat
+/// colour, so it needs neither the palette axis nor the atlas lookups nor the `discard`s; and
+/// `vUv` is unread here, so the interpolation axis of AMD-058 does not apply either.
+///
+/// Two axes are left. The curvature, because the backdrop bends with the scene; and the voxel
+/// grid, because AMD-055 §3 point 5 makes REQ-SCN-081 apply to the faces of the box, modulating
+/// the albedo `c` **before** the model of REQ-SCN-075 so that a groove does not darken the
+/// specular term. The pixel shadows of REQ-SCN-082 are **not** an axis here: that requirement is
+/// about tile meshes and says so ("sans objet sur le backdrop").
 ///
 /// The program is built the first time a frame asks for it, so a player with
 /// `render.backdrop_lighting` off — or with no backdrop at all, which is every profile that does
 /// not enable it in Lua — never compiles it.
 #[must_use]
-pub const fn backdrop(bend: bool) -> ProgramSource {
+pub const fn backdrop(bend: bool, voxel_grid: bool) -> ProgramSource {
     ProgramSource {
-        name: if bend { "backdrop_bend" } else { "backdrop" },
+        name: match (bend, voxel_grid) {
+            (false, false) => "backdrop",
+            (true, false) => "backdrop_bend",
+            (false, true) => "backdrop_grid",
+            (true, true) => "backdrop_bend_grid",
+        },
         vertex: Stage::of([
             when(bend, BEND_DEFINE),
+            when(voxel_grid, VOXEL_GRID_DEFINE),
             DEFORMATION,
             when(bend, BEND),
             SCENE_VERT,
             "",
             "",
+            "",
+            "",
+            "",
         ]),
-        fragment: Stage::of([when(bend, BEND_DEFINE), TRANSFER, BACKDROP_FRAG, "", "", ""]),
+        fragment: Stage::of([
+            when(bend, BEND_DEFINE),
+            when(voxel_grid, VOXEL_GRID_DEFINE),
+            TRANSFER,
+            when(voxel_grid, VOXEL_GRID),
+            BACKDROP_FRAG,
+            "",
+            "",
+            "",
+            "",
+            "",
+        ]),
     }
 }
 
@@ -206,18 +378,37 @@ pub const fn shadow(bend: bool) -> ProgramSource {
             SHADOW_VERT,
             "",
             "",
+            "",
+            "",
+            "",
+            "",
         ]),
-        fragment: Stage::of([SHADOW_FRAG, "", "", "", "", ""]),
+        fragment: Stage::of([SHADOW_FRAG, "", "", "", "", "", "", "", "", ""]),
     }
 }
 
 /// The frame palette linearised entry by entry ([`super::linear_palette`]).
 pub const LINEAR_PALETTE: ProgramSource = ProgramSource {
     name: "linear_palette",
-    vertex: Stage::of([include_str!("../shaders/resolve.vert"), "", "", "", "", ""]),
+    vertex: Stage::of([
+        include_str!("../shaders/resolve.vert"),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+    ]),
     fragment: Stage::of([
         TRANSFER,
         include_str!("../shaders/linear_palette.frag"),
+        "",
+        "",
+        "",
+        "",
         "",
         "",
         "",
@@ -229,7 +420,18 @@ pub const LINEAR_PALETTE: ProgramSource = ProgramSource {
 /// after the blending (AMD-021 R2-009).
 pub const RESOLVE: ProgramSource = ProgramSource {
     name: "resolve",
-    vertex: Stage::of([include_str!("../shaders/resolve.vert"), "", "", "", "", ""]),
+    vertex: Stage::of([
+        include_str!("../shaders/resolve.vert"),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+    ]),
     fragment: Stage::of([
         TRANSFER,
         include_str!("../shaders/resolve.frag"),
@@ -237,10 +439,25 @@ pub const RESOLVE: ProgramSource = ProgramSource {
         "",
         "",
         "",
+        "",
+        "",
+        "",
+        "",
     ]),
 };
 
-const SKY_VERTEX: Stage = Stage::of([include_str!("../shaders/sky.vert"), "", "", "", "", ""]);
+const SKY_VERTEX: Stage = Stage::of([
+    include_str!("../shaders/sky.vert"),
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+]);
 
 const GRADIENT: &str = include_str!("../shaders/sky_gradient.frag");
 const FANTASY: &str = include_str!("../shaders/sky_fantasy.frag");
@@ -258,6 +475,10 @@ const fn sky_fragment(procedural: bool, body: &'static str) -> Stage {
         },
         SKY_BODIES,
         body,
+        "",
+        "",
+        "",
+        "",
         "",
     ])
 }

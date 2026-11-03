@@ -17,6 +17,14 @@ out vec4 oColor;
 in vec3 vBent;
 #endif
 
+// ZAX_VOXEL_GRID (AMD-055 REQ-SCN-081, §3 point 5): the mesh normal of the box face, which is
+// also its **scene** normal — the backdrop's placement is a scale and a translation, with no
+// rotation, and a non-uniform scale changes an axis-aligned normal's length but not its
+// direction. The grid's position here is `vScene`, the scene position before the curvature.
+#ifdef ZAX_VOXEL_GRID
+in vec3 vLocalNormal;
+#endif
+
 // `Backdrop.Color`, sRGB; the albedo `c` of REQ-SCN-075 is this, linearised.
 uniform vec3 uFlatColor;
 // The eye, in the scene frame: `V` is the unit vector from the fragment towards it. Only this
@@ -111,6 +119,12 @@ void main()
     // AMD-021 R2-009: written linear, like every other colour these shaders produce; the sRGB
     // encode of REQ-SCN-028 is the resolve pass's job. The backdrop is opaque.
     vec3 albedoLinear = zaxToLinear3(uFlatColor);
+#ifdef ZAX_VOXEL_GRID
+    // AMD-055 §3 point 5: the grid modulates the albedo `c` **before** the model below, so that a
+    // groove does not darken the specular term — which is why this multiplies `albedoLinear` and
+    // not `lit`. The edges are at the scene coordinates that are multiples of `N × scene scale`.
+    albedoLinear *= zaxVoxelGrid(vScene, normalize(vLocalNormal), uVoxelCell);
+#endif
     vec3 lit = albedoLinear * (1.0 - ZAX_BACKDROP_REFLECTANCE)
             * (vec3(uAmbient) + uLightLinear * (shadow * fd * nl))
         + uLightLinear * (shadow * spec * f);

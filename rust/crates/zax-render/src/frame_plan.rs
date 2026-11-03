@@ -697,6 +697,12 @@ pub struct SceneConstants {
     /// The curvature of REQ-SCN-067, the identity by default. The renderer reads it to pick the
     /// shader variant and, when it bends anything, to upload the five per-axis uniforms.
     pub bend: SpaceBend,
+    /// The cell side of the voxel grid of AMD-055 REQ-SCN-081, `N = 2^spl.voxel_grid` voxels in
+    /// the mesh's local frame and `N × scene scale` in scene units for the backdrop.
+    ///
+    /// The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of, so
+    /// the two coincide and one uniform serves both. Uploaded only while the grid variant draws.
+    pub voxel_cell: f32,
 }
 
 impl SceneConstants {
@@ -734,6 +740,8 @@ impl SceneConstants {
             normal_offset: geometry::SHADOW_NORMAL_OFFSET,
             shadow_enabled: volume.has_content,
             bend: scene.bend,
+            #[allow(clippy::cast_precision_loss)] // 2, 4 or 8.
+            voxel_cell: scene.settings.style.voxel_cell() as f32,
             light_direction: scene.light.direction,
             hud_light_direction: view.hud_light_direction(scene.light.direction),
             eye: view.eye,

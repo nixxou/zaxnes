@@ -18,6 +18,20 @@ use zax_render::color;
 use zax_render::numerics::Vector3;
 use zax_render::shaders;
 
+/// The four axes these tests vary, as the named-field variant of `shaders::scene`. AMD-055 added
+/// two more axes (the voxel grid of REQ-SCN-081 and the pixel shadows of REQ-SCN-082); both are
+/// off here, which is what every assertion of this file is about.
+#[allow(clippy::fn_params_excessive_bools)] // The four axes, as `shaders::scene` had them.
+fn variant(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) -> shaders::SceneVariant {
+    shaders::SceneVariant {
+        solid,
+        srgb_palette,
+        bend,
+        centroid,
+        ..shaders::SceneVariant::FLAT
+    }
+}
+
 /// Tolerance of AMD-049's automatic vectors: ±0.001 on a linear value.
 const LINEAR_TOLERANCE: f32 = 0.001;
 
@@ -429,13 +443,13 @@ fn req_scn_075_no_tile_fragment_carries_the_model() {
             for srgb in [false, true] {
                 for bend in [false, true] {
                     for centroid in [false, true] {
-                        let source = shaders::scene(solid_variant, srgb, bend, centroid);
+                        let source = shaders::scene(variant(solid_variant, srgb, bend, centroid));
                         for (fragment, stage) in [(false, &source.vertex), (true, &source.fragment)]
                         {
                             let assembled = shaders::assemble(stage, fragment, embedded);
                             for forbidden in BACKDROP_ONLY {
                                 assert!(
-                                    !assembled.contains(forbidden),
+                                    !common::mentions(&assembled, forbidden),
                                     "{}: the tile shader is given {forbidden}",
                                     source.name
                                 );
@@ -450,7 +464,7 @@ fn req_scn_075_no_tile_fragment_carries_the_model() {
         // atlas machinery of REQ-SCN-034 — no palette lookup, no index texture, no texel
         // coordinate and no rejected fragment.
         for bend in [false, true] {
-            let source = shaders::backdrop(bend);
+            let source = shaders::backdrop(bend, false);
             let fragment = shaders::assemble(&source.fragment, true, embedded);
             for forbidden in [
                 "uIndexTexture",
@@ -477,12 +491,15 @@ fn req_scn_075_no_tile_fragment_carries_the_model() {
 /// apart from the scene programs (`gl/program_cache.rs`).
 #[test]
 fn req_scn_075_the_backdrop_variants_have_names_of_their_own() {
-    let mut names = vec![shaders::backdrop(false).name, shaders::backdrop(true).name];
+    let mut names = vec![
+        shaders::backdrop(false, false).name,
+        shaders::backdrop(true, false).name,
+    ];
     for solid_variant in [false, true] {
         for srgb in [false, true] {
             for bend in [false, true] {
                 for centroid in [false, true] {
-                    names.push(shaders::scene(solid_variant, srgb, bend, centroid).name);
+                    names.push(shaders::scene(variant(solid_variant, srgb, bend, centroid)).name);
                 }
             }
         }

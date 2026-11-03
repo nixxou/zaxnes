@@ -24,6 +24,20 @@ use zax_profiles::enums::ProfileLayer;
 use zax_render::geometry;
 use zax_render::shaders;
 
+/// The four axes these tests vary, as the named-field variant of `shaders::scene`. AMD-055 added
+/// two more axes (the voxel grid of REQ-SCN-081 and the pixel shadows of REQ-SCN-082); both are
+/// off here, which is what every assertion of this file is about.
+#[allow(clippy::fn_params_excessive_bools)] // The four axes, as `shaders::scene` had them.
+fn variant(solid: bool, srgb_palette: bool, bend: bool, centroid: bool) -> shaders::SceneVariant {
+    shaders::SceneVariant {
+        solid,
+        srgb_palette,
+        bend,
+        centroid,
+        ..shaders::SceneVariant::FLAT
+    }
+}
+
 /// AMD-012: no joint pixel may be more than 2 levels off the surface colour.
 const TOLERANCE: i32 = 2;
 
@@ -279,7 +293,7 @@ fn amd_058_the_pixel_centre_variant_carries_nothing_of_the_centroid() {
         for solid_variant in [false, true] {
             for srgb in [false, true] {
                 for bend in [false, true] {
-                    let source = shaders::scene(solid_variant, srgb, bend, false);
+                    let source = shaders::scene(variant(solid_variant, srgb, bend, false));
                     for (fragment, stage) in [(false, &source.vertex), (true, &source.fragment)] {
                         let assembled = shaders::assemble(stage, fragment, embedded);
                         // The define itself is never emitted, so the guarded branches below
@@ -314,8 +328,8 @@ fn amd_058_the_two_variants_differ_only_by_the_qualifier_on_v_uv() {
         for solid_variant in [false, true] {
             for srgb in [false, true] {
                 for bend in [false, true] {
-                    let centre = shaders::scene(solid_variant, srgb, bend, false);
-                    let centroid = shaders::scene(solid_variant, srgb, bend, true);
+                    let centre = shaders::scene(variant(solid_variant, srgb, bend, false));
+                    let centroid = shaders::scene(variant(solid_variant, srgb, bend, true));
                     assert_ne!(centre.name, centroid.name, "two cache keys, two programs");
                     for (fragment, centre_stage, centroid_stage) in [
                         (false, &centre.vertex, &centroid.vertex),
@@ -361,7 +375,7 @@ fn amd_058_the_names_of_the_pixel_centre_variants_are_unchanged() {
     for bend in [false, true] {
         for srgb in [false, true] {
             for solid_variant in [false, true] {
-                found.push(shaders::scene(solid_variant, srgb, bend, false).name);
+                found.push(shaders::scene(variant(solid_variant, srgb, bend, false)).name);
             }
         }
     }

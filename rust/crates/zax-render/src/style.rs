@@ -265,6 +265,51 @@ fn level_odd(level: i32) -> f32 {
     2.0 * level - 1.0
 }
 
+/// Half-width of a groove, as a fraction of a cell (REQ-SCN-081).
+pub const GROOVE_HALF_WIDTH: f32 = 0.035;
+
+/// Where the bright edge of REQ-SCN-081 reaches 1 again, as a fraction of a cell.
+pub const BRIGHT_EDGE_END: f32 = 0.16;
+
+/// The albedo factor the voxel grid of REQ-SCN-081 applies at the point `p` of a face of unit
+/// normal `n`, both in the frame the grid is evaluated in (the mesh's local frame for a tile,
+/// scene units for the backdrop), for a cell side of `cell`.
+///
+/// The CPU twin of `shaders/voxel_grid.glsl`, written first and checked against the amendment's
+/// four-point table before any GPU code existed — the shape `color::backdrop_linear` took for
+/// AMD-049. **The one clause it cannot carry** is the smoothing of the transition at
+/// `d = 0.035`, which REQ-SCN-081 states in *screen* pixels: it is a screen-space quantity, so
+/// the twin gives the unsmoothed value and the measured points of the criteria are all well
+/// clear of that band.
+#[must_use]
+// The named quantities of REQ-SCN-081, spelled as the specification spells them (`p`, `n`,
+// `m`, `t`, `k`, `e`, `w`, `d`): the idiom `geometry.rs` already uses for a formula of the spec.
+#[allow(clippy::many_single_char_names)]
+pub fn voxel_grid_factor(p: [f32; 3], n: [f32; 3], cell: f32) -> f32 {
+    let an = [n[0].abs(), n[1].abs(), n[2].abs()];
+    let m = an[0].max(an[1]).max(an[2]);
+    let t = ((m - 0.8) / 0.1).clamp(0.0, 1.0);
+    let k = 0.38 + 0.24 * t;
+    let e = 0.20 - 0.10 * t;
+
+    let mut factor = 1.0;
+    for axis in 0..3 {
+        // Axis weight: 0 perpendicular to the face, 1 in its plane.
+        let w = (4.0 * (1.0 - an[axis])).clamp(0.0, 1.0);
+        // Distance to the nearest cell edge, as a fraction of a cell.
+        let cells = p[axis] / cell;
+        let d = (cells - cells.round()).abs();
+        factor *= if d <= GROOVE_HALF_WIDTH {
+            1.0 - w * (1.0 - k)
+        } else if d <= BRIGHT_EDGE_END {
+            1.0 + w * e * (BRIGHT_EDGE_END - d) / (BRIGHT_EDGE_END - GROOVE_HALF_WIDTH)
+        } else {
+            1.0
+        };
+    }
+    factor
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -50,6 +50,16 @@ out vec2 vUv;
 out vec3 vBent;
 #endif
 
+// AMD-055 REQ-SCN-081 and REQ-SCN-082: the position and the normal in the **mesh's local frame**
+// (REQ-E3D-504 for GREEDY and GREEDY_MULTICOLOR, REQ-E3D-522 for MARCHING), before the animated
+// deformation, before the object's transform and before the curvature. That is the frame both
+// requirements evaluate in, and it is why the grooves and the shadow squares follow the object's
+// scale, its rotation and the curved surface. Nothing of this is emitted without the variants.
+#if defined(ZAX_VOXEL_GRID) || defined(ZAX_PIXEL_SHADOW)
+out vec3 vLocal;
+out vec3 vLocalNormal;
+#endif
+
 void main()
 {
     // The fields are read from the block one by one: copying the whole instance into a local
@@ -72,6 +82,15 @@ void main()
         uInstances[index].normal[2].xyz);
     vNormal = uNormalSign * (normalMatrix * aNormal);
     vUv = aUv;
+
+#if defined(ZAX_VOXEL_GRID) || defined(ZAX_PIXEL_SHADOW)
+    // The untouched attributes: aPosition is the voxel-grid position of REQ-E3D-504 and aNormal
+    // the mesh normal there — the face normal in GREEDY and GREEDY_MULTICOLOR, the triangle's
+    // flat normal in MARCHING (REQ-E3D-522), which makes it constant over a triangle and so
+    // unchanged by the interpolation.
+    vLocal = aPosition;
+    vLocalNormal = aNormal;
+#endif
 
 #ifdef ZAX_BEND
     // REQ-SCN-067, applied last: after the animated deformation and after the object's own

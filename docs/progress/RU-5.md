@@ -10,15 +10,17 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | # | Step | Status |
 |---|---|---|
 | 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `a9216ce` |
-| 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | in progress |
-| 3 | REQ-SCN-080: base lighting and the order of passes | todo |
-| 4 | REQ-SCN-081: the voxel grid | todo |
-| 5 | REQ-SCN-082: the pixel shadows | todo |
-| 6 | REQ-SCN-083: ambient occlusion (Depth, MSVO under its declared fallback D) | todo |
-| 7 | REQ-SCN-084: the floor reflections | todo |
-| 8 | GLES capability probing, handheld page, desktop options group, harness options | todo |
-| 9 | The per-effect measurements | todo |
-| 10 | Closing: `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
+| 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | done — `98a08ce` |
+| 3 | REQ-SCN-081: the voxel grid | in progress |
+| 4 | REQ-SCN-082: the pixel shadows | todo |
+| 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | todo |
+| 6 | REQ-SCN-084: the floor reflections | todo |
+| 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
+| 8 | The per-effect measurements | todo |
+| 9 | Closing: `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
+
+**The checklist went from 10 steps to 9 after step 2**, so the commit of step 3 says "3/9" while
+steps 1 and 2 say "/10". The reason is written out under "The checklist was renumbered" below.
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -229,3 +231,194 @@ amd055_style_setting_tests`: 5 passed. fmt and workspace clippy clean.
 *(The dump helper of step 1 is recreated in `crates/zax-render/tests/dump_sources_tmp.rs` while
 the lot runs and is **not committed**; it returns immediately without `ZAX_DUMP_DIR`. Whoever
 resumes will see it as an untracked file beside the untracked `tests/` folder of the .NET tree.)*
+
+### The checklist was renumbered after step 2 — 10 steps became 9
+
+The brief's step 3 was "base lighting and order of passes (REQ-SCN-080)". Read against the code,
+REQ-SCN-080 has almost no code of its own: its first sentence ("en Enhanced, l'éclairage des
+tiles, du backdrop et du HUD est celui de Classic") is already true and step 2 measured it, and
+the rest of the requirement **constrains** the four effects rather than adding a fifth thing — the
+grid and the pixel shadows before the curvature, the two screen passes after it, in that order.
+Its only standalone deliverable is the infrastructure the two screen passes share (the resolved
+colour and depth, the lazy lifecycle of their targets), and *that* cannot be built and tested
+without its first consumer, which is the occlusion.
+
+So a step 3 of its own would have been a stub, and this lot's rule is that every step builds,
+passes and is committed. The order clause instead travels with each effect, which is also where
+it can be measured:
+
+| # | Step | Where REQ-SCN-080 is honoured |
+|---|---|---|
+| 3 | the voxel grid | before the curvature, in the mesh's local frame; the HUD, the sky and the 2D rectangle excluded |
+| 4 | the pixel shadows | the same frame, the same exclusions |
+| 5 | the screen-space infrastructure **and** the occlusion | the resolved colour and depth, after the opaque run and after the curvature, before the transparent objects |
+| 6 | the reflections | before the occlusion, both after the opaque run |
+
+The new checklist is therefore **9 steps**, and the table at the top of this file is the one to
+follow. Nothing of the brief is dropped; what moved is where it is implemented and measured.
+
+### Step 3 — REQ-SCN-081, the voxel grid
+
+#### The shape: two independent variant axes
+
+`ZAX_VOXEL_GRID` and `ZAX_PIXEL_SHADOW` are **two** axes, not one "Enhanced" axis, because
+REQ-SCN-079 switches `spl.voxel_grid` and `spl.pixel_shadow` separately and both default to 0: a
+player who turns the grid on must not pay for the voxel snapping of step 4.
+
+| Piece | What landed |
+|---|---|
+| `shaders/voxel_grid.glsl` (new) | `zaxVoxelGrid(p, n, cell)`, the formula of REQ-SCN-081, compiled only into the `ZAX_VOXEL_GRID` variants |
+| `style.rs` | `voxel_grid_factor`, the platform-free CPU twin, plus `GROOVE_HALF_WIDTH` and `BRIGHT_EDGE_END` |
+| `gl/shaders.rs` | `SceneVariant`, a **named-field** key replacing six positional bools; `scene(variant)` with its 64 names; `backdrop(bend, voxel_grid)`; `SLOTS` 6 → 10 |
+| `renderer.rs` | `ProgramKey` (5 axes, 32 slots); `select_style_variants`; `draw_hud` extracted; `ScenePrograms::style_programs` |
+| `frame_plan.rs` | `SceneConstants::voxel_cell` |
+| `scene.vert`, `scene.frag`, `backdrop.frag` | `vLocal` / `vLocalNormal` and the modulation, each under its guard |
+
+**`SceneVariant` instead of six bools.** `scene(solid, srgb, bend, centroid, grid, shadow)` is
+six positional booleans at every call site, which is a bug waiting to happen; the struct names
+them and `SceneVariant::FLAT` names the pair the renderer is created with. The three existing
+test files that build variants gained a four-argument `variant(…)` helper, so what they assert is
+unchanged and the two new axes are visibly off in them.
+
+**The names of the sixteen old variants are unchanged**, because a name goes into the key of the
+on-disk program cache: a player who uses neither effect keeps every binary that cache holds, the
+promise AMD-058 made for a player who uses no anti-aliasing. A test rebuilds all 64 names from
+their suffixes with `format!` and compares, so the hand-written table cannot drift.
+
+#### Where the grid is evaluated, and the three frames it is not
+
+REQ-SCN-081 fixes the frame, and the Rust already had everything: `scene.vert` holds `aPosition`
+and `aNormal`, which **are** the mesh's local frame of REQ-E3D-504, before the deformation,
+before the object transform and before the curvature. **No vertex attribute was added** — only
+two varyings, inside the variants.
+
+| Surface | What it reads |
+|---|---|
+| a tile (opaque or transparent) | `vLocal`, `vLocalNormal`, cell `N` |
+| the backdrop, lighting on | `vScene`, `vLocalNormal`, cell `N × scene scale` — `backdrop.frag`, on the albedo `c` **before** the model, so a groove does not darken the specular term (AMD-055 §3 point 5) |
+| the backdrop, lighting off | the same, through `scene.frag` at colour mode 2 |
+| the HUD, the skybox, the 2D rectangle | **nothing**: see below |
+
+The scene normal of a backdrop face **is** its mesh normal: the backdrop's placement is a scale
+and a translation with no rotation, and a non-uniform scale changes an axis-aligned normal's
+length but not its direction. So one varying serves both.
+
+The three exclusions cost nothing:
+
+- the **skybox** has its own program, so it is excluded by construction;
+- the **HUD** draws in its own pass, which already switched to the flat variant for REQ-SCN-068;
+  the same switch now drops the grid and the pixel shadows, so it is three setters instead of one;
+- the **2D-mode rectangle** is the only object of a 2D-mode frame (the finding RU-4a step 5
+  recorded), so `select_style_variants` simply does not select the variant in 2D mode — the whole
+  frame then draws plain, and the exclusion is free.
+
+The **tunnel and the TV models** of REQ-SCN-053 and REQ-SCN-054, which REQ-SCN-081 also excludes,
+**do not exist in Zaxnes**: AMD-031 retired the TV box, and `scene.tv_box` is a profile field that
+applies nothing (`zax-profiles`, `amd_031_the_tv_box_field_survives_a_round_trip_and_applies_nothing`).
+That exclusion is therefore moot here, and the same will hold for REQ-SCN-083 and REQ-SCN-084.
+
+#### The one per-fragment uniform test, and why it is allowed
+
+`scene.frag`, inside the grid variant only, reads
+`uColorMode == 2 ? vScene : vLocal`. That is a uniform that is **constant over a whole draw**, the
+same kind as the per-axis `uBendOn` RU-4a kept inside the curvature variant; the forbidden one is
+a uniform that switches between having an effect and not having it, and that one is the `#define`.
+It buys the backdrop being correct in both positions of `render.backdrop_lighting` rather than
+only in one.
+
+#### What the implementation reproduces, and the two measurements that were wrong
+
+**Every ratio of the acceptance table came out right**, on the CPU twin and on the GPU:
+
+| Point (local, `N` = 4) | Published | CPU twin | GPU (min/max over the face) |
+|---|---|---|---|
+| (0 ; 2), centre of a groove | 0,62 ± 0,03 | 0.620 | present |
+| (2 ; 2), centre of a cell | 1,00 ± 0,01 | 1.000 | over a quarter of the face exactly 1 |
+| (0,4 ; 2), bright edge | 1,048 ± 0,02 | 1.048 | present; the brightest pixel 1.12 to 1.17 |
+| (0 ; 0), crossing | 0,384 ± 0,03 | 0.384 | **0.378** at `N` = 2, 4 and 8 alike |
+
+The sRGB columns (133 / 166 / 169 / 107) follow from the ratios at the albedo of the close-up G,
+and recovering the **166** of the "grid off" column is what pins the fixture: it is
+`0,503 × (0,1812 + 0,577)`, the ambient of REQ-SCN-028 plus `N·L = 1/√3` on a face of normal
+(0, 0, −1) lit from (1, −1, 1). The close-up G itself is **not** buildable on this side — it wants
+a custom texture in the direct RGB format (188, 188, 188), which the synthetic fixture cannot make
+— so the sRGB columns on the GPU are R0's.
+
+**Two of my own measurements were wrong and the code was right**, which is worth recording
+because both are easy to repeat:
+
+1. **A rectangle of the capture is not a surface.** The first GPU test measured ratios over a
+   window and read a minimum of 0.08, far under the 0.384 floor an axis-aligned face allows. The
+   window took in a second, dimmer surface at the face's edge, which is already 0.154 of the face
+   with the grid **off**. The test now masks to the pixels that were the front face in the
+   grid-off capture, so every ratio is one surface against itself — and the minimum is 0.378.
+2. **Halving the cell does not increase the groove area.** The second test counted groove
+   *pixels* and expected them to double from `N` = 8 to `N` = 4 to `N` = 2; they did not move
+   (8213, 8823, 8727). That is the formula: the groove is a band of 3.5 % of a **cell**, so
+   halving the cell halves every line's width as it doubles their number. The criterion is about
+   **spacing**, so the test counts the groove *lines* that cross one row of the face — and picks
+   the row whose mean ratio is highest, because a row that happens to sit on a horizontal groove
+   is dark end to end and crosses no vertical line at all.
+
+A third finding, in an existing test rather than mine: `ZAX_PI`, a constant of the backdrop model,
+is a **substring** of the new `ZAX_PIXEL_SHADOW`, so `req_scn_075_no_tile_fragment_carries_the_model`
+reported a leak that was not one. `common::mentions` now compares whole GLSL tokens, and says in
+place why.
+
+#### The brief's point 1, measured
+
+- **All 80 Classic sources are identical to step 1's as the compiler sees them**, checked by
+  running the `ZAX_VOXEL_GRID`/`ZAX_PIXEL_SHADOW`-undefined branch of the preprocessor over both
+  dumps and diffing. The source *text* differs, and cannot not: a `#ifdef` line is text. That is
+  the same situation AMD-058 recorded for `ZAX_CENTROID`, and the committed form of the check is
+  `req_scn_081_no_classic_variant_carries_anything_of_the_grid`, which preprocesses the assembled
+  source the way the compiler would and asserts that none of `zaxVoxelGrid`, `uVoxelCell`,
+  `vLocal` and `vLocalNormal` reaches it — over all 32 Classic scene variants × 2 contexts and the
+  two backdrop programs without the grid axis, and in reverse for the grid variant.
+- **The eleven synthetic captures at default settings are identical to step 1's at tolerance 0**,
+  all eleven, and the draw-call, triangle and resident-mesh counts are unchanged.
+- `style_programs` is **0** in Classic and 0 in Enhanced at `spl.voxel_grid` = 0, and 2 or more
+  once the grid is on.
+- `SLOTS` went 6 → 10, which changes no assembled source: `assemble` skips an empty slot without
+  even a blank line.
+
+#### Tests (12 in `zax-render/tests/amd055_voxel_grid_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| REQ-SCN-081's four-point table, ratios and sRGB, on the twin | `req_scn_081_the_four_points_of_the_acceptance_table` |
+| the factor is exactly 1 past 16 % of a cell, at the three cell sizes | `req_scn_081_the_factor_is_exactly_one_away_from_an_edge` |
+| an axis perpendicular to the face cuts no groove | `req_scn_081_an_axis_perpendicular_to_the_face_cuts_no_groove` |
+| `k` and `e` interpolated between `m` = 0,8 and 0,9 | `req_scn_081_the_alignment_interpolates_k_and_e` |
+| the edges are the multiples of `N`, one through the tile centre for all three | `req_scn_081_the_edges_are_the_multiples_of_the_cell` |
+| **the published ratios are what the shader draws**, at `N` = 2, 4 and 8 | `req_scn_081_the_published_ratios_are_what_the_shader_draws` |
+| third criterion: the spacing doubles as the cell halves | `req_scn_081_the_three_settings_space_the_grooves_two_four_and_eight_units_apart` |
+| fourth criterion: `scale = (2, 1, 1)` and `rot = (0, 0, 30)` move the grooves with the object | `req_scn_081_the_grid_follows_the_object` |
+| the scope: 0 is Classic to the pixel, nothing compiled, and the sky and the HUD are untouched | `req_scn_081_the_grid_is_off_at_zero_and_never_reaches_the_hud_or_the_sky` |
+| AMD-055 §3 point 5: the backdrop takes the grid, in both positions of `render.backdrop_lighting` | `req_scn_075_the_backdrop_takes_the_grid_on_its_albedo` |
+| REQ-SCN-080's order clause: the grid is painted on the geometry, and survives a 90° bend | `req_scn_080_the_grid_is_painted_on_the_geometry_not_on_the_screen` |
+| the brief's point 1: no Classic variant carries anything of the grid | `req_scn_081_no_classic_variant_carries_anything_of_the_grid` |
+
+`cargo test --release --workspace --features zax-app/bundled`: **2329 passed, 0 failed**, 83
+ignored (2297 at the close of RU-4b). fmt and workspace clippy clean. The render goldens and the
+PPU goldens hold.
+
+Four pre-existing clippy ceilings were hit by the additions and are recorded rather than worked
+around: `SceneVariant` and `ProgramKey` pass the four-bool limit (the same `allow` `Passes` and
+`ScenePrograms` already carry, each bool being an independent variant axis); `scene()` passes the
+100-line ceiling, which is a table of 64 names a `const fn` cannot build and has no logic to
+split out; and `render_scene` passed it again, so the HUD pass moved out into `draw_hud` — the
+same remedy RU-4b applied when `bind_frame_uniforms` moved out.
+
+#### What is left for R0 on this requirement
+
+1. The **close-up G** itself, on the GPU: 1920 × 1080, the direct texture (188, 188, 188), the
+   camera at (128 ; 120 ; −34), and the four sRGB values 133 / 166 / 169 / 107 ± 3. The ratios are
+   confirmed here; what is left is the absolute column, which needs a texture the synthetic
+   fixture cannot make.
+2. The **wide framing B** of REQ-SCN-080: the backdrop at 90° of left-right curvature, the groove
+   lines' deviation from their chord at `2,661 × |y − 120|` pixels. The order clause is confirmed
+   here (the grid survives the bend and is painted on the geometry); the numbers want the harness
+   at 1920 × 1080, which step 7 gives it the options for.
+3. The **review criterion**: Super Mario Bros. 1-1 at `spl.voxel_grid` = 2 in a close view — the
+   toy-brick look, the sky and the score unchanged. No commercial ROM is available on this side.

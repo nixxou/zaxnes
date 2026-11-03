@@ -15,6 +15,13 @@ out vec4 oColor;
 in vec3 vBent;
 #endif
 
+// AMD-055 REQ-SCN-081, REQ-SCN-082: the position and the normal in the mesh's local frame, the
+// declarations of scene.vert.
+#if defined(ZAX_VOXEL_GRID) || defined(ZAX_PIXEL_SHADOW)
+in vec3 vLocal;
+in vec3 vLocalNormal;
+#endif
+
 // 0 = indexed atlas, 1 = direct colour atlas, 2 = flat colour (backdrop).
 uniform int uColorMode;
 uniform usampler2D uIndexTexture;
@@ -98,6 +105,17 @@ void main()
             texelAlpha = direct.a;
         }
     }
+
+#ifdef ZAX_VOXEL_GRID
+    // REQ-SCN-081: the grid modulates the **albedo**, before any lighting calculation
+    // (REQ-SCN-028). For a tile the position is the one in the mesh's local frame; for the
+    // backdrop — colour mode 2, which only reaches this shader when `render.backdrop_lighting`
+    // is off, since otherwise backdrop.frag draws it — it is the scene position of REQ-SCN-081's
+    // second paragraph. The test is uniform over a whole draw, not a per-fragment switch between
+    // having the effect and not having it: that one is the #define.
+    albedoLinear *= zaxVoxelGrid(uColorMode == 2 ? vScene : vLocal,
+        normalize(vLocalNormal), uVoxelCell);
+#endif
 
     vec3 n = normalize(vNormal);
     vec3 l = normalize(-uLightDirection);
