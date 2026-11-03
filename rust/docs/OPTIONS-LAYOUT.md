@@ -2,11 +2,16 @@
 
 Lot **RO-1** (branch `reworkoptions`, from `rustupdated` 0b0aa8c) reorganised the desktop options
 window at the owner's request; **RO-2** changed what a script may write and what a game may hold;
-**RO-3** reorganised the **console** option pages on the same branch. This note records the
-deliberate divergences and the complete mappings, so that R1 can amend the specification and so
-that nobody has to reconstruct a move from a diff.
+**RO-3** reorganised the **console** option pages on the same branch; **RO-5** made the
+anti-aliasing labels say what the renderer does and gave the arc centre the quarters between its
+two heights. This note records the deliberate divergences and the complete mappings, so that R1 can
+amend the specification and so that nobody has to reconstruct a move from a diff.
 
-Every divergence here is raised with R1 as **Q-107**. §5 is the console tree of RO-3.
+Every divergence here is raised with R1 as **Q-107**. §5 is the console tree of RO-3; §6 and §7 are
+the two owner requests of RO-5.
+
+Lot **RO-4** (patches always hooked) was **withdrawn by the owner** and is not on this branch; it
+appears in no section here, and no setting has been added to the window or the tree since RO-1.
 
 The window's layout lives in one table, `crates/zax-app/src/ui/options.rs::LAYOUT`: one line per
 tab, one entry per row or group heading, in the order the window draws them. Before RO-1 the
@@ -187,7 +192,8 @@ ties to the even one, so a write of 45 gives 60.
 - No rendering code changed: the curvature maths takes degrees as a continuous `f32`
   (`zax-engine3d/src/space_bend.rs`) and the shader variant switch is still "all three angles zero
   or not".
-- `scene.arc_center` is not concerned.
+- `scene.arc_center` is not concerned by the angles' grid; it has a grid of its own since RO-5 —
+  see §7.
 
 **Two consequences for R1 to weigh.**
 
@@ -425,3 +431,136 @@ RetroAchievements entry stays at the end, where RO-2 put it. The menu carries **
 own**: it walks `GAME_MAIN` and `OptionsPage::game_rows`, which is what keeps the two interfaces
 from drifting. RO-2's `GAME_DISPLAY_ROWS`, `GAME_3D_ROWS`, `GAME_CURVATURE_ROWS` and
 `GAME_ADVANCED_ROWS` are gone with it.
+
+---
+
+## 6. Divergence: the anti-aliasing levels are labelled as the multisampling they are
+
+**What the specification says.** AMD-032 §2 names the three levels of `video.anti_alias`
+"None / FFAA / SMAA", and the same paragraph decides what they *do*: FFAA is rendered as MSAA 4×,
+SMAA as MSAA 8×. Zaxnes implements neither of the two algorithms those acronyms stand for — FXAA-ish
+and *Subpixel Morphological Anti-Aliasing* are post-processes, and multisampling is a different
+thing altogether.
+
+**What Zaxnes does now** (owner decision, RO-5 part 1): everywhere the user **reads** the setting,
+the three levels are shown as what the renderer produces.
+
+| Value | English | French |
+|---|---|---|
+| 0 | None | Aucun |
+| 1 | **MSAA 4×** | **MSAA 4×** |
+| 2 | **MSAA 8×** | **MSAA 8×** |
+
+That is the desktop options window, the console global pages and game pages of §5, the desktop
+*Game options* menu, and the tooltip. The tooltip is rewritten: the sample counts first, then the
+sentence that **3dSen calls these levels FFAA and SMAA, and that those two names are what the
+settings file and the libretro option hold**, Zaxnes drawing them as what they are. The old
+sentence ("the two names are the ones the specification gives the two levels") is gone — true and
+useless.
+
+**Why.** A user reading "SMAA" believes they are choosing a morphological post-process; they get
+eight samples per pixel. The label should say what is delivered.
+
+**What is kept, exactly.**
+
+- The stored **values** 0, 1, 2 and the default (1 on the desktop, 0 on a handheld).
+- The **settings file**, which holds the domain label: `"anti_alias": "FFAA"`.
+- The **3dSen settings import**, field 32.
+- The **Lua API**: `Video.AntiAlias` reads and writes the same numbers, `Setting.Msaa` keeps 0/2/4
+  and the rule of §4; `goldens/lua-api.txt` is unchanged byte for byte.
+- The row's place in the window and in the tree, and `EXCLUDED`.
+- No code at all: the change is **four string-table entries** (`option.FFAA` and `option.SMAA` in
+  both languages, and the rewritten tooltip in both). All four interfaces read the value through
+  `ui::text::label_of_option`, which looks a domain label up as `option.<label>` and falls back to
+  the label itself when there is no entry — which is exactly why the user read "FFAA".
+
+**The reservation: libretro keeps the old names.** A `CoreOption` carries one `values: Vec<String>`
+per value, which is at once what RetroArch persists in its `.opt` file and what it displays; this
+port does not expose `retro_core_option_v2`'s separate display label. Changing the string would
+therefore reset a user's persisted choice, so **the libretro values stay `None` / `FFAA` / `SMAA`**
+and the libretro core is the one place the two acronyms are still read. Giving libretro a display
+label of its own is a lot of its own (`core_options.rs` and the libretro shim). Recorded in
+Q-107 §7.
+
+---
+
+## 7. Divergence: `scene.arc_center` takes the quarters between its two heights
+
+**What the specification says.** AMD-043 REQ-SCN-066 makes the arc centre an integer with two
+values — 0 the screen centre, 1 the bottom edge of the reference frame, that is the pivot
+`y = −120 · s` relative to `C` — and §6 publishes "one option, 2 values"
+(`Screen Center` / `Screen Edge`).
+
+**What Zaxnes does now** (owner decision, RO-5 part 2): **five** rungs, an intermediate one placing
+the pivot at the matching linear interpolation between the two heights, `pivot = −120 · s · c`.
+
+| Value | English | French | Domain label |
+|---|---|---|---|
+| 0 | Screen centre | Centre de l'écran | `Screen Center` |
+| 0.25 | 25 % | 25 % | `25%` |
+| 0.5 | 50 % | 50 % | `50%` |
+| 0.75 | 75 % | 75 % | `75%` |
+| 1 | Screen edge | Bord de l'écran | `Screen Edge` |
+
+**Why.** Two heights are a coarse choice for a transformation that is continuous in the pivot's
+height: between an arc pivoting at the centre of the image and one pivoting eight units below its
+edge there was nothing.
+
+**Where it reaches the picture.** The fraction arrives at the GPU through the uniform `uBendPivot`
+**that was already there**, computed in `SpaceBend::new` when a curvature setting changes. The
+three paths that read it — the scene pass, the shadow pass and the 2D-mode rectangle — therefore
+get the interpolation with **no shader change and nothing new per frame**.
+
+**What is kept, exactly.**
+
+- The two heights of REQ-SCN-066: at 0 and at 1 the arithmetic is **bit-exact** (`x · 1 = x`, and
+  the near end is written `0.0` rather than multiplied, a product by zero of a negative number
+  being `−0.0`). A capture at either end is pixel-identical to the one before this lot, by
+  construction and not by measurement.
+- The thirteen vectors of REQ-SCN-067 and the ordering clause of REQ-SCN-068, both stated for the
+  two heights.
+- The **settings file**, for the two values that existed: `json::float_json` writes the shortest
+  text that reads back as the same float, which is `0` and `1` — exactly what an `Int` wrote — and
+  the `Float` branch of `from_json` reads any JSON number. A settings file, a `games.json` or a
+  profile written before this lot loads unchanged. `SettingKeys.reference.txt` holds keys only and
+  does not change.
+- **3dSen compatibility**: a Lua write of 0 or of 1 is a rung and goes through untouched; a 3dSen
+  2.0 profile can write only those two; a Lua read of a setting holding 0 or 1 gives the same
+  number and the same Lua type as before. A write off the grid snaps to the nearest quarter, ties
+  away from zero — the rule §3 gives the three angles. A read of a setting the player put at 0.5
+  gives 0.5: `spl.arc_center` is reachable only as a style parameter (REQ-LUA-114), and
+  `visual_style_parameter` has always returned an `f64`, so **no member changes type** and
+  `goldens/lua-api.txt` is unchanged.
+- No setting added or removed, no new key, no row moved: `goldens/desktop-options-shown.txt` and
+  `goldens/handheld-option-tree.txt` hold **keys**, never values, so five rungs read there exactly
+  as two did.
+- The handheld defaults: the setting keeps its own default of 0 on both platforms, which costs
+  nothing, the pivot being read only while the arc is active.
+
+**Three consequences for R1 to weigh.**
+
+1. The key's **type goes from integer to real**. `Domain::coerce` rebuilds an `Int` value with
+   `truncate_to_i32`, so an integer-kinded setting cannot hold 0.25 at all. SPEC-09 §4.1 gives the
+   key the type "entier"; that is the divergence. The file format of the key is unchanged for the
+   two values that existed (above).
+2. The domain is a **grid, not a step**. The owner asks for the nearest rung with ties **away from
+   zero**, which is `Domain::grid` and not `Domain::stepped` — the latter rounds ties to the even
+   rung, so 0.125 would give 0 and 0.375 would give 0.5. This is letter for letter the rule §3
+   gives the three angles, so the branch keeps one rule.
+3. The **libretro option** publishes 5 values where AMD-043 §6 writes 2, and the **rung indices**
+   of AMD-059 REQ-LUA-116 shift for this one parameter (rung 1 was 1.0 and is now 0.25) — the same
+   consequence, for the same reason, as §2's second one. No persisted libretro choice is lost:
+   `core_options::try_apply` matches a value by **label**, and the two the amendment names are
+   still there, at the two ends. The round trip REQ-LUA-116 promises is still exact.
+
+**A smaller reservation.** The window decides on a drop-down from "the domain publishes rungs
+**and** the kind is enumerated or integer". Adding "or real" would turn `audio.volume`,
+`camera.fov` and `light.intensity` — stepped reals whose rungs are labelled with their own numbers
+— into twenty-entry drop-downs. Hence an explicit list, `ui::options::LABELLED_FRACTIONS`, holding
+only `scene.arc_center` today, read by the window *and* by the console page so the two cannot
+disagree. Recorded in Q-107 §8, which asks R1 whether a declarative rule (a marker on the
+descriptor) would be preferable.
+
+**The harness.** `--bend`'s fourth part accepted the literal strings `"0"` and `"1"` and nothing
+else; it now parses any number and refuses anything outside `[0, 1]`, snapping included none — so a
+capture campaign can compare pivots the menu does not offer, as it already could with the angles.

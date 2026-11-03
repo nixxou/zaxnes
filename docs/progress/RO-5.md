@@ -20,8 +20,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 |---|---|---|
 | 1 | The map of both parts, the decisions they force, the test plan | done — `e3a7b9d` |
 | 2 | Part 1: the labels | done — `7cd57f7` |
-| 3 | Part 2: the arc centre | done — this commit |
-| 4 | Closing: the notes, Q-107, `OPTIONS-LAYOUT.md`, fmt, clippy, the full tests, the release build | todo |
+| 3 | Part 2: the arc centre | done — `38b6b84` |
+| 4 | Closing: the notes, Q-107, `OPTIONS-LAYOUT.md`, fmt, clippy, the full tests, the release build | done — this commit |
 
 ## Notes
 
@@ -393,3 +393,79 @@ angles already took anything, on or off the grid, deliberately.
 - the per-frame paths: part 1 touches string tables only; part 2's pivot is computed in
   `SpaceBend::new`, which `scene_script_bridge::bend_of` calls when a curvature setting changes and
   never per frame, per tile or per pixel, and reaches the GPU as the uniform that was already there.
+
+### Step 4 — the closing, and the state the lot is left in
+
+**Q-107 gains two sections**, 7 and 8, in the shared ticket
+(`spec/changes/Q-107.md`) and in its copy (`impl/docs/spec/changes/Q-107.md`), the two byte for
+byte identical:
+
+- **§7**, the anti-aliasing labels: what AMD-032 §2 names, what it decided the levels *do*, the
+  owner's point, the three labels in both languages, the rewritten tooltip, the six things kept
+  (the values, the settings file, field 32, the Lua API and its golden, the row's place), the fact
+  that the change is four string-table entries and no code, and the reservation on libretro — one
+  `values` vector that is both persisted and displayed, so the two acronyms stay there and a
+  display label of libretro's own is a lot of its own. R1 is asked whether it wants one.
+- **§8**, the arc centre: the five rungs and their labels, the pivot formula, the uniform the
+  fraction travels through, the three consequences (the kind becoming real with the settings file
+  unchanged for 0 and 1, the grid rather than the step so that ties go away from zero as §3 does
+  for the angles, the libretro list growing from two values to five without losing a persisted
+  choice), the 3dSen compatibility table case by case, the bit-exactness of the two ends, and the
+  reservation on `LABELLED_FRACTIONS` — an explicit list rather than a declarative rule, R1 asked
+  whether it would prefer a marker on the descriptor.
+
+The ticket's header records RO-5 and adds AMD-032 §2, REQ-LUA-114 and SPEC-09 §4.1 to the
+requirements it concerns.
+
+**One correction in the shared ticket, and why it is not a deletion.** §1 carried a paragraph
+announcing that RO-4 would add `emu.patches_always_hooked` and one line to each of the two goldens.
+The owner withdrew the lot, so the sentence asserted something false about the current state. It is
+rewritten to say that the exception no longer exists and that the two goldens are RO-3's — rather
+than removed, because **Q-108** describes the withdrawn lot and would otherwise read as being in
+force. Q-108 itself is untouched: it is R0's to retire.
+
+**`rust/docs/OPTIONS-LAYOUT.md` gains §6 and §7**, the same two divergences written for the
+implementation side (the mapping, what is kept, the consequences for R1, the harness change). Its
+header records RO-5 and states plainly that RO-4 was withdrawn and appears in no section, so that
+nobody reading the note looks for a seventh divergence that was never merged. §2's line
+"`scene.arc_center` is not concerned" now points at §7 — it was true of the angles' grid and would
+have read as "the arc centre has no grid".
+
+**The code references the ticket** where the ticket says it does: `// Q-107 §7` in the two string
+tables (`english.rs` had it, `french.rs` gained it in this step), `// Q-107 §8` in
+`zax-settings/src/table.rs`, `zax-app/src/ui/options.rs`, `space_bend.rs` (added in this step, the
+interpolation being there) and in the two test files that record the type change.
+
+**The spec copy.** RO-5 implements no amendment — it is two owner requests that *diverge* from two
+already-implemented ones — so there was nothing new to copy.
+`docs/spec/changes/AMD-032-anticrenelage-echelle-resolution.md` and `AMD-043-courbure-espace.md`
+are both present and byte-identical to the spec folder's; Q-107 is the one file this lot syncs.
+
+#### The final run
+
+Foreground, one suite at a time, `CARGO_TARGET_DIR=rust/target-ro`, `--features zax-app/bundled`:
+
+| | |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release --workspace --features zax-app/bundled` | **2482 passed, 0 failed, 84 ignored** |
+| `cargo build --release --features zax-app/bundled` | `rust/target-ro/release/zaxnes.exe` |
+
+The 84 ignored are the ones that need a real 3dSen installation (`ZAXNES_3DSEN_INSTALL`) plus the
+GPU-bound ones, as on every lot of this branch; R0 runs them against real 1.1.2 and 2.0
+installations. No GPU stress campaign was run.
+
+The two scratch probes and the root `tests/` tree are still untracked and still on disk, as RO-1 to
+RO-3 left them; every commit of this lot staged files **by name**, so neither probe ever entered
+the index.
+
+#### What R0 should measure, and what the lot claims
+
+Part 1 changed no code at all, so no profile can move. Part 2 adds, to a function that runs when a
+curvature setting changes, a finiteness test, a clamp and a branch; the uniform it produces was
+already uploaded once per change, and **no shader source changed**, so a callgrind profile that
+uses nothing new should be identical within noise. The claim worth checking on real hardware is the
+pixel-identity of the two ends: a curvature capture of RU-4a at `--bend 0,0,60,0` and
+`--bend 0,0,60,1` must match the pre-lot capture byte for byte, which is what the bit-comparison of
+`arc_pivot()` and the vertex-for-vertex export test assert in software.

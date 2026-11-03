@@ -487,7 +487,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.Fantasy", "Fantaisie"),
     ("option.None", "Aucun"),
     // RO-5 partie 1 : voir le commentaire de `english.rs`. Les deux noms sont les mêmes dans les
-    // deux langues, un niveau de multi-échantillonnage n'étant pas un mot.
+    // deux langues, un niveau de multi-échantillonnage n'étant pas un mot. Q-107 §7.
     ("option.FFAA", "MSAA 4×"),
     ("option.SMAA", "MSAA 8×"),
     ("option.Native", "Native"),

@@ -35,6 +35,7 @@ pub const ANGLE_THRESHOLD: f32 = 1e-4;
 /// RO-5 part 2 (owner decision): `scene.arc_center` is a **fraction** of this offset, so the pivot
 /// is `EDGE_PIVOT_OFFSET · s · c` with `c` one of 0, 0.25, 0.5, 0.75, 1. At `c = 0` and `c = 1`
 /// the arithmetic is bit-exact, so the two heights REQ-SCN-066 names are unchanged to the pixel.
+// Q-107 §8
 pub const EDGE_PIVOT_OFFSET: f32 = -120.0;
 
 /// The centre `C = (128, 120, 0)` of the reference frame, which is the fixed point of every axis
