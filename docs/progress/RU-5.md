@@ -11,7 +11,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 |---|---|---|
 | 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `a9216ce` |
 | 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | done — `98a08ce` |
-| 3 | REQ-SCN-081: the voxel grid | in progress |
+| 3 | REQ-SCN-081: the voxel grid | done — `c5dfc8d` |
 | 4 | REQ-SCN-082: the pixel shadows | todo |
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | todo |
 | 6 | REQ-SCN-084: the floor reflections | todo |
@@ -422,3 +422,132 @@ same remedy RU-4b applied when `bind_frame_uniforms` moved out.
    at 1920 × 1080, which step 7 gives it the options for.
 3. The **review criterion**: Super Mario Bros. 1-1 at `spl.voxel_grid` = 2 in a close view — the
    toy-brick look, the sky and the score unchanged. No commercial ROM is available on this side.
+
+## Where this session stopped, and what the next one picks up
+
+**Steps 1 to 3 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`); the tree builds, 2329
+tests pass, fmt and workspace clippy are clean, the eleven synthetic captures at default settings
+are identical to step 1's at tolerance 0, and the render and PPU goldens hold. **Steps 4 to 9 are
+not started.** The session ran out before step 4; nothing is half-built, and the working tree holds
+no uncommitted change of this lot (only the two untracked items named in the step-1 notes).
+
+The design work for the next steps was done while step 3 was being written, and is recorded here
+so that it is not re-derived. None of it is committed code.
+
+### Step 4 — REQ-SCN-082, the pixel shadows: the design, and its one piece of plumbing
+
+The variant axis already exists: `ZAX_PIXEL_SHADOW` is declared in `gl/shaders.rs`, is a bit of
+`ProgramKey`, is selected by `select_style_variants`, is dropped for the HUD by `draw_hud`, and
+`vLocal` / `vLocalNormal` are already emitted under the shared guard. **What is left is the body.**
+
+The snapping has to happen **per fragment** (`⌊p⌋ + 0,5` varies across one face), so the
+fragment stage has to transform the snapped point as a vertex. That needs three things it does
+not have:
+
+1. **the model matrix**, as `flat out mat4 vModel` — the fragment shader cannot read
+   `gl_InstanceID`, so the vertex stage has to hand it over. Four varying slots, inside the
+   variant only;
+2. **the deformation**, as `flat out vec4 vDeformTile` plus the `DEFORMATION` chunk in the
+   fragment stage (REQ-SCN-082 point 3 says "déformation animée, puis échelle, rotation et
+   position, dans l'ordre de REQ-E3D-406"). `uDeform` already gates it, as in the vertex stage;
+3. **the construction depth `D`** — this is the one piece of plumbing. On `z` the voxel edges are
+   offset by `D/2` (REQ-SCN-082 point 2), and `D` is a property of the **pattern**, not of the
+   mesh's extent, so `bounds_max.z` is *not* a safe substitute (a `sizeZ` = 1 plate does not span
+   the box). The route to follow is the one AMD-057 already laid for `axis_aligned_normals`:
+   compute it once where the mesh is built, carry it on `TileMesh`, copy it onto `GpuMesh`, and
+   read it per **run** in `Passes::draw_run`, beside `wall_clip_bias(mesh)` which does exactly
+   that today. Only `fract(D/2)` matters — 0 for even `D`, 0.5 for odd — so one `f32` uniform
+   (`uVoxelZOffset`) serves.
+
+The varying budget is comfortable: the variant's varyings come to about 37 components (`vScene` 3,
+`vNormal` 3, `vUv` 2, `vBent` 3, `vLocal` 3, `vLocalNormal` 3, `vModel` 16, `vDeformTile` 4),
+under the 60 GLES 3.0 guarantees.
+
+Two clauses to get right, both easy to miss:
+
+- the **two axes** are those of smallest `|n_a|`, ties broken by the smallest index in the order
+  `x`, `y`, `z`; the third is left alone so the point stays on the face. On a GREEDY face that
+  picks exactly the two axes whose `|n_a|` = 0; on a MARCHING surface it always picks two, with no
+  plate where the effect would vanish;
+- the bias and the normal offset of REQ-SCN-031 are applied **to the displaced point**, not to the
+  fragment, or the shadow acne REQ-SCN-031 avoids comes back (REQ-SCN-082, Notes).
+
+Scope: opaque tiles only. Transparent tiles and the HUD already have `receive_shadow` false, so
+the `uReceiveShadow != 0` branch excludes them by construction. The **backdrop** does not:
+with `render.backdrop_lighting` off it draws through `scene.frag` at colour mode 2 and does
+receive shadows, so the snapping must be gated on `uColorMode != 2` — the same uniform test the
+grid already makes, constant over a draw.
+
+The acceptance criterion is the plate over the floor (`rot = (90, 0, 0)` floor, a `sizeZ` = 1
+plate 29 units above it, light (1, −3, 1)): with the effect on, every pixel of a fully visible
+1-voxel cell has the same value to ±2 sRGB levels, and the shadow boundary follows cell edges at
+exactly 6 and 14 units from the floor centre; with it off, at least one cell of each shadow edge
+holds both lit and shadowed pixels. **That last clause is what makes the criterion discriminate** —
+the shadows of REQ-SCN-030 are already hard, so edge sharpness does not tell the two styles apart.
+
+### Step 5 — REQ-SCN-080 and REQ-SCN-083: the infrastructure, and the occlusion
+
+The one allocation Classic cannot share is named in the step-1 map: the single-sample depth of
+`LinearColorBuffer` is a **renderbuffer**, so it cannot be sampled. The shape to follow:
+
+- `begin_pass` takes "does a screen pass want depth" as an argument, and allocates the depth as a
+  **texture** only then. With the argument false, `allocate` is byte-identical to today's, which
+  is what keeps the brief's point 1 ("no extra framebuffer, render target, texture or buffer
+  allocated" in Classic);
+- a new `gl/screen_effects.rs` owns everything else — the half-resolution targets of
+  `ao_half_resolution` and `ssr_half_resolution`, the blur targets, the noise texture — allocated
+  the first time a frame asks for either effect and **released when no frame wants either**, which
+  is the lifecycle the brief's point 1 asks for. `screen_effect_bytes` reports their size and is
+  already in `RenderStatistics`;
+- the two passes run in `render_scene` between the opaque runs and the transparent ones, in the
+  order REQ-SCN-058 (as amended) gives: **reflections first, then occlusion**. With MSAA on, the
+  colour and the depth are **resolved** before they are read (REQ-SCN-080, last bullet), so the
+  transparent objects and the HUD then draw into the resolved single-sample target. That is a real
+  consequence to state in the notes when it lands: with anti-aliasing **and** a screen effect on,
+  the transparent objects and the HUD are drawn without multisampling. Resolving the depth needs
+  a `GL_DEPTH_BUFFER_BIT` blit from the multisampled framebuffer, which is where the capability
+  probe of the brief's point 3 belongs.
+
+REQ-SCN-083 itself: hemisphere SSAO from depth, the public technique the amendment names (John
+Chapman 2013) — a kernel drawn in the normal's hemisphere and tightened near the point, rotated
+per pixel, a range check, then a depth-aware blur. `style.rs` already publishes every normative
+quantity (`ao_radius_units`, `ao_ceiling`, `ao_samples`, `ao_half_resolution`). The **MSVO** mode
+is rendered as Depth, the declared fallback **(D)**, until the MIT port of REQ-SCN-083 exists;
+`ao.thickness` therefore has no observable effect and is greyed, and `third_party/README.md` gains
+no entry in this lot.
+
+### Step 6 — REQ-SCN-084, the reflections
+
+Screen-space ray trace, linear march then bisection (McGuire and Mara 2014); `style.rs` publishes
+`ssr_intensity`, `ssr_max_length`, `ssr_blur_fraction`, `ssr_steps`, `ssr_refinements` and
+`ssr_half_resolution`. The decision already taken, in the step-1 map: **the floor test is per
+instance, not per fragment** — a face whose scene normal before curvature has `+Y ≥ 0.9` and whose
+instance's `xz` bounding box before curvature measures at least `6 × scene scale` in both
+dimensions. Both quantities live with the placement, so the test belongs in `frame_plan.rs` and
+reaches the pass as a mask, never as a per-fragment computation. The local-camera case of
+REQ-SCN-009 (v1.4) swaps `+Y` for the image plane's normal `(0, 0, −1)` and measures the footprint
+in `xy`; `SceneCamera::local_camera` is the flag to read.
+
+### Steps 7 to 9
+
+Step 7 (the GLES probe, the handheld page, the desktop options group, the harness options) has one
+finding already in hand: the thirteen settings are all in `ui/options.rs` `EXCLUDED`, with a
+comment that names this lot as the one that takes them out, and `ui/handheld/advanced.rs` picks up
+every steppable setting of the four desktop tabs by construction — so the handheld page needs no
+code, as it needed none for `render.backdrop_lighting` in RU-4b step 9. The desktop side needs the
+collapsible "Style" group of REQ-UI-061 as amended, with the visibility rules of REQ-SCN-079
+(the `ao.*` rows only when `spl.ao` ≠ 0, the `ssr.*` rows only when `spl.reflections` = 1), and
+`ao.thickness` greyed under the fallback.
+
+**Q-104 still has to be appended to**, not replaced: the brief's point 6 says Enhanced is
+OpenGL-only in this lot as the curvature was, so under `wgpu` the style reads back as set and
+renders as Classic, with one log line. Nothing of that is written yet.
+
+### The two untracked items in the working tree
+
+1. `tests/` — the .NET test tree's build output, as in RU-4a and RU-4b. Not this lot's.
+2. `rust/crates/zax-render/tests/dump_sources_tmp.rs` — the shader-dump helper of step 1,
+   deliberately not committed. It returns immediately without `ZAX_DUMP_DIR`. The baseline dump it
+   is compared against lives outside the repository, so a new session has to retake the baseline
+   from the commit it starts at rather than from step 1's; the committed form of the check is
+   `req_scn_081_no_classic_variant_carries_anything_of_the_grid`, which needs no dump at all.
