@@ -14,7 +14,8 @@
 //!       "depth": 8, "geometry": 0, "layer": 2,           // the main variant
 //!       "solid": false, "permanent": true, "self_connected": true,
 //!       "scale": [1,1,1], "offset": [0,0,0], "tags": "",
-//!       "texture": "face.png" } ],                      // optional: explicit texture
+//!       "texture": "face.png",                          // optional: explicit texture
+//!       "copies": [{ "offset": [0,0,6] }] } ],          // optional: more variants, all drawn
 //!   "scripts": [{ "name": "main", "file": "main.lua" }] }  // optional: Lua, files beside it
 //! ```
 //!
@@ -449,6 +450,25 @@ fn build_pattern(
         variant.deform_speed = matrix16(deform.get("speed"));
         variant.deform_offset = matrix16(deform.get("offset"));
     }
+    // "copies": [{"offset": [x, y, z], "depth": d}, ...]: more variants of the pattern, each
+    // drawn as well (one frame instance per variant, REQ-E3D-190): the main variant with that
+    // offset and depth, e.g. a motif repeated in depth.
+    let mut variants = vec![Arc::new(variant.clone())];
+    for copy in entry
+        .get("copies")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let mut extra = variant.clone();
+        if let Some(offset) = float3(copy.get("offset")) {
+            extra.offset = Some(offset);
+        }
+        if copy.get("depth").is_some() {
+            extra.depth = int(copy.get("depth"), extra.depth);
+        }
+        variants.push(Arc::new(extra));
+    }
     Ok(ProfilePattern {
         grid: Some(PatternGrid::new(width, height, cells)),
         constraint_size: Vec2I::UNCONSTRAINED,
@@ -458,7 +478,7 @@ fn build_pattern(
         color_flags,
         tile_density,
         pixel_density,
-        variants: vec![Arc::new(variant)],
+        variants,
         self_connected: flag(entry.get("self_connected"), true),
         skip_geometry: false,
         recorded_fields: None,

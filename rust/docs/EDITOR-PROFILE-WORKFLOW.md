@@ -41,6 +41,10 @@ kill, rebuild, relaunch, `state.load_slot` 9. The executable is locked while it 
   "scripts": [ { "name": "main", "file": "main.lua" } ] }
 ```
 
+`copies`: more variants of the pattern, each drawn too (the format's pattern instances): a thin
+slice repeated in depth with a small gap (`"depth": 2, "copies": [{"offset": [0, 0, 5]}, ...]`)
+gives a volume that keeps the motif, as Metal Force's fire.
+
 `texture`: a PNG laid pixel for pixel over the pattern (alpha 0 = empty), for a picture the
 game does not draw (a coin's true face, a 3D model's colours).
 
