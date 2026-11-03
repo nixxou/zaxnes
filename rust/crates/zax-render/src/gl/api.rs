@@ -145,6 +145,15 @@ impl Gl {
         unsafe { self.context.depth_mask(write) }
     }
 
+    /// The depth bias of `GL_POLYGON_OFFSET_FILL`, which the floor-mask pass of AMD-055
+    /// REQ-SCN-084 pulls its geometry towards the eye by so that it wins a `LEQUAL` test against
+    /// the depth the frame left — a resolved multisampled depth is the depth of one sample, and
+    /// re-rasterising the same triangle does not reproduce it exactly.
+    pub fn polygon_offset(&self, factor: f32, units: f32) {
+        // SAFETY: renderer contract; a plain state call.
+        unsafe { self.context.polygon_offset(factor, units) }
+    }
+
     pub fn color_mask(&self, write: bool) {
         // SAFETY: renderer contract; a plain state call.
         unsafe { self.context.color_mask(write, write, write, write) }

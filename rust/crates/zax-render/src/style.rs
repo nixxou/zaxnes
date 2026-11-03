@@ -255,6 +255,42 @@ impl StyleSettings {
     pub const fn ssr_half_resolution(&self) -> bool {
         self.ssr_quality != 3
     }
+
+    /// Taps of the blur spiral the trace averages the reflected colour over, by quality: 4, 6, 8
+    /// and 12. Not observable — REQ-SCN-084 leaves "la forme du noyau de flou" free — so this is
+    /// an implementation choice, and the invariant it serves is the *width* of the blur, which
+    /// [`Self::ssr_blur_fraction`] fixes.
+    #[must_use]
+    pub const fn ssr_blur_taps(&self) -> i32 {
+        match self.ssr_quality {
+            0 => 4,
+            1 => 6,
+            3 => 12,
+            _ => 8,
+        }
+    }
+
+    /// The **longest** ray any setting of `ssr.length` can ask for: `40 × 9 × échelle de scène`,
+    /// so 360 units at a scale of 1 ([`Self::ssr_max_length`] at rung 5).
+    ///
+    /// The march's sample positions are fitted to this length and truncated at the setting's own,
+    /// so raising `ssr.length` only ever adds positions at the far end. That is what makes the
+    /// invariant "`ssr.length` croissant allonge la zone modifiée" hold by construction: spreading
+    /// one step count over each setting's own length would instead make a short ray *finer* and a
+    /// long one coarser, and a coarser march can lose a reflection it used to find.
+    ///
+    /// `// Q-106`: that invariant is not readable in the close-up R as the amendment writes it —
+    /// every ray of that configuration is far shorter than the forty units the shortest setting
+    /// allows — so what the tests of this side assert is the property above, that the reflected
+    /// area is never **shortened**.
+    #[must_use]
+    pub fn ssr_longest(scene_scale: f32) -> f32 {
+        let longest = Self {
+            ssr_length: 5,
+            ..Self::default()
+        };
+        longest.ssr_max_length(scene_scale)
+    }
 }
 
 /// `n(niveau) = 2 · niveau − 1` of REQ-SCN-084: levels 1 to 5 give 1, 3, 5, 7 and 9.

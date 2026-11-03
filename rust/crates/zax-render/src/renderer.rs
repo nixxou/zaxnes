@@ -37,7 +37,7 @@ use crate::gl::shadow_map::ShadowMap;
 use crate::gl::skybox::SkyboxPass;
 use crate::gl::texture_cache::TextureCache;
 use crate::interop;
-use crate::numerics::Vector4;
+use crate::numerics::{Vector3, Vector4};
 use crate::scene::{SceneFrame, SceneState};
 use crate::shadow_volume::ShadowVolume;
 use crate::statistics::RenderStatistics;
@@ -113,7 +113,7 @@ struct ScenePrograms {
     /// Every program built so far; `built[0]` and `built[1]` are the flat, pixel-centre
     /// `[plain, solid]` pair the renderer is created with.
     built: Vec<ShaderProgram>,
-    /// For each `(bend, centroid, voxel_grid, pixel_shadow, backdrop)` key, the indices in
+    /// For each `(bend, centroid, voxel_grid, pixel_shadow, backdrop, floor_mask)` key, the indices in
     /// `built` of its plain and solid programs — `[0, 1]`, the flat scene pair, until that
     /// variant has been built. A backdrop key points **both** entries at one program: the
     /// backdrop never clips and never reads a colour texture, so only the solid form is ever
@@ -132,6 +132,17 @@ struct ScenePrograms {
     /// requirement is about tile meshes and is without object on the backdrop.
     pixel_shadow: bool,
     backdrop: bool,
+    /// Where in `built` the floor-mask program of AMD-055 REQ-SCN-084 is, and the curvature it
+    /// was built for; `None` until a frame asks for the reflections.
+    ///
+    /// **Not an axis of [`ProgramKey`]**, and that is the brief's point 1 measured: widening the
+    /// key put a branch — or an extra shift and add — inside [`Self::current_key`], which every
+    /// draw run of every frame refreshes the cached slot through, and cost `render_scene` about
+    /// 120 instructions. A field of its own costs Classic nothing: [`Self::set_floor_mask`]
+    /// writes the cached slot directly, twice on a frame that lays a mask down and never
+    /// otherwise.
+    mask: Option<usize>,
+    mask_bend: bool,
     /// Whether this frame wants the backdrop model at all (`render.backdrop_lighting` and a
     /// backdrop to draw), decided once a frame by [`SceneRenderer::select_backdrop_variant`].
     ///
@@ -161,7 +172,8 @@ struct ProgramKey {
 }
 
 impl ScenePrograms {
-    /// `bend` × `centroid` × `voxel_grid` × `pixel_shadow` × `backdrop`.
+    /// `bend` × `centroid` × `voxel_grid` × `pixel_shadow` × `backdrop`. The floor mask of
+    /// AMD-055 REQ-SCN-084 is **not** an axis of this table: see [`Self::mask`].
     const KEYS: usize = 32;
 
     /// The slot of `slots` a variant is kept at.
@@ -179,6 +191,11 @@ impl ScenePrograms {
     /// object on the backdrop and [`shaders::backdrop`] therefore has no such axis: normalising
     /// it here is what keeps the slot a backdrop program was installed at and the slot the
     /// backdrop run then looks it up at the same one.
+    ///
+    /// The mask of REQ-SCN-084 is **not** in this key, and that is a measurement: a `floor_mask`
+    /// axis here cost `render_scene` about 120 instructions, because every `set_*` of the opaque
+    /// loop refreshes the cached slot through this function. [`Self::mask`] holds it instead, and
+    /// Classic therefore pays nothing at all for it.
     const fn current_key(&self) -> ProgramKey {
         ProgramKey {
             bend: self.bend,
@@ -226,6 +243,28 @@ impl ScenePrograms {
             self.style_programs += 1;
         }
         self.refresh();
+    }
+
+    /// Takes a freshly built floor-mask program of AMD-055 REQ-SCN-084 into service. One program
+    /// for both forms, as the backdrop's is: the mask never clips and reads no colour texture, so
+    /// the solid form is never asked for.
+    ///
+    /// Kept in [`Self::mask`] rather than in the slot table, for the reason that field states.
+    fn install_mask(&mut self, bend: bool, program: ShaderProgram) {
+        self.built.push(program);
+        self.mask = Some(self.built.len() - 1);
+        self.mask_bend = bend;
+        self.style_programs += 1;
+    }
+
+    /// Puts the floor-mask program of AMD-055 REQ-SCN-084 in or out of use, for the one pass that
+    /// lays the mask down. Writes the cached slot straight, so the frame's own variant comes back
+    /// with one [`Self::refresh`] and nothing of this reaches the draw runs.
+    fn set_floor_mask(&mut self, floor_mask: bool) {
+        match (floor_mask, self.mask) {
+            (true, Some(index)) => self.slot = [index, index],
+            _ => self.refresh(),
+        }
     }
 
     fn set_bend(&mut self, bend: bool) {
@@ -430,6 +469,8 @@ impl SceneRenderer {
                 voxel_grid: false,
                 pixel_shadow: false,
                 backdrop: false,
+                mask: None,
+                mask_bend: false,
                 backdrop_wanted: false,
                 style_programs: 0,
             },
@@ -623,7 +664,7 @@ impl SceneRenderer {
         // programs of the two screen passes, counted together. 0 in Classic, and 0 in Enhanced
         // until an effect is turned on.
         statistics.style_programs =
-            self.passes.scene.style_programs + effects.map_or(0, |_| ScreenEffects::PROGRAMS);
+            self.passes.scene.style_programs + effects.map_or(0, ScreenEffects::programs);
         statistics.screen_effect_bytes = effects.map_or(0, ScreenEffects::bytes);
         statistics.resident_meshes = count(self.meshes.count());
         statistics.mesh_uploads = self.meshes.uploads();
@@ -823,21 +864,39 @@ impl SceneRenderer {
     /// satisfies both clauses at once and costs nothing — the same reading
     /// [`Self::select_style_variants`] already applies to the voxel grid.
     ///
-    /// The reflections of REQ-SCN-084 join the test when they land; until then a frame that asks
-    /// only for them allocates nothing, which is what point 2 of the brief wants of an effect that
-    /// does not exist yet.
+    /// **Each effect on its own.** The module holds the occlusion of REQ-SCN-083 and the
+    /// reflections of REQ-SCN-084 as two independent halves, so a player who turns one on compiles
+    /// and allocates only that one — point 2 of the brief, for the pair that are passes rather
+    /// than variants.
     ///
     /// # Errors
     ///
-    /// [`RenderError::Gl`] when one of the three programs does not compile or link.
+    /// [`RenderError::Gl`] when one of the programs does not compile or link.
     fn select_screen_effects(&mut self, scene: &SceneState) -> Result<(), RenderError> {
-        let wanted = scene.settings.style.ao_active() && !scene.two_dimensional_mode;
+        let style = &scene.settings.style;
+        let wanted = style.screen_effects_active() && !scene.two_dimensional_mode;
         if !wanted {
             self.screen_effects = None;
             return Ok(());
         }
-        if self.screen_effects.is_none() {
-            self.screen_effects = Some(ScreenEffects::new(&self.gl)?);
+
+        let effects = match &mut self.screen_effects {
+            Some(effects) => effects,
+            none => none.insert(ScreenEffects::new(&self.gl)?),
+        };
+        effects.select(style)?;
+
+        // REQ-SCN-084's mask is laid down by the scene's own vertex stage, so its program belongs
+        // with the other scene variants — and like them it is built the first time a frame asks
+        // for it, for the curvature the frame draws with and no other.
+        if style.reflections_active() {
+            let bend = self.passes.scene.bend;
+            let scene = &self.passes.scene;
+            if scene.mask.is_none() || scene.mask_bend != bend {
+                let program = ShaderProgram::create(&self.gl, &shaders::floor_mask(bend))?;
+                program.bind_uniform_block("ZaxInstances", INSTANCE_BINDING);
+                self.passes.scene.install_mask(bend, program);
+            }
         }
         Ok(())
     }
@@ -1030,6 +1089,22 @@ impl SceneRenderer {
             self.passes.instance_alignment,
             STD140_PLACEMENT,
         );
+        // AMD-055 REQ-SCN-084: which instances are floors, and the runs the mask pass redraws.
+        // Both only on a frame whose Enhanced style asks for the reflections — in Classic this is
+        // one `is_some_and` on an `Option` that is already `None`. After `lay_out_instances`,
+        // which fixes the order of the opaque bucket the marks are indexed by, and before the
+        // instance data is uploaded.
+        if self
+            .screen_effects
+            .as_ref()
+            .is_some_and(ScreenEffects::reflects)
+        {
+            mark_floors(
+                &mut self.plan,
+                self.passes.instance_alignment,
+                scene.camera.local_camera,
+            );
+        }
         let passes = &mut self.passes;
         passes.upload_instances(&self.plan.instance_data);
         let lists = &self.plan.lists;
@@ -1051,6 +1126,9 @@ impl SceneRenderer {
         };
 
         bind_frame_uniforms(passes, &mut common);
+        // AMD-055 REQ-SCN-084: and on the mask program, when this frame has one. One
+        // `has` on a slot table in Classic.
+        bind_mask_uniforms(passes, &mut common, scene.camera.local_camera);
 
         // 1. Opaque objects.
         for run in &lists.opaque_runs {
@@ -1076,33 +1154,25 @@ impl SceneRenderer {
         passes.set_winding(false, false);
 
         // 2. The screen-space passes of AMD-055 REQ-SCN-080, in the order that requirement fixes:
-        // after the opaque objects — so the tiles, the backdrop and the 2D-mode rectangle occlude
-        // and are darkened — and before the transparent ones, which therefore neither occlude nor
-        // are darkened, nor is the HUD drawn after them. The floor reflections of REQ-SCN-084 go
-        // first, between the opaque objects and the occlusion, when they land.
+        // after the opaque objects — so the tiles, the backdrop and the 2D-mode rectangle occlude,
+        // are darkened and are reflected — and before the transparent ones, which therefore
+        // neither occlude nor reflect nor are darkened, nor is the HUD drawn after them. The floor
+        // reflections of REQ-SCN-084 go first, then the occlusion of REQ-SCN-083.
         if let Some(effects) = &mut self.screen_effects {
-            run_screen_effects(effects, &mut self.linear, passes, gl, scene, view)?;
+            run_screen_effects(
+                effects,
+                &mut self.linear,
+                passes,
+                lists,
+                &self.plan.floor_runs,
+                (scene, view),
+            )?;
         }
 
         // 3. Transparent objects, farthest first, each with a depth-only pass first
         // (REQ-SCN-040, AMD-012).
         if !lists.transparent.is_empty() {
-            passes.scene.current().use_program();
-            common.bind(passes);
-            let light = common.constants.light_direction;
-            passes.scene.current().set_vec3("uLightDirection", light);
-            gl.enable(glow::BLEND);
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            for group in &lists.transparent_objects {
-                passes.draw_blended(
-                    &lists.transparent,
-                    &lists.transparent_runs[group.runs.0..group.runs.1],
-                );
-            }
-
-            gl.disable(glow::BLEND);
-            passes.statistics.transparent_tiles = count(lists.transparent.len());
-            passes.statistics.transparent_objects = count(lists.transparent_objects.len());
+            draw_transparent(passes, &mut common, lists);
         }
 
         // 4. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
@@ -1147,35 +1217,57 @@ fn run_screen_effects(
     effects: &mut ScreenEffects,
     linear: &mut LinearColorBuffer,
     passes: &mut Passes,
-    gl: &Gl,
-    scene: &SceneState,
-    view: &CameraView,
+    lists: &DrawLists<GpuMesh, Texture>,
+    floor_runs: &[InstanceRun],
+    (scene, view): (&SceneState, &CameraView),
 ) -> Result<(), GlError> {
     // REQ-SCN-080's last bullet: the two passes work on the **resolved** colour and depth. The
     // consequence, stated where it happens: from here on the frame draws into the single-sample
     // target, so with anti-aliasing *and* a screen effect the transparent objects and the HUD are
     // not multisampled.
     linear.resolve_samples();
-    if let Some(depth) = linear.depth_texture() {
+    if let (Some(depth), Some(color)) = (linear.depth_texture(), linear.color_texture()) {
         let frame = ScreenFrame {
             depth,
+            color,
             capacity: linear.capacity(),
             drawn: linear.drawn(),
             drawn_scale: linear.drawn_scale(),
             projection: projection_terms(view),
         };
         // The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of,
-        // so the radius in scene units is the radius in view units
+        // so a length in scene units is a length in view units
         // (`frame_plan::SceneConstants::voxel_cell` reads the same scale the same way).
-        let mut submitted = effects.occlude(frame, &scene.settings.style, 1.0)?;
-        linear.bind_for_draw();
-        submitted += effects.composite(frame);
+        let style = &scene.settings.style;
+        let mut submitted = 0;
+
+        // 2a. The reflections of REQ-SCN-084, **first** (REQ-SCN-058 as the amendment orders it),
+        // so that what they reflect is the scene the occlusion has not yet darkened.
+        if effects.reflects() {
+            if effects.begin_mask(frame)? {
+                draw_floor_mask(passes, lists, floor_runs);
+                submitted += 1;
+            }
+            submitted += effects.trace(frame, style, 1.0)?;
+            linear.bind_for_draw();
+            submitted += effects.composite_reflections(frame);
+        }
+
+        // 2b. The occlusion of REQ-SCN-083.
+        if effects.occludes() {
+            submitted += effects.occlude(frame, style, 1.0)?;
+            linear.bind_for_draw();
+            submitted += effects.composite_occlusion(frame);
+        }
+
+        effects.end_passes();
         passes.statistics.screen_effect_passes = submitted;
     }
 
     // The passes bound targets and a vertex array of their own, and left the depth test off; the
     // draws that follow rebind what they need and expect the frame's state.
     passes.forget_bindings();
+    let gl = &passes.gl.clone();
     gl.enable(glow::DEPTH_TEST);
     gl.depth_func(glow::LESS);
     gl.depth_mask(true);
@@ -1184,6 +1276,74 @@ fn run_screen_effects(
         gl.cull_face(glow::BACK);
     }
     Ok(())
+}
+
+/// The two steps AMD-055 REQ-SCN-084 asks of the draw list: which instances are floors, and the
+/// runs the mask pass redraws.
+///
+/// **`#[inline(never)]` is the brief's point 1, measured**, the same way `run_screen_effects`
+/// carries it: inlined, the pair put 126 instructions into `render_scene`, a function R0 counts,
+/// and none of them runs on a frame that does not ask for the reflections. Out of line,
+/// `render_scene` pays the one `is_some_and` that decides not to call this.
+///
+/// The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of
+/// (`SceneConstants::voxel_cell` and the occlusion's radius read it the same way).
+#[inline(never)]
+fn mark_floors(plan: &mut FramePlan<GpuMesh, Texture>, alignment: usize, local_camera: bool) {
+    plan.mark_floor_surfaces(local_camera, 1.0);
+    plan.lay_out_floor(alignment, STD140_PLACEMENT);
+}
+
+/// The floor-mask pass of AMD-055 REQ-SCN-084: the floor-eligible opaque runs redrawn into the
+/// mask target the caller has bound, through the program whose fragment stage is the `+Y ≥ 0,9`
+/// test of the floor definition.
+///
+/// It draws with `Passes::draw_run`, exactly as the opaque loop does, so the mask carries the
+/// animated deformation, the placement, the curvature and the wall bias of AMD-057 of the frame it
+/// masks — the mask cannot land anywhere the frame did not draw. The uniforms the mask program
+/// does not have (the palette, the clip rectangle, the shadow map, the grid cell) are writes that
+/// find nothing, the same way the five curvature uniforms are on a flat program.
+fn draw_floor_mask(
+    passes: &mut Passes,
+    lists: &DrawLists<GpuMesh, Texture>,
+    floor_runs: &[InstanceRun],
+) {
+    passes.scene.set_floor_mask(true);
+    passes.scene.current().use_program();
+    for run in floor_runs {
+        passes.draw_run(&lists.opaque, run, true);
+    }
+    passes.scene.set_floor_mask(false);
+}
+
+/// The transparent objects of REQ-SCN-040 and AMD-012, farthest first, each with its own
+/// depth-only pass.
+///
+/// Extracted from `render_scene` for the reason `draw_hud` was: that function is at clippy's line
+/// ceiling, and this block is one self-contained step of REQ-SCN-058's order.
+fn draw_transparent(
+    passes: &mut Passes,
+    common: &mut CommonUniforms<'_>,
+    lists: &DrawLists<GpuMesh, Texture>,
+) {
+    passes.scene.current().use_program();
+    common.bind(passes);
+    let light = common.constants.light_direction;
+    passes.scene.current().set_vec3("uLightDirection", light);
+    passes.gl.enable(glow::BLEND);
+    passes
+        .gl
+        .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+    for group in &lists.transparent_objects {
+        passes.draw_blended(
+            &lists.transparent,
+            &lists.transparent_runs[group.runs.0..group.runs.1],
+        );
+    }
+
+    passes.gl.disable(glow::BLEND);
+    passes.statistics.transparent_tiles = count(lists.transparent.len());
+    passes.statistics.transparent_objects = count(lists.transparent_objects.len());
 }
 
 fn draw_hud(
@@ -1260,6 +1420,37 @@ fn bind_frame_uniforms(passes: &mut Passes, common: &mut CommonUniforms<'_>) {
 
     // Back to the scene programs, so the opaque loop starts where it always did.
     passes.scene.set_backdrop(false);
+    passes.scene.current().use_program();
+}
+
+/// Binds the frame's uniforms on the floor-mask program of AMD-055 REQ-SCN-084, when this frame
+/// has one — which is only when `spl.reflections` = 1.
+///
+/// **Here and not in the pass**, for the reason the backdrop's are here: the mask program needs
+/// the same once-a-frame values every scene program needs (the view projection, the curvature's
+/// five constants, the deformation's), and binding them where [`CommonUniforms`] is already open
+/// keeps that value out of the screen-pass block — passing it there cost `render_scene` 126
+/// instructions of spilled matrices, which is the brief's point 1 measured.
+///
+/// `#[inline(never)]` for the same reason: inlined, this body is 116 instructions of
+/// `render_scene` that only a frame with the reflections on ever runs.
+#[inline(never)]
+fn bind_mask_uniforms(passes: &mut Passes, common: &mut CommonUniforms<'_>, local_camera: bool) {
+    if passes.scene.mask.is_none() {
+        return;
+    }
+
+    passes.scene.set_floor_mask(true);
+    passes.scene.current().use_program();
+    common.bind(passes);
+    passes.set_normal_sign(false, true);
+    let up = crate::style::floor_vertical(local_camera);
+    passes
+        .scene
+        .current()
+        .set_vec3("uFloorUp", Vector3::new(up[0], up[1], up[2]));
+
+    passes.scene.set_floor_mask(false);
     passes.scene.current().use_program();
 }
 

@@ -73,6 +73,14 @@ flat out mat3 vModelLinear;
 flat out vec3 vDeformTile;
 #endif
 
+// AMD-055 REQ-SCN-084: the normal in the scene frame **before** the curvature, which is the frame
+// the floor definition is written in ("la normale, exprimée dans le repère de scène avant
+// courbure"). The curvature overwrites vNormal below (REQ-SCN-068 transports it), so the mask
+// pass takes its own copy of the value that requirement judges. Emitted by no other variant.
+#ifdef ZAX_FLOOR_MASK
+out vec3 vSceneNormal;
+#endif
+
 void main()
 {
     // The fields are read from the block one by one: copying the whole instance into a local
@@ -108,6 +116,11 @@ void main()
 #ifdef ZAX_PIXEL_SHADOW
     vModelLinear = mat3(uInstances[index].model);
     vDeformTile = uInstances[index].deformTile.xyz;
+#endif
+
+#ifdef ZAX_FLOOR_MASK
+    // Before the curvature, and after the normal matrix: the scene normal of REQ-SCN-084.
+    vSceneNormal = vNormal;
 #endif
 
 #ifdef ZAX_BEND

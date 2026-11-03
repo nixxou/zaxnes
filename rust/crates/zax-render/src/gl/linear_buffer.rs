@@ -215,6 +215,14 @@ impl LinearColorBuffer {
         self.attachments.as_ref().and_then(|a| a.depth.texture())
     }
 
+    /// The linear colour of the frame, which the reflections of REQ-SCN-084 sample ("seule la
+    /// scène déjà rendue peut être reflétée"). Always a texture — it is the one the resolve pass
+    /// has always read — so this allocates nothing new; `None` before the first
+    /// [`begin_pass`](Self::begin_pass).
+    pub fn color_texture(&self) -> Option<Texture> {
+        self.attachments.as_ref().map(|a| a.color)
+    }
+
     /// Resolves the multisampled copy — colour **and** depth — into the single-sample
     /// attachments and binds those for the draws that follow, so that the screen-space passes of
     /// REQ-SCN-080 read a resolved frame ("après résolution du MSAA éventuel").

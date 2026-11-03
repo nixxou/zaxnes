@@ -11,8 +11,6 @@ in vec2 vUv;
 out vec4 oOcclusion;
 
 uniform sampler2D uOcclusion;
-// One texel of the occlusion target, in viewport coordinates.
-uniform vec2 uTexel;
 
 // How fast a tap loses its weight with the depth difference, **relative to the distance of the
 // pixel**: at a difference of 1/ZAX_AO_BLUR_SHARPNESS of the distance a tap counts for 1/e.

@@ -235,6 +235,10 @@ pub struct FramePlan<M, T> {
     /// `spl.reflections` = 1, so Classic and Enhanced-without-reflections neither fill it nor
     /// walk the bucket a second time.
     pub floor_surfaces: Vec<bool>,
+    /// AMD-055 REQ-SCN-084: the runs the floor-mask pass draws, over [`DrawLists::opaque`], with
+    /// placements of their own in [`Self::instance_data`]. **Empty on every frame that does not
+    /// ask for them** ([`Self::lay_out_floor`] is called only when `spl.reflections` = 1).
+    pub floor_runs: Vec<InstanceRun>,
     /// The bounding boxes [`Self::mark_floor_surfaces`] accumulates, kept from frame to frame so
     /// that the pass costs no allocation once it has run once. `None` is the key of the backdrop,
     /// which is an object of its own (Q-093 (a)).
@@ -254,6 +258,7 @@ impl<M, T> Default for FramePlan<M, T> {
             caster_data: Vec::new(),
             diagnostics: RenderDiagnostics::default(),
             floor_surfaces: Vec::new(),
+            floor_runs: Vec::new(),
             floor_boxes: FastMap::default(),
             frame: 0,
             scratch: OpaqueScratch::default(),
@@ -551,6 +556,10 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
     /// The backdrop carries no instance and is measured **as an object of its own** (Q-093 (a),
     /// answered): at its default size of 256 × 240 × 1 its `z` dimension is 1, under the
     /// threshold of 6, so by default it is not a floor and the reading is not observable.
+    // Out of line for the reason `LinearColorBuffer::allocate` is: it runs only on a frame whose
+    // Enhanced style asks for the reflections, and inlined it would carry that whole body into
+    // `render_scene`, a function R0 counts (the step-5 measurement of this lot).
+    #[inline(never)]
     pub fn mark_floor_surfaces(&mut self, local_camera: bool, scene_scale: f32) {
         let Self {
             lists,
@@ -583,6 +592,61 @@ impl<M: Copy + Eq + Hash + Debug, T: Copy + Eq + Hash + Debug> FramePlan<M, T> {
                 )
             });
             floor_surfaces.push(floor);
+        }
+    }
+
+    /// Cuts the floor-marked items of the opaque runs into runs of their own and appends their
+    /// placements to [`Self::instance_data`], for the mask pass of AMD-055 REQ-SCN-084.
+    ///
+    /// Called after [`Self::lay_out_instances`] — which is what fixes the order of the opaque
+    /// bucket and the runs this walks — and after [`Self::mark_floor_surfaces`], on a frame whose
+    /// Enhanced style asks for the reflections and on no other.
+    ///
+    /// **Why the placements are written a second time.** A floor-marked stretch of an opaque run
+    /// is contiguous in the instance data, so the mask could in principle bind a sub-range of
+    /// it — but `glBindBufferRange` wants an offset that is a multiple of
+    /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT` (256 bytes on most drivers, two placements), and a
+    /// stretch that starts mid-run has no such offset. Appending the stretch at an aligned offset
+    /// of its own costs 128 bytes per floor tile in a buffer that is streamed once a frame, and
+    /// lets the mask pass reuse `Passes::draw_run` exactly as the opaque loop does — the same
+    /// deformation, the same wall bias of AMD-057, the same winding and normal sign of Q-069.
+    #[inline(never)] // As [`Self::mark_floor_surfaces`]: cold code, out of `render_scene`.
+    pub fn lay_out_floor(&mut self, alignment: usize, placement: impl Placement) {
+        let Self {
+            lists,
+            instance_data,
+            floor_surfaces,
+            floor_runs,
+            ..
+        } = self;
+        floor_runs.clear();
+
+        let floor = |index: usize| floor_surfaces.get(index).copied().unwrap_or(false);
+        for run in &lists.opaque_runs {
+            let end = run.first + run.count;
+            let mut index = run.first;
+            while index < end {
+                if !floor(index) {
+                    index += 1;
+                    continue;
+                }
+
+                let first = index;
+                while index < end && floor(index) {
+                    index += 1;
+                }
+
+                let offset = instance_data.len().next_multiple_of(alignment);
+                instance_data.resize(offset, 0);
+                for item in &lists.opaque[first..index] {
+                    placement.write(instance_data, &item.model, item.deform.as_ref());
+                }
+                floor_runs.push(InstanceRun {
+                    first,
+                    count: index - first,
+                    offset,
+                });
+            }
         }
     }
 

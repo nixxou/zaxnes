@@ -44,8 +44,8 @@ pub use renderer::{RenderError, SceneRenderer};
 /// the curvature variant does.
 pub mod shaders {
     pub use crate::gl::shaders::{
-        assemble, backdrop, fantasy, gradient, scene, shadow, ProgramSource, SceneVariant, Stage,
-        AO, AO_BLUR, AO_COMPOSITE,
+        assemble, backdrop, fantasy, floor_mask, gradient, scene, shadow, ProgramSource,
+        SceneVariant, Stage, AO, AO_BLUR, AO_COMPOSITE, SSR, SSR_COMPOSITE,
     };
 }
 

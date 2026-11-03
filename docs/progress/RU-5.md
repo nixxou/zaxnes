@@ -15,7 +15,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 4 | REQ-SCN-082: the pixel shadows | done — `be7de5c` |
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — this commit |
 | 6a | REQ-SCN-084: the floor definition, on the CPU | done — this commit |
-| 6b | REQ-SCN-084: the mask, the trace and the composite | todo |
+| 6b | REQ-SCN-084: the mask, the trace and the composite | done — this commit |
 | 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
 | 8 | The per-effect measurements | todo |
 | 9 | Closing: `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
@@ -836,6 +836,174 @@ The AMD-055 question tickets this lot implements against — **Q-092 to Q-100**,
 copied into `docs/spec/changes/` with this step, which rounds out the spec copy steps 1 to 5 cited
 but had not taken.
 
+### Step 6b — REQ-SCN-084, the mask, the trace and the composite
+
+| Piece | What landed |
+|---|---|
+| `shaders/floor_mask.frag` (new) | the `+Y ≥ 0,9` test of the floor definition, into one `R8` channel |
+| `shaders/ssr.frag` (new) | the march, the bisection, the distance-proportional blur and the two attenuations |
+| `shaders/ssr_composite.frag` (new) | `(1 − i) · surface + i · reflet`, premultiplied, masked again at full resolution |
+| `shaders/screen_depth.glsl` | `zaxViewNormal`, `zaxNeighbour`, `zaxDither`, `uTexel` and the two spiral constants **moved in** from `ao.frag`: both passes read the same frame the same way |
+| `shaders/scene.vert` | `vSceneNormal` under `ZAX_FLOOR_MASK` — the scene normal **before** the bend |
+| `gl/shaders.rs` | `FLOOR_MASK_DEFINE`, `floor_mask(bend)`, `SSR`, `SSR_COMPOSITE` |
+| `gl/screen_effects.rs` | split into two independent halves (`Occlusion`, `Reflections`), `select`, `begin_mask`, `trace`, `composite_reflections`, `programs()` |
+| `gl/linear_buffer.rs`, `gl/api.rs` | `color_texture()`; `polygon_offset` |
+| `frame_plan.rs` | `floor_runs` and `lay_out_floor` |
+| `renderer.rs` | `ScenePrograms::mask`, `set_floor_mask`, `install_mask`; `bind_mask_uniforms`, `draw_floor_mask`, `mark_floors`, `draw_transparent` |
+| `style.rs` | `ssr_blur_taps`, `ssr_longest` |
+
+#### Five decisions inside the pass, and what drove each
+
+1. **The mask is a geometry pass, and it had to be.** The two halves of the floor definition are a
+   per-instance flag and a per-fragment normal (step 6a), so the mask is an `R8` target the
+   floor-eligible runs are **re-drawn** into, with the frame's **own depth texture** attached and
+   depth writes off. Nothing of the Classic framebuffer changes, and the pass does not exist at
+   `spl.reflections` = 0.
+2. **Its vertex stage is `scene.vert` itself**, under `ZAX_FLOOR_MASK`. That is what makes the mask
+   carry the animated deformation, the placement, the curvature and the wall bias of AMD-057 of
+   the frame it masks — it cannot land where the frame did not draw — and it lets the pass reuse
+   `Passes::draw_run` unchanged, with its winding, its normal sign (Q-069) and its instance
+   ranges. The fragment stage is thirty lines.
+3. **The floor runs get placements of their own.** A floor-marked stretch of an opaque run is
+   contiguous in the instance data, but `glBindBufferRange` wants an offset that is a multiple of
+   `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT` — 256 bytes, two placements — and a stretch that starts
+   mid-run has none. `lay_out_floor` appends each stretch at an aligned offset: 128 bytes per
+   floor tile in a buffer streamed once a frame, against widening `draw_run`.
+4. **`RGBA16F`, premultiplied.** The trace writes `rgb = w · c` and `a = w`, so the composite is
+   `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)` — the requirement's blend, in place, with no
+   second colour target. Premultiplied because the composite samples the half-resolution target
+   back up with a linear filter, and only a premultiplied value filters correctly across the edge
+   of the reflected area. `RGBA16F` is the format `LinearColorBuffer` has always rendered into
+   (GLES 3.0 through `EXT_color_buffer_float`), so **no capability is new**.
+5. **The mask is applied a second time, at full resolution, in the composite.** Not a belt: the
+   trace runs at half of each dimension, so the linear upsample would spread the reflection half
+   an output pixel past the floor's silhouette — and "aucun pixel qui n'est pas une surface de sol
+   n'est modifié" is three of the six invariants. With the mask in the composite it is true pixel
+   by pixel.
+
+#### The march, and the clause it is shaped by
+
+Linear march then bisection (McGuire and Mara 2014, the family the amendment names), with two
+choices worth recording:
+
+- the positions are **quadratic** in the step index, `360 × (i/n)²` scene units, and fitted to the
+  **longest** ray any setting can ask for (`style::ssr_longest`), truncated at the setting's own.
+  Quadratic because the first steps are then fractions of a unit — which is what resolves a
+  reflection at the contact, where the invariant of the red channel is read — and the last are
+  tens of units, where the blur has widened past them. Fitted to the longest ray so that raising
+  `ssr.length` only ever **adds** positions at the far end: spreading one step count over each
+  setting's own length would make a short ray finer and a long one coarser, and a coarser march
+  can lose a reflection a finer one found;
+- the **thickness test is after the bisection, not during the march**. During the march the step
+  is coarse and the first positive crossing can be far behind the surface; rejecting it there is
+  what made a cube more than a dozen units off the floor stop reflecting at all. After the
+  refinement the distance is the real one, and a hit still far from every surface is a ray that
+  passed behind a thin object.
+
+#### The brief's point 1 and point 2, measured
+
+- **The twenty-two synthetic captures at default settings are byte identical to step 6a's** — the
+  eleven at `--anti-alias 0` and the eleven at the default MSAA — and both `render.json` with
+  them, compared by SHA-256 against a throwaway `git worktree` of `276b98a`.
+- `req_scn_084_no_geometry_program_carries_anything_of_the_reflections` preprocesses the assembled
+  source the way the compiler would, over the 64 Classic scene variants × 2 contexts, the four
+  backdrop programs and the two shadow programs, and asserts that none of `vSceneNormal`,
+  `uFloorUp`, `uIntensity`, `uMaxLength`, `uReferenceLength` and `zaxBlurredColour` reaches it —
+  and in reverse for the mask.
+- The four counters: `style_programs` and `screen_effect_bytes`/`passes` are **0** in Classic, 0
+  in Enhanced at `spl.reflections` = 0 and `spl.ao` = 0, **3 / > 0 / 3** with the reflections
+  alone, **3 / > 0 / 3** with the occlusion alone, **6 / > 0 / 6** with both — and the bytes and
+  the passes go back to 0 when the style returns to Classic. Each effect pays its own share and
+  not the other's, which is point 2 for the pair that are passes.
+
+#### The instruction counts, and the 120 that hid in one branch
+
+| Symbol | step 6a (`276b98a`) | step 6b |
+|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | **1095** |
+| `Construction::segment` | 159 | **159** |
+| `SceneRenderer::render_scene` | 3382 | **3411** (+29, **+0.86 %**) |
+
+Three of the four are untouched. `render_scene` took four measurements to settle, and the lesson
+is worth keeping:
+
+1. **The first shape of the mask program cost +126 (+3.7 %)**, and none of it was where it looked.
+   `#[inline(never)]` on the floor marking moved 3; taking `CommonUniforms` out of the pass block
+   moved 2 — the hypothesis that a spilled `SceneConstants` was the cost was simply wrong.
+2. **It was the program key.** `floor_mask` as a sixth axis of `ProgramKey` put a branch inside
+   `ScenePrograms::current_key`, and **every `set_*` of the opaque loop refreshes the cached slot
+   through that function** — `set_backdrop` alone runs once per opaque run. Installing the one
+   mask program at all thirty-two slots of its curvature instead of normalising the axes away
+   brought `render_scene` to 3433; giving it a field of its own (`ScenePrograms::mask`, and
+   `set_floor_mask` writing the cached slot straight) took the key back to exactly what it was and
+   brought it to **3402**.
+3. The remaining +29 are the one `is_some_and` that decides not to mark the floors, the call to
+   `bind_mask_uniforms`, the two extra arguments of `run_screen_effects` — and 9 of them are
+   `draw_transparent`, extracted because `render_scene` hit clippy's line ceiling again (the same
+   remedy `draw_hud` was in step 3).
+
+Dynamically a Classic frame executes one `Option` test more than at step 6a. The gate is R0's
+callgrind count on a profile that uses nothing new, and that profile takes none of these branches.
+
+#### Tests (13 in `zax-render/tests/amd055_reflection_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| §2.5 first invariant: the red channel at the foot of the cube grows ≥ 10 % — measured **+94 %** | `req_scn_084_the_floor_reflects_the_red_cube_at_its_foot` |
+| fourth invariant, `ssr.shine`: the gap grows monotonically (139, 417, 680, 951, 1223) | `req_scn_084_the_shine_grows_the_gap_monotonically` |
+| fourth invariant, `ssr.clarity`, as far as the configuration allows (`Q-106`) | `req_scn_084_the_clarity_narrows_the_blur` |
+| fourth invariant, `ssr.length`, as far as the configuration allows (`Q-106`) | `req_scn_084_the_length_never_shortens_the_reflected_area` |
+| fifth invariant and point 2: 0 is Classic to the pixel, nothing compiled, allocated or submitted, and released on the way back | `req_scn_084_the_reflections_are_off_at_zero_and_in_classic` |
+| second invariant, **R-m**: not one pixel of the wall's front face moves | `req_scn_084_no_pixel_of_the_wall_is_modified` |
+| third invariant, **R-s**: the 8-unit block moves on 177 pixels, the 4-unit one on 0 | `req_scn_084_the_eight_unit_block_reflects_and_the_four_unit_one_does_not` |
+| sixth invariant, **R-h**: the Gradient skybox's and the HUD's pixels do not move | `req_scn_084_the_skybox_and_the_hud_are_left_alone` |
+| REQ-SCN-080's order clause: a bent frame reflects, on the depth the curvature left | `req_scn_080_the_reflections_work_on_the_bent_depth` |
+| REQ-SCN-080's last bullet: with anti-aliasing the pass works on the resolved frame, sample count unchanged | `req_scn_080_the_reflections_work_on_the_resolved_frame` |
+| the 2D mode runs no pass, allocates no target, compiles no program | `req_scn_080_the_two_dimensional_mode_runs_no_pass` |
+| REQ-SCN-058 as amended: the reflections first, then the occlusion; each effect alone pays its own share | `req_scn_080_the_reflections_run_before_the_occlusion` |
+| point 1 on the shaders: no geometry program carries anything of the reflections | `req_scn_084_no_geometry_program_carries_anything_of_the_reflections` |
+
+#### Five fixture readings that were wrong, and the implementation that was right
+
+The step-5 lesson repeated itself, and the probe-first rule is what kept it short. All five are
+easy to repeat:
+
+1. **A background cube over the floor is not drawn.** One screen cell carries one background tile,
+   so the cube replaced the floor's own tile there — the step-5 finding, met again. The cube is a
+   **sprite**.
+2. **A sprite drawn with palette 1 of a tile of colour 2 reads PPU byte 22**, not byte 2. The
+   fixture set byte 2, so the cube was **black**, and a black cube reflects nothing. That one cost
+   three runs: the reflection machinery was reporting three passes and 921 600 bytes of targets
+   while changing no pixel at all.
+3. **A sprite cannot be moved in `z`**, and a pattern of another layer is placed at that layer's
+   depth. Either way the cube ended up twelve units in front of the block of the variant R-s — too
+   far for its reflection to land on an eight-unit face. R-s is therefore **two background tiles
+   of the same layer**, the cube ten units along `x` and eight up, which is the variant's own
+   placement ("sa base au niveau de la face supérieure du bloc, sa face (−1, 0, 0) à 2 unités du
+   bord `+x` du bloc") and gives 177 pixels against 0.
+4. **A resolved multisampled depth is not the depth a re-rasterised triangle writes.** With
+   anti-aliasing on, the mask's `LEQUAL` against the resolved depth marked **nothing**, so a
+   multisampled frame reflected nothing. `GL_POLYGON_OFFSET_FILL` at −16 units of the last place
+   pulls the mask geometry a hair towards the eye and settles it, at both sample counts.
+5. **An 8-unit cube resting on a floor cannot test `ssr.length` or `ssr.clarity`**, and no fixture
+   this side can build does: every ray travels about fifteen units of the forty the shortest
+   setting already allows, and the blur — proportional to the distance travelled — stays under one
+   texel. Seven configurations were measured, down to 5° of camera elevation and up to 30 tiles of
+   floor; `Q-106` carries the figures, names what a corrected configuration would need (a tall
+   reflector and a grazing view), and leaves both invariants to R0.
+
+#### What is left for R0 on this requirement
+
+1. The **absolute column** of the close-up R at 1920 × 1080, which wants the two direct-format
+   textures the synthetic fixture cannot make — the same limit steps 3 to 5 recorded. The ratios
+   are confirmed here.
+2. The invariants of **`ssr.length` and `ssr.clarity`** (`Q-106`), on the published configuration.
+3. The **review criteria**: the close-up R's look (sharp at the contact, blurring and fading with
+   distance, no hard edge), "Super Mario Bros." 1-1 with the reflections on, and the four
+   `ssr.quality` values giving the same general aspect. No commercial ROM is available on this
+   side.
+
 #### What step 6b owes this one
 
 `mark_floor_surfaces` is called from `render_scene` only when `reflections_active()`, **after**
@@ -844,6 +1012,18 @@ and the mask pass re-draws the marked items — contiguous sub-ranges of each op
 sub-range maps to a contiguous range of the instance data and needs no second upload.
 
 ## Where this session stopped, and what the next one picks up
+
+**Steps 1 to 6 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`, `1f3d8ec`,
+`276b98a`, and step 6b in this commit); **steps 7 to 9 are not started.** Step 7 is the GLES
+capability probing, the handheld page, the desktop options group and the harness options — its
+notes are under "Steps 7 to 9" below, and this step adds one finding to them: **no capability is
+new**, because the two formats the passes use (`R8` and `RGBA16F`) are the two the renderer
+already depends on, and the one thing that did need care — the resolved multisampled depth — is
+settled by a polygon offset rather than by a probe. What step 7 still owes is the greying of
+`ao.thickness`, the thirteen rows coming out of `EXCLUDED`, the handheld defaults, the harness
+`--style` / `--style-param` options and the `wgpu` line of Q-104.
+
+*(Historical note, left as written: the paragraph below was the step-6a handoff.)*
 
 **Steps 1 to 5 and 6a are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`,
 `1f3d8ec`, and step 6a in this commit); **step 6b and steps 7 to 9 are not started.** The step-6

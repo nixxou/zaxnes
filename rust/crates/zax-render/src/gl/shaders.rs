@@ -79,6 +79,11 @@ const VOXEL_GRID_DEFINE: &str = "#define ZAX_VOXEL_GRID";
 /// player who turns the grid on must not pay for the snapping, and the other way round.
 const PIXEL_SHADOW_DEFINE: &str = "#define ZAX_PIXEL_SHADOW";
 
+/// Emits the pre-curvature scene normal the floor mask of AMD-055 REQ-SCN-084 judges. **Its
+/// absence is the point**, as for the five above: the mask is a pass of its own, so no variant any
+/// other draw uses carries this.
+const FLOOR_MASK_DEFINE: &str = "#define ZAX_FLOOR_MASK";
+
 /// The voxel grid of REQ-SCN-081 (AMD-055).
 const VOXEL_GRID: &str = include_str!("../shaders/voxel_grid.glsl");
 
@@ -386,6 +391,36 @@ pub const fn backdrop(bend: bool, voxel_grid: bool) -> ProgramSource {
     }
 }
 
+/// The floor mask of AMD-055 REQ-SCN-084: the same vertex stage as [`scene`], so the mask is laid
+/// down by exactly the geometry, the deformation, the placement, the curvature and the wall bias of
+/// AMD-057 that drew the frame — and therefore cannot drift from the depth it is tested against.
+/// The fragment stage is the `+Y ≥ 0,9` test of the floor definition and nothing else.
+///
+/// A **separate program**, not an axis of [`scene`], for the reason [`backdrop`] is one and more:
+/// the mask writes one channel and reads no texture, so none of `solid`, `srgb_palette`,
+/// `centroid`, `voxel_grid` and `pixel_shadow` applies to it. One axis is left, the curvature,
+/// because the mask has to land where the bent frame drew.
+///
+/// Built the first time a frame asks for the reflections, and released with them.
+#[must_use]
+pub const fn floor_mask(bend: bool) -> ProgramSource {
+    ProgramSource {
+        name: if bend {
+            "floor_mask_bend"
+        } else {
+            "floor_mask"
+        },
+        vertex: Stage::of([
+            when(bend, BEND_DEFINE),
+            FLOOR_MASK_DEFINE,
+            DEFORMATION,
+            when(bend, BEND),
+            SCENE_VERT,
+        ]),
+        fragment: Stage::of([include_str!("../shaders/floor_mask.frag")]),
+    }
+}
+
 /// The shadow pass: the same placement, depth only. `bend` bends it too, so that the shadows
 /// follow the curved surface instead of sliding off it (REQ-SCN-068).
 #[must_use]
@@ -496,6 +531,24 @@ pub const AO_COMPOSITE: ProgramSource = ProgramSource {
     name: "ao_composite",
     vertex: SCREEN_VERTEX,
     fragment: Stage::of([include_str!("../shaders/ao_composite.frag")]),
+};
+
+/// The screen-space reflected ray of AMD-055 REQ-SCN-084, into an `RGBA16F` target.
+///
+/// **Built the first time a frame asks for the reflections**, and released when no frame wants
+/// them any more: in Classic, and in Enhanced at `spl.reflections` = 0, neither this nor
+/// [`SSR_COMPOSITE`] nor [`floor_mask`] exists (point 1 and point 2 of the lot's brief).
+pub const SSR: ProgramSource = ProgramSource {
+    name: "ssr",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([SCREEN_DEPTH, include_str!("../shaders/ssr.frag")]),
+};
+
+/// The `(1 − i) · surface + i · reflet` of REQ-SCN-084, blended into the linear buffer.
+pub const SSR_COMPOSITE: ProgramSource = ProgramSource {
+    name: "ssr_composite",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([include_str!("../shaders/ssr_composite.frag")]),
 };
 
 const SKY_VERTEX: Stage = Stage::of([
