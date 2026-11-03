@@ -20,7 +20,10 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 7b | The harness options (`--style`, `--style-param`) | done — hash in the next commit |
 | 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | done — hash in the next commit |
 | 8 | The per-effect measurements | done — hash in the next commit |
-| 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
+| 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | done — this commit |
+
+**The lot is closed.** What is left is R0's, and is listed step by step in the notes below;
+`Q-104 §5.3` and `Q-106` await an answer from the owner and neither blocks the lot.
 
 **The checklist went from 10 steps to 9 after step 2**, so the commit of step 3 says "3/9" while
 steps 1 and 2 say "/10". The reason is written out under "The checklist was renumbered" below.
@@ -1390,6 +1393,94 @@ Three readings for the owner, in the order they matter on a handheld:
    the memory is 2.6 MiB at 720p before Ultra — and the handheld screens that would make the fill
    cheap are also the ones whose GPUs make the march dear.
 
+### Step 9 — closing
+
+#### The SPEC chapter edits, which steps 1 to 8 cited without having made
+
+Steps 1 to 6 copied the amendment and the question tickets into `docs/spec/changes/` but left the
+chapter edits of AMD-055 §3 undone; step 7a took the one that was its own subject (SPEC-10
+REQ-UI-061). The rest landed here:
+
+| Edit | Where |
+|---|---|
+| §3 point 8: new section **§3.11bis « Style visuel Enhanced »** after REQ-SCN-043, holding REQ-SCN-078 to REQ-SCN-084 (the amendment's §2 text) | `docs/spec/SPEC-06-scene-rendu.md` |
+| §3 point 3: REQ-SCN-058's frame order — the reflections then the occlusion, in Enhanced — and what follows from it for the transparent objects, the HUD and the shadow-only tiles | the same |
+| §3 point 5: the sentence of REQ-SCN-075 that said the voxel grid "n'est pas reprise", replaced by the modulation of the backdrop's albedo | the same |
+| §3 point 8: the thirteen settings in §4.1 | the same |
+| §3 point 7: the thirteen lines of §4.1.1 and the libretro exclusion — **already there since RU-2** — plus the two cells this lot makes exact (immediate effect on the rendering; `ao.thickness` greyed outside an effective MSVO) | `docs/spec/SPEC-09-persistance.md` |
+| §3 point 9: REQ-SCN-078 to 084 in the index's §3 and §5, the rows of REQ-SCN-058, -075, -066, REQ-UI-061 and REQ-LUA-114, and the `AMD-055` row of the amendment table | `docs/spec/SPEC-v1.2-INDEX.md` |
+| §3 point 6: REQ-UI-061 | step 7a |
+| §3 point 10: the labels and the help sentences into AMD-035's tables | step 7a (`strings/english.rs`, `strings/french.rs`) |
+| §3 point 11: `third_party/README.md` gains **no** entry — the MSVO port does not exist, so the declared fallback **(D)** of REQ-SCN-083 applies (`style::MSVO_PORTED`) | — |
+
+The internal references "§2.1" to "§2.5" inside §3.11bis are the amendment's own section numbers
+and designate 3.11bis.1 to 3.11bis.5; the inserted header says so, which is cheaper and safer than
+rewriting a hundred cross-references inside normative text.
+
+#### The intended image changes: **none**, and none measured
+
+At the default settings the eleven synthetic captures are **byte identical to RU-4b's**
+(`9cb306c`), at `--anti-alias 0` *and* at the default anti-aliasing, `render.json` included — 12
+files against 12 in each mode, compared with `cmp` against a throwaway `git worktree`. That is
+point 7 of the brief measured end to end over the whole lot rather than step by step, and it is the
+strongest form it can take here.
+
+Every pixel this lot can change needs a setting written for it:
+
+| What changes the picture | What it takes |
+|---|---|
+| the voxel grid of REQ-SCN-081 | `render.visual_style` = 4 **and** `spl.voxel_grid` ≠ 0 |
+| the pixel shadows of REQ-SCN-082 | = 4 **and** `spl.pixel_shadow` = 1 |
+| the occlusion of REQ-SCN-083 | = 4 **and** `spl.ao` ≠ 0 |
+| the reflections of REQ-SCN-084 | = 4 **and** `spl.reflections` = 1 **and** a floor surface in the frame |
+
+`render.visual_style` defaults to 0 on every target and the four effect switches default to 0, so
+no capture, golden or review image moves until a player or R0 asks for it.
+
+#### The closing verification
+
+- `cargo fmt --check`: clean. `cargo clippy --workspace --all-targets --features zax-app/bundled
+  -- -D warnings`: clean. The same clippy and `cargo check` with `--features wgpu` on the three
+  crates the `wgpu` edits touch: clean.
+- `cargo test --release --workspace --features zax-app/bundled`: **2398 passed, 0 failed**, 83
+  ignored (2384 at the close of step 6b). The C# render goldens (`render_tests`), the PPU goldens
+  and the ROM report are in that run.
+- The four instruction counts are those of step 7c (2231 / 1187 / 3411 / 159), themselves identical
+  to a fresh measurement of step 6b.
+
+#### What is left for R0, gathered
+
+Each item is recorded in the step that found it; this is the index:
+
+1. the **absolute columns** of the close-ups G (step 3), A (step 5) and R (step 6b) at
+   1920 × 1080. All three want a texture in the direct RGB format that the synthetic fixture
+   cannot make; the **ratios**, which is the form every invariant of §2.3 to §2.5 is written in,
+   are confirmed here.
+2. the two invariants of **`ssr.length` and `ssr.clarity`** — `Q-106` carries the seven
+   configurations measured and says what a corrected one would need.
+3. the **wide framing B** of REQ-SCN-080 (step 3): the groove lines' deviation from their chord at
+   1920 × 1080, which step 7b's options now give the harness the means to capture.
+4. the **review criteria** on a commercial game: the toy-brick look at `spl.voxel_grid` = 2, the
+   block shadows cut into pixel squares, the occlusion in a close view, the close-up R's look, and
+   the four `ssr.quality` values giving the same general aspect. No commercial ROM is available on
+   this side.
+5. the `#[ignore]` tests that want a real 3dSen installation (`ZAXNES_3DSEN_INSTALL`).
+6. **`Q-104 §5.3`** (should the Enhanced style be ported to the `wgpu` backend, and is the log line
+   enough?) and **`Q-106`** await the owner. Neither blocks this lot.
+
+## Where this lot ended
+
+**The nine steps are done and committed**: `a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`, `1f3d8ec`,
+`276b98a`, `86a810f`, `42226e9`, `a282a05`, `8186f18`, `ec23c61` and this commit. The tree builds,
+**2398 tests pass**, fmt and workspace clippy are clean, the eleven synthetic captures at default
+settings are **byte identical to RU-4b's** and the render and PPU goldens hold. Nothing is
+half-built, and the working tree holds no uncommitted change of this lot — only the three untracked
+items named at the end of this file.
+
+*(Everything below is historical: the handoffs of the sessions that stopped mid-lot, and the design
+notes written before the steps they describe. Where a note and a step's own notes differ, the
+step's notes are what landed.)*
+
 **Steps 1 to 6 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`, `1f3d8ec`,
 `276b98a`, `86a810f`); **steps 7 to 9 are not started.** Step 7 is the GLES
 capability probing, the handheld page, the desktop options group and the harness options — its
@@ -1658,7 +1749,12 @@ reaches the pass as a mask, never as a per-fragment computation. The local-camer
 REQ-SCN-009 (v1.4) swaps `+Y` for the image plane's normal `(0, 0, −1)` and measures the footprint
 in `xy`; `SceneCamera::local_camera` is the flag to read.
 
-### Steps 7 to 9
+### Steps 7 to 9 — the design, as written before they were implemented
+
+*(Kept as it was written. Two of its readings turned out wrong and the steps' own notes say so: the
+handheld page **did** need code — `render.visual_style` has no bounds, so the page's filter dropped
+it — and the "GLES probe" became "no capability is new, and a refusal is survivable", because the
+three formats the effects use were already required.)*
 
 Step 7 (the GLES probe, the handheld page, the desktop options group, the harness options) has one
 finding already in hand: the thirteen settings are all in `ui/options.rs` `EXCLUDED`, with a

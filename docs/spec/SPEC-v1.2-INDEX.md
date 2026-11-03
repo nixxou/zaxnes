@@ -59,6 +59,10 @@ vérificateur. Un ticket n'est pas normatif ; c'est la réponse R0 qui l'est, et
 | `AMD-021-round2.md` | 2026-10-21 | amendements issus du round 2 | REQ-CORE-022, -037, -062, -100, REQ-E3D-091, REQ-INP-030/-031, REQ-SCN-028, -032, -040, -054, REQ-AUD-041 |
 | `AMD-022-q-tickets-r2fixes.md` | 2026-10-21 | Q-058, Q-059.1 à .5 | précise AMD-021 : R2-001, R2-005, R2-006, R2-008, R2-014 ; tests d'acceptation de SPEC-12 |
 | `AMD-023-q-tickets-p5r.md` | 2026-10-21 | Q-060 à Q-062 | REQ-ACC-020, -021, -030, -041, REQ-CORE-115 |
+| `AMD-055-style-enhanced.md` | 2026-11-01 | style visuel **Enhanced** de 3dSen 2.0 | **crée REQ-SCN-078 à REQ-SCN-084** (SPEC-06 §3.11bis) ; amende REQ-SCN-058, REQ-SCN-075, REQ-SCN-066 (AMD-043), REQ-LUA-114 (AMD-040), REQ-UI-061 ; treize lignes en SPEC-06 §4.1 et SPEC-09 §4.1.1 |
+
+Les amendements `AMD-039` à `AMD-059` (mise à jour 3dSen 2.0) ne sont listés ici qu'au fur et à
+mesure que le côté propre les écrit dans les chapitres : leur texte normatif est dans `changes/`.
 
 ---
 
@@ -206,6 +210,7 @@ divergence volontaire assumée ; `→` marque un remplacement (voir §4).
 | REQ-LUA-086, -088 | DEC-R2-T8 ; AMD-001 T-2 (v1.1 : repère de scène) |
 | REQ-LUA-095 | AMD-001 05-2 (v1.1 : écrire `Video.SceneScale` réinitialise la vue) |
 | REQ-LUA-110, -111 | DEC-R2-T8 ; **AMD-019 Q-047** : partie « auto » mesurée sur trame pleine synthétique (protocole de Q-042), partie jeux de référence étiquetée [ROM] ; AMD-001 05-4 (v1.1 : instrumentation définie) |
+| REQ-LUA-114 | **AMD-040** (créée) ; **AMD-055 §3 points 1 et 2** : les paramètres du style Enhanced sont ceux de REQ-SCN-079 (identifiant 4, 1 accepté), `VisualStyle` a un effet immédiat sur le rendu, et la note « défaut 0 » est restreinte aux quatre paramètres de courbure |
 | SPEC-05 §4 (tables) | **AMD-020 Q-052** : `EngineMode`, `IsProfileMode`, `IsRomMode` **requis** en lecture seule ; DEC-05-Q6 : seuls les membres du §4 sont requis |
 | SPEC-05 §4.2 `Pattern` | AMD-001 05-7 (v1.1 : « pattern de frame » défini) |
 | dialecte et runtime | DEC-05-Q1 : Lua 5.4 (KeraLua) avec les contre-mesures de SPEC-05 |
@@ -240,6 +245,10 @@ divergence volontaire assumée ; `→` marque un remplacement (voir §4).
 | REQ-SCN-064 | DEC-R2-T8 ; **AMD-019 Q-047** : étiquette **[ROM]** pour la mesure sur les jeux ; **AMD-023 Q-062** : le banc de mesure doit tourner sans exception |
 | REQ-SCN-065 | **exigence créée par AMD-012** (P2 : aucune ligne visible à la jointure de deux tiles) ; **AMD-014 Q-032** : résidu de 1 à 2 px sur translucides obliques accepté (P3) ; **AMD-058** : tient pour `video.anti_alias` = 0, 1 et 2, et pour deux objets voisins |
 | REQ-SCN-048 | **AMD-049** : éclairé selon REQ-SCN-075 et non plus de façon diffuse ; le panneau noir du critère devient presque noir (sRGB ≈ 21 / ≈ 5) |
+| REQ-SCN-058 | **AMD-055 §3 point 3** : l'ordre de frame reçoit, après les objets opaques et en style Enhanced, les reflets du sol (REQ-SCN-084) puis l'occlusion ambiante (REQ-SCN-083) ; ce que les transparents, le HUD et les tiles « ombre seule » n'occultent ni ne reflètent en découle |
+| REQ-SCN-075 | **AMD-049** (exigence créée) ; **AMD-055 §3 point 5** : la grille de voxels de REQ-SCN-081 module l'albédo `c` du pavé avant le modèle ; la phrase « la grille de voxels … n'est pas reprise » est supprimée |
+| REQ-SCN-066 | **AMD-043** ; **AMD-055 §3 point 4** : les réglages de courbure agissent en Classic comme en Enhanced **(D)**, et se lisent par `Get/SetVisualStyleParameter(4, …)` (1 accepté) |
+| REQ-SCN-078 … REQ-SCN-084 | **exigences créées par AMD-055** — **écrites dans SPEC-06 §3.11bis** : style visuel Enhanced (sélection et paramètres, éclairage de base et ordre des effets, grille de voxels, ombres pixel, occlusion ambiante, reflets du sol) |
 | cubemaps | DEC-06-Q1 : 6 faces réextraites, conventions dans `cubemaps.json` |
 | écritures Lua sur réglages | DEC-06-Q5 **(D)** et DEC-09-Q3 : couche de session non persistée |
 | glisser à la souris | DEC-06-Q6 : SPEC-08 fixe le bouton ; le clic Zapper prime sur la caméra ; AMD-001 08-7 |
@@ -325,6 +334,7 @@ divergence volontaire assumée ; `→` marque un remplacement (voir §4).
 | REQ-UI-036 | **AMD-020 Q-051** : filtre `.nes`, `.zip`, « Tous les fichiers » ; `.7z` non proposé |
 | REQ-UI-039, -121, -122, -140 | AMD-001 10-3 (DEC-10-Q5 **D** : bouton « Site » retiré) |
 | REQ-UI-051 | AMD-001 09-3 |
+| REQ-UI-061 | **AMD-055 §3 point 6** : la grille desktop reçoit, après la ligne `Skybox`, une ligne `Style` (Classic / Enhanced) et, en Enhanced, les douze paramètres de REQ-SCN-079 dans un groupe repliable « Style », avec ses règles de visibilité ; la ligne et le groupe sont une addition de Zaxnes **(D)** |
 | REQ-UI-062 | AMD-001 06-10, 10-10 (v1.1 : `Graphic` conservé dans le modèle, absent de l'UI desktop) |
 | REQ-UI-076 | AMD-001 10-4 (DEC-10-Q3 : bloc « à propos » = identité « Sen », GPL v3, crédits à 3dSen et à 3DNes_Engine) |
 | REQ-UI-084 | AMD-001 10-5 (v1.1 : texte exact) |
@@ -411,6 +421,10 @@ Elles n'apparaissent dans aucun fichier `SPEC-*.md` : on les lit dans leur amend
 | REQ-E3D-410 | P1 | `AMD-001` T-2, sous DEC-R2-T2 — **écrite dans SPEC-04B v1.1** | repère de scène unique |
 | REQ-SCN-065 | P2 | `AMD-012`, complétée par `AMD-058` — **écrite dans SPEC-06 §3.11** | aucune ligne visible à la jointure de deux tiles, pour les trois valeurs de `video.anti_alias` |
 | REQ-SCN-075 | P2 | `AMD-049` — **écrite dans SPEC-06 §3.13** | éclairage du backdrop (réflexion presque mate, remplace le diffus de REQ-SCN-048) |
+| REQ-SCN-078, -079 | P2 | `AMD-055` — **écrites dans SPEC-06 §3.11bis** | choix du style visuel (Classic / Enhanced, identifiant 4, 1 accepté) et ses douze paramètres |
+| REQ-SCN-080 | P2 | `AMD-055` — **écrite dans SPEC-06 §3.11bis** | éclairage de base d'Enhanced et ordre des effets ; tous effets désactivés, la capture est celle de Classic |
+| REQ-SCN-081, -082 | P2 | `AMD-055` — **écrites dans SPEC-06 §3.11bis** | grille de voxels (rainures tous les `N` voxels) et ombres pixel (ombre lue au centre du voxel) |
+| REQ-SCN-083, -084 | P3 | `AMD-055` — **écrites dans SPEC-06 §3.11bis** | occlusion ambiante d'écran (mode MSVO avec repli déclaré sur Depth) et reflets du sol en espace écran |
 | REQ-UI-200 … REQ-UI-209 | P1 sauf -207 et -208 (P2) | `AMD-010` | interface d'émulateur classique |
 
 **Référence morte.** `SPEC-04B` REQ-E3D-406 cite « REQ-E3D-504, REQ-E3D-512 » ; **REQ-E3D-512
