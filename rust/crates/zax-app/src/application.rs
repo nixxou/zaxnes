@@ -359,6 +359,8 @@ impl Running {
                     .ok_or("the wgpu renderer has no wgpu window")?,
             ),
         };
+        // The editor's pens come with its MCP server (EDITOR-1).
+        host.annotations_mut().enabled = options.mcp_port.is_some();
         let mut ui = ImguiFrontend::new(ui_graphics, &host, options, height)?;
         ui.set_clipboard(window.clipboard());
         // REQ-LOOP-077 is presentation, so it only exists for the renderer that presents here.

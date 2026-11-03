@@ -1,5 +1,6 @@
 //! The emulation loop (SPEC-07): states, commands, games, save states, rollback.
 
+pub mod annotations;
 pub mod commands;
 pub mod emulation_state;
 pub mod fast_forward_state;

@@ -197,6 +197,8 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     movie_after_launch: Option<String>,
     /// The thread exploring the movie being played, while it runs (EDITOR-1).
     movie_explorer: Option<super::movie_explorer::MovieExplorer>,
+    /// The drawings over the view and the editor's pens (EDITOR-1).
+    annotations: super::annotations::Annotations,
     job: Option<jobs::LoadJob>,
     loading: bool,
     confirmation: Option<ConfirmationRequest>,
@@ -364,6 +366,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             movie_timeline: None,
             movie_after_launch: None,
             movie_explorer: None,
+            annotations: super::annotations::Annotations::default(),
             job: None,
             loading: false,
             confirmation: None,

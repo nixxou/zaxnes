@@ -182,6 +182,15 @@ pub const MOVIE_BAR_PLAY: &str = "movie_bar.play";
 pub const MOVIE_BAR_PAUSE: &str = "movie_bar.pause";
 pub const MOVIE_BAR_SEEKING: &str = "movie_bar.seeking";
 
+// --------------------------------------------------------- editor's pens
+pub const PENS_HAND: &str = "pens.hand";
+pub const PENS_UNDO: &str = "pens.undo";
+pub const PENS_CLEAR: &str = "pens.clear";
+pub const PENS_RED: &str = "pens.red";
+pub const PENS_BLUE: &str = "pens.blue";
+pub const PENS_BLACK: &str = "pens.black";
+pub const PENS_WHITE: &str = "pens.white";
+
 // ------------------------------------------------------- profile chooser
 pub const PROFILE_TWO_DIMENSIONAL: &str = "profile.two_dimensional";
 pub const PROFILE_SOURCE_TWO_DIMENSIONAL: &str = "profile.source.two_dimensional";
@@ -559,6 +568,13 @@ pub const PUBLISHED: &[&str] = &[
     MOVIE_BAR_PLAY,
     MOVIE_BAR_PAUSE,
     MOVIE_BAR_SEEKING,
+    PENS_HAND,
+    PENS_UNDO,
+    PENS_CLEAR,
+    PENS_RED,
+    PENS_BLUE,
+    PENS_BLACK,
+    PENS_WHITE,
     PROFILE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_TWO_DIMENSIONAL,
     PROFILE_SOURCE_DEFAULT_THREE_D,

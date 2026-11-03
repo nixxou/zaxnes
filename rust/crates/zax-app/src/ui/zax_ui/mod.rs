@@ -14,6 +14,7 @@ mod menu;
 mod movie_bar;
 mod options;
 mod overlay;
+mod pens;
 
 use std::path::{Path, PathBuf};
 
@@ -300,6 +301,7 @@ impl ZaxUi {
             self.draw_welcome(ui, frame.host);
         }
         if self.state.has_current_game {
+            pens::draw_pens(ui, frame.host);
             self.draw_movie_bar(ui, frame.host);
         }
         if self.state.options {

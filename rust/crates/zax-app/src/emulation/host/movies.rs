@@ -302,6 +302,17 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
         }
     }
 
+    /// The drawings over the view (EDITOR-1).
+    #[must_use]
+    pub const fn annotations(&self) -> &crate::emulation::annotations::Annotations {
+        &self.annotations
+    }
+
+    /// The drawings over the view, to draw or wipe.
+    pub const fn annotations_mut(&mut self) -> &mut crate::emulation::annotations::Annotations {
+        &mut self.annotations
+    }
+
     /// The movie frame on screen and the movie's length, while a movie plays with a timeline.
     #[must_use]
     pub fn movie_position(&self) -> Option<(u32, u32)> {

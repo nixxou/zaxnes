@@ -52,10 +52,12 @@ pub fn definitions() -> Vec<Value> {
             "inputSchema": { "type": "object", "properties": {
                 "mode": { "type": "string", "enum": ["fast", "exact"], "default": "fast" } } } }),
         json!({ "name": "screenshot", "description": "The picture on screen as a PNG: the 3D view \
-            (scaled to width x height, default 960 x 720) or the NES picture (2d, 256 x 240, \
-            wider with widescreen margins).",
+            (scaled to width x height, default 960 x 720) with the user's drawings over it (the \
+            editor's pens; annotations: false leaves them out), or the NES picture (2d, 256 x \
+            240, wider with widescreen margins, no drawings).",
             "inputSchema": { "type": "object", "properties": {
                 "view": { "type": "string", "enum": ["3d", "2d"], "default": "3d" },
+                "annotations": { "type": "boolean", "default": true },
                 "width": { "type": "integer", "minimum": 16, "maximum": 3840 },
                 "height": { "type": "integer", "minimum": 16, "maximum": 2160 } } } }),
         json!({ "name": "read_ram", "description": "Reads CPU memory without side effects \
@@ -64,10 +66,21 @@ pub fn definitions() -> Vec<Value> {
                 "address": { "type": "integer", "minimum": 0, "maximum": 65535 },
                 "length": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 16 } },
                 "required": ["address"] } }),
-        json!({ "name": "dump_frame", "description": "Writes the tile records of the frame on             screen to a JSON file, as zax-harness render --dump-frame does (palette, then low and             high planes, x, y, palette, mirrors, hidden, sprite of each tile).",
+        json!({ "name": "dump_frame", "description": "Writes the tile records of the frame on \
+            screen to a JSON file, as zax-harness render --dump-frame does (palette, then low and \
+            high planes, x, y, palette, mirrors, hidden, sprite of each tile).",
             "inputSchema": { "type": "object", "properties": {
                 "path": { "type": "string", "description": "The JSON file to write" } },
                 "required": ["path"] } }),
+        json!({ "name": "annotations", "description": "The strokes the user drew over the view \
+            with the editor's pens (red, blue, black, white): for each, its pen and its points, \
+            from 0 to 1 from the top left of the view and in pixels of a width x height view \
+            (default 960 x 720, as screenshot).",
+            "inputSchema": { "type": "object", "properties": {
+                "width": { "type": "integer", "minimum": 16, "maximum": 3840 },
+                "height": { "type": "integer", "minimum": 16, "maximum": 2160 } } } }),
+        json!({ "name": "clear_annotations", "description": "Wipes the user's drawings over the \
+            view.", "inputSchema": empty }),
         json!({ "name": "get_log", "description": "The last lines of the log: Lua print, warnings \
             and errors, and the program's own lines.",
             "inputSchema": { "type": "object", "properties": {
@@ -151,7 +164,9 @@ fn start(call: &ToolCall, host: &mut AppHost, seeking: bool) -> Started {
     let arguments = &call.arguments;
     let number = |name: &str| arguments.get(name).and_then(Value::as_i64);
     match call.name.as_str() {
-        "status" | "get_log" | "read_ram" | "dump_frame" => Started::Answer(finish(call, host)),
+        "status" | "get_log" | "read_ram" | "dump_frame" | "annotations" | "clear_annotations" => {
+            Started::Answer(finish(call, host))
+        }
         "screenshot" => {
             if seeking {
                 Started::Later(1)
@@ -261,6 +276,19 @@ fn finish(call: &ToolCall, host: &mut AppHost) -> ToolResult {
             ToolResult::text(text)
         }
         "dump_frame" => dump_frame(host, arguments),
+        "annotations" => {
+            let size = |name: &str, default: i64| {
+                u32::try_from(number(name).unwrap_or(default).clamp(16, 3840)).unwrap_or(16)
+            };
+            let listed = host
+                .annotations()
+                .to_json(size("width", 960), size("height", 720));
+            ToolResult::text(listed.to_string())
+        }
+        "clear_annotations" => {
+            host.annotations_mut().clear();
+            ToolResult::text("The drawings are wiped.")
+        }
         "get_log" => {
             let count = usize::try_from(number("lines").unwrap_or(50).clamp(1, 1000)).unwrap_or(50);
             ToolResult::text(crate::app_log::recent(count).join("\n"))
@@ -279,22 +307,16 @@ fn dump_frame(host: &AppHost, arguments: &Value) -> ToolResult {
         return ToolResult::error("No game is running.");
     };
     let batch = session.core().frame_batch();
-    let mut text = String::from(
-        "{
-  \"palette\": [",
-    );
+    let mut text = String::from("{\n  \"palette\": [");
     for (entry, value) in batch.palette.iter().enumerate() {
         let _ = write!(text, "{}{value}", if entry > 0 { ", " } else { "" });
     }
-    text.push_str(
-        "],
-  \"tiles\": [
-",
-    );
+    text.push_str("],\n  \"tiles\": [\n");
     for (n, record) in batch.records.iter().enumerate() {
         let _ = write!(
             text,
-            "    {{ \"low\": {}, \"high\": {}, \"x\": {}, \"y\": {}, \"palette\": {},              \"mirrorH\": {}, \"mirrorV\": {}, \"hidden\": {}, \"sprite\": {} }}{}",
+            "    {{ \"low\": {}, \"high\": {}, \"x\": {}, \"y\": {}, \"palette\": {}, \
+             \"mirrorH\": {}, \"mirrorV\": {}, \"hidden\": {}, \"sprite\": {} }}{}",
             record.plane0,
             record.plane1,
             record.x,
@@ -304,16 +326,14 @@ fn dump_frame(host: &AppHost, arguments: &Value) -> ToolResult {
             record.mirror_v,
             record.hidden,
             !record.background,
-            if n + 1 < batch.records.len() { ",
-" } else { "
-" }
+            if n + 1 < batch.records.len() {
+                ",\n"
+            } else {
+                "\n"
+            }
         );
     }
-    text.push_str(
-        "  ]
-}
-",
-    );
+    text.push_str("  ]\n}\n");
     match std::fs::write(path, text) {
         Ok(()) => ToolResult::text(format!("{} tiles written to {path}", batch.records.len())),
         Err(error) => ToolResult::error(format!("{path}: {error}")),
@@ -374,12 +394,16 @@ fn screenshot(host: &mut AppHost, arguments: &Value) -> ToolResult {
                 .clamp(16, 3840)
         };
         let (width, height) = (size("width", 960), size("height", 720));
-        let Some(rgb) = host
+        let Some(mut rgb) = host
             .view_mut()
             .and_then(|view| view.capture_rgb(width, height))
         else {
             return ToolResult::error("The 3D view could not be read.");
         };
+        // The user's drawings over the view (the editor's pens), unless asked without.
+        if arguments.get("annotations").and_then(Value::as_bool) != Some(false) {
+            host.annotations().draw_into(&mut rgb, width, height);
+        }
         zax_render::assets::png_image::encode_rgb(width, height, &rgb)
     };
     match png {

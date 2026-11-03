@@ -85,8 +85,22 @@ Tools (each action goes through the window's own commands, so it shows there):
 | `screenshot {view: 3d/2d, width, height}` | the picture on screen as a PNG (3D view scaled, default 960 x 720; or the NES picture) |
 | `read_ram {address, length}` | CPU memory without side effects, hexadecimal |
 | `dump_frame {path}` | the tile records of the frame on screen to a JSON file, as `zax-harness render --dump-frame` writes them (works on a live game too) |
+| `annotations {width, height}` | the user's drawings (section 6): each stroke's pen and points, from 0 to 1 and in pixels of the view |
+| `clear_annotations` | wipes the drawings |
 | `get_log {lines}` | the last lines of the log, Lua `print`, warnings and errors included |
 | `run_command {name, number, text}` | any command of the menus by name (`docs` of `emulation/commands.rs`) |
+
+## 6. The pens
+
+With `--mcp`, a tool box at the left of the window while a game runs: the hand (`M`, the
+pointer turns the camera as usual), a red, a blue, a black and a white pen, undo (`<`) and clear
+(`X`). With a pen in hand, a drag draws over the view instead of turning the camera: circle a
+zone, write a note, draw what is to be modelled and where. The strokes stay over the view
+(kept from 0 to 1 of the window, so a resize keeps them in place) until undone or cleared.
+
+`screenshot` (3D view, which is the picture on screen) draws them over the picture it returns
+(`annotations: false` leaves them out); `annotations` lists them. The NES picture (`view: 2d`)
+has none: it is the game's own picture.
 
 ## 5. Cost when it is not used
 
