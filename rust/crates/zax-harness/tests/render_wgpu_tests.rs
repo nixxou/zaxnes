@@ -24,11 +24,22 @@ fn check(backend: &str) {
         "zax-harness-render-{backend}-{}",
         std::process::id()
     ));
+    // The same two options as `render_tests.rs`, and for the same reasons it states: the goldens
+    // were captured with the anti-aliasing off and with the diffuse backdrop term of
+    // REQ-SCN-028, before AMD-052 REQ-PERS-089 took the anti-aliasing default to 1 and AMD-049
+    // REQ-SCN-075 took the backdrop to the almost-matt model. Without them this test compared a
+    // MSAA 4x capture against a no-AA golden, which no backend can match: it read 93.1 % on
+    // `heavy` and 58.5 % on `backdrop` on an adapter that in fact renders them both correctly.
+    // It went unnoticed because the test skips where no adapter answers, which is every machine
+    // the two lots that wrote it ran on (Q-104 §2, §5.2). RU-7 step 1.
     let arguments = [
         "--out".to_owned(),
         output.display().to_string(),
         "--backend".to_owned(),
         backend.to_owned(),
+        "--anti-alias".to_owned(),
+        "0".to_owned(),
+        "--no-backdrop-lighting".to_owned(),
     ];
     let options = Options::parse(&arguments).unwrap();
     let result = render::run(&options);
