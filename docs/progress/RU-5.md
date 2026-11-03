@@ -12,7 +12,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `a9216ce` |
 | 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | done — `98a08ce` |
 | 3 | REQ-SCN-081: the voxel grid | done — `c5dfc8d` |
-| 4 | REQ-SCN-082: the pixel shadows | done — hash in the commit of step 5 |
+| 4 | REQ-SCN-082: the pixel shadows | done — `be7de5c` |
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | todo |
 | 6 | REQ-SCN-084: the floor reflections | todo |
 | 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
@@ -591,9 +591,8 @@ angle at which it both moves every pixel and leaves its edges inside voxels.
 
 ## Where this session stopped, and what the next one picks up
 
-**Steps 1 to 4 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, and step 4 whose hash
-goes into the commit of step 5); the tree builds, **2348 tests pass** (2329 at the close of step
-3), fmt and workspace clippy are clean, the eleven synthetic captures at default settings are
+**Steps 1 to 4 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`); the tree
+builds, **2348 tests pass** (2329 at the close of step 3), fmt and workspace clippy are clean, the eleven synthetic captures at default settings are
 **byte identical to step 3's**, and the render and PPU goldens hold. **Steps 5 to 9 are not
 started.** Nothing is half-built, and the working tree holds no uncommitted change of this lot
 (only the two untracked items named in the step-1 notes).
@@ -654,6 +653,63 @@ plate 29 units above it, light (1, −3, 1)): with the effect on, every pixel of
 exactly 6 and 14 units from the floor centre; with it off, at least one cell of each shadow edge
 holds both lit and shadowed pixels. **That last clause is what makes the criterion discriminate** —
 the shadows of REQ-SCN-030 are already hard, so edge sharpness does not tell the two styles apart.
+
+### Step 5, sharpened — read against the GL code after step 4 landed
+
+The design recorded at the end of step 3 (below, "Step 5 — REQ-SCN-080 and REQ-SCN-083") still
+holds. What follows is what reading `gl/linear_buffer.rs`, `render_scene` and REQ-SCN-083 again
+settled, so that it is not re-derived; **none of it is committed code**.
+
+1. **The composite needs no colour texture.** The pass multiplies the scene colour by `1 − O`
+   "en espace linéaire, avant l'encodage sRGB", and a pass cannot sample the attachment it draws
+   into. It does not have to: `glBlendFunc(GL_ZERO, GL_SRC_COLOR)` makes the destination
+   `dst × src`, so a full-screen triangle that outputs `(1 − O, 1 − O, 1 − O, 1)` multiplies the
+   linear buffer in place and leaves the alpha alone (`dst_a × 1`). No second colour target, no
+   copy, and the composite is one draw of three vertices.
+2. **No noise texture.** REQ-SCN-083 asks for a kernel "rotation du noyau par pixel" and leaves the
+   pattern free. An interleaved-gradient hash of `gl_FragCoord` gives that without a resource to
+   allocate, release and count — one fewer thing for the handheld, and the invariant it has to meet
+   ("aucun motif fixe ne reste visible après lissage") is a property of the blur either way.
+3. **`R8` and not a float target.** The occlusion is one scalar in `[0, 1]`. `GL_R8` is
+   colour-renderable in OpenGL 3.3 core *and* required renderable in GLES 3.0, so the only
+   capability left to probe in step 7 is the **multisampled depth blit** of point 5 — not the
+   render-target format. Two targets are needed: the raw occlusion and the blurred one (the blur
+   reads the first and writes the second; a 4 × 4 depth-weighted box in one pass).
+4. **The depth texture is the one allocation Classic cannot share**, as the step-1 map said. The
+   shape: `begin_pass` takes "a screen pass wants to sample the depth" and `allocate` creates a
+   `DEPTH_COMPONENT24` **texture** instead of a renderbuffer only then. With the argument false the
+   function is byte identical to today's, which is what keeps the brief's point 1. A change of the
+   wish has to reallocate, so it belongs beside `capacity` and `samples` in the comparison that
+   decides to release.
+5. **MSAA is resolved before the passes, colour *and* depth** (REQ-SCN-080, last bullet). The
+   colour blit already exists in `resolve_to`; the depth needs `GL_DEPTH_BUFFER_BIT` with identical
+   rectangles, which is where step 7's probe goes. The real consequence to state when it lands:
+   with anti-aliasing **and** a screen effect on, the transparent objects and the HUD are drawn
+   into the **resolved single-sample** target, so they are not multisampled. That follows from the
+   requirement's own order and is worth a line in the notes and in `PERFORMANCE-HISTORY.md`.
+6. **The pass does not run in 2D mode.** REQ-SCN-083 excludes the rectangle of AMD-046 §2 from
+   being *modified* while letting it occlude; in 2D mode it is the only object of the frame, so not
+   running the pass satisfies both clauses at once and costs nothing — the same reasoning
+   `select_style_variants` already uses for the voxel grid. The tunnel and the TV models do not
+   exist in Zaxnes (step 3).
+7. **The skybox and the cleared background are excluded by the depth test, not by a mask.** Both
+   leave the far plane in the depth buffer, so `depth >= 1` gives `O = 0` — which is also the
+   requirement's own reason ("la skybox … à distance infinie … n'occulte jamais"). The HUD and the
+   transparent objects are drawn after the pass, so they need nothing.
+8. **The radius is in scene units**, `ao_radius_units(scene scale)`, and the view matrix is built
+   from scene coordinates, so view-space distances *are* scene units: the radius goes into the
+   shader as it comes out of `style.rs`, with no conversion. The normal is reconstructed from the
+   depth gradient (there is no normal buffer and REQ-SCN-083 asks for none).
+
+The invariants of REQ-SCN-083 that the tests have to carry, in the order they are cheapest to
+measure: a plane alone is 1.00 ± 0.02 everywhere; a pixel at the foot of the cube is `< 1` and
+`≥ 0.10`; a pixel at `2 r` = 40 units is 1.00 ± 0.02; `ao.strength` 5 is everywhere `≥ 0.05` and 1
+is everywhere `≥ 0.70`, non-increasing in the setting and strictly decreasing from 1 to 4; under
+the fallback **(D)** `spl.ao` = 1 and 2 are the same capture; `spl.ao` = 0 is Classic; and in the
+A-h variant the skybox and the HUD pixels do not move. The close-up A wants the direct texture
+(188, 188, 188) at 1920 × 1080, which this side cannot build — the same limit as the grid's
+close-up G and the pixel shadows' sRGB column — so the **ratios** are measurable here and the
+absolute columns are R0's.
 
 ### Step 5 — REQ-SCN-080 and REQ-SCN-083: the infrastructure, and the occlusion
 
