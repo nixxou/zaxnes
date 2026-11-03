@@ -86,19 +86,24 @@ fn req_ui_202_the_settings_spec10_showed_are_all_there() {
 }
 
 #[test]
-fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
+fn req_ui_202_the_tabs_are_the_nine_of_the_ro_1_layout() {
     let _language = UiLanguageScope::keep();
     strings::set_language(UiLanguage::English);
 
     let titles = |tabs: &[OptionsTab]| -> Vec<String> {
         tabs.iter().map(|tab| options::title_of(*tab)).collect()
     };
-    // The six of the amendment, then RetroAchievements (Rust-only, owner request).
+    // RO-1 replaces the single "Video" tab of REQ-UI-202 — which held three families — with
+    // Display, NES picture and 3D rendering; the other six are the amendment's, plus
+    // RetroAchievements (Rust-only, owner request). A divergence: see `docs/OPTIONS-LAYOUT.md`
+    // and Q-105.
     assert_eq!(
         vec![
-            "Video",
-            "Camera",
+            "Display",
+            "NES picture",
+            "3D rendering",
             "Light and shadows",
+            "Camera",
             "Audio",
             "Emulation",
             "Interface",
@@ -110,9 +115,11 @@ fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
     strings::set_language(UiLanguage::French);
     assert_eq!(
         vec![
-            "Vidéo",
-            "Caméra",
+            "Affichage",
+            "Image NES",
+            "Rendu 3D",
             "Lumière et ombres",
+            "Caméra",
             "Audio",
             "Émulation",
             "Interface",
@@ -125,18 +132,20 @@ fn req_ui_202_the_six_tabs_are_the_ones_the_amendment_names() {
 
     let model = OptionsModel::new();
     for tab in options::TABS {
-        assert!(!model.rows(tab).is_empty());
+        assert!(!model.rows(tab).is_empty(), "{tab:?} has rows");
         for row in model.rows(tab) {
             assert_ne!(row.label(), "");
         }
     }
 
-    // The field of view belongs to the camera tab, the shadows to the light one, and the scene
-    // decor to the video one.
+    // One family per tab, which is what the lot is for.
+    assert!(keys(&model, OptionsTab::Display).contains(&SettingId::VideoVSync));
+    assert!(keys(&model, OptionsTab::Display).contains(&SettingId::UiFullscreen));
+    assert!(keys(&model, OptionsTab::NesPicture).contains(&SettingId::VideoNesPalette));
+    assert!(keys(&model, OptionsTab::Render3d).contains(&SettingId::SceneSkybox));
     assert!(keys(&model, OptionsTab::Camera).contains(&SettingId::CameraFov));
     assert!(keys(&model, OptionsTab::Light).contains(&SettingId::RenderShadow));
     assert!(keys(&model, OptionsTab::Light).contains(&SettingId::LightIntensity));
-    assert!(keys(&model, OptionsTab::Video).contains(&SettingId::SceneSkybox));
     assert!(keys(&model, OptionsTab::Audio).contains(&SettingId::AudioVolume));
     assert!(keys(&model, OptionsTab::Emulation).contains(&SettingId::EmuGameSpeed));
     assert!(keys(&model, OptionsTab::Interface).contains(&SettingId::UiShowFps));

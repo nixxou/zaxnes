@@ -43,7 +43,12 @@ fn enhanced() -> SettingsModel {
 }
 
 /// SPEC-10 REQ-UI-061 as amended: the thirteen are rows of the options window — they left
-/// `EXCLUDED` with this lot, which is what their effect earns them.
+/// `EXCLUDED` with AMD-055's lot, which is what their effect earns them.
+///
+/// RO-1 splits **where** they are drawn: the six parameters that change a surface are in the
+/// "Style" group of the 3D rendering tab, the six that decide where light does not reach are in
+/// the "Style" group of the Light and shadows tab, beside the shadow switch they relate to. Every
+/// one of the thirteen is still exactly one row.
 #[test]
 fn req_ui_061_the_thirteen_settings_are_rows_of_the_options_window() {
     let model = OptionsModel::new();
@@ -52,41 +57,57 @@ fn req_ui_061_the_thirteen_settings_are_rows_of_the_options_window() {
         .map(|row| row.descriptor.id())
         .filter(|id| GROUP.contains(id))
         .collect();
-    assert_eq!(GROUP.to_vec(), shown, "all thirteen, in the §4 order");
-
+    assert_eq!(GROUP.len(), shown.len(), "all thirteen, each once");
     for id in GROUP {
+        assert!(shown.contains(&id), "{id:?} is a row");
         assert!(
             !options::EXCLUDED.contains(&id),
             "{id:?} is no longer excluded"
         );
     }
 
-    // They belong to the Video tab, which is where the Render theme goes (REQ-UI-202).
-    let video: Vec<SettingId> = model
-        .rows(OptionsTab::Video)
-        .iter()
-        .map(|row| row.descriptor.id())
-        .collect();
-    for id in GROUP {
-        assert!(video.contains(&id), "{id:?} is on the Video tab");
+    // RO-1: the six surface effects with the style, the six light effects with the light.
+    let tab = |id: SettingId| options::tab_of(id).expect("a tab");
+    assert_eq!(OptionsTab::Render3d, tab(SettingId::RenderVisualStyle));
+    for id in [
+        SettingId::RenderStyleVoxelGrid,
+        SettingId::RenderStyleReflections,
+        SettingId::RenderStyleSsrShine,
+        SettingId::RenderStyleSsrClarity,
+        SettingId::RenderStyleSsrLength,
+        SettingId::RenderStyleSsrQuality,
+    ] {
+        assert_eq!(OptionsTab::Render3d, tab(id), "{id:?}");
+        assert_eq!(Some(options::OptionsGroup::Style), options::group_of(id));
+    }
+    for id in [
+        SettingId::RenderStylePixelShadow,
+        SettingId::RenderStyleAo,
+        SettingId::RenderStyleAoStrength,
+        SettingId::RenderStyleAoRadius,
+        SettingId::RenderStyleAoThickness,
+        SettingId::RenderStyleAoQuality,
+    ] {
+        assert_eq!(OptionsTab::Light, tab(id), "{id:?}");
+        assert_eq!(Some(options::OptionsGroup::Style), options::group_of(id));
     }
 }
 
 /// SPEC-10 REQ-UI-061 as amended: the `Style` row comes **after the `Skybox` row** — which
-/// carries its colour button with it (REQ-UI-063) — and the twelve parameters follow it.
+/// carries its colour button with it (REQ-UI-063) — and the parameters of that tab follow it.
 #[test]
 fn req_ui_061_the_style_row_comes_after_the_skybox_row() {
     let model = OptionsModel::new();
-    let video: Vec<SettingId> = model
-        .rows(OptionsTab::Video)
+    let render: Vec<SettingId> = model
+        .rows(OptionsTab::Render3d)
         .iter()
         .map(|row| row.descriptor.id())
         .collect();
     let at = |wanted: SettingId| {
-        video
+        render
             .iter()
             .position(|id| *id == wanted)
-            .unwrap_or_else(|| panic!("{wanted:?} is a row of the Video tab"))
+            .unwrap_or_else(|| panic!("{wanted:?} is a row of the 3D rendering tab"))
     };
 
     assert_eq!(
@@ -95,16 +116,26 @@ fn req_ui_061_the_style_row_comes_after_the_skybox_row() {
         "the style row follows the skybox row and its colour"
     );
     assert!(at(SettingId::SceneSkybox) < at(SettingId::RenderVisualStyle));
-    // And the twelve follow it, contiguously, in their own order.
-    for (offset, id) in GROUP.iter().enumerate() {
+    // And the six of this tab follow it, contiguously, in their own order.
+    for (offset, id) in [
+        SettingId::RenderStyleVoxelGrid,
+        SettingId::RenderStyleReflections,
+        SettingId::RenderStyleSsrShine,
+        SettingId::RenderStyleSsrClarity,
+        SettingId::RenderStyleSsrLength,
+        SettingId::RenderStyleSsrQuality,
+    ]
+    .iter()
+    .enumerate()
+    {
         assert_eq!(
-            at(SettingId::RenderVisualStyle) + offset,
+            at(SettingId::RenderVisualStyle) + 1 + offset,
             at(*id),
             "{id:?} is the {offset}-th row of the group"
         );
     }
-    // The catalogue's own order — the order of the settings file — is the other one, which is
-    // the whole reason the window reorders: `render.visual_style` is written long before
+    // The catalogue's own order — the order of the settings file — is the other one, which is why
+    // the window has a layout table of its own: `render.visual_style` is written long before
     // `scene.skybox`.
     let catalogue: Vec<SettingId> = zax_settings::catalogue::descriptors()
         .map(zax_settings::meta::SettingDescriptor::id)
@@ -113,39 +144,44 @@ fn req_ui_061_the_style_row_comes_after_the_skybox_row() {
     assert!(where_in(SettingId::RenderVisualStyle) < where_in(SettingId::SceneSkybox));
 }
 
-/// AMD-055 §3 point 6: the group is collapsible and titled "Style", opened by its **first**
-/// parameter and by no other row of any tab — and it is drawn only while the style is Enhanced.
+/// AMD-055 §3 point 6: the group is collapsible and titled "Style" — and its rows are drawn only
+/// while the style is Enhanced.
 #[test]
-fn req_ui_061_only_the_first_parameter_opens_the_collapsible_group() {
-    let model = OptionsModel::new();
-    let opens: Vec<SettingId> = model
-        .all_rows()
-        .map(|row| row.descriptor.id())
-        .filter(|id| options::style_heading(*id).is_some())
-        .collect();
-    assert_eq!(vec![SettingId::RenderStyleAo], opens);
+fn req_ui_061_the_style_group_is_collapsible_and_drawn_only_in_enhanced() {
+    assert!(options::OptionsGroup::Style.is_collapsible());
 
     for (language, expected) in [
         (UiLanguage::English, "Style"),
         (UiLanguage::French, "Style"),
     ] {
         strings::set_language(language);
-        assert_eq!(
-            Some(expected.to_owned()),
-            options::style_heading(SettingId::RenderStyleAo)
-        );
+        assert_eq!(expected, options::OptionsGroup::Style.title());
     }
     strings::set_language(UiLanguage::English);
 
+    // It is the group of both tabs that carry style parameters, and of no other row.
+    for id in options::STYLE {
+        assert_eq!(Some(options::OptionsGroup::Style), options::group_of(id));
+    }
+    assert_ne!(
+        Some(options::OptionsGroup::Style),
+        options::group_of(SettingId::RenderVisualStyle)
+    );
+
     assert!(
         !options::style_group_shown(&SettingsModel::new()),
-        "in Classic the group is not drawn at all"
+        "in Classic no row of the group is drawn"
     );
     assert!(options::style_group_shown(&enhanced()));
     // The accepted identifier 1 selects Enhanced too (REQ-SCN-078), so it opens the group.
     let mut alias = SettingsModel::new();
     alias.set(SettingId::RenderVisualStyle, SettingValue::Int(1));
     assert!(options::style_group_shown(&alias));
+
+    // RO-1: in Classic the heading is still drawn, with the reason the rows are missing — which
+    // is what tells a player on the Light and shadows tab that these effects exist at all.
+    assert!(options::style_group_note(&SettingsModel::new()).is_some());
+    assert_eq!(None, options::style_group_note(&enhanced()));
 }
 
 /// REQ-SCN-079's visibility rules, and the amended acceptance criterion of REQ-UI-061: four of
@@ -227,18 +263,20 @@ fn req_scn_079_the_thickness_is_greyed_while_msvo_is_rendered_as_depth() {
     let mut model = enhanced();
     for mode in [0, 1, 2] {
         model.set(SettingId::RenderStyleAo, SettingValue::Int(mode));
-        let note = options::style_inert_note(SettingId::RenderStyleAoThickness, &model);
+        let note = options::inert_note(SettingId::RenderStyleAoThickness, &model);
         assert!(
             note.is_some(),
             "greyed at spl.ao = {mode} while MSVO is not ported"
         );
+        // And it is the only greyed row of the thirteen while the shadows are on, which is their
+        // default — RO-1 greys `spl.pixel_shadow` when they are off, and nothing else.
         for other in GROUP {
             if other == SettingId::RenderStyleAoThickness {
                 continue;
             }
             assert_eq!(
                 None,
-                options::style_inert_note(other, &model),
+                options::inert_note(other, &model),
                 "{other:?} is live"
             );
         }
@@ -249,7 +287,7 @@ fn req_scn_079_the_thickness_is_greyed_while_msvo_is_rendered_as_depth() {
         (UiLanguage::French, "l'occlusion Depth"),
     ] {
         strings::set_language(language);
-        let note = options::style_inert_note(SettingId::RenderStyleAoThickness, &model)
+        let note = options::inert_note(SettingId::RenderStyleAoThickness, &model)
             .expect("the note is shown");
         assert!(note.contains(fragment), "{language:?}: {note:?}");
     }

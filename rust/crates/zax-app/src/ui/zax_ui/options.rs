@@ -1,96 +1,112 @@
 //! The options window (REQ-UI-202): one tab per theme, one widget per setting.
 
-use imgui::{ColorEditFlags, Condition, TabItem, TabItemFlags, TreeNodeFlags, Ui, WindowFlags};
+use imgui::{
+    ColorEditFlags, Condition, TabBarFlags, TabItem, TabItemFlags, TreeNodeFlags, Ui, WindowFlags,
+};
 use zax_settings::meta::{SettingEffect, SettingKind};
 use zax_settings::values::{Color, SettingValue};
 
 use super::{centre, play, BrowserPurpose, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
-use crate::persistence::app_settings::AppSettings as _;
-use crate::render_scaling;
-use crate::ui::options::{self, OptionsRow};
+use crate::ui::options::{self, OptionsGroup, OptionsRow, TabEntry};
 use crate::ui::text;
-use zax_settings::catalogue::SettingId;
+
+/// The window's default size. RO-1 widened it: nine tabs and the long French titles need the room,
+/// and the grid of a reorganised tab is no longer 41 rows deep (the old 560 × 520 was sized for a
+/// window the player had to scroll).
+const WINDOW_SIZE: [f32; 2] = [820.0, 600.0];
 
 impl ZaxUi {
     pub(super) fn draw_options(&mut self, ui: &Ui, host: &mut AppHost) {
         let mut open = self.state.options;
         let window = ui
             .window(text::options_title())
-            .size([560.0, 520.0], Condition::FirstUseEver)
-            .position(centre(ui, 560.0, 520.0), Condition::FirstUseEver)
+            .size(WINDOW_SIZE, Condition::FirstUseEver)
+            .position(
+                centre(ui, WINDOW_SIZE[0], WINDOW_SIZE[1]),
+                Condition::FirstUseEver,
+            )
             .flags(WindowFlags::NO_COLLAPSE)
             .opened(&mut open)
             .begin();
         if let Some(_window) = window {
-            if let Some(_bar) = ui.tab_bar("##options") {
+            // RO-1: nine tabs. Scrolling keeps every title readable where the window is too narrow
+            // for all of them; the default policy would shrink them to an ellipsis instead.
+            if let Some(_bar) =
+                ui.tab_bar_with_flags("##options", TabBarFlags::FITTING_POLICY_SCROLL)
+            {
                 // The capture aid of --ui-shots: asking for a tab is the same thing a click on it
                 // would do. It is honoured on one frame only, so the tab the shot photographs has
                 // no stray close button left on it.
                 let forced = self.force_options_tab.take();
                 for tab in options::TABS {
-                    let mut selected = true;
-                    let item = TabItem::new(options::title_of(tab));
-                    let shown = if forced == Some(tab) {
-                        item.flags(TabItemFlags::SET_SELECTED)
-                            .opened(&mut selected)
-                            .begin(ui)
-                    } else {
-                        item.begin(ui)
-                    };
-                    let Some(_item) = shown else {
-                        continue;
-                    };
-                    if ui.button(text::reset_defaults()) {
-                        host.update_settings(|model| self.options.reset_tab(model, tab));
-                        play(host, UiSound::Confirm);
-                    }
-                    ui.separator();
-                    if tab == options::OptionsTab::Achievements
-                        && crate::ui::achievements_view::draw_account(ui, host, &mut self.sign_in)
-                    {
-                        play(host, UiSound::Confirm);
-                    }
-                    // Q-103: whether the game being played holds Run-ahead at 0, read once for
-                    // the whole tab rather than per row.
-                    let forced = host
-                        .session()
-                        .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
-                    // AMD-055 §3 point 6: the twelve style parameters live in a collapsible
-                    // group, shown only while the style is Enhanced. Read once for the whole tab.
-                    let style_group = options::style_group_shown(host.settings());
-                    let mut style_open = false;
-                    for row in self.options.rows(tab).to_vec() {
-                        let id = row.descriptor.id();
-                        // AMD-043 §6: the curvature settings are shown in a group of their own,
-                        // opened by a heading. One comparison per row, and only the first
-                        // setting of the group answers.
-                        if let Some(heading) = options::geometry_heading(id) {
-                            ui.separator();
-                            ui.text_disabled(heading);
-                        }
-                        if let Some(heading) = options::style_heading(id).filter(|_| style_group) {
-                            // Open the first time it is shown: a player who has just picked
-                            // Enhanced is looking for exactly these rows. It stays collapsible,
-                            // which is what AMD-055 §3 point 6 asks for.
-                            style_open = ui.collapsing_header(heading, TreeNodeFlags::DEFAULT_OPEN);
-                        }
-                        if options::STYLE.contains(&id)
-                            && !(style_open && options::style_row_visible(id, host.settings()))
-                        {
-                            continue;
-                        }
-                        if options::is_folder(&row) {
-                            self.draw_folder_row(ui, host, &row);
-                        } else {
-                            draw_row(ui, host, &row, forced);
-                        }
-                    }
+                    self.draw_options_tab(ui, host, tab, forced);
                 }
             }
         }
         self.state.options = open;
+    }
+
+    /// One tab: its reset button, then its entries in the order [`options::LAYOUT`] gives them.
+    fn draw_options_tab(
+        &mut self,
+        ui: &Ui,
+        host: &mut AppHost,
+        tab: options::OptionsTab,
+        forced: Option<options::OptionsTab>,
+    ) {
+        let mut selected = true;
+        let item = TabItem::new(options::title_of(tab));
+        let shown = if forced == Some(tab) {
+            item.flags(TabItemFlags::SET_SELECTED)
+                .opened(&mut selected)
+                .begin(ui)
+        } else {
+            item.begin(ui)
+        };
+        let Some(_item) = shown else {
+            return;
+        };
+        if ui.button(text::reset_defaults()) {
+            host.update_settings(|model| self.options.reset_tab(model, tab));
+            play(host, UiSound::Confirm);
+        }
+        ui.separator();
+        if tab == options::OptionsTab::Achievements
+            && crate::ui::achievements_view::draw_account(ui, host, &mut self.sign_in)
+        {
+            play(host, UiSound::Confirm);
+        }
+        // Q-103: whether the game being played holds Run-ahead at 0, read once for the whole tab
+        // rather than per row.
+        let run_ahead_forced = host
+            .session()
+            .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
+        // AMD-055 §3 point 6: the style parameters live in a collapsible group, whose rows are
+        // drawn only while the style is Enhanced. Read once for the whole tab.
+        let style_note = options::style_group_note(host.settings());
+        // Whether the rows of the group being drawn are shown at all: a collapsed header hides
+        // them, and a Style group in Classic shows none (REQ-SCN-079).
+        let mut group_open = true;
+        for entry in self.options.entries(tab).to_vec() {
+            match entry {
+                TabEntry::Group(group) => {
+                    group_open = draw_group_heading(ui, group, style_note.as_deref());
+                }
+                TabEntry::Row(row) => {
+                    let id = row.descriptor.id();
+                    if !group_open || !options::style_row_visible(id, host.settings()) {
+                        continue;
+                    }
+                    if options::is_folder(&row) {
+                        self.draw_folder_row(ui, host, &row);
+                    } else {
+                        draw_row(ui, host, &row, run_ahead_forced);
+                    }
+                }
+            }
+        }
     }
 
     /// A folder setting: a field written on Enter or when it loses the focus, and a button
@@ -125,22 +141,48 @@ impl ZaxUi {
     }
 }
 
+/// The heading of a group, and whether the rows under it are drawn.
+///
+/// A long family (RO-1: three rows or more) folds away behind a collapsing header; a short one is
+/// a separator and a dim title, which is what AMD-043 §6 asked of the Geometry group. `style_note`
+/// is [`options::style_group_note`]'s answer: a Style group in Classic draws its heading and that
+/// one sentence, and none of its rows (REQ-SCN-079).
+fn draw_group_heading(ui: &Ui, group: OptionsGroup, style_note: Option<&str>) -> bool {
+    let note = (group == OptionsGroup::Style)
+        .then_some(style_note)
+        .flatten();
+    if group.is_collapsible() {
+        // Open by default: a player who has just picked Enhanced is looking for exactly these
+        // rows, and a group nobody opens is a group nobody finds. It stays collapsible, which is
+        // what AMD-055 §3 point 6 asks for.
+        let open = ui.collapsing_header(group.title(), TreeNodeFlags::DEFAULT_OPEN);
+        if let Some(note) = note {
+            ui.text_disabled(note);
+            return false;
+        }
+        return open;
+    }
+    ui.separator();
+    ui.text_disabled(group.title());
+    if let Some(note) = note {
+        ui.text_disabled(note);
+        return false;
+    }
+    true
+}
+
 /// One row of a tab. `run_ahead_forced` is Q-103's verdict on the running game, which only the
 /// Run-ahead row shows.
 fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: bool) {
     let descriptor = row.descriptor;
     let id = descriptor.id();
     let _id = ui.push_id(descriptor.key());
-    // AMD-032 §3: the resolution scale only exists for the render-texture method; under the
-    // direct method the scene is always drawn at the native resolution, so the row is shown
-    // greyed out rather than hidden, with the reason spelled out beside it.
-    let inert = id == SettingId::VideoResScale
-        && !render_scaling::scale_applies(host.settings().render_method());
-    // AMD-055 REQ-SCN-079: `ao.thickness` is greyed while the MSVO mode is rendered as Depth
-    // (REQ-SCN-083's fallback **(D)**), with the reason spelled out beside it. The row is kept
-    // and the setting persists, exactly as the resolution-scale row above is kept.
-    let style_note = options::style_inert_note(id, host.settings());
-    let disabled = ui.begin_disabled(inert || style_note.is_some());
+    // RO-1 point 1: a row whose setting cannot act while another one is set a certain way is drawn
+    // greyed out with the reason beside it, never hidden. The setting itself is kept and persists,
+    // and acts again as soon as the other one changes. `options::inert_note` holds every case and
+    // names the code path each one was read from.
+    let inert_note = options::inert_note(id, host.settings());
+    let disabled = ui.begin_disabled(inert_note.is_some());
     // A setting whose domain is a finite list gets a drop-down whatever its shape:
     // video.frame_rate is a whole number out of {60, 90, 120} (SPEC-09 §4.1.1), and SPEC-10
     // REQ-UI-061 shows it as a list.
@@ -184,11 +226,7 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
     }
     draw_row_hint(ui, row);
     drop(disabled);
-    if inert {
-        ui.same_line();
-        ui.text_disabled(text::res_scale_needs_render_texture());
-    }
-    if let Some(note) = style_note {
+    if let Some(note) = inert_note {
         ui.same_line();
         ui.text_disabled(note);
     }

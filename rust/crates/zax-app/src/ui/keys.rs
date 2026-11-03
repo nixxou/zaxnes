@@ -134,6 +134,42 @@ pub const HINT_AT_NEXT_START: &str = "hint.at_next_start";
 pub const HINT_AT_NEXT_LOAD: &str = "hint.at_next_load";
 pub const HINT_PROFILE_SETTING: &str = "hint.profile_setting";
 
+// ------------------------------- the groups of the options window (RO-1)
+/// The resolution the scene is drawn at, and how its edges are smoothed.
+pub const GROUP_RESOLUTION: &str = "group.resolution";
+/// What the picture costs: the switches of `docs/PERFORMANCE-HISTORY.md`.
+pub const GROUP_PERFORMANCE: &str = "group.performance";
+/// The picture's edges a television did not show.
+pub const GROUP_OVERSCAN: &str = "group.overscan";
+/// The widescreen extension.
+pub const GROUP_WIDESCREEN: &str = "group.widescreen";
+/// The video region.
+pub const GROUP_REGION: &str = "group.region";
+/// What a player should not need; used on more than one tab.
+pub const GROUP_ADVANCED: &str = "group.advanced";
+
+// ------------------------------- why a row is greyed out (RO-1 point 1)
+/// `video.res_scale` while the automatic resolution chooses it instead.
+pub const HINT_RES_SCALE_AUTOMATIC: &str = "hint.res_scale_automatic";
+/// `spl.pixel_shadow` while the shadows are off.
+pub const HINT_NEEDS_SHADOWS: &str = "hint.needs_shadows";
+/// `emu.lua_experimental` and `emu.pipeline` without the optimised Lua.
+pub const HINT_NEEDS_LUA_OPTIMIZED: &str = "hint.needs_lua_optimized";
+/// `scene.custom_bg_color` under the gradient and the fantasy sky.
+pub const HINT_BG_COLOR_UNUSED: &str = "hint.bg_color_unused";
+/// `scene.arc_center` while the horizontal arc is 0.
+pub const HINT_NEEDS_ARC: &str = "hint.needs_arc";
+/// `scene.bend_2d_mode` while no curvature is set.
+pub const HINT_NEEDS_CURVATURE: &str = "hint.needs_curvature";
+/// `emu.tv_mode` while the region is detected automatically.
+pub const HINT_REGION_AUTOMATIC: &str = "hint.region_automatic";
+/// `emu.core`: this version has one core, so the value is always 0.
+pub const HINT_SINGLE_CORE: &str = "hint.single_core";
+/// The four RetroAchievements options while RetroAchievements is off.
+pub const HINT_NEEDS_ACHIEVEMENTS: &str = "hint.needs_achievements";
+/// Why a "Style" group shows no row: the style is Classic.
+pub const HINT_STYLE_CLASSIC: &str = "hint.style_classic";
+
 // ------------------------------------- the Geometry group (AMD-043 §6, AMD-046 §3)
 /// The heading above the curvature settings.
 pub const GROUP_GEOMETRY: &str = "group.geometry";
@@ -188,7 +224,11 @@ pub const ABOUT_CREDIT_DISCLAIMER: &str = "about.credit.disclaimer";
 pub const ABOUT_VERSION_PREFIX: &str = "about.version_prefix";
 
 // ----------------------------------------------------- options window tabs
-pub const TAB_VIDEO: &str = "options.tab.video";
+// RO-1 replaces the single "Video" tab of REQ-UI-202, which held three families, with the three
+// tabs below (see `docs/OPTIONS-LAYOUT.md` and Q-105).
+pub const TAB_DISPLAY: &str = "options.tab.display";
+pub const TAB_NES_PICTURE: &str = "options.tab.nes_picture";
+pub const TAB_RENDER_3D: &str = "options.tab.render_3d";
 pub const TAB_CAMERA: &str = "options.tab.camera";
 pub const TAB_LIGHT: &str = "options.tab.light";
 pub const TAB_AUDIO: &str = "options.tab.audio";
@@ -553,6 +593,31 @@ pub const PUBLISHED: &[&str] = &[
     HINT_AT_NEXT_START,
     HINT_AT_NEXT_LOAD,
     HINT_PROFILE_SETTING,
+    // RO-1: the groups of the window, and the reasons a row is greyed out.
+    GROUP_RESOLUTION,
+    GROUP_PERFORMANCE,
+    GROUP_OVERSCAN,
+    GROUP_WIDESCREEN,
+    GROUP_REGION,
+    GROUP_ADVANCED,
+    GROUP_GEOMETRY,
+    HINT_RES_SCALE_AUTOMATIC,
+    HINT_NEEDS_SHADOWS,
+    HINT_NEEDS_LUA_OPTIMIZED,
+    HINT_BG_COLOR_UNUSED,
+    HINT_NEEDS_ARC,
+    HINT_NEEDS_CURVATURE,
+    HINT_REGION_AUTOMATIC,
+    HINT_SINGLE_CORE,
+    HINT_NEEDS_ACHIEVEMENTS,
+    HINT_STYLE_CLASSIC,
+    // AMD-043 §6 and AMD-046 §3: the help sentences of the curvature settings.
+    HELP_BEND_LR,
+    HELP_BEND_TB,
+    HELP_ARC_H,
+    HELP_ARC_CENTER,
+    HELP_BEND_2D_MODE,
+    HELP_BACKDROP_LIGHTING,
     // AMD-055 §4: the group, its thirteen help sentences and the note on the greyed Thickness.
     GROUP_STYLE,
     HELP_VISUAL_STYLE,
@@ -582,7 +647,9 @@ pub const PUBLISHED: &[&str] = &[
     ABOUT_CREDIT_ADAPTED,
     ABOUT_CREDIT_DISCLAIMER,
     ABOUT_VERSION_PREFIX,
-    TAB_VIDEO,
+    TAB_DISPLAY,
+    TAB_NES_PICTURE,
+    TAB_RENDER_3D,
     TAB_CAMERA,
     TAB_LIGHT,
     TAB_AUDIO,

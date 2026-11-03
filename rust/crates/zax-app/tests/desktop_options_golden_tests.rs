@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use zax_app::ui::handheld::advanced;
 use zax_app::ui::options::{self, OptionsModel};
-use zax_settings::catalogue::SettingId;
+use zax_settings::catalogue::{self, SettingId};
 use zax_settings::meta::SettingKind;
 
 /// The tag of a line only a `wgpu` build shows.
@@ -103,6 +103,173 @@ fn ro_1_the_excluded_list_is_unchanged() {
         ],
         options::EXCLUDED
     );
+}
+
+/// RO-1: `LAYOUT` is the whole window, so every setting `is_shown` accepts has to be in it — and
+/// in exactly one place. A setting added to the catalogue without a line in `LAYOUT` would
+/// otherwise vanish silently; this is the test that sends its author to the table.
+#[test]
+fn ro_1_the_layout_table_places_every_shown_setting_exactly_once() {
+    let placed: Vec<SettingId> = options::LAYOUT
+        .iter()
+        .flat_map(|(_, entries)| entries.iter())
+        .filter_map(|entry| match entry {
+            options::LayoutEntry::Row(id) => Some(*id),
+            options::LayoutEntry::Group(_) => None,
+        })
+        .collect();
+
+    let missing: Vec<String> = catalogue::descriptors()
+        .filter(|descriptor| options::is_shown(descriptor) && !placed.contains(&descriptor.id()))
+        .map(|descriptor| descriptor.key().into_owned())
+        .collect();
+    assert_eq!(Vec::<String>::new(), missing, "settings with no row");
+
+    for id in &placed {
+        assert_eq!(
+            1,
+            placed.iter().filter(|other| *other == id).count(),
+            "{} is placed twice",
+            id.key()
+        );
+        // A line for a setting the window never shows would be a silent lie in the table. The
+        // graphics API is the one exception: `is_shown` drops it off a `wgpu` build.
+        assert!(
+            options::is_shown(catalogue::descriptor(*id)) || *id == SettingId::VideoBackend,
+            "{} is in LAYOUT but never shown",
+            id.key()
+        );
+    }
+
+    // Every group heading of the table has at least one row under it.
+    for (tab, entries) in options::LAYOUT {
+        for (index, entry) in entries.iter().enumerate() {
+            if let options::LayoutEntry::Group(group) = entry {
+                assert!(
+                    matches!(entries.get(index + 1), Some(options::LayoutEntry::Row(_))),
+                    "{group:?} opens nothing on {tab:?}"
+                );
+            }
+        }
+    }
+}
+
+/// RO-1 point 1: every reason a row is greyed out names a setting the player can reach, and the
+/// greyed row keeps its value. Each case is read from the code path that consumes the setting —
+/// the comments of `options::inert_reason` name them — so this test pins the trigger, not the
+/// wording.
+#[test]
+fn ro_1_a_row_is_greyed_only_while_its_dependency_is_unmet() {
+    use zax_settings::model::SettingsModel;
+    use zax_settings::values::SettingValue;
+
+    // A fresh model: shadows on, direct rendering, Classic, no curvature, automatic region off…
+    let mut model = SettingsModel::new();
+
+    // The one row that is greyed whatever anyone does: there is a single core (REQ-PERS-003).
+    assert!(options::inert_reason(SettingId::EmuCore, &model).is_some());
+
+    // Direct rendering greys the resolution scale and the automatic resolution (AMD-032 §3).
+    assert!(options::inert_reason(SettingId::VideoResScale, &model).is_some());
+    assert!(options::inert_reason(SettingId::VideoDynamicResolution, &model).is_some());
+    model.set(SettingId::VideoRenderMethod, SettingValue::Enum(1));
+    assert_eq!(
+        None,
+        options::inert_reason(SettingId::VideoDynamicResolution, &model)
+    );
+    assert_eq!(
+        None,
+        options::inert_reason(SettingId::VideoResScale, &model)
+    );
+    // …until the automatic resolution takes the choice over.
+    model.set(SettingId::VideoDynamicResolution, SettingValue::Bool(true));
+    assert!(options::inert_reason(SettingId::VideoResScale, &model).is_some());
+    model.set(SettingId::VideoDynamicResolution, SettingValue::Bool(false));
+
+    // The pixel shadows need the shadows.
+    assert_eq!(
+        None,
+        options::inert_reason(SettingId::RenderStylePixelShadow, &model)
+    );
+    model.set(SettingId::RenderShadow, SettingValue::Bool(false));
+    assert!(options::inert_reason(SettingId::RenderStylePixelShadow, &model).is_some());
+    model.set(SettingId::RenderShadow, SettingValue::Bool(true));
+
+    // The experimental Lua and the pipelined frames need the optimised Lua.
+    for id in [SettingId::EmuLuaExperimental, SettingId::EmuPipeline] {
+        assert!(options::inert_reason(id, &model).is_some(), "{id:?}");
+    }
+    model.set(SettingId::EmuLuaOptimized, SettingValue::Bool(true));
+    for id in [SettingId::EmuLuaExperimental, SettingId::EmuPipeline] {
+        assert_eq!(None, options::inert_reason(id, &model), "{id:?}");
+    }
+
+    // The custom background colour reaches neither the gradient nor the fantasy sky.
+    for skybox in [-1, 0] {
+        model.set(SettingId::SceneSkybox, SettingValue::Enum(skybox));
+        assert_eq!(
+            None,
+            options::inert_reason(SettingId::SceneCustomBgColor, &model),
+            "skybox {skybox}"
+        );
+    }
+    for skybox in [1, 2] {
+        model.set(SettingId::SceneSkybox, SettingValue::Enum(skybox));
+        assert!(
+            options::inert_reason(SettingId::SceneCustomBgColor, &model).is_some(),
+            "skybox {skybox}"
+        );
+    }
+
+    // The arc centre needs an arc; the 2D-mode switch needs some curvature.
+    assert!(options::inert_reason(SettingId::SceneArcCenter, &model).is_some());
+    assert!(options::inert_reason(SettingId::SceneBend2dMode, &model).is_some());
+    model.set(SettingId::SceneArcH, SettingValue::Int(30));
+    assert_eq!(
+        None,
+        options::inert_reason(SettingId::SceneArcCenter, &model)
+    );
+    assert_eq!(
+        None,
+        options::inert_reason(SettingId::SceneBend2dMode, &model)
+    );
+    model.set(SettingId::SceneArcH, SettingValue::Int(0));
+    model.set(SettingId::SceneBendLr, SettingValue::Int(-30));
+    assert_eq!(
+        None,
+        options::inert_reason(SettingId::SceneBend2dMode, &model),
+        "either angle is enough"
+    );
+
+    // The region is overwritten by the detection, so the row says so rather than lying.
+    assert_eq!(None, options::inert_reason(SettingId::EmuTvMode, &model));
+    model.set(SettingId::EmuAutoTvMode, SettingValue::Bool(true));
+    assert!(options::inert_reason(SettingId::EmuTvMode, &model).is_some());
+
+    // The four RetroAchievements options need the switch.
+    let achievements = [
+        SettingId::AchievementsEncore,
+        SettingId::AchievementsUnofficial,
+        SettingId::AchievementsSound,
+        SettingId::AchievementsChallenges,
+    ];
+    for id in achievements {
+        assert!(options::inert_reason(id, &model).is_some(), "{id:?}");
+    }
+    model.set(SettingId::AchievementsEnabled, SettingValue::Bool(true));
+    for id in achievements {
+        assert_eq!(None, options::inert_reason(id, &model), "{id:?}");
+    }
+    // The switch itself is never greyed.
+    assert_eq!(
+        None,
+        options::inert_reason(SettingId::AchievementsEnabled, &model)
+    );
+
+    // Greying is a presentation: the value of a greyed row is written and read back all the same.
+    model.set(SettingId::EmuAutoTvMode, SettingValue::Bool(true));
+    model.set(SettingId::EmuTvMode, SettingValue::Enum(1));
+    assert_eq!(1, model.get(SettingId::EmuTvMode).as_int());
 }
 
 /// RO-1 point 2: the console's "Advanced options" page shows exactly the rows it showed before,

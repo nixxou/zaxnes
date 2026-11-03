@@ -38,38 +38,35 @@ fn req_scn_066_the_five_settings_are_rows_of_the_options_window() {
         );
     }
 
-    // They belong to the Video tab, which is where the Scene theme goes (REQ-UI-202).
-    let video: Vec<SettingId> = model
-        .rows(OptionsTab::Video)
+    // RO-1: they are on the 3D rendering tab, which took the Scene theme off the old Video tab.
+    let render: Vec<SettingId> = model
+        .rows(OptionsTab::Render3d)
         .iter()
         .map(|row| row.descriptor.id())
         .collect();
     for id in GROUP {
-        assert!(video.contains(&id), "{id:?} is on the Video tab");
+        assert!(render.contains(&id), "{id:?} is on the 3D rendering tab");
     }
 }
 
-/// AMD-043 §6: the group is marked by a heading of its own, opened by its **first** setting and
-/// by no other row of any tab.
+/// AMD-043 §6: the group is marked by a heading of its own, which holds exactly the five settings
+/// and no other row of any tab. RO-1 makes it collapsible, the family having grown to five.
 #[test]
-fn req_scn_066_only_the_first_setting_of_the_group_opens_it() {
-    let model = OptionsModel::new();
-    let opens: Vec<SettingId> = model
+fn req_scn_066_the_group_holds_exactly_the_five_settings() {
+    let in_group: Vec<SettingId> = OptionsModel::new()
         .all_rows()
         .map(|row| row.descriptor.id())
-        .filter(|id| options::geometry_heading(*id).is_some())
+        .filter(|id| options::group_of(*id) == Some(options::OptionsGroup::Geometry))
         .collect();
-    assert_eq!(vec![SettingId::SceneBendLr], opens);
+    assert_eq!(GROUP.to_vec(), in_group);
+    assert!(options::OptionsGroup::Geometry.is_collapsible());
 
     for (language, expected) in [
         (UiLanguage::English, "Geometry"),
         (UiLanguage::French, "Géométrie"),
     ] {
         strings::set_language(language);
-        assert_eq!(
-            Some(expected.to_owned()),
-            options::geometry_heading(SettingId::SceneBendLr)
-        );
+        assert_eq!(expected, options::OptionsGroup::Geometry.title());
     }
     strings::set_language(UiLanguage::English);
 }

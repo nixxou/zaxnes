@@ -12,8 +12,8 @@ Build directory: `rust/target-ro` (the owner may hold `rust/target/release/zaxne
 
 | # | Step | State |
 |---|---|---|
-| 1 | Inventory of every shown desktop setting, the golden list, the "nothing disappears" test | done — `17f9f2b` |
-| 2 | The new tab/group layout, with the dependency greying | todo |
+| 1 | Inventory of every shown desktop setting, the golden list, the "nothing disappears" test | done — `4e3221e` |
+| 2 | The new tab/group layout, with the dependency greying | done — `PENDING2` |
 | 3 | Tooltip infrastructure and the texts of the first tabs | todo |
 | 4 | The remaining tooltip texts in both languages, and their completeness test | todo |
 | 5 | Compact overscan rows (point 6) and the finer curvature steps (point 7) | todo |
@@ -80,31 +80,130 @@ Neither is touched by this lot, and both already have their own guard:
 `crates/zax-harness/tests/lua_api_tests.rs` reproduces `goldens/lua-api.txt` byte for byte. Step 6
 runs both.
 
+### Step 2 — the layout is now a table, not a derivation
+
+`ui/options.rs` used to derive the window from the catalogue: `tab_of` mapped a *theme* to a tab
+and the catalogue's order (the order of the settings **file**) chose the place, with one
+hand-written exception that moved the Style rows after `Skybox`. That is exactly how 41 rows ended
+up on one tab: the Video, Render and Scene themes all answered "Video".
+
+The window is now `options::LAYOUT`: one line per tab, one entry per row or group heading, in the
+order they are drawn. `OptionsModel::new` walks it, drops what `is_shown` rejects (`video.backend`
+off a `wgpu` build) and drops a heading left with no row. The catch-all of the old theme mapping
+became `is_shown`'s `has_a_tab` — a `vr.*` setting had no row because its theme had no tab, and it
+still has none.
+
+New API, all of it pure and testable without a window: `LayoutEntry`, `OptionsGroup`
+(`title`, `key`, `is_collapsible`), `TabEntry`, `OptionsModel::entries`, `tab_of(SettingId)`,
+`group_of(SettingId)`, `style_group_note`, `inert_note` / `inert_reason`. Gone: `geometry_heading`,
+`style_heading`, `style_inert_note`, `move_style_after_skybox`, `text::res_scale_needs_render_texture`
+(the reason now comes from `inert_reason`), and `tab_of(&SettingDescriptor)`.
+
+#### The final layout
+
+| Tab (EN / FR) | Group | Settings, in order |
+|---|---|---|
+| **Display** / *Affichage* | — | `ui.fullscreen`, `video.vsync`, `video.frame_rate` |
+| | Resolution / *Résolution* | `video.render_method`, `video.res_scale`, `video.dynamic_resolution`, `video.anti_alias` |
+| | Performance / *Performances* | `video.skip_frame`, `emu.catch_up`, `emu.catch_up_last_3d`, `emu.pause_3d_in_2d`, `emu.lua_smooth_gc`, `emu.lua_optimized`, `emu.pipeline`, `emu.lua_experimental` |
+| | Advanced / *Avancé* | `video.backend` *(wgpu only)*, `video.max_queued_frames` |
+| **NES picture** / *Image NES* | — | `video.nes_palette`, `video.remove_sprite_limit` |
+| | Overscan | `video.overscan_mode`, the four NTSC margins, the four PAL margins |
+| | Widescreen / *Écran large* | `video.widescreen_strict_edges` |
+| **3D rendering** / *Rendu 3D* | — | `scene.skybox`, `scene.custom_bg_color`, `render.visual_style` |
+| | Style | `render.style.voxel_grid`, `render.style.reflections`, `ssr_shine`, `ssr_clarity`, `ssr_length`, `ssr_quality` |
+| | Geometry / *Géométrie* | `scene.bend_lr`, `scene.bend_tb`, `scene.arc_h`, `scene.arc_center`, `scene.bend_2d_mode` |
+| | Advanced / *Avancé* | `render.mesh_algo` |
+| **Light and shadows** / *Lumière et ombres* | — | `light.intensity`, `render.shadow`, `render.backdrop_lighting` |
+| | Style | `render.style.pixel_shadow`, `render.style.ao`, `ao_strength`, `ao_radius`, `ao_thickness`, `ao_quality` |
+| **Camera** / *Caméra* | — | `camera.fov` |
+| **Audio** | — | `audio.volume` |
+| **Emulation** / *Émulation* | — | `emu.game_speed`, `emu.run_ahead` |
+| | Video region / *Région vidéo* | `emu.auto_tv_mode`, `emu.tv_mode` |
+| | Advanced / *Avancé* | `input.emulated_menu_button`, `emu.core` |
+| **Interface** | — | `ui.language`, `ui.roms_folder`, `ui.sort_option`, `ui.show_fps`, `ui.profiler` |
+| **RetroAchievements** | — | `achievements.enabled`, `.sound`, `.challenges`, `.unofficial`, `.encore` |
+
+70 rows, 71 with `wgpu` — the golden set, unchanged.
+
+#### Four refinements of the owner's starting idea, with their reasons
+
+1. **Reflections and the voxel grid stay with the style; the pixel shadows and the occlusion go to
+   the light.** The line the brief left open is drawn by what each effect *does*: the Light and
+   shadows tab holds the effects that decide **where light does not reach** (the shadows, the pixel
+   shadows, which only change how those same shadows are drawn, the ambient occlusion, which is a
+   different effect, and the backdrop lighting). The voxel grooves and the floor reflections change
+   a **surface**, not the lighting, so they belong with the style. That also keeps the two
+   reflection-dependent quartets together under one switch.
+2. **`render.mesh_algo` is at the end of the 3D tab, in an Advanced group**, not at the top where
+   the owner's list put it. SPEC-10 REQ-UI-061 as amended by AMD-055 requires the `Style` row to
+   come **right after the `Skybox` row and its colour button**, and that test still passes; the
+   mesh algorithm is the most advanced row of the tab anyway (GREEDY / MARCHING /
+   GREEDY_MULTICOLOR).
+3. **The Emulation tab is not split further.** The brief suggested pulling conversion, clipping,
+   layers and inputs out of it. Every conversion, clipping and layer setting is profile-scoped, so
+   none has ever been a row (REQ-UI-061 keeps the video region alone), and the only input setting
+   shown is `input.emulated_menu_button`. A tab for one row is worse than the Advanced group it is
+   in now.
+4. **`ui.fullscreen` left Interface for Display**, which is where the brief puts "window".
+
+#### The window got bigger, and its tab bar scrolls
+
+Nine tabs do not fit in 560 px, and the default fitting policy would shrink the titles to an
+ellipsis ("Light and sh…"). The default size is now 820 × 600 with
+`TabBarFlags::FITTING_POLICY_SCROLL`: full titles, arrows where the window is still too narrow, and
+the window is resizable as before. 520 px of height was sized for a tab 41 rows deep; no tab is
+now deeper than 16.
+
+#### The dependency greying — what was verified, and what was not
+
+Every case below was read in the code that *consumes* the setting (the comments of
+`options::inert_reason` name the file), never inferred from a label. The row keeps its place and
+its value: greying is presentation, and the setting acts again the moment the other one changes.
+
+| Greyed row | While | Where it was verified |
+|---|---|---|
+| `video.res_scale`, `video.dynamic_resolution` | the render method is Direct | `render_scaling::scale_applies`, `application.rs` arms the governor only for the render texture |
+| `video.res_scale` | the automatic resolution is on | `application.rs` reads the governor's factor *instead of* `res_scale_factor()` |
+| `render.style.pixel_shadow` | `render.shadow` is off | `renderer.rs` skips the shadow pass and sets `uReceiveShadow` = 0, and the pixel-shadow displacement is inside that branch of `scene.frag` |
+| `render.style.ao_thickness` | the MSVO mode is drawn as Depth | unchanged (AMD-055 REQ-SCN-079, `MSVO_PORTED`) |
+| `emu.lua_experimental`, `emu.pipeline` | `emu.lua_optimized` is off | `runtime/mod.rs` reads `optimized && experimental`; `PipelineMode::of` returns `Off` outright |
+| `scene.custom_bg_color` | the skybox is Gradient or Fantasy | `scene.rs`: those two skies are drawn from the game's own colour and palette and cover the clear in full |
+| `scene.arc_center` | `scene.arc_h` is 0 | `space_bend.rs`: the pivot is read only inside `if self.arc.active` |
+| `scene.bend_2d_mode` | all three angles are 0 | `scene.rs`: the switch chooses between the curvature and the identity, which coincide |
+| `emu.tv_mode` | `emu.auto_tv_mode` is on | `jobs.rs` → `apply_detected_region` *writes* `emu.tv_mode` at the next ROM load |
+| `emu.core` | always | `Domain::core_index` takes it modulo 1, so every write reads back 0 and nothing consumes it |
+| the four `achievements.*` | `achievements.enabled` is off | `achievements/mod.rs` keeps no client at all, so no option is forwarded and no unlock can fire |
+
+Candidates **rejected** after reading the code, to save the next reader the trip:
+
+- `emu.catch_up_last_3d` at `emu.catch_up` = None: still live whenever the emulated rate exceeds
+  the displayed one (fast forward, a low-refresh screen) or the displayed rate is unknown —
+  `CatchUp::Off` does not mean "one frame" in `frame_pacer`. The tooltip of step 3 says so instead.
+- `video.anti_alias`: inert only where the device grants a single sample, which the settings model
+  cannot know.
+- `video.max_queued_frames`: inert on the wgpu backend and at depth 2, neither of which is a
+  setting the row can point at honestly.
+- `video.widescreen_strict_edges`: needs the game's widescreen patch to be applied, which is a
+  per-game state, not a global setting.
+- the twelve Enhanced parameters in Classic: they stay **hidden**, as REQ-SCN-079 says, because
+  "never hidden more than today" is a floor and the brief keeps the Style group's own rules unless
+  the aim needs otherwise. What RO-1 adds is one sentence: the heading is now drawn in Classic too,
+  with "Style = Classic: these effects are off" under it (`style_group_note`), so a player on the
+  Light and shadows tab can see that pixel shadows and ambient occlusion exist at all — which is
+  the owner's second complaint, answered without touching a visibility rule.
+
+#### Other families split over several rows of one quantity (point 6's question)
+
+Besides the eight overscan margins, which step 5 compacts, the window holds no other family of the
+same shape: the four `video.overscan_*` globals and the three widescreen settings are in `EXCLUDED`
+(a game's own options edit them), `light.direction` is a profile vector with no row, and the four
+`clip.*` margins and the thirty layer settings are profile-scoped. The Style group's two quartets
+(`ao_*`, `ssr_*`) are four **different** quantities, not four sides of one, so they stay four rows.
+
 ### Next step
 
-Step 2: the new layout. The plan, to be confirmed or refined in this file as it is written:
-
-- **Display** — `ui.fullscreen`, `video.vsync`, `video.frame_rate`; group *Resolution*:
-  `video.render_method`, `video.res_scale`, `video.dynamic_resolution`, `video.anti_alias`; group
-  *Graphics API*: `video.backend`, `video.max_queued_frames`; group *Performance*:
-  `video.skip_frame`, `emu.catch_up`, `emu.catch_up_last_3d`, `emu.pause_3d_in_2d`, `emu.pipeline`,
-  `emu.lua_smooth_gc`, `emu.lua_optimized`, `emu.lua_experimental`.
-- **NES picture** — `video.nes_palette`, `video.remove_sprite_limit`; group *Overscan*:
-  `video.overscan_mode` and the two compact rows of point 6; group *Widescreen*:
-  `video.widescreen_strict_edges`.
-- **3D rendering** — `render.visual_style`, `render.mesh_algo`, `scene.skybox`,
-  `scene.custom_bg_color`; group *Style*: `render.style.voxel_grid`, `render.style.reflections` and
-  the four `render.style.ssr_*`; group *Geometry*: the five curvature settings.
-- **Light and shadows** — `light.intensity`, `render.shadow`, `render.backdrop_lighting`; group
-  *Style*: `render.style.pixel_shadow`, `render.style.ao` and its four parameters.
-- **Camera**, **Audio**, **Emulation**, **Interface**, **RetroAchievements** — as they are, less
-  `ui.fullscreen` (to Display) and the performance switches (to Display).
-
-Open questions to settle in step 2, each by reading the code path rather than guessing: which
-dependencies can honestly be greyed (pixel shadows under `render.shadow` off,
-`video.dynamic_resolution` under the direct method, `emu.lua_experimental` under
-`emu.lua_optimized` off, `scene.custom_bg_color` off the Color skybox, `scene.arc_center` at
-`scene.arc_h` = 0, `emu.catch_up_last_3d` at `emu.catch_up` = None, the four
-`achievements.*` under `achievements.enabled` off, `emu.tv_mode` under `emu.auto_tv_mode` on), and
-whether the Style group's existing **hide** rule stays a hide (first reading of the brief: yes, it
-stays, with the reason spelled out beside the group heading instead of the silence there is today).
+Step 3: the tooltip infrastructure, and the texts of the Display, NES picture and 3D rendering
+tabs. The existing `help.*` sentences (the thirteen of AMD-055 §4, the five of AMD-043/AMD-046 and
+the backdrop one) are kept and **extended**, never duplicated: `help_of` stays the entry point and
+grows a second table for the settings that had no sentence.

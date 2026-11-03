@@ -110,6 +110,49 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HINT_AT_NEXT_START, "(at the next start)"),
     (keys::HINT_AT_NEXT_LOAD, "(at the next load)"),
     (keys::HINT_PROFILE_SETTING, "(profile setting)"),
+    // ---------------------------- RO-1: the groups of the options window
+    (keys::GROUP_RESOLUTION, "Resolution"),
+    (keys::GROUP_PERFORMANCE, "Performance"),
+    (keys::GROUP_OVERSCAN, "Overscan"),
+    (keys::GROUP_WIDESCREEN, "Widescreen"),
+    (keys::GROUP_REGION, "Video region"),
+    (keys::GROUP_ADVANCED, "Advanced"),
+    // ------------- RO-1 point 1: why a row is greyed out. Each one names the setting that has
+    //               to change for the row to act again; the value itself is kept either way.
+    (
+        keys::HINT_RES_SCALE_AUTOMATIC,
+        "(no effect: the automatic resolution chooses it)",
+    ),
+    (keys::HINT_NEEDS_SHADOWS, "(no effect: the shadows are off)"),
+    (
+        keys::HINT_NEEDS_LUA_OPTIMIZED,
+        "(no effect: Optimized Lua is off)",
+    ),
+    (
+        keys::HINT_BG_COLOR_UNUSED,
+        "(no effect: this background is drawn from the game's own colours)",
+    ),
+    (keys::HINT_NEEDS_ARC, "(no effect: Arc Horizontal is 0)"),
+    (
+        keys::HINT_NEEDS_CURVATURE,
+        "(no effect: no curvature is set)",
+    ),
+    (
+        keys::HINT_REGION_AUTOMATIC,
+        "(set by the detection at the next ROM load)",
+    ),
+    (
+        keys::HINT_SINGLE_CORE,
+        "(this version has one core: the value is always 0)",
+    ),
+    (
+        keys::HINT_NEEDS_ACHIEVEMENTS,
+        "(no effect: RetroAchievements is off)",
+    ),
+    (
+        keys::HINT_STYLE_CLASSIC,
+        "Style = Classic: these effects are off.",
+    ),
     // ---------------------------------------------------- fields, columns
     (keys::FIELD_SEARCH, "Search"),
     (keys::COLUMN_ACTION, "Action"),
@@ -127,7 +170,9 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::ABOUT_CREDIT_DISCLAIMER, "Not affiliated with Geod Studio or Nintendo."),
     (keys::ABOUT_VERSION_PREFIX, "Version"),
     // -------------------------------------------------- options window tabs
-    (keys::TAB_VIDEO, "Video"),
+    (keys::TAB_DISPLAY, "Display"),
+    (keys::TAB_NES_PICTURE, "NES picture"),
+    (keys::TAB_RENDER_3D, "3D rendering"),
     (keys::TAB_CAMERA, "Camera"),
     (keys::TAB_LIGHT, "Light and shadows"),
     (keys::TAB_AUDIO, "Audio"),

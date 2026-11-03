@@ -110,6 +110,25 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HINT_AT_NEXT_START, "(au prochain démarrage)"),
     (keys::HINT_AT_NEXT_LOAD, "(au prochain chargement)"),
     (keys::HINT_PROFILE_SETTING, "(réglage de profil)"),
+    // ---------------------------- RO-1 : les groupes de la fenêtre d'options
+    (keys::GROUP_RESOLUTION, "Résolution"),
+    (keys::GROUP_PERFORMANCE, "Performances"),
+    (keys::GROUP_OVERSCAN, "Overscan"),
+    (keys::GROUP_WIDESCREEN, "Écran large"),
+    (keys::GROUP_REGION, "Région vidéo"),
+    (keys::GROUP_ADVANCED, "Avancé"),
+    // ------------- RO-1 point 1 : pourquoi une ligne est grisée. Chacune nomme le réglage qu'il
+    //               faut changer pour que la ligne agisse de nouveau ; la valeur est conservée.
+    (keys::HINT_RES_SCALE_AUTOMATIC, "(sans effet : la résolution automatique la choisit)"),
+    (keys::HINT_NEEDS_SHADOWS, "(sans effet : les ombres sont désactivées)"),
+    (keys::HINT_NEEDS_LUA_OPTIMIZED, "(sans effet : le Lua optimisé est désactivé)"),
+    (keys::HINT_BG_COLOR_UNUSED, "(sans effet : ce fond est tiré des couleurs du jeu)"),
+    (keys::HINT_NEEDS_ARC, "(sans effet : Arc horizontal est à 0)"),
+    (keys::HINT_NEEDS_CURVATURE, "(sans effet : aucune courbure n'est réglée)"),
+    (keys::HINT_REGION_AUTOMATIC, "(fixée par la détection au prochain chargement de ROM)"),
+    (keys::HINT_SINGLE_CORE, "(cette version n'a qu'un cœur : la valeur est toujours 0)"),
+    (keys::HINT_NEEDS_ACHIEVEMENTS, "(sans effet : RetroAchievements est désactivé)"),
+    (keys::HINT_STYLE_CLASSIC, "Style = Classic : ces effets sont désactivés."),
     // ---------------------------------------------------- fields, columns
     (keys::FIELD_SEARCH, "Rechercher"),
     (keys::COLUMN_ACTION, "Action"),
@@ -127,7 +146,9 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::ABOUT_CREDIT_DISCLAIMER, "Sans lien avec Geod Studio ni Nintendo."),
     (keys::ABOUT_VERSION_PREFIX, "Version"),
     // -------------------------------------------------- options window tabs
-    (keys::TAB_VIDEO, "Vidéo"),
+    (keys::TAB_DISPLAY, "Affichage"),
+    (keys::TAB_NES_PICTURE, "Image NES"),
+    (keys::TAB_RENDER_3D, "Rendu 3D"),
     (keys::TAB_CAMERA, "Caméra"),
     (keys::TAB_LIGHT, "Lumière et ombres"),
     (keys::TAB_AUDIO, "Audio"),

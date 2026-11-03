@@ -273,12 +273,6 @@ pub fn reset_defaults() -> String {
     strings::get(keys::BUTTON_RESET_DEFAULTS)
 }
 
-/// Why the resolution scale is greyed out under the direct render method (AMD-032 §3).
-#[must_use]
-pub fn res_scale_needs_render_texture() -> String {
-    strings::get(keys::HINT_RES_SCALE_DIRECT)
-}
-
 /// Why Run-ahead has no effect while this game is playing: its scripts change the core from a
 /// frame hook, so the guard-rail of Q-103 holds the effective value at 0. The setting itself is
 /// untouched and applies again to the next game.

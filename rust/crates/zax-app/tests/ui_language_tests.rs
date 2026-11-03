@@ -140,7 +140,7 @@ fn amd_035_a_fresh_user_folder_is_english() {
     assert_eq!("en", harness.host.settings().language());
     assert_eq!(UiLanguage::English, strings::language());
     assert_eq!("File", harness.ui.menu_bar.menus()[0].title);
-    assert_eq!("Video", options::title_of(OptionsTab::Video));
+    assert_eq!("Display", options::title_of(OptionsTab::Display));
     assert_eq!("Open a ROM…", strings::get(&Command::OpenRom.label_key()));
     assert_eq!(
         "Player 1 — NES buttons",
@@ -162,7 +162,7 @@ fn amd_035_switching_to_french_changes_the_texts_at_once() {
 
     assert_eq!(UiLanguage::French, strings::language());
     assert_eq!("Fichier", harness.ui.menu_bar.menus()[0].title);
-    assert_eq!("Vidéo", options::title_of(OptionsTab::Video));
+    assert_eq!("Affichage", options::title_of(OptionsTab::Display));
     assert_eq!(
         "Ouvrir une ROM…",
         strings::get(&Command::OpenRom.label_key())

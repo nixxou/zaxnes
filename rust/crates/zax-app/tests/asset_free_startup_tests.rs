@@ -203,7 +203,9 @@ fn req_pub_001_the_command_line_resolves_the_generic_entries_without_assets() {
 /// `rust/target-*` beside it (`.gitignore` lists them one by one).
 fn is_build_output(relative: &Path) -> bool {
     let mut parts = relative.components();
-    parts.next().is_some_and(|first| first.as_os_str() == "rust")
+    parts
+        .next()
+        .is_some_and(|first| first.as_os_str() == "rust")
         && parts.next().is_some_and(|second| {
             second
                 .as_os_str()

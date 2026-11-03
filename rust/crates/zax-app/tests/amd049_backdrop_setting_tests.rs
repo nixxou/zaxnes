@@ -105,7 +105,7 @@ fn req_scn_075_the_options_window_shows_it_with_the_light() {
     assert!(!options::EXCLUDED.contains(&SettingId::RenderBackdropLighting));
     assert_eq!(
         Some(options::OptionsTab::Light),
-        options::tab_of(descriptor)
+        options::tab_of(SettingId::RenderBackdropLighting)
     );
 
     let model = options::OptionsModel::new();
