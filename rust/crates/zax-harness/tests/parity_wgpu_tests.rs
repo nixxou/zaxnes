@@ -375,6 +375,199 @@ fn req_scn_079_each_shader_effect_moves_as_much_of_the_frame_on_each_backend() {
     }
 }
 
+// ------------------------------------------------------ AMD-055, the occlusion of REQ-SCN-083
+
+/// The settings that turn the hemisphere occlusion of REQ-SCN-083 on: `spl.ao` = 2, the mode
+/// whose estimator is reconstructed from the frame's depth alone.
+const DEPTH_OCCLUSION: [&str; 4] = ["--style", "enhanced", "--style-param", "spl.ao=2"];
+
+/// AMD-055 REQ-SCN-083, mode `spl.ao` = 2: the whole chain — the depth reconstruction, the
+/// hemisphere kernel, the depth-aware blur and the multiply composite — agrees with OpenGL.
+///
+/// This is the first effect of the lot that is a **screen pass** rather than a scene variant, so
+/// it is also where the two conventions `screen_depth.wgsl` undoes are read: a port that kept the
+/// GLSL's `ndc = uv * 2 - 1` would mirror view space in y, and a port that got the stored depth
+/// wrong would darken the wrong distances.
+#[test]
+fn req_scn_083_the_depth_occlusion_agrees_between_the_backends() {
+    let Some((share, channel)) = parity("ao-depth", &DEPTH_OCCLUSION) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the Depth occlusion agrees on only {:.4} % of pixels",
+        share * 100.0
+    );
+    println!(
+        "ao depth: worst {:.4} % within 2, max {channel} levels",
+        share * 100.0
+    );
+}
+
+/// REQ-SCN-083 at `ao.quality` High, where the estimator runs at the frame's **own** resolution
+/// rather than half of each dimension — a different target size, a different `uTexel`, and the
+/// composite's upsample out of the picture. The divisor is the one number of this pass a port can
+/// get right at one quality and wrong at the other.
+#[test]
+fn req_scn_083_the_full_resolution_occlusion_agrees_between_the_backends() {
+    let Some((share, _)) = parity(
+        "ao-high",
+        &[
+            "--style",
+            "enhanced",
+            "--style-param",
+            "spl.ao=2,ao.quality=2",
+        ],
+    ) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the full-resolution occlusion agrees on only {:.4} % of pixels",
+        share * 100.0
+    );
+}
+
+/// The occlusion has to **do** something on the `wgpu` side, and the same something — the half of
+/// the check a share cannot make. And it must not touch the HUD, which REQ-SCN-080 draws *after*
+/// the pass (so the exclusion is the frame order rather than a test in the shader).
+///
+/// **The scene is `shadow`, and which scene it is was measured rather than chosen.** On the
+/// OpenGL backend the Depth occlusion leaves `framing`, `heavy`, `clip`, `nudge`, `alpha`, `sky`
+/// and `hud` **byte-identical** and moves 1.76 % of `shadow` (and of `no-shadow` and
+/// `layer-shadow-off`) and 2.54 % of `backdrop`. That is REQ-SCN-083 working as written, not a
+/// defect: `O` is null "là où aucune géométrie occultante ne se trouve à moins de 2r", and the
+/// dense tile-box scenes of the set are flat facades with no concavity inside the radius, while
+/// the three shadow scenes and the backdrop have a box standing on a floor. It is also why the
+/// `ao-depth` rows above sit exactly on the Classic control for `framing` and `heavy` — on those
+/// two the pass runs and changes nothing, on either backend.
+#[test]
+fn req_scn_083_the_occlusion_darkens_as_much_of_the_frame_on_each_backend() {
+    let classic = capture("darkens-classic", None, &[]).expect("OpenGL always renders");
+    let occluded = capture("darkens-ao", None, &DEPTH_OCCLUSION).expect("OpenGL always renders");
+    let reference = figures(&load(&classic, "shadow"), &load(&occluded, "shadow")).differing;
+    assert!(
+        reference > 0.015,
+        "the OpenGL occlusion darkened only {:.2} % of `shadow`",
+        reference * 100.0
+    );
+    // And it leaves the scenes with no occluder within the radius exactly alone.
+    for scene in ["framing", "heavy"] {
+        let untouched = figures(&load(&classic, scene), &load(&occluded, scene));
+        assert_eq!(
+            untouched.max_channel, 0,
+            "REQ-SCN-083 moved `{scene}` on OpenGL, so this file's reading of the set is stale"
+        );
+    }
+
+    for backend in backends() {
+        let Some(flat) = capture("darkens-classic", Some(backend), &[]) else {
+            continue;
+        };
+        let on = capture("darkens-ao", Some(backend), &DEPTH_OCCLUSION).unwrap();
+        let moved = figures(&load(&flat, "shadow"), &load(&on, "shadow")).differing;
+        println!(
+            "ao depth on {backend}: darkens {:.4} % of `shadow`, OpenGL {:.4} %",
+            moved * 100.0,
+            reference * 100.0
+        );
+        assert!(
+            (moved - reference).abs() < 0.004,
+            "the occlusion on {backend} darkened {:.4} % against OpenGL's {:.4} %",
+            moved * 100.0,
+            reference * 100.0
+        );
+
+        let hud = figures(&load(&flat, "hud"), &load(&on, "hud"));
+        assert_eq!(
+            hud.max_channel, 0,
+            "the occlusion on {backend} changed the HUD by up to {} levels",
+            hud.max_channel
+        );
+        fs::remove_dir_all(&flat).unwrap();
+        fs::remove_dir_all(&on).unwrap();
+    }
+    fs::remove_dir_all(&classic).unwrap();
+    fs::remove_dir_all(&occluded).unwrap();
+}
+
+/// AMD-055 REQ-SCN-080 under anti-aliasing, which is the one path with no OpenGL counterpart: the
+/// passes read the **resolved** depth, and `wgpu` has no depth resolve, so this frame submits the
+/// extra pass of `shaders/depth_resolve.wgsl` and then draws the transparent objects and the HUD
+/// into the single-sample target.
+///
+/// A port that read the multisampled depth would not compile; one that read an **unresolved**
+/// single-sample depth — never written — would darken nothing at all, which is what the
+/// comparison with OpenGL's own multisampled capture catches.
+#[test]
+fn req_scn_080_the_occlusion_agrees_under_anti_aliasing() {
+    let mut arguments = vec!["--anti-alias", "1"];
+    arguments.extend_from_slice(&DEPTH_OCCLUSION);
+    let Some((share, channel)) = parity("ao-depth-aa", &arguments) else {
+        return;
+    };
+    println!(
+        "ao depth, MSAA 4x: worst {:.4} % within 2 of OpenGL, max {channel} levels",
+        share * 100.0
+    );
+    assert!(
+        share >= WITHIN_TWO_MULTISAMPLED,
+        "the occlusion under MSAA 4x agrees with OpenGL on only {:.4} % of pixels",
+        share * 100.0
+    );
+}
+
+/// What the occlusion asked of each backend, read off `render.json`: the share figures say the two
+/// pictures match, and these say the two renderers did the same amount of work to get there.
+///
+/// The one number that differs by construction is the **pass count under anti-aliasing**: the
+/// depth resolve of REQ-SCN-080's last bullet is one `glBlitFramebuffer` on OpenGL, which is not a
+/// pass, and a render pass of its own here. So `wgpu` submits exactly one more, and the test says
+/// so rather than relaxing to an inequality.
+#[test]
+fn req_scn_080_the_occlusion_costs_the_same_passes_and_bytes_on_each_backend() {
+    for (level, extra) in [("0", 0_u32), ("1", 1)] {
+        let mut arguments = vec!["--anti-alias", level];
+        arguments.extend_from_slice(&DEPTH_OCCLUSION);
+        let reference = capture("ao-counts", None, &arguments).expect("OpenGL always renders");
+        let counters = |folder: &PathBuf| {
+            let records = read_render(&folder.join("render.json")).unwrap();
+            let scene = records
+                .iter()
+                .find(|record| record.scene == "framing")
+                .expect("the synthetic set has a `framing` scene");
+            (
+                scene.screen_effect_passes.expect("Enhanced writes the key"),
+                scene.screen_effect_bytes.expect("Enhanced writes the key"),
+            )
+        };
+        let (gl_passes, gl_bytes) = counters(&reference);
+        for backend in backends() {
+            let Some(capture) = capture("ao-counts", Some(backend), &arguments) else {
+                continue;
+            };
+            let (passes, bytes) = counters(&capture);
+            println!(
+                "ao depth, anti_alias {level} on {backend}: {passes} passes and {bytes} bytes, \
+                 OpenGL {gl_passes} and {gl_bytes}"
+            );
+            assert_eq!(
+                passes,
+                gl_passes + extra,
+                "anti_alias {level} on {backend} submitted {passes} screen passes, \
+                 OpenGL {gl_passes} plus the {extra} this API needs for the depth resolve"
+            );
+            assert_eq!(
+                bytes, gl_bytes,
+                "anti_alias {level} on {backend} allocated {bytes} bytes of screen targets, \
+                 OpenGL {gl_bytes}"
+            );
+            fs::remove_dir_all(&capture).unwrap();
+        }
+        fs::remove_dir_all(&reference).unwrap();
+    }
+}
+
 // ------------------------------------------------------------- AMD-032, the anti-aliasing levels
 
 /// AMD-032 §2 and AMD-052 REQ-PERS-089: `video.anti_alias` 0, 1 and 2 mean no anti-aliasing,
@@ -470,11 +663,23 @@ fn amd032_the_anti_alias_levels_agree_between_the_backends() {
 /// And the two `wgpu` backends against each other, at every level: the same WGSL through the same
 /// naga, so this is the assertion that holds tightest and the one that caught the `fwidth` of
 /// step 3.
+///
+/// The occlusion of REQ-SCN-083 rides along, which makes this the strongest check the screen
+/// passes get: at level 1 and 2 it exercises the depth resolve of REQ-SCN-080 — the pass with no
+/// OpenGL counterpart — and a difference between the two APIs there would be a driver's or the
+/// port's, not a sample pattern's.
 #[cfg(windows)]
 #[test]
 fn ru_7_vulkan_and_dx12_agree_with_each_other_at_every_level() {
     for level in ["0", "1", "2"] {
-        let arguments = ["--anti-alias", level, "--style", "enhanced"];
+        let arguments = [
+            "--anti-alias",
+            level,
+            "--style",
+            "enhanced",
+            "--style-param",
+            "spl.ao=2",
+        ];
         let Some(vulkan) = capture("pair", Some("vulkan"), &arguments) else {
             return;
         };

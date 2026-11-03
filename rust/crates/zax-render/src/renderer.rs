@@ -1879,7 +1879,11 @@ fn set_deformation(program: &mut ShaderProgram, deform: Option<&DeformParameters
 /// and `m22` *are* its two scales, `m33` is `range = far/(near − far)` and `m43` is `range × near`,
 /// so the near plane is their quotient. Reading them off the matrix rather than plumbing the
 /// camera's field of view through keeps this right if the camera ever changes its planes.
-fn projection_terms(view: &CameraView) -> Vector4 {
+/// `pub(crate)` for the `wgpu` backend's own screen passes (RU-7 step 4b), which read the same
+/// four numbers off the same matrix. Nothing else about this function changed, and nothing of the
+/// OpenGL path calls it differently: the lot that ported the passes was not allowed to touch this
+/// backend, so the one-word widening is the whole of its diff here.
+pub(crate) fn projection_terms(view: &CameraView) -> Vector4 {
     let projection = &view.projection;
     let range = projection.m33;
     let near = if range.abs() > f32::EPSILON {

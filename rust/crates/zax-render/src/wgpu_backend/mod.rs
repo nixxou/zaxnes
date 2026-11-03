@@ -6,5 +6,6 @@ pub mod headless;
 mod preprocess;
 mod renderer;
 mod resources;
+mod screen_effects;
 
 pub use renderer::{WgpuRenderError, WgpuSceneRenderer, WgpuTarget, BATCHING_FEATURES};

@@ -27,10 +27,11 @@ use zax_engine3d::vectors::{Mat4, Vec3};
 
 use super::preprocess;
 use super::resources::{self, MeshHandle, MeshStore, TextureHandle, TextureStore, VERTEX_STRIDE};
+use super::screen_effects::{ScreenEffects, ScreenFrame};
 use crate::camera::CameraView;
 use crate::color;
 use crate::frame_plan::{
-    DrawItem, FixedMeshes, FramePlan, InstanceRun, Placement, Residency, SceneConstants,
+    DrawItem, DrawLists, FixedMeshes, FramePlan, InstanceRun, Placement, Residency, SceneConstants,
 };
 use crate::geometry;
 use crate::interop;
@@ -39,12 +40,13 @@ use crate::scene::{SceneFrame, SceneState, SkyboxKind};
 use crate::shadow_volume::ShadowVolume;
 use crate::sky::{self, SkyBodySettings};
 use crate::statistics::RenderStatistics;
+use crate::style::StyleSettings;
 
 /// The format of the linear scene buffer (REQ-SCN-035, AMD-021 R2-009).
-const LINEAR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+pub(super) const LINEAR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// The depth format of the scene buffer and of the shadow map: 24 bits, as the GL path's
 /// `DEPTH_COMPONENT24`, so that coplanar faces tie the same way.
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+pub(super) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
 /// Bytes of the per-run block (`Draw` in common.wgsl).
 const DRAW_BLOCK: usize = 80;
@@ -236,9 +238,18 @@ struct LinearTargets {
     width: u32,
     height: u32,
     samples: u32,
+    /// Whether the depth was allocated so that a shader can read it (AMD-055 REQ-SCN-080): the
+    /// one allocation Classic cannot share, and the twin of the flag
+    /// `LinearColorBuffer::begin_pass` takes on the OpenGL side.
+    readable_depth: bool,
     resolved: wgpu::TextureView,
     multisampled: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
+    /// The single-sample depth the screen passes read and the second scene pass attaches: the
+    /// frame's own `depth` without anti-aliasing, a target of its own with it (there is no depth
+    /// resolve in this API — `screen_effects::ScreenEffects::resolve_depth`). `None` without the
+    /// screen passes.
+    depth_single: Option<wgpu::TextureView>,
     resolve_group: wgpu::BindGroup,
 }
 
@@ -411,6 +422,18 @@ pub struct WgpuSceneRenderer {
     shadow_map_size: u32,
     shadow_map_requested: i32,
     linear: Option<LinearTargets>,
+    /// How many times the linear attachments have been allocated, so that the bind groups of the
+    /// screen passes know when the views they name have been replaced. A `wgpu::TextureView` is a
+    /// handle with no identity to compare.
+    linear_generation: u64,
+    /// AMD-055 REQ-SCN-080: the screen-space passes, held only while a frame wants one — the twin
+    /// of `SceneRenderer::screen_effects`, and `None` in Classic, where the whole cost of
+    /// AMD-055's screen side is the `is_none` test that decides not to run it.
+    screen_effects: Option<ScreenEffects>,
+    /// How many scene modules AMD-055 added: a variant with the voxel grid of REQ-SCN-081 or the
+    /// pixel shadows of REQ-SCN-082. **0 in Classic**, and 0 in Enhanced until one of the two is
+    /// turned on, which is what `ScenePrograms::style_programs` counts on the other side.
+    style_modules: u32,
     frame_group: wgpu::BindGroup,
     draw_group: wgpu::BindGroup,
     shadow_frame_group: wgpu::BindGroup,
@@ -602,6 +625,9 @@ impl WgpuSceneRenderer {
             shadow_map_size,
             shadow_map_requested: requested,
             linear: None,
+            linear_generation: 0,
+            screen_effects: None,
+            style_modules: 0,
             frame_group,
             draw_group: scene_draw_group,
             shadow_frame_group,
@@ -635,6 +661,12 @@ impl WgpuSceneRenderer {
         if !self.scene_modules.contains_key(&variant) {
             let module = build_module(&self.device, "zax scene", &[SCENE, TEXTURES_BOUND], variant);
             self.scene_modules.insert(variant, module);
+            // What AMD-055 added, counted the way `ScenePrograms::install` counts it: the
+            // curvature's and the centroid's own modules are AMD-043's and AMD-058's and exist in
+            // Classic too, so they are not AMD-055's to count.
+            if variant.voxel_grid || variant.pixel_shadow {
+                self.style_modules += 1;
+            }
         }
         let shadow = variant.shadow();
         if !self.shadow_modules.contains_key(&shadow) {
@@ -709,6 +741,42 @@ impl WgpuSceneRenderer {
         Ok(variant)
     }
 
+    /// Builds or releases the screen-space passes of AMD-055 REQ-SCN-080 for this frame, once a
+    /// frame: the twin of `SceneRenderer::select_screen_effects`.
+    ///
+    /// **Not in 2D mode.** The rectangle of AMD-046 §2 is the only object of a 2D-mode frame, and
+    /// REQ-SCN-083 excludes it from being modified while letting it occlude; not running the pass
+    /// satisfies both clauses at once and costs nothing — the same reading
+    /// [`Self::select_bend_variant`] already applies to the voxel grid.
+    ///
+    /// In Classic this is one test on an `Option` that is already `None`.
+    fn select_screen_effects(&mut self, scene: &SceneState) {
+        let style = &scene.settings.style;
+        if !style.screen_effects_active() || scene.two_dimensional_mode {
+            self.screen_effects = None;
+            return;
+        }
+        self.prepare_screen_effects(scene);
+    }
+
+    /// Builds what the screen passes need. Out of line because none of it belongs in a Classic
+    /// frame's instruction cache — the reason [`run_screen_effects`] is out of line too.
+    ///
+    /// Nothing here is fallible, and that is a property of the API rather than a shortcut: where
+    /// the OpenGL module returns a `GlError` when a program will not link or a target will not
+    /// allocate, `wgpu` reports both through the device's error scope and hands back a usable
+    /// handle. The one refusal REQ-SCN-083 names — the `R16F` pyramid of the MSVO mode, the
+    /// fallback **(D)** — is therefore asked of the adapter rather than caught, and that is step
+    /// 4d's.
+    #[inline(never)]
+    fn prepare_screen_effects(&mut self, scene: &SceneState) {
+        let effects = match &mut self.screen_effects {
+            Some(effects) => effects,
+            none => none.insert(ScreenEffects::new(&self.device, &self.queue)),
+        };
+        effects.select(&self.device, &scene.settings.style);
+    }
+
     /// The device the renderer draws with.
     #[must_use]
     pub const fn device(&self) -> &wgpu::Device {
@@ -779,6 +847,9 @@ impl WgpuSceneRenderer {
         // never per vertex — the same choice, in the same place in the frame, as
         // `SceneRenderer::select_bend_variant` makes on the OpenGL side.
         let variant = self.select_bend_variant(scene)?;
+        // AMD-055 REQ-SCN-080: and the same once a frame for the screen-space passes, in the
+        // place `SceneRenderer::render` makes the same call.
+        self.select_screen_effects(scene);
 
         self.statistics.begin_frame();
         self.meshes.begin_frame();
@@ -1076,7 +1147,17 @@ impl WgpuSceneRenderer {
             scene.settings.anti_alias_samples(),
             i32::try_from(self.max_samples).unwrap_or(1),
         ) as u32;
-        self.ensure_linear(target.width, target.height, wanted);
+        // AMD-055 REQ-SCN-080: a frame that runs a screen-space pass needs a depth a shader can
+        // read, which is the one allocation Classic cannot share. `false` is the Classic path, and
+        // with it `ensure_linear` allocates exactly what it allocated before the amendment —
+        // decided here rather than inside, and before `nothing_to_draw` for the reason the OpenGL
+        // path decides it before its own early return: the allocation must not flip on an empty
+        // frame.
+        let effects = self
+            .screen_effects
+            .as_ref()
+            .is_some_and(ScreenEffects::active);
+        self.ensure_linear(target.width, target.height, wanted, effects);
         #[allow(clippy::cast_possible_wrap)] // 1 to 8.
         {
             self.statistics.anti_alias_samples = wanted as i32;
@@ -1088,17 +1169,16 @@ impl WgpuSceneRenderer {
         }
         #[allow(clippy::cast_possible_wrap)] // The side is at most the device limit.
         let constants = SceneConstants::new(scene, view, volume, self.shadow_map_size as i32);
-        // Q-104, the same gap for AMD-055: the Enhanced style is **not** rendered here either.
-        // `scene.settings.style` reaches this backend and nothing reads it — no variant axis, no
-        // screen pass — so a game played on Vulkan or DirectX 12 with Enhanced selected sees the
-        // Classic picture, which is this backend's own picture of before the amendment. The
-        // setting is kept and read back as set (REQ-SCN-078 is a requirement on the *setting*),
-        // and the gap is said out loud once, where AMD-051's diagnostics already go.
-        if scene.settings.style.enhanced && !self.style_reported {
+        // Q-104, what is left of the gap: the curvature of AMD-043, the voxel grid of REQ-SCN-081,
+        // the pixel shadows of REQ-SCN-082 and the occlusion of REQ-SCN-083 are rendered here now
+        // (RU-7 steps 2, 3 and 4b). The reflections of REQ-SCN-084 are not yet, so the line says
+        // that and no more, and it goes with step 4c. The setting is kept and read back as set
+        // whatever this backend draws (REQ-SCN-078 is a requirement on the *setting*).
+        if scene.settings.style.reflections_active() && !self.style_reported {
             self.style_reported = true;
             self.diagnostics.push(
-                "the Enhanced visual style is not rendered by this graphics backend; the scene \
-                 is drawn in the Classic style (AMD-055 REQ-SCN-078, Q-104)"
+                "the floor reflections of the Enhanced visual style are not rendered by this \
+                 graphics backend; everything else of the style is (AMD-055 REQ-SCN-084, Q-104)"
                     .to_owned(),
             );
         }
@@ -1125,6 +1205,13 @@ impl WgpuSceneRenderer {
                 .lay_out_instances(self.group_opaque, AFFINE_BYTES, AFFINE_PLACEMENT);
             self.upload_draws(&constants, batched);
             self.prepare_pipelines(scene.settings.cull_back_faces, wanted, batched, variant);
+            // REQ-SCN-080: with a screen pass the transparent objects and the HUD draw into the
+            // **single-sample** target, so they need the one-sample pipelines as well — which is
+            // this backend's spelling of the consequence that requirement states, that with
+            // anti-aliasing *and* a screen effect those two buckets are not multisampled.
+            if effects && wanted > 1 {
+                self.prepare_pipelines(scene.settings.cull_back_faces, 1, batched, variant);
+            }
             if !batched {
                 self.prepare_texture_groups();
             }
@@ -1139,116 +1226,133 @@ impl WgpuSceneRenderer {
             Some(multisampled) => (multisampled, Some(&linear.resolved)),
             None => (&linear.resolved, None),
         };
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("zax scene"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: attachment,
-                depth_slice: None,
-                resolve_target,
-                ops: wgpu::Operations {
-                    // REQ-SCN-046: cleared with the background colour, without any lighting.
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(background.x),
-                        g: f64::from(background.y),
-                        b: f64::from(background.z),
-                        a: 1.0,
+        let buckets = BucketScene {
+            pipelines: &self.scene_pipelines,
+            texture_groups: &self.texture_groups,
+            meshes: &self.meshes,
+            frame_group: &self.frame_group,
+            draw_group: &self.draw_group,
+            lists: &self.plan.lists,
+            batching: self.batching.as_ref(),
+            batched,
+            cull: scene.settings.cull_back_faces,
+            samples: wanted,
+            variant,
+        };
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("zax scene"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: attachment,
+                    depth_slice: None,
+                    resolve_target,
+                    ops: wgpu::Operations {
+                        // REQ-SCN-046: cleared with the background colour, without any lighting.
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: f64::from(background.x),
+                            g: f64::from(background.y),
+                            b: f64::from(background.z),
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &linear.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        // Kept, not discarded: the depth of the scene is what post-processing
+                        // tools such as ReShade read once the pass is over.
+                        store: wgpu::StoreOp::Store,
                     }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &linear.depth,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    // Kept, not discarded: the depth of the scene is what post-processing tools
-                    // such as ReShade read once the pass is over.
-                    store: wgpu::StoreOp::Store,
+                    stencil_ops: None,
                 }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
 
-        // REQ-SCN-058: the skybox replaces the clear, behind everything else.
-        if sky {
-            pass.set_pipeline(&self.sky_pipelines[&(sky_kind == SkyboxKind::Gradient, wanted)]);
-            pass.set_bind_group(0, &self.sky_group, &[]);
-            pass.draw(0..3, 0..1);
+            // REQ-SCN-058: the skybox replaces the clear, behind everything else.
+            if sky {
+                pass.set_pipeline(&self.sky_pipelines[&(sky_kind == SkyboxKind::Gradient, wanted)]);
+                pass.set_bind_group(0, &self.sky_group, &[]);
+                pass.draw(0..3, 0..1);
+            }
+
+            if drawing {
+                // REQ-SCN-080: a frame with a screen pass stops after the opaque objects, so that
+                // the tiles, the backdrop and the 2D-mode rectangle occlude, are darkened and are
+                // reflected, and the transparent objects and the HUD are not. Without one, this is
+                // the whole frame and the second pass below is never opened.
+                let which = if effects {
+                    Buckets::Opaque
+                } else {
+                    Buckets::All
+                };
+                draw_buckets(&mut pass, &buckets, &mut self.statistics, which);
+            }
         }
 
-        if drawing {
-            pass.set_bind_group(0, &self.frame_group, &[]);
-            pass.set_bind_group(1, &self.draw_group, &[]);
-            let (vertices, indices) = self.meshes.buffers();
-            pass.set_vertex_buffer(0, vertices.slice(..));
-            pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-            let cull = scene.settings.cull_back_faces;
-            let lists = &self.plan.lists;
-            let indirect = match (&self.batching, batched) {
-                (
-                    Some(Batching {
-                        group: Some((_, group)),
-                        indirect,
-                        ..
-                    }),
-                    true,
-                ) => {
-                    pass.set_bind_group(2, group, &[]);
-                    Some(&indirect.buffer)
-                }
-                _ => None,
-            };
-            let mut draw = Drawer {
-                pass: &mut pass,
-                pipelines: &self.scene_pipelines,
-                texture_groups: &self.texture_groups,
-                meshes: &self.meshes,
-                statistics: &mut self.statistics,
-                cull,
-                samples: wanted,
-                variant,
-                current: None,
-                bound_textures: None,
-                indirect,
-                pending: None,
-            };
-
-            // The indirect arguments follow the run lists: opaque, transparent, then HUD.
-            let transparent_base = lists.opaque_runs.len();
-            let hud_base = transparent_base + lists.transparent_runs.len();
-            // 1. Opaque objects.
-            for (entry, run) in lists.opaque_runs.iter().enumerate() {
-                draw.run(&lists.opaque, run, entry, SceneMode::Opaque);
-            }
-            // 2. Transparent objects, farthest first, depth first then colour (REQ-SCN-040).
-            for group in &lists.transparent_objects {
-                draw.blended(
-                    &lists.transparent,
-                    &lists.transparent_runs,
-                    group.runs,
-                    transparent_base,
+        // The screen-space passes of AMD-055 REQ-SCN-080, between the opaque objects and the
+        // transparent ones, in the order that requirement fixes.
+        if effects && drawing {
+            if let Some(effects) = &mut self.screen_effects {
+                self.statistics.screen_effect_passes = run_screen_effects(
+                    effects,
+                    &self.device,
+                    &self.queue,
+                    encoder,
+                    linear,
+                    self.linear_generation,
+                    &scene.settings.style,
+                    view,
                 );
             }
-            // 3. HUD (REQ-SCN-044), which never bends (REQ-SCN-068).
-            draw.variant = hud_variant(variant);
-            for group in &lists.hud_objects {
-                draw.blended(&lists.hud, &lists.hud_runs, group.runs, hud_base);
-            }
-            draw.flush();
-
-            let statistics = &mut *draw.statistics;
-            statistics.opaque_tiles = count(lists.opaque.len());
-            statistics.transparent_tiles = count(lists.transparent.len());
-            statistics.transparent_objects = if lists.transparent.is_empty() {
-                0
-            } else {
-                count(lists.transparent_objects.len())
+            let Some(depth_single) = &linear.depth_single else {
+                unreachable!("ensure_linear made the readable depth");
             };
-            statistics.hud_tiles = count(lists.hud.len());
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("zax scene blended"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &linear.resolved,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_single,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            draw_buckets(
+                &mut pass,
+                &BucketScene {
+                    samples: 1,
+                    ..buckets
+                },
+                &mut self.statistics,
+                Buckets::Blended,
+            );
         }
-        drop(pass);
+
+        let effects_pipelines = self
+            .screen_effects
+            .as_ref()
+            .map_or(0, ScreenEffects::pipelines);
+        let effects_bytes = self.screen_effects.as_ref().map_or(0, ScreenEffects::bytes);
+        self.statistics.style_programs = self.style_modules + effects_pipelines;
+        self.statistics.screen_effect_bytes = effects_bytes;
+        self.statistics.centroid_interpolation = variant.centroid;
 
         // AMD-021 R2-009: the whole image is encoded to sRGB once, into the target.
         let mut resolve = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1272,12 +1376,23 @@ impl WgpuSceneRenderer {
         resolve.draw(0..3, 0..1);
     }
 
-    fn ensure_linear(&mut self, width: u32, height: u32, samples: u32) {
+    /// The linear buffer, its depth and — with `readable_depth`, which only AMD-055 REQ-SCN-080
+    /// asks for — the single-sample depth a shader can read.
+    ///
+    /// With `readable_depth` false this allocates exactly what it allocated before this
+    /// amendment, which is the Classic path and the handheld one.
+    fn ensure_linear(&mut self, width: u32, height: u32, samples: u32, readable_depth: bool) {
         if self.linear.as_ref().is_some_and(|linear| {
-            (linear.width, linear.height, linear.samples) == (width, height, samples)
+            (
+                linear.width,
+                linear.height,
+                linear.samples,
+                linear.readable_depth,
+            ) == (width, height, samples, readable_depth)
         }) {
             return;
         }
+        self.linear_generation += 1;
 
         let texture = |label: &'static str, format, samples, usage| {
             self.device
@@ -1307,12 +1422,32 @@ impl WgpuSceneRenderer {
                 wgpu::TextureUsages::RENDER_ATTACHMENT,
             )
         });
+        // REQ-SCN-080: a frame that runs a screen pass needs a depth a shader can read, which is
+        // the one allocation Classic cannot share. Multisampled, the pass that reads it is
+        // `resolve_depth`'s; single-sample, it is the screen passes themselves.
+        let readable = if readable_depth {
+            wgpu::TextureUsages::TEXTURE_BINDING
+        } else {
+            wgpu::TextureUsages::empty()
+        };
         let depth = texture(
             "zax depth",
             DEPTH_FORMAT,
             samples,
-            wgpu::TextureUsages::RENDER_ATTACHMENT,
+            wgpu::TextureUsages::RENDER_ATTACHMENT | readable,
         );
+        let depth_single = match (readable_depth, samples > 1) {
+            (false, _) => None,
+            // Without anti-aliasing the frame's depth already is the single-sample one, and no
+            // resolve pass is submitted.
+            (true, false) => Some(depth.clone()),
+            (true, true) => Some(texture(
+                "zax depth resolved",
+                DEPTH_FORMAT,
+                1,
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            )),
+        };
         let resolve_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("zax resolve"),
             layout: &self.layouts.resolve,
@@ -1325,9 +1460,11 @@ impl WgpuSceneRenderer {
             width,
             height,
             samples,
+            readable_depth,
             resolved,
             multisampled,
             depth,
+            depth_single,
             resolve_group,
         });
     }
@@ -1599,6 +1736,173 @@ fn texture_slot(item: &WgpuDrawItem) -> i32 {
         .map_or(0, |handle| i32::try_from(handle.0 + 1).unwrap_or(0))
 }
 
+/// Which of the scene's buckets one render pass draws (REQ-SCN-058's order, cut where
+/// AMD-055 REQ-SCN-080 cuts it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Buckets {
+    /// All three, in their order: the one pass of a frame with no screen-space effect, which is
+    /// every Classic frame and every handheld frame.
+    All,
+    /// The opaque objects alone — everything REQ-SCN-080 has the screen passes work on.
+    Opaque,
+    /// The transparent objects and the HUD, which REQ-SCN-080 puts after the screen passes.
+    Blended,
+}
+
+/// What [`draw_buckets`] needs of the renderer: field borrows rather than `&self`, because the
+/// render pass it draws into already borrows `self.linear`.
+#[derive(Debug, Clone, Copy)]
+struct BucketScene<'a> {
+    pipelines: &'a FastMap<SceneKey, wgpu::RenderPipeline>,
+    texture_groups: &'a FastMap<(Option<TextureHandle>, Option<TextureHandle>), wgpu::BindGroup>,
+    meshes: &'a MeshStore,
+    frame_group: &'a wgpu::BindGroup,
+    draw_group: &'a wgpu::BindGroup,
+    lists: &'a DrawLists<MeshHandle, TextureHandle>,
+    batching: Option<&'a Batching>,
+    batched: bool,
+    cull: bool,
+    /// The sample count of the pipelines this pass takes: the frame's, or 1 for the pass that
+    /// follows a screen effect (REQ-SCN-080).
+    samples: u32,
+    variant: ShaderVariant,
+}
+
+/// Draws `which` of the scene's buckets into `pass`, in REQ-SCN-058's order.
+fn draw_buckets(
+    pass: &mut wgpu::RenderPass<'_>,
+    scene: &BucketScene<'_>,
+    statistics: &mut RenderStatistics,
+    which: Buckets,
+) {
+    pass.set_bind_group(0, scene.frame_group, &[]);
+    pass.set_bind_group(1, scene.draw_group, &[]);
+    let (vertices, indices) = scene.meshes.buffers();
+    pass.set_vertex_buffer(0, vertices.slice(..));
+    pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+    let lists = scene.lists;
+    let indirect = match (scene.batching, scene.batched) {
+        (
+            Some(Batching {
+                group: Some((_, group)),
+                indirect,
+                ..
+            }),
+            true,
+        ) => {
+            pass.set_bind_group(2, group, &[]);
+            Some(&indirect.buffer)
+        }
+        _ => None,
+    };
+    let mut draw = Drawer {
+        pass,
+        pipelines: scene.pipelines,
+        texture_groups: scene.texture_groups,
+        meshes: scene.meshes,
+        statistics,
+        cull: scene.cull,
+        samples: scene.samples,
+        variant: scene.variant,
+        current: None,
+        bound_textures: None,
+        indirect,
+        pending: None,
+    };
+
+    // The indirect arguments follow the run lists: opaque, transparent, then HUD.
+    let transparent_base = lists.opaque_runs.len();
+    let hud_base = transparent_base + lists.transparent_runs.len();
+    if which != Buckets::Blended {
+        // 1. Opaque objects.
+        for (entry, run) in lists.opaque_runs.iter().enumerate() {
+            draw.run(&lists.opaque, run, entry, SceneMode::Opaque);
+        }
+    }
+    if which != Buckets::Opaque {
+        // 2. Transparent objects, farthest first, depth first then colour (REQ-SCN-040).
+        for group in &lists.transparent_objects {
+            draw.blended(
+                &lists.transparent,
+                &lists.transparent_runs,
+                group.runs,
+                transparent_base,
+            );
+        }
+        // 3. HUD (REQ-SCN-044), which never bends (REQ-SCN-068).
+        draw.variant = hud_variant(scene.variant);
+        for group in &lists.hud_objects {
+            draw.blended(&lists.hud, &lists.hud_runs, group.runs, hud_base);
+        }
+    }
+    draw.flush();
+
+    let statistics = &mut *draw.statistics;
+    if which != Buckets::Blended {
+        statistics.opaque_tiles = count(lists.opaque.len());
+    }
+    if which != Buckets::Opaque {
+        statistics.transparent_tiles = count(lists.transparent.len());
+        statistics.transparent_objects = if lists.transparent.is_empty() {
+            0
+        } else {
+            count(lists.transparent_objects.len())
+        };
+        statistics.hud_tiles = count(lists.hud.len());
+    }
+}
+
+/// Runs the screen-space passes of AMD-055 REQ-SCN-080 over the frame drawn so far, and says how
+/// many passes that took.
+///
+/// The order is the one that requirement fixes: after the opaque objects — so the tiles, the
+/// backdrop and the 2D-mode rectangle occlude, are darkened and are reflected — and before the
+/// transparent ones, which therefore neither occlude nor reflect nor are darkened, nor is the HUD
+/// drawn after them. The floor reflections of REQ-SCN-084 go first, then the occlusion of
+/// REQ-SCN-083.
+///
+/// **`#[inline(never)]` for the reason the OpenGL twin carries it**: none of this runs in Classic,
+/// where the branch is not taken, and a hot once-a-frame function should not carry the Enhanced
+/// path through its instruction cache to prove it.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)] // The frame's inputs, one parameter each.
+fn run_screen_effects(
+    effects: &mut ScreenEffects,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    linear: &LinearTargets,
+    generation: u64,
+    style: &StyleSettings,
+    view: &CameraView,
+) -> u32 {
+    let Some(depth) = &linear.depth_single else {
+        return 0;
+    };
+    let mut submitted = 0;
+    // REQ-SCN-080's last bullet: the passes work on the **resolved** colour and depth. The colour
+    // side is free — the scene pass named the single-sample target as its `resolve_target` — and
+    // the depth side is a pass of this backend's own, because `wgpu` has no depth resolve. It is
+    // counted, unlike the OpenGL blit, because it is a pass this backend really submits.
+    if linear.samples > 1 {
+        submitted += effects.resolve_depth(device, encoder, &linear.depth, depth, generation);
+    }
+    let frame = ScreenFrame {
+        depth,
+        size: (linear.width, linear.height),
+        generation,
+        projection: crate::renderer::projection_terms(view),
+    };
+    // The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of, so a
+    // length in scene units is a length in view units (`SceneConstants::voxel_cell` reads the same
+    // scale the same way).
+    if effects.occludes() {
+        submitted += effects.occlude(device, queue, encoder, frame, style, 1.0);
+        submitted += effects.composite_occlusion(encoder, &linear.resolved);
+    }
+    submitted
+}
+
 /// Issues the draws of the scene buckets: one draw call per run, or, with indirect arguments,
 /// one multi-draw per stretch of runs that share a pipeline.
 struct Drawer<'p, 'a> {
@@ -1867,9 +2171,32 @@ fn build_module(
     let mut chunks = variant.chunks();
     chunks.extend_from_slice(parts);
     let composed = preprocess::compose(&chunks, &defines);
-    let mut source = format!("const ZAX_SRGB_DOUBLE: f32 = {:?};\n", sky::SRGB_DOUBLE);
-    source.push_str(&composed.wgsl);
-    if let Some(problem) = &composed.problem {
+    let source = format!(
+        "const ZAX_SRGB_DOUBLE: f32 = {:?};\n{}",
+        sky::SRGB_DOUBLE,
+        composed.wgsl
+    );
+    shader_module(
+        device,
+        &format!("{label}{}", variant.suffix()),
+        &source,
+        composed.problem.as_deref(),
+    )
+}
+
+/// One module from WGSL already composed, with an unreadable variant marker turned into the
+/// `const_assert` [`build_module`]'s documentation describes.
+///
+/// `pub(super)` for [`super::screen_effects`], whose passes have no variant axis — one body is one
+/// pass there — but whose markers have to fail the same loud way.
+pub(super) fn shader_module(
+    device: &wgpu::Device,
+    label: &str,
+    wgsl: &str,
+    problem: Option<&str>,
+) -> wgpu::ShaderModule {
+    let mut source = wgsl.to_owned();
+    if let Some(problem) = problem {
         use std::fmt::Write as _;
         let _ = write!(
             source,
@@ -1879,7 +2206,7 @@ fn build_module(
         );
     }
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(&format!("{label}{}", variant.suffix())),
+        label: Some(label),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     })
 }

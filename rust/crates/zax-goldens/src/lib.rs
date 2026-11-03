@@ -116,6 +116,18 @@ pub struct RenderScene {
     pub distinct_colors: u32,
     pub background_pixels: u32,
     pub mean_luma: f64,
+    /// The four keys AMD-055 adds, which `describe` writes **only** when the Enhanced style is
+    /// selected: `None` on every capture at the default settings, including every committed
+    /// golden. Read so that a test can compare what the style asked of each backend
+    /// (RU-7: the pass count and the target bytes of REQ-SCN-080 on OpenGL and on `wgpu`).
+    #[serde(default)]
+    pub visual_style: Option<u32>,
+    #[serde(default)]
+    pub style_programs_resident: Option<u32>,
+    #[serde(default)]
+    pub screen_effect_bytes: Option<u64>,
+    #[serde(default)]
+    pub screen_effect_passes: Option<u32>,
 }
 
 /// Parses `render.json`.

@@ -146,29 +146,35 @@ fn req_scn_078_the_curvature_acts_in_both_styles() {
     assert_ne!(classic.pixels, flat.pixels, "60° changes the picture");
 }
 
-/// Q-104, being answered (RU-7): the two **shader** effects of the Enhanced style are in the
-/// `wgpu` backend, and the two **screen passes** are not yet.
+/// Q-104, being answered (RU-7): the two **shader** effects of the Enhanced style and the
+/// **occlusion** of REQ-SCN-083 are in the `wgpu` backend, and the **reflections** of
+/// REQ-SCN-084 are not yet.
 ///
 /// This test used to assert that not one of the four effects was in the WGSL — the known gap, so
-/// that a half-done parity failed loudly rather than passing unnoticed. RU-7 step 3 ported the
-/// voxel grid of REQ-SCN-081 and the pixel shadows of REQ-SCN-082, which are variants of the
-/// scene module; the occlusion of REQ-SCN-083 and the reflections of REQ-SCN-084 are passes of
-/// their own and are step 4's. So the assertion is now **two-sided**, and it is what keeps the
-/// remaining half of the gap pinned: the day the screen passes land, the second list empties and
-/// the diagnostic line of `wgpu_backend/renderer.rs` goes with it.
+/// that a half-done parity failed loudly rather than passing unnoticed. Step 3 ported the voxel
+/// grid of REQ-SCN-081 and the pixel shadows of REQ-SCN-082, which are variants of the scene
+/// module; step 4b ported the occlusion of REQ-SCN-083 and the architecture its passes live in.
+/// So the assertion stays **two-sided**, and the second list is what keeps the remaining gap
+/// pinned: the day the reflections land, it empties and the diagnostic line of
+/// `wgpu_backend/renderer.rs` goes with it.
 ///
 /// Whether the WGSL compiles and whether the two backends agree is not a question this side can
 /// answer — naga validates at module creation. That is
 /// `zax-harness/tests/parity_wgpu_tests.rs`.
 #[cfg(feature = "wgpu")]
 #[test]
-fn q_104_the_wgpu_backend_carries_the_two_shader_effects_and_not_yet_the_two_passes() {
+fn q_104_the_wgpu_backend_carries_the_occlusion_and_not_yet_the_reflections() {
     const COMMON: &str = include_str!("../src/wgpu_backend/shaders/common.wgsl");
     const SCENE: &str = include_str!("../src/wgpu_backend/shaders/scene.wgsl");
     const SHADOW: &str = include_str!("../src/wgpu_backend/shaders/shadow.wgsl");
     const RESOLVE: &str = include_str!("../src/wgpu_backend/shaders/resolve.wgsl");
     const VOXEL_GRID: &str = include_str!("../src/wgpu_backend/shaders/voxel_grid.wgsl");
     const PIXEL_SHADOW: &str = include_str!("../src/wgpu_backend/shaders/pixel_shadow.wgsl");
+    const SCREEN_DEPTH: &str = include_str!("../src/wgpu_backend/shaders/screen_depth.wgsl");
+    const AO: &str = include_str!("../src/wgpu_backend/shaders/ao.wgsl");
+    const AO_BLUR: &str = include_str!("../src/wgpu_backend/shaders/ao_blur.wgsl");
+    const AO_COMPOSITE: &str = include_str!("../src/wgpu_backend/shaders/ao_composite.wgsl");
+    const DEPTH_RESOLVE: &str = include_str!("../src/wgpu_backend/shaders/depth_resolve.wgsl");
 
     // REQ-SCN-081: the grooves, with the five constants of the requirement.
     assert!(VOXEL_GRID.contains("fn zax_voxel_grid("));
@@ -184,15 +190,61 @@ fn q_104_the_wgpu_backend_carries_the_two_shader_effects_and_not_yet_the_two_pas
     assert!(SCENE.contains("albedo_linear *= zax_voxel_grid("));
     assert!(SCENE.contains("zax_voxel_shadow_point("));
 
-    // And the half that is still to come: nothing of the two screen passes of REQ-SCN-083 and
-    // REQ-SCN-084 is in any WGSL source yet.
-    for source in [COMMON, SCENE, SHADOW, RESOLVE, VOXEL_GRID, PIXEL_SHADOW] {
-        for name in ["occlusion", "reflect", "ssr", "msvo"] {
+    // REQ-SCN-080: the depth reconstruction both screen passes share, with the two conventions
+    // this backend has to undo — the y-mirrored NDC map, and the clamp of GL's CLAMP_TO_EDGE.
+    for name in [
+        "fn zax_view_depth(",
+        "fn zax_view_sample(",
+        "fn zax_view_normal(",
+        "fn zax_project_view(",
+        "fn zax_dither(",
+    ] {
+        assert!(SCREEN_DEPTH.contains(name), "REQ-SCN-080: {name}");
+    }
+    assert!(SCREEN_DEPTH.contains("1.0 - (uv.y * 2.0)"), "the y mirror");
+    // REQ-SCN-083: the hemisphere kernel, its ceiling, the depth-aware blur and the `1 - O`
+    // factor the multiply blend applies in place.
+    assert!(AO.contains("fn zax_kernel("));
+    assert!(AO.contains("mix(0.1, 1.0, fraction * fraction)"));
+    assert!(AO.contains("screen.ao.y * (occlusion / count)"));
+    assert!(AO_BLUR.contains("ZAX_AO_BLUR_SHARPNESS: f32 = 20.0"));
+    assert!(AO_COMPOSITE.contains("1.0 - occlusion"));
+    // And the pass REQ-SCN-080's last bullet needs here and nowhere else.
+    assert!(DEPTH_RESOLVE.contains("texture_depth_multisampled_2d"));
+    assert!(DEPTH_RESOLVE.contains("@builtin(frag_depth)"));
+
+    // And the half that is still to come: nothing of the reflections of REQ-SCN-084, nor of the
+    // multi-scale estimator of REQ-SCN-083's *Mode MSVO*, is in any WGSL source yet.
+    //
+    // The names here are **functions** rather than words: the sources above say "MSVO" and
+    // "reflections" in their prose, because each explains which requirement it serves and which
+    // part of it is still to come, and that prose is the thing a reviewer wants. What must not
+    // exist yet is the code.
+    for source in [
+        COMMON,
+        SCENE,
+        SHADOW,
+        RESOLVE,
+        VOXEL_GRID,
+        PIXEL_SHADOW,
+        SCREEN_DEPTH,
+        AO,
+        AO_BLUR,
+        AO_COMPOSITE,
+        DEPTH_RESOLVE,
+    ] {
+        for name in [
+            "fn zax_trace",
+            "fn zax_reflect",
+            "fn zax_floor_mask",
+            "fn zax_ssr",
+            "fn zax_msvo",
+        ] {
             assert!(
                 !source.to_ascii_lowercase().contains(name),
-                "the wgpu shaders mention '{name}': the screen passes of REQ-SCN-083 and \
-                 REQ-SCN-084 are being ported, so this second list, the diagnostic line of \
-                 wgpu_backend/renderer.rs and the Q-104 notes go together"
+                "the wgpu shaders mention '{name}': the reflections of REQ-SCN-084 and the MSVO \
+                 estimator of REQ-SCN-083 are being ported, so this second list, the diagnostic \
+                 line of wgpu_backend/renderer.rs and the Q-104 notes go together"
             );
         }
     }

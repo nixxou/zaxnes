@@ -16,15 +16,26 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 1 | The gate: why the `wgpu` tests skip, fixed or proven; the map against `gl/`; the test plan | done — `f46feea` |
 | 2 | Curvature (AMD-043, AMD-046) | done — `9ffb3b7` |
 | 3 | The voxel grid and the pixel shadows | done — `6872645` |
-| 4a | The anti-aliasing levels and AMD-058's centroid interpolation | done — this commit |
-| 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | todo |
+| 4a | The anti-aliasing levels and AMD-058's centroid interpolation | done — `d678e46` |
+| 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | done — this commit (its clippy fix and its design: `9ef1447`) |
 | 4c | The reflections of REQ-SCN-084 and the floor mask | todo |
 | 4d | The MSVO estimator and its runtime fallback | todo |
+| 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | todo |
 | 5 | The parity measurements and the costs | todo |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
+
+**Step 4e is an addition the owner decided between the two sessions of this lot**, and it is in
+the checklist rather than in a lot of its own because it is the same subject: step 1 measured that
+`src/shaders/backdrop.frag` and the `backdrop` axis of the OpenGL `ProgramKey` have **no WGSL
+counterpart at all**, and that with the backdrop lighting on — the desktop default since AMD-049 —
+the two backends agree on only 58.9 % of the `backdrop` scene. Step 1 recorded it as out of scope
+("Implement only what is listed here"); the owner put it in. It goes **before** the parity
+measurements, so that step 5's table is the whole picture rather than a picture with a known hole
+in it, and the remaining steps are renumbered accordingly (the brief's step 5 is now 5 of 10
+rather than 5 of 9).
 
 **The brief's step 4 is split into four**, and the reason is this lot's own protocol: every step
 must be a commit that builds and whose tests pass. The brief's step 4 is "the screen passes: Depth
@@ -632,11 +643,243 @@ such fields: "an enum per axis would say less, not more"), and it rides in step 
 than an amend, which this lot's protocol forbids. The check itself now tests the count against
 zero instead of trusting an exit status.
 
-### Where the lot stands, and what step 4b has to solve
+### Step 4b — the screen-pass architecture, the frame order, and the Depth occlusion
 
-Steps 1, 2, 3 and 4a are landed and green. What follows is the state 4b starts from, written out
-because this lot's protocol says the session may be cut and resumed by someone else, and because
-the design work below is already done and should not be repeated.
+The architecture the three effects live in, and the first of them. Everything the previous
+session's design section settled was built as it stands there; what follows is what the code says
+and what the device said back.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `wgpu_backend/screen_effects.rs` (new, 700 lines) | the twin of `gl/screen_effects.rs`: the lazy lifecycle, the `R8Unorm` targets of the raw pass and its blur, the one bind-group layout every screen pass takes, the uniform blocks, the three pipelines of REQ-SCN-083 and the depth resolve |
+| `shaders/screen_depth.wgsl` (new) | the twin of `shaders/screen_depth.glsl`, plus the full-screen triangle of `resolve.vert` and the bindings — `zax_view_depth`, `zax_view_sample`, `zax_view_normal`, `zax_project_view`, `zax_dither`, `zax_neighbour` |
+| `shaders/ao.wgsl`, `ao_blur.wgsl`, `ao_composite.wgsl` (new) | the hemisphere estimator of REQ-SCN-083, its depth-aware blur, and the `1 - O` factor the multiply blend applies in place |
+| `shaders/depth_resolve.wgsl` (new) | the pass with no OpenGL counterpart, below |
+| `wgpu_backend/renderer.rs` | `screen_effects`, `linear_generation`, `style_modules`; `select_screen_effects` / `prepare_screen_effects`; `ensure_linear` grows the readable-depth flag and the single-sample depth; `scene_pass` splits into one or two render passes; `Buckets`, `BucketScene`, `draw_buckets` and `run_screen_effects`; `shader_module` factored out of `build_module`; the Q-104 diagnostic line narrowed to what is still missing |
+| `renderer.rs` (OpenGL) | one word: `projection_terms` is `pub(crate)`. See below — it is the whole of this lot's diff in that file, and the four instruction counts are unchanged |
+| `zax-goldens/src/lib.rs` | `RenderScene` reads the four keys AMD-055 writes, as `Option`s that are `None` on every capture at the default settings, so that a test can compare the passes and the bytes of REQ-SCN-080 on each backend |
+| `zax-render/tests/amd055_style_tests.rs` | the two-sided Q-104 test moves one effect across: the occlusion must now **be** in the WGSL, the reflections and the MSVO estimator must not be yet |
+| `zax-harness/tests/parity_wgpu_tests.rs` | five more tests |
+
+#### The scene pass had to become two, and that is the whole of the architecture
+
+REQ-SCN-080 puts the screen passes between the opaque objects and the transparent ones, and has
+them read the frame's rendered colour and depth. On OpenGL that is a sequence of draws into
+framebuffers bound and unbound inside one logical pass; in `wgpu` reading an attachment means the
+render pass that wrote it has ended. So a frame with a screen effect submits:
+
+1. **`zax scene`** — the sky and the opaque objects, resolving colour into the single-sample target;
+2. **`zax depth resolve`** — only when multisampled (below);
+3. the effect's own passes — two for the occlusion, then its composite;
+4. **`zax scene blended`** — the transparent objects and the HUD, into the **single-sample** target
+   with the single-sample depth, loading both.
+
+A frame without one submits exactly what it submitted before this step: one `zax scene` carrying
+all three buckets, then the resolve. That is what `Buckets::All` is, and it is why the bucket loop
+was lifted into a free function (`draw_buckets`) taking field borrows rather than a `&mut self`
+method — the render pass already borrows `self.linear`, so a method could not be used.
+
+Pass 4 is REQ-SCN-080's own stated consequence, made concrete: **with anti-aliasing *and* a screen
+effect, the transparent objects and the HUD are not multisampled**, because from the resolve
+onwards the frame draws into the single-sample target. The practical cost is one extra line in
+`prepare_pipelines` — those two buckets ask for the one-sample pipelines as well, and
+`SceneKey.samples` already keyed on it.
+
+#### The depth resolve, and why sample 0 is the faithful answer and not an approximation
+
+The one piece of this step with no OpenGL counterpart at all.
+`LinearColorBuffer::resolve_samples` is one `glBlitFramebuffer` with
+`COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT`. On `wgpu` the colour half is free — the scene pass already
+names the single-sample target as its `resolve_target` — but there is **no depth resolve**:
+`RenderPassDepthStencilAttachment` has no `resolve_target` field, and there is no
+texture-to-texture blit for a depth format.
+
+So `depth_resolve.wgsl`: one full-screen triangle reading `texture_depth_multisampled_2d` and
+writing `textureLoad(depth, coord, 0)` into `@builtin(frag_depth)`, through a depth-only pipeline
+with `depth_compare: Always`. Sample 0 is what the OpenGL blit gives, and `gl/screen_effects.rs`
+already says so where it matters — "the depth the pass reads is a **resolved** multisampled depth
+— one sample's, not the fragment centre's" — which is also why the floor mask of REQ-SCN-084
+carries its polygon-offset bias. With `video.anti_alias` = 0, the handheld default and the one the
+goldens are taken at, the pass is **not submitted** and `depth_single` *is* the frame's own depth
+texture.
+
+It is **counted** in `screen_effect_passes`, unlike the OpenGL blit, which is not a pass. So that
+counter reads one higher on `wgpu` under anti-aliasing, and
+`req_scn_080_the_occlusion_costs_the_same_passes_and_bytes_on_each_backend` asserts exactly that
+difference rather than relaxing to an inequality: 3 and 3 at `video.anti_alias` = 0, **4 against
+3** at level 1, and 153 600 bytes of targets on both at both levels.
+
+#### Four things the port had to get right that a text substitution would not
+
+1. **`uTexel` and the target size are different numbers, and one block cannot serve two
+   resolutions.** `wgpu` applies every `queue.write_buffer` of a submission **before** the command
+   buffers run, so a block written twice hands both passes the second value. The estimator runs at
+   half of each dimension (except at `ao.quality` High) and the composite at the frame's own, so
+   there are two blocks 256 bytes apart in one buffer and a bind group per block.
+2. **The depth is read with `textureLoad` and the clamp written out.** GL's `NEAREST` with
+   `CLAMP_TO_EDGE` is `clamp(floor(uv * size), 0, size - 1)`; a `textureLoad` outside the texture
+   hands back **0** here, and 0 is the near plane — the one value that would make every sample
+   occlude. The composite's read is the one that keeps a sampler, because its upsample is the
+   `LINEAR` filter of `allocate_occlusion(filtered = true)`.
+3. **`out` parameters again.** `zaxProjectView` and `zaxViewNormal` each return a value and a
+   boolean, so each returns a struct (`ZaxProjected`, `ZaxNormal`).
+4. **The composite is a blend state, not a copy.** `glBlendFunc(GL_ZERO, GL_SRC_COLOR)` — the
+   `dst = dst * src` that lets one triangle scale the linear buffer in place — is
+   `BlendComponent { src_factor: Zero, dst_factor: Src, operation: Add }`. So the occlusion needs
+   no second colour target and no copy of the scene here either, which is REQ-SCN-083's "en espace
+   linéaire, avant l'encodage sRGB" satisfied the same way.
+
+#### The y mirror: measured, right, and nearly invisible — which is the finding
+
+The previous session's design section called the `uv`-to-NDC mapping "the real coordinate trap"
+and predicted that getting it wrong "would **not** fail obviously". Both halves were tested by
+building the wrong version and measuring it. The scene is `shadow`, the only one of the four this
+file reads where the occlusion does anything (see below); release, 640 × 480, anti-aliasing off,
+Vulkan and DX12 identical in every row.
+
+| `screen_depth.wgsl` as built | `shadow`, within 2 levels | pixels differing |
+|---|---|---|
+| **the port as it stands** (y mirrored in the NDC map *and* in the dither's pixel) | **99.8594 %** | 1.4782 % |
+| the dither left in `wgpu`'s row order | 99.8232 % | 1.5726 % |
+| the GLSL's `ndc = uv * 2 - 1` kept — no y mirror at all | 99.7790 % | 1.5684 % |
+
+So the prediction holds **exactly**: the wrong NDC mapping costs 0.08 of a percentage point and
+would have passed every bar in this file. The reason is the one the design gave —
+`zax_view_normal` fixes the normal's sign from `dot(normal, p)` rather than from the winding, so
+the occlusion is nearly invariant under a mirror of view space. It is the reflections of step 4c,
+whose rays march in a direction that has to agree with the eye, where it would bite; the figure
+above is the warning written down with a number on it.
+
+The dither's own mirror is the smaller half and it is a deliberate choice rather than a
+requirement: `zax_pixel` returns `(x, height - y)` so that `zax_dither` hands each pixel the same
+kernel rotation it gets on OpenGL. REQ-SCN-083 leaves the per-pixel variation free, so either
+would be faithful — but mirroring it means the two backends' occlusion of a pixel differs by the
+compilers' rounding rather than by the kernel's variance, and it is worth 0.036 of a point.
+
+#### Parity, measured
+
+Same method as steps 2 and 3 — worst of four scenes, release, 640 × 480. Vulkan and DX12 agree to
+the fourth decimal in every row.
+
+| Configuration | max channel | pixels differing | within 2 levels |
+|---|---|---|---|
+| Classic, the control | 223 | 0.3577 % | 99.6423 % |
+| `spl.ao` = 2 (Depth, `ao.quality` Medium — half resolution) | 223 | 0.3577 % | **99.6423 %** |
+| `spl.ao` = 2, `ao.quality` = 2 (High — full resolution) | 223 | 0.3577 % | **99.6423 %** |
+| `spl.ao` = 2 under MSAA 4x | 223 | 0.8919 % | **99.1084 %** |
+
+The worst scene of each row is `heavy`, and on `heavy` the figure is **the control's, to the
+fourth decimal** — for the reason the next section gives. The scene where the occlusion actually
+acts is `shadow`, and there the rows read:
+
+| Configuration | `shadow`, within 2 | pixels differing | (the Classic control) |
+|---|---|---|---|
+| `spl.ao` = 2, Medium | 99.8594 % | 1.4782 % | 99.9990 %, 0.0010 % |
+| `spl.ao` = 2, High | 99.9342 % | 1.2692 % | — |
+| `spl.ao` = 2, MSAA 4x | 99.7044 % | 1.5990 % | — |
+
+The occlusion itself moves 1.76 % of `shadow` on OpenGL, so of the pixels it touches, **84 % agree
+exactly and 92 % agree to within 2 levels**. The residual is the kernel's boundary cases: ten
+samples, each worth up to `ceiling / 10` = 0.09 of `O`, and each decided by a `>` on floats the
+two compilers may round the other way — one such flip is up to about 23 sRGB levels on a bright
+surface, which is where the max channel of 107 on that scene comes from. High (16 samples, full
+resolution, no upsample) reads better than Medium, which is the same explanation from the other
+side.
+
+The MSAA row is held to 98.5 % for the reason step 4a established and measured: MSAA sample
+positions are implementation-defined in all three APIs. It reads 99.1084 %, which is 4a's own
+`heavy` figure to the fourth decimal — the occlusion adds nothing to it.
+
+#### The occlusion moves nothing at all of `framing` or `heavy`, and that is REQ-SCN-083 working
+
+The one thing in this step that looked like a defect and is not. The first version of
+`req_scn_083_the_occlusion_darkens_as_much_of_the_frame_on_each_backend` asked `framing`, and
+failed with "the **OpenGL** occlusion darkened only 0.00 %". Measured across the whole set, on the
+OpenGL backend, `spl.ao` = 2 against Classic:
+
+| scene | pixels the occlusion changes |
+|---|---|
+| `framing`, `heavy`, `clip`, `nudge`, `alpha`, `sky`, `hud` | **0.000 %** — byte-identical |
+| `shadow`, `no-shadow`, `layer-shadow-off` | 1.76 % |
+| `backdrop` | 2.54 % |
+
+That is the requirement as written: `O` is null "là où aucune géométrie occultante ne se trouve à
+moins de 2r", and the dense tile-box scenes of the synthetic set are flat facades with no
+concavity inside the radius, while the three shadow scenes and the backdrop have a box standing on
+a floor. So the agreement rows above sitting exactly on the Classic control for `framing` and
+`heavy` is not the port hiding — on those two the pass runs (3 submitted passes, 153 600 bytes
+allocated, both backends) and changes nothing, on both backends alike. The test now reads `shadow`
+and **asserts that `framing` and `heavy` are untouched**, so that a future fixture change which
+makes them occlude is a failure rather than a silent weakening.
+
+#### The one word of the OpenGL path, and the counts that say it cost nothing
+
+`crate::renderer::projection_terms` — the four numbers these passes read off the projection matrix
+— went from `fn` to `pub(crate) fn`, and the `wgpu` screen passes call it. That is the whole diff
+in an OpenGL file for this step, and it was preferred to a second copy of the same four matrix
+reads because a numerical rule in two places is how the two backends drift.
+
+- `git diff --stat` over `gl/`, `src/shaders/`, `zax-engine3d/` and `zax-app/` is **empty**;
+  `renderer.rs` is +5/-1, four lines of which are the comment explaining the fifth.
+- **The four instruction counts are unchanged**, re-measured with a script written fresh for this
+  lot (post-LTO assembly of the harness binary, default features, so the column is the OpenGL
+  path):
+
+| Symbol | `faced2a` | step 4b |
+|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | **1095** |
+| `SceneRenderer::render_scene` | 3401 | **3401** |
+| `Construction::segment` | 159 | **159** |
+
+- `render_tests` (the OpenGL goldens): 3 passed. `render_wgpu_tests`: 2 passed.
+
+#### What a Classic `wgpu` frame pays for this step
+
+Nothing it can measure, and the list is short enough to state in full:
+
+- `select_screen_effects` is one `screen_effects_active()` on the style and one assignment of
+  `None` to an `Option` that is already `None`;
+- `scene_pass` gains one `is_some_and` on that same `Option`, whose result (`false`) selects
+  `Buckets::All` and the single render pass of before this step;
+- `ensure_linear` takes a fourth comparison in its "same as last frame" test, and allocates
+  exactly what it allocated before (`readable_depth` false adds no usage flag and no texture);
+- `style_programs` and `screen_effect_bytes` are assigned 0 once a frame.
+
+No pass is submitted, no pipeline is switched to, no target is allocated and no module is built —
+which is the brief's "wgpu Classic unchanged in cost" check, item by item.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| the block the WGSL declares and the block the renderer writes are the same length; `uTexel` at half resolution is two pixels of the frame | 2 unit tests in `screen_effects.rs` |
+| REQ-SCN-080's depth reconstruction and the y mirror, REQ-SCN-083's kernel, ceiling, blur and factor, and the multisampled-depth pass are in the WGSL; **nothing of REQ-SCN-084 or of the MSVO estimator is** | `amd055_style_tests.rs` `q_104_the_wgpu_backend_carries_the_occlusion_and_not_yet_the_reflections` (rewritten) |
+| REQ-SCN-083 at the default quality | `parity_wgpu_tests.rs` `req_scn_083_the_depth_occlusion_agrees_between_the_backends` |
+| REQ-SCN-083 at High, where the divisor is 1 — the one number a port can get right at one quality and wrong at the other | `req_scn_083_the_full_resolution_occlusion_agrees_between_the_backends` |
+| the occlusion darkens as much of `shadow` on each backend, leaves `framing` and `heavy` alone, and never touches the HUD | `req_scn_083_the_occlusion_darkens_as_much_of_the_frame_on_each_backend` |
+| REQ-SCN-080 under MSAA 4x — the depth-resolve path | `req_scn_080_the_occlusion_agrees_under_anti_aliasing` |
+| the passes and the target bytes each backend spent, off `render.json`, with the one pass this API needs more | `req_scn_080_the_occlusion_costs_the_same_passes_and_bytes_on_each_backend` |
+| Vulkan against DX12 at every anti-aliasing level, **with the occlusion on** | `ru_7_vulkan_and_dx12_agree_with_each_other_at_every_level` (extended) — 100.0000 %, max channel 0, at all three levels |
+
+`cargo test --release -p zax-render --features wgpu`: 33 suites, **314 passed, 0 failed**, 1
+ignored (312 at step 4a, plus this step's two unit tests). `-p zax-harness --features wgpu`: 13
+suites, **68 passed, 0 failed** (17 of them `parity_wgpu_tests`). `-p zax-goldens`: 3 passed.
+`cargo fmt --all --check` and `cargo clippy --workspace --all-targets --features zax-app/wgpu --
+-D warnings` clean.
+
+### The design 4b was built from, and what is left after it
+
+Written at the end of the lot's **first** session, when steps 1, 2, 3 and 4a were landed, so that
+the second session would not have to repeat the design work. **Step 4b was built exactly as this
+section says**, including the two things it predicted would be awkward (the resolved depth and the
+`y` sign), and its own section above records what the device said back — so this is kept as it was
+written rather than updated, and the table at the end of it is the one that still has work in it.
+The two measured predictions are worth reading together with it: the resolved depth became
+`depth_resolve.wgsl`, and the `y` mirror turned out to cost 0.08 of a percentage point in the
+occlusion and to be the reflections' problem instead.
 
 #### The three effects still to port, against `gl/`
 
@@ -717,12 +960,23 @@ pass is needed, and it must not be submitted: the depth texture is already singl
 
 | Step | What |
 |---|---|
-| 4b | `wgpu_backend/screen_effects.rs`, `screen_depth.wgsl`, `ao.wgsl`, `ao_blur.wgsl`, `ao_composite.wgsl`, the depth-resolve pass, the frame order, the lazy lifecycle and its statistics |
+| ~~4b~~ | ~~`wgpu_backend/screen_effects.rs`, `screen_depth.wgsl`, `ao.wgsl`, `ao_blur.wgsl`, `ao_composite.wgsl`, the depth-resolve pass, the frame order, the lazy lifecycle and its statistics~~ — **landed**, see its own section above |
 | 4c | `ssr.wgsl`, `ssr_composite.wgsl`, `floor_mask.wgsl`, the mask's scene-pipeline variant (`ZAX_FLOOR_MASK`) and its depth attachment |
 | 4d | `msvo.wgsl` x5, the `R16F` pyramid, the runtime fallback **(D)** and its one diagnostic line |
-| — | then the diagnostic line "the Enhanced visual style is not rendered by this graphics backend…", `style_reported`, and the remaining `// Q-104` comments in `wgpu_backend/renderer.rs`, `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |
+| 4e | `backdrop.wgsl` and the `backdrop` axis of AMD-049 REQ-SCN-075, the step the owner added between the two sessions (see the checklist) |
+| — | then the diagnostic line of `wgpu_backend/renderer.rs` — narrowed by 4b to the reflections alone — `style_reported`, and the remaining `// Q-104` comments in `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |
 | 5 | the parity table and the GPU costs of each effect at 1080p, beside RU-5's and RU-6's OpenGL figures |
 | 6 | the close: `PERFORMANCE-HISTORY.md`, the Q-104 closing section answering its questions 1, 3 and 4, the full suite, the release build with `zax-app/bundled,zax-app/wgpu` |
+
+Two notes 4b leaves for the steps after it:
+
+- **`DepthBiasState` is the right equivalent for the floor mask's bias**, but the mask's depth
+  attachment is `depth_single`, the single-sample depth 4b allocates and (under anti-aliasing)
+  writes — not the frame's multisampled one. 4c binds that, and its pipeline is a one-sample
+  variant of the scene pipeline.
+- **The `Screen` uniform block already has the reflections' five fields** (`ssr`, `blur_aspect`,
+  `counts.yzw`), written as zeros today, and a `Slot` enum to put a third and fourth block in.
+  4d's MSVO pyramid is the one that will need the block per level.
 
 #### What the lot has established so far, for Q-104's closing section
 
