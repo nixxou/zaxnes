@@ -428,6 +428,11 @@ fn build_menus() -> Vec<Menu> {
             item(Command::ShowDataFolder),
             item(Command::ShowAbout),
             MenuItem::rule(),
+            // RO-2 part 1 (owner decision): RetroAchievements has no menu of its own any more.
+            // Its game entry went into the game options menu, which is greyed without a game;
+            // the account has to stay reachable without one, so it is here.
+            MenuItem::of_ui(UiCommand::AchievementsAccount, ""),
+            MenuItem::rule(),
             item(Command::ToggleMovieRecording),
             MenuItem::sub(text::movies(), Submenu::Movies),
             item(Command::AnnotateMovie),

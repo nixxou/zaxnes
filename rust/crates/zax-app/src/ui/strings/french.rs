@@ -261,6 +261,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("cmd.ui.toggle_console", "Mode console"),
     ("cmd.ui.save_states", "Sauvegarder un état…"),
     ("cmd.ui.load_states", "Charger un état…"),
+    // RO-2 part 1 : l'entrée nomme la fonction, le menu qui la porte ne la nomme plus.
+    ("cmd.ui.achievements_account", "Compte et options RetroAchievements…"),
     // ------------------------------------------- labels of SPEC-09 settings
     ("setting.video.frame_rate", "Fréquence de rendu"),
     // AMD-052 §3 point 10 : juste après « Fréquence de rendu », dans le groupe Vidéo.
@@ -1142,7 +1144,6 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_CONTROLS_PLAYER, "Manette du joueur 1"),
     // ----------------------------------- RetroAchievements (Rust-only)
     (keys::TAB_ACHIEVEMENTS, "RetroAchievements"),
-    (keys::ACH_MENU, "RetroAchievements"),
     (keys::ACH_LIST, "Succès du jeu"),
     (keys::ACH_LIST_EMPTY, "Aucun succès : aucun jeu n'est lancé, ou RetroAchievements ne le connaît pas."),
     (keys::ACH_GRID_STUDYING, "RetroAchievements est interrogé sur ce jeu..."),

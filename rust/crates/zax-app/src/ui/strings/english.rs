@@ -288,6 +288,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("cmd.ui.toggle_console", "Console mode"),
     ("cmd.ui.save_states", "Save a state…"),
     ("cmd.ui.load_states", "Load a state…"),
+    // RO-2 part 1: the entry names the feature, the menu it is in no longer does.
+    ("cmd.ui.achievements_account", "RetroAchievements account and options…"),
     // ------------------------------------------- labels of SPEC-09 settings
     ("setting.video.frame_rate", "Render rate"),
     // AMD-052 §3 point 10: right after "Render Rate", in the Video group.
@@ -1135,7 +1137,6 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_CONTROLS_PLAYER, "Player 1 gamepad"),
     // ----------------------------------- RetroAchievements (Rust-only)
     (keys::TAB_ACHIEVEMENTS, "RetroAchievements"),
-    (keys::ACH_MENU, "RetroAchievements"),
     (keys::ACH_LIST, "Achievements of the game"),
     (keys::ACH_LIST_EMPTY, "No achievements: no game is running, or RetroAchievements doesn't know it."),
     (keys::ACH_GRID_STUDYING, "Asking RetroAchievements about this game..."),

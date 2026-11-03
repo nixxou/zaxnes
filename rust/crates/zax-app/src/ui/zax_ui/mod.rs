@@ -423,6 +423,12 @@ impl ZaxUi {
             UiCommand::ToggleConsole | UiCommand::SaveStates | UiCommand::LoadStates => {
                 self.console_request = Some(command);
             }
+            // RO-2 part 1: the RetroAchievements account, which must stay reachable without a
+            // game, is an entry of the Tools menu now. It opens the window where it always was.
+            UiCommand::AchievementsAccount => {
+                self.state.options = true;
+                self.force_options_tab = Some(crate::ui::options::OptionsTab::Achievements);
+            }
         }
     }
 

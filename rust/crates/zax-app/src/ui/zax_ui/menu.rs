@@ -40,9 +40,8 @@ impl ZaxUi {
                 chosen = chosen.or(draw_items(ui, items, host));
             }
         }
-        let (open, hacks) = draw_game_options(ui, host, &mut self.menu_hacks);
+        let (open, hacks) = self.draw_game_options(ui, host);
         engaged |= open;
-        engaged |= self.draw_achievements_menu(ui, host);
         if hacks {
             self.open_hacks(host, HacksView::Widescreen);
             self.menu_chosen = true;
@@ -59,57 +58,80 @@ impl ZaxUi {
     }
 }
 
-/// The options of the game in play (Rust-only, owner request): the widescreen (a click turns it
-/// on with everything or off, its settings a window), the hacks (a submenu of the aids), a submenu
-/// per option with its values, "Use Global" first, and an entry that puts everything back.
-/// Greyed with no game. Returns whether the menu is open, and whether the widescreen's settings
-/// were asked for.
-fn draw_game_options(
+impl ZaxUi {
+    /// The options of the game in play (Rust-only, owner request): the widescreen (a click turns
+    /// it on with everything or off, its settings a window), the hacks (a submenu of the aids), a
+    /// submenu per option with its values, "Use Global" first, an entry that puts everything
+    /// back, and — since RO-2 part 1 — the game's achievements at the end. Greyed with no game.
+    /// Returns whether the menu is open, and whether the widescreen's settings were asked for.
+    fn draw_game_options(&mut self, ui: &Ui, host: &mut AppHost) -> (bool, bool) {
+        let title = strings::get(keys::HANDHELD_HINT_GAME_OPTIONS);
+        let Some(rom) = host.current_rom_path().map(str::to_owned) else {
+            // Greyed: there is no game to set options for, nor achievements to list.
+            drop(ui.begin_menu_with_enabled(&title, false));
+            return (false, false);
+        };
+        let options = host.game_options(&rom);
+        let own = options
+            .iter()
+            .any(|(id, _)| game_options::is_game_row_setting(*id));
+        let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
+        let menu = ui.begin_menu(&title);
+        drop(colour);
+        let Some(_menu) = menu else {
+            return (false, false);
+        };
+        // Owner request: the widescreen and the hacks apart. The hacks are studied as the menu
+        // opens, and kept while it is open.
+        let path = std::path::Path::new(&rom);
+        if ui.is_window_appearing()
+            || self
+                .menu_hacks
+                .as_ref()
+                .is_none_or(|hacks| hacks.rom() != path)
+        {
+            self.menu_hacks = Some(
+                HacksModel::for_rom(host, path, host.current_game_title())
+                    .with_view(HacksView::Aids),
+            );
+        }
+        let hacks = self
+            .menu_hacks
+            .as_mut()
+            .is_some_and(|hacks| draw_widescreen_and_aids(ui, host, hacks));
+        ui.separator();
+        let name = host.current_game_title().unwrap_or_default().to_owned();
+        let mut model = GameOptionsModel::new(PathBuf::from(&rom), name, host.settings(), options);
+        let mut changed = false;
+        if ui
+            .menu_item_config(strings::get(keys::HANDHELD_GAME_OPTIONS_RESET))
+            .enabled(model.has_options())
+            .build()
+        {
+            model.reset_all();
+            changed = true;
+        }
+        ui.separator();
+        changed |= draw_game_rows(ui, host, &mut model, &GAME_ROWS);
+        ui.separator();
+        self.draw_achievements_entry(ui, host);
+        if changed {
+            host.set_game_options(&rom, model.options());
+        }
+        (true, hacks)
+    }
+}
+
+/// A submenu per row of `rows`, labelled "Name: value" as the console page labels them, with
+/// "Use Global" first and a tick on the value in force. Returns whether a value changed.
+fn draw_game_rows(
     ui: &Ui,
-    host: &mut AppHost,
-    menu_hacks: &mut Option<HacksModel>,
-) -> (bool, bool) {
-    let title = strings::get(keys::HANDHELD_HINT_GAME_OPTIONS);
-    let Some(rom) = host.current_rom_path().map(str::to_owned) else {
-        // Greyed: there is no game to set options for.
-        drop(ui.begin_menu_with_enabled(&title, false));
-        return (false, false);
-    };
-    let options = host.game_options(&rom);
-    let own = options
-        .iter()
-        .any(|(id, _)| game_options::is_game_row_setting(*id));
-    let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
-    let menu = ui.begin_menu(&title);
-    drop(colour);
-    let Some(_menu) = menu else {
-        return (false, false);
-    };
-    // Owner request: the widescreen and the hacks apart. The hacks are studied as the menu
-    // opens, and kept while it is open.
-    let path = std::path::Path::new(&rom);
-    if ui.is_window_appearing() || menu_hacks.as_ref().is_none_or(|hacks| hacks.rom() != path) {
-        *menu_hacks = Some(
-            HacksModel::for_rom(host, path, host.current_game_title()).with_view(HacksView::Aids),
-        );
-    }
-    let hacks = menu_hacks
-        .as_mut()
-        .is_some_and(|hacks| draw_widescreen_and_aids(ui, host, hacks));
-    ui.separator();
-    let name = host.current_game_title().unwrap_or_default().to_owned();
-    let mut model = GameOptionsModel::new(PathBuf::from(&rom), name, host.settings(), options);
+    host: &AppHost,
+    model: &mut GameOptionsModel,
+    rows: &[options::OptionRow],
+) -> bool {
     let mut changed = false;
-    if ui
-        .menu_item_config(strings::get(keys::HANDHELD_GAME_OPTIONS_RESET))
-        .enabled(model.has_options())
-        .build()
-    {
-        model.reset_all();
-        changed = true;
-    }
-    ui.separator();
-    for (index, row) in GAME_ROWS.iter().enumerate() {
+    for (index, row) in rows.iter().enumerate() {
         let _id = ui.push_id_usize(index);
         let own = model.is_own(*row);
         let label = format!("{}: {}", options::label(*row), model.value_text(*row));
@@ -122,7 +144,7 @@ fn draw_game_options(
         let global =
             GameOptionsModel::new(PathBuf::new(), String::new(), host.settings(), Vec::new());
         if *row == options::OptionRow::Overscan {
-            changed |= draw_game_overscan(ui, &mut model, &global);
+            changed |= draw_game_overscan(ui, model, &global);
             continue;
         }
         let use_global = global.value_text(*row);
@@ -144,10 +166,7 @@ fn draw_game_options(
             }
         }
     }
-    if changed {
-        host.set_game_options(&rom, model.options());
-    }
-    (true, hacks)
+    changed
 }
 
 /// The game's overscan (Rust-only, owner request): a submenu per side, "Global" (its region's)

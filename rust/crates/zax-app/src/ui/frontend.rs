@@ -363,7 +363,11 @@ impl ImguiFrontend {
                     self.switch_console(host, true, true);
                 }
             }
-            UiCommand::ToggleDebugOverlay | UiCommand::CloseWindows => {}
+            // Neither asks anything of the console mode: `ZaxUi::run_ui_command` does the whole
+            // of each one itself.
+            UiCommand::ToggleDebugOverlay
+            | UiCommand::CloseWindows
+            | UiCommand::AchievementsAccount => {}
         }
     }
 

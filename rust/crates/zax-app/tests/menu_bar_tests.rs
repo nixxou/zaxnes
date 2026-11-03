@@ -398,6 +398,69 @@ fn the_game_options_menu_follows_the_game_in_play() {
         harness.host.game_options(&rom).len(),
         "drawing changes nothing"
     );
+    // RO-2 part 1: the game's achievement entry is drawn at the end of this menu now, and
+    // drawing it does not open its window.
+    assert!(!harness.ui.state.achievements);
+}
+
+/// RO-2 part 1 (owner decision): the bar has no RetroAchievements menu any more. Its account
+/// entry, which has to stay reachable with no game, is an entry of **Tools**; its game entry is
+/// drawn inside the game options menu, which is greyed without a game.
+#[test]
+fn ro_2_the_retroachievements_account_is_an_entry_of_the_tools_menu() {
+    let _language = UiLanguageScope::keep();
+    let mut harness = UiHarness::new(&["Arkanoid"]);
+
+    // No menu of the bar is named after the feature, in either language.
+    for language in [UiLanguage::English, UiLanguage::French] {
+        let _scope = UiLanguageScope::new(language);
+        harness.ui.menu_bar = MenuBarModel::new();
+        let titles: Vec<String> = harness
+            .ui
+            .menu_bar
+            .menus()
+            .iter()
+            .map(|menu| menu.title.clone())
+            .collect();
+        assert!(
+            !titles
+                .iter()
+                .any(|title| title.contains("RetroAchievements")),
+            "{titles:?}"
+        );
+    }
+    harness.ui.menu_bar = MenuBarModel::new();
+
+    // The account is in Tools, it runs no host command, and it is enabled with no game.
+    let tools = harness
+        .ui
+        .menu_bar
+        .menus()
+        .iter()
+        .find(|menu| menu.title == text::menu_tools())
+        .expect("the Tools menu")
+        .clone();
+    let account = tools
+        .items
+        .iter()
+        .find(|item| item.ui_command == Some(UiCommand::AchievementsAccount))
+        .expect("the account entry");
+    assert_eq!(None, account.command);
+    assert!(
+        account.label.contains("RetroAchievements"),
+        "{}",
+        account.label
+    );
+    assert!(MenuBarModel::is_enabled(account, &harness.host));
+    assert_eq!(None, harness.host.current_game_id(), "and with no game");
+
+    // It opens the options window on the RetroAchievements tab.
+    harness.ui.run_ui_command(UiCommand::AchievementsAccount);
+    assert!(harness.ui.state.options);
+    assert_eq!(
+        Some(zax_app::ui::options::OptionsTab::Achievements),
+        harness.ui.force_options_tab
+    );
 }
 
 /// The console mode of the desktop (Rust-only): F1 and Home switch to it, Ctrl+S and Ctrl+L ask

@@ -16,8 +16,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 
 | # | Step | State |
 |---|---|---|
-| 1 | The map of what each part touches, and the test plan | in progress |
-| 2 | The RetroAchievements menu move (part 1) | todo |
+| 1 | The map of what each part touches, and the test plan | done — `31d5aae` |
+| 2 | The RetroAchievements menu move (part 1) | in progress |
 | 3 | The new per-game rows: the data, the desktop menu, the console page (part 2) | todo |
 | 4 | The Lua curvature rounding (part 3) | todo |
 | 5 | `Setting.Msaa` drives the anti-aliasing (part 4) | todo |
@@ -156,6 +156,42 @@ gradations are a preference. Adding them later is one line each in `GAME_ADVANCE
 | 4 | each of the three clauses ignores the write, and the AA is still stored and read back | `two_zero_api_tests.rs` |
 | 4 | with none of them, 0 → off and 2 or 4 → MSAA 4×, in the session layer | `two_zero_api_tests.rs` |
 | 4 | the end of the game gives the user's preference back, and nothing is persisted | `two_zero_api_tests.rs`, `persistence_tests.rs` |
+
+### Step 2 — the move itself
+
+The bar is now **five** menus, all of them data: File, Emulation, Video, Audio, Tools. The two
+drawn beside the model are down to one, the game options menu.
+
+- `UiCommand::AchievementsAccount` ("RetroAchievements account and options…" / "Compte et options
+  RetroAchievements…") is the last entry but one of **Tools**, between About and the movie
+  entries. `ZaxUi::run_ui_command` opens the options window on its RetroAchievements tab, which
+  is exactly what the old entry did. `ui/frontend.rs::follow_console_request` had to name it
+  among the commands that ask nothing of the console mode.
+- `draw_achievements_menu` became `draw_achievements_entry`, which draws the account **line** and
+  the achievement-list entry, and is called at the end of `draw_game_options` after a separator.
+  The list entry keeps its own enabling rule (`host.achievements.game().is_some()`), and the
+  whole thing is unreachable without a game because the menu that holds it is greyed — which is
+  what the brief asks for.
+- `draw_game_options` became a method of `ZaxUi` (it needs `self` for the entry and already
+  needed `self.menu_hacks`), and its per-row loop came out as `draw_game_rows(ui, host, model,
+  rows)` so that step 3 can call it for a group of rows without copying it.
+- `keys::ACH_MENU` is gone, with its two texts: its only reader was the menu, and the string was
+  "RetroAchievements" in both languages — word for word `TAB_ACHIEVEMENTS`, which the options tab
+  still uses. `keys::ACH_LIST` and `keys::ACH_ACCOUNT` stay; `ACH_ACCOUNT` ("Account and
+  options…") is still the label of nothing drawn, so it is a loose end step 6 revisits.
+- `ui/shots.rs` needed nothing, as step 1 found: the capture plan never had a shot of the
+  achievements menu, only of the options tab and of the achievements window, and neither moved.
+
+Tests: `menu_bar_tests::ro_2_the_retroachievements_account_is_an_entry_of_the_tools_menu` (no
+menu of the bar is named after the feature in either language; the entry is in Tools, runs no
+host command, is enabled with no game, and opens the window on the right tab) and one line added
+to `the_game_options_menu_follows_the_game_in_play` (drawing the game menu, achievements entry
+included, opens nothing). `ui_language_tests::amd_035_every_command_and_every_shown_setting_has_a_label`
+and `key_config_window_tests` cover the new command's texts and its row for free, walking
+`UiCommand::ALL`.
+
+715 tests pass in `zax-app`, `cargo fmt --check` and `cargo clippy -p zax-app --all-targets` are
+clean.
 
 ### Step 1 — what may not change
 

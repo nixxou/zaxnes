@@ -428,8 +428,8 @@ pub fn detail(key: &str) -> String {
 // ----------------------------------------------------------- RetroAchievements (Rust-only)
 /// Tab of the options window: RetroAchievements.
 pub const TAB_ACHIEVEMENTS: &str = "options.tab.achievements";
-/// Menu of the menu bar.
-pub const ACH_MENU: &str = "achievements.menu";
+// RO-2 part 1 removed `ACH_MENU` ("RetroAchievements", the title of the menu of the bar): the
+// menu is gone, and the key was word for word `TAB_ACHIEVEMENTS` in both languages.
 /// Its entry, and the window, of the game's achievements.
 pub const ACH_LIST: &str = "achievements.list";
 /// What the list says without a game's achievements.
@@ -808,7 +808,6 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_HOLD_FOR_SETTINGS,
     HANDHELD_HINT_HACKS,
     TAB_ACHIEVEMENTS,
-    ACH_MENU,
     ACH_LIST,
     ACH_LIST_EMPTY,
     ACH_GRID_STUDYING,
