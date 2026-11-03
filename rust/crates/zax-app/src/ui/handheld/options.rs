@@ -80,6 +80,7 @@ pub enum OptionRow {
 /// The same pages serve the global options and a game's, with a list of their own for each:
 /// [`Self::rows`] and [`Self::game_rows`]. A game cannot set everything the console can, so its
 /// pages are shorter and two of the hub's six do not exist for it.
+// Q-107 §6
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionsPage {
     /// The performance switches together (owner request, before RO-3).

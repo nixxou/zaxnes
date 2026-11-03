@@ -13,8 +13,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 | # | Step | State |
 |---|---|---|
 | 1 | The map (current rows → new places), the test plan, the coverage test written red | done — `f078668` |
-| 2–5 | The tree: the row model and the group rows, the global pages, the game pages with their two readability rules, the pointer, the desktop *Game options* menu | in progress |
-| 6 | Closing: the notes, the golden, fmt, clippy, the full tests, the release build | todo |
+| 2–5 | The tree: the row model and the group rows, the global pages, the game pages with their two readability rules, the pointer, the desktop *Game options* menu | done — `683c016` |
+| 6 | Closing: the notes, Q-107 §6, `OPTIONS-LAYOUT.md`, fmt, clippy, the full tests, the release build | done — this commit |
 
 Steps 2 to 5 are **one commit**, not four. The brief's suggested order splits work that one type
 holds together: `OptionRow` gained `Page` and `Group`, and the two old variants
@@ -274,6 +274,88 @@ settings-file key, or `row.*` / `page.*` / `[group.*]`). An ignored test regener
 (`ro_3_write_the_option_tree_golden`). What the old file pinned and the new one does not — that
 `advanced::ROW_SETTINGS` holds 56 settings — is now one assertion in
 `ro_3_every_console_setting_is_a_row_the_console_can_step`.
+
+### Step 6 — the closing
+
+#### Q-107 grows a §6, and nothing else is copied
+
+RO-3 implements **no amendment**: the console interface is Rust-only, with no requirement behind
+it (Q-036, REQ-UI-207 describes the desktop window alone), so there is no amendment text and no
+SPEC chapter edit to copy into `impl/docs/spec/changes/`. What there is, is a layout the owner
+decided, and it belongs beside RO-1's and RO-2's rather than in a ticket of its own — splitting
+three lots of one reorganisation over three numbers would make R1 read them apart. **Q-107**
+therefore gained a §6 and two header lines, and `impl/docs/spec/changes/Q-107.md` is the identical
+copy.
+
+§6 records the tree, the three things it adds that are not settings, what is kept exactly, and the
+one reservation of decision 4 — read of **rows** rather than of settings, with the table of the
+three composite rows and the six settings they share. Code mark: `// Q-107 §6` on `OptionsPage`,
+and `// Q-107 §5, §6` on `game_options::page_rows`.
+
+`rust/docs/OPTIONS-LAYOUT.md` gained a §5 for the console tree (the tree itself, what moved, the
+three additions, the reservation, what is kept, and the desktop menu that walks it), its title and
+preamble now name the three lots, and §1's "what did not change" no longer points at the golden
+this lot deletes.
+
+#### Closing checks
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release --workspace --features zax-app/bundled --no-fail-fast` | **2466 passed, 0 failed, 84 ignored** |
+| `goldens/lua-api.txt` (`zax-harness::lua_api_tests`) | passes, unchanged |
+| `goldens/desktop-options-shown.txt` | passes, unchanged |
+| `goldens/handheld-option-tree.txt` | new, and matches the mockup |
+| `goldens/handheld-advanced-rows.txt` | deleted, replaced by the tree golden |
+| the settings file's keys (`zax-settings::catalogue::no_published_key_disappeared`) | passes, unchanged |
+| release `zaxnes.exe` in `rust/target-ro/release/` | built from the final commit, `bundled,wgpu` |
+
+RO-2 left 2453 passing and 83 ignored. RO-3 adds 13 passing and one ignored — the ignored one is
+`ro_3_write_the_option_tree_golden`, the regeneration aid of the tree golden, which R0 never needs
+to run. The other 83 are unchanged: they need a real 3dSen installation, a ROM corpus or a GPU run.
+
+Every new label is covered without a test of its own: `ui_language_tests` walks `keys::PUBLISHED`,
+which the four page and group titles and the two game texts joined, and asserts a text in both
+languages for each.
+
+#### Performance
+
+Nothing new runs in the core, the conversion, the Lua hooks, the draw list or the renderer. No
+file outside `ui/handheld/`, `ui/zax_ui/menu.rs` and the two string tables was touched.
+
+- **A console page** is drawn only while it is shown, and the tree made the pages *shorter*: the
+  longest is 11 rows where the flat advanced page was 56, so `first_visible` and the row loop do
+  less work per frame of that screen, not more. The main page lost two rows.
+- **A group title** costs one `add_text` and two `set_window_font_scale` calls, on the page that
+  has one, while that page is shown.
+- **The own-counts of a game** (§2 rule 2) walk the game tree — 30 rows at most, and only the
+  subtree under each page row — once per drawn frame of a game-options screen. They read the
+  game-options model, which is built when the screen opens; nothing of them exists while a game
+  plays.
+- **The desktop menu** walks `GAME_MAIN` (11 entries) at the first level and a page's rows only
+  while that submenu is open, where RO-2 walked 16 + 3 + a submenu. `GameOptionsModel::walk`'s cap
+  is unchanged at 48.
+- **The pointer** now counts zones in a span instead of subtracting two slot numbers: at most one
+  pass over the zones of the screen shown, on a click, in the desktop's console mode only.
+- **The navigation** gained `step_selection`, a loop bounded by the page's length (11 at most) on
+  a press of up or down.
+
+#### What R0 should look at in the running application
+
+1. `--console` (or a handheld build): the main page is 12 rows, with no "Camera view" and no
+   "Show FPS"; *Advanced options* opens six rows and not 56.
+2. *Advanced options › Display*: the titles "Resolution" and "Advanced" are smaller and greyed,
+   up and down step straight over them, and a click just past one moves the selection one row.
+3. *Advanced options › 3D rendering › Enhanced effects*: three levels deep, the title band reading
+   "Advanced options > 3D rendering > Enhanced effects", and B climbing back one at a time.
+4. *Optimisations*: nine rows, the smooth Lua collector last.
+5. A game's options (Select on the home screen): the widescreen between the overscan and the
+   region, the hacks last; a row on the global value reading "Global: …" dimmed, a row with the
+   game's own showing `*` in cyan, and "Advanced options   2 own >" once two values are set under
+   it — in two different pages of the hub, to see the count add up.
+6. The desktop *Game options* menu with a game: the same order as the console main page, the two
+   submenus, and the cyan climbing to a submenu title when a row inside holds a value of its own.
 
 ### Step 1 — what may not change
 

@@ -1,16 +1,21 @@
-# The desktop options window: the layout of Zaxnes, and where it diverges from the specification
+# The options of Zaxnes: the layout of the window and of the console tree, and where they diverge from the specification
 
 Lot **RO-1** (branch `reworkoptions`, from `rustupdated` 0b0aa8c) reorganised the desktop options
-window at the owner's request. This note records two deliberate divergences and the complete
-old-tab → new-tab mapping, so that R1 can amend the specification and so that nobody has to
-reconstruct the move from a diff.
+window at the owner's request; **RO-2** changed what a script may write and what a game may hold;
+**RO-3** reorganised the **console** option pages on the same branch. This note records the
+deliberate divergences and the complete mappings, so that R1 can amend the specification and so
+that nobody has to reconstruct a move from a diff.
 
-Both divergences are raised with R1 as **Q-107**.
+Every divergence here is raised with R1 as **Q-107**. §5 is the console tree of RO-3.
 
-The layout itself lives in one table, `crates/zax-app/src/ui/options.rs::LAYOUT`: one line per
+The window's layout lives in one table, `crates/zax-app/src/ui/options.rs::LAYOUT`: one line per
 tab, one entry per row or group heading, in the order the window draws them. Before RO-1 the
 window was *derived* — a setting's theme chose its tab and the catalogue's order (the order of the
 settings **file**) chose its place.
+
+The console's layout lives in the tables of
+`crates/zax-app/src/ui/handheld/options.rs::OptionsPage`, one per page, and in
+`game_options.rs::page_rows` for the reduced tree of one game. Before RO-3 it was four flat lists.
 
 ---
 
@@ -43,8 +48,9 @@ style, with nothing saying how the three relate.
 **What did not change.** No setting was added, removed, renamed, or changed in value, default,
 domain, persistence key or behaviour by this divergence. The set of settings the window shows is
 pinned by `goldens/desktop-options-shown.txt`, computed from the rules of `0b0aa8c` and compared
-on every test run. `EXCLUDED` is the same nineteen entries. The console pages are untouched
-(`goldens/handheld-advanced-rows.txt`), the Lua API dump is unchanged, and so is the settings file.
+on every test run. `EXCLUDED` is the same nineteen entries. The console pages were untouched by
+RO-1 — §5 is where RO-3 reorganises them, and `goldens/handheld-option-tree.txt` is what pins them
+now — the Lua API dump is unchanged, and so is the settings file.
 
 ### The complete mapping, setting by setting
 
@@ -291,3 +297,131 @@ asymmetry comes out of the owner's clause 2 read together with REQ-PERS-089's de
 worth confirming: if the intent were "unless the user made an *explicit* choice" rather than
 "unless the value is above 0", the clause would have to test the user layer instead, and a write
 could then turn a default-on anti-aliasing off. The code follows the letter of the owner's rule.
+
+---
+
+## 5. The console option pages: one flat page of 56 rows becomes a tree
+
+**What the specification says.** Nothing: the console (handheld) interface is Rust-only, an owner
+feature with no requirement behind it (Q-036). REQ-UI-207 describes the desktop window only. This
+section is therefore not a divergence from a text but the record of a layout the owner designed on
+an HTML mockup and approved, kept here beside the window's so that the two can be read together.
+
+**What Zaxnes did until RO-2.** Four flat lists and one screen: the main page (14 rows), its
+Android variant (15, the touch-pad row after the controls), an *Optimizations* page (8), an
+*Advanced options* page of **56 rows** in one scroll, and the overscan screen (9).
+
+**What Zaxnes does since RO-3.** The 56-row page is a hub of six pages, two of which have a page
+of their own, and a group title may head a run of rows inside a page. Nothing else about the
+console changed: no setting was added, removed, renamed, or changed in value, default, domain,
+persistence key or behaviour.
+
+### The tree
+
+```
+options
+ ├─ Language, Volume, Render scale, Shadows, Palette
+ ├─ Overscan >                 the overscan screen, 9 rows, unchanged
+ ├─ Region
+ ├─ Optimizations >            9 rows: the 8 performance switches + emu.lua_smooth_gc
+ ├─ Advanced options >
+ │   ├─ Display >              Show FPS, VSync, Frame rate, Skip frame
+ │   │                         [Resolution] Render scale, Dynamic resolution, Render method,
+ │   │                                      Anti-aliasing
+ │   │                         [Advanced]   GPU queue
+ │   ├─ 3D rendering >         Visual style
+ │   │   ├─ Enhanced effects > Voxel grid
+ │   │   │                     [Reflections] Reflections, SSR shine, clarity, length, quality
+ │   │   └─ Geometry (curvature) > Bend L-R, Bend T-B, Arc H, Arc centre, Bend 2D mode
+ │   │                         Skybox, Mesh algorithm
+ │   ├─ Light and shadows >    Light intensity, Backdrop lighting, Pixel shadows
+ │   │                         [Ambient occlusion] AO, strength, radius, thickness, quality
+ │   ├─ NES picture >          Remove sprite limit, Widescreen strict edges
+ │   ├─ Camera >               Camera view, Field of view
+ │   └─ Emulation >            Run-ahead, Game speed, Auto region, Region, Emulated menu button
+ ├─ Controls >, RetroAchievements >
+ └─ Profiler
+```
+
+The options of one **game** are the same tree reduced to what a game can hold: the main screen
+keeps the volume, the render scale, the shadows, the palette, the overscan, the widescreen and the
+region; *Optimisations* keeps eight of the nine (the smooth collector stays global); the hub has
+four pages (*Display*, *3D rendering* with its two, *Light and shadows*, *Emulation*) and not six —
+a game has nothing to set on *NES picture* or *Camera*.
+
+The exact tree, both trees, page by page and row by row, is
+`rust/goldens/handheld-option-tree.txt`, which replaces `handheld-advanced-rows.txt`. The tables
+it is generated from are in `crates/zax-app/src/ui/handheld/options.rs` (`OptionsPage::rows`) and
+`game_options.rs` (`page_rows`, `GAME_MAIN`).
+
+### What moved, and that is all that moved
+
+| Row | Before RO-3 | Since |
+|---|---|---|
+| Camera view | the main page | *Advanced options › Camera* |
+| Show FPS | the main page | *Advanced options › Display* |
+| `emu.lua_smooth_gc` | the flat advanced page | *Optimisations*, with the other performance switches |
+| the other 55 of the flat page | one scroll | the six pages of the hub, by family |
+| the widescreen of a game | next to last on its main screen | between the overscan and the region |
+
+The *Advanced options* hub repeats nothing the other pages offer: the palette and the shadows are
+main-page rows, the nine overscan settings the overscan screen's, and the seven performance
+switches the Optimisations page's.
+
+### Three things the tree adds, none of them a setting
+
+- A **group title** is a non-selectable row: up and down skip it, it is drawn smaller
+  (`set_window_font_scale(0.8)`) and dimmer than a value, and it records no pointer zone, so the
+  mouse of the desktop's console mode cannot select what the pad cannot.
+- On a **game's** screens, a row using the global value shows "Global: value" dimmed; a row with
+  the game's own shows it plainly with a `*` marker in the colour RO-2 uses for an own value.
+- On a **game's** screens, a row that opens a page shows how many own values are reachable under
+  it ("Advanced options   2 own >"), and nothing when there are none. The count is computed from
+  the game-options model when the page is drawn; a console page is drawn only while it is shown,
+  so nothing of this runs while a game plays.
+
+Four labels are new, in both languages — *Enhanced effects*, *Geometry (curvature)*, *Reflections*,
+*Ambient occlusion* — and two texts: "Global: {0}" and "{0} own". The chevron is the ASCII `>` the
+console rows already used and not the mockup's `›`: U+203A is outside the atlas's glyph ranges.
+
+### The one reservation: "one place" is a rule about rows
+
+The owner's rule reads "no setting other than `video.res_scale` is reachable from two places".
+Read of settings it is false of the mockup itself; read of **rows** it is exactly true — no row
+appears twice in the tree. What appears twice is a setting a *composite* row moves together with
+others, where the mockup also asks for that setting's own row on a page:
+
+| Composite row | Its settings | The rows of the same settings |
+|---|---|---|
+| Render scale (main page) | `video.res_scale`, `video.dynamic_resolution`, `video.render_method` | Display › Resolution, all three |
+| Region (main page) | `emu.auto_tv_mode`, `emu.tv_mode` | Emulation, both |
+| Frame cap (Optimisations) | `video.vsync` | Display |
+
+Six settings, from three rows the mockup keeps where they were. The second and third couples come
+out of the mockup's own *Display* and *Emulation* pages, so the one-sentence rule cannot be applied
+literally without taking rows out of the mockup. `handheld_tree_tests.rs::TWO_PLACES` pins those
+six exactly, so a seventh is a failure and not a drift. Raised with R1 in **Q-107 §6**.
+
+### What is kept, exactly
+
+- The 56 settings the console offers, same count and same keys
+  (`ui::handheld::advanced::ROW_SETTINGS`), and the 30 rows a game can hold.
+- The overscan screen and its nine rows, untouched.
+- `TOUCH_ROWS`: the main page and the touch-pad row after the controls, as before.
+- The **desktop options window** of §1: its nine tabs, `goldens/desktop-options-shown.txt` and
+  `EXCLUDED` are not part of RO-3 and are unchanged.
+- `goldens/lua-api.txt` and `SettingKeys.reference.txt`, identical.
+- The handheld defaults (`ui/handheld/defaults.rs`): no setting is new, so there is no new
+  handheld default to choose.
+- The per-frame paths: a console page is drawn only while it is shown, and the desktop menu draws
+  a submenu only while it is open.
+
+### The desktop *Game options* menu follows the same tree
+
+Its first level **is** the console main screen of a game, row for row and in its order; below it
+come the *Optimisations* and *Advanced options* submenus, the latter holding *Display*,
+*3D rendering* (with *Enhanced effects* and *Geometry*), *Light and shadows* and *Emulation*; the
+RetroAchievements entry stays at the end, where RO-2 put it. The menu carries **no list of its
+own**: it walks `GAME_MAIN` and `OptionsPage::game_rows`, which is what keeps the two interfaces
+from drifting. RO-2's `GAME_DISPLAY_ROWS`, `GAME_3D_ROWS`, `GAME_CURVATURE_ROWS` and
+`GAME_ADVANCED_ROWS` are gone with it.
