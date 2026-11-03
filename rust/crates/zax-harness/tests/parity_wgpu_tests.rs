@@ -23,6 +23,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use zax_goldens::read_render;
 use zax_harness::compare::matching_share;
 use zax_harness::render::{self, Options};
 use zax_harness::HarnessError;
@@ -371,6 +372,130 @@ fn req_scn_079_each_shader_effect_moves_as_much_of_the_frame_on_each_backend() {
         }
         fs::remove_dir_all(&classic).unwrap();
         fs::remove_dir_all(&enhanced).unwrap();
+    }
+}
+
+// ------------------------------------------------------------- AMD-032, the anti-aliasing levels
+
+/// AMD-032 §2 and AMD-052 REQ-PERS-089: `video.anti_alias` 0, 1 and 2 mean no anti-aliasing,
+/// MSAA 4x and MSAA 8x, and the `wgpu` backend grants exactly what the OpenGL one grants — which
+/// is the normative half of the brief's point 5, and the half that is an equality rather than a
+/// share.
+#[test]
+fn amd032_each_anti_alias_level_grants_the_same_samples_on_every_backend() {
+    for (level, wanted) in [("0", 1_u32), ("1", 4), ("2", 8)] {
+        let reference =
+            capture("aa", None, &["--anti-alias", level]).expect("OpenGL always renders");
+        let granted = |folder: &PathBuf| {
+            let records = read_render(&folder.join("render.json")).unwrap();
+            let samples: Vec<u32> = records.iter().map(|r| r.anti_alias_samples).collect();
+            assert!(
+                samples.iter().all(|&s| s == samples[0]),
+                "the level is one per run, not one per scene"
+            );
+            samples[0]
+        };
+        let opengl = granted(&reference);
+        assert_eq!(
+            opengl, wanted,
+            "video.anti_alias = {level} on OpenGL granted {opengl} samples"
+        );
+        for backend in backends() {
+            let Some(capture) = capture("aa", Some(backend), &["--anti-alias", level]) else {
+                continue;
+            };
+            let mine = granted(&capture);
+            println!("video.anti_alias = {level}: {backend} granted {mine}, OpenGL {opengl}");
+            assert_eq!(
+                mine, opengl,
+                "video.anti_alias = {level} on {backend} granted {mine}, OpenGL {opengl}"
+            );
+            fs::remove_dir_all(&capture).unwrap();
+        }
+        fs::remove_dir_all(&reference).unwrap();
+    }
+}
+
+/// What the two multisampled levels are held to against OpenGL, and why it is not [`WITHIN_TWO`].
+///
+/// **MSAA sample positions are implementation-defined in every one of the three APIs.** Neither
+/// OpenGL nor Vulkan nor DirectX 12 fixes where inside a pixel the 4 or 8 samples sit, so two
+/// correct implementations resolve an edge pixel to different colours. The measurement that
+/// settles it is in this file's own output: under MSAA 4x on `heavy` — 1926 overlapping tile
+/// boxes, so silhouette edges everywhere — **Vulkan and DX12 agree with each other on 100.000 %
+/// of the pixels** and both differ from OpenGL on 0.892 %. One pattern on the two `wgpu` APIs,
+/// another in the OpenGL driver, and nothing in the renderer to choose between them.
+///
+/// Measured here, worst scene of four: **99.1084 %** at MSAA 4x and **98.9489 %** at MSAA 8x,
+/// both on `heavy`, and the more samples the further the two patterns can diverge. The floor is
+/// set just under the worse of the two rather than at a round number.
+///
+/// So the multisampled rows are held to this against OpenGL and to [`AGREE`] against each other,
+/// which is the stronger of the two assertions and the one a port can actually break.
+const WITHIN_TWO_MULTISAMPLED: f64 = 0.985;
+
+/// What the two `wgpu` backends are held to against **each other**: they run the same WGSL
+/// through the same naga, so a difference between them is a bug in one driver or in the port's
+/// use of a feature one of them reads differently — which is how step 3 found `fwidth`.
+const AGREE: f64 = 0.999;
+
+/// AMD-032: each level's picture, compared with OpenGL's and between the two `wgpu` backends.
+/// AMD-058 REQ-SCN-065 is in this too — the centroid variant exists only for the multisampled
+/// levels, so this is where it is read.
+#[test]
+fn amd032_the_anti_alias_levels_agree_between_the_backends() {
+    for (level, floor) in [
+        ("0", WITHIN_TWO),
+        ("1", WITHIN_TWO_MULTISAMPLED),
+        ("2", WITHIN_TWO_MULTISAMPLED),
+    ] {
+        let Some((share, channel)) = parity(
+            &format!("aa-{level}"),
+            &["--anti-alias", level, "--style", "enhanced"],
+        ) else {
+            return;
+        };
+        println!(
+            "video.anti_alias = {level}: worst {:.4} % within 2 of OpenGL, max {channel} levels",
+            share * 100.0
+        );
+        assert!(
+            share >= floor,
+            "video.anti_alias = {level} agrees with OpenGL on only {:.4} % of pixels",
+            share * 100.0
+        );
+    }
+}
+
+/// And the two `wgpu` backends against each other, at every level: the same WGSL through the same
+/// naga, so this is the assertion that holds tightest and the one that caught the `fwidth` of
+/// step 3.
+#[cfg(windows)]
+#[test]
+fn ru_7_vulkan_and_dx12_agree_with_each_other_at_every_level() {
+    for level in ["0", "1", "2"] {
+        let arguments = ["--anti-alias", level, "--style", "enhanced"];
+        let Some(vulkan) = capture("pair", Some("vulkan"), &arguments) else {
+            return;
+        };
+        let Some(dx12) = capture("pair", Some("dx12"), &arguments) else {
+            return;
+        };
+        for scene in SCENES {
+            let figures = figures(&load(&vulkan, scene), &load(&dx12, scene));
+            println!(
+                "anti_alias {level} {scene:<10} vulkan vs dx12: max {:>3} levels, {:>8.4} % within 2",
+                figures.max_channel,
+                figures.within_two * 100.0
+            );
+            assert!(
+                figures.within_two >= AGREE,
+                "anti_alias {level}, {scene}: the two wgpu backends agree on only {:.4} %",
+                figures.within_two * 100.0
+            );
+        }
+        fs::remove_dir_all(&vulkan).unwrap();
+        fs::remove_dir_all(&dx12).unwrap();
     }
 }
 

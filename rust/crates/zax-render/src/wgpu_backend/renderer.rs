@@ -149,6 +149,9 @@ struct ShaderVariant {
     /// Independent of the grid: REQ-SCN-079 switches the two separately, so a player who turns
     /// the grid on must not pay for the snapping, nor the other way round.
     pixel_shadow: bool,
+    /// AMD-058 REQ-SCN-065: `uv` interpolated at the centroid of the covered samples, which is
+    /// only ever asked for when the buffer is multisampled.
+    centroid: bool,
 }
 
 impl ShaderVariant {
@@ -157,6 +160,7 @@ impl ShaderVariant {
         bend: false,
         voxel_grid: false,
         pixel_shadow: false,
+        centroid: false,
     };
 
     /// The defines [`preprocess::compose`] expands this variant's sources with.
@@ -170,6 +174,9 @@ impl ShaderVariant {
         }
         if self.pixel_shadow {
             defines.push("ZAX_PIXEL_SHADOW");
+        }
+        if self.centroid {
+            defines.push("ZAX_CENTROID");
         }
         defines
     }
@@ -196,6 +203,7 @@ impl ShaderVariant {
             (self.bend, " bend"),
             (self.voxel_grid, " grid"),
             (self.pixel_shadow, " pixel-shadow"),
+            (self.centroid, " centroid"),
         ] {
             if on {
                 suffix.push_str(name);
@@ -213,6 +221,7 @@ impl ShaderVariant {
             bend: self.bend,
             voxel_grid: false,
             pixel_shadow: false,
+            centroid: false,
         }
     }
 }
@@ -667,6 +676,12 @@ impl WgpuSceneRenderer {
             bend,
             voxel_grid: style.voxel_grid_active() && !flat,
             pixel_shadow: style.pixel_shadow_active() && !flat,
+            // AMD-058 REQ-SCN-065. The trigger is the **setting** of AMD-032 §2, not the sample
+            // count the driver granted: a buffer that falls back to one sample interpolates a
+            // centroid at the pixel centre anyway (the covered sample set is that one sample), so
+            // the fallback draws the same pixels. With `video.anti_alias` = 0 nothing is built,
+            // which is what keeps the handheld default on the module of before this amendment.
+            centroid: scene.settings.anti_alias_samples() > 1,
         };
         self.ensure_modules(variant);
         // REQ-SCN-081: the HUD never takes the grid, and it draws with the flat variant of
@@ -2318,11 +2333,20 @@ const fn vec4(value: Vector4) -> [f32; 4] {
 }
 
 /// The variant the HUD draws with: `variant` with every axis REQ-SCN-068 and AMD-055 exclude the
-/// HUD from cleared. The twin of what `draw_hud` does on the OpenGL side, which clears all three
-/// of the same bits — so the answer is the plain variant whatever came in, and the parameter is
-/// kept so that an axis the HUD *does* take would be added here and nowhere else.
-const fn hud_variant(_variant: ShaderVariant) -> ShaderVariant {
-    ShaderVariant::PLAIN
+/// HUD from cleared, and the one it does **not** exclude kept.
+///
+/// The twin of what `draw_hud` does on the OpenGL side, which clears exactly three bits — the
+/// curvature (REQ-SCN-068: the HUD draws flat), the voxel grid (REQ-SCN-081: "the HUD never takes
+/// the grid") and the pixel shadows (the HUD carries no shadow to read) — and leaves the
+/// interpolation alone. AMD-058's centroid is about reading the atlas at the right texel, which
+/// the HUD's own tiles need as much as the scene's.
+const fn hud_variant(variant: ShaderVariant) -> ShaderVariant {
+    ShaderVariant {
+        bend: false,
+        voxel_grid: false,
+        pixel_shadow: false,
+        centroid: variant.centroid,
+    }
 }
 
 /// The four curvature `vec4` of AMD-043 REQ-SCN-067, the arc pivot riding in the `w` of the

@@ -45,7 +45,18 @@ struct VertexOut {
     @builtin(position) position: vec4<f32>,
     @location(0) scene: vec3<f32>,
     @location(1) normal: vec3<f32>,
+//#ifdef ZAX_CENTROID
+    // AMD-058 REQ-SCN-065: interpolated at the centroid of the samples the fragment covers,
+    // which is always inside them. A fragment on the edge of a wall whose pixel centre falls
+    // *outside* the triangle otherwise gets an extrapolated `uv`, the `floor` below then lands
+    // one texel past the face, and the atlas returns a neighbour's texel — a light line one pixel
+    // wide along the joint. Only ever asked for when the buffer is multisampled; with
+    // `video.anti_alias` = 0 the centroid **is** the pixel centre, so the variant would change
+    // nothing and is not built (the handheld default).
+    @location(2) @interpolate(perspective, centroid) uv: vec2<f32>,
+//#else
     @location(2) uv: vec2<f32>,
+//#endif
     @location(3) @interpolate(flat) run: u32,
 //#ifdef ZAX_BEND
     // The position the curvature of REQ-SCN-067 placed this vertex at, which the shadow lookup

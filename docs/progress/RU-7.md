@@ -15,13 +15,39 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 |---|---|---|
 | 1 | The gate: why the `wgpu` tests skip, fixed or proven; the map against `gl/`; the test plan | done — `f46feea` |
 | 2 | Curvature (AMD-043, AMD-046) | done — `9ffb3b7` |
-| 3 | The voxel grid and the pixel shadows | done — this commit |
-| 4 | The screen passes: Depth AO, MSVO, SSR, their targets and lifecycle, the AA resolve | todo |
+| 3 | The voxel grid and the pixel shadows | done — `6872645` |
+| 4a | The anti-aliasing levels and AMD-058's centroid interpolation | done — this commit |
+| 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | todo |
+| 4c | The reflections of REQ-SCN-084 and the floor mask | todo |
+| 4d | The MSVO estimator and its runtime fallback | todo |
 | 5 | The parity measurements and the costs | todo |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
+
+**The brief's step 4 is split into four**, and the reason is this lot's own protocol: every step
+must be a commit that builds and whose tests pass. The brief's step 4 is "the screen passes: Depth
+AO, MSVO, SSR, their targets and lifecycle, AA resolve" — which against the code is four
+independent deliverables and about 1 400 lines of the OpenGL backend (`gl/screen_effects.rs` 789,
+`gl/msvo.rs` 472, plus eleven GLSL sources). They cannot be one green commit, and three of the
+four can each be one:
+
+- the **anti-aliasing levels** (the brief's point 5) turned out to be a subject of its own and the
+  smallest: the MSAA machinery was already there, and what was missing was AMD-058's centroid
+  interpolation. It is also a *prerequisite* of the other three, because REQ-SCN-080's last bullet
+  has the screen passes read the **resolved** colour and depth — so the AA behaviour has to be
+  settled and measured before a pass is laid on top of it. Hence 4a rather than last.
+- the **module, the frame order and the Depth estimator** (4b) is the architecture: the lazy
+  lifecycle, the targets, the blend states, the composite, `REQ-SCN-080`'s order. The Depth
+  estimator rides with it because an architecture with no pass over it is observable only as an
+  allocation — the same argument RU-6 made for its own steps 2 and 3.
+- the **reflections** (4c) add a pass of a different shape: a geometric mask drawn with a scene
+  pipeline variant, and a trace that reads the frame's colour.
+- the **MSVO estimator** (4d) is RU-6's port: a four-level pyramid, five programs, twenty passes
+  and a runtime fallback.
+
+Nothing of the brief is dropped; what moves is which commit carries it.
 
 ## Notes
 
@@ -502,3 +528,94 @@ backend and the process — so `req_scn_081`'s `voxel-grid` folder and the one
 `req_scn_079` renders under the same label were **the same path**, and whichever finished first
 deleted the other's captures. Found by the suite failing only when run without
 `--test-threads=1`. The folder name now carries a counter as well.
+
+### Step 4a — the anti-aliasing levels and the centroid
+
+Point 5 of the brief: "check the `wgpu` backend honours them as the OpenGL one does, clamped to
+what the adapter supports, with the screen passes resolving correctly under MSAA as in the OpenGL
+backend." Checked, and one thing was missing.
+
+#### What was already right
+
+The MSAA machinery of the `wgpu` backend predates this lot and is correct:
+`geometry::clamp_anti_alias_samples` is the shared helper both backends call, `ensure_linear`
+allocates a multisampled colour target with the resolved one as its `resolve_target`, and
+`max_samples` clamps to what the adapter reports. Measured, every backend grants the same count:
+
+| `video.anti_alias` | means | OpenGL | Vulkan | DX12 |
+|---|---|---|---|---|
+| 0 | no anti-aliasing | 1 | **1** | **1** |
+| 1 | MSAA 4x | 4 | **4** | **4** |
+| 2 | MSAA 8x | 8 | **8** | **8** |
+
+#### What was missing: AMD-058's centroid interpolation
+
+`gl/shaders.rs` has a `centroid` axis of its own (REQ-SCN-065, AMD-058): under MSAA, `vUv` is
+interpolated at the centroid of the samples the fragment covers. The defect AMD-058 §1 measured is
+that a fragment on the edge of a wall whose pixel *centre* falls outside the triangle gets an
+**extrapolated** `uv`, `floor()` then lands one texel past the face, and the atlas returns a
+neighbour's texel — a light line one pixel wide along every joint. The `wgpu` backend had no such
+axis, so it had the defect at both multisampled levels.
+
+WGSL can express it: `@interpolate(perspective, centroid)` (naga 29 `Sampling::Centroid`). So
+`ShaderVariant` gained a fourth field and `scene.wgsl` a `//#ifdef ZAX_CENTROID` on that one
+varying. The trigger is the **setting** and not the granted count, for the reason the OpenGL side
+states: a buffer that falls back to one sample interpolates a centroid at the pixel centre anyway.
+
+What it bought, worst scene against the OpenGL reference:
+
+| | before | after |
+|---|---|---|
+| `framing`, MSAA 4x | 99.118 % | **99.528 %** |
+| `heavy`, MSAA 4x | 99.023 % | **99.108 %** |
+| `hud`, MSAA 4x | 99.990 % | **99.997 %** |
+| the other eight scenes | ≈ 99.855 % | ≈ **99.919 %** |
+
+Every scene improved, and `framing` crossed the 99.5 % bar.
+
+**The HUD keeps the centroid.** `hud_variant` clears three bits and not this one, because
+`draw_hud` on the OpenGL side clears exactly the curvature, the grid and the pixel shadows and
+leaves the interpolation alone — AMD-058 is about reading the atlas at the right texel, which the
+HUD's own tiles need as much as the scene's. That is why `hud_variant` kept its parameter in step
+2 instead of being a constant.
+
+#### The residual is MSAA sample positions, and the proof is in the measurement
+
+`heavy` stays at 99.108 % (4x) and 98.949 % (8x). That is not a port fault, and the figure that
+settles it is this:
+
+| MSAA 4x, `heavy` | within 2 levels | max channel |
+|---|---|---|
+| **Vulkan against DX12** | **100.0000 %** | **0** |
+| Vulkan against OpenGL | 99.108 % | 223 |
+| DX12 against OpenGL | 99.108 % | 223 |
+
+The two `wgpu` APIs are **byte-identical** — at every level, on every scene — and both differ from
+OpenGL by exactly the same amount. MSAA sample positions are implementation-defined in all three
+APIs: none of OpenGL, Vulkan or DirectX 12 fixes where inside a pixel the 4 or 8 samples sit, so
+two correct implementations resolve an edge pixel to different colours, and `heavy` is 1926
+overlapping boxes, i.e. silhouette edge everywhere. There is nothing in the renderer to choose
+between the two patterns, and more samples let them diverge further — which is why 8x reads lower
+than 4x.
+
+So the multisampled rows are held to **98.5 %** against OpenGL (just under the worse of the two
+measured values) and to **99.9 %** against each other. The second is the stronger assertion and
+the one a port can actually break — it is what caught `fwidth` in step 3, and it now reads
+100.0000 % with max channel 0 at all three levels.
+
+#### What landed
+
+| Piece | What changed |
+|---|---|
+| `shaders/scene.wgsl` | `uv` under `//#ifdef ZAX_CENTROID`, with REQ-SCN-065's defect written out |
+| `wgpu_backend/renderer.rs` | `ShaderVariant.centroid`, its define and its label; the trigger in `select_bend_variant`; `hud_variant` keeps it |
+| `zax-harness/tests/parity_wgpu_tests.rs` | three tests: the granted counts, the three levels' pictures, and the two `wgpu` backends against each other |
+
+#### The OpenGL backend still did not move
+
+`git diff --name-only faced2a` over the OpenGL path is **still empty**; the four instruction counts
+are still 2231 / 1095 / 3401 / 159. `zax-render --test amd058_centroid_tests`: 10 passed, which is
+the OpenGL side of the same requirement unchanged. `render_tests` (the OpenGL goldens) and
+`render_wgpu_tests`: 3 and 2 passed.
+
+`parity_wgpu_tests`: **12 passed**. `cargo fmt --all --check` and clippy clean.
