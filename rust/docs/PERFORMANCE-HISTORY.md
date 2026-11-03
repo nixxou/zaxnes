@@ -628,6 +628,65 @@ median of 60 frames, each ended by a `finish()`)
   would have made the fill cheap. `ao.quality` and `ssr.quality` default to **Low** on a handheld
   (`ui/handheld/defaults.rs`) and to the amendment's 1 and 2 on the desktop.
 
+**The MSVO occlusion adds one format, and it is one the renderer already had** (RU-6, AMD-055
+REQ-SCN-083 *Mode MSVO*)
+- The multi-scale estimator (`gl/msvo.rs`, ported from the MIT-licensed MiniEngine) needs a fourth
+  format beside the three above: **`R16F` as a colour target**, for the four levels of its linear
+  depth pyramid. It is colour-renderable in OpenGL 3.3 core, and on GLES 3.0 through the very
+  `EXT_color_buffer_float` / `EXT_color_buffer_half_float` that already makes the `RGBA16F` of
+  `LinearColorBuffer` renderable on every frame — a driver that grants one grants the other. So
+  there is still nothing to probe and nothing to grey out, and still no probe at context creation.
+- Sixteen bits are **enough**, but only because the access of each level is stored with a factor-2
+  headroom (`style::MSVO_ACCESS_HEADROOM`). Without it, clamping the access at 1 before the
+  smoothing turns the estimator's zero-mean sampling noise into a one-sided bias that four pyramid
+  levels multiply: measured, a lone plane came out at 0.949 against the 1.00 ± 0.02 §2.4 requires,
+  and `R32F` did **not** fix it. With the headroom in, `R32F` changes no figure of §2.4 and `R16F`
+  stays.
+- **A refusal falls back one level, not all the way.** Where the three formats above are given up
+  for the whole screen-effect module, a refused pyramid gives up only the **mode**: `spl.ao` = 1
+  then renders exactly as `spl.ao` = 2, which is REQ-SCN-083's declared fallback **(D)**, with one
+  diagnostic line and no retry (`ScreenEffects::msvo_refused`).
+- **One estimator or the other is built, never both.** `spl.ao` = 2 compiles the hemisphere pass,
+  its blur and the shared composite (3 programs); `spl.ao` = 1 compiles the five of the port and the
+  same composite (6). Switching the mode releases the one that leaves, pyramid and all.
+
+**What the MSVO occlusion costs when it is on** (RU-6, AMD-055; `--bench 120 --anti-alias 0`,
+median of 120 frames, each ended by a `finish()`, `framing`)
+- The Classic baseline of this session reads 0.47 → 0.65 ms and the Depth rows re-measure RU-5's
+  within the session spread (0.86 / 0.89 / 1.71 ms at 1080p against its 0.867 / 0.871 / 1.682),
+  which is what makes the two tables comparable. Every delta below is against the baseline of
+  **this** run.
+
+  | Effect | 720p | 1080p | passes | target bytes, 720p / 1080p |
+  |---|---|---|---|---|
+  | occlusion Depth, `ao.quality` Low | +0.15 ms | +0.21 ms | 3 | 460 800 / 1 036 800 |
+  | occlusion Depth, `ao.quality` Medium | +0.12 ms | +0.24 ms | 3 | 460 800 / 1 036 800 |
+  | occlusion Depth, `ao.quality` High | +0.45 ms | +1.06 ms | 3 | 1 843 200 / 4 147 200 |
+  | occlusion **MSVO**, `ao.quality` Low | +0.20 ms | **+0.49 ms** | 20 | 1 526 400 / **3 434 160** |
+  | occlusion **MSVO**, `ao.quality` Medium | +0.41 ms | **+0.64 ms** | 20 | 1 526 400 / **3 434 160** |
+  | occlusion **MSVO**, `ao.quality` High | +1.00 ms | **+2.74 ms** | 20 | 6 105 600 / **13 737 600** |
+
+- **MSVO costs 2.3 to 2.7 times Depth** at the same rung, and the pass column says why: twenty
+  full-screen passes against three — one linearise, three decimations, four occlusions, eight
+  smoothings and three upsamples. Only the four occlusion passes sample; the other sixteen are
+  cheap, and together they are the factor.
+- **The memory is exactly 3.31 times Depth's at every rung**, and derivable: four levels, each one
+  `R16F` depth plus two or three `R8` occlusion targets, at `finest >> level`. At 1080p that is
+  3.28 MiB at Low and Medium and **13.1 MiB** at High, against 0.99 and 3.96. On a 1 GB handheld
+  only the first figure is in reach, and `spl.ao` = 0 is the console default.
+- The rungs: Low and Medium are both at **half** resolution and differ only by the sample pattern
+  (four checkerboard pairs against seven), so they are 1.3 apart at 1080p; High is the same chain at
+  full resolution and costs ×4.3 of Medium, the ratio the pixel count predicts. **Medium is the
+  rung to offer**, as it is for Depth. The number of *scales* stays 4 at every rung (`Q-097`): the
+  coarsest level carries the wide half of a multi-scale estimate, and dropping it at Low gives a
+  lighter effect, not a cheaper one.
+- Worth knowing when reading a capture: on `framing` — 1798 separate tile boxes with the lateral
+  walls of REQ-E3D-501 at every joint — the **Depth** estimator changes not one pixel while MSVO
+  darkens 10.7 % of the frame by at least one sRGB level and 22 pixels by four, with a frame mean of
+  0.22 levels and no banding. The hemisphere estimator tests the rise above a reconstructed tangent
+  plane, which a one-unit joint step between coplanar faces does not pass; the sphere test of the
+  multi-scale one registers it at its finest level.
+
 **The curved Zapper aim runs on a change, not per frame** (RU-4a, AMD-043 REQ-INP-124)
 - REQ-INP-061 refreshes the Zapper once per displayed frame and must keep doing so, so the march
   of the inverse is guarded by a memo of its inputs (`AimInputs`: the pointer, the target size,

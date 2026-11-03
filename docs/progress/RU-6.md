@@ -22,8 +22,10 @@ Build directory: `rust/target-ro`. `CARGO_TARGET_DIR=<impl>/rust/target-ro`,
 | 2 | The MSVO pass: the module, the resources, the lifecycle, the whole chain, the mode switched on, and the invariants of §2.4 in it | done — `d9bd07a` |
 | 3 | The handheld and the GLES side: the defaults, the console page, the capability finding, Q-104 | done — `b3b3687` |
 | 4 | The comparisons with the figures of the .NET lots and of Q-100 | done — `07247cc` |
-| 5 | The cost of the pass at 1080p, per quality, beside Depth's | done — this commit |
-| 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-100 appendix, fmt, clippy, full tests, release build | todo |
+| 5 | The cost of the pass at 1080p, per quality, beside Depth's | done — `c2cc565` |
+| 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-100 appendix, fmt, clippy, full tests, release build | done — this commit |
+
+**The lot is closed.** What is left is R0's and is listed under "What is left for R0" at the end.
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
 lot).
@@ -601,3 +603,62 @@ at all: they give the same 0,2-to-0,3-level whisper, Low the noisiest of the thr
 
 The brief and `CLAUDE.md` both forbid one. What this step ran is 14 benches of 120 frames — seven
 configurations at each of two sizes — plus the 1080p byte probe, and nothing was repeated.
+
+### Step 6 — closing
+
+| Closing item | What was done |
+|---|---|
+| the spec copy | AMD-055 and Q-095 … Q-100 were **already** in `impl/docs/spec/changes/` and byte identical to `spec/changes/` (RU-5 copied them). The port implements no new amendment text, so the only copy this lot owes is the Q-100 appendix below. No SPEC chapter edit follows from it: REQ-SCN-083 already describes the mode, its parameters, its invariants and its fallback, and nothing of that text changes. |
+| the Q-100 appendix | appended to `spec/changes/Q-100.md` and copied to `impl/docs/spec/changes/Q-100.md`, **without touching a line of the earlier text**: what the Rust port does differently, the two scenes' figures beside the .NET's, and the three ratios the ticket is written in. Its conclusion: hypothesis 1 still holds with a residual 1,7 to 1,8 times smaller, and `MSVO_SHARE` is not retouched. |
+| `PERFORMANCE-HISTORY.md` | two new blocks in §5.4, beside RU-5's: the `R16F` finding and the per-rung cost and memory table, with the note that a refusal falls back one level (the mode) rather than all the way (the module). |
+| `THIRD-PARTY-NOTICES.md` | the MiniEngine entry with the MIT licence in full (step 2) — which is how the three packaging scripts already carry every third-party licence, so no script changed. |
+| `third_party/README.md` | **already** carries the MiniEngine-SSAO entry with its origin, licence, clean-room status and usage rules. It is what RU-5 looked for under `impl/` and did not find; nothing to add. |
+| no new Q ticket | nothing in the amendment had to be guessed. The three sampling choices of step 2 are inside what §2.4 leaves free in so many words ("la loi de pondération et d'atténuation … le rayon et le seuil du lissage … le motif PEUT varier par pixel"), and the residual width gap already has its ticket. The next free number stays Q-109. |
+
+#### The final state
+
+- `cargo fmt --all --check`: clean.
+- `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings`: clean. Also
+  clean with `--features wgpu` on `zax-render` (step 3).
+- `cargo test --release --workspace --features zax-app/bundled`: **2494 passed, 0 failed**, 84
+  ignored (RO-5 left 2482). The three `*_tmp.rs` scratch probes were moved out of
+  `crates/zax-render/tests/` for the run so that the count is the committed suite, and put back
+  afterwards; they are **never staged**, as the brief requires.
+- **The twelve files of the synthetic render are byte identical to `f5a5be9`'s**, at
+  `--anti-alias 0` and at the default anti-aliasing (step 2).
+- **The four instruction counts**, measured with the same script over both columns:
+
+| Symbol | `f5a5be9` | RU-6 |
+|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | **1095** |
+| `SceneRenderer::render_scene` | 3411 | **3401** |
+| `Construction::segment` | 159 | **159** |
+
+- The release executable of this commit's tree is `rust/target-ro/release/zaxnes.exe`.
+- No setting was added, removed or moved; `goldens/lua-api.txt` is untouched, as are the desktop
+  and handheld option goldens — the lot changes what `spl.ao` = 1 **renders**, not what any
+  surface exposes.
+
+#### What is left for R0
+
+1. The **absolute columns** of the close-up A and of the kerb scene at 1920 × 1080 with the
+   criterion's own geometry: the floor turned by `rot = (90, 0, 0)` and the custom texture in the
+   direct RGB format (188, 188, 188), which the synthetic fixture cannot make — the same limit
+   RU-5 recorded for the voxel grid's close-up G and for the pixel shadows' sRGB column. What is
+   confirmed on this side is every **ratio** of §2.4, which is what the invariants are written in.
+2. The two **review criteria** of §2.4 in the MSVO mode: "Super Mario Bros." 1-1 at the defaults —
+   the foot of the bushes, hills and blocks visibly darkened without going black, the sky and the
+   HUD unchanged — and the close-up A's progressive, contour-free, band-free, still-camera-stable
+   darkening. No commercial ROM is on this side.
+3. The **reference figures of Q-095 and Q-100** on "Punch-Out!!" (frame 1499, the built-in profile)
+   and on "Super Mario Bros." 1-1 (frame 419) in the MSVO mode: zone and mean darkening against the
+   reference's 32,2 % / 7,1. The Rust appendix of Q-100 records what the two synthetic scenes give
+   and why the absolute columns of a different fixture cannot stand in.
+4. A check on a **real GLES 3.0 device** that `R16F` is granted as a colour target. The argument
+   that it is wherever `RGBA16F` is holds for every driver this side can reason about, and the
+   fallback is tested — but by injection, since no driver here refuses it.
+5. The **callgrind** instruction counts the brief's gate is written in. Nothing new runs in a
+   Classic frame or in an Enhanced frame with `spl.ao` = 0: the mode lives entirely inside
+   `run_screen_effects`, which RU-5 took out of line, and `render_scene` is ten instructions
+   smaller than at the head of the branch.

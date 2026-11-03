@@ -169,7 +169,14 @@ fn q_104_the_wgpu_backend_carries_nothing_of_the_enhanced_style_yet() {
         // `msvo` joined the list with RU-6, which ported the multi-scale occlusion of
         // REQ-SCN-083's *Mode MSVO* into the OpenGL backend and left this one drawing Classic:
         // the gap Q-104 records is the same gap, one effect wider.
-        for name in ["voxel", "pixel_shadow", "occlusion", "reflect", "ssr", "msvo"] {
+        for name in [
+            "voxel",
+            "pixel_shadow",
+            "occlusion",
+            "reflect",
+            "ssr",
+            "msvo",
+        ] {
             assert!(
                 !source.to_ascii_lowercase().contains(name),
                 "the wgpu shaders mention '{name}': the Enhanced style is being ported, so \
