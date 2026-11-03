@@ -21,8 +21,8 @@ Build directory: `rust/target-ro`. `CARGO_TARGET_DIR=<impl>/rust/target-ro`,
 | 1 | Map: the .NET lots read, the requirement map, the test plan, the "before" figures | done — `1e0d8cf` |
 | 2 | The MSVO pass: the module, the resources, the lifecycle, the whole chain, the mode switched on, and the invariants of §2.4 in it | done — `d9bd07a` |
 | 3 | The handheld and the GLES side: the defaults, the console page, the capability finding, Q-104 | done — `b3b3687` |
-| 4 | The comparisons with the figures of the .NET lots and of Q-100 | done — this commit |
-| 5 | The cost of the pass at 1080p, per quality, beside Depth's | todo |
+| 4 | The comparisons with the figures of the .NET lots and of Q-100 | done — `07247cc` |
+| 5 | The cost of the pass at 1080p, per quality, beside Depth's | done — this commit |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-100 appendix, fmt, clippy, full tests, release build | todo |
 
 The hash of a step is written in the commit of the step that follows (no amend, protocol of this
@@ -534,3 +534,70 @@ caught by a test whose numbers are already public in V2-25.
 
 `cargo test --release -p zax-render --test amd055_msvo_tests`: 10 passed. `cargo fmt --all --check`
 and `cargo clippy -p zax-render --all-targets -- -D warnings` clean.
+
+### Step 5 — what the pass costs, beside Depth's
+
+Method, RU-5 step 8's unchanged so that the two tables can be read together:
+`zax-harness render --frames synthetic:framing --anti-alias 0 --bench 120`, median of 120 frames
+after the warm-up, each frame ended by a `finish()` so the median is wall time for a whole frame.
+`framing` because a screen-space pass costs **fill**: 1798 draws of front-facing tiles fill the
+view, and the scene only decides what is in front of the pass. The baselines are re-measured in the
+same session. The byte counts are `RenderStatistics::screen_effect_bytes`, read off the renderer.
+
+| Configuration | 1280 × 720 | 1920 × 1080 | passes | programs | bytes at 720p / 1080p |
+|---|---|---|---|---|---|
+| Classic | 0,47 ms | 0,65 ms | 0 | 0 | 0 / 0 |
+| Depth, `ao.quality` Low | 0,62 (+0,15) | 0,86 (+0,21) | 3 | 3 | 460 800 / 1 036 800 |
+| Depth, `ao.quality` Medium | 0,59 (+0,12) | 0,89 (+0,24) | 3 | 3 | 460 800 / 1 036 800 |
+| Depth, `ao.quality` High | 0,92 (+0,45) | 1,71 (+1,06) | 3 | 3 | 1 843 200 / 4 147 200 |
+| **MSVO**, `ao.quality` Low | 0,67 (+0,20) | **1,14 (+0,49)** | 20 | 6 | 1 526 400 / **3 434 160** |
+| **MSVO**, `ao.quality` Medium | 0,88 (+0,41) | **1,29 (+0,64)** | 20 | 6 | 1 526 400 / **3 434 160** |
+| **MSVO**, `ao.quality` High | 1,47 (+1,00) | **3,39 (+2,74)** | 20 | 6 | 6 105 600 / **13 737 600** |
+
+#### How to read them
+
+- **The Depth column re-measures RU-5's step 8 almost exactly** — 0,86 / 0,89 / 1,71 ms at 1080p
+  against the 0,867 / 0,871 / 1,682 it recorded — which is the check that the method and the
+  machine are the same and that the two columns of this table are comparable. The Classic baseline
+  reads 0,65 against RU-5's 0,572, a session difference of the kind that lot's notes warn about,
+  and it is why every delta here is taken against the baseline measured in **this** run.
+- **MSVO costs 2,3 to 2,7 times what Depth costs** at the same rung: +0,49 / +0,64 / +2,74 ms at
+  1080p against +0,21 / +0,24 / +1,06. The reason is in the pass column — **20 full-screen passes
+  against 3** — and the structure of the ratio tells which ones: one linearise, three decimations,
+  four occlusions, eight smoothings and three upsamples. Only the four occlusion passes do real
+  sampling work; the other sixteen are cheap, and together they are what the factor buys.
+- **The quality rungs behave as the design says.** Low and Medium are both at half resolution and
+  differ only by the sample pattern (four checkerboard pairs against seven), so their delta ratio
+  is 1,3 at 1080p — the pattern is a third of the work, not all of it. High is the same chain at
+  **full** resolution and costs 4,3 times Medium, close to the 4 the pixel count predicts, which is
+  the same shape RU-5 measured for Depth (3,5 at 1080p).
+- **The memory is exactly 3,31 times Depth's at every rung**, and derivable: the pyramid is four
+  levels, each holding one `R16F` depth and two or three `R8` occlusion targets, at
+  `finest >> level` — so `5 × (1 + 1/4 + 1/16) + 4/64` texel-bytes per finest texel against the
+  two `R8` of the Depth estimator. At 1080p that is **3,28 MiB** at Low and Medium and
+  **13,1 MiB** at High, against 0,99 and 3,96. For a 1 GB handheld the figure that matters is the
+  first, and the console default keeps the occlusion off (step 3).
+- **Medium is the rung to offer**, as it is for Depth: it costs a third more than Low at 1080p and
+  gives the full checkerboard, where High triples the time and quadruples the memory.
+
+#### An aside the table turned up: the two estimators see different scenes
+
+On `framing` — 1798 **separate tile boxes** filling the view, with the lateral walls of
+REQ-E3D-501 at every joint — the Depth estimator changes **not one pixel** (the capture is byte
+identical to Classic's at all three qualities) while MSVO darkens 10,7 % of the frame by at least
+one sRGB level, 4,6 % by two, and 22 pixels by four; the mean over the frame is 0,22 levels and the
+maximum **5**. No pixel moves by the 12 the "zone" measure of Q-095 counts, and the row and column
+means across the field are smooth (0,24 to 0,42) with no alternation — so this is a soft
+darkening at the joints and not a banding.
+
+It is the mode doing what §2.4 says it is for ("un contact fin **et** un assombrissement large"):
+the hemisphere estimator reconstructs a normal and tests the rise above the tangent plane, which a
+one-unit joint step between two coplanar tile faces does not pass; the sphere test of the
+multi-scale estimator registers it at its finest level. Worth recording because it is also the
+honest answer to "do the three qualities give the same general aspect" on a scene with no contact
+at all: they give the same 0,2-to-0,3-level whisper, Low the noisiest of the three.
+
+#### No long or repeated GPU campaign
+
+The brief and `CLAUDE.md` both forbid one. What this step ran is 14 benches of 120 frames — seven
+configurations at each of two sizes — plus the 1080p byte probe, and nothing was repeated.
