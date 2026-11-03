@@ -17,8 +17,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 | # | Step | State |
 |---|---|---|
 | 1 | The map of what each part touches, and the test plan | done — `31d5aae` |
-| 2 | The RetroAchievements menu move (part 1) | in progress |
-| 3 | The new per-game rows: the data, the desktop menu, the console page (part 2) | todo |
+| 2 | The RetroAchievements menu move (part 1) | done — `6eb88e6` |
+| 3 | The new per-game rows: the data, the desktop menu, the console page (part 2) | in progress |
 | 4 | The Lua curvature rounding (part 3) | todo |
 | 5 | `Setting.Msaa` drives the anti-aliasing (part 4) | todo |
 | 6 | Closing: the notes, the Q-107 appendix, fmt, clippy, the full tests, the release build | todo |
@@ -192,6 +192,115 @@ and `key_config_window_tests` cover the new command's texts and its row for free
 
 715 tests pass in `zax-app`, `cargo fmt --check` and `cargo clippy -p zax-app --all-targets` are
 clean.
+
+### Step 3 — the fourteen new per-game rows
+
+The fourteen settings, in the order the console page lists them:
+
+| Group (desktop) | Rows |
+|---|---|
+| at the level of the sixteen | `emu.run_ahead`, `video.anti_alias`, `video.max_queued_frames` |
+| *3D rendering* submenu | `render.visual_style`, `render.style.voxel_grid`, `render.style.pixel_shadow`, `render.style.ao`, `render.style.reflections`, `render.backdrop_lighting` |
+| *Geometry* submenu of it | `scene.bend_lr`, `scene.bend_tb`, `scene.arc_h`, `scene.arc_center`, `scene.bend_2d_mode` |
+
+The labels are the settings' own, so the rows read "Anti Alias: Use Global : FFAA" exactly as the
+sixteen read "Shadows: Use Global : enabled". The *3D rendering* and *Geometry* titles are the
+window's own `TAB_RENDER_3D` and `GROUP_GEOMETRY` — the five curvature settings are the
+*Geometry* group of the window too, so the two places agree without a new string.
+
+#### What the existing structure gave for free
+
+`OptionRow::Setting(SettingId)` already existed for the console's global advanced page, with
+`options::label`, `options::value_text` and `options::step_row` routed to `advanced::label /
+value_text / step`. So **no widget code was written**: a new row is a line in a table. Two things
+had to be taught:
+
+- `row_settings` answers `&[id]` for the fourteen, through a `one_setting(id)` match of
+  one-element `'static` slices. A `Setting` row that is *not* one of the fourteen — the
+  fifty-six of the global page come through the same variant — answers `&[]`, so it can never
+  become an option of a game. A test checks both halves of that.
+- `normalise` and `is_game_row_setting` walk `all_game_rows()` = `GAME_ROWS` then
+  `GAME_ADVANCED_ROWS`, instead of `GAME_ROWS` alone.
+
+`GameOptionsModel::walk`'s `LIMIT` went from 24 to 48. A curvature angle has 23 rungs since RO-1,
+so 24 was *exactly* the length of the longest list: one rung more and the last would have been
+dropped in silence. No existing row has more than 11 values, so nothing else changed.
+
+#### The console: a page of the game's options
+
+`GameOptionsModel` gained `page: Option<usize>` — the row of the main screen to come back to —
+exactly as `HandheldOptionsModel` holds its two pages. Its API: `in_advanced`, `page_rows`,
+`row_count`, and `selected_row` is now public and answers the page's row or the main screen's.
+The main screen is 20 rows where it was 19:
+
+| Index | Row |
+|---|---|
+| 0 | "Put everything back to global" |
+| 1 … 16 | the sixteen of `GAME_ROWS`, untouched and in the same order |
+| 17 | **Advanced options** (new) — `>`, in the colour of a game's own value when one of the fourteen holds one |
+| 18 | the widescreen |
+| 19 | the hacks |
+
+On the page: Left/Right/A step the row, Up/Down wrap round the **page**, X still puts every
+option of the game back without leaving the page, B comes back to row 17. `select(index)` leaves
+the page, which is what the widescreen hold needs when it re-reads the options and selects
+`WIDESCREEN_ROW`.
+
+That is the brief's "same advanced-option treatment as their global counterparts", read from the
+code rather than from the label: all fourteen are rows of `advanced::ROW_SETTINGS`, the console's
+global advanced page, and none is on its main page, its touch page or its Optimizations page. A
+test asserts exactly that, so the two pages cannot drift apart.
+
+#### The desktop menu
+
+`draw_game_rows(ui, host, model, rows, id_base)` draws any group; `draw_game_advanced` calls it
+three times, the last two inside submenus. `id_base` (0, 100, 200, 300) keeps a row of one group
+apart from a row of another at the same level of the menu whatever their labels — ImGui would
+have hashed the labels and got away with it today, but not if two groups ever showed the same
+text.
+
+Q-103: the run-ahead row of the menu shows `ui::options::forced_run_ahead_note` above its values
+while the game in play forces the effective value to 0, and the console page shows the shorter
+`handheld::options::forced_run_ahead_note` beside the value, which is what the global page
+already did. The guard itself was not touched: it lives where the loop reads the effective value,
+so a per-game run-ahead goes through it like a preference.
+
+#### The sub-parameters, and what a game cannot set
+
+Kept global, as step 1 decided and for the reasons written there. Also still global, because the
+brief does not list them: the SSR and AO gradations, the mesh algorithm, the skybox, the light,
+the camera and the overscan globals (`EXCLUDED`).
+
+#### Tests
+
+`game_options.rs` unit tests: the three desktop groups concatenate to `GAME_ADVANCED_ROWS`, each
+row names exactly one setting, no setting is a row twice, none overlaps the sixteen, and a
+`Setting` row this lot did not add names nothing
+(`ro_2_the_desktop_groups_are_the_advanced_rows_and_nothing_else`); every one of the fourteen
+stores its own value, "Use Global" takes it back and "Put everything back to global" clears all
+fourteen at once (`ro_2_every_new_row_stores_its_own_value_and_goes_back_to_global`); the page
+opens, steps, X resets from inside it and B comes back
+(`ro_2_the_advanced_page_of_a_game_opens_steps_and_goes_back`); a curvature row of a game offers
+the 23 rungs of RO-1 and not the 13 of AMD-043; the main screen kept its rows and its indices.
+
+`zax-settings::game_config::ro_2_the_new_options_of_a_game_survive_a_restart`: all fourteen
+written to `games.json` and read back, including a 15° rung the 30° grid has not got. One thing
+the test found: `scene.bend_2d_mode` is a **switch** (AMD-046 REQ-SCN-074), not a number, and
+`json::to_json` rightly drops an `Int` written for it — the test says `Bool`.
+
+`handheld_ui_tests::ro_2_the_advanced_options_of_a_game_are_a_page_of_their_own`: the whole path
+over a real host — the row, the page, a value set on the anti-aliasing row, the preference left
+alone, the value in force while the game plays, the global value back at its end, and the value
+still written down afterwards. `HandheldUi::game_options()` was added for it, beside the existing
+`hacks()`.
+
+`desktop_options_golden_tests::ro_2_the_new_per_game_rows_change_no_global_page`: none of the
+fourteen joined a global console page, every one is still shown by the options window (so "Use
+Global" has a global value to point at) and is a row of the console's global advanced page, and
+the desktop grouping is the same fourteen.
+
+`zax-app` and `zax-settings` pass with 0 failures; `cargo fmt --check` and
+`cargo clippy --workspace --all-targets` are clean.
 
 ### Step 1 — what may not change
 

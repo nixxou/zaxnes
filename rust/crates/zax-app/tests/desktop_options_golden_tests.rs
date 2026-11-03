@@ -576,6 +576,46 @@ fn ro_1_the_handheld_option_pages_are_unchanged() {
     );
 }
 
+/// RO-2 part 2: the fourteen per-game rows the lot added are rows of the options of a **game**,
+/// not of the console's global pages nor of the desktop window. Neither of those may have gained
+/// or lost anything, and every one of the fourteen must be a setting the window still shows (so
+/// that "Use Global" has a global value to point at) and a row of the console's global advanced
+/// page (which is what settles that the game's copy belongs on a page of its own too).
+#[test]
+fn ro_2_the_new_per_game_rows_change_no_global_page() {
+    use zax_app::ui::handheld::game_options::{self, GAME_ADVANCED_ROWS};
+    use zax_app::ui::handheld::options::{OptionRow, OPTIMIZATION_ROWS, ROWS, TOUCH_ROWS};
+
+    for row in GAME_ADVANCED_ROWS {
+        let OptionRow::Setting(id) = row else {
+            panic!("{row:?} is not a setting row");
+        };
+        assert!(
+            advanced::ROW_SETTINGS.contains(&id),
+            "{} is not on the console's global advanced page",
+            id.key()
+        );
+        assert!(
+            options::is_shown(catalogue::descriptor(id)),
+            "{} is not shown by the options window",
+            id.key()
+        );
+        // None of them joined a global console page.
+        assert!(!ROWS.contains(&row), "{row:?}");
+        assert!(!TOUCH_ROWS.contains(&row), "{row:?}");
+        assert!(!OPTIMIZATION_ROWS.contains(&row), "{row:?}");
+    }
+
+    // The desktop menu draws the same fourteen as the console's page of a game, grouped.
+    let grouped: Vec<OptionRow> = game_options::GAME_DISPLAY_ROWS
+        .into_iter()
+        .chain(game_options::GAME_3D_ROWS)
+        .chain(game_options::GAME_CURVATURE_ROWS)
+        .collect();
+    assert_eq!(GAME_ADVANCED_ROWS.to_vec(), grouped);
+    assert_eq!(14, GAME_ADVANCED_ROWS.len());
+}
+
 /// The inventory of step 1, printed rather than asserted: run with `--nocapture` to read the
 /// layout the window has now (tab, order, group). It is what the table of the progress file and
 /// the old-tab column of `docs/options-layout-divergence.md` are built from.

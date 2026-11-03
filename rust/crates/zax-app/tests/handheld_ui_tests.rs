@@ -589,6 +589,89 @@ fn the_game_options_keep_the_hacks_of_the_game() {
     assert_eq!(vec![widescreen], harness.host.game_options(&rom));
 }
 
+/// RO-2 part 2: the advanced options of a game, on the console. Their row is after the sixteen
+/// economical ones, it opens a page of fourteen, a value set there is the game's own, it is in
+/// force while the game plays, the end of the game gives the global value back, and it comes
+/// back after a restart out of `games.json`.
+#[test]
+fn ro_2_the_advanced_options_of_a_game_are_a_page_of_their_own() {
+    use zax_app::ui::handheld::game_options::{GameOptionsModel, GAME_ADVANCED_ROWS};
+    use zax_app::ui::handheld::options::OptionRow;
+
+    let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
+    let rom = harness.root.path().join("roms").join("Game.nes");
+    let rom = rom.to_string_lossy().into_owned();
+    let global = harness.host.settings().get(SettingId::VideoAntiAlias);
+
+    tap(&mut harness, &mut handheld, PadButton::Select);
+    assert_eq!(Screen::GameOptions, handheld.screen());
+    for _ in 0..GameOptionsModel::ADVANCED_ROW {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    let options = handheld.game_options().expect("the game's options");
+    assert!(!options.in_advanced());
+    assert_eq!(GameOptionsModel::ADVANCED_ROW, options.selected_index());
+
+    // The row opens the page, whose first row is the run-ahead.
+    tap(&mut harness, &mut handheld, PadButton::A);
+    let options = handheld.game_options().expect("the game's options");
+    assert!(options.in_advanced());
+    assert_eq!(GAME_ADVANCED_ROWS.len(), options.row_count());
+    assert_eq!(
+        Some(OptionRow::Setting(SettingId::EmuRunAhead)),
+        options.selected_row()
+    );
+
+    // The anti-aliasing is the second row; stepping it keeps the game's own value and leaves
+    // the preference alone.
+    tap(&mut harness, &mut handheld, PadButton::Down);
+    tap(&mut harness, &mut handheld, PadButton::A);
+    let own = harness.host.game_options(&rom);
+    assert_eq!(1, own.len(), "{own:?}");
+    assert_eq!(SettingId::VideoAntiAlias, own[0].0);
+    assert_ne!(global.as_int(), own[0].1.as_int());
+    assert_eq!(
+        global,
+        harness.host.settings().get(SettingId::VideoAntiAlias),
+        "the global value stays"
+    );
+
+    // B leaves the page for the row that opened it, B again the screen.
+    tap(&mut harness, &mut handheld, PadButton::B);
+    let options = handheld.game_options().expect("the game's options");
+    assert!(!options.in_advanced());
+    assert_eq!(GameOptionsModel::ADVANCED_ROW, options.selected_index());
+    tap(&mut harness, &mut handheld, PadButton::B);
+    assert_eq!(Screen::Home, handheld.screen());
+
+    // The game plays with it, and the end of the game gives the global value back.
+    tap(&mut harness, &mut handheld, PadButton::A);
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::InGame, handheld.screen());
+    assert_eq!(
+        own[0].1.as_int(),
+        harness
+            .host
+            .settings()
+            .get(SettingId::VideoAntiAlias)
+            .as_int()
+    );
+    tap(&mut harness, &mut handheld, PadButton::Menu);
+    for _ in 0..8 {
+        tap(&mut harness, &mut handheld, PadButton::Down);
+    }
+    tap(&mut harness, &mut handheld, PadButton::A); // quit to the ROM list
+    press(&mut harness, &mut handheld, &[]);
+    assert_eq!(Screen::Home, handheld.screen());
+    assert_eq!(
+        global,
+        harness.host.settings().get(SettingId::VideoAntiAlias)
+    );
+
+    // And it is still written down: a restart reads it back out of `games.json`.
+    assert_eq!(own, harness.host.game_options(&rom));
+}
+
 /// A version of a game a widescreen hack is made for another ROM of (here by its name): a dark
 /// grey [W] while the ROM was not studied, then L2 opens its widescreen and hacks, which study it:
 /// no hack fits, the [W] turns red and nothing changes in the game's options.

@@ -11,7 +11,7 @@ use zax_settings::catalogue::SettingId;
 
 use super::achievements::{AchievementsRow, SpecialKey, SPECIAL_KEYS};
 use super::compat::Tone;
-use super::game_options::{GameOptionsModel, GAME_ROWS};
+use super::game_options::{GameOptionsModel, GAME_ADVANCED_ROWS, GAME_ROWS};
 use super::layout::{self, Hint, Metrics};
 use super::options;
 use super::overlay::OverlayItem;
@@ -446,7 +446,7 @@ impl HandheldUi {
         self.follow_the_state_picture(frame.host);
         match self.screen {
             Screen::Home => self.draw_home(ui, frame),
-            Screen::GameOptions => self.draw_game_options(ui),
+            Screen::GameOptions => self.draw_game_options(ui, frame),
             Screen::Hacks => self.draw_hacks(ui),
             Screen::Profiles => self.draw_profiles(ui),
             Screen::Options => self.draw_options(ui, frame),
@@ -595,7 +595,7 @@ impl HandheldUi {
         painter.hint_entries(&hints);
     }
 
-    fn draw_game_options(&self, ui: &Ui) {
+    fn draw_game_options(&self, ui: &Ui, frame: &UiFrame<'_>) {
         let (Some(_window), Some(options)) = (
             full_screen(ui, "##game-options", BACKGROUND),
             &self.game_options,
@@ -607,9 +607,41 @@ impl HandheldUi {
             &strings::get(keys::HANDHELD_GAME_OPTIONS_TITLE),
             &[options.name()],
         );
-        painter.title(&title, "");
         let rows = self.metrics.visible_rows(painter.size[1]);
         let selected = options.selected_index();
+        // RO-2 part 2: the advanced options of the game are a page of their own, as the global
+        // ones are a page of the console's options. Every row of it is a value row.
+        if let Some(page) = options.page_rows() {
+            painter.title(&title, &strings::get(keys::HANDHELD_OPTION_ADVANCED));
+            // Q-103, read once for the page, as the console's global advanced page does.
+            let run_ahead_forced = frame
+                .host
+                .session()
+                .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
+            let first = first_visible(selected, rows, page.len());
+            for (slot, (index, row)) in page.iter().enumerate().skip(first).take(rows).enumerate() {
+                let own = options.is_own(*row);
+                let colour = match (own, index == selected) {
+                    (true, true) => GAME_OWN_ON_FOCUS,
+                    (true, false) => GAME_OWN,
+                    (false, _) => DIM,
+                };
+                let shown = format!("< {} >", options.value_text(*row));
+                let shown = match options::forced_run_ahead_note(*row, run_ahead_forced) {
+                    Some(note) => format!("{shown} {note}"),
+                    None => shown,
+                };
+                painter.row(
+                    slot,
+                    index == selected,
+                    &options::label(*row),
+                    (&shown, colour),
+                );
+            }
+            painter.hints(layout::hints(Screen::GameOptions));
+            return;
+        }
+        painter.title(&title, "");
         let total = GameOptionsModel::ROW_COUNT;
         let first = first_visible(selected, rows, total);
         for (slot, index) in (0..total).skip(first).take(rows).enumerate() {
@@ -625,6 +657,23 @@ impl HandheldUi {
             }
             if index == GameOptionsModel::HACKS_ROW {
                 painter.row(slot, focused, &strings::get(keys::MENU_AIDS), (">", DIM));
+                continue;
+            }
+            // RO-2 part 2: the row that opens the game's advanced options, in the colour of a
+            // game's own value as soon as one of the fourteen holds one.
+            if index == GameOptionsModel::ADVANCED_ROW {
+                let own = GAME_ADVANCED_ROWS.iter().any(|row| options.is_own(*row));
+                let colour = match (own, focused) {
+                    (true, true) => GAME_OWN_ON_FOCUS,
+                    (true, false) => GAME_OWN,
+                    (false, _) => DIM,
+                };
+                painter.row(
+                    slot,
+                    focused,
+                    &strings::get(keys::HANDHELD_OPTION_ADVANCED),
+                    (">", colour),
+                );
                 continue;
             }
             let Some(row) = index.checked_sub(1).map(|row| GAME_ROWS[row]) else {

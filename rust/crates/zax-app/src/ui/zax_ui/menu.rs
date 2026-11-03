@@ -112,7 +112,9 @@ impl ZaxUi {
             changed = true;
         }
         ui.separator();
-        changed |= draw_game_rows(ui, host, &mut model, &GAME_ROWS);
+        changed |= draw_game_rows(ui, host, &mut model, &GAME_ROWS, 0);
+        ui.separator();
+        changed |= draw_game_advanced(ui, host, &mut model);
         ui.separator();
         self.draw_achievements_entry(ui, host);
         if changed {
@@ -124,15 +126,19 @@ impl ZaxUi {
 
 /// A submenu per row of `rows`, labelled "Name: value" as the console page labels them, with
 /// "Use Global" first and a tick on the value in force. Returns whether a value changed.
+///
+/// `id_base` keeps the identifier of a row of one group apart from the row of another group at
+/// the same level of the menu, whatever their labels.
 fn draw_game_rows(
     ui: &Ui,
     host: &AppHost,
     model: &mut GameOptionsModel,
     rows: &[options::OptionRow],
+    id_base: usize,
 ) -> bool {
     let mut changed = false;
     for (index, row) in rows.iter().enumerate() {
-        let _id = ui.push_id_usize(index);
+        let _id = ui.push_id_usize(id_base + index);
         let own = model.is_own(*row);
         let label = format!("{}: {}", options::label(*row), model.value_text(*row));
         let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
@@ -146,6 +152,18 @@ fn draw_game_rows(
         if *row == options::OptionRow::Overscan {
             changed |= draw_game_overscan(ui, model, &global);
             continue;
+        }
+        // Q-103: a profile whose scripts change the core runs at 0 whatever this row says, and
+        // the note is the only place the menu can explain it.
+        if let Some(note) = crate::ui::options::forced_run_ahead_note(
+            SettingId::EmuRunAhead,
+            *row == options::OptionRow::Setting(SettingId::EmuRunAhead)
+                && host
+                    .session()
+                    .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero),
+        ) {
+            ui.text_disabled(&note);
+            ui.separator();
         }
         let use_global = global.value_text(*row);
         if ui.menu_item_config(&use_global).selected(!own).build() {
@@ -164,6 +182,35 @@ fn draw_game_rows(
                 model.choose(*row, choice);
                 changed = true;
             }
+        }
+    }
+    changed
+}
+
+/// The fourteen rows RO-2 part 2 added, grouped so the menu stays readable (owner request): the
+/// three of `GAME_DISPLAY_ROWS` at this level, then a *3D rendering* submenu holding the style,
+/// the four Enhanced effects, the backdrop lighting and a *Geometry* submenu of the five
+/// curvature rows. Returns whether a value changed.
+fn draw_game_advanced(ui: &Ui, host: &AppHost, model: &mut GameOptionsModel) -> bool {
+    let mut changed = draw_game_rows(ui, host, model, &game_options::GAME_DISPLAY_ROWS, 100);
+    let own = game_options::GAME_3D_ROWS
+        .iter()
+        .chain(&game_options::GAME_CURVATURE_ROWS)
+        .any(|row| model.is_own(*row));
+    let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
+    let submenu = ui.begin_menu(strings::get(keys::TAB_RENDER_3D));
+    drop(colour);
+    if submenu.is_some() {
+        changed |= draw_game_rows(ui, host, model, &game_options::GAME_3D_ROWS, 200);
+        ui.separator();
+        let own = game_options::GAME_CURVATURE_ROWS
+            .iter()
+            .any(|row| model.is_own(*row));
+        let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
+        let curvature = ui.begin_menu(strings::get(keys::GROUP_GEOMETRY));
+        drop(colour);
+        if curvature.is_some() {
+            changed |= draw_game_rows(ui, host, model, &game_options::GAME_CURVATURE_ROWS, 300);
         }
     }
     changed

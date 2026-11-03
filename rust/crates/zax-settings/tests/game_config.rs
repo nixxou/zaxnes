@@ -183,3 +183,50 @@ fn the_options_of_a_game_are_remembered_per_rom() {
     assert!(second.forget_rom(rom));
     assert_eq!(0, second.options_for(rom).len());
 }
+
+/// RO-2 part 2: the fourteen settings the lot added to the options of a game survive a restart
+/// like the sixteen that were there before — `games.json` writes an option by its stable key and
+/// reads it back through the catalogue, so a new row needs nothing of its own in the format.
+#[test]
+fn ro_2_the_new_options_of_a_game_survive_a_restart() {
+    let rom = r"D:\roms\castlevania.nes";
+    let options = vec![
+        (SettingId::EmuRunAhead, SettingValue::Int(3)),
+        (SettingId::VideoAntiAlias, SettingValue::Enum(0)),
+        (SettingId::VideoMaxQueuedFrames, SettingValue::Int(1)),
+        (SettingId::RenderVisualStyle, SettingValue::Int(4)),
+        (SettingId::RenderStyleVoxelGrid, SettingValue::Int(1)),
+        (SettingId::RenderStylePixelShadow, SettingValue::Int(1)),
+        (SettingId::RenderStyleAo, SettingValue::Int(1)),
+        (SettingId::RenderStyleReflections, SettingValue::Int(1)),
+        (SettingId::RenderBackdropLighting, SettingValue::Bool(true)),
+        // A rung of the finer grid of RO-1 point 7, which the 30° grid of AMD-043 has not got.
+        (SettingId::SceneBendLr, SettingValue::Int(15)),
+        (SettingId::SceneBendTb, SettingValue::Int(-5)),
+        (SettingId::SceneArcH, SettingValue::Int(30)),
+        (SettingId::SceneArcCenter, SettingValue::Int(1)),
+        // A switch, not a number (AMD-046 REQ-SCN-074); the file keeps it as one.
+        (SettingId::SceneBend2dMode, SettingValue::Bool(false)),
+    ];
+    let mut first = GameConfigFile::new(MemoryStorage::new());
+    first.set_options_for(rom, options.clone());
+    first.save().expect("the store accepts the write");
+
+    let written = first
+        .storage()
+        .text(GameConfigFile::<MemoryStorage>::DEFAULT_NAME)
+        .expect("the file was written");
+    assert!(written.contains("scene.bend_lr"), "{written}");
+
+    let mut second = GameConfigFile::new(first.storage().clone());
+    assert_eq!(second.load(now()).status, SettingsLoadStatus::Loaded);
+    let read = second.options_for(rom);
+    assert_eq!(options.len(), read.len(), "{read:?}");
+    for (id, value) in &options {
+        let found = read
+            .iter()
+            .find(|(known, _)| known == id)
+            .map(|(_, value)| value.as_int());
+        assert_eq!(Some(value.as_int()), found, "{id:?}");
+    }
+}

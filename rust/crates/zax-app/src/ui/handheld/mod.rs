@@ -1033,6 +1033,12 @@ impl HandheldUi {
         self.hacks.as_ref()
     }
 
+    /// The options of a game, while their screen is open.
+    #[must_use]
+    pub const fn game_options(&self) -> Option<&GameOptionsModel> {
+        self.game_options.as_ref()
+    }
+
     fn open_game_options(&mut self, path: &Path, host: &AppHost) {
         let name = RomEntry::new(path.to_path_buf()).name;
         let options = host.game_options(&path.to_string_lossy());
