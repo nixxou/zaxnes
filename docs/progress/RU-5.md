@@ -16,11 +16,11 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — `1f3d8ec` |
 | 6a | REQ-SCN-084: the floor definition, on the CPU | done — `276b98a` |
 | 6b | REQ-SCN-084: the mask, the trace and the composite | done — `86a810f` |
-| 7a | REQ-UI-061 and REQ-SCN-079: the desktop "Style" group, the labels, the handheld page | done — hash in the next commit |
-| 7b | The harness options (`--style`, `--style-param`) | done — hash in the next commit |
-| 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | done — hash in the next commit |
-| 8 | The per-effect measurements | done — hash in the next commit |
-| 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | done — this commit |
+| 7a | REQ-UI-061 and REQ-SCN-079: the desktop "Style" group, the labels, the handheld page | done — `42226e9` |
+| 7b | The harness options (`--style`, `--style-param`) | done — `a282a05` |
+| 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | done — `8186f18` |
+| 8 | The per-effect measurements | done — `ec23c61` |
+| 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | done — `6f4bf27` |
 
 **The lot is closed.** What is left is R0's, and is listed step by step in the notes below;
 `Q-104 §5.3` and `Q-106` await an answer from the owner and neither blocks the lot.
