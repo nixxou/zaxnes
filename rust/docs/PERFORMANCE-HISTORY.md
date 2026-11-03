@@ -577,6 +577,57 @@ REQ-SCN-080 to REQ-SCN-084)
 - `wgpu` (Vulkan, DirectX 12): the style is read back as set and the scene is drawn in **Classic**,
   with one log line — the same gap the curvature has there, recorded in `Q-104`.
 
+**What each Enhanced effect costs when it is on** (RU-5, AMD-055; `--bench 60 --anti-alias 0`,
+median of 60 frames, each ended by a `finish()`)
+- Enhanced with **every effect off is Classic**, measured and not only asserted: 0.451 against
+  0.460 ms at 1280 × 720 and 0.529 against 0.572 at 1920 × 1080 on `framing`, 1.026 against 1.064
+  and 1.108 against 1.067 on `heavy` — inside the ±0.05 ms run-to-run spread, in three of the four
+  rows on the faster side — with **0 bytes** of targets and 0 passes submitted.
+- `framing` at 1280 × 720 → 1920 × 1080, against a Classic baseline of 0.460 → 0.572 ms:
+
+  | Effect | 720p | 1080p | target bytes, 720p / 1080p |
+  |---|---|---|---|
+  | voxel grid `N` = 4 | +0.03 ms | +0.03 ms | 0 / 0 |
+  | pixel shadows | +0.00 ms | −0.01 ms | 0 / 0 |
+  | occlusion Depth, `ao.quality` Low | +0.13 ms | +0.30 ms | 460 800 / 1 036 800 |
+  | occlusion Depth, `ao.quality` Medium | +0.15 ms | +0.30 ms | 460 800 / 1 036 800 |
+  | occlusion Depth, `ao.quality` High | +0.53 ms | +1.11 ms | 1 843 200 / 4 147 200 |
+
+- `heavy` at **45° of camera elevation**, against a Classic baseline of 1.064 → 1.067 ms. The
+  elevation is not decoration: a floor surface needs a face of pre-curvature scene normal
+  `+Y ≥ 0,9` on an instance whose `xz` box reaches 6 units in both dimensions, and at the default
+  camera the only candidates — the top faces of the deeper tile boxes — are edge-on, so **no pixel
+  is marked** and `ssr.frag` returns at its mask test. Measured without the elevation, the
+  reflections read +0.08 ms, which is the cost of one texture fetch per pixel and not a figure.
+
+  | Effect | 720p | 1080p | target bytes, 720p / 1080p |
+  |---|---|---|---|
+  | reflections, `ssr.quality` Low | +0.75 ms | +0.87 ms | 2 764 800 / 6 220 800 |
+  | reflections, `ssr.quality` Medium | +0.71 ms | +0.89 ms | 2 764 800 / 6 220 800 |
+  | reflections, `ssr.quality` High | +0.80 ms | +0.89 ms | 2 764 800 / 6 220 800 |
+  | reflections, `ssr.quality` Ultra | +0.91 ms | +1.02 ms | 8 294 400 / 18 662 400 |
+  | occlusion Depth, Medium (cross-check) | +0.11 ms | +0.30 ms | 460 800 / 1 036 800 |
+  | all four effects on | +0.89 ms | +1.15 ms | 3 225 600 / 7 257 600 |
+
+- Reading of the quality rungs, which is what the handheld options need: **Low and Medium are the
+  half-resolution rungs** of both effects and High/Ultra the full-resolution ones, and that — not
+  the sample or step count — is what moves the figures. The occlusion goes ×3.5 in time and ×4 in
+  memory from Medium to High at 1080p; the reflections barely move across Low, Medium and High
+  (the march is paid only on the marked pixels) and pay their Ultra in **memory**: 17.8 MiB at
+  1080p against 5.9.
+- The targets, exactly: the occlusion is two `R8` targets at half of each dimension (full at
+  `ao.quality` High); the reflections are one `R8` mask at the frame's own size plus one
+  `RGBA16F` trace at half of each dimension (full at `ssr.quality` Ultra).
+- The effects **add up and do not multiply**: all four on costs 1.957 ms against the 1.99 the sum
+  of the deltas predicts.
+- **Handheld**: Classic stays the default (`render.visual_style` = 0 is the setting's own default,
+  and at Classic the amendment costs nothing anywhere). The order to offer them in, on these
+  figures: the voxel grid and the pixel shadows first (no target, no pass, cost inside the
+  measurement spread **on a desktop GPU**), then the occlusion at Low, then the reflections —
+  whose mask pass is geometry re-drawn and whose march is dear on exactly the GPUs whose screens
+  would have made the fill cheap. `ao.quality` and `ssr.quality` default to **Low** on a handheld
+  (`ui/handheld/defaults.rs`) and to the amendment's 1 and 2 on the desktop.
+
 **The curved Zapper aim runs on a change, not per frame** (RU-4a, AMD-043 REQ-INP-124)
 - REQ-INP-061 refreshes the Zapper once per displayed frame and must keep doing so, so the march
   of the inverse is guarded by a memo of its inputs (`AimInputs`: the pointer, the target size,

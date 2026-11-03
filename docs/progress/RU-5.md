@@ -19,7 +19,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 7a | REQ-UI-061 and REQ-SCN-079: the desktop "Style" group, the labels, the handheld page | done — hash in the next commit |
 | 7b | The harness options (`--style`, `--style-param`) | done — hash in the next commit |
 | 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | done — hash in the next commit |
-| 8 | The per-effect measurements | todo |
+| 8 | The per-effect measurements | done — hash in the next commit |
 | 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
 
 **The checklist went from 10 steps to 9 after step 2**, so the commit of step 3 says "3/9" while
@@ -1277,7 +1277,118 @@ One clippy ceiling was hit and recorded rather than worked around: `SceneRendere
 four-bool limit, the same `allow` `Passes`, `ScenePrograms`, `SceneVariant` and `ProgramKey`
 already carry.
 
-## Where this session stopped, and what the next one picks up
+### Step 8 — what each effect costs when it is on
+
+Point 4 of the brief: each effect measured on this desktop at 1280 × 720 and 1920 × 1080, per
+quality level, in GPU time per frame and in the memory of the extra targets. **These figures are
+informative; the gate is point 1**, which steps 2 to 7 measured.
+
+Method: `zax-harness render --bench 60 --anti-alias 0`, median of 60 frames after 8 warm-up
+frames, each frame ended by a `finish()` so the median is wall time for a whole frame rather than
+a submission. Anti-aliasing off on purpose, so that what is measured is the effect and not the
+resolve. One scene per table, because a screen-space pass costs **fill** and the scene only
+decides what is in front of it. The baselines are re-measured in the same run.
+
+#### The tables
+
+**`framing`** (1798 draws, the view filled with front-facing tiles) — the three effects whose cost
+does not depend on the scene having a floor:
+
+| Configuration | 1280 × 720 | 1920 × 1080 | target bytes at 720p / 1080p |
+|---|---|---|---|
+| Classic | 0.460 ms | 0.572 ms | 0 / 0 |
+| Enhanced, every effect off | 0.451 ms | 0.529 ms | **0 / 0** |
+| voxel grid `N` = 4 | 0.489 ms | 0.604 ms | 0 / 0 |
+| pixel shadows | 0.456 ms | 0.558 ms | 0 / 0 |
+| occlusion Depth, `ao.quality` Low | 0.587 ms | 0.867 ms | 460 800 / 1 036 800 |
+| occlusion Depth, `ao.quality` Medium | 0.606 ms | 0.871 ms | 460 800 / 1 036 800 |
+| occlusion Depth, `ao.quality` High | 0.986 ms | 1.682 ms | 1 843 200 / 4 147 200 |
+
+**`heavy` at 45° of camera elevation** (3852 draws; the elevation is what makes a floor surface
+visible — see below) — the reflections, and the occlusion again as a cross-check:
+
+| Configuration | 1280 × 720 | 1920 × 1080 | target bytes at 720p / 1080p |
+|---|---|---|---|
+| Classic | 1.064 ms | 1.067 ms | 0 / 0 |
+| Enhanced, every effect off | 1.026 ms | 1.108 ms | **0 / 0** |
+| reflections, `ssr.quality` Low | 1.818 ms | 1.934 ms | 2 764 800 / 6 220 800 |
+| reflections, `ssr.quality` Medium | 1.775 ms | 1.958 ms | 2 764 800 / 6 220 800 |
+| reflections, `ssr.quality` High | 1.863 ms | 1.954 ms | 2 764 800 / 6 220 800 |
+| reflections, `ssr.quality` Ultra | 1.977 ms | 2.089 ms | 8 294 400 / 18 662 400 |
+| occlusion Depth, `ao.quality` Medium | 1.175 ms | 1.364 ms | 460 800 / 1 036 800 |
+| **all four effects on** | 1.957 ms | 2.217 ms | 3 225 600 / 7 257 600 |
+
+#### How to read them
+
+- **Enhanced with every effect off is Classic**, on both scenes and at both sizes: the two
+  readings differ by less than the run-to-run spread (it comes out *faster* in three of the four
+  rows), and the byte counts are exactly 0. That is point 2 of the brief as a time rather than as
+  a counter.
+- **The spread is about ±0.05 ms**, which is what the "all off" rows measure, so no delta under
+  that is a delta. The grid (+0.03) and the pixel shadows (+0.00 to −0.01) are **inside** it on
+  this GPU: both are per-fragment work in a variant the tile already runs, and neither allocates
+  anything. On a Mali-G31 that is not the same sentence, which is why the handheld default stays
+  off and the figures are here.
+- **The occlusion is a fill cost and it shows**: +0.13 to +0.15 ms at 720p and +0.30 ms at 1080p
+  at Low and Medium — the two half-resolution rungs — and **+0.53 / +1.11 ms** at High, which is
+  the same pass at full resolution. The ratio between High and Medium is 3.5 at 1080p, close to
+  the 4 the pixel count predicts. Low and Medium differ by 6 samples against 10 and are within the
+  spread of each other at 1080p: **Medium is the rung to offer**, and High is the one to think
+  twice about.
+- **The reflections cost about +0.8 ms at 720p and +0.87 ms at 1080p**, nearly flat across Low,
+  Medium and High, and +0.91 / +1.02 ms at Ultra. The quality rung moves the time far less than it
+  moves the *step count* (12 → 48) because the march's cost is paid only on the pixels the floor
+  mask marks, and the mask is a small part of this frame; what Ultra really changes is the
+  **resolution** of the trace, and with it the memory — 7.9 MiB at 720p and **17.8 MiB** at 1080p
+  against 2.6 and 5.9.
+- **The two effects add up and do not multiply**: all four on costs 1.957 against 1.064 + the sum
+  of their deltas (1.064 + 0.79 + 0.11 + 0.03 = 1.99). The passes are independent, as the design
+  says.
+- The memory is exact and derivable, which is what the owner needs for a 1 GB device: the
+  occlusion is **two `R8` targets** at half of each dimension (full at High), the reflections are
+  **one `R8` mask at the frame's own size** plus **one `RGBA16F` trace** at half of each dimension
+  (full at Ultra).
+
+#### The one measurement that had to be set up, and why
+
+The first run measured the reflections at **+0.08 ms**, which would have been a lie. The
+synthetic scenes are NES tiles facing the camera, and a floor surface needs a face whose
+pre-curvature scene normal has `+Y ≥ 0,9` *and* an instance whose `xz` box reaches 6 units in both
+dimensions (REQ-SCN-084). At the default camera the only candidates — the **top faces** of the
+deeper tile boxes — are edge-on, so **not one pixel is marked**, and `ssr.frag` returns at its
+mask test: what was being measured was one texture fetch per pixel.
+
+Three things had to line up for a real figure, and the search for them is worth recording:
+
+1. the scene needs a pattern of depth ≥ 6, which `framing` (depth 1) has not and `shadow`
+   (depth 8), `clip` (depth 8) and `heavy` (depth 6) have;
+2. the camera has to look **down** on it — 45° of elevation (`--angles 45,0`) — so that the top
+   faces are more than a line;
+3. `alpha`'s depth-6 pattern is **translucent**, and a transparent object is never a floor surface
+   (REQ-SCN-080's order, step 6a's third reading), so that scene stays unreflecting at any angle.
+
+Each candidate was checked by comparing the capture with and without `spl.reflections`, which is
+also a free extra reading of the fifth invariant: `shadow`, `clip` and `heavy` differ at 45° and
+all four scenes are identical to the pixel at the default camera.
+
+#### What this says about the handheld options
+
+Classic stays the handheld default, and these numbers say why: on a **desktop** GPU the two screen
+passes cost 0.3 to 1 ms of a 16.7 ms frame at 1080p, and a Mali-G31 class part has neither the
+fill rate nor the bandwidth for that — the occlusion alone reads the depth 6 to 16 times per pixel.
+What the figures do support is the shape step 7a gave the handheld defaults: the **qualities** land
+on their cheap rung there, because Low and Medium are the half-resolution ones and the step from
+Medium to High is a factor of 3.5 in time and 4 in memory.
+
+Three readings for the owner, in the order they matter on a handheld:
+
+1. the **voxel grid** and the **pixel shadows** are the two to offer first: no target, no pass, and
+   a cost inside the measurement spread on this GPU;
+2. the **occlusion at Low** is the next: 0.44 MiB at 720p and a fill cost that scales with the
+   pixel count, so it is the one effect whose cost a smaller screen really reduces;
+3. the **reflections** are the last: the mask pass is geometry re-drawn, the trace is a march, and
+   the memory is 2.6 MiB at 720p before Ultra — and the handheld screens that would make the fill
+   cheap are also the ones whose GPUs make the march dear.
 
 **Steps 1 to 6 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`, `1f3d8ec`,
 `276b98a`, `86a810f`); **steps 7 to 9 are not started.** Step 7 is the GLES
