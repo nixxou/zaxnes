@@ -316,8 +316,9 @@ fn the_options_change_the_settings_of_the_host() {
     );
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Options, handheld.screen());
-    for _ in 0..4 {
-        // show fps, camera, region, optimizations
+    // RO-3: Show FPS and the camera view left the main page for the *Advanced options* hub, so
+    // the region and the optimisations are the next two rows.
+    for _ in 0..2 {
         tap(&mut harness, &mut handheld, PadButton::Down);
     }
     // The optimizations page, on its frame cap row.
@@ -589,14 +590,14 @@ fn the_game_options_keep_the_hacks_of_the_game() {
     assert_eq!(vec![widescreen], harness.host.game_options(&rom));
 }
 
-/// RO-2 part 2: the advanced options of a game, on the console. Their row is after the sixteen
-/// economical ones, it opens a page of fourteen, a value set there is the game's own, it is in
-/// force while the game plays, the end of the game gives the global value back, and it comes
-/// back after a restart out of `games.json`.
+/// RO-3 §2: the advanced options of a game, on the console. Their row of the main screen opens
+/// the hub, the hub opens *Display*, a value set there is the game's own, it is in force while the
+/// game plays, the end of the game gives the global value back, and it comes back after a restart
+/// out of `games.json`. The row that opened each page says how many own values are under it.
 #[test]
-fn ro_2_the_advanced_options_of_a_game_are_a_page_of_their_own() {
-    use zax_app::ui::handheld::game_options::{GameOptionsModel, GAME_ADVANCED_ROWS};
-    use zax_app::ui::handheld::options::OptionRow;
+fn ro_3_the_advanced_options_of_a_game_are_a_hub_of_pages() {
+    use zax_app::ui::handheld::game_options::{GameOptionsModel, GAME_ADVANCED_HUB};
+    use zax_app::ui::handheld::options::{OptionRow, OptionsPage};
 
     let (mut harness, mut handheld) = start(&[], &["Game.nes"]);
     let rom = harness.root.path().join("roms").join("Game.nes");
@@ -611,20 +612,36 @@ fn ro_2_the_advanced_options_of_a_game_are_a_page_of_their_own() {
     let options = handheld.game_options().expect("the game's options");
     assert!(!options.in_advanced());
     assert_eq!(GameOptionsModel::ADVANCED_ROW, options.selected_index());
+    assert!(
+        options.own_count_text(OptionsPage::Advanced).is_empty(),
+        "nothing of its own yet, so the row says nothing"
+    );
 
-    // The row opens the page, whose first row is the run-ahead.
+    // The row opens the hub of four pages, whose first row opens *Display*.
     tap(&mut harness, &mut handheld, PadButton::A);
     let options = handheld.game_options().expect("the game's options");
     assert!(options.in_advanced());
-    assert_eq!(GAME_ADVANCED_ROWS.len(), options.row_count());
+    assert_eq!(GAME_ADVANCED_HUB.len(), options.row_count());
     assert_eq!(
-        Some(OptionRow::Setting(SettingId::EmuRunAhead)),
+        Some(OptionRow::Page(OptionsPage::Display)),
         options.selected_row()
     );
+    tap(&mut harness, &mut handheld, PadButton::A);
+    let options = handheld.game_options().expect("the game's options");
+    assert_eq!(
+        vec![OptionsPage::Advanced, OptionsPage::Display],
+        options.path()
+    );
 
-    // The anti-aliasing is the second row; stepping it keeps the game's own value and leaves
-    // the preference alone.
+    // The anti-aliasing is the third row of *Display*; stepping it keeps the game's own value and
+    // leaves the preference alone.
     tap(&mut harness, &mut handheld, PadButton::Down);
+    tap(&mut harness, &mut handheld, PadButton::Down);
+    let options = handheld.game_options().expect("the game's options");
+    assert_eq!(
+        Some(OptionRow::Setting(SettingId::VideoAntiAlias)),
+        options.selected_row()
+    );
     tap(&mut harness, &mut handheld, PadButton::A);
     let own = harness.host.game_options(&rom);
     assert_eq!(1, own.len(), "{own:?}");
@@ -636,11 +653,24 @@ fn ro_2_the_advanced_options_of_a_game_are_a_page_of_their_own() {
         "the global value stays"
     );
 
-    // B leaves the page for the row that opened it, B again the screen.
+    // RO-3 §2 rule 2: the pages of the path now count the one own value.
+    let options = handheld.game_options().expect("the game's options");
+    assert_eq!(1, options.own_count(OptionsPage::Advanced));
+    assert_eq!(1, options.own_count(OptionsPage::Display));
+    assert_eq!(0, options.own_count(OptionsPage::Rendering3d));
+
+    // B climbs back one page at a time, then leaves the screen.
+    tap(&mut harness, &mut handheld, PadButton::B);
+    let options = handheld.game_options().expect("the game's options");
+    assert_eq!(
+        Some(OptionRow::Page(OptionsPage::Display)),
+        options.selected_row()
+    );
     tap(&mut harness, &mut handheld, PadButton::B);
     let options = handheld.game_options().expect("the game's options");
     assert!(!options.in_advanced());
     assert_eq!(GameOptionsModel::ADVANCED_ROW, options.selected_index());
+    assert_ne!("", options.own_count_text(OptionsPage::Advanced));
     tap(&mut harness, &mut handheld, PadButton::B);
     assert_eq!(Screen::Home, handheld.screen());
 

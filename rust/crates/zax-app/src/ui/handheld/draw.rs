@@ -11,7 +11,7 @@ use zax_settings::catalogue::SettingId;
 
 use super::achievements::{AchievementsRow, SpecialKey, SPECIAL_KEYS};
 use super::compat::Tone;
-use super::game_options::{GameOptionsModel, GAME_ADVANCED_ROWS, GAME_ROWS};
+use super::game_options::{GameRow, GAME_MAIN};
 use super::layout::{self, Hint, Metrics};
 use super::options;
 use super::overlay::OverlayItem;
@@ -46,12 +46,27 @@ const FAVORITE_MARKER: &str = "*";
 /// A value a game has of its own, and the hint of the list when the game has some.
 const GAME_OWN: [f32; 4] = [0.3, 0.9, 1.0, 1.0];
 const GAME_OWN_ON_FOCUS: [f32; 4] = [0.0, 0.3, 0.4, 1.0];
+/// RO-3 §2 rule 1: what marks a row holding the game's own value rather than the global one. Drawn
+/// in [`GAME_OWN`], as a badge before the value, so that the value's own span — what a click on the
+/// desktop's console mode steps — keeps its place.
+const GAME_OWN_MARKER: &str = "*";
+/// A group title of the option tree (RO-3): dimmer than [`DIM`], which is a value.
+const GROUP_TITLE: [f32; 4] = [0.5, 0.54, 0.62, 1.0];
 /// The save state screen when it saves, and when it loads: two colours apart from each other and
 /// from the orange and red of the states that do not load as they are.
 const SAVE_ACCENT: [f32; 4] = [0.84, 0.46, 1.0, 1.0];
 const LOAD_ACCENT: [f32; 4] = [0.36, 0.68, 1.0, 1.0];
 /// A state made with the built-in patches set the other way (it loads once they are switched).
 const OTHER_MODE: [f32; 4] = [1.0, 0.62, 0.2, 1.0];
+
+/// The path of pages open over the main one, as the title band spells it out: "Advanced options >
+/// 3D rendering > Enhanced effects". Empty on the main page (RO-3).
+fn page_path(path: &[options::OptionsPage]) -> String {
+    path.iter()
+        .map(|page| strings::get(page.title_key()))
+        .collect::<Vec<_>>()
+        .join(" > ")
+}
 
 /// A few games for the screenshots of a machine with no ROM folder.
 pub(super) fn sample_roms() -> RomListModel {
@@ -233,6 +248,18 @@ impl Painter<'_> {
             .with_clip_rect_intersect([x0, top], [clip_to, top + metrics.row], || {
                 self.text(x0 + metrics.padding, y, main, left);
             });
+    }
+
+    /// A group title (RO-3): a label and nothing else, drawn smaller and dimmed. It records **no**
+    /// zone, so the mouse of the desktop's console mode cannot select what the pad cannot.
+    fn group_row(&self, slot: usize, title: &str) {
+        const SCALE: f32 = 0.8;
+        let metrics = &self.metrics;
+        let top = self.row_top(slot);
+        self.ui.set_window_font_scale(SCALE);
+        let y = top + (metrics.row - metrics.font * SCALE) * 0.6;
+        self.text(metrics.padding * 1.5, y, GROUP_TITLE, title);
+        self.ui.set_window_font_scale(1.0);
     }
 
     /// The bar of hints at the bottom.
@@ -609,96 +636,86 @@ impl HandheldUi {
         );
         let rows = self.metrics.visible_rows(painter.size[1]);
         let selected = options.selected_index();
-        // RO-2 part 2: the advanced options of the game are a page of their own, as the global
-        // ones are a page of the console's options. Every row of it is a value row.
-        if let Some(page) = options.page_rows() {
-            painter.title(&title, &strings::get(keys::HANDHELD_OPTION_ADVANCED));
-            // Q-103, read once for the page, as the console's global advanced page does.
-            let run_ahead_forced = frame
-                .host
-                .session()
-                .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
-            let first = first_visible(selected, rows, page.len());
-            for (slot, (index, row)) in page.iter().enumerate().skip(first).take(rows).enumerate() {
-                let own = options.is_own(*row);
-                let colour = match (own, index == selected) {
-                    (true, true) => GAME_OWN_ON_FOCUS,
-                    (true, false) => GAME_OWN,
-                    (false, _) => DIM,
-                };
-                let shown = format!("< {} >", options.value_text(*row));
-                let shown = match options::forced_run_ahead_note(*row, run_ahead_forced) {
-                    Some(note) => format!("{shown} {note}"),
-                    None => shown,
-                };
-                painter.row(
-                    slot,
-                    index == selected,
-                    &options::label(*row),
-                    (&shown, colour),
-                );
-            }
-            painter.hints(layout::hints(Screen::GameOptions));
-            return;
-        }
-        painter.title(&title, "");
-        let total = GameOptionsModel::ROW_COUNT;
-        let first = first_visible(selected, rows, total);
-        for (slot, index) in (0..total).skip(first).take(rows).enumerate() {
+        painter.title(&title, &page_path(&options.path()));
+        // Q-103, read once for the screen, as the console's global pages do.
+        let run_ahead_forced = frame
+            .host
+            .session()
+            .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
+        // RO-3: the game's pages are the same tree as the global ones, reduced to what a game can
+        // set. Every row of a page is an option row; the main screen has three that are not.
+        let main: Vec<GameRow> = options.page_rows().map_or_else(
+            || GAME_MAIN.to_vec(),
+            |page| page.iter().copied().map(GameRow::Option).collect(),
+        );
+        let first = first_visible(selected, rows, main.len());
+        for (slot, (index, row)) in main.iter().enumerate().skip(first).take(rows).enumerate() {
             let focused = index == selected;
-            if index == GameOptionsModel::WIDESCREEN_ROW {
-                painter.row(
-                    slot,
-                    focused,
-                    &strings::get(keys::HACK_WIDESCREEN),
-                    (&strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS), DIM),
-                );
-                continue;
-            }
-            if index == GameOptionsModel::HACKS_ROW {
-                painter.row(slot, focused, &strings::get(keys::MENU_AIDS), (">", DIM));
-                continue;
-            }
-            // RO-2 part 2: the row that opens the game's advanced options, in the colour of a
-            // game's own value as soon as one of the fourteen holds one.
-            if index == GameOptionsModel::ADVANCED_ROW {
-                let own = GAME_ADVANCED_ROWS.iter().any(|row| options.is_own(*row));
-                let colour = match (own, focused) {
-                    (true, true) => GAME_OWN_ON_FOCUS,
-                    (true, false) => GAME_OWN,
-                    (false, _) => DIM,
-                };
-                painter.row(
-                    slot,
-                    focused,
-                    &strings::get(keys::HANDHELD_OPTION_ADVANCED),
-                    (">", colour),
-                );
-                continue;
-            }
-            let Some(row) = index.checked_sub(1).map(|row| GAME_ROWS[row]) else {
-                let colour = if options.has_options() { GAME_OWN } else { DIM };
-                let colour = if focused && colour == GAME_OWN {
-                    GAME_OWN_ON_FOCUS
-                } else {
-                    colour
-                };
-                painter.row(
-                    slot,
-                    focused,
-                    &strings::get(keys::HANDHELD_GAME_OPTIONS_RESET),
-                    ("", colour),
-                );
-                continue;
-            };
-            let own = options.is_own(row);
-            let colour = match (own, focused) {
+            let own_colour = |own: bool| match (own, focused) {
                 (true, true) => GAME_OWN_ON_FOCUS,
                 (true, false) => GAME_OWN,
                 (false, _) => DIM,
             };
-            let shown = format!("< {} >", options.value_text(row));
-            painter.row(slot, focused, &options::label(row), (&shown, colour));
+            match row {
+                GameRow::ResetAll => {
+                    let colour = own_colour(options.has_options());
+                    painter.row(
+                        slot,
+                        focused,
+                        &strings::get(keys::HANDHELD_GAME_OPTIONS_RESET),
+                        ("", colour),
+                    );
+                }
+                GameRow::Widescreen => painter.row(
+                    slot,
+                    focused,
+                    &strings::get(keys::HACK_WIDESCREEN),
+                    (&strings::get(keys::HANDHELD_HOLD_FOR_SETTINGS), DIM),
+                ),
+                GameRow::Hacks => {
+                    painter.row(slot, focused, &strings::get(keys::MENU_AIDS), (">", DIM));
+                }
+                GameRow::Option(options::OptionRow::Group(key)) => {
+                    painter.group_row(slot, &strings::get(key));
+                }
+                // RO-3 §2 rule 2: a row that climbs to a page says how many values of its own the
+                // game has under it, and nothing when it has none.
+                GameRow::Option(options::OptionRow::Page(page)) => {
+                    let count = options.own_count_text(*page);
+                    let shown = if count.is_empty() {
+                        ">".to_owned()
+                    } else {
+                        format!("{count} >")
+                    };
+                    painter.row(
+                        slot,
+                        focused,
+                        &strings::get(page.title_key()),
+                        (&shown, own_colour(!count.is_empty())),
+                    );
+                }
+                GameRow::Option(row) => {
+                    let own = options.is_own(*row);
+                    let shown = format!("< {} >", options.console_value_text(*row));
+                    let shown = match options::forced_run_ahead_note(*row, run_ahead_forced) {
+                        Some(note) => format!("{shown} {note}"),
+                        None => shown,
+                    };
+                    // RO-3 §2 rule 1: the global value is dimmed, the game's own is marked.
+                    let badges: &[(&str, [f32; 4])] = if own {
+                        &[(GAME_OWN_MARKER, GAME_OWN)]
+                    } else {
+                        &[]
+                    };
+                    painter.row_badged(
+                        slot,
+                        focused,
+                        &options::label(*row),
+                        badges,
+                        (&shown, own_colour(own)),
+                    );
+                }
+            }
         }
         painter.hints(layout::hints(Screen::GameOptions));
     }
@@ -813,7 +830,9 @@ impl HandheldUi {
             return;
         };
         let painter = self.painter(ui);
-        let page = self.options.page().map_or_else(String::new, options::label);
+        // RO-3: the pages are three deep, so the title band spells the path out rather than the
+        // innermost page's name alone.
+        let page = page_path(&self.options.path());
         painter.title(&text::options_title(), &page);
         // The list scrolls with the selection when it is longer than the screen.
         let rows = self.metrics.visible_rows(painter.size[1]);
@@ -826,10 +845,14 @@ impl HandheldUi {
             .session()
             .is_some_and(crate::game_session::GameSession::forces_run_ahead_to_zero);
         for (slot, (index, row)) in list.iter().enumerate().skip(first).take(rows).enumerate() {
+            if let options::OptionRow::Group(_) = row {
+                painter.group_row(slot, &options::label(*row));
+                continue;
+            }
             let value = options::value_text(*row, frame.host.settings(), self.overlay.camera());
             let shown = match row {
                 options::OptionRow::Controls => String::new(),
-                options::OptionRow::Optimizations | options::OptionRow::Advanced => ">".to_owned(),
+                options::OptionRow::Page(_) => ">".to_owned(),
                 options::OptionRow::Overscan | options::OptionRow::Achievements => {
                     format!("{value} >")
                 }

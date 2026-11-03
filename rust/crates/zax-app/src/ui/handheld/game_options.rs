@@ -9,66 +9,96 @@ use zax_settings::catalogue::SettingId;
 use zax_settings::games::GameOptions;
 use zax_settings::model::SettingsModel;
 
-use super::options::{self, OptionRow};
+use super::options::{self, OptionRow, OptionsPage, MAX_DEPTH};
 use super::overlay::CameraPreset;
 use super::pad::PadButton;
 use crate::ui::{keys, strings};
 
-/// The rows a game can have a value of its own for: the options, without the language, the
-/// camera and the bindings, which belong to the player rather than to the game.
-///
-/// These are the economical ones — the main page of the console, the first level of the desktop
-/// menu. The ones RO-2 added are in [`GAME_ADVANCED_ROWS`], apart, because every one of them is
-/// a row of the console's *global* advanced page (`super::advanced::ROW_SETTINGS`) and the brief
-/// asks each interface to keep its own habit about those.
-pub const GAME_ROWS: [OptionRow; 16] = [
-    OptionRow::Volume,
-    OptionRow::RenderScale,
-    OptionRow::Shadows,
-    OptionRow::Palette,
-    OptionRow::Overscan,
-    OptionRow::FrameCap,
-    OptionRow::ShowFps,
-    OptionRow::Profiler,
-    OptionRow::CatchUp,
-    OptionRow::CatchUpLast3d,
-    OptionRow::HalfRate3d,
-    OptionRow::LuaOptimized,
-    OptionRow::LuaExperimental,
-    OptionRow::Pipeline,
-    OptionRow::Pause3dIn2d,
-    OptionRow::Region,
+/// A row of the main screen of a game's options: the ordinary option rows, and the three the game
+/// has of its own — "put everything back", the widescreen and the hacks. RO-3 made this a list
+/// because the mockup moves the widescreen into the middle of it, where an index constant per
+/// special row would have grown fragile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GameRow {
+    /// "Put everything back to global", the first row.
+    ResetAll,
+    /// An option row, drawn and stepped as the global pages draw and step it.
+    Option(OptionRow),
+    /// The widescreen of the game: a press turns it on with everything or off, a hold opens its
+    /// settings.
+    Widescreen,
+    /// The hacks of the game: its own screen.
+    Hacks,
+}
+
+/// The rows of the main screen of a game's options, in the order of the owner's mockup (RO-3).
+/// The widescreen moved from next to last to between the overscan and the region; the hacks stay
+/// last.
+pub const GAME_MAIN: [GameRow; 11] = [
+    GameRow::ResetAll,
+    GameRow::Option(OptionRow::Volume),
+    GameRow::Option(OptionRow::RenderScale),
+    GameRow::Option(OptionRow::Shadows),
+    GameRow::Option(OptionRow::Palette),
+    GameRow::Option(OptionRow::Overscan),
+    GameRow::Widescreen,
+    GameRow::Option(OptionRow::Region),
+    GameRow::Option(OptionRow::Page(OptionsPage::Optimizations)),
+    GameRow::Option(OptionRow::Page(OptionsPage::Advanced)),
+    GameRow::Hacks,
 ];
 
-/// The rows RO-2 added that belong to the picture as it reaches the screen: the run-ahead, whose
-/// right value depends on each game's own lag (Q-103 still holds it at 0 for a profile whose
-/// scripts change the core), the anti-aliasing and the depth of the GPU frame queue. The desktop
-/// menu draws these three at the level of [`GAME_ROWS`].
-pub const GAME_DISPLAY_ROWS: [OptionRow; 3] = [
-    OptionRow::Setting(SettingId::EmuRunAhead),
+/// *Optimisations* of a game: the eight performance rows of the global page. The smooth Lua
+/// collector is not among them — it stays global, as it was before RO-3.
+pub const GAME_OPTIMIZATION_ROWS: [OptionRow; 8] = [
+    OptionRow::FrameCap,
+    OptionRow::HalfRate3d,
+    OptionRow::CatchUp,
+    OptionRow::CatchUpLast3d,
+    OptionRow::Pause3dIn2d,
+    OptionRow::Pipeline,
+    OptionRow::LuaOptimized,
+    OptionRow::LuaExperimental,
+];
+
+/// *Advanced options* of a game: four pages where the global hub has six. A game has nothing to
+/// set on the *NES picture* page (its palette and its overscan are main-screen rows) nor on the
+/// *Camera* page (the view belongs to the player).
+pub const GAME_ADVANCED_HUB: [OptionRow; 4] = [
+    OptionRow::Page(OptionsPage::Display),
+    OptionRow::Page(OptionsPage::Rendering3d),
+    OptionRow::Page(OptionsPage::LightShadows),
+    OptionRow::Page(OptionsPage::Emulation),
+];
+
+/// *Advanced options › Display* of a game: the two rows that left the main screen, and the two
+/// of RO-2 that belong to the picture as it reaches the screen.
+pub const GAME_DISPLAY_ROWS: [OptionRow; 4] = [
+    OptionRow::ShowFps,
+    OptionRow::Profiler,
     OptionRow::Setting(SettingId::VideoAntiAlias),
     OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
 ];
 
-/// The rows RO-2 added that decide what the 3D scene looks like: the visual style, the four
-/// Enhanced effects of AMD-055 REQ-SCN-079 and the backdrop lighting of AMD-049 REQ-SCN-075.
-/// The desktop menu draws them in a *3D rendering* submenu.
-///
-/// The graded sub-parameters of the effects (`ao_*`, `ssr_*`) stay **global** on purpose: they
-/// tune an effect rather than decide whether it runs, and they would take the per-game rows from
-/// 14 to 22. Adding one later is one line here.
-pub const GAME_3D_ROWS: [OptionRow; 6] = [
+/// *Advanced options › 3D rendering* of a game: the visual style, then its two pages.
+pub const GAME_3D_ROWS: [OptionRow; 3] = [
     OptionRow::Setting(SettingId::RenderVisualStyle),
+    OptionRow::Page(OptionsPage::EnhancedEffects),
+    OptionRow::Page(OptionsPage::Geometry),
+];
+
+/// *3D rendering › Enhanced effects* of a game: the four switches of AMD-055 REQ-SCN-079.
+///
+/// Their graded sub-parameters (`ao_*`, `ssr_*`) stay **global** on purpose, as RO-2 decided:
+/// they tune an effect rather than decide whether it runs. Adding one is a line here.
+pub const GAME_EFFECTS_ROWS: [OptionRow; 4] = [
     OptionRow::Setting(SettingId::RenderStyleVoxelGrid),
     OptionRow::Setting(SettingId::RenderStylePixelShadow),
     OptionRow::Setting(SettingId::RenderStyleAo),
     OptionRow::Setting(SettingId::RenderStyleReflections),
-    OptionRow::Setting(SettingId::RenderBackdropLighting),
 ];
 
-/// The curvature of AMD-043 REQ-SCN-066: the three angles, the arc centre and the 2D mode, which
-/// the desktop menu puts in a *Geometry* submenu of the *3D rendering* one — the same name the
-/// options window gives that very group.
+/// *3D rendering › Geometry* of a game: the curvature of AMD-043 REQ-SCN-066.
 pub const GAME_CURVATURE_ROWS: [OptionRow; 5] = [
     OptionRow::Setting(SettingId::SceneBendLr),
     OptionRow::Setting(SettingId::SceneBendTb),
@@ -77,33 +107,52 @@ pub const GAME_CURVATURE_ROWS: [OptionRow; 5] = [
     OptionRow::Setting(SettingId::SceneBend2dMode),
 ];
 
-/// The fourteen rows RO-2 added, in the order the console's advanced page of a game lists them:
-/// [`GAME_DISPLAY_ROWS`], then [`GAME_3D_ROWS`], then [`GAME_CURVATURE_ROWS`]. The desktop menu
-/// draws the same fourteen, grouped; a test holds the two to the same list.
-// Q-107 §5
-pub const GAME_ADVANCED_ROWS: [OptionRow; 14] = [
-    OptionRow::Setting(SettingId::EmuRunAhead),
-    OptionRow::Setting(SettingId::VideoAntiAlias),
-    OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
-    OptionRow::Setting(SettingId::RenderVisualStyle),
-    OptionRow::Setting(SettingId::RenderStyleVoxelGrid),
-    OptionRow::Setting(SettingId::RenderStylePixelShadow),
-    OptionRow::Setting(SettingId::RenderStyleAo),
-    OptionRow::Setting(SettingId::RenderStyleReflections),
-    OptionRow::Setting(SettingId::RenderBackdropLighting),
-    OptionRow::Setting(SettingId::SceneBendLr),
-    OptionRow::Setting(SettingId::SceneBendTb),
-    OptionRow::Setting(SettingId::SceneArcH),
-    OptionRow::Setting(SettingId::SceneArcCenter),
-    OptionRow::Setting(SettingId::SceneBend2dMode),
-];
+/// *Advanced options › Light and shadows* of a game: the backdrop lighting of AMD-049
+/// REQ-SCN-075. The shadow switch is a main-screen row and the pixel shadows an Enhanced effect.
+pub const GAME_LIGHT_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::RenderBackdropLighting)];
 
-/// Every row a game can have a value of its own for, the economical ones first.
-pub fn all_game_rows() -> impl Iterator<Item = OptionRow> {
-    GAME_ROWS.into_iter().chain(GAME_ADVANCED_ROWS)
+/// *Advanced options › Emulation* of a game: the run-ahead, whose right value depends on each
+/// game's own lag. Q-103 still holds it at 0 for a profile whose scripts change the core.
+pub const GAME_EMULATION_ROWS: [OptionRow; 1] = [OptionRow::Setting(SettingId::EmuRunAhead)];
+
+/// The rows of `page` in the options of one **game**; empty for a page a game has not got.
+// Q-107 §5, §6
+#[must_use]
+pub const fn page_rows(page: OptionsPage) -> &'static [OptionRow] {
+    match page {
+        OptionsPage::Optimizations => &GAME_OPTIMIZATION_ROWS,
+        OptionsPage::Advanced => &GAME_ADVANCED_HUB,
+        OptionsPage::Display => &GAME_DISPLAY_ROWS,
+        OptionsPage::Rendering3d => &GAME_3D_ROWS,
+        OptionsPage::EnhancedEffects => &GAME_EFFECTS_ROWS,
+        OptionsPage::Geometry => &GAME_CURVATURE_ROWS,
+        OptionsPage::LightShadows => &GAME_LIGHT_ROWS,
+        OptionsPage::Emulation => &GAME_EMULATION_ROWS,
+        OptionsPage::NesPicture | OptionsPage::Camera => &[],
+    }
 }
 
-/// The settings a row of [`GAME_ROWS`] or [`GAME_ADVANCED_ROWS`] changes.
+/// The option rows of the main screen, the three specials dropped.
+pub fn main_option_rows() -> impl Iterator<Item = OptionRow> {
+    GAME_MAIN.into_iter().filter_map(|row| match row {
+        GameRow::Option(row) => Some(row),
+        GameRow::ResetAll | GameRow::Widescreen | GameRow::Hacks => None,
+    })
+}
+
+/// Every row a game can have a value of its own for: the main screen's, then every page's. The
+/// rows that only climb to a page or head a group are not values and are left out.
+pub fn all_game_rows() -> impl Iterator<Item = OptionRow> {
+    main_option_rows()
+        .chain(
+            OptionsPage::ALL
+                .into_iter()
+                .flat_map(|page| page.game_rows().iter().copied()),
+        )
+        .filter(|row| !matches!(row, OptionRow::Page(_) | OptionRow::Group(_)))
+}
+
+/// The settings a row of a game's options changes; nothing for a row a game cannot set.
 #[must_use]
 pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
     match row {
@@ -133,15 +182,15 @@ pub const fn row_settings(row: OptionRow) -> &'static [SettingId] {
         // variant — names nothing here, so it can never become an option of a game.
         OptionRow::Setting(id) => one_setting(id),
         OptionRow::Language
-        | OptionRow::Advanced
         | OptionRow::Camera
         | OptionRow::Controls
         | OptionRow::Achievements
-        | OptionRow::Optimizations => &[],
+        | OptionRow::Page(_)
+        | OptionRow::Group(_) => &[],
     }
 }
 
-/// The one setting of a [`GAME_ADVANCED_ROWS`] row, as a `'static` slice of one; nothing for
+/// The one setting of a `Setting` row a game may have, as a `'static` slice of one; nothing for
 /// any other setting.
 const fn one_setting(id: SettingId) -> &'static [SettingId] {
     match id {
@@ -163,8 +212,8 @@ const fn one_setting(id: SettingId) -> &'static [SettingId] {
     }
 }
 
-/// Whether `id` is a setting of a row of [`GAME_ROWS`] or [`GAME_ADVANCED_ROWS`]; the game's
-/// other options (its hacks) belong to other screens.
+/// Whether `id` is a setting of a row of the game's options; the game's other options (its hacks)
+/// belong to other screens.
 #[must_use]
 pub fn is_game_row_setting(id: SettingId) -> bool {
     all_game_rows().any(|row| row_settings(row).contains(&id))
@@ -194,9 +243,10 @@ pub struct GameOptionsModel {
     rom: PathBuf,
     name: String,
     selected: usize,
-    /// On the advanced page of the game's options: the row of the main page to come back to.
-    /// `selected` then indexes [`GAME_ADVANCED_ROWS`] instead of the main page.
-    page: Option<usize>,
+    /// The pages open over the main screen, innermost last: each the page shown and the row of
+    /// the screen under it to come back to. `selected` indexes the page shown.
+    trail: [(OptionsPage, usize); MAX_DEPTH],
+    depth: usize,
     /// The global values: the preferences, without the scripts' or a game's.
     global: SettingsModel,
     /// The global values with the game's own over them.
@@ -220,7 +270,8 @@ impl GameOptionsModel {
             rom,
             name,
             selected: 0,
-            page: None,
+            trail: [(OptionsPage::Advanced, 0); MAX_DEPTH],
+            depth: 0,
             edited: global.clone(),
             global,
             kept,
@@ -242,60 +293,90 @@ impl GameOptionsModel {
         &self.name
     }
 
-    /// The rows of the main screen: "reset everything", the rows of [`GAME_ROWS`], the advanced
-    /// page, then the widescreen and the hacks (owner request: apart).
-    pub const ROW_COUNT: usize = GAME_ROWS.len() + 4;
+    /// How many rows the main screen has ([`GAME_MAIN`]).
+    pub const ROW_COUNT: usize = GAME_MAIN.len();
 
-    /// The row that opens the advanced options of the game ([`GAME_ADVANCED_ROWS`]).
-    pub const ADVANCED_ROW: usize = GAME_ROWS.len() + 1;
+    /// The row that opens the advanced options of the game. The three index constants are the
+    /// places of the three rows of [`GAME_MAIN`] other code has to reach by name; a unit test
+    /// holds each one to the row it stands for.
+    pub const ADVANCED_ROW: usize = 9;
 
     /// The row of the widescreen of the game.
-    pub const WIDESCREEN_ROW: usize = GAME_ROWS.len() + 2;
+    pub const WIDESCREEN_ROW: usize = 6;
 
     /// The row that opens the hacks of the game, the last one.
-    pub const HACKS_ROW: usize = GAME_ROWS.len() + 3;
+    pub const HACKS_ROW: usize = 10;
 
-    /// The index of the selected row: on the main screen 0 is "reset everything", on the advanced
-    /// page 0 is its first row.
+    /// The index of the selected row: on the main screen 0 is "reset everything", on a page 0 is
+    /// its first row.
     #[must_use]
     pub const fn selected_index(&self) -> usize {
         self.selected
     }
 
-    /// Whether the advanced page of the game's options is shown.
+    /// Whether a page of the game's options is shown rather than the main screen.
     #[must_use]
     pub const fn in_advanced(&self) -> bool {
-        self.page.is_some()
+        self.depth > 0
     }
 
-    /// The rows of the screen shown: the advanced page's, or none for the main screen, whose
-    /// rows are not a plain list (it has "reset everything", the widescreen and the hacks too).
+    /// The page shown, if any.
     #[must_use]
-    pub const fn page_rows(&self) -> Option<&'static [OptionRow]> {
-        if self.page.is_some() {
-            Some(&GAME_ADVANCED_ROWS)
-        } else {
-            None
-        }
+    pub fn page(&self) -> Option<OptionsPage> {
+        self.depth.checked_sub(1).map(|last| self.trail[last].0)
+    }
+
+    /// The pages open over the main screen, outermost first: what the title band spells out.
+    #[must_use]
+    pub fn path(&self) -> Vec<OptionsPage> {
+        self.trail[..self.depth]
+            .iter()
+            .map(|(page, _)| *page)
+            .collect()
+    }
+
+    /// The rows of the page shown, or none for the main screen, whose rows are [`GAME_MAIN`] and
+    /// not a plain list of option rows.
+    #[must_use]
+    pub fn page_rows(&self) -> Option<&'static [OptionRow]> {
+        self.page().map(OptionsPage::game_rows)
     }
 
     /// How many rows the screen shown has.
     #[must_use]
-    pub const fn row_count(&self) -> usize {
-        if self.page.is_some() {
-            GAME_ADVANCED_ROWS.len()
-        } else {
-            Self::ROW_COUNT
-        }
+    pub fn row_count(&self) -> usize {
+        self.page_rows().map_or(Self::ROW_COUNT, <[OptionRow]>::len)
     }
 
     /// Selects the row `index` of the main screen (back from the hacks, on their row), leaving
-    /// the advanced page if it was shown.
+    /// any page that was shown.
     pub const fn select(&mut self, index: usize) {
         if index < Self::ROW_COUNT {
-            self.page = None;
+            self.depth = 0;
             self.selected = index;
         }
+    }
+
+    /// Moves the selection `step` places: round the page shown, skipping its group titles, or
+    /// round the main screen, every row of which is selectable.
+    fn move_selection(&mut self, step: i32) {
+        if let Some(rows) = self.page_rows() {
+            self.selected = options::step_selection(rows, self.selected, step);
+            return;
+        }
+        let count = Self::ROW_COUNT;
+        let forward = if step < 0 { count - 1 } else { 1 };
+        self.selected = (self.selected + forward) % count;
+    }
+
+    /// Climbs to `page`, remembering the row to come back to.
+    fn open(&mut self, page: OptionsPage) {
+        if self.depth >= MAX_DEPTH {
+            return;
+        }
+        self.trail[self.depth] = (page, self.selected);
+        self.depth += 1;
+        self.selected = self.page_rows().map_or(0, options::first_selectable);
     }
 
     /// The options to keep: only the settings that differ from the global values, and the
@@ -324,7 +405,8 @@ impl GameOptionsModel {
             .any(|id| self.edited.has_game_value(*id))
     }
 
-    /// The value of `row` as the screen shows it: the game's own, or "Use Global : <value>".
+    /// The value of `row` as the desktop menu shows it: the game's own, or
+    /// "Use Global : &lt;value&gt;".
     #[must_use]
     pub fn value_text(&self, row: OptionRow) -> String {
         if self.is_own(row) {
@@ -332,6 +414,49 @@ impl GameOptionsModel {
         } else {
             let global = options::value_text(row, &self.global, CameraPreset::Orbit);
             strings::format(&strings::get(keys::HANDHELD_USE_GLOBAL), &[&global])
+        }
+    }
+
+    /// RO-3 §2 rule 1: the value of `row` as a **console** row of a game's options shows it — its
+    /// own value plainly, or the shorter "Global: &lt;value&gt;", which the drawing dims. The
+    /// marker beside an own value is the drawing's, the colour being RO-2's.
+    #[must_use]
+    pub fn console_value_text(&self, row: OptionRow) -> String {
+        if self.is_own(row) {
+            options::value_text(row, &self.edited, CameraPreset::Orbit)
+        } else {
+            let global = options::value_text(row, &self.global, CameraPreset::Orbit);
+            strings::format(&strings::get(keys::HANDHELD_GLOBAL_VALUE), &[&global])
+        }
+    }
+
+    /// RO-3 §2 rule 2: how many values of its own the game has under `page`, counting the pages
+    /// `page` itself climbs to. The console row that opens a page says so; 0 means it says
+    /// nothing.
+    ///
+    /// Computed from the model when the page is drawn, never per frame while playing: a console
+    /// page is only drawn while it is shown.
+    #[must_use]
+    pub fn own_count(&self, page: OptionsPage) -> usize {
+        page.game_rows()
+            .iter()
+            .map(|row| match row {
+                OptionRow::Page(under) => self.own_count(*under),
+                OptionRow::Group(_) => 0,
+                row => usize::from(self.is_own(*row)),
+            })
+            .sum()
+    }
+
+    /// What a console row that opens `page` shows beside it: "2 own" and nothing with none.
+    #[must_use]
+    pub fn own_count_text(&self, page: OptionsPage) -> String {
+        match self.own_count(page) {
+            0 => String::new(),
+            count => strings::format(
+                &strings::get(keys::HANDHELD_OWN_COUNT),
+                &[&count.to_string()],
+            ),
         }
     }
 
@@ -400,53 +525,62 @@ impl GameOptionsModel {
 
     /// One press of a button.
     pub fn handle(&mut self, button: PadButton) -> Option<GameOptionsCommand> {
-        let count = self.row_count();
         match button {
-            PadButton::Up => self.selected = (self.selected + count - 1) % count,
-            PadButton::Down => self.selected = (self.selected + 1) % count,
-            // The advanced page: every row is a value row, B comes back to the row that opened
-            // it, and X still puts every option of the game back.
-            PadButton::X if self.page.is_some() => return self.reset(),
-            PadButton::B | PadButton::Menu if self.page.is_some() => {
-                self.selected = self.page.take().unwrap_or(Self::ADVANCED_ROW);
-            }
-            PadButton::Left if self.page.is_some() => return self.step(-1),
-            PadButton::Right | PadButton::A if self.page.is_some() => return self.step(1),
-            PadButton::A | PadButton::Right if self.selected == Self::ADVANCED_ROW => {
-                self.page = Some(self.selected);
-                self.selected = 0;
-            }
-            PadButton::A | PadButton::Right if self.selected == Self::HACKS_ROW => {
-                return Some(GameOptionsCommand::OpenHacks);
-            }
-            PadButton::A if self.selected == Self::WIDESCREEN_ROW => {
-                return Some(GameOptionsCommand::Widescreen);
-            }
-            PadButton::Right if self.selected == Self::WIDESCREEN_ROW => {
-                return Some(GameOptionsCommand::OpenWidescreen);
+            // A page may hold a group title, which up and down skip; every row of the main
+            // screen is selectable, so there it is a plain walk round the list.
+            PadButton::Up => self.move_selection(-1),
+            PadButton::Down => self.move_selection(1),
+            // X puts every option of the game back, from wherever it is pressed.
+            PadButton::X => return self.reset(),
+            // B climbs back one page at a time, and leaves the screen from the main one.
+            PadButton::B | PadButton::Menu => match self.depth.checked_sub(1) {
+                Some(last) => {
+                    self.depth = last;
+                    self.selected = self.trail[last].1;
+                }
+                None => return Some(GameOptionsCommand::Close),
+            },
+            PadButton::A | PadButton::Left | PadButton::Right
+                if matches!(self.selected_row(), Some(OptionRow::Page(_))) =>
+            {
+                if let Some(OptionRow::Page(page)) = self.selected_row() {
+                    self.open(page);
+                }
             }
             PadButton::A | PadButton::Left | PadButton::Right
                 if self.selected_row() == Some(OptionRow::Overscan) =>
             {
                 return Some(GameOptionsCommand::OpenOverscan);
             }
+            PadButton::A | PadButton::Right
+                if !self.in_advanced() && self.selected == Self::HACKS_ROW =>
+            {
+                return Some(GameOptionsCommand::OpenHacks);
+            }
+            PadButton::A if !self.in_advanced() && self.selected == Self::WIDESCREEN_ROW => {
+                return Some(GameOptionsCommand::Widescreen);
+            }
+            PadButton::Right if !self.in_advanced() && self.selected == Self::WIDESCREEN_ROW => {
+                return Some(GameOptionsCommand::OpenWidescreen);
+            }
+            PadButton::A if !self.in_advanced() && self.selected == 0 => return self.reset(),
             PadButton::Left => return self.step(-1),
-            PadButton::A if self.selected == 0 => return self.reset(),
             PadButton::Right | PadButton::A => return self.step(1),
-            PadButton::X => return self.reset(),
-            PadButton::B | PadButton::Menu => return Some(GameOptionsCommand::Close),
             _ => {}
         }
         None
     }
 
-    /// The row selected: one of [`GAME_ADVANCED_ROWS`] on the advanced page, one of
-    /// [`GAME_ROWS`] on the main screen, none on its first and last rows.
+    /// The row selected: the page's on a page, the main screen's option row on the main screen,
+    /// none on its three rows that are not options.
     #[must_use]
     pub fn selected_row(&self) -> Option<OptionRow> {
         match self.page_rows() {
             Some(rows) => rows.get(self.selected).copied(),
-            None => GAME_ROWS.get(self.selected.checked_sub(1)?).copied(),
+            None => match GAME_MAIN.get(self.selected)? {
+                GameRow::Option(row) => Some(*row),
+                GameRow::ResetAll | GameRow::Widescreen | GameRow::Hacks => None,
+            },
         }
     }
 
@@ -539,8 +673,41 @@ mod tests {
         )
     }
 
+    /// The pages to open to reach `row` in the game tree, outermost first.
+    fn path_to(row: OptionRow) -> Option<Vec<OptionsPage>> {
+        fn search(rows: &[OptionRow], wanted: OptionRow, path: &mut Vec<OptionsPage>) -> bool {
+            for candidate in rows {
+                if *candidate == wanted {
+                    return true;
+                }
+                if let OptionRow::Page(page) = candidate {
+                    path.push(*page);
+                    if search(page.game_rows(), wanted, path) {
+                        return true;
+                    }
+                    path.pop();
+                }
+            }
+            false
+        }
+        let main: Vec<OptionRow> = main_option_rows().collect();
+        let mut path = Vec::new();
+        search(&main, row, &mut path).then_some(path)
+    }
+
+    /// Walks to `row` wherever it is in the game tree: out to the main screen, then down its path.
     fn go_to(model: &mut GameOptionsModel, row: OptionRow) {
-        while model.selected_index() == 0 || GAME_ROWS[model.selected_index() - 1] != row {
+        while model.in_advanced() {
+            model.handle(PadButton::B);
+        }
+        let path = path_to(row).unwrap_or_else(|| panic!("{row:?} is not a row of a game"));
+        for page in path {
+            while model.selected_row() != Some(OptionRow::Page(page)) {
+                model.handle(PadButton::Down);
+            }
+            model.handle(PadButton::A);
+        }
+        while model.selected_row() != Some(row) {
             model.handle(PadButton::Down);
         }
     }
@@ -549,7 +716,7 @@ mod tests {
     fn every_row_starts_on_the_global_value() {
         let model = model(GameOptions::new());
         assert!(!model.has_options());
-        assert!(GAME_ROWS.iter().all(|row| !model.is_own(*row)));
+        assert!(all_game_rows().all(|row| !model.is_own(row)));
         assert!(model.value_text(OptionRow::Shadows).contains(':'));
     }
 
@@ -649,39 +816,33 @@ mod tests {
         assert_eq!(0, model.options().len());
     }
 
-    /// RO-2 part 2: the fourteen rows the lot added are the three groups the desktop menu draws,
-    /// concatenated in that order; each names exactly one setting, and no setting is a row twice.
+    /// Every row of the game tree names exactly one setting or a set of its own (the overscan,
+    /// the region, the render scale), no setting is a row twice, and a `Setting` row the tree does
+    /// not hold names nothing — so it can never become an option of a game.
     #[test]
-    fn ro_2_the_desktop_groups_are_the_advanced_rows_and_nothing_else() {
-        let groups: Vec<OptionRow> = GAME_DISPLAY_ROWS
-            .into_iter()
-            .chain(GAME_3D_ROWS)
-            .chain(GAME_CURVATURE_ROWS)
-            .collect();
-        assert_eq!(GAME_ADVANCED_ROWS.to_vec(), groups);
-
+    fn ro_3_every_row_of_the_game_tree_names_its_settings_once() {
         let mut seen: Vec<SettingId> = Vec::new();
-        for row in GAME_ADVANCED_ROWS {
+        for row in all_game_rows() {
             let settings = row_settings(row);
-            assert_eq!(1, settings.len(), "{row:?}");
-            assert!(!seen.contains(&settings[0]), "{row:?} twice");
-            seen.push(settings[0]);
-            assert!(is_game_row_setting(settings[0]));
-            // Every one of them is a row of the console's **global** advanced page, which is what
-            // settles that the game's copy belongs on a page of its own too.
-            assert!(
-                super::super::advanced::ROW_SETTINGS.contains(&settings[0]),
-                "{row:?}"
-            );
-        }
-        // The fourteen do not overlap the sixteen economical rows.
-        for row in GAME_ROWS {
-            for id in row_settings(row) {
-                assert!(!seen.contains(id), "{row:?} is also an advanced row");
+            assert!(!settings.is_empty(), "{row:?} names nothing");
+            for id in settings {
+                // The two composite rows of the main screen share no setting with any other row;
+                // the test of the global tree records the two settings they share with a
+                // `Setting` row of a page (`ro_3_no_row_is_reachable_from_two_places`).
+                assert!(!seen.contains(id), "{} is a row twice", id.key());
+                seen.push(*id);
+                assert!(is_game_row_setting(*id));
             }
         }
-        // A `Setting` row of the console's global page that this lot did not add names nothing,
-        // so it can never become an option of a game.
+        for row in all_game_rows() {
+            if let OptionRow::Setting(id) = row {
+                assert!(
+                    super::super::advanced::ROW_SETTINGS.contains(&id),
+                    "{} is not a console setting",
+                    id.key()
+                );
+            }
+        }
         assert_eq!(
             row_settings(OptionRow::Setting(SettingId::LightIntensity)),
             []
@@ -689,18 +850,25 @@ mod tests {
         assert!(!is_game_row_setting(SettingId::LightIntensity));
     }
 
-    /// Each of the fourteen stores a value of its own, "Use Global" takes it back, and "Put
-    /// everything back to global" clears the lot.
+    /// Each of the thirty rows a game can have stores a value of its own, "Use Global" takes it
+    /// back, and "Put everything back to global" clears the lot.
     #[test]
-    fn ro_2_every_new_row_stores_its_own_value_and_goes_back_to_global() {
+    fn ro_3_every_row_stores_its_own_value_and_goes_back_to_global() {
+        let steppable: Vec<OptionRow> = all_game_rows()
+            // The overscan has a screen of its own rather than a stepped value, and it has its
+            // own test above.
+            .filter(|row| *row != OptionRow::Overscan)
+            .collect();
+        assert_eq!(29, steppable.len(), "{steppable:?}");
         let mut model = model(GameOptions::new());
-        for row in GAME_ADVANCED_ROWS {
+        for row in &steppable {
+            let row = *row;
             assert!(!model.is_own(row), "{row:?} starts on the global value");
             assert!(
-                model.value_text(row).contains(':'),
-                "{row:?} shows \"Use Global : <value>\""
+                model.console_value_text(row).starts_with("Global"),
+                "{row:?} shows \"Global: <value>\": {}",
+                model.console_value_text(row)
             );
-            // The first value that differs from the global one, whichever direction gets there.
             let choices = model.choices(row);
             assert!(choices.len() > 1, "{row:?} has {} choices", choices.len());
             let global = options::value_text(row, model.global(), CameraPreset::Orbit);
@@ -710,63 +878,93 @@ mod tests {
                 .expect("a value other than the global one");
             model.choose(row, other);
             assert!(model.is_own(row), "{row:?} keeps its own value");
-            assert_eq!(1, model.options().len(), "{row:?}: {:?}", model.options());
-            assert_eq!(row_settings(row)[0], model.options()[0].0);
+            assert_eq!(
+                model.console_value_text(row),
+                options::value_text(row, model.edited(), CameraPreset::Orbit),
+                "{row:?} shows its own value plainly"
+            );
             model.use_global(row);
             assert!(!model.is_own(row), "{row:?}: {:?}", model.options());
             assert_eq!(0, model.options().len());
         }
 
         // Several at once, then "Put everything back to global".
-        let mut kept = 0;
-        for row in GAME_ADVANCED_ROWS {
-            let global = options::value_text(row, model.global(), CameraPreset::Orbit);
-            let choices = model.choices(row);
+        for row in &steppable {
+            let global = options::value_text(*row, model.global(), CameraPreset::Orbit);
+            let choices = model.choices(*row);
             let other = choices
                 .iter()
                 .position(|text| *text != global)
                 .expect("a value other than the global one");
-            model.choose(row, other);
-            kept += 1;
-            assert_eq!(kept, model.options().len(), "{row:?}");
+            model.choose(*row, other);
+            assert!(model.is_own(*row), "{row:?}");
         }
-        assert_eq!(GAME_ADVANCED_ROWS.len(), model.options().len());
         model.reset_all();
         assert_eq!(0, model.options().len());
         assert!(!model.has_options());
     }
 
-    /// The advanced page of the game's options: the row opens it, its rows step, B comes back to
-    /// the row that opened it, and X still puts everything back from inside it.
+    /// RO-3 §2: the pages of a game's options open, step, and B climbs back one at a time to the
+    /// row that opened each; X still puts everything back from inside a page.
     #[test]
-    fn ro_2_the_advanced_page_of_a_game_opens_steps_and_goes_back() {
+    fn ro_3_the_pages_of_a_game_open_step_and_go_back() {
         let mut model = model(GameOptions::new());
         model.select(GameOptionsModel::ADVANCED_ROW);
         assert!(!model.in_advanced());
+        assert_eq!(
+            Some(OptionRow::Page(OptionsPage::Advanced)),
+            model.selected_row()
+        );
         assert_eq!(None, model.handle(PadButton::A));
         assert!(model.in_advanced());
         assert_eq!(0, model.selected_index());
-        assert_eq!(GAME_ADVANCED_ROWS.len(), model.row_count());
-        assert_eq!(Some(GAME_ADVANCED_ROWS[0]), model.selected_row());
+        assert_eq!(GAME_ADVANCED_HUB.len(), model.row_count());
 
-        // Down walks the page and wraps round it, not round the main screen.
-        for _ in 0..GAME_ADVANCED_ROWS.len() {
+        // Down the hub to *3D rendering*, then into *Enhanced effects*: three levels.
+        while model.selected_row() != Some(OptionRow::Page(OptionsPage::Rendering3d)) {
+            model.handle(PadButton::Down);
+        }
+        model.handle(PadButton::A);
+        while model.selected_row() != Some(OptionRow::Page(OptionsPage::EnhancedEffects)) {
+            model.handle(PadButton::Down);
+        }
+        model.handle(PadButton::A);
+        assert_eq!(
+            vec![
+                OptionsPage::Advanced,
+                OptionsPage::Rendering3d,
+                OptionsPage::EnhancedEffects
+            ],
+            model.path()
+        );
+
+        // Down wraps round this page, not round anything above it.
+        for _ in 0..GAME_EFFECTS_ROWS.len() {
             model.handle(PadButton::Down);
         }
         assert_eq!(0, model.selected_index());
 
         // A steps the selected row, and the change is the game's own.
         assert_eq!(Some(GameOptionsCommand::Save), model.handle(PadButton::A));
-        assert!(model.is_own(GAME_ADVANCED_ROWS[0]));
+        assert!(model.is_own(GAME_EFFECTS_ROWS[0]));
         assert_eq!(1, model.options().len());
 
-        // X still puts everything back from inside the page, without leaving it.
+        // X still puts everything back from inside a page, without leaving it.
         assert_eq!(Some(GameOptionsCommand::Save), model.handle(PadButton::X));
         assert_eq!(0, model.options().len());
-        assert!(model.in_advanced());
+        assert_eq!(Some(OptionsPage::EnhancedEffects), model.page());
 
-        // B comes back to the advanced row of the main screen.
-        model.handle(PadButton::Down);
+        // B climbs back one page at a time, each time onto the row that opened it.
+        assert_eq!(None, model.handle(PadButton::B));
+        assert_eq!(
+            Some(OptionRow::Page(OptionsPage::EnhancedEffects)),
+            model.selected_row()
+        );
+        assert_eq!(None, model.handle(PadButton::B));
+        assert_eq!(
+            Some(OptionRow::Page(OptionsPage::Rendering3d)),
+            model.selected_row()
+        );
         assert_eq!(None, model.handle(PadButton::B));
         assert!(!model.in_advanced());
         assert_eq!(GameOptionsModel::ADVANCED_ROW, model.selected_index());
@@ -788,16 +986,90 @@ mod tests {
         }
     }
 
-    /// The main screen kept its sixteen rows and its order; only the advanced row is new, and it
-    /// sits before the widescreen and the hacks, which the owner keeps last.
+    /// RO-3 §2: the main screen is the owner's mockup, row for row — the widescreen between the
+    /// overscan and the region, the hacks last — and the three index constants name the three
+    /// rows they stand for.
     #[test]
-    fn ro_2_the_main_screen_kept_its_rows() {
-        assert_eq!(16, GAME_ROWS.len());
-        assert_eq!(OptionRow::Volume, GAME_ROWS[0]);
-        assert_eq!(OptionRow::Region, GAME_ROWS[15]);
-        assert_eq!(17, GameOptionsModel::ADVANCED_ROW);
-        assert_eq!(18, GameOptionsModel::WIDESCREEN_ROW);
-        assert_eq!(19, GameOptionsModel::HACKS_ROW);
-        assert_eq!(20, GameOptionsModel::ROW_COUNT);
+    fn ro_3_the_main_screen_is_the_mockups() {
+        assert_eq!(
+            [
+                GameRow::ResetAll,
+                GameRow::Option(OptionRow::Volume),
+                GameRow::Option(OptionRow::RenderScale),
+                GameRow::Option(OptionRow::Shadows),
+                GameRow::Option(OptionRow::Palette),
+                GameRow::Option(OptionRow::Overscan),
+                GameRow::Widescreen,
+                GameRow::Option(OptionRow::Region),
+                GameRow::Option(OptionRow::Page(OptionsPage::Optimizations)),
+                GameRow::Option(OptionRow::Page(OptionsPage::Advanced)),
+                GameRow::Hacks,
+            ],
+            GAME_MAIN
+        );
+        assert_eq!(11, GameOptionsModel::ROW_COUNT);
+        assert_eq!(
+            GameRow::Option(OptionRow::Page(OptionsPage::Advanced)),
+            GAME_MAIN[GameOptionsModel::ADVANCED_ROW]
+        );
+        assert_eq!(
+            GameRow::Widescreen,
+            GAME_MAIN[GameOptionsModel::WIDESCREEN_ROW]
+        );
+        assert_eq!(GameRow::Hacks, GAME_MAIN[GameOptionsModel::HACKS_ROW]);
+    }
+
+    /// RO-3 §2 rule 2: a row that opens a page counts the game's own values under it, the pages
+    /// below included, and says nothing when there are none. The count is of the model, so it
+    /// follows a change at once.
+    #[test]
+    fn ro_3_a_page_row_counts_the_own_values_under_it() {
+        let mut model = model(GameOptions::new());
+        for page in OptionsPage::ALL {
+            assert_eq!(0, model.own_count(page), "{page:?}");
+            assert!(model.own_count_text(page).is_empty(), "{page:?}");
+        }
+
+        // One value two levels down: *Advanced options* counts it, and so does every page of the
+        // path to it, and no other.
+        go_to(&mut model, GAME_CURVATURE_ROWS[0]);
+        assert_eq!(Some(GameOptionsCommand::Save), model.handle(PadButton::A));
+        assert!(model.is_own(GAME_CURVATURE_ROWS[0]));
+        assert_eq!(1, model.own_count(OptionsPage::Advanced));
+        assert_eq!(1, model.own_count(OptionsPage::Rendering3d));
+        assert_eq!(1, model.own_count(OptionsPage::Geometry));
+        assert_eq!(0, model.own_count(OptionsPage::Display));
+        assert_eq!(0, model.own_count(OptionsPage::Optimizations));
+        assert!(model.own_count_text(OptionsPage::Advanced).contains('1'));
+
+        // A second, on another page of the hub: the hub counts two, each page its own one.
+        go_to(&mut model, OptionRow::ShowFps);
+        assert_eq!(Some(GameOptionsCommand::Save), model.handle(PadButton::A));
+        assert_eq!(2, model.own_count(OptionsPage::Advanced));
+        assert_eq!(1, model.own_count(OptionsPage::Display));
+        assert_eq!(1, model.own_count(OptionsPage::Rendering3d));
+
+        // And "Put everything back to global" empties every count at once.
+        model.reset_all();
+        for page in OptionsPage::ALL {
+            assert_eq!(0, model.own_count(page), "{page:?}");
+        }
+    }
+
+    /// RO-3 §2: every page of a game is reachable from its main screen, and a page a game has not
+    /// got is on neither tree of its options.
+    #[test]
+    fn ro_3_the_game_tree_has_no_page_a_game_cannot_use() {
+        for page in OptionsPage::ALL {
+            let reachable = path_to(OptionRow::Page(page)).is_some();
+            assert_eq!(
+                !page.game_rows().is_empty(),
+                reachable,
+                "{page:?}: rows {}, reachable {reachable}",
+                page.game_rows().len()
+            );
+        }
+        assert_eq!(OptionsPage::NesPicture.game_rows(), []);
+        assert_eq!(OptionsPage::Camera.game_rows(), []);
     }
 }

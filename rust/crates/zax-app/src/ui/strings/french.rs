@@ -117,6 +117,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::GROUP_WIDESCREEN, "Écran large"),
     (keys::GROUP_REGION, "Région vidéo"),
     (keys::GROUP_ADVANCED, "Avancé"),
+    // ---------------- RO-3 : les pages et les titres de groupe de l'arbre d'options console
+    (keys::PAGE_ENHANCED_EFFECTS, "Effets améliorés"),
+    (keys::PAGE_GEOMETRY, "Géométrie (courbure)"),
+    (keys::GROUP_REFLECTIONS, "Réflexions"),
+    (keys::GROUP_AMBIENT_OCCLUSION, "Occlusion ambiante"),
     // -------------- RO-1 point 6 : les deux lignes compactes des marges d'overscan, et la légende
     //                de chacune des quatre valeurs qu'une ligne compacte porte côte à côte.
     (keys::COMPACT_OVERSCAN_NTSC, "Overscan NTSC"),
@@ -1077,6 +1082,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HANDHELD_GAME_OPTIONS_TITLE, "Options du jeu — {0}"),
     (keys::HANDHELD_GAME_OPTIONS_RESET, "Tout remettre en global"),
     (keys::HANDHELD_USE_GLOBAL, "Use Global : {0}"),
+    (keys::HANDHELD_GLOBAL_VALUE, "Global : {0}"),
+    (keys::HANDHELD_OWN_COUNT, "{0} propres"),
     (keys::HANDHELD_RUN_AHEAD_FORCED, "(forcé à 0 : scripts)"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Options du jeu"),
     (keys::HANDHELD_HINT_FAVORITE, "Favori"),

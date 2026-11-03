@@ -468,28 +468,17 @@ fn ro_1_the_detailed_tooltips_are_desktop_only() {
     assert_eq!(vec!["ui/options.rs", "ui/zax_ui/options.rs"], callers);
 }
 
-/// RO-1 point 2: the console's "Advanced options" page shows exactly the rows it showed before,
-/// in the same order. It used to be built by walking four tabs of the desktop window, so this is
-/// the test that makes the desktop reorganisation invisible to it.
+/// The settings the console offers as `Setting` rows are, every one of them, a row the console can
+/// draw and step. RO-1 pinned their order with `goldens/handheld-advanced-rows.txt`, which held
+/// one flat page; RO-3 split that page over a tree and `goldens/handheld-option-tree.txt`
+/// (`handheld_tree_tests.rs`) pins both the list and the place of each one. What is left here is
+/// the rule the computed list of 0b0aa8c applied, which no golden can express.
 #[test]
-fn ro_1_the_handheld_advanced_page_is_unchanged() {
-    let text = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../goldens/handheld-advanced-rows.txt"),
-    )
-    .expect("the golden list of the console's advanced page");
-    let expected: Vec<&str> = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .collect();
+fn ro_3_every_console_setting_is_a_row_the_console_can_step() {
+    // The 56 of `336dd8f`: a setting may move in the tree, never leave the console.
+    assert_eq!(56, advanced::ROW_SETTINGS.len());
 
-    let shown: Vec<String> = advanced::ROW_SETTINGS
-        .iter()
-        .map(|id| id.key().into_owned())
-        .collect();
-    assert_eq!(expected, shown);
-
-    // And every one of them is still a row the page can actually draw and step: the rule the
+    // Every one of them is still a row the page can actually draw and step: the rule the
     // computed list applied before — a switch, a choice, or a number with bounds or named rungs —
     // and never the graphics API, which belongs to the desktop alone.
     let model = OptionsModel::new();
@@ -516,11 +505,14 @@ fn ro_1_the_handheld_advanced_page_is_unchanged() {
     }
 }
 
-/// RO-1 point 2: the console's own pages — the main one, the Android one and the performance one —
-/// are untouched. They are plain constants, so the check is their content, row for row.
+/// RO-3: the console's main page, its Android variant and its Optimisations page, row for row, as
+/// the owner's mockup lays them out. The pages of the *Advanced options* hub are pinned by
+/// `goldens/handheld-option-tree.txt` with the rest of the tree.
 #[test]
-fn ro_1_the_handheld_option_pages_are_unchanged() {
-    use zax_app::ui::handheld::options::{OptionRow, OPTIMIZATION_ROWS, ROWS, TOUCH_ROWS};
+fn ro_3_the_handheld_main_pages_are_the_mockups() {
+    use zax_app::ui::handheld::options::{
+        OptionRow, OptionsPage, OPTIMIZATION_ROWS, ROWS, TOUCH_ROWS,
+    };
 
     assert_eq!(
         [
@@ -530,11 +522,9 @@ fn ro_1_the_handheld_option_pages_are_unchanged() {
             OptionRow::Shadows,
             OptionRow::Palette,
             OptionRow::Overscan,
-            OptionRow::ShowFps,
-            OptionRow::Camera,
             OptionRow::Region,
-            OptionRow::Optimizations,
-            OptionRow::Advanced,
+            OptionRow::Page(OptionsPage::Optimizations),
+            OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,
             OptionRow::Achievements,
             OptionRow::Profiler,
@@ -549,11 +539,9 @@ fn ro_1_the_handheld_option_pages_are_unchanged() {
             OptionRow::Shadows,
             OptionRow::Palette,
             OptionRow::Overscan,
-            OptionRow::ShowFps,
-            OptionRow::Camera,
             OptionRow::Region,
-            OptionRow::Optimizations,
-            OptionRow::Advanced,
+            OptionRow::Page(OptionsPage::Optimizations),
+            OptionRow::Page(OptionsPage::Advanced),
             OptionRow::Controls,
             OptionRow::TouchPad,
             OptionRow::Achievements,
@@ -571,28 +559,31 @@ fn ro_1_the_handheld_option_pages_are_unchanged() {
             OptionRow::Pipeline,
             OptionRow::LuaOptimized,
             OptionRow::LuaExperimental,
+            OptionRow::Setting(SettingId::EmuLuaSmoothGc),
         ],
         OPTIMIZATION_ROWS
     );
 }
 
-/// RO-2 part 2: the fourteen per-game rows the lot added are rows of the options of a **game**,
-/// not of the console's global pages nor of the desktop window. Neither of those may have gained
-/// or lost anything, and every one of the fourteen must be a setting the window still shows (so
-/// that "Use Global" has a global value to point at) and a row of the console's global advanced
-/// page (which is what settles that the game's copy belongs on a page of its own too).
+/// Every `Setting` row a game can have names a setting the console offers and the options window
+/// shows, so that "Use Global" has a global value to point at, and the two interfaces that draw a
+/// game's options walk one tree, so neither can gain a row the other has not got.
 #[test]
-fn ro_2_the_new_per_game_rows_change_no_global_page() {
-    use zax_app::ui::handheld::game_options::{self, GAME_ADVANCED_ROWS};
-    use zax_app::ui::handheld::options::{OptionRow, OPTIMIZATION_ROWS, ROWS, TOUCH_ROWS};
+fn ro_3_every_setting_a_game_can_set_has_a_global_value_to_point_at() {
+    use zax_app::ui::handheld::game_options;
+    use zax_app::ui::handheld::options::OptionRow;
 
-    for row in GAME_ADVANCED_ROWS {
+    for row in game_options::all_game_rows() {
+        // A row of the interface's own is not held to this: the frame cap moves `video.vsync`
+        // between two values the window spells out differently, the half-rate 3D is a console
+        // switch the window does not carry (`EXCLUDED`), and a game's overscan has keys of its
+        // own (`video.overscan_top` …) which only its own screen shows.
         let OptionRow::Setting(id) = row else {
-            panic!("{row:?} is not a setting row");
+            continue;
         };
         assert!(
             advanced::ROW_SETTINGS.contains(&id),
-            "{} is not on the console's global advanced page",
+            "{} is not a console setting",
             id.key()
         );
         assert!(
@@ -600,20 +591,69 @@ fn ro_2_the_new_per_game_rows_change_no_global_page() {
             "{} is not shown by the options window",
             id.key()
         );
-        // None of them joined a global console page.
-        assert!(!ROWS.contains(&row), "{row:?}");
-        assert!(!TOUCH_ROWS.contains(&row), "{row:?}");
-        assert!(!OPTIMIZATION_ROWS.contains(&row), "{row:?}");
     }
 
-    // The desktop menu draws the same fourteen as the console's page of a game, grouped.
-    let grouped: Vec<OptionRow> = game_options::GAME_DISPLAY_ROWS
-        .into_iter()
-        .chain(game_options::GAME_3D_ROWS)
-        .chain(game_options::GAME_CURVATURE_ROWS)
+    // The desktop menu and the console pages of a game walk the same tree, so neither can gain a
+    // row the other has not got: the main screen plus the pages, and nothing else.
+    assert_eq!(30, game_options::all_game_rows().count());
+}
+
+/// RO-3 §3: the desktop *Game options* menu follows the console tree, and does so by **walking
+/// it** rather than by carrying a copy. The tree itself is pinned by
+/// `goldens/handheld-option-tree.txt`; what this test pins is that the menu has no list of its
+/// own to drift from it — `GAME_MAIN` for the first level, `game_rows()` for each submenu, and no
+/// per-group constant of the kind RO-2 had (`GAME_DISPLAY_ROWS` and friends were three slices the
+/// menu alone used).
+#[test]
+fn ro_3_the_desktop_game_menu_walks_the_console_tree() {
+    use zax_app::ui::handheld::options::{OptionRow, OptionsPage};
+
+    let menu = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui/zax_ui/menu.rs");
+    let text = std::fs::read_to_string(&menu).expect("the menu bar source");
+    let code: Vec<&str> = text
+        .lines()
+        .map(str::trim_start)
+        .filter(|line| !line.starts_with("//"))
         .collect();
-    assert_eq!(GAME_ADVANCED_ROWS.to_vec(), grouped);
-    assert_eq!(14, GAME_ADVANCED_ROWS.len());
+    let code = code.join("\n");
+    assert!(
+        code.contains("GAME_MAIN"),
+        "the first level is the console main page"
+    );
+    assert!(
+        code.contains("game_rows()"),
+        "a submenu is a page of the game tree"
+    );
+    // The menu names no page of its own: every submenu title comes from `OptionsPage::title_key`.
+    assert!(
+        code.contains("page.title_key()"),
+        "a submenu is titled by the page it draws"
+    );
+    for stale in [
+        "GAME_DISPLAY_ROWS",
+        "GAME_3D_ROWS",
+        "GAME_CURVATURE_ROWS",
+        "GAME_ADVANCED_ROWS",
+    ] {
+        assert!(
+            !code.contains(stale),
+            "{stale}: the menu still carries a list of its own"
+        );
+    }
+    // And the pages the menu can reach are the pages a game has, so no submenu is ever empty.
+    for page in OptionsPage::ALL {
+        if page.game_rows().is_empty() {
+            continue;
+        }
+        for row in page.game_rows() {
+            if let OptionRow::Page(under) = row {
+                assert!(
+                    !under.game_rows().is_empty(),
+                    "{under:?} is an empty submenu of {page:?}"
+                );
+            }
+        }
+    }
 }
 
 /// The inventory of step 1, printed rather than asserted: run with `--nocapture` to read the

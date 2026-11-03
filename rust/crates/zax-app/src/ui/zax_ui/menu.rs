@@ -9,8 +9,9 @@ use super::ZaxUi;
 use crate::application::AppHost;
 use crate::emulation::commands::{Command, CommandArgs};
 use crate::ui::commands::UiCommand;
-use crate::ui::handheld::game_options::{self, GameOptionsModel, GAME_ROWS};
+use crate::ui::handheld::game_options::{self, GameOptionsModel, GameRow};
 use crate::ui::handheld::hacks::{HackRow, HacksModel, HacksView};
+use crate::ui::handheld::options::{OptionRow, OptionsPage};
 use crate::ui::handheld::{options, overscan};
 use crate::ui::menu_bar::{Menu, MenuBarModel, MenuItem, MenuItemKind, MenuWarning};
 use crate::ui::{keys, strings};
@@ -81,8 +82,7 @@ impl ZaxUi {
         let Some(_menu) = menu else {
             return (false, false);
         };
-        // Owner request: the widescreen and the hacks apart. The hacks are studied as the menu
-        // opens, and kept while it is open.
+        // The hacks are studied as the menu opens, and kept while it is open.
         let path = std::path::Path::new(&rom);
         if ui.is_window_appearing()
             || self
@@ -95,26 +95,48 @@ impl ZaxUi {
                     .with_view(HacksView::Aids),
             );
         }
-        let hacks = self
-            .menu_hacks
-            .as_mut()
-            .is_some_and(|hacks| draw_widescreen_and_aids(ui, host, hacks));
-        ui.separator();
         let name = host.current_game_title().unwrap_or_default().to_owned();
         let mut model = GameOptionsModel::new(PathBuf::from(&rom), name, host.settings(), options);
         let mut changed = false;
-        if ui
-            .menu_item_config(strings::get(keys::HANDHELD_GAME_OPTIONS_RESET))
-            .enabled(model.has_options())
-            .build()
-        {
-            model.reset_all();
-            changed = true;
+        let mut hacks = false;
+        // RO-3 §3: the first level is the console main page, row for row and in its order — the
+        // widescreen between the overscan and the region, the hacks last, and the two submenus
+        // where the console climbs to a page.
+        for (index, row) in game_options::GAME_MAIN.iter().enumerate() {
+            let _id = ui.push_id_usize(index);
+            match row {
+                GameRow::ResetAll => {
+                    if ui
+                        .menu_item_config(strings::get(keys::HANDHELD_GAME_OPTIONS_RESET))
+                        .enabled(model.has_options())
+                        .build()
+                    {
+                        model.reset_all();
+                        changed = true;
+                    }
+                    ui.separator();
+                }
+                GameRow::Widescreen => {
+                    hacks |= self
+                        .menu_hacks
+                        .as_mut()
+                        .is_some_and(|model| draw_widescreen(ui, host, model));
+                }
+                GameRow::Hacks => {
+                    ui.separator();
+                    if let Some(aids) = self.menu_hacks.as_mut() {
+                        draw_aids(ui, host, aids);
+                    }
+                }
+                GameRow::Option(OptionRow::Page(page)) => {
+                    ui.separator();
+                    changed |= draw_game_page(ui, host, &mut model, *page);
+                }
+                GameRow::Option(row) => {
+                    changed |= draw_game_rows(ui, host, &mut model, std::slice::from_ref(row), 0);
+                }
+            }
         }
-        ui.separator();
-        changed |= draw_game_rows(ui, host, &mut model, &GAME_ROWS, 0);
-        ui.separator();
-        changed |= draw_game_advanced(ui, host, &mut model);
         ui.separator();
         self.draw_achievements_entry(ui, host);
         if changed {
@@ -187,30 +209,33 @@ fn draw_game_rows(
     changed
 }
 
-/// The fourteen rows RO-2 part 2 added, grouped so the menu stays readable (owner request): the
-/// three of `GAME_DISPLAY_ROWS` at this level, then a *3D rendering* submenu holding the style,
-/// the four Enhanced effects, the backdrop lighting and a *Geometry* submenu of the five
-/// curvature rows. Returns whether a value changed.
-fn draw_game_advanced(ui: &Ui, host: &AppHost, model: &mut GameOptionsModel) -> bool {
-    let mut changed = draw_game_rows(ui, host, model, &game_options::GAME_DISPLAY_ROWS, 100);
-    let own = game_options::GAME_3D_ROWS
-        .iter()
-        .chain(&game_options::GAME_CURVATURE_ROWS)
-        .any(|row| model.is_own(*row));
+/// One page of the game tree as a submenu (RO-3 §3): its title in the colour of a game's own
+/// value as soon as one value under it — on this page or on a page of it — is the game's own, and
+/// one entry per row, a page of its own becoming a submenu in its turn. Returns whether a value
+/// changed.
+fn draw_game_page(
+    ui: &Ui,
+    host: &AppHost,
+    model: &mut GameOptionsModel,
+    page: OptionsPage,
+) -> bool {
+    let own = model.own_count(page) > 0;
     let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
-    let submenu = ui.begin_menu(strings::get(keys::TAB_RENDER_3D));
+    let submenu = ui.begin_menu(strings::get(page.title_key()));
     drop(colour);
-    if submenu.is_some() {
-        changed |= draw_game_rows(ui, host, model, &game_options::GAME_3D_ROWS, 200);
-        ui.separator();
-        let own = game_options::GAME_CURVATURE_ROWS
-            .iter()
-            .any(|row| model.is_own(*row));
-        let colour = own.then(|| ui.push_style_color(imgui::StyleColor::Text, GAME_OWN));
-        let curvature = ui.begin_menu(strings::get(keys::GROUP_GEOMETRY));
-        drop(colour);
-        if curvature.is_some() {
-            changed |= draw_game_rows(ui, host, model, &game_options::GAME_CURVATURE_ROWS, 300);
+    if submenu.is_none() {
+        return false;
+    }
+    let mut changed = false;
+    for (index, row) in page.game_rows().iter().enumerate() {
+        let _id = ui.push_id_usize(index);
+        match row {
+            OptionRow::Group(key) => {
+                ui.separator();
+                ui.text_disabled(strings::get(key));
+            }
+            OptionRow::Page(under) => changed |= draw_game_page(ui, host, model, *under),
+            row => changed |= draw_game_rows(ui, host, model, std::slice::from_ref(row), 0),
         }
     }
     changed
@@ -270,12 +295,11 @@ impl ZaxUi {
     }
 }
 
-/// The widescreen of the game `rom` in play (a check turning it on with its advanced mode and
-/// every option of it, or off; its settings in a window) and its hacks (a submenu with a check
-/// per aid, which works with or without the widescreen). Returns whether the widescreen's
-/// settings were asked for.
-fn draw_widescreen_and_aids(ui: &Ui, host: &mut AppHost, hacks: &mut HacksModel) -> bool {
-    let mut changed = false;
+/// The widescreen of the game in play: a check turning it on with its advanced mode and every
+/// option of it, or off, and an entry that opens its settings in a window. Returns whether the
+/// settings were asked for. RO-3 §3 split this from the aids, which the console main page puts at
+/// the other end of the list.
+fn draw_widescreen(ui: &Ui, host: &mut AppHost, hacks: &mut HacksModel) -> bool {
     if hacks.is_capable()
         && ui
             .menu_item_config(strings::get(keys::HACK_WIDESCREEN))
@@ -283,9 +307,15 @@ fn draw_widescreen_and_aids(ui: &Ui, host: &mut AppHost, hacks: &mut HacksModel)
             .build()
     {
         hacks.toggle_widescreen_all();
-        changed = true;
+        hacks.apply(host);
     }
-    let settings = ui.menu_item(strings::get(keys::MENU_WIDESCREEN_SETTINGS));
+    ui.menu_item(strings::get(keys::MENU_WIDESCREEN_SETTINGS))
+}
+
+/// The hacks of the game in play: a submenu with a check per aid, which works with or without the
+/// widescreen.
+fn draw_aids(ui: &Ui, host: &mut AppHost, hacks: &mut HacksModel) {
+    let mut changed = false;
     let rows = hacks.rows();
     let menu = ui.begin_menu_with_enabled(strings::get(keys::MENU_AIDS), !rows.is_empty());
     if let Some(_menu) = menu {
@@ -305,7 +335,6 @@ fn draw_widescreen_and_aids(ui: &Ui, host: &mut AppHost, hacks: &mut HacksModel)
     if changed {
         hacks.apply(host);
     }
-    settings
 }
 
 /// What the user chose in a menu: a command of the host, or one of the interface.

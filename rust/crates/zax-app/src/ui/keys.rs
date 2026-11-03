@@ -148,6 +148,18 @@ pub const GROUP_REGION: &str = "group.region";
 /// What a player should not need; used on more than one tab.
 pub const GROUP_ADVANCED: &str = "group.advanced";
 
+// --------------------- the group titles the console tree of RO-3 adds. The options window has
+//                       no group of these three names: it spreads the same settings over its
+//                       `Style` groups, which the console tree names for what they are.
+/// The effects the Enhanced style adds (AMD-055 REQ-SCN-079): the page of the console tree.
+pub const PAGE_ENHANCED_EFFECTS: &str = "handheld.page.enhanced_effects";
+/// The curvature page of the console tree, named for what it bends (AMD-043 REQ-SCN-066).
+pub const PAGE_GEOMETRY: &str = "handheld.page.geometry";
+/// The screen-space reflections and their four gradations.
+pub const GROUP_REFLECTIONS: &str = "group.reflections";
+/// The ambient occlusion and its four gradations.
+pub const GROUP_AMBIENT_OCCLUSION: &str = "group.ambient_occlusion";
+
 // ------------------- the compact rows of RO-1 point 6: the title of the row, and the caption
 //                     of each of the four values it holds side by side.
 pub const COMPACT_OVERSCAN_NTSC: &str = "compact.overscan_ntsc";
@@ -331,6 +343,11 @@ pub const HANDHELD_HINT_PAGE: &str = "handheld.hint.page";
 pub const HANDHELD_GAME_OPTIONS_TITLE: &str = "handheld.game_options.title";
 pub const HANDHELD_GAME_OPTIONS_RESET: &str = "handheld.game_options.reset";
 pub const HANDHELD_USE_GLOBAL: &str = "handheld.game_options.use_global";
+/// RO-3 §2 rule 1: what a console row of a game's options shows while it uses the global value.
+/// Shorter than [`HANDHELD_USE_GLOBAL`], which the desktop menu still uses for its entry.
+pub const HANDHELD_GLOBAL_VALUE: &str = "handheld.game_options.global";
+/// RO-3 §2 rule 2: how many values of its own a game has under a row that opens a page.
+pub const HANDHELD_OWN_COUNT: &str = "handheld.game_options.own_count";
 /// Q-103, the console's own, shorter note: Run-ahead is held at 0 by this game's scripts.
 pub const HANDHELD_RUN_AHEAD_FORCED: &str = "handheld.options.run_ahead_forced";
 pub const HANDHELD_HINT_GAME_OPTIONS: &str = "handheld.hint.game_options";
@@ -628,6 +645,11 @@ pub const PUBLISHED: &[&str] = &[
     GROUP_REGION,
     GROUP_ADVANCED,
     GROUP_GEOMETRY,
+    // RO-3: the pages and the group titles the console tree adds.
+    PAGE_ENHANCED_EFFECTS,
+    PAGE_GEOMETRY,
+    GROUP_REFLECTIONS,
+    GROUP_AMBIENT_OCCLUSION,
     COMPACT_OVERSCAN_NTSC,
     COMPACT_OVERSCAN_PAL,
     CAPTION_TOP,
@@ -765,6 +787,8 @@ pub const PUBLISHED: &[&str] = &[
     HANDHELD_GAME_OPTIONS_TITLE,
     HANDHELD_GAME_OPTIONS_RESET,
     HANDHELD_USE_GLOBAL,
+    HANDHELD_GLOBAL_VALUE,
+    HANDHELD_OWN_COUNT,
     HANDHELD_RUN_AHEAD_FORCED,
     HANDHELD_HINT_GAME_OPTIONS,
     HANDHELD_HINT_FAVORITE,

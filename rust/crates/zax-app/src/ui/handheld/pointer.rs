@@ -116,7 +116,6 @@ pub fn presses(zones: &[Zone], pointer: &PointerInput) -> Vec<PadButton> {
         }
         ZoneAction::Row { selected: true, .. } => out.push(PadButton::A),
         ZoneAction::Row { slot, .. } => {
-            // The rows of a screen are one after the other: the selection moves as many steps.
             let focused = zones.iter().find_map(|zone| match zone.action {
                 ZoneAction::Row {
                     slot,
@@ -126,12 +125,22 @@ pub fn presses(zones: &[Zone], pointer: &PointerInput) -> Vec<PadButton> {
                 _ => None,
             });
             if let Some(focused) = focused {
-                let step = if slot > focused {
-                    PadButton::Down
+                let (step, span) = if slot > focused {
+                    (PadButton::Down, focused + 1..=slot)
                 } else {
-                    PadButton::Up
+                    (PadButton::Up, slot..=focused.saturating_sub(1))
                 };
-                out.extend(std::iter::repeat_n(step, slot.abs_diff(focused)));
+                // One press per row the selection has to cross — not `slot - focused`, because a
+                // group title of RO-3 holds a slot and **records no zone**, up and down skipping
+                // it. Counting the zones in the span is counting exactly the rows a press moves
+                // through.
+                let steps = zones
+                    .iter()
+                    .filter(|zone| {
+                        matches!(zone.action, ZoneAction::Row { slot, .. } if span.contains(&slot))
+                    })
+                    .count();
+                out.extend(std::iter::repeat_n(step, steps));
             }
         }
     }
@@ -172,6 +181,26 @@ mod tests {
         );
         assert_eq!(vec![PadButton::Up], presses(&zones, &click(10.0, 110.0)));
         assert_eq!(vec![PadButton::A], presses(&zones, &click(10.0, 150.0)));
+    }
+
+    /// RO-3: a group title holds a slot and records no zone, so the selection crossing it moves
+    /// by one row and not by two. Here slot 2 is a title: a click on slot 3 from slot 1 is one
+    /// Down, and a click on slot 0 from slot 3 is two Ups.
+    #[test]
+    fn ro_3_a_click_past_a_group_title_moves_by_one_row() {
+        let zones = [row(0, false), row(1, true), row(3, false)];
+        assert_eq!(vec![PadButton::Down], presses(&zones, &click(10.0, 225.0)));
+        let zones = [row(0, false), row(1, false), row(3, true)];
+        assert_eq!(
+            vec![PadButton::Up, PadButton::Up],
+            presses(&zones, &click(10.0, 110.0))
+        );
+        // A click on the title itself reaches nothing: it records no zone of its own, and the row
+        // zones do not cover it.
+        assert_eq!(
+            Vec::<PadButton>::new(),
+            presses(&zones, &click(10.0, 190.0))
+        );
     }
 
     #[test]

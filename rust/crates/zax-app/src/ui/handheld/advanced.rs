@@ -1,6 +1,13 @@
-//! The "Advanced options" page of the console (Rust-only, owner request): the settings of the
-//! desktop's options window a handheld does not otherwise show (anti-aliasing, the camera, the
-//! light and the rest), each stepped with the pad. A strong Android device can afford them.
+//! The settings of the desktop's options window the console offers as stepped `Setting` rows
+//! (Rust-only, owner request): the anti-aliasing, the camera, the light and the rest, each moved
+//! with the pad. A strong Android device can afford them.
+//!
+//! Until RO-3 these **were** a page: one flat list of 56 rows behind "Advanced options". RO-3
+//! spread them over the tree of `super::options::OptionsPage`, so what is left here is the
+//! catalogue ([`ROW_SETTINGS`]) and the three functions a `Setting` row is drawn and stepped with
+//! ([`label`], [`value_text`], [`step`]). The catalogue still earns its keep: it is where a row's
+//! **widget bounds** come from, and a page that showed a setting outside it would have no step to
+//! move the value by.
 
 use std::sync::LazyLock;
 
@@ -13,18 +20,18 @@ use super::options::OptionRow;
 use crate::ui::options::{OptionsModel, OptionsRow};
 use crate::ui::text;
 
-/// The settings of the page, in order.
+/// Every setting the console offers as a `Setting` row, in the order the flat page of RO-2 listed
+/// them. Where each one is **shown** since RO-3 is the business of `super::options`'s page tables;
+/// this is the list of what a console row may hold, and nothing else.
 ///
-/// Until RO-1 this list was computed: four tabs of the desktop window (Video, Camera, Light and
+/// Until RO-1 it was computed: four tabs of the desktop window (Video, Camera, Light and
 /// Emulation) walked in order, keeping every row a pad can step. RO-1 reorganises those tabs for
-/// the desktop alone, so the list is written out here instead — the console pages are not part of
-/// that lot and must look exactly as they did. `goldens/handheld-advanced-rows.txt` is what holds
-/// it to that, and the filter the old computation applied (a switch, a choice or a bounded number;
-/// never the graphics API, which is the desktop's alone, and never a folder) is now a test of the
-/// same file rather than a run-time rule.
+/// the desktop alone, so the list was written out here instead. The filter the old computation
+/// applied (a switch, a choice or a bounded number; never the graphics API, which is the desktop's
+/// alone, and never a folder) is a test of this list rather than a run-time rule.
 ///
-/// Adding a setting to the desktop window therefore no longer adds a row here: a console row is
-/// an owner decision, and this page is where it is written down.
+/// Adding a setting to the desktop window therefore does not add a console row: a console row is
+/// an owner decision, written down here and placed by a page table.
 pub const ROW_SETTINGS: [SettingId; 56] = [
     SettingId::VideoVSync,
     SettingId::VideoFrameRate,
@@ -122,7 +129,8 @@ static ROWS: LazyLock<Vec<OptionRow>> = LazyLock::new(|| {
         .collect()
 });
 
-/// The rows of the page.
+/// Every setting of [`ROW_SETTINGS`] as a `Setting` row: the settings the console offers, whatever
+/// page of the RO-3 tree each one is shown on.
 #[must_use]
 pub fn rows() -> &'static [OptionRow] {
     &ROWS

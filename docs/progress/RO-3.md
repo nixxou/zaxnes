@@ -12,12 +12,17 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 
 | # | Step | State |
 |---|---|---|
-| 1 | The map (current rows → new places), the test plan, the coverage test written red | todo |
-| 2 | Group rows and page hubs in the handheld UI (the row model, the drawing, the pointer) | todo |
-| 3 | The global console pages | todo |
-| 4 | The game pages, with the two readability rules | todo |
-| 5 | The desktop *Game options* menu | todo |
+| 1 | The map (current rows → new places), the test plan, the coverage test written red | done — `f078668` |
+| 2–5 | The tree: the row model and the group rows, the global pages, the game pages with their two readability rules, the pointer, the desktop *Game options* menu | in progress |
 | 6 | Closing: the notes, the golden, fmt, clippy, the full tests, the release build | todo |
+
+Steps 2 to 5 are **one commit**, not four. The brief's suggested order splits work that one type
+holds together: `OptionRow` gained `Page` and `Group`, and the two old variants
+(`Optimizations`, `Advanced`) became `Page(…)`. From that first line the crate does not compile
+again until the drawing of both console screens and the desktop menu have followed, so there is
+no intermediate state whose tests pass, and the protocol asks for commits that build. The
+coverage test of step 1 is in the same commit, for the same reason: a test file naming a type that
+does not exist yet breaks the build of the step that would carry it alone.
 
 ## Notes
 
@@ -171,6 +176,104 @@ cannot be read literally. Recorded for R1 in Q-107 §6.
 | game | the whole path over a real host: the pages open, a value is set, it is in force and written | `handheld_ui_tests.rs` |
 | desktop | the menu's first level is the console main page, and its submenus are the tree | `desktop_options_golden_tests.rs` |
 | unchanged | `goldens/lua-api.txt`, `goldens/desktop-options-shown.txt`, `SettingKeys.reference.txt` | their own tests |
+
+### Steps 2–5 — the tree as it was built
+
+#### The row model
+
+`ui/handheld/options.rs` holds the whole tree as tables:
+
+| Table | Rows | Where |
+|---|---|---|
+| `ROWS` / `TOUCH_ROWS` | 12 / 13 | the main page, Android's with the touch-pad row |
+| `OPTIMIZATION_ROWS` | 9 | *Optimisations*, the smooth Lua collector joined |
+| `ADVANCED_HUB` | 6 | *Advanced options*: six `Page` rows and nothing else |
+| `DISPLAY_ROWS` | 11 | with the groups "Resolution" and "Advanced" |
+| `RENDERING_3D_ROWS` | 5 | the style, two `Page` rows, the skybox, the mesh algorithm |
+| `ENHANCED_EFFECTS_ROWS` | 7 | with the group "Reflections" |
+| `GEOMETRY_ROWS` | 5 | the curvature |
+| `LIGHT_SHADOWS_ROWS` | 9 | with the group "Ambient occlusion" |
+| `NES_PICTURE_ROWS` | 2 | |
+| `CAMERA_ROWS` | 2 | the camera view that left the main page, and the field of view |
+| `EMULATION_ROWS` | 5 | |
+
+`OptionsPage::{rows, game_rows}` is the only way a page's rows are read, so the walk of the tree
+is one recursive function in each place that needs it (the tests, the own-count of a game, the
+desktop menu).
+
+`HandheldOptionsModel` and `GameOptionsModel` each hold `trail: [(OptionsPage, usize); MAX_DEPTH]`
+and a `depth`: the pages open over the main one, each with the row to come back to. `MAX_DEPTH`
+is 3, the depth of the mockup; `open` does nothing beyond it, so a page added under *Enhanced
+effects* would need the constant raised and would not misbehave in the meantime.
+
+#### What a group title is
+
+`OptionRow::Group(key)` carries the key of its text and nothing else:
+
+- `options::step_selection` skips it, in both directions, and `first_selectable` keeps a page from
+  opening on one. Both are used by the global model and by a game's, so there is one rule.
+- `Painter::group_row` draws it at `set_window_font_scale(0.8)` in a colour dimmer than a value's,
+  and **records no zone**: the mouse of the desktop's console mode cannot select what the pad
+  cannot. The row keeps its full height, so the slot arithmetic of the scrolling list and of the
+  pointer is untouched.
+- `pointer::presses` counts the row **zones** between the focused slot and the clicked one instead
+  of subtracting their slot numbers. Without that, a click past a title would have moved the
+  selection one row too far — the bug the group row would otherwise have introduced.
+
+A third baked font size was the alternative to scaling, and was rejected: the handheld atlas is
+rebuilt whenever the display changes, and "smaller" is worth one draw-list call, not a third face.
+
+#### The game's screens
+
+`GameRow::{ResetAll, Option(OptionRow), Widescreen, Hacks}` and the table `GAME_MAIN` (11 rows)
+replace "row 0 resets, rows 1…16 are `GAME_ROWS`, then three specials". That is what lets the
+widescreen move into the middle of the list, which the mockup asks for. `ADVANCED_ROW`,
+`WIDESCREEN_ROW` and `HACKS_ROW` are now indices **into that table**, each held to the row it
+stands for by a unit test.
+
+The two readability rules:
+
+1. `console_value_text(row)` gives the game's own value plainly, or `"Global: <value>"`
+   (`handheld.game_options.global`, "Global : {0}" in French), which the drawing dims. The desktop
+   menu keeps `"Use Global : <value>"` for its entry — a menu has room, a console row has not.
+   An own value also carries a marker, `*` in RO-2's cyan, drawn as a **badge** before the value
+   so that the span a click steps keeps its place.
+2. `own_count(page)` counts the game's own values under a page, the pages below included, and
+   `own_count_text` turns it into "2 own" ("2 propres"); the row shows "2 own >", or just ">" with
+   none. Both read the game-options model, and a console page is drawn only while it is shown, so
+   nothing of this runs while a game plays.
+
+The chevron is the ASCII `>` the console rows already used, not the mockup's `›`: U+203A is
+outside the atlas's glyph ranges (`ui/fonts.rs::GLYPH_RANGES`) and would draw as a box.
+
+#### The desktop menu
+
+`draw_game_options` walks `GAME_MAIN` in its order, so the first level **is** the console main
+page: the reset, the six value rows, the widescreen between the overscan and the region, the two
+submenus, the aids last, then the achievements entry RO-2 put at the end. `draw_game_page` draws
+one page of the tree as a submenu and calls itself for a page of a page; a group title is
+`text_disabled` under a separator. RO-2's `draw_widescreen_and_aids` split in two, the widescreen
+and the aids being at opposite ends of the list now.
+
+RO-2's `GAME_DISPLAY_ROWS`, `GAME_3D_ROWS`, `GAME_CURVATURE_ROWS` and `GAME_ADVANCED_ROWS` are
+gone as *menu* tables: the menu has no list of its own left, which a test of the source pins
+(`ro_3_the_desktop_game_menu_walks_the_console_tree`).
+
+#### What the brief's one-sentence rule really means
+
+Decision 4 above said five settings; the walk found **six**, from three composite rows. The third
+is the frame cap, which moves `video.vsync` between its two values and which the mockup keeps on
+the Optimisations page while *Display* gets the `video.vsync` row. `TWO_PLACES` in
+`handheld_tree_tests.rs` lists the six with the table of which row causes each.
+
+#### Where the old golden went
+
+`goldens/handheld-advanced-rows.txt` is deleted and `goldens/handheld-option-tree.txt` replaces
+it: the whole tree, both trees, page › group › row, with a stable name per row (a setting's
+settings-file key, or `row.*` / `page.*` / `[group.*]`). An ignored test regenerates it
+(`ro_3_write_the_option_tree_golden`). What the old file pinned and the new one does not — that
+`advanced::ROW_SETTINGS` holds 56 settings — is now one assertion in
+`ro_3_every_console_setting_is_a_row_the_console_can_step`.
 
 ### Step 1 — what may not change
 

@@ -61,49 +61,134 @@ pub enum OptionRow {
     Controls,
     /// RetroAchievements (Rust-only): opens its own screen.
     Achievements,
-    /// The performance rows (Rust-only): opens the [`OPTIMIZATION_ROWS`] page.
-    Optimizations,
     /// The touch pad (Rust-only, a touch screen only): no, yes or automatic.
     TouchPad,
-    /// The settings of the desktop's options window (Rust-only): opens the
-    /// [`super::advanced`] page.
-    Advanced,
-    /// A setting of the advanced page.
+    /// A setting of the desktop's options window shown as a stepped row
+    /// ([`super::advanced::ROW_SETTINGS`] names every one the console offers).
     Setting(SettingId),
+    /// A row that climbs to another page of the tree (RO-3).
+    Page(OptionsPage),
+    /// A group title: a label and nothing else (RO-3). Up and down skip it, and it is drawn
+    /// smaller and dimmed. The field is the key of its text.
+    Group(&'static str),
 }
 
-/// The rows of the main page, in order.
-pub const ROWS: [OptionRow; 14] = [
+/// A page of the console options (RO-3, the owner's mockup): the main page climbs to the
+/// *Optimisations* page and to the *Advanced options* hub, and the hub to six pages, two of which
+/// have a page of their own.
+///
+/// The same pages serve the global options and a game's, with a list of their own for each:
+/// [`Self::rows`] and [`Self::game_rows`]. A game cannot set everything the console can, so its
+/// pages are shorter and two of the hub's six do not exist for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptionsPage {
+    /// The performance switches together (owner request, before RO-3).
+    Optimizations,
+    /// The hub of the six pages below.
+    Advanced,
+    /// How the picture reaches the screen, and what it costs.
+    Display,
+    /// What the 3D scene looks like.
+    Rendering3d,
+    /// The effects the Enhanced style adds (AMD-055 REQ-SCN-079).
+    EnhancedEffects,
+    /// The curvature of AMD-043 REQ-SCN-066.
+    Geometry,
+    /// The light, the shadows and the ambient occlusion.
+    LightShadows,
+    /// What the console puts out, before any 3D.
+    NesPicture,
+    /// The camera.
+    Camera,
+    /// The emulation.
+    Emulation,
+}
+
+impl OptionsPage {
+    /// Every page, for the tests that walk them all.
+    pub const ALL: [Self; 10] = [
+        Self::Optimizations,
+        Self::Advanced,
+        Self::Display,
+        Self::Rendering3d,
+        Self::EnhancedEffects,
+        Self::Geometry,
+        Self::LightShadows,
+        Self::NesPicture,
+        Self::Camera,
+        Self::Emulation,
+    ];
+
+    /// The key of the page's title.
+    #[must_use]
+    pub const fn title_key(self) -> &'static str {
+        match self {
+            Self::Optimizations => keys::HANDHELD_OPTION_OPTIMIZATIONS,
+            Self::Advanced => keys::HANDHELD_OPTION_ADVANCED,
+            Self::Display => keys::TAB_DISPLAY,
+            Self::Rendering3d => keys::TAB_RENDER_3D,
+            Self::EnhancedEffects => keys::PAGE_ENHANCED_EFFECTS,
+            Self::Geometry => keys::PAGE_GEOMETRY,
+            Self::LightShadows => keys::TAB_LIGHT,
+            Self::NesPicture => keys::TAB_NES_PICTURE,
+            Self::Camera => keys::TAB_CAMERA,
+            Self::Emulation => keys::TAB_EMULATION,
+        }
+    }
+
+    /// The rows of the page in the **global** options.
+    #[must_use]
+    pub const fn rows(self) -> &'static [OptionRow] {
+        match self {
+            Self::Optimizations => &OPTIMIZATION_ROWS,
+            Self::Advanced => &ADVANCED_HUB,
+            Self::Display => &DISPLAY_ROWS,
+            Self::Rendering3d => &RENDERING_3D_ROWS,
+            Self::EnhancedEffects => &ENHANCED_EFFECTS_ROWS,
+            Self::Geometry => &GEOMETRY_ROWS,
+            Self::LightShadows => &LIGHT_SHADOWS_ROWS,
+            Self::NesPicture => &NES_PICTURE_ROWS,
+            Self::Camera => &CAMERA_ROWS,
+            Self::Emulation => &EMULATION_ROWS,
+        }
+    }
+
+    /// The rows of the page in the options of one **game**; empty for a page a game has not got.
+    #[must_use]
+    pub const fn game_rows(self) -> &'static [OptionRow] {
+        super::game_options::page_rows(self)
+    }
+}
+
+/// The rows of the main page, in order (RO-3: the owner's mockup). "Camera view" and "Show FPS"
+/// left it for the *Advanced options* hub.
+pub const ROWS: [OptionRow; 12] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
     OptionRow::Palette,
     OptionRow::Overscan,
-    OptionRow::ShowFps,
-    OptionRow::Camera,
     OptionRow::Region,
-    OptionRow::Optimizations,
-    OptionRow::Advanced,
+    OptionRow::Page(OptionsPage::Optimizations),
+    OptionRow::Page(OptionsPage::Advanced),
     OptionRow::Controls,
     OptionRow::Achievements,
     OptionRow::Profiler,
 ];
 
 /// The rows of the main page where the touch pad is offered (Android): its row after the
-/// controls.
-pub const TOUCH_ROWS: [OptionRow; 15] = [
+/// controls, which is where it was before RO-3.
+pub const TOUCH_ROWS: [OptionRow; 13] = [
     OptionRow::Language,
     OptionRow::Volume,
     OptionRow::RenderScale,
     OptionRow::Shadows,
     OptionRow::Palette,
     OptionRow::Overscan,
-    OptionRow::ShowFps,
-    OptionRow::Camera,
     OptionRow::Region,
-    OptionRow::Optimizations,
-    OptionRow::Advanced,
+    OptionRow::Page(OptionsPage::Optimizations),
+    OptionRow::Page(OptionsPage::Advanced),
     OptionRow::Controls,
     OptionRow::TouchPad,
     OptionRow::Achievements,
@@ -117,8 +202,10 @@ fn touch_pad(settings: &SettingsModel) -> i32 {
     settings.get(SettingId::InputTouchPad).as_int()
 }
 
-/// The rows of the "Optimizations" page (owner request: the performance switches together).
-pub const OPTIMIZATION_ROWS: [OptionRow; 8] = [
+/// The rows of the "Optimizations" page (owner request: the performance switches together). RO-3
+/// moved the smooth Lua collector here from the flat advanced page, where it was the one
+/// performance switch not with the others.
+pub const OPTIMIZATION_ROWS: [OptionRow; 9] = [
     OptionRow::FrameCap,
     OptionRow::HalfRate3d,
     OptionRow::CatchUp,
@@ -127,6 +214,99 @@ pub const OPTIMIZATION_ROWS: [OptionRow; 8] = [
     OptionRow::Pipeline,
     OptionRow::LuaOptimized,
     OptionRow::LuaExperimental,
+    OptionRow::Setting(SettingId::EmuLuaSmoothGc),
+];
+
+/// The *Advanced options* hub: six pages where RO-2 left one flat list of 56 rows. It repeats
+/// nothing the other pages offer — the palette and the shadows are the main page's, the nine
+/// overscan settings the overscan screen's, the performance switches the Optimisations page's.
+pub const ADVANCED_HUB: [OptionRow; 6] = [
+    OptionRow::Page(OptionsPage::Display),
+    OptionRow::Page(OptionsPage::Rendering3d),
+    OptionRow::Page(OptionsPage::LightShadows),
+    OptionRow::Page(OptionsPage::NesPicture),
+    OptionRow::Page(OptionsPage::Camera),
+    OptionRow::Page(OptionsPage::Emulation),
+];
+
+/// *Advanced options › Display*. The render scale is here **and** on the main page: the one
+/// setting the mockup gives two entry points on purpose.
+pub const DISPLAY_ROWS: [OptionRow; 11] = [
+    OptionRow::ShowFps,
+    OptionRow::Setting(SettingId::VideoVSync),
+    OptionRow::Setting(SettingId::VideoFrameRate),
+    OptionRow::Setting(SettingId::VideoSkipFrame),
+    OptionRow::Group(keys::GROUP_RESOLUTION),
+    OptionRow::Setting(SettingId::VideoResScale),
+    OptionRow::Setting(SettingId::VideoDynamicResolution),
+    OptionRow::Setting(SettingId::VideoRenderMethod),
+    OptionRow::Setting(SettingId::VideoAntiAlias),
+    OptionRow::Group(keys::GROUP_ADVANCED),
+    OptionRow::Setting(SettingId::VideoMaxQueuedFrames),
+];
+
+/// *Advanced options › 3D rendering*.
+pub const RENDERING_3D_ROWS: [OptionRow; 5] = [
+    OptionRow::Setting(SettingId::RenderVisualStyle),
+    OptionRow::Page(OptionsPage::EnhancedEffects),
+    OptionRow::Page(OptionsPage::Geometry),
+    OptionRow::Setting(SettingId::SceneSkybox),
+    OptionRow::Setting(SettingId::RenderMeshAlgo),
+];
+
+/// *3D rendering › Enhanced effects* (AMD-055 REQ-SCN-079), the reflections and their four
+/// gradations under a title of their own.
+pub const ENHANCED_EFFECTS_ROWS: [OptionRow; 7] = [
+    OptionRow::Setting(SettingId::RenderStyleVoxelGrid),
+    OptionRow::Group(keys::GROUP_REFLECTIONS),
+    OptionRow::Setting(SettingId::RenderStyleReflections),
+    OptionRow::Setting(SettingId::RenderStyleSsrShine),
+    OptionRow::Setting(SettingId::RenderStyleSsrClarity),
+    OptionRow::Setting(SettingId::RenderStyleSsrLength),
+    OptionRow::Setting(SettingId::RenderStyleSsrQuality),
+];
+
+/// *3D rendering › Geometry (curvature)* (AMD-043 REQ-SCN-066, AMD-046 §3).
+pub const GEOMETRY_ROWS: [OptionRow; 5] = [
+    OptionRow::Setting(SettingId::SceneBendLr),
+    OptionRow::Setting(SettingId::SceneBendTb),
+    OptionRow::Setting(SettingId::SceneArcH),
+    OptionRow::Setting(SettingId::SceneArcCenter),
+    OptionRow::Setting(SettingId::SceneBend2dMode),
+];
+
+/// *Advanced options › Light and shadows*. The shadow switch itself is the main page's row.
+pub const LIGHT_SHADOWS_ROWS: [OptionRow; 9] = [
+    OptionRow::Setting(SettingId::LightIntensity),
+    OptionRow::Setting(SettingId::RenderBackdropLighting),
+    OptionRow::Setting(SettingId::RenderStylePixelShadow),
+    OptionRow::Group(keys::GROUP_AMBIENT_OCCLUSION),
+    OptionRow::Setting(SettingId::RenderStyleAo),
+    OptionRow::Setting(SettingId::RenderStyleAoStrength),
+    OptionRow::Setting(SettingId::RenderStyleAoRadius),
+    OptionRow::Setting(SettingId::RenderStyleAoThickness),
+    OptionRow::Setting(SettingId::RenderStyleAoQuality),
+];
+
+/// *Advanced options › NES picture*. The palette is the main page's row and the overscan its own
+/// screen, so what is left is what the console puts out beyond them.
+pub const NES_PICTURE_ROWS: [OptionRow; 2] = [
+    OptionRow::Setting(SettingId::VideoRemoveSpriteLimit),
+    OptionRow::Setting(SettingId::VideoWidescreenStrictEdges),
+];
+
+/// *Advanced options › Camera*: the preset row that left the main page, and the field of view.
+pub const CAMERA_ROWS: [OptionRow; 2] =
+    [OptionRow::Camera, OptionRow::Setting(SettingId::CameraFov)];
+
+/// *Advanced options › Emulation*. The region row of the main page sets the same two settings in
+/// one step; these are the two apart, as the mockup asks.
+pub const EMULATION_ROWS: [OptionRow; 5] = [
+    OptionRow::Setting(SettingId::EmuRunAhead),
+    OptionRow::Setting(SettingId::EmuGameSpeed),
+    OptionRow::Setting(SettingId::EmuAutoTvMode),
+    OptionRow::Setting(SettingId::EmuTvMode),
+    OptionRow::Setting(SettingId::InputEmulatedMenuButton),
 ];
 
 /// The values of the palette row (`video.nes_palette`): the setting's choices.
@@ -214,13 +394,58 @@ pub enum OptionsCommand {
     StepCamera(i32),
 }
 
+/// How deep the pages go (RO-3): main › *Advanced options* › *3D rendering* › *Enhanced effects*.
+pub const MAX_DEPTH: usize = 3;
+
+/// The index of the first row of `rows` a selection may rest on: a group title is a label, not a
+/// row. A page with nothing but group titles would be a mistake, and a test forbids it; the fall
+/// back of 0 keeps the index in range either way.
+#[must_use]
+pub fn first_selectable(rows: &[OptionRow]) -> usize {
+    rows.iter()
+        .position(|row| !matches!(row, OptionRow::Group(_)))
+        .unwrap_or(0)
+}
+
+/// The selection `from` moved `step` places through `rows`, wrapping round and **skipping the
+/// group titles** (RO-3). `step` is −1 or 1.
+#[must_use]
+pub fn step_selection(rows: &[OptionRow], from: usize, step: i32) -> usize {
+    let count = rows.len();
+    if count == 0 {
+        return 0;
+    }
+    let mut at = from;
+    // At most one turn round the list: a page of nothing but titles leaves the selection where
+    // it was rather than looping for ever.
+    for _ in 0..count {
+        at = if step < 0 {
+            (at + count - 1) % count
+        } else {
+            (at + 1) % count
+        };
+        if !matches!(rows[at], OptionRow::Group(_)) {
+            return at;
+        }
+    }
+    from
+}
+
 /// The list and its selection.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HandheldOptionsModel {
     selected: usize,
-    /// On a page of the main one ("Optimizations", "Advanced options"): that page's row, and the
-    /// row of the main page to come back to.
-    page: Option<(OptionRow, usize)>,
+    /// The pages open over the main one, innermost last: each the page shown and the row of the
+    /// page under it to come back to. RO-3 made this a trail rather than one page, the hub of
+    /// the mockup being three levels deep.
+    trail: [(OptionsPage, usize); MAX_DEPTH],
+    depth: usize,
+}
+
+impl Default for HandheldOptionsModel {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl HandheldOptionsModel {
@@ -229,40 +454,58 @@ impl HandheldOptionsModel {
     pub const fn new() -> Self {
         Self {
             selected: 0,
-            page: None,
+            trail: [(OptionsPage::Advanced, 0); MAX_DEPTH],
+            depth: 0,
         }
     }
 
-    /// The rows of the page shown.
+    /// The rows of the main page: the Android one where a touch screen is offered.
     #[must_use]
-    pub fn rows(&self) -> &'static [OptionRow] {
-        if let Some((OptionRow::Advanced, _)) = self.page {
-            super::advanced::rows()
-        } else if self.page.is_some() {
-            &OPTIMIZATION_ROWS
-        } else if zax_platform::input::touch::offered() {
+    pub fn main_rows() -> &'static [OptionRow] {
+        if zax_platform::input::touch::offered() {
             &TOUCH_ROWS
         } else {
             &ROWS
         }
     }
 
-    /// Whether the "Optimizations" page is shown.
+    /// The rows of the page shown.
     #[must_use]
-    pub const fn in_optimizations(&self) -> bool {
-        matches!(self.page, Some((OptionRow::Optimizations, _)))
+    pub fn rows(&self) -> &'static [OptionRow] {
+        match self.depth.checked_sub(1) {
+            Some(last) => self.trail[last].0.rows(),
+            None => Self::main_rows(),
+        }
     }
 
-    /// The page of the main one shown ("Optimizations", "Advanced options"), if any.
+    /// Whether the "Optimizations" page is shown.
     #[must_use]
-    pub fn page(&self) -> Option<OptionRow> {
-        self.page.map(|(row, _)| row)
+    pub fn in_optimizations(&self) -> bool {
+        self.page() == Some(OptionsPage::Optimizations)
+    }
+
+    /// The page shown, if any; none on the main page.
+    #[must_use]
+    pub fn page(&self) -> Option<OptionsPage> {
+        self.depth.checked_sub(1).map(|last| self.trail[last].0)
+    }
+
+    /// The pages open over the main one, outermost first: what the title band spells out.
+    #[must_use]
+    pub fn path(&self) -> Vec<OptionsPage> {
+        self.trail[..self.depth]
+            .iter()
+            .map(|(page, _)| *page)
+            .collect()
     }
 
     /// The selected row.
     #[must_use]
     pub fn selected(&self) -> OptionRow {
-        self.rows()[self.selected]
+        let rows = self.rows();
+        rows.get(self.selected)
+            .copied()
+            .unwrap_or_else(|| rows[first_selectable(rows)])
     }
 
     /// The index of the selected row.
@@ -271,24 +514,31 @@ impl HandheldOptionsModel {
         self.selected
     }
 
+    /// Climbs to `page`, remembering the row to come back to. Does nothing at [`MAX_DEPTH`].
+    fn open(&mut self, page: OptionsPage) {
+        if self.depth >= MAX_DEPTH {
+            return;
+        }
+        self.trail[self.depth] = (page, self.selected);
+        self.depth += 1;
+        self.selected = first_selectable(self.rows());
+    }
+
     /// One press of a button; a value row changes `settings` itself.
     pub fn handle(
         &mut self,
         button: PadButton,
         settings: &mut SettingsModel,
     ) -> Option<OptionsCommand> {
-        let count = self.rows().len();
         match button {
-            PadButton::Up => self.selected = (self.selected + count - 1) % count,
-            PadButton::Down => self.selected = (self.selected + 1) % count,
+            PadButton::Up => self.selected = step_selection(self.rows(), self.selected, -1),
+            PadButton::Down => self.selected = step_selection(self.rows(), self.selected, 1),
             PadButton::Left | PadButton::Right | PadButton::A
-                if matches!(
-                    self.selected(),
-                    OptionRow::Optimizations | OptionRow::Advanced
-                ) =>
+                if matches!(self.selected(), OptionRow::Page(_)) =>
             {
-                self.page = Some((self.selected(), self.selected));
-                self.selected = 0;
+                if let OptionRow::Page(page) = self.selected() {
+                    self.open(page);
+                }
             }
             PadButton::Left => return self.step(settings, -1),
             PadButton::Right => return self.step(settings, 1),
@@ -299,8 +549,12 @@ impl HandheldOptionsModel {
                     _ => self.step(settings, 1),
                 };
             }
-            PadButton::B => match self.page.take() {
-                Some((_, main)) => self.selected = main,
+            // B climbs back one page at a time, and leaves the options from the main one.
+            PadButton::B => match self.depth.checked_sub(1) {
+                Some(last) => {
+                    self.depth = last;
+                    self.selected = self.trail[last].1;
+                }
                 None => return Some(OptionsCommand::Close),
             },
             _ => {}
@@ -382,7 +636,7 @@ pub fn step_row(row: OptionRow, settings: &mut SettingsModel, step: i32) -> Opti
             let next = *cycled(&TOUCH_PADS, &touch_pad(settings), step);
             settings.set(SettingId::InputTouchPad, SettingValue::Enum(next));
         }
-        OptionRow::Controls | OptionRow::Optimizations | OptionRow::Advanced => {}
+        OptionRow::Controls | OptionRow::Page(_) | OptionRow::Group(_) => {}
         OptionRow::Setting(id) => super::advanced::step(id, settings, step),
         OptionRow::Achievements => return Some(OptionsCommand::OpenAchievements),
     }
@@ -418,11 +672,11 @@ pub fn label(row: OptionRow) -> String {
         OptionRow::Pipeline => strings::get(keys::HANDHELD_OPTION_PIPELINE),
         OptionRow::Region => strings::get(keys::HANDHELD_OPTION_REGION),
         OptionRow::TouchPad => strings::get(keys::HANDHELD_OPTION_TOUCH_PAD),
-        OptionRow::Advanced => strings::get(keys::HANDHELD_OPTION_ADVANCED),
         OptionRow::Setting(id) => super::advanced::label(id),
         OptionRow::Controls => strings::get(keys::HANDHELD_OPTION_CONTROLS),
-        OptionRow::Optimizations => strings::get(keys::HANDHELD_OPTION_OPTIMIZATIONS),
         OptionRow::Achievements => strings::get(keys::TAB_ACHIEVEMENTS),
+        OptionRow::Page(page) => strings::get(page.title_key()),
+        OptionRow::Group(key) => strings::get(key),
     }
 }
 
@@ -475,7 +729,7 @@ pub fn value_text(row: OptionRow, settings: &SettingsModel, camera: CameraPreset
             1 => strings::get(keys::HANDHELD_TOUCH_PAD_ON),
             _ => text::label_of_option("Auto"),
         },
-        OptionRow::Controls | OptionRow::Optimizations | OptionRow::Advanced => String::new(),
+        OptionRow::Controls | OptionRow::Page(_) | OptionRow::Group(_) => String::new(),
         OptionRow::Setting(id) => super::advanced::value_text(id, settings),
         OptionRow::Achievements => switch(settings.get(SettingId::AchievementsEnabled).as_bool()),
     }
@@ -606,12 +860,35 @@ fn set_render_scale(settings: &mut SettingsModel, step: i32) {
 mod tests {
     use super::*;
 
+    /// The pages to open to reach `row`, outermost first; none for a row of no page.
+    fn path_to(row: OptionRow) -> Option<Vec<OptionsPage>> {
+        fn search(rows: &[OptionRow], wanted: OptionRow, path: &mut Vec<OptionsPage>) -> bool {
+            for candidate in rows {
+                if *candidate == wanted {
+                    return true;
+                }
+                if let OptionRow::Page(page) = candidate {
+                    path.push(*page);
+                    if search(page.rows(), wanted, path) {
+                        return true;
+                    }
+                    path.pop();
+                }
+            }
+            false
+        }
+        let mut path = Vec::new();
+        search(HandheldOptionsModel::main_rows(), row, &mut path).then_some(path)
+    }
+
+    /// Walks to `row` wherever it is in the tree: out to the main page, then down its path.
     fn go_to(model: &mut HandheldOptionsModel, row: OptionRow, settings: &mut SettingsModel) {
-        let in_page = OPTIMIZATION_ROWS.contains(&row);
-        if model.in_optimizations() && !in_page {
+        while model.page().is_some() {
             model.handle(PadButton::B, settings);
-        } else if !model.in_optimizations() && in_page {
-            while model.selected() != OptionRow::Optimizations {
+        }
+        let path = path_to(row).expect("a reachable row");
+        for page in path {
+            while model.selected() != OptionRow::Page(page) {
                 model.handle(PadButton::Down, settings);
             }
             model.handle(PadButton::A, settings);
@@ -625,16 +902,139 @@ mod tests {
     fn the_optimizations_page_opens_and_goes_back_to_its_row() {
         let mut settings = SettingsModel::new();
         let mut model = HandheldOptionsModel::new();
-        go_to(&mut model, OptionRow::Optimizations, &mut settings);
+        let row = OptionRow::Page(OptionsPage::Optimizations);
+        go_to(&mut model, row, &mut settings);
         assert_eq!(None, model.handle(PadButton::A, &mut settings));
         assert!(model.in_optimizations());
         assert_eq!(OPTIMIZATION_ROWS[0], model.selected());
         assert_eq!(None, model.handle(PadButton::B, &mut settings));
         assert!(!model.in_optimizations());
-        assert_eq!(OptionRow::Optimizations, model.selected());
+        assert_eq!(row, model.selected());
         assert_eq!(
             Some(OptionsCommand::Close),
             model.handle(PadButton::B, &mut settings)
+        );
+    }
+
+    /// RO-3: the three levels of the mockup — main › *Advanced options* › *3D rendering* ›
+    /// *Enhanced effects* — open one at a time, and B climbs back to the row that opened each.
+    #[test]
+    fn ro_3_the_three_levels_open_and_b_climbs_back_one_at_a_time() {
+        let mut settings = SettingsModel::new();
+        let mut model = HandheldOptionsModel::new();
+        for page in [
+            OptionsPage::Advanced,
+            OptionsPage::Rendering3d,
+            OptionsPage::EnhancedEffects,
+        ] {
+            while model.selected() != OptionRow::Page(page) {
+                model.handle(PadButton::Down, &mut settings);
+            }
+            assert_eq!(None, model.handle(PadButton::A, &mut settings));
+            assert_eq!(Some(page), model.page());
+        }
+        assert_eq!(
+            vec![
+                OptionsPage::Advanced,
+                OptionsPage::Rendering3d,
+                OptionsPage::EnhancedEffects
+            ],
+            model.path()
+        );
+        assert_eq!(MAX_DEPTH, model.path().len(), "the tree is three deep");
+        // A fourth level does not exist, and asking for one changes nothing.
+        let before = model;
+        model.handle(PadButton::A, &mut settings);
+        assert_eq!(Some(OptionsPage::EnhancedEffects), model.page());
+
+        model = before;
+        for page in [OptionsPage::Rendering3d, OptionsPage::Advanced] {
+            assert_eq!(None, model.handle(PadButton::B, &mut settings));
+            assert_eq!(Some(page), model.page());
+            // The selection comes back to the row that opened the page below.
+            assert!(matches!(model.selected(), OptionRow::Page(_)));
+        }
+        assert_eq!(None, model.handle(PadButton::B, &mut settings));
+        assert_eq!(None, model.page());
+        assert_eq!(OptionRow::Page(OptionsPage::Advanced), model.selected());
+        assert_eq!(
+            Some(OptionsCommand::Close),
+            model.handle(PadButton::B, &mut settings)
+        );
+    }
+
+    /// RO-3: a group title is a label. Up and down skip it in both directions, on every page of
+    /// the tree that has one, and no page is nothing but titles.
+    #[test]
+    fn ro_3_a_group_title_is_never_selected() {
+        let mut settings = SettingsModel::new();
+        for page in OptionsPage::ALL {
+            let rows = page.rows();
+            assert!(
+                rows.iter().any(|row| !matches!(row, OptionRow::Group(_))),
+                "{page:?} is nothing but group titles"
+            );
+            if !rows.iter().any(|row| matches!(row, OptionRow::Group(_))) {
+                continue;
+            }
+            let mut model = HandheldOptionsModel::new();
+            go_to(&mut model, OptionRow::Page(page), &mut settings);
+            model.handle(PadButton::A, &mut settings);
+            assert_eq!(Some(page), model.page());
+            // Twice round the page in each direction: a title is never where the selection lands.
+            for step in [PadButton::Down, PadButton::Up] {
+                for _ in 0..2 * rows.len() {
+                    assert!(
+                        !matches!(model.selected(), OptionRow::Group(_)),
+                        "{page:?} selected a group title at {}",
+                        model.selected_index()
+                    );
+                    model.handle(step, &mut settings);
+                }
+            }
+            // And the page opens on a row, not on its first title.
+            assert!(!matches!(rows[first_selectable(rows)], OptionRow::Group(_)));
+        }
+    }
+
+    /// RO-3: the smooth Lua collector left the flat advanced page for the Optimisations page,
+    /// where the other performance switches are, and it still steps.
+    #[test]
+    fn ro_3_the_optimizations_page_holds_the_smooth_collector() {
+        let row = OptionRow::Setting(SettingId::EmuLuaSmoothGc);
+        assert!(OPTIMIZATION_ROWS.contains(&row));
+        assert_eq!(
+            Some(vec![OptionsPage::Optimizations]),
+            path_to(row),
+            "it is on the Optimisations page and nowhere else"
+        );
+        let mut settings = SettingsModel::new();
+        let mut model = HandheldOptionsModel::new();
+        go_to(&mut model, row, &mut settings);
+        let before = settings.get(SettingId::EmuLuaSmoothGc).as_bool();
+        model.handle(PadButton::A, &mut settings);
+        assert_eq!(!before, settings.get(SettingId::EmuLuaSmoothGc).as_bool());
+    }
+
+    /// RO-3: the two rows the mockup takes off the main page are reachable where it puts them,
+    /// and the render scale is the one row the main page keeps a second copy of.
+    #[test]
+    fn ro_3_the_main_page_is_the_mockups() {
+        assert!(!ROWS.contains(&OptionRow::Camera));
+        assert!(!ROWS.contains(&OptionRow::ShowFps));
+        assert_eq!(
+            Some(vec![OptionsPage::Advanced, OptionsPage::Camera]),
+            path_to(OptionRow::Camera)
+        );
+        assert_eq!(
+            Some(vec![OptionsPage::Advanced, OptionsPage::Display]),
+            path_to(OptionRow::ShowFps)
+        );
+        assert_eq!(Some(Vec::new()), path_to(OptionRow::RenderScale));
+        assert_eq!(
+            Some(vec![OptionsPage::Advanced, OptionsPage::Display]),
+            path_to(OptionRow::Setting(SettingId::VideoResScale)),
+            "the one setting with two entry points"
         );
     }
 

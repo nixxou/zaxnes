@@ -117,6 +117,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::GROUP_WIDESCREEN, "Widescreen"),
     (keys::GROUP_REGION, "Video region"),
     (keys::GROUP_ADVANCED, "Advanced"),
+    // ---------------------- RO-3: the pages and the group titles of the console option tree
+    (keys::PAGE_ENHANCED_EFFECTS, "Enhanced effects"),
+    (keys::PAGE_GEOMETRY, "Geometry (curvature)"),
+    (keys::GROUP_REFLECTIONS, "Reflections"),
+    (keys::GROUP_AMBIENT_OCCLUSION, "Ambient occlusion"),
     // -------------- RO-1 point 6: the two compact rows of the overscan margins, and the caption
     //                of each of the four values a compact row holds side by side.
     (keys::COMPACT_OVERSCAN_NTSC, "Overscan NTSC"),
@@ -1070,6 +1075,8 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::HANDHELD_GAME_OPTIONS_TITLE, "Game options — {0}"),
     (keys::HANDHELD_GAME_OPTIONS_RESET, "Put everything back to global"),
     (keys::HANDHELD_USE_GLOBAL, "Use Global : {0}"),
+    (keys::HANDHELD_GLOBAL_VALUE, "Global: {0}"),
+    (keys::HANDHELD_OWN_COUNT, "{0} own"),
     (keys::HANDHELD_RUN_AHEAD_FORCED, "(forced to 0: scripts)"),
     (keys::HANDHELD_HINT_GAME_OPTIONS, "Game options"),
     (keys::HANDHELD_HINT_FAVORITE, "Favorite"),
