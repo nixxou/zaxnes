@@ -80,6 +80,8 @@ draw list. Lua scripts hook into the conversion, never into the core.
   (the extra registers the hacks use), and [`docs/hacks/`](docs/hacks) one folder per game's
   widescreen hack.
 - [`docs/MOVIES.md`](docs/MOVIES.md): the `.zmv` movies.
+- [`docs/OPTIONS-LAYOUT.md`](docs/OPTIONS-LAYOUT.md): the layout of the desktop options window,
+  where it diverges from the specification, and the old-tab → new-tab mapping of every setting.
 - [`build/portmaster/README.md`](build/portmaster/README.md): the handheld build and its controls.
 
 ## Specification

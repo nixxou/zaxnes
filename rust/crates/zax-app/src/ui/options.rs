@@ -12,7 +12,7 @@
 //!
 //! The layout is therefore [`LAYOUT`]: one line per tab, one entry per row or group heading, in the
 //! order the window draws them. It is a **divergence from the tab list of REQ-UI-202**, recorded in
-//! `docs/OPTIONS-LAYOUT.md` and raised with R1 as Q-105.
+//! `docs/OPTIONS-LAYOUT.md` and raised with R1 as Q-107.
 //!
 //! No setting may leave the window on the way: `goldens/desktop-options-shown.txt` holds the set
 //! the window showed at `0b0aa8c` and `tests/desktop_options_golden_tests.rs` compares it with
@@ -314,6 +314,10 @@ const ACHIEVEMENTS: &[LayoutEntry] = &[
 ];
 
 /// The window, tab by tab: every row and every group heading, in the order they are drawn.
+///
+/// The nine tabs are a divergence from the six of SPEC-10 REQ-UI-202, decided by the owner and
+/// recorded in `docs/OPTIONS-LAYOUT.md`.
+// Q-107
 pub const LAYOUT: [(OptionsTab, &[LayoutEntry]); 9] = [
     (OptionsTab::Display, DISPLAY),
     (OptionsTab::NesPicture, NES_PICTURE),

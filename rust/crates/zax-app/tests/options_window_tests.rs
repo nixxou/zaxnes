@@ -96,7 +96,7 @@ fn req_ui_202_the_tabs_are_the_nine_of_the_ro_1_layout() {
     // RO-1 replaces the single "Video" tab of REQ-UI-202 — which held three families — with
     // Display, NES picture and 3D rendering; the other six are the amendment's, plus
     // RetroAchievements (Rust-only, owner request). A divergence: see `docs/OPTIONS-LAYOUT.md`
-    // and Q-105.
+    // and Q-107.
     assert_eq!(
         vec![
             "Display",

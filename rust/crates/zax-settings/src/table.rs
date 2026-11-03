@@ -42,6 +42,7 @@ const LANGUAGE_FRENCH: &str = "fr";
 /// A divergence from REQ-SCN-066, which gives 13 rungs of 30°. Every one of those 13 is still a
 /// rung here, so a value saved before this lot loads unchanged, and a Lua write still rounds on
 /// the 30° grid (`styles::snap_write`), so a profile written for 3dSen behaves as it did.
+// Q-107
 pub(crate) const CURVATURE_DEGREES: [f64; 23] = [
     -180.0, -150.0, -120.0, -90.0, -60.0, -30.0, -25.0, -20.0, -15.0, -10.0, -5.0, 0.0, 5.0, 10.0,
     15.0, 20.0, 25.0, 30.0, 60.0, 90.0, 120.0, 150.0, 180.0,
@@ -705,7 +706,7 @@ fn curvature(out: &mut Vec<SettingDescriptor>) {
             .with_domain(Domain::grid(&CURVATURE_DEGREES, 0))
             .with_label(label)
             // AMD-043 §6 writes "option, 13 valeurs"; RO-1 point 7 makes it 23 — the owner's
-            // divergence, recorded in `docs/OPTIONS-LAYOUT.md` and raised as Q-105. The libretro
+            // divergence, recorded in `docs/OPTIONS-LAYOUT.md` and raised as Q-107. The libretro
             // list is also what the console's advanced page steps by, so the two have to agree.
             .with_libretro(curvature_options()),
         );

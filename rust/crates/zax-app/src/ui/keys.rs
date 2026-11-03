@@ -236,7 +236,7 @@ pub const ABOUT_VERSION_PREFIX: &str = "about.version_prefix";
 
 // ----------------------------------------------------- options window tabs
 // RO-1 replaces the single "Video" tab of REQ-UI-202, which held three families, with the three
-// tabs below (see `docs/OPTIONS-LAYOUT.md` and Q-105).
+// tabs below (see `docs/OPTIONS-LAYOUT.md` and Q-107).
 pub const TAB_DISPLAY: &str = "options.tab.display";
 pub const TAB_NES_PICTURE: &str = "options.tab.nes_picture";
 pub const TAB_RENDER_3D: &str = "options.tab.render_3d";

@@ -17,8 +17,8 @@ Build directory: `rust/target-ro` (the owner may hold `rust/target/release/zaxne
 | 3 | Tooltip infrastructure and the texts of the first tabs | done — `b0570ef` |
 | 4 | The remaining tooltip texts in both languages, and their completeness test | done — `baac780` |
 | 5a | Compact overscan rows (point 6) | done — `c38c663` |
-| 5b | The finer curvature grid (point 7) | done — `PENDING5B` |
-| 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | todo |
+| 5b | The finer curvature grid (point 7) | done — `fd8fe82` |
+| 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | done — `PENDING6` |
 
 ## Notes
 
@@ -366,6 +366,55 @@ and no GPU run).
 
 2427 tests pass across the workspace.
 
-### Next step
+### Step 6 — the divergence note, the Q ticket, and the closing
 
-Step 6: the divergence note in `rust/docs/OPTIONS-LAYOUT.md`, the Q ticket, and the closing.
+- `rust/docs/OPTIONS-LAYOUT.md` (new, linked from `rust/README.md`): the two divergences, and the
+  **old tab → new tab → new group** mapping of all 70 settings, one row per setting.
+- **Q-107** in `G:/3dsen/cleanroom/spec/changes/`, copied to `impl/docs/spec/changes/`. The next
+  free number was **107**, not 105 — Q-105 (AMD-051's notification gravity, lot RU-4b) and Q-106
+  (AMD-055's SSR invariants, lot RU-5) were already taken; the first references written in step 2
+  said Q-105 and were corrected. Code marks: `// Q-107` on `options::LAYOUT`, on the tab keys of
+  `ui/keys.rs` and on `table.rs::CURVATURE_DEGREES`.
+- The ticket is class **D**: it records two owner decisions rather than an ambiguity, so that R1
+  can amend REQ-UI-202 and REQ-UI-061 (the tabs, and the Style group split over two of them) and
+  REQ-SCN-066 with AMD-043 §6 (the 23 rungs and the 23 libretro values). It also puts the one
+  consequence that is R1's to weigh in front of them: the rung indices of REQ-LUA-116 shift for
+  the three angles, and why keeping them was judged worse.
+- This lot implements no amendment, so there is nothing else to copy into
+  `impl/docs/spec/changes/`.
+
+#### Closing checks
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release --workspace --features zax-app/bundled --no-fail-fast` | **2428 passed, 0 failed, 83 ignored** |
+| `goldens/lua-api.txt` byte for byte (`zax-harness::lua_api_tests`) | passes, unchanged |
+| the settings file's keys (`zax-settings/tests/data/SettingKeys.reference.txt`) | passes, unchanged |
+| release `zaxnes.exe` in `rust/target-ro/release/` | built from the final commit, `bundled,wgpu` |
+
+The 83 ignored tests are the ones that need a real 3dSen installation, a ROM corpus or a GPU run
+(`ZAXNES_3DSEN_INSTALL`, `ZAXNES_ROMS`, the golden-core sweeps): R0's to run.
+
+#### What R0 should look at in the running application
+
+1. The nine tabs and their titles in both languages, and whether 820 px is wide enough on the
+   owner's screen before the tab bar starts scrolling.
+2. *Light and shadows* with the style at **Classic**: the "Style" heading with its one sentence,
+   which is the answer to the owner's second complaint and the only thing in the lot that cannot
+   be checked without a window.
+3. The two compact overscan rows: four 70-px drop-downs and their captions on one line, in French
+   too (*haut / bas / gauche / droite*).
+4. A few tooltips, including a **greyed** row — the resolution scale under the direct method, or
+   `emu.core` — since a greyed row reports no hover unless asked, and that flag is the one thing a
+   test cannot see.
+5. The curvature rows: 23 entries, 5° steps near 0.
+
+#### Performance
+
+UI only. The options window is not drawn while it is closed, and a tooltip is built only for the
+row under the pointer. Nothing was added to the core, the conversion, the Lua hooks, the draw list
+or the renderer; the one change outside the interface is the curvature **domain**, read when a
+setting changes and never per frame or per tile. The settings-file load path gained a nearest-rung
+search over 23 values, which runs once per load for three keys.
