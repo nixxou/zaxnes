@@ -425,6 +425,79 @@ fn req_scn_080_the_reflections_run_before_the_occlusion_on_both_backends() {
     );
 }
 
+/// REQ-SCN-083's fallback **(D)** on this backend: "tant que ce portage n'est pas disponible,
+/// `spl.ao` = 1 DOIT être rendu exactement comme `spl.ao` = 2".
+///
+/// An implementation that refuses the pyramid — the one thing the mode needs that the rest of the
+/// renderer does not, an `R16Float` colour target — falls back on the Depth estimator, says so
+/// **once**, and does not try again. The refusal is injected
+/// (`WgpuSceneRenderer::refuse_msvo`), the same kind of seam the OpenGL renderer carries and for
+/// the same reason: `R16Float` is colour-renderable on every adapter WebGPU admits, so the
+/// production path asks the adapter about it in `new` and no desktop machine ever says no — an
+/// unreachable fallback is an untested one.
+///
+/// This is the twin of `amd055_msvo_tests.rs`'s own fallback test, assertion for assertion.
+#[test]
+fn req_scn_083_an_implementation_that_refuses_the_pyramid_renders_msvo_as_depth() {
+    let mut built = close_up_r(true, 8, 1.0, 0.0);
+    let Some(mut fixture) = WgpuFixture::new(GpuApi::Vulkan) else {
+        return;
+    };
+
+    let depth_style = StyleSettings {
+        reflections: false,
+        ao: AmbientOcclusion::Depth,
+        ..REFLECTIONS
+    };
+    let msvo_style = StyleSettings {
+        ao: AmbientOcclusion::Msvo,
+        ..depth_style
+    };
+    built.scene.settings.style = depth_style;
+    let depth = fixture.render_built(&built);
+    built.scene.settings.style = msvo_style;
+    let msvo = fixture.render_built(&built);
+    assert_ne!(
+        depth.pixels, msvo.pixels,
+        "the two estimators draw different pictures when the port runs"
+    );
+    assert_eq!(
+        4,
+        fixture.statistics().occlusion_levels,
+        "the four levels of style::MSVO_LEVELS"
+    );
+    fixture.renderer().take_diagnostics();
+
+    assert!(
+        fixture.renderer().refuse_msvo(),
+        "the frame had an estimator to refuse"
+    );
+    let fallback = fixture.render_built(&built);
+    assert_eq!(
+        depth.pixels, fallback.pixels,
+        "REQ-SCN-083 fallback (D): MSVO is then rendered exactly as Depth"
+    );
+    let refused = fixture.statistics();
+    assert_eq!(0, refused.occlusion_levels, "no pyramid is built");
+    assert_eq!(3, refused.style_programs, "the Depth estimator is in place");
+    assert!(fixture.renderer().msvo_refused());
+
+    let lines = fixture.renderer().take_diagnostics();
+    assert_eq!(1, lines.len(), "one line says so: {lines:?}");
+    assert!(
+        lines[0].contains("MSVO") && lines[0].contains("REQ-SCN-083"),
+        "{lines:?}"
+    );
+
+    // And it is not retried: a second frame draws the same Depth picture and says nothing more.
+    let again = fixture.render_built(&built);
+    assert_eq!(depth.pixels, again.pixels);
+    assert!(
+        fixture.renderer().take_diagnostics().is_empty(),
+        "and only once"
+    );
+}
+
 /// And the two `wgpu` APIs against each other, with the reflections on: the same WGSL through the
 /// same naga, so this is the assertion that holds tightest.
 #[cfg(windows)]

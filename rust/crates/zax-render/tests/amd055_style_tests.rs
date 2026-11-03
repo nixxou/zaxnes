@@ -146,23 +146,26 @@ fn req_scn_078_the_curvature_acts_in_both_styles() {
     assert_ne!(classic.pixels, flat.pixels, "60° changes the picture");
 }
 
-/// Q-104, answered (RU-7): **all four effects of the Enhanced style are in the `wgpu` backend**,
-/// and what is left of the gap is the multi-scale estimator of REQ-SCN-083's *Mode MSVO*, which
-/// falls back on Depth (the declared fallback **(D)**) rather than being missing.
+/// Q-104, answered (RU-7): **every effect of the Enhanced style of AMD-055 is in the `wgpu`
+/// backend**, down to the multi-scale estimator of REQ-SCN-083's *Mode MSVO* and its fallback.
 ///
-/// This test used to assert that not one of the four was in the WGSL — the known gap, so that a
+/// This test used to assert that not one of them was in the WGSL — the known gap, so that a
 /// half-done parity failed loudly rather than passing unnoticed. Step 3 ported the voxel grid of
 /// REQ-SCN-081 and the pixel shadows of REQ-SCN-082; step 4b the occlusion of REQ-SCN-083 and the
-/// architecture its passes live in; step 4c the reflections of REQ-SCN-084 and the floor mask. The
-/// diagnostic line of `wgpu_backend/renderer.rs` went with that last one, as this test's own
-/// message had instructed. The second list below is what keeps the one remaining piece pinned.
+/// architecture its passes live in; step 4c the reflections of REQ-SCN-084 and the floor mask; step
+/// 4d the multi-scale chain. The diagnostic line of `wgpu_backend/renderer.rs` went with 4c, as
+/// this test's own message had instructed, and the list of what must *not* exist is empty — so what
+/// is left here is the **positive** half: each effect's own constants, named one by one, so that a
+/// change which quietly drops one of them fails.
 ///
 /// Whether the WGSL compiles and whether the two backends agree is not a question this side can
 /// answer — naga validates at module creation. That is
 /// `zax-harness/tests/parity_wgpu_tests.rs` and `amd055_parity_tests.rs`.
 #[cfg(feature = "wgpu")]
 #[test]
-fn q_104_the_wgpu_backend_carries_every_effect_but_the_multi_scale_estimator() {
+// One assertion per constant of four amendments; a shorter body would say less.
+#[allow(clippy::too_many_lines)]
+fn q_104_the_wgpu_backend_carries_every_effect_of_the_enhanced_style() {
     const COMMON: &str = include_str!("../src/wgpu_backend/shaders/common.wgsl");
     const SCENE: &str = include_str!("../src/wgpu_backend/shaders/scene.wgsl");
     const SHADOW: &str = include_str!("../src/wgpu_backend/shaders/shadow.wgsl");
@@ -176,6 +179,11 @@ fn q_104_the_wgpu_backend_carries_every_effect_but_the_multi_scale_estimator() {
     const DEPTH_RESOLVE: &str = include_str!("../src/wgpu_backend/shaders/depth_resolve.wgsl");
     const SSR: &str = include_str!("../src/wgpu_backend/shaders/ssr.wgsl");
     const SSR_COMPOSITE: &str = include_str!("../src/wgpu_backend/shaders/ssr_composite.wgsl");
+    const MSVO_LINEARIZE: &str = include_str!("../src/wgpu_backend/shaders/msvo_linearize.wgsl");
+    const MSVO_DOWNSAMPLE: &str = include_str!("../src/wgpu_backend/shaders/msvo_downsample.wgsl");
+    const MSVO_OCCLUDE: &str = include_str!("../src/wgpu_backend/shaders/msvo_occlude.wgsl");
+    const MSVO_BLUR: &str = include_str!("../src/wgpu_backend/shaders/msvo_blur.wgsl");
+    const MSVO_UPSAMPLE: &str = include_str!("../src/wgpu_backend/shaders/msvo_upsample.wgsl");
 
     // REQ-SCN-081: the grooves, with the five constants of the requirement.
     assert!(VOXEL_GRID.contains("fn zax_voxel_grid("));
@@ -235,14 +243,39 @@ fn q_104_the_wgpu_backend_carries_every_effect_but_the_multi_scale_estimator() {
     assert!(SCENE.contains("scene_normal: vec3<f32>"));
     assert!(SCENE.contains("out.scene_normal = out.normal;"));
 
-    // And the one piece that is still to come: nothing of the multi-scale estimator of
-    // REQ-SCN-083's *Mode MSVO* — the four-level pyramid RU-6 ported on the OpenGL side — is in
-    // any WGSL source yet.
-    //
-    // The names here are **functions** rather than words: the sources above say "MSVO" and
-    // "reflections" in their prose, because each explains which requirement it serves and which
-    // part of it is still to come, and that prose is the thing a reviewer wants. What must not
-    // exist yet is the code.
+    // REQ-SCN-083 *Mode MSVO*: the five passes of the chain RU-6 ported from `MiniEngine`, each
+    // with the constant or the departure that would be missing if the pass had been dropped.
+    assert!(MSVO_LINEARIZE.contains("-zax_view_sample(in.uv).z"));
+    // The decimation's mirrored row, which is the first of this chain's two row-order traps.
+    assert!(MSVO_DOWNSAMPLE.contains("at.y * 2 + 1"));
+    assert!(MSVO_OCCLUDE.contains("ZAX_MSVO_PATTERN"));
+    for entry in [
+        "0.9165151",
+        "0.9591663",
+        "0.8246211",
+        "0.7745967",
+        "0.4472136",
+    ] {
+        assert!(
+            MSVO_OCCLUDE.contains(entry),
+            "the original's table: {entry}"
+        );
+    }
+    // The per-pixel rotation, and the second row-order trap: the hash reads OpenGL's coordinate.
+    assert!(MSVO_OCCLUDE.contains("fract(sin(dot(at, vec2<f32>(12.9898, 78.233))) * 43758.5453)"));
+    assert!(MSVO_OCCLUDE.contains("floor(zax_pixel(in.position.xy))"));
+    // The access headroom, which §2.4's first invariant is what found the need for.
+    assert!(MSVO_OCCLUDE.contains("clamp(access, 0.0, headroom) / headroom"));
+    // The `SmartBlur` and its tent, and the bilateral upsample with its ceiling and its far test.
+    assert!(MSVO_BLUR.contains("select(1.0, 0.5, abs(tap) == 2)"));
+    assert!(MSVO_UPSAMPLE.contains("(0.01 * fine) + 1e-3"));
+    assert!(MSVO_UPSAMPLE.contains("ceiling * occlusion"));
+    assert!(MSVO_UPSAMPLE.contains("fine >= far_distance"));
+
+    // And no WGSL source of this backend carries a `const_assert`, which is how
+    // `wgpu_backend/preprocess.rs` reports a variant marker it could not read: the markers are
+    // expanded at module creation, so a malformed one is a module that does not compile — and the
+    // sources themselves must never carry one.
     for source in [
         COMMON,
         SCENE,
@@ -257,20 +290,12 @@ fn q_104_the_wgpu_backend_carries_every_effect_but_the_multi_scale_estimator() {
         DEPTH_RESOLVE,
         SSR,
         SSR_COMPOSITE,
+        MSVO_LINEARIZE,
+        MSVO_DOWNSAMPLE,
+        MSVO_OCCLUDE,
+        MSVO_BLUR,
+        MSVO_UPSAMPLE,
     ] {
-        for name in [
-            "fn zax_trace",
-            "fn zax_reflect",
-            "fn zax_floor_mask",
-            "fn zax_ssr",
-            "fn zax_msvo",
-        ] {
-            assert!(
-                !source.to_ascii_lowercase().contains(name),
-                "the wgpu shaders mention '{name}': the reflections of REQ-SCN-084 and the MSVO \
-                 estimator of REQ-SCN-083 are being ported, so this second list, the diagnostic \
-                 line of wgpu_backend/renderer.rs and the Q-104 notes go together"
-            );
-        }
+        assert!(!source.contains("const_assert"), "a source carries one");
     }
 }

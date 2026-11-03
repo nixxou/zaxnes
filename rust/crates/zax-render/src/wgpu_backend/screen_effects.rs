@@ -22,13 +22,14 @@ use zax_engine3d::hashing::FastMap;
 use crate::numerics::Vector4;
 use crate::style::StyleSettings;
 
+use super::msvo::{Bindings, Msvo};
 use super::preprocess;
 
 /// The format of the occlusion targets and of the floor mask: one channel of eight bits.
-const OCCLUSION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+pub(super) const OCCLUSION_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
 /// Bytes one texel of an occlusion target or of the floor mask occupies.
-const OCCLUSION_BYTES_PER_TEXEL: u64 = 1;
+pub(super) const OCCLUSION_BYTES_PER_TEXEL: u64 = 1;
 
 /// The format of the reflections' trace target: a linear colour, as the linear buffer's own
 /// (REQ-SCN-084).
@@ -37,8 +38,8 @@ const REFLECTION_FORMAT: wgpu::TextureFormat = super::renderer::LINEAR_FORMAT;
 /// Bytes one texel of it occupies: four half-float channels.
 const REFLECTION_BYTES_PER_TEXEL: u64 = 8;
 
-/// Bytes of the [`Screen`](shaders/screen_depth.wgsl) block: seven `vec4`.
-const SCREEN_BYTES: usize = 7 * 16;
+/// Bytes of the [`Screen`](shaders/screen_depth.wgsl) block: twelve `vec4`.
+pub(super) const SCREEN_BYTES: usize = 12 * 16;
 
 /// How far apart two blocks of [`ScreenEffects::uniforms`] sit. Each pass group writes its own,
 /// and they have to be separate because `wgpu` applies every `write_buffer` of a submission
@@ -48,7 +49,7 @@ const SCREEN_SLOT: u64 = 256;
 
 /// Which block of [`ScreenEffects::uniforms`] a pass group reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Slot {
+pub(super) enum Slot {
     /// The occlusion of REQ-SCN-083 and its blur, at the estimator's own resolution.
     Occlusion,
     /// The composite of REQ-SCN-083, at the frame's resolution.
@@ -57,18 +58,49 @@ enum Slot {
     Reflections,
     /// The composite of REQ-SCN-084, at the frame's resolution.
     ReflectionsComposite,
+    /// One of the nineteen passes of the multi-scale chain of REQ-SCN-083's *Mode MSVO*, which
+    /// needs a block per level and per axis: [`Slot::occlude`], [`Slot::blur`] and
+    /// [`Slot::upsample`] name them, and index 0 is the pair of depth-pyramid passes, which read
+    /// only the finest level's numbers (the decimation reads no field at all).
+    Msvo(u32),
 }
 
 impl Slot {
-    const COUNT: u64 = 4;
+    /// The blocks that are not the multi-scale chain's.
+    const FIXED: u64 = 4;
 
-    const fn offset(self) -> u64 {
+    /// The chain's own: 1 for the pyramid, 4 for the occlusion of each level, 8 for the two axes
+    /// of its blur, and 3 for the upsample chain — `style::MSVO_LEVELS` being 4.
+    const MSVO: u64 = 16;
+
+    const COUNT: u64 = Self::FIXED + Self::MSVO;
+
+    /// The occlusion of level `level` of the multi-scale chain.
+    #[allow(clippy::cast_possible_truncation)] // `style::MSVO_LEVELS` is 4.
+    pub(super) const fn occlude(level: usize) -> Self {
+        Self::Msvo(1 + level as u32)
+    }
+
+    /// One axis of the blur of level `level`: 0 horizontally, 1 vertically.
+    #[allow(clippy::cast_possible_truncation)] // `style::MSVO_LEVELS` is 4.
+    pub(super) const fn blur(level: usize, axis: u32) -> Self {
+        Self::Msvo(5 + 2 * level as u32 + axis)
+    }
+
+    /// The upsample step that folds everything coarser into level `level`.
+    #[allow(clippy::cast_possible_truncation)] // `style::MSVO_LEVELS` is 4.
+    pub(super) const fn upsample(level: usize) -> Self {
+        Self::Msvo(13 + level as u32)
+    }
+
+    pub(super) const fn offset(self) -> u64 {
         SCREEN_SLOT
             * match self {
                 Self::Occlusion => 0,
                 Self::OcclusionComposite => 1,
                 Self::Reflections => 2,
                 Self::ReflectionsComposite => 3,
+                Self::Msvo(index) => Self::FIXED + index as u64,
             }
     }
 }
@@ -99,9 +131,9 @@ pub struct ScreenFrame<'a> {
 
 /// One colour target and the size it was allocated at.
 #[derive(Debug)]
-struct Target {
-    view: wgpu::TextureView,
-    size: (u32, u32),
+pub(super) struct Target {
+    pub(super) view: wgpu::TextureView,
+    pub(super) size: (u32, u32),
 }
 
 /// The hemisphere estimator of REQ-SCN-083 — the mode `spl.ao` = 2, and the declared fallback
@@ -122,12 +154,17 @@ struct Depth {
     generation: u64,
 }
 
-/// Which estimator of REQ-SCN-083 is in force. **One or the other is built, never both**, which is
-/// the rule that keeps the two effects independent of each other, applied one level down.
+/// Which estimator of REQ-SCN-083 is in force. **One or the other is built, never both**: a player
+/// who chooses `spl.ao` = 1 builds the five pipelines of the multi-scale port and allocates its
+/// pyramid, and the two pipelines and two targets of the hemisphere estimator stay out of
+/// existence — the same rule that keeps the occlusion and the reflections independent of each
+/// other, applied one level down.
 #[derive(Debug)]
 enum Estimator {
     /// `spl.ao` = 2, and `spl.ao` = 1 once the multi-scale estimator has been refused.
     Depth(Depth),
+    /// `spl.ao` = 1 with the port available (REQ-SCN-083 *Mode MSVO*).
+    Msvo(Msvo),
 }
 
 /// The occlusion of REQ-SCN-083: whichever estimator the mode asks for, and the composite the two
@@ -184,13 +221,28 @@ pub struct ScreenEffects {
     occlusion: Option<Occlusion>,
     reflections: Option<Reflections>,
     depth_resolve: Option<DepthResolve>,
+    /// Whether this implementation refused the multi-scale estimator of REQ-SCN-083's *Mode MSVO*,
+    /// so that `spl.ao` = 1 renders as `spl.ao` = 2 from now on — the declared fallback **(D)**.
+    ///
+    /// Sticky for the life of the module, and for the reason RU-5 gave the whole module's own
+    /// fallback: the one format the mode needs that nothing else here needs is the `R16Float`
+    /// pyramid, so a refusal is a property of the implementation and not of the frame. It carries
+    /// the reason, so that the renderer can write the one diagnostic line of the fallback.
+    msvo_refused: Option<String>,
+    /// The group the shared composite reads the multi-scale estimator's `O` through, and the frame
+    /// allocation it was built against.
+    msvo_composite: Option<wgpu::BindGroup>,
+    msvo_composite_generation: u64,
 }
 
 impl ScreenEffects {
     /// Creates the module with neither effect in it: the layout every screen pass takes, the
     /// sampler, the dummy source and the uniform blocks. [`Self::select`] then builds the halves
     /// the frame asks for.
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    /// `multi_scale` says whether the adapter renders into the `R16Float` pyramid of REQ-SCN-083's
+    /// *Mode MSVO*; `false` makes that mode fall back on Depth from the first frame, with one
+    /// diagnostic line (the declared fallback **(D)**).
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, multi_scale: bool) -> Self {
         let source = |binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::FRAGMENT,
@@ -235,6 +287,7 @@ impl ScreenEffects {
                 source(3),
                 source(4),
                 source(5),
+                source(6),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -264,6 +317,14 @@ impl ScreenEffects {
             occlusion: None,
             reflections: None,
             depth_resolve: None,
+            msvo_composite: None,
+            msvo_composite_generation: u64::MAX,
+            msvo_refused: (!multi_scale).then(|| {
+                format!(
+                    "this adapter does not render into {:?}",
+                    super::msvo::PYRAMID_FORMAT
+                )
+            }),
             layout,
             pipeline_layout,
         }
@@ -276,6 +337,22 @@ impl ScreenEffects {
     /// the reflections exists.
     pub fn select(&mut self, device: &wgpu::Device, style: &StyleSettings) {
         if style.ao_active() {
+            // A change of `spl.ao` between its two estimators releases the one that is leaving,
+            // targets and all, and builds the one that arrives — which is also how the mode falls
+            // back on Depth when the multi-scale port is refused ([`Self::refuse_msvo`]).
+            let wanted_msvo = style.msvo_active() && self.msvo_refused.is_none();
+            if self.occlusion.is_some() && self.occludes_multi_scale() != wanted_msvo {
+                self.occlusion = None;
+            }
+            if self.occlusion.is_none() && wanted_msvo {
+                let estimator =
+                    Estimator::Msvo(Msvo::new(device, &self.pipeline_layout, &mut self.modules));
+                let composite = self.occlusion_composite(device);
+                self.occlusion = Some(Occlusion {
+                    composite,
+                    estimator,
+                });
+            }
             if self.occlusion.is_none() {
                 let estimator = Estimator::Depth(Depth {
                     pass: self.screen_pipeline(device, "zax ao", AO, OCCLUSION_FORMAT, None),
@@ -292,24 +369,7 @@ impl ScreenEffects {
                     divisor: 0,
                     generation: u64::MAX,
                 });
-                // REQ-SCN-083: `dst x src`, so the full-screen triangle scales the linear buffer
-                // in place — no second colour target and no copy of the scene. The OpenGL path's
-                // `glBlendFunc(GL_ZERO, GL_SRC_COLOR)`, spelled for this API.
-                let multiply = wgpu::BlendComponent {
-                    src_factor: wgpu::BlendFactor::Zero,
-                    dst_factor: wgpu::BlendFactor::Src,
-                    operation: wgpu::BlendOperation::Add,
-                };
-                let composite = self.screen_pipeline(
-                    device,
-                    "zax ao composite",
-                    AO_COMPOSITE,
-                    super::renderer::LINEAR_FORMAT,
-                    Some(wgpu::BlendState {
-                        color: multiply,
-                        alpha: multiply,
-                    }),
-                );
+                let composite = self.occlusion_composite(device);
                 self.occlusion = Some(Occlusion {
                     composite,
                     estimator,
@@ -355,9 +415,71 @@ impl ScreenEffects {
         }
     }
 
+    /// The composite the two estimators share (REQ-SCN-083): `dst x src`, so the full-screen
+    /// triangle scales the linear buffer in place — no second colour target and no copy of the
+    /// scene. The OpenGL path's `glBlendFunc(GL_ZERO, GL_SRC_COLOR)`, spelled for this API.
+    fn occlusion_composite(&mut self, device: &wgpu::Device) -> wgpu::RenderPipeline {
+        let multiply = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::Zero,
+            dst_factor: wgpu::BlendFactor::Src,
+            operation: wgpu::BlendOperation::Add,
+        };
+        self.screen_pipeline(
+            device,
+            "zax ao composite",
+            AO_COMPOSITE,
+            super::renderer::LINEAR_FORMAT,
+            Some(wgpu::BlendState {
+                color: multiply,
+                alpha: multiply,
+            }),
+        )
+    }
+
     /// Whether the occlusion of REQ-SCN-083 is in this module.
     pub const fn occludes(&self) -> bool {
         self.occlusion.is_some()
+    }
+
+    /// Whether the occlusion in this module is the **multi-scale** estimator of REQ-SCN-083's
+    /// *Mode MSVO*, rather than the hemisphere one.
+    pub const fn occludes_multi_scale(&self) -> bool {
+        matches!(
+            &self.occlusion,
+            Some(occlusion) if matches!(occlusion.estimator, Estimator::Msvo(_))
+        )
+    }
+
+    /// Levels the multi-scale pyramid holds, 0 when the estimator is the hemisphere one or has not
+    /// run yet. Read by the tests of REQ-SCN-083's *Mode MSVO*, which have no other way to tell
+    /// one estimator's resources from the other's.
+    pub fn multi_scale_levels(&self) -> usize {
+        match &self.occlusion {
+            Some(Occlusion {
+                estimator: Estimator::Msvo(msvo),
+                ..
+            }) => msvo.levels(),
+            _ => 0,
+        }
+    }
+
+    /// Why the multi-scale estimator of REQ-SCN-083 was refused by this implementation, when it
+    /// was, so that `spl.ao` = 1 renders as Depth — the fallback **(D)**. `None` on every machine
+    /// whose adapter answers normally, which is every desktop one.
+    pub fn msvo_refused(&self) -> Option<&str> {
+        self.msvo_refused.as_deref()
+    }
+
+    /// Makes the frames that follow refuse the multi-scale estimator, so that the fallback above
+    /// can be observed on a machine that refuses nothing.
+    ///
+    /// Only a test calls this — the same kind of seam the OpenGL module carries, and for the same
+    /// reason: `R16Float` is colour-renderable on every adapter WebGPU admits, and an unreachable
+    /// fallback is an untested one.
+    pub fn refuse_msvo(&mut self, reason: &str) {
+        self.msvo_refused = Some(reason.to_owned());
+        self.occlusion = None;
+        self.msvo_composite = None;
     }
 
     /// Whether the reflections of REQ-SCN-084 are.
@@ -378,6 +500,7 @@ impl ScreenEffects {
         let occlusion = self.occlusion.as_ref().map_or(0, |occlusion| {
             1 + match &occlusion.estimator {
                 Estimator::Depth(_) => 2,
+                Estimator::Msvo(_) => Msvo::PIPELINES,
             }
         });
         occlusion + if self.reflections.is_some() { 2 } else { 0 }
@@ -394,6 +517,7 @@ impl ScreenEffects {
                     bytes(depth.raw.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
                         + bytes(depth.blurred.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
                 }
+                Estimator::Msvo(msvo) => msvo.bytes(),
             });
         let reflections = self.reflections.as_ref().map_or(0, |reflections| {
             bytes(reflections.mask.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
@@ -415,9 +539,20 @@ impl ScreenEffects {
         single: &wgpu::TextureView,
         generation: u64,
     ) -> u32 {
+        // **Without** the shared chunk, unlike every other pass of this module: that chunk
+        // declares group 0 as the uniform block, the frame's depth, the sampler and the four
+        // sources, and this pass's layout is one multisampled depth texture at binding 0. Its own
+        // triangle is three lines, so there is nothing to share.
+        //
         // Cloned so that the map it lives in is no longer borrowed when `depth_resolve` is: both
         // are fields of `self` and both are reached through a method.
-        let module = self.module(device, DEPTH_RESOLVE, &[]).clone();
+        let module = self
+            .modules
+            .entry(DEPTH_RESOLVE)
+            .or_insert_with(|| {
+                super::renderer::shader_module(device, "zax depth resolve", DEPTH_RESOLVE, None)
+            })
+            .clone();
         let resolve = self.depth_resolve.get_or_insert_with(|| {
             let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("zax depth resolve"),
@@ -607,7 +742,7 @@ impl ScreenEffects {
             let (Some(mask), Some(traced)) = (&reflections.mask, &reflections.traced) else {
                 return 0;
             };
-            let group = |slot: Slot, sources: [&wgpu::TextureView; 3]| {
+            let group = |slot: Slot, sources: [&wgpu::TextureView; 4]| {
                 screen_group(
                     device,
                     layout,
@@ -620,12 +755,12 @@ impl ScreenEffects {
             };
             let groups = [
                 // The trace reads the frame's colour and the mask, both texel by texel.
-                group(Slot::Reflections, [frame.color, &mask.view, dummy]),
+                group(Slot::Reflections, [frame.color, &mask.view, dummy, dummy]),
                 // The composite samples the trace back up to the frame's size through the filtered
                 // sampler, and reads the mask texel by texel at that size.
                 group(
                     Slot::ReflectionsComposite,
-                    [&traced.view, &mask.view, dummy],
+                    [&traced.view, &mask.view, dummy, dummy],
                 ),
             ];
             reflections.groups = Some(groups);
@@ -696,6 +831,10 @@ impl ScreenEffects {
 
     /// Runs the occlusion of REQ-SCN-083 over `frame` into this module's own targets, and says how
     /// many passes that took.
+    // The two estimators' preambles and the hemisphere one's own two passes, which is the shape
+    // the OpenGL twin has for the same reason: both estimators have to write the shared
+    // composite's block, and splitting on that would move the list rather than shorten it.
+    #[allow(clippy::too_many_lines)]
     pub fn occlude(
         &mut self,
         device: &wgpu::Device,
@@ -707,6 +846,37 @@ impl ScreenEffects {
     ) -> u32 {
         if self.occlusion.is_none() {
             return 0;
+        }
+        if self.occludes_multi_scale() {
+            // The shared composite's own block, which the chain does not touch: it reads the drawn
+            // scale and the frame's size, and a slot left at zero would make it sample texel
+            // (0, 0) everywhere.
+            queue.write_buffer(
+                &self.uniforms,
+                Slot::OcclusionComposite.offset(),
+                &ScreenBlock {
+                    frame: frame.size,
+                    target: frame.size,
+                    divisor: 1,
+                    projection: frame.projection,
+                    ..ScreenBlock::default()
+                }
+                .bytes(),
+            );
+            let bindings = Bindings {
+                layout: &self.layout,
+                uniforms: &self.uniforms,
+                sampler: &self.sampler,
+                dummy: &self.dummy,
+            };
+            let Some(Occlusion {
+                estimator: Estimator::Msvo(msvo),
+                ..
+            }) = &mut self.occlusion
+            else {
+                return 0;
+            };
+            return msvo.draw(device, queue, encoder, bindings, frame, style, scene_scale);
         }
         let divisor = if style.ao_half_resolution() { 2 } else { 1 };
         let radius = style.ao_radius_units(scene_scale);
@@ -743,8 +913,9 @@ impl ScreenEffects {
         let Some(occlusion) = &mut self.occlusion else {
             return 0;
         };
-        // One arm today; `Estimator::Msvo` joins it in step 4d.
-        let Estimator::Depth(depth) = &mut occlusion.estimator;
+        let Estimator::Depth(depth) = &mut occlusion.estimator else {
+            return 0;
+        };
         if depth.divisor != divisor
             || depth.generation != frame.generation
             || !matches!(&depth.raw, Some(target) if target.size == size)
@@ -766,7 +937,7 @@ impl ScreenEffects {
             };
             // The raw target is read texel by texel (`zax_load0`) and the blurred one through the
             // filtered sampler, which is what the OpenGL path's NEAREST and LINEAR are.
-            let group = |slot: Slot, sources: [&wgpu::TextureView; 3]| {
+            let group = |slot: Slot, sources: [&wgpu::TextureView; 4]| {
                 screen_group(
                     device,
                     layout,
@@ -778,9 +949,12 @@ impl ScreenEffects {
                 )
             };
             let groups = [
-                group(Slot::Occlusion, [dummy, dummy, dummy]),
-                group(Slot::Occlusion, [&raw.view, dummy, dummy]),
-                group(Slot::OcclusionComposite, [&blurred.view, dummy, dummy]),
+                group(Slot::Occlusion, [dummy, dummy, dummy, dummy]),
+                group(Slot::Occlusion, [&raw.view, dummy, dummy, dummy]),
+                group(
+                    Slot::OcclusionComposite,
+                    [&blurred.view, dummy, dummy, dummy],
+                ),
             ];
             depth.groups = Some(groups);
         }
@@ -822,16 +996,44 @@ impl ScreenEffects {
     /// Multiplies the colour of `target` by `1 - O` (REQ-SCN-083). One pass.
     pub fn composite_occlusion(
         &mut self,
+        device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
+        frame: ScreenFrame<'_>,
         target: &wgpu::TextureView,
     ) -> u32 {
+        // The multi-scale estimator's result is a level of its own pyramid, so the group that
+        // reads it is rebuilt whenever that pyramid is — which the generation says.
+        if let Some(Occlusion {
+            estimator: Estimator::Msvo(msvo),
+            ..
+        }) = &self.occlusion
+        {
+            if self.msvo_composite_generation != frame.generation || self.msvo_composite.is_none() {
+                let result = msvo.result().cloned();
+                self.msvo_composite = result.map(|view| {
+                    screen_group(
+                        device,
+                        &self.layout,
+                        &self.uniforms,
+                        Slot::OcclusionComposite,
+                        &self.sampler,
+                        frame.depth,
+                        [&view, &self.dummy, &self.dummy, &self.dummy],
+                    )
+                });
+                self.msvo_composite_generation = frame.generation;
+            }
+        }
         let Some(occlusion) = &self.occlusion else {
             return 0;
         };
         // Both estimators write `O` into an `R8` target, so the composite reads whichever one is
-        // in force and the pipeline is the same.
+        // in force and the pipeline is the same. The hemisphere one keeps its group with its
+        // targets; the multi-scale one hands back the view of its finest combination, and the
+        // group that names it is built here and kept beside it.
         let Some(group) = (match &occlusion.estimator {
             Estimator::Depth(depth) => depth.groups.as_ref().map(|groups| &groups[2]),
+            Estimator::Msvo(_) => self.msvo_composite.as_ref(),
         }) else {
             return 0;
         };
@@ -860,30 +1062,12 @@ impl ScreenEffects {
 
     // ------------------------------------------------------------------- modules and pipelines
 
-    /// The module of `body`, built the first time it is asked for. Keyed on the body because one
-    /// body is one pass here: these modules have no variant axis, unlike the scene's.
-    fn module(
-        &mut self,
-        device: &wgpu::Device,
-        body: &'static str,
-        chunks: &[&'static str],
-    ) -> &wgpu::ShaderModule {
-        self.modules.entry(body).or_insert_with(|| {
-            let mut parts = chunks.to_vec();
-            parts.push(body);
-            let composed = preprocess::compose(&parts, &[]);
-            super::renderer::shader_module(
-                device,
-                "zax screen",
-                &composed.wgsl,
-                composed.problem.as_deref(),
-            )
-        })
+    /// The module of `body`, built the first time it is asked for.
+    fn module(&mut self, device: &wgpu::Device, body: &'static str) -> wgpu::ShaderModule {
+        screen_module(device, &mut self.modules, body)
     }
 
-    /// One full-screen pass of REQ-SCN-080: the triangle of `screen_depth.wgsl`, `body`'s
-    /// fragment stage, and no depth attachment — every pass of this module reads the frame's
-    /// depth as a texture and writes none.
+    /// One full-screen pass of REQ-SCN-080 through this module's layout.
     fn screen_pipeline(
         &mut self,
         device: &wgpu::Device,
@@ -892,71 +1076,131 @@ impl ScreenEffects {
         format: wgpu::TextureFormat,
         blend: Option<wgpu::BlendState>,
     ) -> wgpu::RenderPipeline {
-        let module = self.module(device, body, &[SCREEN_DEPTH]).clone();
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(label),
-            layout: Some(&self.pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_screen"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_main"),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        })
+        let module = self.module(device, body);
+        screen_pipeline(device, &self.pipeline_layout, &module, label, format, blend)
     }
+}
+
+/// The module of `body`, built the first time it is asked for and handed back by value. Keyed on
+/// the body because one body is one pass here: these modules have no variant axis, unlike the
+/// scene's.
+///
+/// `pub(super)` for [`super::msvo`], whose five pipelines are built the same way.
+pub(super) fn screen_module(
+    device: &wgpu::Device,
+    modules: &mut FastMap<&'static str, wgpu::ShaderModule>,
+    body: &'static str,
+) -> wgpu::ShaderModule {
+    modules
+        .entry(body)
+        .or_insert_with(|| {
+            let composed = preprocess::compose(&[SCREEN_DEPTH, body], &[]);
+            super::renderer::shader_module(
+                device,
+                "zax screen",
+                &composed.wgsl,
+                composed.problem.as_deref(),
+            )
+        })
+        .clone()
+}
+
+/// One full-screen pass of REQ-SCN-080: the triangle of `screen_depth.wgsl`, `body`'s fragment
+/// stage, and no depth attachment — every pass of this module reads the frame's depth as a
+/// texture and writes none, so every one of them is single-sample whatever the frame is.
+pub(super) fn screen_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    module: &wgpu::ShaderModule,
+    label: &'static str,
+    format: wgpu::TextureFormat,
+    blend: Option<wgpu::BlendState>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module,
+            entry_point: Some("vs_screen"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module,
+            entry_point: Some("fs_main"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format,
+                blend,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview_mask: None,
+        cache: None,
+    })
 }
 
 /// The [`Screen`](shaders/screen_depth.wgsl) block, as the passes of REQ-SCN-080 set it.
 #[derive(Debug, Clone, Copy, Default)]
-struct ScreenBlock {
+pub(super) struct ScreenBlock {
     /// The size in pixels the frame drew into, which `uTexel` is relative to.
-    frame: (u32, u32),
+    pub(super) frame: (u32, u32),
     /// The size in pixels of the target this pass draws into.
-    target: (u32, u32),
-    /// 1, or 2 for a pass at half of each dimension (REQ-SCN-083, REQ-SCN-084).
-    divisor: u32,
-    projection: Vector4,
+    pub(super) target: (u32, u32),
+    /// 1, or 2 for a pass at half of each dimension, or `divisor << level` for a level of the
+    /// multi-scale pyramid (REQ-SCN-083, REQ-SCN-084).
+    pub(super) divisor: u32,
+    pub(super) projection: Vector4,
     /// `x` the radius, `y` the ceiling, `z` the bias.
-    ao: [f32; 4],
-    samples: i32,
+    pub(super) ao: [f32; 4],
+    pub(super) samples: i32,
     /// `x` the intensity, `y` the longest ray this setting asks for, `z` the longest any setting
     /// can ask for, `w` the blur as a fraction of the ray (REQ-SCN-084).
-    ssr: [f32; 4],
+    pub(super) ssr: [f32; 4],
     /// The aspect the blur spiral is stretched by.
-    blur_aspect: [f32; 2],
-    steps: i32,
-    refinements: i32,
-    blur_taps: i32,
+    pub(super) blur_aspect: [f32; 2],
+    pub(super) steps: i32,
+    pub(super) refinements: i32,
+    pub(super) blur_taps: i32,
+    /// REQ-SCN-083 *Mode MSVO*: the level's radius, its focal length, the rejection falloff and
+    /// the weight normalisation.
+    pub(super) msvo_a: [f32; 4],
+    /// The headroom, the blur's sharpness, the share and the ceiling.
+    pub(super) msvo_b: [f32; 4],
+    /// One texel of this level along the axis the blur runs on.
+    pub(super) msvo_step: [f32; 2],
+    /// One texel of the coarse level the upsample gathers from.
+    pub(super) msvo_coarse_texel: [f32; 2],
+    /// The distance a pixel with no geometry carries.
+    pub(super) msvo_far: f32,
+    /// How many entries of the pattern this quality takes.
+    pub(super) msvo_pattern: i32,
+    /// Whether this is the last upsample step, the one that writes `O`.
+    pub(super) msvo_final: i32,
 }
 
 impl ScreenBlock {
+    /// `uTexel`: one texel of this pass's target in **viewport** coordinates, which is
+    /// `divisor / drawn` on the OpenGL side and the same quotient here.
+    #[allow(clippy::cast_precision_loss)] // Sizes far below 2^24.
+    pub(super) fn texel(self) -> (f32, f32) {
+        let frame = (self.frame.0.max(1) as f32, self.frame.1.max(1) as f32);
+        let divisor = self.divisor.max(1) as f32;
+        (divisor / frame.0, divisor / frame.1)
+    }
+
     /// The block's bytes, in the order `screen_depth.wgsl` declares them.
     #[allow(clippy::cast_precision_loss)] // Sizes far below 2^24.
-    fn bytes(self) -> Vec<u8> {
-        let frame = (self.frame.0.max(1) as f32, self.frame.1.max(1) as f32);
+    pub(super) fn bytes(self) -> Vec<u8> {
         let target = (self.target.0.max(1) as f32, self.target.1.max(1) as f32);
-        let divisor = self.divisor.max(1) as f32;
         let mut data = Vec::with_capacity(SCREEN_BYTES);
         // The attachments are allocated at the frame's exact size, so the drawn scale is (1, 1).
         push(&mut data, [1.0, 1.0, target.0, target.1]);
-        // `uTexel`: one texel of this pass's target in **viewport** coordinates, which is
-        // `divisor / drawn` on the OpenGL side and the same quotient here.
-        push(&mut data, [divisor / frame.0, divisor / frame.1, 0.0, 0.0]);
+        let texel = self.texel();
+        push(&mut data, [texel.0, texel.1, 0.0, 0.0]);
         push(
             &mut data,
             [
@@ -973,6 +1217,21 @@ impl ScreenBlock {
             [self.blur_aspect[0], self.blur_aspect[1], 0.0, 0.0],
         );
         for value in [self.samples, self.steps, self.refinements, self.blur_taps] {
+            data.extend_from_slice(&value.to_ne_bytes());
+        }
+        push(&mut data, self.msvo_a);
+        push(&mut data, self.msvo_b);
+        push(
+            &mut data,
+            [
+                self.msvo_step[0],
+                self.msvo_step[1],
+                self.msvo_coarse_texel[0],
+                self.msvo_coarse_texel[1],
+            ],
+        );
+        push(&mut data, [self.msvo_far, 0.0, 0.0, 0.0]);
+        for value in [self.msvo_pattern, self.msvo_final, 0, 0] {
             data.extend_from_slice(&value.to_ne_bytes());
         }
         data
@@ -997,7 +1256,7 @@ fn bytes(target: Option<&Target>, per_texel: u64) -> u64 {
 }
 
 /// One colour target of `size` and its view.
-fn allocate(
+pub(super) fn allocate(
     device: &wgpu::Device,
     label: &'static str,
     size: (u32, u32),
@@ -1024,14 +1283,14 @@ fn allocate(
 
 /// The bind group of one screen pass: its block of the uniforms, the frame's depth, the shared
 /// sampler and the three source slots — a dummy in each the pass does not read.
-fn screen_group(
+pub(super) fn screen_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     uniforms: &wgpu::Buffer,
     slot: Slot,
     sampler: &wgpu::Sampler,
     depth: &wgpu::TextureView,
-    sources: [&wgpu::TextureView; 3],
+    sources: [&wgpu::TextureView; 4],
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("zax screen"),
@@ -1064,6 +1323,10 @@ fn screen_group(
             wgpu::BindGroupEntry {
                 binding: 5,
                 resource: wgpu::BindingResource::TextureView(sources[2]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::TextureView(sources[3]),
             },
         ],
     })
@@ -1102,6 +1365,7 @@ mod tests {
             steps: 24,
             refinements: 5,
             blur_taps: 8,
+            ..ScreenBlock::default()
         };
         assert_eq!(block.bytes().len(), SCREEN_BYTES);
     }

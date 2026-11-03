@@ -18,8 +18,8 @@ executable is built with `--features zax-app/bundled,zax-app/wgpu`.
 | 3 | The voxel grid and the pixel shadows | done — `6872645` |
 | 4a | The anti-aliasing levels and AMD-058's centroid interpolation | done — `d678e46` |
 | 4b | The screen-pass architecture, the frame order of REQ-SCN-080, and the Depth occlusion | done — `46f3174` (its clippy fix and its design: `9ef1447`) |
-| 4c | The reflections of REQ-SCN-084 and the floor mask | done — this commit |
-| 4d | The MSVO estimator and its runtime fallback | todo |
+| 4c | The reflections of REQ-SCN-084 and the floor mask | done — `0a763dd` |
+| 4d | The MSVO estimator and its runtime fallback | done — this commit |
 | 4e | The backdrop lighting of AMD-049 (REQ-SCN-075), added to the lot by the owner | todo |
 | 5 | The parity measurements and the costs | todo |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-104 closing section, fmt, clippy, full tests, release build | todo |
@@ -1045,6 +1045,167 @@ ignored (314 at step 4b, plus this step's seven). `-p zax-harness --features wgp
 **71 passed, 0 failed** (20 of them `parity_wgpu_tests`). `cargo fmt --all --check` and
 `cargo clippy --workspace --all-targets --features zax-app/wgpu -- -D warnings` clean.
 
+### Step 4d — the MSVO estimator and its runtime fallback
+
+RU-6's own port, carried across: the four-level pyramid, the sphere-penetration test per level, the
+`SmartBlur` over every level and the bilateral upsample. Nineteen passes, five pipelines, sixteen
+uniform blocks — and with it **the last gap Q-104 recorded closes**.
+
+#### What landed
+
+| Piece | What landed |
+|---|---|
+| `wgpu_backend/msvo.rs` (new) | the twin of `gl/msvo.rs`: the pyramid, its per-level targets, the bind group of every pass, the sixteen blocks and the chain itself |
+| `shaders/msvo_linearize.wgsl`, `msvo_downsample.wgsl`, `msvo_occlude.wgsl`, `msvo_blur.wgsl`, `msvo_upsample.wgsl` (new) | the five fragment passes, each carrying its own MiniEngine attribution header as the GLSL does |
+| `shaders/screen_depth.wgsl` | the `Screen` block grows the chain's five `vec4`, the layout a fourth source slot (the bilateral upsample gathers from two depths and two occlusions at once), and `zax_load1` a sibling |
+| `wgpu_backend/screen_effects.rs` | `Estimator::Msvo`; `Slot` grows the chain's sixteen blocks and the three helpers that name them; `occludes_multi_scale`, `multi_scale_levels`, `msvo_refused`, `refuse_msvo`; the composite's group for the multi-scale result; `screen_module` and `screen_pipeline` factored out so the chain builds its own |
+| `wgpu_backend/renderer.rs` | `multi_scale` — what the adapter says about `R16Float` — and the one diagnostic line of the fallback; `refuse_msvo` and `msvo_refused` as test seams; `occlusion_levels` in the statistics |
+| `zax-render/tests/common/mod.rs` | `WgpuFixture::statistics` and `::renderer`, which the fallback test needs |
+| `zax-render/tests/amd055_parity_tests.rs` | the fallback test, assertion for assertion the twin of `amd055_msvo_tests.rs`'s |
+| `zax-render/tests/amd055_style_tests.rs` | the Q-104 test's negative list is **empty**, so what is left is the positive half: every effect's own constants, named one by one |
+| `zax-harness/tests/parity_wgpu_tests.rs` | three more tests |
+
+#### Two row-order traps, and neither is visible in the GLSL
+
+The chain reads a **row index** twice, and both times the OpenGL expression is right in OpenGL's
+convention and wrong in this one. This is the class of difference the previous steps met once (the
+dither of 4b, worth 0.036 of a point); here it is worth far more, because both are coarse.
+
+1. **The decimation keeps a different texel.** `msvo_downsample.frag` reads
+   `texelFetch(uSource, ivec2(gl_FragCoord.xy) * 2, 0)`, and in OpenGL both `gl_FragCoord.y` and a
+   `texelFetch` row index count from the **bottom**. Here both count from the top. Transcribing the
+   expression keeps the texel *above* the one OpenGL keeps, and the whole pyramid is then built on
+   a half-texel shift that compounds over four levels. Either choice is a correct point decimation —
+   the block's four texels are equally admissible, which is why the requirement says nothing about
+   it — but the lot's rule is that OpenGL is the reference, so the row is mirrored: destination row
+   `j` from the top reads source row `2j + 1` from the top, which is the same geometric texel
+   OpenGL's `2j` from the bottom is.
+2. **The per-pixel rotation hashes a different pixel.** `msvo_occlude.frag` turns the pattern by
+   `fract(sin(dot(floor(vUv / uTexel), …)))`, whose argument is the pixel coordinate counting rows
+   from the bottom. The hash is wildly discontinuous, so a top-down coordinate gives every pixel a
+   *different* azimuth from the one OpenGL gives it. Admissible again — REQ-SCN-083 says the
+   pattern "PEUT varier par pixel" — but the two backends' estimator noise would then no longer
+   cancel pixel by pixel, and the parity figures would read the estimator's variance rather than
+   the port's fidelity. `zax_pixel`, written in step 4b for the Depth estimator's dither, is
+   exactly the mirror this needs.
+
+Both are written out in the WGSL where they happen, with the reasoning, because neither is
+recoverable from reading the GLSL beside the WGSL.
+
+#### Sixteen uniform blocks, and why they cannot be fewer
+
+The chain's nineteen passes take their numbers from the level they run on: the sphere radius, the
+focal length, one texel of the level, the blur's step on one axis, one texel of the coarse level
+the upsample gathers from. `wgpu` applies every `queue.write_buffer` of a submission **before** the
+command buffers run, so a block written once per pass would hand all nineteen the last pass's
+numbers. Hence `Slot::Msvo(n)` and the three helpers that name its parts: 1 for the pyramid (the
+decimation reads no field at all, and the linearise pass reads the finest level's), 4 for the
+occlusion, 8 for the two axes of the blur, 3 for the upsample. 256 bytes apart, one bind group
+each, built with the pyramid.
+
+The OpenGL path has the same nineteen sets of numbers; it just sets them as uniforms between draws,
+which this API has no equivalent of.
+
+#### `from` is a reserved word in WGSL
+
+One line of the step, and the only compile failure: `let from = …` in the decimation. naga says so
+clearly and module creation fails with it, which is the behaviour step 2 built the `const_assert`
+path for — a shader fault reported loudly at the point it happens.
+
+#### Parity, measured
+
+Same method — worst of four scenes, release, 640 × 480, anti-aliasing off. Vulkan and DX12 agree to
+the fourth decimal.
+
+| Configuration | max channel | pixels differing | within 2 levels |
+|---|---|---|---|
+| Classic, the control | 223 | 0.3577 % | 99.6423 % |
+| `spl.ao` = 1 (MSVO, `ao.quality` Medium) | 223 | — | **99.6410 %** |
+| `spl.ao` = 1, `ao.quality` = 2 (High) | 223 | — | **99.6423 %** |
+
+The worst scene is `heavy`, where the control already sits, and the MSVO row is **the control's
+figure to within 0.0013 of a point**. Read on the scenes where the occlusion acts, over the whole
+set:
+
+| scene | within 2 levels |
+|---|---|
+| `shadow`, `no-shadow`, `layer-shadow-off` | 99.906 % |
+| `backdrop` | 99.836 % |
+| `framing` | 99.903 % |
+| `hud`, `sky`, `nudge` | 100.000 % |
+
+Those are tighter than the Depth estimator's own (99.8594 % on `shadow`), which is the expected
+ordering: the multi-scale chain's output has been through four `SmartBlur` passes and three
+bilateral upsamples, and a blur is exactly what turns a boundary-case sample into a fraction of a
+level.
+
+**And the two renderers did the same work, not merely the same-looking work** — which is the
+strongest statement this step makes, and the one a whole-frame share cannot:
+
+| counter | OpenGL | Vulkan | DX12 |
+|---|---|---|---|
+| `screenEffectPasses` | 20 | **20** | **20** |
+| `screenEffectBytes` | 508 800 | **508 800** | **508 800** |
+| `styleProgramsResident` | 6 | **6** | **6** |
+| `occlusionLevels` | 4 | **4** | **4** |
+
+Twenty is the nineteen of the chain and the shared composite; six is the chain's five pipelines and
+that composite; 508 800 bytes is the four levels of `R16Float` depth and their three or four `R8`
+occlusions each.
+
+#### The fallback **(D)**, and the one thing `wgpu` makes different about it
+
+REQ-SCN-083 says that while the port is unavailable, `spl.ao` = 1 "DOIT être rendu exactement comme
+`spl.ao` = 2". On OpenGL the trigger is a `GlError` — a program that will not link, or an `R16F`
+target the driver refuses — caught where it happens.
+
+**`wgpu` has no such error to catch**: a refused allocation is reported through the device's error
+scope and `create_texture` hands back a usable handle. So the question is put to the **adapter**
+instead, once, in `WgpuSceneRenderer::new`:
+`adapter.get_texture_format_features(R16Float).allowed_usages.contains(RENDER_ATTACHMENT)`. A
+`false` there sets the refusal with its reason from the first frame, and the mode renders as Depth
+with one diagnostic line — the same wording `RenderDiagnostics::msvo_unavailable` writes on the
+other side. Every adapter WebGPU admits grants `r16float` as a colour target, so the production
+path never says no here, and the fallback is reached through the same kind of test seam the OpenGL
+renderer carries (`refuse_msvo`). An unreachable fallback is an untested one.
+
+The test is the twin of `amd055_msvo_tests.rs`'s, assertion for assertion: the two estimators draw
+different pictures while the port runs; four levels are built; the refusal is injected; the next
+frame is **byte-identical** to the `spl.ao` = 2 capture; no pyramid is built; `style_programs` is
+back to 3; one diagnostic line mentions MSVO and REQ-SCN-083; and a second frame says nothing more.
+
+#### What a Classic `wgpu` frame pays for this step
+
+Nothing: `multi_scale` is a `bool` read once in `new`, `msvo_reported` is read only inside
+`prepare_screen_effects` (which Classic does not call), and the statistics gain one
+`map_or(0, …)` on an `Option` that is `None`. No module is built — the chain's five are built the
+first time `spl.ao` = 1 asks for them — and the `Screen` block growing from 7 `vec4` to 12 costs
+nothing to a frame with no screen effect, which writes none of it.
+
+The four instruction counts are still **2231 / 1095 / 3401 / 159**, and `git diff --stat` over
+`gl/`, `src/shaders/`, `renderer.rs`, `zax-engine3d/` and `zax-app/` is **empty for this step**.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| the five passes of the chain are in the WGSL with the original's table, the headroom, the `SmartBlur`'s tent and the upsample's ceiling and far test; **both row mirrors are there**; and no source carries a `const_assert` | `amd055_style_tests.rs` `q_104_the_wgpu_backend_carries_every_effect_of_the_enhanced_style` (rewritten; its negative list is empty) |
+| REQ-SCN-083 *Mode MSVO* at the default quality, and at High where every level doubles | `parity_wgpu_tests.rs` `req_scn_083_the_multi_scale_occlusion_agrees_between_the_backends`, `..._the_full_resolution_pyramid_...` |
+| the twenty passes, the pyramid's bytes and the six programs, on each backend | `req_scn_083_the_multi_scale_chain_costs_the_same_passes_and_bytes_on_each_backend` |
+| REQ-SCN-083's fallback **(D)**: refused, rendered as Depth to the pixel, said once, never retried | `amd055_parity_tests.rs` `req_scn_083_an_implementation_that_refuses_the_pyramid_renders_msvo_as_depth` |
+
+`cargo test --release -p zax-render --features wgpu`: 34 suites, **322 passed, 0 failed**, 1
+ignored (321 at step 4c, plus the fallback test). `-p zax-harness --features wgpu`: 13 suites,
+**74 passed, 0 failed** (23 of them `parity_wgpu_tests`). `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets --features zax-app/wgpu -- -D warnings` clean.
+
+#### What is left of Q-104 after this step
+
+Of the list step 1 drew up against `gl/`, one line is left: the **backdrop lighting of AMD-049**
+(`backdrop.frag` and the `backdrop` axis of the OpenGL `ProgramKey`), which step 1 found and
+recorded as out of scope and which the owner then put into this lot. That is step 4e. Everything
+AMD-043, AMD-046, AMD-055 and AMD-058 ask for is now rendered by both backends.
+
 ### The design 4b was built from, and what is left after it
 
 Written at the end of the lot's **first** session, when steps 1, 2, 3 and 4a were landed, so that
@@ -1137,7 +1298,7 @@ pass is needed, and it must not be submitted: the depth texture is already singl
 |---|---|
 | ~~4b~~ | ~~`wgpu_backend/screen_effects.rs`, `screen_depth.wgsl`, `ao.wgsl`, `ao_blur.wgsl`, `ao_composite.wgsl`, the depth-resolve pass, the frame order, the lazy lifecycle and its statistics~~ — **landed**, see its own section above |
 | ~~4c~~ | ~~`ssr.wgsl`, `ssr_composite.wgsl`, `floor_mask.wgsl`, the mask's scene-pipeline variant (`ZAX_FLOOR_MASK`) and its depth attachment~~ — **landed**, see its own section above |
-| 4d | `msvo.wgsl` x5, the `R16F` pyramid, the runtime fallback **(D)** and its one diagnostic line |
+| ~~4d~~ | ~~`msvo.wgsl` x5, the `R16F` pyramid, the runtime fallback **(D)** and its one diagnostic line~~ — **landed**, see its own section above |
 | 4e | `backdrop.wgsl` and the `backdrop` axis of AMD-049 REQ-SCN-075, the step the owner added between the two sessions (see the checklist) |
 | — | then the diagnostic line of `wgpu_backend/renderer.rs` — narrowed by 4b to the reflections alone — `style_reported`, and the remaining `// Q-104` comments in `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |
 | 5 | the parity table and the GPU costs of each effect at 1080p, beside RU-5's and RU-6's OpenGL figures |

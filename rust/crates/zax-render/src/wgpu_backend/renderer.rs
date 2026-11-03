@@ -463,6 +463,12 @@ pub struct WgpuSceneRenderer {
     /// of `SceneRenderer::screen_effects`, and `None` in Classic, where the whole cost of
     /// AMD-055's screen side is the `is_none` test that decides not to run it.
     screen_effects: Option<ScreenEffects>,
+    /// Whether this adapter renders into the `R16Float` pyramid of REQ-SCN-083's *Mode MSVO*,
+    /// asked once in [`Self::new`]. False makes that mode fall back on Depth — the declared
+    /// fallback **(D)** — with the one diagnostic line below.
+    multi_scale: bool,
+    /// Whether that line has been written. One per renderer, as `RenderDiagnostics` bounds its own.
+    msvo_reported: bool,
     /// How many scene modules AMD-055 added: a variant with the voxel grid of REQ-SCN-081 or the
     /// pixel shadows of REQ-SCN-082. **0 in Classic**, and 0 in Enhanced until one of the two is
     /// turned on, which is what `ScenePrograms::style_programs` counts on the other side.
@@ -533,6 +539,15 @@ impl WgpuSceneRenderer {
         target_format: wgpu::TextureFormat,
     ) -> Result<Self, WgpuRenderError> {
         let max_samples = max_samples(adapter, &device);
+        // AMD-055 REQ-SCN-083's fallback **(D)**: the `R16Float` pyramid of the *Mode MSVO* is the
+        // one format of that amendment the renderer does not already depend on, so the adapter is
+        // asked once whether it renders into it. `wgpu` reports a refused allocation through the
+        // device's error scope rather than by handing back an error, so the question has to be put
+        // here rather than caught where the pyramid is made.
+        let multi_scale = adapter
+            .get_texture_format_features(super::msvo::PYRAMID_FORMAT)
+            .allowed_usages
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT);
         let layouts = Layouts::new(&device);
 
         let module =
@@ -659,6 +674,8 @@ impl WgpuSceneRenderer {
             linear: None,
             linear_generation: 0,
             screen_effects: None,
+            multi_scale,
+            msvo_reported: false,
             style_modules: 0,
             frame_group,
             draw_group: scene_draw_group,
@@ -805,11 +822,52 @@ impl WgpuSceneRenderer {
     /// 4d's.
     #[inline(never)]
     fn prepare_screen_effects(&mut self, scene: &SceneState) {
+        let multi_scale = self.multi_scale;
         let effects = match &mut self.screen_effects {
             Some(effects) => effects,
-            none => none.insert(ScreenEffects::new(&self.device, &self.queue)),
+            none => none.insert(ScreenEffects::new(&self.device, &self.queue, multi_scale)),
         };
         effects.select(&self.device, &scene.settings.style);
+
+        // AMD-055 REQ-SCN-083: the multi-scale estimator may be refused — by this adapter's
+        // formats, or on request of a test — in which case `spl.ao` = 1 renders as `spl.ao` = 2
+        // and one line says so (the fallback **(D)**). The test is on an `Option` that is `None`
+        // on every machine whose adapter answers normally, and the wording is the one
+        // `RenderDiagnostics::msvo_unavailable` writes on the OpenGL side.
+        if let Some(reason) = effects.msvo_refused().map(str::to_owned) {
+            if !self.msvo_reported {
+                self.msvo_reported = true;
+                self.diagnostics.push(format!(
+                    "the multi-scale ambient occlusion (MSVO) could not be prepared ({reason}); \
+                     the scene is drawn with the Depth occlusion instead (AMD-055 REQ-SCN-083)"
+                ));
+            }
+        }
+    }
+
+    /// Makes this renderer refuse the multi-scale estimator of REQ-SCN-083's *Mode MSVO*, so that
+    /// the fallback **(D)** onto the Depth occlusion can be observed on a machine whose adapter
+    /// refuses nothing. `false` when the frame has no screen effects to refuse it on.
+    ///
+    /// Only a test calls this, as on the OpenGL side; the production path sets the same flag from
+    /// what the adapter said about `R16Float` in [`Self::new`].
+    pub fn refuse_msvo(&mut self) -> bool {
+        match &mut self.screen_effects {
+            Some(effects) => {
+                effects.refuse_msvo("refused on request of a test");
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether the multi-scale estimator has been given up on this renderer, so that `spl.ao` = 1
+    /// renders as Depth. False on every machine whose adapter answers normally.
+    #[must_use]
+    pub fn msvo_refused(&self) -> bool {
+        self.screen_effects
+            .as_ref()
+            .is_some_and(|effects| effects.msvo_refused().is_some())
     }
 
     /// Builds the floor-mask module and pipelines of AMD-055 REQ-SCN-084 for this frame, on a
@@ -1422,6 +1480,11 @@ impl WgpuSceneRenderer {
         let effects_bytes = self.screen_effects.as_ref().map_or(0, ScreenEffects::bytes);
         self.statistics.style_programs = self.style_modules + effects_pipelines;
         self.statistics.screen_effect_bytes = effects_bytes;
+        self.statistics.occlusion_levels = count(
+            self.screen_effects
+                .as_ref()
+                .map_or(0, ScreenEffects::multi_scale_levels),
+        );
         self.statistics.centroid_interpolation = variant.centroid;
 
         // AMD-021 R2-009: the whole image is encoded to sRGB once, into the target.
@@ -2112,7 +2175,7 @@ fn run_screen_effects(
     // 2b. The occlusion of REQ-SCN-083.
     if effects.occludes() {
         submitted += effects.occlude(device, queue, encoder, frame, style, 1.0);
-        submitted += effects.composite_occlusion(encoder, &linear.resolved);
+        submitted += effects.composite_occlusion(device, encoder, frame, &linear.resolved);
     }
     statistics.screen_effect_passes = submitted;
 }

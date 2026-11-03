@@ -568,6 +568,105 @@ fn req_scn_080_the_occlusion_costs_the_same_passes_and_bytes_on_each_backend() {
     }
 }
 
+// --------------------------------- AMD-055, the multi-scale estimator of REQ-SCN-083 *Mode MSVO*
+
+/// The settings that turn the multi-scale occlusion on: `spl.ao` = 1, the four-level pyramid RU-6
+/// ported from Microsoft's `MiniEngine`.
+const MULTI_SCALE: [&str; 4] = ["--style", "enhanced", "--style-param", "spl.ao=1"];
+
+/// AMD-055 REQ-SCN-083 *Mode MSVO*: the whole chain of nineteen passes — the linear pyramid, the
+/// sphere-penetration test per level, the `SmartBlur` over each of them and the bilateral upsample
+/// — agrees with OpenGL.
+///
+/// Two details of this chain read a **row index**, and both had to be mirrored into OpenGL's
+/// convention rather than transcribed: which texel of each 2 × 2 block the decimation keeps
+/// (`msvo_downsample.wgsl`) and which pixel coordinate the per-pixel rotation hashes
+/// (`msvo_occlude.wgsl`). A port that transcribed either would still be admissible — the
+/// requirement leaves the decimation and the pattern free — and would read far worse here, which
+/// is what this test is for.
+#[test]
+fn req_scn_083_the_multi_scale_occlusion_agrees_between_the_backends() {
+    let Some((share, channel)) = parity("ao-msvo", &MULTI_SCALE) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the multi-scale occlusion agrees on only {:.4} % of pixels",
+        share * 100.0
+    );
+    println!(
+        "ao msvo: worst {:.4} % within 2, max {channel} levels",
+        share * 100.0
+    );
+}
+
+/// The same at `ao.quality` High, where every level of the pyramid doubles in each dimension: the
+/// focal length of each level, the sphere's pixel radius and the blur's step all change with it.
+#[test]
+fn req_scn_083_the_full_resolution_pyramid_agrees_between_the_backends() {
+    let Some((share, _)) = parity(
+        "ao-msvo-high",
+        &[
+            "--style",
+            "enhanced",
+            "--style-param",
+            "spl.ao=1,ao.quality=2",
+        ],
+    ) else {
+        return;
+    };
+    assert!(
+        share >= WITHIN_TWO,
+        "the full-resolution pyramid agrees on only {:.4} % of pixels",
+        share * 100.0
+    );
+}
+
+/// What the multi-scale chain asked of each backend: **nineteen** passes and the composite, the
+/// four levels of `style::MSVO_LEVELS`, and the same pyramid bytes — the strongest statement that
+/// the two renderers ran the same chain rather than two chains that happen to look alike.
+#[test]
+fn req_scn_083_the_multi_scale_chain_costs_the_same_passes_and_bytes_on_each_backend() {
+    let reference = capture("msvo-counts", None, &MULTI_SCALE).expect("OpenGL always renders");
+    let counters = |folder: &PathBuf| {
+        let records = read_render(&folder.join("render.json")).unwrap();
+        let scene = records
+            .iter()
+            .find(|record| record.scene == "framing")
+            .expect("the synthetic set has a `framing` scene");
+        (
+            scene.screen_effect_passes.expect("Enhanced writes the key"),
+            scene.screen_effect_bytes.expect("Enhanced writes the key"),
+            scene
+                .style_programs_resident
+                .expect("Enhanced writes the key"),
+        )
+    };
+    let (gl_passes, gl_bytes, gl_programs) = counters(&reference);
+    assert_eq!(
+        gl_passes, 20,
+        "the nineteen passes of the chain and the composite"
+    );
+    for backend in backends() {
+        let Some(capture) = capture("msvo-counts", Some(backend), &MULTI_SCALE) else {
+            continue;
+        };
+        let (passes, bytes, programs) = counters(&capture);
+        println!(
+            "ao msvo on {backend}: {passes} passes, {bytes} bytes and {programs} programs; \
+             OpenGL {gl_passes}, {gl_bytes} and {gl_programs}"
+        );
+        assert_eq!(passes, gl_passes, "the same nineteen passes and composite");
+        assert_eq!(bytes, gl_bytes, "the same pyramid");
+        assert_eq!(
+            programs, gl_programs,
+            "the five of the chain and the composite"
+        );
+        fs::remove_dir_all(&capture).unwrap();
+    }
+    fs::remove_dir_all(&reference).unwrap();
+}
+
 // ----------------------------------------------------- AMD-055, the reflections of REQ-SCN-084
 
 /// The settings that turn the floor reflections of REQ-SCN-084 on.

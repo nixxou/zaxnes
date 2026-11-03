@@ -244,6 +244,16 @@ impl WgpuFixture {
     pub fn adapter(&self) -> String {
         self.gpu.adapter().name.clone()
     }
+
+    /// What the last rendered frame cost.
+    pub fn statistics(&self) -> zax_render::statistics::RenderStatistics {
+        self.gpu.renderer_ref().statistics().clone()
+    }
+
+    /// The renderer itself, for the seams a test needs: `refuse_msvo`, `take_diagnostics`.
+    pub fn renderer(&mut self) -> &mut zax_render::wgpu_backend::WgpuSceneRenderer {
+        self.gpu.renderer()
+    }
 }
 
 /// One capture, as rows of RGBA bytes with the top row first.

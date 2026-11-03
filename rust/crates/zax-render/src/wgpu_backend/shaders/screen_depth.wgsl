@@ -52,6 +52,18 @@ struct Screen {
     blur_aspect: vec4<f32>,
     // x the occlusion's sample count, y the march's steps, z its refinements, w the blur's taps.
     counts: vec4<i32>,
+    // REQ-SCN-083 *Mode MSVO*: x this level's sphere radius in scene units, y this level's focal
+    // length in pixels, z the rejection falloff of `ao.thickness`, w `1 / sum of the weights`.
+    msvo_a: vec4<f32>,
+    // x the access headroom, y the blur's sharpness, z the share of the hemisphere, w the ceiling.
+    msvo_b: vec4<f32>,
+    // xy one texel of this level along the axis the blur runs on, zw one texel of the coarse level
+    // the upsample gathers from.
+    msvo_c: vec4<f32>,
+    // x the distance a pixel with no geometry carries; yzw spare.
+    msvo_d: vec4<f32>,
+    // x how many entries of the pattern this quality takes, y whether this is the last upsample.
+    msvo_counts: vec4<i32>,
 }
 
 @group(0) @binding(0) var<uniform> screen: Screen;
@@ -60,12 +72,14 @@ struct Screen {
 // The filtered sampler, for the two reads that are an upsample: the occlusion's composite and the
 // reflections'. Every other read is a `textureLoad`.
 @group(0) @binding(2) var zax_smooth: sampler;
-// What this pass reads besides the depth: the occlusion, the frame's colour, the floor mask —
-// whichever the pass wants, in the order its own header gives. The slots a pass does not read
-// hold a 1 x 1 dummy.
+// What this pass reads besides the depth: the occlusion, the frame's colour, the floor mask, a
+// level of the multi-scale pyramid — whichever the pass wants, in the order its own header gives.
+// The slots a pass does not read hold a 1 x 1 dummy. Four, because the bilateral upsample of
+// REQ-SCN-083's *Mode MSVO* gathers from two depths and two occlusions at once.
 @group(0) @binding(3) var zax_source0: texture_2d<f32>;
 @group(0) @binding(4) var zax_source1: texture_2d<f32>;
 @group(0) @binding(5) var zax_source2: texture_2d<f32>;
+@group(0) @binding(6) var zax_source3: texture_2d<f32>;
 
 const ZAX_TAU: f32 = 6.283185307;
 
