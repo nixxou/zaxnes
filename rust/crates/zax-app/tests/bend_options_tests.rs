@@ -152,17 +152,39 @@ fn req_scn_066_the_arc_centre_is_a_list_of_two_named_values() {
     }
     strings::set_language(UiLanguage::English);
 
-    // And the three angles keep their thirteen rungs of 30 degrees (REQ-SCN-066).
+    // RO-1 point 7 (owner decision, a divergence from REQ-SCN-066): the three angles keep the
+    // bounds of the amendment and every one of its thirteen rungs, with ten more of 5 degrees
+    // between −30 and 30. The domain has no single step any more, which is why it answers None.
     for id in [
         SettingId::SceneBendLr,
         SettingId::SceneBendTb,
         SettingId::SceneArcH,
     ] {
         let domain = zax_settings::catalogue::descriptor(id).domain();
-        assert_eq!(Some(30.0), domain.step());
+        assert_eq!(None, domain.step());
         assert_eq!(Some(-180.0), domain.minimum());
         assert_eq!(Some(180.0), domain.maximum());
-        assert_eq!(13, domain.options().expect("rungs").len());
+        let rungs: Vec<f64> = domain
+            .options()
+            .expect("rungs")
+            .iter()
+            .map(|option| option.value)
+            .collect();
+        assert_eq!(
+            vec![
+                -180.0, -150.0, -120.0, -90.0, -60.0, -30.0, -25.0, -20.0, -15.0, -10.0, -5.0, 0.0,
+                5.0, 10.0, 15.0, 20.0, 25.0, 30.0, 60.0, 90.0, 120.0, 150.0, 180.0
+            ],
+            rungs,
+            "{id:?}"
+        );
+        // Every rung of the amendment's 30-degree grid is still a rung.
+        for coarse in (-180..=180).step_by(30) {
+            assert!(
+                rungs.contains(&f64::from(coarse)),
+                "{coarse} is still a rung"
+            );
+        }
     }
 }
 
@@ -181,12 +203,27 @@ fn req_scn_066_the_handheld_advanced_page_offers_the_five() {
         );
     }
 
-    // And the page can step each one, which is what putting it there is for.
+    // And the page can step each one, which is what putting it there is for. RO-1 point 7: the
+    // pad walks the same grid the desktop offers, so one press near 0 is 5 degrees and one press
+    // past 30 is 30.
     let mut model = zax_settings::model::SettingsModel::new();
     advanced::step(SettingId::SceneBendLr, &mut model, 1);
-    assert_eq!(30, model.get(SettingId::SceneBendLr).as_int());
+    assert_eq!(5, model.get(SettingId::SceneBendLr).as_int());
     advanced::step(SettingId::SceneBendLr, &mut model, -1);
     assert_eq!(0, model.get(SettingId::SceneBendLr).as_int());
+    for expected in [-5, -10, -15, -20, -25, -30, -60, -90] {
+        advanced::step(SettingId::SceneBendLr, &mut model, -1);
+        assert_eq!(expected, model.get(SettingId::SceneBendLr).as_int());
+    }
+    // And it stops at the end rather than wrapping, as it did when it moved by an increment.
+    for _ in 0..10 {
+        advanced::step(SettingId::SceneBendLr, &mut model, -1);
+    }
+    assert_eq!(-180, model.get(SettingId::SceneBendLr).as_int());
+    model.set(
+        SettingId::SceneBendLr,
+        zax_settings::values::SettingValue::Int(0),
+    );
 
     advanced::step(SettingId::SceneBend2dMode, &mut model, 1);
     assert!(!model.get(SettingId::SceneBend2dMode).as_bool(), "toggled");

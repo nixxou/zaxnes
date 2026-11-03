@@ -187,6 +187,11 @@ fn req_lua_114_run_ahead_and_visual_style_are_brought_into_their_domain() {
 }
 
 /// The criterion of REQ-LUA-114 on the style parameters, value by value.
+///
+/// RO-1 point 7 gave the three curvature angles a finer grid for the interface and the settings
+/// file (5° between −30 and 30), and left this rule exactly where it was: a **script** write still
+/// rounds on the 30° grid of REQ-SCN-066, so 15 reads back 0 and 45 reads back 60, and a profile
+/// written for 3dSen behaves as it always did.
 #[test]
 fn req_lua_114_a_style_parameter_is_normalised_as_amd_040_requires() {
     let mut session = blank();

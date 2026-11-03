@@ -16,8 +16,8 @@ Build directory: `rust/target-ro` (the owner may hold `rust/target/release/zaxne
 | 2 | The new tab/group layout, with the dependency greying | done — `58407a7` |
 | 3 | Tooltip infrastructure and the texts of the first tabs | done — `b0570ef` |
 | 4 | The remaining tooltip texts in both languages, and their completeness test | done — `baac780` |
-| 5a | Compact overscan rows (point 6) | done — `PENDING5A` |
-| 5b | The finer curvature grid (point 7) | todo |
+| 5a | Compact overscan rows (point 6) | done — `c38c663` |
+| 5b | The finer curvature grid (point 7) | done — `PENDING5B` |
 | 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | todo |
 
 ## Notes
@@ -304,6 +304,68 @@ layout test now use, so a compact entry is not invisible to them.
 No other family of the window is split over several rows of one quantity (see the step-2 note), so
 nothing else was compacted.
 
+### Step 5b — the finer curvature grid, and the one rule that had to stay coarse
+
+The grid, 23 rungs (`zax-settings/src/table.rs::CURVATURE_DEGREES`): −180, −150, −120, −90, −60,
+−30, −25, −20, −15, −10, −5, 0, 5, 10, 15, 20, 25, 30, 60, 90, 120, 150, 180. Every one of the
+amendment's thirteen 30° rungs is still a rung, so a settings file written before this lot loads
+unchanged.
+
+The hard part was that **two different roundings now live on one key**. The brief requires the
+interface and the settings file to take 5° steps near 0, and Lua writes to keep AMD-040 §3 exactly
+(45 → 60, 15 → 0). `Domain::snap` was the single normalisation point for both. The split:
+
+- `Domain::grid(&CURVATURE_DEGREES, 0)` replaces `Domain::stepped(−180, 180, 30, 0)`. It keeps the
+  bounds, the published rungs (REQ-PERS-081) and the `Snap` rule — a value off the grid is brought
+  onto the nearest rung, never refused — and `Domain::step()` now answers `None`, there being no
+  one step. Ties go to the rung of **greater magnitude**, which is what keeps REQ-SCN-066's own
+  acceptance criterion true: `model.set(45)` still reads back 60.
+- `styles::snap_write(id, value)` is the new entry point for a **script** write. For the three
+  angles it rounds on the 30° grid first (nearest multiple, ties to the even multiple — so 45 → 60
+  and 75 → 60, bit for bit what `Domain::stepped` did), then hands the result to the domain, which
+  leaves it alone. For every other style parameter it *is* `domain.snap`. The Lua test of
+  REQ-LUA-114 (`two_zero_api_tests`) passes unchanged, which is the proof.
+- `ScriptSettings::restore_visual_style_parameters` — the `Setting.VisualStyleParameters` round
+  trip of AMD-059 REQ-LUA-116 — writes a **rung** rather than a value, so it must not be coarsened:
+  a 15° rung would have come back as 30°. It now goes through a new private
+  `record_style_parameter` with the domain's own rounding, and `set_visual_style_parameter` is the
+  same function with `styles::snap_write`. REQ-LUA-116's promise of putting a list back *exactly*
+  therefore holds.
+
+A consequence worth flagging to R1, in the Q ticket of step 6: the **rung indices** REQ-LUA-116
+reports for the three angles shift, the list having grown from 13 entries to 23 (rung 6 was 0° and
+is now −25°). The alternative — keeping the reported rungs on the 13-entry list — would have made
+`Setting.VisualStyleParameters` report a value the setting does not hold, which the requirement
+("the rung each one holds now") forbids. The log and the setting stay consistent; the numbers move.
+
+Everything else:
+
+- **The desktop row** needed nothing: the angles are drawn by `draw_enum` over
+  `domain().options()`, so 23 rungs give 23 entries.
+- **The console's advanced row** needed a change. It moved by `row.step`, which came from the
+  libretro list (30), so it would have kept stepping by 30. `advanced::step` now walks the
+  **rungs** of a whole-number domain and stops at the ends. For every evenly spaced row of the
+  page that is the same thing as the old increment, which
+  `advanced::tests::the_rung_walk_matches_the_old_step_for_every_evenly_spaced_row` holds it to
+  value by value.
+- **The libretro option** went from 13 values to 23 (AMD-043 §6 says 13): a divergence, and also a
+  necessity, since the libretro list is what `options::bounds` feeds the console page.
+- **The harness `--bend`** already took any angle, on or off the grid, deliberately. Its help text
+  and the doc comment of `parse_bend` now name the new grid; no code changed.
+- **No rendering code changed.** `space_bend.rs` takes degrees as a continuous `f32` and the
+  shader variant switch is still "all three angles zero or not".
+
+New tests: the 23 rungs and the amendment's thirteen still among them (`bend_options_tests`,
+`core_options`); the grid's snapping and the §3 rule side by side (`two_zero_settings`); a settings
+file written before the lot loading unchanged, a fine rung surviving a restart, and a hand-edited
+value snapping (`bend_settings_tests`); a Lua write still coarse and a Lua read giving back the
+fine rung (`zax-scripting::settings::tests`); the console walking 0 → 5 → … → −90 and stopping at
+−180 (`bend_options_tests`); and a 15° export that differs from 0° **and** from 30° and equals
+`B(P)` for 15° (`zax-render::bend_tests`, through the CPU harness `scene_export`, so no GL context
+and no GPU run).
+
+2427 tests pass across the workspace.
+
 ### Next step
 
-Step 5b: the finer curvature grid (point 7).
+Step 6: the divergence note in `rust/docs/OPTIONS-LAYOUT.md`, the Q ticket, and the closing.

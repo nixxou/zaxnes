@@ -799,21 +799,26 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ),
     (
         "detail.scene.bend_lr",
-        "Degrees, from −180 to 180 in steps of 30; 0 is a flat scene. The whole level is bent, and \
+        "Degrees; 0 is a flat scene. The steps are 5 degrees between −30 and 30, where a slight \
+         bend is worth tuning, and 30 degrees beyond, out to ±180. The whole level is bent, and \
          the camera and the Zapper aim follow it. It costs a little per vertex while any of the \
          three angles is not 0, and nothing at all while all three are 0. A script reaches it as \
-         spl.bend_zx. Default: 0.",
+         spl.bend_zx, and a script's write still lands on a multiple of 30 as it did in 3dSen. \
+         Default: 0.",
     ),
     (
         "detail.scene.bend_tb",
-        "Degrees, from −180 to 180 in steps of 30; 0 is a flat scene. It costs a little per vertex \
-         while any of the three angles is not 0, and nothing at all while all three are 0. A \
-         script reaches it as spl.bend_zy. Default: 0.",
+        "Degrees; 0 is a flat scene. The steps are 5 degrees between −30 and 30 and 30 degrees \
+         beyond, out to ±180. It costs a little per vertex while any of the three angles is not 0, \
+         and nothing at all while all three are 0. A script reaches it as spl.bend_zy, and a \
+         script's write still lands on a multiple of 30 as it did in 3dSen. Default: 0.",
     ),
     (
         "detail.scene.arc_h",
-        "Degrees, from −180 to 180 in steps of 30; 0 is a flat scene. The Arc Center row below \
-         chooses what the level bends around. A script reaches it as spl.arc_yx. Default: 0.",
+        "Degrees; 0 is a flat scene. The steps are 5 degrees between −30 and 30 and 30 degrees \
+         beyond, out to ±180. The Arc Center row below chooses what the level bends around. A \
+         script reaches it as spl.arc_yx, and a script's write still lands on a multiple of 30 as \
+         it did in 3dSen. Default: 0.",
     ),
     (
         "detail.scene.arc_center",

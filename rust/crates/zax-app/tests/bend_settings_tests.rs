@@ -146,6 +146,53 @@ fn req_scn_066_the_five_settings_survive_a_restart() {
     assert_eq!(bend_of(&model), bend_of(&restarted));
 }
 
+/// RO-1 point 7: a settings file written **before** this lot loads unchanged — every rung of the
+/// amendment's 30° grid is still a rung — and a value off the new grid is brought onto the nearest
+/// one rather than refused or defaulted.
+#[test]
+fn ro_1_a_stored_curvature_loads_unchanged_or_snaps_to_the_nearest_rung() {
+    let folder = TemporaryRoot::new("zax-bend-grid-");
+    let paths = UserDataPaths::resolve(Some(folder.path()), None, None);
+
+    // Written as a file from before the lot: the three angles on the 30° grid.
+    let mut before = SettingsModel::new();
+    before.set(SettingId::SceneBendLr, SettingValue::Int(-150));
+    before.set(SettingId::SceneBendTb, SettingValue::Int(90));
+    before.set(SettingId::SceneArcH, SettingValue::Int(30));
+    SettingsStore::new(&paths).save(&before);
+
+    let mut restarted = SettingsModel::new();
+    SettingsStore::new(&paths).load(&mut restarted, at(0));
+    assert_eq!(-150, restarted.get(SettingId::SceneBendLr).as_int());
+    assert_eq!(90, restarted.get(SettingId::SceneBendTb).as_int());
+    assert_eq!(30, restarted.get(SettingId::SceneArcH).as_int());
+    assert_eq!(bend_of(&before), bend_of(&restarted));
+
+    // The fine rungs the lot adds survive a restart as themselves.
+    let mut fine = SettingsModel::new();
+    fine.set(SettingId::SceneBendLr, SettingValue::Int(15));
+    fine.set(SettingId::SceneBendTb, SettingValue::Int(-5));
+    fine.set(SettingId::SceneArcH, SettingValue::Int(25));
+    SettingsStore::new(&paths).save(&fine);
+    let mut reloaded = SettingsModel::new();
+    SettingsStore::new(&paths).load(&mut reloaded, at(0));
+    assert_eq!(15, reloaded.get(SettingId::SceneBendLr).as_int());
+    assert_eq!(-5, reloaded.get(SettingId::SceneBendTb).as_int());
+    assert_eq!(25, reloaded.get(SettingId::SceneArcH).as_int());
+    assert_eq!(bend_of(&fine), bend_of(&reloaded));
+
+    // A hand-edited value off the grid lands on the nearest rung, and the scene gets that one.
+    let mut edited = SettingsModel::new();
+    edited.set(SettingId::SceneBendLr, SettingValue::Int(13));
+    edited.set(SettingId::SceneArcH, SettingValue::Int(-99));
+    assert_eq!(15, edited.get(SettingId::SceneBendLr).as_int());
+    assert_eq!(-90, edited.get(SettingId::SceneArcH).as_int());
+    assert_eq!(
+        SpaceBend::new(15.0, 0.0, -90.0, false, 1.0),
+        bend_of(&edited)
+    );
+}
+
 /// REQ-SCN-074 note: the setting has **no Lua access** — the original program has none — so it
 /// is neither a style parameter of REQ-LUA-114 nor a `Setting` member.
 #[test]

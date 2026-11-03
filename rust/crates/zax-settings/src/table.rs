@@ -35,6 +35,26 @@ const BACKGROUND_PRESETS: [(i32, &str); 8] = [
 const LANGUAGE_ENGLISH: &str = "en";
 const LANGUAGE_FRENCH: &str = "fr";
 
+/// The angles the three curvature settings of AMD-043 REQ-SCN-066 take, in degrees (RO-1 point 7,
+/// owner decision): **5° between −30 and 30**, where a player wants to tune a slight bend, and the
+/// 30° of the amendment beyond, where a bend is a deliberate deformation. 23 rungs.
+///
+/// A divergence from REQ-SCN-066, which gives 13 rungs of 30°. Every one of those 13 is still a
+/// rung here, so a value saved before this lot loads unchanged, and a Lua write still rounds on
+/// the 30° grid (`styles::snap_write`), so a profile written for 3dSen behaves as it did.
+pub(crate) const CURVATURE_DEGREES: [f64; 23] = [
+    -180.0, -150.0, -120.0, -90.0, -60.0, -30.0, -25.0, -20.0, -15.0, -10.0, -5.0, 0.0, 5.0, 10.0,
+    15.0, 20.0, 25.0, 30.0, 60.0, 90.0, 120.0, 150.0, 180.0,
+];
+
+/// [`CURVATURE_DEGREES`] as the libretro option list of AMD-043 §6, labelled as whole degrees.
+fn curvature_options() -> Vec<SettingOption> {
+    CURVATURE_DEGREES
+        .iter()
+        .map(|value| SettingOption::new(*value, &format!("{value:.0}")))
+        .collect()
+}
+
 /// Every setting of §4.1, in the order of the specification's tables.
 pub(crate) fn build() -> Vec<SettingDescriptor> {
     let mut all = Vec::new();
@@ -663,25 +683,15 @@ fn scene(out: &mut Vec<SettingDescriptor>) {
 /// The five curvature settings of the "Geometry" group: the four angles of AMD-043 REQ-SCN-066
 /// and the "Bend 2D Mode" switch of AMD-046 REQ-SCN-074.
 fn curvature(out: &mut Vec<SettingDescriptor>) {
-    // The four of AMD-043 REQ-SCN-066. They are the style parameters `spl.bend_zx`,
-    // `spl.bend_zy`, `spl.arc_yx` and `spl.arc_center` of REQ-LUA-114, so they carry the step
-    // the rounding of AMD-040 §3 uses.
-    for (id, minimum, maximum, step, label) in [
-        (
-            SettingId::SceneBendLr,
-            -180.0,
-            180.0,
-            30.0,
-            "Bend Left-Right",
-        ),
-        (
-            SettingId::SceneBendTb,
-            -180.0,
-            180.0,
-            30.0,
-            "Bend Top-Bottom",
-        ),
-        (SettingId::SceneArcH, -180.0, 180.0, 30.0, "Arc Horizontal"),
+    // The three angles of AMD-043 REQ-SCN-066, on the finer grid of RO-1 point 7
+    // ([`CURVATURE_DEGREES`]). They are the style parameters `spl.bend_zx`, `spl.bend_zy` and
+    // `spl.arc_yx` of REQ-LUA-114; a Lua write still rounds on the 30° grid the amendment gives
+    // (`styles::snap_write`), so a profile written for 3dSen behaves exactly as it did, and the
+    // grid below is what the interface offers and what the settings file is brought onto.
+    for (id, label) in [
+        (SettingId::SceneBendLr, "Bend Left-Right"),
+        (SettingId::SceneBendTb, "Bend Top-Bottom"),
+        (SettingId::SceneArcH, "Arc Horizontal"),
     ] {
         out.push(
             SettingDescriptor::new(
@@ -692,10 +702,12 @@ fn curvature(out: &mut Vec<SettingDescriptor>) {
                 SettingEffect::Immediate,
                 SettingTheme::Scene,
             )
-            .with_domain(Domain::stepped(minimum, maximum, step, 0))
+            .with_domain(Domain::grid(&CURVATURE_DEGREES, 0))
             .with_label(label)
-            // AMD-043 §6: "option, 13 valeurs".
-            .with_libretro(steps(minimum, maximum, step, 0)),
+            // AMD-043 §6 writes "option, 13 valeurs"; RO-1 point 7 makes it 23 — the owner's
+            // divergence, recorded in `docs/OPTIONS-LAYOUT.md` and raised as Q-105. The libretro
+            // list is also what the console's advanced page steps by, so the two have to agree.
+            .with_libretro(curvature_options()),
         );
     }
     // The arc centre is the same stepped domain with two rungs, published as the two named

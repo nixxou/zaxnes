@@ -408,6 +408,22 @@ impl ScriptSettings {
     /// Returns false, without recording anything, when the style is unknown or when the
     /// identifier does not exist for that style.
     pub fn set_visual_style_parameter(&mut self, style: i32, id: &str, value: f64) -> bool {
+        // `styles::snap_write` is the domain's own rounding for every parameter but the three
+        // curvature angles, whose Lua write keeps the 30° grid of REQ-SCN-066 although the
+        // interface offers 5° steps near 0 since RO-1 point 7: a write of 45 still reads 60.
+        self.record_style_parameter(style, id, value, styles::snap_write)
+    }
+
+    /// `set_visual_style_parameter` with the normalisation handed in, so that the rung round trip
+    /// of REQ-LUA-116 can use the domain's own and keep its promise of putting a list back
+    /// *exactly* — a rung of the fine curvature grid is a value no 30° rounding may coarsen.
+    fn record_style_parameter(
+        &mut self,
+        style: i32,
+        id: &str,
+        value: f64,
+        normalise: fn(SettingId, f64) -> f64,
+    ) -> bool {
         let (Some(key), Some(position)) = (
             styles::parameter(style, id),
             styles::parameter_position(style, id),
@@ -415,10 +431,7 @@ impl ScriptSettings {
             return false;
         };
 
-        let normalised = zax_settings::catalogue::descriptor(key)
-            .domain()
-            .snap(value);
-        self.write_int(key, number_format::to_i32(normalised));
+        self.write_int(key, number_format::to_i32(normalise(key, value)));
 
         // AMD-059 REQ-LUA-116: a call that answers true adds the parameter to the log, or leaves
         // it where it is when it is already there — the order is that of the **first** write.
@@ -488,8 +501,16 @@ impl ScriptSettings {
                 continue;
             };
 
+            // The rung's own value, written through the domain's rounding alone: it is already a
+            // rung, so nothing moves — where `set_visual_style_parameter`'s 30° rounding of a
+            // curvature angle would have coarsened a 15° rung to 30° and broken the round trip
+            // REQ-LUA-116 promises.
             let value = styles::value_of_rung(key, usize::from(*rung));
-            self.set_visual_style_parameter(style, id, value);
+            self.record_style_parameter(style, id, value, |key, value| {
+                zax_settings::catalogue::descriptor(key)
+                    .domain()
+                    .snap(value)
+            });
         }
     }
 
@@ -649,5 +670,48 @@ const fn alignment_of(raw: i32) -> ZAlignment {
         1 => ZAlignment::Center,
         2 => ZAlignment::Back,
         _ => ZAlignment::Other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> ScriptSettings {
+        ScriptSettings::new(SettingsModel::new(), ScriptLight::Model)
+    }
+
+    /// RO-1 point 7: a **script** write of a curvature angle still rounds on the 30° grid of
+    /// AMD-040 §3 and REQ-SCN-066 — 45 reads back 60, 15 reads back 0 — although the player's own
+    /// grid is finer now. A profile written for 3dSen therefore behaves exactly as it did.
+    #[test]
+    fn ro_1_a_script_write_of_a_curvature_angle_keeps_the_thirty_degree_rounding() {
+        let mut settings = settings();
+        for (written, expected) in [(45.0, 60.0), (15.0, 0.0), (-15.0, 0.0), (40.0, 30.0)] {
+            assert!(settings.set_visual_style_parameter(4, "spl.bend_zx", written));
+            assert_eq!(
+                expected,
+                settings.visual_style_parameter(4, "spl.bend_zx"),
+                "{written}"
+            );
+        }
+    }
+
+    /// RO-1 point 7, the other half: a script **read** gives back whatever the player chose, fine
+    /// rung included. The write rule above is about what a script may ask for, not about what it
+    /// is allowed to see.
+    #[test]
+    fn ro_1_a_script_read_gives_back_the_fine_rung_the_player_chose() {
+        let mut settings = settings();
+        for chosen in [15, -5, 25, -20] {
+            settings
+                .model_mut()
+                .set(SettingId::SceneBendLr, SettingValue::Int(chosen));
+            assert_eq!(
+                f64::from(chosen),
+                settings.visual_style_parameter(4, "spl.bend_zx"),
+                "{chosen}"
+            );
+        }
     }
 }

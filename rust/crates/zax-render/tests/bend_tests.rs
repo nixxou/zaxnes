@@ -240,6 +240,60 @@ fn req_scn_068_the_exported_vertices_of_a_tile_are_at_their_bent_position() {
     assert!(moved > 0, "the curvature moved something");
 }
 
+/// RO-1 point 7: 15° is a rung the player can choose now, and it is a curvature of its own — the
+/// exported vertices differ from the flat scene **and** from the 30° the old grid would have
+/// rounded it to.
+///
+/// The curvature maths takes degrees as a continuous `f32` (`space_bend.rs`), so nothing in the
+/// renderer had to change for the finer grid; this is the test that says so rather than assuming
+/// it. The variant switch stays "all three angles zero or not", which
+/// `req_scn_067_the_flat_variant_carries_nothing_of_the_curvature` above covers.
+#[test]
+fn ro_1_a_curvature_of_15_degrees_differs_from_0_and_from_30() {
+    let mut built = SceneFixture::new()
+        .background(0x0F)
+        .palette(1, 0x30)
+        .pattern(solid(1, 0), 1, ProfileLayer::L1)
+        .rect(solid(1, 0), 30, 15, 1, 1)
+        .build();
+    built.scene.settings.shadows = false;
+    let view = steady_view(&built.scene);
+    let frame = SceneFrame::with_draw_list(&built.draw_list);
+
+    let positions = |scene: &mut SceneState, degrees: f32| -> Vec<zax_engine3d::vectors::Vec3> {
+        scene.bend = SpaceBend::new(degrees, 0.0, 0.0, false, 1.0);
+        scene_export::objects(scene, &frame, &view)
+            .iter()
+            .flat_map(|object| object.positions.clone())
+            .collect()
+    };
+
+    let flat = positions(&mut built.scene, 0.0);
+    let fine = positions(&mut built.scene, 15.0);
+    let coarse = positions(&mut built.scene, 30.0);
+    assert!(!flat.is_empty(), "the tile is exported");
+    assert_eq!(flat.len(), fine.len());
+    assert_eq!(flat.len(), coarse.len());
+
+    let farthest = |a: &[zax_engine3d::vectors::Vec3], b: &[zax_engine3d::vectors::Vec3]| -> f32 {
+        a.iter()
+            .zip(b)
+            .map(|(a, b)| zax_engine3d::vectors::Vec3::distance(*a, *b))
+            .fold(0.0_f32, f32::max)
+    };
+    assert!(farthest(&flat, &fine) > 0.5, "15° is not the flat scene");
+    assert!(farthest(&coarse, &fine) > 0.5, "15° is not 30° either");
+    // And it is exactly B(P) for 15°, as REQ-SCN-068's criterion asks of any angle.
+    let transform = SpaceBend::new(15.0, 0.0, 0.0, false, 1.0);
+    for (before, after) in flat.iter().zip(&fine) {
+        let expected = transform.apply(*before);
+        assert!(
+            zax_engine3d::vectors::Vec3::distance(expected, *after) < 1e-3,
+            "{after:?} is not B({before:?}) = {expected:?}"
+        );
+    }
+}
+
 /// REQ-SCN-068, same criterion: the exported HUD is unchanged by the curvature — the plane
 /// attached to the camera stays flat, so the score of a bent game stays readable (REQ-SCN-044).
 #[test]

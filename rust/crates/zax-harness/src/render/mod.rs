@@ -104,7 +104,9 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
                            (the conditioning AMD-050 REQ-SCN-076 needs to be observable)
   --bend <lr>,<tb>,<arc>[,<centre>]  the curvature of AMD-043 REQ-SCN-066, in degrees; the
                            centre is 0 for the screen centre (default) or 1 for its bottom edge.
-                           All 0 by default, which is the capture of before the amendment
+                           All 0 by default, which is the capture of before the amendment.
+                           Any angle is taken, on or off the grid the settings offer (RO-1
+                           point 7: 5 degrees between -30 and 30, 30 beyond)
   --no-bend-2d             keep the 2D-mode rectangle flat whatever --bend says (REQ-SCN-074)
   --no-backdrop-lighting   light the backdrop with the diffuse term of REQ-SCN-028 instead of
                            the model of AMD-049 REQ-SCN-075 — the look of before the amendment
@@ -565,9 +567,12 @@ impl Options {
 /// description.
 /// `--bend <left-right>,<top-bottom>,<arc>[,<centre>]`: the curvature of AMD-043 REQ-SCN-066.
 ///
-/// The angles reach `SpaceBend::new` as they are, **without** the 30-degree snapping the
-/// setting's domain applies, so that a capture can be taken at an angle between two rungs. The
-/// centre is 0 for the screen centre (the default) or 1 for the bottom edge of the frame.
+/// The angles reach `SpaceBend::new` as they are, **without** the snapping the setting's domain
+/// applies, so that a capture can be taken at an angle between two rungs. Since RO-1 point 7 the
+/// grid the settings offer is finer near 0 — 5 degrees between −30 and 30, 30 degrees beyond — and
+/// this parser is still the one that takes anything, which is what a comparison of 0, 15 and 30
+/// degrees needs. The centre is 0 for the screen centre (the default) or 1 for the bottom edge of
+/// the frame.
 fn parse_bend(value: &str) -> Result<SpaceBend, String> {
     let parts: Vec<&str> = value.split(',').collect();
     if !(3..=4).contains(&parts.len()) {

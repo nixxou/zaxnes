@@ -8,8 +8,12 @@ use zax_settings::model::SettingsModel;
 use zax_settings::styles;
 use zax_settings::values::SettingValue;
 
-/// AMD-040 §3: a value is bounded, then put on the nearest rung of the step, ties going to the
-/// even rung. The four values the amendment names, plus the bounds.
+/// AMD-040 §3 as a **script** write reaches it (`styles::snap_write`): a value is bounded, then
+/// put on the nearest rung of the 30° step, ties going to the even rung. The four values the
+/// amendment names, plus the bounds.
+///
+/// RO-1 point 7 widened the grid the interface and the settings file use, and left this rule
+/// exactly as it was, so a profile written for 3dSen behaves as it did.
 #[rstest]
 #[case(500.0, 180.0)]
 #[case(-500.0, -180.0)]
@@ -18,14 +22,40 @@ use zax_settings::values::SettingValue;
 #[case(15.0, 0.0)]
 #[case(-15.0, 0.0)]
 #[case(-45.0, -60.0)]
+#[case(75.0, 60.0)]
 #[case(0.0, 0.0)]
 fn a_curvature_value_is_rounded_as_amd_040_requires(#[case] written: f64, #[case] expected: f64) {
+    assert!(
+        (styles::snap_write(SettingId::SceneBendLr, written) - expected).abs() < 1e-9,
+        "{written}"
+    );
+}
+
+/// RO-1 point 7: the **domain** — which is what the options window, the console's advanced page
+/// and the settings file go through — takes the finer grid: 5° between −30 and 30, 30° beyond.
+/// A value off the grid lands on the nearest rung, a tie going to the one of greater magnitude,
+/// which is what keeps REQ-SCN-066's criterion (45 gives 60) true.
+#[rstest]
+#[case(500.0, 180.0)]
+#[case(-500.0, -180.0)]
+#[case(45.0, 60.0)]
+#[case(-45.0, -60.0)]
+#[case(15.0, 15.0)]
+#[case(-15.0, -15.0)]
+#[case(7.0, 5.0)]
+#[case(3.0, 5.0)]
+#[case(2.0, 0.0)]
+#[case(40.0, 30.0)]
+#[case(31.0, 30.0)]
+#[case(0.0, 0.0)]
+fn a_curvature_value_lands_on_the_finer_grid_of_ro_1(#[case] written: f64, #[case] expected: f64) {
     let domain = catalogue::descriptor(SettingId::SceneBendLr).domain();
     assert!((domain.snap(written) - expected).abs() < 1e-9, "{written}");
 }
 
-/// The same rounding reached through the model, which is what a write from the options window
-/// does (AMD-043 REQ-SCN-066: writing 45 gives 60).
+/// The same rounding reached through the model, which is what a write from the options window and
+/// a value read out of the settings file both do (AMD-043 REQ-SCN-066: writing 45 gives 60; RO-1
+/// point 7: a value already on the 30° grid loads unchanged, and 15 is now a value of its own).
 #[test]
 fn a_model_write_of_a_curvature_value_is_rounded_too() {
     let mut model = SettingsModel::new();
@@ -33,6 +63,22 @@ fn a_model_write_of_a_curvature_value_is_rounded_too() {
     assert_eq!(60, model.get(SettingId::SceneBendLr).as_int());
     model.set(SettingId::SceneBendLr, SettingValue::Int(500));
     assert_eq!(180, model.get(SettingId::SceneBendLr).as_int());
+
+    // Every rung of the amendment's grid loads unchanged.
+    for coarse in (-180..=180).step_by(30) {
+        model.set(SettingId::SceneBendLr, SettingValue::Int(coarse));
+        assert_eq!(coarse, model.get(SettingId::SceneBendLr).as_int());
+    }
+    // And so does every rung of the finer one.
+    for fine in [-30, -25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25, 30] {
+        model.set(SettingId::SceneBendLr, SettingValue::Int(fine));
+        assert_eq!(fine, model.get(SettingId::SceneBendLr).as_int());
+    }
+    // A value off the grid snaps to the nearest allowed one.
+    model.set(SettingId::SceneBendLr, SettingValue::Int(13));
+    assert_eq!(15, model.get(SettingId::SceneBendLr).as_int());
+    model.set(SettingId::SceneBendLr, SettingValue::Int(-99));
+    assert_eq!(-90, model.get(SettingId::SceneBendLr).as_int());
 }
 
 /// AMD-055 REQ-SCN-079, the normalisation of the graded parameters: 9 gives 5, 0 gives 1.

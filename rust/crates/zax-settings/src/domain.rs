@@ -150,6 +150,33 @@ impl Domain {
         }
     }
 
+    /// An explicit, **unevenly** spaced set of rungs, labelled with `decimals` decimals. A value
+    /// is brought into the bounds and then replaced by the nearest rung; where two are equally
+    /// near, the one of **greater magnitude** wins, which is what keeps REQ-SCN-066's acceptance
+    /// criterion true — a write of 45 degrees still reads back 60.
+    ///
+    /// RO-1 point 7: the three curvature angles of AMD-043 REQ-SCN-066 take 5° steps between −30
+    /// and 30 and 30° steps beyond, which no single step can describe. Everything else about the
+    /// domain is what [`Domain::stepped`] gave it — the bounds, the published rungs (REQ-PERS-081)
+    /// and the `Snap` rule, so a value off the grid in a settings file is brought onto it rather
+    /// than refused — except [`Domain::step`], which answers `None` because there is no one step.
+    #[must_use]
+    pub fn grid(values: &[f64], decimals: usize) -> Self {
+        let minimum = values.iter().copied().fold(f64::INFINITY, f64::min);
+        let maximum = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let options = values
+            .iter()
+            .map(|value| SettingOption::new(*value, &format!("{value:.decimals$}")))
+            .collect();
+        Self {
+            minimum: Some(minimum),
+            maximum: Some(maximum),
+            options: Some(options),
+            step: None,
+            ..Self::with_rule(OutOfDomainRule::Snap)
+        }
+    }
+
     /// A finite set of values of which some are written another way: `aliases` maps a value a
     /// write may use onto the one the model keeps (the style identifier 1 onto 4, AMD-055
     /// REQ-SCN-078). A value that is neither an option nor an alias takes the default.
@@ -217,21 +244,53 @@ impl Domain {
 
     /// `value` normalised as AMD-040 §3 requires: brought into the bounds, then replaced by
     /// `a + n × step` with `n` the integer nearest `(value − a) / step` — the **even** one when
-    /// two are equally near — then brought into the bounds again. A domain without a step
-    /// answers its own bounds, or `value` when it has none.
+    /// two are equally near — then brought into the bounds again.
+    ///
+    /// A [`Domain::grid`] has no one step, so it answers the nearest of its published rungs, ties
+    /// going to the one of greater magnitude (RO-1 point 7: a write of 45 degrees reads back 60,
+    /// which is REQ-SCN-066's criterion). A domain that is neither answers its own bounds, or
+    /// `value` when it has none.
     ///
     /// This is the one place the rounding of a style parameter happens, whoever writes: a Lua
-    /// call, the options window or the settings file (AMD-040 REQ-LUA-114).
+    /// call, the options window or the settings file (AMD-040 REQ-LUA-114). The one exception is
+    /// the Lua write of a curvature angle, which rounds on the 30° grid of REQ-SCN-066 **before**
+    /// coming here, so that a profile written for 3dSen behaves as it did (`styles::snap_write`).
     #[must_use]
     pub fn snap(&self, value: f64) -> f64 {
         let bounded = self.bounded(value);
-        let (Some(low), Some(step)) = (self.minimum, self.step) else {
+        let Some(low) = self.minimum else {
             return bounded;
+        };
+        let Some(step) = self.step else {
+            return self.nearest_rung(bounded);
         };
         if step <= 0.0 || step.is_nan() || !bounded.is_finite() {
             return bounded;
         }
         self.bounded(rung(low, step, ((bounded - low) / step).round_ties_even()))
+    }
+
+    /// The published rung nearest `value`, ties going to the one of greater magnitude; `value`
+    /// itself when the domain publishes none.
+    fn nearest_rung(&self, value: f64) -> f64 {
+        let Some(options) = self.options.as_deref() else {
+            return value;
+        };
+        if !value.is_finite() {
+            return value;
+        }
+        options
+            .iter()
+            .map(|option| option.value)
+            .reduce(|best, candidate| {
+                let (near, far) = ((candidate - value).abs(), (best - value).abs());
+                if near < far || (same_number(near, far) && candidate.abs() > best.abs()) {
+                    candidate
+                } else {
+                    best
+                }
+            })
+            .unwrap_or(value)
     }
 
     fn bounded(&self, value: f64) -> f64 {

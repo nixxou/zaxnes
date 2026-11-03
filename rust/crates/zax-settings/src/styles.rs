@@ -113,6 +113,49 @@ pub fn parameter_of_position(position: usize) -> Option<(i32, &'static str, Sett
         .map(|(name, id)| (ENHANCED_STYLE, *name, *id))
 }
 
+/// The angles of the three curvature settings a **Lua** write rounds on: the 13 rungs of 30° that
+/// AMD-043 REQ-SCN-066 gives, which RO-1 point 7 widened for the interface but not for a script.
+const CURVATURE_LUA_STEP: f64 = 30.0;
+
+/// Whether `id` is one of the three curvature **angles** (not the arc centre, which has two rungs
+/// and no step of degrees).
+fn is_curvature_angle(id: SettingId) -> bool {
+    matches!(
+        id,
+        SettingId::SceneBendLr | SettingId::SceneBendTb | SettingId::SceneArcH
+    )
+}
+
+/// `value` normalised for a write from a **script** (REQ-LUA-114).
+///
+/// For almost every parameter this is the domain's own rounding — the one place AMD-040 §3 lives.
+/// The three curvature angles are the exception RO-1 point 7 creates: their domain now publishes
+/// 23 rungs (5° between −30 and 30), but a script must keep behaving exactly as it did against
+/// 3dSen, so a Lua write is first rounded onto the 30° grid of REQ-SCN-066 — a write of 45 still
+/// reads back 60 — and the domain then leaves it where it is, every multiple of 30 being a rung of
+/// the finer grid too.
+///
+/// The interface and the settings file do **not** come through here: they are allowed the fine
+/// grid, which is the whole point of the owner's change.
+#[must_use]
+pub fn snap_write(id: SettingId, value: f64) -> f64 {
+    let domain = crate::catalogue::descriptor(id).domain();
+    if !is_curvature_angle(id) {
+        return domain.snap(value);
+    }
+    let bounded = value.clamp(
+        domain.minimum().unwrap_or(value),
+        domain.maximum().unwrap_or(value),
+    );
+    if !bounded.is_finite() {
+        return domain.snap(value);
+    }
+    // The rounding of AMD-040 §3 on the amendment's own step: the nearest multiple of 30, the
+    // even multiple when two are equally near (45 → 60, 75 → 60).
+    let coarse = (bounded / CURVATURE_LUA_STEP).round_ties_even() * CURVATURE_LUA_STEP;
+    domain.snap(coarse)
+}
+
 /// The rung of `value` among the values the domain of `id` publishes, and the value of a rung.
 /// A style parameter only ever holds one of its rungs, the domain snapping every write
 /// (AMD-040 §3), so the two are a faithful round trip.
@@ -182,9 +225,13 @@ mod tests {
             assert!(!seen.contains(&id), "{name} shares its setting");
             seen.push(id);
             let descriptor = catalogue::descriptor(id);
+            // A step, or — since RO-1 point 7 gave the three curvature angles an uneven grid —
+            // the published rungs the grid snaps to. Either way AMD-040 §3 has something to
+            // round onto.
+            let domain = descriptor.domain();
             assert!(
-                descriptor.domain().step().is_some(),
-                "{name} needs a step for the rounding of AMD-040 §3"
+                domain.step().is_some() || domain.options().is_some_and(|rungs| rungs.len() > 1),
+                "{name} needs a step or a grid for the rounding of AMD-040 §3"
             );
         }
     }

@@ -791,22 +791,27 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     (
         "detail.scene.bend_lr",
-        "En degrés, de −180 à 180 par pas de 30 ; 0 donne une scène plate. Tout le niveau est \
-         courbé, et la caméra comme la visée du Zapper le suivent. Cela coûte un peu par sommet dès \
-         qu'un des trois angles n'est pas 0, et rien du tout quand les trois sont 0. Un script y \
-         accède sous le nom spl.bend_zx. Par défaut : 0.",
+        "En degrés ; 0 donne une scène plate. Les pas sont de 5 degrés entre −30 et 30, là où une \
+         légère courbure vaut d'être réglée finement, et de 30 degrés au-delà, jusqu'à ±180. Tout \
+         le niveau est courbé, et la caméra comme la visée du Zapper le suivent. Cela coûte un peu \
+         par sommet dès qu'un des trois angles n'est pas 0, et rien du tout quand les trois sont 0. \
+         Un script y accède sous le nom spl.bend_zx, et l'écriture d'un script tombe toujours sur \
+         un multiple de 30 comme dans 3dSen. Par défaut : 0.",
     ),
     (
         "detail.scene.bend_tb",
-        "En degrés, de −180 à 180 par pas de 30 ; 0 donne une scène plate. Cela coûte un peu par \
-         sommet dès qu'un des trois angles n'est pas 0, et rien du tout quand les trois sont 0. Un \
-         script y accède sous le nom spl.bend_zy. Par défaut : 0.",
+        "En degrés ; 0 donne une scène plate. Les pas sont de 5 degrés entre −30 et 30 et de 30 \
+         degrés au-delà, jusqu'à ±180. Cela coûte un peu par sommet dès qu'un des trois angles \
+         n'est pas 0, et rien du tout quand les trois sont 0. Un script y accède sous le nom \
+         spl.bend_zy, et l'écriture d'un script tombe toujours sur un multiple de 30 comme dans \
+         3dSen. Par défaut : 0.",
     ),
     (
         "detail.scene.arc_h",
-        "En degrés, de −180 à 180 par pas de 30 ; 0 donne une scène plate. La ligne Centre de l'arc \
-         ci-dessous choisit autour de quoi le niveau se courbe. Un script y accède sous le nom \
-         spl.arc_yx. Par défaut : 0.",
+        "En degrés ; 0 donne une scène plate. Les pas sont de 5 degrés entre −30 et 30 et de 30 \
+         degrés au-delà, jusqu'à ±180. La ligne Centre de l'arc ci-dessous choisit autour de quoi \
+         le niveau se courbe. Un script y accède sous le nom spl.arc_yx, et l'écriture d'un script \
+         tombe toujours sur un multiple de 30 comme dans 3dSen. Par défaut : 0.",
     ),
     (
         "detail.scene.arc_center",

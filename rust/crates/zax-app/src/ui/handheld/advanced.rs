@@ -212,8 +212,44 @@ fn cycle(id: SettingId, settings: &mut SettingsModel, step: i32, whole: bool) {
     );
 }
 
-/// Steps the setting `id` by `step`: a switch flips, a choice cycles, a number moves by its
-/// step (a twentieth of its range when it has none) and stops at its bounds.
+/// The rungs a whole-number row moves between, or `None` when its domain publishes none (so the
+/// row is a plain number with a step).
+fn rungs_of(row: &OptionsRow) -> Option<Vec<i32>> {
+    let options = row.descriptor.domain().options()?;
+    (options.len() > 1).then(|| {
+        options
+            .iter()
+            .map(|option| {
+                #[allow(clippy::cast_possible_truncation)] // a rung of a whole-number domain
+                let value = option.value.round() as i32;
+                value
+            })
+            .collect()
+    })
+}
+
+/// Moves `id` by `step` rungs of its domain and stops at the ends — never wraps, unlike
+/// [`cycle`], because this is the branch that replaced an increment that clamped.
+fn step_by_rung(id: SettingId, row: &OptionsRow, settings: &mut SettingsModel, step: i32) {
+    let Some(rungs) = rungs_of(row) else {
+        return;
+    };
+    let current = settings.get(id).as_int();
+    // The rung the value holds, or the nearest one below it for a value off the grid.
+    let at = rungs
+        .iter()
+        .position(|rung| *rung == current)
+        .or_else(|| rungs.iter().rposition(|rung| *rung <= current))
+        .unwrap_or(0);
+    let last = rungs.len() - 1;
+    let next = i32::try_from(at).unwrap_or(0).saturating_add(step);
+    let next = usize::try_from(next).unwrap_or(0).min(last);
+    settings.set(id, SettingValue::Int(rungs[next]));
+}
+
+/// Steps the setting `id` by `step`: a switch flips, a choice cycles, a whole number whose domain
+/// publishes rungs moves by one rung, and any other number moves by its step (a twentieth of its
+/// range when it has none). All of them stop at their bounds except a choice, which cycles.
 pub fn step(id: SettingId, settings: &mut SettingsModel, step: i32) {
     let Some(row) = row_of(id) else {
         return;
@@ -228,6 +264,13 @@ pub fn step(id: SettingId, settings: &mut SettingsModel, step: i32) {
             settings.set(id, SettingValue::Bool(!on));
         }
         SettingKind::Enum => cycle(id, settings, step, false),
+        // A whole number whose domain publishes its rungs moves from one rung to the next and
+        // stops at the ends, which is what the three curvature angles of RO-1 point 7 need: their
+        // rungs are 5° apart near 0 and 30° apart beyond, so no one increment describes them. For
+        // every other such row — the twelve style parameters, the run-ahead, the arc centre —
+        // moving by a rung and moving by the step are the same thing, which is what the test
+        // `the_rung_walk_matches_the_old_step_for_every_evenly_spaced_row` holds it to.
+        SettingKind::Int if rungs_of(row).is_some() => step_by_rung(id, row, settings, step),
         kind => {
             let increment = if row.step > 0.0 {
                 row.step
@@ -261,6 +304,46 @@ mod tests {
         assert_ne!(before, settings.get(SettingId::VideoAntiAlias).as_int());
         step(SettingId::VideoAntiAlias, &mut settings, -1);
         assert_eq!(before, settings.get(SettingId::VideoAntiAlias).as_int());
+    }
+
+    /// RO-1 point 7 replaced the increment of a whole-number row with a walk along its rungs, so
+    /// that the curvature angles can have an uneven grid. For every **evenly** spaced row of the
+    /// page — the twelve style parameters, the run-ahead, the arc centre, the GPU frame queue —
+    /// the two give the same answer, which is what makes the change invisible on the console.
+    #[test]
+    fn the_rung_walk_matches_the_old_step_for_every_evenly_spaced_row() {
+        for row in SETTINGS.iter() {
+            let id = row.descriptor.id();
+            let Some(rungs) = rungs_of(row) else { continue };
+            if row.descriptor.kind() != SettingKind::Int {
+                continue;
+            }
+            // Only the evenly spaced ones: the three curvature angles are the exception this lot
+            // creates, and they have a test of their own in `bend_options_tests.rs`.
+            let even = row.step > 0.0
+                && rungs
+                    .windows(2)
+                    .all(|pair| (f64::from(pair[1] - pair[0]) - row.step).abs() < 1e-9);
+            if !even {
+                continue;
+            }
+            let mut walked = SettingsModel::new();
+            let mut stepped = SettingsModel::new();
+            for direction in [1, -1, 1, 1, 1, 1, 1, 1, -1] {
+                step(id, &mut walked, direction);
+                // What the branch before RO-1 did: move by the step and clamp.
+                let value = (stepped.get(id).as_double() + f64::from(direction) * row.step)
+                    .clamp(row.minimum, row.maximum);
+                #[allow(clippy::cast_possible_truncation)] // within the setting's bounds
+                stepped.set(id, SettingValue::Int(value.round() as i32));
+                assert_eq!(
+                    stepped.get(id).as_int(),
+                    walked.get(id).as_int(),
+                    "{}",
+                    row.descriptor.key()
+                );
+            }
+        }
     }
 
     #[test]

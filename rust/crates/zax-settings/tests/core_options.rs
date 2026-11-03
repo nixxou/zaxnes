@@ -242,8 +242,9 @@ fn an_unknown_option_or_label_is_refused() {
 }
 
 /// AMD-043 §6 and AMD-046 §3: the five curvature options as the two amendments publish them —
-/// thirteen values for each angle, two named ones for the arc centre, and the switch of the 2D
-/// mode with `enabled` as its default.
+/// two named values for the arc centre and the switch of the 2D mode with `enabled` as its
+/// default — and, for each angle, the **23** values of RO-1 point 7 in place of the amendment's
+/// thirteen (owner decision, recorded as a divergence; every one of the thirteen is still there).
 #[test]
 fn the_curvature_options_are_the_ones_the_amendments_publish() {
     for key in [
@@ -252,12 +253,24 @@ fn the_curvature_options_are_the_ones_the_amendments_publish() {
         "zaxnes_scene_arc_h",
     ] {
         let option = core_options::find(key).expect(key);
-        assert_eq!(13, option.values.len(), "{key}: 13 values");
+        assert_eq!(23, option.values.len(), "{key}: 23 values");
         assert_eq!("-180", option.values[0]);
-        assert_eq!("0", option.values[6]);
-        assert_eq!("180", option.values[12]);
+        assert_eq!("-30", option.values[5]);
+        assert_eq!("0", option.values[11]);
+        assert_eq!("30", option.values[17]);
+        assert_eq!("180", option.values[22]);
         assert_eq!("0", option.default_value, "{key}");
         assert_eq!("Scene", option.category, "{key}");
+        // The amendment's own thirteen rungs are all still offered.
+        for coarse in (-180..=180).step_by(30) {
+            assert!(
+                option
+                    .values
+                    .iter()
+                    .any(|value| value == &coarse.to_string()),
+                "{key}: {coarse} is still a value"
+            );
+        }
     }
 
     let centre = core_options::find("zaxnes_scene_arc_center").expect("arc centre");
