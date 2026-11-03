@@ -130,6 +130,7 @@ fn req_pub_001_the_default_3d_entry_converts_in_3d_and_the_2d_entry_does_not() {
             log: Box::new(NullScriptLog),
             different_game: true,
             two_dimensional_mode,
+            console_interface: false,
         };
         GameSession::create(request, &mut SettingsModel::new()).unwrap()
     };

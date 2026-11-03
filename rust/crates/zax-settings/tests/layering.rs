@@ -485,3 +485,42 @@ fn the_options_of_a_game_sit_between_the_preferences_and_the_scripts() {
         "the preference again"
     );
 }
+
+/// RO-2 part 4: `SettingsModel::preference` is "the user's own choice" — the layers **under** a
+/// game's options and under a script's session write. It is what the `Setting.Msaa` rule reads,
+/// so a session value a script left behind must not look like the user asking for something.
+#[test]
+fn ro_2_the_preference_is_read_under_the_game_and_the_session() {
+    let mut model = SettingsModel::new();
+    let id = SettingId::VideoAntiAlias;
+
+    // No value of the user's own: the catalogue default (1 since AMD-052 REQ-PERS-089).
+    assert_eq!(1, model.preference(id).as_int());
+    assert_eq!(model.get(id), model.preference(id));
+
+    // An environment default — what a handheld build sets — is the user's effective choice while
+    // the user holds none.
+    model.set_environment_default(id, SettingValue::Enum(0));
+    assert_eq!(0, model.preference(id).as_int());
+
+    // The user's own choice wins over it.
+    model.set(id, SettingValue::Enum(2));
+    assert_eq!(2, model.preference(id).as_int());
+
+    // A game's option is in force but is not the preference.
+    model.set_game_values([(id, SettingValue::Enum(0))]);
+    assert_eq!(0, model.get(id).as_int());
+    assert_eq!(2, model.preference(id).as_int());
+    model.clear_game_values();
+
+    // Nor is a script's session write.
+    model.set_layer(id, SettingValue::Enum(1), SettingLayer::Session);
+    assert_eq!(1, model.get(id).as_int());
+    assert_eq!(2, model.preference(id).as_int());
+    model.clear_session_layer();
+    assert_eq!(2, model.get(id).as_int());
+
+    // A command-line override **is** the user asking, for this run (Q-066).
+    model.set_layer(id, SettingValue::Enum(0), SettingLayer::CommandLine);
+    assert_eq!(0, model.preference(id).as_int());
+}

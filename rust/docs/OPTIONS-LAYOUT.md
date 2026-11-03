@@ -247,3 +247,47 @@ predict, and it is what the domain already did for everybody else.
 **For R1 to weigh.** This is a divergence from AMD-040 §3 for the three curvature angles, and
 only for them: the amendment's rounding is still the rule everywhere its step is uniform. The
 alternative — amending REQ-SCN-066 back to 13 rungs — would undo §2, which the owner wants.
+
+---
+
+## 4. Divergence changed: `Setting.Msaa` now drives the anti-aliasing, within a rule
+
+**What the specification says.** AMD-059 REQ-LUA-116 §34 makes `Setting.Msaa` a stored value with
+the mapping `v ≤ 1 → 0`, `2 ≤ v ≤ 3 → 2`, `v ≥ 4 → 4`, persisted under `video.msaa_2_0`, and
+**no effect** — divergence **(D)** of the amendment, whose reason it states: "dans la 2.0 il fixe
+l'anticrénelage à la session suivante ; Zaxnes a son propre réglage (`video.anti_alias`, AMD-032)
+qu'un script ne doit pas changer à l'insu de l'utilisateur."
+
+**What Zaxnes does now** (owner decision, RO-2 part 4). The write still stores the normalised
+value and a read still gives it back, exactly as the amendment specifies. On top of that it
+**takes effect on `video.anti_alias`** — 0 → None, 2 or 4 → FFAA, which AMD-032 §2 makes MSAA 4×,
+Zaxnes having no 2× — as a **session** value (REQ-PERS-010): in force until the end of the game,
+the user's preference restored afterwards, never persisted by the script.
+
+It is ignored for the anti-aliasing when any of these holds:
+
+| Clause | Read from |
+|---|---|
+| the program shows the console interface: a handheld build (`PortMaster`, Android), `--handheld`, or a desktop opened with `--console` | `AppOptions`, carried to the session (`SessionRequest::console_interface`) and from there to `ScriptSettings` |
+| the user's **global** `video.anti_alias` is above 0 | `SettingsModel::preference` — the layers under a game's options and under the session write |
+| the game in play has a per-game anti-aliasing option (§5 below), **0 included** | `SettingsModel::has_game_value` |
+
+**The rule is one-directional, and that is the point.** Zaxnes ships `video.anti_alias` at 1
+(AMD-052 REQ-PERS-089), so clause 2 is the ordinary desktop case and the write is ignored there.
+What the rule allows is therefore exactly one thing: a script may **add** anti-aliasing for a user
+who has none, on a desktop, for one game, for the length of that game. It can never take a user's
+own anti-aliasing away, never downgrade SMAA to FFAA, never cost a handheld a frame, and never
+override a choice made for that very game. AMD-059's own acceptance criterion
+(`Setting.Msaa = 3` → 2, `= 1` → 0, `= 8` → 4, `video.anti_alias` unchanged) therefore still
+passes **unchanged**, on a default model, and its test is untouched.
+
+**What is kept, exactly.** The stored key, the mapping, the read-back value, the persistence scope
+and the Lua member are all as AMD-059 writes them; `goldens/lua-api.txt` is byte for byte the
+same. Nothing new runs per frame: this is a setting read when it changes.
+
+**For R1 to weigh.** Divergence (D) of AMD-059 §34 becomes a narrower one: the member is no longer
+"sans effet", it is "sans effet sauf dans un cas où il ne peut rien enlever à l'utilisateur". The
+asymmetry comes out of the owner's clause 2 read together with REQ-PERS-089's default of 1, and is
+worth confirming: if the intent were "unless the user made an *explicit* choice" rather than
+"unless the value is above 0", the clause would have to test the user layer instead, and a write
+could then turn a default-on anti-aliasing off. The code follows the letter of the owner's rule.

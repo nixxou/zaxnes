@@ -19,8 +19,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 | 1 | The map of what each part touches, and the test plan | done — `31d5aae` |
 | 2 | The RetroAchievements menu move (part 1) | done — `6eb88e6` |
 | 3 | The new per-game rows: the data, the desktop menu, the console page (part 2) | done — `8c84587` |
-| 4 | The Lua curvature rounding (part 3) | in progress |
-| 5 | `Setting.Msaa` drives the anti-aliasing (part 4) | todo |
+| 4 | The Lua curvature rounding (part 3) | done — `9ee3bc5` |
+| 5 | `Setting.Msaa` drives the anti-aliasing (part 4) | in progress |
 | 6 | Closing: the notes, the Q-107 appendix, fmt, clippy, the full tests, the release build | todo |
 
 ## Notes
@@ -356,6 +356,88 @@ table and what is kept exactly; §2's bullet about the Lua write points at it. T
 `table.rs::CURVATURE_DEGREES` and `curvature()` and of `Domain::snap` say there is one grid again.
 
 The whole workspace passes.
+
+### Step 5 — `Setting.Msaa`
+
+The session layer needed nothing: a script write already goes to it
+(`ScriptSettings::write` → `set_layer(.., SettingLayer::Session)`), and `end_of_game` drops it.
+So REQ-PERS-010's "in force until the game ends, the preference back afterwards, never persisted"
+came for free, and the work was the guard.
+
+Three pieces:
+
+- `ScriptSettings::write_msaa(written)` replaces the `mapped` property of `Msaa`. It stores
+  `normalise_msaa(written)` in `video.msaa_2_0` — the amendment's mapping, unchanged, now a
+  public `const fn` so there is one copy of it — and, when the guard allows, writes
+  `video.anti_alias`: 0 → None, anything else → FFAA (Zaxnes has no 2×; FFAA is MSAA 4× by
+  AMD-032 §2).
+- `ScriptSettings::msaa_drives_anti_alias()` is the guard. Clause 1 reads a new field
+  `console_interface`, clause 2 a new `SettingsModel::preference(id)`, clause 3 the existing
+  `has_game_value`.
+- `SettingsModel::preference(id)`: the value the user's **own** choice gives — command line, then
+  the preference (or the profile value for a P setting), then the environment default, then the
+  catalogue default — skipping a game's options and the session layer. Without it, a session value
+  a previous write of the same script left behind would look like the user asking for
+  anti-aliasing and the second write would be ignored.
+
+#### The flag, and where it is read
+
+`console_interface` is a fact of the **process**, not of the model, and `zax-scripting` cannot see
+it: `handheld_mode::resolve` lives in `zax-app`. So it is carried —
+`AppOptions{handheld, console}` → `configure_pacing` → `EmulationHost::console_interface` →
+`SessionRequest::console_interface` → `ScriptSettings::set_console_interface` — and read once,
+when the session is made. `--console` is in it because the desktop's console mode *is* the console
+interface; F1 switching the presentation mid-game is not a change of platform and deliberately
+does not change the answer. Default `false`, which is the desktop and what every existing test
+harness gets.
+
+#### The rule is one-directional, and AMD-059's criterion still passes unchanged
+
+Worth writing down because it surprised me while reading it. `video.anti_alias` ships at **1**
+(AMD-052 REQ-PERS-089, a divergence of its own), so clause 2 — "the user's global value is above
+0" — is the **ordinary desktop case**: on a default install the write is ignored. What the rule
+allows is exactly one thing: a script may *add* anti-aliasing for a user who has none, on a
+desktop, for one game, for the length of that game. It can never take a user's own away, never
+downgrade SMAA to FFAA, never cost a handheld a frame, and never override a choice made for that
+very game.
+
+That reading is coherent — "a script may never remove the user's anti-aliasing, only add where
+there is none" — and it is the letter of the brief, so it is what the code does. The consequence
+is that AMD-059's own acceptance criterion (`= 3` → 2, `= 1` → 0, `= 8` → 4, `video.anti_alias`
+unchanged) still passes on a default model and its test is **untouched**, which is a good sign
+rather than a lucky one. The alternative reading — "unless the user made an *explicit* choice",
+i.e. testing the user layer rather than the value — would let a script turn a default-on
+anti-aliasing off; it is raised with R1 in Q-107 rather than chosen here.
+
+#### Tests
+
+`two_zero_api_tests`, four tests, one per branch and one for the Lua surface:
+
+- `ro_2_a_lua_msaa_write_drives_the_anti_aliasing_when_the_user_has_none` — the seven mappings,
+  the session layer, the preference unmoved, what the settings file would hold, and the end of the
+  game giving the preference back;
+- `ro_2_a_lua_msaa_write_leaves_the_anti_aliasing_alone_on_a_handheld` (clause 1);
+- `ro_2_a_lua_msaa_write_leaves_a_users_own_anti_aliasing_alone` (clause 2, both the shipped
+  default of 1 and an explicit SMAA);
+- `ro_2_a_lua_msaa_write_leaves_a_games_own_anti_aliasing_alone` (clause 3, with the game's value
+  at 0, 1 and 2, and the same write acting once the option is gone — so the clause is what blocks
+  it and nothing else);
+- `ro_2_the_lua_member_reads_back_the_normalised_value_either_way`, through the member itself.
+
+`zax-settings::layering::ro_2_the_preference_is_read_under_the_game_and_the_session` is the new
+accessor: the default, an environment default, the user's own, a game's option, a session write
+and a command-line override.
+
+`zax-app::game_session_script_tests::ro_2_the_session_carries_the_console_interface_to_the_lua_view`
+is the plumbing from `SessionRequest` to `ScriptSettings`. The rule itself is not re-tested there:
+in that harness the session only holds the host's model inside a `lend`, so a bare `evaluate`
+writes to a scratch model — a trap worth recording for the next reader.
+
+`goldens/lua-api.txt` is unchanged, as required: the bespoke property publishes the same member
+with the same kind and the same rights as the `mapped` helper did.
+
+The whole workspace passes; `cargo fmt --check` and `cargo clippy --workspace --all-targets` are
+clean.
 
 ### Step 1 — what may not change
 

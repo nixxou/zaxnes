@@ -625,6 +625,7 @@ fn session_of(source: &str) -> GameSession {
             log: Box::new(NullScriptLog),
             different_game: true,
             two_dimensional_mode: None,
+            console_interface: false,
         },
         &mut model,
     )

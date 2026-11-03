@@ -2,6 +2,9 @@
 //! and the export methods of `Instance` (AMD-040 REQ-LUA-112 to REQ-LUA-115, AMD-059
 //! REQ-LUA-116 and REQ-LUA-117).
 
+use zax_settings::catalogue::SettingId;
+use zax_settings::values::SettingValue;
+
 use super::support::{assert_close, ScriptProfileBuilder, ScriptSession};
 
 fn blank() -> ScriptSession {
@@ -377,6 +380,185 @@ fn req_lua_116_the_four_scalar_members_normalise_what_is_written() {
     assert_eq!(0.0, session.number("return Setting.LibraryView"));
     session.evaluate("Setting.LibraryView = 7");
     assert_eq!(7.0, session.number("return Setting.LibraryView"));
+}
+
+// RO-2 part 4: `Setting.Msaa` drives the real anti-aliasing, within the owner's rule.
+//
+// The rule is one-directional, which is worth saying once here: Zaxnes ships `video.anti_alias`
+// **on** (1 = FFAA, AMD-052 REQ-PERS-089), so clause 2 — "the user's global value is above 0" —
+// is the ordinary desktop case and the write is ignored there. A script can therefore *add*
+// anti-aliasing for a user who has none, and can never take away a user's own. The acceptance
+// criterion of AMD-059 ("`video.anti_alias` unchanged") still holds unchanged for that reason,
+// and `req_lua_116_the_four_new_scalar_members` above is where it is checked.
+
+/// `video.anti_alias`: None, and FFAA, which AMD-032 §2 makes MSAA 4×.
+const ANTI_ALIAS_NONE: i32 = 0;
+const ANTI_ALIAS_FFAA: i32 = 1;
+
+/// A view whose user has **no** anti-aliasing: the one state in which a Lua write of
+/// `Setting.Msaa` reaches the real setting.
+fn settings_without_anti_alias() -> zax_scripting::ScriptSettings {
+    let mut settings = zax_scripting::ScriptSettings::default();
+    settings.model_mut().set(
+        SettingId::VideoAntiAlias,
+        SettingValue::Enum(ANTI_ALIAS_NONE),
+    );
+    settings.model_mut().drain_changes().for_each(drop);
+    settings
+}
+
+/// With none of the three clauses: 0 turns the anti-aliasing off and 2 or 4 asks for MSAA 4×, as
+/// a **session** value — in force until the game ends, the user's preference back afterwards
+/// (REQ-PERS-010) and never persisted. The member still reads back the normalised 0, 2 or 4.
+#[test]
+fn ro_2_a_lua_msaa_write_drives_the_anti_aliasing_when_the_user_has_none() {
+    let mut settings = settings_without_anti_alias();
+    assert!(!settings.console_interface());
+
+    for (written, expected_member, expected_level) in [
+        (4, 4, ANTI_ALIAS_FFAA),
+        (8, 4, ANTI_ALIAS_FFAA),
+        (2, 2, ANTI_ALIAS_FFAA),
+        (3, 2, ANTI_ALIAS_FFAA),
+        (1, 0, ANTI_ALIAS_NONE),
+        (0, 0, ANTI_ALIAS_NONE),
+        (-7, 0, ANTI_ALIAS_NONE),
+    ] {
+        settings.write_msaa(written);
+        assert_eq!(
+            expected_member,
+            settings.int(SettingId::VideoMsaa20),
+            "Msaa = {written}"
+        );
+        assert_eq!(
+            expected_level,
+            settings.int(SettingId::VideoAntiAlias),
+            "Msaa = {written}"
+        );
+    }
+
+    // It is a session value, and the user's own preference never moved.
+    settings.write_msaa(4);
+    assert!(settings
+        .model()
+        .has_session_value(SettingId::VideoAntiAlias));
+    assert_eq!(
+        ANTI_ALIAS_NONE,
+        settings
+            .model()
+            .preference(SettingId::VideoAntiAlias)
+            .as_int()
+    );
+    let persisted: Vec<i32> = settings
+        .model()
+        .user_preferences()
+        .filter(|(id, _)| *id == SettingId::VideoAntiAlias)
+        .map(|(_, value)| value.as_int())
+        .collect();
+    assert_eq!(vec![ANTI_ALIAS_NONE], persisted, "the file would hold 0");
+
+    // And the end of the game gives the user's preference back (REQ-PERS-012, REQ-PERS-010).
+    settings.end_game();
+    assert_eq!(ANTI_ALIAS_NONE, settings.int(SettingId::VideoAntiAlias));
+    assert!(!settings
+        .model()
+        .has_session_value(SettingId::VideoAntiAlias));
+}
+
+/// Clause 1: the console interface — a handheld build, `--handheld`, or a desktop opened in its
+/// console mode. The value is still stored and read back; the anti-aliasing is left alone.
+#[test]
+fn ro_2_a_lua_msaa_write_leaves_the_anti_aliasing_alone_on_a_handheld() {
+    let mut settings = settings_without_anti_alias();
+    settings.set_console_interface(true);
+
+    settings.write_msaa(4);
+    assert_eq!(4, settings.int(SettingId::VideoMsaa20), "still stored");
+    assert_eq!(ANTI_ALIAS_NONE, settings.int(SettingId::VideoAntiAlias));
+    assert!(!settings
+        .model()
+        .has_session_value(SettingId::VideoAntiAlias));
+
+    settings.write_msaa(2);
+    assert_eq!(2, settings.int(SettingId::VideoMsaa20));
+    assert_eq!(ANTI_ALIAS_NONE, settings.int(SettingId::VideoAntiAlias));
+}
+
+/// Clause 2: the user's global `video.anti_alias` is above 0 — the shipped default 1 included, so
+/// this is the ordinary desktop case. A script may not take a user's anti-aliasing away, nor
+/// swap SMAA for FFAA.
+#[test]
+fn ro_2_a_lua_msaa_write_leaves_a_users_own_anti_aliasing_alone() {
+    // The shipped default (AMD-052 REQ-PERS-089): FFAA, with nothing in the user layer.
+    let mut settings = zax_scripting::ScriptSettings::default();
+    assert_eq!(ANTI_ALIAS_FFAA, settings.int(SettingId::VideoAntiAlias));
+    settings.write_msaa(0);
+    assert_eq!(0, settings.int(SettingId::VideoMsaa20), "still stored");
+    assert_eq!(
+        ANTI_ALIAS_FFAA,
+        settings.int(SettingId::VideoAntiAlias),
+        "a script may not turn it off"
+    );
+
+    // And an explicit SMAA (2) is not swapped for FFAA either.
+    let mut settings = zax_scripting::ScriptSettings::default();
+    settings
+        .model_mut()
+        .set(SettingId::VideoAntiAlias, SettingValue::Enum(2));
+    settings.model_mut().drain_changes().for_each(drop);
+    settings.write_msaa(4);
+    assert_eq!(4, settings.int(SettingId::VideoMsaa20));
+    assert_eq!(2, settings.int(SettingId::VideoAntiAlias));
+}
+
+/// Clause 3: the game in play has a per-game anti-aliasing option (RO-2 part 2), **0 included** —
+/// a choice made for this very game outranks a choice made for every game, and outranks a script.
+#[test]
+fn ro_2_a_lua_msaa_write_leaves_a_games_own_anti_aliasing_alone() {
+    for game_level in [0, 1, 2] {
+        let mut settings = settings_without_anti_alias();
+        settings
+            .model_mut()
+            .set_game_values([(SettingId::VideoAntiAlias, SettingValue::Enum(game_level))]);
+        settings.model_mut().drain_changes().for_each(drop);
+
+        settings.write_msaa(4);
+        assert_eq!(4, settings.int(SettingId::VideoMsaa20), "still stored");
+        assert_eq!(
+            game_level,
+            settings.int(SettingId::VideoAntiAlias),
+            "the game's own value of {game_level} stands"
+        );
+        assert!(!settings
+            .model()
+            .has_session_value(SettingId::VideoAntiAlias));
+    }
+
+    // Without the game's option, the same write acts: the clause is what blocks it, nothing else.
+    let mut settings = settings_without_anti_alias();
+    settings.write_msaa(4);
+    assert_eq!(ANTI_ALIAS_FFAA, settings.int(SettingId::VideoAntiAlias));
+}
+
+/// From Lua, through the member itself: the read gives the normalised value whatever happens to
+/// the anti-aliasing, which is what AMD-059 REQ-LUA-116 specifies, and the write still raises
+/// nothing.
+#[test]
+fn ro_2_the_lua_member_reads_back_the_normalised_value_either_way() {
+    let mut session = blank();
+    for (written, expected) in [(3, 2.0), (1, 0.0), (8, 4.0), (-7, 0.0), (2, 2.0)] {
+        session.evaluate(&format!("Setting.Msaa = {written}"));
+        assert_eq!(
+            expected,
+            session.number("return Setting.Msaa"),
+            "Msaa = {written}"
+        );
+    }
+    assert!(
+        session.log.errors().is_empty(),
+        "{:?}",
+        session.log.errors()
+    );
 }
 
 /// REQ-LUA-116: no numeric write of the four members raises, whatever the number.

@@ -216,6 +216,9 @@ pub struct SessionRequest<'a> {
     pub different_game: bool,
     /// Whether the game is played flat; `None` means "when the profile has no pattern".
     pub two_dimensional_mode: Option<bool>,
+    /// Whether this run shows the gamepad-only interface (RO-2 part 4): a Lua write of
+    /// `Setting.Msaa` leaves the anti-aliasing alone there.
+    pub console_interface: bool,
 }
 
 /// The inputs of one emulated frame.
@@ -377,6 +380,7 @@ impl GameSession {
             log,
             different_game,
             two_dimensional_mode,
+            console_interface,
         } = request;
         let mut core = NesCore::new();
         let mut input = ScriptInputState::default();
@@ -392,6 +396,9 @@ impl GameSession {
             std::mem::replace(model, SettingsModel::new()),
             ScriptLight::Model,
         );
+        // RO-2 part 4: read once, when the session is made. The desktop's F1 switches the
+        // presentation mid-game, which is not a change of platform and does not change this.
+        settings.set_console_interface(console_interface);
         let changes = sender.clone();
         settings.set_on_changed(move |id| notify(&changes, SessionEvent::SettingChanged(id)));
         let saves = sender.clone();

@@ -35,11 +35,16 @@ struct Session {
 
 impl Session {
     fn open(scripts: Vec<ProfileScript>) -> Self {
+        Self::open_on(scripts, false, SettingsModel::new())
+    }
+
+    /// A session over `model`, told whether this run shows the console interface (RO-2 part 4).
+    fn open_on(scripts: Vec<ProfileScript>, console_interface: bool, model: SettingsModel) -> Self {
         let mut profile = GameProfile::create_empty();
         profile.scripts.extend(scripts);
 
         let mut scene = SceneState::default();
-        let mut model = SettingsModel::new();
+        let mut model = model;
         let request = SessionRequest {
             profile: &profile,
             title: "Test",
@@ -47,6 +52,7 @@ impl Session {
             log: Box::new(NullScriptLog),
             different_game: true,
             two_dimensional_mode: None,
+            console_interface,
         };
         let mut game = GameSession::create(request, &mut model).unwrap();
         assert!(game.load_rom(&SyntheticRom::counter(), "test.nes").success);
@@ -266,4 +272,22 @@ fn the_script_pad_is_additive_req_lua_032() {
 
     // 8.9 truncates to 8 (REQ-LUA-040) and joins the A button of the physical mask.
     assert_eq!(session.game.runtime().unwrap().script_pad_state(), 8);
+}
+
+/// RO-2 part 4: the session is what tells the Lua view whether this run shows the console
+/// interface, so that a write of `Setting.Msaa` leaves the real anti-aliasing alone there. This
+/// is the plumbing from `SessionRequest` to `ScriptSettings`; the rule it feeds is tested, branch
+/// by branch, in `zax-scripting`'s `two_zero_api_tests`.
+#[test]
+fn ro_2_the_session_carries_the_console_interface_to_the_lua_view() {
+    for console_interface in [false, true] {
+        let mut session = Session::open_on(Vec::new(), console_interface, SettingsModel::new());
+        let carried = session
+            .game
+            .with_runtime(&mut session.scene, |runtime, _| {
+                runtime.settings().console_interface()
+            })
+            .expect("a runtime");
+        assert_eq!(console_interface, carried);
+    }
 }

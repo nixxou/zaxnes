@@ -405,6 +405,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             // Q-065: the same empty profile plays flat as "2D Mode" and in 3D as "3D by
             // default (no profile)"; the entry decides, not the pattern count.
             two_dimensional_mode: game.is_default_three_dimensional.then_some(false),
+            console_interface: self.console_interface,
         };
         match GameSession::create(request, &mut self.settings) {
             Ok(session) => {

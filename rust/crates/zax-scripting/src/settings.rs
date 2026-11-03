@@ -44,6 +44,27 @@ pub const ROM_ENGINE_MODE: i32 = 0;
 /// Value of `app.engine_mode` that means PROFILE (§4.1.10).
 pub const PROFILE_ENGINE_MODE: i32 = 1;
 
+/// `video.anti_alias` = no multisampling (AMD-032 §2, REQ-PERS-017's labels).
+const ANTI_ALIAS_NONE: i32 = 0;
+
+/// `video.anti_alias` = FFAA, which is MSAA 4× (AMD-032 §2). Zaxnes has no 2×, so this is what
+/// both `Setting.Msaa = 2` and `= 4` ask for (RO-2 part 4).
+const ANTI_ALIAS_FFAA: i32 = 1;
+
+/// `Setting.Msaa` normalised as AMD-059 REQ-LUA-116 §34 requires: `v ≤ 1 → 0`, `2 ≤ v ≤ 3 → 2`,
+/// `v ≥ 4 → 4`. This is the value the member stores and hands back, whatever the write does to
+/// the real anti-aliasing.
+#[must_use]
+pub const fn normalise_msaa(written: i32) -> i32 {
+    if written <= 1 {
+        0
+    } else if written <= 3 {
+        2
+    } else {
+        4
+    }
+}
+
 /// Where the directional light keeps its state (SPEC-09 §4.1.3, REQ-PERS-005 point 2).
 #[derive(Debug, Clone, Default)]
 pub enum ScriptLight {
@@ -104,6 +125,13 @@ pub struct ScriptSettings {
     /// `Setting.VisualStyleParameters` reads (AMD-059 REQ-LUA-116); the *values* are not kept
     /// here, they are the settings' own.
     written_styles: Vec<u8>,
+    /// Whether this run shows the gamepad-only interface — a handheld build (`PortMaster`, Android)
+    /// or `--handheld` on a desktop. A fact of the process, not of the model, so the host sets it
+    /// when the session is made ([`ScriptSettings::set_console_interface`]).
+    ///
+    /// RO-2 part 4 is the one thing that reads it: a Lua write of `Setting.Msaa` never touches the
+    /// real anti-aliasing there, a handheld's budget being the frame itself.
+    console_interface: bool,
 }
 
 impl Default for ScriptSettings {
@@ -127,7 +155,20 @@ impl ScriptSettings {
             save_requested: None,
             load_requested: None,
             written_styles: Vec::new(),
+            console_interface: false,
         }
+    }
+
+    /// Tells the view that this run shows the gamepad-only interface (RO-2 part 4). Off by
+    /// default, which is the desktop.
+    pub const fn set_console_interface(&mut self, console: bool) {
+        self.console_interface = console;
+    }
+
+    /// Whether this run shows the gamepad-only interface.
+    #[must_use]
+    pub const fn console_interface(&self) -> bool {
+        self.console_interface
     }
 
     /// The settings of the emulator instance this view reads and writes.
@@ -224,6 +265,50 @@ impl ScriptSettings {
     fn write(&mut self, id: SettingId, value: SettingValue) {
         self.model.set_layer(id, value, SettingLayer::Session);
         self.absorb();
+    }
+
+    /// A script write of `Setting.Msaa` (AMD-059 REQ-LUA-116, amended by the owner in RO-2 part
+    /// 4). `written` is the raw number; the normalised value `normalise_msaa` gives is stored in
+    /// `video.msaa_2_0` and is what a read gives back, exactly as the amendment specifies.
+    ///
+    /// In 3dSen 2.0 the member sets the real anti-aliasing for the next session, and AMD-059 made
+    /// it a stored value with no effect (divergence D) so that a script could not change the
+    /// picture behind the user's back. The owner's rule now lets it act — as a **session** value,
+    /// so it is in force until the game ends and the user's preference comes back afterwards
+    /// (REQ-PERS-010), and never persisted — unless one of three things holds
+    /// ([`Self::msaa_drives_anti_alias`]).
+    ///
+    /// Zaxnes has no 2× multisampling (`video.anti_alias`: None, FFAA = 4 samples, SMAA = 8), so
+    /// the mapping is 0 → None and 2 or 4 → FFAA, which AMD-032 §2 makes MSAA 4×.
+    pub fn write_msaa(&mut self, written: i32) {
+        let normalised = normalise_msaa(written);
+        self.write_int(SettingId::VideoMsaa20, normalised);
+        if self.msaa_drives_anti_alias() {
+            let level = if normalised == 0 {
+                ANTI_ALIAS_NONE
+            } else {
+                ANTI_ALIAS_FFAA
+            };
+            self.write_int(SettingId::VideoAntiAlias, level);
+        }
+    }
+
+    /// Whether a write of `Setting.Msaa` reaches `video.anti_alias` (RO-2 part 4). It does not
+    /// when any of the owner's three clauses holds:
+    ///
+    /// 1. the program shows the console interface — a handheld build or `--handheld` — where the
+    ///    anti-aliasing is off by default (`ui/handheld/defaults.rs`) because the frame is the
+    ///    whole budget, and no script may spend it;
+    /// 2. the user's **global** `video.anti_alias` is above 0: the user asked for anti-aliasing,
+    ///    and a script may not take it away. Note that the shipped default is 1 (AMD-052
+    ///    REQ-PERS-089), so this is the ordinary desktop case: the rule is one-directional, a
+    ///    script can add anti-aliasing where there is none and never remove it;
+    /// 3. the game in play has a per-game anti-aliasing option (RO-2 part 2), **0 included**: a
+    ///    choice made for this very game outranks a choice made for every game.
+    fn msaa_drives_anti_alias(&self) -> bool {
+        !self.console_interface
+            && self.model.preference(SettingId::VideoAntiAlias).as_int() <= 0
+            && !self.model.has_game_value(SettingId::VideoAntiAlias)
     }
 
     /// The custom background colour (REQ-SCN-046).

@@ -221,6 +221,10 @@ pub struct EmulationHost<C: GameCatalog, V: GameView = NoView> {
     /// (Rust-only "emulation on a separate core", handheld default): the game sees its inputs
     /// one displayed frame later, nothing else changes. See `GameSession::prepare_frame_timed`.
     pub separate_core: bool,
+    /// Whether this run shows the gamepad-only interface: a handheld (`--handheld`) or the
+    /// desktop opened in its console mode (`--console`). Handed to each session so that a Lua
+    /// write of `Setting.Msaa` leaves the anti-aliasing alone there (RO-2 part 4).
+    pub console_interface: bool,
     /// Whether, with [`EmulationHost::separate_core`], the next frame may start before the
     /// scripts of the last one have run, for a profile whose scripts leave the core alone
     /// (`GameSession::can_run_ahead`): "emulation ahead", on by default.
@@ -376,6 +380,7 @@ impl<C: GameCatalog, V: GameView> EmulationHost<C, V> {
             step_input: Default::default(),
             rollback_enabled: true,
             separate_core: false,
+            console_interface: false,
             core_ahead: true,
             fast_forward: FastForwardState::new(),
             notifications: NotificationCenter::new(),

@@ -1318,6 +1318,10 @@ fn configure_pacing(host: &mut AppHost, options: &AppOptions) {
     // No rewind on a handheld (owner request): its snapshot every 60 frames costs a spike.
     host.rollback_enabled = !options.handheld;
     host.separate_core = separate_core(options);
+    // RO-2 part 4: a handheld build, `--handheld`, or a desktop opened in its console mode. It
+    // is the launch-time choice of interface; F1 switching the presentation later does not make
+    // a desktop a handheld.
+    host.console_interface = options.handheld || options.console;
     // `ZAXNES_CORE_AHEAD=0` keeps the next frame waiting for the scripts of the last one.
     host.core_ahead = std::env::var("ZAXNES_CORE_AHEAD").map_or(true, |value| value.trim() != "0");
 }

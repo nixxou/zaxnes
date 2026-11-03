@@ -308,15 +308,25 @@ fn setting_values(definition: &mut TypeDef) {
             }
         },
     );
-    mapped(definition, "Msaa", SettingId::VideoMsaa20, |value| {
-        if value <= 1 {
-            0
-        } else if value <= 3 {
-            2
-        } else {
-            4
-        }
-    });
+    // RO-2 part 4 (owner decision): the normalised value is still stored in `video.msaa_2_0` and
+    // still what a read gives back (AMD-059 REQ-LUA-116), but the write now also drives the real
+    // anti-aliasing as a session value, unless one of the three clauses of
+    // `ScriptSettings::msaa_drives_anti_alias` holds. A bespoke property rather than `mapped`
+    // because of that side effect; the member it publishes is identical, so `goldens/lua-api.txt`
+    // does not move.
+    definition.property(
+        "Msaa",
+        |cx, _| {
+            Ok(num(cx.data(|data| {
+                data.env.settings.int(SettingId::VideoMsaa20)
+            })?))
+        },
+        |cx, _, value| {
+            let wanted = cx.integer(value, "Msaa")?;
+            with_settings(cx, |settings| settings.write_msaa(wanted))
+        },
+        None,
+    );
     whole(definition, "SortOption", SettingId::UiSortOption);
     whole(definition, "MovieMode", SettingId::MovieMode);
     whole(definition, "SelectionMode", SettingId::EditorSelectionMode);

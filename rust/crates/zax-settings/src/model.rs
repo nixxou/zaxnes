@@ -169,6 +169,33 @@ impl SettingsModel {
         self.session.contains_key(&id)
     }
 
+    /// The value of `id` as the user's **own** choice gives it: the layers under a game's options
+    /// and under a script's session write — the preference or a command-line override of it, then
+    /// the environment default, then the catalogue default.
+    ///
+    /// This is what "the user's global value" means, as against [`get`](Self::get), which is the
+    /// value in force. RO-2 part 4 needs it: a Lua write of `Setting.Msaa` must not touch the
+    /// real anti-aliasing when the user asked for anti-aliasing, and a session value a previous
+    /// write of the same script left behind is not the user asking.
+    #[must_use]
+    pub fn preference(&self, id: SettingId) -> SettingValue {
+        let descriptor = catalogue::descriptor(id);
+        if descriptor.scope() == SettingScope::Derived {
+            return self.read(descriptor);
+        }
+        let stored = if descriptor.scope() == SettingScope::Profile {
+            self.profile.get(&id)
+        } else {
+            self.user.get(&id)
+        };
+        self.command
+            .get(&id)
+            .or(stored)
+            .or_else(|| self.environment_defaults.get(&id))
+            .unwrap_or_else(|| descriptor.default_value())
+            .clone()
+    }
+
     /// The options of the game in play (Rust-only): its values over the preferences and the
     /// profile.
     #[must_use]
