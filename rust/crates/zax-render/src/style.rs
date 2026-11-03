@@ -25,13 +25,153 @@ pub const ENHANCED_ALIAS: i32 = 1;
 /// Whether the *Mode MSVO* of REQ-SCN-083 is ported, which is what decides whether `spl.ao` = 1
 /// is anything other than `spl.ao` = 2 and whether `ao.thickness` does anything at all.
 ///
-/// **False**, which is the declared fallback **(D)** of REQ-SCN-083: MSVO is rendered as Depth
-/// until the MIT port named in AMD-055 §3 point 11 exists, and `third_party/README.md` carries no
-/// such entry. One constant rather than a sprinkling of comments, because two very distant places
-/// have to agree on it: the occlusion pass, which renders MSVO as Depth, and the options window,
-/// which greys `ao.thickness` for exactly as long ([`thickness_acts`]). The day the port lands,
-/// this is what changes.
-pub const MSVO_PORTED: bool = false;
+/// **True** since the port landed: `spl.ao` = 1 selects the multi-scale estimator of `gl/msvo.rs`,
+/// and `ao.thickness` acts (REQ-SCN-079, REQ-SCN-083). One constant rather than a sprinkling of
+/// comments, because distant places have to agree on it: the occlusion pass, which chooses the
+/// estimator, and the options window, which greys `ao.thickness` outside the mode
+/// ([`thickness_acts`]).
+///
+/// It is kept rather than inlined because the fallback it used to carry is still a real path: a
+/// driver that refuses the pyramid falls back on Depth **at runtime**
+/// (`gl::screen_effects::ScreenEffects::msvo_refused`), and REQ-SCN-083's fallback **(D)** is
+/// therefore still described by one name in the code.
+pub const MSVO_PORTED: bool = true;
+
+/// Levels of the MSVO depth pyramid, at **every** quality (REQ-SCN-083's *Mode MSVO*).
+///
+/// Four, which is the `HierarchyDepth` the `MiniEngine`'s own chain allows, and four at Low as well:
+///
+/// - **three is not enough** (Q-100 correction 2). With [`MSVO_COARSEST_RADIUS`] taking the coarse
+///   end out to the far field §2.4 permits, three halvings put the finest sphere at `0,44 r` and
+///   softened the contact the mode is also meant to give; a fourth brings it back to `0,22 r` and
+///   keeps the wide end.
+/// - **Low cannot have fewer** (Q-097). The coarsest level is what carries the wide half of a
+///   multi-scale estimate, and dropping it cost Low half the darkening at a contact, where
+///   REQ-SCN-083 asks of the three qualities "le même aspect général, Low pouvant être plus
+///   bruité" — noisier, not lighter. Low stays the cheapest by its sample pattern
+///   ([`MSVO_LOW_ENTRIES`]), at half resolution.
+///
+/// The count is declared unobservable by REQ-SCN-083, and the two coarsest buffers are an eighth
+/// and a sixteenth of the finest, in `R8`.
+// Q-097, Q-100
+pub const MSVO_LEVELS: i32 = 4;
+
+/// The sphere radius of the coarsest MSVO level, as a multiple of the radius `r` of REQ-SCN-083.
+///
+/// The coarsest level used to take `r` itself, and that is what cost the mode its wide half
+/// (Q-100 correction 3). The estimator's test is *exactly* a sphere — an entry of
+/// [`MSVO_PATTERN`] at a fraction `(u, v)` of the radius carries a half-thickness
+/// `√(1 − u² − v²)`, so a sample counts only within `R` of the point in all three dimensions and
+/// the farthest entry, at four fifths, has barely any depth window at all. A coarsest sphere of
+/// `R = r` therefore reaches `r` and measures a profile *narrower* than the single-scale estimator
+/// of the rest of REQ-SCN-083 — the opposite of what a multi-scale estimate is for.
+///
+/// §2.4 binds the far field by one figure, "`O` DOIT être nul là où aucune géométrie occultante ne
+/// se trouve à moins de `2 r`", which is the room the coarsest scale has. It is taken here less the
+/// reach of the smoothing that follows: `1,75 r` = 35 scene units at the default `r` = 20, the
+/// darkening dying by 37 against the 40 the invariant measures at.
+// Q-100
+pub const MSVO_COARSEST_RADIUS: f32 = 1.75;
+
+/// The share of the hemisphere the MSVO estimator has to find blocked for the darkening to reach
+/// the ceiling `O ≤ min(0,95 ; 0,3 × ao.strength)` of REQ-SCN-083 — the mode's equivalent of the
+/// Depth estimator's own normalisation.
+///
+/// Q-095 settled that the ceiling is read as a **scale** and not a mere bound, and Q-097 raised the
+/// ceiling itself to the v1.4 figure. Calibrated under that ceiling on the measurements of the
+/// Q-095 answer, the anchor being the ratio the reference shows **between the two modes**, which no
+/// framing factor can disturb: MSVO stronger than Depth on the ring, 7,1 against 5,2 in mean
+/// darkening, a factor of 1,37. Swept over 0,12 to 1,00, **0,75** measures 1,355 times the Depth
+/// mode's mean darkening there.
+///
+/// It is near the accessibility the port writes unscaled, which is the finding of Q-097: under the
+/// ceiling v1.4 states, the `MiniEngine` estimator very nearly carries the reference's magnitude on
+/// its own, and what the earlier lot read as a missing gain was the old ceiling clipping the port.
+// Q-095, Q-097
+pub const MSVO_SHARE: f32 = 0.75;
+
+/// What the MSVO access of each level is **divided by** before it is stored in its `R8` target.
+///
+/// The access the `MiniEngine` estimator writes is 1 on a lone plane and may rise **above** 1 where
+/// a pair is less than half occluded; the original's destination is a float, so it keeps that. A
+/// port that stores it in an `R8` clamps it at 1 instead, and that turns the estimator's zero-mean
+/// sampling noise into a one-sided bias which four levels of the pyramid then multiply — measured
+/// on the lone plane of §2.4's first invariant, a worst ratio of 0,949 against the 1,00 ± 0,02 the
+/// invariant allows. Two is enough headroom to keep the sign of the noise, costs nothing in memory
+/// and quantises the access to two thousandths.
+pub const MSVO_ACCESS_HEADROOM: f32 = 2.0;
+
+/// How fast a tap of the MSVO smoothing loses its weight as its depth parts from the pixel's, as a
+/// multiple of the **relative** depth difference. REQ-SCN-083 leaves "le rayon et le seuil du
+/// lissage" free; at 32 a tap 3 % away in depth — a receding floor, one texel over — keeps two
+/// thirds of its weight while a silhouette step of 10 % keeps under a quarter.
+pub const MSVO_BLUR_SHARPNESS: f32 = 32.0;
+
+/// The step between two rungs of `ao.thickness`, read as the `MiniEngine`'s rejection fall-off
+/// (see [`StyleSettings::msvo_falloff`]): the five rungs span the fall-off's own range, 1 to 10.
+const MSVO_THICKNESS_STEP: f32 = 2.25;
+
+/// Entries of [`MSVO_PATTERN`] the Low quality takes: a prefix, which is why the table is ordered
+/// as it is.
+pub const MSVO_LOW_ENTRIES: i32 = 4;
+
+/// One entry of the MSVO sample pattern: a sample **pair** of the checkerboard of
+/// `AoRenderCS.hlsli`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MsvoPatternEntry {
+    /// The larger offset, in fifths of the sphere radius.
+    pub x: f32,
+    /// The smaller one; 0 for an axial entry, equal to `x` for a diagonal one.
+    pub y: f32,
+    /// `√(1 − u² − v²)`, the half-thickness of the sphere at that offset — which is both the
+    /// depth window of the test and the weight of the entry.
+    pub thickness: f32,
+    /// How many samples the entry stands for: four for an axial or a diagonal entry, eight for an
+    /// L-shaped one.
+    pub count: f32,
+}
+
+/// The checkerboard pattern of `AoRenderCS.hlsli`: the seven sample pairs its
+/// `SAMPLE_CHECKER` path keeps of the twelve `SSAO.cpp` tabulates.
+///
+/// **Ordered so that the Low quality is a prefix** ([`MSVO_LOW_ENTRIES`]), which the original's own
+/// `LowPattern` index list is not: the four Low entries come first, the three the other qualities
+/// add follow. Nothing else of the table is changed — the same seven offsets, the same thicknesses,
+/// the same sample counts, and the weights normalised over whichever prefix is in use
+/// ([`StyleSettings::msvo_weight_scale`]).
+///
+/// The thicknesses are written out rather than computed, because `f32::sqrt` is not a `const fn`
+/// and the shader needs the same seven numbers as a constant array; the unit test
+/// `req_scn_083_the_msvo_pattern_is_the_checkerboard_of_the_original` recomputes every one of them
+/// from its offset, so the table cannot drift.
+pub const MSVO_PATTERN: [MsvoPatternEntry; 7] = [
+    // The four of the Low quality.
+    entry(2.0, 0.0, 0.916_515_1, 4.0),
+    entry(1.0, 1.0, 0.959_166_3, 4.0),
+    entry(2.0, 2.0, 0.824_621_1, 4.0),
+    entry(1.0, 3.0, 0.774_596_7, 8.0),
+    // And the three the other qualities add.
+    entry(4.0, 0.0, 0.6, 4.0),
+    entry(3.0, 3.0, 0.529_150_3, 4.0),
+    entry(2.0, 4.0, 0.447_213_6, 8.0),
+];
+
+/// Entries [`MSVO_PATTERN`] holds, as the shaders and the settings count them. Written out because
+/// a `usize` length cannot become an `i32` in a `const` without a cast; the assertion below is what
+/// keeps it honest.
+pub const MSVO_ENTRIES: i32 = 7;
+const _: () = assert!(MSVO_PATTERN.len() == 7);
+
+/// One entry of [`MSVO_PATTERN`], from its offset in fifths, its sphere half-thickness and the
+/// samples it stands for.
+const fn entry(x: f32, y: f32, thickness: f32, count: f32) -> MsvoPatternEntry {
+    MsvoPatternEntry {
+        x,
+        y,
+        thickness,
+        count,
+    }
+}
 
 /// Whether `ao.thickness` has an observable effect, given the occlusion mode in force
 /// (REQ-SCN-079: "sans effet observable hors du mode MSVO", and REQ-SCN-083's fallback **(D)**
@@ -223,6 +363,77 @@ impl StyleSettings {
     #[must_use]
     pub const fn ao_half_resolution(&self) -> bool {
         self.ao_quality != 2
+    }
+
+    /// Whether the multi-scale estimator of REQ-SCN-083's *Mode MSVO* draws this frame, rather
+    /// than the hemisphere estimator of the rest of the requirement.
+    ///
+    /// Both the mode **and** [`MSVO_PORTED`] have to say so: while the port does not exist,
+    /// `spl.ao` = 1 is the declared fallback **(D)** and renders exactly as `spl.ao` = 2.
+    #[must_use]
+    pub const fn msvo_active(&self) -> bool {
+        MSVO_PORTED && self.enhanced && matches!(self.ao, AmbientOcclusion::Msvo)
+    }
+
+    /// The rejection fall-off the MSVO estimator rejects a too-near sample with, as the uniform
+    /// its shader reads it: `−1 / (1 + 2,25 × (ao.thickness − 1))`.
+    ///
+    /// `ao.thickness` is the **assumed thickness** of an occluder known only by its depth
+    /// (REQ-SCN-083), and in the `MiniEngine` estimator that is exactly the *rejection fall-off*,
+    /// whose own range is 1 to 10: the five rungs give 1, 3.25, 5.5, 7.75 and 10. The fall-off
+    /// multiplies a sample's penetration before it is clamped, so a **larger** thickness rejects
+    /// **fewer** near samples and can only darken more — which is the monotonicity REQ-SCN-083
+    /// requires ("l'assombrissement NE DOIT PAS décroître quand `ao.thickness` croît").
+    #[must_use]
+    pub fn msvo_falloff(&self) -> f32 {
+        #[allow(clippy::cast_precision_loss)] // Five rungs.
+        let steps = (self.ao_thickness.clamp(1, 5) - 1) as f32;
+        -1.0 / (1.0 + MSVO_THICKNESS_STEP * steps)
+    }
+
+    /// How many entries of [`MSVO_PATTERN`] the quality takes: the four cheapest at Low, all
+    /// seven otherwise.
+    ///
+    /// REQ-SCN-083 asks `ao.quality` to vary "le nombre d'échelles et d'échantillons" and
+    /// declares both **unobservable**. The number of *scales* stays 4 at every quality
+    /// ([`MSVO_LEVELS`]), so this is where Low is made cheaper; Medium and High then differ by
+    /// resolution alone ([`Self::ao_half_resolution`]), which is the division the requirement does
+    /// name.
+    #[must_use]
+    pub const fn msvo_pattern_entries(&self) -> i32 {
+        if self.ao_quality == 0 {
+            MSVO_LOW_ENTRIES
+        } else {
+            MSVO_ENTRIES
+        }
+    }
+
+    /// `1 / Σ weights` over the entries the quality takes, the normalisation `SSAO.cpp` applies to
+    /// its weight table: with it, a pair of samples that nothing occludes contributes 2 and a lone
+    /// plane contributes exactly 1 — which is the first invariant of §2.4.
+    #[must_use]
+    pub fn msvo_weight_scale(&self) -> f32 {
+        let entries = usize::try_from(self.msvo_pattern_entries().clamp(0, MSVO_ENTRIES))
+            .unwrap_or(MSVO_PATTERN.len());
+        let mut total = 0.0;
+        for entry in &MSVO_PATTERN[..entries] {
+            total += entry.count * entry.thickness;
+        }
+        if total > 0.0 {
+            1.0 / total
+        } else {
+            0.0
+        }
+    }
+
+    /// The sphere radius of the **coarsest** MSVO level, in scene units: `1,75 r` (see
+    /// [`MSVO_COARSEST_RADIUS`]). Each finer level halves the one above it, as in the original.
+    #[must_use]
+    pub fn msvo_level_radius(&self, scene_scale: f32, level: i32) -> f32 {
+        let coarsest = self.ao_radius_units(scene_scale) * MSVO_COARSEST_RADIUS;
+        #[allow(clippy::cast_precision_loss)] // Four levels.
+        let halvings = (MSVO_LEVELS - 1 - level.clamp(0, MSVO_LEVELS - 1)) as f32;
+        coarsest / halvings.exp2()
     }
 
     /// The fraction of the reflected colour mixed into the surface (REQ-SCN-084):
@@ -623,6 +834,182 @@ mod tests {
             ..StyleSettings::default()
         };
         assert!((1.0 - five.ao_ceiling() - 0.05).abs() < 1e-6);
+    }
+
+    /// REQ-SCN-083 *Mode MSVO*: the pattern table is the checkerboard of `AoRenderCS.hlsli`, with
+    /// the seven offsets its `SAMPLE_CHECKER` path keeps and the sphere half-thickness
+    /// `√(1 − u² − v²)` of each — recomputed here from the offset, so the written-out constants of
+    /// [`MSVO_PATTERN`] (which a `const fn` cannot compute, `f32::sqrt` not being const) cannot
+    /// drift from what the shader's own copy of the table carries.
+    #[test]
+    fn req_scn_083_the_msvo_pattern_is_the_checkerboard_of_the_original() {
+        // The seven of `SSAO.cpp` that survive the zeroing of the non-checker weights, in the
+        // order `MSVO_PATTERN` puts them: the four of the Low quality first.
+        let expected = [
+            (2.0, 0.0, 4.0),
+            (1.0, 1.0, 4.0),
+            (2.0, 2.0, 4.0),
+            (1.0, 3.0, 8.0),
+            (4.0, 0.0, 4.0),
+            (3.0, 3.0, 4.0),
+            (2.0, 4.0, 8.0),
+        ];
+        for (index, &(x, y, count)) in expected.iter().enumerate() {
+            let entry = MSVO_PATTERN[index];
+            assert!((entry.x - x).abs() < 1e-6, "entry {index} x");
+            assert!((entry.y - y).abs() < 1e-6, "entry {index} y");
+            // Axial and diagonal entries stand for four samples, L-shaped ones for eight.
+            let shape = if y != 0.0 && (x - y).abs() > 1e-6 {
+                8.0
+            } else {
+                4.0
+            };
+            assert!((entry.count - count).abs() < 1e-6, "entry {index} count");
+            assert!((entry.count - shape).abs() < 1e-6, "entry {index} shape");
+            let (u, v) = (x * 0.2, y * 0.2);
+            let thickness = (1.0 - (u * u) - (v * v)).sqrt();
+            assert!(
+                (entry.thickness - thickness).abs() < 1e-6,
+                "entry {index} thickness: {} against {thickness}",
+                entry.thickness
+            );
+        }
+
+        // Low is a **prefix** of the table, which is the one thing reordering it buys.
+        let low = StyleSettings {
+            ao_quality: 0,
+            ..StyleSettings::default()
+        };
+        assert_eq!(MSVO_LOW_ENTRIES, low.msvo_pattern_entries());
+        for quality in [1, 2] {
+            let style = StyleSettings {
+                ao_quality: quality,
+                ..StyleSettings::default()
+            };
+            assert_eq!(
+                MSVO_ENTRIES,
+                style.msvo_pattern_entries(),
+                "ao.quality {quality}"
+            );
+        }
+
+        // And the weights are normalised over whichever prefix is in use, so that a lone plane
+        // reads exactly 1 at either quality (the first invariant of §2.4).
+        for quality in 0..=2 {
+            let style = StyleSettings {
+                ao_quality: quality,
+                ..StyleSettings::default()
+            };
+            let entries = usize::try_from(style.msvo_pattern_entries()).unwrap();
+            let total: f32 = MSVO_PATTERN[..entries]
+                .iter()
+                .map(|entry| entry.count * entry.thickness * style.msvo_weight_scale())
+                .sum();
+            assert!(
+                (total - 1.0).abs() < 1e-5,
+                "ao.quality {quality}: the weights sum to {total}"
+            );
+        }
+    }
+
+    /// REQ-SCN-083 *Mode MSVO*: `ao.thickness` spans the rejection fall-off's own range, 1 to 10,
+    /// and the uniform the shader reads is its negated reciprocal — so a **larger** thickness gives
+    /// a fall-off nearer zero, rejects fewer near samples and can only darken more.
+    #[test]
+    fn req_scn_083_the_thickness_spans_the_rejection_falloff() {
+        let thicknesses = [1.0, 3.25, 5.5, 7.75, 10.0];
+        let mut previous = f32::NEG_INFINITY;
+        for rung in 1..=5 {
+            let index = usize::try_from(rung - 1).unwrap();
+            let style = StyleSettings {
+                ao_thickness: rung,
+                ..StyleSettings::default()
+            };
+            let falloff = style.msvo_falloff();
+            assert!(
+                (falloff + 1.0 / thicknesses[index]).abs() < 1e-6,
+                "ao.thickness {rung}: {falloff}"
+            );
+            assert!(falloff < 0.0, "the fall-off is negative at every rung");
+            assert!(falloff > previous, "and strictly increasing: {falloff}");
+            previous = falloff;
+        }
+        // The default, which is the middle rung.
+        assert!((StyleSettings::default().msvo_falloff() + 1.0 / 5.5).abs() < 1e-6);
+        // And the domain of REQ-PERS-003 is the belt, not the only guard.
+        for out in [-3, 0, 9] {
+            let style = StyleSettings {
+                ao_thickness: out,
+                ..StyleSettings::default()
+            };
+            let falloff = style.msvo_falloff();
+            assert!((-1.0..=-0.1).contains(&falloff), "{out}: {falloff}");
+        }
+    }
+
+    /// REQ-SCN-083 *Mode MSVO*, Q-100: the coarsest sphere is `1,75 r` and each finer level halves
+    /// the one above it, so the four levels of [`MSVO_LEVELS`] span `0,21875 r` to `1,75 r`.
+    ///
+    /// The coarse end is what the far field of §2.4 leaves room for (`2 r`) less the reach of the
+    /// smoothing: at the default `r` = 20 it is 35 scene units, and the darkening dies well inside
+    /// the 40 units the second invariant measures at.
+    #[test]
+    fn req_scn_083_the_msvo_levels_halve_from_the_far_field_down() {
+        let style = StyleSettings::default();
+        let radius = style.ao_radius_units(1.0);
+        assert!((radius - 20.0).abs() < 1e-5);
+        let coarsest = radius * MSVO_COARSEST_RADIUS;
+        assert!((coarsest - 35.0).abs() < 1e-4);
+
+        let mut previous = 0.0;
+        for level in 0..MSVO_LEVELS {
+            let at = style.msvo_level_radius(1.0, level);
+            #[allow(clippy::cast_precision_loss)] // Four levels.
+            let expected =
+                coarsest / f32::from(u8::try_from(1 << (MSVO_LEVELS - 1 - level)).unwrap());
+            assert!((at - expected).abs() < 1e-4, "level {level}: {at}");
+            assert!(at > previous, "the levels grow from fine to coarse");
+            previous = at;
+        }
+        assert!((style.msvo_level_radius(1.0, MSVO_LEVELS - 1) - 35.0).abs() < 1e-4);
+        assert!((style.msvo_level_radius(1.0, 0) - 4.375).abs() < 1e-4);
+        // The scene scale of REQ-SCN-002 multiplies the whole ladder.
+        assert!((style.msvo_level_radius(3.0, MSVO_LEVELS - 1) - 105.0).abs() < 1e-3);
+        // And a level out of range is clamped rather than read out of the ladder.
+        assert!((style.msvo_level_radius(1.0, 9) - 35.0).abs() < 1e-4);
+    }
+
+    /// REQ-SCN-083: `spl.ao` = 1 selects the multi-scale estimator only in Enhanced, and
+    /// `ao.thickness` acts in exactly that case ([`thickness_acts`]).
+    #[test]
+    fn req_scn_083_the_msvo_mode_is_enhanced_only_and_carries_the_thickness() {
+        const { assert!(MSVO_PORTED, "the port has landed; see MSVO_PORTED") };
+        let msvo = StyleSettings {
+            enhanced: true,
+            ao: AmbientOcclusion::Msvo,
+            ..StyleSettings::default()
+        };
+        assert!(msvo.msvo_active());
+        assert!(msvo.ao_active());
+        assert!(thickness_acts(msvo.ao));
+
+        for mode in [AmbientOcclusion::Off, AmbientOcclusion::Depth] {
+            let other = StyleSettings {
+                enhanced: true,
+                ao: mode,
+                ..StyleSettings::default()
+            };
+            assert!(!other.msvo_active(), "{mode:?}");
+            assert!(!thickness_acts(mode), "{mode:?}");
+        }
+
+        // Classic ignores the mode, as it ignores every other parameter (§3 point 4).
+        let classic = StyleSettings {
+            ao: AmbientOcclusion::Msvo,
+            ..StyleSettings::default()
+        };
+        assert!(!classic.msvo_active());
+        assert!(!classic.ao_active());
     }
 
     /// REQ-SCN-084: the three parameterised quantities, each at its five rungs, and the defaults

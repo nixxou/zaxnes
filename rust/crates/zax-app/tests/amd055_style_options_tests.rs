@@ -251,23 +251,27 @@ fn req_scn_079_four_parameters_are_visible_by_default_and_twelve_with_both_effec
     assert!(options::style_row_visible(SettingId::CameraFov, &classic));
 }
 
-/// REQ-SCN-079: `ao.thickness` is presented **greyed** for as long as the MSVO mode is rendered
-/// as Depth (REQ-SCN-083's fallback **(D)**), with the reason beside it — and it is the only row
-/// that is. The setting itself is kept and persisted: greying is a presentation, not a refusal.
+/// REQ-SCN-079: `ao.thickness` is presented **greyed** outside the MSVO mode, with the reason
+/// beside it — and it is the only row that is. The setting itself is kept and persisted: greying is
+/// a presentation, not a refusal.
+///
+/// RU-6 landed the MSVO port, so the row is **live** at `spl.ao` = 1 and greyed at 0 and 2; before
+/// it, the fallback **(D)** of REQ-SCN-083 made the mode never effective and the row was greyed at
+/// all three. `zax_render::style::thickness_acts` is the one predicate both the renderer and this
+/// rule read, so the two cannot drift apart.
 #[test]
-fn req_scn_079_the_thickness_is_greyed_while_msvo_is_rendered_as_depth() {
-    // This lot renders MSVO as Depth: REQ-SCN-083's declared fallback (D). The day the port
-    // lands, this is the assertion that sends whoever changes the constant to the greying rule.
-    const { assert!(!zax_render::style::MSVO_PORTED) };
+fn req_scn_079_the_thickness_is_greyed_outside_the_msvo_mode() {
+    const { assert!(zax_render::style::MSVO_PORTED) };
 
     let mut model = enhanced();
     for mode in [0, 1, 2] {
         model.set(SettingId::RenderStyleAo, SettingValue::Int(mode));
         let note = options::inert_note(SettingId::RenderStyleAoThickness, &model);
-        assert!(
-            note.is_some(),
-            "greyed at spl.ao = {mode} while MSVO is not ported"
-        );
+        if mode == 1 {
+            assert_eq!(None, note, "spl.ao = 1 is the MSVO mode: the row acts");
+        } else {
+            assert!(note.is_some(), "greyed at spl.ao = {mode}");
+        }
         // And it is the only greyed row of the thirteen while the shadows are on, which is their
         // default — RO-1 greys `spl.pixel_shadow` when they are off, and nothing else.
         for other in GROUP {
@@ -281,6 +285,8 @@ fn req_scn_079_the_thickness_is_greyed_while_msvo_is_rendered_as_depth() {
             );
         }
     }
+    // The language fragments below are read at a mode where the row **is** greyed.
+    model.set(SettingId::RenderStyleAo, SettingValue::Int(2));
 
     for (language, fragment) in [
         (UiLanguage::English, "Depth occlusion"),

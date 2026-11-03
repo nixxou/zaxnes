@@ -526,11 +526,53 @@ pub const AO_BLUR: ProgramSource = ProgramSource {
     fragment: Stage::of([SCREEN_DEPTH, include_str!("../shaders/ao_blur.frag")]),
 };
 
-/// The `1 − O` multiply of REQ-SCN-083, blended into the linear buffer.
+/// The `1 − O` multiply of REQ-SCN-083, blended into the linear buffer. **Shared by the two
+/// estimators** of the requirement: both write `O` into an `R8` target, the Depth one in
+/// [`AO`] and the multi-scale one in the last step of [`MSVO_UPSAMPLE`].
 pub const AO_COMPOSITE: ProgramSource = ProgramSource {
     name: "ao_composite",
     vertex: SCREEN_VERTEX,
     fragment: Stage::of([include_str!("../shaders/ao_composite.frag")]),
+};
+
+/// The finest level of the depth pyramid of REQ-SCN-083's *Mode MSVO* (`gl/msvo.rs`): the frame's
+/// window depth as a view distance in scene units.
+///
+/// **Built the first time a frame asks for `spl.ao` = 1**, and released when no frame does: the
+/// hemisphere estimator's own two programs ([`AO`], [`AO_BLUR`]) do not exist while these five do,
+/// and the other way round.
+pub const MSVO_LINEARIZE: ProgramSource = ProgramSource {
+    name: "msvo_linearize",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([SCREEN_DEPTH, include_str!("../shaders/msvo_linearize.frag")]),
+};
+
+/// One coarser level of that pyramid, decimated from the one above it (REQ-SCN-083).
+pub const MSVO_DOWNSAMPLE: ProgramSource = ProgramSource {
+    name: "msvo_downsample",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([include_str!("../shaders/msvo_downsample.frag")]),
+};
+
+/// The occlusion of one level, by the sphere-penetration test of the `MiniEngine` (REQ-SCN-083).
+pub const MSVO_OCCLUDE: ProgramSource = ProgramSource {
+    name: "msvo_occlude",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([include_str!("../shaders/msvo_occlude.frag")]),
+};
+
+/// The `SmartBlur` of the `MiniEngine`, over every level (REQ-SCN-083).
+pub const MSVO_BLUR: ProgramSource = ProgramSource {
+    name: "msvo_blur",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([include_str!("../shaders/msvo_blur.frag")]),
+};
+
+/// The bilateral upsample that combines two levels, and in its last step the `O` of REQ-SCN-083.
+pub const MSVO_UPSAMPLE: ProgramSource = ProgramSource {
+    name: "msvo_upsample",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([include_str!("../shaders/msvo_upsample.frag")]),
 };
 
 /// The screen-space reflected ray of AMD-055 REQ-SCN-084, into an `RGBA16F` target.

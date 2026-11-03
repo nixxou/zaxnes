@@ -53,6 +53,9 @@ pub struct RenderDiagnostics {
     /// Whether the one line of AMD-055 REQ-SCN-080 has been written (see
     /// [`Self::screen_effects_unavailable`]). One subject, so one boolean rather than a set.
     screen_effects_reported: bool,
+    /// Whether the one line of REQ-SCN-083's fallback **(D)** has been written (see
+    /// [`Self::msvo_unavailable`]). One subject, so one boolean rather than a set.
+    msvo_reported: bool,
     /// Lines handed out since the last reset, against [`LINE_CAP`].
     lines_emitted: usize,
     /// The lines waiting for the host.
@@ -116,6 +119,27 @@ impl RenderDiagnostics {
         );
     }
 
+    /// Reports that the multi-scale estimator of AMD-055 REQ-SCN-083's *Mode MSVO* cannot run on
+    /// this implementation, so `spl.ao` = 1 is rendered as `spl.ao` = 2 — the declared fallback
+    /// **(D)** of that requirement, the label `MSVO` staying exposed and read back.
+    ///
+    /// **Once per game**, and for the same reason as [`Self::screen_effects_unavailable`]: the one
+    /// thing the mode needs that the rest of the renderer does not is an `R16F` colour target, and
+    /// an implementation that refuses it will refuse it for ever.
+    pub fn msvo_unavailable(&mut self, reason: &str, frame: u64) {
+        if self.msvo_reported {
+            return;
+        }
+        self.msvo_reported = true;
+        self.push(
+            frame,
+            format!(
+                "the multi-scale ambient occlusion (MSVO) could not be prepared ({reason}); \
+                 the scene is drawn with the Depth occlusion instead (AMD-055 REQ-SCN-083)"
+            ),
+        );
+    }
+
     /// The lines the host should log, and nothing on a frame where nothing went wrong.
     pub fn take(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending)
@@ -148,6 +172,7 @@ impl RenderDiagnostics {
         self.late_objects.reported.clear();
         self.late_objects.total = 0;
         self.screen_effects_reported = false;
+        self.msvo_reported = false;
         self.lines_emitted = 0;
         self.pending.clear();
         self.last_summary = 0;

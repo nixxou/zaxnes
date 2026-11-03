@@ -20,6 +20,7 @@
 use glow::{Framebuffer, Texture, VertexArray};
 
 use super::api::{Gl, GlError};
+use super::msvo::Msvo;
 use super::program::ShaderProgram;
 use super::shaders;
 use crate::numerics::{Vector2, Vector4};
@@ -50,25 +51,49 @@ pub struct ScreenFrame {
 }
 
 /// One target and its framebuffer.
+///
+/// `pub(super)` so that [`super::msvo`], which allocates fifteen of them for its pyramid, builds
+/// them the same way the two passes here do rather than with a second copy of the code.
 #[derive(Debug)]
-struct Target {
-    framebuffer: Framebuffer,
-    texture: Texture,
-    size: (i32, i32),
+pub(super) struct Target {
+    pub(super) framebuffer: Framebuffer,
+    pub(super) texture: Texture,
+    pub(super) size: (i32, i32),
 }
 
-/// The occlusion of REQ-SCN-083: three programs, and the pair of `R8` targets of the raw pass and
-/// its blur.
+/// The hemisphere estimator of REQ-SCN-083 — the mode `spl.ao` = 2, and the declared fallback
+/// **(D)** of the MSVO mode: two programs and the pair of `R8` targets of the raw pass and its
+/// blur.
 #[derive(Debug)]
-struct Occlusion {
+struct Depth {
     pass: ShaderProgram,
     blur: ShaderProgram,
-    composite: ShaderProgram,
     raw: Option<Target>,
     blurred: Option<Target>,
     /// 1 at `ao.quality` High, 2 otherwise (REQ-SCN-083: "à la moitié de chaque dimension de la
     /// cible de rendu courante sauf en High").
     divisor: i32,
+}
+
+/// Which estimator of REQ-SCN-083 is in force. **One or the other is built, never both**: a player
+/// who chooses `spl.ao` = 1 compiles the five programs of the multi-scale port and allocates its
+/// pyramid, and the two programs and two targets of the hemisphere estimator stay out of
+/// existence — the same rule that keeps the occlusion and the reflections independent of each
+/// other (the brief's point 2, applied one level down).
+#[derive(Debug)]
+enum Estimator {
+    /// `spl.ao` = 2, and `spl.ao` = 1 while [`style::MSVO_PORTED`] is false.
+    Depth(Depth),
+    /// `spl.ao` = 1 with the port available (REQ-SCN-083 *Mode MSVO*).
+    Msvo(Msvo),
+}
+
+/// The occlusion of REQ-SCN-083: whichever estimator the mode asks for, and the composite the two
+/// of them share.
+#[derive(Debug)]
+struct Occlusion {
+    composite: ShaderProgram,
+    estimator: Estimator,
 }
 
 /// The reflections of REQ-SCN-084: the trace, its composite, the `R8` floor mask at the frame's
@@ -96,6 +121,16 @@ pub struct ScreenEffects {
     vertex_array: VertexArray,
     occlusion: Option<Occlusion>,
     reflections: Option<Reflections>,
+    /// Whether this implementation refused the multi-scale estimator of REQ-SCN-083's *Mode
+    /// MSVO*, so that `spl.ao` = 1 renders as `spl.ao` = 2 from now on — the declared fallback
+    /// **(D)**.
+    ///
+    /// Sticky for the life of the module, and for the reason RU-5 gave the whole module's own
+    /// fallback: the one format the mode needs that nothing else here needs is an `R16F` colour
+    /// target, so a refusal is a property of the implementation and not of the frame, and retrying
+    /// it every frame would cost a failed allocation per frame for ever. It carries the reason, so
+    /// that the renderer can write the one diagnostic line of the fallback.
+    msvo_refused: Option<String>,
 }
 
 impl ScreenEffects {
@@ -111,7 +146,26 @@ impl ScreenEffects {
             vertex_array: gl.create_vertex_array()?,
             occlusion: None,
             reflections: None,
+            msvo_refused: None,
         })
+    }
+
+    /// Why the multi-scale estimator of REQ-SCN-083 was refused by this implementation, when it
+    /// was, so that `spl.ao` = 1 renders as Depth — the fallback **(D)**. `None` on every machine
+    /// whose driver answers normally.
+    pub fn msvo_refused(&self) -> Option<&str> {
+        self.msvo_refused.as_deref()
+    }
+
+    /// Makes the next frame that asks for the multi-scale estimator refuse it, so that the
+    /// fallback above can be observed on a machine whose driver refuses nothing.
+    ///
+    /// Only a test calls this — the same kind of seam as `SceneRenderer::fail_screen_effects`, and
+    /// for the same reason: no driver on this side refuses `R16F`, and an unreachable fallback is
+    /// an untested one.
+    pub fn refuse_msvo(&mut self, reason: &str) {
+        self.msvo_refused = Some(reason.to_owned());
+        self.release_occlusion();
     }
 
     /// Builds the halves `style` asks for and releases the others, once a frame.
@@ -126,19 +180,47 @@ impl ScreenEffects {
     /// without the effect rather than not at all.
     pub fn select(&mut self, style: &StyleSettings) -> Result<(), GlError> {
         if style.ao_active() {
+            // A change of `spl.ao` between its two estimators releases the one that is leaving,
+            // targets and all, and compiles the one that arrives — which is also how the mode
+            // falls back on Depth when the multi-scale port is refused
+            // ([`Self::refuse_msvo`]).
+            let wanted_msvo = style.msvo_active() && self.msvo_refused.is_none();
+            if self.occlusion.is_some() && self.occludes_multi_scale() != wanted_msvo {
+                self.release_occlusion();
+            }
             if self.occlusion.is_none() {
+                // A refusal here is not a reason to draw the frame without any occlusion at all:
+                // REQ-SCN-083 says `spl.ao` = 1 "DOIT être rendu exactement comme `spl.ao` = 2"
+                // while the port is unavailable, and an implementation that will not give the
+                // port its programs is exactly that case.
+                let msvo = if wanted_msvo {
+                    match Msvo::new(&self.gl) {
+                        Ok(msvo) => Some(msvo),
+                        Err(error) => {
+                            self.msvo_refused = Some(error.to_string());
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let estimator = match msvo {
+                    Some(msvo) => Estimator::Msvo(msvo),
+                    None => Estimator::Depth(Depth {
+                        pass: ShaderProgram::create(&self.gl, &shaders::AO)?,
+                        blur: ShaderProgram::create(&self.gl, &shaders::AO_BLUR)?,
+                        raw: None,
+                        blurred: None,
+                        divisor: 0,
+                    }),
+                };
                 self.occlusion = Some(Occlusion {
-                    pass: ShaderProgram::create(&self.gl, &shaders::AO)?,
-                    blur: ShaderProgram::create(&self.gl, &shaders::AO_BLUR)?,
                     composite: ShaderProgram::create(&self.gl, &shaders::AO_COMPOSITE)?,
-                    raw: None,
-                    blurred: None,
-                    divisor: 0,
+                    estimator,
                 });
             }
-        } else if let Some(occlusion) = self.occlusion.take() {
-            release(&self.gl, occlusion.raw);
-            release(&self.gl, occlusion.blurred);
+        } else {
+            self.release_occlusion();
         }
 
         if style.reflections_active() {
@@ -165,31 +247,78 @@ impl ScreenEffects {
         self.occlusion.is_some()
     }
 
+    /// Whether the occlusion in this module is the **multi-scale** estimator of REQ-SCN-083's
+    /// *Mode MSVO*, rather than the hemisphere one.
+    pub const fn occludes_multi_scale(&self) -> bool {
+        matches!(
+            &self.occlusion,
+            Some(occlusion) if matches!(occlusion.estimator, Estimator::Msvo(_))
+        )
+    }
+
     /// Whether the reflections of REQ-SCN-084 are.
     pub const fn reflects(&self) -> bool {
         self.reflections.is_some()
     }
 
-    /// How many programs this module holds, for `RenderStatistics::style_programs`: three for the
-    /// occlusion (the pass, its blur and the composite) and two for the reflections (the trace and
-    /// its composite). A value and not a constant, because each effect is switched on its own.
-    pub const fn programs(&self) -> u32 {
-        (if self.occlusion.is_some() { 3 } else { 0 })
-            + (if self.reflections.is_some() { 2 } else { 0 })
+    /// How many programs this module holds, for `RenderStatistics::style_programs`: the shared
+    /// composite plus its estimator — two for the hemisphere one, five for the multi-scale one —
+    /// and two for the reflections (the trace and its composite). A value and not a constant,
+    /// because each effect, and each estimator, is switched on its own.
+    pub fn programs(&self) -> u32 {
+        let occlusion = self.occlusion.as_ref().map_or(0, |occlusion| {
+            1 + match &occlusion.estimator {
+                Estimator::Depth(_) => 2,
+                Estimator::Msvo(_) => Msvo::PROGRAMS,
+            }
+        });
+        occlusion + (if self.reflections.is_some() { 2 } else { 0 })
     }
 
     /// Bytes its targets occupy, for `RenderStatistics::screen_effect_bytes`; 0 until a pass has
     /// run once.
     pub fn bytes(&self) -> u64 {
-        let occlusion = self.occlusion.as_ref().map_or(0, |occlusion| {
-            bytes(occlusion.raw.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
-                + bytes(occlusion.blurred.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
-        });
+        let occlusion = self
+            .occlusion
+            .as_ref()
+            .map_or(0, |occlusion| match &occlusion.estimator {
+                Estimator::Depth(depth) => {
+                    bytes(depth.raw.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
+                        + bytes(depth.blurred.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
+                }
+                Estimator::Msvo(msvo) => msvo.bytes(),
+            });
         let reflections = self.reflections.as_ref().map_or(0, |reflections| {
             bytes(reflections.mask.as_ref(), OCCLUSION_BYTES_PER_TEXEL)
                 + bytes(reflections.traced.as_ref(), REFLECTION_BYTES_PER_TEXEL)
         });
         occlusion + reflections
+    }
+
+    /// Levels the multi-scale pyramid holds, 0 when the estimator is the hemisphere one or has not
+    /// run yet. Read by the tests of REQ-SCN-083's *Mode MSVO*, which have no other way to tell
+    /// one estimator's resources from the other's.
+    pub fn multi_scale_levels(&self) -> usize {
+        match &self.occlusion {
+            Some(Occlusion {
+                estimator: Estimator::Msvo(msvo),
+                ..
+            }) => msvo.levels(),
+            _ => 0,
+        }
+    }
+
+    /// Releases the occlusion half, whichever estimator it holds.
+    fn release_occlusion(&mut self) {
+        if let Some(occlusion) = self.occlusion.take() {
+            match occlusion.estimator {
+                Estimator::Depth(depth) => {
+                    release(&self.gl, depth.raw);
+                    release(&self.gl, depth.blurred);
+                }
+                Estimator::Msvo(mut msvo) => msvo.release(&self.gl),
+            }
+        }
     }
 
     // ------------------------------------------------------- REQ-SCN-084, the reflections
@@ -377,23 +506,47 @@ impl ScreenEffects {
         let Some(occlusion) = &mut self.occlusion else {
             return Ok(0);
         };
+
+        // Every full-screen triangle of the two estimators draws from the same attribute-less
+        // vertex array, so it is bound once here rather than inside each of them.
+        self.gl.bind_vertex_array(Some(self.vertex_array));
+        let depth = match &mut occlusion.estimator {
+            Estimator::Msvo(msvo) => {
+                // A pyramid the implementation refuses is REQ-SCN-083's fallback **(D)** and not
+                // a reason to fail the frame: the mode is given up, this frame draws without the
+                // occlusion, and the next `select` builds the Depth estimator in its place.
+                return match msvo.draw(&self.gl, frame, style, scene_scale) {
+                    Ok(passes) => Ok(passes),
+                    Err(error) => {
+                        self.refuse_msvo(&error.to_string());
+                        Ok(0)
+                    }
+                };
+            }
+            Estimator::Depth(depth) => depth,
+        };
         let size = scaled(frame.capacity, divisor);
-        if occlusion.divisor != divisor
-            || !matches!(&occlusion.raw, Some(target) if target.size == size)
-        {
-            release(&self.gl, occlusion.raw.take());
-            release(&self.gl, occlusion.blurred.take());
-            occlusion.raw = Some(allocate_occlusion(&self.gl, size, false)?);
-            occlusion.blurred = Some(allocate_occlusion(&self.gl, size, true)?);
-            occlusion.divisor = divisor;
+        if depth.divisor != divisor || !matches!(&depth.raw, Some(target) if target.size == size) {
+            release(&self.gl, depth.raw.take());
+            release(&self.gl, depth.blurred.take());
+            depth.raw = Some(allocate_occlusion(&self.gl, size, false)?);
+            depth.blurred = Some(allocate_occlusion(&self.gl, size, true)?);
+            depth.divisor = divisor;
         }
-        let (Some(raw), Some(blurred)) = (&occlusion.raw, &occlusion.blurred) else {
+        // The handles are copied out before the programs are borrowed mutably: a target and the
+        // program that draws into it live in the same `Depth` value.
+        let (Some((raw, raw_texture)), Some(blurred)) = (
+            depth
+                .raw
+                .as_ref()
+                .map(|target| (target.framebuffer, target.texture)),
+            depth.blurred.as_ref().map(|target| target.framebuffer),
+        ) else {
             return Ok(0);
         };
 
         let gl = &self.gl;
         screen_pass_state(gl);
-        gl.bind_vertex_array(Some(self.vertex_array));
         let viewport = (
             (frame.drawn.0 / divisor).max(1),
             (frame.drawn.1 / divisor).max(1),
@@ -401,9 +554,9 @@ impl ScreenEffects {
         let texel = texel(frame.drawn, divisor);
 
         // 1. The occlusion itself, from the depth alone.
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(raw.framebuffer));
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(raw));
         gl.viewport(viewport.0, viewport.1);
-        let program = &mut occlusion.pass;
+        let program = &mut depth.pass;
         program.use_program();
         program.set_i32("uDepth", 0);
         program.set_vec2("uDrawnScale", frame.drawn_scale);
@@ -421,8 +574,8 @@ impl ScreenEffects {
         gl.draw_triangles(3);
 
         // 2. The blur, which respects the depth discontinuities (REQ-SCN-083).
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(blurred.framebuffer));
-        let program = &mut occlusion.blur;
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(blurred));
+        let program = &mut depth.blur;
         program.use_program();
         program.set_i32("uOcclusion", 0);
         program.set_i32("uDepth", 1);
@@ -430,7 +583,7 @@ impl ScreenEffects {
         program.set_vec4("uProjection", frame.projection);
         program.set_vec2("uTexel", texel);
         gl.active_texture(0);
-        gl.bind_texture(glow::TEXTURE_2D, Some(raw.texture));
+        gl.bind_texture(glow::TEXTURE_2D, Some(raw_texture));
         gl.active_texture(1);
         gl.bind_texture(glow::TEXTURE_2D, Some(frame.depth));
         gl.draw_triangles(3);
@@ -447,7 +600,12 @@ impl ScreenEffects {
         let Some(occlusion) = &mut self.occlusion else {
             return 0;
         };
-        let Some(blurred) = &occlusion.blurred else {
+        // Both estimators write `O` into an `R8` target, so the composite reads whichever one is
+        // in force and the shader is the same.
+        let Some(result) = (match &occlusion.estimator {
+            Estimator::Depth(depth) => depth.blurred.as_ref().map(|target| target.texture),
+            Estimator::Msvo(msvo) => msvo.result(),
+        }) else {
             return 0;
         };
 
@@ -462,7 +620,7 @@ impl ScreenEffects {
         program.set_i32("uOcclusion", 0);
         program.set_vec2("uDrawnScale", frame.drawn_scale);
         gl.active_texture(0);
-        gl.bind_texture(glow::TEXTURE_2D, Some(blurred.texture));
+        gl.bind_texture(glow::TEXTURE_2D, Some(result));
         gl.draw_triangles(3);
 
         gl.disable(glow::BLEND);
@@ -480,10 +638,7 @@ impl ScreenEffects {
 
 impl Drop for ScreenEffects {
     fn drop(&mut self) {
-        if let Some(occlusion) = self.occlusion.take() {
-            release(&self.gl, occlusion.raw);
-            release(&self.gl, occlusion.blurred);
-        }
+        self.release_occlusion();
         if let Some(reflections) = self.reflections.take() {
             release(&self.gl, reflections.mask);
             release(&self.gl, reflections.traced);
@@ -492,8 +647,9 @@ impl Drop for ScreenEffects {
     }
 }
 
-/// The GL state every full-screen pass of REQ-SCN-080 draws under.
-fn screen_pass_state(gl: &Gl) {
+/// The GL state every full-screen pass of REQ-SCN-080 draws under. `pub(super)` for
+/// [`super::msvo`], whose chain draws under exactly the same state.
+pub(super) fn screen_pass_state(gl: &Gl) {
     gl.disable(glow::POLYGON_OFFSET_FILL);
     gl.disable(glow::SCISSOR_TEST);
     gl.disable(glow::BLEND);
@@ -525,7 +681,7 @@ fn bytes(target: Option<&Target>, per_texel: u64) -> u64 {
     })
 }
 
-fn release(gl: &Gl, target: Option<Target>) {
+pub(super) fn release(gl: &Gl, target: Option<Target>) {
     if let Some(target) = target {
         gl.delete_texture(target.texture);
         gl.delete_framebuffer(target.framebuffer);
@@ -568,8 +724,9 @@ fn allocate_reflection(gl: &Gl, size: (i32, i32)) -> Result<Target, GlError> {
 }
 
 /// One colour target of `size` and its framebuffer, with `depth` attached when there is one.
+/// `pub(super)` for [`super::msvo`], whose pyramid is fifteen of them.
 #[allow(clippy::too_many_arguments)] // One per property of the allocation, all of them data.
-fn allocate(
+pub(super) fn allocate(
     gl: &Gl,
     size: (i32, i32),
     internal: u32,

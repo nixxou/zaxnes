@@ -393,15 +393,17 @@ fn req_scn_083_the_strength_is_the_darkening_ceiling() {
     }
 }
 
-/// REQ-SCN-083, fourth invariant, in its fallback form: "Sous le repli **(D)**, `spl.ao` = 1 et
-/// `spl.ao` = 2 donnent des captures identiques à ±2 niveaux sRGB."
+/// REQ-SCN-079, the clause this file owns of `ao.thickness`: it has "aucun effet hors du mode
+/// MSVO", so with the **Depth** estimator — the one this file is about — moving it from 1 to 5
+/// changes no pixel at all.
 ///
-/// Asserted at tolerance 0: the MSVO port of REQ-SCN-083 does not exist, so `spl.ao` = 1 selects
-/// the very same pass with the very same uniforms. REQ-SCN-079's own criterion rides on the same
-/// fact — `ao.thickness` acts in MSVO and in no other mode, so under the fallback changing it from
-/// 1 to 5 changes no pixel.
+/// The other half of the clause, that it **does** act in the MSVO mode, and the fourth invariant of
+/// §2.4 in the form the port gives it, are in `amd055_msvo_tests.rs`; what used to stand here was
+/// the *fallback* form of that invariant (`spl.ao` = 1 identical to `spl.ao` = 2), which RU-6
+/// retired by landing the port. The fallback itself is still a real path and is asserted in
+/// `req_scn_083_an_implementation_that_refuses_the_pyramid_renders_msvo_as_depth` there.
 #[test]
-fn req_scn_083_msvo_is_rendered_as_depth_and_the_thickness_does_nothing() {
+fn req_scn_079_the_thickness_does_nothing_to_the_depth_occlusion() {
     let gl = GlFixture::create(640, 480);
     let mut renderer = gl.renderer();
     let mut built = close_up_a(true);
@@ -412,18 +414,7 @@ fn req_scn_083_msvo_is_rendered_as_depth_and_the_thickness_does_nothing() {
         &mut built,
         with_occlusion(AmbientOcclusion::Depth),
     );
-    let (msvo, _) = shot(
-        &gl,
-        &mut renderer,
-        &mut built,
-        with_occlusion(AmbientOcclusion::Msvo),
-    );
-    assert_eq!(
-        depth.pixels, msvo.pixels,
-        "REQ-SCN-083 fallback (D): MSVO is rendered exactly as Depth"
-    );
-
-    for thickness in [1, 5] {
+    for thickness in [1, 2, 4, 5] {
         let style = StyleSettings {
             ao_thickness: thickness,
             ..with_occlusion(AmbientOcclusion::Depth)
@@ -431,7 +422,7 @@ fn req_scn_083_msvo_is_rendered_as_depth_and_the_thickness_does_nothing() {
         let (shot, _) = shot(&gl, &mut renderer, &mut built, style);
         assert_eq!(
             depth.pixels, shot.pixels,
-            "REQ-SCN-079: ao.thickness has no effect outside an effective MSVO mode"
+            "REQ-SCN-079: ao.thickness {thickness} has no effect outside the MSVO mode"
         );
     }
 }

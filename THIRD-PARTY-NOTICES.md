@@ -46,6 +46,41 @@ suivante :
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
+### MiniEngine (DirectX-Graphics-Samples) — (c) 2015 Microsoft — licence MIT
+
+L'occlusion ambiante multi-échelle du style Enhanced — le mode « MSVO » de l'option *Ambient
+Occlusion* (`rust/crates/zax-render/src/gl/msvo.rs` et les nuanceurs
+`rust/crates/zax-render/src/shaders/msvo_*.frag`) — est **adaptée du MiniEngine de Microsoft**
+(<https://github.com/microsoft/DirectX-Graphics-Samples>, fichiers `MiniEngine/Core/SSAO.cpp` et
+`MiniEngine/Core/Shaders/Ao*.hlsl(i)`, auteur James Stanard), portée des nuanceurs de calcul
+Direct3D 12 vers des passes de fragments OpenGL 3.3. Les fichiers concernés portent l'en-tête :
+
+    // Portions adapted from Microsoft MiniEngine (c) Microsoft, MIT License
+
+Le MiniEngine est publié sous la licence MIT suivante, compatible avec la GPL v3 de Zaxnes :
+
+    The MIT License (MIT)
+
+    Copyright (c) 2015 Microsoft
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
 ### rcheevos — (c) 2018 RetroAchievements.org — licence MIT
 
 La prise en charge de RetroAchievements (`rust/crates/zax-achievements`) compile la bibliothèque

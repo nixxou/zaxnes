@@ -7,6 +7,7 @@ pub mod gpu_timer;
 pub mod linear_buffer;
 pub mod linear_palette;
 pub mod mesh_cache;
+pub mod msvo;
 pub mod picture;
 pub mod program;
 pub mod program_cache;

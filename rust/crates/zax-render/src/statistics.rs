@@ -75,6 +75,15 @@ pub struct RenderStatistics {
     /// the voxel grid (REQ-SCN-081) and of the pixel shadows (REQ-SCN-082), and the programs of
     /// the two screen passes. **0 in Classic**, and 0 in Enhanced until an effect is turned on.
     pub style_programs: u32,
+    /// Levels of the depth pyramid the **multi-scale** estimator of REQ-SCN-083's *Mode MSVO*
+    /// built this frame: [`crate::style::MSVO_LEVELS`] with `spl.ao` = 1 and the port in force,
+    /// and **0** with `spl.ao` = 2, with the occlusion off, in Classic, and under the fallback
+    /// **(D)**.
+    ///
+    /// It is the one thing that tells the two estimators apart from outside the renderer: both
+    /// write the same `O` through the same composite, so the picture does not say which ran, and
+    /// the fallback to Depth has to be observable (REQ-SCN-083).
+    pub occlusion_levels: u32,
     /// CPU time of the collection of the tiles into the buckets (Rust-only, for the frame
     /// profiler).
     pub collect_time: Duration,
@@ -109,6 +118,7 @@ impl Default for RenderStatistics {
             screen_effect_passes: 0,
             screen_effect_bytes: 0,
             style_programs: 0,
+            occlusion_levels: 0,
             collect_time: Duration::ZERO,
             gpu_time: None,
         }

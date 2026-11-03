@@ -679,6 +679,11 @@ impl SceneRenderer {
         statistics.style_programs =
             self.passes.scene.style_programs + effects.map_or(0, ScreenEffects::programs);
         statistics.screen_effect_bytes = effects.map_or(0, ScreenEffects::bytes);
+        // AMD-055 REQ-SCN-083: which of the two estimators ran, as a level count — 0 for the
+        // hemisphere one and for the fallback **(D)**, `MSVO_LEVELS` for the multi-scale port.
+        statistics.occlusion_levels = effects.map_or(0, |effects| {
+            u32::try_from(effects.multi_scale_levels()).unwrap_or(u32::MAX)
+        });
         statistics.resident_meshes = count(self.meshes.count());
         statistics.mesh_uploads = self.meshes.uploads();
         statistics.resident_textures = count(self.textures.count());
@@ -913,6 +918,19 @@ impl SceneRenderer {
             self.plan
                 .diagnostics
                 .screen_effects_unavailable(&error.to_string(), frame);
+            return;
+        }
+        // AMD-055 REQ-SCN-083: the multi-scale estimator may be refused on its own — by its
+        // programs here, or by its pyramid during the pass of an earlier frame — in which case
+        // `spl.ao` = 1 renders as `spl.ao` = 2 and one line says so (the fallback **(D)**). The
+        // test is on an `Option` that is `None` on every machine whose driver answers normally.
+        if let Some(reason) = self
+            .screen_effects
+            .as_ref()
+            .and_then(|effects| effects.msvo_refused().map(str::to_owned))
+        {
+            let frame = self.plan.frame_count();
+            self.plan.diagnostics.msvo_unavailable(&reason, frame);
         }
     }
 
@@ -961,6 +979,31 @@ impl SceneRenderer {
     /// the same reason: the behaviour it exercises is otherwise unreachable here.
     pub const fn fail_screen_effects(&mut self, fail: bool) {
         self.fail_screen_effects = fail;
+    }
+
+    /// Makes this renderer refuse the multi-scale estimator of REQ-SCN-083's *Mode MSVO*, so that
+    /// the fallback **(D)** onto the Depth occlusion can be observed on a machine whose driver
+    /// refuses nothing. `false` when the frame has no screen effects to refuse it on.
+    ///
+    /// Only a test calls this, for the reason [`Self::fail_screen_effects`] exists; the production
+    /// path sets the same flag from the `GlError` the pyramid's allocation returns.
+    pub fn refuse_msvo(&mut self) -> bool {
+        match &mut self.screen_effects {
+            Some(effects) => {
+                effects.refuse_msvo("refused on request of a test");
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether the multi-scale estimator has been given up on this renderer, so that `spl.ao` = 1
+    /// renders as Depth. False on every machine whose driver answers normally.
+    #[must_use]
+    pub fn msvo_refused(&self) -> bool {
+        self.screen_effects
+            .as_ref()
+            .is_some_and(|effects| effects.msvo_refused().is_some())
     }
 
     /// Drops every cached GPU mesh and texture. The host calls it when the 3D engine rebuilds
