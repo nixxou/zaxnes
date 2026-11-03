@@ -17,7 +17,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 6a | REQ-SCN-084: the floor definition, on the CPU | done — `276b98a` |
 | 6b | REQ-SCN-084: the mask, the trace and the composite | done — `86a810f` |
 | 7a | REQ-UI-061 and REQ-SCN-079: the desktop "Style" group, the labels, the handheld page | done — hash in the next commit |
-| 7b | The harness options (`--style`, `--style-param`) | todo |
+| 7b | The harness options (`--style`, `--style-param`) | done — hash in the next commit |
 | 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | todo |
 | 8 | The per-effect measurements | todo |
 | 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
@@ -1122,6 +1122,61 @@ and the window has only the settings model: `video.backend` is a wish read at st
 back to OpenGL when no Vulkan driver answers (`application::open_window`), so the setting alone
 cannot say what is drawing. Plumbing the live backend into the options window is more machinery
 than point 6 asks for; the log line says it instead.
+
+### Step 7b — the harness options
+
+Point 7 of the brief: "Add harness options to select the style and each Enhanced parameter, so R0
+can capture each effect separately."
+
+| Piece | What landed |
+|---|---|
+| `--style <classic\|enhanced>` | `render.visual_style`, Classic by default; the numbers 0, 4 and the accepted 1 taken too |
+| `--style-param <id>=<v>,…` | the twelve parameters of REQ-SCN-079, by the **Lua identifiers** of the amendment; repeatable, comma-separated |
+| `Options::style_settings()` | the style the run renders with, built through a settings model |
+| `render.json` | four keys — `visualStyle`, `styleProgramsResident`, `screenEffectBytes`, `screenEffectPasses` — written **only** in Enhanced |
+
+#### Three decisions
+
+1. **The values go through a settings model, not into the fields.** `--style-param ao.strength=9`
+   has to land on 5, `spl.voxel_grid=4` on 3 and `spl.ao=1,4` on 1 — REQ-SCN-079's first criterion
+   — and the style 1 has to read back as 4. Writing the fields of `StyleSettings` directly would
+   mean re-implementing that normalisation; `Options::style_settings` writes into a
+   `SettingsModel` instead and reads the result, so the flag takes **the same code path** a write
+   from the options window or from `Setting:SetVisualStyleParameter` takes. That is what makes an
+   R0 capture comparable with the application's picture rather than merely similar.
+2. **The identifiers come from `zax_settings::styles`**, the very table the Lua methods use, so a
+   flag and a script cannot name a parameter differently. The four **curvature** identifiers of
+   AMD-043 are in that table and are rejected here with a message naming `--bend`: the curvature
+   is not part of the style (REQ-SCN-078) and reaches the scene through `SceneState::bend`, so a
+   `--style-param spl.bend_zx=30` that parsed would have been silently ignored.
+3. **A misspelt `--style` is an error, not Classic.** The *setting* answers Classic for every
+   unknown value (REQ-SCN-078, and a test of step 2 pins it); a capture campaign must not quietly
+   produce the wrong picture because a flag was mistyped, so the flag is strict where the setting
+   is lenient.
+
+#### `render.json` stays byte identical at the default settings
+
+The four new keys are written only when Enhanced is selected — the idiom `--bench` already uses
+for its two — so a capture at the default settings produces the entry of before the amendment,
+byte for byte, which is what point 7 asks of every default capture. What they buy is that a
+campaign capture of one effect carries the three counters the brief's points 1 and 2 are read on,
+beside the picture they belong to.
+
+`Options::style_settings` is the twin of `zax_app::scene_script_bridge::style_of` and cannot share
+it: `zax-render` owns `StyleSettings` and does not depend on `zax-settings`, so neither crate can
+hold the conversion for both.
+
+#### Tests (3 in `zax-harness/tests/render_report_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| REQ-SCN-078: Classic by default, both names and the three numbers (1 reading back as 4), and five bad values refused | `req_scn_078_the_style_flag_is_classic_by_default_and_takes_both_names` |
+| REQ-SCN-079: the twelve named and normalised — 1,4 → 1, 9 → 5, 4 → 3, 0 → 1 — the defaults without the flag, a parameter set in Classic kept but inert, and the four refusals | `req_scn_079_the_style_parameters_are_named_and_normalised` |
+| the brief's points 1 and 2 through the harness: Enhanced with every effect off is the Classic PNG **byte for byte** with three zeros, the grid adds programs and no pass, the occlusion adds 3 programs and 3 passes, and a Classic report has none of the four keys | `req_scn_080_the_harness_captures_each_effect_separately` |
+
+`cargo test --release -p zax-harness`: **48 passed, 0 failed** — the C# golden captures
+(`render_tests`) and the ROM report among them. fmt and harness clippy (`--all-targets -- -D
+warnings`) clean.
 
 ## Where this session stopped, and what the next one picks up
 

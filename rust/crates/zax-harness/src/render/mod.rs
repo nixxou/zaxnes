@@ -32,6 +32,9 @@ use zax_render::geometry;
 use zax_render::numerics::Vector3;
 use zax_render::scene::SkyboxKind;
 use zax_render::statistics::RenderStatistics;
+use zax_render::style::{AmbientOcclusion, StyleSettings};
+use zax_settings::catalogue::SettingId;
+use zax_settings::values::SettingValue;
 
 use crate::{json_text, HarnessError};
 use engine::{Backend, Engine};
@@ -105,6 +108,15 @@ zax-harness render --out <dir> --rom <file.nes> [--profile <title|file>] [--run 
   --no-bend-2d             keep the 2D-mode rectangle flat whatever --bend says (REQ-SCN-074)
   --no-backdrop-lighting   light the backdrop with the diffuse term of REQ-SCN-028 instead of
                            the model of AMD-049 REQ-SCN-075 — the look of before the amendment
+  --style <name>           render.visual_style of AMD-055 REQ-SCN-078: classic (the default) or
+                           enhanced. The numbers 0, 4 and the accepted 1 are taken too
+  --style-param <id>=<v>[,<id>=<v>...]  the Enhanced parameters of REQ-SCN-079, by the Lua
+                           identifiers the amendment makes normative: spl.ao, ao.strength,
+                           ao.radius, ao.thickness, ao.quality, spl.pixel_shadow,
+                           spl.voxel_grid, spl.reflections, ssr.shine, ssr.clarity, ssr.length,
+                           ssr.quality. Each value goes through the setting's own normalisation,
+                           as a write from the options window or from Lua does. The curvature
+                           parameters of AMD-043 are --bend's, not these
   --real-time <seconds>    real time the star twinkle uses (REQ-SCN-050)
   --sky-bodies             light the procedural sun, moon and clouds (REQ-PUB-003, Q-064)
   --backend <name>         gl (default), or vulkan or dx12 with a harness built with the
@@ -224,6 +236,18 @@ pub struct Options {
     /// AMD-049 REQ-SCN-075. On by default, as the desktop setting is; this is the flag that
     /// reproduces the look of before the amendment, which the goldens were captured in.
     pub backdrop_lighting: bool,
+    /// `--style <name>`: `render.visual_style` of AMD-055 REQ-SCN-078, as the setting holds it.
+    /// **0 (Classic) by default**, which is the setting's own default and the capture of before
+    /// the amendment.
+    pub style: i32,
+    /// `--style-param <id>=<value>,…`: the writes to the twelve parameters of REQ-SCN-079, in the
+    /// order they were given, each already resolved to the setting its Lua identifier stands for.
+    /// Empty by default, so every parameter keeps the default of the amendment.
+    ///
+    /// They are kept as writes rather than as a built value so that each one goes through the
+    /// setting's **own** normalisation (AMD-040 §3) when the style is built — the very path a
+    /// write from the options window or from a Lua script takes.
+    pub style_params: Vec<(zax_settings::catalogue::SettingId, f64)>,
     /// `--atlas-budget <texels>`: the ceiling AMD-051 REQ-E3D-644 is verified against, over and
     /// above whatever the driver refuses. `None` — the default — leaves the driver as the only
     /// limit, so a capture taken without it is the capture of before the amendment.
@@ -304,6 +328,10 @@ impl Options {
             bend_two_dimensional_mode: true,
             use_nes_background_color: true,
             backdrop_lighting: true,
+            // AMD-055, the same rule: Classic and the twelve defaults of REQ-SCN-079, so a
+            // capture taken without the two new flags is the capture of before the amendment.
+            style: zax_settings::styles::CLASSIC_STYLE,
+            style_params: Vec::new(),
             // AMD-051: both default to the application's own behaviour — no budget of our own
             // and no delay — so a capture taken without them is the capture of before the
             // amendment.
@@ -477,6 +505,10 @@ impl Options {
                     return Err("--anti-alias expects 0, 1 or 2.".to_owned());
                 }
             }
+            // AMD-055 REQ-SCN-078 and REQ-SCN-079: the style, and its parameters by the Lua
+            // identifiers the amendment makes normative.
+            "--style" => self.style = parse_style(value)?,
+            "--style-param" => self.style_params.extend(parse_style_params(value)?),
             // AMD-051 §3 point 8: the budget is in texels, because a pattern carries a variable
             // number of objects of variable sizes (REQ-E3D-564).
             "--atlas-budget" => self.atlas_budget = Some(unsigned(value)?),
@@ -489,6 +521,42 @@ impl Options {
             _ => return Err(format!("unknown argument '{key}'")),
         }
         Ok(())
+    }
+
+    /// The style the run renders with, built the way the application builds it: `--style` and
+    /// every `--style-param` write go into a **settings model**, which validates and snaps each of
+    /// them (REQ-PERS-003, AMD-040 §3 — so `ao.strength` 9 lands on 5, `spl.voxel_grid` 4 on 3 and
+    /// the style 1 on 4), and the model is then read into the one value the renderer holds.
+    ///
+    /// Twin of `zax_app::scene_script_bridge::style_of`, which it cannot share: `zax-render` owns
+    /// [`StyleSettings`] and does not depend on `zax-settings`. Going through the model rather
+    /// than filling the fields is what makes a capture comparable with the application's picture —
+    /// the normalisation is the same code, not a second reading of it.
+    #[must_use]
+    pub fn style_settings(&self) -> StyleSettings {
+        let mut model = zax_settings::model::SettingsModel::new();
+        model.set(SettingId::RenderVisualStyle, SettingValue::Int(self.style));
+        for (id, value) in &self.style_params {
+            #[allow(clippy::cast_possible_truncation)] // A rung of 0 to 5.
+            model.set(*id, SettingValue::Float(*value as f32));
+        }
+
+        let level = |id: SettingId| model.get(id).as_int();
+        StyleSettings {
+            enhanced: StyleSettings::style_of(level(SettingId::RenderVisualStyle)),
+            ao: AmbientOcclusion::of(level(SettingId::RenderStyleAo)),
+            ao_strength: level(SettingId::RenderStyleAoStrength),
+            ao_radius: level(SettingId::RenderStyleAoRadius),
+            ao_thickness: level(SettingId::RenderStyleAoThickness),
+            ao_quality: level(SettingId::RenderStyleAoQuality),
+            pixel_shadow: level(SettingId::RenderStylePixelShadow) != 0,
+            voxel_grid: level(SettingId::RenderStyleVoxelGrid),
+            reflections: level(SettingId::RenderStyleReflections) != 0,
+            ssr_shine: level(SettingId::RenderStyleSsrShine),
+            ssr_clarity: level(SettingId::RenderStyleSsrClarity),
+            ssr_length: level(SettingId::RenderStyleSsrLength),
+            ssr_quality: level(SettingId::RenderStyleSsrQuality),
+        }
     }
 }
 
@@ -524,6 +592,80 @@ fn parse_bend(value: &str) -> Result<SpaceBend, String> {
         1.0,
     ))
 }
+
+/// `--style <classic|enhanced>`: the value `render.visual_style` holds (AMD-055 REQ-SCN-078).
+///
+/// The two names and the three numbers the requirement admits; anything else is an error rather
+/// than the silent "every other value is Classic" the **setting** applies, because a misspelt
+/// flag on a capture campaign must not quietly produce the Classic picture.
+fn parse_style(value: &str) -> Result<i32, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "classic" | "0" => Ok(zax_settings::styles::CLASSIC_STYLE),
+        "enhanced" | "4" => Ok(zax_settings::styles::ENHANCED_STYLE),
+        // The identifier AMD-040 wrote, which REQ-SCN-078 accepts and reads back as 4.
+        "1" => Ok(zax_settings::styles::ENHANCED_STYLE_ALIAS),
+        other => Err(format!(
+            "--style expects classic or enhanced (0, 4 or 1), got '{other}'"
+        )),
+    }
+}
+
+/// `--style-param <id>=<value>,…`: the writes to the twelve parameters of REQ-SCN-079.
+///
+/// The identifier is the amendment's own (`spl.ao`, `ao.strength`, …), resolved through the very
+/// table the Lua methods use (`zax_settings::styles`), so the flag and
+/// `Setting:SetVisualStyleParameter` cannot name a parameter differently. The **value** is kept
+/// as given and normalised later, by the setting's own domain.
+fn parse_style_params(value: &str) -> Result<Vec<(SettingId, f64)>, String> {
+    let mut writes = Vec::new();
+    for item in value.split(',').filter(|item| !item.trim().is_empty()) {
+        let (name, number) = item.split_once('=').ok_or_else(|| {
+            format!(
+                "--style-param expects <id>=<value> items, got '{}'",
+                item.trim()
+            )
+        })?;
+        let name = name.trim();
+        let setting = zax_settings::styles::parameter(zax_settings::styles::ENHANCED_STYLE, name)
+            .filter(|setting| STYLE_PARAMETERS.contains(setting))
+            .ok_or_else(|| {
+                if zax_settings::styles::parameter(zax_settings::styles::ENHANCED_STYLE, name)
+                    .is_some()
+                {
+                    // The four curvature parameters of AMD-043 are known identifiers that this
+                    // flag cannot serve: the curvature is not part of the style (REQ-SCN-078) and
+                    // reaches the scene through `SceneState::bend`.
+                    format!("--style-param: '{name}' is a curvature parameter; use --bend")
+                } else {
+                    format!("--style-param: unknown parameter '{name}'")
+                }
+            })?;
+        let number = number
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| format!("--style-param {name}: '{}' is not a number", number.trim()))?;
+        writes.push((setting, number));
+    }
+    Ok(writes)
+}
+
+/// The twelve parameters of REQ-SCN-079, which are the ones `--style-param` sets. The four
+/// curvature identifiers of AMD-043, which `zax_settings::styles` also knows, are deliberately
+/// absent: `--bend` is what sets those.
+const STYLE_PARAMETERS: [SettingId; 12] = [
+    SettingId::RenderStyleAo,
+    SettingId::RenderStyleAoStrength,
+    SettingId::RenderStyleAoRadius,
+    SettingId::RenderStyleAoThickness,
+    SettingId::RenderStyleAoQuality,
+    SettingId::RenderStylePixelShadow,
+    SettingId::RenderStyleVoxelGrid,
+    SettingId::RenderStyleReflections,
+    SettingId::RenderStyleSsrShine,
+    SettingId::RenderStyleSsrClarity,
+    SettingId::RenderStyleSsrLength,
+    SettingId::RenderStyleSsrQuality,
+];
 
 fn parse_frames(value: &str) -> FrameSource {
     let synthetic = value
@@ -828,6 +970,10 @@ fn apply(options: &Options, scene: &mut SyntheticScene) {
     state.use_nes_background_color = options.use_nes_background_color;
     // AMD-049 REQ-SCN-075, same rule: on unless `--no-backdrop-lighting` says otherwise.
     state.settings.backdrop_lighting = options.backdrop_lighting;
+    // AMD-055 REQ-SCN-078 and REQ-SCN-079: Classic and the twelve defaults unless `--style` and
+    // `--style-param` say otherwise, so a capture taken without them is the capture of before the
+    // amendment — which is what point 7 of this lot's brief asks of every default capture.
+    state.settings.style = options.style_settings();
 
     // AMD-032 §2: video.anti_alias as the application applies it.
     state
@@ -864,8 +1010,15 @@ fn write_nes_picture(file: &Path, indices: &[u8], rows: usize) -> Result<(), Har
     Ok(())
 }
 
+/// Whether the run renders in the Enhanced style (AMD-055 REQ-SCN-078): `--style enhanced`, or
+/// the accepted 1.
+fn state_is_enhanced(options: &Options) -> bool {
+    StyleSettings::style_of(options.style)
+}
+
 /// One entry of `render.json`, in the format of the C# harness, with the run-ahead of AMD-041
-/// added at the end (REQ-ARCH-012 amended).
+/// added at the end (REQ-ARCH-012 amended) and the four keys of AMD-055 after it, when the
+/// Enhanced style is selected.
 fn describe(
     scene: &SyntheticScene,
     render: &RenderStatistics,
@@ -879,12 +1032,28 @@ fn describe(
             time.median_ms, time.p99_ms
         )
     });
+    // AMD-055: what the Enhanced style asked of the renderer, so that a campaign capture of one
+    // effect carries the three counters the lot's points 1 and 2 are read on. Written **only**
+    // when Enhanced is selected, the same way `--bench` writes its two keys only when it ran: a
+    // capture at the default settings produces the entry of before the amendment, byte for byte.
+    let style = if state_is_enhanced(options) {
+        format!(
+            ", \"visualStyle\": {}, \"styleProgramsResident\": {}, \
+             \"screenEffectBytes\": {}, \"screenEffectPasses\": {}",
+            zax_settings::styles::canonical_style(options.style),
+            render.style_programs,
+            render.screen_effect_bytes,
+            render.screen_effect_passes
+        )
+    } else {
+        String::new()
+    };
     format!(
         "{{ \"scene\": \"{}\", \"description\": \"{}\", \"width\": {}, \"height\": {}, \
          \"opaqueTiles\": {}, \"transparentTiles\": {}, \"hudTiles\": {}, \"shadowCasters\": {}, \
          \"drawCalls\": {}, \"triangles\": {}, \"residentMeshes\": {}, \"antiAliasSamples\": {}, \
          \"shadowMapSize\": {}, \"requestedShadowMapSize\": {}, \"distinctColors\": {}, \
-         \"backgroundPixels\": {}, \"meanLuma\": {:.4}, \"runAhead\": {}{bench} }}",
+         \"backgroundPixels\": {}, \"meanLuma\": {:.4}, \"runAhead\": {}{bench}{style} }}",
         json_text::escape(&scene.name),
         json_text::escape(&scene.description),
         options.width,

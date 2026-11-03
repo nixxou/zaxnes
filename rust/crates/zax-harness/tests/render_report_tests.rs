@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 use zax_engine3d::settings::RenderAlgorithm;
 use zax_harness::render::{self, scenes, Options};
+use zax_render::style::{AmbientOcclusion, StyleSettings};
 
 fn output(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("zax-harness-{name}-{}", std::process::id()))
@@ -152,4 +153,195 @@ fn backdrop_lighting_is_on_unless_the_flag_turns_it_off() {
         colours(&lit),
         colours(&plain)
     );
+}
+
+/// AMD-055 REQ-SCN-078: `--style` is Classic by default — the setting's own default, so a capture
+/// taken without it is the capture of before the amendment — and takes both names and the three
+/// numbers the requirement admits, 1 among them.
+#[test]
+fn req_scn_078_the_style_flag_is_classic_by_default_and_takes_both_names() {
+    let parse = |values: &[&str]| -> Options {
+        let arguments: Vec<String> = ["--out", "x"]
+            .iter()
+            .chain(values)
+            .map(|&value| value.to_owned())
+            .collect();
+        Options::parse(&arguments).unwrap()
+    };
+
+    assert!(
+        !parse(&[]).style_settings().enhanced,
+        "Classic by default, as the setting is"
+    );
+    assert!(!parse(&["--style", "classic"]).style_settings().enhanced);
+    assert!(!parse(&["--style", "0"]).style_settings().enhanced);
+    for value in ["enhanced", "Enhanced", "ENHANCED", "4", "1"] {
+        let style = parse(&["--style", value]).style_settings();
+        assert!(style.enhanced, "--style {value}");
+        // REQ-SCN-078: the accepted 1 reads back as 4.
+        assert_eq!(4, style.identifier(), "--style {value}");
+    }
+
+    // A misspelt flag is an error, not the silent Classic the setting falls back to: a capture
+    // campaign must not quietly produce the wrong picture.
+    for value in ["", "Enhance", "2", "7", "-1"] {
+        let arguments = ["--out", "x", "--style", value].map(str::to_owned);
+        assert!(Options::parse(&arguments).is_err(), "--style {value:?}");
+    }
+}
+
+/// AMD-055 REQ-SCN-079: `--style-param` names the twelve parameters by the Lua identifiers the
+/// amendment makes normative, and each value goes through the setting's **own** normalisation —
+/// the criterion's own examples, `ao.strength` 9 → 5, `spl.voxel_grid` 4 → 3, `spl.ao` 1,4 → 1.
+#[test]
+fn req_scn_079_the_style_parameters_are_named_and_normalised() {
+    let parse = |values: &[&str]| -> Options {
+        let arguments: Vec<String> = ["--out", "x"]
+            .iter()
+            .chain(values)
+            .map(|&value| value.to_owned())
+            .collect();
+        Options::parse(&arguments).unwrap()
+    };
+
+    let style = parse(&[
+        "--style",
+        "enhanced",
+        "--style-param",
+        "spl.ao=1.4,ao.strength=9,ao.radius=1,ao.thickness=5,ao.quality=2",
+        "--style-param",
+        "spl.pixel_shadow=1,spl.voxel_grid=4,spl.reflections=1",
+        "--style-param",
+        "ssr.shine=5,ssr.clarity=1,ssr.length=0,ssr.quality=3",
+    ])
+    .style_settings();
+
+    assert_eq!(AmbientOcclusion::Msvo, style.ao, "1,4 snaps to 1");
+    assert_eq!(5, style.ao_strength, "9 is bounded to 5");
+    assert_eq!(1, style.ao_radius);
+    assert_eq!(5, style.ao_thickness);
+    assert_eq!(2, style.ao_quality);
+    assert!(style.pixel_shadow);
+    assert_eq!(3, style.voxel_grid, "4 is bounded to 3");
+    assert!(style.reflections);
+    assert_eq!(5, style.ssr_shine);
+    assert_eq!(1, style.ssr_clarity);
+    assert_eq!(1, style.ssr_length, "0 is bounded to 1");
+    assert_eq!(3, style.ssr_quality);
+
+    // Without the flag every parameter keeps the default of the amendment.
+    assert_eq!(StyleSettings::default(), parse(&[]).style_settings());
+
+    // A parameter set without `--style` is kept and normalised, but the style stays Classic, so
+    // nothing of it acts: the style is what selects, as REQ-SCN-078 says.
+    let classic = parse(&["--style-param", "spl.voxel_grid=2"]).style_settings();
+    assert!(!classic.enhanced);
+    assert_eq!(2, classic.voxel_grid);
+    assert!(!classic.voxel_grid_active());
+
+    let bad = |values: &[&str]| {
+        let arguments: Vec<String> = ["--out", "x"]
+            .iter()
+            .chain(values)
+            .map(|&value| value.to_owned())
+            .collect();
+        Options::parse(&arguments)
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default()
+    };
+    assert!(bad(&["--style-param", "ao.power=3"]).contains("unknown parameter"));
+    assert!(bad(&["--style-param", "spl.ao"]).contains("<id>=<value>"));
+    assert!(bad(&["--style-param", "spl.ao=lots"]).contains("not a number"));
+    // The four curvature parameters of AMD-043 are known identifiers this flag cannot serve:
+    // the curvature is not part of the style (REQ-SCN-078) and reaches the scene another way.
+    for name in ["spl.bend_zx", "spl.bend_zy", "spl.arc_yx", "spl.arc_center"] {
+        assert!(
+            bad(&["--style-param", &format!("{name}=30")]).contains("--bend"),
+            "{name}"
+        );
+    }
+}
+
+/// The brief's points 1 and 2 as a capture campaign reads them: at `--style enhanced` with every
+/// effect off, the three counters of `render.json` are 0 and the capture is the Classic one **byte
+/// for byte**; each effect turned on moves its own counter and no other.
+///
+/// This is the flag pair R0 captures each effect with, so the test is also the demonstration that
+/// it works.
+#[test]
+fn req_scn_080_the_harness_captures_each_effect_separately() {
+    let png = |name: &str| fs::read(output(name).join("framing.png")).unwrap();
+    let counter = |entries: &[Value], key: &str| -> u64 {
+        entries[0]
+            .get(key)
+            .and_then(Value::as_u64)
+            .unwrap_or_else(|| panic!("{key} is in the report"))
+    };
+
+    // The Classic capture, and the report of before the amendment: not one of the four keys.
+    let (_, classic) = run("style-classic", &["--frames", "synthetic:framing"]);
+    for key in [
+        "visualStyle",
+        "styleProgramsResident",
+        "screenEffectBytes",
+        "screenEffectPasses",
+    ] {
+        assert!(
+            classic[0].get(key).is_none(),
+            "{key} is absent from a Classic report"
+        );
+    }
+
+    // Enhanced with every effect off: the same picture, to the byte, and three zeros.
+    let (_, off) = run(
+        "style-enhanced-off",
+        &["--frames", "synthetic:framing", "--style", "enhanced"],
+    );
+    assert_eq!(4, counter(&off, "visualStyle"));
+    assert_eq!(0, counter(&off, "styleProgramsResident"));
+    assert_eq!(0, counter(&off, "screenEffectBytes"));
+    assert_eq!(0, counter(&off, "screenEffectPasses"));
+    assert_eq!(
+        png("style-classic"),
+        png("style-enhanced-off"),
+        "Enhanced with every effect off is the Classic capture, byte for byte"
+    );
+
+    // The voxel grid is shader variants: programs, and still no screen pass.
+    let (_, grid) = run(
+        "style-grid",
+        &[
+            "--frames",
+            "synthetic:framing",
+            "--style",
+            "enhanced",
+            "--style-param",
+            "spl.voxel_grid=2",
+        ],
+    );
+    assert!(counter(&grid, "styleProgramsResident") > 0);
+    assert_eq!(0, counter(&grid, "screenEffectBytes"));
+    assert_eq!(0, counter(&grid, "screenEffectPasses"));
+    assert_ne!(
+        png("style-classic"),
+        png("style-grid"),
+        "the grid changes the picture"
+    );
+
+    // The occlusion is a pass: its own programs, its own targets, and three passes.
+    let (_, occlusion) = run(
+        "style-ao",
+        &[
+            "--frames",
+            "synthetic:framing",
+            "--style",
+            "enhanced",
+            "--style-param",
+            "spl.ao=2",
+        ],
+    );
+    assert_eq!(3, counter(&occlusion, "styleProgramsResident"));
+    assert!(counter(&occlusion, "screenEffectBytes") > 0);
+    assert_eq!(3, counter(&occlusion, "screenEffectPasses"));
 }
