@@ -102,6 +102,11 @@ zone, write a note, draw what is to be modelled and where. The strokes stay over
 (`annotations: false` leaves them out); `annotations` lists them. The NES picture (`view: 2d`)
 has none: it is the game's own picture.
 
+Under the pens, the views: `2D` (the NES picture, as F11), `3D` (as Zaxnes draws it), `3S` (as
+3dSen draws it: the `#zax` blocks of the scripts stay comments) and `HH` (as Zaxnes draws it on a
+handheld: the blocks read with the `handheld` condition). A change of reading reloads the scripts
+(fast); the framed button is the view shown.
+
 ## 6. Cost when it is not used
 
 Nothing of it runs in the frame loop unless used: the movie hook already existed (one `Option`
