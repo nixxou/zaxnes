@@ -82,6 +82,10 @@ const PIXEL_SHADOW_DEFINE: &str = "#define ZAX_PIXEL_SHADOW";
 /// The voxel grid of REQ-SCN-081 (AMD-055).
 const VOXEL_GRID: &str = include_str!("../shaders/voxel_grid.glsl");
 
+/// The frame's depth and the view-space position it reconstructs to, as the two screen-space
+/// passes of AMD-055 REQ-SCN-080 read them.
+const SCREEN_DEPTH: &str = include_str!("../shaders/screen_depth.glsl");
+
 /// The pixel shadows of REQ-SCN-082 (AMD-055).
 const PIXEL_SHADOW: &str = include_str!("../shaders/pixel_shadow.glsl");
 
@@ -461,6 +465,37 @@ pub const RESOLVE: ProgramSource = ProgramSource {
         "",
         "",
     ]),
+};
+
+/// The full-screen triangle every screen-space pass draws, the same vertex stage the resolve pass
+/// uses: three vertices built from `gl_VertexID`, with no attribute and no buffer, and a `vUv`
+/// that runs 0 to 1 over the viewport.
+const SCREEN_VERTEX: Stage = Stage::of([include_str!("../shaders/resolve.vert")]);
+
+/// The ambient occlusion of AMD-055 REQ-SCN-083, into a one-channel target (`gl/screen_effects.rs`).
+///
+/// **Built the first time a frame asks for the occlusion**, and released with the module when no
+/// frame wants a screen effect any more: in Classic, and in Enhanced at `spl.ao` = 0, these three
+/// programs do not exist (point 1 and point 2 of the lot's brief, reported as
+/// `RenderStatistics::style_programs`).
+pub const AO: ProgramSource = ProgramSource {
+    name: "ao",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([SCREEN_DEPTH, include_str!("../shaders/ao.frag")]),
+};
+
+/// The depth-aware smoothing of the occlusion (REQ-SCN-083).
+pub const AO_BLUR: ProgramSource = ProgramSource {
+    name: "ao_blur",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([SCREEN_DEPTH, include_str!("../shaders/ao_blur.frag")]),
+};
+
+/// The `1 − O` multiply of REQ-SCN-083, blended into the linear buffer.
+pub const AO_COMPOSITE: ProgramSource = ProgramSource {
+    name: "ao_composite",
+    vertex: SCREEN_VERTEX,
+    fragment: Stage::of([include_str!("../shaders/ao_composite.frag")]),
 };
 
 const SKY_VERTEX: Stage = Stage::of([

@@ -15,6 +15,12 @@
 //! AMD-032 §2: when anti-aliasing is on, the scene is drawn into a *multisampled* copy of the
 //! same attachments and that copy is resolved into the single-sample texture before anything
 //! samples it.
+//!
+//! AMD-055 REQ-SCN-080: the two screen-space passes of the Enhanced style read the **depth** of
+//! the frame, which a renderbuffer cannot give them. That is the one allocation Classic cannot
+//! share, so it is asked for by the frame ([`LinearColorBuffer::begin_pass`]'s `sample_depth`):
+//! with the wish false the attachments are the ones of before the amendment, down to the
+//! renderbuffer.
 
 use glow::{Framebuffer, Renderbuffer, Texture, VertexArray};
 
@@ -30,7 +36,32 @@ use crate::target::RenderTarget;
 struct Attachments {
     framebuffer: Framebuffer,
     color: Texture,
-    depth: Renderbuffer,
+    depth: DepthAttachment,
+}
+
+/// What holds the depth of the single-sample attachments.
+///
+/// **The default case is the first one**, and that is the point: a frame that samples no depth
+/// allocates exactly what it allocated before AMD-055 (REQ-SCN-080, and point 1 of the lot's
+/// brief: "no extra framebuffer, render target, texture or buffer allocated" in Classic).
+#[derive(Debug, Clone, Copy)]
+enum DepthAttachment {
+    /// A renderbuffer: cheaper to allocate on some drivers, and it cannot be sampled.
+    Plain(Renderbuffer),
+    /// A `DEPTH_COMPONENT24` texture, which a screen-space pass of REQ-SCN-080 reads. The same
+    /// format and the same transfer type the shadow map of REQ-SCN-030 already uses, so the pair
+    /// is proven on both a desktop core context and GLES 3.0.
+    Sampled(Texture),
+}
+
+impl DepthAttachment {
+    /// The texture a screen pass samples, or `None` for a plain renderbuffer.
+    const fn texture(self) -> Option<Texture> {
+        match self {
+            Self::Plain(_) => None,
+            Self::Sampled(texture) => Some(texture),
+        }
+    }
 }
 
 /// The multisampled attachments.
@@ -59,6 +90,13 @@ pub struct LinearColorBuffer {
     /// The room the host asks to keep.
     reserve: (i32, i32),
     samples: i32,
+    /// Whether the depth is a texture a screen pass can read (AMD-055 REQ-SCN-080). False for
+    /// every Classic frame, and a change of it reallocates, as a change of size does.
+    sample_depth: bool,
+    /// Whether the multisampled copy has already been resolved into the single-sample
+    /// attachments this frame, which is what the screen-space passes of REQ-SCN-080 need before
+    /// they read the colour and the depth. [`Self::resolve_to`] then has nothing to blit.
+    resolved: bool,
 }
 
 impl LinearColorBuffer {
@@ -82,6 +120,8 @@ impl LinearColorBuffer {
             capacity: (0, 0),
             reserve: (0, 0),
             samples: 1,
+            sample_depth: false,
+            resolved: false,
         })
     }
 
@@ -99,29 +139,104 @@ impl LinearColorBuffer {
     }
 
     /// Binds the buffer as the draw target at `width` × `height`, reallocating it when the size
-    /// of the attachments or the sample count changes. `samples` is clamped to what
-    /// `GL_MAX_SAMPLES` allows, then lowered one step at a time until the multisampled
+    /// of the attachments, the sample count or the depth wish changes. `samples` is clamped to
+    /// what `GL_MAX_SAMPLES` allows, then lowered one step at a time until the multisampled
     /// framebuffer is complete (AMD-032 §2).
-    pub fn begin_pass(&mut self, width: i32, height: i32, samples: i32) -> Result<(), GlError> {
+    ///
+    /// `sample_depth` is the wish of AMD-055 REQ-SCN-080: a frame whose Enhanced style runs a
+    /// screen-space pass needs a depth a shader can read. **False is the Classic path**, and with
+    /// it this function allocates exactly what it allocated before the amendment.
+    pub fn begin_pass(
+        &mut self,
+        width: i32,
+        height: i32,
+        samples: i32,
+        sample_depth: bool,
+    ) -> Result<(), GlError> {
         let (w, h) = (width.max(1), height.max(1));
         let capacity = (w.max(self.reserve.0), h.max(self.reserve.1));
         let wanted = geometry::clamp_anti_alias_samples(samples, self.max_samples);
-        if self.attachments.is_none() || capacity != self.capacity || wanted != self.samples {
+        if self.attachments.is_none()
+            || capacity != self.capacity
+            || wanted != self.samples
+            || sample_depth != self.sample_depth
+        {
             self.release();
-            self.attachments = Some(allocate(&self.gl, capacity.0, capacity.1)?);
+            self.attachments = Some(allocate(&self.gl, capacity.0, capacity.1, sample_depth)?);
             self.capacity = capacity;
+            self.sample_depth = sample_depth;
             self.allocate_samples(wanted)?;
         }
         self.width = w;
         self.height = h;
+        self.resolved = false;
 
+        self.bind_for_draw();
+        Ok(())
+    }
+
+    /// Binds the attachments the scene draws into — the multisampled copy while there is one and
+    /// it has not been resolved yet — and sets the viewport to the drawn size.
+    ///
+    /// The renderer calls it again after a screen-space pass of REQ-SCN-080 has drawn into
+    /// targets of its own, so that the transparent objects and the HUD go back to the frame.
+    pub fn bind_for_draw(&self) {
         let framebuffer = match (&self.samples_attachments, &self.attachments) {
-            (Some(multisampled), _) => Some(multisampled.framebuffer),
-            (None, single) => single.as_ref().map(|a| a.framebuffer),
+            (Some(multisampled), _) if !self.resolved => Some(multisampled.framebuffer),
+            (_, single) => single.as_ref().map(|a| a.framebuffer),
         };
         self.gl.bind_framebuffer(glow::FRAMEBUFFER, framebuffer);
         self.gl.viewport(self.width, self.height);
-        Ok(())
+    }
+
+    /// The size drawn into this frame.
+    pub const fn drawn(&self) -> (i32, i32) {
+        (self.width, self.height)
+    }
+
+    /// The size of the attachments, which is the drawn size unless the host reserved room.
+    pub const fn capacity(&self) -> (i32, i32) {
+        self.capacity
+    }
+
+    /// The part of the attachments the frame drew into, in texture coordinates: `(1, 1)` unless
+    /// the host reserved room. Every screen-space pass of REQ-SCN-080 scales its reads by it.
+    pub fn drawn_scale(&self) -> Vector2 {
+        #[allow(clippy::cast_precision_loss)] // Sizes far below 2^24.
+        Vector2::new(
+            self.width as f32 / self.capacity.0.max(1) as f32,
+            self.height as f32 / self.capacity.1.max(1) as f32,
+        )
+    }
+
+    /// The depth texture a screen-space pass of REQ-SCN-080 reads; `None` whenever the frame did
+    /// not ask for one, which is every Classic frame.
+    pub fn depth_texture(&self) -> Option<Texture> {
+        self.attachments.as_ref().and_then(|a| a.depth.texture())
+    }
+
+    /// Resolves the multisampled copy — colour **and** depth — into the single-sample
+    /// attachments and binds those for the draws that follow, so that the screen-space passes of
+    /// REQ-SCN-080 read a resolved frame ("après résolution du MSAA éventuel").
+    ///
+    /// The real consequence, stated where it happens: from here on the frame draws into the
+    /// **single-sample** target, so the transparent objects and the HUD of a frame with
+    /// anti-aliasing *and* a screen effect are not multisampled. That follows from the order
+    /// REQ-SCN-080 fixes.
+    ///
+    /// Without a multisampled copy this only binds, which is what a frame with anti-aliasing off
+    /// needs: the scene is already in the single-sample attachments.
+    pub fn resolve_samples(&mut self) {
+        if let (Some(sampled), Some(attachments)) = (&self.samples_attachments, &self.attachments) {
+            let gl = &self.gl;
+            gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(sampled.framebuffer));
+            gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, Some(attachments.framebuffer));
+            gl.disable(glow::SCISSOR_TEST);
+            gl.blit_colour_and_depth(self.width, self.height);
+            gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        }
+        self.resolved = true;
+        self.bind_for_draw();
     }
 
     /// Encodes the buffer to sRGB into `target`, which becomes the bound framebuffer.
@@ -131,7 +246,7 @@ impl LinearColorBuffer {
         };
 
         let gl = &self.gl;
-        if let Some(sampled) = &self.samples_attachments {
+        if let (Some(sampled), false) = (&self.samples_attachments, self.resolved) {
             // Same size on both sides, so the filter is never used; NEAREST is the one a
             // multisample resolve is allowed to take.
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(sampled.framebuffer));
@@ -201,7 +316,7 @@ impl LinearColorBuffer {
             release_samples(&self.gl, &sampled);
         }
         if let Some(attachments) = self.attachments.take() {
-            self.gl.delete_renderbuffer(attachments.depth);
+            release_depth(&self.gl, attachments.depth);
             self.gl.delete_texture(attachments.color);
             self.gl.delete_framebuffer(attachments.framebuffer);
         }
@@ -209,6 +324,8 @@ impl LinearColorBuffer {
         self.width = 0;
         self.height = 0;
         self.capacity = (0, 0);
+        self.sample_depth = false;
+        self.resolved = false;
     }
 }
 
@@ -219,7 +336,11 @@ impl Drop for LinearColorBuffer {
     }
 }
 
-fn allocate(gl: &Gl, width: i32, height: i32) -> Result<Attachments, GlError> {
+/// Allocates the single-sample attachments. Out of line on purpose: it runs only when the size,
+/// the sample count or the depth wish of AMD-055 REQ-SCN-080 changes, and inlined it carried that
+/// cold code into `begin_pass` and so into `render_scene`, which R0 counts.
+#[inline(never)]
+fn allocate(gl: &Gl, width: i32, height: i32, sample_depth: bool) -> Result<Attachments, GlError> {
     let framebuffer = gl.create_framebuffer()?;
     gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
 
@@ -245,9 +366,7 @@ fn allocate(gl: &Gl, width: i32, height: i32) -> Result<Attachments, GlError> {
     gl.framebuffer_texture(glow::COLOR_ATTACHMENT0, color);
     gl.bind_texture(glow::TEXTURE_2D, None);
 
-    let depth = gl.create_renderbuffer()?;
-    gl.renderbuffer_storage(depth, 1, glow::DEPTH_COMPONENT24, width, height);
-    gl.framebuffer_renderbuffer(glow::DEPTH_ATTACHMENT, depth);
+    let depth = allocate_depth(gl, width, height, sample_depth)?;
 
     let status = gl.framebuffer_status();
     let attachments = Attachments {
@@ -256,7 +375,7 @@ fn allocate(gl: &Gl, width: i32, height: i32) -> Result<Attachments, GlError> {
         depth,
     };
     if status != glow::FRAMEBUFFER_COMPLETE {
-        gl.delete_renderbuffer(attachments.depth);
+        release_depth(gl, attachments.depth);
         gl.delete_texture(attachments.color);
         gl.delete_framebuffer(attachments.framebuffer);
         return Err(GlError::Incomplete {
@@ -268,6 +387,58 @@ fn allocate(gl: &Gl, width: i32, height: i32) -> Result<Attachments, GlError> {
     }
 
     Ok(attachments)
+}
+
+/// Attaches the depth of the single-sample framebuffer, which is bound.
+///
+/// With `sampled` false this is the renderbuffer of before AMD-055, call for call. With it true
+/// the depth is a `DEPTH_COMPONENT24` **texture** instead, the one allocation the screen-space
+/// passes of REQ-SCN-080 cannot do without — the same format and transfer type the shadow map of
+/// REQ-SCN-030 has always used, so no capability is new here.
+fn allocate_depth(
+    gl: &Gl,
+    width: i32,
+    height: i32,
+    sampled: bool,
+) -> Result<DepthAttachment, GlError> {
+    if !sampled {
+        let depth = gl.create_renderbuffer()?;
+        gl.renderbuffer_storage(depth, 1, glow::DEPTH_COMPONENT24, width, height);
+        gl.framebuffer_renderbuffer(glow::DEPTH_ATTACHMENT, depth);
+        return Ok(DepthAttachment::Plain(depth));
+    }
+
+    let depth = gl.create_texture()?;
+    gl.bind_texture(glow::TEXTURE_2D, Some(depth));
+    gl.tex_image_2d(
+        glow::TEXTURE_2D,
+        glow::DEPTH_COMPONENT24,
+        width,
+        height,
+        glow::DEPTH_COMPONENT,
+        glow::UNSIGNED_INT,
+        None,
+    );
+    // The passes read single texels and reconstruct a position from them; a filtered depth is
+    // meaningless, and GLES 3.0 does not make a 24-bit depth texture filterable anyway.
+    for (parameter, value) in [
+        (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
+        (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
+        (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+        (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+    ] {
+        gl.tex_parameter(glow::TEXTURE_2D, parameter, value);
+    }
+    gl.bind_texture(glow::TEXTURE_2D, None);
+    gl.framebuffer_texture(glow::DEPTH_ATTACHMENT, depth);
+    Ok(DepthAttachment::Sampled(depth))
+}
+
+fn release_depth(gl: &Gl, depth: DepthAttachment) {
+    match depth {
+        DepthAttachment::Plain(renderbuffer) => gl.delete_renderbuffer(renderbuffer),
+        DepthAttachment::Sampled(texture) => gl.delete_texture(texture),
+    }
 }
 
 fn try_allocate_samples(

@@ -13,7 +13,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | done — `98a08ce` |
 | 3 | REQ-SCN-081: the voxel grid | done — `c5dfc8d` |
 | 4 | REQ-SCN-082: the pixel shadows | done — `be7de5c` |
-| 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | todo |
+| 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — this commit |
 | 6 | REQ-SCN-084: the floor reflections | todo |
 | 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
 | 8 | The per-effect measurements | todo |
@@ -589,7 +589,175 @@ angle at which it both moves every pixel and leaves its edges inside voxels.
    into one-NES-pixel squares aligned on the game's pixels, the score and the sky unchanged. No
    commercial ROM is available on this side.
 
+### Step 5 — REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure, and the occlusion
+
+The sharpened design recorded under "Step 5, sharpened" below is what landed, all eight points of
+it, and nothing of it had to be revised. What follows is what the implementation added to it.
+
+| Piece | What landed |
+|---|---|
+| `gl/screen_effects.rs` (new) | `ScreenEffects`, the module the renderer holds as an `Option`: three programs, a pair of `R8` targets, the lifecycle |
+| `shaders/screen_depth.glsl` (new) | `zaxViewDepth`, `zaxViewSample`, `zaxProjectView` — the depth and the view-space position both screen passes read |
+| `shaders/ao.frag` (new) | the hemisphere kernel, the per-pixel rotation, the range check |
+| `shaders/ao_blur.frag` (new) | the depth-weighted 4 × 4 box |
+| `shaders/ao_composite.frag` (new) | `1 − O`, blended `GL_ZERO, GL_SRC_COLOR` |
+| `gl/linear_buffer.rs` | `DepthAttachment`, `begin_pass(…, sample_depth)`, `resolve_samples`, `bind_for_draw`, `drawn`/`capacity`/`drawn_scale`/`depth_texture` |
+| `gl/api.rs` | `blit_colour_and_depth`, the colour **and** depth resolve of REQ-SCN-080's last bullet |
+| `gl/shaders.rs` | `SCREEN_VERTEX` (the resolve pass's own vertex stage) and the three `ProgramSource`s |
+| `renderer.rs` | `select_screen_effects` (the lifecycle, once a frame), `run_screen_effects` (the pass block), `projection_terms` |
+
+#### The frame order, and the consequence worth stating
+
+The passes run in `render_scene` between the opaque runs and the transparent ones, which is
+REQ-SCN-080's order exactly. The real consequence, now that it is implemented: with
+anti-aliasing **and** a screen effect on, the transparent objects and the HUD are drawn into the
+**resolved single-sample** target, so they are not multisampled. That follows from the
+requirement's own order ("après résolution du MSAA éventuel") and is recorded in
+`resolve_samples`'s own doc comment and in `PERFORMANCE-HISTORY.md` at the close of the lot.
+
+#### The brief's point 1 and point 2, measured
+
+- **The eleven synthetic captures at default settings are byte identical to step 4's**, all
+  eleven, at `--anti-alias 0` *and* at the default anti-aliasing, and `render.json` with them
+  (draw calls, triangles, resident meshes, colours). Compared by SHA-256 against a throwaway
+  `git worktree` of `290c6fc`, the method step 4 established.
+- `req_scn_083_no_geometry_program_carries_anything_of_the_occlusion` asserts the shader side
+  structurally rather than by preprocessing: the occlusion is three **separate** programs, not a
+  variant axis, so no scene, backdrop or shadow source can carry anything of it — over the 64
+  Classic scene variants × 2 contexts, the four backdrop programs and the shadow programs.
+- The three zeros of step 2 still hold, and now have a fourth reading: `style_programs`,
+  `screen_effect_bytes` and `screen_effect_passes` are **0** in Classic, 0 in Enhanced at
+  `spl.ao` = 0, and 3 / > 0 / 3 once the occlusion is on — then **0 again** when the style goes
+  back to Classic, which is the release half of the lifecycle asserted rather than assumed.
+
+#### The instruction counts, and the 973 that had to come back out of line
+
+| Symbol | baseline `290c6fc` | step 5 |
+|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** |
+| `DrawListBuilder::build` | 1095 | **1095** |
+| `Construction::segment` | 159 | **159** |
+| `SceneRenderer::render_scene` | 3559 | **3382** (**−177, −5.0 %**) |
+
+Three of the four are untouched, as they must be. `render_scene` took work, and the record is
+worth keeping because the first measurement was alarming and the reason was not a real cost:
+
+1. **Inlined, the pass block put 4532 − 3559 = +973 instructions (+27 %) into `render_scene`.**
+   None of them *runs* in Classic — the branch is not taken — but a once-a-frame function R0
+   counts should not carry the Enhanced path through its instruction cache to prove it.
+   `#[inline(never)]` on `run_screen_effects` brought it to **3709**.
+2. The remaining +150 were mostly **cold allocation code**: `begin_pass` gained the
+   `sample_depth` argument, and `allocate` was inlined into it — and had been in RU-4b too.
+   `#[inline(never)]` on `allocate`, which runs only when the size, the sample count or the depth
+   wish changes, brought `render_scene` to **3382**, *below* the shipped baseline.
+3. **At equal inlining** the step's own cost is **+57 instructions, +1.71 %**: the baseline
+   patched with the same one line on `allocate` measures **3325** against this step's 3382. Those
+   57 are the `is_some` branch, the depth wish threaded through `begin_pass`'s reallocation test,
+   and the `resolved` test in `resolve_to`. Dynamically a Classic frame executes a handful of
+   them, once per frame.
+
+Both figures are reported because they answer different questions, and neither should be quoted
+alone: against what RU-4b ships, this hot function is **5 % smaller**; against itself at equal
+inlining it is **1.71 % larger** in *static size*. The brief's gate is callgrind's **executed**
+count on a profile that uses nothing new, which is R0's to run — and the executed Classic path
+grows by one not-taken branch and two comparisons per frame, not by 57.
+
+#### Four decisions inside the pass, and the one measurement that drove each
+
+1. **No noise texture.** REQ-SCN-083 leaves the kernel's per-pixel rotation free, so an
+   interleaved-gradient hash of `gl_FragCoord` (Jimenez 2014) does it: one fewer resource to
+   allocate, release, count and carry on a handheld, and the invariant it has to meet — no fixed
+   pattern surviving the blur — is a property of the blur either way.
+2. **No colour target for the composite.** `glBlendFunc(GL_ZERO, GL_SRC_COLOR)` makes the
+   destination `dst × src`, so one full-screen triangle outputting `1 − O` multiplies the linear
+   buffer in place. No second colour target, no copy, and the alpha is multiplied by 1.
+3. **`R8`, not a float target.** The occlusion is one scalar in `[0, 1]`, and `GL_R8` is
+   colour-renderable in OpenGL 3.3 core *and* required renderable in GLES 3.0 — so the only
+   capability left for step 7 to probe is the multisampled **depth** blit, not a target format.
+4. **A pixel with no plane is left alone, never darkened.** Where an axis has neither neighbour
+   on a surface — the sharp corner of a silhouette — `ao.frag` answers "no occlusion" rather than
+   invent a normal. Three pixels of the plane of the close-up A are in that case, and it is the
+   first invariant ("1,00 ± 0,02 en tout pixel du sol") that found them.
+
+#### Tests (12 in `zax-render/tests/amd055_occlusion_tests.rs`)
+
+| Criterion | Test |
+|---|---|
+| §2.4 first invariant: a plane alone is 1,00 ± 0,02 everywhere — it comes out **exactly 1** over all 144 094 of its pixels | `req_scn_083_a_plane_alone_is_never_darkened` |
+| second invariant: the foot of the cube is `< 1` and `≥ 0,10`, and the plane at `2r` = 40 units is 1,00 ± 0,02 | `req_scn_083_the_foot_of_the_cube_is_darkened_and_the_far_plane_is_not` |
+| third invariant: `ao.strength` 1 ≥ 0,70 and 5 ≥ 0,05 (the ceiling read as a floor), non-increasing in the setting, strictly decreasing 1 → 4 | `req_scn_083_the_strength_is_the_darkening_ceiling` |
+| fourth invariant under the fallback **(D)**: `spl.ao` 1 and 2 are the same capture, and `ao.thickness` changes no pixel | `req_scn_083_msvo_is_rendered_as_depth_and_the_thickness_does_nothing` |
+| fifth invariant and the brief's point 2: `spl.ao` = 0 is Classic **to the pixel**, nothing compiled, allocated or submitted — and all of it released when the style goes back | `req_scn_083_the_occlusion_is_off_at_zero_and_in_classic` |
+| the A-h variant: the Gradient skybox's and the HUD's pixels do not move, at tolerance 0 | `req_scn_083_the_skybox_and_the_hud_are_left_alone` |
+| REQ-SCN-083's quality rungs: half resolution except High (the bytes), and the three agree to within a quarter at the contact | `req_scn_083_the_three_qualities_agree_and_only_high_is_full_resolution` |
+| the 2D mode runs no pass, allocates no target, compiles no program, and draws the Classic picture | `req_scn_083_the_two_dimensional_mode_runs_no_pass` |
+| REQ-SCN-080, 4th bullet: a transparent object does not occlude — and the same slab made opaque does | `req_scn_080_a_transparent_object_neither_occludes_nor_is_darkened` |
+| REQ-SCN-080's order clause: the pass works on the **rendered** depth, so after the curvature | `req_scn_080_the_occlusion_works_on_the_bent_depth` |
+| REQ-SCN-080's last bullet: with anti-aliasing on the pass works on the resolved frame, and the sample count is unchanged | `req_scn_080_the_occlusion_works_on_the_resolved_frame` |
+| the brief's point 1 on the shaders: no geometry program carries anything of the occlusion | `req_scn_083_no_geometry_program_carries_anything_of_the_occlusion` |
+
+#### Four fixture readings that were wrong, and the implementation that was right
+
+This step was resumed from an uncommitted working tree: the implementation was complete and
+sound, and **eight of its twelve tests failed on their own fixtures**. A scratch probe reproduced
+every published invariant on the first run — a plane alone at exactly 1,0000, the five strengths
+at 0,8152 / 0,6350 / 0,4527 / 0,4257 / 0,4257, MSVO identical to Depth, `spl.ao` = 0 identical to
+Classic — which is what said the fault was in the measuring and not in the measured. All four
+causes are easy to repeat:
+
+1. **The background outnumbers the plane.** `plane_shade` took the commonest colour of the whole
+   capture, but the plane covers 144 094 of the 307 200 pixels and the black background the other
+   163 106 — so the "plane shade" was black, and every ratio was a division by zero. The helper
+   now skips the background, which is what the probe did and the test did not.
+2. **A depth test selects the plane too.** `is_cube` picked the instance to displace by its build
+   depth, and the plane is built at `D` = 8 exactly like the cube; the other form read the
+   transform, which is the thing the predicate exists to *set*. It now selects on the mesh's
+   extent — 8 units against 96 — which neither the depth nor the transform can confuse.
+3. **The HUD bucket is a layer, not a screen position.** `frame_plan` files a tile under
+   `SceneContainer::Interface` when its pattern's layer is `ProfileLayer::Ui`; the fixture used
+   `L1` and put the tile above the visible rectangle, which puts it on the sky and in the *scene*
+   bucket. (The same misreading is recorded in the voxel-grid test of step 3, where the comment
+   "this fixture's tile is in the scene bucket" states it correctly.)
+4. **A background record at a cell of the plane replaces the plane's own tile there** — one screen
+   cell carries one background tile — which left a **hole** whose rim is real geometry at a right
+   angle. The occlusion darkened that rim correctly, in the transparent capture as in the opaque
+   one, so the clause "a transparent object does not occlude" could not be read at all: the probe
+   showed 144 opaque tiles with no slab and **143** with it. The slab is now a **sprite**, which
+   coexists with the background tile it covers (REQ-CORE-043), and the measurement then separates
+   cleanly: the plane's face is at ratio **1,0000 over all 141 527 pixels** with the transparent
+   slab and **0,5578 over 12 411** with the same slab made opaque.
+
+A fifth reading was wrong in the same family: asserting that the *whole capture* does not move
+with a transparent object present. The plane is a closed slab of `D` = 8 (REQ-E3D-501), so its own
+lateral walls meet its face at a right angle and the occlusion darkens that corner — correctly,
+and in both captures. The clause is about the plane's **face**, and `plane_shade` is its mask.
+The bent fixture needed the mirror of that lesson: under curvature the plane does not carry one
+lighting term, so its "one shade" is a narrow band that need not touch the cube — that test
+measures over "not the background" instead (`worst_geometry_ratio`).
+
+`cargo test --release -p zax-render`: **261 passed, 0 failed**, 1 ignored (220 at the close of
+step 2). fmt and workspace clippy clean.
+
+#### What is left for R0 on this requirement
+
+1. The **absolute column** of the close-up A at 1920 × 1080, which wants the direct texture
+   (188, 188, 188) the synthetic fixture cannot make — the same limit steps 3 and 4 recorded. The
+   ratios, which are what §2.4's invariants are written as, are all confirmed here.
+2. The **review criterion**: a commercial ROM in a close view at `spl.ao` = 2. No commercial ROM
+   is available on this side.
+3. The **MSVO** mode is rendered as Depth, the amendment's declared fallback **(D)**, so
+   `ao.thickness` has no observable effect; step 7 greys it, and `third_party/README.md` gains no
+   entry in this lot.
+
 ## Where this session stopped, and what the next one picks up
+
+**Steps 1 to 5 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`, and step 5 in
+this commit); **steps 6 to 9 are not started.** The step-6 design below ("Step 6 — REQ-SCN-084")
+still holds and is the place to start.
+
+*(Historical note, left as written: the paragraph below was the step-4 handoff, and said steps 5
+to 9 were not started. Step 5 was then implemented in a session that was cut before it could
+commit; this commit is that work, reviewed, corrected on its four fixture faults and measured.)*
 
 **Steps 1 to 4 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`); the tree
 builds, **2348 tests pass** (2329 at the close of step 3), fmt and workspace clippy are clean, the eleven synthetic captures at default settings are
@@ -769,7 +937,12 @@ collapsible "Style" group of REQ-UI-061 as amended, with the visibility rules of
 OpenGL-only in this lot as the curvature was, so under `wgpu` the style reads back as set and
 renders as Classic, with one log line. Nothing of that is written yet.
 
-### The two untracked items in the working tree
+### The untracked items in the working tree
+
+*(Step 5 added a third: `rust/crates/zax-render/tests/probe_tmp.rs`, the scratch probe that
+measured the invariants and found the four fixture faults. Like the dump helper it returns
+immediately without its environment variable — `ZAX_PROBE` — and is deliberately not committed.)*
+
 
 1. `tests/` — the .NET test tree's build output, as in RU-4a and RU-4b. Not this lot's.
 2. `rust/crates/zax-render/tests/dump_sources_tmp.rs` — the shader-dump helper of step 1,

@@ -31,6 +31,7 @@ use crate::gl::linear_palette::LinearPalette;
 use crate::gl::mesh_cache::{GpuMesh, MeshCache};
 use crate::gl::picture::NesPictureTexture;
 use crate::gl::program::ShaderProgram;
+use crate::gl::screen_effects::{ScreenEffects, ScreenFrame};
 use crate::gl::shaders::{self, SceneVariant};
 use crate::gl::shadow_map::ShadowMap;
 use crate::gl::skybox::SkyboxPass;
@@ -319,6 +320,13 @@ pub struct SceneRenderer {
     skybox: SkyboxPass,
     picture: NesPictureTexture,
     linear: LinearColorBuffer,
+    /// The screen-space passes of AMD-055 REQ-SCN-080 and everything they own, created the first
+    /// time a frame asks for one and dropped as soon as none does.
+    ///
+    /// **`None` is the state of every Classic frame**, and of every Enhanced frame at the
+    /// defaults of REQ-SCN-079: the whole cost of AMD-055's screen side is then the `is_none`
+    /// test that decides not to run it (point 1 and point 2 of this lot's brief).
+    screen_effects: Option<ScreenEffects>,
     linear_palette: LinearPalette,
     /// Whether the scene programs read [`LinearPalette`] (else they linearise per fragment).
     convert_palette: bool,
@@ -445,6 +453,7 @@ impl SceneRenderer {
             skybox: SkyboxPass::new(&gl, assets),
             picture: NesPictureTexture::new(&gl),
             linear: LinearColorBuffer::new(&gl)?,
+            screen_effects: None,
             linear_palette: LinearPalette::new(&gl)?,
             convert_palette,
             unit_box: Arc::new(interop::unit_box()?),
@@ -537,6 +546,10 @@ impl SceneRenderer {
         // AMD-049 REQ-SCN-075: and which key the backdrop program belongs to, once the three
         // above have settled. One boolean test when the setting is off.
         self.select_backdrop_variant(scene)?;
+        // AMD-055 REQ-SCN-080 and REQ-SCN-083: whether this frame runs a screen-space pass, which
+        // is what decides whether the module and its targets exist at all. In Classic, and in
+        // Enhanced at the defaults of REQ-SCN-079, one boolean test and one `is_none`.
+        self.select_screen_effects(scene)?;
 
         self.passes.statistics.begin_frame();
         self.meshes.begin_frame();
@@ -604,8 +617,14 @@ impl SceneRenderer {
             timer.end(&self.gl);
         }
 
+        let effects = self.screen_effects.as_ref();
         let statistics = &mut self.passes.statistics;
-        statistics.style_programs = self.passes.scene.style_programs;
+        // AMD-055, point 1 of the lot's brief: the variants of REQ-SCN-081 and REQ-SCN-082 and the
+        // programs of the two screen passes, counted together. 0 in Classic, and 0 in Enhanced
+        // until an effect is turned on.
+        statistics.style_programs =
+            self.passes.scene.style_programs + effects.map_or(0, |_| ScreenEffects::PROGRAMS);
+        statistics.screen_effect_bytes = effects.map_or(0, ScreenEffects::bytes);
         statistics.resident_meshes = count(self.meshes.count());
         statistics.mesh_uploads = self.meshes.uploads();
         statistics.resident_textures = count(self.textures.count());
@@ -791,6 +810,38 @@ impl SceneRenderer {
         Ok(())
     }
 
+    /// Creates or releases the screen-space passes of AMD-055 REQ-SCN-080, once a frame.
+    ///
+    /// **What it does in the usual case is nothing.** In Classic the style gates every effect
+    /// off, and in Enhanced `spl.ao` and `spl.reflections` are 0 by default (REQ-SCN-079), so this
+    /// is one boolean test and an `Option` that is already `None`. The first frame that asks for
+    /// an effect compiles its programs; the first frame that asks for none again drops the module,
+    /// which releases its targets with it — the lifecycle point 1 of this lot's brief requires.
+    ///
+    /// **Not in 2D mode.** The rectangle of AMD-046 §2 is the only object of a 2D-mode frame, and
+    /// REQ-SCN-083 excludes it from being modified while letting it occlude; not running the pass
+    /// satisfies both clauses at once and costs nothing — the same reading
+    /// [`Self::select_style_variants`] already applies to the voxel grid.
+    ///
+    /// The reflections of REQ-SCN-084 join the test when they land; until then a frame that asks
+    /// only for them allocates nothing, which is what point 2 of the brief wants of an effect that
+    /// does not exist yet.
+    ///
+    /// # Errors
+    ///
+    /// [`RenderError::Gl`] when one of the three programs does not compile or link.
+    fn select_screen_effects(&mut self, scene: &SceneState) -> Result<(), RenderError> {
+        let wanted = scene.settings.style.ao_active() && !scene.two_dimensional_mode;
+        if !wanted {
+            self.screen_effects = None;
+            return Ok(());
+        }
+        if self.screen_effects.is_none() {
+            self.screen_effects = Some(ScreenEffects::new(&self.gl)?);
+        }
+        Ok(())
+    }
+
     /// Drops every cached GPU mesh and texture. The host calls it when the 3D engine rebuilds
     /// its geometry wholesale, for instance after a change of mesh algorithm (REQ-E3D-340).
     pub fn invalidate_caches(&mut self) {
@@ -939,10 +990,14 @@ impl SceneRenderer {
         // whole image is encoded to sRGB once, on the way into the host framebuffer.
         // AMD-032 §2: that buffer is multisampled when anti-aliasing is on, and resolved before
         // the sRGB pass reads it. The shadow map keeps its own single-sample target.
+        // AMD-055 REQ-SCN-080: a frame that runs a screen-space pass needs a depth a shader can
+        // read, which is the one allocation Classic cannot share. `false` is the Classic path,
+        // and with it `begin_pass` allocates exactly what it allocated before the amendment.
         self.linear.begin_pass(
             target.width,
             target.height,
             scene.settings.anti_alias_samples(),
+            self.screen_effects.is_some(),
         )?;
         self.passes.statistics.anti_alias_samples = self.linear.samples();
         self.passes.statistics.centroid_interpolation = self.passes.scene.centroid;
@@ -1020,7 +1075,16 @@ impl SceneRenderer {
         // The tiles may have left the winding reversed (Q-069).
         passes.set_winding(false, false);
 
-        // 2. Transparent objects, farthest first, each with a depth-only pass first
+        // 2. The screen-space passes of AMD-055 REQ-SCN-080, in the order that requirement fixes:
+        // after the opaque objects — so the tiles, the backdrop and the 2D-mode rectangle occlude
+        // and are darkened — and before the transparent ones, which therefore neither occlude nor
+        // are darkened, nor is the HUD drawn after them. The floor reflections of REQ-SCN-084 go
+        // first, between the opaque objects and the occlusion, when they land.
+        if let Some(effects) = &mut self.screen_effects {
+            run_screen_effects(effects, &mut self.linear, passes, gl, scene, view)?;
+        }
+
+        // 3. Transparent objects, farthest first, each with a depth-only pass first
         // (REQ-SCN-040, AMD-012).
         if !lists.transparent.is_empty() {
             passes.scene.current().use_program();
@@ -1041,7 +1105,7 @@ impl SceneRenderer {
             passes.statistics.transparent_objects = count(lists.transparent_objects.len());
         }
 
-        // 3. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
+        // 4. HUD, after the transparent objects, lit in the camera frame (REQ-SCN-029,
         // REQ-SCN-044).
         if !lists.hud.is_empty() {
             draw_hud(passes, &mut common, lists);
@@ -1063,6 +1127,65 @@ impl SceneRenderer {
 /// what keeps the score of a bent game readable — and AMD-055 excludes it from the voxel grid of
 /// REQ-SCN-081 and from the pixel shadows of REQ-SCN-082. One switch therefore drops all three,
 /// and `select_style_variants` has already built the pair this asks for.
+/// Runs the screen-space passes of AMD-055 REQ-SCN-080 over the frame drawn so far, and leaves the
+/// state the draws that follow expect.
+///
+/// Extracted from `render_scene` for the reason `draw_hud` was: the body of that function is at
+/// clippy's line ceiling, and the pass block is one self-contained step of REQ-SCN-080's order.
+///
+/// **`#[inline(never)]` is the brief's point 1, measured.** Inlined, this body put 973 instructions
+/// — 27 % — into `render_scene`, a function R0 counts: none of them runs in Classic, where the
+/// branch is not taken, but a hot once-a-frame function should not carry the Enhanced path through
+/// its instruction cache to prove it. Out of line, `render_scene` costs the one `is_some` test that
+/// decides not to call this, and the call itself is paid once a frame by a frame that wants it.
+///
+/// # Errors
+///
+/// [`GlError`] when a target cannot be allocated. The frame is then drawn without the effect.
+#[inline(never)]
+fn run_screen_effects(
+    effects: &mut ScreenEffects,
+    linear: &mut LinearColorBuffer,
+    passes: &mut Passes,
+    gl: &Gl,
+    scene: &SceneState,
+    view: &CameraView,
+) -> Result<(), GlError> {
+    // REQ-SCN-080's last bullet: the two passes work on the **resolved** colour and depth. The
+    // consequence, stated where it happens: from here on the frame draws into the single-sample
+    // target, so with anti-aliasing *and* a screen effect the transparent objects and the HUD are
+    // not multisampled.
+    linear.resolve_samples();
+    if let Some(depth) = linear.depth_texture() {
+        let frame = ScreenFrame {
+            depth,
+            capacity: linear.capacity(),
+            drawn: linear.drawn(),
+            drawn_scale: linear.drawn_scale(),
+            projection: projection_terms(view),
+        };
+        // The scene scale of REQ-SCN-002 is 1 outside virtual reality, which Zaxnes has none of,
+        // so the radius in scene units is the radius in view units
+        // (`frame_plan::SceneConstants::voxel_cell` reads the same scale the same way).
+        let mut submitted = effects.occlude(frame, &scene.settings.style, 1.0)?;
+        linear.bind_for_draw();
+        submitted += effects.composite(frame);
+        passes.statistics.screen_effect_passes = submitted;
+    }
+
+    // The passes bound targets and a vertex array of their own, and left the depth test off; the
+    // draws that follow rebind what they need and expect the frame's state.
+    passes.forget_bindings();
+    gl.enable(glow::DEPTH_TEST);
+    gl.depth_func(glow::LESS);
+    gl.depth_mask(true);
+    if scene.settings.cull_back_faces {
+        gl.enable(glow::CULL_FACE);
+        gl.cull_face(glow::BACK);
+    }
+    Ok(())
+}
+
 fn draw_hud(
     passes: &mut Passes,
     common: &mut CommonUniforms<'_>,
@@ -1450,6 +1573,25 @@ fn set_deformation(program: &mut ShaderProgram, deform: Option<&DeformParameters
         program.set_vec4(SPEED[row], matrix_row(&parameters.speed, row));
         program.set_vec4(PHASE[row], matrix_row(&parameters.phase, row));
     }
+}
+
+/// The four terms of the projection the screen-space passes of AMD-055 REQ-SCN-080 read: the two
+/// scales, the `range` term and the near plane.
+///
+/// Four floats rather than the inverse matrix, because the camera of SPEC-06 §3.3 builds one
+/// symmetric perspective and nothing else (`Matrix4x4::create_perspective_field_of_view`): `m11`
+/// and `m22` *are* its two scales, `m33` is `range = far/(near − far)` and `m43` is `range × near`,
+/// so the near plane is their quotient. Reading them off the matrix rather than plumbing the
+/// camera's field of view through keeps this right if the camera ever changes its planes.
+fn projection_terms(view: &CameraView) -> Vector4 {
+    let projection = &view.projection;
+    let range = projection.m33;
+    let near = if range.abs() > f32::EPSILON {
+        projection.m43 / range
+    } else {
+        0.0
+    };
+    Vector4::new(projection.m11, projection.m22, range, near)
 }
 
 fn matrix_row(matrix: &Mat4, row: usize) -> Vector4 {

@@ -10,6 +10,7 @@ pub mod mesh_cache;
 pub mod picture;
 pub mod program;
 pub mod program_cache;
+pub mod screen_effects;
 pub mod shaders;
 pub mod shadow_map;
 pub mod skybox;

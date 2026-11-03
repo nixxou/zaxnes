@@ -685,6 +685,33 @@ impl Gl {
         }
     }
 
+    /// Blits colour **and** depth, which is what REQ-SCN-080's last bullet asks for when a
+    /// screen-space pass is to read a multisampled frame: the two passes of AMD-055 work on the
+    /// **resolved** colour and depth.
+    ///
+    /// A depth blit is stricter than a colour one: both sides must carry the same depth format
+    /// and the rectangles must be identical. Both hold here — `DEPTH_COMPONENT24` on either side
+    /// and one rectangle — which is why this is a second method rather than a mask argument on
+    /// [`Self::blit_colour`].
+    pub fn blit_colour_and_depth(&self, width: i32, height: i32) {
+        // SAFETY: renderer contract; a read and a draw framebuffer of at least that size are
+        // bound, with matching colour and depth formats.
+        unsafe {
+            self.context.blit_framebuffer(
+                0,
+                0,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+                glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT,
+                glow::NEAREST,
+            );
+        }
+    }
+
     pub fn create_renderbuffer(&self) -> Result<Renderbuffer, GlError> {
         // SAFETY: renderer contract; creates a new object.
         created("renderbuffer", unsafe {
