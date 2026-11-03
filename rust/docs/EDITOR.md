@@ -85,12 +85,12 @@ Tools (each action goes through the window's own commands, so it shows there):
 | `screenshot {view: 3d/2d, width, height}` | the picture on screen as a PNG (3D view scaled, default 960 x 720; or the NES picture) |
 | `read_ram {address, length}` | CPU memory without side effects, hexadecimal |
 | `dump_frame {path}` | the tile records of the frame on screen to a JSON file, as `zax-harness render --dump-frame` writes them (works on a live game too) |
-| `annotations {width, height}` | the user's drawings (section 6): each stroke's pen and points, from 0 to 1 and in pixels of the view |
+| `annotations {width, height}` | the user's drawings (section 5): each stroke's pen and points, from 0 to 1 and in pixels of the view |
 | `clear_annotations` | wipes the drawings |
 | `get_log {lines}` | the last lines of the log, Lua `print`, warnings and errors included |
 | `run_command {name, number, text}` | any command of the menus by name (`docs` of `emulation/commands.rs`) |
 
-## 6. The pens
+## 5. The pens
 
 With `--mcp`, a tool box at the left of the window while a game runs: the hand (`M`, the
 pointer turns the camera as usual), a red, a blue, a black and a white pen, undo (`<`) and clear
@@ -102,7 +102,7 @@ zone, write a note, draw what is to be modelled and where. The strokes stay over
 (`annotations: false` leaves them out); `annotations` lists them. The NES picture (`view: 2d`)
 has none: it is the game's own picture.
 
-## 5. Cost when it is not used
+## 6. Cost when it is not used
 
 Nothing of it runs in the frame loop unless used: the movie hook already existed (one `Option`
 test); the timeline adds one `bool` read beside `rollback_enabled` per emulated frame, and work
