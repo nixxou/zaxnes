@@ -129,6 +129,7 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::HINT_SINGLE_CORE, "(cette version n'a qu'un cœur : la valeur est toujours 0)"),
     (keys::HINT_NEEDS_ACHIEVEMENTS, "(sans effet : RetroAchievements est désactivé)"),
     (keys::HINT_STYLE_CLASSIC, "Style = Classic : ces effets sont désactivés."),
+    (keys::HINT_MENU_BUTTON_UNUSED, "(conservé pour 3dSen : Zaxnes n'en tient pas compte)"),
     // ---------------------------------------------------- fields, columns
     (keys::FIELD_SEARCH, "Rechercher"),
     (keys::COLUMN_ACTION, "Action"),
@@ -471,6 +472,358 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.Recent", "Récent"),
     ("option.en", "English"),
     ("option.fr", "Français"),
+    // ================================================================= RO-1 point 3
+    // L'infobulle détaillée de chaque ligne de la fenêtre d'options du bureau : ce que fait le
+    // réglage, ce que valent ses valeurs quand ce n'est pas évident, sa valeur par défaut (et celle
+    // des consoles portables quand elle diffère), ce qu'il coûte et de quoi il dépend.
+    // `ui::options::tooltip_of` place d'abord la phrase courte `help.*` de l'amendement, quand il y
+    // en a une, puis ce paragraphe.
+    //
+    // Bureau seulement : les pages des consoles et Android n'ont pas de survol.
+
+    // ------------------------------------------------------ onglet Affichage
+    (
+        "detail.ui.fullscreen",
+        "Dessine la fenêtre sur tout l'écran, sans bordure. Alt+Entrée fait la même chose à tout \
+         moment, ainsi que Vidéo ▸ Plein écran. Par défaut : désactivé.",
+    ),
+    (
+        "detail.video.vsync",
+        "Lie l'image au rafraîchissement de l'écran. Désactivée, chaque image part dès qu'elle est \
+         dessinée : le délai le plus court, et l'image peut se déchirer. À chaque rafraîchissement \
+         suit l'écran, ce qui supprime le déchirement et plafonne la cadence de rendu à celle de \
+         l'écran (60 images par seconde sur une dalle 60 Hz). Un rafraîchissement sur deux divise \
+         encore ce chiffre par deux, pour un écran dont le rafraîchissement dépasse largement ce \
+         que la machine peut dessiner. Par défaut : désactivée sur le bureau, à chaque \
+         rafraîchissement sur une console portable.",
+    ),
+    (
+        "detail.video.frame_rate",
+        "Combien de fois par seconde la scène 3D est redessinée. Ce n'est pas la vitesse du jeu : \
+         l'émulation garde la cadence de la console (environ 60 images par seconde pour un jeu \
+         NTSC, 50 pour un jeu PAL) quel que soit ce choix. Une cadence plus élevée rend la caméra \
+         et le défilement plus fluides et coûte du temps GPU en proportion. La synchronisation \
+         verticale réglée sur un rafraîchissement la plafonne à la cadence de l'écran. \
+         Par défaut : 90.",
+    ),
+    (
+        "detail.video.render_method",
+        "Direct dessine la scène 3D directement dans la fenêtre, toujours à la résolution de \
+         celle-ci. Render Tex la dessine d'abord dans une texture puis affiche la texture, ce dont \
+         l'échelle de résolution et la résolution automatique ont besoin ; cela coûte une copie \
+         plein écran par image. Par défaut : Direct, sur les deux plates-formes.",
+    ),
+    (
+        "detail.video.res_scale",
+        "Dessine la scène 3D plus petite que la fenêtre puis l'étire : une façon simple d'acheter \
+         de la cadence avec de la netteté. 1/2 représente un quart des pixels, 1/4 un seizième. \
+         Nécessite la méthode Render Tex — en Direct la scène est toujours dessinée à la résolution \
+         de la fenêtre — et la résolution automatique prend le choix à sa place quand elle est \
+         active. Par défaut : Native.",
+    ),
+    (
+        "detail.video.dynamic_resolution",
+        "Laisse l'échelle de la scène suivre le temps que prend le GPU, entre native et 1/2, au \
+         lieu de l'échelle fixe ci-dessus : l'image s'adoucit là où une scène est lourde et \
+         redevient nette ailleurs. Nécessite la méthode Render Tex, le moteur OpenGL et un budget \
+         d'image connu, c'est-à-dire la synchronisation verticale ou un plafond de cadence. \
+         Par défaut : désactivée, sur les deux plates-formes.",
+    ),
+    (
+        "detail.video.anti_alias",
+        "Adoucit l'escalier sur les arêtes obliques des formes 3D. Zaxnes emploie le \
+         multi-échantillonnage plutôt qu'un filtre plein écran, afin que les textures en pixel art \
+         restent nettes : FFAA vaut 4 échantillons par pixel, SMAA 8. Les deux noms sont ceux que \
+         la spécification donne aux deux niveaux. Le coût est surtout de la bande passante mémoire \
+         et croît avec la résolution. Par défaut : FFAA sur le bureau, Aucun sur une console \
+         portable.",
+    ),
+    (
+        "detail.video.skip_frame",
+        "Quand l'émulation n'a produit aucune nouvelle image depuis le dernier rendu de la scène, \
+         l'image précédente est conservée au lieu de redessiner la même scène. Rien ne change à \
+         l'écran — la caméra est la seule exception, aussi désactivez-le si un mouvement de caméra \
+         lent doit être plus fluide que la cadence du jeu. Par défaut : activé, sur les deux \
+         plates-formes.",
+    ),
+    (
+        "detail.emu.catch_up",
+        "Combien d'images émulées une image affichée peut exécuter quand le jeu a pris du retard, \
+         afin qu'il rattrape au lieu de ralentir. Aucune ne laisse une image affichée exécuter que \
+         les images que le rapport des cadences impose, si bien qu'une machine qui ne suit pas \
+         ralentit le jeu. Plus la limite est haute, plus une image en retard peut coûter d'un coup. \
+         Par défaut : 2 sur le bureau, 5 sur une console portable.",
+    ),
+    (
+        "detail.emu.catch_up_last_3d",
+        "Quand une image affichée exécute plusieurs images émulées, seule la dernière est convertie \
+         en 3D : les autres sont bien émulées en entier — le jeu et son son restent exacts — mais \
+         elles ne sont pas converties et leurs hooks d'image de script ne sont pas appelés. Cela \
+         économise la conversion et le Lua de chaque image ainsi sautée ; un profil dont le script \
+         anime quelque chose à chaque image peut saccader. Un profil dont les scripts écrivent dans \
+         la console est laissé tel quel : chacune de ses images est convertie. Par défaut : \
+         désactivé sur le bureau, activé sur une console portable.",
+    ),
+    (
+        "detail.emu.pause_3d_in_2d",
+        "Pendant que l'image 2D plate est à l'écran, rien de la scène 3D ne l'est, donc ni la \
+         conversion ni les hooks d'image de script ne sont exécutés ; l'image montrée au retour de \
+         la 3D est convertie d'abord. Un profil dont les scripts écrivent dans la console est \
+         laissé tel quel. Par défaut : désactivé sur le bureau, activé sur une console portable.",
+    ),
+    (
+        "detail.emu.lua_smooth_gc",
+        "Règle le ramasse-miettes des scripts de profil pour qu'il travaille un peu à chaque image \
+         au lieu de s'arrêter de temps en temps pour une longue collecte — des collectes de 100 à \
+         300 ms ont été mesurées sans cela. La seule différence qu'un script puisse voir est le \
+         chiffre que renvoie collectgarbage(\"count\"). Par défaut : activé, sur les deux \
+         plates-formes.",
+    ),
+    (
+        "detail.emu.lua_optimized",
+        "Fait passer les liaisons de script par des chemins optimisés qui emploient du code unsafe : \
+         les valeurs de l'hôte sont atteintes par des métaméthodes C au lieu des enveloppes sûres, \
+         pour les mêmes résultats et moins de temps par accès. Désactivé, seuls les chemins sûrs \
+         sont employés. Les images en pipeline et l'optimisation expérimentale ci-dessous en ont \
+         besoin toutes les deux. Prend effet au prochain chargement de jeu. Par défaut : désactivé \
+         sur le bureau, activé sur une console portable.",
+    ),
+    (
+        "detail.emu.pipeline",
+        "Exécute les scripts et la conversion 3D d'une image sur un fil d'exécution propre pendant \
+         que l'image précédente est dessinée, ce qui affiche l'image un rendu plus tard. Désactivé \
+         ne le fait jamais ; Auto ne le fait que lorsque les images sont en retard ; Toujours le \
+         fait dès que le jeu le permet. Nécessite le Lua optimisé — une image en pipeline confie le \
+         moteur de script à un autre fil — et reste simplement désactivé sans lui. Par défaut : \
+         désactivé sur le bureau, Auto sur une console portable.",
+    ),
+    (
+        "detail.emu.lua_experimental",
+        "Par-dessus le Lua optimisé : un hook UpdateS dont la source ne lit que des champs de shape \
+         reçoit un shape allégé et pas de shape2D. Quels hooks sont dans ce cas est lu dans le \
+         script au chargement du profil, et cette lecture est une heuristique — un profil qu'elle \
+         juge mal peut mal se comporter, et c'est ce qui rend l'option expérimentale. Prend effet au \
+         prochain chargement de jeu. Nécessite le Lua optimisé. Par défaut : désactivé sur le \
+         bureau, activé sur une console portable.",
+    ),
+    (
+        "detail.video.backend",
+        "Avec quelle API graphique la fenêtre dessine, lue une seule fois au démarrage de Zaxnes. \
+         OpenGL 3.3 est la valeur par défaut et le seul choix sur une console portable. Vulkan \
+         permet à des outils de post-traitement comme ReShade de lire la profondeur de la scène \
+         3D ; DirectX 12 est réservé à Windows et ne fonctionne pas encore avec ReShade. Ni Vulkan \
+         ni DirectX 12 ne dessine les effets du style Enhanced, et aucun des deux n'applique la \
+         résolution automatique. Par défaut : OpenGL.",
+    ),
+    (
+        "detail.video.max_queued_frames",
+        "Combien d'images dessinées le pilote graphique peut encore avoir en chantier avant que \
+         Zaxnes attende la plus ancienne. 2 laisse le processeur prendre une image d'avance sur la \
+         carte graphique, ce qui est le plus fluide ; 1 attend chaque image, ce qui coûte des \
+         images par seconde et raccourcit le délai entre l'appui sur un bouton et l'image. Cela \
+         concerne le moteur OpenGL — Vulkan et DirectX 12 ont leur propre file — et sur une console \
+         portable rien n'est attendu à 2. Par défaut : 2.",
+    ),
+
+    // ----------------------------------------------------- onglet Image NES
+    (
+        "detail.video.nes_palette",
+        "Dans quelle table de couleurs RVB les 64 couleurs de la console sont montrées, aussi bien \
+         dans l'image plate que dans la vue 3D. La console émet un signal composite, que chaque \
+         émulateur décode en une table qui lui est propre ; la première entrée est la table de \
+         3dSen, les autres celles des principaux émulateurs et de quelques téléviseurs mesurés. \
+         Rien d'autre que les couleurs ne change. Par défaut : Mesen.",
+    ),
+    (
+        "detail.video.remove_sprite_limit",
+        "La console ne pouvait dessiner que huit sprites sur une même ligne de balayage, ce qui \
+         explique le clignotement de certains jeux : ils montrent leurs sprites une image sur deux \
+         pour se partager la ligne. Désactivé garde la limite et le clignotement, Toujours les \
+         dessine tous, et Intelligent garde la limite sur une ligne où un jeu empile volontairement \
+         huit sprites pour cacher ceux qui sont derrière — ce que fait Mesen. Cela ne change que \
+         l'image 2D plate : la vue 3D a tous les sprites quel que soit ce choix. Par défaut : \
+         Intelligent.",
+    ),
+    (
+        "detail.video.overscan_mode",
+        "Ce que devient la place libérée par les marges d'overscan. Fit laisse à l'image la taille \
+         qu'elle avait et ne dessine simplement pas les bords coupés, si bien que le fond de la \
+         scène apparaît là. Resize agrandit ce qui reste jusqu'à remplir de nouveau la vue, en 2D. \
+         Par défaut : Resize.",
+    ),
+    (
+        "detail.video.overscan_ntsc_top",
+        "Combien de rangées de pixels sont coupées en haut de l'image d'un jeu NTSC. Un téléviseur \
+         masquait les rangées extrêmes, et beaucoup de jeux y laissent des déchets de défilement. \
+         De 0 à 32 pixels ; 8 est la valeur usuelle pour le haut et le bas. Ce qui arrive à la place \
+         libérée est réglé par la ligne Overscan ci-dessus. Un jeu peut régler ses quatre marges \
+         dans ses options, qui l'emportent alors sur celles-ci. Par défaut : 0 — toute l'image.",
+    ),
+    (
+        "detail.video.overscan_ntsc_bottom",
+        "Combien de rangées de pixels sont coupées en bas de l'image d'un jeu NTSC. Un téléviseur \
+         masquait les rangées extrêmes, et beaucoup de jeux y laissent des déchets de défilement. \
+         De 0 à 32 pixels ; 8 est la valeur usuelle pour le haut et le bas. Un jeu peut régler ses \
+         quatre marges dans ses options, qui l'emportent alors sur celles-ci. Par défaut : 0 — \
+         toute l'image.",
+    ),
+    (
+        "detail.video.overscan_ntsc_left",
+        "Combien de colonnes de pixels sont coupées à gauche de l'image d'un jeu NTSC. De 0 à 32 \
+         pixels ; les côtés demandent en général moins que le haut et le bas. Une marge d'écran \
+         large n'est jamais coupée : l'image supplémentaire continue au-delà de ce bord. Un jeu \
+         peut régler ses quatre marges dans ses options, qui l'emportent alors sur celles-ci. \
+         Par défaut : 0 — toute l'image.",
+    ),
+    (
+        "detail.video.overscan_ntsc_right",
+        "Combien de colonnes de pixels sont coupées à droite de l'image d'un jeu NTSC. De 0 à 32 \
+         pixels ; les côtés demandent en général moins que le haut et le bas. Une marge d'écran \
+         large n'est jamais coupée : l'image supplémentaire continue au-delà de ce bord. Un jeu \
+         peut régler ses quatre marges dans ses options, qui l'emportent alors sur celles-ci. \
+         Par défaut : 0 — toute l'image.",
+    ),
+    (
+        "detail.video.overscan_pal_top",
+        "Combien de rangées de pixels sont coupées en haut de l'image d'un jeu PAL. Un téléviseur \
+         PAL montrait davantage de l'image qu'un téléviseur NTSC, aussi ces quatre marges sont-elles \
+         tenues à part de celles du NTSC ; laquelle des deux paires sert suit la région vidéo de \
+         l'onglet Émulation. De 0 à 32 pixels. Par défaut : 0 — toute l'image.",
+    ),
+    (
+        "detail.video.overscan_pal_bottom",
+        "Combien de rangées de pixels sont coupées en bas de l'image d'un jeu PAL. Un téléviseur \
+         PAL montrait davantage de l'image qu'un téléviseur NTSC, aussi ces quatre marges sont-elles \
+         tenues à part de celles du NTSC ; laquelle des deux paires sert suit la région vidéo de \
+         l'onglet Émulation. De 0 à 32 pixels. Par défaut : 0 — toute l'image.",
+    ),
+    (
+        "detail.video.overscan_pal_left",
+        "Combien de colonnes de pixels sont coupées à gauche de l'image d'un jeu PAL. Laquelle des \
+         deux paires de marges sert suit la région vidéo de l'onglet Émulation. Une marge d'écran \
+         large n'est jamais coupée : l'image supplémentaire continue au-delà de ce bord. De 0 à 32 \
+         pixels. Par défaut : 0 — toute l'image.",
+    ),
+    (
+        "detail.video.overscan_pal_right",
+        "Combien de colonnes de pixels sont coupées à droite de l'image d'un jeu PAL. Laquelle des \
+         deux paires de marges sert suit la région vidéo de l'onglet Émulation. Une marge d'écran \
+         large n'est jamais coupée : l'image supplémentaire continue au-delà de ce bord. De 0 à 32 \
+         pixels. Par défaut : 0 — toute l'image.",
+    ),
+    (
+        "detail.video.widescreen_strict_edges",
+        "Réservé à une ROM corrigée pour l'extension d'écran large. Là où le jeu a cessé de \
+         dessiner une bande de l'image élargie, les formes coupées y sont laissées inachevées — \
+         dessinées avec le motif temporaire — jusqu'au retour de toute la bande, afin que rien \
+         n'apparaisse à moitié construit. C'est désactivé par défaut parce qu'un objet d'une seule \
+         tuile posé dans une telle bande resterait temporaire tant qu'il y est. Cela ne fait rien \
+         tant que le jeu ne produit pas de marge d'écran large ; l'écran large lui-même se règle \
+         pour chaque jeu, dans les options de ce jeu. Par défaut : désactivé.",
+    ),
+
+    // ------------------------------------------------------ onglet Rendu 3D
+    (
+        "detail.scene.skybox",
+        "Ce qu'il y a derrière la scène 3D. Default prend la couleur de fond du jeu, et se rabat \
+         sur la couleur ci-dessous pour un profil qui la désactive. Color remplit le fond avec la \
+         couleur ci-dessous. Gradient et Fantasy sont tirés de la couleur de fond et de la palette \
+         du jeu, si bien que la couleur ci-dessous ne les atteint pas. Par défaut : Default.",
+    ),
+    (
+        "detail.scene.custom_bg_color",
+        "La couleur derrière la scène lorsque le fond ci-dessus est réglé sur Color, et sous le \
+         fond Default pour un profil qui désactive la couleur propre du jeu. Les ciels Gradient et \
+         Fantasy sont tirés des couleurs du jeu et l'ignorent. Par défaut : noir.",
+    ),
+    (
+        "detail.render.visual_style",
+        "Enhanced est ce dont les groupes ci-dessous ont besoin : la grille de voxels et les reflets \
+         ici, les ombres pixel et l'occlusion ambiante dans l'onglet Lumière et ombres. À Classic \
+         aucun d'eux n'est compilé, aucune passe supplémentaire ne tourne et aucun tampon \
+         supplémentaire n'est alloué : toute la famille ne coûte exactement rien. Les moteurs \
+         Vulkan et DirectX 12 ne dessinent pas du tout les effets Enhanced. Par défaut : Classic, \
+         sur les deux plates-formes.",
+    ),
+    (
+        "detail.render.style.voxel_grid",
+        "Creuse un sillon dans les faces de la scène tous les 2, 4 ou 8 voxels, de sorte qu'une \
+         forme se lise comme un empilement de blocs et non comme un bloc plein. Plus l'écart est \
+         petit, plus il y a de sillons. Un coût par pixel sur toute l'image. Nécessite le style \
+         Enhanced. Par défaut : désactivée.",
+    ),
+    (
+        "detail.render.style.reflections",
+        "Reflète la scène sur le sol en marchant dans le tampon de profondeur. C'est l'effet le plus \
+         coûteux du style Enhanced, et les quatre lignes en dessous décident à quel point. \
+         Nécessite le style Enhanced. Par défaut : désactivés.",
+    ),
+    (
+        "detail.render.style.ssr_shine",
+        "De 1 à 5 : quelle part de la scène le sol renvoie, du sol à peine humide au miroir. Cela \
+         change l'aspect, pas le coût. Nécessite les reflets. Par défaut : 3.",
+    ),
+    (
+        "detail.render.style.ssr_clarity",
+        "De 1 à 5 : plus la valeur est haute, plus un reflet reste net en s'éloignant de l'objet \
+         auquel il appartient ; une valeur basse le fond dans le sol. Nécessite les reflets. \
+         Par défaut : 3.",
+    ),
+    (
+        "detail.render.style.ssr_length",
+        "De 1 à 5 : jusqu'où un reflet s'étend sur le sol. Un reflet plus long demande plus de pas \
+         de marche, donc celui-ci coûte. Nécessite les reflets. Par défaut : 3.",
+    ),
+    (
+        "detail.render.style.ssr_quality",
+        "Combien de pas la marche fait et combien de fois elle affine ce qu'elle trouve, ce qui \
+         décide du nombre de trous dans le reflet : Low vaut 12 pas et 2 affinages, High 48 et 5, \
+         Ultra davantage encore. C'est la ligne à baisser en premier sur une petite machine. \
+         Nécessite les reflets. Par défaut : High sur le bureau, Low sur une console portable.",
+    ),
+    (
+        "detail.scene.bend_lr",
+        "En degrés, de −180 à 180 par pas de 30 ; 0 donne une scène plate. Tout le niveau est \
+         courbé, et la caméra comme la visée du Zapper le suivent. Cela coûte un peu par sommet dès \
+         qu'un des trois angles n'est pas 0, et rien du tout quand les trois sont 0. Un script y \
+         accède sous le nom spl.bend_zx. Par défaut : 0.",
+    ),
+    (
+        "detail.scene.bend_tb",
+        "En degrés, de −180 à 180 par pas de 30 ; 0 donne une scène plate. Cela coûte un peu par \
+         sommet dès qu'un des trois angles n'est pas 0, et rien du tout quand les trois sont 0. Un \
+         script y accède sous le nom spl.bend_zy. Par défaut : 0.",
+    ),
+    (
+        "detail.scene.arc_h",
+        "En degrés, de −180 à 180 par pas de 30 ; 0 donne une scène plate. La ligne Centre de l'arc \
+         ci-dessous choisit autour de quoi le niveau se courbe. Un script y accède sous le nom \
+         spl.arc_yx. Par défaut : 0.",
+    ),
+    (
+        "detail.scene.arc_center",
+        "Si l'arc se courbe autour du milieu de l'écran ou autour de son bord inférieur. Cela ne \
+         fait rien tant qu'Arc horizontal vaut 0. Un script y accède sous le nom spl.arc_center. \
+         Par défaut : centre de l'écran.",
+    ),
+    (
+        "detail.scene.bend_2d_mode",
+        "Un réglage propre à Zaxnes : 3dSen courbe toujours le rectangle plat du mode 2D avec la \
+         scène, et c'est ainsi que l'on garde ce rectangle plat pendant que la scène 3D reste \
+         courbée. Cela ne fait rien en mode 3D, ni quand les trois angles valent 0. Aucun script n'y \
+         accède — le programme d'origine n'a pas ce réglage. Par défaut : activé, sur les deux \
+         plates-formes.",
+    ),
+    (
+        "detail.render.mesh_algo",
+        "Comment les voxels d'une tuile deviennent un maillage. GREEDY fusionne les faces voisines \
+         en les plus grands rectangles possibles sans regarder leur couleur, ce qui donne le moins \
+         de triangles ; GREEDY_MULTICOLOR ne fusionne que des faces de même couleur ; MARCHING \
+         construit une surface lissée par marching cubes, ce qui arrondit les formes et coûte le \
+         plus cher. La forme d'un profil peut demander son propre algorithme, qui l'emporte alors \
+         sur celui-ci. Par défaut : GREEDY.",
+    ),
+
     // ------------------------------------------- handheld interface (Rust-only)
     (keys::HANDHELD_GAMES_TITLE, "Jeux"),
     (keys::HANDHELD_ROMS_EMPTY, "Aucune ROM trouvée. Copiez des fichiers .nes dans {0}"),

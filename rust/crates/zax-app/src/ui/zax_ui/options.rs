@@ -1,8 +1,10 @@
 //! The options window (REQ-UI-202): one tab per theme, one widget per setting.
 
 use imgui::{
-    ColorEditFlags, Condition, TabBarFlags, TabItem, TabItemFlags, TreeNodeFlags, Ui, WindowFlags,
+    ColorEditFlags, Condition, ItemHoveredFlags, TabBarFlags, TabItem, TabItemFlags, TreeNodeFlags,
+    Ui, WindowFlags,
 };
+use zax_settings::catalogue::SettingId;
 use zax_settings::meta::{SettingEffect, SettingKind};
 use zax_settings::values::{Color, SettingValue};
 
@@ -16,6 +18,9 @@ use crate::ui::text;
 /// and the grid of a reorganised tab is no longer 41 rows deep (the old 560 × 520 was sized for a
 /// window the player had to scroll).
 const WINDOW_SIZE: [f32; 2] = [820.0, 600.0];
+
+/// How wide a detailed tooltip is allowed to grow before its text wraps (RO-1 point 3).
+const TOOLTIP_WIDTH: f32 = 420.0;
 
 impl ZaxUi {
     pub(super) fn draw_options(&mut self, ui: &Ui, host: &mut AppHost) {
@@ -133,12 +138,39 @@ impl ZaxUi {
             host.update_settings(|model| model.set(id, value.as_str()));
             play(host, UiSound::Confirm);
         }
+        let hovered = hovered(ui);
         ui.same_line();
         if ui.button(text::browse()) {
             self.open_browser(host, BrowserPurpose::RomsFolder);
         }
         ui.text_disabled(text::roms_folder_hint(&default));
+        if hovered {
+            draw_tooltip(ui, id);
+        }
     }
+}
+
+/// Whether the pointer is over the item just drawn, **including** a greyed one: a row the player
+/// cannot change is the row whose explanation is worth the most, and `ImGui` reports no hover over
+/// a disabled item unless it is asked to (RO-1 point 3).
+fn hovered(ui: &Ui) -> bool {
+    ui.is_item_hovered_with_flags(ItemHoveredFlags::ALLOW_WHEN_DISABLED)
+}
+
+/// The detailed tooltip of a row (RO-1 point 3), wrapped so that a paragraph of a few sentences
+/// stays a readable block rather than one line across the screen.
+///
+/// Built here and nowhere else: `tooltip_of` is called only for the row under the pointer.
+fn draw_tooltip(ui: &Ui, id: SettingId) {
+    let text = options::tooltip_of(id);
+    if text.is_empty() {
+        return;
+    }
+    ui.tooltip(|| {
+        let wrap = ui.push_text_wrap_pos_with_pos(TOOLTIP_WIDTH);
+        ui.text_wrapped(text);
+        drop(wrap);
+    });
 }
 
 /// The heading of a group, and whether the rows under it are drawn.
@@ -208,13 +240,10 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
             _ => draw_float(ui, host, row),
         }
     };
-    // AMD-043 §6 and AMD-046 §3 give a help sentence for each curvature setting; it is shown on
-    // hover, the idiom the achievements view already uses.
-    if ui.is_item_hovered() {
-        if let Some(help) = options::help_of(id) {
-            ui.tooltip_text(help);
-        }
-    }
+    // RO-1 point 3: the detailed tooltip, on hover over the label or the widget — ImGui's item
+    // covers both. It is drawn after the disabled scope is dropped, so a greyed row's explanation
+    // is not itself greyed; the hover has to be read here, while the item is still the current one.
+    let hovered = hovered(ui);
     if let Some(value) = changed {
         host.update_settings(|model| model.set(id, value));
         if options::plays_validation_sound(id) {
@@ -235,6 +264,9 @@ fn draw_row(ui: &Ui, host: &mut AppHost, row: &OptionsRow, run_ahead_forced: boo
     if let Some(note) = options::forced_run_ahead_note(id, run_ahead_forced) {
         ui.same_line();
         ui.text_disabled(note);
+    }
+    if hovered {
+        draw_tooltip(ui, id);
     }
 }
 

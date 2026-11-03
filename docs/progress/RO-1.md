@@ -13,8 +13,8 @@ Build directory: `rust/target-ro` (the owner may hold `rust/target/release/zaxne
 | # | Step | State |
 |---|---|---|
 | 1 | Inventory of every shown desktop setting, the golden list, the "nothing disappears" test | done — `4e3221e` |
-| 2 | The new tab/group layout, with the dependency greying | done — `PENDING2` |
-| 3 | Tooltip infrastructure and the texts of the first tabs | todo |
+| 2 | The new tab/group layout, with the dependency greying | done — `58407a7` |
+| 3 | Tooltip infrastructure and the texts of the first tabs | done — `PENDING3` |
 | 4 | The remaining tooltip texts in both languages, and their completeness test | todo |
 | 5 | Compact overscan rows (point 6) and the finer curvature steps (point 7) | todo |
 | 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | todo |
@@ -201,9 +201,56 @@ same shape: the four `video.overscan_*` globals and the three widescreen setting
 `clip.*` margins and the thirty layer settings are profile-scoped. The Style group's two quartets
 (`ao_*`, `ssr_*`) are four **different** quantities, not four sides of one, so they stay four rows.
 
+### Step 3 — the tooltip infrastructure, and the first three tabs
+
+A second key family, `detail.<setting key>`, holds the paragraph; `options::tooltip_of(id)` puts
+the short `help.<key>` sentence of the amendment **first and unchanged** — those are the
+amendment's own words, and the AMD-055 and AMD-043 tests still check them letter for letter — then
+a blank line, then the paragraph. A setting no amendment wrote a sentence for has the paragraph
+alone. Nothing is duplicated: the paragraphs were written not to repeat the sentence above them.
+
+Three details of the drawing that matter:
+
+- `ImGui`'s item box for a slider, a combo and a check box **includes its label**, so one
+  `is_item_hovered` covers "the row's label or widget" with no extra hit test.
+- it is read with `ItemHoveredFlags::ALLOW_WHEN_DISABLED`: without it a **greyed** row reports no
+  hover at all, and a greyed row is the one whose explanation is worth the most.
+- the tooltip is drawn *after* the disabled scope is dropped, so the explanation of a greyed row is
+  not itself greyed, and wrapped at 420 px so a paragraph stays a block.
+
+`tooltip_of` allocates only for the row under the pointer, so an open window costs nothing for the
+sixty-nine rows that are not hovered — and the window is not drawn at all while it is closed.
+
+Texts written in this step: the 17 rows of Display (`video.backend` included), the 12 of NES
+picture and the 15 of 3D rendering, in English and French. Each was written from `table.rs`,
+`ui/handheld/defaults.rs`, `docs/PERFORMANCE-HISTORY.md` §6 and the code path that reads the
+setting. Four things the reading turned up and the texts now say:
+
+- `video.anti_alias` is **multisampling**, not a post filter (AMD-032): FFAA is 4 samples, SMAA is
+  8 (`geometry::anti_alias_samples`). The two names are only the ones REQ-PERS-017 gave the levels.
+- `video.skip_frame` (REQ-SCN-060) keeps the previous picture when no new emulated frame has
+  arrived — the camera is the one thing that still moves between emulated frames, which is the
+  reason to turn it off.
+- the Vulkan and DirectX 12 back end draws **none** of the Enhanced style and applies no automatic
+  resolution (`wgpu_backend/renderer.rs`), which the `video.backend` and `render.visual_style`
+  texts now warn about.
+- `render.mesh_algo`: GREEDY merges faces without regard to colour, GREEDY_MULTICOLOR only equal
+  colours, MARCHING builds a smoothed marching-cubes surface (`settings::RenderAlgorithm`), and a
+  profile's shape can override the global choice (`instance.effective_algorithm`).
+
+One more row joined the greyed list: `input.emulated_menu_button`, whose `SettingEffect` is
+`NoEffect` by DEC-08-6 and DEC-R2-D7 — stored, handed to Lua, acted on by nothing. It is greyed for
+the same reason `emu.core` is.
+
+#### Two stale figures found in `docs/PERFORMANCE-HISTORY.md` §6
+
+Reported, not fixed (the table is R0's record, and this lot is a UI lot): §6 gives `emu.catch_up`
+a desktop default of 5, which AMD-052 REQ-LOOP-074 took to 2 (`table.rs`), and
+`emu.lua_experimental` a handheld default of off, which `ui/handheld/defaults.rs` sets to **on**.
+The tooltips follow the code.
+
 ### Next step
 
-Step 3: the tooltip infrastructure, and the texts of the Display, NES picture and 3D rendering
-tabs. The existing `help.*` sentences (the thirteen of AMD-055 §4, the five of AMD-043/AMD-046 and
-the backdrop one) are kept and **extended**, never duplicated: `help_of` stays the entry point and
-grows a second table for the settings that had no sentence.
+Step 4: the remaining 27 texts (Light and shadows, Camera, Audio, Emulation, Interface,
+RetroAchievements) and the completeness test — every shown setting has a non-empty tooltip in both
+languages, and every `detail.*` key belongs to a shown setting.

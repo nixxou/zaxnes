@@ -169,6 +169,8 @@ pub const HINT_SINGLE_CORE: &str = "hint.single_core";
 pub const HINT_NEEDS_ACHIEVEMENTS: &str = "hint.needs_achievements";
 /// Why a "Style" group shows no row: the style is Classic.
 pub const HINT_STYLE_CLASSIC: &str = "hint.style_classic";
+/// `input.emulated_menu_button`, which Zaxnes keeps and never acts on (DEC-08-6, DEC-R2-D7).
+pub const HINT_MENU_BUTTON_UNUSED: &str = "hint.menu_button_unused";
 
 // ------------------------------------- the Geometry group (AMD-043 §6, AMD-046 §3)
 /// The heading above the curvature settings.
@@ -380,6 +382,16 @@ pub const SETTING_PREFIX: &str = "setting.";
 // ------------------------------------------- labels of enumerated values
 pub const OPTION_PREFIX: &str = "option.";
 
+// -------------------- the detailed tooltip of every shown setting (RO-1 point 3)
+/// The paragraph the desktop options window shows on hover, keyed by the setting's stable key.
+///
+/// It is the detail RO-1 adds **beside** the short `help.<key>` sentence the amendments give,
+/// never a copy of it: `ui::options::tooltip_of` puts the two together, the amendment's words
+/// first. A setting the amendments give no sentence for has the paragraph alone.
+///
+/// Desktop only: the console pages and Android have no hover.
+pub const DETAIL_PREFIX: &str = "detail.";
+
 /// The label key of the command named `command`.
 #[must_use]
 pub fn command(command: &str) -> String {
@@ -396,6 +408,12 @@ pub fn setting(key: &str) -> String {
 #[must_use]
 pub fn option(label: &str) -> String {
     format!("{OPTION_PREFIX}{label}")
+}
+
+/// The detailed-tooltip key of the setting whose stable key is `key`.
+#[must_use]
+pub fn detail(key: &str) -> String {
+    format!("{DETAIL_PREFIX}{key}")
 }
 
 // ----------------------------------------------------------- RetroAchievements (Rust-only)
@@ -611,6 +629,7 @@ pub const PUBLISHED: &[&str] = &[
     HINT_SINGLE_CORE,
     HINT_NEEDS_ACHIEVEMENTS,
     HINT_STYLE_CLASSIC,
+    HINT_MENU_BUTTON_UNUSED,
     // AMD-043 §6 and AMD-046 §3: the help sentences of the curvature settings.
     HELP_BEND_LR,
     HELP_BEND_TB,

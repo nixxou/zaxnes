@@ -513,6 +513,10 @@ pub fn inert_reason(id: SettingId, model: &SettingsModel) -> Option<&'static str
         // every write reads back as 0 and nothing consumes it. The row is kept all the same — the
         // key is part of the settings file and of the Lua surface (`Setting.Core`).
         SettingId::EmuCore => keys::HINT_SINGLE_CORE,
+        // DEC-08-6 and DEC-R2-D7: stored and handed to Lua with no effect of any kind. Kept for
+        // the same reason as the core index, and greyed for the same reason — a live widget over
+        // a setting nothing reads is the confusion this lot is about.
+        SettingId::InputEmulatedMenuButton => keys::HINT_MENU_BUTTON_UNUSED,
         // `achievements/mod.rs`: without the switch there is no client at all, so the options are
         // never forwarded, no unlock can fire the sound, and the challenge view returns at once.
         SettingId::AchievementsEncore
@@ -536,6 +540,28 @@ fn any_curvature(model: &SettingsModel) -> bool {
     ]
     .iter()
     .any(|id| model.get(*id).as_int() != 0)
+}
+
+/// The detailed tooltip of `id`, in the language in force: RO-1 point 3.
+///
+/// Where an amendment gives a short sentence for the setting ([`help_of`]: the thirteen of
+/// AMD-055 §4, the five of AMD-043 §6 and AMD-046 §3, and the backdrop lighting of AMD-049) that
+/// sentence comes **first, unchanged** — those are the amendment's own words, which the tests of
+/// AMD-055 and AMD-043 check — and the paragraph RO-1 writes follows it after a blank line. A
+/// setting with no amendment sentence has the paragraph alone.
+///
+/// Desktop only: the console pages and Android are driven by a pad and a touch screen, which have
+/// no hover. Built only while the row is hovered, so an open window costs nothing per frame for
+/// the sixty-nine rows that are not.
+#[must_use]
+pub fn tooltip_of(id: SettingId) -> String {
+    let detail = strings::lookup_or_none(&keys::detail(&id.key()));
+    match (help_of(id), detail) {
+        (Some(help), Some(detail)) => format!("{help}\n\n{detail}"),
+        (Some(help), None) => help,
+        (None, Some(detail)) => detail.to_owned(),
+        (None, None) => String::new(),
+    }
 }
 
 /// The help sentence AMD-043 §6, AMD-046 §3 and AMD-055 §4 give for `id`, shown as a tooltip, or

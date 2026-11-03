@@ -153,6 +153,10 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
         keys::HINT_STYLE_CLASSIC,
         "Style = Classic: these effects are off.",
     ),
+    (
+        keys::HINT_MENU_BUTTON_UNUSED,
+        "(kept for 3dSen: Zaxnes does not act on it)",
+    ),
     // ---------------------------------------------------- fields, columns
     (keys::FIELD_SEARCH, "Search"),
     (keys::COLUMN_ACTION, "Action"),
@@ -494,6 +498,338 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.Recent", "Recent"),
     ("option.en", "English"),
     ("option.fr", "Français"),
+    // ================================================================= RO-1 point 3
+    // The detailed tooltip of every row of the desktop options window: what the setting does, what
+    // its values mean where they are not obvious, its default (and the handheld one where it
+    // differs), what it costs, and what it depends on. `ui::options::tooltip_of` puts the short
+    // `help.*` sentence of the amendment first, where there is one, and this paragraph after it.
+    //
+    // Written from `zax-settings/src/table.rs`, `ui/handheld/defaults.rs`,
+    // `docs/PERFORMANCE-HISTORY.md` and the code path that reads each setting — never guessed.
+    // Desktop only: the console pages and Android have no hover.
+
+    // ------------------------------------------------------------- Display tab
+    (
+        "detail.ui.fullscreen",
+        "Draws the window over the whole screen, without borders. Alt+Enter does the same thing at \
+         any time, and so does Video ▸ Full screen. Default: off.",
+    ),
+    (
+        "detail.video.vsync",
+        "Ties the picture to the screen's refresh. Off hands each frame over as soon as it is \
+         drawn: the lowest delay, and the picture can tear. Every refresh follows the screen, which \
+         removes the tearing and caps the render rate at the screen's own (60 frames per second on \
+         a 60 Hz panel). Every other refresh halves that again, for a screen whose refresh is far \
+         above what the machine can draw. Default: Off on the desktop, Every refresh on a handheld.",
+    ),
+    (
+        "detail.video.frame_rate",
+        "How many times a second the 3D scene is redrawn. It is not the speed of the game: the \
+         emulation keeps the console's own rate (about 60 frames per second for an NTSC game, 50 \
+         for a PAL one) whatever is chosen here. A higher rate makes the camera and the scrolling \
+         smoother and costs GPU time in proportion. Vertical synchronisation set to a refresh caps \
+         it at the screen's rate. Default: 90.",
+    ),
+    (
+        "detail.video.render_method",
+        "Direct draws the 3D scene straight into the window, always at the window's own resolution. \
+         Render Tex draws it into a texture first and then puts the texture on the screen, which is \
+         what the resolution scale and the automatic resolution need; it costs one full-screen copy \
+         per frame. Default: Direct, on both platforms.",
+    ),
+    (
+        "detail.video.res_scale",
+        "Draws the 3D scene smaller than the window and stretches it back: a cheap way to buy frame \
+         rate with sharpness. 1/2 is a quarter of the pixels, 1/4 a sixteenth. Needs the Render Tex \
+         method — under Direct the scene is always drawn at the window's resolution — and the \
+         automatic resolution takes the choice over while it is on. Default: Native.",
+    ),
+    (
+        "detail.video.dynamic_resolution",
+        "Lets the scale of the scene follow the time the GPU is taking, between native and 1/2, \
+         instead of the fixed resolution scale above: the picture softens where a scene is heavy \
+         and sharpens again where it is not. Needs the Render Tex method, the OpenGL back end, and \
+         a known frame budget — that is, vertical synchronisation or a frame cap. Default: off, on \
+         both platforms.",
+    ),
+    (
+        "detail.video.anti_alias",
+        "Smooths the staircase on the slanted edges of the 3D shapes. Zaxnes uses multisampling \
+         rather than a full-screen filter, so the pixel art of the textures stays sharp: FFAA is 4 \
+         samples per pixel, SMAA is 8. The two names are the ones the specification gives the two \
+         levels. The cost is mostly memory bandwidth and grows with the resolution. Default: FFAA \
+         on the desktop, None on a handheld.",
+    ),
+    (
+        "detail.video.skip_frame",
+        "When the emulation has produced no new frame since the last time the scene was drawn, the \
+         previous picture is kept instead of drawing the same scene again. Nothing on screen \
+         changes — the camera is the one exception, so turn it off if a slow camera move has to be \
+         smoother than the game's own rate. Default: on, on both platforms.",
+    ),
+    (
+        "detail.emu.catch_up",
+        "How many emulated frames one displayed frame may run when the game has fallen behind, so \
+         that it catches up rather than running slow. None lets a displayed frame run only the \
+         frames the two rates call for, so a machine that cannot keep up slows the game down \
+         instead. The higher the limit, the more a late frame can cost at once. Default: 2 on the \
+         desktop, 5 on a handheld.",
+    ),
+    (
+        "detail.emu.catch_up_last_3d",
+        "When one displayed frame runs several emulated ones, only the last of them is turned into \
+         3D: the others are still emulated in full — the game and its sound are exact — but they \
+         are not converted and their script frame hooks do not run. It saves the conversion and the \
+         Lua of every frame skipped that way; a profile whose script animates something on every \
+         frame can jerk. A profile whose scripts write to the console is left alone: every frame of \
+         it is converted. Default: off on the desktop, on a handheld.",
+    ),
+    (
+        "detail.emu.pause_3d_in_2d",
+        "While the flat 2D picture is on screen, none of the 3D scene is, so neither the conversion \
+         nor the script frame hooks are run; the frame shown when the 3D comes back is converted \
+         first. A profile whose scripts write to the console is left alone. Default: off on the \
+         desktop, on a handheld.",
+    ),
+    (
+        "detail.emu.lua_smooth_gc",
+        "Tunes the garbage collector of the profile scripts so that it does a little work on every \
+         frame instead of stopping for one long collection now and then — collections of 100 to \
+         300 ms were measured without it. The only difference a script can see is the figure \
+         collectgarbage(\"count\") reports. Default: on, on both platforms.",
+    ),
+    (
+        "detail.emu.lua_optimized",
+        "Runs the script bindings through optimised paths that use unsafe code: the host's values \
+         are reached through C metamethods instead of the safe wrappers, for the same results and \
+         less time per access. Off, only the safe paths run. The pipelined frames and the \
+         experimental optimisation below both need it. Takes effect at the next game load. \
+         Default: off on the desktop, on a handheld.",
+    ),
+    (
+        "detail.emu.pipeline",
+        "Runs the scripts and the 3D conversion of a frame on a thread of their own while the frame \
+         before it is being drawn, which shows the picture one displayed frame later. Off never \
+         does it; Auto does it only while the frames are late; Always does it whenever the game \
+         allows it. Needs Optimized Lua — a pipelined frame hands the script runtime to another \
+         thread — and is simply off without it. Default: Off on the desktop, Auto on a handheld.",
+    ),
+    (
+        "detail.emu.lua_experimental",
+        "On top of Optimized Lua: an UpdateS hook whose source only ever reads fields of shape is \
+         given a light shape and no shape2D. Which hooks those are is read from the script when the \
+         profile loads, and that reading is a heuristic — a profile it judges wrongly can \
+         misbehave, which is what makes this experimental. Takes effect at the next game load. \
+         Needs Optimized Lua. Default: off on the desktop, on a handheld.",
+    ),
+    (
+        "detail.video.backend",
+        "Which graphics API the window draws with, read once when Zaxnes starts. OpenGL 3.3 is the \
+         default and the only choice on a handheld. Vulkan lets post-processing tools such as \
+         ReShade read the depth of the 3D scene; DirectX 12 is Windows only and does not work with \
+         ReShade yet. Neither Vulkan nor DirectX 12 draws the effects of the Enhanced style, and \
+         neither applies the automatic resolution. Default: OpenGL.",
+    ),
+    (
+        "detail.video.max_queued_frames",
+        "How many drawn frames the graphics driver may still be working on before Zaxnes waits for \
+         the oldest to finish. 2 lets the processor run a frame ahead of the graphics card, which \
+         is the smoothest; 1 waits for each frame, which costs frames per second and shortens the \
+         delay between a button press and the picture. It applies to the OpenGL back end — Vulkan \
+         and DirectX 12 keep a queue of their own — and on a handheld nothing is waited for at 2. \
+         Default: 2.",
+    ),
+
+    // --------------------------------------------------------- NES picture tab
+    (
+        "detail.video.nes_palette",
+        "Which table of RGB colours the console's 64 colours are shown in, in the flat picture and \
+         in the 3D view alike. The console puts out a composite signal, which every emulator \
+         decodes into a table of its own; the first entry is 3dSen's own table, the others are \
+         those of the main emulators and of a few measured televisions. Nothing but the colours \
+         changes. Default: Mesen.",
+    ),
+    (
+        "detail.video.remove_sprite_limit",
+        "The console could only draw eight sprites on one scan line, which is why some games \
+         flicker: they show their sprites every other frame to share the line. Disabled keeps the \
+         limit and the flicker, Always draws them all, and Smart keeps the limit on a line where a \
+         game deliberately stacks eight sprites in order to hide the ones behind them — what Mesen \
+         does. It changes the flat 2D picture only: the 3D view has every sprite whatever is chosen \
+         here. Default: Smart.",
+    ),
+    (
+        "detail.video.overscan_mode",
+        "What becomes of the space the overscan margins free. Fit leaves the picture the size it \
+         was and simply does not draw the cut edges, so the scene's background shows through there. \
+         Resize enlarges what is left until it fills the view again, in 2D. Default: Resize.",
+    ),
+    (
+        "detail.video.overscan_ntsc_top",
+        "How many pixel rows are cut from the top of the picture of an NTSC game. A television hid \
+         the outermost rows, and many games leave scrolling rubbish there. 0 to 32 pixels; 8 is the \
+         usual value for the top and the bottom. What happens to the freed space is the Overscan \
+         mode row above. A game can set its own four margins in its options, which then win over \
+         these. Default: 0 — the whole picture.",
+    ),
+    (
+        "detail.video.overscan_ntsc_bottom",
+        "How many pixel rows are cut from the bottom of the picture of an NTSC game. A television \
+         hid the outermost rows, and many games leave scrolling rubbish there. 0 to 32 pixels; 8 is \
+         the usual value for the top and the bottom. A game can set its own four margins in its \
+         options, which then win over these. Default: 0 — the whole picture.",
+    ),
+    (
+        "detail.video.overscan_ntsc_left",
+        "How many pixel columns are cut from the left of the picture of an NTSC game. 0 to 32 \
+         pixels; the sides usually need less than the top and the bottom. A widescreen margin is \
+         never cut: the extra picture goes on past this edge. A game can set its own four margins \
+         in its options, which then win over these. Default: 0 — the whole picture.",
+    ),
+    (
+        "detail.video.overscan_ntsc_right",
+        "How many pixel columns are cut from the right of the picture of an NTSC game. 0 to 32 \
+         pixels; the sides usually need less than the top and the bottom. A widescreen margin is \
+         never cut: the extra picture goes on past this edge. A game can set its own four margins \
+         in its options, which then win over these. Default: 0 — the whole picture.",
+    ),
+    (
+        "detail.video.overscan_pal_top",
+        "How many pixel rows are cut from the top of the picture of a PAL game. A PAL television \
+         showed more of the picture than an NTSC one, so these four margins are kept apart from the \
+         NTSC ones; which pair is used follows the video region on the Emulation tab. 0 to 32 \
+         pixels. Default: 0 — the whole picture.",
+    ),
+    (
+        "detail.video.overscan_pal_bottom",
+        "How many pixel rows are cut from the bottom of the picture of a PAL game. A PAL television \
+         showed more of the picture than an NTSC one, so these four margins are kept apart from the \
+         NTSC ones; which pair is used follows the video region on the Emulation tab. 0 to 32 \
+         pixels. Default: 0 — the whole picture.",
+    ),
+    (
+        "detail.video.overscan_pal_left",
+        "How many pixel columns are cut from the left of the picture of a PAL game. Which pair of \
+         margins is used follows the video region on the Emulation tab. A widescreen margin is \
+         never cut: the extra picture goes on past this edge. 0 to 32 pixels. Default: 0 — the \
+         whole picture.",
+    ),
+    (
+        "detail.video.overscan_pal_right",
+        "How many pixel columns are cut from the right of the picture of a PAL game. Which pair of \
+         margins is used follows the video region on the Emulation tab. A widescreen margin is \
+         never cut: the extra picture goes on past this edge. 0 to 32 pixels. Default: 0 — the \
+         whole picture.",
+    ),
+    (
+        "detail.video.widescreen_strict_edges",
+        "Only for a ROM patched for the widescreen extension. Where the game has stopped drawing a \
+         band of the wider picture, the shapes cut there are left unfinished — drawn with the \
+         temporary pattern — until the whole band is back, so that nothing pops into sight \
+         half-built. It is off by default because a one-tile object standing in such a band would \
+         stay temporary for as long as it is there. It does nothing while the game produces no \
+         widescreen margin; the widescreen itself is set for each game, in that game's own options. \
+         Default: off.",
+    ),
+
+    // -------------------------------------------------------- 3D rendering tab
+    (
+        "detail.scene.skybox",
+        "What is behind the 3D scene. Default takes the game's own background colour, falling back \
+         on the colour below for a profile that turns that off. Color fills the background with the \
+         colour below. Gradient and Fantasy are drawn from the game's own background colour and \
+         palette, so the colour below does not reach them. Default: Default.",
+    ),
+    (
+        "detail.scene.custom_bg_color",
+        "The colour behind the scene when the background above is set to Color, and under the \
+         Default background for a profile that turns the game's own colour off. The gradient and \
+         fantasy skies are drawn from the game's colours and ignore it. Default: black.",
+    ),
+    (
+        "detail.render.visual_style",
+        "Enhanced is what the groups below need: the voxel grid and the reflections here, the pixel \
+         shadows and the ambient occlusion on the Light and shadows tab. At Classic not one of them \
+         is compiled, no extra pass runs and no extra buffer is allocated, so the whole family \
+         costs exactly nothing. The Vulkan and DirectX 12 back ends do not draw the Enhanced \
+         effects at all. Default: Classic, on both platforms.",
+    ),
+    (
+        "detail.render.style.voxel_grid",
+        "Carves a groove into the faces of the scene every 2, 4 or 8 voxels, so that a shape reads \
+         as a stack of blocks instead of one solid. The smaller the spacing, the more grooves. A \
+         per-pixel cost over the whole picture. Needs the Enhanced style. Default: Off.",
+    ),
+    (
+        "detail.render.style.reflections",
+        "Reflects the scene on the floor by marching through the depth buffer. It is the most \
+         expensive effect of the Enhanced style, and the four rows under it decide how expensive. \
+         Needs the Enhanced style. Default: off.",
+    ),
+    (
+        "detail.render.style.ssr_shine",
+        "1 to 5: how much of the scene the floor gives back, from barely damp to a mirror. It \
+         changes the look, not the cost. Needs Reflections. Default: 3.",
+    ),
+    (
+        "detail.render.style.ssr_clarity",
+        "1 to 5: the higher the value, the longer a reflection stays sharp as it moves away from \
+         the object it belongs to; a low value blurs it into the floor. Needs Reflections. \
+         Default: 3.",
+    ),
+    (
+        "detail.render.style.ssr_length",
+        "1 to 5: how far across the floor a reflection reaches. A longer reflection is more \
+         marching steps, so this one does cost. Needs Reflections. Default: 3.",
+    ),
+    (
+        "detail.render.style.ssr_quality",
+        "How many steps the march takes and how many times it refines what it finds, which is what \
+         decides how few gaps the reflection has: Low is 12 steps and 2 refinements, High 48 and 5, \
+         Ultra more again. This is the row to lower first on a small machine. Needs Reflections. \
+         Default: High on the desktop, Low on a handheld.",
+    ),
+    (
+        "detail.scene.bend_lr",
+        "Degrees, from −180 to 180 in steps of 30; 0 is a flat scene. The whole level is bent, and \
+         the camera and the Zapper aim follow it. It costs a little per vertex while any of the \
+         three angles is not 0, and nothing at all while all three are 0. A script reaches it as \
+         spl.bend_zx. Default: 0.",
+    ),
+    (
+        "detail.scene.bend_tb",
+        "Degrees, from −180 to 180 in steps of 30; 0 is a flat scene. It costs a little per vertex \
+         while any of the three angles is not 0, and nothing at all while all three are 0. A \
+         script reaches it as spl.bend_zy. Default: 0.",
+    ),
+    (
+        "detail.scene.arc_h",
+        "Degrees, from −180 to 180 in steps of 30; 0 is a flat scene. The Arc Center row below \
+         chooses what the level bends around. A script reaches it as spl.arc_yx. Default: 0.",
+    ),
+    (
+        "detail.scene.arc_center",
+        "Whether the arc bends around the middle of the screen or around its bottom edge. It does \
+         nothing while Arc Horizontal is 0. A script reaches it as spl.arc_center. Default: Screen \
+         Center.",
+    ),
+    (
+        "detail.scene.bend_2d_mode",
+        "A setting of Zaxnes's own: 3dSen always bends the flat rectangle of the 2D mode with the \
+         scene, and this is how to keep that rectangle flat while the 3D scene stays curved. It \
+         does nothing in 3D mode, and nothing while all three angles are 0. No script reaches it — \
+         the original program has no such setting. Default: on, on both platforms.",
+    ),
+    (
+        "detail.render.mesh_algo",
+        "How the voxels of a tile are turned into a mesh. GREEDY merges neighbouring faces into \
+         the largest rectangles it can without looking at their colour, which gives the fewest \
+         triangles; GREEDY_MULTICOLOR merges only faces of the same colour; MARCHING builds a \
+         smoothed surface with marching cubes, which rounds the shapes off and costs the most. A \
+         profile's shape can ask for an algorithm of its own, which then wins over this. \
+         Default: GREEDY.",
+    ),
+
     // ------------------------------------------- handheld interface (Rust-only)
     (keys::HANDHELD_GAMES_TITLE, "Games"),
     (keys::HANDHELD_ROMS_EMPTY, "No ROM found. Copy .nes files to {0}"),
