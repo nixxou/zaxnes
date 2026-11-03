@@ -13,9 +13,9 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | done — `98a08ce` |
 | 3 | REQ-SCN-081: the voxel grid | done — `c5dfc8d` |
 | 4 | REQ-SCN-082: the pixel shadows | done — `be7de5c` |
-| 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — this commit |
-| 6a | REQ-SCN-084: the floor definition, on the CPU | done — this commit |
-| 6b | REQ-SCN-084: the mask, the trace and the composite | done — this commit |
+| 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | done — `1f3d8ec` |
+| 6a | REQ-SCN-084: the floor definition, on the CPU | done — `276b98a` |
+| 6b | REQ-SCN-084: the mask, the trace and the composite | done — `86a810f` |
 | 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
 | 8 | The per-effect measurements | todo |
 | 9 | Closing: `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
@@ -1014,7 +1014,7 @@ sub-range maps to a contiguous range of the instance data and needs no second up
 ## Where this session stopped, and what the next one picks up
 
 **Steps 1 to 6 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, `be7de5c`, `1f3d8ec`,
-`276b98a`, and step 6b in this commit); **steps 7 to 9 are not started.** Step 7 is the GLES
+`276b98a`, `86a810f`); **steps 7 to 9 are not started.** Step 7 is the GLES
 capability probing, the handheld page, the desktop options group and the harness options — its
 notes are under "Steps 7 to 9" below, and this step adds one finding to them: **no capability is
 new**, because the two formats the passes use (`R8` and `RGBA16F`) are the two the renderer
