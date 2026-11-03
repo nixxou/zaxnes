@@ -138,6 +138,10 @@ struct SceneKey {
 /// RU-7**, built in [`WgpuSceneRenderer::new`] and the only one a Classic frame at the default
 /// curvature ever asks for: the others are built the first time a frame wants them and cost a
 /// frame that does not nothing at all.
+// One independent axis per field, each named by the requirement that switches it — the same shape
+// and the same reason as the OpenGL `ProgramKey` of `gl/shaders.rs`, which carries six: an enum
+// per axis would say less, not more.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 struct ShaderVariant {
     /// The curvature of AMD-043 REQ-SCN-067, which also places the vertex and transports the

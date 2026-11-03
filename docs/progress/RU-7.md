@@ -618,4 +618,123 @@ are still 2231 / 1095 / 3401 / 159. `zax-render --test amd058_centroid_tests`: 1
 the OpenGL side of the same requirement unchanged. `render_tests` (the OpenGL goldens) and
 `render_wgpu_tests`: 3 and 2 passed.
 
-`parity_wgpu_tests`: **12 passed**. `cargo fmt --all --check` and clippy clean.
+`parity_wgpu_tests`: **12 passed**. `cargo fmt --all --check` clean.
+
+#### A clippy failure went into `d678e46`, and the fix is the next commit
+
+Worth recording rather than hiding, because the protocol of this lot says a step's commit is one
+whose tests pass. The verification chain used `grep -c` to count clippy's complaints, and `grep -c`
+**exits 0 when it finds matches** — so a `&&` chain read "2 problems" as success and committed.
+`ShaderVariant`'s fourth `bool` had tripped `clippy::struct_excessive_bools`.
+
+The fix is the `#[allow]` the OpenGL `ProgramKey` already carries for the same reason (it has six
+such fields: "an enum per axis would say less, not more"), and it rides in step 4b's commit rather
+than an amend, which this lot's protocol forbids. The check itself now tests the count against
+zero instead of trusting an exit status.
+
+### Where the lot stands, and what step 4b has to solve
+
+Steps 1, 2, 3 and 4a are landed and green. What follows is the state 4b starts from, written out
+because this lot's protocol says the session may be cut and resumed by someone else, and because
+the design work below is already done and should not be repeated.
+
+#### The three effects still to port, against `gl/`
+
+| Piece | OpenGL source | Lines |
+|---|---|---|
+| the module, its lifecycle, its targets, the two composites | `gl/screen_effects.rs` | 789 |
+| the shared depth helpers | `shaders/screen_depth.glsl` | 122 |
+| the Depth estimator (REQ-SCN-083) | `ao.frag`, `ao_blur.frag`, `ao_composite.frag` | 290 |
+| the reflections (REQ-SCN-084) | `ssr.frag`, `ssr_composite.frag`, `floor_mask.frag` | 400 |
+| the MSVO estimator (REQ-SCN-083 *Mode MSVO*) | `gl/msvo.rs` + five `msvo_*.frag` | 472 + 640 |
+
+#### What is settled, and should be built this way
+
+1. **The stored depth values are already the same on both backends**, so `zaxViewDepth` ports
+   unchanged. `zax_clip` maps GL's `-1..1` clip depth to wgpu's `0..1` as `(z + w) * 0.5`
+   precisely so that "the same depth values end up in the depth buffer" (`common.wgsl`), and
+   `Depth24Plus` matches `DEPTH_COMPONENT24`. So the two conventions `screen_depth.glsl` undoes —
+   the Direct3D-style projection to `[0, 1]` and then OpenGL's NDC-to-window mapping — are undone
+   by the same two lines here. **This is the one place where the obvious worry is unfounded, and
+   it was checked rather than assumed.**
+
+2. **The `uv`-to-NDC mapping is *not* the same, and this is the real coordinate trap.** A wgpu
+   framebuffer's origin is top-left and its NDC `y` points up, so for a full-screen pass
+   `ndc = vec2(uv.x * 2 - 1, 1 - uv.y * 2)` — the `y` **negated** against the GLSL's
+   `ndc = uv * 2 - 1`. `zaxViewSample` must use that, and `zaxProjectView` must invert it
+   (`uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5)`). Sampling the depth and colour textures
+   themselves needs no flip: they were rendered in wgpu's own convention, which is also what the
+   existing resolve pass relies on (`textureLoad(linear, position.xy)`).
+
+   A port that left `ndc = uv * 2 - 1` would **not** fail obviously: the occlusion is close to
+   invariant under a mirror of view space, because `zaxViewNormal` fixes the normal's sign from
+   `dot(normal, p)` rather than from the winding. It would show up in the reflections, whose rays
+   march in a direction that has to agree with the eye.
+
+3. **The formats carry over as they are.** `R8` for the occlusion and the floor mask (`R8Unorm`),
+   `RGBA16F` for the trace (`Rgba16Float`, which `LINEAR_FORMAT` already is), `R16F` for the MSVO
+   pyramid (`R16Float`). None is a new capability on either `wgpu` backend, which is the same
+   finding RU-5 and RU-6 recorded for OpenGL and GLES.
+
+4. **The composites are blend states, not copies.** `ao_composite.frag` relies on
+   `glBlendFunc(GL_ZERO, GL_SRC_COLOR)` — `dst = dst * src` — so one triangle multiplies the
+   linear buffer in place with no second target. In wgpu that is
+   `BlendComponent { src_factor: Zero, dst_factor: Src, operation: Add }`, and the reflections'
+   `glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)` is `BlendComponent { src_factor: One,
+   dst_factor: OneMinusSrcAlpha, operation: Add }`. Both are expressible, so neither composite
+   needs a copy of the scene.
+
+5. **The frame order of REQ-SCN-080 is the reflections first, then the occlusion**, and both after
+   the resolve and before the transparent objects and the HUD (`run_screen_effects`). Its stated
+   consequence has to be carried over too: with anti-aliasing *and* a screen effect, the
+   transparent objects and the HUD are **not** multisampled, because the frame draws into the
+   single-sample target from the resolve onwards.
+
+#### The one problem that has no OpenGL counterpart: resolving the depth
+
+This is what 4b has to solve first, and it is worth writing down because it is not visible from
+either shader.
+
+REQ-SCN-080's last bullet has the passes read the **resolved** colour and depth. On OpenGL that is
+one call — `glBlitFramebuffer` with `COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT`
+(`LinearColorBuffer::resolve_samples`). On `wgpu` the colour side is free (the scene pass already
+names the single-sample target as its `resolve_target`), but **there is no depth resolve**:
+`RenderPassDepthStencilAttachment` has no `resolve_target` field, and there is no
+texture-to-texture blit for a depth format.
+
+So a multisampled frame that runs a screen pass needs a pass of its own that reads
+`texture_depth_multisampled_2d` and writes a single-sample depth — `textureLoad(depth, coord, 0)`
+into `@builtin(frag_depth)`, a depth-only pipeline with `depth_compare: Always`. Sample 0 is the
+faithful choice: it is what the OpenGL blit gives, and `screen_effects.rs` already says so where
+it matters ("the depth the pass reads is a **resolved** multisampled depth — one sample's, not the
+fragment centre's"), which is also why the floor mask carries its `polygon_offset(-1.0, -16.0)`
+bias. That bias has a wgpu equivalent in `DepthBiasState { constant: -1, slope_scale: -16.0, .. }`.
+
+With `video.anti_alias` = 0 — the handheld default and the one the goldens are taken at — no such
+pass is needed, and it must not be submitted: the depth texture is already single-sample.
+
+#### What is left, in order
+
+| Step | What |
+|---|---|
+| 4b | `wgpu_backend/screen_effects.rs`, `screen_depth.wgsl`, `ao.wgsl`, `ao_blur.wgsl`, `ao_composite.wgsl`, the depth-resolve pass, the frame order, the lazy lifecycle and its statistics |
+| 4c | `ssr.wgsl`, `ssr_composite.wgsl`, `floor_mask.wgsl`, the mask's scene-pipeline variant (`ZAX_FLOOR_MASK`) and its depth attachment |
+| 4d | `msvo.wgsl` x5, the `R16F` pyramid, the runtime fallback **(D)** and its one diagnostic line |
+| — | then the diagnostic line "the Enhanced visual style is not rendered by this graphics backend…", `style_reported`, and the remaining `// Q-104` comments in `wgpu_backend/renderer.rs`, `zax-app/src/graphics.rs` and `zax-harness/src/render/engine.rs` all go, and the second list of `amd055_style_tests.rs`'s two-sided test empties |
+| 5 | the parity table and the GPU costs of each effect at 1080p, beside RU-5's and RU-6's OpenGL figures |
+| 6 | the close: `PERFORMANCE-HISTORY.md`, the Q-104 closing section answering its questions 1, 3 and 4, the full suite, the release build with `zax-app/bundled,zax-app/wgpu` |
+
+#### What the lot has established so far, for Q-104's closing section
+
+Three findings the closing section should carry, all of them already measured:
+
+1. **Q-104 §2's premise is false on hardware that has a driver**, and the skip it rested on was
+   hiding a defect in its own test (step 1).
+2. **The parity is reachable and it is cheap**: the curvature, the voxel grid and the pixel
+   shadows all agree with OpenGL to within the Classic control's own figure, and the two `wgpu`
+   APIs are byte-identical to each other at every anti-aliasing level.
+3. **A device finds what reading cannot** — the `fwidth` of step 3 was a real defect on DirectX 12
+   only, invisible in both shaders, and it is the strongest available answer to Q-104's question 3
+   (whether parity is a per-lot requirement or a catch-up lot): a backend that is never executed
+   accumulates faults that no review finds. The backdrop model of AMD-049 (step 1's second
+   finding) is the other half of that answer.
