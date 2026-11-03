@@ -925,3 +925,60 @@ fn req_scn_083_no_geometry_program_carries_anything_of_the_occlusion() {
     // The composite reads one texture and nothing else: it needs no depth at all.
     assert!(!common::mentions(&composite, "uDepth"));
 }
+
+/// Point 3 of this lot's brief, the fallback half: an implementation that cannot give the screen
+/// passes what they need draws the frame **without** them — the Classic picture, which is cheaper
+/// and never more expensive — says so once, and gives them up for the session rather than trying
+/// again on every frame.
+///
+/// No driver this side refuses either of the two formats the passes use (`R8` and `RGBA16F`, the
+/// two the renderer already depends on — see `gl::screen_effects`), which is why there is nothing
+/// to probe and why the refusal has to be injected here to be observed at all
+/// (`SceneRenderer::fail_screen_effects`, the same kind of test seam as `set_wall_depth_bias`).
+#[test]
+fn req_scn_080_an_implementation_that_refuses_the_passes_draws_the_classic_frame() {
+    let gl = GlFixture::create(640, 480);
+    let mut renderer = gl.renderer();
+    let mut built = close_up_a(true);
+
+    let (classic, _) = shot(&gl, &mut renderer, &mut built, StyleSettings::default());
+    assert!(
+        renderer.take_diagnostics().is_empty(),
+        "a Classic frame says nothing"
+    );
+
+    renderer.fail_screen_effects(true);
+    let (refused, statistics) = shot(
+        &gl,
+        &mut renderer,
+        &mut built,
+        with_occlusion(AmbientOcclusion::Depth),
+    );
+    assert_eq!(
+        classic.pixels, refused.pixels,
+        "the refused frame is the Classic frame, to the pixel"
+    );
+    assert_eq!(0, statistics.style_programs);
+    assert_eq!(0, statistics.screen_effect_bytes);
+    assert_eq!(0, statistics.screen_effect_passes);
+    assert!(renderer.screen_effects_given_up());
+
+    let lines = renderer.take_diagnostics();
+    assert_eq!(1, lines.len(), "{lines:?}");
+    assert!(lines[0].contains("REQ-SCN-080"), "{}", lines[0]);
+    assert!(lines[0].contains("without them"), "{}", lines[0]);
+
+    // Given up for the session: a second frame says nothing more and tries nothing more, even
+    // once the refusal is lifted — the two formats are required ones, so a refusal is a property
+    // of the implementation and not of the frame.
+    renderer.fail_screen_effects(false);
+    let (again, statistics) = shot(
+        &gl,
+        &mut renderer,
+        &mut built,
+        with_occlusion(AmbientOcclusion::Depth),
+    );
+    assert_eq!(classic.pixels, again.pixels);
+    assert_eq!(0, statistics.screen_effect_passes);
+    assert!(renderer.take_diagnostics().is_empty(), "one line, once");
+}

@@ -47,6 +47,13 @@ pub enum GlError {
         /// The linker log.
         log: String,
     },
+    /// Something the implementation does not offer, which an optional effect can be given up for
+    /// rather than failing the frame (AMD-055 REQ-SCN-080, point 3 of the RU-5 brief).
+    #[error("this implementation does not support {what}")]
+    Unsupported {
+        /// What is not available.
+        what: &'static str,
+    },
     /// A framebuffer the renderer needs is not complete.
     #[error("the {what} framebuffer {width}x{height} is incomplete (status 0x{status:X})")]
     Incomplete {

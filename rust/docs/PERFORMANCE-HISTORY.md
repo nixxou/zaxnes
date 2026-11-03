@@ -545,6 +545,38 @@ here because it is the one measurement of the lot that had to come out at zero.
   setting off has to go back to REQ-SCN-048's diffuse term without throwing the program away. A
   test caught exactly this.
 
+**The Enhanced style needs no GL feature the renderer did not already need** (RU-5, AMD-055
+REQ-SCN-080 to REQ-SCN-084)
+- The four effects of the Enhanced style use **three** formats, and all three were already
+  mandatory for Zaxnes before the amendment, so there is nothing to probe and nothing to grey out
+  for want of a capability:
+  - `RGBA16F` as a colour target, for the reflection trace of REQ-SCN-084. It is what
+    `LinearColorBuffer` has rendered **every** frame into since AMD-021 R2-009 — colour-renderable
+    in every GL 3.0 and later implementation, and on GLES 3.0 through `EXT_color_buffer_float`,
+    which the renderer already depends on without a fallback;
+  - `R8` as a colour target, for the occlusion of REQ-SCN-083 and for the floor mask of
+    REQ-SCN-084. Colour-renderable in OpenGL 3.3 core and **required** renderable in GLES 3.0;
+  - `DEPTH_COMPONENT24` as a **sampled texture**, for the depth both screen passes read. Same
+    format and same transfer type as the shadow map of REQ-SCN-030, which every target already
+    allocates and samples.
+  The one thing that did need care is not a capability: with anti-aliasing on, the depth the mask
+  pass tests against is a **resolved** multisampled depth, and an exact `LEQUAL` against it marks
+  nothing at all. A polygon offset of −16 units of the last place settles it at both sample counts
+  (`gl/screen_effects.rs::begin_mask`).
+- **Consequence of REQ-SCN-080's own order, worth stating**: with anti-aliasing **and** a screen
+  effect on, the colour and the depth are resolved before the passes run ("après résolution du
+  MSAA éventuel"), so the transparent objects and the HUD — drawn after the passes — are drawn into
+  the **resolved single-sample** target and are therefore not multisampled. That is the
+  requirement's order, not a shortcut.
+- **A refusal is survivable.** If an implementation nevertheless refuses one of the three, the
+  frame is drawn **without** the effects — the Classic picture, cheaper and never more expensive —
+  one diagnostic line says so, and the effects are given up for the session rather than retried
+  every frame (`SceneRenderer::prepare_screen_effects`). There is no probe at context creation,
+  deliberately: a probe would have to allocate, and point 1 of the RU-5 brief forbids Classic
+  allocating anything the amendment needs. The first Enhanced frame is the probe.
+- `wgpu` (Vulkan, DirectX 12): the style is read back as set and the scene is drawn in **Classic**,
+  with one log line — the same gap the curvature has there, recorded in `Q-104`.
+
 **The curved Zapper aim runs on a change, not per frame** (RU-4a, AMD-043 REQ-INP-124)
 - REQ-INP-061 refreshes the Zapper once per displayed frame and must keep doing so, so the march
   of the inverse is guarded by a memo of its inputs (`AimInputs`: the pointer, the target size,

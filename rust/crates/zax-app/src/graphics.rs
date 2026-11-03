@@ -272,9 +272,10 @@ impl Graphics {
     pub fn take_render_diagnostics(&mut self) -> Vec<String> {
         match self {
             Self::Gl { renderer, .. } => renderer.take_diagnostics(),
-            // Q-104: the wgpu backend has no diagnostics of its own yet.
+            // Q-104: the wgpu backend has one subject of its own — the Enhanced style of
+            // AMD-055, which it does not render — and says so once.
             #[cfg(feature = "wgpu")]
-            Self::Wgpu(_) => Vec::new(),
+            Self::Wgpu(renderer) => renderer.take_diagnostics(),
         }
     }
 

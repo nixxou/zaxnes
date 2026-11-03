@@ -145,3 +145,33 @@ fn req_scn_078_the_curvature_acts_in_both_styles() {
     let flat = fixture.render_built(&mut renderer, &built);
     assert_ne!(classic.pixels, flat.pixels, "60° changes the picture");
 }
+
+/// Q-104, extended to AMD-055 by point 6 of this lot's brief: the Enhanced style landed in the
+/// **OpenGL** backend only — the one SPEC-06 REQ-SCN-056 requires, the one of the default build,
+/// of R0's captures and of the two portable targets. Under `wgpu` the style is read back as set
+/// and the scene is drawn in Classic, with one log line.
+///
+/// This asserts the **known gap**, so that a half-done parity fails loudly rather than passing
+/// unnoticed: not one of the four effects is in the WGSL. When that backend gains them, this test
+/// and the note in `wgpu_backend/renderer.rs` are what have to go. The log line itself is the
+/// observable half and needs a device, which no test on this side is guaranteed one.
+#[cfg(feature = "wgpu")]
+#[test]
+fn q_104_the_wgpu_backend_carries_nothing_of_the_enhanced_style_yet() {
+    const SOURCES: [&str; 4] = [
+        include_str!("../src/wgpu_backend/shaders/common.wgsl"),
+        include_str!("../src/wgpu_backend/shaders/scene.wgsl"),
+        include_str!("../src/wgpu_backend/shaders/shadow.wgsl"),
+        include_str!("../src/wgpu_backend/shaders/resolve.wgsl"),
+    ];
+
+    for source in SOURCES {
+        for name in ["voxel", "pixel_shadow", "occlusion", "reflect", "ssr"] {
+            assert!(
+                !source.to_ascii_lowercase().contains(name),
+                "the wgpu shaders mention '{name}': the Enhanced style is being ported, so \
+                 Q-104, this test and the note in wgpu_backend/renderer.rs go together"
+            );
+        }
+    }
+}

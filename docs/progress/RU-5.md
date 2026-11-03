@@ -18,7 +18,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 6b | REQ-SCN-084: the mask, the trace and the composite | done — `86a810f` |
 | 7a | REQ-UI-061 and REQ-SCN-079: the desktop "Style" group, the labels, the handheld page | done — hash in the next commit |
 | 7b | The harness options (`--style`, `--style-param`) | done — hash in the next commit |
-| 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | todo |
+| 7c | The GL capability finding, the graceful fallback, the `wgpu` line of Q-104 | done — hash in the next commit |
 | 8 | The per-effect measurements | todo |
 | 9 | Closing: the SPEC chapter edits, `PERFORMANCE-HISTORY.md`, intended image changes, fmt, clippy, full tests, goldens | todo |
 
@@ -1177,6 +1177,105 @@ hold the conversion for both.
 `cargo test --release -p zax-harness`: **48 passed, 0 failed** — the C# golden captures
 (`render_tests`) and the ROM report among them. fmt and harness clippy (`--all-targets -- -D
 warnings`) clean.
+
+### Step 7c — the capability finding, the fallback, and the `wgpu` line
+
+#### Point 3 of the brief, answered: **no capability is new**, so there is nothing to grey out
+
+The brief's point 3 is conditional — "**if** an effect needs a GL feature GLES 3.0 does not
+guarantee … probe it once at context creation and grey the option out where unavailable" — and the
+condition does not hold. The four effects use **three** formats and all three were already
+mandatory for Zaxnes before the amendment:
+
+| Format | Used by | Already required because |
+|---|---|---|
+| `RGBA16F` colour target | the reflection trace (REQ-SCN-084) | `LinearColorBuffer` renders **every** frame into it since AMD-021 R2-009 — on GLES 3.0 through `EXT_color_buffer_float`, with no fallback |
+| `R8` colour target | the occlusion and its blur (REQ-SCN-083), the floor mask (REQ-SCN-084) | colour-renderable in OpenGL 3.3 core, **required** renderable in GLES 3.0 |
+| `DEPTH_COMPONENT24` sampled texture | the depth both passes read | the same format and transfer type the shadow map of REQ-SCN-030 already allocates and samples on every target |
+
+The one thing that did need care is not a capability and was settled in step 6b: a **resolved**
+multisampled depth is not what a re-rasterised triangle writes, so the mask's `LEQUAL` needs a
+polygon offset. The three formats are now recorded in `PERFORMANCE-HISTORY.md` §5.4, with the
+consequence of REQ-SCN-080's order on the transparent objects and the HUD under anti-aliasing.
+
+#### And there is no probe at context creation, deliberately
+
+A probe has to allocate something to be worth anything, and **point 1 forbids Classic allocating
+anything the amendment needs**. So the first Enhanced frame *is* the probe, and what the step adds
+is the behaviour on a refusal: the frame is drawn **without** the effects — the Classic picture,
+"cheaper, never more expensive" as point 3 requires — one diagnostic line says so, and the effects
+are given up **for the session** rather than retried every frame, because the three formats are
+required ones and a refusal is a property of the implementation, not of the frame.
+
+| Piece | What landed |
+|---|---|
+| `gl/api.rs` | `GlError::Unsupported`, the variant an optional effect can be given up for |
+| `diagnostics.rs` | `screen_effects_unavailable`, one line per game beside AMD-051's two subjects |
+| `renderer.rs` | `select_screen_effects` split into the two-test Classic path and `prepare_screen_effects` (`#[inline(never)]`); `screen_effects_given_up`; `fail_screen_effects`, the test seam |
+
+**`select_screen_effects` no longer returns a `Result`**, which is the point: a screen effect that
+cannot be prepared is not a reason to fail a frame. The fallible half moved out of line, where the
+allocation and the pass block of step 5 already are, so the Classic path is the two boolean tests
+it was and nothing more.
+
+The refusal is **injected** in the test (`SceneRenderer::fail_screen_effects`, the same kind of
+seam as `set_wall_depth_bias`): no driver on this side refuses `R8`, so the path is otherwise
+unreachable here, and an unreachable fallback is an untested one.
+
+#### The `wgpu` line, and Q-104's addendum
+
+Point 6: under `wgpu` the style reads back as set and renders as Classic, with one log line. The
+line goes through AMD-051's own bounded diagnostics channel — which `Graphics::take_render_diagnostics`
+and the harness's `Engine::take_diagnostics` had stubbed out for that backend with a `// Q-104`
+comment, and which now carries its one subject — written once per renderer, the first frame that
+asks for Enhanced:
+
+> the Enhanced visual style is not rendered by this graphics backend; the scene is drawn in the
+> Classic style (AMD-055 REQ-SCN-078, Q-104)
+
+`Q-104` gained a §5 addendum rather than a new ticket, as the brief asks: the gap, why it is not
+closed (naga validates at module creation, so WGSL that no test can run is less safe than a
+described gap — and the two screen passes are render architecture, not a shader port), the three
+ways it is made non-silent, what is **not** done (the thirteen rows are not greyed under `wgpu`,
+for the reason step 7a recorded), and two new questions for the owner. Copied into
+`docs/spec/changes/`.
+
+#### Point 1, measured
+
+- **The eleven synthetic captures at default settings are byte identical to step 6b's**, at
+  `--anti-alias 0` *and* at the default anti-aliasing, and `render.json` with them — 12 files
+  against 12 in each mode, compared with `cmp` against a throwaway `git worktree` of `86a810f`.
+- **The four instruction counts are identical to the baseline's**, which is the strongest form
+  this step could hope for:
+
+| Symbol | `86a810f`, re-measured here | step 7c |
+|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** |
+| `DrawListBuilder::build` | 1187 | **1187** |
+| `SceneRenderer::render_scene` | 3411 | **3411** |
+| `Construction::segment` | 159 | **159** |
+
+  The `DrawListBuilder::build` column reads 1187 where steps 1 to 6 recorded 1095: the counting
+  script of this session counts a few lines (jump tables, alignment) the earlier one did not. It
+  is the **same** script on both columns, which is what the comparison needs — the step-4 rule
+  that a figure from another session is not a baseline, applied again. The other three agree with
+  the recorded figures exactly.
+
+#### Tests
+
+| Criterion | Test |
+|---|---|
+| point 3's fallback: a refused implementation draws the **Classic** frame to the pixel, with three zeros, one line naming REQ-SCN-080, and nothing retried afterwards | `amd055_occlusion_tests.rs` `req_scn_080_an_implementation_that_refuses_the_passes_draws_the_classic_frame` |
+| point 6 and Q-104: the known gap — not one of the four effects is in the WGSL | `amd055_style_tests.rs` `q_104_the_wgpu_backend_carries_nothing_of_the_enhanced_style_yet` (`--features wgpu`) |
+
+`cargo test --release -p zax-render`: **285 passed, 0 failed**, 1 ignored (284 at the close of
+step 6b). `cargo clippy -p zax-render --all-targets -- -D warnings` clean, and the same with
+`--features wgpu`; `cargo check -p zax-app --features wgpu,bundled` and `-p zax-harness --features
+wgpu` clean, which is what compiles the three `wgpu` edits at all.
+
+One clippy ceiling was hit and recorded rather than worked around: `SceneRenderer` passed the
+four-bool limit, the same `allow` `Passes`, `ScenePrograms`, `SceneVariant` and `ProgramKey`
+already carry.
 
 ## Where this session stopped, and what the next one picks up
 

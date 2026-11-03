@@ -50,6 +50,9 @@ impl<K> Default for Subject<K> {
 pub struct RenderDiagnostics {
     textures: Subject<PatternId>,
     late_objects: Subject<(PatternId, usize)>,
+    /// Whether the one line of AMD-055 REQ-SCN-080 has been written (see
+    /// [`Self::screen_effects_unavailable`]). One subject, so one boolean rather than a set.
+    screen_effects_reported: bool,
     /// Lines handed out since the last reset, against [`LINE_CAP`].
     lines_emitted: usize,
     /// The lines waiting for the host.
@@ -91,6 +94,28 @@ impl RenderDiagnostics {
         }
     }
 
+    /// Reports that the screen-space effects of the Enhanced style cannot be prepared on this
+    /// implementation, so the frame is drawn without them (AMD-055 REQ-SCN-080, and point 3 of the
+    /// RU-5 brief: "a fallback that is cheaper, never more expensive").
+    ///
+    /// **Once per game**, like the two subjects above, because the renderer gives the effects up
+    /// for the session rather than trying them again on every frame: the two formats they need are
+    /// the two the renderer already depends on (`R8` and `RGBA16F`, see `gl::screen_effects`), so
+    /// an implementation that refuses them will refuse them for ever.
+    pub fn screen_effects_unavailable(&mut self, reason: &str, frame: u64) {
+        if self.screen_effects_reported {
+            return;
+        }
+        self.screen_effects_reported = true;
+        self.push(
+            frame,
+            format!(
+                "the screen-space effects of the Enhanced style could not be prepared \
+                 ({reason}); the scene is drawn without them (AMD-055 REQ-SCN-080)"
+            ),
+        );
+    }
+
     /// The lines the host should log, and nothing on a frame where nothing went wrong.
     pub fn take(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending)
@@ -122,6 +147,7 @@ impl RenderDiagnostics {
         self.textures.total = 0;
         self.late_objects.reported.clear();
         self.late_objects.total = 0;
+        self.screen_effects_reported = false;
         self.lines_emitted = 0;
         self.pending.clear();
         self.last_summary = 0;

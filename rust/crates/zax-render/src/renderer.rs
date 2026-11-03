@@ -41,6 +41,7 @@ use crate::numerics::{Vector3, Vector4};
 use crate::scene::{SceneFrame, SceneState};
 use crate::shadow_volume::ShadowVolume;
 use crate::statistics::RenderStatistics;
+use crate::style::StyleSettings;
 use crate::target::{RenderTarget, TargetError};
 
 /// Why the renderer could not be created or could not draw a frame.
@@ -351,6 +352,10 @@ struct Passes {
 /// (REQ-SCN-057, SPEC-01 REQ-ARCH-003). The skyboxes of REQ-SCN-050 and REQ-SCN-051 are
 /// procedural (AMD-024 REQ-PUB-003) unless the host supplies scene assets.
 #[derive(Debug)]
+// Each boolean is an independent property of the session — whether the palette is converted,
+// whether the screen effects were given up, the test seam — and folding them into an enum would
+// hide that. The same `allow` `Passes`, `ScenePrograms`, `SceneVariant` and `ProgramKey` carry.
+#[allow(clippy::struct_excessive_bools)]
 pub struct SceneRenderer {
     gl: Gl,
     meshes: MeshCache,
@@ -366,6 +371,12 @@ pub struct SceneRenderer {
     /// defaults of REQ-SCN-079: the whole cost of AMD-055's screen side is then the `is_none`
     /// test that decides not to run it (point 1 and point 2 of this lot's brief).
     screen_effects: Option<ScreenEffects>,
+    /// Whether this session has given the screen-space passes up because the implementation
+    /// refused them (point 3 of the brief). Tested only on a frame that wants one, and out of
+    /// line, so a Classic frame never reads it.
+    screen_effects_given_up: bool,
+    /// The test seam of [`Self::fail_screen_effects`]: no code path sets it.
+    fail_screen_effects: bool,
     linear_palette: LinearPalette,
     /// Whether the scene programs read [`LinearPalette`] (else they linearise per fragment).
     convert_palette: bool,
@@ -495,6 +506,8 @@ impl SceneRenderer {
             picture: NesPictureTexture::new(&gl),
             linear: LinearColorBuffer::new(&gl)?,
             screen_effects: None,
+            screen_effects_given_up: false,
+            fail_screen_effects: false,
             linear_palette: LinearPalette::new(&gl)?,
             convert_palette,
             unit_box: Arc::new(interop::unit_box()?),
@@ -590,7 +603,7 @@ impl SceneRenderer {
         // AMD-055 REQ-SCN-080 and REQ-SCN-083: whether this frame runs a screen-space pass, which
         // is what decides whether the module and its targets exist at all. In Classic, and in
         // Enhanced at the defaults of REQ-SCN-079, one boolean test and one `is_none`.
-        self.select_screen_effects(scene)?;
+        self.select_screen_effects(scene);
 
         self.passes.statistics.begin_frame();
         self.meshes.begin_frame();
@@ -869,17 +882,49 @@ impl SceneRenderer {
     /// and allocates only that one — point 2 of the brief, for the pair that are passes rather
     /// than variants.
     ///
-    /// # Errors
-    ///
-    /// [`RenderError::Gl`] when one of the programs does not compile or link.
-    fn select_screen_effects(&mut self, scene: &SceneState) -> Result<(), RenderError> {
+    /// **A failure is not fatal** (point 3 of this lot's brief): an implementation that cannot
+    /// give the passes their programs or their targets draws the frame **without** them — the
+    /// Classic picture, which is cheaper and never more expensive — and says so once
+    /// ([`RenderDiagnostics::screen_effects_unavailable`]). The effects are then given up for the
+    /// session: the two formats they need are the two the renderer already depends on, so a
+    /// refusal is a property of the implementation and not of the frame.
+    fn select_screen_effects(&mut self, scene: &SceneState) {
         let style = &scene.settings.style;
-        let wanted = style.screen_effects_active() && !scene.two_dimensional_mode;
-        if !wanted {
+        if !style.screen_effects_active() || scene.two_dimensional_mode {
             self.screen_effects = None;
-            return Ok(());
+            return;
         }
+        self.prepare_screen_effects(scene);
+    }
 
+    /// Builds what the two screen passes need, and gives them up for the session if the
+    /// implementation refuses. Out of line because none of it belongs in a Classic frame's
+    /// instruction cache — the reason [`Self::run_screen_effects`] and
+    /// [`LinearColorBuffer::allocate`] are out of line too.
+    #[inline(never)]
+    fn prepare_screen_effects(&mut self, scene: &SceneState) {
+        if self.screen_effects_given_up {
+            return;
+        }
+        if let Err(error) = self.build_screen_effects(&scene.settings.style) {
+            self.screen_effects = None;
+            self.screen_effects_given_up = true;
+            let frame = self.plan.frame_count();
+            self.plan
+                .diagnostics
+                .screen_effects_unavailable(&error.to_string(), frame);
+        }
+    }
+
+    /// The fallible half of [`Self::prepare_screen_effects`].
+    fn build_screen_effects(&mut self, style: &StyleSettings) -> Result<(), RenderError> {
+        // The seam the fallback is observed through: no code path sets it, only a test
+        // ([`Self::fail_screen_effects`]), because no driver this side refuses `R8`.
+        if self.fail_screen_effects {
+            return Err(RenderError::Gl(GlError::Unsupported {
+                what: "the screen-space effects, refused on request of a test",
+            }));
+        }
         let effects = match &mut self.screen_effects {
             Some(effects) => effects,
             none => none.insert(ScreenEffects::new(&self.gl)?),
@@ -899,6 +944,23 @@ impl SceneRenderer {
             }
         }
         Ok(())
+    }
+
+    /// Whether the screen-space effects of REQ-SCN-080 have been given up for this session
+    /// because the implementation refused them (point 3 of the brief). False on every machine
+    /// whose driver answers normally, which is every machine the two formats are required on.
+    #[must_use]
+    pub const fn screen_effects_given_up(&self) -> bool {
+        self.screen_effects_given_up
+    }
+
+    /// Makes the next frame that wants a screen-space effect fail to prepare it, so that the
+    /// fallback above can be observed on a machine whose driver refuses nothing.
+    ///
+    /// Only a test calls this — the same kind of seam as [`Self::set_wall_depth_bias`], and for
+    /// the same reason: the behaviour it exercises is otherwise unreachable here.
+    pub const fn fail_screen_effects(&mut self, fail: bool) {
+        self.fail_screen_effects = fail;
     }
 
     /// Drops every cached GPU mesh and texture. The host calls it when the 3D engine rebuilds

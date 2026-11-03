@@ -306,6 +306,12 @@ pub struct WgpuSceneRenderer {
     statistics: RenderStatistics,
     last_view: CameraView,
     group_opaque: bool,
+    /// Q-104: the diagnostic lines this backend has to hand the host. Today there is exactly one
+    /// subject — the Enhanced style of AMD-055, which this backend does not render — and it is
+    /// written at most once per renderer.
+    diagnostics: Vec<String>,
+    /// Whether that line has been written.
+    style_reported: bool,
 }
 
 /// The stores the plan asks for the resident meshes and textures.
@@ -495,6 +501,8 @@ impl WgpuSceneRenderer {
             statistics,
             last_view: CameraView::default(),
             group_opaque: false,
+            diagnostics: Vec::new(),
+            style_reported: false,
             layouts,
             scene_module,
             shadow_module,
@@ -544,6 +552,15 @@ impl WgpuSceneRenderer {
     pub fn invalidate_caches(&mut self) {
         self.meshes.clear();
         self.textures.clear();
+    }
+
+    /// The diagnostic lines this backend has for the host, as `SceneRenderer::take_diagnostics`.
+    ///
+    /// Q-104: one subject, the Enhanced style of AMD-055 — selected in the settings, read back as
+    /// selected, and **not rendered** here. The line is written once per renderer, the first time
+    /// a frame asks for it.
+    pub fn take_diagnostics(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.diagnostics)
     }
 
     /// Draws one frame of `scene` into `target` and submits it.
@@ -842,6 +859,20 @@ impl WgpuSceneRenderer {
         }
         #[allow(clippy::cast_possible_wrap)] // The side is at most the device limit.
         let constants = SceneConstants::new(scene, view, volume, self.shadow_map_size as i32);
+        // Q-104, the same gap for AMD-055: the Enhanced style is **not** rendered here either.
+        // `scene.settings.style` reaches this backend and nothing reads it — no variant axis, no
+        // screen pass — so a game played on Vulkan or DirectX 12 with Enhanced selected sees the
+        // Classic picture, which is this backend's own picture of before the amendment. The
+        // setting is kept and read back as set (REQ-SCN-078 is a requirement on the *setting*),
+        // and the gap is said out loud once, where AMD-051's diagnostics already go.
+        if scene.settings.style.enhanced && !self.style_reported {
+            self.style_reported = true;
+            self.diagnostics.push(
+                "the Enhanced visual style is not rendered by this graphics backend; the scene \
+                 is drawn in the Classic style (AMD-055 REQ-SCN-078, Q-104)"
+                    .to_owned(),
+            );
+        }
         // Q-104: `constants.bend` is **not** read here. The curvature of AMD-043 REQ-SCN-067
         // landed in the OpenGL backend only (the one SPEC-06 REQ-SCN-056 requires, the one of the
         // default build and of R0's captures); this backend keeps drawing the scene flat, as it
