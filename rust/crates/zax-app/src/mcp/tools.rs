@@ -64,6 +64,10 @@ pub fn definitions() -> Vec<Value> {
                 "address": { "type": "integer", "minimum": 0, "maximum": 65535 },
                 "length": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 16 } },
                 "required": ["address"] } }),
+        json!({ "name": "dump_frame", "description": "Writes the tile records of the frame on             screen to a JSON file, as zax-harness render --dump-frame does (palette, then low and             high planes, x, y, palette, mirrors, hidden, sprite of each tile).",
+            "inputSchema": { "type": "object", "properties": {
+                "path": { "type": "string", "description": "The JSON file to write" } },
+                "required": ["path"] } }),
         json!({ "name": "get_log", "description": "The last lines of the log: Lua print, warnings \
             and errors, and the program's own lines.",
             "inputSchema": { "type": "object", "properties": {
@@ -147,7 +151,7 @@ fn start(call: &ToolCall, host: &mut AppHost, seeking: bool) -> Started {
     let arguments = &call.arguments;
     let number = |name: &str| arguments.get(name).and_then(Value::as_i64);
     match call.name.as_str() {
-        "status" | "get_log" | "read_ram" => Started::Answer(finish(call, host)),
+        "status" | "get_log" | "read_ram" | "dump_frame" => Started::Answer(finish(call, host)),
         "screenshot" => {
             if seeking {
                 Started::Later(1)
@@ -256,11 +260,63 @@ fn finish(call: &ToolCall, host: &mut AppHost) -> ToolResult {
             }
             ToolResult::text(text)
         }
+        "dump_frame" => dump_frame(host, arguments),
         "get_log" => {
             let count = usize::try_from(number("lines").unwrap_or(50).clamp(1, 1000)).unwrap_or(50);
             ToolResult::text(crate::app_log::recent(count).join("\n"))
         }
         _ => ToolResult::text(status(host).to_string()),
+    }
+}
+
+/// `dump_frame`: the tile records and palette of the frame on screen, in the harness's
+/// `--dump-frame` JSON.
+fn dump_frame(host: &AppHost, arguments: &Value) -> ToolResult {
+    let Some(path) = arguments.get("path").and_then(Value::as_str) else {
+        return ToolResult::error("dump_frame needs a path.");
+    };
+    let Some(session) = host.session() else {
+        return ToolResult::error("No game is running.");
+    };
+    let batch = session.core().frame_batch();
+    let mut text = String::from(
+        "{
+  \"palette\": [",
+    );
+    for (entry, value) in batch.palette.iter().enumerate() {
+        let _ = write!(text, "{}{value}", if entry > 0 { ", " } else { "" });
+    }
+    text.push_str(
+        "],
+  \"tiles\": [
+",
+    );
+    for (n, record) in batch.records.iter().enumerate() {
+        let _ = write!(
+            text,
+            "    {{ \"low\": {}, \"high\": {}, \"x\": {}, \"y\": {}, \"palette\": {},              \"mirrorH\": {}, \"mirrorV\": {}, \"hidden\": {}, \"sprite\": {} }}{}",
+            record.plane0,
+            record.plane1,
+            record.x,
+            record.y,
+            record.palette,
+            record.mirror_h,
+            record.mirror_v,
+            record.hidden,
+            !record.background,
+            if n + 1 < batch.records.len() { ",
+" } else { "
+" }
+        );
+    }
+    text.push_str(
+        "  ]
+}
+",
+    );
+    match std::fs::write(path, text) {
+        Ok(()) => ToolResult::text(format!("{} tiles written to {path}", batch.records.len())),
+        Err(error) => ToolResult::error(format!("{path}: {error}")),
     }
 }
 

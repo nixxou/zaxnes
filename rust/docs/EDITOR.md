@@ -84,6 +84,7 @@ Tools (each action goes through the window's own commands, so it shows there):
 | `reload_script {mode: fast/exact}` | the reload of section 3; answers once done |
 | `screenshot {view: 3d/2d, width, height}` | the picture on screen as a PNG (3D view scaled, default 960 x 720; or the NES picture) |
 | `read_ram {address, length}` | CPU memory without side effects, hexadecimal |
+| `dump_frame {path}` | the tile records of the frame on screen to a JSON file, as `zax-harness render --dump-frame` writes them (works on a live game too) |
 | `get_log {lines}` | the last lines of the log, Lua `print`, warnings and errors included |
 | `run_command {name, number, text}` | any command of the menus by name (`docs` of `emulation/commands.rs`) |
 
