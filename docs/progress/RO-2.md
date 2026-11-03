@@ -18,8 +18,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 |---|---|---|
 | 1 | The map of what each part touches, and the test plan | done — `31d5aae` |
 | 2 | The RetroAchievements menu move (part 1) | done — `6eb88e6` |
-| 3 | The new per-game rows: the data, the desktop menu, the console page (part 2) | in progress |
-| 4 | The Lua curvature rounding (part 3) | todo |
+| 3 | The new per-game rows: the data, the desktop menu, the console page (part 2) | done — `8c84587` |
+| 4 | The Lua curvature rounding (part 3) | in progress |
 | 5 | `Setting.Msaa` drives the anti-aliasing (part 4) | todo |
 | 6 | Closing: the notes, the Q-107 appendix, fmt, clippy, the full tests, the release build | todo |
 
@@ -301,6 +301,61 @@ the desktop grouping is the same fourteen.
 
 `zax-app` and `zax-settings` pass with 0 failures; `cargo fmt --check` and
 `cargo clippy --workspace --all-targets` are clean.
+
+### Step 4 — one grid again
+
+The owner's rule — "the same grid as the menu, to the nearest value, ties away from zero" — is,
+letter for letter, what `Domain::grid`'s `nearest_rung` already did for everybody else
+(`domain.rs`: "the nearest of its published rungs, ties going to the one of greater magnitude").
+So part 3 is a **removal**, not a new rule:
+
+- `styles::snap_write` is now `descriptor(id).domain().snap(value)` for every style parameter.
+  `CURVATURE_LUA_STEP` and `is_curvature_angle` are gone. The function itself stays, rather than
+  its callers going to the domain directly, because it is the one place a *script* write is
+  normalised — the next divergence between a script and the interface, if the owner ever wants
+  one, lands there and nowhere else.
+- `ScriptSettings::record_style_parameter` is gone with it: RO-1 had split
+  `set_visual_style_parameter` in two so that REQ-LUA-116's rung round trip could bypass the 30°
+  rounding, and with one rounding left there is nothing to bypass.
+  `restore_visual_style_parameters` now writes a rung through the ordinary write.
+
+Every case the brief names, checked: 45 → 60, 75 → 90, −45 → −60, 27.5 → 30, 12.5 → 15, 15 → 15,
+and all thirteen multiples of 30 unchanged. `spl.arc_center` keeps its two rungs.
+
+#### REQ-LUA-116's rung indices
+
+They did **not** have to move again. The indices RO-1 noted as shifted are a consequence of the
+**domain** growing from 13 rungs to 23 (RO-1 point 7), which part 3 does not touch; the Lua
+*write* rounding never entered them. What part 3 does change is their **reach**: before it, a Lua
+write could only land on one of the 13 multiples of 30, so a script could only ever see the rung
+indices those occupy; now it can write any of the 23, read it back exactly and put the list back
+exactly — through the one normalisation there now is.
+`two_zero_api_tests::ro_2_the_written_list_carries_a_fine_curvature_rung_there_and_back` is that,
+end to end in Lua, with 15°, −5° and 25°.
+
+#### Tests changed, and why
+
+Two tests pinned the rule the owner removed, and both now pin the new one:
+
+- `zax-scripting::settings::tests::ro_1_a_script_write_of_a_curvature_angle_keeps_the_thirty_degree_rounding`
+  → `ro_2_a_script_write_of_a_curvature_angle_snaps_on_the_menu_grid`, with the new cases and a
+  sweep over all thirteen multiples of 30, written and read back unchanged.
+- `two_zero_api_tests::req_lua_114_a_style_parameter_is_normalised_as_amd_040_requires` keeps its
+  name and the amendment's own criterion value (45 → 60); the `15 → 0` case became `15 → 15`, and
+  75, 12.5, −45 and 30 joined it.
+
+New in `zax-settings::two_zero_settings`:
+`ro_2_a_curvature_value_from_a_script_snaps_on_the_menu_grid` (the owner's cases),
+`ro_2_the_menu_grid_and_the_lua_grid_are_the_same` (a 0.5-step sweep over the whole domain of
+**every** style parameter and a little past each end, asserting `snap_write == domain.snap` — not
+two rules that happen to agree on the named cases, one function), and
+`ro_2_the_three_angles_round_alike_from_a_script`.
+
+Documentation: `rust/docs/OPTIONS-LAYOUT.md` gained a §3 for this divergence, with the before/after
+table and what is kept exactly; §2's bullet about the Lua write points at it. The comments of
+`table.rs::CURVATURE_DEGREES` and `curvature()` and of `Domain::snap` say there is one grid again.
+
+The whole workspace passes.
 
 ### Step 1 — what may not change
 

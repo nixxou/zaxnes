@@ -252,9 +252,10 @@ impl Domain {
     /// `value` when it has none.
     ///
     /// This is the one place the rounding of a style parameter happens, whoever writes: a Lua
-    /// call, the options window or the settings file (AMD-040 REQ-LUA-114). The one exception is
-    /// the Lua write of a curvature angle, which rounds on the 30° grid of REQ-SCN-066 **before**
-    /// coming here, so that a profile written for 3dSen behaves as it did (`styles::snap_write`).
+    /// call, the options window or the settings file (AMD-040 REQ-LUA-114). RO-1 point 7 made the
+    /// Lua write of a curvature angle an exception, rounding it on the 30° grid of REQ-SCN-066
+    /// before coming here; RO-2 part 3 (owner decision) took that exception out, so there is once
+    /// again exactly one grid per setting and `styles::snap_write` is this function.
     #[must_use]
     pub fn snap(&self, value: f64) -> f64 {
         let bounded = self.bounded(value);

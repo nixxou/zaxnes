@@ -189,9 +189,10 @@ fn req_lua_114_run_ahead_and_visual_style_are_brought_into_their_domain() {
 /// The criterion of REQ-LUA-114 on the style parameters, value by value.
 ///
 /// RO-1 point 7 gave the three curvature angles a finer grid for the interface and the settings
-/// file (5° between −30 and 30), and left this rule exactly where it was: a **script** write still
-/// rounds on the 30° grid of REQ-SCN-066, so 15 reads back 0 and 45 reads back 60, and a profile
-/// written for 3dSen behaves as it always did.
+/// file (5° between −30 and 30) and left a **script** write on the 30° grid of REQ-SCN-066.
+/// RO-2 part 3 (owner decision) makes the two grids one: a script write snaps to the nearest
+/// rung of the player's own grid, ties away from zero. The criterion's own value is untouched
+/// (45 gives 60) and so is every multiple of 30; 15 now gives 15, where it gave 0.
 #[test]
 fn req_lua_114_a_style_parameter_is_normalised_as_amd_040_requires() {
     let mut session = blank();
@@ -205,7 +206,16 @@ fn req_lua_114_a_style_parameter_is_normalised_as_amd_040_requires() {
         session.number(r#"return Setting:GetVisualStyleParameter(1, "spl.bend_zx")"#)
     );
 
-    for (written, expected) in [(40.0, 30.0), (45.0, 60.0), (15.0, 0.0)] {
+    for (written, expected) in [
+        (40.0, 30.0),
+        (45.0, 60.0),
+        (75.0, 90.0),
+        (15.0, 15.0),
+        (12.5, 15.0),
+        (-45.0, -60.0),
+        (30.0, 30.0),
+        (0.0, 0.0),
+    ] {
         session.evaluate(&format!(
             r#"Setting:SetVisualStyleParameter(1, "spl.bend_zx", {written})"#
         ));
@@ -446,6 +456,57 @@ fn req_lua_116_the_list_holds_the_parameters_written_since_the_last_reset() {
     assert_eq!(
         0.0,
         session.number(r#"return Setting:GetVisualStyleParameter(4, "spl.ao")"#)
+    );
+}
+
+/// RO-2 part 3: the list of REQ-LUA-116 names a parameter and its value by its **rung**, and the
+/// published rungs of a curvature angle are the 23 of RO-1 point 7. Before this lot a Lua write
+/// could only ever land on one of the 13 multiples of 30, so a script could only ever see the
+/// rung indices those occupy; now it can write any rung, read it back exactly, and put the list
+/// back exactly — through the one normalisation there now is, which is what let
+/// `restore_visual_style_parameters` give up the rounding of its own that RO-1 had to give it.
+#[test]
+fn ro_2_the_written_list_carries_a_fine_curvature_rung_there_and_back() {
+    let mut session = blank();
+
+    session.evaluate(
+        r#"
+        Setting:ResetVisualStyleParameters(4)
+        Setting:SetVisualStyleParameter(4, "spl.bend_zx", 15)
+        Setting:SetVisualStyleParameter(4, "spl.bend_zy", -5)
+        Setting:SetVisualStyleParameter(4, "spl.arc_yx", 25)
+        saved = Setting.VisualStyleParameters
+        "#,
+    );
+
+    // The log reports the fine rungs, not a multiple of 30.
+    assert_eq!(3.0, session.number("return saved.Count"));
+    assert_eq!(15.0, session.number("return saved[0].Value"));
+    assert_eq!(-5.0, session.number("return saved[1].Value"));
+    assert_eq!(25.0, session.number("return saved[2].Value"));
+
+    // The state moves on, then the list goes back exactly as it was.
+    session.evaluate(
+        r#"
+        Setting:SetVisualStyleParameter(4, "spl.bend_zx", 180)
+        Setting.VisualStyleParameters = saved
+        "#,
+    );
+    assert_eq!(
+        3.0,
+        session.number("return Setting.VisualStyleParameters.Count")
+    );
+    assert_eq!(
+        15.0,
+        session.number(r#"return Setting:GetVisualStyleParameter(4, "spl.bend_zx")"#)
+    );
+    assert_eq!(
+        -5.0,
+        session.number(r#"return Setting:GetVisualStyleParameter(4, "spl.bend_zy")"#)
+    );
+    assert_eq!(
+        25.0,
+        session.number(r#"return Setting:GetVisualStyleParameter(4, "spl.arc_yx")"#)
     );
 }
 

@@ -40,8 +40,10 @@ const LANGUAGE_FRENCH: &str = "fr";
 /// 30° of the amendment beyond, where a bend is a deliberate deformation. 23 rungs.
 ///
 /// A divergence from REQ-SCN-066, which gives 13 rungs of 30°. Every one of those 13 is still a
-/// rung here, so a value saved before this lot loads unchanged, and a Lua write still rounds on
-/// the 30° grid (`styles::snap_write`), so a profile written for 3dSen behaves as it did.
+/// rung here, so a value saved before this lot loads unchanged — and since RO-2 part 3 (owner
+/// decision) that holds for a **Lua** write too: it snaps on this very grid, to the nearest rung,
+/// ties away from zero (`styles::snap_write`), so a profile written for 3dSen out of multiples of
+/// 30 behaves exactly as it did, while 45 gives 60, 75 gives 90 and 12.5 gives 15.
 // Q-107
 pub(crate) const CURVATURE_DEGREES: [f64; 23] = [
     -180.0, -150.0, -120.0, -90.0, -60.0, -30.0, -25.0, -20.0, -15.0, -10.0, -5.0, 0.0, 5.0, 10.0,
@@ -686,9 +688,8 @@ fn scene(out: &mut Vec<SettingDescriptor>) {
 fn curvature(out: &mut Vec<SettingDescriptor>) {
     // The three angles of AMD-043 REQ-SCN-066, on the finer grid of RO-1 point 7
     // ([`CURVATURE_DEGREES`]). They are the style parameters `spl.bend_zx`, `spl.bend_zy` and
-    // `spl.arc_yx` of REQ-LUA-114; a Lua write still rounds on the 30° grid the amendment gives
-    // (`styles::snap_write`), so a profile written for 3dSen behaves exactly as it did, and the
-    // grid below is what the interface offers and what the settings file is brought onto.
+    // `spl.arc_yx` of REQ-LUA-114; since RO-2 part 3 one grid serves them all — the interface,
+    // the settings file and a Lua write go through the domain alone (`styles::snap_write`).
     for (id, label) in [
         (SettingId::SceneBendLr, "Bend Left-Right"),
         (SettingId::SceneBendTb, "Bend Top-Bottom"),

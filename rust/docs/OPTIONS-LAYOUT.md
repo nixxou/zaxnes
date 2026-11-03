@@ -173,9 +173,9 @@ ties to the even one, so a write of 45 gives 60.
   loads unchanged. A value off the new grid is brought onto the nearest rung, ties going to the one
   of greater magnitude — which keeps REQ-SCN-066's own acceptance criterion true: writing 45 still
   reads back 60.
-- **A write from a script keeps AMD-040 §3 exactly**: it is rounded onto the 30° grid first
-  (`zax_settings::styles::snap_write`), so 45 still gives 60 and 15 still gives 0, and a profile
-  written for 3dSen behaves as it always did. The REQ-LUA-114 criterion test passes unchanged.
+- **A write from a script snaps on this very grid** since RO-2 part 3 — see §3 below, which
+  replaces what RO-1 had done here. RO-1 had kept AMD-040 §3's own rounding for a Lua write (the
+  30° grid first, so 15 gave 0); the owner found that rule absurd and RO-2 took it out.
 - A script **read** gives back whatever the player chose, fine rung included.
 - The harness `--bend` already took any angle, on or off the grid, and still does.
 - No rendering code changed: the curvature maths takes degrees as a continuous `f32`
@@ -192,5 +192,58 @@ ties to the even one, so a write of 45 gives 60.
    −25°. Keeping the reported rungs on the 13-entry list was the alternative, and it was rejected
    because it would have made the log report a value the setting does not hold, which the
    requirement ("the rung each one holds now") forbids. The log and the setting stay consistent;
-   the numbers move. `restore_visual_style_parameters` still puts a list back *exactly*: it writes
-   a rung through the domain's own rounding, never through the 30° one.
+   the numbers move. The list still goes back *exactly*
+   (`ScriptSettings::restore_visual_style_parameters`), and since RO-2 part 3 it does so through
+   the one normalisation there is, rather than through a second one added to work around the 30°
+   rule.
+
+---
+
+## 3. Divergence: a Lua write of a curvature angle, and the rounding of AMD-040 §3
+
+**What the specification says.** AMD-040 §3 normalises a style parameter written from a script to
+`a + n × step` with `n` the nearest integer, the **even** one when two are equally near. For the
+three curvature angles of AMD-043 REQ-SCN-066 the step is 30°, so a write of 45 gives 60, 75 also
+gives 60, and 15 gives **0**.
+
+**What RO-1 did.** Kept that rule for a Lua write while giving the interface, the settings file
+and the harness a 23-rung grid (§2 above) — two roundings on one key, the Lua one in
+`zax_settings::styles::snap_write`.
+
+**What Zaxnes does now** (owner decision, RO-2 part 3): a Lua write snaps on **the same grid as
+the menu**, to the nearest rung, **ties away from zero**. There is once again exactly one grid
+per setting, and `styles::snap_write` *is* `Domain::snap`.
+
+| Written by a script | RO-1 (AMD-040 §3 on 30°) | Zaxnes since RO-2 |
+|---|---|---|
+| 45 | 60 | 60 |
+| 75 | 60 | **90** |
+| −45 | −60 | −60 |
+| −75 | −60 | **−90** |
+| 15 | 0 | **15** |
+| 27.5 | 30 | 30 |
+| 12.5 | 0 | **15** |
+| every multiple of 30 | itself | itself |
+| 500 / −500 | 180 / −180 | 180 / −180 |
+
+**Why.** The owner finds the ties-to-even rule absurd, and it was the only reason two roundings
+lived on one key. "Nearest rung, ties away from zero" is what a player reading the menu would
+predict, and it is what the domain already did for everybody else.
+
+**What is kept, exactly.**
+
+- Every multiple of 30 is a rung of the grid and is left alone, so a profile written for 3dSen —
+  which can only ever have written multiples of 30, those being all AMD-043 published — behaves
+  **exactly** as it did. REQ-SCN-066's and REQ-LUA-114's own criterion (45 reads back 60) is
+  unchanged, and its test passes with the value the amendment names.
+- `spl.arc_center` is not an angle: it keeps its two rungs, 0 and 1.
+- The twelve style parameters of AMD-055 REQ-SCN-079 are untouched — their domain is stepped, and
+  for an evenly spaced grid the two rules already agreed.
+- A script **read** is untouched (REQ-LUA-114), and so is the exact round trip of
+  `Setting.VisualStyleParameters` (REQ-LUA-116). What changes there is that a script can now
+  *reach* every one of the 23 rungs, where before it could only land on the 13 multiples of 30.
+- No rendering code, no settings-file format, no libretro option and no Lua member changed.
+
+**For R1 to weigh.** This is a divergence from AMD-040 §3 for the three curvature angles, and
+only for them: the amendment's rounding is still the rule everywhere its step is uniform. The
+alternative — amending REQ-SCN-066 back to 13 rungs — would undo §2, which the owner wants.

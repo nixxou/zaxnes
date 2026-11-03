@@ -681,7 +681,10 @@ mod tests {
         }
         // A `Setting` row of the console's global page that this lot did not add names nothing,
         // so it can never become an option of a game.
-        assert_eq!(row_settings(OptionRow::Setting(SettingId::LightIntensity)), []);
+        assert_eq!(
+            row_settings(OptionRow::Setting(SettingId::LightIntensity)),
+            []
+        );
         assert!(!is_game_row_setting(SettingId::LightIntensity));
     }
 

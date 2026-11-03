@@ -9,26 +9,75 @@ use zax_settings::styles;
 use zax_settings::values::SettingValue;
 
 /// AMD-040 §3 as a **script** write reaches it (`styles::snap_write`): a value is bounded, then
-/// put on the nearest rung of the 30° step, ties going to the even rung. The four values the
-/// amendment names, plus the bounds.
+/// put on the nearest rung of the setting's grid.
 ///
-/// RO-1 point 7 widened the grid the interface and the settings file use, and left this rule
-/// exactly as it was, so a profile written for 3dSen behaves as it did.
+/// RO-1 point 7 widened the grid the interface and the settings file use and left a Lua write on
+/// the 13 rungs of 30°, so that 15 gave 0 and 75 gave 60. **RO-2 part 3** (owner decision) takes
+/// that apart: a Lua write snaps on the same grid as the menu, to the nearest rung, ties away
+/// from zero. Every case the owner named, plus the bounds and the thirteen multiples of 30, which
+/// are untouched — which is what makes a profile written for 3dSen behave exactly as it did.
 #[rstest]
 #[case(500.0, 180.0)]
 #[case(-500.0, -180.0)]
 #[case(40.0, 30.0)]
 #[case(45.0, 60.0)]
-#[case(15.0, 0.0)]
-#[case(-15.0, 0.0)]
+#[case(75.0, 90.0)]
 #[case(-45.0, -60.0)]
-#[case(75.0, 60.0)]
+#[case(-75.0, -90.0)]
+#[case(27.5, 30.0)]
+#[case(12.5, 15.0)]
+#[case(-12.5, -15.0)]
+#[case(15.0, 15.0)]
+#[case(-15.0, -15.0)]
 #[case(0.0, 0.0)]
-fn a_curvature_value_is_rounded_as_amd_040_requires(#[case] written: f64, #[case] expected: f64) {
+fn ro_2_a_curvature_value_from_a_script_snaps_on_the_menu_grid(
+    #[case] written: f64,
+    #[case] expected: f64,
+) {
     assert!(
         (styles::snap_write(SettingId::SceneBendLr, written) - expected).abs() < 1e-9,
         "{written}"
     );
+}
+
+/// RO-2 part 3: the menu grid and the Lua grid are **one** grid, for every style parameter and
+/// every value — not two rules that happen to agree on the cases above. `snap_write` is the
+/// setting's own domain, so there is nowhere left for them to diverge.
+#[test]
+fn ro_2_the_menu_grid_and_the_lua_grid_are_the_same() {
+    for (name, id) in styles::all_parameters() {
+        let domain = catalogue::descriptor(*id).domain();
+        let low = domain.minimum().unwrap_or(-10.0) - 5.0;
+        let high = domain.maximum().unwrap_or(10.0) + 5.0;
+        // A fine sweep over the domain and a little past each end.
+        let mut value = low;
+        while value <= high {
+            assert!(
+                (styles::snap_write(*id, value) - domain.snap(value)).abs() < 1e-9,
+                "{name} at {value}"
+            );
+            value += 0.5;
+        }
+    }
+}
+
+/// And a script's three curvature angles all take the same grid: RO-1 point 7 named the three
+/// together, and RO-2 part 3 takes the exception off all three at once.
+#[rstest]
+#[case(SettingId::SceneBendLr)]
+#[case(SettingId::SceneBendTb)]
+#[case(SettingId::SceneArcH)]
+fn ro_2_the_three_angles_round_alike_from_a_script(#[case] id: SettingId) {
+    for (written, expected) in [(45.0, 60.0), (75.0, 90.0), (12.5, 15.0), (15.0, 15.0)] {
+        assert!(
+            (styles::snap_write(id, written) - expected).abs() < 1e-9,
+            "{id:?} at {written}"
+        );
+    }
+    // The arc centre is not an angle and keeps its two rungs.
+    assert!((styles::snap_write(SettingId::SceneArcCenter, 0.4) - 0.0).abs() < 1e-9);
+    assert!((styles::snap_write(SettingId::SceneArcCenter, 0.6) - 1.0).abs() < 1e-9);
+    assert!((styles::snap_write(SettingId::SceneArcCenter, 7.0) - 1.0).abs() < 1e-9);
 }
 
 /// RO-1 point 7: the **domain** — which is what the options window, the console's advanced page
