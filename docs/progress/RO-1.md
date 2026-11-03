@@ -30,6 +30,10 @@ root (the .NET test tree, removed by `d3680e4` and still on disk), and
 not committed" and gated on `ZAX_PROBE`. All three were left alone — they compile, they run
 nothing by default, and none of them is mine to delete.
 
+Correction made at the end of the lot: a wildcard `git add -A rust/` in step 2 swept the two
+probes into `58407a7` all the same. `git rm --cached` took them back out of the index in a commit
+of their own; both files are still on disk, untracked, exactly as they were found.
+
 ### Step 1 — the inventory
 
 The window shows **70 settings** in a default build and **71** with the `wgpu` feature
