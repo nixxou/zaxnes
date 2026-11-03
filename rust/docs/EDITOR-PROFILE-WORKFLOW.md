@@ -76,7 +76,29 @@ game does not draw (a coin's true face, a 3D model's colours).
 * **Animated tiles** (a spinning crystal) are a different picture per step: dump enough frames
   to see every step, or a step left out shows with the default extrusion.
 
-## 4. Pitfalls
+## 4. Zaxnes code in the comments
+
+A profile stays a 3dSen profile and can still carry code for Zaxnes only (commands 3dSen does
+not know, lighter effects on a handheld): Zaxnes reads it out of the comments before compiling
+the script (`zax-scripting/src/macros.rs`); 3dSen sees comments.
+
+```lua
+--[[#zax handheld
+local SPIKE_ROW_Z = { 0, 16 }
+#zax skip-legacy
+]]
+-- #legacy-begin
+local SPIKE_ROW_Z = { 0, 8, 16 }
+-- #legacy-end
+```
+
+* `--[[#zax <condition>` ... `]]`: code when the condition holds, else the comment it is.
+* `#zax skip-legacy` in a block that holds: the next `-- #legacy-begin` / `-- #legacy-end` part
+  is left out.
+* Conditions: `zaxnes` (always), `handheld` or `desktop`, each possibly after `not`, all to
+  hold. The line numbers stay those of the file.
+
+## 5. Pitfalls
 
 * A class picked by place catches its neighbours: filter by palette and only take tiles no class
   has yet; add the picks after the precise ones (a ladder caught in a wall pick goes flat).

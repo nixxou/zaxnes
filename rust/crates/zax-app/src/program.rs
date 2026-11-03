@@ -36,6 +36,12 @@ pub fn run(arguments: &[String]) -> i32 {
             options.system_locale = sys_locale::get_locale();
             options.handheld =
                 handheld_mode::resolve(options.handheld, &DisplayEnvironment::of_process());
+            // The conditions of the Zaxnes code in the profiles' Lua comments.
+            zax_scripting::macros::set_host_conditions(&[if options.handheld {
+                "handheld"
+            } else {
+                "desktop"
+            }]);
             if options.catch_up.is_none() {
                 if let Ok(value) = std::env::var("ZAXNES_CATCH_UP") {
                     match app_options::parse_catch_up(&value) {
