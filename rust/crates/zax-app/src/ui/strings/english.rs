@@ -506,6 +506,12 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     ("option.Gradient", "Gradient"),
     ("option.Fantasy", "Fantasy"),
     ("option.None", "None"),
+    // RO-5 part 1 (owner request): the two levels of `video.anti_alias` are named FFAA and SMAA by
+    // REQ-PERS-017, but AMD-032 §2 renders them as multisampling — 4 samples and 8. The interface
+    // says what the user gets; the **domain** labels stay FFAA and SMAA, being what the settings
+    // file and the libretro option values hold. Q-107 §7.
+    ("option.FFAA", "MSAA 4×"),
+    ("option.SMAA", "MSAA 8×"),
     ("option.Native", "Native"),
     ("option.enabled", "enabled"),
     ("option.disabled", "disabled"),
@@ -570,10 +576,11 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (
         "detail.video.anti_alias",
         "Smooths the staircase on the slanted edges of the 3D shapes. Zaxnes uses multisampling \
-         rather than a full-screen filter, so the pixel art of the textures stays sharp: FFAA is 4 \
-         samples per pixel, SMAA is 8. The two names are the ones the specification gives the two \
-         levels. The cost is mostly memory bandwidth and grows with the resolution. Default: FFAA \
-         on the desktop, None on a handheld.",
+         rather than a full-screen filter, so the pixel art of the textures stays sharp: the two \
+         levels are 4 and 8 samples per pixel. 3dSen calls them FFAA and SMAA, which is also what \
+         the settings file and the libretro option hold; Zaxnes draws them as what they are, MSAA \
+         4× and MSAA 8×. The cost is mostly memory bandwidth and grows with the resolution. \
+         Default: MSAA 4× on the desktop, None on a handheld.",
     ),
     (
         "detail.video.skip_frame",

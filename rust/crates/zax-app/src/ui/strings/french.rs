@@ -480,6 +480,10 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("option.Gradient", "Dégradé"),
     ("option.Fantasy", "Fantaisie"),
     ("option.None", "Aucun"),
+    // RO-5 partie 1 : voir le commentaire de `english.rs`. Les deux noms sont les mêmes dans les
+    // deux langues, un niveau de multi-échantillonnage n'étant pas un mot.
+    ("option.FFAA", "MSAA 4×"),
+    ("option.SMAA", "MSAA 8×"),
     ("option.Native", "Native"),
     ("option.enabled", "activées"),
     ("option.disabled", "désactivées"),
@@ -548,10 +552,11 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
         "detail.video.anti_alias",
         "Adoucit l'escalier sur les arêtes obliques des formes 3D. Zaxnes emploie le \
          multi-échantillonnage plutôt qu'un filtre plein écran, afin que les textures en pixel art \
-         restent nettes : FFAA vaut 4 échantillons par pixel, SMAA 8. Les deux noms sont ceux que \
-         la spécification donne aux deux niveaux. Le coût est surtout de la bande passante mémoire \
-         et croît avec la résolution. Par défaut : FFAA sur le bureau, Aucun sur une console \
-         portable.",
+         restent nettes : les deux niveaux valent 4 et 8 échantillons par pixel. 3dSen les nomme \
+         FFAA et SMAA, et c'est aussi ce que contiennent le fichier de réglages et l'option \
+         libretro ; Zaxnes les affiche pour ce qu'ils sont, MSAA 4× et MSAA 8×. Le coût est \
+         surtout de la bande passante mémoire et croît avec la résolution. Par défaut : MSAA 4× \
+         sur le bureau, Aucun sur une console portable.",
     ),
     (
         "detail.video.skip_frame",

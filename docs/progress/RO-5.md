@@ -18,8 +18,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 
 | # | Step | State |
 |---|---|---|
-| 1 | The map of both parts, the decisions they force, the test plan | in progress |
-| 2 | Part 1: the labels | todo |
+| 1 | The map of both parts, the decisions they force, the test plan | done — `db41949` |
+| 2 | Part 1: the labels | done — this commit |
 | 3 | Part 2: the arc centre | todo |
 | 4 | Closing: the notes, Q-107, `OPTIONS-LAYOUT.md`, fmt, clippy, the full tests, the release build | todo |
 
@@ -82,6 +82,42 @@ persisted key and reset a user's choice.
 > **Decision: the libretro values stay `None` / `FFAA` / `SMAA`.** Nothing changed for libretro.
 > Recorded in Q-107 §7 and in `OPTIONS-LAYOUT.md`, with the note that giving libretro a display
 > label of its own is a lot of its own (it would touch `core_options.rs` and the libretro shim).
+
+### Step 2 — the labels, which turned out to be four string-table entries
+
+Exactly what step 1's map predicted, and nothing more:
+
+- `option.FFAA` → "MSAA 4×" and `option.SMAA` → "MSAA 8×", in **both** language tables (the two
+  names are the same in French: a sample count is not a word). `option.None` already read "None" /
+  "Aucun", so the three levels now read "None / MSAA 4× / MSAA 8×" and
+  "Aucun / MSAA 4× / MSAA 8×".
+- `detail.video.anti_alias` rewritten in both languages: the sample counts, then **3dSen calls them
+  FFAA and SMAA, and so do the settings file and the libretro option; Zaxnes draws them as what
+  they are**. The old sentence "The two names are the ones the specification gives the two levels"
+  is gone — it was true and useless, and the new one tells the user where they will meet FFAA
+  again. The default line now says "MSAA 4× on the desktop, None on a handheld".
+
+No code changed. The four interfaces the brief lists all read the value through
+`text::label_of_option`, which looks a domain label up as `option.<label>` and falls back to the
+label itself — which is why the user read "FFAA" in the first place. `video.anti_alias` has **no**
+short `help.*` sentence (`options::help_of` returns `None` for it), so the tooltip is the paragraph
+alone and there was nothing else to rewrite.
+
+The × is U+00D7, inside the atlas's first glyph range (`ui/fonts.rs::GLYPH_RANGES`,
+`0x0020..0x00FF`) and inside the built-in font's Latin-1, so the console draws it — unlike the
+mockup's `›` of RO-3. `text::speed_label` has been drawing a × on the same console page since
+AMD-041.
+
+`crates/zax-app/tests/anti_alias_labels_tests.rs` (new, 6 tests): the three levels in both
+languages through the window's drop-down list **and** through `advanced::value_text` (which is the
+console's global pages, the console's game pages and the desktop *Game options* menu, all three);
+the row still where it was; the stored values, the domain labels, the default, field 32 and the
+Lua path untouched; the settings file still holding `"SMAA"` and a file holding `"None"` / `"FFAA"`
+/ `"SMAA"` reading back as 0 / 1 / 2; the libretro values still `None` / `FFAA` / `SMAA` and
+`try_apply("SMAA")` still applying; the tooltip naming all four of FFAA, SMAA, MSAA 4× and MSAA 8×.
+
+`zax-app`: **759 passed, 0 failed** (753 before, plus the 6 new). `cargo fmt --check` and
+`cargo clippy -p zax-app --all-targets -- -D warnings` clean.
 
 ### Step 1 — part 2: what `scene.arc_center` is at `32adb08`
 
