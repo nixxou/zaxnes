@@ -45,6 +45,10 @@ kill, rebuild, relaunch, `state.load_slot` 9. The executable is locked while it 
 slice repeated in depth with a small gap (`"depth": 2, "copies": [{"offset": [0, 0, 5]}, ...]`)
 gives a volume that keeps the motif, as Metal Force's fire.
 
+A tile drawn mirrored (a sprite flipped by the game: the dump's `mirrorH` / `mirrorV`) is only
+matched with that mirroring: give it as a third element, `["<low>", "<high>", "hv"]` (`h`, `v`
+or `hv`).
+
 `texture`: a PNG laid pixel for pixel over the pattern (alpha 0 = empty), for a picture the
 game does not draw (a coin's true face, a 3D model's colours).
 
