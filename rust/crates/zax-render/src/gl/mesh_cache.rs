@@ -38,6 +38,13 @@ pub struct GpuMesh {
     /// lateral wall of a tile box (AMD-057, REQ-SCN-065). Carried here so the draw path reads it
     /// from the handle it already has, instead of a field per tile of the list.
     pub axis_aligned_normals: bool,
+    /// [`TileMesh::build_depth`]: the depth `D` of the voxel field the mesh was built from, which
+    /// is where the voxel edges of its local frame fall on `z` (REQ-E3D-504). Carried here for the
+    /// same reason as the field above, and read by the draw path **only** while the pixel-shadow
+    /// variant of AMD-055 REQ-SCN-082 is in use. The depth itself and not the `D/2` the shader
+    /// wants: this handle is a key of the draw list (`Residency::Mesh: Eq + Hash`), and a float is
+    /// neither.
+    pub build_depth: i32,
 }
 
 #[derive(Debug)]
@@ -49,6 +56,7 @@ struct Entry {
     index_buffer: Buffer,
     index_count: i32,
     axis_aligned_normals: bool,
+    build_depth: i32,
     last_used: u64,
 }
 
@@ -176,6 +184,7 @@ impl MeshCache {
             // A tile mesh holds far fewer than 2^31 indices.
             index_count: mesh.triangles().len() as i32,
             axis_aligned_normals: mesh.has_axis_aligned_normals(),
+            build_depth: mesh.build_depth(),
             last_used: self.frame,
         })
     }
@@ -187,6 +196,7 @@ impl Entry {
             vertex_array: self.vertex_array,
             index_count: self.index_count,
             axis_aligned_normals: self.axis_aligned_normals,
+            build_depth: self.build_depth,
         }
     }
 

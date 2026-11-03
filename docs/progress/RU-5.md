@@ -12,7 +12,7 @@ AMD-055 on `dotnetupdated` is a reading reference only.
 | 1 | Map: what exists, where each requirement goes, the "before" measurements | done — `a9216ce` |
 | 2 | REQ-SCN-078: the style reaches the renderer, and the zero assertions | done — `98a08ce` |
 | 3 | REQ-SCN-081: the voxel grid | done — `c5dfc8d` |
-| 4 | REQ-SCN-082: the pixel shadows | todo |
+| 4 | REQ-SCN-082: the pixel shadows | done — hash in the commit of step 5 |
 | 5 | REQ-SCN-080 and REQ-SCN-083: the screen-space infrastructure and the ambient occlusion | todo |
 | 6 | REQ-SCN-084: the floor reflections | todo |
 | 7 | GLES capability probing, handheld page, desktop options group, harness options | todo |
@@ -423,16 +423,186 @@ same remedy RU-4b applied when `bind_frame_uniforms` moved out.
 3. The **review criterion**: Super Mario Bros. 1-1 at `spl.voxel_grid` = 2 in a close view — the
    toy-brick look, the sky and the score unchanged. No commercial ROM is available on this side.
 
+### Step 4 — REQ-SCN-082, the pixel shadows
+
+The shadow of an opaque tile is read at the **centre of the fragment's voxel** instead of at the
+fragment, so it changes by squares of one voxel. The variant axis `ZAX_PIXEL_SHADOW` already
+existed (step 3 declared it, keyed it, selected it and dropped it for the HUD, and emitted `vLocal`
+and `vLocalNormal` under the shared guard); what landed here is the body, and the one piece of
+plumbing it needed.
+
+| Piece | What landed |
+|---|---|
+| `zax-engine3d` `tile_mesh.rs` | `TileMesh::build_depth()`, the depth `D` of REQ-E3D-504, set by the two meshers (`builder.build(field.depth())`), 0 for a mesh that is not a tile's |
+| `zax-render` `style.rs` | `voxel_center`, the CPU twin of the snapping; `voxel_z_offset`; `VOXEL_CENTRE_REACH` |
+| `shaders/pixel_shadow.glsl` (new) | `zaxVoxelCenter` and `zaxVoxelShadowPoint`, compiled only into the `ZAX_PIXEL_SHADOW` variants |
+| `scene.vert`, `scene.frag` | `flat` `vModelLinear` and `vDeformTile`, and the override of the shadow point — **every added line inside a `#ifdef ZAX_PIXEL_SHADOW` block**, no existing line touched |
+| `gl/shaders.rs` | `SLOTS` 10 → 12; `Stage::of` took a const generic so a stage may list fewer chunks than slots; the fragment stage gained `DEFORMATION`, `BEND` (when the frame bends) and `PIXEL_SHADOW`, each under the pixel-shadow guard |
+| `gl/mesh_cache.rs` | `GpuMesh::build_depth`, beside `axis_aligned_normals` — the shape AMD-057 laid for a per-run property of the mesh |
+| `renderer.rs` `draw_run` | `uVoxelZOffset`, uploaded only while the variant is in use |
+
+#### Why the fragment stage gets a placement, and why it is three varyings and not twenty
+
+The snapping has to happen per fragment: `⌊p⌋ + 0,5` varies across one face. So the fragment stage
+has to transform a point **like a vertex** (REQ-SCN-082 point 3), and a fragment can read neither
+`gl_InstanceID` nor the instance block it indexes.
+
+The placement is **affine**, which is the whole trick: only the *difference* between the snapped
+point and the fragment's own has to be carried through it, so the translation of the model matrix
+cancels and `mat3(model)` is enough. `zaxVoxelShadowPoint` therefore takes the fragment's own
+`vScene` and adds `mat3(model) × (delta + deform(snapped) − deform(p))` — nine components plus the
+three of the deformation's tile position, instead of the sixteen of the matrix plus four. The
+budget is comfortable either way (37 components against the 60 GLES 3.0 guarantees), but the
+cheaper form is also the clearer one: it says the snapping is a *displacement*.
+
+#### The one piece of plumbing: the construction depth `D`
+
+On `z` the voxel edges of the local frame are offset by `D/2` (REQ-E3D-504: the corner of voxel
+`(i, j, k)` is at `(i − 4, j − 4, k − D/2)`), and `D` is a property of the **build**, not of the
+mesh's extent — a `sizeZ` = 1 plate does not span the box of a deeper build, and a sparse tile does
+not reach its own edges, so `bounds_max.z` is no substitute. It is computed where the mesh is
+built, carried on `TileMesh`, copied onto `GpuMesh` and read per **run** in `draw_run`, beside
+`wall_clip_bias(mesh)` which does exactly that for AMD-057.
+
+Only `D/2 mod 1` changes the result — write `D/2 = m + f` and the two whole `m` cancel — so one
+number out of two reaches the shader: **0 for an even depth, 0.5 for an odd one**. For a cylinder
+it stays the **initial** depth and not the effective `D'` of REQ-E3D-452, which is what that
+requirement says ("le champ de voxels et le centrage local des maillages restent ceux de la
+profondeur initiale").
+
+#### Two uniform tests inside the variant, both constant over a draw
+
+`uColorMode != 2` excludes the **backdrop**, which with `render.backdrop_lighting` off draws
+through `scene.frag` and *does* receive shadows; without the test it would snap in the unit box's
+own local frame, where a whole face reads one single voxel centre. `uDeform != 0` skips the
+deformation, exactly as the vertex stage does. Both are uniforms that are constant over a whole
+draw — the kind RU-4a's notes allow; the forbidden one is a uniform that switches between having an
+effect and not having it, and that one is the `#define`.
+
+The other exclusions of REQ-SCN-082 cost nothing: the **HUD** and the **transparent objects** carry
+`uReceiveShadow` = 0 (REQ-SCN-040), the **2D-mode rectangle** is the only object of a 2D-mode frame
+so `select_style_variants` does not select the variant at all, and the tunnel and TV models do not
+exist in Zaxnes (the step-3 finding).
+
+#### The brief's point 1, measured
+
+- **Every added line of `scene.vert` and `scene.frag` is inside a `#ifdef ZAX_PIXEL_SHADOW`
+  block**, and no existing line moved — which is the structural proof that the Classic sources are
+  unchanged as the compiler sees them. The committed form of the check is
+  `req_scn_082_no_classic_variant_carries_anything_of_the_pixel_shadow`, which preprocesses the
+  assembled source the way the compiler would, over the 64 Classic variants × 2 contexts and the
+  four backdrop programs, and asserts that none of `zaxVoxelShadowPoint`, `zaxVoxelCenter`,
+  `uVoxelZOffset`, `vModelLinear` and `vDeformTile` reaches it.
+- **The eleven synthetic captures at default settings are byte identical to step 3's**, all eleven,
+  and the counts of `render.json` (draw calls, triangles, resident meshes, colours) with them. The
+  baseline was retaken from `c5dfc8d` in a throwaway `git worktree` — the step-1 dump lives outside
+  the repository and was gone with that session — and compared by SHA-256.
+- `SLOTS` 10 → 12 changes no assembled source: `assemble` skips an empty slot without even a blank
+  line, and `Stage::of` now pads.
+
+#### The instruction counts, and the 3510 that was not reproducible
+
+| Symbol | step 3 (`c5dfc8d`), re-measured here | step 4 | recorded in step 1 |
+|---|---|---|---|
+| `Ppu2C02::run_dots` | 2231 | **2231** | 2231 |
+| `DrawListBuilder::build` | 1095 | **1095** | 1095 |
+| `SceneRenderer::render_scene` | 3548 | **3559** (+11, **+0.31 %**) | 3510 |
+| `Construction::segment` | 159 | **159** | 159 |
+
+The step-1 figure for `render_scene` — 3510 — **does not reproduce on this machine today**: the
+step-3 commit itself measures 3548 with the same method and the same script, so 38 of the 49
+instructions a naive reading would have blamed on this step are a toolchain or build difference
+between the two sessions. That is why the baseline column is a fresh measurement of `c5dfc8d` and
+not the recorded number: **a figure from another session is not a baseline**. Against the real
+baseline the step costs **+11 instructions, 0.31 %**, which is the one new boolean test per draw
+run (`draw_run` is inlined into `render_scene` at three sites: the opaque loop and the two passes
+of REQ-SCN-040). The other three symbols are untouched, as they must be.
+
+Two detours worth recording, because both looked like the explanation and neither was: taking the
+uniform upload out of line (`#[inline(never)]`) changed nothing, and narrowing `GpuMesh`'s new
+field from an `i32` to a `bool` — which keeps the handle at twelve bytes rather than sixteen —
+changed nothing either. Both were measured and both reverted to the simpler code.
+
+#### Tests (14 in `zax-render/tests/amd055_pixel_shadow_tests.rs`, 4 in `zax-engine3d`)
+
+| Criterion | Test |
+|---|---|
+| REQ-SCN-082 point 2: a GREEDY face snaps the two axes of its plane, in all six orientations | `req_scn_082_a_greedy_face_snaps_the_two_axes_of_its_plane` |
+| the tie rule — smallest index — at 45°, on a degenerate normal and on an oblique MARCHING one | `req_scn_082_the_tie_is_broken_by_the_smaller_index` |
+| point 2 on `z`: even depth to the half coordinates, odd to the whole ones; a `sizeZ` = 1 plate is one voxel | `req_scn_082_the_z_axis_follows_the_construction_depth` |
+| Notes: the point moves 0,7 unit at most, and never leaves the face | `req_scn_082_the_point_moves_at_most_seven_tenths_of_a_unit` |
+| Notes: the cells are those of REQ-SCN-081 with `N` = 1 | `req_scn_082_the_cells_are_those_of_the_voxel_grid_at_one` |
+| **the acceptance criterion, both bullets**: no cell holds both lit and shadowed pixels with the effect on, several cells of each edge do with it off | `req_scn_082_the_shadow_changes_by_whole_voxel_cells` |
+| the criterion's own geometry: floor at `rot = (90, 0, 0)`, light (1, −3, 1), plate **29 units** above, camera at 45° of elevation | `req_scn_082_the_rotated_floor_of_the_criterion_quantises_too` |
+| the scope: 0 is Classic to the pixel, Classic ignores the parameter, nothing compiled, `style_programs` 0 then ≥ 2 | `req_scn_082_the_snapping_is_off_at_zero_and_in_classic` |
+| "sans objet sur le backdrop": a frame whose only receiver is the backdrop is the same picture both ways, to the pixel | `req_scn_082_the_backdrop_keeps_its_own_shadows` |
+| the HUD, a transparent object and the 2D-mode rectangle: the same picture both ways | `req_scn_082_the_hud_the_transparent_objects_and_the_two_dimensional_mode_are_left_out` |
+| REQ-SCN-080's order clause: the snapping is before the curvature, so a bent frame quantises on the mesh's own cells | `req_scn_080_the_snapping_happens_before_the_curvature` |
+| the brief's point 1: no Classic variant carries anything of the snapping | `req_scn_082_no_classic_variant_carries_anything_of_the_pixel_shadow` |
+| the backdrop program has no such axis | `req_scn_082_the_backdrop_program_has_no_pixel_shadow_axis` |
+| the deformation and the curvature reach the fragment stage only for the snapping, and the curvature only when the frame bends | `req_scn_082_the_fragment_stage_takes_the_placement_only_for_the_snapping` |
+| REQ-E3D-504: each mesher carries the depth of its field; the bounds run `−D/2` … `+D/2`; a hand-built mesh and an empty tile report 0 | 4 tests in `zax-engine3d/tests/engine3d/amd055_build_depth_tests.rs` |
+| the derived quantities | 1 unit test in `style.rs` |
+
+#### How the criterion is measured, and the three readings that were wrong
+
+The criterion's discriminating bullet is the **second** one: the shadows of REQ-SCN-030 are already
+hard, so the sharpness of an edge tells the two styles apart not at all. What tells them apart is
+that with the effect on *no voxel cell of the floor holds both lit and shadowed pixels*. So the
+measurement is a **census of cells**: each 1-voxel cell of each floor tile is sampled at nine
+points of its local square, each point is projected through the frame's own camera (and curvature)
+exactly as the vertex stage projects it, and the cell is counted as lit, shadowed, or **mixed**.
+
+Three readings were wrong before the test said anything true, and all three are easy to repeat:
+
+1. **A plate has two faces, and the wrong one shifts the whole grid.** A floor tile of `sizeZ` = 1
+   is a closed box: its two faces are one unit apart, and a perspective camera at 30 units
+   magnifies that unit into several pixels at the edge of the view. Sampling the far face reported
+   mixed cells all over a picture that had none. The test now picks the face from the geometry —
+   the one whose outward normal points at the eye — and not from the capture.
+2. **A cell's outer ring is not the cell.** The criterion says "pour chaque cellule de 1 voxel du
+   sol **entièrement visible**", and the outer ring of each tile box is not: a box is closed on
+   itself (REQ-E3D-501), so at the joint with its neighbour the lateral wall of one stands one unit
+   from the face of the other, and a wall is a face of its own — with its own two snapped axes. The
+   census skips that ring, and the last stubborn mixed cell went with it. Sampling the middle
+   *third* of a cell rather than the middle *half* is the same lesson one scale down: widening the
+   samples to 1/6 … 5/6 brought twelve false mixed cells back.
+3. **A light of simple ratios hides the effect.** With a light of (1, −1, 1) and a whole number of
+   units between caster and floor, the shadow's edges fall exactly **on** cell edges, so there is
+   nothing for the snapping to move and the two styles draw the same picture. That is why the
+   criterion puts its plate at **29** units under a light of (1, −3, 1): the shadow lands at
+   29/3 = 9,667 units, with its edges in the middle of a voxel. The flat fixture here uses a light
+   of (1, −0,7, 2,6) for the same reason, and the rotated one the criterion's own.
+
+The curvature fixture needed one more turn of the same screw: at 30° the bend moves the shadow off
+the part of the floor the camera sees, and at 15° it falls on cell edges again. **10°** is the
+angle at which it both moves every pixel and leaves its edges inside voxels.
+
+#### What is left for R0 on this requirement
+
+1. The **absolute sRGB column** of the criterion (195 ± 3 lit, 118 ± 3 shadowed) at 1920 × 1080
+   with the albedo and colours of the close-up G. Those want the direct texture (188, 188, 188)
+   the synthetic fixture cannot make — the same limit step 3 recorded for the grid. What is
+   confirmed here is the clause the numbers serve: every pixel of a cell carries the **same** value
+   (compared exactly, which is stronger than the ±2 sRGB levels the criterion allows).
+2. The **review criterion**: "Super Mario Bros." 1-1 at `spl.pixel_shadow` = 1 — block shadows cut
+   into one-NES-pixel squares aligned on the game's pixels, the score and the sky unchanged. No
+   commercial ROM is available on this side.
+
 ## Where this session stopped, and what the next one picks up
 
-**Steps 1 to 3 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`); the tree builds, 2329
-tests pass, fmt and workspace clippy are clean, the eleven synthetic captures at default settings
-are identical to step 1's at tolerance 0, and the render and PPU goldens hold. **Steps 4 to 9 are
-not started.** The session ran out before step 4; nothing is half-built, and the working tree holds
-no uncommitted change of this lot (only the two untracked items named in the step-1 notes).
+**Steps 1 to 4 are done and committed** (`a9216ce`, `98a08ce`, `c5dfc8d`, and step 4 whose hash
+goes into the commit of step 5); the tree builds, **2348 tests pass** (2329 at the close of step
+3), fmt and workspace clippy are clean, the eleven synthetic captures at default settings are
+**byte identical to step 3's**, and the render and PPU goldens hold. **Steps 5 to 9 are not
+started.** Nothing is half-built, and the working tree holds no uncommitted change of this lot
+(only the two untracked items named in the step-1 notes).
 
-The design work for the next steps was done while step 3 was being written, and is recorded here
-so that it is not re-derived. None of it is committed code.
+The design work for the steps that follow was done while step 3 was being written, and is recorded
+here so that it is not re-derived. None of it is committed code. **The step-4 design below is kept
+as it was written, before the step was implemented**: where it and the step-4 notes above differ,
+the notes are what landed — the varying is `mat3(model)` and not the whole `mat4`, because the
+placement is affine and only the displacement has to travel through it.
 
 ### Step 4 — REQ-SCN-082, the pixel shadows: the design, and its one piece of plumbing
 

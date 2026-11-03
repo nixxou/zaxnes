@@ -51,6 +51,14 @@ pub struct TileMesh {
     /// (REQ-E3D-521). Computed once here, never per draw; the renderer reads it to tell a
     /// lateral wall from a front face (AMD-057, `geometry::WALL_DEPTH_BIAS`).
     axis_aligned_normals: bool,
+    /// The depth `D` the voxel field was built with (REQ-E3D-504), which is what centres the
+    /// local frame on `z`: the corner of voxel `(i, j, k)` is at `(i − 4, j − 4, k − D/2)`. For a
+    /// cylinder it stays the **initial** depth, not the effective `D'` of REQ-E3D-452, because
+    /// that requirement leaves the field and the local centring on the initial one.
+    ///
+    /// 0 for a mesh that is not a tile's — the backdrop box, the rectangle of the 2D mode, an OBJ
+    /// model — where it is read by nothing.
+    build_depth: i32,
 }
 
 impl TileMesh {
@@ -67,11 +75,12 @@ impl TileMesh {
             return Err(TriangleCountError(triangles.len()));
         }
 
-        Ok(Self::with_bounds(vertices, triangles))
+        Ok(Self::with_bounds(vertices, triangles, 0))
     }
 
-    /// A mesh over a triangle list known to hold whole triangles, with its bounding box.
-    fn with_bounds(vertices: Vec<MeshVertex>, triangles: Vec<u32>) -> Self {
+    /// A mesh over a triangle list known to hold whole triangles, with its bounding box and the
+    /// construction depth of its local frame (REQ-E3D-504).
+    fn with_bounds(vertices: Vec<MeshVertex>, triangles: Vec<u32>, build_depth: i32) -> Self {
         let (bounds_min, bounds_max) = match vertices.first() {
             None => (Vec3::ZERO, Vec3::ZERO),
             Some(first) => {
@@ -101,6 +110,7 @@ impl TileMesh {
             bounds_min,
             bounds_max,
             axis_aligned_normals,
+            build_depth,
         }
     }
 
@@ -150,6 +160,18 @@ impl TileMesh {
     #[must_use]
     pub const fn has_axis_aligned_normals(&self) -> bool {
         self.axis_aligned_normals
+    }
+
+    /// The depth `D` of the voxel field the mesh was built from (REQ-E3D-504), 0 for a mesh that
+    /// is not a tile's.
+    ///
+    /// The one place it is read is the pixel shadows of AMD-055 REQ-SCN-082, which snap a point to
+    /// the centre of its voxel: on `z` the voxel edges of the local frame are offset by `D/2`, so
+    /// the snapping needs `D` and the extent of the mesh will not do (a `sizeZ` = 1 plate does not
+    /// span the box of a deeper build).
+    #[must_use]
+    pub const fn build_depth(&self) -> i32 {
+        self.build_depth
     }
 
     /// Lowest corner of the local bounding box.
@@ -235,14 +257,15 @@ impl TileMeshBuilder {
         self.push_triangle(first, first + 1, first + 2);
     }
 
-    /// Freezes the accumulated data into a mesh.
-    pub fn build(self) -> TileMesh {
+    /// Freezes the accumulated data into a mesh of a field of depth `build_depth`, which is what
+    /// centres its local frame on `z` (REQ-E3D-504).
+    pub fn build(self, build_depth: i32) -> TileMesh {
         if self.triangles.is_empty() {
             return TileMesh::empty();
         }
 
         // Every push adds whole triangles.
-        TileMesh::with_bounds(self.vertices, self.triangles)
+        TileMesh::with_bounds(self.vertices, self.triangles, build_depth)
     }
 
     #[allow(clippy::cast_possible_truncation)] // A tile mesh holds far fewer than 2^32 vertices.

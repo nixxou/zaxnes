@@ -60,6 +60,19 @@ out vec3 vLocal;
 out vec3 vLocalNormal;
 #endif
 
+// AMD-055 REQ-SCN-082: the placement the fragment stage needs to transform a voxel centre like a
+// vertex. The snapping varies **across** a face, so it cannot be done here; and a fragment cannot
+// read gl_InstanceID, so the instance's placement has to be handed over.
+//
+// Only the **linear part** of the model matrix travels, nine components rather than the sixteen
+// of the matrix: the placement is affine, so the translation cancels in the difference between the
+// snapped point and the fragment's own, which is what `zaxVoxelShadowPoint` carries through it.
+// `flat` because a placement is one value per instance, not something to interpolate.
+#ifdef ZAX_PIXEL_SHADOW
+flat out mat3 vModelLinear;
+flat out vec3 vDeformTile;
+#endif
+
 void main()
 {
     // The fields are read from the block one by one: copying the whole instance into a local
@@ -90,6 +103,11 @@ void main()
     // unchanged by the interpolation.
     vLocal = aPosition;
     vLocalNormal = aNormal;
+#endif
+
+#ifdef ZAX_PIXEL_SHADOW
+    vModelLinear = mat3(uInstances[index].model);
+    vDeformTile = uInstances[index].deformTile.xyz;
 #endif
 
 #ifdef ZAX_BEND

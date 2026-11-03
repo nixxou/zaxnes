@@ -77,7 +77,7 @@ pub fn build(voxels: &PatternVoxels<'_>, image_index: usize, empty_color: i32) -
         }
     }
 
-    builder.build()
+    builder.build(depth)
 }
 
 /// Emits the surface that separates the corners of value `color` from the others, inside one

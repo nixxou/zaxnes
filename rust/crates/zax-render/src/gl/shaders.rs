@@ -82,12 +82,16 @@ const PIXEL_SHADOW_DEFINE: &str = "#define ZAX_PIXEL_SHADOW";
 /// The voxel grid of REQ-SCN-081 (AMD-055).
 const VOXEL_GRID: &str = include_str!("../shaders/voxel_grid.glsl");
 
-/// How many chunks a stage may hold. The largest is the scene fragment with all six defines
-/// (six defines, the transfer functions, the grid and the body: nine).
+/// The pixel shadows of REQ-SCN-082 (AMD-055).
+const PIXEL_SHADOW: &str = include_str!("../shaders/pixel_shadow.glsl");
+
+/// How many chunks a stage may hold. The largest is the scene fragment with all six defines (six
+/// defines, the transfer functions, the grid, the deformation and the curvature the pixel shadows
+/// need in that stage too, the snapping itself and the body: twelve).
 ///
 /// Raising it costs nothing and changes no assembled source: [`assemble`] skips an empty slot
 /// without even a blank line.
-const SLOTS: usize = 10;
+const SLOTS: usize = 12;
 
 /// One stage of a program: the chunks it is made of, in order, after the header. Empty slots are
 /// skipped, so a variant can leave a define out without changing the shape of the array.
@@ -98,9 +102,19 @@ pub struct Stage {
 }
 
 impl Stage {
-    /// A stage of the chunks of `parts`, in order.
-    const fn of(parts: [&'static str; SLOTS]) -> Self {
-        Self { parts }
+    /// A stage of the chunks of `parts`, in order, the slots past them left empty.
+    ///
+    /// The array may be shorter than [`SLOTS`]: a stage that needs no chunk beyond its body says
+    /// so in one line, and raising the ceiling does not touch every call site. Longer than
+    /// [`SLOTS`] is a compile error, which is what it should be.
+    const fn of<const N: usize>(parts: [&'static str; N]) -> Self {
+        let mut all = [""; SLOTS];
+        let mut slot = 0;
+        while slot < N {
+            all[slot] = parts[slot];
+            slot += 1;
+        }
+        Self { parts: all }
     }
 }
 
@@ -292,9 +306,6 @@ pub const fn scene(variant: SceneVariant) -> ProgramSource {
             DEFORMATION,
             when(bend, BEND),
             SCENE_VERT,
-            "",
-            "",
-            "",
         ]),
         fragment: Stage::of([
             when(solid, SOLID_DEFINE),
@@ -305,8 +316,14 @@ pub const fn scene(variant: SceneVariant) -> ProgramSource {
             when(pixel_shadow, PIXEL_SHADOW_DEFINE),
             TRANSFER,
             when(voxel_grid, VOXEL_GRID),
+            // REQ-SCN-082 transforms a voxel centre **like a vertex**, so the fragment stage of
+            // that variant — and of no other — carries the animated deformation and, when the
+            // frame bends, the curvature as well. Both are chunks the vertex stage already had;
+            // their uniforms are program-wide, so nothing new is uploaded for them.
+            when(pixel_shadow, DEFORMATION),
+            when(pixel_shadow && bend, BEND),
+            when(pixel_shadow, PIXEL_SHADOW),
             SCENE_FRAG,
-            "",
         ]),
     }
 }

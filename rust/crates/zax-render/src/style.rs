@@ -310,6 +310,61 @@ pub fn voxel_grid_factor(p: [f32; 3], n: [f32; 3], cell: f32) -> f32 {
     factor
 }
 
+/// The offset of the voxel edges on `z` in the mesh's local frame, as the fragment stage needs
+/// it: `D/2` reduced to its fractional part (REQ-SCN-082 point 2, REQ-E3D-504).
+///
+/// The snapping is `⌊p_z + D/2⌋ + 0,5 − D/2`, and only `D/2 mod 1` changes its result — write
+/// `D/2 = m + f` with `m` whole and the two `m` cancel. So **one number out of two** is enough:
+/// 0 for an even depth, whose voxel edges fall on the whole coordinates, and 0.5 for an odd one,
+/// whose voxel *centres* do. A mesh that is not a tile's reports a depth of 0 and lands on the
+/// first case, which is also what the grid of REQ-E3D-504 would give it.
+#[must_use]
+pub const fn voxel_z_offset(build_depth: i32) -> f32 {
+    if build_depth % 2 == 0 {
+        0.0
+    } else {
+        0.5
+    }
+}
+
+/// How far a point may travel when it is snapped to the centre of its voxel: half a voxel on each
+/// of the two axes of the face (REQ-SCN-082, Notes, "0,7 unité au plus").
+pub const VOXEL_CENTRE_REACH: f32 = std::f32::consts::FRAC_1_SQRT_2;
+
+/// The centre of the voxel that holds the point `p` of a face of normal `n`, both in the mesh's
+/// local frame of REQ-E3D-504, with `z_offset` the fractional part of `D/2`
+/// ([`voxel_z_offset`]) — the point REQ-SCN-082 evaluates the shadow at instead of the fragment.
+///
+/// The CPU twin of `shaders/pixel_shadow.glsl`, as [`voxel_grid_factor`] is of the grid's: the
+/// rule is written once and checked without a GL context, and the shader is then asserted against
+/// the same numbers on the GPU.
+///
+/// **Only two of the three axes move.** They are the two of smallest `|n_a|`, ties broken by the
+/// smaller index in the order `x`, `y`, `z`; the third is left alone, which is what keeps the
+/// displaced point **on the face**. Equivalently — and this is how it is computed — the axis left
+/// alone is the one of largest `|n_a|`, ties broken the other way round. On a GREEDY face
+/// (REQ-E3D-505) that picks exactly the two axes whose `|n_a|` is 0; on a MARCHING surface, whose
+/// normal is arbitrary, it still picks two, so there is no plate where the effect would vanish.
+#[must_use]
+pub fn voxel_center(p: [f32; 3], n: [f32; 3], z_offset: f32) -> [f32; 3] {
+    let an = [n[0].abs(), n[1].abs(), n[2].abs()];
+    let mut keep = 0;
+    if an[1] >= an[keep] {
+        keep = 1;
+    }
+    if an[2] >= an[keep] {
+        keep = 2;
+    }
+
+    let mut snapped = [
+        p[0].floor() + 0.5,
+        p[1].floor() + 0.5,
+        (p[2] + z_offset).floor() + 0.5 - z_offset,
+    ];
+    snapped[keep] = p[keep];
+    snapped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -511,6 +566,30 @@ mod tests {
             );
             assert_eq!(half, style.ssr_half_resolution(), "ssr.quality {quality}");
         }
+    }
+
+    /// REQ-SCN-082: the voxel centre of a point, with the two axes of the face moved and the
+    /// third left alone, and the `z` grid offset by `D/2` (REQ-E3D-504). The full table of the
+    /// rule is in `tests/amd055_pixel_shadow_tests.rs`; what is kept here is the pair of facts
+    /// the renderer reads — the reach of the displacement and the two values of the offset.
+    #[test]
+    fn req_scn_082_the_voxel_centre_moves_two_axes_by_half_a_voxel_at_most() {
+        // A GREEDY face of normal −z: x and y snap to the voxel centre, z does not move.
+        let snapped = voxel_center([1.2, -3.7, -0.5], [0.0, 0.0, -1.0], 0.0);
+        assert_eq!([1.5, -3.5, -0.5], snapped);
+        let moved = ((snapped[0] - 1.2).powi(2) + (snapped[1] + 3.7).powi(2)).sqrt();
+        assert!(moved <= VOXEL_CENTRE_REACH);
+
+        // The offset of the `z` grid is the fractional part of `D/2`, so one of two values.
+        assert_eq!(0.0, voxel_z_offset(0));
+        assert_eq!(0.0, voxel_z_offset(8));
+        assert_eq!(0.5, voxel_z_offset(1));
+        assert_eq!(0.5, voxel_z_offset(9));
+        // The `sizeZ` = 1 plate of the criterion: one voxel on `z`, centred on 0.
+        assert_eq!(
+            0.0,
+            voxel_center([0.0, 0.0, 0.4], [1.0, 0.0, 0.0], voxel_z_offset(1))[2]
+        );
     }
 
     /// `spl.ao` reads its three values and nothing else.

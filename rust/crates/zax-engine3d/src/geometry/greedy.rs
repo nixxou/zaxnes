@@ -75,7 +75,7 @@ pub fn build(field: &TileVoxels, texture: &ObjectTexture, multicolor: bool) -> T
         }
     }
 
-    builder.build()
+    builder.build(field.depth())
 }
 
 /// Fills `mask` with the face cells of one plane and one direction (REQ-E3D-501), and answers

@@ -1274,6 +1274,10 @@ impl Passes {
 
         // AMD-057 / REQ-SCN-065: read before the program is borrowed.
         let wall_bias = self.wall_clip_bias(item.mesh);
+        // AMD-055 REQ-SCN-082: whether the voxel-grid offset of `z` has to be uploaded for this
+        // run. Read from the cached flag of the variant in use — before the program is borrowed —
+        // so Classic pays one boolean test per **run** and no upload.
+        let snapping = self.scene.pixel_shadow;
         let program = self.scene.current();
         program.set_i32("uColorMode", item.color_mode);
         program.set_i32("uPaletteTable", item.palette_table);
@@ -1287,6 +1291,12 @@ impl Passes {
         // meet. 0 for a mesh whose normals are not axis aligned (MARCHING merges its tiles, so
         // it has no joint to hide and the `|normal.z|` test would be meaningless there).
         program.set_f32("uWallClipBias", wall_bias);
+        if snapping {
+            program.set_f32(
+                "uVoxelZOffset",
+                crate::style::voxel_z_offset(item.mesh.build_depth),
+            );
+        }
         program.set_i32(
             "uReceiveShadow",
             i32::from(self.shadow_enabled && item.receive_shadow),

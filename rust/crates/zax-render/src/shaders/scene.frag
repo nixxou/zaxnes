@@ -22,6 +22,12 @@ in vec3 vLocal;
 in vec3 vLocalNormal;
 #endif
 
+// AMD-055 REQ-SCN-082: the placement of scene.vert, which the two stages must agree on.
+#ifdef ZAX_PIXEL_SHADOW
+flat in mat3 vModelLinear;
+flat in vec3 vDeformTile;
+#endif
+
 // 0 = indexed atlas, 1 = direct colour atlas, 2 = flat colour (backdrop).
 uniform int uColorMode;
 uniform usampler2D uIndexTexture;
@@ -129,6 +135,20 @@ void main()
         vec3 biased = vBent + n * uNormalOffset;
 #else
         vec3 biased = vScene + n * uNormalOffset;
+#endif
+#ifdef ZAX_PIXEL_SHADOW
+        // REQ-SCN-082: on an opaque **tile**, the shadow is read at the centre of the fragment's
+        // voxel instead. The bias and the normal offset of REQ-SCN-031 are applied to that
+        // displaced point and not to the fragment, or the shadow acne REQ-SCN-031 avoids comes
+        // back (REQ-SCN-082, Notes). Colour mode 2 is the backdrop drawn through this shader —
+        // `render.backdrop_lighting` off — which the requirement leaves alone ("sans objet sur le
+        // backdrop"); the test is a uniform, constant over the whole draw, as the grid's is. The
+        // HUD and the transparent objects carry `uReceiveShadow` = 0, so they are already out.
+        if (uColorMode != 2)
+        {
+            biased = zaxVoxelShadowPoint(vScene, vLocal, normalize(vLocalNormal), vModelLinear,
+                vDeformTile) + n * uNormalOffset;
+        }
 #endif
         vec4 light = uLightViewProjection * vec4(biased.x, biased.y, -biased.z, 1.0);
         vec3 projected = light.xyz / light.w * 0.5 + 0.5;

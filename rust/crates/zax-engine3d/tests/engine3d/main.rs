@@ -8,6 +8,7 @@
 // tolerance of REQ-E3D-523 is applied where those tests apply it.
 #![allow(clippy::float_cmp)]
 
+mod amd055_build_depth_tests;
 mod amd057_wall_tests;
 mod corpus_tests;
 mod cylinder_vector_tests;
