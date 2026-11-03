@@ -238,3 +238,12 @@ instructions) and `NesCore::run_frame` (2 096) unchanged.
   a Zaxnes movie (`.mv<n>`) or an `.fm2`: the MCP server is independent of movies; the seek bar
   needs a movie (either kind).
 * MCP implementation: as simple as possible (hand-written, no tokio).
+
+## Trying the editor on a game (2026-11-02/03)
+
+The owner edited a Metal Force profile with it (outside the repo, `<dossier de test>/metalforce`):
+title relief, the coin, the first level, the start of the second. What it taught is written up
+in `docs/EDITOR-PROFILE-WORKFLOW.md` (the loop, measured facts, pitfalls). Added on the way: the
+MCP tool `dump_frame` (1e708e2), for the tiles of a live game. An engine spikes geometry was
+tried and reverted (a88cb5e): the profiles stay 3dSen-compatible, the spikes are shapes the
+script adds.

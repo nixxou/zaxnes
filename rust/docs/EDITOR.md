@@ -56,7 +56,7 @@ Without a movie, a reload is fast.
 
 ## 4. The MCP server
 
-Off by default. `--mcp` starts it on `127.0.0.1:8765` (`--mcp=<port>` for another port); only the
+Off by default (making a profile with it: `EDITOR-PROFILE-WORKFLOW.md`). `--mcp` starts it on `127.0.0.1:8765` (`--mcp=<port>` for another port); only the
 loopback interface is bound, and a request from a web page of another host is refused. It is
 hand-written (Streamable HTTP, JSON answers, `serde_json`, no async runtime).
 
