@@ -1,0 +1,83 @@
+# The settings the desktop options window shows, as of commit 0b0aa8c — the state of the window
+# before lot RO-1 reorganised its tabs. RO-1 point 2: the reorganisation may change which tab and
+# which group a setting is in, but not the set itself; every key below must still be a row of the
+# window, exactly once, and no key may join it without leaving this list in the same commit.
+#
+# A set, not an order: the file is sorted by key. The tab each one was in before is recorded in
+# `rust/docs/OPTIONS-LAYOUT.md`, which is where the old → new mapping lives.
+#
+# A line tagged [wgpu] is only a row in a build carrying that feature (`options::is_shown`).
+#
+# Checked by `crates/zax-app/tests/desktop_options_golden_tests.rs`.
+
+achievements.challenges
+achievements.enabled
+achievements.encore
+achievements.sound
+achievements.unofficial
+audio.volume
+camera.fov
+emu.auto_tv_mode
+emu.catch_up
+emu.catch_up_last_3d
+emu.core
+emu.game_speed
+emu.lua_experimental
+emu.lua_optimized
+emu.lua_smooth_gc
+emu.pause_3d_in_2d
+emu.pipeline
+emu.run_ahead
+emu.tv_mode
+input.emulated_menu_button
+light.intensity
+render.backdrop_lighting
+render.mesh_algo
+render.shadow
+render.style.ao
+render.style.ao_quality
+render.style.ao_radius
+render.style.ao_strength
+render.style.ao_thickness
+render.style.pixel_shadow
+render.style.reflections
+render.style.ssr_clarity
+render.style.ssr_length
+render.style.ssr_quality
+render.style.ssr_shine
+render.style.voxel_grid
+render.visual_style
+scene.arc_center
+scene.arc_h
+scene.bend_2d_mode
+scene.bend_lr
+scene.bend_tb
+scene.custom_bg_color
+scene.skybox
+ui.fullscreen
+ui.language
+ui.profiler
+ui.roms_folder
+ui.show_fps
+ui.sort_option
+video.anti_alias
+video.backend [wgpu]
+video.dynamic_resolution
+video.frame_rate
+video.max_queued_frames
+video.nes_palette
+video.overscan_mode
+video.overscan_ntsc_bottom
+video.overscan_ntsc_left
+video.overscan_ntsc_right
+video.overscan_ntsc_top
+video.overscan_pal_bottom
+video.overscan_pal_left
+video.overscan_pal_right
+video.overscan_pal_top
+video.remove_sprite_limit
+video.render_method
+video.res_scale
+video.skip_frame
+video.vsync
+video.widescreen_strict_edges

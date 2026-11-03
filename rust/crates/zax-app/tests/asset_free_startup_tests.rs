@@ -199,6 +199,19 @@ fn req_pub_001_the_command_line_resolves_the_generic_entries_without_assets() {
     assert_eq!(profile_resolver::list(None).unwrap().len(), 2);
 }
 
+/// Whether `relative` is inside a Cargo build directory of the workspace: `rust/target` and every
+/// `rust/target-*` beside it (`.gitignore` lists them one by one).
+fn is_build_output(relative: &Path) -> bool {
+    let mut parts = relative.components();
+    parts.next().is_some_and(|first| first.as_os_str() == "rust")
+        && parts.next().is_some_and(|second| {
+            second
+                .as_os_str()
+                .to_str()
+                .is_some_and(|name| name.starts_with("target"))
+        })
+}
+
 // REQ-PUB-002
 #[test]
 fn req_pub_002_the_repository_carries_no_asset_file() {
@@ -220,7 +233,11 @@ fn req_pub_002_the_repository_carries_no_asset_file() {
             // and the golden pictures the render tests compare with carry their own rules.
             let relative = entry.path().strip_prefix(repository).unwrap();
             !(relative.starts_with(".git")
-                || relative.starts_with("rust/target")
+                // Every build directory, not just `rust/target`: `Path::starts_with` compares
+                // whole components, so the one the Android package writes (`rust/target-android`)
+                // and the one a session uses while the owner holds `rust/target` open
+                // (`rust/target-ro`) need the prefix test. All of them are in `.gitignore`.
+                || is_build_output(relative)
                 || relative.starts_with("rust/test-roms")
                 || relative.starts_with("rust/goldens")
                 || relative.starts_with("tests/roms")

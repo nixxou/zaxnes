@@ -10,15 +10,78 @@ use zax_settings::model::SettingsModel;
 use zax_settings::values::SettingValue;
 
 use super::options::OptionRow;
-use crate::ui::options::{self as desktop, OptionsModel, OptionsRow, OptionsTab};
+use crate::ui::options::{OptionsModel, OptionsRow};
 use crate::ui::text;
 
-/// The tabs of the desktop window the page takes its settings from.
-const TABS: [OptionsTab; 4] = [
-    OptionsTab::Video,
-    OptionsTab::Camera,
-    OptionsTab::Light,
-    OptionsTab::Emulation,
+/// The settings of the page, in order.
+///
+/// Until RO-1 this list was computed: four tabs of the desktop window (Video, Camera, Light and
+/// Emulation) walked in order, keeping every row a pad can step. RO-1 reorganises those tabs for
+/// the desktop alone, so the list is written out here instead — the console pages are not part of
+/// that lot and must look exactly as they did. `goldens/handheld-advanced-rows.txt` is what holds
+/// it to that, and the filter the old computation applied (a switch, a choice or a bounded number;
+/// never the graphics API, which is the desktop's alone, and never a folder) is now a test of the
+/// same file rather than a run-time rule.
+///
+/// Adding a setting to the desktop window therefore no longer adds a row here: a console row is
+/// an owner decision, and this page is where it is written down.
+pub const ROW_SETTINGS: [SettingId; 56] = [
+    SettingId::VideoVSync,
+    SettingId::VideoFrameRate,
+    SettingId::VideoSkipFrame,
+    SettingId::VideoRenderMethod,
+    SettingId::VideoMaxQueuedFrames,
+    SettingId::VideoResScale,
+    SettingId::VideoAntiAlias,
+    SettingId::RenderMeshAlgo,
+    SettingId::SceneSkybox,
+    SettingId::RenderVisualStyle,
+    SettingId::RenderStyleAo,
+    SettingId::RenderStyleAoStrength,
+    SettingId::RenderStyleAoRadius,
+    SettingId::RenderStyleAoThickness,
+    SettingId::RenderStyleAoQuality,
+    SettingId::RenderStylePixelShadow,
+    SettingId::RenderStyleVoxelGrid,
+    SettingId::RenderStyleReflections,
+    SettingId::RenderStyleSsrShine,
+    SettingId::RenderStyleSsrClarity,
+    SettingId::RenderStyleSsrLength,
+    SettingId::RenderStyleSsrQuality,
+    SettingId::SceneBendLr,
+    SettingId::SceneBendTb,
+    SettingId::SceneArcH,
+    SettingId::SceneArcCenter,
+    SettingId::SceneBend2dMode,
+    SettingId::VideoDynamicResolution,
+    SettingId::VideoWidescreenStrictEdges,
+    SettingId::VideoRemoveSpriteLimit,
+    SettingId::VideoOverscanNtscTop,
+    SettingId::VideoOverscanNtscBottom,
+    SettingId::VideoOverscanNtscLeft,
+    SettingId::VideoOverscanNtscRight,
+    SettingId::VideoOverscanPalTop,
+    SettingId::VideoOverscanPalBottom,
+    SettingId::VideoOverscanPalLeft,
+    SettingId::VideoOverscanPalRight,
+    SettingId::VideoOverscanMode,
+    SettingId::VideoNesPalette,
+    SettingId::CameraFov,
+    SettingId::RenderShadow,
+    SettingId::RenderBackdropLighting,
+    SettingId::LightIntensity,
+    SettingId::EmuGameSpeed,
+    SettingId::EmuTvMode,
+    SettingId::EmuAutoTvMode,
+    SettingId::EmuRunAhead,
+    SettingId::EmuCatchUp,
+    SettingId::EmuLuaSmoothGc,
+    SettingId::EmuLuaOptimized,
+    SettingId::EmuLuaExperimental,
+    SettingId::EmuPipeline,
+    SettingId::EmuPause3dIn2d,
+    SettingId::EmuCatchUpLast3d,
+    SettingId::InputEmulatedMenuButton,
 ];
 
 /// Whether the setting is a whole number the page has to step as a **list** rather than as a
@@ -38,22 +101,16 @@ fn is_named_list(row: &OptionsRow) -> bool {
             .is_some_and(|options| options.len() > 1)
 }
 
-/// The settings of those tabs a pad can step: switches, choices and bounded numbers. The
-/// renderer's backend is the desktop's alone.
+/// [`ROW_SETTINGS`] with the widget bounds of the options model, which is what [`step`] moves by.
 static SETTINGS: LazyLock<Vec<OptionsRow>> = LazyLock::new(|| {
     let model = OptionsModel::new();
-    TABS.iter()
-        .flat_map(|tab| model.rows(*tab).iter().copied())
-        .filter(|row| {
-            row.descriptor.id() != SettingId::VideoBackend
-                && !desktop::is_folder(row)
-                && match row.descriptor.kind() {
-                    SettingKind::Bool | SettingKind::Enum => true,
-                    SettingKind::Int | SettingKind::Float => {
-                        row.maximum > row.minimum || is_named_list(row)
-                    }
-                    _ => false,
-                }
+    ROW_SETTINGS
+        .iter()
+        .filter_map(|id| {
+            model
+                .all_rows()
+                .find(|row| row.descriptor.id() == *id)
+                .copied()
         })
         .collect()
 });

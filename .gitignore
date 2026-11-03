@@ -103,3 +103,7 @@ rust/test-roms/
 
 # The Android build (build/package-android.py)
 rust/target-android/
+
+# The build directory a clean-side session uses while the owner runs rust/target/release/zaxnes.exe,
+# which Windows keeps locked (RO-1).
+rust/target-ro/
