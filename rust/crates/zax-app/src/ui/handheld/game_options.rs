@@ -80,6 +80,7 @@ pub const GAME_CURVATURE_ROWS: [OptionRow; 5] = [
 /// The fourteen rows RO-2 added, in the order the console's advanced page of a game lists them:
 /// [`GAME_DISPLAY_ROWS`], then [`GAME_3D_ROWS`], then [`GAME_CURVATURE_ROWS`]. The desktop menu
 /// draws the same fourteen, grouped; a test holds the two to the same list.
+// Q-107 §5
 pub const GAME_ADVANCED_ROWS: [OptionRow; 14] = [
     OptionRow::Setting(SettingId::EmuRunAhead),
     OptionRow::Setting(SettingId::VideoAntiAlias),

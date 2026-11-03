@@ -20,8 +20,8 @@ Windows (the workspace has no `SDL2.lib` on the library path).
 | 2 | The RetroAchievements menu move (part 1) | done — `6eb88e6` |
 | 3 | The new per-game rows: the data, the desktop menu, the console page (part 2) | done — `8c84587` |
 | 4 | The Lua curvature rounding (part 3) | done — `9ee3bc5` |
-| 5 | `Setting.Msaa` drives the anti-aliasing (part 4) | in progress |
-| 6 | Closing: the notes, the Q-107 appendix, fmt, clippy, the full tests, the release build | todo |
+| 5 | `Setting.Msaa` drives the anti-aliasing (part 4) | done — `484841f` |
+| 6 | Closing: the notes, the Q-107 appendix, fmt, clippy, the full tests, the release build | in progress |
 
 ## Notes
 
@@ -438,6 +438,95 @@ with the same kind and the same rights as the `mapped` helper did.
 
 The whole workspace passes; `cargo fmt --check` and `cargo clippy --workspace --all-targets` are
 clean.
+
+### Step 6 — the closing
+
+#### The same wildcard mistake as RO-1, and the same fix
+
+`git add -A rust/crates` in step 5 swept the two scratch probes
+(`zax-render/tests/dump_sources_tmp.rs`, `probe_tmp.rs`) into `484841f`, exactly as RO-1's step 2
+had done. `git rm --cached` took them back out in a commit of its own (`6acf169`); both files are
+still on disk, untracked, as they were found. Worth leaving written down: a wildcard `add` under
+`rust/` will do this every time, and the probes are nobody's to delete.
+
+#### Q-107, extended rather than replaced
+
+RO-2 raises no new ticket number: its two divergences are the same family as RO-1's, on the same
+settings, and splitting them over two tickets would make R1 read them apart. **Q-107** therefore
+gained three sections and two corrections, and its title and preamble now say that two lots wrote
+it:
+
+- §3, the Lua curvature rounding, which **replaces** the second bullet of §2's "what is kept"
+  (the old text is struck through there rather than deleted, so R1 can see what moved);
+- §4, `Setting.Msaa`, which **narrows** AMD-059's divergence (D) — and which carries the one real
+  **question** of this lot, see below;
+- §5, the fourteen new per-game rows and the menu-bar move, which contradict no requirement (the
+  per-game options are Rust-only, Q-036) but are worth recording beside the rest;
+- §2's consequence 2 gained a parenthesis: the REQ-LUA-116 rung indices do **not** move a second
+  time, and what RO-2 changes is their reach.
+
+Code marks: `// Q-107 §3` on `styles::snap_write`, `// Q-107 §4` on `write_msaa` and
+`msaa_drives_anti_alias`, `// Q-107 §5` on `GAME_ADVANCED_ROWS`. Copied to
+`impl/docs/spec/changes/Q-107.md`, identical. This lot implements no amendment, so there is nothing
+else to copy; the four amendments it touches (AMD-040, AMD-043, AMD-052, AMD-059) were already
+there.
+
+#### The one question for R1
+
+`Setting.Msaa`'s clause 2 — "the user's global `video.anti_alias` is above 0" — is worded as a
+test of the **value** and justified as a test of the user's **will** ("the user made an explicit
+choice"). The shipped default of 1 (AMD-052 REQ-PERS-089) keeps the two apart: with the value test
+a write is ignored on a fresh install; with a will test (does the user layer hold anything) a
+script could **turn off** a default-on anti-aliasing. The letter of the owner's rule is what is
+implemented, being the only one of the two that can never let a script degrade the picture of a
+user who asked for nothing. Q-107 §4 puts the choice in front of R1; the fix, either way, is one
+line.
+
+#### Closing checks
+
+| Check | Result |
+|---|---|
+| `cargo fmt --check` | clean |
+| `cargo clippy --workspace --all-targets --features zax-app/bundled -- -D warnings` | clean |
+| `cargo test --release --workspace --features zax-app/bundled --no-fail-fast` | **2453 passed, 0 failed, 83 ignored** |
+| `goldens/lua-api.txt` byte for byte (`zax-harness::lua_api_tests`) | passes, unchanged |
+| `goldens/desktop-options-shown.txt`, `goldens/handheld-advanced-rows.txt` | pass, unchanged |
+| the settings file's keys (`zax-settings::catalogue::no_published_key_disappeared`) | passes, unchanged |
+| release `zaxnes.exe` in `rust/target-ro/release/` | built from the final commit, `bundled,wgpu` |
+
+RO-1 left 2428 passing; RO-2 adds 25 and removes none. The 83 ignored are unchanged: they need a
+real 3dSen installation, a ROM corpus or a GPU run (`ZAXNES_3DSEN_INSTALL`, `ZAXNES_ROMS`, the
+golden-core sweeps), and they are R0's to run.
+
+#### Performance
+
+Nothing new runs in the core, the conversion, the Lua hooks, the draw list or the renderer.
+
+- **The per-game rows** are applied by `set_game_values` when the game starts or the user edits
+  one, exactly as the existing sixteen are; the frame loop reads the settings model it always
+  read.
+- **The Lua rounding** got *cheaper*: `snap_write` lost a branch, a clamp and a multiplication,
+  and it runs on a script write, never per frame.
+- **`Setting.Msaa`** adds, on a Lua write of that one member, one read of the model's user layer
+  and one map lookup. A read of the member is unchanged.
+- **The desktop menu** draws fourteen more rows only while the *Game options* menu is open, and
+  the two new submenus only while they are open. `GameOptionsModel::walk`'s cap went from 24 to 48
+  iterations, which bounds work that happens when a submenu is open and never otherwise.
+- **The console** draws its new page only while it is shown; the main page draws one row more.
+
+#### What R0 should look at in the running application
+
+1. The menu bar: five menus, no RetroAchievements; *Tools* → "RetroAchievements account and
+   options…" with no game, and the game's achievement list at the end of *Game options* with one.
+2. *Game options* with a game: the three new rows at the first level, the *3D rendering* submenu
+   and its *Geometry* submenu, and the cyan colour climbing to the group title when a row inside
+   holds a value of its own.
+3. The console's game options: the new *Advanced options* row at index 17, its page of fourteen,
+   and the Q-103 note beside the run-ahead row for a profile whose scripts change the core.
+4. A 2.0 profile that writes `Setting.Msaa`: on a default desktop install nothing should change,
+   which is the point of the rule — the interesting run is with `video.anti_alias` set to None
+   first.
+5. `--handheld` with the same profile: the anti-aliasing must stay off.
 
 ### Step 1 — what may not change
 

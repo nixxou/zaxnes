@@ -280,6 +280,7 @@ impl ScriptSettings {
     ///
     /// Zaxnes has no 2× multisampling (`video.anti_alias`: None, FFAA = 4 samples, SMAA = 8), so
     /// the mapping is 0 → None and 2 or 4 → FFAA, which AMD-032 §2 makes MSAA 4×.
+    // Q-107 §4
     pub fn write_msaa(&mut self, written: i32) {
         let normalised = normalise_msaa(written);
         self.write_int(SettingId::VideoMsaa20, normalised);
@@ -305,6 +306,12 @@ impl ScriptSettings {
     ///    script can add anti-aliasing where there is none and never remove it;
     /// 3. the game in play has a per-game anti-aliasing option (RO-2 part 2), **0 included**: a
     ///    choice made for this very game outranks a choice made for every game.
+    ///
+    /// Clause 2 is the one Q-107 §4 asks R1 to confirm: the owner's rule words it as a test of the
+    /// **value**, and justifies it as a test of the user's **will**, which the shipped default of
+    /// 1 keeps apart. The letter of the rule is what is written here, being the only one of the
+    /// two that can never let a script degrade the picture of a user who asked for nothing.
+    // Q-107 §4
     fn msaa_drives_anti_alias(&self) -> bool {
         !self.console_interface
             && self.model.preference(SettingId::VideoAntiAlias).as_int() <= 0

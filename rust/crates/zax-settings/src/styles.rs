@@ -128,6 +128,7 @@ pub fn parameter_of_position(position: usize) -> Option<(i32, &'static str, Sett
 /// The function stays, rather than its callers going straight to the domain, because it is the
 /// one place a *script* write is normalised: the next divergence between a script and the
 /// interface, if the owner ever wants one, lands here and nowhere else.
+// Q-107 §3
 #[must_use]
 pub fn snap_write(id: SettingId, value: f64) -> f64 {
     crate::catalogue::descriptor(id).domain().snap(value)
