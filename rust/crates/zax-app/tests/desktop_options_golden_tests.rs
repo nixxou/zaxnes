@@ -116,14 +116,7 @@ fn ro_1_the_excluded_list_is_unchanged() {
 /// otherwise vanish silently; this is the test that sends its author to the table.
 #[test]
 fn ro_1_the_layout_table_places_every_shown_setting_exactly_once() {
-    let placed: Vec<SettingId> = options::LAYOUT
-        .iter()
-        .flat_map(|(_, entries)| entries.iter())
-        .filter_map(|entry| match entry {
-            options::LayoutEntry::Row(id) => Some(*id),
-            options::LayoutEntry::Group(_) => None,
-        })
-        .collect();
+    let placed = options::placed_settings();
 
     let missing: Vec<String> = catalogue::descriptors()
         .filter(|descriptor| options::is_shown(descriptor) && !placed.contains(&descriptor.id()))
@@ -152,11 +145,99 @@ fn ro_1_the_layout_table_places_every_shown_setting_exactly_once() {
         for (index, entry) in entries.iter().enumerate() {
             if let options::LayoutEntry::Group(group) = entry {
                 assert!(
-                    matches!(entries.get(index + 1), Some(options::LayoutEntry::Row(_))),
+                    entries
+                        .get(index + 1)
+                        .is_some_and(|next| !next.settings().is_empty()),
                     "{group:?} opens nothing on {tab:?}"
                 );
             }
         }
+    }
+}
+
+/// RO-1 point 6: the eight overscan margins are shown as **two** rows, one per region, and the
+/// "nothing disappears" test above still sees all eight.
+#[test]
+fn ro_1_the_overscan_margins_are_two_rows_of_four_values() {
+    use zax_app::ui::options::{CompactRow, LayoutEntry, TabEntry};
+
+    // The layout places them as two compact entries and no longer as eight rows of their own.
+    let entries: Vec<LayoutEntry> = options::LAYOUT
+        .iter()
+        .find(|(tab, _)| *tab == options::OptionsTab::NesPicture)
+        .map(|(_, entries)| entries.to_vec())
+        .expect("the NES picture tab");
+    assert!(entries.contains(&LayoutEntry::Compact(CompactRow::OverscanNtsc)));
+    assert!(entries.contains(&LayoutEntry::Compact(CompactRow::OverscanPal)));
+    for id in CompactRow::OverscanNtsc
+        .settings()
+        .into_iter()
+        .chain(CompactRow::OverscanPal.settings())
+    {
+        assert!(
+            !entries.contains(&LayoutEntry::Row(id)),
+            "{} still has a row of its own",
+            id.key()
+        );
+        // And each one is still a setting of the window, in the Overscan group.
+        assert_eq!(Some(options::OptionsTab::NesPicture), options::tab_of(id));
+        assert_eq!(Some(options::OptionsGroup::Overscan), options::group_of(id));
+    }
+
+    // The built tab draws two compact entries, each holding its four cells in the order top,
+    // bottom, left, right.
+    let model = OptionsModel::new();
+    let compact: Vec<(CompactRow, [options::OptionsRow; 4])> = model
+        .entries(options::OptionsTab::NesPicture)
+        .iter()
+        .filter_map(|entry| match entry {
+            TabEntry::Compact(compact, cells) => Some((*compact, *cells)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(2, compact.len());
+    for (row, cells) in compact {
+        let ids: Vec<SettingId> = cells.iter().map(|cell| cell.descriptor.id()).collect();
+        assert_eq!(row.settings().to_vec(), ids);
+        // Each of the four is a drop-down of the same 33 values it had as a row of its own, and
+        // each carries its own tooltip.
+        for cell in &cells {
+            assert_eq!(
+                33,
+                cell.descriptor
+                    .domain()
+                    .options()
+                    .expect("0 to 32 pixels")
+                    .len()
+            );
+            assert!(options::tooltip_of(cell.descriptor.id()).len() > 80);
+        }
+    }
+
+    // A caption for every cell, in both languages, and a title for both rows.
+    let _language = UiLanguageScope::keep();
+    for language in [UiLanguage::English, UiLanguage::French] {
+        strings::set_language(language);
+        for caption in options::COMPACT_CAPTIONS {
+            assert!(strings::lookup(language, caption).is_some(), "{caption}");
+        }
+        assert_ne!("", CompactRow::OverscanNtsc.title());
+        assert_ne!("", CompactRow::OverscanPal.title());
+    }
+    strings::set_language(UiLanguage::English);
+
+    // The reset button of the tab still reaches all eight (they are rows of the tab).
+    let rows: Vec<SettingId> = model
+        .rows(options::OptionsTab::NesPicture)
+        .iter()
+        .map(|row| row.descriptor.id())
+        .collect();
+    for id in CompactRow::OverscanNtsc
+        .settings()
+        .into_iter()
+        .chain(CompactRow::OverscanPal.settings())
+    {
+        assert!(rows.contains(&id), "{} is a row of the tab", id.key());
     }
 }
 

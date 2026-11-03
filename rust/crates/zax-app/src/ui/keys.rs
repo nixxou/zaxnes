@@ -148,6 +148,15 @@ pub const GROUP_REGION: &str = "group.region";
 /// What a player should not need; used on more than one tab.
 pub const GROUP_ADVANCED: &str = "group.advanced";
 
+// ------------------- the compact rows of RO-1 point 6: the title of the row, and the caption
+//                     of each of the four values it holds side by side.
+pub const COMPACT_OVERSCAN_NTSC: &str = "compact.overscan_ntsc";
+pub const COMPACT_OVERSCAN_PAL: &str = "compact.overscan_pal";
+pub const CAPTION_TOP: &str = "caption.top";
+pub const CAPTION_BOTTOM: &str = "caption.bottom";
+pub const CAPTION_LEFT: &str = "caption.left";
+pub const CAPTION_RIGHT: &str = "caption.right";
+
 // ------------------------------- why a row is greyed out (RO-1 point 1)
 /// `video.res_scale` while the automatic resolution chooses it instead.
 pub const HINT_RES_SCALE_AUTOMATIC: &str = "hint.res_scale_automatic";
@@ -619,6 +628,12 @@ pub const PUBLISHED: &[&str] = &[
     GROUP_REGION,
     GROUP_ADVANCED,
     GROUP_GEOMETRY,
+    COMPACT_OVERSCAN_NTSC,
+    COMPACT_OVERSCAN_PAL,
+    CAPTION_TOP,
+    CAPTION_BOTTOM,
+    CAPTION_LEFT,
+    CAPTION_RIGHT,
     HINT_RES_SCALE_AUTOMATIC,
     HINT_NEEDS_SHADOWS,
     HINT_NEEDS_LUA_OPTIMIZED,

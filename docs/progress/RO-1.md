@@ -15,8 +15,9 @@ Build directory: `rust/target-ro` (the owner may hold `rust/target/release/zaxne
 | 1 | Inventory of every shown desktop setting, the golden list, the "nothing disappears" test | done — `4e3221e` |
 | 2 | The new tab/group layout, with the dependency greying | done — `58407a7` |
 | 3 | Tooltip infrastructure and the texts of the first tabs | done — `b0570ef` |
-| 4 | The remaining tooltip texts in both languages, and their completeness test | done — `PENDING4` |
-| 5 | Compact overscan rows (point 6) and the finer curvature steps (point 7) | todo |
+| 4 | The remaining tooltip texts in both languages, and their completeness test | done — `baac780` |
+| 5a | Compact overscan rows (point 6) | done — `PENDING5A` |
+| 5b | The finer curvature grid (point 7) | todo |
 | 6 | The divergence note, the Q ticket, and the closing (full tests, fmt, clippy, release build) | todo |
 
 ## Notes
@@ -283,6 +284,26 @@ Tests added to `desktop_options_golden_tests.rs`:
 
 715 tests pass in `zax-app`.
 
+### Step 5a — the eight overscan margins become two rows
+
+`LayoutEntry::Compact(CompactRow)` and `TabEntry::Compact(CompactRow, [OptionsRow; 4])`:
+`CompactRow::OverscanNtsc` and `::OverscanPal` each hold their four settings in the order
+`table.rs` lists them (top, bottom, left, right), drawn as the row title and then four 70-px
+drop-downs under the captions *top / bottom / left / right* (*haut / bas / gauche / droite*).
+
+Nothing about the eight settings changed. Each is still edited by its own drop-down over the same
+33 values, each write still goes through `model.set` and plays the validation sound, the reset
+button of the tab still reaches all eight (a compact entry contributes its four cells to
+`rows(tab)`), each of the four keeps its **own** tooltip, and the settings file is untouched.
+`draw_enum` grew a `draw_enum_labelled` sibling so a cell can be labelled with its caption instead
+of with the setting's own label; `draw_enum` is now one line over it.
+
+`LayoutEntry::settings()` and `options::placed_settings()` are what `tab_of`, `group_of` and the
+layout test now use, so a compact entry is not invisible to them.
+
+No other family of the window is split over several rows of one quantity (see the step-2 note), so
+nothing else was compacted.
+
 ### Next step
 
-Step 5: the two compact overscan rows (point 6) and the finer curvature grid (point 7).
+Step 5b: the finer curvature grid (point 7).

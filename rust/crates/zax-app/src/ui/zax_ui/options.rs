@@ -11,8 +11,8 @@ use zax_settings::values::{Color, SettingValue};
 use super::{centre, play, BrowserPurpose, ZaxUi};
 use crate::application::AppHost;
 use crate::audio::UiSound;
-use crate::ui::options::{self, OptionsGroup, OptionsRow, TabEntry};
-use crate::ui::text;
+use crate::ui::options::{self, CompactRow, OptionsGroup, OptionsRow, TabEntry};
+use crate::ui::{strings, text};
 
 /// The window's default size. RO-1 widened it: nine tabs and the long French titles need the room,
 /// and the grid of a reorganised tab is no longer 41 rows deep (the old 560 × 520 was sized for a
@@ -21,6 +21,10 @@ const WINDOW_SIZE: [f32; 2] = [820.0, 600.0];
 
 /// How wide a detailed tooltip is allowed to grow before its text wraps (RO-1 point 3).
 const TOOLTIP_WIDTH: f32 = 420.0;
+
+/// How wide one cell of a compact row is (RO-1 point 6): enough for "32 px" and the arrow, so
+/// that the four cells and their captions fit on one line of the window.
+const COMPACT_CELL_WIDTH: f32 = 70.0;
 
 impl ZaxUi {
     pub(super) fn draw_options(&mut self, ui: &Ui, host: &mut AppHost) {
@@ -108,6 +112,11 @@ impl ZaxUi {
                         self.draw_folder_row(ui, host, &row);
                     } else {
                         draw_row(ui, host, &row, run_ahead_forced);
+                    }
+                }
+                TabEntry::Compact(compact, cells) => {
+                    if group_open {
+                        draw_compact_row(ui, host, compact, &cells);
                     }
                 }
             }
@@ -201,6 +210,35 @@ fn draw_group_heading(ui: &Ui, group: OptionsGroup, style_note: Option<&str>) ->
         return false;
     }
     true
+}
+
+/// A compact row (RO-1 point 6): the title of the row, then the four values of the quantity side
+/// by side, each under its own caption and each with its own tooltip.
+///
+/// Every one of the four is still its own setting, edited by its own widget and written through
+/// the same path a row of its own used: a change plays the validation sound, the reset button of
+/// the tab reaches all four, and the settings file is untouched. Only the place changes.
+fn draw_compact_row(ui: &Ui, host: &mut AppHost, compact: CompactRow, cells: &[OptionsRow; 4]) {
+    let _id = ui.push_id(compact.title());
+    ui.text(compact.title());
+    for (cell, caption) in cells.iter().zip(options::COMPACT_CAPTIONS) {
+        let id = cell.descriptor.id();
+        let _cell = ui.push_id(cell.descriptor.key());
+        ui.same_line();
+        let width = ui.push_item_width(COMPACT_CELL_WIDTH);
+        let changed = draw_enum_labelled(ui, host, cell, &strings::get(caption));
+        drop(width);
+        let hovered = hovered(ui);
+        if let Some(value) = changed {
+            host.update_settings(|model| model.set(id, value));
+            if options::plays_validation_sound(id) {
+                play(host, UiSound::Confirm);
+            }
+        }
+        if hovered {
+            draw_tooltip(ui, id);
+        }
+    }
 }
 
 /// One row of a tab. `run_ahead_forced` is Q-103's verdict on the running game, which only the
@@ -323,6 +361,17 @@ fn draw_bool(ui: &Ui, host: &AppHost, row: &OptionsRow) -> Option<SettingValue> 
 }
 
 fn draw_enum(ui: &Ui, host: &AppHost, row: &OptionsRow) -> Option<SettingValue> {
+    draw_enum_labelled(ui, host, row, &row.label())
+}
+
+/// The same drop-down under a label of the caller's choosing: a compact row (RO-1 point 6) labels
+/// each of its cells with a caption instead of with the setting's own label.
+fn draw_enum_labelled(
+    ui: &Ui,
+    host: &AppHost,
+    row: &OptionsRow,
+    label: &str,
+) -> Option<SettingValue> {
     let descriptor = row.descriptor;
     let Some(options) = descriptor
         .domain()
@@ -340,9 +389,7 @@ fn draw_enum(ui: &Ui, host: &AppHost, row: &OptionsRow) -> Option<SettingValue> 
         .iter()
         .map(|option| text::label_of_option(&option.label))
         .collect();
-    if !ui.combo(row.label(), &mut index, &labels, |label| {
-        label.as_str().into()
-    }) {
+    if !ui.combo(label, &mut index, &labels, |label| label.as_str().into()) {
         return None;
     }
     #[allow(clippy::cast_possible_truncation)] // the C# `(int)options[index].Value`

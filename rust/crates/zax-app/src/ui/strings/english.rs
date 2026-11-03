@@ -117,6 +117,14 @@ pub(super) const ENGLISH: &[(&str, &str)] = &[
     (keys::GROUP_WIDESCREEN, "Widescreen"),
     (keys::GROUP_REGION, "Video region"),
     (keys::GROUP_ADVANCED, "Advanced"),
+    // -------------- RO-1 point 6: the two compact rows of the overscan margins, and the caption
+    //                of each of the four values a compact row holds side by side.
+    (keys::COMPACT_OVERSCAN_NTSC, "Overscan NTSC"),
+    (keys::COMPACT_OVERSCAN_PAL, "Overscan PAL"),
+    (keys::CAPTION_TOP, "top"),
+    (keys::CAPTION_BOTTOM, "bottom"),
+    (keys::CAPTION_LEFT, "left"),
+    (keys::CAPTION_RIGHT, "right"),
     // ------------- RO-1 point 1: why a row is greyed out. Each one names the setting that has
     //               to change for the row to act again; the value itself is kept either way.
     (

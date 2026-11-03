@@ -114,13 +114,81 @@ impl OptionsGroup {
     }
 }
 
+/// A row that edits **several** settings of one quantity side by side (RO-1 point 6).
+///
+/// The eight overscan margins took eight rows of their own, one quantity each, which is four
+/// fifths of a tab for a thing a player sets once. They are now two rows — one per region — with
+/// the four sides beside each other under a short caption. Every one of the eight is still a
+/// setting of its own, still edited by its own widget, and still carries its own tooltip: what
+/// changes is where the widgets sit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompactRow {
+    /// The four margins of an NTSC game.
+    OverscanNtsc,
+    /// The four of a PAL game.
+    OverscanPal,
+}
+
+/// The caption of each cell of a compact row, in the order [`CompactRow::settings`] gives them.
+pub const COMPACT_CAPTIONS: [&str; 4] = [
+    keys::CAPTION_TOP,
+    keys::CAPTION_BOTTOM,
+    keys::CAPTION_LEFT,
+    keys::CAPTION_RIGHT,
+];
+
+impl CompactRow {
+    /// The settings of the row, in the order they are drawn: top, bottom, left, right — the order
+    /// `table.rs` lists them in, so nothing is reordered on the way.
+    #[must_use]
+    pub const fn settings(self) -> [SettingId; 4] {
+        match self {
+            Self::OverscanNtsc => [
+                SettingId::VideoOverscanNtscTop,
+                SettingId::VideoOverscanNtscBottom,
+                SettingId::VideoOverscanNtscLeft,
+                SettingId::VideoOverscanNtscRight,
+            ],
+            Self::OverscanPal => [
+                SettingId::VideoOverscanPalTop,
+                SettingId::VideoOverscanPalBottom,
+                SettingId::VideoOverscanPalLeft,
+                SettingId::VideoOverscanPalRight,
+            ],
+        }
+    }
+
+    /// The title of the row, in the language in force.
+    #[must_use]
+    pub fn title(self) -> String {
+        strings::get(match self {
+            Self::OverscanNtsc => keys::COMPACT_OVERSCAN_NTSC,
+            Self::OverscanPal => keys::COMPACT_OVERSCAN_PAL,
+        })
+    }
+}
+
 /// One entry of a tab, as [`LAYOUT`] writes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LayoutEntry {
     /// One setting, one widget.
     Row(SettingId),
+    /// Several settings of one quantity, side by side (RO-1 point 6).
+    Compact(CompactRow),
     /// The heading of a group. Every row until the next heading belongs to it.
     Group(OptionsGroup),
+}
+
+impl LayoutEntry {
+    /// The settings the entry places: one for a row, four for a compact one, none for a heading.
+    #[must_use]
+    pub fn settings(self) -> Vec<SettingId> {
+        match self {
+            Self::Row(id) => vec![id],
+            Self::Compact(compact) => compact.settings().to_vec(),
+            Self::Group(_) => Vec::new(),
+        }
+    }
 }
 
 /// The rows of the **Display** tab: what the picture costs to put on the screen.
@@ -153,14 +221,8 @@ const NES_PICTURE: &[LayoutEntry] = &[
     LayoutEntry::Row(SettingId::VideoRemoveSpriteLimit),
     LayoutEntry::Group(OptionsGroup::Overscan),
     LayoutEntry::Row(SettingId::VideoOverscanMode),
-    LayoutEntry::Row(SettingId::VideoOverscanNtscTop),
-    LayoutEntry::Row(SettingId::VideoOverscanNtscBottom),
-    LayoutEntry::Row(SettingId::VideoOverscanNtscLeft),
-    LayoutEntry::Row(SettingId::VideoOverscanNtscRight),
-    LayoutEntry::Row(SettingId::VideoOverscanPalTop),
-    LayoutEntry::Row(SettingId::VideoOverscanPalBottom),
-    LayoutEntry::Row(SettingId::VideoOverscanPalLeft),
-    LayoutEntry::Row(SettingId::VideoOverscanPalRight),
+    LayoutEntry::Compact(CompactRow::OverscanNtsc),
+    LayoutEntry::Compact(CompactRow::OverscanPal),
     LayoutEntry::Group(OptionsGroup::Widescreen),
     LayoutEntry::Row(SettingId::VideoWidescreenStrictEdges),
 ];
@@ -297,13 +359,16 @@ impl OptionsRow {
     }
 }
 
-/// One entry of a built tab: a group heading, or a row with its bounds.
+/// One entry of a built tab: a group heading, a row with its bounds, or a compact row with the
+/// bounds of each of its cells.
 #[derive(Debug, Clone, Copy)]
 pub enum TabEntry {
     /// The heading of a group.
     Group(OptionsGroup),
     /// One row.
     Row(OptionsRow),
+    /// Several settings of one quantity, side by side (RO-1 point 6).
+    Compact(CompactRow, [OptionsRow; 4]),
 }
 
 /// The settings the window leaves out although they are user settings: the last browsed folder
@@ -689,6 +754,23 @@ impl OptionsModel {
                                 entries.push(TabEntry::Row(build_row(descriptor)));
                             }
                         }
+                        LayoutEntry::Compact(compact) => {
+                            let cells = compact.settings().map(catalogue::descriptor);
+                            if cells.iter().all(|descriptor| is_shown(descriptor)) {
+                                entries.push(TabEntry::Compact(compact, cells.map(build_row)));
+                            } else {
+                                // A build that hides one of the four cannot compact the rest:
+                                // the ones it does show stay rows of their own rather than
+                                // vanish. No build does this today — the four margins of a
+                                // region are plain user settings — and the layout test is what
+                                // would catch one that did.
+                                for descriptor in cells {
+                                    if is_shown(descriptor) {
+                                        entries.push(TabEntry::Row(build_row(descriptor)));
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 if matches!(entries.last(), Some(TabEntry::Group(_))) {
@@ -696,9 +778,10 @@ impl OptionsModel {
                 }
                 let rows = entries
                     .iter()
-                    .filter_map(|entry| match entry {
-                        TabEntry::Row(row) => Some(*row),
-                        TabEntry::Group(_) => None,
+                    .flat_map(|entry| match entry {
+                        TabEntry::Row(row) => vec![*row],
+                        TabEntry::Compact(_, cells) => cells.to_vec(),
+                        TabEntry::Group(_) => Vec::new(),
                     })
                     .collect();
                 BuiltTab {
@@ -787,12 +870,22 @@ fn has_a_tab(theme: SettingTheme) -> bool {
     )
 }
 
+/// Every setting [`LAYOUT`] places, in the order the window draws it — a compact row contributing
+/// its four cells.
+#[must_use]
+pub fn placed_settings() -> Vec<SettingId> {
+    LAYOUT
+        .iter()
+        .flat_map(|(_, layout)| layout.iter().flat_map(|entry| entry.settings()))
+        .collect()
+}
+
 /// The tab [`LAYOUT`] puts `id` in, or `None` for a setting it has no row for.
 #[must_use]
 pub fn tab_of(id: SettingId) -> Option<OptionsTab> {
     LAYOUT
         .iter()
-        .find(|(_, layout)| layout.contains(&LayoutEntry::Row(id)))
+        .find(|(_, layout)| layout.iter().any(|entry| entry.settings().contains(&id)))
         .map(|(tab, _)| *tab)
 }
 
@@ -801,13 +894,13 @@ pub fn tab_of(id: SettingId) -> Option<OptionsTab> {
 pub fn group_of(id: SettingId) -> Option<OptionsGroup> {
     let (_, layout) = LAYOUT
         .iter()
-        .find(|(_, layout)| layout.contains(&LayoutEntry::Row(id)))?;
+        .find(|(_, layout)| layout.iter().any(|entry| entry.settings().contains(&id)))?;
     let mut group = None;
     for entry in *layout {
-        match *entry {
-            LayoutEntry::Group(candidate) => group = Some(candidate),
-            LayoutEntry::Row(candidate) if candidate == id => return group,
-            LayoutEntry::Row(_) => {}
+        if let LayoutEntry::Group(candidate) = *entry {
+            group = Some(candidate);
+        } else if entry.settings().contains(&id) {
+            return group;
         }
     }
     None

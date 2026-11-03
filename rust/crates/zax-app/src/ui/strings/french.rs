@@ -117,6 +117,14 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     (keys::GROUP_WIDESCREEN, "Écran large"),
     (keys::GROUP_REGION, "Région vidéo"),
     (keys::GROUP_ADVANCED, "Avancé"),
+    // -------------- RO-1 point 6 : les deux lignes compactes des marges d'overscan, et la légende
+    //                de chacune des quatre valeurs qu'une ligne compacte porte côte à côte.
+    (keys::COMPACT_OVERSCAN_NTSC, "Overscan NTSC"),
+    (keys::COMPACT_OVERSCAN_PAL, "Overscan PAL"),
+    (keys::CAPTION_TOP, "haut"),
+    (keys::CAPTION_BOTTOM, "bas"),
+    (keys::CAPTION_LEFT, "gauche"),
+    (keys::CAPTION_RIGHT, "droite"),
     // ------------- RO-1 point 1 : pourquoi une ligne est grisée. Chacune nomme le réglage qu'il
     //               faut changer pour que la ligne agisse de nouveau ; la valeur est conservée.
     (keys::HINT_RES_SCALE_AUTOMATIC, "(sans effet : la résolution automatique la choisit)"),
