@@ -20,8 +20,8 @@ Build directory: `rust/target-ro`. `CARGO_TARGET_DIR=<impl>/rust/target-ro`,
 |---|---|---|
 | 1 | Map: the .NET lots read, the requirement map, the test plan, the "before" figures | done — `1e0d8cf` |
 | 2 | The MSVO pass: the module, the resources, the lifecycle, the whole chain, the mode switched on, and the invariants of §2.4 in it | done — `d9bd07a` |
-| 3 | The handheld and the GLES side: the defaults, the console page, the capability finding, Q-104 | done — this commit |
-| 4 | The comparisons with the figures of the .NET lots and of Q-100 | todo |
+| 3 | The handheld and the GLES side: the defaults, the console page, the capability finding, Q-104 | done — `b3b3687` |
+| 4 | The comparisons with the figures of the .NET lots and of Q-100 | done — this commit |
 | 5 | The cost of the pass at 1080p, per quality, beside Depth's | todo |
 | 6 | Closing: notes, `PERFORMANCE-HISTORY.md`, the Q-100 appendix, fmt, clippy, full tests, release build | todo |
 
@@ -404,3 +404,133 @@ already describes that gap for the whole of AMD-055, and the port added no WGSL.
 `zax-app` (`amd055_style_options`, `app_options`, `desktop_options_golden`, `handheld_tree`,
 `handheld_ui`, `options_window`): 70 passed, 0 failed, 1 ignored.
 `cargo test --release -p zax-render --features wgpu --test amd055_style_tests`: 5 passed.
+
+### Step 4 — the comparison with the .NET figures
+
+#### No commercial ROM is on this side, and V2-25 was in the same position
+
+The brief asks for "the same profiles as the V2-24/V2-25 comparisons (Punch-Out!! 1499, SMB 419)".
+`ZAXNES_ROMS` is unset, `test-roms/` holds only the public test ROMs, and a search of the whole
+clean-room tree for `*.nes` finds no commercial title. **V2-25 itself hit this exactly**: its notes
+open with "the Punch-Out!! ROM is gone … It cannot be the R5 scene for this lot, and the
+reference's own figures for it cannot be reproduced here", and it measured instead on the two
+**normative, third-party-reproducible** configurations of §2.4 plus one synthetic scene of its own
+making. This lot measures on the same three, which is what makes the two columns comparable at all:
+
+- the **close-up A** of §2.4 — the floor and the 8-unit cube;
+- the **kerb scene** V2-25 added for the large-scale question — the same floor with a laterally
+  wide occluder of 64 × 8 × 8 units, because the pattern of each level is a seven-entry
+  checkerboard scaled by that level's sphere radius, and an 8-unit cube falls between the samples
+  of a coarse one whatever the pyramid does;
+- and the two modes read off the **same** capture of each, so that the figure that matters — the
+  mode against the Depth mode — is free of every fixture and framing difference.
+
+The Punch-Out!! and SMB figures stay R0's, and `Q-100`'s R1 answer already records them for the
+.NET port (MSVO zone 29,7 % against the reference's 32,2 %).
+
+#### Why the absolute columns are not comparable, and what is
+
+The two fixtures differ in three ways the progress file of RU-5 already records for this side: the
+Rust floor is the frame's **own plane** (normal (0, 0, −1)) rather than the criterion's floor turned
+by `rot = (90, 0, 0)`, the albedo is reached through NES colour `0x10` rather than a custom direct
+texture, and the capture is 640 × 480 unless stated. The base brightness of the floor therefore
+differs, and a darkening read in **sRGB levels** scales with it: the Rust columns below run about a
+third of the .NET's on the same bands. What no such difference can disturb is the **ratio of one
+mode to the other on one capture**, which is the figure both Q-095's answer and Q-100 are written
+in, and which is why V2-25 printed its Depth column "for scale".
+
+#### Close-up A — the mean darkening of the floor by 4-unit bands of distance to the cube
+
+At **1920 × 1080**, the resolution the criterion and the .NET lots measure at:
+
+| | 0-4 | 4-8 | 8-12 | 12-16 | 16-20 | wide/contact | zone | mean |
+|---|---|---|---|---|---|---|---|---|
+| Depth, .NET V2-25 | 30,90 | 21,13 | 13,01 | 6,49 | 2,63 | 0,239 | — | — |
+| MSVO, .NET V2-25 | 30,20 | 14,27 | 7,59 | 3,87 | 1,77 | **0,146** | — | — |
+| Depth, **Rust RU-6** | 12,07 | 5,57 | 3,20 | 1,48 | 0,58 | 0,145 | 1,378 % | 0,220 |
+| MSVO, **Rust RU-6** | 22,88 | 10,64 | 5,80 | 3,74 | 0,96 | **0,153** | 1,452 % | 0,377 |
+
+("wide/contact" is V2-25's own summary: the mean of the `0,5 r` to `r` bands over the contact band.
+"zone" is the share of the frame whose RGB-summed change exceeds 12 and "mean" the mean darkening
+over the whole frame — the two figures of the Q-095 answer.)
+
+Read as ratios of one mode to the other on the same capture:
+
+| figure | .NET | **Rust** | the reference (Q-095 R1, the ring) |
+|---|---|---|---|
+| MSVO wide/contact over Depth's | 0,61 | **1,06** | — |
+| MSVO zone over Depth's | — | **1,05** | **1,38** |
+| MSVO mean over Depth's | — | **1,71** | **1,37** |
+
+The .NET port's MSVO was **narrower** than its own Depth mode (0,61), which is the whole subject of
+Q-100; this one is **wider** on both figures, and its mean ratio of 1,71 brackets the reference's
+1,37 from above rather than from a third of it.
+
+#### The kerb scene — the laterally wide occluder
+
+At **1920 × 1080**, on the **near side of the kerb** (see `kerb_profile`'s own comment for why the
+side has to be chosen):
+
+| | 0-4 | 4-8 | 8-12 | 12-16 | mid/contact | zone | mean |
+|---|---|---|---|---|---|---|---|
+| Depth, .NET V2-25 | 90,38 | 48,62 | 25,49 | 7,25 | 0,410 | — | — |
+| MSVO, .NET V2-25 | 67,07 | 20,18 | 5,47 | 0,57 | **0,191** | — | — |
+| Depth, **Rust RU-6** | 17,74 | 8,94 | 4,34 | 1,85 | 0,374 | 4,685 % | 0,657 |
+| MSVO, **Rust RU-6** | 34,19 | 16,82 | 5,12 | 0,14 | **0,321** | 3,668 % | 0,952 |
+
+| figure | .NET | **Rust** |
+|---|---|---|
+| MSVO mid/contact over Depth's — the bound V2-25's regression test holds at > 0,30 | **0,466** | **0,858** |
+| MSVO contact band over Depth's | 0,742 | **1,927** |
+| MSVO zone over Depth's | — | 0,78 |
+| MSVO mean over Depth's | — | 1,45 |
+
+And at 640 × 480, which is where the committed regression test runs: Depth 17,20 / 9,24 / 4,42 /
+1,82 (mid/contact 0,397), MSVO 23,41 / 16,17 / 4,86 / 0,11 (mid/contact **0,449**), the ratio
+**1,131**.
+
+#### The three figures Q-100 is written in, side by side
+
+| Q-100's figure | the reference | .NET at V2-25 | .NET after its R1 re-measure | **Rust RU-6** |
+|---|---|---|---|---|
+| darkening at the mat centre (Punch-Out!!) | 15,7 | 11,2 | 18,0 | **R0's** — no ROM here |
+| zone, MSVO (Punch-Out!!) | 32,2 % | 23 % | 29,7 % | **R0's** |
+| **MSVO zone over Depth zone** | **1,38** | 0,98 (V2-24) | — | **1,05** close-up A, 0,78 kerb |
+| **MSVO mid/contact over Depth's**, kerb | — | 0,466 | — | **0,858** |
+| **MSVO wide/contact over Depth's**, close-up A | — | 0,61 | — | **1,06** |
+
+What this says, stated plainly:
+
+1. **The ordering the reference shows is now the port's ordering.** MSVO stronger than Depth in
+   mean (1,71 and 1,45 against the reference's 1,37) and wider in zone on the close-up A (1,05).
+   The .NET port at V2-25 had it the other way on every figure, which is what Q-100 opened for.
+2. **On a laterally wide, low occluder the zone ratio is still under 1** (0,78 on the kerb), and
+   that is the residual of exactly the structural cause Q-100 names: the MiniEngine estimator
+   compares a sample's depth to the **centre pixel's**, so an occluder counts by its departure from
+   the surface's own depth gradient and not by its rise above the tangent plane. A low kerb seen on
+   a receding floor departs from that gradient very little. No calibration constant moves it, and
+   `MSVO_SHARE` is **not** retouched — for the reason V2-25 gave and this lot inherits: the scene
+   the reference's own figures come from is not on this machine, and retuning a constant against a
+   different scene is tuning blind.
+3. The gap is therefore **narrower than the .NET port's by a factor of 1,7 to 1,8** on both
+   synthetic scenes, and Q-100's hypothesis 1 — the port stays the MiniEngine's and the residual
+   width is a declared deviation — still holds, with a smaller residual. The Rust appendix of
+   Q-100 (step 6) records this without touching the ticket's earlier text.
+
+Three of the four corrections of step 2 contribute to the improvement, and the access **headroom**
+is the one that does most of it: before it, the clamp at 1 rectified the estimator's noise into a
+spurious darkening spread over the whole frame, which *inflated* the zone and the mean while
+breaking §2.4's first invariant. Removing it both fixed the invariant and let the real mid-field
+through.
+
+#### What landed
+
+`req_scn_083_the_msvo_mode_finds_a_laterally_wide_occluder` in `amd055_msvo_tests.rs`: the kerb
+scene, both modes read off two captures of it, and the **four bounds of V2-25's own regression
+test** — the contact band over 20 levels (23,4), mid/contact over 0,12 (0,449), that ratio over the
+Depth mode's over 0,30 (1,131), and nothing beyond `2 r` (0,000). Keeping the .NET's bounds rather
+than tightening them to this port's figures is deliberate: a regression in either direction is then
+caught by a test whose numbers are already public in V2-25.
+
+`cargo test --release -p zax-render --test amd055_msvo_tests`: 10 passed. `cargo fmt --all --check`
+and `cargo clippy -p zax-render --all-targets -- -D warnings` clean.

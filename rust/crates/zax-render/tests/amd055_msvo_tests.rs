@@ -76,8 +76,57 @@ fn close_up_a(cube: bool) -> common::Built {
     built
 }
 
-/// Whether a drawn tile belongs to the cube rather than to the plane: the cube is the one instance
-/// of a single tile, so its mesh spans 8 units where the plane's spans 96.
+/// The same floor with a **kerb** of 64 × 8 × 8 units across it in place of the close-up's single
+/// cube: the scene the .NET lot V2-25 added for the large-scale question, and the only one of the
+/// two that asks it.
+///
+/// The occluder has to be **laterally wide** for a multi-scale estimate to have anything to find:
+/// the pattern of each level is a seven-entry checkerboard scaled by that level's sphere radius, so
+/// a coarse level samples sparsely in absolute terms and an 8-unit cube falls between its samples
+/// whatever the pyramid does. Eight tiles of the close-up's own pattern, side by side across the
+/// middle row, are 64 units wide and 8 tall — which the coarsest sphere of `1,75 r` = 35 units sees
+/// whole.
+fn close_up_kerb() -> common::Built {
+    let mut fixture = SceneFixture::new()
+        .background(0x0F)
+        .palette(1, 0x10)
+        .palette(2, 0x10)
+        .pattern_block(solid(1, 0), 12, 12, 8, ProfileLayer::L2, 1.0)
+        .rect(solid(1, 0), 10, 9, 12, 12)
+        .pattern(solid(2, 7), 8, ProfileLayer::L1);
+    // Each record replaces the floor tile of its own cell, as the close-up's cube does: the kerb
+    // stands where that tile was and hides it.
+    for column in KERB_COLUMNS {
+        fixture = fixture.tile(solid(2, 7), column * 8, 14 * 8, 1);
+    }
+
+    let mut built = fixture.build();
+    for id in built.instances(is_cube) {
+        built.instance_mut(id).offset = Vec3::new(4.0, -4.0, 4.0);
+    }
+    built.rebuild_draw_list();
+
+    built.scene.light.direction = Vector3::new(1.0, -1.0, 1.0);
+    built.scene.camera.set_fov(70.0);
+    let setpoint = built.scene.camera.current_mut();
+    setpoint.angles = Vector3::new(30.0, 35.0, 0.0);
+    setpoint.target = CENTRE;
+    setpoint.set_distance(80.0);
+    built.scene.camera.snap_to_setpoints();
+    built
+}
+
+/// The tile columns the kerb occupies. The close-up's cube is column 15 of row 14 and its footprint
+/// is centred on the floor's centre, so column `c` of that row is centred on
+/// `CENTRE.x + (c − 15) × 8`: columns 12 to 19 span 64 units about the centre.
+const KERB_COLUMNS: std::ops::Range<i32> = 12..20;
+
+/// The scene `x` the kerb spans, less half a tile at each end so that every sample of
+/// [`kerb_profile`] faces the kerb rather than its corner.
+const KERB_X: (f32, f32) = (CENTRE.x - 24.0, CENTRE.x + 32.0);
+
+/// Whether a drawn tile belongs to the cube or to the kerb rather than to the plane: either is an
+/// instance of a single tile, so its mesh spans 8 units where the plane's spans 96.
 fn is_cube(tile: &zax_engine3d::draw_list::DrawTile) -> bool {
     tile.mesh.as_ref().is_some_and(|mesh| {
         let span = mesh.bounds_max().x - mesh.bounds_min().x;
@@ -230,6 +279,74 @@ fn profile(off: &Capture, on: &Capture, view: &CameraView, shade: i32) -> [f64; 
             bands[band].1 += 1;
         }
     }
+    bands.map(|(sum, count)| {
+        #[allow(clippy::cast_precision_loss)] // Counts far below 2^53.
+        if count > 0 {
+            sum / count as f64
+        } else {
+            0.0
+        }
+    })
+}
+
+/// The mean darkening of the floor of [`close_up_kerb`], in sRGB levels, by 4-unit bands of
+/// distance to the kerb — and **on the near side of it only**.
+///
+/// The side matters, and finding out why is worth the sentence: the kerb stands 8 units out of the
+/// floor, so from a camera 30° above it the floor **behind** the kerb is hidden for the first 12
+/// units and comes back into view beyond that, at a grazing angle where the kerb genuinely blocks
+/// much more of its hemisphere. Averaging the two sides therefore reads a profile that *rises*
+/// again at 12 to 16 units — 5,1 then 13,9 levels at 1920 × 1080 — which looks exactly like a ring
+/// of banding and is nothing of the kind. The near side is the one the whole profile is visible on.
+fn kerb_profile(off: &Capture, on: &Capture, view: &CameraView, shade: i32) -> [f64; 8] {
+    let mut bands = [(0.0_f64, 0_usize); 8];
+    for side in [1.0_f32, -1.0] {
+        let mut found = [(0.0_f64, 0_usize); 8];
+        for step_y in 0..=384 {
+            for step_x in 0..=224 {
+                #[allow(clippy::cast_precision_loss)] // 0 to 384.
+                let (x, y) = (
+                    KERB_X.0 + step_x as f32 * 0.25,
+                    CENTRE.y - PLANE_HALF + step_y as f32 * 0.25,
+                );
+                if (y - CENTRE.y) * side < 0.0 {
+                    continue;
+                }
+                // The kerb is 8 units deep about the floor's centre row.
+                let distance = (y - CENTRE.y).abs() - 4.0;
+                if distance < 0.0 {
+                    continue;
+                }
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // Bounded.
+                let band = (distance / 4.0) as usize;
+                if band >= found.len() {
+                    continue;
+                }
+                let Some((px, py)) =
+                    project(view, Vector3::new(x, y, PLANE_Z), off.width, off.height)
+                else {
+                    continue;
+                };
+                if off.packed(px, py) != shade {
+                    continue;
+                }
+                let (r0, g0, b0) = off.at(px, py);
+                let (r1, g1, b1) = on.at(px, py);
+                found[band].0 += f64::from((r0 - r1) + (g0 - g1) + (b0 - b1)) / 3.0;
+                found[band].1 += 1;
+            }
+        }
+        // The near side is the one whose contact band the camera sees at all.
+        if found[0].1 > 0 {
+            bands = found;
+            break;
+        }
+    }
+    assert!(
+        bands[0].1 > 1000,
+        "the near side of the kerb must be visible, found {} samples",
+        bands[0].1
+    );
     bands.map(|(sum, count)| {
         #[allow(clippy::cast_precision_loss)] // Counts far below 2^53.
         if count > 0 {
@@ -747,5 +864,73 @@ fn req_scn_083_the_multi_scale_mode_reaches_further_than_the_single_scale_one() 
     assert!(
         msvo[4] < 1.0 && depth[4] < 1.0,
         "both fade by 16 to 20 units: {msvo:?}, {depth:?}"
+    );
+}
+
+/// REQ-SCN-083 *Mode MSVO*, the large scale, on the kerb scene — the regression test the .NET lot
+/// V2-25 wrote for the same clause, with the same four bounds and the same shape: both modes'
+/// profiles read off two captures of one scene, each bound held so that it can be broken in either
+/// direction.
+///
+/// Every bound is a figure measured in **this** lot and not a figure of the reference: the
+/// requirement is P3 and judged by review, and `Q-100` says what the reference's own figures would
+/// need. The figures themselves, side by side with the .NET's, are in `docs/progress/RU-6.md`.
+#[test]
+fn req_scn_083_the_msvo_mode_finds_a_laterally_wide_occluder() {
+    let gl = GlFixture::create(640, 480);
+    let mut renderer = gl.renderer();
+    let mut built = close_up_kerb();
+
+    let (off, _) = shot(&gl, &mut renderer, &mut built, StyleSettings::default());
+    let shade = plane_shade(&off);
+    let view = view_of(&built);
+    let (depth_shot, _) = shot(
+        &gl,
+        &mut renderer,
+        &mut built,
+        with_occlusion(AmbientOcclusion::Depth),
+    );
+    let (msvo_shot, statistics) = shot(
+        &gl,
+        &mut renderer,
+        &mut built,
+        with_occlusion(AmbientOcclusion::Msvo),
+    );
+    assert_eq!(
+        style::MSVO_LEVELS,
+        i32::try_from(statistics.occlusion_levels).unwrap()
+    );
+
+    let depth = kerb_profile(&off, &depth_shot, &view, shade);
+    let msvo = kerb_profile(&off, &msvo_shot, &view, shade);
+
+    // 1. The contact band darkens, and well past the noise floor.
+    assert!(
+        msvo[0] > 20.0,
+        "the contact band of the kerb darkens: {msvo:?}"
+    );
+
+    // 2. The mid field — `0,25 r` to `0,75 r`, which is the 4 to 12 units of the two bands that
+    //    follow the contact — is a real share of it, which is what "multi-scale" buys.
+    let mid = f64::midpoint(msvo[1], msvo[2]);
+    let ratio = mid / msvo[0];
+    assert!(ratio > 0.12, "mid / contact is {ratio:.4}: {msvo:?}");
+
+    // 3. And it is a **larger** share than the single-scale estimator's on the same scene. The
+    //    .NET port measured 0,466 of the Depth mode's ratio here and `Q-100` recorded the shortfall
+    //    against the reference's 1,38; this one measures above 1, so the ordering is the
+    //    reference's. The bound is the .NET's own, so that a regression in either port's direction
+    //    is caught.
+    let depth_ratio = f64::midpoint(depth[1], depth[2]) / depth[0];
+    assert!(
+        ratio / depth_ratio > 0.30,
+        "mid / contact against the Depth mode's: {:.4} ({ratio:.4} over {depth_ratio:.4})",
+        ratio / depth_ratio
+    );
+
+    // 4. §2.4's second invariant on this scene: beyond `2 r` = 40 units nothing is darkened.
+    assert!(
+        msvo[7] < 1.0 && depth[7] < 1.0,
+        "beyond 2 r the floor is untouched: {msvo:?}, {depth:?}"
     );
 }
